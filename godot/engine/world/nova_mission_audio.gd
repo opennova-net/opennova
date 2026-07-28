@@ -57,12 +57,9 @@ const STRATEGY_TARGET_ID := 2
 # [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, channel table @ 0x24D6688].
 const MIX_CHANNELS := 8
 const SILENT_DB := -80.0  # hard-silent floor for out-of-mix voices
-# Time-of-day region cuts, hours: [4,10)=morning, [10,17)=day, [17,21)=evening,
-# else night — soundloop_1..4 select by region [orig: Entity_CalcTimeOfDayRegion
-# @ 0x408110 boundaries 0x40000/0xA0000/0x110000/0x150000 Q16].
-const REGION_CUTS_H: Array[float] = [4.0, 10.0, 17.0, 21.0]
-# Crossfade margin at a region edge: 5460/65536 h (~5 game-minutes) [orig: @ 0x408203].
-const REGION_BLEND_H := 5460.0 / 65536.0
+# Time-of-day region cuts (4/10/17/21 h) and the ~5-game-minute crossfade margin
+# live with the eval in libs/audio (ambient_mixer.cpp time_of_day_region)
+# [orig: Entity_CalcTimeOfDayRegion @ 0x408110; margin @ 0x408203].
 
 var _resource_root  # NovaResourceRoot
 var _item_db  # NovaItemDatabase
@@ -77,6 +74,17 @@ var _audio_root: Node3D
 # [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_h:float,
 #    layers_by_set:{set_name: Array[Dictionary]} }]
 var _markers: Array = []
+# The native emitter system (libs/audio AmbientMixer): staggered tick&7 marker
+# eval/registration on the logic-tick clock + the per-frame live-slot ranking
+# (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). The host keeps the
+# per-candidate descriptors for stream resolution and the voice binding below.
+var _mixer: NovaAmbientMixer = null
+var _candidate_lookup: Dictionary = {}  # candidate_id -> {descriptor, pos}
+# Latched once a hosted logic tick arrives (advance_ticks): the world tick owns
+# the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
+# (editor-idle hosts — the nova_weather host/autonomous split).
+var _hosted_ticks := false
+var _hosted_tick_offset := 0
 # At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].
 var _channels: Array = []
 var _next_candidate_id := 1
@@ -228,6 +236,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			int(_stats.markers_total),
 			"missing" if _item_db == null else "loaded"])
 
+	_feed_mixer()
 	_apply_reverb(int(mission_info.get("reverb", 0)))
 	_apply_music(int(mission_info.get("music", 0)))
 	return _stats
@@ -263,6 +272,7 @@ func set_markers(markers: Array, container: Node3D = null) -> void:
 					layer["candidate_id"] = _next_candidate_id
 				_next_candidate_id = maxi(
 					_next_candidate_id, int(layer.get("candidate_id", 0)) + 1)
+	_feed_mixer()
 
 
 func set_resolution_strategy(strategy: int) -> void:
@@ -433,6 +443,23 @@ func _resolve_wav(filename: String) -> AudioStreamWAV:
 ## Host pump for the mission clock; HHMM like NovaEnvironment.time_of_day.
 func set_time_of_day_hhmm(hhmm: float) -> void:
 	_time_of_day_hhmm = hhmm
+	if _mixer != null:
+		_mixer.set_time_of_day_hours(_hhmm_to_hours(hhmm))
+
+
+## Hosted eval clock: the world tick pushes the sim's logic tick after each
+## tick_realtime batch, and the native mixer runs the witnessed staggered cohort
+## walk for the elapsed ticks — each placed marker re-evaluates every 8th 62.5 Hz
+## tick [orig: Entity_UpdateAllEntities @ 0x4c225a pool-2 walk;
+## Entity_UpdateEnvSoundEmitter @ 0x4a8080]. The first hosted tick rebases the
+## clock so an editor session that free-ran before Play keeps its slot lifetimes.
+func advance_ticks(logic_tick: int) -> void:
+	if _mixer == null:
+		return
+	if not _hosted_ticks:
+		_hosted_ticks = true
+		_hosted_tick_offset = maxi(0, int(_mixer.clock_tick()) - logic_tick)
+	_mixer.advance_to_tick(logic_tick + _hosted_tick_offset)
 
 
 ## Occlusion provider (the NovaSimulation) — emitter/one-shot distances inflate
@@ -443,82 +470,47 @@ func set_simulation(sim: Object) -> void:
 	_simulation = sim
 	if _bank != null:
 		_bank.occlusion_provider = sim
+	if _mixer != null:
+		_mixer.set_occlusion_provider(sim)
 
 
-## The per-frame ambient emitter mix [orig: SoundEmitter_UpdateAndMixTop8
-## @ 0x5284a0]: every virtual layer computes its witnessed distance volume for
-## the CURRENT time-of-day slot and the loudest MIX_CHANNELS bind to reusable
-## players. CADENCE DIVERGENCE D-SND-16 (docs/audio/lwf-dbf-sound-re.md
-## §driver cadence): retail evals+registers each placed marker every 8th
-## 62.5 Hz tick (pool-2 tick&7 stagger) and per-frame touches only LIVE slots;
-## this runs the full marker x layer eval every render frame instead — the
-## cadence-faithful port is the tracked libs/audio slice. Everything else remains data. Volume = member volume x the region crossfade blend through the
-## two-radius curve; a voice at or beyond its falloff radius is hard silent
-## (which is also the cull [orig: @ 0x5285da]). Stable candidate IDs let selected
-## incumbents continue while an entrant restarts, matching transient registration —
-## docs/audio/lwf-dbf-sound-re.md (D-SND-6, D-SND-8). Occlusion inflates the
-## mixed distance through the sim's two-ray LOS [orig: the
-## Sound_ApplyOcclusionDistance call @ 0x528659, after the range cull]; rays
-## run only for markers whose raw distance already yields audible volume — the
-## original culls before raycasting [orig: @ 0x5285da], and inflation only
-## ever reduces volume, so a raw-silent marker stays silent either way.
-func tick(camera_pos: Vector3) -> void:
+## The per-frame ambient mix pass [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0,
+## called once per render frame from the Game Loop render callback @ 0x521341]:
+## the native mixer (libs/audio AmbientMixer) ranks the LIVE emitter slots —
+## registered at the witnessed staggered tick cadence via advance_ticks — through
+## the two-radius member-0 curve with occlusion, and this host binds the loudest
+## MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 host territory). Stable
+## candidate IDs let selected incumbents continue while an entrant restarts,
+## matching transient registration. `delta` free-runs the autonomous 62.5 Hz eval
+## clock only for hosts that never push logic ticks (editor idle) — see
+## docs/audio/lwf-dbf-sound-re.md §driver cadence (D-SND-16, ported).
+func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	var start := Time.get_ticks_usec()
 	_last_camera_pos = camera_pos
 	var writes := 0
-	var hhmm := _time_of_day_hhmm
-	var base_hours := _hhmm_to_hours(hhmm)
+	if _mixer == null:
+		_perf_markers = 0
+		_perf_voice_writes = 0
+		_perf_tick_us = Time.get_ticks_usec() - start
+		return
+	if not _hosted_ticks and delta > 0.0:
+		_mixer.advance_seconds(delta)
+	var rows: PackedFloat32Array = _mixer.mix(camera_pos)
+	# Ranked loudest-first (candidate-id tie-break) by the native mixer; a
+	# physical incumbent is never rebound merely because its rank within the
+	# selected eight changed.
 	var candidates: Array = []  # [{candidate_id, descriptor, pos, vol}]
-	for marker_value in _markers:
-		var m: Dictionary = marker_value
-		var tod := time_of_day_region(base_hours + float(m.stagger_h))
-		var region := int(tod.region)
-		var slot_sets: PackedStringArray = m.slot_sets
-		var active_set := String(slot_sets[region])
-		if active_set.is_empty():
+	for base in range(0, rows.size(), 5):
+		var row_id := int(rows[base])
+		var entry: Dictionary = _candidate_lookup.get(row_id, {})
+		if entry.is_empty():
 			continue
-		var blend := float(tod.blend)
-		# Neighbouring regions sharing the set keep full volume through the
-		# crossfade [orig: @ 0x4a819d same-slot check].
-		if active_set == String(slot_sets[int(tod.adjacent)]):
-			blend = 1.0
-		var vol_byte := crossfade_volume_byte(blend)
-		var dist_q16 := int((m.pos as Vector3).distance_to(camera_pos) * 65536.0)
-		var dist_occluded_q16 := -1  # lazy: at most one two-ray LOS per marker per tick
-		var layers_by_set: Dictionary = m.get("layers_by_set", {})
-		var layers: Array = layers_by_set.get(active_set, [])
-		for layer_value in layers:
-			var layer: Dictionary = layer_value
-			var falloff := int(layer.get("falloff_radius", 0))
-			var min_d := int(layer.get("min_distance", 0))
-			var member_vol := int(layer.get("volume", NovaSoundBank.VOLUME_BYTE_MAX))
-			var clamp_vol := int(layer.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX))
-			var vol := NovaSoundBank.emitter_layer_volume(
-				dist_q16, falloff, min_d, vol_byte, member_vol, clamp_vol)
-			if vol > 0 and _simulation != null:
-				if dist_occluded_q16 < 0:
-					dist_occluded_q16 = int(_simulation.sound_occlusion_distance_q16(
-						camera_pos, m.pos, dist_q16,
-						int(m.get("source_bms_id", 0))))
-				if dist_occluded_q16 != dist_q16:
-					vol = NovaSoundBank.emitter_layer_volume(
-						dist_occluded_q16, falloff, min_d,
-						vol_byte, member_vol, clamp_vol)
-			if vol > 0:
-				candidates.append({
-					"candidate_id": int(layer.get("candidate_id", 0)),
-					"descriptor": layer,
-					"pos": m.pos,
-					"vol": vol,
-				})
-
-	# Deterministic tie-breaking keeps membership stable when equally loud layers
-	# straddle the budget. A physical incumbent is never rebound merely because
-	# its rank within the selected eight changed.
-	candidates.sort_custom(func(a, b):
-		var av := int(a.vol)
-		var bv := int(b.vol)
-		return av > bv if av != bv else int(a.candidate_id) < int(b.candidate_id))
+		candidates.append({
+			"candidate_id": row_id,
+			"descriptor": entry.descriptor,
+			"pos": entry.pos,
+			"vol": int(rows[base + 1]),
+		})
 	var incumbent_by_id: Dictionary = {}
 	for state_value in _channels:
 		var state: Dictionary = state_value
@@ -694,10 +686,60 @@ func teardown() -> void:
 	_failed_candidate_ids.clear()
 	_validated_candidate_ids.clear()
 	_warned_ambient_decode_failure = false
+	_mixer = null
+	_candidate_lookup.clear()
+	_hosted_ticks = false
+	_hosted_tick_offset = 0
 	_bank = null
 
 
 # --- Internals ---
+
+# Push the resolved marker/layer data into a fresh native mixer. The mixer owns
+# the witnessed cadence (staggered eval, tick-unit slot lifetimes) and the ranked
+# mix; the host keeps each candidate's descriptor for stream resolution by id.
+func _feed_mixer() -> void:
+	_mixer = NovaAmbientMixer.new()
+	_mixer.set_occlusion_provider(_simulation)
+	_mixer.set_time_of_day_hours(_hhmm_to_hours(_time_of_day_hhmm))
+	_candidate_lookup.clear()
+	_hosted_ticks = false
+	_hosted_tick_offset = 0
+	for mi in _markers.size():
+		var marker: Dictionary = _markers[mi]
+		var pos: Vector3 = marker.get("pos", Vector3.ZERO)
+		var layers_by_set: Dictionary = marker.get("layers_by_set", {})
+		var slot_sets: PackedStringArray = marker.get("slot_sets", PackedStringArray())
+		var set_names: Array = []
+		var sets: Array = []
+		for set_name in layers_by_set:
+			var packed := PackedInt32Array()
+			for layer_value in layers_by_set[set_name]:
+				var layer: Dictionary = layer_value
+				var cid := int(layer.get("candidate_id", 0))
+				_candidate_lookup[cid] = {"descriptor": layer, "pos": pos}
+				packed.append_array(PackedInt32Array([
+					cid,
+					int(layer.get("falloff_radius", 0)),
+					int(layer.get("min_distance", 0)),
+					int(layer.get("volume", NovaSoundBank.VOLUME_BYTE_MAX)),
+					int(layer.get("clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX)),
+				]))
+			if packed.is_empty():
+				continue
+			set_names.append(String(set_name))
+			sets.append(packed)
+		var slot_keys := PackedInt32Array([-1, -1, -1, -1])
+		for r in range(4):
+			if r < slot_sets.size():
+				slot_keys[r] = set_names.find(String(slot_sets[r]))
+		# The walk cohort and the clock stagger both ride the marker's pool-slot
+		# nibble [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158];
+		# the stored stagger_h is that nibble in hours, inverted here.
+		var stagger_slot := int(roundf(float(marker.get("stagger_h", 0.0)) * 65536.0)) >> 11
+		_mixer.add_marker(pos, int(marker.get("source_bms_id", 0)), stagger_slot,
+				0, slot_keys, sets)
+
 
 static func _hhmm_to_hours(hhmm: float) -> float:
 	var wrapped := fposmod(hhmm, NovaEnvironment.HHMM_DAY)
@@ -765,48 +807,10 @@ func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
 ## next cut; `adjacent` is the neighbouring region at that edge (same-set
 ## neighbours suppress the dip [orig: @ 0x4a819d]).
 static func time_of_day_region(hours: float) -> TimeOfDayRegion:
-	var t := fposmod(hours, 24.0)
-	var region := 3
-	var low := REGION_CUTS_H[3]
-	var high := 0.0
-	for i in range(3):
-		# Regions are OPEN at the low cut (the original's unsigned range-check
-		# idiom starts each interval at cut+1 tick): the exact cut instant
-		# falls through to night at full blend [orig: @ 0x408175/0x4081b0
-		# (t - (cut+1)) <= (width-2) forms].
-		if t > REGION_CUTS_H[i] and t < REGION_CUTS_H[i + 1]:
-			region = i
-			low = REGION_CUTS_H[i]
-			high = REGION_CUTS_H[i + 1]
-			break
-	var blend := 1.0
-	var direction := 1
-	var blend_dist := 0.0
-	var in_blend := false
-	if region == 3:
-		# Night wraps 21h -> 4h; only its 21h edge fades [orig: the wrapped
-		# region's high-edge test can't fire @ 0x40820f].
-		if t > low and t - REGION_BLEND_H < low:
-			blend_dist = t - low
-			in_blend = true
-	else:
-		if t - REGION_BLEND_H < low:
-			blend_dist = t - low
-			in_blend = true
-		elif t + REGION_BLEND_H > high:
-			direction = -1
-			blend_dist = high - t
-			in_blend = true
-	# A zero blend distance falls through to full volume — the original's
-	# `if (blendDistance && ...)` guard [orig: @ 0x408251].
-	if in_blend and blend_dist > 0.0:
-		blend = blend_dist / REGION_BLEND_H
-	var adjacent := region - direction
-	if adjacent > 3:
-		adjacent = 0
-	elif adjacent < 0:
-		adjacent = 3
-	return TimeOfDayRegion.new(region, adjacent, clampf(blend, 0.0, 1.0))
+	# The open-low cuts, edge blends, and night-wrap forms live in libs/audio
+	# (ambient_mixer.cpp time_of_day_region) beside the eval that consumes them.
+	var d: Dictionary = NovaAmbientMixer.time_of_day_region(hours)
+	return TimeOfDayRegion.new(int(d.region), int(d.adjacent), float(d.blend))
 
 
 ## The emitter volume byte for a region crossfade blend. The original registers
@@ -815,8 +819,7 @@ static func time_of_day_region(hours: float) -> TimeOfDayRegion:
 ## volume [orig: Entity_UpdateEnvSoundEmitter @ 0x4a81c6 (blendAlpha); the mix
 ## reads slot byte +25 @ 0x52865e]. Net: byte = (0xFFFF * blend_q16 + 0x8000) >> 24.
 static func crossfade_volume_byte(blend: float) -> int:
-	var blend_q16 := 0xFFFF if blend >= 1.0 else int(clampf(blend, 0.0, 1.0) * 65536.0)
-	return (0xFFFF * blend_q16 + 0x8000) >> 24
+	return NovaAmbientMixer.crossfade_volume_byte(blend)
 
 
 # Reverb id -> an AudioEffectReverb preset on the Ambient bus. The exact JO preset

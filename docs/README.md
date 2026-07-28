@@ -65,7 +65,7 @@ behavior is summarized and cited.
 
 | Domain | Doc | Status |
 |---|---|---|
-| Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed (+ §sound-profile: the SndProf.def system + infantry slot-sound consumers, witnessed + ported 2026-07-17, D-SND-10..15; + §driver cadence: the ambient tick/frame clock split witnessed 2026-07-28, D-SND-16 minted) |
+| Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed (+ §sound-profile: the SndProf.def system + infantry slot-sound consumers, witnessed + ported 2026-07-17, D-SND-10..15; + §driver cadence: the ambient tick/frame clock split witnessed 2026-07-28, D-SND-16 minted + PORTED same day into libs/audio AmbientMixer) |
 | Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |

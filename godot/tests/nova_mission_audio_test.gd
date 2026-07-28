@@ -88,7 +88,7 @@ func test_only_the_loudest_eight_candidates_mix() -> void:
 	audio.set_markers(markers, holder)
 	assert_eq(_players(holder).size(), 0,
 		"virtual ambient candidates do not create SceneTree audio nodes")
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	var players := _players(holder)
 	assert_eq(players.size(), 8, "the physical ambient pool never exceeds its eight channels")
 	players.sort_custom(func(a, b): return a.position.x < b.position.x)
@@ -108,7 +108,7 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 	audio.set_markers([_marker(
 		Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
 		{"amb": [_layer(100)]})], holder)
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(_players(holder).size(), 0,
 		"a candidate at d >= falloff_radius consumes no physical channel [orig: 0x75ca31]")
 
@@ -128,7 +128,7 @@ func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 			{"amb": [_layer(100)]}, 0.0, 456),
 	], holder)
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 
 	assert_eq(provider.calls, 1,
 		"only the raw-audible marker queries once despite carrying two layers")
@@ -148,11 +148,11 @@ func test_time_of_day_slot_selects_the_active_set() -> void:
 		{"night_hum": [_layer(500)]})], holder)
 
 	audio.set_time_of_day_hhmm(1200.0)  # noon -> region 1 (day) -> empty slot
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(_players(holder).size(), 0, "day region with an empty slot plays nothing")
 
 	audio.set_time_of_day_hhmm(2300.0)  # 23:00 -> region 3 (night)
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(_players(holder).size(), 1)
 	assert_gt(_players(holder)[0].volume_db, SILENT_DB, "night region plays the night slot")
 
@@ -167,14 +167,14 @@ func test_region_crossfade_scales_volume() -> void:
 	audio.set_markers(markers, holder)
 
 	audio.set_time_of_day_hhmm(1200.0)  # mid-day: full blend
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	var day := _players(holder)[0]
 	var full_db := day.volume_db
 	assert_gt(full_db, SILENT_DB)
 
 	# 10:01 is inside the ~5-minute fade-in after the 10h cut [orig: @ 0x408203].
 	audio.set_time_of_day_hhmm(1001.0)
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_gt(day.volume_db, SILENT_DB, "fading-in slot is audible")
 	assert_lt(day.volume_db, full_db, "crossfade blend attenuates the entering region")
 
@@ -189,12 +189,12 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 		{"amb": [_layer(500)]})], holder)
 
 	audio.set_time_of_day_hhmm(1200.0)
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	var allday := _players(holder)[0]
 	var full_db := allday.volume_db
 
 	audio.set_time_of_day_hhmm(1001.0)  # in the 10h blend window
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(allday.volume_db, full_db,
 		"identical adjacent slot keeps full volume through the boundary [orig: 0x4a819d]")
 
@@ -207,27 +207,27 @@ func test_tick_writes_only_on_change() -> void:
 		Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
 		{"amb": [_layer(500)]})], holder)
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "first tick writes the voice on")
 	var p := _players(holder)[0]
 	var first_stream := p.stream
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "unchanged mix writes nothing")
 	assert_eq(_players(holder)[0], p, "the incumbent keeps its physical channel")
 	assert_eq(_players(holder)[0].stream, first_stream, "the incumbent playback is not restarted")
 
-	audio.tick(Vector3(2000, 0, 0))  # walk out of range
+	audio.tick(Vector3(2000, 0, 0), 0.2)  # walk out of range
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "leaving range writes the silence once")
 	assert_eq(p.volume_db, SILENT_DB)
 	assert_null(p.stream, "a dropout releases its bound stream")
 	assert_eq(p.process_mode, Node.PROCESS_MODE_DISABLED,
 		"an unused physical channel leaves SceneTree processing")
 
-	audio.tick(Vector3(2000, 0, 0))
+	audio.tick(Vector3(2000, 0, 0), 0.2)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "steady silence writes nothing")
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1,
 		"re-entering the mix binds and restarts the voice once")
 	assert_eq(_players(holder)[0], p, "the bounded pool reuses its free channel")
@@ -236,7 +236,7 @@ func test_tick_writes_only_on_change() -> void:
 	assert_eq(p.process_mode, Node.PROCESS_MODE_INHERIT,
 		"an audible entrant returns the physical channel to processing")
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0,
 		"the resumed steady mix stays write-free")
 
@@ -252,7 +252,7 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 			{"amb": [_layer(2000)]}))
 	audio.set_markers(markers, holder)
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
 	var candidate_one_stream := _active_player(holder, 1).stream
 	var pool_ids: Array[int] = []
@@ -260,7 +260,7 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 		pool_ids.append(player.get_instance_id())
 	pool_ids.sort()
 
-	audio.tick(Vector3(1100, 0, 0))
+	audio.tick(Vector3(1100, 0, 0), 0.2)
 	assert_eq(_active_ids(holder), [5, 6, 7, 8, 9, 10, 11, 12],
 		"the closest eight virtual candidates replace the four dropouts")
 	var moved_pool_ids: Array[int] = []
@@ -269,7 +269,7 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 	moved_pool_ids.sort()
 	assert_eq(moved_pool_ids, pool_ids, "entrant replacement allocates no ninth channel")
 
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(_active_ids(holder), [1, 2, 3, 4, 5, 6, 7, 8])
 	assert_ne(_active_player(holder, 1).stream, candidate_one_stream,
 		"a dropped candidate restarts when it becomes an entrant again")
@@ -335,7 +335,7 @@ end
 	assert_eq(int(stats.get("physical_channels", -1)), 0)
 	assert_eq(_players(container).size(), 0,
 		"mission setup stores marker/layer data without creating candidate nodes")
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_lte(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS)
 	assert_eq(int(audio.get_stats().get("physical_channels", -1)), _players(container).size())
 	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
@@ -398,7 +398,7 @@ end
 	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 0,
 		"setup remains descriptor-only and has not decoded either WAV")
 	assert_eq(int(stats.get("ambient_decode_failures", -1)), 0)
-	audio.tick(Vector3.ZERO)
+	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 2)
 	assert_eq(int(stats.get("ambient_decode_failures", -1)), 1,
 		"the corrupt virtual candidate is visible in runtime stats")
