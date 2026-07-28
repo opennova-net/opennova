@@ -123,6 +123,7 @@ add_library(${TARGET_NAME} SHARED
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
+    simulation/nova_present_applier.cpp
     simulation/nova_simulation.cpp
     simulation/nova_simulation_assets.cpp
     simulation/nova_simulation_bind.cpp

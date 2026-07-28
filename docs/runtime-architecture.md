@@ -99,11 +99,16 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
   the deterministic single-tick primitive (Step / MCP / tests). Both `game_world.gd` (game) and
   `mission_controller.gd` (editor) drive it.
-- **Present passes (GDScript)** — `mission_present_pass.gd` applies each entity's transform + PANM part
+- **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
-  host writes the `Node3D`. The basis convention is single-sourced in
+  host writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
+  is native — `NovaPresentApplier` (`godot/engine/simulation/nova_present_applier.cpp`), with the
+  GDScript file as the host-facing facade and the node-side visual contract (ADR 0007) still
+  GDScript; the aim-overlay/emplaced-weapon adapters delegate to the same native statics so the
+  mission and wire passes share one implementation. The basis convention is single-sourced in
   `MissionObjectPlacer.bms_to_godot_basis` (`Entity_SpawnFromBMSRecord @0x40eb66` +
-  `Math_BuildFixedPointMatrixFromEulerAngles @0x613f40`). The sibling passes listed in the map above
+  `Math_BuildFixedPointMatrixFromEulerAngles @0x613f40`); the native twin is pinned to it by
+  `mission_present_pass_test.gd`'s basis parity case. The sibling passes listed in the map above
   follow the same rule for their own systems: each reads a drain or snapshot the sim produced and
   writes host nodes/effects, so the simulation itself stays render-free and headless-testable.
   Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off
