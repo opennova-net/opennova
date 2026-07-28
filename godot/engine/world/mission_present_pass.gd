@@ -34,18 +34,22 @@ const PresentEmplacedWeapon := preload(
 
 var _sim                    # NovaSimulation (or a compatible snapshot source)
 var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index) -> Node
-var _drive_transform := true
-var _drive_part_anim := true
-var _drive_visibility := true
-# A/B seam like _drive_transform/_drive_visibility: freezes the body-anim
-# dispatch (play_body_clip_at / play_body_anim_at and the pose chain they
-# drive) so probes can isolate the skeleton-update share of the frame.
-var _drive_body_anim := true
+const OUTPUT_TRANSFORM := 1
+const OUTPUT_PART_ANIM := 2
+const OUTPUT_VISIBILITY := 4
+const OUTPUT_BODY_ANIM := 8
+const OUTPUT_ALL := OUTPUT_TRANSFORM | OUTPUT_PART_ANIM \
+		| OUTPUT_VISIBILITY | OUTPUT_BODY_ANIM
+var _output_channels := OUTPUT_ALL
 # bms_id -> true for nodes the render-occlusion frame currently hides. Shared
 # BY REFERENCE from the host (GameWorld mutates it in place) via the
 # occlusion_hidden_ids setup option; consulted only on a hidden->visible write,
 # never per steady row. Hosts without render occlusion leave it empty.
 var _occlusion_hidden_ids: Dictionary = {}
+# bms_id -> the exact combined PF_HIDDEN/local-view presentation intent. Shared
+# with GameWorld so an occlusion release never invents a second visibility
+# predicate and resurrects a first-person-suppressed model.
+var _present_visibility: Dictionary = {}
 var _stats: Dictionary = { "moved": 0, "posed": 0, "hidden": 0, "muzzles": 0 }
 var _row_plan_revision := -1
 var _row_plan_stride := 0
@@ -68,26 +72,47 @@ const CAP_BODY_PLAY := 4
 const CAP_AIM := 8
 const CAP_RHC := 16
 const CAP_CTRL := 32
+const CAP_MUZZLE := 64
 var _row_caps := PackedInt32Array()
 var _row_aim_valid := PackedInt32Array()
 var _row_rhc := PackedInt32Array()
+var _row_present_visible := PackedInt32Array()
 # infantry_anim_key(state) allocates its String natively per call; the state->key
 # map is global and tiny, so cache it for every pass instance.
 static var _infantry_key_cache: Dictionary = {}
 
 
-## options: { drive_transform, drive_part_anim, drive_visibility } (all default true) +
-## occlusion_hidden_ids (the host's shared occlusion-claim set; absent = empty). The editor
-## preview drives all three; the game drives all three too (its NPCs were previously static-placed).
+## options: { drive_transform, drive_part_anim, drive_visibility,
+## drive_body_anim } (all default true), plus the host's shared
+## occlusion_hidden_ids and present_visibility maps.
 func setup(sim, index, options: Dictionary = {}) -> void:
 	_sim = sim
 	_index = index
-	_drive_transform = bool(options.get("drive_transform", true))
-	_drive_part_anim = bool(options.get("drive_part_anim", true))
-	_drive_visibility = bool(options.get("drive_visibility", true))
+	_output_channels = OUTPUT_ALL
+	if not bool(options.get("drive_transform", true)):
+		_output_channels &= ~OUTPUT_TRANSFORM
+	if not bool(options.get("drive_part_anim", true)):
+		_output_channels &= ~OUTPUT_PART_ANIM
+	if not bool(options.get("drive_visibility", true)):
+		_output_channels &= ~OUTPUT_VISIBILITY
+	if not bool(options.get("drive_body_anim", true)):
+		_output_channels &= ~OUTPUT_BODY_ANIM
 	var occlusion_ids: Variant = options.get("occlusion_hidden_ids")
 	if occlusion_ids is Dictionary:
 		_occlusion_hidden_ids = occlusion_ids
+	var present_visibility: Variant = options.get("present_visibility")
+	if present_visibility is Dictionary:
+		_present_visibility = present_visibility
+
+
+## Public A/B surface used by performance probes; one mask update changes a
+## coherent set of presenter outputs without exposing implementation fields.
+func set_output_channels(channels: int) -> void:
+	_output_channels = channels & OUTPUT_ALL
+
+
+func get_output_channels() -> int:
+	return _output_channels
 
 
 func get_stats() -> Dictionary:
@@ -126,7 +151,7 @@ func present_snapshot(
 			# rebuild because validation rejects it.
 			continue
 		var caps := int(_row_caps[row])
-		if _drive_transform:
+		if _output_channels & OUTPUT_TRANSFORM:
 			_apply_transform(node, snap, base)
 		# Inline of PresentAimOverlay.apply(node, snap, base, false) with the
 		# capability lookups hoisted into the row plan and the no-overlay clear
@@ -144,7 +169,7 @@ func present_snapshot(
 			elif int(_row_aim_valid[row]) != 0:
 				node.set_aim_overlay([])
 			_row_aim_valid[row] = aim_valid
-		if _drive_part_anim:
+		if _output_channels & OUTPUT_PART_ANIM:
 			if caps & CAP_CTRL:
 				# Remove last tick's semantic mount ownership before generic model-order
 				# channels run. A generic PLAYPARTANIM can itself address EWEAP_*; it
@@ -155,7 +180,15 @@ func present_snapshot(
 			else:
 				# No ctrl channels on this node: clear/apply are permanent no-ops.
 				_apply_procedural_part(node, snap, base)
-		if _drive_visibility:
+		var present_visible := (
+				int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
+				and int(snap[base +
+						NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
+		var present_visible_int := 1 if present_visible else 0
+		if present_visible_int != int(_row_present_visible[row]):
+			_present_visibility[int(_row_bms_ids[row])] = present_visible
+			_row_present_visible[row] = present_visible_int
+		if _output_channels & OUTPUT_VISIBILITY:
 			# Death is not disappearance: a dead ORGANIC keeps rendering as a corpse
 			# (its death anim holds the last frame) until the sim despawns it via
 			# PF_HIDDEN — the corpse timer + the seen-by-the-local-player watch
@@ -170,25 +203,26 @@ func present_snapshot(
 			# Entity.hidden, collision, simulation, and separately-rendered attached
 			# actors remain untouched. [orig: Entity_RenderVehicleModel @0x4407d0,
 			# cull @0x4407f6..0x44084c, submit @0x440918]
-			var visible := (
-					int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
-					and int(snap[base +
-							NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
-			if node.visible != visible:
+			if node.visible != present_visible:
 				# Two-bit visibility ownership: while the render-occlusion frame
 				# claims this node (the shared hidden set), a sim-wants-visible
 				# node stays hidden — occlusion releases through the same set and
 				# lands the node on the sim's current intent, so neither writer
 				# fights the other frame over frame.
-				if not (visible
+				if not (present_visible
 						and _occlusion_hidden_ids.has(int(_row_bms_ids[row]))):
-					node.visible = visible
-			if not visible:
+					node.visible = present_visible
+			if not present_visible:
 				_stats.hidden += 1
-		if _drive_body_anim:
-			_apply_body_anim(node, snap, base, caps)
 		var net_id := int(snap[base + NovaSimulation.PF_NET_ID])
-		if net_id > 0:
+		# Hidden models skip skeletal writes unless they own the authoritative
+		# posed-muzzle feedback seam. That explicit exception preserves AI fire
+		# origins while allowing hidden non-weapon actors to take the cheap path.
+		if (_output_channels & OUTPUT_BODY_ANIM) != 0 \
+				and (present_visible or (
+						net_id > 0 and (caps & CAP_MUZZLE) != 0)):
+			_apply_body_anim(node, snap, base, caps)
+		if net_id > 0 and (caps & CAP_MUZZLE) != 0:
 			_push_muzzle(node, net_id)
 
 
@@ -236,6 +270,8 @@ func _rebuild_row_plan(
 	_row_caps.clear()
 	_row_aim_valid.clear()
 	_row_rhc.clear()
+	_row_present_visible.clear()
+	_present_visibility.clear()
 	_row_plan_revision = layout_revision
 	_row_plan_stride = stride
 	_row_plan_snapshot_size = snap.size()
@@ -271,10 +307,14 @@ func _rebuild_row_plan(
 			caps |= CAP_RHC
 		if node.has_method("set_ctrl_value") and node.has_method("clear_ctrl_value"):
 			caps |= CAP_CTRL
+		if node.has_method("has_muzzle") and node.has_method(
+				"get_muzzle_world_position") and node.has_muzzle():
+			caps |= CAP_MUZZLE
 		_row_caps.append(caps)
 		# Last-applied edge state (-1 = unknown, first frame always applies).
 		_row_aim_valid.append(-1)
 		_row_rhc.append(-1)
+		_row_present_visible.append(-1)
 
 
 # The D-AI-6 muzzle seam: feed each posed model's gun-flash userpoint world position

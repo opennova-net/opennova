@@ -111,6 +111,27 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
 - **Audio** — name-keyed sound sets (`SoundProfile_FindLoadedByName @0x5274f0`); the member-selection
   state machine lives in portable `libs/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
 
+## F3 frame-stat diagnostics
+
+The shipped F3 **Stats** tab observes the same runtime rather than installing a
+second update loop. A host-owned `FrameStatsBoard` is the fixed-slot boundary:
+opening the tab emits one capture edge, producers add integer microseconds (or
+plain counts), and the pane drains a roughly half-second window. Multiple
+62.5 Hz catch-up ticks written during one render frame are folded before the
+peak comparison, so the displayed peak is a worst **render frame**, not a
+worst individual fixed tick.
+
+Capture is default-off. The close edge disables native runtime profiling and
+both measured viewports immediately; leaving their host trees performs the
+same teardown. While closed, the trace/net/occlusion paths take no diagnostic
+clock reads. While open, `MissionRuntime` samples projectile attribution
+without a per-tick `Dictionary`: `NovaSimulation` returns value types through
+`get_last_projectile_trace_times_us()` (`terrain/static/dynamic/person`),
+`get_last_projectile_trace_counts()` (`calls/static/dynamic/person
+survivors`), and `get_last_projectile_trace_faces()` (`static/dynamic`).
+The UI labels their sum **Projectile trace (attributed)** because water and
+owner/exclusion setup are intentionally outside those native timing buckets.
+
 ## Two animation systems (do not conflate)
 
 - **PANM (procedural part anim)** — the vehicle/emplacement part system (turret/dish), driven by the

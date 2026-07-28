@@ -127,6 +127,13 @@ func get_stats() -> Dictionary:
 	return _stats.duplicate()
 
 
+func get_stats_record() -> WirePresentStats:
+	return WirePresentStats.new(
+			int(_stats.get("live", 0)),
+			int(_stats.get("spawned", 0)),
+			int(_stats.get("unresolved", 0)))
+
+
 ## Resolve the live node owned by this wire presenter. Runtime-only entities
 ## have no authored BMS identity, so consumers such as destruction must use the
 ## same packed pool/slot handle that keys this pass.

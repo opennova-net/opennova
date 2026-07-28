@@ -4,6 +4,13 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const NATIVE_RUNTIME_TIMING_KEYS := [
+	"sim_tick_us",
+	"net_tick_us",
+	"present_snapshot_us",
+	"occlusion_build_us",
+	"occlusion_probe_us",
+]
 
 # NovaSimulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
@@ -26,6 +33,79 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_spawned_count(), 6, "one building + three markers + two organics spawned into pools")
 	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
 	sim.free()
+
+
+func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
+	var sim := NovaSimulation.new()
+	assert_false(sim.is_runtime_profiling_enabled(),
+			"retail/default play does not own the profiling clocks")
+	sim.build_demo_mission()
+	sim.occlusion_init_mission()
+	assert_true(sim.step())
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
+	var unprofiled_buildings: PackedInt64Array = sim.get_building_visibility()
+	var unprofiled_culled: PackedInt32Array = sim.get_render_culled_bms_ids()
+	var unprofiled_positions: Array[Vector3] = []
+	for i in range(sim.get_entity_count()):
+		unprofiled_positions.append(sim.get_entity_position(i))
+	var counters: Dictionary = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_false(bool(counters.get("runtime_profiling_enabled", true)))
+	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+
+	sim.set_runtime_profiling_enabled(true)
+	assert_true(sim.is_runtime_profiling_enabled())
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_eq(sim.get_building_visibility(), unprofiled_buildings,
+			"profiling does not change building submission")
+	assert_eq(sim.get_render_culled_bms_ids(), unprofiled_culled,
+			"profiling does not change entity render gates")
+	assert_eq(sim.get_present_snapshot(), unprofiled_snapshot,
+			"profiling does not change the client-view snapshot")
+	for i in range(unprofiled_positions.size()):
+		assert_eq(sim.get_entity_position(i), unprofiled_positions[i],
+				"turning profiling on does not mutate simulation state")
+	assert_true(sim.step())
+	counters = sim.get_runtime_perf_counters()
+	assert_true(bool(counters.get("runtime_profiling_enabled", false)))
+	assert_true(bool(counters.get("trace_profiling_enabled", false)))
+	var sampled_us := 0
+	for key in NATIVE_RUNTIME_TIMING_KEYS:
+		sampled_us += int(counters.get(key, 0))
+	assert_gt(sampled_us, 0,
+			"the enabled gate records at least one native runtime span")
+
+	# Mission reload rebuilds CollisionWorld, so this pins reapplication of the
+	# one profiling request as well as the cleared timing snapshot.
+	sim.build_demo_mission()
+	assert_true(sim.is_runtime_profiling_enabled(),
+			"a mission reset preserves the active consumer request")
+	counters = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_true(bool(counters.get("trace_profiling_enabled", false)),
+			"the rebuilt CollisionWorld inherits the unified gate")
+
+	sim.set_runtime_profiling_enabled(false)
+	assert_false(sim.is_runtime_profiling_enabled())
+	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_true(sim.step())
+	sim.get_present_snapshot()
+	counters = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+	sim.free()
+
+
+func _assert_native_runtime_timings_zero(counters: Dictionary) -> void:
+	for key in NATIVE_RUNTIME_TIMING_KEYS:
+		assert_eq(int(counters.get(key, -1)), 0,
+				"%s stays zero while native profiling is closed" % key)
 
 
 func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:

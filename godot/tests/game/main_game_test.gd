@@ -134,7 +134,7 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 
 func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	# The F3 Stats capture rides the same frame-leg measurements as the probe
-	# but lands on the FrameStatsBoard, and only while the board is enabled.
+	# but lands on the FrameStatsBoard, and only while capture is active.
 	var game := _make()
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
@@ -148,20 +148,48 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	game.set("_camera", camera)
 	game.set("_state", MainGameScript.State.WORLD)
 
-	var board: FrameStatsBoard = game.get("_frame_stats")
+	var board: FrameStatsBoard = game.get_frame_stats_board()
 	assert_not_null(board, "the shell owns a frame-stats board from construction")
 	game.call("_process", 0.0)
-	assert_eq(board.window_counts()[FrameStatsBoard.FRAME_WORLD], 0,
+	assert_eq(board.drain().sample_frames[FrameStatsBoard.FRAME_WORLD], 0,
 			"ordinary main frames feed nothing")
 
-	board.enabled = true
+	board.set_capture_active(true)
 	game.call("_process", 0.0)
-	var counts := board.window_counts()
+	var counts := board.drain().sample_frames
 	for slot in [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
 			FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]:
-		assert_eq(counts[slot], 1, "an enabled board captures each main-frame leg")
+		assert_eq(counts[slot], 1, "an active board captures each main-frame leg")
 	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
 			"stats capture never writes the probe span dictionary")
+
+
+func test_root_render_measurement_releases_on_capture_close_and_tree_exit() -> void:
+	_shell = await _make_packed_shell("jodemo")
+	if _shell == null:
+		return
+	var board: FrameStatsBoard = _shell.get_frame_stats_board()
+	board.set_capture_active(true)
+	await get_tree().process_frame
+	assert_true(_shell.is_root_render_stats_measured(),
+			"an active Stats capture measures the root viewport")
+
+	board.set_capture_active(false)
+	assert_false(_shell.is_root_render_stats_measured(),
+			"the capture close edge releases measurement synchronously")
+
+	board.set_capture_active(true)
+	await get_tree().process_frame
+	assert_true(_shell.is_root_render_stats_measured())
+	var parent := _shell.get_parent()
+	parent.remove_child(_shell)
+	assert_false(_shell.is_root_render_stats_measured(),
+			"leaving the tree releases RenderingServer measurement state")
+
+	# Reattach for the suite's normal shell/resource cleanup. Keep capture
+	# closed so the next process frame cannot re-arm measurement.
+	parent.add_child(_shell)
+	board.set_capture_active(false)
 
 
 func test_runtime_root_honors_the_persisted_game_profile() -> void:

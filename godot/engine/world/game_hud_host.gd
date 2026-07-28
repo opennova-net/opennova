@@ -170,7 +170,7 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 func tick() -> void:
 	var probe_enabled := _perf_probe_enabled
-	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()

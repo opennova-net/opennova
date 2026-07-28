@@ -1,11 +1,62 @@
 extends GutTest
 
-# DebugStatsPane: the F3 Stats tab. Fabricated windows pin the row layout and
-# formatting; the capture tests pin the edge-gating contract (the board only
-# accumulates while the tab is actually the visible overlay tab).
+# DebugStatsPane: semantic rows and capture lifecycle are exercised through the
+# public value interface. The Tree and TabContainer remain implementation
+# details of the F3 overlay.
 
 const PaneScript := preload("res://engine/debug/debug_stats_pane.gd")
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+
+
+class EffectInfoStub:
+	extends RefCounted
+	func active_entry_count() -> int:
+		return 3
+
+
+class DestructionInfoStub:
+	extends RefCounted
+	var husk_swaps := 2
+	var bursts := 4
+
+
+class ThrowableInfoStub:
+	extends RefCounted
+	var live := 5
+
+
+class WorldInfoStub:
+	extends RefCounted
+	var effect := EffectInfoStub.new()
+	func get_runtime_perf_counters() -> Dictionary:
+		return {"runtime": {"sim": {"present_entity_count": 7}}}
+	func get_effect_world():
+		return effect
+	func get_fire_present_stats() -> Dictionary:
+		return {"fires": 2, "sounds": 1}
+	func get_destruction_present_stats():
+		return DestructionInfoStub.new()
+
+
+class RuntimeInfoStub:
+	extends RefCounted
+	func get_throwable_present_stats():
+		return ThrowableInfoStub.new()
+	func get_wire_present_stats() -> WirePresentStats:
+		return WirePresentStats.new(4, 0, 1)
+
+
+class SimInfoStub:
+	extends RefCounted
+	func get_host_peer_count() -> int:
+		return 0
+	func is_joiner() -> bool:
+		return false
+	func get_occlusion_debug() -> Dictionary:
+		return {
+			"active": true,
+			"counts": {"instances": 6, "visible": 5, "culled_entities": 1},
+		}
 
 
 func _make_pane() -> DebugStatsPane:
@@ -17,93 +68,121 @@ func _make_pane() -> DebugStatsPane:
 func _blank_window() -> Array:
 	var sums := PackedInt64Array()
 	sums.resize(FrameStatsBoard.SLOT_COUNT)
-	var maxes := PackedInt64Array()
-	maxes.resize(FrameStatsBoard.SLOT_COUNT)
+	var peaks := PackedInt64Array()
+	peaks.resize(FrameStatsBoard.SLOT_COUNT)
 	var counts := PackedInt32Array()
 	counts.resize(FrameStatsBoard.SLOT_COUNT)
-	return [sums, maxes, counts]
+	return [sums, peaks, counts]
 
 
-func _row(pane: DebugStatsPane, id: String) -> TreeItem:
-	return pane._items[id] as TreeItem
+func _row(pane: DebugStatsPane, id: StringName) -> DebugStatsDisplayRow:
+	for row in pane.get_display_snapshot():
+		if row.id == id:
+			return row
+	return null
 
 
-func test_rows_cover_every_major_system() -> void:
+func test_rows_cover_major_systems_and_label_units() -> void:
 	var pane := _make_pane()
-	for id in ["frame", "world", "foliage", "sim", "net", "effects", "present",
-			"snapshot", "mission_rows", "wire_rows", "fire", "destruction",
-			"throwable", "occl", "occl_build", "occl_probe",
-			"occl_apply", "env", "audio", "hud", "render"]:
-		assert_true(pane._items.has(id), "the Stats tab carries a '%s' row" % id)
+	for id in [&"frame", &"world", &"foliage", &"runtime", &"sim", &"net",
+			&"trace", &"trace_terrain", &"trace_static", &"trace_dynamic",
+			&"trace_person", &"effects_drain", &"effects", &"present",
+			&"snapshot", &"mission_rows", &"wire_rows", &"fire",
+			&"destruction", &"throwable", &"occl", &"occl_build",
+			&"occl_probe", &"occl_apply", &"occl_glue", &"env", &"audio",
+			&"hud", &"render"]:
+		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
+	assert_eq(pane.stats_tree.get_column_title(1), "avg ms/frame")
+	assert_eq(pane.stats_tree.get_column_title(2), "peak ms/frame")
+	assert_eq(_row(pane, &"trace").label, "Projectile trace (attributed)",
+			"the group does not claim the intentionally uncharged setup/water time")
 
 
-func test_render_window_formats_avg_and_max() -> void:
+func test_render_window_formats_average_peak_groups_and_residual() -> void:
 	var pane := _make_pane()
 	var window := _blank_window()
 	var sums: PackedInt64Array = window[0]
-	var maxes: PackedInt64Array = window[1]
+	var peaks: PackedInt64Array = window[1]
 	var counts: PackedInt32Array = window[2]
-	# 20 ms across 10 frames = 2.00 ms/frame avg; worst frame 5 ms.
 	sums[FrameStatsBoard.SIM_STEP] = 20_000
-	maxes[FrameStatsBoard.SIM_STEP] = 5_000
+	peaks[FrameStatsBoard.SIM_STEP] = 5_000
 	counts[FrameStatsBoard.SIM_STEP] = 10
-	pane.render_window(10, sums, maxes, counts, null, null)
-	assert_eq(_row(pane, "sim").get_text(1), "2.00", "avg = window mean per frame")
-	assert_eq(_row(pane, "sim").get_text(2), "5.00", "max = worst single frame")
-	assert_eq(_row(pane, "hud").get_text(1), "-", "an unfed system reads as absent")
-
-
-func test_group_rows_sum_their_children() -> void:
-	var pane := _make_pane()
-	var window := _blank_window()
-	var sums: PackedInt64Array = window[0]
-	var counts: PackedInt32Array = window[2]
 	sums[FrameStatsBoard.OCCL_BUILD] = 2_000
-	counts[FrameStatsBoard.OCCL_BUILD] = 10
 	sums[FrameStatsBoard.OCCL_PROBE] = 3_000
-	counts[FrameStatsBoard.OCCL_PROBE] = 10
 	sums[FrameStatsBoard.OCCL_APPLY] = 4_000
-	counts[FrameStatsBoard.OCCL_APPLY] = 10
 	sums[FrameStatsBoard.OCCL_GLUE] = 1_000
-	counts[FrameStatsBoard.OCCL_GLUE] = 10
-	pane.render_window(10, sums, window[1], counts, null, null)
-	assert_eq(_row(pane, "occl").get_text(1), "1.00",
-			"the Occlusion group sums build+probe+apply+glue")
-	assert_eq(_row(pane, "occl_apply").get_text(1), "0.40")
+	for slot in [FrameStatsBoard.OCCL_BUILD, FrameStatsBoard.OCCL_PROBE,
+			FrameStatsBoard.OCCL_APPLY, FrameStatsBoard.OCCL_GLUE]:
+		counts[slot] = 10
+	sums[FrameStatsBoard.FRAME_WALL] = 100_000
+	counts[FrameStatsBoard.FRAME_WALL] = 10
+	sums[FrameStatsBoard.FRAME_WORLD] = 60_000
+	counts[FrameStatsBoard.FRAME_WORLD] = 10
+	sums[FrameStatsBoard.FRAME_HUD] = 10_000
+	counts[FrameStatsBoard.FRAME_HUD] = 10
+
+	pane.render_window(10, sums, peaks, counts, null, null)
+	assert_eq(_row(pane, &"sim").average, "2.00")
+	assert_eq(_row(pane, &"sim").peak, "5.00")
+	assert_eq(_row(pane, &"hud_attach").average, "-")
+	assert_eq(_row(pane, &"occl").average, "1.00",
+			"the group includes build, probe, apply, and binding glue")
+	assert_eq(_row(pane, &"occl_glue").average, "0.10")
+	assert_eq(_row(pane, &"shell_residual").average, "3.00")
 
 
-func test_capture_follows_host_visibility_and_own_visibility() -> void:
+func test_capture_follows_visibility_and_board_replacement() -> void:
 	var pane := _make_pane()
+	var first := FrameStatsBoard.new()
+	var second := FrameStatsBoard.new()
+	pane.set_frame_stats_board(first)
+	assert_false(first.is_capture_active())
+	pane.set_capture_active(true)
+	assert_true(first.is_capture_active())
+	pane.visible = false
+	assert_false(first.is_capture_active())
+	pane.visible = true
+	assert_true(first.is_capture_active())
+
+	pane.set_frame_stats_board(second)
+	assert_false(first.is_capture_active(),
+			"replacing a live board closes the old capture")
+	assert_true(second.is_capture_active(),
+			"the replacement inherits the pane's live capture state")
+	pane.set_frame_stats_board(null)
+	assert_false(second.is_capture_active(), "null detaches and closes the board")
+	assert_false(pane.is_capturing())
+
+
+func test_exit_tree_closes_capture() -> void:
+	var pane: DebugStatsPane = PaneScript.new()
+	add_child(pane)
 	var board := FrameStatsBoard.new()
 	pane.set_frame_stats_board(board)
-	assert_false(board.enabled, "capture starts off")
 	pane.set_capture_active(true)
-	assert_true(board.enabled, "visible tab + visible overlay -> capturing")
-	pane.visible = false
-	assert_false(board.enabled, "switching away from the tab stops capture")
-	pane.visible = true
-	assert_true(board.enabled, "switching back resumes")
-	pane.set_capture_active(false)
-	assert_false(board.enabled, "closing the overlay stops capture")
+	assert_true(board.is_capture_active())
+	remove_child(pane)
+	assert_false(board.is_capture_active(),
+			"leaving the tree releases every capture-owned diagnostic")
+	pane.free()
 
 
-func test_overlay_grows_a_stats_tab_and_gates_capture_by_tab() -> void:
+func test_overlay_selects_stats_without_exposing_tabs() -> void:
 	var overlay = add_child_autofree(OverlayScript.new())
-	var stats = overlay._tabs.get_node_or_null("Stats")
-	assert_not_null(stats, "the overlay carries the Stats tab")
-	assert_true(stats is DebugStatsPane)
-
 	var board := FrameStatsBoard.new()
 	overlay.set_frame_stats_board(board)
 	overlay.toggle()
 	await get_tree().process_frame
-	assert_false(board.enabled,
-			"opening the overlay on another tab leaves capture off")
-	overlay._tabs.current_tab = (stats as Control).get_index()
+	assert_false(board.is_capture_active(),
+			"opening on another tab leaves capture off")
+	assert_true(overlay.select_tab(&"Stats"))
 	await get_tree().process_frame
-	assert_true(board.enabled, "picking the Stats tab starts capture")
+	assert_true(overlay.is_stats_capturing())
+	assert_true(board.is_capture_active())
+	assert_false(overlay.select_tab(&"DoesNotExist"))
+	assert_gt(overlay.get_stats_display_snapshot().size(), 0)
 	overlay.toggle()
-	assert_false(board.enabled, "closing the overlay stops capture")
+	assert_false(board.is_capture_active())
 
 
 func test_refresh_drains_the_board_window() -> void:
@@ -111,37 +190,35 @@ func test_refresh_drains_the_board_window() -> void:
 	var board := FrameStatsBoard.new()
 	pane.set_frame_stats_board(board)
 	pane.set_capture_active(true)
-	assert_true(board.enabled)
-	# Two frames of a 4 ms sim step land in the window...
-	board.add(FrameStatsBoard.SIM_STEP, 4_000)
 	board.add(FrameStatsBoard.SIM_STEP, 4_000)
 	await get_tree().process_frame
+	board.add(FrameStatsBoard.SIM_STEP, 4_000)
 	await get_tree().process_frame
-	# ...the divided refresh reads it on its second call.
 	pane.refresh(null, null)
 	pane.refresh(null, null)
-	assert_false(_row(pane, "sim").get_text(1) == "-",
-			"a captured window renders onto the sim row")
-	assert_eq(board.window_sums()[FrameStatsBoard.SIM_STEP], 0,
-			"the drained window resets for the next reading")
+	assert_ne(_row(pane, &"sim").average, "-")
+	assert_eq(board.drain().sums[FrameStatsBoard.SIM_STEP], 0,
+			"the pane atomically drained the prior window")
 
 
-func test_shell_residual_row_subtracts_measured_legs() -> void:
-	# The "Outside shell spans" row: the wall frame minus every measured shell
-	# leg — work outside our spans made first-class so the next perf slice can
-	# cite it.
+func test_mission_scoped_info_clears_when_sources_disappear() -> void:
 	var pane := _make_pane()
+	var world := WorldInfoStub.new()
+	pane.set_world_source(func(): return world)
 	var window := _blank_window()
 	var sums: PackedInt64Array = window[0]
 	var counts: PackedInt32Array = window[2]
-	sums[FrameStatsBoard.FRAME_WALL] = 100_000  # 10 ms/frame across 10 frames
-	counts[FrameStatsBoard.FRAME_WALL] = 10
-	sums[FrameStatsBoard.FRAME_WORLD] = 60_000
-	counts[FrameStatsBoard.FRAME_WORLD] = 10
-	sums[FrameStatsBoard.FRAME_HUD] = 10_000
-	counts[FrameStatsBoard.FRAME_HUD] = 10
-	pane.render_window(10, sums, window[1], counts, null, null)
-	assert_eq(_row(pane, "frame").get_text(1), "10.00",
-			"the frame row is the window-averaged wall frame time")
-	assert_eq(_row(pane, "shell_residual").get_text(1), "3.00",
-			"residual = wall frame minus the measured shell legs")
+	sums[FrameStatsBoard.EFFECTS_DRAIN] = 2_000
+	counts[FrameStatsBoard.EFFECTS_DRAIN] = 1
+	pane.render_window(1, sums, window[1], counts,
+			RuntimeInfoStub.new(), SimInfoStub.new())
+	for id in [&"effects", &"fire", &"destruction", &"throwable",
+			&"wire_rows", &"occl"]:
+		assert_ne(_row(pane, id).info, "", "%s received live mission info" % id)
+
+	pane.set_world_source(Callable())
+	pane.render_window(1, sums, window[1], counts, null, null)
+	for id in [&"effects", &"fire", &"destruction", &"throwable",
+			&"wire_rows", &"occl"]:
+		assert_eq(_row(pane, id).info, "",
+				"%s does not retain the previous mission" % id)

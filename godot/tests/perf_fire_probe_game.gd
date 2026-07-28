@@ -14,6 +14,7 @@ const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
+const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
 
 var _mount_guard = MountGuard.new()
 var _property_guard = PropertyGuard.new()
@@ -243,21 +244,29 @@ func _run() -> void:
 	var xformoff := {avg = -1.0}
 	var visoff := {avg = -1.0}
 	var bodyoff := {avg = -1.0}
-	if _set_guarded_if_present(_present, &"_drive_transform", false):
+	var present_channels := int(_present.get_output_channels()) \
+			if _present != null and _present.has_method("get_output_channels") else -1
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_TRANSFORM)
 		await _settle_ms(500)
 		xformoff = await _measure("xformoff", 3000)
-		_restore_guarded(_present, &"_drive_transform")
-	if _set_guarded_if_present(_present, &"_drive_visibility", false):
+		_present.set_output_channels(present_channels)
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_VISIBILITY)
 		await _settle_ms(500)
 		visoff = await _measure("visoff", 3000)
-		_restore_guarded(_present, &"_drive_visibility")
+		_present.set_output_channels(present_channels)
 	# Body-anim A/B: freeze the pose dispatch (and with it the Skeleton3D
 	# update chain those writes dirty) — the deferred/off-span suspect the
 	# WORLDOFF-minus-spans residual points at.
-	if _set_guarded_if_present(_present, &"_drive_body_anim", false):
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_BODY_ANIM)
 		await _settle_ms(500)
 		bodyoff = await _measure("bodyoff", 3000)
-		_restore_guarded(_present, &"_drive_body_anim")
+		_present.set_output_channels(present_channels)
 
 	# Occlusion legs A/B (visibility writes across the occluded set per frame).
 	var occloff := {avg = -1.0}
@@ -533,14 +542,17 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 		if _sim != null and _sim.has_method("get_runtime_perf_counters"):
 			var sc: Dictionary = _sim.get_runtime_perf_counters()
 			if int(sc.get("trace_calls", 0)) > 0:
-				spans += " trace{n=%d ter=%.1f sta=%.1f dyn=%.1f per=%.1f surv=%d faces=%d}" % [
+				spans += " trace{n=%d ter=%.1f sta=%.1f dyn=%.1f per=%.1f surv=%d/%d/%d faces=%d/%d}" % [
 						int(sc.get("trace_calls", 0)),
 						float(sc.get("trace_terrain_us", 0)) / 1000.0,
 						float(sc.get("trace_static_us", 0)) / 1000.0,
 						float(sc.get("trace_dynamic_us", 0)) / 1000.0,
 						float(sc.get("trace_person_us", 0)) / 1000.0,
 						int(sc.get("trace_static_survivors", 0)),
-						int(sc.get("trace_static_faces", 0))]
+						int(sc.get("trace_dynamic_survivors", 0)),
+						int(sc.get("trace_person_survivors", 0)),
+						int(sc.get("trace_static_faces", 0)),
+						int(sc.get("trace_dynamic_faces", 0))]
 	var rmeas := ""
 	if _vprid.is_valid():
 		rmeas = " rcpu=%.1f rgpu=%.1f" % [

@@ -1644,6 +1644,7 @@ struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
     int32_t model_id = -1;
     EntityHandle expected;
     int ensure_calls = 0;
+    int matrix_calls = 0;
 
     bool ensure_collision_instance(World &, EntityHandle entity) override {
         ++ensure_calls;
@@ -1656,6 +1657,7 @@ struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
                                 const CollisionMatrix &entity_world,
                                 const CollisionModel &model,
                                 std::vector<CollisionMatrix> &out) override {
+        ++matrix_calls;
         out.assign(model.sections.size(), entity_world);
         return true;
     }
@@ -1920,6 +1922,291 @@ void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
     CHECK(rows.size() == 1);
     if (!rows.empty()) CHECK(rows[0].section == 14);
     CHECK(provider.ensure_calls == 1);
+}
+
+void test_projectile_person_broad_gate_skips_far_provider() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 200.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.position = Vec3{5.0f, 100.0f, 0.0f};
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(owner.valid() && victim.valid());
+
+    CollisionModel person;
+    person.sections.resize(1);
+    person.sections[0].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(person));
+    DemandPersonProvider provider;
+    provider.collision = &collision;
+    provider.model_id = model_id;
+    provider.expected = victim;
+    collision.set_section_matrix_provider(&provider);
+    collision.set_trace_profile_enabled(true);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{fx(10.0), 0, 0};
+    CHECK(!collision.trace_projectile(world, trace).hit());
+    CHECK(provider.ensure_calls == 0);
+    CHECK(collision.trace_profile().person_survivors == 0);
+
+    // A fresh slot snapshot admits the same provider-backed entity once it is
+    // near. The optimization gates only the expensive provider/view build.
+    world.registry.get(victim)->position = Vec3{5.0f, 0.0f, 0.0f};
+    collision.build_tick_tables(world);
+    const ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == victim);
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.trace_profile().person_survivors == 1);
+}
+
+void test_projectile_trace_view_cache_is_tick_scoped() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(victim.valid());
+
+    CollisionModel person;
+    person.sections.resize(1);
+    person.sections[0].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(person));
+    DemandPersonProvider provider;
+    provider.collision = &collision;
+    provider.model_id = model_id;
+    provider.expected = victim;
+    collision.set_section_matrix_provider(&provider);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{fx(10.0), 0, 0};
+    const auto hits_victim = [&](const ProjectileHit &hit) {
+        return hit.hit_class == ProjectileHitClass::Person &&
+               hit.geometry_entity == victim;
+    };
+
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.ensure_calls == 1);
+    CHECK(provider.matrix_calls == 1);
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.ensure_calls == 1);
+    CHECK(provider.matrix_calls == 1);
+
+    // build_tick_tables publishes the next proximity epoch and expires every
+    // cached target view. The provider is not re-entered for identity, but its
+    // posed section matrices must be copied exactly once for the new tick.
+    collision.build_tick_tables(world);
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.ensure_calls == 1);
+    CHECK(provider.matrix_calls == 2);
+
+    collision.build_initial_tables(world);
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.matrix_calls == 3);
+
+    collision.refresh_after_registry_change(world);
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.matrix_calls == 4);
+
+    CollisionModel unrelated;
+    unrelated.sections.resize(1);
+    unrelated.sections[0].radius = fx(1.0);
+    collision.add_model(std::move(unrelated));
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(provider.matrix_calls == 5);
+
+    CountingMatrixProvider replacement_provider;
+    collision.set_section_matrix_provider(&replacement_provider);
+    CHECK(hits_victim(collision.trace_projectile(world, trace)));
+    CHECK(replacement_provider.calls_for(victim) == 1);
+}
+
+void test_projectile_trace_cache_revalidates_reused_registry_slot() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle first = world.registry.spawn(0, victim_seed);
+    CHECK(owner.valid() && first.valid());
+
+    CollisionModel old_model;
+    old_model.sections.resize(1);
+    old_model.sections[0].radius = fx(1.0);
+    CollisionModel replacement_model;
+    replacement_model.sections.resize(2);
+    mark_unset_person_sections_absent(replacement_model);
+    replacement_model.sections[1].radius = fx(1.0);
+
+    CollisionWorld collision;
+    const int32_t old_model_id = collision.add_model(std::move(old_model));
+    const int32_t replacement_model_id =
+            collision.add_model(std::move(replacement_model));
+    const uint64_t first_spawn_id =
+            world.registry.get(first)->registry_spawn_id;
+    collision.assign_entity(first, old_model_id, first_spawn_id);
+    const int32_t at_victim[3] = {fx(5.0), 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+            first, {collision_matrix_from_heading(0, at_victim)}));
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{fx(10.0), 0, 0};
+    const ProjectileHit first_hit = collision.trace_projectile(world, trace);
+    CHECK(first_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(first_hit.geometry_entity == first);
+    CHECK(first_hit.bone_index == 0);
+
+    // Recycle the packed handle and attach a structurally different model
+    // without publishing a new table epoch. The existing proximity slot is
+    // still valid for this handle, but its cached target view is not.
+    world.registry.despawn(first);
+    const EntityHandle replacement = world.registry.spawn(0, victim_seed);
+    CHECK(replacement == first);
+    const uint64_t replacement_spawn_id =
+            world.registry.get(replacement)->registry_spawn_id;
+    CHECK(replacement_spawn_id != first_spawn_id);
+    collision.assign_entity(
+            replacement, replacement_model_id, replacement_spawn_id);
+    const CollisionMatrix replacement_matrix =
+            collision_matrix_from_heading(0, at_victim);
+    CHECK(collision.publish_entity_section_matrices(
+            replacement, {replacement_matrix, replacement_matrix}));
+
+    const ProjectileHit replacement_hit =
+            collision.trace_projectile(world, trace);
+    CHECK(replacement_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(replacement_hit.geometry_entity == replacement);
+    CHECK(replacement_hit.bone_index == 1);
+}
+
+void test_projectile_trace_cache_observes_published_pose_same_tick() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    victim_seed.bound_radius = 8.0f;
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(owner.valid() && victim.valid());
+
+    CollisionModel person;
+    person.sections.resize(1);
+    person.sections[0].radius = fx(1.0);
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(std::move(person));
+    collision.assign_entity(victim, model_id);
+
+    const int32_t first_pose[3] = {fx(5.0), 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+            victim, {collision_matrix_from_heading(0, first_pose)}));
+    collision.build_tick_tables(world);
+
+    ProjectileTrace first_trace;
+    first_trace.owner = owner;
+    first_trace.start = FixedVec3{0, 0, 0};
+    first_trace.end = FixedVec3{fx(10.0), 0, 0};
+    CHECK(collision.trace_projectile(world, first_trace).hit_class ==
+          ProjectileHitClass::Person);
+
+    // Animation publishes a newer pose before another round in this logic
+    // tick. That round must consume the new matrices, not the cached copy.
+    const int32_t moved_pose[3] = {fx(5.0), fx(2.0), 0};
+    CHECK(collision.publish_entity_section_matrices(
+            victim, {collision_matrix_from_heading(0, moved_pose)}));
+    ProjectileTrace moved_trace;
+    moved_trace.owner = owner;
+    moved_trace.start = FixedVec3{0, fx(2.0), 0};
+    moved_trace.end = FixedVec3{fx(10.0), fx(2.0), 0};
+    const ProjectileHit moved_hit =
+            collision.trace_projectile(world, moved_trace);
+    CHECK(moved_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(moved_hit.geometry_entity == victim);
+    CHECK(moved_hit.bone_index == 0);
+
+    collision.clear_entity_section_matrices(victim);
+    CHECK(!collision.trace_projectile(world, moved_trace).hit());
+
+    CHECK(collision.publish_entity_section_matrices(
+            victim, {collision_matrix_from_heading(0, moved_pose)}));
+    CHECK(collision.trace_projectile(world, moved_trace).hit_class ==
+          ProjectileHitClass::Person);
+    collision.remove_entity_instance(victim);
+    CHECK(!collision.trace_projectile(world, moved_trace).hit());
+}
+
+void test_projectile_trace_cache_observes_husk_assignment_same_tick() {
+    World world;
+    world.registry.configure_pool(0, 4);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    victim_seed.engine_flags = 0x4u;
+    const EntityHandle victim = world.registry.spawn(0, victim_seed);
+    CHECK(owner.valid() && victim.valid());
+
+    CollisionModel intact;
+    intact.sections.resize(1);
+    intact.sections[0].radius = fx(1.0);
+    CollisionModel husk;
+    husk.sections.resize(2);
+    mark_unset_person_sections_absent(husk);
+    husk.sections[1].radius = fx(1.0);
+
+    CollisionWorld collision;
+    const int32_t intact_id = collision.add_model(std::move(intact));
+    const int32_t husk_id = collision.add_model(std::move(husk));
+    collision.assign_entity(victim, intact_id);
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, 0};
+    trace.end = FixedVec3{fx(10.0), 0, 0};
+    const ProjectileHit intact_hit = collision.trace_projectile(world, trace);
+    CHECK(intact_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(intact_hit.bone_index == 0);
+
+    collision.assign_entity_husk(victim, husk_id);
+    const ProjectileHit husk_hit = collision.trace_projectile(world, trace);
+    CHECK(husk_hit.hit_class == ProjectileHitClass::Person);
+    CHECK(husk_hit.geometry_entity == victim);
+    CHECK(husk_hit.bone_index == 1);
+    CHECK(provider.calls_for(victim) == 2);
 }
 
 void test_reused_registry_slot_rejects_old_collision_identity() {
@@ -2360,6 +2647,104 @@ void test_projectile_static_slot_signed_coordinates() {
     CHECK(hit.hit_class == ProjectileHitClass::StaticEntity);
     CHECK(hit.geometry_entity == rig.building);
     CHECK(std::abs(hit.position_q16.x - fx(-10.0)) < 8);
+}
+
+void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 8);
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity person_seed;
+    person_seed.kind = EntityKind::Organic;
+    person_seed.position = Vec3{9.0f, 0.0f, 0.0f};
+    const EntityHandle person = world.registry.spawn(0, person_seed);
+    Entity dynamic_seed;
+    dynamic_seed.kind = EntityKind::Item;
+    dynamic_seed.position = Vec3{7.0f, 0.0f, 0.0f};
+    dynamic_seed.yaw = 90;
+    dynamic_seed.alive = true;
+    const EntityHandle dynamic = world.registry.spawn(1, dynamic_seed);
+    Entity static_seed = dynamic_seed;
+    static_seed.kind = EntityKind::Building;
+    static_seed.position.x = 5.0f;
+    const EntityHandle statik = world.registry.spawn(2, static_seed);
+    CHECK(owner.valid() && person.valid() && dynamic.valid() && statik.valid());
+
+    CollisionWorld collision;
+    const int32_t static_model = collision.add_model(wall_triangle_model());
+    const int32_t dynamic_model = collision.add_model(wall_triangle_model());
+    collision.assign_entity(statik, static_model);
+    collision.assign_entity(dynamic, dynamic_model);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, fx(0.9)};
+    trace.end = FixedVec3{fx(12.0), 0, fx(0.9)};
+
+    const auto profile_is_empty = [](const CollisionWorld::TraceProfile &p) {
+        return p.calls == 0 && p.terrain_us == 0 && p.static_us == 0 &&
+               p.dynamic_us == 0 && p.person_us == 0 &&
+               p.static_survivors == 0 && p.dynamic_survivors == 0 &&
+               p.person_survivors == 0 && p.static_faces == 0 &&
+               p.dynamic_faces == 0;
+    };
+    const auto hits_match = [](const ProjectileHit &a, const ProjectileHit &b) {
+        return a.hit_class == b.hit_class &&
+               a.geometry_entity == b.geometry_entity && a.t_q16 == b.t_q16 &&
+               a.position_q16.x == b.position_q16.x &&
+               a.position_q16.y == b.position_q16.y &&
+               a.position_q16.z == b.position_q16.z &&
+               a.normal_q16.x == b.normal_q16.x &&
+               a.normal_q16.y == b.normal_q16.y &&
+               a.normal_q16.z == b.normal_q16.z &&
+               a.section_index == b.section_index &&
+               a.face_index == b.face_index && a.bone_index == b.bone_index &&
+               a.hit_zone == b.hit_zone && a.surface_type == b.surface_type &&
+               a.material_flags == b.material_flags;
+    };
+
+    CHECK(!collision.trace_profile_enabled());
+    const ProjectileHit unprofiled = collision.trace_projectile(world, trace);
+    CHECK(unprofiled.hit_class == ProjectileHitClass::StaticEntity);
+    CHECK(unprofiled.geometry_entity == statik);
+    CHECK(profile_is_empty(collision.trace_profile()));
+
+    collision.set_trace_profile_enabled(true);
+    CHECK(collision.trace_profile_enabled());
+    CHECK(profile_is_empty(collision.trace_profile()));
+    const ProjectileHit profiled = collision.trace_projectile(world, trace);
+    CHECK(hits_match(unprofiled, profiled));
+    const CollisionWorld::TraceProfile &captured = collision.trace_profile();
+    CHECK(captured.calls == 1);
+    CHECK(captured.static_survivors == 1);
+    CHECK(captured.dynamic_survivors == 1);
+    CHECK(captured.person_survivors == 1);
+    CHECK(captured.static_faces == 1);
+    CHECK(captured.dynamic_faces == 1);
+    CHECK(captured.terrain_us >= 0 && captured.static_us >= 0 &&
+          captured.dynamic_us >= 0 && captured.person_us >= 0);
+
+    // Repeating a state is not an edge and preserves this tick's snapshot.
+    collision.set_trace_profile_enabled(true);
+    CHECK(collision.trace_profile().calls == 1);
+    // Tick boundaries reset an active capture.
+    collision.build_tick_tables(world);
+    CHECK(profile_is_empty(collision.trace_profile()));
+    CHECK(hits_match(unprofiled, collision.trace_projectile(world, trace)));
+    CHECK(collision.trace_profile().calls == 1);
+
+    // Disable is an edge: clear once, then keep the ordinary path untouched.
+    collision.set_trace_profile_enabled(false);
+    CHECK(!collision.trace_profile_enabled());
+    CHECK(profile_is_empty(collision.trace_profile()));
+    CHECK(hits_match(unprofiled, collision.trace_projectile(world, trace)));
+    CHECK(profile_is_empty(collision.trace_profile()));
 }
 
 void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
@@ -3166,6 +3551,11 @@ int main() {
     test_iris_static_rays_prefilter_before_section_matrices();
     test_sound_los_prefilters_candidates_before_section_matrices();
     test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
+    test_projectile_person_broad_gate_skips_far_provider();
+    test_projectile_trace_view_cache_is_tick_scoped();
+    test_projectile_trace_cache_revalidates_reused_registry_slot();
+    test_projectile_trace_cache_observes_published_pose_same_tick();
+    test_projectile_trace_cache_observes_husk_assignment_same_tick();
     test_reused_registry_slot_rejects_old_collision_identity();
     test_person_section_reverse_scan_and_mask();
     test_person_section_retail_radius_rules();
@@ -3173,6 +3563,7 @@ int main() {
     test_face_raycast_pitched_entity();
     test_round_inside_bound_sphere_hits_wall();
     test_projectile_static_slot_signed_coordinates();
+    test_projectile_trace_profile_is_opt_in_and_parity_neutral();
     test_projectile_dynamic_fallback_encloses_scaled_diagonal();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();

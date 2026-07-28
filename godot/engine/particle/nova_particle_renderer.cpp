@@ -1362,6 +1362,7 @@ void NovaParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	clear_warm_pipelines();
 	if (!impl_)
 		return;
+	impl_->world_effect->request_pipeline_warm();
 	Ref<QuadMesh> quad;
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
@@ -1385,6 +1386,8 @@ void NovaParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 }
 
 void NovaParticleRenderer::clear_warm_pipelines() {
+	if (impl_)
+		impl_->world_effect->cancel_pipeline_warm();
 	for (Node *node : warm_nodes_) {
 		if (node != nullptr)
 			node->queue_free();

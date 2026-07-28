@@ -56,6 +56,8 @@ constexpr std::uint32_t kFallbackSceneTextureSide = 1;
 constexpr std::uint32_t kRgba8BytesPerPixel = 4;
 constexpr std::uint64_t kNoAtlasGeneration =
 		std::numeric_limits<std::uint64_t>::max();
+constexpr std::uint64_t kPipelineWarmRequestedBit = 1;
+constexpr std::uint64_t kPipelineWarmEpochStep = 2;
 
 static_assert(sizeof(renderer::ParticleVertex) == 28,
 		"RD upload must retain the retail particle vertex stride");
@@ -269,6 +271,11 @@ public:
 		std::size_t atlas_pages = 0;
 		std::uint32_t vertex_capacity_bytes = 0;
 		std::uint64_t vertex_capacity_growths = 0;
+		std::uint64_t pipeline_warm_requests = 0;
+		std::uint64_t pipeline_warm_requests_serviced = 0;
+		std::size_t warmed_pipeline_modes = 0;
+		std::size_t warmed_framebuffer_formats = 0;
+		bool scene_snapshot_pipeline_warmed = false;
 		bool callback_seen = false;
 		bool rd_available = false;
 	};
@@ -303,6 +310,11 @@ public:
 	mutable std::mutex submission_mutex;
 	std::shared_ptr<const NovaParticleWorldSubmission> latest_submission;
 	std::atomic<bool> hidden{false};
+	// Low bit is the pending request; upper bits form an epoch. Both request
+	// and cancel advance the epoch, so a failed callback can rearm only the
+	// exact request it claimed without resurrecting a later cancellation or
+	// consuming a newer request.
+	std::atomic<std::uint64_t> pipeline_warm_state{0};
 
 	mutable std::mutex diagnostics_mutex;
 	Diagnostics diagnostics;
@@ -432,6 +444,7 @@ public:
 	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view);
 	RID pipeline_for(const renderer::ParticleDrawCommand &command,
 			int64_t framebuffer_format);
+	bool warm_pipelines(RenderData *render_data);
 	bool validate_submission(const NovaParticleWorldSubmission &submission) const;
 	bool draw(const NovaParticleWorldSubmission &submission,
 			RenderData *render_data);
@@ -1005,9 +1018,12 @@ RID NovaParticleCompositorEffect::Impl::pipeline_for(
 	depth->set_depth_compare_operator(
 			RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
 
-	RenderingDevice::BlendFactor source = RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
-	RenderingDevice::BlendFactor destination =
+	RenderingDevice::BlendFactor source_color =
+			RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
+	RenderingDevice::BlendFactor destination_color =
 			RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	RenderingDevice::BlendFactor source_alpha = source_color;
+	RenderingDevice::BlendFactor destination_alpha = destination_color;
 	switch (command.pipeline) {
 		case renderer::ParticlePipeline::Blend:
 		case renderer::ParticlePipeline::Bump:
@@ -1020,29 +1036,40 @@ RID NovaParticleCompositorEffect::Impl::pipeline_for(
 			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA)]. The
 			// type-1 atlas alpha clear zeroes the fragment alpha, which is what
 			// turns this pair into a pure add for additive layers.
-			source = RenderingDevice::BLEND_FACTOR_ONE;
+			source_color = RenderingDevice::BLEND_FACTOR_ONE;
+			source_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;
 		case renderer::ParticlePipeline::Bumpadd:
 			// [orig: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE]
-			destination = RenderingDevice::BLEND_FACTOR_ONE;
+			destination_color = RenderingDevice::BLEND_FACTOR_ONE;
+			destination_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;
 		case renderer::ParticlePipeline::Mod:
-			source = RenderingDevice::BLEND_FACTOR_DST_COLOR;
-			destination = RenderingDevice::BLEND_FACTOR_ZERO;
+			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
+			destination_color = RenderingDevice::BLEND_FACTOR_ZERO;
+			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
+			destination_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
 			break;
 		case renderer::ParticlePipeline::Mod2x:
-			source = RenderingDevice::BLEND_FACTOR_DST_COLOR;
-			destination = RenderingDevice::BLEND_FACTOR_SRC_COLOR;
+			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
+			destination_color = RenderingDevice::BLEND_FACTOR_SRC_COLOR;
+			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
+			destination_alpha = RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
 			break;
 	}
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
 	attachment->set_enable_blend(true);
-	attachment->set_src_color_blend_factor(source);
-	attachment->set_dst_color_blend_factor(destination);
+	attachment->set_src_color_blend_factor(source_color);
+	attachment->set_dst_color_blend_factor(destination_color);
 	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-	attachment->set_src_alpha_blend_factor(source);
-	attachment->set_dst_alpha_blend_factor(destination);
+	// D3D9's DESTCOLOR/SRCCOLOR factors are component-wise: their alpha
+	// component is destination/source alpha. RenderingDevice exposes separate
+	// color and alpha slots, and D3D12 rejects color-only factors in the alpha
+	// slots, so use the explicit alpha equivalents without changing the
+	// witnessed blend equation.
+	attachment->set_src_alpha_blend_factor(source_alpha);
+	attachment->set_dst_alpha_blend_factor(destination_alpha);
 	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
@@ -1063,6 +1090,62 @@ RID NovaParticleCompositorEffect::Impl::pipeline_for(
 	}
 	pipelines.emplace(key, pipeline);
 	return pipeline;
+}
+
+bool NovaParticleCompositorEffect::Impl::warm_pipelines(
+		RenderData *render_data) {
+	if (!initialize_rd())
+		return false;
+	if (render_data == nullptr) {
+		set_failure("Compositor pipeline warm received no RenderData",
+				"pipeline_warm_render_data_missing");
+		return false;
+	}
+	Ref<RenderSceneBuffers> generic_buffers =
+			render_data->get_render_scene_buffers();
+	RenderSceneBuffersRD *buffers = Object::cast_to<RenderSceneBuffersRD>(
+			generic_buffers.ptr());
+	if (buffers == nullptr) {
+		set_failure("Particle pipeline warm requires RenderSceneBuffersRD",
+				"pipeline_warm_render_data_unsupported");
+		return false;
+	}
+	const std::uint32_t view_count = buffers->get_view_count();
+	const Vector2i size = buffers->get_internal_size();
+	if (!ensure_targets(buffers, view_count, size))
+		return false;
+
+	std::vector<int64_t> framebuffer_formats;
+	for (std::uint32_t view = 0; view < view_count; ++view) {
+		ViewTarget &target = targets[view];
+		const int64_t framebuffer_format =
+				rd->framebuffer_get_format(target.framebuffer);
+		if (std::find(framebuffer_formats.begin(), framebuffer_formats.end(),
+					framebuffer_format) == framebuffer_formats.end()) {
+			framebuffer_formats.push_back(framebuffer_format);
+			for (std::uint8_t mode = 0; mode < 8; ++mode) {
+				renderer::ParticleDrawCommand command;
+				command.pipeline =
+						static_cast<renderer::ParticlePipeline>(mode);
+				if (!pipeline_for(command, framebuffer_format).is_valid())
+					return false;
+			}
+		}
+		// Distort has a second real RD pipeline and retained scratch resources
+		// for the resolved-scene copy. Exercise its draw now as well so first
+		// live distortion cannot move that one-time behind the loading screen.
+		if (!ensure_scene_color_target(target, view) ||
+				!snapshot_scene_color(target, view)) {
+			return false;
+		}
+	}
+
+	std::lock_guard<std::mutex> lock(diagnostics_mutex);
+	++diagnostics.pipeline_warm_requests_serviced;
+	diagnostics.warmed_pipeline_modes = 8;
+	diagnostics.warmed_framebuffer_formats = framebuffer_formats.size();
+	diagnostics.scene_snapshot_pipeline_warmed = true;
+	return true;
 }
 
 bool NovaParticleCompositorEffect::Impl::validate_submission(
@@ -1338,6 +1421,16 @@ Dictionary NovaParticleCompositorEffect::Impl::report() const {
 			static_cast<int64_t>(diagnostics.vertex_capacity_bytes);
 	result["vertex_capacity_growths"] =
 			godot_token(diagnostics.vertex_capacity_growths);
+	result["pipeline_warm_requests"] =
+			godot_token(diagnostics.pipeline_warm_requests);
+	result["pipeline_warm_requests_serviced"] =
+			godot_token(diagnostics.pipeline_warm_requests_serviced);
+	result["warmed_pipeline_modes"] =
+			static_cast<int64_t>(diagnostics.warmed_pipeline_modes);
+	result["warmed_framebuffer_formats"] =
+			static_cast<int64_t>(diagnostics.warmed_framebuffer_formats);
+	result["scene_snapshot_pipeline_warmed"] =
+			diagnostics.scene_snapshot_pipeline_warmed;
 	return result;
 }
 
@@ -1388,6 +1481,47 @@ void NovaParticleCompositorEffect::set_particles_hidden(bool p_hidden) {
 	}
 }
 
+void NovaParticleCompositorEffect::request_pipeline_warm() {
+	if (!impl_)
+		return;
+	{
+		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
+		++impl_->diagnostics.pipeline_warm_requests;
+		impl_->diagnostics.warmed_pipeline_modes = 0;
+		impl_->diagnostics.warmed_framebuffer_formats = 0;
+		impl_->diagnostics.scene_snapshot_pipeline_warmed = false;
+	}
+	// Publish the request only after its diagnostics are initialized; the
+	// compositor callback may be running concurrently on the render thread.
+	std::uint64_t observed =
+			impl_->pipeline_warm_state.load(std::memory_order_relaxed);
+	for (;;) {
+		const std::uint64_t requested =
+				((observed + kPipelineWarmEpochStep) |
+						kPipelineWarmRequestedBit);
+		if (impl_->pipeline_warm_state.compare_exchange_weak(observed, requested,
+					std::memory_order_release, std::memory_order_relaxed)) {
+			break;
+		}
+	}
+}
+
+void NovaParticleCompositorEffect::cancel_pipeline_warm() {
+	if (!impl_)
+		return;
+	std::uint64_t observed =
+			impl_->pipeline_warm_state.load(std::memory_order_relaxed);
+	for (;;) {
+		const std::uint64_t canceled =
+				(observed + kPipelineWarmEpochStep) &
+				~kPipelineWarmRequestedBit;
+		if (impl_->pipeline_warm_state.compare_exchange_weak(observed, canceled,
+					std::memory_order_release, std::memory_order_relaxed)) {
+			break;
+		}
+	}
+}
+
 Dictionary NovaParticleCompositorEffect::get_backend_report() const {
 	return impl_ ? impl_->report() : Dictionary();
 }
@@ -1407,6 +1541,28 @@ void NovaParticleCompositorEffect::_render_callback(
 	}
 	if (impl_->hidden.load(std::memory_order_acquire))
 		return;
+	std::uint64_t requested =
+			impl_->pipeline_warm_state.load(std::memory_order_acquire);
+	while ((requested & kPipelineWarmRequestedBit) != 0) {
+		const std::uint64_t claimed =
+				requested & ~kPipelineWarmRequestedBit;
+		if (!impl_->pipeline_warm_state.compare_exchange_weak(requested, claimed,
+					std::memory_order_acq_rel, std::memory_order_acquire)) {
+			continue;
+		}
+		if (!impl_->warm_pipelines(p_render_data)) {
+			// A transient target/resource failure may recover on the next
+			// frame, but only if request/cancel has not advanced the epoch
+			// while this callback was working. This CAS cannot resurrect a
+			// cancellation or overwrite a newer request.
+			std::uint64_t expected = claimed;
+			impl_->pipeline_warm_state.compare_exchange_strong(expected,
+					requested, std::memory_order_release,
+					std::memory_order_relaxed);
+			return;
+		}
+		break;
+	}
 	const std::shared_ptr<const NovaParticleWorldSubmission> submission =
 			impl_->snapshot();
 	if (!submission) {

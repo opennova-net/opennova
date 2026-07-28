@@ -257,7 +257,8 @@ public:
 	// caller's node array (index = part index; null/absent entries skipped).
 	// p_applied_revision is what the caller last applied: the returned
 	// revision equal to it means nothing was written; 0 forces a full apply
-	// (fresh nodes). No per-call allocations, no Dictionary boxing.
+	// (fresh nodes). The common empty-control path performs no per-call
+	// allocation, and the result never boxes transforms into a Dictionary.
 	int64_t apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 			const Dictionary &p_ctrl_values, const Array &p_nodes,
 			int64_t p_applied_revision) const;

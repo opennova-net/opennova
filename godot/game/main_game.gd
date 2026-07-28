@@ -65,11 +65,12 @@ var _hud_host: NovaGameHudHost
 var _player_host: LocalPlayerHost = null
 # The per-system frame-stats board behind F3 -> Stats. Created with the shell
 # and handed to every feeding host; it costs nothing until the tab opens
-# (enabled stays false, every feed site gates on it).
+# (capture stays inactive, every feed site gates on it).
 var _frame_stats := FrameStatsBoard.new()
 # Edge latch for RenderingServer render-time measurement on the root viewport
 # (only measured while the Stats tab captures).
 var _stats_render_measured := false
+var _stats_render_viewport_ref: WeakRef = null
 # Previous shell-frame timestamp for the Stats tab's wall frame row (0 = no
 # prior frame in this capture window).
 var _stats_last_frame_usec := 0
@@ -96,6 +97,18 @@ var _round_ended := false
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
+
+
+func _init() -> void:
+	# Render-time measurement is RenderingServer state, not Node-owned state.
+	# Observe the capture close edge directly so it cannot survive until some
+	# later process frame (or outlive this scene).
+	_frame_stats.capture_changed.connect(_on_frame_stats_capture_changed)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE:
+		_stop_root_render_stats()
 
 
 ## True from the menu-to-loading handoff until the world reports success or
@@ -249,7 +262,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not key.pressed and key.keycode == ARMORY_KEY:
 		if _use_latched:
 			_use_latched = false
-			if _state == State.WORLD and _try_toggle_mount():
+			if is_gameplay_input_active() and _try_toggle_mount():
 				get_viewport().set_input_as_handled()
 		return
 	if not key.pressed or key.echo:
@@ -269,7 +282,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	# The MISSION OBJECTIVES panel toggle, in-world only.
 	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
-	if key.keycode == OBJECTIVES_KEY and _state == State.WORLD and _hud_host != null:
+	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_host != null:
 		_hud_host.toggle_objectives()
 		get_viewport().set_input_as_handled()
 		return
@@ -279,7 +292,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# LABEL_121 latch @0x4e0b71 -> Input_ProcessFrame release edge @0x49d6dc ->
 	# Entity_ToggleVehicleMount @0x436950]. (The vehicle-loadout-volume vehicle.mnu leg
 	# @0x4e0bfe awaits that screen's port.)
-	if key.keycode == ARMORY_KEY and _state == State.WORLD:
+	if key.keycode == ARMORY_KEY and is_gameplay_input_active():
 		if _try_open_armory():
 			get_viewport().set_input_as_handled()
 		else:
@@ -291,7 +304,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
 	# LocalPlayerHost — the same host ONED play-in-editor routes to.
-	if _player_host != null and _player_host.handle_key_input(event, _state == State.WORLD):
+	if _player_host != null and _player_host.handle_key_input(
+			event, is_gameplay_input_active()):
 		get_viewport().set_input_as_handled()
 
 
@@ -322,11 +336,30 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.hitbox_debug_toggled.connect(_on_hitbox_debug_toggled)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
+	if is_debug_overlay_open():
+		# A press begun before F3 must not turn into a mount action when Shift is
+		# released behind the overlay.
+		_use_latched = false
 
 
 func is_debug_overlay_open() -> bool:
 	return _debug_overlay != null and is_instance_valid(_debug_overlay) \
 			and _debug_overlay.visible
+
+
+func get_debug_overlay() -> NovaDebugOverlay:
+	return _debug_overlay if _debug_overlay != null \
+			and is_instance_valid(_debug_overlay) else null
+
+
+func get_frame_stats_board() -> FrameStatsBoard:
+	return _frame_stats
+
+
+func is_root_render_stats_measured() -> bool:
+	return _stats_render_measured \
+			and _stats_render_viewport_ref != null \
+			and is_instance_valid(_stats_render_viewport_ref.get_ref())
 
 
 func is_gameplay_input_active() -> bool:
@@ -1200,7 +1233,7 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 func _process(delta: float) -> void:
 	var probe_enabled := _perf_probe_enabled
-	var stats_on: bool = _frame_stats.enabled
+	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
 	# the F3 Stats capture both consume the same measurements.
 	var timing := probe_enabled or stats_on
@@ -1270,16 +1303,22 @@ func _process(delta: float) -> void:
 func _sample_render_stats(stats_on: bool) -> void:
 	if not stats_on and not _stats_render_measured:
 		return
+	if not stats_on:
+		_stop_root_render_stats()
+		return
 	var viewport := get_viewport()
 	if viewport == null:
+		_stop_root_render_stats()
 		return
-	if stats_on != _stats_render_measured:
-		_stats_render_measured = stats_on
+	var previous: Object = (
+			_stats_render_viewport_ref.get_ref()
+			if _stats_render_viewport_ref != null else null)
+	if not _stats_render_measured or previous != viewport:
+		_stop_root_render_stats()
+		_stats_render_measured = true
+		_stats_render_viewport_ref = weakref(viewport)
 		RenderingServer.viewport_set_measure_render_time(
-				viewport.get_viewport_rid(), stats_on)
-	if not stats_on:
-		_stats_last_frame_usec = 0
-		return
+				viewport.get_viewport_rid(), true)
 	# The TRUE wall time between consecutive shell frames (matches fps exactly;
 	# Godot's TIME_PROCESS monitor does not). The Stats tab derives its
 	# "outside shell spans" residual from this minus the measured frame legs —
@@ -1296,10 +1335,29 @@ func _sample_render_stats(stats_on: bool) -> void:
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
 
 
+func _on_frame_stats_capture_changed(active: bool) -> void:
+	if not active:
+		_stop_root_render_stats()
+
+
+func _stop_root_render_stats() -> void:
+	var previous: Object = (
+			_stats_render_viewport_ref.get_ref()
+			if _stats_render_viewport_ref != null else null)
+	if previous is Viewport:
+		RenderingServer.viewport_set_measure_render_time(
+				(previous as Viewport).get_viewport_rid(), false)
+	_stats_render_viewport_ref = null
+	_stats_render_measured = false
+	_stats_last_frame_usec = 0
+
+
 # Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);
-# the shell only says when the player is live: in-world, loaded, mouse captured.
+# the shell only says when the player is live: gameplay input is active, the
+# world is loaded, and the mouse is captured.
 func _unhandled_input(event: InputEvent) -> void:
 	if _player_host != null and _player_host.handle_input(
 			event,
-			_state == State.WORLD and _world.is_loaded() and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):
+			is_gameplay_input_active() and _world.is_loaded() \
+					and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):
 		get_viewport().set_input_as_handled()

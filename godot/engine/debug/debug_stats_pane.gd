@@ -6,8 +6,8 @@ extends VBoxContainer
 ## FrameStatsBoard the hosts feed; this pane only opens/closes the capture
 ## window and formats what accumulated.
 ##
-## Capture is edge-gated: the board's `enabled` flips true only while this tab
-## is the visible overlay tab, so a closed overlay costs the hosts nothing.
+## Capture is edge-gated: the board is active only while this tab is the visible
+## overlay tab, so a closed overlay costs the hosts nothing.
 ## Rows read from a fixed table; the Tree is built once and text is updated
 ## in place. Every read/format runs at the (divided) overlay refresh cadence,
 ## never per frame.
@@ -33,27 +33,43 @@ const _ROWS := [
 			"slot": FrameStatsBoard.FRAME_WORLD},
 	{"id": "foliage", "label": "Foliage", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.WORLD_FOLIAGE},
-	{"id": "sim", "label": "Sim step", "depth": 2, "kind": _KIND_SPAN,
+	{"id": "runtime", "label": "Mission runtime", "depth": 2, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.WORLD_RUNTIME},
+	{"id": "sim", "label": "Sim step", "depth": 3, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.SIM_STEP},
-	{"id": "net", "label": "Net wire leg", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "net", "label": "Net wire leg", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.SIM_NET},
-	{"id": "effects", "label": "Effects tick", "depth": 2, "kind": _KIND_SPAN,
+	{"id": "trace", "label": "Projectile trace (attributed)", "depth": 4,
+			"kind": _KIND_GROUP,
+			"slots": [FrameStatsBoard.TRACE_TERRAIN, FrameStatsBoard.TRACE_STATIC,
+					FrameStatsBoard.TRACE_DYNAMIC, FrameStatsBoard.TRACE_PERSON]},
+	{"id": "trace_terrain", "label": "Terrain", "depth": 5, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.TRACE_TERRAIN},
+	{"id": "trace_static", "label": "Static", "depth": 5, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.TRACE_STATIC},
+	{"id": "trace_dynamic", "label": "Dynamic", "depth": 5, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.TRACE_DYNAMIC},
+	{"id": "trace_person", "label": "Person", "depth": 5, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.TRACE_PERSON},
+	{"id": "effects_drain", "label": "Effects drain", "depth": 3, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.EFFECTS_DRAIN},
+	{"id": "effects", "label": "Effects tick", "depth": 3, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.EFFECTS_TICK},
-	{"id": "present", "label": "Present", "depth": 2, "kind": _KIND_GROUP,
+	{"id": "present", "label": "Present", "depth": 3, "kind": _KIND_GROUP,
 			"slots": [FrameStatsBoard.PRESENT_SNAPSHOT, FrameStatsBoard.PRESENT_MISSION,
 					FrameStatsBoard.PRESENT_WIRE, FrameStatsBoard.PRESENT_FIRE,
 					FrameStatsBoard.PRESENT_DESTRUCTION, FrameStatsBoard.PRESENT_THROWABLE]},
-	{"id": "snapshot", "label": "Row snapshot", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "snapshot", "label": "Row snapshot", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_SNAPSHOT},
-	{"id": "mission_rows", "label": "Mission rows", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "mission_rows", "label": "Mission rows", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_MISSION},
-	{"id": "wire_rows", "label": "Wire rows", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "wire_rows", "label": "Wire rows", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_WIRE},
-	{"id": "fire", "label": "Fire", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "fire", "label": "Fire", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_FIRE},
-	{"id": "destruction", "label": "Destruction", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "destruction", "label": "Destruction", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_DESTRUCTION},
-	{"id": "throwable", "label": "Throwable", "depth": 3, "kind": _KIND_SPAN,
+	{"id": "throwable", "label": "Throwable", "depth": 4, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_THROWABLE},
 	{"id": "occl", "label": "Occlusion", "depth": 2, "kind": _KIND_GROUP,
 			"slots": [FrameStatsBoard.OCCL_BUILD, FrameStatsBoard.OCCL_PROBE,
@@ -64,6 +80,8 @@ const _ROWS := [
 			"slot": FrameStatsBoard.OCCL_PROBE},
 	{"id": "occl_apply", "label": "Apply (nodes)", "depth": 3, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.OCCL_APPLY},
+	{"id": "occl_glue", "label": "Binding/glue", "depth": 3, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.OCCL_GLUE},
 	{"id": "env", "label": "Env (weather/blink/iris)", "depth": 2, "kind": _KIND_GROUP,
 			"slots": [FrameStatsBoard.WORLD_WEATHER, FrameStatsBoard.WORLD_BLINK,
 					FrameStatsBoard.WORLD_IRIS]},
@@ -129,16 +147,16 @@ func _init() -> void:
 	stats_tree.columns = 4
 	stats_tree.column_titles_visible = true
 	stats_tree.set_column_title(0, "System")
-	stats_tree.set_column_title(1, "avg")
-	stats_tree.set_column_title(2, "max")
+	stats_tree.set_column_title(1, "avg ms/frame")
+	stats_tree.set_column_title(2, "peak ms/frame")
 	stats_tree.set_column_title(3, "info")
 	stats_tree.set_column_expand(0, true)
-	stats_tree.set_column_custom_minimum_width(0, 118)
+	stats_tree.set_column_custom_minimum_width(0, 148)
 	for column in [1, 2]:
 		stats_tree.set_column_expand(column, false)
-		stats_tree.set_column_custom_minimum_width(column, 46)
+		stats_tree.set_column_custom_minimum_width(column, 88)
 	stats_tree.set_column_expand(3, true)
-	stats_tree.set_column_custom_minimum_width(3, 60)
+	stats_tree.set_column_custom_minimum_width(3, 110)
 	stats_tree.hide_root = true
 	stats_tree.focus_mode = Control.FOCUS_NONE
 	stats_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -147,7 +165,14 @@ func _init() -> void:
 
 
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _board:
+		return
+	if _board != null:
+		_board.set_capture_active(false)
 	_board = board
+	_capture_active = false
+	_refresh_count = 0
+	status_label.text = "No frame stats source." if board == null else "Stats capture paused."
 	_sync_capture()
 
 
@@ -164,6 +189,12 @@ func set_capture_active(host_visible: bool) -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE:
+		_host_visible = false
+		if _board != null:
+			_board.set_capture_active(false)
+		_capture_active = false
+		return
 	# Tab switches flip this Control's own visibility.
 	if what == NOTIFICATION_VISIBILITY_CHANGED:
 		_sync_capture()
@@ -175,13 +206,18 @@ func is_capturing() -> bool:
 
 func _sync_capture() -> void:
 	var want := _board != null and _host_visible and visible and is_inside_tree()
-	if want == _capture_active:
+	if want == _capture_active \
+			and (_board == null or _board.is_capture_active() == want):
 		return
 	_capture_active = want
 	_refresh_count = 0
 	if _board != null:
-		_board.enabled = want
-		_board.reset_window()
+		_board.set_capture_active(want)
+	if want:
+		status_label.text = "Capturing…"
+		_clear_display_values()
+	elif _board != null:
+		status_label.text = "Stats capture paused."
 
 
 ## One overlay-cadence refresh. Reads the window only every _REFRESH_DIVIDER
@@ -196,15 +232,24 @@ func refresh(runtime: Object, sim: Object) -> void:
 	_refresh_count += 1
 	if _refresh_count % _REFRESH_DIVIDER != 0:
 		return
-	var frames := _board.window_frames()
-	var sums := _board.window_sums()
-	var maxes := _board.window_maxes()
-	var counts := _board.window_counts()
-	_board.reset_window()
-	if frames <= 0:
+	var window := _board.drain()
+	if window.frames <= 0:
 		return
-	status_label.text = "Per-frame means over the last %d frames." % frames
-	render_window(frames, sums, maxes, counts, runtime, sim)
+	status_label.text = "Captured %d render frames; overlay cost is included." % window.frames
+	render_window(window.frames, window.sums, window.peaks,
+			window.sample_frames, runtime, sim)
+
+
+## Stable, value-only observation seam for tests and automated probes.
+func get_display_snapshot() -> Array[DebugStatsDisplayRow]:
+	var out: Array[DebugStatsDisplayRow] = []
+	for row_v in _ROWS:
+		var row := row_v as Dictionary
+		var item := _items[row["id"]] as TreeItem
+		out.append(DebugStatsDisplayRow.new(
+				StringName(row["id"]), String(row["label"]),
+				item.get_text(1), item.get_text(2), item.get_text(3)))
+	return out
 
 
 ## Format one drained window into the rows. Split from refresh() so tests can
@@ -267,6 +312,14 @@ func _build_rows() -> void:
 		stack.push_back(item)
 
 
+func _clear_display_values() -> void:
+	for item_v in _items.values():
+		var item := item_v as TreeItem
+		item.set_text(1, "-")
+		item.set_text(2, "-")
+		item.set_text(3, "")
+
+
 func _set_info(id: String, text: String) -> void:
 	(_items[id] as TreeItem).set_text(3, text)
 
@@ -276,6 +329,12 @@ func _set_info(id: String, text: String) -> void:
 # harness stubs all render what they have.
 func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int,
 		runtime: Object, sim: Object) -> void:
+	# Sources are mission-scoped and can disappear between divided refreshes.
+	# Clear every conditional cell first so reload/menu transitions cannot retain
+	# counters from the previous world.
+	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
+			"throwable", "wire_rows", "occl"]:
+		_set_info(id, "")
 	_set_info("frame", "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS)))
 	_set_info("render", "%d draws · %d objs · %s prims · %d nodes" % [
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
@@ -316,11 +375,22 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			net_info = "%d peer(s)" % peers
 	_set_info("net", net_info)
 
+	if counts[FrameStatsBoard.TRACE_CALLS] > 0:
+		_set_info("trace",
+				"%.1f calls/f · S %.1f D %.1f P %.1f surv/f · %.1f/%.1f faces/f" % [
+					float(sums[FrameStatsBoard.TRACE_CALLS]) / frames,
+					float(sums[FrameStatsBoard.TRACE_STATIC_SURVIVORS]) / frames,
+					float(sums[FrameStatsBoard.TRACE_DYNAMIC_SURVIVORS]) / frames,
+					float(sums[FrameStatsBoard.TRACE_PERSON_SURVIVORS]) / frames,
+					float(sums[FrameStatsBoard.TRACE_STATIC_FACES]) / frames,
+					float(sums[FrameStatsBoard.TRACE_DYNAMIC_FACES]) / frames,
+				])
+
 	if world != null and world.has_method("get_effect_world"):
 		var fx = world.get_effect_world()
 		if fx != null and is_instance_valid(fx) and fx.has_method("active_entry_count"):
 			var drain_ms := float(sums[FrameStatsBoard.EFFECTS_DRAIN]) / 1000.0 / frames
-			_set_info("effects", "%d live · drain %.2f" % [
+			_set_info("effects", "%d live · drain %.2f ms/f" % [
 					int(fx.active_entry_count()), drain_ms])
 
 	if world != null and world.has_method("get_fire_present_stats"):
@@ -341,10 +411,10 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 			_set_info("throwable", "%d live" % int(throwable.live))
 
 	if runtime != null and runtime.has_method("get_wire_present_stats"):
-		var wire: Dictionary = runtime.get_wire_present_stats()
-		if not wire.is_empty():
+		var wire: WirePresentStats = runtime.get_wire_present_stats()
+		if wire != null and (wire.live > 0 or wire.unresolved > 0):
 			_set_info("wire_rows", "%d live · %d unresolved" % [
-					int(wire.get("live", 0)), int(wire.get("unresolved", 0))])
+					wire.live, wire.unresolved])
 
 	if sim != null and sim.has_method("get_occlusion_debug"):
 		var occ: Dictionary = sim.get_occlusion_debug()
@@ -354,8 +424,6 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 					int(occ_counts.get("instances", 0)),
 					int(occ_counts.get("visible", 0)),
 					int(occ_counts.get("culled_entities", 0))])
-		else:
-			_set_info("occl", "")
 
 
 static func _compact_count(value: int) -> String:

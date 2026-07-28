@@ -61,11 +61,11 @@ public:
 	bool get_procedural_fallback_enabled() const;
 
 	// Deterministic pipeline warm for the loading screen: one centimeter quad
-	// per blend shader so every particle pipeline compiles up front. Warming
-	// by spawning effects alone is timing-dependent (delayed emitters emit
-	// nothing during the warm frames and their pipelines then compile as a
-	// ~100 ms stall on the first live shot). clear_warm_pipelines frees the
-	// quads; the effect world calls it from its runtime reset.
+	// per FirstPerson spatial shader plus a one-shot request for all eight
+	// World RenderingDevice pipelines on the compositor's real framebuffer.
+	// Warming by spawning effects alone is timing-dependent (delayed emitters
+	// emit nothing during the warm frames). clear_warm_pipelines frees the
+	// quads and cancels an unserviced compositor request.
 	void warm_pipelines(const Vector3 &p_position);
 	void clear_warm_pipelines();
 

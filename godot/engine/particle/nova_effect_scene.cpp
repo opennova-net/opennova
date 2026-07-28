@@ -506,6 +506,8 @@ void NovaEffectScene::_bind_methods() {
 			&NovaEffectScene::detach);
 	ClassDB::bind_method(D_METHOD("detach_slot", "slot_token"),
 			&NovaEffectScene::detach_slot);
+	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
+			&NovaEffectScene::reset_runtime_state);
 	ClassDB::bind_method(D_METHOD("advance", "delta_seconds"),
 			&NovaEffectScene::advance);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
@@ -689,6 +691,11 @@ void NovaEffectScene::detach_slot(int64_t p_slot_token) {
 		token_from_godot(p_slot_token)
 	});
 	advance_in_place(0.0);
+}
+
+void NovaEffectScene::reset_runtime_state() {
+	scene_.reset_runtime_state();
+	snapshot_dirty_ = true;
 }
 
 void NovaEffectScene::advance_in_place(double p_delta_seconds) {

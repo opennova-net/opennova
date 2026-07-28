@@ -41,13 +41,19 @@ var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
 # Per-frame hot-path caches: object_data capability lookups (has_method is a
 # string-keyed scan) refresh in rebuild(); the environment-node capability
-# refreshes on assignment. The light-push cache holds the last-applied light
-# uniform set so identical values are never re-pushed (retained mode — a
-# skipped identical push is invisible).
+# refreshes on assignment. The typed light-push cache holds the last-applied
+# uniform set so identical values are never re-pushed without allocating a
+# comparison Array (retained mode — a skipped identical push is invisible).
 var _od_has_eval := false
 var _od_has_frame := false
 var _env_has_generation := false
-var _last_light_push: Array = []
+var _last_light_push_valid := false
+var _last_light_count := 0
+var _last_light_position := Vector3.ZERO
+var _last_light_color := Color.WHITE
+var _last_light_intensity := 0.0
+var _last_light_atten_start := 0.0
+var _last_light_atten_end := 0.0
 # Dense part-index -> Node3D array + the PANM revision this model last applied
 # (apply_panm_to_nodes skips every node write while the shared evaluation's
 # revision is unchanged; 0 forces the fresh-node full apply after rebuild).
@@ -884,7 +890,7 @@ func rebuild() -> void:
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
 	_last_env_values = null
-	_last_light_push = []
+	_last_light_push_valid = false
 	_robj_dense = []
 	_panm_applied_revision = 0
 	if object_data == null or not object_data.has_document():
@@ -1025,6 +1031,14 @@ func _last_object_update_mask() -> int:
 
 
 func _process(delta: float) -> void:
+	advance_runtime_frame(delta)
+
+
+## Advance the model's render-time state once. This is the public equivalent
+## of the engine process callback for deterministic hosts and tests: clocks
+## continue while hidden, while render-derived work waits until the model can
+## be submitted again.
+func advance_runtime_frame(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
 		return
 	# Retail evaluates material constants / PANM transforms / light state per
@@ -1231,7 +1245,8 @@ func _apply_robj_transforms() -> bool:
 	# once per graphic per frame (the placer shares one NovaObjectData across
 	# every instance of a graphic, all riding one presentation clock) and
 	# writes only the parts whose transforms changed since this model last
-	# applied. No Dictionary boxing, no per-frame allocations.
+	# applied. The common empty-control path allocates nothing and no output
+	# Dictionary is boxed.
 	if object_data.has_method("apply_panm_to_nodes"):
 		var revision := int(object_data.apply_panm_to_nodes(
 				_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
@@ -1287,10 +1302,21 @@ func _apply_lights() -> void:
 	# (retained mode — the skip is invisible); an animated/PANM-carried light
 	# changes the compare key and pushes normally.
 	var intensity := best_intensity if best_intensity > 0.0 else 1.0
-	var push := [count, position, color, intensity, atten_start, atten_end]
-	if push == _last_light_push:
+	if _last_light_push_valid \
+			and count == _last_light_count \
+			and position == _last_light_position \
+			and color == _last_light_color \
+			and intensity == _last_light_intensity \
+			and atten_start == _last_light_atten_start \
+			and atten_end == _last_light_atten_end:
 		return
-	_last_light_push = push
+	_last_light_push_valid = true
+	_last_light_count = count
+	_last_light_position = position
+	_last_light_color = color
+	_last_light_intensity = intensity
+	_last_light_atten_start = atten_start
+	_last_light_atten_end = atten_end
 	for material in _surface_materials:
 		if material == null:
 			continue

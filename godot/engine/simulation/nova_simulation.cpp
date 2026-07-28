@@ -65,6 +65,11 @@ constexpr float kBinocularAimOffsetDeg = 2.8125f; // 0x02000000 BAM
 constexpr double kTau = 6.28318530717958647692;
 constexpr const char *kJoinerNetDiagnosticsEnv = "OPENNOVA_NET_DIAGNOSTICS";
 
+int32_t trace_profile_lane(int64_t value) {
+	return static_cast<int32_t>(std::clamp<int64_t>(
+			value, 0, std::numeric_limits<int32_t>::max()));
+}
+
 bool environment_flag_enabled(const char *name) {
 	const String value =
 			OS::get_singleton()->get_environment(name).strip_edges().to_lower();
@@ -781,6 +786,8 @@ void NovaSimulation::reset_world() {
 	infantry_adm_resolved_ai_count_ = 0;
 	panm_time_override_ms_ = -1;
 	collision_world_ = opennova::world::CollisionWorld{};
+	collision_world_.set_trace_profile_enabled(
+			runtime_profiling_enabled_);
 	// Occlusion models too — retail reloads the model cache per mission, so the
 	// weld pass's shared-record type-5 rewrites never leak across loads.
 	occlusion_world_ = opennova::world::OcclusionWorld{};
@@ -2397,10 +2404,13 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 	cam.local_blink_flags =
 			collision_world_.local_player_blink_flags | (p_force_indoors ? 0x2u : 0u);
 
-	const uint64_t occl_build_start = perf_now_us();
+	const uint64_t occl_build_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	occlusion_world_.build_frame(*world_, collision_world_, cam);
-	const uint64_t occl_probe_start = perf_now_us();
-	last_occlusion_build_us_ = occl_probe_start - occl_build_start;
+	const uint64_t occl_probe_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
+	if (runtime_profiling_enabled_)
+		last_occlusion_build_us_ = occl_probe_start - occl_build_start;
 
 	// The entity collectors' render gates over the non-building entities the
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
@@ -2420,7 +2430,8 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 		if (!occlusion_world_.entity_render_visible(*world_, collision_world_, *e, cam))
 			occlusion_culled_bms_.push_back(e->bms_id);
 	}
-	last_occlusion_probe_us_ = perf_now_us() - occl_probe_start;
+	if (runtime_profiling_enabled_)
+		last_occlusion_probe_us_ = perf_now_us() - occl_probe_start;
 }
 
 PackedInt64Array NovaSimulation::get_building_visibility() const {
@@ -4911,6 +4922,16 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("get_wac_state"), &NovaSimulation::get_wac_state);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &NovaSimulation::get_runtime_perf_counters);
+	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
+			&NovaSimulation::set_runtime_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("is_runtime_profiling_enabled"),
+			&NovaSimulation::is_runtime_profiling_enabled);
+	ClassDB::bind_method(D_METHOD("get_last_projectile_trace_times_us"),
+			&NovaSimulation::get_last_projectile_trace_times_us);
+	ClassDB::bind_method(D_METHOD("get_last_projectile_trace_counts"),
+			&NovaSimulation::get_last_projectile_trace_counts);
+	ClassDB::bind_method(D_METHOD("get_last_projectile_trace_faces"),
+			&NovaSimulation::get_last_projectile_trace_faces);
 	ClassDB::bind_method(D_METHOD("get_last_sim_tick_us"), &NovaSimulation::get_last_sim_tick_us);
 	ClassDB::bind_method(D_METHOD("get_last_net_tick_us"), &NovaSimulation::get_last_net_tick_us);
 	ClassDB::bind_method(D_METHOD("get_last_present_snapshot_us"),
@@ -5173,17 +5194,20 @@ bool NovaSimulation::step() {
 	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
 	// Server_TickUpdate owns the C2S drain at the top of the loop and the post-logic S2C fan;
 	// host_pump drives it and the local client's decode happens via the host's ClientRuntime.
-	const uint64_t sim_start = perf_now_us();
+	const uint64_t sim_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
 		resolve_new_infantry_adm_ids();
-		last_sim_tick_us_ = perf_now_us() - sim_start;
+		if (runtime_profiling_enabled_)
+			last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
 		joiner_pump();
 		resolve_new_infantry_adm_ids();
-		last_sim_tick_us_ = perf_now_us() - sim_start;
+		if (runtime_profiling_enabled_)
+			last_sim_tick_us_ = perf_now_us() - sim_start;
 		return true;
 	}
 	// No-net editor/unit path: one authoritative logic tick, no replication.
@@ -5193,7 +5217,8 @@ bool NovaSimulation::step() {
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	resolve_new_infantry_adm_ids();
-	last_sim_tick_us_ = perf_now_us() - sim_start;
+	if (runtime_profiling_enabled_)
+		last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
 
@@ -5415,9 +5440,11 @@ void NovaSimulation::host_pump() {
 	// fold. The S2C serialize/emit half rides inside np::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
 	// npruntime grows a phase seam.
-	const uint64_t net_start = perf_now_us();
+	const uint64_t net_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
-	last_net_tick_us_ = perf_now_us() - net_start;
+	if (runtime_profiling_enabled_)
+		last_net_tick_us_ = perf_now_us() - net_start;
 }
 
 // host_pump's dispatch_event + admit_peer were promoted into libs/npruntime (np::dispatch_event /
@@ -5500,11 +5527,15 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 
 void NovaSimulation::joiner_pump() {
 	namespace np = opennova::np;
-	if (!runtime_) return;
+	if (!runtime_) {
+		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
+		return;
+	}
 	const uint32_t now = now_tick_;
 	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
 	// uplink ship, ending where the local (non-authority) world work begins.
-	const uint64_t net_start = perf_now_us();
+	const uint64_t net_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	// ClientHello once (Idle -> Hello) the first armed frame.
 	if (!joiner_started_) {
 		const std::vector<uint8_t> hello = runtime_->start();
@@ -5546,7 +5577,8 @@ void NovaSimulation::joiner_pump() {
 		outs = runtime_->Client_ProcessNetworkFrame(now);
 	}
 	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
-	last_net_tick_us_ = perf_now_us() - net_start;
+	if (runtime_profiling_enabled_)
+		last_net_tick_us_ = perf_now_us() - net_start;
 	apply_joiner_authoritative_loadout();
 	// The team selector may only just have become known (the S2C 0x04 latch landing
 	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
@@ -8207,6 +8239,42 @@ Dictionary NovaSimulation::get_wac_state() const {
 	return out;
 }
 
+void NovaSimulation::set_runtime_profiling_enabled(bool p_enabled) {
+	if (runtime_profiling_enabled_ == p_enabled) return;
+	runtime_profiling_enabled_ = p_enabled;
+	last_sim_tick_us_ = 0;
+	last_net_tick_us_ = 0;
+	last_present_snapshot_us_ = 0;
+	last_occlusion_build_us_ = 0;
+	last_occlusion_probe_us_ = 0;
+	collision_world_.set_trace_profile_enabled(p_enabled);
+}
+
+Vector4i NovaSimulation::get_last_projectile_trace_times_us() const {
+	const opennova::world::CollisionWorld::TraceProfile &tp =
+			collision_world_.trace_profile();
+	return Vector4i(trace_profile_lane(tp.terrain_us),
+			trace_profile_lane(tp.static_us),
+			trace_profile_lane(tp.dynamic_us),
+			trace_profile_lane(tp.person_us));
+}
+
+Vector4i NovaSimulation::get_last_projectile_trace_counts() const {
+	const opennova::world::CollisionWorld::TraceProfile &tp =
+			collision_world_.trace_profile();
+	return Vector4i(trace_profile_lane(tp.calls),
+			trace_profile_lane(tp.static_survivors),
+			trace_profile_lane(tp.dynamic_survivors),
+			trace_profile_lane(tp.person_survivors));
+}
+
+Vector2i NovaSimulation::get_last_projectile_trace_faces() const {
+	const opennova::world::CollisionWorld::TraceProfile &tp =
+			collision_world_.trace_profile();
+	return Vector2i(trace_profile_lane(tp.static_faces),
+			trace_profile_lane(tp.dynamic_faces));
+}
+
 Dictionary NovaSimulation::get_runtime_perf_counters() const {
 	Dictionary out;
 	out["loaded"] = loaded_;
@@ -8218,16 +8286,21 @@ Dictionary NovaSimulation::get_runtime_perf_counters() const {
 	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
 	out["occlusion_build_us"] = static_cast<int64_t>(last_occlusion_build_us_);
 	out["occlusion_probe_us"] = static_cast<int64_t>(last_occlusion_probe_us_);
+	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile).
 	const opennova::world::CollisionWorld::TraceProfile &tp =
 			collision_world_.trace_profile();
+	out["trace_profiling_enabled"] = collision_world_.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;
 	out["trace_static_us"] = tp.static_us;
 	out["trace_dynamic_us"] = tp.dynamic_us;
 	out["trace_person_us"] = tp.person_us;
 	out["trace_static_survivors"] = tp.static_survivors;
+	out["trace_dynamic_survivors"] = tp.dynamic_survivors;
+	out["trace_person_survivors"] = tp.person_survivors;
 	out["trace_static_faces"] = tp.static_faces;
+	out["trace_dynamic_faces"] = tp.dynamic_faces;
 	return out;
 }
 
@@ -9020,7 +9093,8 @@ bool NovaSimulation::get_entity_hidden(int p_index) const {
 }
 
 PackedFloat32Array NovaSimulation::get_present_snapshot() const {
-	const uint64_t start_us = perf_now_us();
+	const uint64_t start_us =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
 	// P7 (ADR 0011 Decision 1): every play path is the in-process listen server — the present pass
 	// reads the state the LOCAL CLIENT decoded off the wire (ClientState), not the authoritative sim
 	// directly. SP, a LAN host, and the editor preview all render exactly what a networked peer would;
@@ -9047,7 +9121,8 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		present_layout_ = std::move(next_layout);
 		++present_layout_revision_;
 	}
-	last_present_snapshot_us_ = perf_now_us() - start_us;
+	if (runtime_profiling_enabled_)
+		last_present_snapshot_us_ = perf_now_us() - start_us;
 	return out;
 }
 

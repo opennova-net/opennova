@@ -12,7 +12,9 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector4i.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -300,6 +302,9 @@ private:
 	// (OcclusionWorld::build_frame) and the per-entity render-gate probe loop.
 	uint64_t last_occlusion_build_us_ = 0;
 	uint64_t last_occlusion_probe_us_ = 0;
+	// One opt-in gate for every native runtime timer/counter. Retail play keeps
+	// this false; F3 Stats and the manual probe share the public ownership seam.
+	bool runtime_profiling_enabled_ = false;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
 	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
@@ -1233,6 +1238,20 @@ public:
 	Dictionary get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
+	// One opt-in seam for native sim/net/present/occlusion timings and
+	// projectile collision attribution. Disabled by default so ordinary play
+	// performs no native profiling clock reads or timing-counter writes.
+	void set_runtime_profiling_enabled(bool p_enabled);
+	bool is_runtime_profiling_enabled() const {
+		return runtime_profiling_enabled_;
+	}
+	// Allocation-free last-tick trace sampling for the F3 hot path. Vector
+	// lanes are times=(terrain, static, dynamic, person),
+	// counts=(calls, static survivors, dynamic survivors, person survivors),
+	// and faces=(static, dynamic).
+	Vector4i get_last_projectile_trace_times_us() const;
+	Vector4i get_last_projectile_trace_counts() const;
+	Vector2i get_last_projectile_trace_faces() const;
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
 	int64_t get_last_sim_tick_us() const { return static_cast<int64_t>(last_sim_tick_us_); }

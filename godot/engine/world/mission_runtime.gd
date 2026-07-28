@@ -63,6 +63,8 @@ var _perf_did_tick := false
 # Stats tab captures, the sim/net legs and each present pass land their spans
 # on it; otherwise all extra clock reads are skipped.
 var _frame_stats: FrameStatsBoard = null
+var _runtime_probe_enabled := false
+var _has_trace_stats_sampling := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
@@ -98,6 +100,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = NovaSimulation.new()
+	_has_trace_stats_sampling = (
+			_sim.has_method("get_last_projectile_trace_times_us")
+			and _sim.has_method("get_last_projectile_trace_counts")
+			and _sim.has_method("get_last_projectile_trace_faces"))
+	_sync_runtime_profiling()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
 	_mission_file = mission_path.replace("\\", "/").get_file()
@@ -594,7 +601,39 @@ func local_player_team() -> int:
 ## The host hands the shared FrameStatsBoard here (game shell -> GameWorld ->
 ## each runtime it creates).
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _frame_stats:
+		return
+	if _frame_stats != null:
+		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(old_capture_changed):
+			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_frame_stats = board
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if not _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.connect(capture_changed)
+	_sync_runtime_profiling()
+
+
+## Manual probe ownership is independent of F3 capture; the native timer stays
+## enabled while either consumer is active.
+func set_runtime_profiling_enabled(enabled: bool) -> void:
+	_runtime_probe_enabled = enabled
+	_sync_runtime_profiling()
+
+
+func _on_frame_stats_capture_changed(_active: bool) -> void:
+	_sync_runtime_profiling()
+
+
+func _sync_runtime_profiling() -> void:
+	if _sim == null or not _sim.has_method(
+			"set_runtime_profiling_enabled"):
+		return
+	var stats_active := _frame_stats != null \
+			and _frame_stats.is_capture_active()
+	_sim.set_runtime_profiling_enabled(
+			_runtime_probe_enabled or stats_active)
 
 
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
@@ -603,8 +642,9 @@ func get_fire_present_stats() -> Dictionary:
 
 
 # Wire-presentation counters (spawned/unresolved/live; empty when the pass is absent).
-func get_wire_present_stats() -> Dictionary:
-	return _wire_present.get_stats() if _wire_present != null else {}
+func get_wire_present_stats() -> WirePresentStats:
+	return _wire_present.get_stats_record() \
+			if _wire_present != null else WirePresentStats.new()
 
 
 ## Load-time warm hook: compile the fire-presentation pipelines (the tracer
@@ -819,7 +859,7 @@ func tick() -> bool:
 		_perf_did_tick = false
 		_ticks_last_frame = 0
 		return false
-	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
 	var did_tick := _advance_one_tick_no_present()
 	_perf_present_us = 0
@@ -845,6 +885,7 @@ func _advance_one_tick_no_present() -> bool:
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
 	_perf_effects_us = 0
 	if did_tick:
+		_feed_projectile_trace_stats()
 		var logic_tick := int(_sim.get_logic_tick())
 		# Invalidate before delivering effects: any owned spawn seeded during
 		# this tick and the fixed-tick particle advance both observe this exact
@@ -865,6 +906,39 @@ func _advance_one_tick_no_present() -> bool:
 	return did_tick
 
 
+func _feed_projectile_trace_stats() -> void:
+	if _frame_stats == null or not _frame_stats.is_capture_active() \
+			or not _has_trace_stats_sampling:
+		return
+	# Three value-type native reads preserve each logic tick's snapshot without
+	# allocating a Dictionary on the capture hot path. In a catch-up render
+	# frame the board folds each tick into one complete-frame peak.
+	var counts: Vector4i = _sim.get_last_projectile_trace_counts()
+	if counts.x <= 0:
+		return
+	var times: Vector4i = _sim.get_last_projectile_trace_times_us()
+	var faces: Vector2i = _sim.get_last_projectile_trace_faces()
+	_frame_stats.add(FrameStatsBoard.TRACE_TERRAIN,
+			times.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC,
+			times.y)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC,
+			times.z)
+	_frame_stats.add(FrameStatsBoard.TRACE_PERSON,
+			times.w)
+	_frame_stats.add(FrameStatsBoard.TRACE_CALLS, counts.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_SURVIVORS,
+			counts.y)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_SURVIVORS,
+			counts.z)
+	_frame_stats.add(FrameStatsBoard.TRACE_PERSON_SURVIVORS,
+			counts.w)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_FACES,
+			faces.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_FACES,
+			faces.y)
+
+
 ## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
 ## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
 ## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
@@ -876,7 +950,7 @@ func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
 		_ticks_last_frame = 0
 		return 0
-	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
 	_accum += delta
 	var n := int(_accum / TICK_DT)
@@ -1031,6 +1105,15 @@ func _for_each_present_node(fn: Callable) -> void:
 # The sim is held off-tree, so free it explicitly when this driver leaves the tree (a reload / Stop
 # queue_free()s the driver). [mirrors the old MissionSimDriver._exit_tree.]
 func _exit_tree() -> void:
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.disconnect(capture_changed)
+	_runtime_probe_enabled = false
+	_has_trace_stats_sampling = false
+	if _sim != null and _sim.has_method(
+			"set_runtime_profiling_enabled"):
+		_sim.set_runtime_profiling_enabled(false)
 	_clear_present_effect_poses()
 	_has_native_present_effect_pose_lookup = false
 	if _fire_present != null:

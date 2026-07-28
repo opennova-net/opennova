@@ -505,8 +505,10 @@ func test_local_first_person_usegun_parent_is_not_world_rendered() -> void:
 	index.by_bms_id = { 41: mount, 42: unrelated }
 	var sim := FakeSim.new()
 	sim.entities = [
-		{ "bms_id": 41, "hidden": 0, "local_view_suppressed": 1 },
-		{ "bms_id": 42, "hidden": 0, "local_view_suppressed": 0 },
+		{ "bms_id": 41, "hidden": 0, "local_view_suppressed": 1,
+				"anim_state": 43, "anim_phase": 7 },
+		{ "bms_id": 42, "hidden": 0, "local_view_suppressed": 0,
+				"anim_state": 43, "anim_phase": 7 },
 	]
 	var presenter := _make_pass(index, sim)
 	presenter.present()
@@ -514,12 +516,18 @@ func test_local_first_person_usegun_parent_is_not_world_rendered() -> void:
 			"the committed first-person UseGun parent skips its own world model")
 	assert_true(unrelated.visible,
 			"local UseGun suppression cannot hide unrelated world entities")
+	assert_eq(mount.body_calls.size(), 0,
+			"a hidden model without a muzzle provider skips skeletal writes")
+	assert_eq(unrelated.body_calls.size(), 1,
+			"the visible model still receives its absolute pose")
 
 	# Camera-mode changes, detach, and pre-commit slot mismatch all clear the
 	# transient verdict. PF_HIDDEN remains independently authoritative.
 	sim.entities[0]["local_view_suppressed"] = 0
 	presenter.present()
 	assert_true(mount.visible, "clearing the render verdict restores the parent immediately")
+	assert_eq(mount.body_calls.size(), 1,
+			"the absolute phase catches up when the model becomes renderable")
 	sim.entities[0]["hidden"] = 1
 	presenter.present()
 	assert_false(mount.visible, "authoritative PF_HIDDEN still wins independently")
@@ -559,15 +567,27 @@ func test_occlusion_claim_blocks_the_show_but_never_the_hide() -> void:
 	var sim := FakeSim.new()
 	sim.entities = [{ "bms_id": 1001 }]
 	var claims := { 1001: true }
-	var present_pass := _make_pass(index, sim, {"occlusion_hidden_ids": claims})
+	var visibility_intent := {}
+	var present_pass := _make_pass(index, sim, {
+		"occlusion_hidden_ids": claims,
+		"present_visibility": visibility_intent,
+	})
 
 	model.visible = false  # occlusion hid it; the sim wants it visible
 	present_pass.present()
 	assert_false(model.visible, "a claimed node is not re-shown by the present drive")
+	assert_true(bool(visibility_intent.get(1001, false)),
+			"the shared release intent records the complete present predicate")
 
 	sim.entities = [{ "bms_id": 1001, "hidden": 1 }]
 	present_pass.present()
 	assert_false(model.visible, "a sim hide lands regardless of the claim")
+	assert_false(bool(visibility_intent.get(1001, true)))
+
+	sim.entities = [{ "bms_id": 1001, "local_view_suppressed": 1 }]
+	present_pass.present()
+	assert_false(bool(visibility_intent.get(1001, true)),
+			"first-person suppression is part of the same release predicate")
 
 	sim.entities = [{ "bms_id": 1001 }]
 	claims.clear()
@@ -577,9 +597,8 @@ func test_occlusion_claim_blocks_the_show_but_never_the_hide() -> void:
 
 
 func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
-	# _drive_body_anim mirrors the _drive_transform/_drive_visibility probe
-	# seams: freezing it stops every pose dispatch so probes can isolate the
-	# skeleton-update share of the frame.
+	# The public output-channel mask freezes pose dispatch so probes can isolate
+	# the skeleton-update share without reaching into presenter fields.
 	var model := FakeModel.new()
 	add_child_autofree(model)
 	var index := FakeIndex.new()
@@ -589,9 +608,10 @@ func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
 	var present_pass := _make_pass(index, sim)
 	present_pass.present()
 	assert_eq(model.body_calls.size(), 1, "body anim dispatches by default")
-	present_pass._drive_body_anim = false
+	var channels := int(present_pass.get_output_channels())
+	present_pass.set_output_channels(channels & ~PresentPass.OUTPUT_BODY_ANIM)
 	present_pass.present()
 	assert_eq(model.body_calls.size(), 1, "the frozen seam dispatches nothing new")
-	present_pass._drive_body_anim = true
+	present_pass.set_output_channels(channels)
 	present_pass.present()
 	assert_eq(model.body_calls.size(), 2, "restoring the seam resumes dispatch")

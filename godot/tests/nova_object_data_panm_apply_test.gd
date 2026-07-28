@@ -58,24 +58,25 @@ func test_time_advance_writes_only_moved_parts() -> void:
 	var moved := -1
 	var still := -1
 	for key in t0.keys():
-		if not (t0[key] as Transform3D).is_equal_approx(t1[key]):
-			if moved < 0:
-				moved = int(key)
-		elif still < 0:
-			still = int(key)
-	assert_gt(moved, -1, "the pump jack animates at least one part over 640 ms")
+		if (t0[key] as Transform3D).is_equal_approx(t1[key]):
+			if still < 0:
+				still = int(key)
+		elif moved < 0:
+			moved = int(key)
+		if moved >= 0 and still >= 0:
+			break
+	assert_gte(moved, 0, "the pump jack animates at least one part over 640 ms")
+	assert_gte(still, 0, "the pump jack keeps at least one part still over 640 ms")
 	var nodes := _nodes(t0.size())
 	var revision := int(data.apply_panm_to_nodes(0, 0, {}, nodes, 0))
 	var poison := Transform3D(Basis(), Vector3(9, 9, 9))
-	if still >= 0:
-		(nodes[still] as Node3D).transform = poison
+	(nodes[still] as Node3D).transform = poison
 	var second := int(data.apply_panm_to_nodes(0, 640, {}, nodes, revision))
 	assert_gt(second, revision, "movement mints a new revision")
 	assert_true((nodes[moved] as Node3D).transform.is_equal_approx(t1[moved]),
 			"the moved part is rewritten to the new pose")
-	if still >= 0:
-		assert_true((nodes[still] as Node3D).transform.is_equal_approx(poison),
-				"an unmoved part is not rewritten (the poison survives)")
+	assert_true((nodes[still] as Node3D).transform.is_equal_approx(poison),
+			"an unmoved part is not rewritten (the poison survives)")
 
 
 func test_stale_caller_catches_up_after_skipped_revisions() -> void:

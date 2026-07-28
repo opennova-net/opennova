@@ -1521,6 +1521,9 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
 int32_t CollisionWorld::add_model(CollisionModel model) {
     model.finalize_sections();
     models_.push_back(std::move(model));
+    // CollisionTargetView retains a pointer into models_. A push can reallocate
+    // that vector even though every existing model id remains stable.
+    invalidate_trace_views();
     return static_cast<int32_t>(models_.size()) - 1;
 }
 
@@ -1540,10 +1543,13 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
         husk = existing->second.husk_model_id;
     }
     instances_[h.packed] = Instance{model_id, husk, registry_spawn_id};
+    invalidate_trace_view(h);
 }
 
 void CollisionWorld::remove_entity_instance(EntityHandle h) {
-    if (h.valid()) instances_.erase(h.packed);
+    if (!h.valid()) return;
+    instances_.erase(h.packed);
+    invalidate_trace_view(h);
 }
 
 void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
@@ -1553,6 +1559,14 @@ void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
     auto it = instances_.find(h.packed);
     if (it == instances_.end()) return; // husk stages ride an existing instance
     it->second.husk_model_id = husk_model_id;
+    invalidate_trace_view(h);
+}
+
+void CollisionWorld::set_section_matrix_provider(
+        ICollisionSectionMatrixProvider *provider) {
+    if (section_matrix_provider_ == provider) return;
+    section_matrix_provider_ = provider;
+    invalidate_trace_views();
 }
 
 const CollisionWorld::Instance *CollisionWorld::live_instance(
@@ -1578,12 +1592,14 @@ bool CollisionWorld::publish_entity_section_matrices(
     const CollisionModel *m = model(it->second.model_id);
     if (m == nullptr || matrices.size() != m->sections.size()) return false;
     it->second.section_matrices = std::move(matrices);
+    invalidate_trace_view(h);
     return true;
 }
 
 void CollisionWorld::clear_entity_section_matrices(EntityHandle h) {
     auto it = instances_.find(h.packed);
     if (it != instances_.end()) it->second.section_matrices.clear();
+    invalidate_trace_view(h);
 }
 
 bool CollisionWorld::has_instance(EntityHandle h) const {
@@ -1641,6 +1657,7 @@ bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
         // The packed slot was despawned/reused. Never let its old intact or
         // husk model satisfy a query for the new registry lifetime.
         instances_.erase(existing);
+        invalidate_trace_view(h);
     }
     if (section_matrix_provider_ == nullptr) return false;
     if (!section_matrix_provider_->ensure_collision_instance(world, h)) return false;
@@ -1718,11 +1735,22 @@ void CollisionWorld::replace_projectile_dynamic_proxies(
     projectile_dynamic_proxies_ = std::move(proxies);
 }
 
-void CollisionWorld::build_tick_tables(World &world) {
-    // The projectile target-view cache lives exactly one tick (see the header
-    // note): the snapshot build is the tick epoch every consumer runs after.
-    trace_view_cache_.clear();
+void CollisionWorld::set_trace_profile_enabled(bool enabled) {
+    if (trace_profile_enabled_ == enabled) return;
+    trace_profile_enabled_ = enabled;
     trace_profile_ = TraceProfile{};
+}
+
+void CollisionWorld::invalidate_trace_view(EntityHandle h) {
+    if (h.valid()) trace_view_cache_.erase(h.packed);
+}
+
+void CollisionWorld::invalidate_trace_views() {
+    trace_view_cache_.clear();
+}
+
+void CollisionWorld::build_tick_tables(World &world) {
+    if (trace_profile_enabled_) trace_profile_ = TraceProfile{};
     build_tables(world, true);
 }
 
@@ -1731,6 +1759,10 @@ void CollisionWorld::build_initial_tables(World &world) {
 }
 
 void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
+    // Every pool-table publication is a new trace-view epoch, including the
+    // mission-initial and registry-refresh paths that do not advance retail's
+    // 17-tick candidate-slice cadence.
+    invalidate_trace_views();
     tick_tables_built_ = true;
     // Packed pool/slot handles are reused. Remove every binding whose recorded
     // lifetime no longer names the registry occupant before any proximity,
@@ -1937,6 +1969,9 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
 }
 
 void CollisionWorld::refresh_after_registry_change(World &world) {
+    // Clear even when no table has been published yet: refresh is the public
+    // registry-lifetime edge and may follow a direct headless trace.
+    invalidate_trace_views();
     if (!candidate_slices_built_) {
         // A pre-logic pool snapshot is already authoritative, so keep it
         // coherent after spawn/restore without consuming one of the initial 16
@@ -2101,18 +2136,43 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
 // earlier in the same tick can husk the target.
 const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
                                                              EntityHandle h) const {
-    auto emplaced = trace_view_cache_.try_emplace(h.packed);
-    TraceViewCacheEntry &entry = emplaced.first->second;
     const Entity *e = world.registry.get(h);
     const bool husk_now = e != nullptr && (e->engine_flags & 0x4u) != 0;
     const uint32_t mask_now = e != nullptr ? e->spawned_piece_mask : 0;
-    if (!emplaced.second && husk_now == entry.husk_bit &&
-        mask_now == entry.piece_mask)
-        return entry.valid ? &entry.view : nullptr;
-    entry.matrices.clear();
-    entry.valid = target_view(world, h, entry.view, entry.matrices) != nullptr;
-    entry.husk_bit = husk_now;
-    entry.piece_mask = mask_now;
+    const uint64_t spawn_id_now =
+            e != nullptr ? e->registry_spawn_id : uint64_t{0};
+    const Instance *instance = live_instance(world, h);
+    int32_t model_id_now = -1;
+    if (instance != nullptr) {
+        model_id_now = husk_now && instance->husk_model_id >= 0
+                ? instance->husk_model_id
+                : instance->model_id;
+    }
+    const auto cached = trace_view_cache_.find(h.packed);
+    if (cached != trace_view_cache_.end()) {
+        const TraceViewCacheEntry &entry = cached->second;
+        if (husk_now == entry.husk_bit &&
+            mask_now == entry.piece_mask &&
+            spawn_id_now == entry.registry_spawn_id &&
+            model_id_now == entry.effective_model_id)
+            return entry.valid ? &entry.view : nullptr;
+    }
+
+    // Build outside the map: the host matrix callback is an external seam.
+    // Its contract is read-only, but keeping no map reference across it also
+    // prevents accidental callback invalidation from becoming use-after-free.
+    TraceViewCacheEntry rebuilt;
+    rebuilt.valid =
+            target_view(world, h, rebuilt.view, rebuilt.matrices) != nullptr;
+    rebuilt.husk_bit = husk_now;
+    rebuilt.piece_mask = mask_now;
+    rebuilt.registry_spawn_id = spawn_id_now;
+    rebuilt.effective_model_id = model_id_now;
+    auto inserted = trace_view_cache_.insert_or_assign(
+            h.packed, std::move(rebuilt));
+    TraceViewCacheEntry &entry = inserted.first->second;
+    entry.view.matrices =
+            entry.matrices.empty() ? nullptr : entry.matrices.data();
     return entry.valid ? &entry.view : nullptr;
 }
 
@@ -2134,14 +2194,19 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     if (segment_length <= 0) return best;
     int32_t best_distance = 0x7FFFFFFF;
 
-    // Trace attribution (per-tick, cleared with the tick tables).
+    // Trace attribution is deliberately cold unless an F3/probe consumer opts
+    // in: ordinary projectile traces do not touch the clock or counters.
+    const bool profile_trace = trace_profile_enabled_;
     const auto prof_now = []() {
         return std::chrono::duration_cast<std::chrono::microseconds>(
                        std::chrono::steady_clock::now().time_since_epoch())
                 .count();
     };
-    trace_profile_.calls++;
-    int64_t prof_t = prof_now();
+    int64_t prof_t = 0;
+    if (profile_trace) {
+        trace_profile_.calls++;
+        prof_t = prof_now();
+    }
 
     auto point_at = [&](int32_t t_q16) {
         FixedVec3 p;
@@ -2201,7 +2266,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
     }
 
-    {
+    if (profile_trace) {
         const int64_t prof_n = prof_now();
         trace_profile_.terrain_us += prof_n - prof_t;
         prof_t = prof_n;
@@ -2396,6 +2461,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (!round_broad_phase(p0f, p1f, sc,
                                    static_cast<float>(slot.radius) * slot_to_units))
                 continue;
+            if (profile_trace) {
+                if (hit_class == ProjectileHitClass::StaticEntity)
+                    trace_profile_.static_survivors++;
+                else
+                    trace_profile_.dynamic_survivors++;
+            }
             const Entity *entity = world.registry.get(h);
             if (entity == nullptr || entity->hidden ||
                 (entity->engine_flags & 0x02000001u) != 0)
@@ -2406,11 +2477,15 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 entity->ref_num == mount_ref_num)
                 continue;
             CollisionPolygonHit model_hit;
-            trace_profile_.static_survivors++;
             const CollisionTargetView *target = trace_target_view(world, h);
-            if (target != nullptr && target->model != nullptr)
-                trace_profile_.static_faces +=
-                        static_cast<int64_t>(target->model->faces.size());
+            if (profile_trace && target != nullptr && target->model != nullptr) {
+                const int64_t faces =
+                    static_cast<int64_t>(target->model->faces.size());
+                if (hit_class == ProjectileHitClass::StaticEntity)
+                    trace_profile_.static_faces += faces;
+                else
+                    trace_profile_.dynamic_faces += faces;
+            }
             if (target == nullptr) {
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
@@ -2460,12 +2535,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // one live local person (retail's own-player entity plays that role).
     const bool wire_projected = world.mp_session && !world.projectile_authority;
 
-    {
+    if (profile_trace) {
         const int64_t prof_n = prof_now();
         prof_t = prof_n; // owner/exclusion setup charged to neither pass
     }
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
-    {
+    if (profile_trace) {
         const int64_t prof_n = prof_now();
         trace_profile_.static_us += prof_n - prof_t;
         prof_t = prof_n;
@@ -2505,9 +2580,13 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (!round_broad_phase(p0f, p1f, sc,
                                    static_cast<float>(broad_radius) / 65536.0f))
                 continue;
+            if (profile_trace) trace_profile_.dynamic_survivors++;
             CollisionPolygonHit model_hit;
             const CollisionModel *proxy_model = model(proxy.model_id);
             if (proxy_model != nullptr && proxy_model->valid()) {
+                if (profile_trace)
+                    trace_profile_.dynamic_faces +=
+                        static_cast<int64_t>(proxy_model->faces.size());
                 const int32_t pos[3] = {proxy.position_q16.x, proxy.position_q16.y,
                                         proxy.position_q16.z};
                 // The decoded pose mirrors the retail client entity fields the
@@ -2575,7 +2654,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
     }
 
-    {
+    if (profile_trace) {
         const int64_t prof_n = prof_now();
         trace_profile_.dynamic_us += prof_n - prof_t;
         prof_t = prof_n;
@@ -2705,6 +2784,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                 65536.0f;
                 if (!round_broad_phase(p0f, p1f, sc, r)) continue;
             }
+            if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;
             if (!trace_torso_fallback(proxy.position_q16, eh, hit_distance))
@@ -2714,9 +2794,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
 
         const PersonSlot &slot = persons_[entry.index];
-        // The witnessed person-slot gate [orig: the pool-0 person table runs
-        // the same slot bound test as pools-2/1,
-        // Projectile_RaycastProximitySlots @ 0x4e5340]. This walk had lost
+        // The witnessed person-slot gate [orig:
+        // Physics_RaycastAgainstProximityList @ 0x4e4a30]. This walk had lost
         // it, so every organic in the mission built a full pose view per
         // ROUND per TICK (~0.9 ms each with rounds in flight - the sustained
         // full-auto collapse). The pad covers the bone spread beyond the
@@ -2736,7 +2815,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                             65536.0f;
             if (!round_broad_phase(p0f, p1f, sc, r)) continue;
         }
-        trace_profile_.static_survivors++;
+        if (profile_trace) trace_profile_.person_survivors++;
         // Visual-client ghost suppression: local pool-0 slots other than L are
         // the load-frozen mission organics whose live poses arrive on the wire;
         // their decoded person proxies (folded into this same ordered walk)
@@ -2825,7 +2904,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         break;
     }
 
-    trace_profile_.person_us += prof_now() - prof_t;
+    if (profile_trace) trace_profile_.person_us += prof_now() - prof_t;
     return best;
 }
 

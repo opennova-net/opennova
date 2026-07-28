@@ -162,6 +162,44 @@ func test_world_backend_executes_a_live_gpu_submission() -> void:
 			"full linear fog must tint the white fallback toward the supplied blue")
 
 
+func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 0, 5)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := NovaParticleRenderer.new()
+	viewport.add_child(renderer)
+	await get_tree().process_frame
+
+	# No scene/particles are needed: delayed emitters are exactly why the World
+	# compositor must manufacture its real framebuffer-specific pipeline set.
+	renderer.warm_pipelines(Vector3.ZERO)
+	renderer.render_now()
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+
+	var report := renderer.get_debug_packet_report()
+	var backend: Dictionary = report.get("world_backend", {})
+	if not bool(backend.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_true(bool(backend.get("callback_seen", false)),
+			"the forced draw/sync must service the callback before reset can cancel it")
+	assert_eq(int(backend.get("pipeline_warm_requests", 0)), 1)
+	assert_eq(int(backend.get("pipeline_warm_requests_serviced", 0)), 1,
+			String(backend.get("failure", "RD pipeline warm was not serviced")))
+	assert_eq(int(backend.get("warmed_pipeline_modes", 0)), 8,
+			"all retail blend modes must exist on the actual World framebuffer")
+	assert_gt(int(backend.get("warmed_framebuffer_formats", 0)), 0)
+	assert_true(bool(backend.get("scene_snapshot_pipeline_warmed", false)),
+			"Distort's resolved-scene copy pipeline must be warmed too")
+
+
 func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)

@@ -73,29 +73,26 @@ func _run() -> void:
 
 	# The real F3 path: summon the overlay, switch to the Stats tab.
 	game.toggle_debug_overlay()
-	var overlay = game.get("_debug_overlay")
+	var overlay = game.get_debug_overlay()
 	if overlay == null:
 		push_error("[fsp] no debug overlay after toggle")
 		_finish(1)
 		return
-	var tabs: TabContainer = overlay.get("_tabs")
-	var pane = tabs.get_node_or_null("Stats")
-	if pane == null:
+	if not overlay.select_tab(&"Stats"):
 		push_error("[fsp] overlay carries no Stats tab")
 		_finish(1)
 		return
-	tabs.current_tab = (pane as Control).get_index()
 	await _settle_ms(500)
-	if not bool(pane.is_capturing()):
+	if not overlay.is_stats_capturing():
 		push_error("[fsp] the Stats tab did not open its capture window")
 		_finish(1)
 		return
 
 	await _settle_ms(2000)
-	var first := _snapshot_rows(pane)
+	var first := _snapshot_rows(overlay)
 	_dump("READING 1", first)
 	await _settle_ms(2000)
-	var second := _snapshot_rows(pane)
+	var second := _snapshot_rows(overlay)
 	_dump("READING 2", second)
 
 	var missing := PackedStringArray()
@@ -115,12 +112,10 @@ func _run() -> void:
 		_finish(2)
 
 
-func _snapshot_rows(pane) -> Dictionary:
+func _snapshot_rows(overlay) -> Dictionary:
 	var out := {}
-	var items: Dictionary = pane.get("_items")
-	for id in items:
-		var item: TreeItem = items[id]
-		out[id] = [item.get_text(1), item.get_text(2), item.get_text(3)]
+	for row in overlay.get_stats_display_snapshot():
+		out[String(row.id)] = [row.average, row.peak, row.info]
 	return out
 
 
@@ -131,10 +126,12 @@ func _row_ms(rows: Dictionary, id: String) -> float:
 
 func _dump(label: String, rows: Dictionary) -> void:
 	print("[fsp] ---- %s ----" % label)
-	for id in ["frame", "before", "world", "foliage", "sim", "net", "effects",
-			"present", "snapshot", "mission_rows", "wire_rows", "fire",
+	for id in ["frame", "before", "world", "foliage", "runtime", "sim", "net",
+			"trace", "trace_terrain", "trace_static", "trace_dynamic",
+			"trace_person", "effects_drain", "effects", "present", "snapshot",
+			"mission_rows", "wire_rows", "fire",
 			"destruction", "throwable", "occl", "occl_build",
-			"occl_probe", "occl_apply", "env", "audio", "after", "hud",
+			"occl_probe", "occl_apply", "occl_glue", "env", "audio", "after", "hud",
 			"hud_scalars", "hud_attach", "hud_waypoint", "hud_info", "hud_flush",
 			"shell_residual",
 			"render", "render_root_cpu", "render_root_gpu", "render_water_cpu",
@@ -143,18 +140,11 @@ func _dump(label: String, rows: Dictionary) -> void:
 		print("[fsp] %-16s avg=%-8s max=%-8s %s" % [id, row[0], row[1], row[2]])
 
 
-# Placed-model classification census: which models carry per-frame runtime
-# work (lights / live PANM / dynamic materials / part anims / skeletons) and
-# how many are currently hidden — the population behind the model-_process
-# residual numbers.
+# Placed-model census stays on public Node/visibility behavior. Work-class
+# attribution belongs to the Stats rows rather than private model internals.
 func _census_models() -> void:
 	var total := 0
 	var hidden := 0
-	var lights := 0
-	var live_panm := 0
-	var dyn_mats := 0
-	var parts := 0
-	var skeletal := 0
 	var stack: Array = [root]
 	while not stack.is_empty():
 		var node: Node = stack.pop_back()
@@ -165,20 +155,7 @@ func _census_models() -> void:
 		total += 1
 		if not (node as Node3D).is_visible_in_tree():
 			hidden += 1
-		if bool(node.get("_has_lights")):
-			lights += 1
-		if bool(node.get("_has_live_panm")):
-			live_panm += 1
-		var slots: Variant = node.get("_dynamic_material_slots")
-		if slots is PackedInt32Array and not (slots as PackedInt32Array).is_empty():
-			dyn_mats += 1
-		var part_anims: Variant = node.get("_part_anims")
-		if part_anims is Dictionary and not (part_anims as Dictionary).is_empty():
-			parts += 1
-		if node.get("_skeleton") != null:
-			skeletal += 1
-	print("[fsp] model census: %d models · %d hidden · %d lights · %d live-panm · %d dyn-mats · %d part-anims · %d skeletal" % [
-			total, hidden, lights, live_panm, dyn_mats, parts, skeletal])
+	print("[fsp] model census: %d models · %d hidden" % [total, hidden])
 
 
 func _finish(exit_code: int) -> void:

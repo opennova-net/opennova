@@ -151,6 +151,10 @@ var _blink_water_suppressed := false
 # bms_id -> true for every node occlusion currently hides (buildings whose
 # batch verdict culled them, entities the render gates culled).
 var _occlusion_hidden_ids: Dictionary = {}
+# Exact MissionPresentPass bms_id -> visibility intent, shared by reference.
+# Occlusion only layers hides on top of this value and never reconstructs the
+# present predicate independently.
+var _present_visibility: Dictionary = {}
 # bms_id -> resolved node, so steady frames skip registry lookups. Entries
 # revalidate with is_instance_valid on use; reset on unload/A-B seams.
 var _occlusion_node_cache: Dictionary = {}
@@ -263,6 +267,9 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE:
+		_stop_water_render_stats()
+		return
 	if what != NOTIFICATION_VISIBILITY_CHANGED or not is_node_ready():
 		return
 	if _loaded and is_visible_in_tree():
@@ -1154,6 +1161,7 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_stop_water_render_stats()
 	_cancel_join_preload()
 	_join_admission_ready_emitted = false
 	_join_deploy_signal_active = false
@@ -1178,6 +1186,7 @@ func unload() -> void:
 	_item_fx_control_active.clear()
 	_item_fx_control_nodes.clear()
 	_item_fx_control_instances.clear()
+	_present_visibility.clear()
 	# The user-point view retains its toggle and re-arms on the next successful load.
 	_remove_user_point_debug_view()
 	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
@@ -1497,7 +1506,7 @@ var _perf_probe_skip_fixed_handlers := false
 var _perf_probe_occlusion_skipped := false
 
 # The shared F3 frame-stats board (null outside the game shell). Feeds gate on
-# board.enabled so a closed Stats tab costs nothing; the occlusion split spans
+# board capture so a closed Stats tab costs nothing; the occlusion split spans
 # land from _apply_occlusion_frame, the tick legs from tick() below.
 var _frame_stats: FrameStatsBoard = null
 # The two _apply_occlusion_frame halves, valid while probe/stats timing runs:
@@ -1511,9 +1520,30 @@ var _stats_water_vp_ref: WeakRef = null
 ## The game shell hands its FrameStatsBoard here; the world re-hands it to
 ## every MissionRuntime it creates and feeds its own tick legs.
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _frame_stats:
+		return
+	if _frame_stats != null:
+		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(old_capture_changed):
+			_frame_stats.capture_changed.disconnect(old_capture_changed)
+	_stop_water_render_stats()
 	_frame_stats = board
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if not _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.connect(capture_changed)
 	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
 		_runtime.set_frame_stats_board(board)
+
+
+func _on_frame_stats_capture_changed(active: bool) -> void:
+	if not active:
+		_stop_water_render_stats()
+
+
+func is_water_render_stats_measured() -> bool:
+	return _stats_water_vp_ref != null \
+			and is_instance_valid(_stats_water_vp_ref.get_ref())
 
 
 ## Enables the manual frame-span/A-B probe. Disabling restores every skip
@@ -1526,12 +1556,13 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 		_perf_probe_skip_effect_tick = false
 		_perf_probe_skip_fixed_handlers = false
 		_perf_probe_occlusion_skipped = false
+	_sync_runtime_profiling()
 
 
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	_sample_panm_clock()
 	var probe_enabled := _perf_probe_enabled
-	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	# One shared gate for the per-leg clock reads: the manual A/B probe and the
 	# F3 Stats capture consume the same measurements.
 	var timing := probe_enabled or stats_on
@@ -1655,6 +1686,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	if stats_on:
 		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
+		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(stats_on)
 
@@ -1685,6 +1717,21 @@ func _sample_water_render_stats(stats_on: bool) -> void:
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
 	_frame_stats.add(FrameStatsBoard.RENDER_WATER_GPU,
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
+
+
+func _stop_water_render_stats() -> void:
+	var previous: Object = (
+			_stats_water_vp_ref.get_ref() if _stats_water_vp_ref != null else null)
+	if previous is SubViewport:
+		RenderingServer.viewport_set_measure_render_time(
+				(previous as SubViewport).get_viewport_rid(), false)
+	_stats_water_vp_ref = null
+
+
+func _sync_runtime_profiling() -> void:
+	if _runtime != null and _runtime.has_method(
+			"set_runtime_profiling_enabled"):
+		_runtime.set_runtime_profiling_enabled(_perf_probe_enabled)
 
 
 func get_runtime_perf_counters() -> Dictionary:
@@ -2503,7 +2550,10 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# The occlusion-claim set the present pass consults (two-bit visibility
 	# ownership; see _set_occlusion_hidden). Shared by reference: this world
 	# mutates it in place across the mission's occlusion frames.
-	opts["present_options"] = {"occlusion_hidden_ids": _occlusion_hidden_ids}
+	opts["present_options"] = {
+		"occlusion_hidden_ids": _occlusion_hidden_ids,
+		"present_visibility": _present_visibility,
+	}
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
@@ -2536,6 +2586,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or
 	# submitted: in a net session the original's spawn kit is a page of this file,
 	# selected by the very class byte it also puts on the wire
@@ -2693,7 +2744,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
 	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
 			and not skip_effect_tick:
-		if _frame_stats != null and _frame_stats.enabled:
+		if _frame_stats != null and _frame_stats.is_capture_active():
 			var fx_start := Time.get_ticks_usec()
 			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 			_frame_stats.add(FrameStatsBoard.EFFECTS_TICK,
@@ -2766,23 +2817,48 @@ func _warm_effect_world_catalog() -> int:
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	if cam != null:
 		warm_pos = cam.global_position - cam.global_transform.basis.z * 8.0
+	# The persistent master switch is a gameplay preference, not a reason to
+	# leave the catalog cold forever. Lift it only across the loading-screen
+	# draws; keep _particles_hidden unchanged and restore the EffectWorld before
+	# persistent item effects are reattached.
+	var restore_particles_hidden := _effect_world.are_particles_hidden()
+	if restore_particles_hidden:
+		_effect_world.set_particles_hidden(false)
 	var spawned := int(_effect_world.warm_all_effects(warm_pos))
 	if spawned <= 0:
+		_effect_world.reset_runtime_state()
+		if restore_particles_hidden:
+			_effect_world.set_particles_hidden(true)
 		return 0
 	# The tracer ribbon pipelines compile in the same forced frames.
 	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
 		_runtime.warm_present_pipelines(warm_pos)
 	if _effect_world.has_method("advance_fixed_tick"):
 		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	if _effect_world.has_method("render_now"):
+		_effect_world.render_now()
 	# Pipeline compiles need real draws. Skip the forced frames inside the
 	# editor host (re-entrant editor drawing); the texture warm above still
 	# runs there, and the shipped game is what the full warm protects.
 	if is_inside_tree() and not Engine.is_editor_hint():
+		# MainGame keeps World hidden behind the opaque loading CanvasLayer.
+		# Temporarily expose it so the particle domains, tracer MeshInstance,
+		# and deterministic helper quads are actually submitted to force_draw.
+		var was_visible := visible
+		visible = true
 		RenderingServer.force_draw(true)
 		if _effect_world.has_method("advance_fixed_tick"):
 			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		if _effect_world.has_method("render_now"):
+			_effect_world.render_now()
 		RenderingServer.force_draw(true)
+		# The reset below cancels any unserviced compositor warm request. Drain
+		# the forced draws first so threaded renderers cannot race that cancel.
+		RenderingServer.force_sync()
+		visible = was_visible
 	_effect_world.reset_runtime_state()
+	if restore_particles_hidden:
+		_effect_world.set_particles_hidden(true)
 	_attach_item_effects()
 	var unresolved := 0
 	if _effect_world.has_method("get_unresolved_texture_names"):
@@ -3450,7 +3526,7 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 		var wh = _water.get("water_height")
 		if wh != null:
 			water_z = float(wh)
-	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := _perf_probe_enabled or stats_on
 	var native_start := Time.get_ticks_usec() if timing else 0
 	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
@@ -3541,9 +3617,7 @@ func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void
 			if node.visible:
 				node.visible = false
 	elif _occlusion_hidden_ids.erase(bms_id):
-		var present_visible := true
-		if sim != null and sim.has_method("entity_present_visible"):
-			present_visible = bool(sim.entity_present_visible(bms_id))
+		var present_visible := _entity_present_visible(sim, bms_id)
 		if present_visible and not node.visible:
 			node.visible = true
 
@@ -3557,6 +3631,17 @@ func _occlusion_sim() -> Object:
 	return sim if sim is Object else null
 
 
+func _entity_present_visible(sim: Object, bms_id: int) -> bool:
+	if _present_visibility.has(bms_id):
+		return bool(_present_visibility[bms_id])
+	# Compatibility/test sources without MissionPresentPass retain the native
+	# base predicate. Production placed nodes always publish the exact combined
+	# hidden + local-view-suppressed intent above.
+	if sim != null and sim.has_method("entity_present_visible"):
+		return bool(sim.entity_present_visible(bms_id))
+	return true
+
+
 # Release every occlusion override: restore claimed nodes to the sim's present
 # intent, clear section masks to fully-visible, drop the caches, and forget the
 # sim's delta baseline so a later re-enable re-emits full state. The A/B seam
@@ -3567,9 +3652,7 @@ func _release_occlusion_overrides(reset_semantics: bool) -> void:
 	for bms_id in _occlusion_hidden_ids:
 		var node: Variant = _occlusion_node_cache.get(bms_id)
 		if node != null and is_instance_valid(node):
-			var present_visible := true
-			if sim != null and sim.has_method("entity_present_visible"):
-				present_visible = bool(sim.entity_present_visible(int(bms_id)))
+			var present_visible := _entity_present_visible(sim, int(bms_id))
 			if present_visible:
 				(node as Node3D).visible = true
 	_occlusion_hidden_ids.clear()

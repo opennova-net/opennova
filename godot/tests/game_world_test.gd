@@ -23,6 +23,13 @@ class TransportRuntimeStub:
 		return true
 
 
+class ProfilingRuntimeStub:
+	extends Node
+	var requests: Array[bool] = []
+	func set_runtime_profiling_enabled(enabled: bool) -> void:
+		requests.append(enabled)
+
+
 class FxRuntimeStub:
 	extends Node
 	func entity_position_for_ssn(ssn: int) -> Variant:
@@ -367,6 +374,46 @@ class ImpactGameWorldHarness:
 		_on_runtime_fixed_tick(1)
 
 
+class WarmEffectWorldStub:
+	extends NovaEffectWorld
+	var hidden_during_warm := true
+	var calls: Array[String] = []
+	var visibility_changes: Array[bool] = []
+
+	func set_particles_hidden(hidden: bool) -> void:
+		visibility_changes.append(hidden)
+		super.set_particles_hidden(hidden)
+
+	func warm_all_effects(_position: Vector3) -> int:
+		hidden_during_warm = are_particles_hidden()
+		calls.append("warm")
+		return 1
+
+	func advance_fixed_tick(_delta: float) -> void:
+		calls.append("advance")
+
+	func render_now() -> int:
+		calls.append("render")
+		return 1
+
+	func reset_runtime_state() -> void:
+		calls.append("reset")
+
+
+class WarmGameWorldHarness:
+	extends GameWorld
+	var attached_while_hidden := false
+
+	func configure_warm_effects(effects: NovaEffectWorld) -> void:
+		_effect_world = effects
+
+	func warm_effect_catalog() -> int:
+		return _warm_effect_world_catalog()
+
+	func _attach_item_effects() -> void:
+		attached_while_hidden = _effect_world.are_particles_hidden()
+
+
 
 # Single stub-injection seam for this file: GameWorld builds its runtime
 # internally in _start_runtime, so duck-typed transport stubs go in through
@@ -379,6 +426,20 @@ func _install_runtime(world, runtime, effects = null) -> void:
 
 func _detach_runtime(world) -> void:
 	_install_runtime(world, null)
+
+
+func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := ProfilingRuntimeStub.new()
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+
+	world.set_perf_probe_enabled(true)
+	world.set_perf_probe_enabled(false)
+	assert_eq(runtime.requests, [true, false],
+			"GameWorld forwards only consumer intent through MissionRuntime's public seam")
+	_detach_runtime(world)
 
 
 func test_tick_gates_the_runtime_on_its_transport() -> void:
@@ -1713,6 +1774,26 @@ func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 	assert_true(world.is_foliage_hidden(), "the flag holds even with no dispatcher to act on")
 
 
+func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> void:
+	var world := WarmGameWorldHarness.new()
+	var effects := WarmEffectWorldStub.new()
+	world.configure_warm_effects(effects)
+	world.set_particles_hidden(true)
+
+	assert_eq(world.warm_effect_catalog(), 1)
+
+	assert_false(effects.hidden_during_warm,
+			"the persistent gameplay preference cannot suppress load warming")
+	assert_eq(effects.calls, ["warm", "advance", "render", "reset"],
+			"the warm snapshot is submitted before its runtime values reset")
+	assert_eq(effects.visibility_changes, [true, false, true],
+			"warming lifts the switch only for the covered load pass")
+	assert_true(effects.are_particles_hidden(),
+			"the user's particle preference is restored before returning")
+	assert_true(world.attached_while_hidden,
+			"persistent item effects reattach under the restored preference")
+
+
 func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	# Mission kinds preserve the original pool mapping. Pool 0 is not walked;
 	# pool 1 skips attrib 0x42; pools 2/3 skip only powerup bit 0x2.
@@ -2335,6 +2416,15 @@ class IrisWeatherStub:
 	var iris_samples := PackedFloat32Array()
 
 
+class WaterStatsStub:
+	extends Node3D
+	var reflection_viewport := SubViewport.new()
+	func _init() -> void:
+		name = "NovaWater"
+		reflection_viewport.size = Vector2i(16, 16)
+		add_child(reflection_viewport)
+
+
 func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
 	# The section-mask/portal frame (docs/render/render-occlusion-re.md §3/§5):
 	# building batch visibility + per-section masks land on the de-batched
@@ -2603,8 +2693,7 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	# nothing and receives nothing; an enabled one gets every world leg — the
 	# occlusion apply split included — without touching the probe dicts.
 	var world := _make_world()
-	var water := Node3D.new()
-	water.name = "NovaWater"
+	var water := WaterStatsStub.new()
 	world.add_child(water)
 	add_child_autofree(world)
 	var runtime := OcclusionRuntimeStub.new()
@@ -2618,14 +2707,12 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	world.set_frame_stats_board(board)
 
 	world.tick(Vector3.ZERO)
-	assert_eq(board.window_counts()[FrameStatsBoard.OCCL_APPLY], 0,
+	assert_eq(board.drain().sample_frames[FrameStatsBoard.OCCL_APPLY], 0,
 			"a disabled board sees no feeds")
-	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
-			"stats feeds never write the probe span dictionary")
 
-	board.enabled = true
+	board.set_capture_active(true)
 	world.tick(Vector3.ZERO)
-	var counts := board.window_counts()
+	var counts := board.drain().sample_frames
 	assert_gt(counts[FrameStatsBoard.OCCL_APPLY], 0, "the GDScript apply leg lands")
 	assert_gt(counts[FrameStatsBoard.OCCL_GLUE], 0,
 			"a sim without the native split feeds the whole native call as glue")
@@ -2635,9 +2722,20 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	assert_gt(counts[FrameStatsBoard.WORLD_BLINK], 0)
 	assert_gt(counts[FrameStatsBoard.WORLD_IRIS], 0)
 	assert_gt(counts[FrameStatsBoard.WORLD_FOLIAGE], 0)
+	assert_gt(counts[FrameStatsBoard.WORLD_RUNTIME], 0)
 	assert_gt(counts[FrameStatsBoard.WORLD_AUDIO], 0)
-	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
-			"the probe transport stays opt-in even while stats capture")
+	assert_true(world.is_water_render_stats_measured(),
+			"capture enables the reflection viewport's render-time measurement")
+
+	board.set_capture_active(false)
+	assert_false(world.is_water_render_stats_measured(),
+			"the capture edge tears measurement down without another world tick")
+	board.set_capture_active(true)
+	world.tick(Vector3.ZERO)
+	assert_true(world.is_water_render_stats_measured())
+	world.set_frame_stats_board(null)
+	assert_false(world.is_water_render_stats_measured(),
+			"detaching the board also releases measurement immediately")
 
 
 func _make_world() -> GameWorld:

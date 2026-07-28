@@ -178,8 +178,10 @@ func clear_world() -> void:
 	_renderer.set_texture_dir("")
 
 
-## Reopen the mounted catalog with fresh runtime state. Mission Stop uses this
-## instead of clear_world() so textures/files remain available for the next Play.
+## Clear live simulation values while preserving the compiled catalog, native
+## definition identity, interned handles, texture atlas, and renderer pipelines.
+## Mission Stop uses this instead of clear_world() so the next Play reuses every
+## load-time warm result.
 func reset_runtime_state() -> void:
 	_slot_tokens.clear()
 	_owner_tokens.clear()
@@ -188,7 +190,7 @@ func reset_runtime_state() -> void:
 	_next_token = 1
 	if is_instance_valid(_renderer) and _renderer.has_method("clear_warm_pipelines"):
 		_renderer.clear_warm_pipelines()
-	_open_files()
+	_scene.reset_runtime_state()
 
 
 func intern_effect(name: String) -> int:
@@ -316,9 +318,9 @@ func spawn_effect_request(name: String, transform: Transform3D,
 ## (advancing the fixed tick so fresh emitters actually emit and draw), then
 ## clears the warm spawns via reset_runtime_state(). Returns spawn count.
 func warm_all_effects(position: Vector3) -> int:
-	# Deterministic half first: one quad per blend shader compiles every
-	# particle pipeline regardless of emitter timing (delayed emitters emit
-	# nothing during the warm frames).
+	# Deterministic half first: one quad per FirstPerson blend shader plus a
+	# compositor request for all eight World RD pipelines, independent of
+	# emitter timing (delayed emitters emit nothing during the warm frames).
 	_ensure_renderer()
 	if _renderer.has_method("warm_pipelines"):
 		_renderer.warm_pipelines(position)
@@ -332,14 +334,27 @@ func warm_all_effects(position: Vector3) -> int:
 			if effect_id.is_empty() or seen.has(effect_id):
 				continue
 			seen[effect_id] = true
-			# BOTH render domains: the first-person domain draws through its
-			# own pipeline set, and a world-only warm left the FP muzzle flash
-			# compiling ~75 ms on the first live shot (measured on revx02).
+			# Catalog values warm through the uncapped World packet. The
+			# deterministic helpers above already compile all eight
+			# FirstPerson shaders; cloning a large catalog into that ArrayMesh
+			# domain can exceed Godot's per-mesh surface limit.
 			if spawn_effect_transient(effect_id, position) != 0:
 				spawned += 1
-			spawn_effect_transient(effect_id, position, Vector3.ZERO, 0,
-					RENDER_DOMAIN_FIRST_PERSON)
+	# GameWorld skips its draw/reset leg when there was nothing to warm. Do not
+	# strand the deterministic shader helper quads in that empty-catalog path.
+	if spawned == 0 and _renderer.has_method("clear_warm_pipelines"):
+		_renderer.clear_warm_pipelines()
 	return spawned
+
+
+## Compile and submit the latest scene snapshot synchronously. The normal
+## process path calls the renderer every frame; mission loading uses this seam
+## between fixed warm ticks and forced draws so freshly emitted values are in
+## the submitted packet immediately. Returns the number of material runs.
+func render_now() -> int:
+	_ensure_renderer()
+	_renderer.render_now()
+	return int(_renderer.get_draw_command_count())
 
 
 func spawn_effect_transient(name: String, position: Vector3,

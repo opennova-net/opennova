@@ -81,7 +81,7 @@ signal round_debug_toggled(enabled: bool)
 signal hitbox_debug_toggled(enabled: bool)
 
 const REFRESH_INTERVAL := 0.25
-const PANEL_WIDTH := 380.0
+const PANEL_WIDTH := 560.0
 const PLAYER_POSE_DUMP_DIR := "user://debug/player_locations"
 const PLAYER_POSE_SCHEMA := "opennova.player_pose.v1"
 const DEFAULT_PLAYER_FOV_H_DEG := 80.0
@@ -234,6 +234,23 @@ func toggle() -> void:
 ## The host-owned FrameStatsBoard feeding the Stats tab (null detaches).
 func set_frame_stats_board(board) -> void:
 	_stats_pane.set_frame_stats_board(board)
+
+
+## Select a named diagnostic tab without exposing the TabContainer.
+func select_tab(tab_name: StringName) -> bool:
+	var tab := _tabs.get_node_or_null(NodePath(String(tab_name))) as Control
+	if tab == null:
+		return false
+	_tabs.current_tab = tab.get_index()
+	return true
+
+
+func is_stats_capturing() -> bool:
+	return _stats_pane.is_capturing()
+
+
+func get_stats_display_snapshot() -> Array[DebugStatsDisplayRow]:
+	return _stats_pane.get_display_snapshot()
 
 
 ## Supplier of the world host (GameWorld or null) for the Stats tab's counters.

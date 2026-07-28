@@ -291,6 +291,8 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_true(_shell.is_gameplay_input_active())
 	var tick_before := int(runtime.get_sim().get_logic_tick())
 	_shell.toggle_debug_overlay()
+	assert_false(_shell.is_gameplay_input_active(),
+			"the public input gate closes on the same F3 edge")
 	for _frame in range(4):
 		await get_tree().process_frame
 	assert_true(_shell.is_debug_overlay_open())
