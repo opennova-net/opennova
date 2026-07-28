@@ -26,8 +26,7 @@ enum {
 	WORLD_BLINK,
 	WORLD_IRIS,
 	WORLD_AUDIO,
-	# The render-occlusion frame, split build/probe/apply (+ the pre-present restore)
-	OCCL_RESTORE,          # _restore_occlusion_overrides
+	# The render-occlusion frame, split build/probe/apply
 	OCCL_BUILD,            # native OcclusionWorld::build_frame (portal walk)
 	OCCL_PROBE,            # native per-entity render-gate loop
 	OCCL_APPLY,            # GDScript node application (masks + culled set + water)

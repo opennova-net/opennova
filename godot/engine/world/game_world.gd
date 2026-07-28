@@ -141,13 +141,19 @@ var _clear_above_water := true
 var _blink_indoors := false
 var _blink_water_suppressed := false
 # --- Render-occlusion frame state (the section-mask/portal slice) ---
-# Nodes the entity render gates hid last frame (restored before re-applying).
-var _occlusion_culled_nodes: Array = []
-# bms_id -> building node THIS system set invisible (batch-culled); restored
-# before each present pass so the sim's own hidden drive is never overridden.
-var _occlusion_hidden_buildings: Dictionary = {}
-# bms_id -> building node the frame has driven (reset on unload).
-var _occlusion_masked_nodes: Dictionary = {}
+# Diff-applied: the sim emits verdict CHANGES (get_building_visibility_changes /
+# get_render_culled_changes) and only transitions touch nodes, so a steady frame
+# does no per-node work. Two ownership bits decide final visibility:
+# the present pass owns the sim's intent (PF_HIDDEN), this system owns the
+# occlusion hide — the present pass consults _occlusion_hidden_ids (shared by
+# reference) so it never fights an occlusion hide, and an occlusion release
+# lands on sim.entity_present_visible() so a sim-hidden entity never flashes.
+# bms_id -> true for every node occlusion currently hides (buildings whose
+# batch verdict culled them, entities the render gates culled).
+var _occlusion_hidden_ids: Dictionary = {}
+# bms_id -> resolved node, so steady frames skip registry lookups. Entries
+# revalidate with is_instance_valid on use; reset on unload/A-B seams.
+var _occlusion_node_cache: Dictionary = {}
 # The mission attribute that forces the indoors accum bit every frame.
 # [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
@@ -1545,32 +1551,24 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	var runtime_ticks := 0
-	# Undo LAST frame's occlusion visibility writes BEFORE the present pass, so
-	# present's hidden drive (corpse despawn, WAC hides) is the base state this
-	# frame's occlusion re-culls from — occlusion only ever HIDES on top of
-	# present, it never force-shows a node the sim wants hidden. Safe while
-	# paused too: the culled/hidden sets only ever contain nodes occlusion
-	# itself hid while they were visible.
-	var probe_phase_start := Time.get_ticks_usec() if timing else 0
-	if _loaded:
-		_restore_occlusion_overrides()
-		# Section masks persist on the de-batched model nodes. On the edge into
-		# occlusion A/B, release only that render override; mission blink/indoors
-		# semantics remain authoritative and iris exposure keeps sampling below.
-		if probe_enabled:
-			if skip_occlusion and not _perf_probe_occlusion_skipped:
+	# Occlusion no longer restores-then-rehides per frame: the apply below is
+	# diff-based and the present pass consults the shared occlusion-hidden set,
+	# so steady verdicts leave nodes untouched. Only the A/B seam edges do bulk
+	# work: entering the skip releases every occlusion override (mission
+	# blink/indoors semantics remain authoritative; iris keeps sampling below),
+	# leaving it re-arms a full re-emit from the sim's delta baseline.
+	if probe_enabled and _loaded:
+		if skip_occlusion != _perf_probe_occlusion_skipped:
+			if skip_occlusion:
 				if _water != null:
 					_water.visible = not _blink_water_suppressed
-				_reset_occlusion_section_masks()
-			_perf_probe_occlusion_skipped = skip_occlusion
+				_release_occlusion_overrides(false)
+			else:
+				_reset_occlusion_apply_baseline()
+		_perf_probe_occlusion_skipped = skip_occlusion
 	elif probe_enabled:
 		_perf_probe_occlusion_skipped = false
-	if timing:
-		var restore_us := Time.get_ticks_usec() - probe_phase_start
-		if probe_enabled:
-			_perf_probe_spans["occl_restore"] = restore_us
-		if stats_on:
-			_frame_stats.add(FrameStatsBoard.OCCL_RESTORE, restore_us)
+	var probe_phase_start := 0
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -2493,6 +2491,10 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# remote-entity avatars (build_player_animated_model); unused by the host present path.
 	opts["placer"] = _placer
 	opts["env_node"] = _env
+	# The occlusion-claim set the present pass consults (two-bit visibility
+	# ownership; see _set_occlusion_hidden). Shared by reference: this world
+	# mutates it in place across the mission's occlusion frames.
+	opts["present_options"] = {"occlusion_hidden_ids": _occlusion_hidden_ids}
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
@@ -3407,34 +3409,35 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	var native_end := Time.get_ticks_usec() if timing else 0
 
 	# Building batch visibility + per-section masks (bit N = render part N,
-	# forced-visible def bits already merged by the sim). Hide-only: a building
-	# occlusion hid is restored by _restore_occlusion_overrides before the next
-	# present pass, so a sim/host hide is never force-shown from here.
+	# forced-visible def bits already merged by the sim), applied as CHANGES:
+	# the sim diffs against what this host last applied, so a steady frame
+	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
+	# verdicts as the full-walk form land on the nodes.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
-	var vis: PackedInt64Array = sim.get_building_visibility()
-	for i in range(0, vis.size(), 2):
-		var bms_id := int(vis[i])
-		var node: Node = registry.resolve_single(bms_id)
-		if node == null or not (node is Node3D):
+	var changes: PackedInt64Array = sim.get_building_visibility_changes()
+	for i in range(0, changes.size(), 2):
+		var bms_id := int(changes[i])
+		var node := _occlusion_node(registry, bms_id)
+		if node == null:
 			continue
-		var packed := int(vis[i + 1])
-		var batch_visible := ((packed >> 32) & 1) == 1
-		if not batch_visible and (node as Node3D).visible:
-			(node as Node3D).visible = false
-			_occlusion_hidden_buildings[bms_id] = node
+		var packed := int(changes[i + 1])
 		if node.has_method("set_section_visibility_mask"):
 			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
-		_occlusion_masked_nodes[bms_id] = node
+		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
 
-	# Entity render gates (the blink-hits gate + the outdoors three-ray latch):
-	# hide this frame's culled set (last frame's was restored pre-present).
-	# [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
-	var culled: PackedInt32Array = sim.get_render_culled_bms_ids()
-	for id in culled:
-		var node: Node = registry.resolve_single(int(id))
-		if node is Node3D and (node as Node3D).visible:
-			(node as Node3D).visible = false
-			_occlusion_culled_nodes.append(node)
+	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
+	# also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
+	var culled_changes: PackedInt32Array = sim.get_render_culled_changes()
+	if culled_changes.size() >= 2:
+		var added := int(culled_changes[0])
+		for i in range(1, 1 + added):
+			var node := _occlusion_node(registry, int(culled_changes[i]))
+			if node != null:
+				_set_occlusion_hidden(sim, node, int(culled_changes[i]), true)
+		for i in range(2 + added, culled_changes.size()):
+			var node := _occlusion_node(registry, int(culled_changes[i]))
+			if node != null:
+				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
 
 	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
 	# authored water letter suppressing (accum bit 0x8), the water still renders
@@ -3463,39 +3466,85 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
 
 
-# Undo the previous occlusion frame's visibility writes: last frame's gated
-# entities and batch-hidden buildings become visible again, leaving the present
-# pass to assert the sim's own hidden state right after.
-func _restore_occlusion_overrides() -> void:
-	for n in _occlusion_culled_nodes:
-		if is_instance_valid(n):
-			(n as Node3D).visible = true
-	_occlusion_culled_nodes.clear()
-	for bms_id in _occlusion_hidden_buildings:
-		var node = _occlusion_hidden_buildings[bms_id]
-		if is_instance_valid(node):
-			(node as Node3D).visible = true
-	_occlusion_hidden_buildings.clear()
+# Resolve (and cache) the node a bms_id drives. Cache entries revalidate with
+# is_instance_valid; a freed node re-resolves through the registry (reloads
+# recreate nodes under the same ids).
+func _occlusion_node(registry, bms_id: int) -> Node3D:
+	var cached: Variant = _occlusion_node_cache.get(bms_id)
+	if cached != null and is_instance_valid(cached):
+		return cached
+	var node: Node = registry.resolve_single(bms_id)
+	if node == null or not (node is Node3D):
+		_occlusion_node_cache.erase(bms_id)
+		return null
+	_occlusion_node_cache[bms_id] = node
+	return node
 
 
-## Release only the render-owned section masks when the occlusion A/B seam is
-## entered. Unlike _reset_occlusion_frame(), this deliberately preserves the
-## mission's forced-indoors semantic state.
-func _reset_occlusion_section_masks(restore_visibility: bool = false) -> void:
-	for bms_id in _occlusion_masked_nodes:
-		var node = _occlusion_masked_nodes[bms_id]
-		if is_instance_valid(node):
-			if restore_visibility and node is Node3D:
+# The occlusion-hidden ownership bit. A hide claims the id (the present pass
+# consults the shared set and never fights it); a release clears the claim and
+# lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
+# entity never flashes for a frame.
+func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void:
+	if hidden:
+		if not _occlusion_hidden_ids.has(bms_id):
+			_occlusion_hidden_ids[bms_id] = true
+			if node.visible:
+				node.visible = false
+	elif _occlusion_hidden_ids.erase(bms_id):
+		var present_visible := true
+		if sim != null and sim.has_method("entity_present_visible"):
+			present_visible = bool(sim.entity_present_visible(bms_id))
+		if present_visible and not node.visible:
+			node.visible = true
+
+
+# Duck-typed sim resolution for the occlusion apply paths: harness runtimes
+# serve stub sims that the typed get_sim() accessor cannot return.
+func _occlusion_sim() -> Object:
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return null
+	var sim: Variant = _runtime.get_sim()
+	return sim if sim is Object else null
+
+
+# Release every occlusion override: restore claimed nodes to the sim's present
+# intent, clear section masks to fully-visible, drop the caches, and forget the
+# sim's delta baseline so a later re-enable re-emits full state. The A/B seam
+# keeps mission blink/indoors semantics (reset_semantics=false); unload resets
+# them too.
+func _release_occlusion_overrides(reset_semantics: bool) -> void:
+	var sim := _occlusion_sim()
+	for bms_id in _occlusion_hidden_ids:
+		var node: Variant = _occlusion_node_cache.get(bms_id)
+		if node != null and is_instance_valid(node):
+			var present_visible := true
+			if sim != null and sim.has_method("entity_present_visible"):
+				present_visible = bool(sim.entity_present_visible(int(bms_id)))
+			if present_visible:
 				(node as Node3D).visible = true
-			if node.has_method("set_section_visibility_mask"):
-				node.set_section_visibility_mask(-1)
-	_occlusion_masked_nodes.clear()
+	_occlusion_hidden_ids.clear()
+	for bms_id in _occlusion_node_cache:
+		var node: Variant = _occlusion_node_cache[bms_id]
+		if node != null and is_instance_valid(node) \
+				and (node as Node).has_method("set_section_visibility_mask"):
+			(node as Node).set_section_visibility_mask(-1)
+	_occlusion_node_cache.clear()
+	_reset_occlusion_apply_baseline()
+	if reset_semantics:
+		_mission_forces_indoors = false
+
+
+# Forget the sim's applied-state baseline so the next occlusion frame re-emits
+# everything (the host caches were dropped or the A/B skip ended).
+func _reset_occlusion_apply_baseline() -> void:
+	var sim := _occlusion_sim()
+	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):
+		sim.reset_occlusion_apply_baseline()
 
 
 func _reset_occlusion_frame() -> void:
-	_restore_occlusion_overrides()
-	_reset_occlusion_section_masks(true)
-	_mission_forces_indoors = false
+	_release_occlusion_overrides(true)
 
 
 func _reset_blink_frame_gates() -> void:

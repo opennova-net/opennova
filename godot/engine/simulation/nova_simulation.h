@@ -271,6 +271,12 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
+	// Delta baselines for the render-occlusion apply path: what the host last
+	// applied, so steady frames emit nothing. Cleared on world reset and via
+	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full
+	// re-emit).
+	std::unordered_map<uint32_t, int64_t> occl_apply_building_last_;
+	std::vector<int32_t> occl_apply_culled_last_;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -1500,6 +1506,20 @@ public:
 	PackedInt64Array get_building_visibility() const;
 	// bms_ids of non-building entities the collector gates culled this frame.
 	PackedInt32Array get_render_culled_bms_ids() const;
+	// Delta form of get_building_visibility(): only pairs whose packed value
+	// changed since the last call, so the host applies changes instead of
+	// re-walking the whole building set every frame.
+	PackedInt64Array get_building_visibility_changes();
+	// Delta form of get_render_culled_bms_ids():
+	// [n_added, ids..., n_removed, ids...] since the last call.
+	PackedInt32Array get_render_culled_changes();
+	// The present pass's visibility intent for one placed entity — the
+	// occlusion release edge lands a node on the sim's CURRENT visibility so a
+	// hidden entity never flashes for a frame.
+	bool entity_present_visible(int p_bms_id) const;
+	// Forget the applied-state baselines: the next delta call re-emits the
+	// full frame state (the occlusion A/B seam and host cache resets use it).
+	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
 	bool occlusion_camera_indoors() const;
 

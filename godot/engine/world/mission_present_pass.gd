@@ -37,6 +37,11 @@ var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index
 var _drive_transform := true
 var _drive_part_anim := true
 var _drive_visibility := true
+# bms_id -> true for nodes the render-occlusion frame currently hides. Shared
+# BY REFERENCE from the host (GameWorld mutates it in place) via the
+# occlusion_hidden_ids setup option; consulted only on a hidden->visible write,
+# never per steady row. Hosts without render occlusion leave it empty.
+var _occlusion_hidden_ids: Dictionary = {}
 var _stats: Dictionary = { "moved": 0, "posed": 0, "hidden": 0, "muzzles": 0 }
 var _row_plan_revision := -1
 var _row_plan_stride := 0
@@ -67,7 +72,8 @@ var _row_rhc := PackedInt32Array()
 static var _infantry_key_cache: Dictionary = {}
 
 
-## options: { drive_transform, drive_part_anim, drive_visibility } (all default true). The editor
+## options: { drive_transform, drive_part_anim, drive_visibility } (all default true) +
+## occlusion_hidden_ids (the host's shared occlusion-claim set; absent = empty). The editor
 ## preview drives all three; the game drives all three too (its NPCs were previously static-placed).
 func setup(sim, index, options: Dictionary = {}) -> void:
 	_sim = sim
@@ -75,6 +81,9 @@ func setup(sim, index, options: Dictionary = {}) -> void:
 	_drive_transform = bool(options.get("drive_transform", true))
 	_drive_part_anim = bool(options.get("drive_part_anim", true))
 	_drive_visibility = bool(options.get("drive_visibility", true))
+	var occlusion_ids: Variant = options.get("occlusion_hidden_ids")
+	if occlusion_ids is Dictionary:
+		_occlusion_hidden_ids = occlusion_ids
 
 
 func get_stats() -> Dictionary:
@@ -162,7 +171,14 @@ func present_snapshot(
 					and int(snap[base +
 							NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
 			if node.visible != visible:
-				node.visible = visible
+				# Two-bit visibility ownership: while the render-occlusion frame
+				# claims this node (the shared hidden set), a sim-wants-visible
+				# node stays hidden — occlusion releases through the same set and
+				# lands the node on the sim's current intent, so neither writer
+				# fights the other frame over frame.
+				if not (visible
+						and _occlusion_hidden_ids.has(int(_row_bms_ids[row]))):
+					node.visible = visible
 			if not visible:
 				_stats.hidden += 1
 		_apply_body_anim(node, snap, base, caps)

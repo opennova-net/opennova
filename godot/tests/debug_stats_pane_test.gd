@@ -32,7 +32,7 @@ func test_rows_cover_every_major_system() -> void:
 	var pane := _make_pane()
 	for id in ["frame", "world", "foliage", "sim", "net", "effects", "present",
 			"snapshot", "mission_rows", "wire_rows", "fire", "destruction",
-			"throwable", "occl", "occl_restore", "occl_build", "occl_probe",
+			"throwable", "occl", "occl_build", "occl_probe",
 			"occl_apply", "env", "audio", "hud", "render"]:
 		assert_true(pane._items.has(id), "the Stats tab carries a '%s' row" % id)
 
@@ -58,17 +58,17 @@ func test_group_rows_sum_their_children() -> void:
 	var window := _blank_window()
 	var sums: PackedInt64Array = window[0]
 	var counts: PackedInt32Array = window[2]
-	sums[FrameStatsBoard.OCCL_RESTORE] = 1_000
-	counts[FrameStatsBoard.OCCL_RESTORE] = 10
 	sums[FrameStatsBoard.OCCL_BUILD] = 2_000
 	counts[FrameStatsBoard.OCCL_BUILD] = 10
 	sums[FrameStatsBoard.OCCL_PROBE] = 3_000
 	counts[FrameStatsBoard.OCCL_PROBE] = 10
 	sums[FrameStatsBoard.OCCL_APPLY] = 4_000
 	counts[FrameStatsBoard.OCCL_APPLY] = 10
+	sums[FrameStatsBoard.OCCL_GLUE] = 1_000
+	counts[FrameStatsBoard.OCCL_GLUE] = 10
 	pane.render_window(10, sums, window[1], counts, null, null)
 	assert_eq(_row(pane, "occl").get_text(1), "1.00",
-			"the Occlusion group sums restore+build+probe+apply(+glue)")
+			"the Occlusion group sums build+probe+apply+glue")
 	assert_eq(_row(pane, "occl_apply").get_text(1), "0.40")
 
 

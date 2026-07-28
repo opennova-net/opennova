@@ -2240,21 +2240,54 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 
 
 class OcclusionSimStub:
+	# building_vis / culled hold the CURRENT frame verdicts; the stub mirrors
+	# the native delta contract by diffing against what it last emitted.
 	var blink_flags := 0
 	var building_vis := PackedInt64Array()
 	var culled := PackedInt32Array()
 	var water_visible := true
 	var frame_calls := 0
 	var iris_calls := 0
+	# bms_id -> true when the sim's present intent for the entity is HIDDEN
+	# (entity_present_visible returns false), the release-edge consult.
+	var present_hidden := {}
+	var _last_building := {}
+	var _last_culled := PackedInt32Array()
 	func local_player_blink_flags() -> int:
 		return blink_flags
 	func run_occlusion_frame(_camera: Transform3D, _fov_y: float, _aspect: float,
 			_near: float, _fog: float, _water_z: float, _force_indoors: bool) -> void:
 		frame_calls += 1
-	func get_building_visibility() -> PackedInt64Array:
-		return building_vis
-	func get_render_culled_bms_ids() -> PackedInt32Array:
-		return culled
+	func get_building_visibility_changes() -> PackedInt64Array:
+		var out := PackedInt64Array()
+		for i in range(0, building_vis.size(), 2):
+			var bms_id := int(building_vis[i])
+			var packed := int(building_vis[i + 1])
+			if int(_last_building.get(bms_id, -1)) != packed:
+				_last_building[bms_id] = packed
+				out.append(bms_id)
+				out.append(packed)
+		return out
+	func get_render_culled_changes() -> PackedInt32Array:
+		var added := PackedInt32Array()
+		var removed := PackedInt32Array()
+		for id in culled:
+			if not _last_culled.has(id):
+				added.append(id)
+		for id in _last_culled:
+			if not culled.has(id):
+				removed.append(id)
+		_last_culled = culled.duplicate()
+		var out := PackedInt32Array([added.size()])
+		out.append_array(added)
+		out.append(removed.size())
+		out.append_array(removed)
+		return out
+	func entity_present_visible(bms_id: int) -> bool:
+		return not present_hidden.has(bms_id)
+	func reset_occlusion_apply_baseline() -> void:
+		_last_building.clear()
+		_last_culled = PackedInt32Array()
 	func occlusion_water_visible() -> bool:
 		return water_visible
 	func compute_iris_samples(_origin: Vector3, _forward: Vector3,
@@ -2291,8 +2324,10 @@ class OcclusionRuntimeStub:
 class MaskedBuildingStub:
 	extends Node3D
 	var applied_mask := -1
+	var mask_calls := 0
 	func set_section_visibility_mask(mask: int) -> void:
 		applied_mask = mask
+		mask_calls += 1
 
 
 class IrisWeatherStub:
@@ -2362,10 +2397,10 @@ func test_occlusion_frame_drives_masks_gates_and_water_override() -> void:
 
 
 func test_occlusion_never_resurrects_sim_hidden_nodes() -> void:
-	# The visibility-write ordering contract: occlusion's restore runs BEFORE
-	# the runtime tick (the present pass), so a node the sim hides during the
-	# tick stays hidden even if occlusion culled it earlier and now releases
-	# it — occlusion only ever HIDES on top of the present pass's base state.
+	# Two-bit visibility ownership: an occlusion RELEASE lands the node on the
+	# sim's CURRENT present intent (entity_present_visible), so a node the sim
+	# hid while occlusion owned it stays hidden — occlusion only ever HIDES on
+	# top of the present pass's base state, never force-shows.
 	var world := _make_world()
 	add_child_autofree(world)
 	var runtime := OcclusionRuntimeStub.new()
@@ -2380,14 +2415,17 @@ func test_occlusion_never_resurrects_sim_hidden_nodes() -> void:
 	assert_false(npc.visible, "occlusion culls the visible npc")
 
 	# The sim now hides the npc (corpse despawn / WAC hide) while occlusion
-	# releases it: the present-analog hide happens after the restore.
+	# releases it: the release consults the sim's intent and leaves it hidden.
 	runtime.hide_on_tick = npc
+	runtime.sim.present_hidden[7] = true
 	runtime.sim.culled = PackedInt32Array()
 	world.tick(Vector3.ZERO)
-	assert_false(npc.visible, "the sim's hide is not overridden by the occlusion restore")
+	assert_false(npc.visible, "the occlusion release honors the sim's hide")
 
-	# The sim shows it again (stops hiding): the release becomes visible.
+	# The sim shows it again (stops hiding): with no occlusion claim left, the
+	# present drive owns visibility alone.
 	runtime.hide_on_tick = null
+	runtime.sim.present_hidden.clear()
 	npc.visible = true
 	world.tick(Vector3.ZERO)
 	assert_true(npc.visible, "an un-culled, un-hidden npc stays visible")
@@ -2463,6 +2501,37 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 			"the resumed occlusion frame may reapply its water override")
 
 
+func test_occlusion_steady_frames_touch_no_nodes() -> void:
+	# The diff-based apply: verdicts that did not change emit no work — no
+	# section-mask dispatches and no visibility flips, frame after frame. This
+	# is the churn contract the perf slice exists for (the old form restored
+	# and re-hid the whole occluded set every frame).
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var building := MaskedBuildingStub.new()
+	world.add_child(building)
+	var npc := Node3D.new()
+	world.add_child(npc)
+	runtime.registry.nodes[42] = building
+	runtime.registry.nodes[7] = npc
+	runtime.sim.building_vis = PackedInt64Array([42, 0x5])  # batch-hidden, mask 0x5
+	runtime.sim.culled = PackedInt32Array([7])
+	_install_runtime(world, runtime)
+
+	world.tick(Vector3.ZERO)
+	assert_false(building.visible, "the batch-culled building hides on the change frame")
+	assert_false(npc.visible, "the gated npc hides on the change frame")
+	var calls := building.mask_calls
+	world.tick(Vector3.ZERO)
+	world.tick(Vector3.ZERO)
+	assert_eq(building.mask_calls, calls,
+			"steady verdicts dispatch no section-mask calls")
+	assert_false(building.visible, "the hidden building stays hidden with no flips")
+	assert_false(npc.visible, "the culled npc stays hidden with no flips")
+
+
 func test_occlusion_debug_view_builds_and_frees() -> void:
 	# The F3 overlay's "Show portal faces" toggle: GameWorld builds/frees the
 	# OcclusionDebugView child (the collision-view contract). Without a sim the
@@ -2532,7 +2601,7 @@ func test_tick_never_emits_session_lost_for_a_non_joiner_or_a_silent_seam() -> v
 func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	# The F3 Stats feeds (FrameStatsBoard): a disabled board costs the tick
 	# nothing and receives nothing; an enabled one gets every world leg — the
-	# occlusion restore/apply split included — without touching the probe dicts.
+	# occlusion apply split included — without touching the probe dicts.
 	var world := _make_world()
 	var water := Node3D.new()
 	water.name = "NovaWater"
@@ -2557,7 +2626,6 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	board.enabled = true
 	world.tick(Vector3.ZERO)
 	var counts := board.window_counts()
-	assert_gt(counts[FrameStatsBoard.OCCL_RESTORE], 0, "the restore leg lands")
 	assert_gt(counts[FrameStatsBoard.OCCL_APPLY], 0, "the GDScript apply leg lands")
 	assert_gt(counts[FrameStatsBoard.OCCL_GLUE], 0,
 			"a sim without the native split feeds the whole native call as glue")

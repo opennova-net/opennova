@@ -759,6 +759,7 @@ void NovaSimulation::reset_world() {
 	last_occlusion_probe_us_ = 0;
 	last_present_snapshot_us_ = 0;
 	last_present_entity_count_ = 0;
+	reset_occlusion_apply_baseline();
 	present_layout_.clear();
 	++present_layout_revision_;
 	// Collision models/instances are mission-scoped: drop them with the world (the
@@ -2449,6 +2450,74 @@ PackedInt32Array NovaSimulation::get_render_culled_bms_ids() const {
 	PackedInt32Array out;
 	for (const int32_t id : occlusion_culled_bms_) out.push_back(id);
 	return out;
+}
+
+// Same verdict walk as get_building_visibility(), emitting only pairs whose
+// packed visible<<32|mask changed since the last call. The GDScript apply
+// walks changes instead of the whole building set, so a steady frame does no
+// per-building node work at all.
+PackedInt64Array NovaSimulation::get_building_visibility_changes() {
+	PackedInt64Array out;
+	if (!world_) return out;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
+		const bool has_occlusion = occlusion_world_.has_instance(e.handle);
+		if (!has_occlusion &&
+				collision_world_.model_for(*world_, e.handle) == nullptr)
+			return;
+		const bool visible = occlusion_world_.building_visible(e.handle);
+		const uint32_t mask =
+		    has_occlusion ? occlusion_world_.section_mask(e.handle) : 0xFFFFFFFFu;
+		const int64_t packed =
+				static_cast<int64_t>(mask) | (visible ? (int64_t(1) << 32) : 0);
+		const uint32_t key = e.handle.packed;
+		auto it = occl_apply_building_last_.find(key);
+		if (it != occl_apply_building_last_.end() && it->second == packed) return;
+		occl_apply_building_last_[key] = packed;
+		out.push_back(e.bms_id);
+		out.push_back(packed);
+	});
+	return out;
+}
+
+PackedInt32Array NovaSimulation::get_render_culled_changes() {
+	std::vector<int32_t> current = occlusion_culled_bms_;
+	std::sort(current.begin(), current.end());
+	std::vector<int32_t> added;
+	std::vector<int32_t> removed;
+	std::set_difference(current.begin(), current.end(),
+			occl_apply_culled_last_.begin(), occl_apply_culled_last_.end(),
+			std::back_inserter(added));
+	std::set_difference(occl_apply_culled_last_.begin(),
+			occl_apply_culled_last_.end(), current.begin(), current.end(),
+			std::back_inserter(removed));
+	occl_apply_culled_last_ = std::move(current);
+	PackedInt32Array out;
+	out.push_back(static_cast<int32_t>(added.size()));
+	for (const int32_t id : added) out.push_back(id);
+	out.push_back(static_cast<int32_t>(removed.size()));
+	for (const int32_t id : removed) out.push_back(id);
+	return out;
+}
+
+// Mirrors the PF_HIDDEN row source (ent->hidden). The local-view-suppression
+// and joiner lifecycle folds only apply to rows without a bms_id, which the
+// occlusion frame never manages, so plain hidden is the whole intent here.
+bool NovaSimulation::entity_present_visible(int p_bms_id) const {
+	if (!world_ || p_bms_id == 0) return true;
+	bool visible = true;
+	bool found = false;
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (found || e.bms_id != p_bms_id) return;
+		found = true;
+		visible = !e.hidden;
+	});
+	return visible;
+}
+
+void NovaSimulation::reset_occlusion_apply_baseline() {
+	occl_apply_building_last_.clear();
+	occl_apply_culled_last_.clear();
 }
 
 bool NovaSimulation::occlusion_water_visible() const {
@@ -4929,6 +4998,14 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_building_visibility);
 	ClassDB::bind_method(D_METHOD("get_render_culled_bms_ids"),
 	                     &NovaSimulation::get_render_culled_bms_ids);
+	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),
+	                     &NovaSimulation::get_building_visibility_changes);
+	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
+	                     &NovaSimulation::get_render_culled_changes);
+	ClassDB::bind_method(D_METHOD("entity_present_visible", "bms_id"),
+	                     &NovaSimulation::entity_present_visible);
+	ClassDB::bind_method(D_METHOD("reset_occlusion_apply_baseline"),
+	                     &NovaSimulation::reset_occlusion_apply_baseline);
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &NovaSimulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("occlusion_camera_indoors"),
