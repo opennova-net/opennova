@@ -15,6 +15,8 @@ extends RefCounted
 const GAME_TYPE_COOP := 0x30020
 ## First port of the witnessed retail LAN host range
 ## [orig: game.cfg mplanserverportmin/max 32768-32787, JO_SERVER].
+## C++ twin: libs/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint
+## hard-fails new bare literals of these values outside the canonical homes).
 const DEFAULT_LAN_PORT := 32768
 ## The NovaWorld gate's UDP port, shared by the OpenNova and original targets
 ## (mirrors GATE_DEFAULT_PORT territory in libs/novaworld/gate_probe.h).

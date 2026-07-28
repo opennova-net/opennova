@@ -47,8 +47,8 @@ const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
 const HITBOX_DEBUG_NAME := "HitboxDebug"
-const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
-const WEATHER_TICK_HZ := 62.0
+const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
+const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16

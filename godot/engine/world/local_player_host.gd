@@ -1,6 +1,7 @@
 class_name LocalPlayerHost
 extends Node
 
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 # Faithful first-person camera. The on-foot eye is Position + CameraOffset, where
@@ -111,7 +112,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
-const WEAPON_TICK_DT := 1.0 / 62.5
+const WEAPON_TICK_DT := MissionRuntime.TICK_DT  # the weapon FSM runs on the engine tick
 
 var _world
 var _camera: Camera3D

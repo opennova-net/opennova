@@ -1,6 +1,9 @@
 class_name AvatarPreview
 extends Control
 
+const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+
+
 # 3D preview for an Avatars.def character combo: composes the resolved third-person
 # head + body .3di models into one scene under a shared environment, framed as a
 # standing character by a fly camera with the editor grid + axis gizmo. Retail combo
@@ -48,7 +51,7 @@ const MENU_ZOOM_IN := 0.78                 # camera distance scale at full hover
 const MENU_IDLE_SPEED_DEG_PER_SEC := 43.9  # 0x800000 BAM/frame x 62.5 Hz
 const MENU_SWAY_FREQ_RAD_PER_SEC := 0.8    # sin(GetTickCount * 0.0008/ms)
 const MENU_SWAY_AMP_DEG := 22.5            # 2^28 BAM amplitude
-const MENU_TICK_HZ := 62.5                 # the original's menu update cadence
+const MENU_TICK_HZ := 1.0 / MissionRuntime.TICK_DT  # the original's menu update cadence = the engine tick rate
 
 # Skeletal idle for the composed character [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]:
 # the original binds the rest skeleton Dt1rst.bad + the looping idle clip PI_Idle.BAD (raw

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <novaworld/gate_probe.h>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -160,7 +161,7 @@ private:
 
 	// Config.
 	String host_ = "127.0.0.1";
-	int gate_port_ = 7597;
+	int gate_port_ = opennova::GATE_DEFAULT_PORT;
 	String player_name_ = "GodotPlayer";
 
 	// State.
