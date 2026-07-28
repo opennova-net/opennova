@@ -20,31 +20,19 @@ const DEFAULT_PORT := 8975
 
 
 static func get_enabled() -> bool:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return true
-	return bool(config.get_value(SECTION, ENABLED_KEY, true))
+	return bool(NovaConfigStore.read(CONFIG_PATH, SECTION, ENABLED_KEY, true))
 
 
 static func set_enabled(value: bool) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(SECTION, ENABLED_KEY, value)
-	config.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, ENABLED_KEY, value)
 
 
 static func get_port() -> int:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return DEFAULT_PORT
-	return clampi(int(config.get_value(SECTION, PORT_KEY, DEFAULT_PORT)), 1024, 65535)
+	return clampi(int(NovaConfigStore.read(CONFIG_PATH, SECTION, PORT_KEY, DEFAULT_PORT)), 1024, 65535)
 
 
 static func set_port(value: int) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(SECTION, PORT_KEY, clampi(value, 1024, 65535))
-	config.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, PORT_KEY, clampi(value, 1024, 65535))
 
 
 ## The --mcp-port flag value, or -1 when absent/invalid.

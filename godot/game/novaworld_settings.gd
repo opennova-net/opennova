@@ -20,15 +20,10 @@ const REAL_NOVAWORLD_HOST := "gs.novaworld.net"
 const GATE_PORT := HostSessionConfig.DEFAULT_GATE_PORT
 
 static func load_target() -> int:
-	var cfg := ConfigFile.new()
-	cfg.load(CONFIG_PATH)  # a missing file is fine; get_value returns the default
-	var value := int(cfg.get_value(SECTION, "target", Target.OPENNOVA))
+	var value := int(NovaConfigStore.read(CONFIG_PATH, SECTION, "target", Target.OPENNOVA))
 	if value != Target.OPENNOVA and value != Target.REAL:
 		return Target.OPENNOVA
 	return value
 
 static func save_target(target: int) -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(CONFIG_PATH)
-	cfg.set_value(SECTION, "target", target)
-	cfg.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, "target", target)

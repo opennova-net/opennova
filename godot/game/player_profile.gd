@@ -16,15 +16,11 @@ const MAX_CALLSIGN_LENGTH := 15
 
 
 static func load_callsign() -> String:
-	var cfg := ConfigFile.new()
-	cfg.load(CONFIG_PATH)  # a missing file is fine; get_value returns the default
-	var stored := String(cfg.get_value(SECTION, "callsign", "")).strip_edges()
-	stored = stored.left(MAX_CALLSIGN_LENGTH)
+	var stored := String(NovaConfigStore.read(CONFIG_PATH, SECTION, "callsign", "")) 			.strip_edges().left(MAX_CALLSIGN_LENGTH)
 	if not stored.is_empty():
 		return stored
 	var generated := _default_callsign()
-	cfg.set_value(SECTION, "callsign", generated)
-	cfg.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, "callsign", generated)
 	return generated
 
 
@@ -32,10 +28,7 @@ static func save_callsign(callsign: String) -> void:
 	callsign = callsign.strip_edges().left(MAX_CALLSIGN_LENGTH)
 	if callsign.is_empty():
 		return
-	var cfg := ConfigFile.new()
-	cfg.load(CONFIG_PATH)
-	cfg.set_value(SECTION, "callsign", callsign)
-	cfg.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, "callsign", callsign)
 
 
 # Per-machine stable suffix: with name-match self-ID, a shared default (the old literal

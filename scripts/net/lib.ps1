@@ -36,6 +36,7 @@ function Get-RunStamp {
 # Godot 4.6.1 binary: $env:GODOT_BIN, else .godot-bin\ walking up from the repo
 # (worktrees borrow the main checkout's copy). Prefer the _console build so stdout
 # reaches the terminal. Returns $null if none found (caller decides whether fatal).
+# Cross-language twin: scripts/godot_bin.sh is the sh-side resolver - change both.
 function Find-GodotBinary {
     if ($env:GODOT_BIN -and (Test-Path $env:GODOT_BIN)) {
         return (Resolve-Path $env:GODOT_BIN).Path
