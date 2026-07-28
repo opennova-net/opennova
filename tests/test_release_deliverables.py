@@ -264,12 +264,16 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
 def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     godot_tests = _workflow_job(workflow, "godot-tests")
+    # The candidate order lives in the shared resolver test_godot.sh sources
+    # (scripts/godot_bin.sh, the W2-5 extraction).
+    resolver = (ROOT / "scripts/godot_bin.sh").read_text(encoding="utf-8")
     test_script = (ROOT / "scripts/test_godot.sh").read_text(encoding="utf-8")
 
     assert "Godot_v${version}_win64_console.exe" in godot_tests
     assert "Godot_v${GODOT_VERSION}_win64_console.exe" in godot_tests
-    assert "Godot_v4.6.1-stable_win64_console.exe" in test_script
-    assert test_script.index("Godot_v4.6.1-stable_win64_console.exe") < test_script.index(
+    assert 'source "$root/scripts/godot_bin.sh"' in test_script
+    assert "Godot_v4.6.1-stable_win64_console.exe" in resolver
+    assert resolver.index("Godot_v4.6.1-stable_win64_console.exe") < resolver.index(
         "Godot_v4.6.1-stable_win64.exe"
     )
 

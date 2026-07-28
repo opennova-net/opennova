@@ -88,45 +88,36 @@ def test_qt_platform_is_not_forced_offscreen_on_windows(monkeypatch):
     assert not screenshot_capture._should_force_offscreen_platform()
 
 
-def test_shared_screenshot_scripts_capture_importer():
+def test_screenshot_script_capture_importer():
     root = Path(__file__).resolve().parents[1]
 
-    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
     sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
 
-    assert "apps.importer.ui.screenshot_capture" in ps1
     assert "apps.importer.ui.screenshot_capture" in sh
 
 
-def test_shared_screenshot_scripts_search_parent_godot_bins():
+def test_screenshot_script_search_parent_godot_bins():
     root = Path(__file__).resolve().parents[1]
 
-    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
     sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
 
-    assert "Find-GodotBinary" in ps1
     assert "find_godot_bin" in sh
 
 
-def test_shared_screenshot_scripts_refresh_godot_script_cache():
+def test_screenshot_script_refresh_godot_script_cache():
     root = Path(__file__).resolve().parents[1]
 
-    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
     sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
 
-    assert "--import" in ps1
     assert "--import" in sh
 
 
-def test_shared_screenshot_scripts_verify_editor_outputs_are_fresh():
+def test_screenshot_script_verify_editor_outputs_are_fresh():
     root = Path(__file__).resolve().parents[1]
 
-    ps1 = (root / "scripts" / "capture_screenshots.ps1").read_text(encoding="utf-8")
     sh = (root / "scripts" / "capture_screenshots.sh").read_text(encoding="utf-8")
 
-    assert "LastWriteTime" in ps1
     assert "-nt" in sh
-    assert "overview.png" in ps1
     assert "environment.png" in sh
 
 
