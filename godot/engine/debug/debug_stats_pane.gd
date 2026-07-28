@@ -86,6 +86,9 @@ const _ROWS := [
 	# The process step minus every measured shell leg: deferred/off-span work
 	# the frame induces (skeleton updates, queued frees, other nodes' _process).
 	# When this row is large, the next slice hides here, not in the spans above.
+	# Caveat: with vsync ON the engine's swap wait can land inside the process
+	# step, inflating this row — read it vsync-off (the A/B probes do), or
+	# treat only growth beyond the vsync period as real work.
 	{"id": "shell_residual", "label": "Outside shell spans", "depth": 1,
 			"kind": _KIND_RESIDUAL, "base": FrameStatsBoard.FRAME_PROCESS,
 			"minus": [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
