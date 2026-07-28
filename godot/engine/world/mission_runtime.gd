@@ -607,6 +607,13 @@ func get_wire_present_stats() -> Dictionary:
 	return _wire_present.get_stats() if _wire_present != null else {}
 
 
+## Load-time warm hook: compile the fire-presentation pipelines (the tracer
+## ribbon materials) behind the loading screen; see GameWorld's effect warm.
+func warm_present_pipelines(at_position: Vector3) -> void:
+	if _fire_present != null and _fire_present.has_method("warm_pipelines"):
+		_fire_present.warm_pipelines(at_position)
+
+
 func get_throwable_present_stats() -> RefCounted:
 	# ThrowablePresentPass.Stats (typed counters, ADR 0017); null until the
 	# presentation pass exists.

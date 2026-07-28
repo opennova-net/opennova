@@ -447,3 +447,20 @@ func test_set_particles_hidden_toggles_render_visibility() -> void:
 	assert_false(world.visible, "the retail master switch hides the render output")
 	world.set_particles_hidden(false)
 	assert_true(world.visible)
+
+
+func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
+	# The load-time warm pass behind the first-shot hitch fix: every cataloged
+	# effect spawns exactly once (dedup by id), the fixed tick makes fresh
+	# emitters live, and the sim-restart reset clears the warm spawns.
+	var world := _make_world()
+	var count := world.load_from_resource_root(_make_root())
+	assert_eq(count, 8, "fixture catalog registers 8 effects")
+	var spawned := world.warm_all_effects(Vector3(1, 2, 3))
+	assert_eq(spawned, 8, "the warm pass spawns each cataloged effect once")
+	assert_gt(world.active_entry_count(), 0, "warm spawns occupy live entries")
+	world.advance_fixed_tick(0.016)
+	world.reset_runtime_state()
+	assert_eq(world.active_entry_count(), 0, "the reset clears every warm spawn")
+	assert_eq(world.warm_all_effects(Vector3.ZERO), 8,
+			"a later warm (reload) spawns the catalog again")

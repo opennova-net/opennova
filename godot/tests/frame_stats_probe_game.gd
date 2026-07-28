@@ -42,7 +42,10 @@ func _run() -> void:
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR").strip_edges()
 	if not res_dir.is_empty():
 		ResourceDirSettings.set_resource_dir(res_dir)
-		ResourceDirSettings.set_expansion("")
+		# NW_EXPANSION mounts an expansion overlay (e.g. revx02) the way the
+		# /exp launch flag would; absent = base game only.
+		ResourceDirSettings.set_expansion(
+				OS.get_environment("NW_EXPANSION").strip_edges())
 
 	var packed := load("res://game/main_game.tscn") as PackedScene
 	if packed == null:

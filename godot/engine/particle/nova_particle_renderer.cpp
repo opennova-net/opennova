@@ -25,6 +25,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -1232,6 +1233,10 @@ NovaParticleRenderer::NovaParticleRenderer() : impl_(std::make_unique<Impl>()) {
 NovaParticleRenderer::~NovaParticleRenderer() = default;
 
 void NovaParticleRenderer::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("warm_pipelines", "position"),
+			&NovaParticleRenderer::warm_pipelines);
+	ClassDB::bind_method(D_METHOD("clear_warm_pipelines"),
+			&NovaParticleRenderer::clear_warm_pipelines);
 	ClassDB::bind_method(D_METHOD("set_scene", "scene"),
 			&NovaParticleRenderer::set_scene);
 	ClassDB::bind_method(D_METHOD("get_scene"),
@@ -1351,6 +1356,40 @@ Node *NovaParticleRenderer::get_environment_source() const {
 		return nullptr;
 	return Object::cast_to<Node>(ObjectDB::get_instance(
 			static_cast<std::uint64_t>(environment_source_)));
+}
+
+void NovaParticleRenderer::warm_pipelines(const Vector3 &p_position) {
+	clear_warm_pipelines();
+	if (!impl_)
+		return;
+	Ref<QuadMesh> quad;
+	quad.instantiate();
+	quad->set_size(Vector2(0.01f, 0.01f));
+	for (std::size_t i = 0; i < impl_->shader_cache.size(); ++i) {
+		Ref<Shader> shader =
+				impl_->shader_for(static_cast<renderer::ParticlePipeline>(i));
+		if (shader.is_null())
+			continue;
+		Ref<ShaderMaterial> material;
+		material.instantiate();
+		material->set_shader(shader);
+		MeshInstance3D *quad_instance = memnew(MeshInstance3D);
+		quad_instance->set_mesh(quad);
+		quad_instance->set_material_override(material);
+		quad_instance->set_cast_shadows_setting(
+				GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		add_child(quad_instance);
+		quad_instance->set_global_position(p_position);
+		warm_nodes_.push_back(quad_instance);
+	}
+}
+
+void NovaParticleRenderer::clear_warm_pipelines() {
+	for (Node *node : warm_nodes_) {
+		if (node != nullptr)
+			node->queue_free();
+	}
+	warm_nodes_.clear();
 }
 
 void NovaParticleRenderer::set_hidden(bool p_hidden) {

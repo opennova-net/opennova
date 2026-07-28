@@ -186,6 +186,8 @@ func reset_runtime_state() -> void:
 	_owner_keys_by_token.clear()
 	_owner_pose_cache.clear()
 	_next_token = 1
+	if is_instance_valid(_renderer) and _renderer.has_method("clear_warm_pipelines"):
+		_renderer.clear_warm_pipelines()
 	_open_files()
 
 
@@ -302,6 +304,42 @@ func spawn_effect_request(name: String, transform: Transform3D,
 	if seed_owner_after_spawn and bool(receipt.get("spawned", false)):
 		_seed_owner_pose(owner_token, owner_transform)
 	return receipt
+
+
+## Load-time warm pass: spawn every catalog effect once at `position` so the
+## lazily-deferred one-times (texture resolves, the renderer's first-draw
+## pipeline compiles) are paid behind the loading screen instead of as a
+## ~90 ms hitch on the player's first live shot. Retail pays this at load —
+## CEffectSystem_Init loads every .ptl AND its textures up front
+## [orig: @ 0x5f6070 <- Game_StartMission @ 0x524980]; the deferred-resolve
+## host path is what made first fire hitch. The caller renders a frame or two
+## (advancing the fixed tick so fresh emitters actually emit and draw), then
+## clears the warm spawns via reset_runtime_state(). Returns spawn count.
+func warm_all_effects(position: Vector3) -> int:
+	# Deterministic half first: one quad per blend shader compiles every
+	# particle pipeline regardless of emitter timing (delayed emitters emit
+	# nothing during the warm frames).
+	_ensure_renderer()
+	if _renderer.has_method("warm_pipelines"):
+		_renderer.warm_pipelines(position)
+	var seen := {}
+	var spawned := 0
+	for file in _files:
+		if file == null:
+			continue
+		for effect_v in file.get_effects():
+			var effect_id := String(effect_v.get_id())
+			if effect_id.is_empty() or seen.has(effect_id):
+				continue
+			seen[effect_id] = true
+			# BOTH render domains: the first-person domain draws through its
+			# own pipeline set, and a world-only warm left the FP muzzle flash
+			# compiling ~75 ms on the first live shot (measured on revx02).
+			if spawn_effect_transient(effect_id, position) != 0:
+				spawned += 1
+			spawn_effect_transient(effect_id, position, Vector3.ZERO, 0,
+					RENDER_DOMAIN_FIRST_PERSON)
+	return spawned
 
 
 func spawn_effect_transient(name: String, position: Vector3,

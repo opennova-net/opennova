@@ -1351,6 +1351,9 @@ public:
 	// invisible to the AI-index seams): entity card + mission-space teleport.
 	Dictionary get_world_entity_debug(int p_net_id) const;
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
+	// Land the local player at an exact F3-dumped pose (probe seam).
+	void debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
+			float p_pitch_deg);
 	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
 	// position; converted + stamped with the logic tick).

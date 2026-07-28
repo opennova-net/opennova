@@ -3,6 +3,7 @@
 // witness record docs/world/world-wac-ai-re.md §15. See collision.h for the
 // per-function [orig] map.
 
+#include <chrono>
 #include "world/collision.h"
 
 #include <algorithm>
@@ -1718,6 +1719,10 @@ void CollisionWorld::replace_projectile_dynamic_proxies(
 }
 
 void CollisionWorld::build_tick_tables(World &world) {
+    // The projectile target-view cache lives exactly one tick (see the header
+    // note): the snapshot build is the tick epoch every consumer runs after.
+    trace_view_cache_.clear();
+    trace_profile_ = TraceProfile{};
     build_tables(world, true);
 }
 
@@ -1781,6 +1786,30 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         entity_pos_fixed(e, pf);
         p.x = pf[0]; p.y = pf[1]; p.z = pf[2];
         p.radius = 0x10000; // [orig: entity boundRadius; person capsule ~1u] (D-COL-3)
+        // A published live pose can place bones far from the feet (seated
+        // poses, corpse spreads, the off-body pose regression test). Widen
+        // the SLOT to the pose's own bone-sphere reach so the projectile
+        // slot gate never excludes a posed bone; unposed persons keep the
+        // capsule radius.
+        auto inst = instances_.find(e.handle.packed);
+        if (inst != instances_.end() && !inst->second.section_matrices.empty()) {
+            const CollisionModel *m = model(inst->second.model_id);
+            if (m != nullptr &&
+                inst->second.section_matrices.size() == m->sections.size()) {
+                int32_t max_reach = 0;
+                for (size_t si = 0; si < m->sections.size(); ++si) {
+                    const CollisionSection &sec = m->sections[si];
+                    if (sec.radius < 0) continue;
+                    int32_t c[3];
+                    inst->second.section_matrices[si].transform_point(sec.center, c);
+                    const int32_t reach =
+                        vec_len_ftol(c[0] - pf[0], c[1] - pf[1], c[2] - pf[2]) +
+                        std::max(sec.radius, 0xCCC);
+                    if (reach > max_reach) max_reach = reach;
+                }
+                if (max_reach > p.radius) p.radius = max_reach;
+            }
+        }
         p.h = e.handle;
         persons_.push_back(p);
     };
@@ -2066,6 +2095,27 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
     return true;
 }
 
+// The per-tick projectile view: build once per (entity, tick), reuse for
+// every round tracing it this tick. A hit revalidates the husk bit — retail
+// picks the model per query [orig: Flags & 4 pick @ 0x413086], and a round
+// earlier in the same tick can husk the target.
+const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
+                                                             EntityHandle h) const {
+    auto emplaced = trace_view_cache_.try_emplace(h.packed);
+    TraceViewCacheEntry &entry = emplaced.first->second;
+    const Entity *e = world.registry.get(h);
+    const bool husk_now = e != nullptr && (e->engine_flags & 0x4u) != 0;
+    const uint32_t mask_now = e != nullptr ? e->spawned_piece_mask : 0;
+    if (!emplaced.second && husk_now == entry.husk_bit &&
+        mask_now == entry.piece_mask)
+        return entry.valid ? &entry.view : nullptr;
+    entry.matrices.clear();
+    entry.valid = target_view(world, h, entry.view, entry.matrices) != nullptr;
+    entry.husk_bit = husk_now;
+    entry.piece_mask = mask_now;
+    return entry.valid ? &entry.view : nullptr;
+}
+
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
     // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
@@ -2083,6 +2133,15 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     const int32_t segment_length = vec_len_ftol(delta[0], delta[1], delta[2]);
     if (segment_length <= 0) return best;
     int32_t best_distance = 0x7FFFFFFF;
+
+    // Trace attribution (per-tick, cleared with the tick tables).
+    const auto prof_now = []() {
+        return std::chrono::duration_cast<std::chrono::microseconds>(
+                       std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+    };
+    trace_profile_.calls++;
+    int64_t prof_t = prof_now();
 
     auto point_at = [&](int32_t t_q16) {
         FixedVec3 p;
@@ -2140,6 +2199,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             };
             consider(th, distance);
         }
+    }
+
+    {
+        const int64_t prof_n = prof_now();
+        trace_profile_.terrain_us += prof_n - prof_t;
+        prof_t = prof_n;
     }
 
     // Water is pass two regardless of a ClipWater-style ammo flag. Retail
@@ -2340,10 +2405,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (entity->ref_num != 0 && mount_ref_num != 0 &&
                 entity->ref_num == mount_ref_num)
                 continue;
-            CollisionTargetView view;
-            std::vector<CollisionMatrix> matrices;
             CollisionPolygonHit model_hit;
-            const CollisionTargetView *target = target_view(world, h, view, matrices);
+            trace_profile_.static_survivors++;
+            const CollisionTargetView *target = trace_target_view(world, h);
+            if (target != nullptr && target->model != nullptr)
+                trace_profile_.static_faces +=
+                        static_cast<int64_t>(target->model->faces.size());
             if (target == nullptr) {
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
@@ -2393,7 +2460,16 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // one live local person (retail's own-player entity plays that role).
     const bool wire_projected = world.mp_session && !world.projectile_authority;
 
+    {
+        const int64_t prof_n = prof_now();
+        prof_t = prof_n; // owner/exclusion setup charged to neither pass
+    }
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
+    {
+        const int64_t prof_n = prof_now();
+        trace_profile_.static_us += prof_n - prof_t;
+        prof_t = prof_n;
+    }
     if (!wire_projected)
         trace_polygon_table(dynamics_, ProjectileHitClass::DynamicEntity,
                             1.0f / 65536.0f, false);
@@ -2497,6 +2573,12 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             eh.material_flags = table_hit.material_flags;
             consider(eh, table_hit.distance_q16);
         }
+    }
+
+    {
+        const int64_t prof_n = prof_now();
+        trace_profile_.dynamic_us += prof_n - prof_t;
+        prof_t = prof_n;
     }
 
     // Consume the pose owner's COBJ matrices when available. The bounded torso
@@ -2614,6 +2696,15 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if ((trace.ammo_flags & 4u) == 0 &&
                 proxy.wire_handle == trace.shooter_wire_handle)
                 continue;
+            {
+                const float sc[3] = {
+                    static_cast<float>(proxy.position_q16.x) / 65536.0f,
+                    static_cast<float>(proxy.position_q16.y) / 65536.0f,
+                    static_cast<float>(proxy.position_q16.z) / 65536.0f};
+                const float r = static_cast<float>(0x20000 + effective_radius) /
+                                65536.0f;
+                if (!round_broad_phase(p0f, p1f, sc, r)) continue;
+            }
             ProjectileHit eh;
             int32_t hit_distance = 0;
             if (!trace_torso_fallback(proxy.position_q16, eh, hit_distance))
@@ -2623,6 +2714,29 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         }
 
         const PersonSlot &slot = persons_[entry.index];
+        // The witnessed person-slot gate [orig: the pool-0 person table runs
+        // the same slot bound test as pools-2/1,
+        // Projectile_RaycastProximitySlots @ 0x4e5340]. This walk had lost
+        // it, so every organic in the mission built a full pose view per
+        // ROUND per TICK (~0.9 ms each with rounds in flight - the sustained
+        // full-auto collapse). The pad covers the bone spread beyond the
+        // capsule center plus the ray's effective radius.
+        {
+            // Gate around the capsule MIDDLE (feet + 0.9u, the torso
+            // fallback's own center) so head bones ~1.8u above the feet stay
+            // inside; radius = capsule + bone spread + the ray's effective
+            // radius. Generous by design: a false pass only costs the narrow
+            // test it always ran before.
+            const float sc[3] = {
+                static_cast<float>(slot.x) / 65536.0f,
+                static_cast<float>(slot.y) / 65536.0f,
+                static_cast<float>(slot.z + kOrganicCenterZQ16) / 65536.0f};
+            const float r = static_cast<float>(slot.radius + 0x18000 +
+                                               effective_radius) /
+                            65536.0f;
+            if (!round_broad_phase(p0f, p1f, sc, r)) continue;
+        }
+        trace_profile_.static_survivors++;
         // Visual-client ghost suppression: local pool-0 slots other than L are
         // the load-frozen mission organics whose live poses arrive on the wire;
         // their decoded person proxies (folded into this same ordered walk)
@@ -2649,10 +2763,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             const_cast<CollisionWorld *>(this)->ensure_entity_instance(
                 const_cast<World &>(world), slot.h);
         }
-        CollisionTargetView person_view;
-        std::vector<CollisionMatrix> person_matrices;
-        const CollisionTargetView *posed =
-            target_view(world, slot.h, person_view, person_matrices);
+        const CollisionTargetView *posed = trace_target_view(world, slot.h);
         if (posed != nullptr && posed->live_section_pose) {
             live_pose_available = true;
             const CollisionModel &person_model = *posed->model;
@@ -2714,6 +2825,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         break;
     }
 
+    trace_profile_.person_us += prof_now() - prof_t;
     return best;
 }
 

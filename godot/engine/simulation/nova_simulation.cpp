@@ -4943,6 +4943,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
 	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &NovaSimulation::get_world_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &NovaSimulation::debug_set_world_entity_position);
+	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
+	                     &NovaSimulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("set_ai_muzzle_world", "net_id", "godot_pos"), &NovaSimulation::set_ai_muzzle_world);
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &NovaSimulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
@@ -8216,6 +8218,16 @@ Dictionary NovaSimulation::get_runtime_perf_counters() const {
 	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
 	out["occlusion_build_us"] = static_cast<int64_t>(last_occlusion_build_us_);
 	out["occlusion_probe_us"] = static_cast<int64_t>(last_occlusion_probe_us_);
+	// The last tick's projectile-trace attribution (collision.h TraceProfile).
+	const opennova::world::CollisionWorld::TraceProfile &tp =
+			collision_world_.trace_profile();
+	out["trace_calls"] = tp.calls;
+	out["trace_terrain_us"] = tp.terrain_us;
+	out["trace_static_us"] = tp.static_us;
+	out["trace_dynamic_us"] = tp.dynamic_us;
+	out["trace_person_us"] = tp.person_us;
+	out["trace_static_survivors"] = tp.static_survivors;
+	out["trace_static_faces"] = tp.static_faces;
 	return out;
 }
 
@@ -8327,6 +8339,29 @@ Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
 	}
 	out["seats"] = seats;
 	return out;
+}
+
+// Probe/diagnostic seam beside debug_set_world_entity_position: land the
+// LOCAL player at an exact dumped pose (mission position + mission yaw/pitch
+// as the F3 Player-tab dump records them) — entity + AI-motor stores written
+// together so the next motor tick continues from the pose instead of
+// snapping back.
+void NovaSimulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
+                                                 float p_yaw_deg, float p_pitch_deg) {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
+	const opennova::world::EntityHandle h = world_->cached.local_player;
+	opennova::world::Entity *e = world_->registry.get(h);
+	AiEntity *p = world_->ai->for_handle(h);
+	if (e == nullptr || p == nullptr) return;
+	e->position.x = p_mission_pos.x;
+	e->position.y = p_mission_pos.y;
+	e->position.z = p_mission_pos.z;
+	p->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
+	p->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
+	p->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
+	p->heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
+	p->pitch = static_cast<int32_t>(
+			static_cast<double>(p_pitch_deg) / opennova::world::kDegreesPerBam);
 }
 
 void NovaSimulation::debug_set_world_entity_position(int p_net_id,

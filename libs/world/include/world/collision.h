@@ -599,6 +599,20 @@ struct ProjectileHit {
 // ----------------------------------------------------------------------------
 class CollisionWorld {
 public:
+    // Per-tick projectile-trace profile (cleared with the tick tables): the
+    // probe/F3 attribution surface for sustained-fire cost. Times are
+    // microseconds; static_faces counts survivor face-set sizes (upper bound
+    // on face-loop iterations).
+    struct TraceProfile {
+        int64_t calls = 0;
+        int64_t terrain_us = 0;
+        int64_t static_us = 0;
+        int64_t dynamic_us = 0;
+        int64_t person_us = 0;
+        int64_t static_survivors = 0;
+        int64_t static_faces = 0;
+    };
+    const TraceProfile &trace_profile() const { return trace_profile_; }
     // --- model registry (host-fed, keyed by an opaque graphic id) ---
     int32_t add_model(CollisionModel model); // returns model id
     const CollisionModel *model(int32_t id) const;
@@ -956,6 +970,30 @@ private:
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+    // Per-logic-tick cache of projectile target views. Sustained automatic
+    // fire re-traced the same structures per ROUND per tick, and every
+    // broad-phase survivor rebuilt its per-section matrix vector (heap
+    // allocation included) — ~15 ms/tick with ~90 rounds in flight at a
+    // firing range. Retail keeps section matrices RESIDENT on the entity
+    // [orig: the entity matrix array consumed by
+    // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]; this cache is the
+    // host-side equivalent scoped to one tick. A cache hit revalidates the
+    // husk bit because retail's model pick runs per query [orig: Flags & 4
+    // pick @ 0x413086] and a round earlier in the SAME tick can husk the
+    // target.
+    struct TraceViewCacheEntry {
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> matrices;
+        bool valid = false;
+        bool husk_bit = false;
+        uint32_t piece_mask = 0;
+    };
+    // Cleared by build_tick_tables (the per-tick proximity snapshot the AI
+    // system publishes before rounds run), so entries never outlive a tick.
+    mutable std::unordered_map<uint16_t, TraceViewCacheEntry> trace_view_cache_;
+    const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
+
+    mutable TraceProfile trace_profile_;
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
     // False exactly when target_view would return null.

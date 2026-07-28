@@ -1030,6 +1030,15 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("effects")
 	_start_effect_world()
 	timeline.end_span()
+	# Warm the effect catalog while the loading screen still covers the frame:
+	# the first live spawn otherwise pays the deferred texture resolves + the
+	# renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
+	# first shot (measured: first-fire tap 92.9 ms -> repeat 12.5 ms). Retail
+	# pays this at load [orig: CEffectSystem_Init @ 0x5f6070 loads every .ptl
+	# and its textures at Game_StartMission].
+	timeline.span("effects_warm")
+	_warm_effect_world_catalog()
+	timeline.end_span()
 	load_progress.emit(95)
 	timeline.finish()
 	_loaded_mission_file = bms_name
@@ -2742,6 +2751,46 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
 	# retail), so the Multiplayerstart P0 loop plays.
 	NovaMusicService.open_game_context(_resource_root)
+
+
+# The load-time effect warm pass (see the load-path call site): spawn every
+# catalog effect in front of the load camera, advance the fixed tick so fresh
+# emitters actually emit, force-draw two frames SYNCHRONOUSLY so every new
+# material/pipeline draws once (no coroutine — the load path stays callable
+# without await), then clear the warm spawns exactly like the sim-restart
+# path (reset + re-register the persistent item effects). Returns the count.
+func _warm_effect_world_catalog() -> int:
+	if _effect_world == null or not _effect_world.has_method("warm_all_effects"):
+		return 0
+	var warm_pos := Vector3.ZERO
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null:
+		warm_pos = cam.global_position - cam.global_transform.basis.z * 8.0
+	var spawned := int(_effect_world.warm_all_effects(warm_pos))
+	if spawned <= 0:
+		return 0
+	# The tracer ribbon pipelines compile in the same forced frames.
+	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
+		_runtime.warm_present_pipelines(warm_pos)
+	if _effect_world.has_method("advance_fixed_tick"):
+		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	# Pipeline compiles need real draws. Skip the forced frames inside the
+	# editor host (re-entrant editor drawing); the texture warm above still
+	# runs there, and the shipped game is what the full warm protects.
+	if is_inside_tree() and not Engine.is_editor_hint():
+		RenderingServer.force_draw(true)
+		if _effect_world.has_method("advance_fixed_tick"):
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		RenderingServer.force_draw(true)
+	_effect_world.reset_runtime_state()
+	_attach_item_effects()
+	var unresolved := 0
+	if _effect_world.has_method("get_unresolved_texture_names"):
+		unresolved = PackedStringArray(
+				_effect_world.get_unresolved_texture_names()).size()
+	print("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
+			spawned, unresolved])
+	return spawned
 
 
 # Mission-start load of EVERY mounted .ptl into the runtime effect world

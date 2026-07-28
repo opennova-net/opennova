@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -32,6 +33,7 @@ private:
 	ObjectID environment_source_;
 	bool hidden_ = false;
 	bool procedural_fallback_enabled_ = false;
+	std::vector<Node *> warm_nodes_;
 
 	void _invalidate_catalog();
 
@@ -57,6 +59,15 @@ public:
 	bool get_hidden() const;
 	void set_procedural_fallback_enabled(bool p_enabled);
 	bool get_procedural_fallback_enabled() const;
+
+	// Deterministic pipeline warm for the loading screen: one centimeter quad
+	// per blend shader so every particle pipeline compiles up front. Warming
+	// by spawning effects alone is timing-dependent (delayed emitters emit
+	// nothing during the warm frames and their pipelines then compile as a
+	// ~100 ms stall on the first live shot). clear_warm_pipelines frees the
+	// quads; the effect world calls it from its runtime reset.
+	void warm_pipelines(const Vector3 &p_position);
+	void clear_warm_pipelines();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.
