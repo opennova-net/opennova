@@ -58,14 +58,14 @@ TypedArray<NovaParticleTableHandles> NovaParticleFile::get_table_handles() const
 Error NovaParticleFile::load_from_file(const String &path) {
 	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
 	if (file.is_null()) {
-		UtilityFunctions::printerr("ptl load failed: cannot open ", path);
+		UtilityFunctions::push_warning("ptl load failed: cannot open ", path);
 		return ERR_FILE_CANT_READ;
 	}
 	const int64_t length = file->get_length();
 	const PackedByteArray bytes = file->get_buffer(length);
 	file->close();
 	if (bytes.size() != length) {
-		UtilityFunctions::printerr("ptl load failed: short read from ", path);
+		UtilityFunctions::push_warning("ptl load failed: short read from ", path);
 		return ERR_FILE_CANT_READ;
 	}
 	return load_from_buffer(bytes, path);
@@ -76,7 +76,7 @@ Error NovaParticleFile::load_from_buffer(const PackedByteArray &bytes, const Str
 	opennova::particle::ParseError err;
 	if (!opennova::particle::load_particles_from_buffer(
 				reinterpret_cast<const char *>(bytes.ptr()), static_cast<std::size_t>(bytes.size()), native, err)) {
-		UtilityFunctions::printerr(String::utf8(("ptl load failed at line " + std::to_string(err.line) + ": " + err.message).c_str()));
+		UtilityFunctions::push_warning(String::utf8(("ptl load failed at line " + std::to_string(err.line) + ": " + err.message).c_str()));
 		return ERR_FILE_CANT_READ;
 	}
 	source_path = display_path;
@@ -89,7 +89,7 @@ Error NovaParticleFile::save_to_file(const String &path) {
 	std::string err;
 	std::ostringstream stream;
 	if (!opennova::particle::save_particles(stream, native, err)) {
-		UtilityFunctions::printerr(String::utf8(("ptl save failed: " + err).c_str()));
+		UtilityFunctions::push_warning(String::utf8(("ptl save failed: " + err).c_str()));
 		return ERR_FILE_CANT_WRITE;
 	}
 	const std::string serialized = stream.str();
@@ -100,12 +100,12 @@ Error NovaParticleFile::save_to_file(const String &path) {
 	}
 	Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
 	if (file.is_null()) {
-		UtilityFunctions::printerr("ptl save failed: cannot open ", path);
+		UtilityFunctions::push_warning("ptl save failed: cannot open ", path);
 		return ERR_FILE_CANT_WRITE;
 	}
 	if (!file->store_buffer(bytes)) {
 		file->close();
-		UtilityFunctions::printerr("ptl save failed: short write to ", path);
+		UtilityFunctions::push_warning("ptl save failed: short write to ", path);
 		return ERR_FILE_CANT_WRITE;
 	}
 	file->close();

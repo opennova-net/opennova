@@ -47,7 +47,7 @@ Variant ResourceFormatLoaderTIL::_load(const String &p_path, const String &p_ori
 	opennova::TilFile til;
 	std::string error;
 	if (!opennova::load_til(bytes.data(), bytes.size(), til, error)) {
-		UtilityFunctions::printerr("ResourceFormatLoaderTIL: ", error.c_str());
+		UtilityFunctions::push_warning("ResourceFormatLoaderTIL: ", error.c_str());
 		return Variant();
 	}
 
@@ -66,7 +66,7 @@ Error ResourceFormatSaverTIL::_save(const Ref<Resource> &p_resource, const Strin
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!opennova::save_til(tile_info->to_native(), bytes, error)) {
-		UtilityFunctions::printerr("ResourceFormatSaverTIL: ", error.c_str());
+		UtilityFunctions::push_warning("ResourceFormatSaverTIL: ", error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
 

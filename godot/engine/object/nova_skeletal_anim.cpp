@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <utility>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -355,7 +356,7 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 	const bool model_table =
 			!p_model_parents.empty() && p_model_parents.size() == p_model_origins.size();
 	if (!p_model_parents.empty() && !model_table) {
-		WARN_PRINT(vformat("NovaSkeletalAnim: %s: model bone parents size %d != origins size %d; model table ignored",
+		UtilityFunctions::push_warning(vformat("NovaSkeletalAnim: %s: model bone parents size %d != origins size %d; model table ignored",
 				adm_name_, static_cast<int>(p_model_parents.size()), static_cast<int>(p_model_origins.size())));
 	}
 	std::vector<opennova::anim::Vec3> shared_rest;
@@ -384,7 +385,7 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 		// model and positions from the reconstruction above.
 		const bool use_model = !model_table && p_model_origins.size() == bones_.size();
 		if (!model_table && !p_model_origins.empty() && !use_model) {
-			WARN_PRINT(vformat("NovaSkeletalAnim: %s: model bone origins size %d != bone count %d; falling back to .bad positions",
+			UtilityFunctions::push_warning(vformat("NovaSkeletalAnim: %s: model bone origins size %d != bone count %d; falling back to .bad positions",
 					adm_name_, static_cast<int>(p_model_origins.size()), static_cast<int>(bones_.size())));
 		}
 		shared_rest.resize(bones_.size());

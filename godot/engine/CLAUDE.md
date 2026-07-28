@@ -29,6 +29,16 @@ Two things live here, and both must stay host-neutral — consumable by the game
 Placement rule: GDScript lands here only if both hosts can consume it. Game-shell-only
 code goes in `godot/game/`; editor-only code goes in `godot/modtools/`.
 
+Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
+`cpp_binding_console_writes`): a failure the caller already receives through the
+return/error contract reports context via `push_warning` (negative-path tests
+drive those legs; GUT counts engine errors as failures); `push_error` is for
+invariant violations nothing recovers from. Load/lifecycle narration uses
+`print_verbose` (visible under `--verbose`), live inspection goes through the
+F3 overlay/stats system, and `libs/` diagnostics ride the `io/log.h` sink.
+Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
+code; CLI tool drivers (screenshot_capture) are the allowlisted exception.
+
 Gotchas:
 
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot

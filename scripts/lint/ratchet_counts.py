@@ -105,6 +105,62 @@ def count_libs_stdout_prints() -> int:
     return count
 
 
+GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
+# CLI drivers whose stdout IS the product; everything else in the shipping
+# godot layer routes through push_error/push_warning, print_verbose, or the
+# F3 debug system.
+GD_PRINT_ALLOWLIST = {"godot/modtools/tools/screenshot_capture.gd"}
+CPP_CONSOLE = re.compile(
+    r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
+    r"|(?<![\w:])print_line\s*\(|\bWARN_PRINT(?:_ONCE|_ED)?\s*\(|\bERR_PRINT(?:_ONCE|_ED)?\s*\(")
+
+
+def count_gd_prints_outside_debug() -> int:
+    """Raw print() family in the shipping godot layer (W1-2): the sanctioned
+    channels are push_error/push_warning, print_verbose, and the F3 overlay.
+    godot/tests and the GUT addon are out of scope (probes print by design)."""
+    count = 0
+    for sub in ("engine", "game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            rel = path.relative_to(REPO).as_posix()
+            if rel in GD_PRINT_ALLOWLIST:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                code = line.split("#", 1)[0]
+                if "print_verbose" in code:
+                    code = code.replace("print_verbose", "")
+                if GD_PRINT.search(code):
+                    count += 1
+    return count
+
+
+def count_cpp_binding_console_writes() -> int:
+    """Console writes in the GDExtension bindings (W1-2): error paths use
+    push_error/push_warning (the engine's error channel); narration uses
+    print_verbose. Raw print/printerr/print_line and the WARN/ERR_PRINT
+    macros are ratcheted at zero."""
+    count = 0
+    for path in (REPO / "godot" / "engine").rglob("*"):
+        if path.suffix.lower() not in (".cpp", ".h", ".hpp"):
+            continue
+        parts = path.relative_to(REPO).parts
+        if "build" in parts:  # local CMake/godot-cpp build output, not source
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            code = line.split("//", 1)[0]
+            if CPP_CONSOLE.search(code):
+                count += 1
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true",
@@ -121,6 +177,8 @@ def main() -> int:
         "test_private_pokes": count_test_private_pokes(),
         "libs_uncited_src_files": count_libs_uncited_src_files(allowlist),
         "libs_stdout_prints": count_libs_stdout_prints(),
+        "gd_prints_outside_debug": count_gd_prints_outside_debug(),
+        "cpp_binding_console_writes": count_cpp_binding_console_writes(),
     }
 
     if args.write_baseline:

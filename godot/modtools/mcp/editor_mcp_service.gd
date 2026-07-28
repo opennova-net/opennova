@@ -63,7 +63,6 @@ func start(port: int) -> Error:
 		return err
 	_last_error = ""
 	var url := server.get_url()
-	print("OpenNova MCP: ", url)
 	log_hub.note_server("listening at %s" % url)
 	_write_server_json()
 	return OK

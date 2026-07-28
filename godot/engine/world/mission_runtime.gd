@@ -400,7 +400,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			# resolved against the ammo table just loaded (the D-AI-5 host seed).
 			# Without it every placed NPC is unarmed — the fire pass skips ammo_primary < 0.
 			_sim.resolve_ai_weapons(options["item_db"])
-	_log_infantry_debug_mounts()
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
@@ -745,36 +744,6 @@ func _seat_type_for_user_point(name: String) -> int:
 
 func _seat_pose_index_for_user_point(name: String) -> int:
 	return ItemSeatSpecs.seat_pose_index_for_user_point(name)
-
-
-func _log_infantry_debug_mounts() -> void:
-	if _sim == null or OS.get_environment("NOVA_INF_DEBUG").is_empty():
-		return
-	for i in range(_sim.get_entity_count()):
-		var card: Dictionary = _sim.get_entity_debug(i)
-		if card.is_empty():
-			continue
-		var waypoint_id := int(card.get("waypoint_id", 0))
-		if not bool(card.get("mounted", false)) and (waypoint_id < 123 or waypoint_id > 125):
-			continue
-		print("NOVA_INF_DEBUG entity=%d ssn=%d wp=%d:%d mounted=%s target=%d seat=%d source=%s type=%d bone=%d pose=%d local=%s yaw_offset=%d seats=%d anim=%s(%d)" % [
-			i,
-			int(card.get("net_id", 0)),
-			waypoint_id,
-			int(card.get("wp_number", 0)),
-			str(bool(card.get("mounted", false))),
-			int(card.get("mount_target_net_id", 0)),
-			int(card.get("mount_seat", -1)),
-			String(card.get("mount_seat_source_name", "")),
-			int(card.get("mount_type", 0)),
-			int(card.get("mount_seat_bone", 0)),
-			int(card.get("mount_seat_pose_index", 0)),
-			str(card.get("mount_seat_local", Vector3.ZERO)),
-			int(card.get("mount_seat_yaw_offset", 0)),
-			int(card.get("mount_target_seat_count", 0)),
-			String(card.get("anim_key", "")),
-			int(card.get("anim_state", -1)),
-		])
 
 
 func is_playing() -> bool:

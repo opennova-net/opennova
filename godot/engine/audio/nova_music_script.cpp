@@ -64,11 +64,11 @@ void NovaMusicScript::load_from_decrypted_bytes(const PackedByteArray &bytes, co
 	_file_bytes = PackedByteArray();
 
 	if (bytes.size() <= 0) {
-		UtilityFunctions::printerr("NovaMusicScript: empty bytes for ", p_source);
+		UtilityFunctions::push_warning("NovaMusicScript: empty bytes for ", p_source);
 		return;
 	}
 	if (mus_open_memory(&_mf, bytes.ptr(), (size_t)bytes.size()) != 0) {
-		UtilityFunctions::printerr("NovaMusicScript: mus_open_memory failed for ", p_source);
+		UtilityFunctions::push_warning("NovaMusicScript: mus_open_memory failed for ", p_source);
 		return;
 	}
 	_opened = true;
@@ -296,7 +296,7 @@ void NovaMusicScript::set_compiled_bytecode(const PackedByteArray &p_bytecode) {
 	uint8_t *out_buf = nullptr;
 	size_t out_size = 0;
 	if (mus_encode_file(ptrs.data(), cc, &out_buf, &out_size) != 0 || out_buf == nullptr) {
-		UtilityFunctions::printerr("NovaMusicScript: mus_encode_file failed in set_compiled_bytecode");
+		UtilityFunctions::push_warning("NovaMusicScript: mus_encode_file failed in set_compiled_bytecode");
 		return;
 	}
 	PackedByteArray fresh;
@@ -325,13 +325,13 @@ String NovaMusicScript::get_decompiled_text(const StringName &p_script_name) {
 	// Two-pass decompile: query required size, then write into a sized buffer.
 	int needed = mus_decompile(s, nullptr, 0);
 	if (needed < 0) {
-		UtilityFunctions::printerr("NovaMusicScript: mus_decompile size query failed");
+		UtilityFunctions::push_warning("NovaMusicScript: mus_decompile size query failed");
 		return String();
 	}
 	std::vector<char> buf((size_t)needed + 1, 0);
 	int written = mus_decompile(s, buf.data(), buf.size());
 	if (written < 0) {
-		UtilityFunctions::printerr("NovaMusicScript: mus_decompile write failed");
+		UtilityFunctions::push_warning("NovaMusicScript: mus_decompile write failed");
 		return String();
 	}
 	return String::utf8(buf.data(), written);
@@ -368,7 +368,7 @@ String NovaMusicScript::get_decompiled_text_with_bank(const StringName &p_script
 	int needed = mus_decompile_with_names(s, name_ptrs.data(),
 			(uint32_t)name_ptrs.size(), nullptr, 0);
 	if (needed < 0) {
-		UtilityFunctions::printerr(
+		UtilityFunctions::push_warning(
 				"NovaMusicScript: mus_decompile_with_names size query failed");
 		return String();
 	}
@@ -376,7 +376,7 @@ String NovaMusicScript::get_decompiled_text_with_bank(const StringName &p_script
 	int written = mus_decompile_with_names(s, name_ptrs.data(),
 			(uint32_t)name_ptrs.size(), buf.data(), buf.size());
 	if (written < 0) {
-		UtilityFunctions::printerr(
+		UtilityFunctions::push_warning(
 				"NovaMusicScript: mus_decompile_with_names write failed");
 		return String();
 	}

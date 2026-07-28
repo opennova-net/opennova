@@ -75,7 +75,7 @@ func finish() -> String:
 	while _ring.size() > RING_SIZE:
 		_ring.pop_front()
 	var line := summary()
-	print("PerfTimeline: ", line)
+	print_verbose("PerfTimeline: ", line)
 	return line
 
 

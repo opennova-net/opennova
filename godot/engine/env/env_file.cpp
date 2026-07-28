@@ -406,7 +406,7 @@ Error EnvFile::load() {
 
 	PackedByteArray bytes;
 	if (!read_nova_payload_file(source_path, bytes)) {
-		UtilityFunctions::printerr("[EnvFile] Cannot open: ", source_path);
+		UtilityFunctions::push_warning("[EnvFile] Cannot open: ", source_path);
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -415,7 +415,7 @@ Error EnvFile::load() {
 	std::string error;
 	env = opennova::env::Config();
 	if (!opennova::env::load_env(input, env, error)) {
-		UtilityFunctions::printerr("[EnvFile] ", error.c_str());
+		UtilityFunctions::push_warning("[EnvFile] ", error.c_str());
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -439,7 +439,7 @@ Error EnvFile::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_r
 	}
 	const PackedByteArray bytes = p_resource_root->read_file(file);
 	if (bytes.is_empty()) {
-		UtilityFunctions::printerr("[EnvFile] Cannot open mounted resource: ", file);
+		UtilityFunctions::push_warning("[EnvFile] Cannot open mounted resource: ", file);
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -448,7 +448,7 @@ Error EnvFile::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_r
 	std::string error;
 	env = opennova::env::Config();
 	if (!opennova::env::load_env(input, env, error)) {
-		UtilityFunctions::printerr("[EnvFile] ", error.c_str());
+		UtilityFunctions::push_warning("[EnvFile] ", error.c_str());
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -470,7 +470,7 @@ Error EnvFile::save_to_path(const String &p_path) {
 	// Mission overrides are a live-view layer; the file always gets the base.
 	const opennova::env::Config &to_save = mission_overrides_active ? env_base : env;
 	if (!opennova::env::save_env(output, to_save, error)) {
-		UtilityFunctions::printerr("[EnvFile] Save failed: ", error.c_str());
+		UtilityFunctions::push_warning("[EnvFile] Save failed: ", error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
 
@@ -799,7 +799,7 @@ bool EnvFile::load_bytes(const PackedByteArray &p_bytes) {
 	std::string error;
 	opennova::env::Config parsed;
 	if (!opennova::env::load_env(input, parsed, error)) {
-		UtilityFunctions::printerr("[EnvFile] load_bytes: ", error.c_str());
+		UtilityFunctions::push_warning("[EnvFile] load_bytes: ", error.c_str());
 		return false;
 	}
 	// Re-resolve sky textures only when the names changed — undo snapshots must
