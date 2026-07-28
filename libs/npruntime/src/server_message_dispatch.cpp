@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstring>
 #include <utility>
+#include <io/le.h>
 
 namespace opennova::np {
 
@@ -36,15 +37,11 @@ namespace {
 // ---------------------------------------------------------------------------
 
 void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
-	out.push_back(static_cast<uint8_t>(v & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+	opennova::io::append_u16_le(out, v);
 }
 
 void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
-	out.push_back(static_cast<uint8_t>(v & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
-	out.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+	opennova::io::append_u32_le(out, v);
 }
 
 void write_u32_le(std::vector<uint8_t> &out, size_t off, uint32_t v) {
@@ -55,10 +52,7 @@ void write_u32_le(std::vector<uint8_t> &out, size_t off, uint32_t v) {
 }
 
 uint32_t read_u32_le(const uint8_t *data) {
-	return static_cast<uint32_t>(data[0]) |
-	       (static_cast<uint32_t>(data[1]) << 8) |
-	       (static_cast<uint32_t>(data[2]) << 16) |
-	       (static_cast<uint32_t>(data[3]) << 24);
+	return opennova::io::read_u32_le(data);
 }
 
 bool read_join_string_tlv(const std::vector<uint8_t> &payload, std::size_t &offset,
