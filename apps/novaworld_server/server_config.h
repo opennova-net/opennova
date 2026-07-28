@@ -1,5 +1,6 @@
 #pragma once
 
+#include <novaworld/gate_probe.h>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -20,7 +21,7 @@ struct ServerConfig {
 
 	// Gate UDP — bootstrap probes from clients land here (port 7597 in
 	// retail). Reply contains POSTIPADDRESS + UDPNOVAWORLD + STARTUPURL.
-	uint16_t gate_udp_port = 7597;
+	uint16_t gate_udp_port = opennova::GATE_DEFAULT_PORT;
 
 	// NW UDP — Layer 2-3 NAPI traffic (HELLO/JOIN/SESSION/GOODBYE) on
 	// port 64206 in retail. Same socket serves both lobby and in-match

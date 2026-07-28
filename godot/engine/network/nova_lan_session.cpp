@@ -82,7 +82,7 @@ void NovaLanSession::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("start_browsing", "destination", "port_min", "port_max"),
 			&NovaLanSession::start_browsing,
-			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(32768), DEFVAL(32787));
+			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)));
 	ClassDB::bind_method(D_METHOD("stop"), &NovaLanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &NovaLanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &NovaLanSession::is_browsing);

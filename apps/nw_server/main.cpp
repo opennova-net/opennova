@@ -8,6 +8,7 @@
 // It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
+#include <npwire/net_ports.h>
 #include <npruntime/host_session.h> // the host owner loop, promoted to libs/npruntime (P7/A3)
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
@@ -67,7 +68,7 @@ int main() {
 		std::fprintf(stderr, "nw-server: set NW_MISSION=<path-to .bms> (the mission to host)\n");
 		return 2;
 	}
-	const uint16_t port = env_port("NW_LAN_PORT", 32768); // ONNET_CLIENT_REFLECT_NOVAWORLD_PORT default
+	const uint16_t port = env_port("NW_LAN_PORT", opennova::kRetailLanPortMin); // the retail mpnovaworldport default
 
 	// --- Load the mission + build the authoritative World (pools + nav + AI brains). ---
 	mission::MissionDocument doc;

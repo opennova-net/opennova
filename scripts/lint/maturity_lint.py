@@ -92,6 +92,43 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
     return out
 
 
+# Promoted named constants (W1-4): these witnessed values have exactly one
+# canonical home per language and NEW bare literals of them are hard findings.
+#   7597        the NovaWorld gate UDP port    gate_probe.h / net_ports.h / HostSessionConfig
+#   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
+#   0x30020     the retail Co-op g_GameType    HostSessionConfig.GAME_TYPE_COOP
+PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|3276[78]|0x30020)(?![\w.])", re.IGNORECASE)
+PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "libs/", "apps/")
+PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
+PROMOTED_CANONICAL = (
+    "godot/engine/world/host_session_config.gd",
+    "libs/novaworld/include/novaworld/gate_probe.h",
+    "libs/npwire/include/npwire/net_ports.h",
+)
+PROMOTED_EXEMPT = re.compile(r"^\s*#|^\s*//|\[orig|\bconst\s|\bconstexpr\s|#define\s")
+
+
+def promoted_literal_findings(diff_range: str) -> list[str]:
+    findings: list[str] = []
+    diff = run_git("diff", "-U0", diff_range, "--", *PROMOTED_SCOPES)
+    path, lineno = "", 0
+    for raw in diff.splitlines():
+        if raw.startswith("+++ b/"):
+            path = raw[6:]
+        elif raw.startswith("@@"):
+            m = re.search(r"\+(\d+)", raw)
+            lineno = int(m.group(1)) if m else 0
+        elif raw.startswith("+") and not raw.startswith("+++"):
+            text = raw[1:]
+            if path.endswith(PROMOTED_SUFFIXES) and path not in PROMOTED_CANONICAL \
+                    and PROMOTED_LITERAL.search(text) and not PROMOTED_EXEMPT.search(text):
+                findings.append(f"{path}:{lineno}: {text.strip()}")
+            lineno += 1
+        elif raw.startswith("-") or raw.startswith(" "):
+            pass
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--range", dest="diff_range", default=None,
@@ -139,7 +176,14 @@ def main() -> int:
     if len(magic_findings) > 20:
         print(f"[lint][magic-number] ... and {len(magic_findings) - 20} more")
 
-    if dict_findings and args.enforce:
+    promoted_findings = promoted_literal_findings(diff_range)
+    for f in promoted_findings:
+        print(f"[lint][promoted-literal] {f}")
+        print("[lint]   this value has a canonical named home "
+              "(HostSessionConfig / novaworld gate_probe.h / npwire net_ports.h) "
+              "— reference it instead of re-minting the literal.")
+
+    if (dict_findings or promoted_findings) and args.enforce:
         return 1
     return 0
 

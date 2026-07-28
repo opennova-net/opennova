@@ -1,5 +1,7 @@
 #pragma once
 
+#include <npwire/net_ports.h>
+
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -48,8 +50,8 @@ private:
 	std::unordered_map<std::string, int> server_indices_;
 	String browse_target_;
 	PackedByteArray probe_;
-	int port_min_ = 32768;
-	int port_max_ = 32787;
+	int port_min_ = opennova::kRetailLanPortMin;
+	int port_max_ = opennova::kRetailLanPortMax;
 	double browse_elapsed_s_ = 0.0;
 	double announce_elapsed_s_ = 0.0;
 	bool browsing_ = false;
