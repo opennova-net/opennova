@@ -254,8 +254,8 @@ func _refresh_servers() -> void:
 	if _client != null and _client.has_method("get_server_rows"):
 		for row in _client.get_server_rows():
 			_rows.append(row)
-			var idx := _server_list.add_item(_format_server_row(row))
-			_server_list.set_item_tooltip(idx, _server_row_tooltip(row))
+			var idx := _server_list.add_item(format_server_row(row))
+			_server_list.set_item_tooltip(idx, server_row_tooltip(row))
 	if _server_list.item_count == 0:
 		_server_list.add_item("No games are being hosted yet.")
 	# A fresh list clears any prior selection.
@@ -264,7 +264,7 @@ func _refresh_servers() -> void:
 
 # "ServerName  (3/16)  AAS  198.51.100.23  [locked]" — name, occupancy, game
 # type, the server's address, and a lock marker when passworded or locked.
-func _format_server_row(row: Dictionary) -> String:
+func format_server_row(row: Dictionary) -> String:
 	var name := String(row.get("name", "server"))
 	var players := int(row.get("players", 0))
 	var max_players := int(row.get("max_players", 0))
@@ -284,7 +284,7 @@ func _format_server_row(row: Dictionary) -> String:
 
 # Hover details for a browser row: the mission and locale fields that don't fit
 # the one-line label.
-func _server_row_tooltip(row: Dictionary) -> String:
+func server_row_tooltip(row: Dictionary) -> String:
 	var parts := PackedStringArray()
 	var mission := String(row.get("mission_name", ""))
 	if not mission.is_empty():

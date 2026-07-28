@@ -91,6 +91,7 @@ public:
 	PackedInt64Array get_active_owner_tokens() const;
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
+	void reset_runtime_state();
 
 	// Runtime clock: advances simulation without materializing a render snapshot
 	// or serializing one into a throwaway Dictionary. The renderer lazily builds

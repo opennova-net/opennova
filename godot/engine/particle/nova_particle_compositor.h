@@ -69,6 +69,11 @@ public:
 	void publish(const std::shared_ptr<const NovaParticleWorldSubmission> &p_submission);
 	void clear_submission();
 	void set_particles_hidden(bool p_hidden);
+	// The real World path owns RenderingDevice pipelines whose framebuffer
+	// format is known only inside the compositor callback. A loading host
+	// requests the warm here, then force_draw() services it synchronously.
+	void request_pipeline_warm();
+	void cancel_pipeline_warm();
 	Dictionary get_backend_report() const;
 
 	void _render_callback(int32_t p_effect_callback_type,

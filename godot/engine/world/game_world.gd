@@ -141,13 +141,23 @@ var _clear_above_water := true
 var _blink_indoors := false
 var _blink_water_suppressed := false
 # --- Render-occlusion frame state (the section-mask/portal slice) ---
-# Nodes the entity render gates hid last frame (restored before re-applying).
-var _occlusion_culled_nodes: Array = []
-# bms_id -> building node THIS system set invisible (batch-culled); restored
-# before each present pass so the sim's own hidden drive is never overridden.
-var _occlusion_hidden_buildings: Dictionary = {}
-# bms_id -> building node the frame has driven (reset on unload).
-var _occlusion_masked_nodes: Dictionary = {}
+# Diff-applied: the sim emits verdict CHANGES (get_building_visibility_changes /
+# get_render_culled_changes) and only transitions touch nodes, so a steady frame
+# does no per-node work. Two ownership bits decide final visibility:
+# the present pass owns the sim's intent (PF_HIDDEN), this system owns the
+# occlusion hide — the present pass consults _occlusion_hidden_ids (shared by
+# reference) so it never fights an occlusion hide, and an occlusion release
+# lands on sim.entity_present_visible() so a sim-hidden entity never flashes.
+# bms_id -> true for every node occlusion currently hides (buildings whose
+# batch verdict culled them, entities the render gates culled).
+var _occlusion_hidden_ids: Dictionary = {}
+# Exact MissionPresentPass bms_id -> visibility intent, shared by reference.
+# Occlusion only layers hides on top of this value and never reconstructs the
+# present predicate independently.
+var _present_visibility: Dictionary = {}
+# bms_id -> resolved node, so steady frames skip registry lookups. Entries
+# revalidate with is_instance_valid on use; reset on unload/A-B seams.
+var _occlusion_node_cache: Dictionary = {}
 # The mission attribute that forces the indoors accum bit every frame.
 # [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
@@ -257,6 +267,9 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE:
+		_stop_water_render_stats()
+		return
 	if what != NOTIFICATION_VISIBILITY_CHANGED or not is_node_ready():
 		return
 	if _loaded and is_visible_in_tree():
@@ -1024,6 +1037,15 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("effects")
 	_start_effect_world()
 	timeline.end_span()
+	# Warm the effect catalog while the loading screen still covers the frame:
+	# the first live spawn otherwise pays the deferred texture resolves + the
+	# renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
+	# first shot (measured: first-fire tap 92.9 ms -> repeat 12.5 ms). Retail
+	# pays this at load [orig: CEffectSystem_Init @ 0x5f6070 loads every .ptl
+	# and its textures at Game_StartMission].
+	timeline.span("effects_warm")
+	_warm_effect_world_catalog()
+	timeline.end_span()
 	load_progress.emit(95)
 	timeline.finish()
 	_loaded_mission_file = bms_name
@@ -1139,6 +1161,7 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_stop_water_render_stats()
 	_cancel_join_preload()
 	_join_admission_ready_emitted = false
 	_join_deploy_signal_active = false
@@ -1163,6 +1186,7 @@ func unload() -> void:
 	_item_fx_control_active.clear()
 	_item_fx_control_nodes.clear()
 	_item_fx_control_instances.clear()
+	_present_visibility.clear()
 	# The user-point view retains its toggle and re-arms on the next successful load.
 	_remove_user_point_debug_view()
 	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
@@ -1481,6 +1505,46 @@ var _perf_probe_skip_effect_tick := false
 var _perf_probe_skip_fixed_handlers := false
 var _perf_probe_occlusion_skipped := false
 
+# The shared F3 frame-stats board (null outside the game shell). Feeds gate on
+# board capture so a closed Stats tab costs nothing; the occlusion split spans
+# land from _apply_occlusion_frame, the tick legs from tick() below.
+var _frame_stats: FrameStatsBoard = null
+# The two _apply_occlusion_frame halves, valid while probe/stats timing runs:
+# the native run_occlusion_frame call and the GDScript node application.
+var _perf_occl_native_us := 0
+var _perf_occl_apply_us := 0
+# Weakref edge latch for measured render time on the water reflection RTT.
+var _stats_water_vp_ref: WeakRef = null
+
+
+## The game shell hands its FrameStatsBoard here; the world re-hands it to
+## every MissionRuntime it creates and feeds its own tick legs.
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _frame_stats:
+		return
+	if _frame_stats != null:
+		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(old_capture_changed):
+			_frame_stats.capture_changed.disconnect(old_capture_changed)
+	_stop_water_render_stats()
+	_frame_stats = board
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if not _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.connect(capture_changed)
+	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
+		_runtime.set_frame_stats_board(board)
+
+
+func _on_frame_stats_capture_changed(active: bool) -> void:
+	if not active:
+		_stop_water_render_stats()
+
+
+func is_water_render_stats_measured() -> bool:
+	return _stats_water_vp_ref != null \
+			and is_instance_valid(_stats_water_vp_ref.get_ref())
+
 
 ## Enables the manual frame-span/A-B probe. Disabling restores every skip
 ## request to its retail default and drops any sampled frame transport.
@@ -1492,11 +1556,16 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 		_perf_probe_skip_effect_tick = false
 		_perf_probe_skip_fixed_handlers = false
 		_perf_probe_occlusion_skipped = false
+	_sync_runtime_profiling()
 
 
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	_sample_panm_clock()
 	var probe_enabled := _perf_probe_enabled
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
+	# One shared gate for the per-leg clock reads: the manual A/B probe and the
+	# F3 Stats capture consume the same measurements.
+	var timing := probe_enabled or stats_on
 	var skip_occlusion := probe_enabled and _perf_probe_skip_occl
 	if probe_enabled:
 		_perf_probe_spans.clear()
@@ -1522,28 +1591,24 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	var runtime_ticks := 0
-	# Undo LAST frame's occlusion visibility writes BEFORE the present pass, so
-	# present's hidden drive (corpse despawn, WAC hides) is the base state this
-	# frame's occlusion re-culls from — occlusion only ever HIDES on top of
-	# present, it never force-shows a node the sim wants hidden. Safe while
-	# paused too: the culled/hidden sets only ever contain nodes occlusion
-	# itself hid while they were visible.
-	var probe_phase_start := Time.get_ticks_usec() if probe_enabled else 0
-	if _loaded:
-		_restore_occlusion_overrides()
-		# Section masks persist on the de-batched model nodes. On the edge into
-		# occlusion A/B, release only that render override; mission blink/indoors
-		# semantics remain authoritative and iris exposure keeps sampling below.
-		if probe_enabled:
-			if skip_occlusion and not _perf_probe_occlusion_skipped:
+	# Occlusion no longer restores-then-rehides per frame: the apply below is
+	# diff-based and the present pass consults the shared occlusion-hidden set,
+	# so steady verdicts leave nodes untouched. Only the A/B seam edges do bulk
+	# work: entering the skip releases every occlusion override (mission
+	# blink/indoors semantics remain authoritative; iris keeps sampling below),
+	# leaving it re-arms a full re-emit from the sim's delta baseline.
+	if probe_enabled and _loaded:
+		if skip_occlusion != _perf_probe_occlusion_skipped:
+			if skip_occlusion:
 				if _water != null:
 					_water.visible = not _blink_water_suppressed
-				_reset_occlusion_section_masks()
-			_perf_probe_occlusion_skipped = skip_occlusion
+				_release_occlusion_overrides(false)
+			else:
+				_reset_occlusion_apply_baseline()
+		_perf_probe_occlusion_skipped = skip_occlusion
 	elif probe_enabled:
 		_perf_probe_occlusion_skipped = false
-	if probe_enabled:
-		_perf_probe_spans["occl_restore"] = Time.get_ticks_usec() - probe_phase_start
+	var probe_phase_start := 0
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -1567,33 +1632,45 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
-	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		_advance_hosted_weather(delta)
-	if probe_enabled:
-		_perf_probe_spans["weather"] = Time.get_ticks_usec() - probe_phase_start
+	if timing:
+		var weather_us := Time.get_ticks_usec() - probe_phase_start
+		if probe_enabled:
+			_perf_probe_spans["weather"] = weather_us
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.WORLD_WEATHER, weather_us)
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
-	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if _loaded and runtime_ticks > 0:
 		_apply_blink_frame_gates()
-	if probe_enabled:
-		_perf_probe_spans["blink"] = Time.get_ticks_usec() - probe_phase_start
+	if timing:
+		var blink_us := Time.get_ticks_usec() - probe_phase_start
+		if probe_enabled:
+			_perf_probe_spans["blink"] = blink_us
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if _loaded:
-		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		if not skip_occlusion:
 			_apply_occlusion_frame(camera_xform)
 		if probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
-		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		_stamp_iris_samples(camera_xform)
-		if probe_enabled:
-			_perf_probe_spans["iris"] = Time.get_ticks_usec() - probe_phase_start
+		if timing:
+			var iris_us := Time.get_ticks_usec() - probe_phase_start
+			if probe_enabled:
+				_perf_probe_spans["iris"] = iris_us
+			if stats_on:
+				_frame_stats.add(FrameStatsBoard.WORLD_IRIS, iris_us)
 	elif probe_enabled:
 		_perf_probe_spans["occl_frame"] = 0
 		_perf_probe_spans["iris"] = 0
@@ -1607,6 +1684,54 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
+		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
+		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
+	_sample_water_render_stats(stats_on)
+
+
+# Water-reflection RTT sampling for the Stats tab: flip measured render time on
+# the reflection SubViewport only while the tab captures, then land the
+# previous frame's CPU/GPU times on the board. Weakref-latched so a freed
+# viewport never sees a stale-RID RenderingServer call.
+func _sample_water_render_stats(stats_on: bool) -> void:
+	var viewport: SubViewport = null
+	if stats_on and _water != null:
+		var viewport_v: Variant = _water.get("reflection_viewport")
+		if viewport_v is SubViewport and is_instance_valid(viewport_v):
+			viewport = viewport_v
+	var previous: Object = _stats_water_vp_ref.get_ref() if _stats_water_vp_ref != null else null
+	if previous != viewport:
+		if previous is SubViewport:
+			RenderingServer.viewport_set_measure_render_time(
+					(previous as SubViewport).get_viewport_rid(), false)
+		_stats_water_vp_ref = weakref(viewport) if viewport != null else null
+		if viewport != null:
+			RenderingServer.viewport_set_measure_render_time(
+					viewport.get_viewport_rid(), true)
+	if viewport == null:
+		return
+	var rid := viewport.get_viewport_rid()
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_CPU,
+			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_GPU,
+			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
+
+
+func _stop_water_render_stats() -> void:
+	var previous: Object = (
+			_stats_water_vp_ref.get_ref() if _stats_water_vp_ref != null else null)
+	if previous is SubViewport:
+		RenderingServer.viewport_set_measure_render_time(
+				(previous as SubViewport).get_viewport_rid(), false)
+	_stats_water_vp_ref = null
+
+
+func _sync_runtime_profiling() -> void:
+	if _runtime != null and _runtime.has_method(
+			"set_runtime_profiling_enabled"):
+		_runtime.set_runtime_profiling_enabled(_perf_probe_enabled)
 
 
 func get_runtime_perf_counters() -> Dictionary:
@@ -2367,6 +2492,8 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
 	add_child(_runtime)
+	if _frame_stats != null:
+		_runtime.set_frame_stats_board(_frame_stats)
 	var mission_file := bms_name.get_file()
 	if mission_file.is_empty():
 		mission_file = bms_name
@@ -2420,6 +2547,13 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# remote-entity avatars (build_player_animated_model); unused by the host present path.
 	opts["placer"] = _placer
 	opts["env_node"] = _env
+	# The occlusion-claim set the present pass consults (two-bit visibility
+	# ownership; see _set_occlusion_hidden). Shared by reference: this world
+	# mutates it in place across the mission's occlusion frames.
+	opts["present_options"] = {
+		"occlusion_hidden_ids": _occlusion_hidden_ids,
+		"present_visibility": _present_visibility,
+	}
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
@@ -2452,6 +2586,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or
 	# submitted: in a net session the original's spawn kit is a page of this file,
 	# selected by the very class byte it also puts on the wire
@@ -2609,7 +2744,13 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
 	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
 			and not skip_effect_tick:
-		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		if _frame_stats != null and _frame_stats.is_capture_active():
+			var fx_start := Time.get_ticks_usec()
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+			_frame_stats.add(FrameStatsBoard.EFFECTS_TICK,
+					Time.get_ticks_usec() - fx_start)
+		else:
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 
 
 func _on_runtime_simulation_restarted() -> void:
@@ -2661,6 +2802,71 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
 	# retail), so the Multiplayerstart P0 loop plays.
 	NovaMusicService.open_game_context(_resource_root)
+
+
+# The load-time effect warm pass (see the load-path call site): spawn every
+# catalog effect in front of the load camera, advance the fixed tick so fresh
+# emitters actually emit, force-draw two frames SYNCHRONOUSLY so every new
+# material/pipeline draws once (no coroutine — the load path stays callable
+# without await), then clear the warm spawns exactly like the sim-restart
+# path (reset + re-register the persistent item effects). Returns the count.
+func _warm_effect_world_catalog() -> int:
+	if _effect_world == null or not _effect_world.has_method("warm_all_effects"):
+		return 0
+	var warm_pos := Vector3.ZERO
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null:
+		warm_pos = cam.global_position - cam.global_transform.basis.z * 8.0
+	# The persistent master switch is a gameplay preference, not a reason to
+	# leave the catalog cold forever. Lift it only across the loading-screen
+	# draws; keep _particles_hidden unchanged and restore the EffectWorld before
+	# persistent item effects are reattached.
+	var restore_particles_hidden := _effect_world.are_particles_hidden()
+	if restore_particles_hidden:
+		_effect_world.set_particles_hidden(false)
+	var spawned := int(_effect_world.warm_all_effects(warm_pos))
+	if spawned <= 0:
+		_effect_world.reset_runtime_state()
+		if restore_particles_hidden:
+			_effect_world.set_particles_hidden(true)
+		return 0
+	# The tracer ribbon pipelines compile in the same forced frames.
+	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
+		_runtime.warm_present_pipelines(warm_pos)
+	if _effect_world.has_method("advance_fixed_tick"):
+		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	if _effect_world.has_method("render_now"):
+		_effect_world.render_now()
+	# Pipeline compiles need real draws. Skip the forced frames inside the
+	# editor host (re-entrant editor drawing); the texture warm above still
+	# runs there, and the shipped game is what the full warm protects.
+	if is_inside_tree() and not Engine.is_editor_hint():
+		# MainGame keeps World hidden behind the opaque loading CanvasLayer.
+		# Temporarily expose it so the particle domains, tracer MeshInstance,
+		# and deterministic helper quads are actually submitted to force_draw.
+		var was_visible := visible
+		visible = true
+		RenderingServer.force_draw(true)
+		if _effect_world.has_method("advance_fixed_tick"):
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		if _effect_world.has_method("render_now"):
+			_effect_world.render_now()
+		RenderingServer.force_draw(true)
+		# The reset below cancels any unserviced compositor warm request. Drain
+		# the forced draws first so threaded renderers cannot race that cancel.
+		RenderingServer.force_sync()
+		visible = was_visible
+	_effect_world.reset_runtime_state()
+	if restore_particles_hidden:
+		_effect_world.set_particles_hidden(true)
+	_attach_item_effects()
+	var unresolved := 0
+	if _effect_world.has_method("get_unresolved_texture_names"):
+		unresolved = PackedStringArray(
+				_effect_world.get_unresolved_texture_names()).size()
+	print("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
+			spawned, unresolved])
+	return spawned
 
 
 # Mission-start load of EVERY mounted .ptl into the runtime effect world
@@ -3320,38 +3526,43 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 		var wh = _water.get("water_height")
 		if wh != null:
 			water_z = float(wh)
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
+	var timing := _perf_probe_enabled or stats_on
+	var native_start := Time.get_ticks_usec() if timing else 0
 	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
 			_mission_forces_indoors)
+	var native_end := Time.get_ticks_usec() if timing else 0
 
 	# Building batch visibility + per-section masks (bit N = render part N,
-	# forced-visible def bits already merged by the sim). Hide-only: a building
-	# occlusion hid is restored by _restore_occlusion_overrides before the next
-	# present pass, so a sim/host hide is never force-shown from here.
+	# forced-visible def bits already merged by the sim), applied as CHANGES:
+	# the sim diffs against what this host last applied, so a steady frame
+	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
+	# verdicts as the full-walk form land on the nodes.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
-	var vis: PackedInt64Array = sim.get_building_visibility()
-	for i in range(0, vis.size(), 2):
-		var bms_id := int(vis[i])
-		var node: Node = registry.resolve_single(bms_id)
-		if node == null or not (node is Node3D):
+	var changes: PackedInt64Array = sim.get_building_visibility_changes()
+	for i in range(0, changes.size(), 2):
+		var bms_id := int(changes[i])
+		var node := _occlusion_node(registry, bms_id)
+		if node == null:
 			continue
-		var packed := int(vis[i + 1])
-		var batch_visible := ((packed >> 32) & 1) == 1
-		if not batch_visible and (node as Node3D).visible:
-			(node as Node3D).visible = false
-			_occlusion_hidden_buildings[bms_id] = node
+		var packed := int(changes[i + 1])
 		if node.has_method("set_section_visibility_mask"):
 			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
-		_occlusion_masked_nodes[bms_id] = node
+		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
 
-	# Entity render gates (the blink-hits gate + the outdoors three-ray latch):
-	# hide this frame's culled set (last frame's was restored pre-present).
-	# [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
-	var culled: PackedInt32Array = sim.get_render_culled_bms_ids()
-	for id in culled:
-		var node: Node = registry.resolve_single(int(id))
-		if node is Node3D and (node as Node3D).visible:
-			(node as Node3D).visible = false
-			_occlusion_culled_nodes.append(node)
+	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
+	# also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
+	var culled_changes: PackedInt32Array = sim.get_render_culled_changes()
+	if culled_changes.size() >= 2:
+		var added := int(culled_changes[0])
+		for i in range(1, 1 + added):
+			var node := _occlusion_node(registry, int(culled_changes[i]))
+			if node != null:
+				_set_occlusion_hidden(sim, node, int(culled_changes[i]), true)
+		for i in range(2 + added, culled_changes.size()):
+			var node := _occlusion_node(registry, int(culled_changes[i]))
+			if node != null:
+				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
 
 	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
 	# authored water letter suppressing (accum bit 0x8), the water still renders
@@ -3361,40 +3572,111 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	if _water != null and sim.has_method("occlusion_water_visible"):
 		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
 
+	if timing:
+		_perf_occl_native_us = native_end - native_start
+		_perf_occl_apply_us = Time.get_ticks_usec() - native_end
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.OCCL_APPLY, _perf_occl_apply_us)
+		# The native call's internal split; the remainder of the bound call
+		# (marshalling + the handle collection) lands in the glue slot so the
+		# pane's Occlusion group still sums to the whole frame cost.
+		if sim.has_method("get_last_occlusion_build_us"):
+			var build_us := int(sim.get_last_occlusion_build_us())
+			var probe_us := int(sim.get_last_occlusion_probe_us())
+			_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
+			_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
+			_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
+					maxi(_perf_occl_native_us - build_us - probe_us, 0))
+		else:
+			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
 
-# Undo the previous occlusion frame's visibility writes: last frame's gated
-# entities and batch-hidden buildings become visible again, leaving the present
-# pass to assert the sim's own hidden state right after.
-func _restore_occlusion_overrides() -> void:
-	for n in _occlusion_culled_nodes:
-		if is_instance_valid(n):
-			(n as Node3D).visible = true
-	_occlusion_culled_nodes.clear()
-	for bms_id in _occlusion_hidden_buildings:
-		var node = _occlusion_hidden_buildings[bms_id]
-		if is_instance_valid(node):
-			(node as Node3D).visible = true
-	_occlusion_hidden_buildings.clear()
+
+# Resolve (and cache) the node a bms_id drives. Cache entries revalidate with
+# is_instance_valid; a freed node re-resolves through the registry (reloads
+# recreate nodes under the same ids).
+func _occlusion_node(registry, bms_id: int) -> Node3D:
+	var cached: Variant = _occlusion_node_cache.get(bms_id)
+	if cached != null and is_instance_valid(cached):
+		return cached
+	var node: Node = registry.resolve_single(bms_id)
+	if node == null or not (node is Node3D):
+		_occlusion_node_cache.erase(bms_id)
+		return null
+	_occlusion_node_cache[bms_id] = node
+	return node
 
 
-## Release only the render-owned section masks when the occlusion A/B seam is
-## entered. Unlike _reset_occlusion_frame(), this deliberately preserves the
-## mission's forced-indoors semantic state.
-func _reset_occlusion_section_masks(restore_visibility: bool = false) -> void:
-	for bms_id in _occlusion_masked_nodes:
-		var node = _occlusion_masked_nodes[bms_id]
-		if is_instance_valid(node):
-			if restore_visibility and node is Node3D:
+# The occlusion-hidden ownership bit. A hide claims the id (the present pass
+# consults the shared set and never fights it); a release clears the claim and
+# lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
+# entity never flashes for a frame.
+func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void:
+	if hidden:
+		if not _occlusion_hidden_ids.has(bms_id):
+			_occlusion_hidden_ids[bms_id] = true
+			if node.visible:
+				node.visible = false
+	elif _occlusion_hidden_ids.erase(bms_id):
+		var present_visible := _entity_present_visible(sim, bms_id)
+		if present_visible and not node.visible:
+			node.visible = true
+
+
+# Duck-typed sim resolution for the occlusion apply paths: harness runtimes
+# serve stub sims that the typed get_sim() accessor cannot return.
+func _occlusion_sim() -> Object:
+	if _runtime == null or not _runtime.has_method("get_sim"):
+		return null
+	var sim: Variant = _runtime.get_sim()
+	return sim if sim is Object else null
+
+
+func _entity_present_visible(sim: Object, bms_id: int) -> bool:
+	if _present_visibility.has(bms_id):
+		return bool(_present_visibility[bms_id])
+	# Compatibility/test sources without MissionPresentPass retain the native
+	# base predicate. Production placed nodes always publish the exact combined
+	# hidden + local-view-suppressed intent above.
+	if sim != null and sim.has_method("entity_present_visible"):
+		return bool(sim.entity_present_visible(bms_id))
+	return true
+
+
+# Release every occlusion override: restore claimed nodes to the sim's present
+# intent, clear section masks to fully-visible, drop the caches, and forget the
+# sim's delta baseline so a later re-enable re-emits full state. The A/B seam
+# keeps mission blink/indoors semantics (reset_semantics=false); unload resets
+# them too.
+func _release_occlusion_overrides(reset_semantics: bool) -> void:
+	var sim := _occlusion_sim()
+	for bms_id in _occlusion_hidden_ids:
+		var node: Variant = _occlusion_node_cache.get(bms_id)
+		if node != null and is_instance_valid(node):
+			var present_visible := _entity_present_visible(sim, int(bms_id))
+			if present_visible:
 				(node as Node3D).visible = true
-			if node.has_method("set_section_visibility_mask"):
-				node.set_section_visibility_mask(-1)
-	_occlusion_masked_nodes.clear()
+	_occlusion_hidden_ids.clear()
+	for bms_id in _occlusion_node_cache:
+		var node: Variant = _occlusion_node_cache[bms_id]
+		if node != null and is_instance_valid(node) \
+				and (node as Node).has_method("set_section_visibility_mask"):
+			(node as Node).set_section_visibility_mask(-1)
+	_occlusion_node_cache.clear()
+	_reset_occlusion_apply_baseline()
+	if reset_semantics:
+		_mission_forces_indoors = false
+
+
+# Forget the sim's applied-state baseline so the next occlusion frame re-emits
+# everything (the host caches were dropped or the A/B skip ended).
+func _reset_occlusion_apply_baseline() -> void:
+	var sim := _occlusion_sim()
+	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):
+		sim.reset_occlusion_apply_baseline()
 
 
 func _reset_occlusion_frame() -> void:
-	_restore_occlusion_overrides()
-	_reset_occlusion_section_masks(true)
-	_mission_forces_indoors = false
+	_release_occlusion_overrides(true)
 
 
 func _reset_blink_frame_gates() -> void:

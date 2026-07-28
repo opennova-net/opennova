@@ -12,7 +12,9 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector4i.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -271,6 +273,12 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
+	// Delta baselines for the render-occlusion apply path: what the host last
+	// applied, so steady frames emit nothing. Cleared on world reset and via
+	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full
+	// re-emit).
+	std::unordered_map<uint32_t, int64_t> occl_apply_building_last_;
+	std::vector<int32_t> occl_apply_culled_last_;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -290,6 +298,13 @@ private:
 	bool listen_server_ = false;
 	uint64_t last_sim_tick_us_ = 0;
 	uint64_t last_net_tick_us_ = 0;
+	// The two halves of run_occlusion_frame: the portal/section build
+	// (OcclusionWorld::build_frame) and the per-entity render-gate probe loop.
+	uint64_t last_occlusion_build_us_ = 0;
+	uint64_t last_occlusion_probe_us_ = 0;
+	// One opt-in gate for every native runtime timer/counter. Retail play keeps
+	// this false; F3 Stats and the manual probe share the public ownership seam.
+	bool runtime_profiling_enabled_ = false;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
 	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
@@ -1223,6 +1238,33 @@ public:
 	Dictionary get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
+	// One opt-in seam for native sim/net/present/occlusion timings and
+	// projectile collision attribution. Disabled by default so ordinary play
+	// performs no native profiling clock reads or timing-counter writes.
+	void set_runtime_profiling_enabled(bool p_enabled);
+	bool is_runtime_profiling_enabled() const {
+		return runtime_profiling_enabled_;
+	}
+	// Allocation-free last-tick trace sampling for the F3 hot path. Vector
+	// lanes are times=(terrain, static, dynamic, person),
+	// counts=(calls, static survivors, dynamic survivors, person survivors),
+	// and faces=(static, dynamic).
+	Vector4i get_last_projectile_trace_times_us() const;
+	Vector4i get_last_projectile_trace_counts() const;
+	Vector2i get_last_projectile_trace_faces() const;
+	// Allocation-free int forms of the same last-frame counters, for per-frame
+	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
+	int64_t get_last_sim_tick_us() const { return static_cast<int64_t>(last_sim_tick_us_); }
+	int64_t get_last_net_tick_us() const { return static_cast<int64_t>(last_net_tick_us_); }
+	int64_t get_last_present_snapshot_us() const {
+		return static_cast<int64_t>(last_present_snapshot_us_);
+	}
+	int64_t get_last_occlusion_build_us() const {
+		return static_cast<int64_t>(last_occlusion_build_us_);
+	}
+	int64_t get_last_occlusion_probe_us() const {
+		return static_cast<int64_t>(last_occlusion_probe_us_);
+	}
 	// Script-disable gate [orig: dword_C6EB28].
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;
@@ -1328,6 +1370,9 @@ public:
 	// invisible to the AI-index seams): entity card + mission-space teleport.
 	Dictionary get_world_entity_debug(int p_net_id) const;
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
+	// Land the local player at an exact F3-dumped pose (probe seam).
+	void debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
+			float p_pitch_deg);
 	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
 	// position; converted + stamped with the logic tick).
@@ -1483,6 +1528,20 @@ public:
 	PackedInt64Array get_building_visibility() const;
 	// bms_ids of non-building entities the collector gates culled this frame.
 	PackedInt32Array get_render_culled_bms_ids() const;
+	// Delta form of get_building_visibility(): only pairs whose packed value
+	// changed since the last call, so the host applies changes instead of
+	// re-walking the whole building set every frame.
+	PackedInt64Array get_building_visibility_changes();
+	// Delta form of get_render_culled_bms_ids():
+	// [n_added, ids..., n_removed, ids...] since the last call.
+	PackedInt32Array get_render_culled_changes();
+	// The present pass's visibility intent for one placed entity — the
+	// occlusion release edge lands a node on the sim's CURRENT visibility so a
+	// hidden entity never flashes for a frame.
+	bool entity_present_visible(int p_bms_id) const;
+	// Forget the applied-state baselines: the next delta call re-emits the
+	// full frame state (the occlusion A/B seam and host cache resets use it).
+	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
 	bool occlusion_camera_indoors() const;
 

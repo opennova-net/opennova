@@ -14,6 +14,7 @@ const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
+const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
 
 var _mount_guard = MountGuard.new()
 var _property_guard = PropertyGuard.new()
@@ -54,7 +55,9 @@ func _on_seg_post_draw() -> void:
 	var now := Time.get_ticks_usec()
 	if _seg_t_pre > 0:
 		_seg_sum[1] += now - _seg_t_pre  # draw
+		_seg_worst_draw = maxi(_seg_worst_draw, now - _seg_t_pre)
 	_seg_t_pre = now
+var _seg_worst_draw := 0
 var _phase := ""
 var _sample_t0 := 0
 
@@ -84,7 +87,10 @@ func _run() -> void:
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR").strip_edges()
 	if not res_dir.is_empty():
 		ResourceDirSettings.set_resource_dir(res_dir)
-		ResourceDirSettings.set_expansion("")
+		# NW_EXPANSION mounts an expansion overlay (e.g. revx02) the way the
+		# /exp launch flag would; absent = base game only.
+		ResourceDirSettings.set_expansion(
+				OS.get_environment("NW_EXPANSION").strip_edges())
 	print("[pfg] mount: dir=%s expansion=%s" % [
 			ResourceDirSettings.get_resource_dir(), ResourceDirSettings.get_expansion()])
 
@@ -131,8 +137,41 @@ func _run() -> void:
 	RenderingServer.frame_pre_draw.connect(_on_seg_pre_draw)
 	RenderingServer.frame_post_draw.connect(_on_seg_post_draw)
 	_census()
-	_look(Vector2(0, 120))
-	await _settle_ms(1500)
+	# The spawn kit equips the KNIFE - holding fire on it measures knife swings,
+	# not automatic fire. Switch to a clip-carrying weapon first so the FIRING
+	# phases exercise the real full-auto path (rounds, tracers, impacts, sounds).
+	await _equip_clip_weapon()
+	# NOVA_PF_POSE=<player-pose json> (the F3 Player-tab dump) lands the probe
+	# at an exact recorded position + aim before measuring; otherwise the
+	# optional NOVA_PF_LOOK_DY pitch (e.g. 320) walks the impact point into
+	# nearby terrain so every round lands its impact effects.
+	var pose_path := OS.get_environment("NOVA_PF_POSE").strip_edges()
+	if not pose_path.is_empty() and _apply_pose_dump(pose_path):
+		await _settle_ms(800)
+	else:
+		var look_dy := 120.0
+		var look_env := OS.get_environment("NOVA_PF_LOOK_DY").strip_edges()
+		if not look_env.is_empty():
+			look_dy = float(look_env)
+		_look(Vector2(0, look_dy))
+		await _settle_ms(1500)
+	# First-shot hitch attribution: the very first live round pays every lazy
+	# one-time (pipeline compiles, texture/sound resolves). Tap 1 fires with
+	# the particle master switch hidden, tap 2 with particles live, tap 3 is
+	# the repeat control (a flat tap 3 proves the cost is one-time). The taps
+	# also consume the first-times, so the FIRING phases below measure clean
+	# sustained cost.
+	if _gw != null and _gw.has_method("set_particles_hidden"):
+		_gw.set_particles_hidden(true)
+		await _settle_ms(400)
+		var tap1 := await _tap_and_measure("tap1-particles-hidden")
+		_gw.set_particles_hidden(false)
+		await _settle_ms(400)
+		var tap2 := await _tap_and_measure("tap2-particles-live")
+		await _settle_ms(400)
+		var tap3 := await _tap_and_measure("tap3-repeat")
+		print("[pfg] first-shot hitch: hidden=%.1fms live=%.1fms repeat=%.1fms" % [
+				tap1, tap2, tap3])
 
 	var fire_s := float(OS.get_environment("NOVA_PF_FIRE_SECONDS").to_float())
 	if fire_s <= 0.0:
@@ -204,14 +243,30 @@ func _run() -> void:
 	# simulation, body posing, and muzzle feedback continue normally.
 	var xformoff := {avg = -1.0}
 	var visoff := {avg = -1.0}
-	if _set_guarded_if_present(_present, &"_drive_transform", false):
+	var bodyoff := {avg = -1.0}
+	var present_channels := int(_present.get_output_channels()) \
+			if _present != null and _present.has_method("get_output_channels") else -1
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_TRANSFORM)
 		await _settle_ms(500)
 		xformoff = await _measure("xformoff", 3000)
-		_restore_guarded(_present, &"_drive_transform")
-	if _set_guarded_if_present(_present, &"_drive_visibility", false):
+		_present.set_output_channels(present_channels)
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_VISIBILITY)
 		await _settle_ms(500)
 		visoff = await _measure("visoff", 3000)
-		_restore_guarded(_present, &"_drive_visibility")
+		_present.set_output_channels(present_channels)
+	# Body-anim A/B: freeze the pose dispatch (and with it the Skeleton3D
+	# update chain those writes dirty) — the deferred/off-span suspect the
+	# WORLDOFF-minus-spans residual points at.
+	if present_channels >= 0:
+		_present.set_output_channels(
+				present_channels & ~MissionPresentPass.OUTPUT_BODY_ANIM)
+		await _settle_ms(500)
+		bodyoff = await _measure("bodyoff", 3000)
+		_present.set_output_channels(present_channels)
 
 	# Occlusion legs A/B (visibility writes across the occluded set per frame).
 	var occloff := {avg = -1.0}
@@ -259,6 +314,63 @@ func _run() -> void:
 		handleroff = await _measure("handleroff", 3000)
 		_restore_guarded(_gw, &"_perf_probe_skip_fixed_handlers")
 
+	# Residual bisect, LAST because it broadly mutates processing state: turn
+	# off every OTHER node's _process (main_game keeps ticking the world). If
+	# the frame collapses toward the measured shell spans, the process residual
+	# is node _process work (bisect by subtree next); if it barely moves, the
+	# residual is engine-internal.
+	var otherprocoff := {avg = -1.0}
+	var process_disabled: Array = []
+	var walk: Array = [root]
+	while not walk.is_empty():
+		var walk_node: Node = walk.pop_back()
+		for walk_child in walk_node.get_children():
+			walk.push_back(walk_child)
+		if walk_node == _main or walk_node == root:
+			continue
+		if walk_node.is_processing():
+			walk_node.set_process(false)
+			process_disabled.append(walk_node)
+	print("[pfg] otherprocoff: disabled _process on %d node(s)" % process_disabled.size())
+	await _settle_ms(500)
+	otherprocoff = await _measure("otherprocoff", 3000)
+	for restored_node in process_disabled:
+		if is_instance_valid(restored_node):
+			(restored_node as Node).set_process(true)
+
+	# Finer attribution of the remaining _process share: the placed-model set
+	# alone, then just their live-PANM evaluation (the Dictionary-building
+	# evaluate_panm path).
+	var models: Array = []
+	var model_walk: Array = [root]
+	while not model_walk.is_empty():
+		var walk_node2: Node = model_walk.pop_back()
+		for walk_child2 in walk_node2.get_children():
+			model_walk.push_back(walk_child2)
+		if walk_node2 is NovaObjectModel:
+			models.append(walk_node2)
+	var modelprocoff := {avg = -1.0}
+	for m in models:
+		(m as Node).set_process(false)
+	await _settle_ms(500)
+	modelprocoff = await _measure("modelprocoff", 3000)
+	for m in models:
+		if is_instance_valid(m):
+			(m as Node).set_process(true)
+	var panmoff := {avg = -1.0}
+	var panm_disabled: Array = []
+	for m in models:
+		if is_instance_valid(m) and bool(m.get("_has_live_panm")):
+			m.set("_has_live_panm", false)
+			panm_disabled.append(m)
+	print("[pfg] panmoff: suspended live PANM on %d of %d model(s)" % [
+			panm_disabled.size(), models.size()])
+	await _settle_ms(500)
+	panmoff = await _measure("panmoff", 3000)
+	for m in panm_disabled:
+		if is_instance_valid(m):
+			m.set("_has_live_panm", true)
+
 	_report("BASELINE", base)
 	_report("FIRING1 ", fire1)
 	_report("FIRING2 ", fire2)
@@ -278,6 +390,9 @@ func _run() -> void:
 	if float(visoff.avg) >= 0.0:
 		print("[pfg] VISOFF   avg=%.2fms (present visibility share vs cooldown: %+.2fms)" % [
 				float(visoff.avg), float(cool.avg) - float(visoff.avg)])
+	if float(bodyoff.avg) >= 0.0:
+		print("[pfg] BODYOFF  avg=%.2fms (body-anim/skeleton share vs cooldown: %+.2fms)" % [
+				float(bodyoff.avg), float(cool.avg) - float(bodyoff.avg)])
 	if float(occloff.avg) >= 0.0:
 		print("[pfg] OCCLOFF  avg=%.2fms (occlusion share vs cooldown: %+.2fms)" % [
 				float(occloff.avg), float(cool.avg) - float(occloff.avg)])
@@ -290,6 +405,15 @@ func _run() -> void:
 	if float(handleroff.avg) >= 0.0:
 		print("[pfg] HANDLEROFF avg=%.2fms (fixed handlers share vs cooldown: %+.2fms)" % [
 				float(handleroff.avg), float(cool.avg) - float(handleroff.avg)])
+	if float(otherprocoff.avg) >= 0.0:
+		print("[pfg] OTHERPROCOFF avg=%.2fms (other nodes' _process share vs cooldown: %+.2fms)" % [
+				float(otherprocoff.avg), float(cool.avg) - float(otherprocoff.avg)])
+	if float(modelprocoff.avg) >= 0.0:
+		print("[pfg] MODELPROCOFF avg=%.2fms (placed-model _process share vs cooldown: %+.2fms)" % [
+				float(modelprocoff.avg), float(cool.avg) - float(modelprocoff.avg)])
+	if float(panmoff.avg) >= 0.0:
+		print("[pfg] PANMOFF  avg=%.2fms (live-PANM evaluation share vs cooldown: %+.2fms)" % [
+				float(panmoff.avg), float(cool.avg) - float(panmoff.avg)])
 	var base_avg: float = base.avg
 	var base_p95: float = base.p95
 	var cool_avg: float = cool.avg
@@ -415,6 +539,20 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 			spans += " gwtick{total=%.1f foliage=%.1f runtime=%.1f audio=%.1f}" % [
 					float(pc.get("tick_us", 0)) / 1000.0, float(pc.get("foliage_us", 0)) / 1000.0,
 					float(pc.get("runtime_us", 0)) / 1000.0, float(pc.get("audio_us", 0)) / 1000.0]
+		if _sim != null and _sim.has_method("get_runtime_perf_counters"):
+			var sc: Dictionary = _sim.get_runtime_perf_counters()
+			if int(sc.get("trace_calls", 0)) > 0:
+				spans += " trace{n=%d ter=%.1f sta=%.1f dyn=%.1f per=%.1f surv=%d/%d/%d faces=%d/%d}" % [
+						int(sc.get("trace_calls", 0)),
+						float(sc.get("trace_terrain_us", 0)) / 1000.0,
+						float(sc.get("trace_static_us", 0)) / 1000.0,
+						float(sc.get("trace_dynamic_us", 0)) / 1000.0,
+						float(sc.get("trace_person_us", 0)) / 1000.0,
+						int(sc.get("trace_static_survivors", 0)),
+						int(sc.get("trace_dynamic_survivors", 0)),
+						int(sc.get("trace_person_survivors", 0)),
+						int(sc.get("trace_static_faces", 0)),
+						int(sc.get("trace_dynamic_faces", 0))]
 	var rmeas := ""
 	if _vprid.is_valid():
 		rmeas = " rcpu=%.1f rgpu=%.1f" % [
@@ -451,6 +589,107 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
 			int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)),
 			parts, trails, spans + rmeas])
+
+
+# The direct NW_SP_MISSION spawn kit carries no gun at all (knife + grenades
+# + claymore), so holding fire used to measure knife swings / claymore throws.
+# Apply a rifle kit through the same seam the deploy screen uses
+# (apply_local_player_loadout + the inventory->presentation sync), candidates
+# in table order — the first name the mission's weapon table resolves wins.
+func _equip_clip_weapon() -> void:
+	if _sim == null or not _sim.has_method("apply_local_player_loadout"):
+		print("[pfg] equip: no loadout API on this sim")
+		return
+	if _sim.has_method("get_local_player_inventory"):
+		print("[pfg] spawn inventory: ",
+				(_sim.get_local_player_inventory() as Dictionary).get("slots", []))
+	# NOVA_PF_WEAPON picks the exact kit weapon; the candidate walk is the
+	# fallback when it is absent or the table rejects it.
+	var candidates := ["WPN_M249", "WPN_M60", "WPN_AK47", "WPN_M16",
+			"WPN_M4", "WPN_M4AUTO"]
+	var forced := OS.get_environment("NOVA_PF_WEAPON").strip_edges()
+	if not forced.is_empty():
+		candidates.push_front(forced)
+	for weapon_name in candidates:
+		var kit: Array[Dictionary] = [{
+			"name": weapon_name,
+			"ammo_primary": -1,
+			"ammo_secondary": -1,
+			"flags": -1,
+		}]
+		if not bool(_sim.apply_local_player_loadout(kit, 0)):
+			continue
+		var inventory: Dictionary = _sim.get_local_player_inventory()
+		var equipped := String(inventory.get("equipped_name", ""))
+		if equipped.is_empty():
+			continue
+		# Mirror the armory's post-apply install exactly: world weapon THEN the
+		# player host's viewmodel refresh, or the first-person arms keep the
+		# knife while the sim fires the rifle.
+		if _gw != null and _gw.has_method("set_local_player_weapon_by_name") \
+				and bool(_gw.set_local_player_weapon_by_name(equipped)):
+			var player_host = _main.get("_player_host") if _main != null else null
+			if player_host != null and player_host.has_method("refresh_viewmodel"):
+				player_host.refresh_viewmodel()
+		await _settle_ms(1500)  # draw anim settles before the baseline
+		var view = _gw.local_player_weapon_view() if _gw != null \
+				and _gw.has_method("local_player_weapon_view") else null
+		print("[pfg] equipped: %s (clip %d, reserve %d)" % [equipped,
+				int(view.clip) if view != null else -1,
+				int(view.reserve) if view != null else -1])
+		return
+	print("[pfg] WARNING: no rifle kit applied; firing whatever is equipped")
+
+
+# Apply an F3 Player-tab pose dump (opennova.player_pose.v1): teleport the
+# local player to its mission position + yaw/pitch via the sim's debug seam.
+func _apply_pose_dump(path: String) -> bool:
+	var text := FileAccess.get_file_as_string(path)
+	if text.is_empty():
+		push_error("[pfg] pose dump unreadable: %s" % path)
+		return false
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		push_error("[pfg] pose dump is not valid JSON: %s" % path)
+		return false
+	var player: Dictionary = (parsed as Dictionary).get("player", {})
+	var bms: Dictionary = player.get("position_bms", {})
+	var orientation: Dictionary = player.get("orientation_mission_deg", {})
+	if bms.is_empty() or _sim == null \
+			or not _sim.has_method("debug_teleport_local_player"):
+		return false
+	var pos := Vector3(float(bms.get("x", 0.0)), float(bms.get("y", 0.0)),
+			float(bms.get("z", 0.0)))
+	var yaw := float(orientation.get("yaw", 0.0))
+	var pitch := float(orientation.get("pitch", 0.0))
+	_sim.debug_teleport_local_player(pos, yaw, pitch)
+	print("[pfg] pose applied: bms(%.1f, %.1f, %.1f) yaw %.1f pitch %.1f (%s)" % [
+			pos.x, pos.y, pos.z, yaw, pitch, path.get_file()])
+	return true
+
+
+# One ~150 ms trigger tap; returns the worst frame time observed over the
+# 600 ms window around it (the hitch detector).
+func _tap_and_measure(label: String) -> float:
+	var worst := 0.0
+	var last := Time.get_ticks_usec()
+	var start := Time.get_ticks_msec()
+	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	while Time.get_ticks_msec() - start < 600:
+		if Time.get_ticks_msec() - start >= 150:
+			_mouse_btn(MOUSE_BUTTON_LEFT, false)
+		await process_frame
+		var now := Time.get_ticks_usec()
+		worst = maxf(worst, float(now - last) / 1000.0)
+		last = now
+	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	# Split the worst frame: a big draw share = pipeline compile at first
+	# draw; a small one = CPU-side cost (spawn/texture decode) in the process
+	# step.
+	print("[pfg] %s worst frame %.1fms (worst draw seg %.1fms)" % [
+			label, worst, float(_seg_worst_draw) / 1000.0])
+	_seg_worst_draw = 0
+	return worst
 
 
 func _census() -> void:

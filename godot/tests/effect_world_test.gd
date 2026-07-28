@@ -91,6 +91,31 @@ func _make_short_effect_file() -> NovaParticleFile:
 	return file
 
 
+func _make_renderable_effect_file() -> NovaParticleFile:
+	var file := _make_short_effect_file()
+	var particle := file.find_particle("puff dots")
+	var graphics: Array = particle.graphics
+	var layer := graphics[0] as NovaParticleGraphicLayer
+	layer.present = true
+	layer.texture = "bink.tga"
+	layer.alpha = 1.0
+	layer.scale_value = 1.0
+	particle.graphics = graphics
+	# Point the loose-file resolver at a committed image fixture without
+	# implying that this synthetic particle file itself exists on disk.
+	file.source_path = ProjectSettings.globalize_path(
+			"res://../fixtures/cbin/renderable_effect_fixture.ptl")
+	return file
+
+
+func _warm_helper_count(world: NovaEffectWorld) -> int:
+	var count := 0
+	for child in world.find_children("*", "MeshInstance3D", true, false):
+		if String(child.name) != "ParticleFirstPersonPacket":
+			count += 1
+	return count
+
+
 func test_load_from_resource_root_scans_every_ptl() -> void:
 	var world := _make_world()
 	var count := world.load_from_resource_root(_make_root())
@@ -154,6 +179,7 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 func test_runtime_reset_preserves_catalog_and_discards_live_admission() -> void:
 	var world := _make_world()
 	world.load_particle_file(_make_short_effect_file())
+	var handle := world.intern_effect("puff")
 	assert_gt(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0)
 	assert_eq(world.file_count(), 1)
 	assert_eq(world.live_group_count(), 1)
@@ -162,6 +188,8 @@ func test_runtime_reset_preserves_catalog_and_discards_live_admission() -> void:
 
 	assert_eq(world.file_count(), 1, "restart keeps the mounted particle catalog")
 	assert_eq(world.live_group_count(), 0, "restart discards pre-rewind live groups")
+	assert_eq(world.intern_effect("PUFF"), handle,
+			"restart preserves the compiled catalog's interned handles")
 	assert_gt(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0,
 			"restart clears old admission slots for the next play session")
 
@@ -447,3 +475,48 @@ func test_set_particles_hidden_toggles_render_visibility() -> void:
 	assert_false(world.visible, "the retail master switch hides the render output")
 	world.set_particles_hidden(false)
 	assert_true(world.visible)
+
+
+func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
+	# The load-time warm pass behind the first-shot hitch fix: every cataloged
+	# effect spawns exactly once (dedup by id), the fixed tick makes fresh
+	# emitters live, and the sim-restart reset clears the warm spawns.
+	var world := _make_world()
+	var count := world.load_from_resource_root(_make_root())
+	assert_eq(count, 8, "fixture catalog registers 8 effects")
+	var spawned := world.warm_all_effects(Vector3(1, 2, 3))
+	assert_eq(spawned, 8, "the warm pass spawns each cataloged effect once")
+	var warm_groups := world.get_debug_group_report()
+	assert_eq(warm_groups.size(), 8,
+			"catalog warming must not duplicate every effect into FirstPerson")
+	for group_v in warm_groups:
+		var group := group_v as Dictionary
+		assert_eq(int(group.get("render_domain", -1)),
+				NovaEffectWorld.RENDER_DOMAIN_WORLD,
+				"catalog values warm through the uncapped World packet")
+	assert_gt(world.active_entry_count(), 0, "warm spawns occupy live entries")
+	world.advance_fixed_tick(0.016)
+	world.reset_runtime_state()
+	assert_eq(world.active_entry_count(), 0, "the reset clears every warm spawn")
+	assert_eq(world.warm_all_effects(Vector3.ZERO), 8,
+			"a later warm (reload) spawns the catalog again")
+
+
+func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
+	var world := _make_world()
+	world.load_particle_file(_make_renderable_effect_file())
+	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
+	world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	assert_gt(world.render_now(), 0,
+			"the public warm facade synchronously submits non-empty material runs")
+
+
+func test_empty_catalog_warm_cleans_pipeline_helpers() -> void:
+	var world := _make_world()
+	assert_eq(_warm_helper_count(world), 0)
+	assert_eq(world.warm_all_effects(Vector3.ZERO), 0)
+	assert_gt(_warm_helper_count(world), 0,
+			"an empty catalog still exercises the deterministic shader helpers")
+	await get_tree().process_frame
+	assert_eq(_warm_helper_count(world), 0,
+			"the empty-catalog early return does not strand helper geometry")

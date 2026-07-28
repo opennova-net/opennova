@@ -491,6 +491,80 @@ bool immutable_snapshot_contract() {
 			"new snapshot contains replacement scene values");
 }
 
+bool runtime_reset_preserves_catalog_identity_contract() {
+	p::EffectScene scene;
+	auto config = one_effect();
+	config.simulation_tick_seconds = 0.25f;
+	scene.open(config);
+	const auto effect = scene.intern("flash");
+
+	p::EffectOwnerPoseUpdate owner_pose;
+	owner_pose.owner = p::EffectOwnerToken{91};
+	owner_pose.pose.position = {9.0f, 8.0f, 7.0f};
+	scene.apply_owner_poses({owner_pose});
+	auto guarded = spawn_request(effect);
+	guarded.pose.position = {1.0f, 2.0f, 3.0f};
+	guarded.admission = p::EffectAdmission::SuppressWhileOwned;
+	guarded.binding = p::EffectBinding::FollowOwner;
+	guarded.slot = p::EffectSlotToken{71};
+	guarded.owner = owner_pose.owner;
+	if (!check(scene.spawn(guarded).spawned() &&
+			scene.spawn(guarded).status == p::EffectSpawnStatus::Suppressed,
+			"reset fixture has live admission and owner state")) return false;
+	scene.spawn(spawn_request(p::EffectHandle{999}));
+	scene.advance_simulation({0.5f});
+
+	p::ParticleFrameSnapshot before;
+	scene.write_snapshot(before);
+	const auto before_debug = scene.inspect();
+	if (!check(before.definitions && before.groups.size() == 1 &&
+			before_debug.suppressed_spawn_count == 1 &&
+			before_debug.rejected_spawn_count == 1,
+			"reset fixture exercises live clocks and counters")) return false;
+	const auto *definition_identity = before.definitions.get();
+
+	scene.reset_runtime_state();
+
+	p::ParticleFrameSnapshot after;
+	scene.write_snapshot(after);
+	const auto after_debug = scene.inspect();
+	if (!check(after.definitions.get() == definition_identity &&
+			after.definitions->size() == 1 &&
+			(*after.definitions)[0].id == "spark",
+			"runtime reset preserves the compiled definition identity")) {
+		return false;
+	}
+	if (!check(after.groups.empty() && after.emitters.empty() &&
+			after.particles.empty() && after.frame_index == 0 &&
+			near(after.simulation_time_seconds, 0.0),
+			"runtime reset clears live values and timing")) return false;
+	if (!check(after_debug.load.effect_count == 1 &&
+			after_debug.interned_effect_count == 1 &&
+			after_debug.group_pool_high_water == 0 &&
+			after_debug.emitter_pool_high_water == 0 &&
+			after_debug.suppressed_spawn_count == 0 &&
+			after_debug.rejected_spawn_count == 0 &&
+			after_debug.capacity_rejection_count == 0,
+			"runtime reset preserves catalog metadata and clears counters")) {
+		return false;
+	}
+	if (!check(scene.intern("FLASH") == effect &&
+			scene.effect_name(effect) == "flash",
+			"runtime reset preserves stable interned handles")) return false;
+
+	const auto respawned = scene.spawn(guarded);
+	if (!check(respawned.spawned(),
+			"runtime reset clears admission state so the effect respawns")) {
+		return false;
+	}
+	const auto respawn_frame = scene.advance({0.0f});
+	return check(respawn_frame.groups.size() == 1 &&
+			near(respawn_frame.groups[0].pose.position.x, 1.0) &&
+			near(respawn_frame.groups[0].pose.position.y, 2.0) &&
+			near(respawn_frame.groups[0].pose.position.z, 3.0),
+			"runtime reset clears cached owner poses before respawn");
+}
+
 bool child_reaping_and_group_suppression_lifetime_contract() {
 	// Retail attaches the action-slot clear callback to CEffectGroup
 	// [orig: CEffectGroup_SetDeathCallback @ 0x5e1940] and invokes it from
@@ -639,5 +713,6 @@ int main() {
 	if (!initial_age_reaps_exhausted_group_contract()) return 1;
 	if (!huge_delta_catch_up_is_bounded_contract()) return 1;
 	if (!immutable_snapshot_contract()) return 1;
+	if (!runtime_reset_preserves_catalog_identity_contract()) return 1;
 	return 0;
 }

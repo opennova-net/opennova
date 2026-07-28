@@ -229,6 +229,50 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(rt.entity_count(), 2)
 
 
+func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var board := FrameStatsBoard.new()
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.set_frame_stats_board(board)
+	rt.setup(w.mission, w.container)
+	var sim := rt.get_sim()
+	assert_false(sim.is_runtime_profiling_enabled(),
+			"an attached but closed Stats board leaves native profiling off")
+
+	board.set_capture_active(true)
+	assert_true(sim.is_runtime_profiling_enabled(),
+			"opening Stats acquires the native profiling gate")
+	assert_true(rt.tick())
+	var active_counters: Dictionary = sim.get_runtime_perf_counters()
+	assert_true(bool(active_counters.get("runtime_profiling_enabled", false)))
+
+	rt.set_runtime_profiling_enabled(true)
+	board.set_capture_active(false)
+	assert_true(sim.is_runtime_profiling_enabled(),
+			"manual probe ownership survives the Stats capture release")
+
+	board.set_capture_active(true)
+	rt.set_runtime_profiling_enabled(false)
+	assert_true(sim.is_runtime_profiling_enabled(),
+			"Stats ownership survives the manual probe release")
+
+	board.set_capture_active(false)
+	assert_false(sim.is_runtime_profiling_enabled(),
+			"the native gate closes only after both consumers release it")
+	var closed_counters: Dictionary = sim.get_runtime_perf_counters()
+	for key in [
+		"sim_tick_us",
+		"net_tick_us",
+		"present_snapshot_us",
+		"occlusion_build_us",
+		"occlusion_probe_us",
+	]:
+		assert_eq(int(closed_counters.get(key, -1)), 0,
+				"closing the last owner clears %s" % key)
+	assert_false(bool(closed_counters.get("trace_profiling_enabled", true)))
+
+
 # The world tick is the ONLY pump for the session socket, so the Play/Step/Stop
 # transport must not be able to halt a live net session: the F3 overlay ships in
 # the game shell, and a paused joiner (or a stopped listen host) starves the

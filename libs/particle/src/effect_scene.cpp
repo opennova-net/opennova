@@ -803,6 +803,29 @@ void EffectScene::detach_slot(EffectSlotToken slot) {
 	}
 }
 
+void EffectScene::reset_runtime_state() {
+	// Destroy live values but retain the vectors' outer allocations. Their
+	// sizes are also the pool high-water diagnostics, so a restarted session
+	// begins with clean counters while the next spawn can reuse capacity.
+	impl_->active_group_slots.clear();
+	impl_->group_by_id.clear();
+	impl_->group_by_slot.clear();
+	impl_->owner_poses.clear();
+	impl_->free_group_slots.clear();
+	impl_->free_emitter_slots.clear();
+	impl_->group_pool.clear();
+	impl_->emitter_pool.clear();
+
+	impl_->next_group_id = 1;
+	impl_->next_emitter_id = 1;
+	impl_->frame_index = 0;
+	impl_->pending_simulation_seconds = 0.0;
+	impl_->simulation_time_seconds = 0.0;
+	impl_->suppressed_spawn_count = 0;
+	impl_->rejected_spawn_count = 0;
+	impl_->capacity_rejection_count = 0;
+}
+
 void EffectScene::advance_simulation(const EffectAdvanceRequest &request) {
 	double requested_seconds = static_cast<double>(request.delta_seconds);
 	if (!std::isfinite(requested_seconds) || requested_seconds < 0.0) {

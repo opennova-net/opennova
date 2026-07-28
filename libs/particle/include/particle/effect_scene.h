@@ -325,6 +325,12 @@ public:
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
 
+	// Clears every live/runtime value while retaining the compiled catalog,
+	// immutable definition identity, and stable interned handles. Mission
+	// restart uses this instead of open() so load-time renderer/catalog warmup
+	// remains valid for the next play session.
+	void reset_runtime_state();
+
 	// Advances all live emitters and reclaims completed groups without copying
 	// render values. Hosts that batch multiple fixed ticks materialize only the
 	// final frame through write_snapshot().

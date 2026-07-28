@@ -57,11 +57,11 @@ func test_server_row_label_shows_address() -> void:
 	var panel := _make_panel(PackedStringArray())
 	var row := {"name": "Alpha", "players": 3, "max_players": 16, "game_type": "COOP",
 			"password": "N", "locked": "N", "ip": "203.0.113.7"}
-	assert_eq(panel._format_server_row(row), "Alpha  (3/16)  COOP  203.0.113.7",
+	assert_eq(panel.format_server_row(row), "Alpha  (3/16)  COOP  203.0.113.7",
 			"the row label carries the server's address")
 	row["locked"] = "Y"
 	row["ip"] = "0.0.0.0"
-	assert_eq(panel._format_server_row(row), "Alpha  (3/16)  COOP  [locked]",
+	assert_eq(panel.format_server_row(row), "Alpha  (3/16)  COOP  [locked]",
 			"an unreported address (0.0.0.0) is omitted, locked marker stays last")
 
 
@@ -69,7 +69,7 @@ func test_server_row_tooltip_lists_details() -> void:
 	var panel := _make_panel(PackedStringArray())
 	var row := {"mission_name": "ASH_G11A", "region": "Jungle", "country": "US",
 			"ip": "203.0.113.7"}
-	assert_eq(panel._server_row_tooltip(row),
+	assert_eq(panel.server_row_tooltip(row),
 			"Mission: ASH_G11A\nRegion: Jungle\nCountry: US\nAddress: 203.0.113.7",
 			"the tooltip lists mission, locale, and address")
 

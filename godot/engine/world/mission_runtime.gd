@@ -59,6 +59,12 @@ var _perf_sim_us: int = 0
 var _perf_present_us: int = 0
 var _perf_effects_us: int = 0
 var _perf_did_tick := false
+# The shared F3 frame-stats board (null outside the game shell). While its
+# Stats tab captures, the sim/net legs and each present pass land their spans
+# on it; otherwise all extra clock reads are skipped.
+var _frame_stats: FrameStatsBoard = null
+var _runtime_probe_enabled := false
+var _has_trace_stats_sampling := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
@@ -94,6 +100,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = NovaSimulation.new()
+	_has_trace_stats_sampling = (
+			_sim.has_method("get_last_projectile_trace_times_us")
+			and _sim.has_method("get_last_projectile_trace_counts")
+			and _sim.has_method("get_last_projectile_trace_faces"))
+	_sync_runtime_profiling()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
 	_mission_file = mission_path.replace("\\", "/").get_file()
@@ -587,9 +598,60 @@ func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
 
+## The host hands the shared FrameStatsBoard here (game shell -> GameWorld ->
+## each runtime it creates).
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	if board == _frame_stats:
+		return
+	if _frame_stats != null:
+		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(old_capture_changed):
+			_frame_stats.capture_changed.disconnect(old_capture_changed)
+	_frame_stats = board
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if not _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.connect(capture_changed)
+	_sync_runtime_profiling()
+
+
+## Manual probe ownership is independent of F3 capture; the native timer stays
+## enabled while either consumer is active.
+func set_runtime_profiling_enabled(enabled: bool) -> void:
+	_runtime_probe_enabled = enabled
+	_sync_runtime_profiling()
+
+
+func _on_frame_stats_capture_changed(_active: bool) -> void:
+	_sync_runtime_profiling()
+
+
+func _sync_runtime_profiling() -> void:
+	if _sim == null or not _sim.has_method(
+			"set_runtime_profiling_enabled"):
+		return
+	var stats_active := _frame_stats != null \
+			and _frame_stats.is_capture_active()
+	_sim.set_runtime_profiling_enabled(
+			_runtime_probe_enabled or stats_active)
+
+
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
+
+
+# Wire-presentation counters (spawned/unresolved/live; empty when the pass is absent).
+func get_wire_present_stats() -> WirePresentStats:
+	return _wire_present.get_stats_record() \
+			if _wire_present != null else WirePresentStats.new()
+
+
+## Load-time warm hook: compile the fire-presentation pipelines (the tracer
+## ribbon materials) behind the loading screen; see GameWorld's effect warm.
+func warm_present_pipelines(at_position: Vector3) -> void:
+	if _fire_present != null and _fire_present.has_method("warm_pipelines"):
+		_fire_present.warm_pipelines(at_position)
 
 
 func get_throwable_present_stats() -> RefCounted:
@@ -722,7 +784,7 @@ func is_playing() -> bool:
 	return _playing
 
 
-func _present_entity_rows() -> void:
+func _present_entity_rows(stats_on := false) -> void:
 	if _sim == null or (_present == null and _wire_present == null):
 		return
 	var stride := int(_sim.get_present_stride())
@@ -731,19 +793,58 @@ func _present_entity_rows() -> void:
 	# Both entity presenters consume the same immutable row buffer. Fetching it
 	# once also makes their topology revision refer to exactly the same layout.
 	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
+	if stats_on:
+		# The native buffer build the fetch above just paid for.
+		_frame_stats.add(FrameStatsBoard.PRESENT_SNAPSHOT,
+				int(_sim.get_last_present_snapshot_us()))
 	var layout_revision := -1
 	if _sim.has_method("get_present_layout_revision"):
 		layout_revision = int(_sim.get_present_layout_revision())
 	if _present != null:
+		var mission_start := Time.get_ticks_usec() if stats_on else 0
 		if _present.has_method("present_snapshot"):
 			_present.present_snapshot(snapshot, stride, layout_revision)
 		else:
 			_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
+					Time.get_ticks_usec() - mission_start)
 	if _wire_present != null:
+		var wire_start := Time.get_ticks_usec() if stats_on else 0
 		if _wire_present.has_method("present_snapshot"):
 			_wire_present.present_snapshot(snapshot, stride, layout_revision)
 		else:
 			_wire_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_WIRE,
+					Time.get_ticks_usec() - wire_start)
+
+
+# One whole present frame: the entity rows plus the tick-driven passes, each
+# pass timed onto the stats board while the Stats tab captures. Owns the
+# bundled _perf_present_us the probe scripts read.
+func _present_frame(fire_ticks: int, stats_on: bool) -> void:
+	var present_start := Time.get_ticks_usec()
+	_present_entity_rows(stats_on)
+	if _fire_present != null:
+		var fire_start := Time.get_ticks_usec() if stats_on else 0
+		_fire_present.present(fire_ticks)
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_FIRE,
+					Time.get_ticks_usec() - fire_start)
+	if _destruction_present != null:
+		var destruction_start := Time.get_ticks_usec() if stats_on else 0
+		_destruction_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_DESTRUCTION,
+					Time.get_ticks_usec() - destruction_start)
+	if _throwable_present != null:
+		var throwable_start := Time.get_ticks_usec() if stats_on else 0
+		_throwable_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_THROWABLE,
+					Time.get_ticks_usec() - throwable_start)
+	_perf_present_us = Time.get_ticks_usec() - present_start
 
 
 ## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
@@ -758,19 +859,17 @@ func tick() -> bool:
 		_perf_did_tick = false
 		_ticks_last_frame = 0
 		return false
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
 	var did_tick := _advance_one_tick_no_present()
 	_perf_present_us = 0
 	if did_tick:
-		var present_start := Time.get_ticks_usec()
-		_present_entity_rows()
-		if _fire_present != null:
-			_fire_present.present(1)
-		if _destruction_present != null:
-			_destruction_present.present()
-		if _throwable_present != null:
-			_throwable_present.present()
-		_perf_present_us = Time.get_ticks_usec() - present_start
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
+			_frame_stats.add(FrameStatsBoard.SIM_NET, int(_sim.get_last_net_tick_us()))
+			_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
+			_frame_stats.add(FrameStatsBoard.SIM_TICKS, 1)
+		_present_frame(1, stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
 	_ticks_last_frame = 1 if did_tick else 0
@@ -786,6 +885,7 @@ func _advance_one_tick_no_present() -> bool:
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
 	_perf_effects_us = 0
 	if did_tick:
+		_feed_projectile_trace_stats()
 		var logic_tick := int(_sim.get_logic_tick())
 		# Invalidate before delivering effects: any owned spawn seeded during
 		# this tick and the fixed-tick particle advance both observe this exact
@@ -806,6 +906,39 @@ func _advance_one_tick_no_present() -> bool:
 	return did_tick
 
 
+func _feed_projectile_trace_stats() -> void:
+	if _frame_stats == null or not _frame_stats.is_capture_active() \
+			or not _has_trace_stats_sampling:
+		return
+	# Three value-type native reads preserve each logic tick's snapshot without
+	# allocating a Dictionary on the capture hot path. In a catch-up render
+	# frame the board folds each tick into one complete-frame peak.
+	var counts: Vector4i = _sim.get_last_projectile_trace_counts()
+	if counts.x <= 0:
+		return
+	var times: Vector4i = _sim.get_last_projectile_trace_times_us()
+	var faces: Vector2i = _sim.get_last_projectile_trace_faces()
+	_frame_stats.add(FrameStatsBoard.TRACE_TERRAIN,
+			times.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC,
+			times.y)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC,
+			times.z)
+	_frame_stats.add(FrameStatsBoard.TRACE_PERSON,
+			times.w)
+	_frame_stats.add(FrameStatsBoard.TRACE_CALLS, counts.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_SURVIVORS,
+			counts.y)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_SURVIVORS,
+			counts.z)
+	_frame_stats.add(FrameStatsBoard.TRACE_PERSON_SURVIVORS,
+			counts.w)
+	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_FACES,
+			faces.x)
+	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_FACES,
+			faces.y)
+
+
 ## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
 ## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
 ## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
@@ -817,6 +950,7 @@ func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
 		_ticks_last_frame = 0
 		return 0
+	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
 	_accum += delta
 	var n := int(_accum / TICK_DT)
@@ -828,7 +962,7 @@ func tick_realtime(delta: float) -> int:
 		_perf_present_us = 0
 		if _present != null or _wire_present != null:
 			var present_start := Time.get_ticks_usec()
-			_present_entity_rows()
+			_present_entity_rows(stats_on)
 			_perf_present_us = Time.get_ticks_usec() - present_start
 		_ticks_last_frame = 0
 		_perf_tick_us = Time.get_ticks_usec() - tick_start
@@ -840,24 +974,21 @@ func tick_realtime(delta: float) -> int:
 		_accum = 0.0  # drop the backlog so a load hitch doesn't spiral into the next frames
 	var sim_us := 0
 	var effects_us := 0
+	var net_us := 0
 	for _i in range(n):
 		_advance_one_tick_no_present()
 		sim_us += _perf_sim_us
 		effects_us += _perf_effects_us
+		if stats_on:
+			net_us += int(_sim.get_last_net_tick_us())
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
-	_perf_present_us = 0
-	if (_present != null or _wire_present != null or _fire_present != null
-			or _destruction_present != null or _throwable_present != null):
-		var present_start := Time.get_ticks_usec()
-		_present_entity_rows()
-		if _fire_present != null:
-			_fire_present.present(n)
-		if _destruction_present != null:
-			_destruction_present.present()
-		if _throwable_present != null:
-			_throwable_present.present()
-		_perf_present_us = Time.get_ticks_usec() - present_start
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.SIM_STEP, sim_us)
+		_frame_stats.add(FrameStatsBoard.SIM_NET, net_us)
+		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, effects_us)
+		_frame_stats.add(FrameStatsBoard.SIM_TICKS, n)
+	_present_frame(n, stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
 	_ticks_last_frame = n
@@ -974,6 +1105,15 @@ func _for_each_present_node(fn: Callable) -> void:
 # The sim is held off-tree, so free it explicitly when this driver leaves the tree (a reload / Stop
 # queue_free()s the driver). [mirrors the old MissionSimDriver._exit_tree.]
 func _exit_tree() -> void:
+	if _frame_stats != null:
+		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		if _frame_stats.capture_changed.is_connected(capture_changed):
+			_frame_stats.capture_changed.disconnect(capture_changed)
+	_runtime_probe_enabled = false
+	_has_trace_stats_sampling = false
+	if _sim != null and _sim.has_method(
+			"set_runtime_profiling_enabled"):
+		_sim.set_runtime_profiling_enabled(false)
 	_clear_present_effect_poses()
 	_has_native_present_effect_pose_lookup = false
 	if _fire_present != null:

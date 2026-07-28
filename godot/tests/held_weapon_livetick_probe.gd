@@ -5,7 +5,8 @@ extends SceneTree
 # Tests exactly one claim: "the AABB probe measured +Z-long at BUILD time only, before
 # NovaObjectModel self-ticks; the LIVE weapon node's long axis at DRAW time may differ."
 #
-# For each firearm gfx3 it builds the model exactly as wire_present_pass._update_held_weapon
+# For each firearm gfx3 it builds the model exactly as the wire present pass's
+# held-weapon update
 # does, measures the combined mesh AABB in the model root's own frame, reports whether the
 # model has LIVE PANM at all, lets 30 real frames elapse (so _process/_apply_runtime_state
 # actually run), and re-measures. Then it drives the measured live attach triple through

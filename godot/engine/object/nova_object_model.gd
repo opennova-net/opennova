@@ -39,6 +39,26 @@ var _material_cache: Dictionary = {}
 var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
+# Per-frame hot-path caches: object_data capability lookups (has_method is a
+# string-keyed scan) refresh in rebuild(); the environment-node capability
+# refreshes on assignment. The typed light-push cache holds the last-applied
+# uniform set so identical values are never re-pushed without allocating a
+# comparison Array (retained mode — a skipped identical push is invisible).
+var _od_has_eval := false
+var _od_has_frame := false
+var _env_has_generation := false
+var _last_light_push_valid := false
+var _last_light_count := 0
+var _last_light_position := Vector3.ZERO
+var _last_light_color := Color.WHITE
+var _last_light_intensity := 0.0
+var _last_light_atten_start := 0.0
+var _last_light_atten_end := 0.0
+# Dense part-index -> Node3D array + the PANM revision this model last applied
+# (apply_panm_to_nodes skips every node write while the shared evaluation's
+# revision is unchanged; 0 forces the fresh-node full apply after rebuild).
+var _robj_dense: Array = []
+var _panm_applied_revision := 0
 # The applied per-section render mask (-1 = everything visible); see
 # set_section_visibility_mask.
 var _section_visibility_mask: int = -1
@@ -139,6 +159,7 @@ func get_object_data() -> NovaObjectData:
 
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
+	_env_has_generation = value != null and value.has_method("get_env_generation")
 	_last_env_gen = -1
 	_last_env_values = null
 	_apply_environment_to_materials()
@@ -774,7 +795,11 @@ func set_right_hand_collapsed(collapsed: bool) -> void:
 ## evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
 ## the bone pose. Public so deterministic hosts can advance the render-time channel without
 ## reaching through Godot's private _process callback.
-func advance_body_animation(delta: float) -> void:
+## write_pose=false advances the clip clock and latches _body_pose_dirty
+## without writing bones — the hidden-model leg: the pose re-derives from
+## _anim_time on the next visible frame, so an unseen clip never freezes or
+## drifts.
+func advance_body_animation(delta: float, write_pose := true) -> void:
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
 		return
 	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
@@ -782,6 +807,8 @@ func advance_body_animation(delta: float) -> void:
 		_body_pose_dirty = true
 	if _promote_remote_body_pending_if_due():
 		_body_pose_dirty = true
+	if not write_pose:
+		return
 	if not _body_pose_dirty:
 		return
 	var use_overlay: bool = (not _aim_overlay_deltas.is_empty()
@@ -863,9 +890,16 @@ func rebuild() -> void:
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
 	_last_env_values = null
+	_last_light_push_valid = false
+	_robj_dense = []
+	_panm_applied_revision = 0
 	if object_data == null or not object_data.has_document():
+		_od_has_eval = false
+		_od_has_frame = false
 		_set_model_bounds(AABB())
 		return
+	_od_has_eval = object_data.has_method("eval_material_runtime")
+	_od_has_frame = object_data.has_method("compute_anim_frame")
 
 	_material_defs = _build_material_defs()
 	_active_lod = _clamp_lod_index(_active_lod)
@@ -997,8 +1031,26 @@ func _last_object_update_mask() -> int:
 
 
 func _process(delta: float) -> void:
+	advance_runtime_frame(delta)
+
+
+## Advance the model's render-time state once. This is the public equivalent
+## of the engine process callback for deterministic hosts and tests: clocks
+## continue while hidden, while render-derived work waits until the model can
+## be submitted again.
+func advance_runtime_frame(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
 		return
+	# Retail evaluates material constants / PANM transforms / light state per
+	# SUBMITTED model only [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the
+	# batch computes constants for the models it draws]. A model that cannot
+	# render this frame (occlusion-hidden building, hidden prop) skips all
+	# clock-DERIVED work; every skipped value re-derives from the absolute
+	# clock on its next visible frame. Time-ACCUMULATING state (commanded part
+	# anims, an internally-timed skeletal clip, the private preview clock)
+	# still advances inside _apply_runtime_state — a door commanded open while
+	# culled is open when next seen.
+	var renderable := is_visible_in_tree()
 	if not _needs_runtime_frame_work():
 		# Keep the private preview clock continuous even while the model has no
 		# time-driven consumer. A later OED edit can make a material/PANM track
@@ -1009,9 +1061,10 @@ func _process(delta: float) -> void:
 		# Lighting/fog is the one retained-state input that can change without a
 		# model mutator. Its generation gate makes this an integer comparison in
 		# the steady state while avoiding all other per-model runtime work.
-		_apply_environment_to_materials()
+		if renderable:
+			_apply_environment_to_materials()
 		return
-	_apply_runtime_state(delta)
+	_apply_runtime_state(delta, renderable)
 
 
 func _needs_runtime_frame_work() -> bool:
@@ -1095,6 +1148,11 @@ func _get_or_create_robj_node(robj_index: int) -> Node3D:
 		node.visible = (_section_visibility_mask >> robj_index) & 1 == 1
 	add_child(node)
 	_robj_nodes[robj_index] = node
+	# The dense part-index -> node array apply_panm_to_nodes writes through
+	# (nulls for parts without a node).
+	while _robj_dense.size() <= robj_index:
+		_robj_dense.append(null)
+	_robj_dense[robj_index] = node
 	return node
 
 
@@ -1127,7 +1185,7 @@ func _compute_transformed_mesh_bounds() -> AABB:
 	return bounds
 
 
-func _apply_runtime_state(delta: float) -> void:
+func _apply_runtime_state(delta: float, renderable := true) -> void:
 	if object_data == null or not object_data.has_document():
 		return
 	if _panm_clock != null:
@@ -1135,21 +1193,24 @@ func _apply_runtime_state(delta: float) -> void:
 	elif _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0xffffffff
 	var part_changed := _advance_part_anims(delta)
-	advance_body_animation(delta)
+	advance_body_animation(delta, renderable)
+	if not renderable:
+		# Everything below derives from the absolute clock + the register/pose
+		# state advanced above; it re-derives on the next visible frame, with
+		# the pending dirt (_bounds_dirty, _body_pose_dirty) staying latched.
+		return
 	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
 	# advances) need a per-frame push; a fully-static material already carries its identity
 	# values from _create_material, so re-evaluating it each frame just re-writes identical
 	# bytes. _dynamic_material_slots holds exactly the slots that can change (built in
 	# _classify_materials); _material_needs_eval[i] distinguishes the eval path from the
 	# texture-flip-book-only path.
-	var has_eval := object_data.has_method("eval_material_runtime")
-	var has_frame := object_data.has_method("compute_anim_frame")
 	for i in _dynamic_material_slots:
 		var material := _surface_materials[i]
 		if material == null:
 			continue
 		var material_index := int(_surface_material_indices[i])
-		if _material_needs_eval[i] and has_eval:
+		if _material_needs_eval[i] and _od_has_eval:
 			var runtime: Dictionary = object_data.eval_material_runtime(material_index, _anim_time_ms, _ctrl_values)
 			if not runtime.is_empty():
 				material.set_shader_parameter("u_uv_offset", runtime.get("uv_offset", Vector2.ZERO))
@@ -1159,7 +1220,7 @@ func _apply_runtime_state(delta: float) -> void:
 				material.set_shader_parameter("u_rgb_mod", rgb)
 				material.set_shader_parameter("u_alpha_mod", runtime.get("alpha_mod", 1.0))
 		var frames: Array = _anim_frames_by_mat.get(material_index, [])
-		if frames.size() > 1 and has_frame:
+		if frames.size() > 1 and _od_has_frame:
 			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
@@ -1178,7 +1239,23 @@ func _apply_runtime_state(delta: float) -> void:
 
 
 func _apply_robj_transforms() -> bool:
-	if object_data == null or not object_data.has_method("evaluate_panm") or _robj_nodes.is_empty():
+	if object_data == null or _robj_nodes.is_empty():
+		return false
+	# The shared-evaluation hot path: one native call evaluates PANM at most
+	# once per graphic per frame (the placer shares one NovaObjectData across
+	# every instance of a graphic, all riding one presentation clock) and
+	# writes only the parts whose transforms changed since this model last
+	# applied. The common empty-control path allocates nothing and no output
+	# Dictionary is boxed.
+	if object_data.has_method("apply_panm_to_nodes"):
+		var revision := int(object_data.apply_panm_to_nodes(
+				_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
+				_panm_applied_revision))
+		var changed := revision != _panm_applied_revision
+		_panm_applied_revision = revision
+		return changed
+	# Dictionary fallback for duck-typed data doubles (tests).
+	if not object_data.has_method("evaluate_panm"):
 		return false
 	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
 	var changed := false
@@ -1220,13 +1297,33 @@ func _apply_lights() -> void:
 	if subobject >= 0 and _robj_nodes.has(subobject):
 		var node := _robj_nodes[subobject] as Node3D
 		position = node.global_transform * position
+	# A static light evaluates to the same values every frame; re-pushing them
+	# re-writes identical uniforms across every material. Push only on change
+	# (retained mode — the skip is invisible); an animated/PANM-carried light
+	# changes the compare key and pushes normally.
+	var intensity := best_intensity if best_intensity > 0.0 else 1.0
+	if _last_light_push_valid \
+			and count == _last_light_count \
+			and position == _last_light_position \
+			and color == _last_light_color \
+			and intensity == _last_light_intensity \
+			and atten_start == _last_light_atten_start \
+			and atten_end == _last_light_atten_end:
+		return
+	_last_light_push_valid = true
+	_last_light_count = count
+	_last_light_position = position
+	_last_light_color = color
+	_last_light_intensity = intensity
+	_last_light_atten_start = atten_start
+	_last_light_atten_end = atten_end
 	for material in _surface_materials:
 		if material == null:
 			continue
 		material.set_shader_parameter("u_local_light_count", count)
 		material.set_shader_parameter("u_local_light_position", position)
 		material.set_shader_parameter("u_local_light_color", Vector3(color.r, color.g, color.b))
-		material.set_shader_parameter("u_local_light_intensity", best_intensity if best_intensity > 0.0 else 1.0)
+		material.set_shader_parameter("u_local_light_intensity", intensity)
 		material.set_shader_parameter("u_local_light_atten_start", atten_start)
 		material.set_shader_parameter("u_local_light_atten_end", atten_end)
 
@@ -1516,8 +1613,7 @@ func _apply_environment_to_materials() -> void:
 	# only ever omits re-pushing identical uniforms (retained mode -> invisible), so the
 	# rendered lighting/fog is byte-identical to pushing every frame.
 	var gen := -1
-	var has_gen: bool = _environment_node != null and _environment_node.has_method("get_env_generation")
-	if has_gen:
+	if _env_has_generation:
 		gen = int(_environment_node.get_env_generation())
 		if gen == _last_env_gen and _last_env_values != null:
 			return

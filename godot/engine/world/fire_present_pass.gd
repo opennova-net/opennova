@@ -193,6 +193,25 @@ func ribbon_mesh() -> ImmediateMesh:
 	return _mesh
 
 
+## Load-time pipeline warm: emit one invisible (alpha-0) strip on each ribbon
+## material at `position` (must be in frustum so the strips actually draw) so
+## their pipelines compile behind the loading screen instead of as a ~40 ms
+## draw stall on the first tracer. The next present's clear_surfaces drops the
+## warm strips.
+func warm_pipelines(position: Vector3) -> void:
+	if _mesh == null:
+		return
+	_mesh.clear_surfaces()
+	for mat in [_mat_additive, _mat_alpha]:
+		if mat == null:
+			continue
+		_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP, mat)
+		for i in range(4):
+			_mesh.surface_set_color(Color(1, 1, 1, 0.0))
+			_mesh.surface_add_vertex(position + Vector3(0.001 * i, 0, 0))
+		_mesh.surface_end()
+
+
 func setup(sim, container: Node3D, audio_provider: Callable, fx_provider: Callable,
 		listener_provider: Callable, muzzle_provider := Callable()) -> void:
 	_sim = sim

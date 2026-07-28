@@ -5,8 +5,8 @@ extends SceneTree
 #
 # Reports, all in the character model's OWN frame (the body node sits at identity):
 #   * every userpoint authored on the player character model (0x14B9 -> its visual item),
-#   * which one NovaObjectModel._resolve_muzzle_userpoint() picks, and on which bone,
-#   * NovaObjectModel.get_muzzle_world_position() (what MissionPresentPass._push_muzzle
+#   * which userpoint the model's muzzle resolver picks, and on which bone,
+#   * NovaObjectModel.get_muzzle_world_position() (what the mission presenter
 #     feeds NovaSimulation.set_ai_muzzle_world),
 #   * the HEAD bone (LocalPlayerHost.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
 #     player's EYE anchor, and the origin we put on the wire for our own shots,

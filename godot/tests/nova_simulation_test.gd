@@ -4,6 +4,13 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://engine/world/present_aim_overlay.gd")
+const NATIVE_RUNTIME_TIMING_KEYS := [
+	"sim_tick_us",
+	"net_tick_us",
+	"present_snapshot_us",
+	"occlusion_build_us",
+	"occlusion_probe_us",
+]
 
 # NovaSimulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
@@ -26,6 +33,79 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_spawned_count(), 6, "one building + three markers + two organics spawned into pools")
 	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
 	sim.free()
+
+
+func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
+	var sim := NovaSimulation.new()
+	assert_false(sim.is_runtime_profiling_enabled(),
+			"retail/default play does not own the profiling clocks")
+	sim.build_demo_mission()
+	sim.occlusion_init_mission()
+	assert_true(sim.step())
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
+	var unprofiled_buildings: PackedInt64Array = sim.get_building_visibility()
+	var unprofiled_culled: PackedInt32Array = sim.get_render_culled_bms_ids()
+	var unprofiled_positions: Array[Vector3] = []
+	for i in range(sim.get_entity_count()):
+		unprofiled_positions.append(sim.get_entity_position(i))
+	var counters: Dictionary = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_false(bool(counters.get("runtime_profiling_enabled", true)))
+	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+
+	sim.set_runtime_profiling_enabled(true)
+	assert_true(sim.is_runtime_profiling_enabled())
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_eq(sim.get_building_visibility(), unprofiled_buildings,
+			"profiling does not change building submission")
+	assert_eq(sim.get_render_culled_bms_ids(), unprofiled_culled,
+			"profiling does not change entity render gates")
+	assert_eq(sim.get_present_snapshot(), unprofiled_snapshot,
+			"profiling does not change the client-view snapshot")
+	for i in range(unprofiled_positions.size()):
+		assert_eq(sim.get_entity_position(i), unprofiled_positions[i],
+				"turning profiling on does not mutate simulation state")
+	assert_true(sim.step())
+	counters = sim.get_runtime_perf_counters()
+	assert_true(bool(counters.get("runtime_profiling_enabled", false)))
+	assert_true(bool(counters.get("trace_profiling_enabled", false)))
+	var sampled_us := 0
+	for key in NATIVE_RUNTIME_TIMING_KEYS:
+		sampled_us += int(counters.get(key, 0))
+	assert_gt(sampled_us, 0,
+			"the enabled gate records at least one native runtime span")
+
+	# Mission reload rebuilds CollisionWorld, so this pins reapplication of the
+	# one profiling request as well as the cleared timing snapshot.
+	sim.build_demo_mission()
+	assert_true(sim.is_runtime_profiling_enabled(),
+			"a mission reset preserves the active consumer request")
+	counters = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_true(bool(counters.get("trace_profiling_enabled", false)),
+			"the rebuilt CollisionWorld inherits the unified gate")
+
+	sim.set_runtime_profiling_enabled(false)
+	assert_false(sim.is_runtime_profiling_enabled())
+	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(
+			Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_true(sim.step())
+	sim.get_present_snapshot()
+	counters = sim.get_runtime_perf_counters()
+	_assert_native_runtime_timings_zero(counters)
+	assert_false(bool(counters.get("trace_profiling_enabled", true)))
+	sim.free()
+
+
+func _assert_native_runtime_timings_zero(counters: Dictionary) -> void:
+	for key in NATIVE_RUNTIME_TIMING_KEYS:
+		assert_eq(int(counters.get(key, -1)), 0,
+				"%s stays zero while native profiling is closed" % key)
 
 
 func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
@@ -2690,6 +2770,49 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		assert_eq(packed & 0xFFFFFFFF, 0xFFFFFFFF,
 			"without a section map the host preserves every de-batched render part")
 		assert_ne(packed & (1 << 32), 0, "the in-frustum building is visible")
+	sim.free()
+
+
+func test_occlusion_delta_calls_emit_changes_only() -> void:
+	# The diff-based apply contract behind GameWorld's occlusion frame: the
+	# first delta call after a frame emits the full verdict state, an unchanged
+	# frame emits nothing, and reset_occlusion_apply_baseline() re-arms the
+	# full emission (the A/B seam and host cache resets rely on it).
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(
+		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
+	var placer := ObjectDataPlacerStub.new(data)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+
+	var first: PackedInt64Array = sim.get_building_visibility_changes()
+	assert_eq(first.size(), 2, "the first delta call emits the building's state")
+	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
+			"no entities to cull in this mission")
+
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_eq(sim.get_building_visibility_changes().size(), 0,
+			"an unchanged frame emits no building deltas")
+	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
+			"an unchanged frame emits no culled deltas")
+
+	sim.reset_occlusion_apply_baseline()
+	assert_eq(sim.get_building_visibility_changes(), first,
+			"a baseline reset re-arms the full emission")
+	assert_true(bool(sim.entity_present_visible(int(placed.get("bms_id", 0)))),
+			"a live placed building reads as present-visible")
+	assert_true(bool(sim.entity_present_visible(424242)),
+			"an unknown bms id defaults visible (never blocks a show)")
 	sim.free()
 
 
