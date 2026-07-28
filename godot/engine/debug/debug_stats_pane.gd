@@ -15,7 +15,7 @@ extends VBoxContainer
 const _KIND_SPAN := 0    # one board slot: avg + max ms
 const _KIND_GROUP := 1   # sum of several slots: avg ms only (maxes don't add)
 const _KIND_HEADER := 2  # label + info only (no time)
-const _KIND_MONITOR := 3 # avg column from a Performance monitor, not the board
+const _KIND_RESIDUAL := 3 # base slot minus a slot list: avg ms only
 
 # Read the board every Nth overlay refresh: at the overlay's 0.25 s cadence
 # this makes 0.5 s windows — wide enough that two consecutive readings of a
@@ -25,7 +25,8 @@ const _REFRESH_DIVIDER := 2
 # The fixed row table. depth parents each row under the nearest shallower row,
 # the span-tree convention the Perf tab uses.
 const _ROWS := [
-	{"id": "frame", "label": "Frame (process)", "depth": 0, "kind": _KIND_MONITOR},
+	{"id": "frame", "label": "Frame (process)", "depth": 0, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.FRAME_PROCESS},
 	{"id": "before", "label": "Player host (pre)", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_PLAYER_BEFORE},
 	{"id": "world", "label": "World tick", "depth": 1, "kind": _KIND_SPAN,
@@ -55,11 +56,8 @@ const _ROWS := [
 	{"id": "throwable", "label": "Throwable", "depth": 3, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.PRESENT_THROWABLE},
 	{"id": "occl", "label": "Occlusion", "depth": 2, "kind": _KIND_GROUP,
-			"slots": [FrameStatsBoard.OCCL_RESTORE, FrameStatsBoard.OCCL_BUILD,
-					FrameStatsBoard.OCCL_PROBE, FrameStatsBoard.OCCL_APPLY,
-					FrameStatsBoard.OCCL_GLUE]},
-	{"id": "occl_restore", "label": "Restore", "depth": 3, "kind": _KIND_SPAN,
-			"slot": FrameStatsBoard.OCCL_RESTORE},
+			"slots": [FrameStatsBoard.OCCL_BUILD, FrameStatsBoard.OCCL_PROBE,
+					FrameStatsBoard.OCCL_APPLY, FrameStatsBoard.OCCL_GLUE]},
 	{"id": "occl_build", "label": "Build (native)", "depth": 3, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.OCCL_BUILD},
 	{"id": "occl_probe", "label": "Probe (native)", "depth": 3, "kind": _KIND_SPAN,
@@ -85,6 +83,13 @@ const _ROWS := [
 			"slot": FrameStatsBoard.HUD_INFO},
 	{"id": "hud_flush", "label": "Flush", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.HUD_FLUSH},
+	# The process step minus every measured shell leg: deferred/off-span work
+	# the frame induces (skeleton updates, queued frees, other nodes' _process).
+	# When this row is large, the next slice hides here, not in the spans above.
+	{"id": "shell_residual", "label": "Outside shell spans", "depth": 1,
+			"kind": _KIND_RESIDUAL, "base": FrameStatsBoard.FRAME_PROCESS,
+			"minus": [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
+					FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]},
 	{"id": "render", "label": "Render", "depth": 0, "kind": _KIND_HEADER},
 	{"id": "render_root_cpu", "label": "Viewport CPU", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_ROOT_CPU},
@@ -224,9 +229,16 @@ func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
 					seen = seen or counts[slot] > 0
 				item.set_text(1, "%.2f" % (float(total) / 1000.0 / frames) if seen else "-")
 				item.set_text(2, "")
-			_KIND_MONITOR:
-				item.set_text(1, "%.2f" %
-						(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0))
+			_KIND_RESIDUAL:
+				var base_slot := int(row["base"])
+				if counts[base_slot] <= 0:
+					item.set_text(1, "-")
+				else:
+					var residual := int(sums[base_slot])
+					for slot_v in row["minus"]:
+						residual -= sums[int(slot_v)]
+					item.set_text(1, "%.2f" %
+							(float(maxi(residual, 0)) / 1000.0 / frames))
 				item.set_text(2, "")
 			_:
 				pass

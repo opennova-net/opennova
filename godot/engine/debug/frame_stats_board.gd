@@ -16,6 +16,7 @@ extends RefCounted
 # hosts measure; the pane owns labels/grouping, the board owns only sums.
 enum {
 	# main_game frame legs (game shell _process)
+	FRAME_PROCESS,         # whole engine process step (TIME_PROCESS, previous frame)
 	FRAME_PLAYER_BEFORE,   # LocalPlayerHost.before_world_tick
 	FRAME_WORLD,           # GameWorld.tick total
 	FRAME_PLAYER_AFTER,    # LocalPlayerHost.after_world_tick
@@ -26,8 +27,7 @@ enum {
 	WORLD_BLINK,
 	WORLD_IRIS,
 	WORLD_AUDIO,
-	# The render-occlusion frame, split build/probe/apply (+ the pre-present restore)
-	OCCL_RESTORE,          # _restore_occlusion_overrides
+	# The render-occlusion frame, split build/probe/apply
 	OCCL_BUILD,            # native OcclusionWorld::build_frame (portal walk)
 	OCCL_PROBE,            # native per-entity render-gate loop
 	OCCL_APPLY,            # GDScript node application (masks + culled set + water)

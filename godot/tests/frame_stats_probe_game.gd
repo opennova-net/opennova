@@ -129,7 +129,7 @@ func _dump(label: String, rows: Dictionary) -> void:
 	print("[fsp] ---- %s ----" % label)
 	for id in ["frame", "before", "world", "foliage", "sim", "net", "effects",
 			"present", "snapshot", "mission_rows", "wire_rows", "fire",
-			"destruction", "throwable", "occl", "occl_restore", "occl_build",
+			"destruction", "throwable", "occl", "occl_build",
 			"occl_probe", "occl_apply", "env", "audio", "after", "hud",
 			"hud_scalars", "hud_attach", "hud_waypoint", "hud_info", "hud_flush",
 			"render", "render_root_cpu", "render_root_gpu", "render_water_cpu",

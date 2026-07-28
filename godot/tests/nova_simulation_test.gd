@@ -2693,6 +2693,49 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	sim.free()
 
 
+func test_occlusion_delta_calls_emit_changes_only() -> void:
+	# The diff-based apply contract behind GameWorld's occlusion frame: the
+	# first delta call after a frame emits the full verdict state, an unchanged
+	# frame emits nothing, and reset_occlusion_apply_baseline() re-arms the
+	# full emission (the A/B seam and host cache resets rely on it).
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+		NovaMissionData.KIND_BUILDING, 102001, Vector3(0, 20, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(
+		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
+	var placer := ObjectDataPlacerStub.new(data)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	sim.occlusion_init_mission()
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+
+	var first: PackedInt64Array = sim.get_building_visibility_changes()
+	assert_eq(first.size(), 2, "the first delta call emits the building's state")
+	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
+			"no entities to cull in this mission")
+
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
+	assert_eq(sim.get_building_visibility_changes().size(), 0,
+			"an unchanged frame emits no building deltas")
+	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
+			"an unchanged frame emits no culled deltas")
+
+	sim.reset_occlusion_apply_baseline()
+	assert_eq(sim.get_building_visibility_changes(), first,
+			"a baseline reset re-arms the full emission")
+	assert_true(bool(sim.entity_present_visible(int(placed.get("bms_id", 0)))),
+			"a live placed building reads as present-visible")
+	assert_true(bool(sim.entity_present_visible(424242)),
+			"an unknown bms id defaults visible (never blocks a show)")
+	sim.free()
+
+
 func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	# Retail walks every exact, case-insensitive "KZ" point on the active first
 	# husk and queues a radius-5 blast there. Keep the main and final models out

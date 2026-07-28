@@ -1276,6 +1276,12 @@ func _sample_render_stats(stats_on: bool) -> void:
 				viewport.get_viewport_rid(), stats_on)
 	if not stats_on:
 		return
+	# The whole engine process step (previous frame, seconds -> us): the Stats
+	# tab derives its "outside shell spans" residual from this minus the
+	# measured frame legs — the number that exposes deferred/off-span work the
+	# world tick induces.
+	_frame_stats.add(FrameStatsBoard.FRAME_PROCESS,
+			int(Performance.get_monitor(Performance.TIME_PROCESS) * 1_000_000.0))
 	var rid := viewport.get_viewport_rid()
 	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_CPU,
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))

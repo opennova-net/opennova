@@ -544,3 +544,54 @@ func test_unresolved_target_does_not_crash() -> void:
 	sim.entities = [{ "bms_id": 1234, "active1": 1, "phase1": 1 }]
 	_make_pass(index, sim).present()  # must not crash
 	assert_eq(int(_make_pass(index, sim).get_stats()["posed"]), 0, "nothing posed when the target is unresolved")
+
+
+func test_occlusion_claim_blocks_the_show_but_never_the_hide() -> void:
+	# Two-bit visibility ownership: the render-occlusion apply owns hides
+	# through a claim set shared by reference (the occlusion_hidden_ids setup
+	# option). A sim-wants-visible write is withheld while the claim stands, a
+	# sim hide always lands, and clearing the claim (as the occlusion release
+	# does) returns sole ownership to this pass.
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 1001: model }
+	var sim := FakeSim.new()
+	sim.entities = [{ "bms_id": 1001 }]
+	var claims := { 1001: true }
+	var present_pass := _make_pass(index, sim, {"occlusion_hidden_ids": claims})
+
+	model.visible = false  # occlusion hid it; the sim wants it visible
+	present_pass.present()
+	assert_false(model.visible, "a claimed node is not re-shown by the present drive")
+
+	sim.entities = [{ "bms_id": 1001, "hidden": 1 }]
+	present_pass.present()
+	assert_false(model.visible, "a sim hide lands regardless of the claim")
+
+	sim.entities = [{ "bms_id": 1001 }]
+	claims.clear()
+	present_pass.present()
+	assert_true(model.visible,
+			"with the claim cleared the present drive owns visibility again")
+
+
+func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
+	# _drive_body_anim mirrors the _drive_transform/_drive_visibility probe
+	# seams: freezing it stops every pose dispatch so probes can isolate the
+	# skeleton-update share of the frame.
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 11: model }
+	var sim := FakeSim.new()
+	sim.entities = [{ "bms_id": 11, "body_anim_slot": 1, "anim_state": 43, "anim_phase": 9 }]
+	var present_pass := _make_pass(index, sim)
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 1, "body anim dispatches by default")
+	present_pass._drive_body_anim = false
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 1, "the frozen seam dispatches nothing new")
+	present_pass._drive_body_anim = true
+	present_pass.present()
+	assert_eq(model.body_calls.size(), 2, "restoring the seam resumes dispatch")
