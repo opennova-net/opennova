@@ -25,8 +25,8 @@ const _REFRESH_DIVIDER := 2
 # The fixed row table. depth parents each row under the nearest shallower row,
 # the span-tree convention the Perf tab uses.
 const _ROWS := [
-	{"id": "frame", "label": "Frame (process)", "depth": 0, "kind": _KIND_SPAN,
-			"slot": FrameStatsBoard.FRAME_PROCESS},
+	{"id": "frame", "label": "Frame (wall)", "depth": 0, "kind": _KIND_SPAN,
+			"slot": FrameStatsBoard.FRAME_WALL},
 	{"id": "before", "label": "Player host (pre)", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_PLAYER_BEFORE},
 	{"id": "world", "label": "World tick", "depth": 1, "kind": _KIND_SPAN,
@@ -83,14 +83,14 @@ const _ROWS := [
 			"slot": FrameStatsBoard.HUD_INFO},
 	{"id": "hud_flush", "label": "Flush", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.HUD_FLUSH},
-	# The process step minus every measured shell leg: deferred/off-span work
-	# the frame induces (skeleton updates, queued frees, other nodes' _process).
-	# When this row is large, the next slice hides here, not in the spans above.
-	# Caveat: with vsync ON the engine's swap wait can land inside the process
-	# step, inflating this row — read it vsync-off (the A/B probes do), or
-	# treat only growth beyond the vsync period as real work.
+	# The wall frame minus every measured shell leg: everything OUTSIDE our
+	# spans — other nodes' _process, engine internals, render/present time on
+	# this thread. When this row is large, the next slice hides here, not in
+	# the spans above (this is the row that exposed the per-model _process
+	# residual). Under an fps cap or vsync-enabled host the pacing wait also
+	# lands here; the project runs uncapped with vsync off.
 	{"id": "shell_residual", "label": "Outside shell spans", "depth": 1,
-			"kind": _KIND_RESIDUAL, "base": FrameStatsBoard.FRAME_PROCESS,
+			"kind": _KIND_RESIDUAL, "base": FrameStatsBoard.FRAME_WALL,
 			"minus": [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
 					FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]},
 	{"id": "render", "label": "Render", "depth": 0, "kind": _KIND_HEADER},

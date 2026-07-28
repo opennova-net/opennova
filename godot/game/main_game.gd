@@ -70,6 +70,9 @@ var _frame_stats := FrameStatsBoard.new()
 # Edge latch for RenderingServer render-time measurement on the root viewport
 # (only measured while the Stats tab captures).
 var _stats_render_measured := false
+# Previous shell-frame timestamp for the Stats tab's wall frame row (0 = no
+# prior frame in this capture window).
+var _stats_last_frame_usec := 0
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -1275,13 +1278,17 @@ func _sample_render_stats(stats_on: bool) -> void:
 		RenderingServer.viewport_set_measure_render_time(
 				viewport.get_viewport_rid(), stats_on)
 	if not stats_on:
+		_stats_last_frame_usec = 0
 		return
-	# The whole engine process step (previous frame, seconds -> us): the Stats
-	# tab derives its "outside shell spans" residual from this minus the
-	# measured frame legs — the number that exposes deferred/off-span work the
-	# world tick induces.
-	_frame_stats.add(FrameStatsBoard.FRAME_PROCESS,
-			int(Performance.get_monitor(Performance.TIME_PROCESS) * 1_000_000.0))
+	# The TRUE wall time between consecutive shell frames (matches fps exactly;
+	# Godot's TIME_PROCESS monitor does not). The Stats tab derives its
+	# "outside shell spans" residual from this minus the measured frame legs —
+	# the number that exposes work outside our spans (other nodes' _process,
+	# engine internals, render/present on this thread).
+	var now_usec := Time.get_ticks_usec()
+	if _stats_last_frame_usec > 0:
+		_frame_stats.add(FrameStatsBoard.FRAME_WALL, now_usec - _stats_last_frame_usec)
+	_stats_last_frame_usec = now_usec
 	var rid := viewport.get_viewport_rid()
 	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_CPU,
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
