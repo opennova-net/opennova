@@ -227,11 +227,12 @@ func _join_against_host(host_expansion: String, dir: String,
 	if world == null:
 		world = _make_world()
 		failures = _watch_failures(world)
-	assert_eq(world.load_mission_as_joiner({
-		"host_ip": "127.0.0.1",
-		"port": host.get_host_listen_port(),
-		"dir": dir,
-	}, "ExpansionJoiner"), OK)
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = host.get_host_listen_port()
+	target.dir = dir
+	target.player_name = "ExpansionJoiner"
+	assert_eq(world.load_mission_as_joiner(target), OK)
 
 	for _i in range(PRELOAD_PUMP_FRAMES):
 		if not failures.is_empty():

@@ -6,7 +6,7 @@ extends GutTest
 # path: setup builds the index, tick presents sim state onto the nodes, Stop rewinds + restores.
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 
 func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
@@ -17,9 +17,9 @@ func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
 	assert_eq(rt._seat_type_for_user_point("UseGun01"), 3, "UseGun -> gunner")
 	assert_eq(rt._seat_type_for_user_point("drvrx"), 5, "drvrx -> driver")
 	assert_eq(rt._seat_type_for_user_point("ground"), 0, "non-seat userpoints are ignored")
-	assert_eq(MissionSeatDiagnostics.seat_type_for_user_point("fooUseGun"), 0,
+	assert_eq(ItemSeatSpecs.seat_type_for_user_point("fooUseGun"), 0,
 			"retail classifies a prefix, not an embedded seat token")
-	assert_eq(MissionSeatDiagnostics.seat_type_for_user_point("xctrlx"), 0,
+	assert_eq(ItemSeatSpecs.seat_type_for_user_point("xctrlx"), 0,
 			"embedded controller text is not a model seat row")
 
 
@@ -49,21 +49,21 @@ func test_seat_userpoints_are_converted_through_vehicle_yaw_zero_basis() -> void
 		"model left maps to a right-facing seat offset")
 
 
-func test_shared_seat_diagnostics_predict_original_command_rules() -> void:
+func test_shared_seat_rules_predict_original_command_rules() -> void:
 	var seats := [
 		{ "type": 1, "position": Vector3(5, 0, 0), "source_name": "sitex00" },
 		{ "type": 2, "position": Vector3(1, 0, 0), "source_name": "ctrlx00" },
 		{ "type": 5, "position": Vector3(2, 0, 0), "source_name": "drvrx00" },
 	]
-	var passenger := MissionSeatDiagnostics.predict_best_seat(seats, 123)
+	var passenger := ItemSeatSpecs.predict_best_seat(seats, 123)
 	assert_eq(int(passenger["seat_index"]), 0, "command 123 is passenger-only")
 	assert_eq(String(passenger["seat"]["source_name"]), "sitex00")
 
-	var non_controller := MissionSeatDiagnostics.predict_best_seat(seats, 124)
+	var non_controller := ItemSeatSpecs.predict_best_seat(seats, 124)
 	assert_eq(int(non_controller["seat_index"]), 2, "command 124 skips ctrlx and takes driver before passenger")
 	assert_eq(String(non_controller["seat"]["source_name"]), "drvrx00")
 
-	var any := MissionSeatDiagnostics.predict_best_seat(seats, 125)
+	var any := ItemSeatSpecs.predict_best_seat(seats, 125)
 	assert_eq(int(any["seat_index"]), 1, "command 125 can select ctrlx by original priority")
 	assert_eq(String(any["seat"]["source_name"]), "ctrlx00")
 	assert_eq(String(any["candidates"][1]["status"]), "selected")
@@ -76,7 +76,7 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
-	var spec := MissionSeatDiagnostics.seat_specs_for_item(
+	var spec := ItemSeatSpecs.seat_specs_for_item(
 			root, item_db, 101419, 101419)
 	assert_eq(String(spec.get("error", "")), "")
 	var seats: Array = spec.get("seats", []) as Array
@@ -103,7 +103,7 @@ func test_emplacement_specs_resolve_userpoints_and_keep_missing_anchor_fallback(
 		{"kind": 0, "key": "addeweap", "userpoint": "Usegun", "item_id": 710101},
 		{"kind": 1, "key": "addeweapG", "userpoint": "missing", "item_id": 710102},
 	]
-	var resolved := MissionSeatDiagnostics.emplacement_specs_from_model(
+	var resolved := ItemSeatSpecs.emplacement_specs_from_model(
 			data, rows, true)
 	assert_eq(resolved.size(), 2, "a missing retail anchor still spawns at parent root")
 	assert_true(resolved[0]["anchor_found"])
@@ -112,7 +112,7 @@ func test_emplacement_specs_resolve_userpoints_and_keep_missing_anchor_fallback(
 	assert_eq(resolved[0]["subobject"],
 			int(data.get_user_point_info(5)["subobject"]))
 	assert_eq(resolved[0]["local"],
-			MissionSeatDiagnostics.seat_local_from_user_point_position(
+			ItemSeatSpecs.seat_local_from_user_point_position(
 					data.get_user_point_info(5)["position"]))
 	assert_false(resolved[1]["anchor_found"])
 	assert_eq(resolved[1]["bone_index"], 0)
@@ -324,12 +324,16 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 9
+	target.player_name = "PresentJoiner"
 	var audio := FireAudioStub.new()
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
-		"net_transport": "lan-join",
+		"join_target": target,
 		"fire_audio": func(): return audio,
 	})), 0)
 

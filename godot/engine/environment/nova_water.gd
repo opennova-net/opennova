@@ -298,7 +298,7 @@ func _process(delta: float) -> void:
 
 	if (not _cached_cam or not _cached_cam.is_inside_tree()
 			or not _cached_cam.current):
-		_cached_cam = _find_camera()
+		_cached_cam = EnvRenderCamera.find(self)
 	if (not _host_rendering_enabled or not is_water_active()
 			or not is_visible_in_tree() or _cached_cam == null):
 		_clear_strip_surfaces()
@@ -600,12 +600,3 @@ func _apply_environment_water_height() -> void:
 		water_height = 0.0
 
 
-func _find_camera() -> Camera3D:
-	if Engine.is_editor_hint():
-		var editor_interface = Engine.get_singleton("EditorInterface")
-		if editor_interface:
-			var viewport = editor_interface.get_editor_viewport_3d(0)
-			if viewport:
-				return viewport.get_camera_3d()
-	var viewport := get_viewport()
-	return viewport.get_camera_3d() if viewport else null

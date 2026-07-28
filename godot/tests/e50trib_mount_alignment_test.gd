@@ -1,7 +1,7 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 const MISSION := "00TRc.bms"
 const GUN_BMS_ID := 88
@@ -49,7 +49,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var part_index := int(userpoint.get("subobject", -1))
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
-	var seats := MissionSeatDiagnostics.seat_specs_from_model(data, true)
+	var seats := ItemSeatSpecs.seat_specs_from_model(data, true)
 	assert_eq(seats.size(), 1)
 	var seat: Dictionary = seats[0]
 	assert_eq(String(seat.get("source_name", "")).to_lower(), "usegun")
@@ -57,7 +57,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 			"the runtime selected the exact retail Usegun row")
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs(MissionSeatDiagnostics.build_item_seat_specs(
+	sim.set_item_seat_specs(ItemSeatSpecs.build_item_seat_specs(
 			mission, root, item_db, true))
 	assert_true(sim.load_from_mission_data(mission))
 	assert_eq(sim.spawn_local_player_at_start(), 1)

@@ -1,12 +1,13 @@
 #pragma once
 
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <novaworld/client_session.h>
 #include <novaworld/lobby_vars.h>   // opennova::HostRegistration
+
+#include "network/nwu_lobby_session.h"
 
 #include <cstdint>
 #include <memory>
@@ -107,11 +108,9 @@ protected:
 	static void _bind_methods();
 
 private:
-	void send_gate_probe();
-	void poll_gate();
-	void begin_session();
-	void poll_session();
-	void send_nw_datagram(const std::vector<uint8_t> &dg);
+	// The gate/session pump is the shared NwuLobbySession driver (lobby_);
+	// the hooks map its progress onto our State + signals.
+	NwuLobbySession::Hooks make_lobby_hooks();
 	void sync_session_state();
 	void send_host_request();   // ClientHostRequest (registration)
 	void send_host_update();    // ClientHostUpdate (heartbeat refresh)
@@ -136,25 +135,10 @@ private:
 	// State.
 	State state_ = STATE_IDLE;
 	int player_count_ = 1;              // the host itself is the first player
-	Ref<PacketPeerUDP> gate_socket_;
-	Ref<PacketPeerUDP> nw_socket_;
-	std::unique_ptr<opennova::ClientSession> session_;
+	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
+	// endpoint, the gate auth-code stash, and the handshake timeout.
+	NwuLobbySession lobby_;
 
-	String nw_udp_host_;
-	uint16_t nw_udp_port_ = 0;
-	uint32_t client_index_ = 0;
-	uint32_t client_key_ = 0;
-	std::string server_nwuid_;          // echoed from the SessionInit into the Cookie
-
-	// Gate-issued session-auth values captured from the gate response (NW-S3).
-	// Empty against the permissive OpenNova gate; carried as 0x42-join CU chunks
-	// for retail parity (live NW's join callbacks validate them).
-	std::string gate_met_tag_;          // gate VAR METLABEL  -> CU MetTag
-	std::string gate_udp_code1_;        // gate VAR UDPCODE1  -> CU UdpCode1
-	std::string gate_udp_code2_;        // gate VAR UDPCODE2  -> CU UdpCode2
-
-	double handshake_elapsed_ = 0.0;
-	double handshake_timeout_s_ = 5.0;
 	double keepalive_accum_ = 0.0;
 	double keepalive_interval_s_ = 2.0;   // session 0x43 keepalive
 	double update_accum_ = 0.0;

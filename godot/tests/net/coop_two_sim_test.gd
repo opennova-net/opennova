@@ -3,7 +3,7 @@ extends GutTest
 const NovaObjectModelScript := preload(
 		"res://engine/object/nova_object_model.gd")
 const PresentEmplacedWeapon := preload(
-		"res://engine/world/present_emplaced_weapon.gd")
+		"res://engine/world/emplaced_weapon_present_pass.gd")
 
 # Co-op LAN bidirectional bring-up (D.2) at the NovaSimulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a
@@ -613,7 +613,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		return
 	var anchor_index := int(moving_anchor["index"])
 	var anchor: Dictionary = moving_anchor["info"]
-	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(model)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
 	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
 	var specs := [{
 		# This attachment-specific fixture deliberately keeps the parent and its
@@ -629,7 +629,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"anchor_found": true,
 			"bone_index": anchor_index + 1,
 			"source_name": String(anchor.get("name", "")),
-			"local": MissionSeatDiagnostics.seat_local_from_user_point_position(
+			"local": ItemSeatSpecs.seat_local_from_user_point_position(
 					anchor.get("position", Vector3.ZERO)),
 		}],
 	}]
@@ -754,7 +754,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		return
 	var yaw_part := int((moving_anchor["info"] as Dictionary).get(
 			"subobject", -1))
-	var seat_specs := MissionSeatDiagnostics.seat_specs_from_model(model)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
 	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
 	var specs := [{
 		"type_id": 1419,

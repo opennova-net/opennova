@@ -14,17 +14,17 @@ extends Control
 # Where to reach the server. Dev default is localhost (matching the launcher's
 # dev mode and the dev compose). Prod sets this from the resolved server IP.
 @export var server_host := "127.0.0.1"
-@export var gate_port := 7597
+@export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
 
 signal closed()
 # The NWJoin handshake resolved the in-match host:port — enter the match as a JOINER. The arg is
-# the joiner row { host_ip, port, mission, player_name } MainGame hands to GameWorld.load_mission_as_joiner
+# the typed dial target MainGame hands to GameWorld.load_mission_as_joiner
 # (the SAME entry the LAN browser + NW_LAN_JOIN env use — one in-match joiner seam, ADR 0009).
-signal join_in_match_requested(info: Dictionary)
+signal join_in_match_requested(target: JoinTarget)
 # Host a NovaWorld game. The panel supplies the gate (the server it's connected to); MainGame fills in
 # the mission + callsign and stands up a browsable listen host (game_world._maybe_start_nw_host).
-signal host_requested(config: Dictionary)
+signal host_requested(config: HostSessionConfig)
 
 var _client            # NovaWorldClient (created at runtime if the class exists)
 var _status_label: Label
@@ -376,12 +376,12 @@ func _on_joined_game(host: String, port: int) -> void:
 		_set_status("Joined %s:%d, but the host's mission is unknown — cannot enter the match." % [host, port])
 		return
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
-	join_in_match_requested.emit({
-		"host_ip": host,
-		"port": port,
-		"mission": _pending_mission,
-		"player_name": _pending_player,
-	})
+	var target := JoinTarget.new()
+	target.host_ip = host
+	target.port = port
+	target.mission = _pending_mission
+	target.player_name = _pending_player
+	join_in_match_requested.emit(target)
 
 
 # Host a NovaWorld game: hand the gate (the server we're connected to) up to MainGame, which fills in
@@ -396,13 +396,13 @@ func _on_host_pressed() -> void:
 		_set_status("No missions are available to host (check the game folder).")
 		return
 	_set_status("Starting a NovaWorld host...")
-	host_requested.emit({
-		"channel": "NovaWorld",
-		"nw_gate_host": _resolved_host(),
-		"nw_gate_port": gate_port,
-		"server_name": "%s's Game" % player_name,
-		"mission": mission,
-	})
+	var config := HostSessionConfig.new()
+	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
+	config.nw_gate_host = _resolved_host()
+	config.nw_gate_port = gate_port
+	config.server_name = "%s's Game" % player_name
+	config.mission = mission
+	host_requested.emit(config)
 
 
 # Populate the Map picker from the injected resource root. Empty (no root / no .bms) leaves the
@@ -411,9 +411,8 @@ func _populate_missions() -> void:
 	if _mission_option == null:
 		return
 	_mission_option.clear()
-	if resource_root != null and resource_root.has_method("list_files"):
-		for m in resource_root.list_files(".bms"):
-			_mission_option.add_item(String(m).get_file())
+	for m in MissionCatalog.mission_names(resource_root):
+		_mission_option.add_item(m)
 	if _mission_option.item_count > 0:
 		_mission_option.select(0)
 

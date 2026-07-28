@@ -717,7 +717,7 @@ void NovaTerrain::build() {
 
 	built = true;
 
-	UtilityFunctions::print("NovaTerrain: Built ", static_cast<int>(tile_infos.size()),
+	UtilityFunctions::print_verbose("NovaTerrain: Built ", static_cast<int>(tile_infos.size()),
 		" tiles, ", static_cast<int>(quad_nodes.size()), " quad nodes, pool=", PATCH_POOL_SIZE);
 }
 
@@ -847,7 +847,7 @@ bool NovaTerrain::_build_terrain() {
 		}
 	}
 
-	UtilityFunctions::print("NovaTerrain: ", total_verts, " verts, ", total_indices, " indices across ",
+	UtilityFunctions::print_verbose("NovaTerrain: ", total_verts, " verts, ", total_indices, " indices across ",
 		static_cast<int>(cpt.tiles.size()), " tiles");
 	return true;
 }
@@ -946,7 +946,7 @@ void NovaTerrain::_build_quadtree() {
 			l1_children[i] = quad_nodes[root_node].children[i];
 	}
 
-	UtilityFunctions::print("NovaTerrain: Quadtree built — ", static_cast<int>(quad_nodes.size()),
+	UtilityFunctions::print_verbose("NovaTerrain: Quadtree built — ", static_cast<int>(quad_nodes.size()),
 		" nodes, leaf_size=", leaf_size, ", mipchain levels=", mipchain.level_count);
 }
 
@@ -1022,7 +1022,7 @@ void NovaTerrain::_build_collision() {
 		}
 	}
 
-	UtilityFunctions::print("NovaTerrain: Built ", static_cast<int>(collision_bodies.size()), " collision bodies");
+	UtilityFunctions::print_verbose("NovaTerrain: Built ", static_cast<int>(collision_bodies.size()), " collision bodies");
 }
 
 // ---------------------------------------------------------------------------

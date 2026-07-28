@@ -3,6 +3,7 @@
 #include "resource_index/nova_resource_root.h"
 
 #include <mission/authoring.h>
+#include <mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -186,7 +187,10 @@ void NovaMissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_TEAM_KING_OF_THE_HILL);
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
+	BIND_CONSTANT(ITEM_ID_OFFSET);
 }
+
+static_assert(NovaMissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
 
 Error NovaMissionData::open_file(const String &path) {
 	source_path = path;

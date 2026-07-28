@@ -1,4 +1,4 @@
-extends Node3D
+extends SimDebugView
 
 # Draws the round hit-detection reality over the scene: nearby non-organic CFAC
 # bullet-mesh wireframes (the triangles Physics_RaycastAgainstBoneCollision
@@ -18,8 +18,6 @@ extends Node3D
 # amber only for the unresolved neutral-damage fallback. Built / freed by
 # GameWorld on the overlay toggle, the collision-view contract.
 
-const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
-
 const LABEL_NEAREST := 12       # detail labels on this many nearest entities
 const SPHERE_SEGMENTS := 20
 
@@ -35,7 +33,6 @@ const FLAG_NEVER_HIT := 0x100   # authored never-hit — rounds ignore it
 const FLAG_DOUBLE_SIDED := 0x800
 const FLAG_BOTH_SIDES := 0x1
 
-var _world: Node                # duck-typed host (get_sim()); re-resolved every frame
 var _mesh: ImmediateMesh        # static entities: rebuilt only on set/pose/husk change
 var _dyn_multimesh: MultiMesh   # posed organic spheres: retained across pose updates
 var _dyn_unit_mesh: ArrayMesh   # one unit wire sphere shared by every organic section
@@ -107,17 +104,14 @@ func _make_unit_wire_sphere_mesh() -> ArrayMesh:
 	return mesh
 
 
-func setup(world: Node) -> void:
-	_world = world
+func _sim_debug_method() -> String:
+	return "get_hitbox_debug"
+
+
+func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
-	var mi := MeshInstance3D.new()
-	mi.name = "HitboxLines"
-	mi.mesh = _mesh
-	var mat := MissionOverlayUtil.line_material()
-	mat.no_depth_test = false  # depth-tested: the mesh should hug the visual model
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.material_override = mat
-	add_child(mi)
+	# Depth-tested: the static wireframe should hug the visual model.
+	add_child(_make_lines_node("HitboxLines", _mesh, false))
 	_dyn_unit_mesh = _make_unit_wire_sphere_mesh()
 	_dyn_multimesh = MultiMesh.new()
 	_dyn_multimesh.instance_count = 0
@@ -136,16 +130,7 @@ func setup(world: Node) -> void:
 	dyn.material_override = dyn_mat
 	add_child(dyn)
 	for i in range(LABEL_NEAREST):
-		var lb := Label3D.new()
-		lb.name = "HitboxLabel%d" % i
-		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lb.fixed_size = false
-		lb.pixel_size = 0.005
-		lb.no_depth_test = true
-		lb.font_size = 8
-		lb.outline_size = 2
-		lb.outline_modulate = Color(0.0, 0.0, 0.0, 0.85)
-		lb.visible = false
+		var lb := _make_overlay_label("HitboxLabel%d" % i, 0.005, 8, 2)
 		add_child(lb)
 		_labels.append(lb)
 
@@ -171,23 +156,9 @@ func advance_refresh(delta: float) -> void:
 		refresh_now()
 
 
-## Immediately refresh from the current simulation.
-func refresh_now() -> void:
-	var sim := _resolve_sim()
-	if sim == null:
-		_clear_all()
-		return
+func _refresh_from_sim(sim: Object) -> void:
 	var debug: Dictionary = sim.get_hitbox_debug()
 	_update(debug.get("entities", []), debug.get("organics", []))
-
-
-func _resolve_sim() -> Object:
-	if _world == null or not is_instance_valid(_world) or not _world.has_method("get_sim"):
-		return null
-	var sim: Variant = _world.get_sim()
-	if sim == null or not is_instance_valid(sim) or not (sim as Object).has_method("get_hitbox_debug"):
-		return null
-	return sim
 
 
 func _clear_all() -> void:
@@ -353,7 +324,7 @@ func _update_labels(entities: Array, organics: Array) -> void:
 		var is_organic: bool = order[i][1]
 		var e3: Dictionary = order[i][2]
 		var ent := int(e3.get("entity_handle", 0xFFFF))
-		var text := "%d/%d" % [(ent >> 12) & 0xF, ent & 0xFFF]
+		var text := WireHandle.label(ent)
 		var label_position: Vector3
 		var label_modulate: Color
 		if is_organic:

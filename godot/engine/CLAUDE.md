@@ -14,7 +14,8 @@ Two things live here, and both must stay host-neutral — consumable by the game
     ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.
   - `debug/` (F3 overlay tabs), `environment/` (time-of-day / water / sky / weather —
     heavily `[orig]`-cited, shared by the game and the Terrain/Object editors),
-    `mission/` (object placer + overlays), `object/` (`nova_object_model.gd`, collision
+    `mission/` (object placer + model resolver; the editor-only authoring overlays
+    live in `modtools/mission/`), `object/` (`nova_object_model.gd`, collision
     hulls), `mcp/` (host-agnostic MCP server core, booted by `modtools/mcp/`),
     `ui/` (HUD view helpers), `avatar/` (avatar composition), `terrain/`,
     `resource_index/`, `util/`, `strings/` (the `NovaStrings` autoload, wired in

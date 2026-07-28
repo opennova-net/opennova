@@ -153,6 +153,6 @@ func _name_of(handle: int, names: Dictionary) -> String:
 		return "?"
 	if names.has(handle) and String(names[handle]) != "":
 		return String(names[handle])
-	var pool := handle >> 12
-	var slot := handle & 0xfff
+	var pool := WireHandle.pool(handle)
+	var slot := WireHandle.slot(handle)
 	return "s%d" % slot if pool == 0 else "s%d·p%d" % [slot, pool]

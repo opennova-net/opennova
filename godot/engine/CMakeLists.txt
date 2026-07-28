@@ -73,6 +73,7 @@ add_library(${TARGET_NAME} SHARED
     register_types.cpp
     network/nova_world_client.cpp
     network/nova_world_host.cpp
+    network/nwu_lobby_session.cpp
     network/nova_net_client.cpp
     network/nova_udp_pump.cpp
     network/nova_lan_session.cpp
@@ -123,6 +124,12 @@ add_library(${TARGET_NAME} SHARED
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
     simulation/nova_simulation.cpp
+    simulation/nova_simulation_assets.cpp
+    simulation/nova_simulation_bind.cpp
+    simulation/nova_simulation_net.cpp
+    simulation/nova_simulation_occlusion.cpp
+    simulation/nova_simulation_player.cpp
+    simulation/nova_simulation_present.cpp
     wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp

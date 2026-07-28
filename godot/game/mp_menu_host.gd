@@ -1,5 +1,5 @@
 class_name MpMenuHost
-extends RefCounted
+extends MenuCompanion
 
 # Drives the multiplayer menu (mp.mnu) by control NAME for the LAN co-op path. It is a
 # companion the game-agnostic NovaMenuHost (menu_shell.gd) delegates to: when the shell
@@ -22,14 +22,12 @@ extends RefCounted
 # wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
 const OWNED_SCREENS := ["LAN_MULTI_PLAYER", "MULTI_PLAYER_HOST"]
 
-# The player chose to join the highlighted discovered LAN server. The argument is the
-# server row dict from the discovery session ({name, host_ip, port, ...}).
-signal lan_join_requested(server: Dictionary)
-# START_GAME on the host screen, with the co-op-minimal host config (see _read_host_config).
-signal lan_host_start_requested(config: Dictionary)
+# The player chose to join the highlighted discovered LAN server. The payload is the
+# typed dial target decoded from the discovery row (JoinTarget.from_lan_row).
+signal lan_join_requested(target: JoinTarget)
+# START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
+signal lan_host_start_requested(config: HostSessionConfig)
 
-var _menu: Node  # the NovaMnuMenu at runtime; typed Node so we depend only on its tree + signals
-var _root: NovaResourceRoot
 var _lan_session = null        # NovaLanSession; injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
@@ -63,19 +61,15 @@ func set_lan_session(session) -> void:
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
 
-# Called by NovaMenuHost after each open_menu (re)build of a menu we own. All of mp.mnu's
-# screens are built as (hidden) children at once, so we wire every owned screen's controls
-# here by name regardless of which screen is visible — matching how the shell wires.
-func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourceRoot) -> void:
-	_menu = menu
-	_root = root
-	if menu == null:
-		return
+# All of mp.mnu's screens are built as (hidden) children at once, so we wire every owned
+# screen's controls by name regardless of which screen is visible — matching how the
+# shell wires.
+func _wire(_file: String, _screen: String) -> void:
 	# Single-click selection in the LAN list relays through the menu's aggregate signal.
 	# Connected by name so the companion stays decoupled from the concrete menu class.
-	if menu.has_signal("widget_value_changed") \
-			and not menu.is_connected("widget_value_changed", _on_widget_value_changed):
-		menu.connect("widget_value_changed", _on_widget_value_changed)
+	if _menu.has_signal("widget_value_changed") \
+			and not _menu.is_connected("widget_value_changed", _on_widget_value_changed):
+		_menu.connect("widget_value_changed", _on_widget_value_changed)
 	_wire_lan_browser()
 	_wire_host_settings()
 
@@ -157,7 +151,7 @@ func _on_lan_list_activated(index: int) -> void:
 func _on_lan_join() -> void:
 	if _selected_server < 0 or _selected_server >= _servers.size():
 		return
-	lan_join_requested.emit(_servers[_selected_server])
+	lan_join_requested.emit(JoinTarget.from_lan_row(_servers[_selected_server]))
 
 
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
@@ -174,11 +168,7 @@ func _wire_host_settings() -> void:
 # Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
 # rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
 func _seed_mission_list(list: NovaMnuList) -> void:
-	var names := PackedStringArray()
-	if _root != null:
-		for m in _root.list_files(".bms"):
-			names.append(String(m).get_file())
-	list.set_items(names)
+	list.set_items(MissionCatalog.mission_names(_root))
 
 
 func _on_add_missions() -> void:
@@ -209,35 +199,26 @@ func _on_host_start() -> void:
 	lan_host_start_requested.emit(_read_host_config())
 
 
-# Read the co-op-minimal host config off the built tree by control name. Unread controls
-# (rules tab, weapon restrictions, server type/location) still render; co-op forces COOP.
-func _read_host_config() -> Dictionary:
+# Read the co-op-minimal host request off the built tree by control name. Unread controls
+# (rules tab, weapon restrictions, server location) still render; co-op forces COOP — the
+# record's game_type default is the witnessed retail Co-op g_GameType
+# (HostSessionConfig.GAME_TYPE_COOP), as is the LAN bind port default.
+func _read_host_config() -> HostSessionConfig:
+	var config := HostSessionConfig.new()
 	var server_name := _edit_text("GAME_NAME", "")
-	if server_name.is_empty():
-		server_name = "COOPGAME"
+	if not server_name.is_empty():
+		config.server_name = server_name
 	var max_text := _edit_text("MAX_PLAYERS", "")
-	var max_players := clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
-	var missions := _selected_missions()
+	config.max_players = clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
+	config.missions = _selected_missions()
+	if config.missions.size() > 0:
+		config.mission = config.missions[0]
+	config.game_type_attr = _spin_attr("GAME_TYPE", "")
 	# Retail's game-name field is the expansion currently mounted by the game,
 	# and is empty for the base game. Never substitute a captured expansion id.
-	var expansion := _root.get_expansion() if _root != null else ""
-	return {
-		"server_name": server_name,
-		"missions": missions,
-		"mission": String(missions[0]) if missions.size() > 0 else "",
-		"max_players": max_players,
-		"game_type": "COOP",
-		"game_type_raw": _spin_attr("GAME_TYPE", ""),  # the GAME_TYPE value attr (HG_COOP=2, ...), for later
-		# This slice deliberately supports only Co-op. Retail derives 0x30020
-		# from an ATTRIB_COOP mission (AI_GetTaskTypeFromFlags @0x40DAE0 ->
-		# Game_StartMission @0x524360); 0x10010 was an ASH_I5A capture value.
-		"gametype": 0x30020,
-		"expansion": expansion,
-		"channel": "LAN",
-		"net_transport": "lan",
-		"bind_port": 32768,                        # witnessed retail LAN host port [game.cfg mplanserverport 32768-32787]
-		"dedicated": _is_dedicated(),              # serve-and-play (false, default) vs dedicated (no local player)
-	}
+	config.expansion = _root.get_expansion() if _root != null else ""
+	config.dedicated = _is_dedicated()  # serve-and-play (false, default) vs dedicated (no local player)
+	return config
 
 
 # Serve-and-play (default) vs dedicated: a DEDICATED host runs the listen server but spawns NO local
@@ -248,9 +229,9 @@ func _is_dedicated() -> bool:
 	return _spin_attr("SERVERTYPE", "0") == "1"
 
 
-func _selected_missions() -> Array:
+func _selected_missions() -> Array[String]:
 	var table := _find("SELECTED_MISSIONS")
-	var out: Array = []
+	var out: Array[String] = []
 	if table is NovaMnuTable:
 		for r in range((table as NovaMnuTable).get_row_count()):
 			out.append((table as NovaMnuTable).get_cell_text(r, 0))
@@ -271,31 +252,7 @@ func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
 	return false
 
 
-func _find(name: String) -> Node:
-	return _menu.find_child(name, true, false) if _menu != null else null
-
-
-func _connect_pressed(name: String, handler: Callable) -> void:
-	var node := _find(name)
-	if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-		(node as BaseButton).pressed.connect(handler)
-
-
-func _edit_text(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node is LineEdit:  # NovaMnuEdit extends LineEdit
-		return (node as LineEdit).text
-	return default_value
-
-
-func _spin_value(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node != null and node.has_method("get_value"):  # NovaMnuSpinList
-		return String(node.get_value())
-	return default_value
-
-
-# Like _spin_value but returns the selected item's `value=` attribute (the semantic value the
+# Returns the selected spin-list item's `value=` attribute (the semantic value the
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
 	var node := _find(name)

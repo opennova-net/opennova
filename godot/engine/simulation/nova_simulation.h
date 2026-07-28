@@ -191,6 +191,28 @@ public:
 		EFFECT_STATE_COUNT
 	};
 
+	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
+	// are pinned to libs/world's SeatType by static_assert in the .cpp.
+	// [orig: Entity_FindBestSeatSlot @0x4351f0 classifies "sitex"->1,
+	// "ctrlx"->2, "UseGun"->3, armory scan ->4 @0x436417, "drvrx"->5]
+	enum SeatCode {
+		SEAT_NONE = 0,
+		SEAT_PASSENGER = 1,
+		SEAT_CONTROLLER = 2,
+		SEAT_GUNNER = 3,
+		SEAT_ARMORY_POINT = 4,
+		SEAT_DRIVER = 5,
+	};
+
+	// The WAC/AI attach-to-seat command ids (world.h SeatSelectionMode maps
+	// them to seat filters). [orig: command 123 = sitex only, 124 = reject
+	// ctrlx, 125 = any seat — the Entity_RequestVehicleAttach command gates]
+	enum MountCommand {
+		MOUNT_COMMAND_PASSENGER_ONLY = 123,
+		MOUNT_COMMAND_SKIP_CONTROLLER = 124,
+		MOUNT_COMMAND_ANY_SEAT = 125,
+	};
+
 private:
 	std::unique_ptr<opennova::world::World> world_;
 	std::unique_ptr<opennova::world::AiSystem> ai_;
@@ -789,7 +811,28 @@ private:
 	void host_pump();
 	// The per-frame non-authority client loop (recv -> Client_ProcessNetworkFrame + decoded
 	// consequences -> run_logic_tick(false) for L's motor/weapon actions -> ship C2S; spawn L on
-	// the in-match edge).
+	// the in-match edge). Sequenced from the named phase helpers below.
+	// What this frame's client net pump decoded (drives the later phases).
+	struct JoinerFrameSignals {
+		bool health = false;      // authoritative 0x0A health tail applied
+		bool objectives = false;  // objective sync applied
+	};
+	// ClientHello once (Idle -> Hello) on the first armed frame.
+	void joiner_send_hello_once();
+	// Deposit received framed datagrams for this frame's recv pump.
+	void joiner_deposit_inbound();
+	// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the
+	// decoded-state folds (loadout/kit, side assignment, deployment-release
+	// latch, freeze tripwire, objective sync). `net_start` is the pump's F3
+	// Stats wire-leg clock (stopped after the uplink ship, before the folds).
+	// Returns what was decoded this frame.
+	JoinerFrameSignals joiner_run_client_net_frame(uint64_t net_start);
+	// On the in-match edge: learn H, spawn L at the host-advertised pose, and
+	// arm it (deferred class/kit/adm), clearing any join-wait input latches.
+	void joiner_spawn_and_arm_local_player();
+	// Apply the recipient-local authoritative health scalar to L (never its
+	// predicted pose), with the fresh-frame and death-latch guards.
+	void joiner_apply_authoritative_health();
 	void joiner_pump();
 	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
 	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
@@ -1699,3 +1742,5 @@ public:
 
 VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);
 VARIANT_ENUM_CAST(godot::NovaSimulation::EffectStateField);
+VARIANT_ENUM_CAST(godot::NovaSimulation::SeatCode);
+VARIANT_ENUM_CAST(godot::NovaSimulation::MountCommand);

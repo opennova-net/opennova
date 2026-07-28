@@ -204,7 +204,7 @@ func _process(_delta: float) -> void:
 		return
 
 	if not _cached_cam or not _cached_cam.is_inside_tree() or not _cached_cam.current:
-		_cached_cam = _find_camera()
+		_cached_cam = EnvRenderCamera.find(self)
 	var cam_pos := _cached_cam.global_position if _cached_cam else Vector3.ZERO
 
 	var sun_dir: Vector3 = env.get_sun_direction()
@@ -347,15 +347,6 @@ func _tint_for(env: Node, tint_key: String) -> Vector3:
 			return env.get_sky_ambient()
 
 
-func _find_camera() -> Camera3D:
-	if Engine.is_editor_hint():
-		var editor_interface = Engine.get_singleton("EditorInterface")
-		if editor_interface:
-			var viewport = editor_interface.get_editor_viewport_3d(0)
-			if viewport:
-				return viewport.get_camera_3d()
-	var viewport := get_viewport()
-	return viewport.get_camera_3d() if viewport else null
 
 
 # Terrain line-of-sight for the glare: the ported boolean raycast form
