@@ -16,6 +16,7 @@ extends RefCounted
 # hosts measure; the pane owns labels/grouping, the board owns only sums.
 enum {
 	# main_game frame legs (game shell _process)
+	FRAME_PROCESS,         # whole engine process step (TIME_PROCESS, previous frame)
 	FRAME_PLAYER_BEFORE,   # LocalPlayerHost.before_world_tick
 	FRAME_WORLD,           # GameWorld.tick total
 	FRAME_PLAYER_AFTER,    # LocalPlayerHost.after_world_tick

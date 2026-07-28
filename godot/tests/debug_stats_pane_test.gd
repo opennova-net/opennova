@@ -124,3 +124,24 @@ func test_refresh_drains_the_board_window() -> void:
 			"a captured window renders onto the sim row")
 	assert_eq(board.window_sums()[FrameStatsBoard.SIM_STEP], 0,
 			"the drained window resets for the next reading")
+
+
+func test_shell_residual_row_subtracts_measured_legs() -> void:
+	# The "Outside shell spans" row: the engine process step minus every
+	# measured shell leg — deferred/off-span work made first-class so the next
+	# perf slice can cite it.
+	var pane := _make_pane()
+	var window := _blank_window()
+	var sums: PackedInt64Array = window[0]
+	var counts: PackedInt32Array = window[2]
+	sums[FrameStatsBoard.FRAME_PROCESS] = 100_000  # 10 ms/frame across 10 frames
+	counts[FrameStatsBoard.FRAME_PROCESS] = 10
+	sums[FrameStatsBoard.FRAME_WORLD] = 60_000
+	counts[FrameStatsBoard.FRAME_WORLD] = 10
+	sums[FrameStatsBoard.FRAME_HUD] = 10_000
+	counts[FrameStatsBoard.FRAME_HUD] = 10
+	pane.render_window(10, sums, window[1], counts, null, null)
+	assert_eq(_row(pane, "frame").get_text(1), "10.00",
+			"the frame row is the window-averaged process step")
+	assert_eq(_row(pane, "shell_residual").get_text(1), "3.00",
+			"residual = process minus the measured shell legs")

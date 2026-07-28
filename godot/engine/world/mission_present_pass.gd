@@ -37,6 +37,10 @@ var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index
 var _drive_transform := true
 var _drive_part_anim := true
 var _drive_visibility := true
+# A/B seam like _drive_transform/_drive_visibility: freezes the body-anim
+# dispatch (play_body_clip_at / play_body_anim_at and the pose chain they
+# drive) so probes can isolate the skeleton-update share of the frame.
+var _drive_body_anim := true
 # bms_id -> true for nodes the render-occlusion frame currently hides. Shared
 # BY REFERENCE from the host (GameWorld mutates it in place) via the
 # occlusion_hidden_ids setup option; consulted only on a hidden->visible write,
@@ -181,7 +185,8 @@ func present_snapshot(
 					node.visible = visible
 			if not visible:
 				_stats.hidden += 1
-		_apply_body_anim(node, snap, base, caps)
+		if _drive_body_anim:
+			_apply_body_anim(node, snap, base, caps)
 		var net_id := int(snap[base + NovaSimulation.PF_NET_ID])
 		if net_id > 0:
 			_push_muzzle(node, net_id)
