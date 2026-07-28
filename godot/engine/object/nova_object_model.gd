@@ -687,13 +687,6 @@ func set_part_phase(channel: int, phase: int) -> void:
 	_bounds_dirty = true
 
 
-## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
-func stop_part_anim(channel: int) -> void:
-	var register := _resolve_anim_channel_register(channel - 1)
-	if not register.is_empty():
-		_part_anims.erase(register)
-
-
 func clear_part_anims() -> void:
 	_part_anims.clear()
 

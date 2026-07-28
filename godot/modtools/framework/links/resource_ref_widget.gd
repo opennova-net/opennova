@@ -159,13 +159,6 @@ func set_status_copy(browse_tooltip: String, missing_tooltip: String) -> void:
 	_missing_copy = missing_tooltip
 
 
-## Force a re-resolve (e.g. after the resource folder was rescanned).
-func refresh_status() -> void:
-	_memo_value = ""
-	_memo_epoch = -1
-	_refresh_status_ui()
-
-
 static func services_from_shell(shell: Object) -> Dictionary:
 	return {
 		"resolve": func(kind: String, name: String) -> Dictionary:

@@ -43,6 +43,5 @@ void normalize_vec3(Vec3 &v);
 void cross3(const float (&a)[3], const float (&b)[3], float (&out)[3]);
 
 MaterialInfoTypeFlags lookup_material_info_flags(const char *shader);
-int find_material_index_by_name(const char *name);
 
 } // namespace oed

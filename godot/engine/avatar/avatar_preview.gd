@@ -35,7 +35,7 @@ const EDITOR_DISTANCE_SCALE := 2.7
 const MENU_DISTANCE_SCALE := 2.7
 const MENU_PITCH := -0.06
 
-# The menu's anamorphic design space (menu_shell.gd scales the whole menu tree from this
+# The menu's anamorphic design space (nova_menu_host.gd scales the whole menu tree from this
 # to the window). In menu mode the SubViewport is rendered at the on-screen pixel size
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
@@ -136,7 +136,7 @@ func set_menu_preview(enabled: bool) -> void:
 		_viewport.gui_disable_input = true
 		_viewport.msaa_3d = Viewport.MSAA_4X  # edges stay clean at the higher render res
 	# Render the 3D at true on-screen resolution. This subtree is scaled anamorphically by
-	# the menu (menu_shell.gd::_recompute_fit), so a design-size SubViewport gets upscaled
+	# the menu (nova_menu_host.gd::_recompute_fit), so a design-size SubViewport gets upscaled
 	# and blurred; sizing it to on-screen px keeps it sharp and undistorted. Recompute on
 	# window resize too. No-op in the ONED workspace (no parent scale, s == 1).
 	if is_inside_tree() and get_viewport() != null \
@@ -327,10 +327,6 @@ func _load_part(slot: String, graphic: String) -> void:
 # combo-camo application is witnessed (docs/playerinfo/avatars-re.md D-PLAYERINFO-1).
 func apply_camo(rgb: Vector3) -> void:
 	_camo = rgb
-
-
-func get_camo() -> Vector3:
-	return _camo
 
 
 func get_part_model(slot: String):
@@ -564,10 +560,6 @@ func _apply_menu_camera() -> void:
 # test [orig: update_player_preview_animation @ 0x55dba0].
 func set_hovered(value: bool) -> void:
 	_hovered = value
-
-
-func is_hovered() -> bool:
-	return _hovered
 
 
 # Per-frame menu portrait animation [orig: update_player_preview_animation @ 0x55dba0]:

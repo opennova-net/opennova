@@ -105,18 +105,6 @@ inline float til_world_from_cell(int cell) {
 	return static_cast<float>(cell * TIL_CELL_WORLD_UNITS);
 }
 
-inline float til_world_x_from_cell(int cell_x) {
-	return til_world_from_cell(cell_x);
-}
-
-inline float til_world_z_from_cell(int cell_z) {
-	return til_world_from_cell(cell_z);
-}
-
-inline float til_world_center_from_cell(int cell) {
-	return til_world_from_cell(cell) + static_cast<float>(TIL_CELL_WORLD_UNITS) * 0.5f;
-}
-
 inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
 	TilAtlasLayout layout;
 	if (atlas_width < TIL_ATLAS_TILE_PIXELS || atlas_height < TIL_ATLAS_TILE_PIXELS) {

@@ -52,14 +52,6 @@ func frames(count: int) -> void:
 		await scene_tree.process_frame
 
 
-## First node matching `pattern` (find_child wildcards) under the tree root.
-func find_node(pattern: String) -> Node:
-	var scene_tree := main_tree()
-	if scene_tree == null or scene_tree.root == null:
-		return null
-	return scene_tree.root.find_child(pattern, true, false)
-
-
 ## The mounted NovaResourceRoot, or null when no resource directory is set.
 func root() -> Variant:
 	return _shell_call("get_resource_root")

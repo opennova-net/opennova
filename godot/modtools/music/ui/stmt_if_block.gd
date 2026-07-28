@@ -388,10 +388,6 @@ func else_rows() -> Array:
 	return _lane_rows(_else_lane)
 
 
-func has_else() -> bool:
-	return _else_lane != null
-
-
 func _lane_rows(lane: VBoxContainer) -> Array:
 	var out: Array = []
 	if lane == null:

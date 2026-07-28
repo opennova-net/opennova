@@ -113,32 +113,8 @@ func apply_default_visual_state(material: ShaderMaterial, sync_data: bool = true
 	sync_material_from_data(material)
 
 
-func set_slot_filename(slot_id: String, filename: String) -> void:
-	if filename.is_empty():
-		texture_files.erase(slot_id)
-	else:
-		texture_files[slot_id] = filename
-
-
-func merge_slot_filenames(source: Dictionary, overwrite_existing: bool = true) -> void:
-	for slot_id in TerrainEditorSlots.get_map_data_slot_ids():
-		var key := String(slot_id)
-		var filename := String(source.get(key, ""))
-		if filename.is_empty():
-			continue
-		if overwrite_existing or not texture_files.has(key):
-			texture_files[key] = filename
-
-
 func get_slot_filename(slot_id: String) -> String:
 	return String(texture_files.get(slot_id, ""))
-
-
-func get_slot_filename_or_default(slot_id: String, terrain_name: String) -> String:
-	var filename := get_slot_filename(slot_id)
-	if not filename.is_empty():
-		return filename
-	return TerrainEditorSlots.get_export_filename(slot_id, terrain_name)
 
 
 func load_tileinfo_from_dir(base_dir: String) -> void:

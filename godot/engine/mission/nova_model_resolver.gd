@@ -28,15 +28,6 @@ func has_item_db() -> bool:
 	return _item_db != null
 
 
-# items.def type == Person, or carries a skeletal anim_def.
-func is_animated(item_id: int) -> bool:
-	if _item_db == null:
-		return false
-	if _item_db.get_item_type(item_id) == NovaItemDatabase.TYPE_PERSON:
-		return true
-	return not _item_db.get_anim_def(item_id).is_empty()
-
-
 # Build a configured NovaObjectModel for `item_id` (a raw items.def id) under
 # `parent`, or null if the item has no graphic / the .3di can't resolve. The model
 # is added to the tree BEFORE set_object_data so the mesh/skeleton build can touch

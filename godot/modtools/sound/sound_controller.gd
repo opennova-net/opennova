@@ -36,7 +36,6 @@ var data: NovaLwfData
 var selection: Dictionary = {"kind": SEL_NONE, "set": -1, "layer": -1, "member": -1}
 
 
-
 func _init() -> void:
 	data = NovaLwfData.new()
 	data.create_empty()
@@ -138,9 +137,6 @@ func select_layer(si: int, li: int) -> void:
 
 func select_member(si: int, li: int, mi: int) -> void:
 	_select(SEL_MEMBER, si, li, mi, true)
-
-func clear_selection() -> void:
-	_select(SEL_NONE, -1, -1, -1, true)
 
 
 func _select(kind: int, si: int, li: int, mi: int, emit: bool) -> void:

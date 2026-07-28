@@ -14,7 +14,7 @@ const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 
 var _shell  # MainGame: start_world_load / enter_net_world / current_resource_root
 var _world: GameWorld
-var _menu_host  # NovaMenuHost (menu_shell.gd)
+var _menu_host  # NovaMenuHost (nova_menu_host.gd)
 var _camera: Camera3D
 var _hud_parent: Node   # where the spectator kill feed mounts
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)

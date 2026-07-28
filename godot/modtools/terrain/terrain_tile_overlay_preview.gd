@@ -167,9 +167,6 @@ func set_authoring_outlines_visible(value: bool) -> void:
 	_dirty = true
 
 
-func are_authoring_outlines_visible() -> bool:
-	return _authoring_outlines_visible
-
 ## User-visible authoring-layer state without exposing owned mesh instances.
 func is_outline_visible() -> bool:
 	if _tile_overlay == null:

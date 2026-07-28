@@ -284,14 +284,6 @@ func get_sector_origin_world(row: int, col: int) -> Vector3:
 	)
 
 
-func get_sector_center_world(row: int, col: int) -> Vector3:
-	var origin := get_sector_origin_world(row, col)
-	var center := Vector3(origin.x + SECTOR_SIZE * 0.5, 0.0, origin.z + SECTOR_SIZE * 0.5)
-	var height := sample_world_height(center.x, center.z)
-	center.y = height if height > -1000000.0 else 0.0
-	return center
-
-
 func sample_world_height(world_x: float, world_z: float) -> float:
 	# Scalar and batch now run the same C++ live-surface sampler; -1e6 is this
 	# wrapper's legacy off-mesh sentinel (the batch variant keeps NAN).

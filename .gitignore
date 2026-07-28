@@ -98,3 +98,4 @@ deploy/compose/docker-compose.winport.yml
 
 # Local reverse-engineering notes/dumps
 ida_dumps/
+stripify_call_*.log

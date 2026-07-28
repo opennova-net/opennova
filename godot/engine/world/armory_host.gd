@@ -20,7 +20,7 @@ extends Node
 
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
-const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (menu_shell's default)
+const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (NovaMenuHost's default)
 const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 

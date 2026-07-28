@@ -46,12 +46,6 @@ enum class ParamType : uint8_t {
 
 constexpr int kParamTypeCount = 28;
 
-// By-reference operand types (passed as pointer so the handler can write an
-// lvalue / read a string buffer). [orig: the {17,18,27} checks in the
-// WacScript_InitAndLoad argc/call_conv derivation loop.]
-inline constexpr bool param_is_raw(ParamType t) {
-    return t == ParamType::Text || t == ParamType::Filename || t == ParamType::Variable;
-}
 
 const char *param_type_name(ParamType t);
 

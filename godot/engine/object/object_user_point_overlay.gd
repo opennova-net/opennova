@@ -52,10 +52,6 @@ func set_points_visible(points_visible: bool) -> void:
 	visible = points_visible and has_user_points()
 
 
-func is_points_visible() -> bool:
-	return visible and has_user_points()
-
-
 func has_user_points() -> bool:
 	return get_user_point_count() > 0
 

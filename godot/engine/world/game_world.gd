@@ -668,7 +668,7 @@ func _reconcile_join_expansion() -> bool:
 	var dir := resource_root.get_root_dir()
 	var previous := String(resource_root.get_expansion())
 	# Switch THIS root rather than swapping in a second one, the same in-place remount
-	# menu_shell._apply_expansion does for the Mods screen: every holder (the menu shell, the
+	# NovaMenuHost._apply_expansion does for the Mods screen: every holder (the menu shell, the
 	# loading screen) is meant to move with it, and mount_runtime rebuilds the index and bumps
 	# the cache epoch, so their caches self-clear. The persisted expansion setting is NOT
 	# written — the host owns this session's data set, not the local menu choice. Same layering
@@ -676,7 +676,7 @@ func _reconcile_join_expansion() -> bool:
 	if resource_root.mount_runtime(dir, plan.expansion, NovaLaunchFlags.loose_override_enabled(),
 			NovaLaunchFlags.game(ResourceDirSettings.get_game())) != OK:
 		# A hard mount failure clears the root, and the shell shares this object, so put the
-		# previous expansion back before aborting to the menu (menu_shell._apply_expansion rolls
+		# previous expansion back before aborting to the menu (NovaMenuHost._apply_expansion rolls
 		# back the same way). The failure surfaces through the preload's abort leg rather than a
 		# bare load_failed, so the live session is torn down too.
 		var mount_error := String(resource_root.get_last_error())
@@ -2335,9 +2335,6 @@ func set_collision_debug(enabled: bool) -> void:
 	_collision_debug = enabled
 	_refresh_collision_debug()
 
-func is_collision_debug() -> bool:
-	return _collision_debug
-
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
@@ -2760,7 +2757,6 @@ func _on_runtime_effects(effects: Array) -> void:
 		return
 	_route_mission_effects(routed)
 	mission_effects.emit(routed)
-
 
 
 func _on_runtime_fixed_tick(_logic_tick: int) -> void:
