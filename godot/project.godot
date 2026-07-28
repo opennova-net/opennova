@@ -42,7 +42,11 @@ enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 
 [rendering]
 
-rendering_device/driver.windows="d3d12"
+; Vulkan measured 23% faster than d3d12 on the AMD APU validation box
+; (perf_fire_probe_game ASH_I5A baseline: 31.5 -> 24.2 ms avg, 2026-07-27);
+; mobile method measured WORSE than Forward+ (28.4 ms) and stays off.
+; Re-check on NVIDIA before shipping if d3d12 ever needs to return.
+rendering_device/driver.windows="vulkan"
 textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
 ; Retail reference captures run the witnessed anisotropic texfilter mode
