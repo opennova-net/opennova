@@ -365,8 +365,9 @@ loop @ 0x52b8a6 caps the outer frame at 16 ms when `dword_2550744` is set — an
 optional whole-loop limiter, off in the fast-retail reference configs.) The in-mission
 mode struct is `"Game Loop"` @ 0x82f340: its update is `Game_ProcessMainFrame
 @ 0x5263f0` (increments `current_tick` @ 0x5265b4, pumps net, runs
-`Entity_UpdateAllEntities @ 0x4c2100`), its render is `0x521310` (the IDB's
-`render_loading_frame` — a misnomer: it is the per-frame in-mission render callback —
+`Entity_UpdateAllEntities @ 0x4c2100`), its render is `GameLoop_RenderFrame
+@ 0x521310` (renamed 2026-07-28 from the `render_loading_frame` misnomer, maintainer
+OK) — the per-frame in-mission render callback:
 listener update `Audio_UpdateListenerFromView @ 0x43b400` ->
 `Audio_UpdateListenerPosition @ 0x527960`, engine sounds, the Top8 mix @ 0x521341
 gated off for dedicated servers via `dword_A87050`, then the scene render).
@@ -543,9 +544,10 @@ Audio_UpdateListenerFromView @ 0x43b400` (the render-cb listener leg: cinematic/
 camera transform else `g_view_pos_x`, MP-session-gated); cadence witness comments at
 `0x4a8080` (pool-2 stagger + tick-unit lifetimes), `0x5284a0` (`current_tick` time
 base), `0x521310` (the "Game Loop" mode-table witness + misnomer note), and the class
-table `0x82abc8` (layout + `def+0x158 -> entity+0x1C4` plumbing). Proposed and
-pending maintainer OK (curated name): `render_loading_frame @ 0x521310 ->
-GameLoop_RenderFrame`. IDB saved.
+table `0x82abc8` (layout + `def+0x158 -> entity+0x1C4` plumbing). Applied with
+maintainer OK (same day): the curated misnomer `render_loading_frame @ 0x521310 ->
+GameLoop_RenderFrame`, entry comment rewritten to the mode-table witness (the old
+"loading frame / previous name confirmed correct" note was wrong). IDB saved.
 
 ## Verdict
 
