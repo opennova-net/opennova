@@ -811,7 +811,28 @@ private:
 	void host_pump();
 	// The per-frame non-authority client loop (recv -> Client_ProcessNetworkFrame + decoded
 	// consequences -> run_logic_tick(false) for L's motor/weapon actions -> ship C2S; spawn L on
-	// the in-match edge).
+	// the in-match edge). Sequenced from the named phase helpers below.
+	// What this frame's client net pump decoded (drives the later phases).
+	struct JoinerFrameSignals {
+		bool health = false;      // authoritative 0x0A health tail applied
+		bool objectives = false;  // objective sync applied
+	};
+	// ClientHello once (Idle -> Hello) on the first armed frame.
+	void joiner_send_hello_once();
+	// Deposit received framed datagrams for this frame's recv pump.
+	void joiner_deposit_inbound();
+	// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the
+	// decoded-state folds (loadout/kit, side assignment, deployment-release
+	// latch, freeze tripwire, objective sync). `net_start` is the pump's F3
+	// Stats wire-leg clock (stopped after the uplink ship, before the folds).
+	// Returns what was decoded this frame.
+	JoinerFrameSignals joiner_run_client_net_frame(uint64_t net_start);
+	// On the in-match edge: learn H, spawn L at the host-advertised pose, and
+	// arm it (deferred class/kit/adm), clearing any join-wait input latches.
+	void joiner_spawn_and_arm_local_player();
+	// Apply the recipient-local authoritative health scalar to L (never its
+	// predicted pose), with the fresh-frame and death-latch guards.
+	void joiner_apply_authoritative_health();
 	void joiner_pump();
 	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
 	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.

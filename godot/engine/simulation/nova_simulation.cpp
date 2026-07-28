@@ -5546,24 +5546,17 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 	}
 }
 
-void NovaSimulation::joiner_pump() {
-	namespace np = opennova::np;
-	if (!runtime_) {
-		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
-		return;
-	}
-	const uint32_t now = now_tick_;
-	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
-	// uplink ship, ending where the local (non-authority) world work begins.
-	const uint64_t net_start =
-			runtime_profiling_enabled_ ? perf_now_us() : 0;
-	// ClientHello once (Idle -> Hello) the first armed frame.
+// ClientHello once (Idle -> Hello) the first armed frame.
+void NovaSimulation::joiner_send_hello_once() {
 	if (!joiner_started_) {
 		const std::vector<uint8_t> hello = runtime_->start();
 		if (!hello.empty()) ship_to_host(hello);
 		joiner_started_ = true;
 	}
-	// Deposit received framed datagrams for this frame's recv pump.
+}
+
+// Deposit received framed datagrams for this frame's recv pump.
+void NovaSimulation::joiner_deposit_inbound() {
 	if (pump_.is_valid()) {
 		pump_->poll();
 		while (pump_->has_inbound()) {
@@ -5572,6 +5565,17 @@ void NovaSimulation::joiner_pump() {
 			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
 		}
 	}
+}
+
+// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the decoded-state
+// folds (loadout/kit, side assignment, deployment-release latch, the ~1 Hz
+// freeze tripwire, objective sync into world subgoals). `net_start` is the
+// pump's F3 Stats wire-leg clock; it stops right after the uplink ship, before
+// the folds, so the Stats board measures exactly the wire leg. Returns what
+// this frame's pump decoded (drives the later phases).
+NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame(
+		uint64_t net_start) {
+	const uint32_t now = now_tick_;
 	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
 	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
 	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
@@ -5714,21 +5718,26 @@ void NovaSimulation::joiner_pump() {
 		joiner_last_gap_depth_ = gap_depth;
 		joiner_diagnostic_sampled_ = true;
 	}
-	const bool received_authoritative_health =
+	JoinerFrameSignals decoded;
+	decoded.health =
 			runtime_->state().health_updates_applied != health_updates_before;
-	const bool received_authoritative_objectives =
+	decoded.objectives =
 			runtime_->state().objective_updates_applied != objective_updates_before;
-	if (received_authoritative_objectives) {
+	if (decoded.objectives) {
 		const opennova::netsim::ClientState &client = runtime_->state();
 		world_->subgoals.won = client.objective_won;
 		world_->subgoals.lost = client.objective_lost;
 		world_->subgoals.show_win = client.objective_show_win;
 		world_->subgoals.show_lose = client.objective_show_lose;
 	}
+	return decoded;
+}
 
-	// On reaching in-match (detected by the recv-fold above): learn H + spawn L at the host-advertised
-	// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
-	// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
+// On the in-match edge (detected by the recv-fold): learn H + spawn L at the host-advertised
+// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
+// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
+void NovaSimulation::joiner_spawn_and_arm_local_player() {
+	namespace np = opennova::np;
 	if (runtime_->in_match() && !joiner_local_spawned_ && world_->ai) {
 		joiner_self_wire_handle_ = runtime_->self_handle();
 		const np::JoinerConnection::SelfSpawn &sp = runtime_->spawn_pose();
@@ -5790,17 +5799,20 @@ void NovaSimulation::joiner_pump() {
 		stance_latch_ = 0;
 		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 	}
+}
 
-	// The 0x0A tail is the authoritative health source for the recipient's OWN
-	// player. H belongs to the host's handle space; apply that recipient-local
-	// scalar to the joiner's distinct motor entity L. A fresh-frame guard
-	// prevents ClientState's pre-frame zero default from killing L during the
-	// handshake. Once L is dead, positive health revives it only after the
-	// separate ACK-qualified deployment release above, and only from a later
-	// tail. That edge also snaps L to H's redeployed authoritative pose before
-	// its next uplink can run.
-	// [orig: tail health read @0x430428; store to local Health @0x4305df]
-	if (received_authoritative_health && joiner_local_spawned_ &&
+// The 0x0A tail is the authoritative health source for the recipient's OWN
+// player. H belongs to the host's handle space; apply that recipient-local
+// scalar to the joiner's distinct motor entity L (the pump gates this phase on
+// the frame's decoded health signal). A fresh-frame guard prevents
+// ClientState's pre-frame zero default from killing L during the handshake.
+// Once L is dead, positive health revives it only after the separate
+// ACK-qualified deployment release latched by the net-frame folds, and only
+// from a later tail. That edge also snaps L to H's redeployed authoritative
+// pose before its next uplink can run.
+// [orig: tail health read @0x430428; store to local Health @0x4305df]
+void NovaSimulation::joiner_apply_authoritative_health() {
+	if (joiner_local_spawned_ &&
 			world_->cached.local_player.valid()) {
 		const opennova::world::EntityHandle local_h =
 				world_->cached.local_player;
@@ -5929,6 +5941,29 @@ void NovaSimulation::joiner_pump() {
 			}
 		}
 	}
+}
+
+// The joiner's per-frame pump. Retail dispatches received messages before the
+// entity/weapon-action pumps, so decoded consequences are applied to L before
+// this frame's local World tick. In particular, an S2C 0x49 arriving on a
+// reload's DONE boundary must refill the slot before IDLE can observe the
+// stale empty magazine and queue a second C2S 0x25.
+// [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180]
+// The pump itself is the phase sequence; each helper carries its witnesses.
+void NovaSimulation::joiner_pump() {
+	if (!runtime_) {
+		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
+		return;
+	}
+	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
+	// uplink ship, ending where the local (non-authority) world work begins.
+	const uint64_t net_start =
+			runtime_profiling_enabled_ ? perf_now_us() : 0;
+	joiner_send_hello_once();
+	joiner_deposit_inbound();
+	const JoinerFrameSignals decoded = joiner_run_client_net_frame(net_start);
+	joiner_spawn_and_arm_local_player();
+	if (decoded.health) joiner_apply_authoritative_health();
 	sync_joiner_authoritative_mount();
 	mirror_client_view_mission_entities();
 
