@@ -4994,6 +4994,8 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_ANIM_REMOTE_REQUEST);
+	BIND_ENUM_CONSTANT(PF_ANIM_STATE_PULSE);
+	BIND_ENUM_CONSTANT(PF_ANIM_PULSE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HELD_WEAPON_ADM);
 	BIND_ENUM_CONSTANT(PF_HELD_WEAPON_PITCH_DEG);
 	BIND_ENUM_CONSTANT(PF_HELD_WEAPON_YAW_DEG);
@@ -9439,6 +9441,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
 		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = -1.0f;
 		r[PF_ANIM_REMOTE_REQUEST] = 0.0f;
+		r[PF_ANIM_STATE_PULSE] = -1.0f; r[PF_ANIM_PULSE_TICKS] = -1.0f;
 		r[PF_WPN_ANIM_STATE] = -1.0f; r[PF_WPN_PHASE_TICKS] = -1.0f;
 		r[PF_HIDDEN] = 0.0f; r[PF_LOCAL_VIEW_SUPPRESSED] = 0.0f;
 		r[PF_ALIVE] = 1.0f; r[PF_RESPAWN_REVISION] = 0.0f;
@@ -9650,6 +9653,18 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				r[PF_ANIM_STATE] =
 						static_cast<float>(es.anim_state_id);
 				r[PF_ANIM_REMOTE_REQUEST] = 1.0f;
+				// A transition state that arrived and was overwritten within
+				// this fold window (a tapped prone roll rides the wire for 1-2
+				// ticks). Presentation dispatches it BEFORE the current state,
+				// replaying retail's per-record apply order [orig: @0x4c1153].
+				if (es.anim_state_pulse >= 0) {
+					r[PF_ANIM_STATE_PULSE] =
+							static_cast<float>(es.anim_state_pulse);
+					if (es.cls == opennova::EntityClass::Player) {
+						r[PF_ANIM_PULSE_TICKS] =
+								static_cast<float>(es.anim_pulse_ratio);
+					}
+				}
 				// The player compact's byte 15 is the authority's elapsed
 				// half-frame ticks in the current body loop. Retail applies it
 				// to remote players as the anim-channel phase seed. Infantry
@@ -9720,6 +9735,9 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			}
 		}
 	}
+	// Consume-once: each transition pulse dispatches exactly one presented
+	// frame (the rows above copied any live pulse into PF_ANIM_STATE_PULSE).
+	runtime_->state().clear_anim_pulses();
 	return out;
 }
 

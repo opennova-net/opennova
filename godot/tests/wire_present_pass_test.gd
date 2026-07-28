@@ -99,6 +99,10 @@ class FakeSim:
 					entity.get("anim_phase", -1))
 			out[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST] = float(
 					entity.get("anim_remote_request", 1))
+			out[base + NovaSimulation.PF_ANIM_STATE_PULSE] = float(
+					entity.get("anim_pulse", -1))
+			out[base + NovaSimulation.PF_ANIM_PULSE_TICKS] = float(
+					entity.get("anim_pulse_ticks", -1))
 			out[base + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
 					entity.get("aim_overlay_valid", 0))
 			var body: Vector3 = entity.get("aim_body", Vector3.ZERO)
@@ -630,6 +634,44 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), 22],
 		[68, "anim_emplaced_2", NovaSimulation.infantry_anim_flags(68), 6],
 	], "raw compact requests reach the completion-aware remote animation channel")
+
+
+func test_wire_model_receives_the_transition_pulse_before_the_current_state() -> void:
+	# A tapped prone roll rides the wire as 41/42 for a single 0x0A sample (the
+	# emitted byte is `pending ?: current`), and several datagrams fold per
+	# render frame, so the sim surfaces the buried transition as
+	# PF_ANIM_STATE_PULSE. Presentation dispatches it FIRST — retail applies the
+	# anim byte per record [orig: @0x4c1153] — so the locked roll clip accepts
+	# and the follow-up state queues behind it at the model. Revisioned sim: the
+	# second leg pins the edge gate staying closed once the pulse is drained.
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"anim_state": 48,
+		"anim_phase": 60,
+		"anim_pulse": 41,
+		"anim_pulse_ticks": 6,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.remote_body_calls, [
+		[41, "anim_roll_left", NovaSimulation.infantry_anim_flags(41), 6],
+		[48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 60],
+	], "the buried pulse dispatches before the current state, carrying its own phase")
+
+	# A steady frame with no pulse and an unchanged state stays on the edge-gated
+	# fast path: no re-dispatch.
+	sim.entities[0]["anim_pulse"] = -1
+	sim.entities[0]["anim_pulse_ticks"] = -1
+	presenter.present()
+	assert_eq(model.remote_body_calls.size(), 2,
+			"pulse-free same-state frames keep the edge-gate skip")
 
 
 func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:

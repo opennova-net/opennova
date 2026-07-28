@@ -29,6 +29,10 @@ ClientEntityState &ClientState::upsert(uint16_t handle) {
 	return entities.back();
 }
 
+void ClientState::clear_anim_pulses() {
+	for (ClientEntityState &e : entities) e.anim_state_pulse = -1;
+}
+
 // ---- NetClientView ----------------------------------------------------------
 
 NetClientView::NetClientView()
@@ -447,6 +451,18 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			continue;
 		}
 		ClientEntityState &es = state_.upsert(rec.handle);
+		// Capture the previous body-anim sample before the per-record clear: if
+		// this record REPLACES it with a different state within one decode fold,
+		// the old value becomes the transition PULSE presentation still has to
+		// dispatch — retail applies each record's anim byte through the receive
+		// arbitration as it decodes [orig: @0x4c1153], and a tapped prone roll
+		// rides the wire for only 1-2 ticks (the byte is `pending ?: current`).
+		// A row's first-ever organic sample never pulses (its default 0 would
+		// read as the anim_reset clip).
+		const bool prev_anim_sampled = es.cls == EntityClass::Player ||
+		                               es.cls == EntityClass::Infantry;
+		const uint8_t prev_anim_state = es.anim_state_id;
+		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
 		es.seen_this_frame = true;
@@ -585,6 +601,18 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			break;
 		default:
 			break; // unresolved/guided records are not compact motion samples
+		}
+		// Latch the overwritten body-anim state as this row's transition pulse.
+		// LAST transition wins: in a fold of [41, 48] the 41 is the state being
+		// buried (the 48 latched by the first transition was already presented
+		// last frame, and re-dispatching a presented state is a same-state
+		// no-op at the model). The presenter drains the pulse once per frame.
+		if (prev_anim_sampled &&
+				(rec.cls == EntityClass::Player ||
+						rec.cls == EntityClass::Infantry) &&
+				es.anim_state_id != prev_anim_state) {
+			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
+			es.anim_pulse_ratio = prev_anim_ratio;
 		}
 		if (!skip_pos) {
 			es.x = fu.anchor_x + network_decompress_fixedpoint(cx);

@@ -112,6 +112,18 @@ public:
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
 		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
+		// A transition state observed and then OVERWRITTEN within one decode fold
+		// (several 0x0A datagrams can apply between present drains). Retail applies
+		// the anim byte PER RECORD through the receive arbitration [orig: @0x4c1153];
+		// our snapshot seam coalesces to the latest byte, which silently drops 1-2
+		// tick pulses — a TAPPED prone roll transmits 41/42 for only an instant
+		// because the wire byte is `pending ?: current` and flips as soon as the
+		// next state queues. Presentation dispatches the pulse BEFORE the current
+		// state so the model's arbitration replays retail's per-record order.
+		// -1 = none; MUST stay ahead of PF_AIM_OVERLAY_VALID (zero-fill would read
+		// as valid state 0 = anim_reset).
+		PF_ANIM_STATE_PULSE,
+		PF_ANIM_PULSE_TICKS,
 		// The SECONDARY (upper-body weapon) channel — the hold-pose ladder every
 		// observer re-derives for every player body, local or remote. -1 = no channel
 		// this frame. These MUST stay ahead of PF_AIM_OVERLAY_VALID: rows are seeded

@@ -54,6 +54,16 @@ struct ClientEntityState {
 	uint8_t aim_yaw_byte = 0;                     // infantry-only entity+720 byte
 	uint8_t anim_state_id = 0;                    // player anim_state_id / infantry anim_byte
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
+	// A body-anim state that was applied and then OVERWRITTEN by a later record
+	// before the presenter drained this row. Retail applies each record's anim
+	// byte through the receive arbitration as it decodes [orig: @0x4c1153]; our
+	// snapshot seam samples once per render frame, so a 1-2 tick transition (a
+	// tapped prone roll: the wire byte is `pending ?: current` and flips as soon
+	// as the follow-up state queues on the authority) would otherwise never
+	// reach presentation. -1 = none. The presenter consumes it first, then the
+	// current state, and clears it (ClientState::clear_anim_pulses).
+	int16_t anim_state_pulse = -1;
+	uint8_t anim_pulse_ratio = 0;
 	// entity+0x2B0, the peer's equipped AdmDef index (the player compact's off-16
 	// `anim_def_index`). Retail's client stores it straight onto the peer entity and its
 	// body updater re-reads it every selection pass to pick that peer's upper-body hold
@@ -146,6 +156,10 @@ struct ClientState {
 
 	ClientEntityState *find(uint16_t handle);
 	ClientEntityState &upsert(uint16_t handle);
+	// Consume-once drain for the per-row anim transition pulses: the presenter
+	// calls this after building a snapshot so each pulse dispatches exactly one
+	// frame (see ClientEntityState::anim_state_pulse).
+	void clear_anim_pulses();
 };
 
 } // namespace opennova::netsim

@@ -194,7 +194,8 @@ func _apply_body_anim_gated(
 		node, snap: PackedFloat32Array, base: int, caps: int, row: int) -> void:
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
 	var remote_request_i := int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST])
-	if (row >= 0 and remote_request_i != 0
+	var anim_pulse := int(snap[base + NovaSimulation.PF_ANIM_STATE_PULSE])
+	if (row >= 0 and remote_request_i != 0 and anim_pulse < 0
 			and anim_state == int(_row_anim_state[row])
 			and remote_request_i == int(_row_anim_request[row])):
 		return
@@ -203,6 +204,18 @@ func _apply_body_anim_gated(
 		_row_anim_request[row] = remote_request_i
 	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	var remote_request := remote_request_i != 0
+	# A transition state that arrived and was overwritten within one decode fold
+	# (several 0x0A datagrams can apply per render frame — a tapped prone roll is
+	# on the wire for 1-2 ticks). Dispatch it FIRST so the model's arbitration
+	# sees retail's per-record order: the locked roll accepts, the follow-up
+	# state queues behind it and promotes at clip completion.
+	# [orig: per-record remote anim apply @0x4c1153]
+	if remote_request and anim_pulse >= 0 and (caps & CAP_REMOTE_BODY) != 0:
+		var pulse_key := _infantry_key(anim_pulse)
+		if not pulse_key.is_empty():
+			node.apply_remote_body_state(anim_pulse, pulse_key,
+					NovaSimulation.infantry_anim_flags(anim_pulse),
+					int(snap[base + NovaSimulation.PF_ANIM_PULSE_TICKS]))
 	if anim_state >= 0:
 		var key := _infantry_key(anim_state)
 		if not key.is_empty():
