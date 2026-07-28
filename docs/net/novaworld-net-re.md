@@ -2273,7 +2273,7 @@ consumed exactly on every payload).
 | — | 4 | eulerY (32-bit BAM) | `spawnFlags & 0x0004` | entity+24 |
 | — | 4 | sectionMask | `spawnFlags & 0x0008` | entity+308 |
 | — | 1 | **teamByte** | `spawnFlags & 0x0010` | entity+354 — BMS team (1=Blue/2=Red); D-NET-58 |
-| — | 2 | parentHandle | `spawnFlags & 0x0100` | resolved → entity+368 (`occupantEntity` pool ptr) — a driver/occupant BACK-REFERENCE, not a transform parent (D-NET-190). Resolve nulls only `0xFFFF`/pool ≥ 5/capacity overflow — `0x0000` is a VALID pool-0 slot-0 ref `[orig: read @ 0x432e35..0x432e53, resolve+store @ 0x43326d..0x433289]`. Live AS witness: retail-vehicle-session carries a Dune Buggy (slot 0x1006, flags 0x1d77) with parent `0x0000` = "Player #1 (Multiplayer)"; the entity's client-side motion still rides its §5.13 compacts exclusively. Flag-clear default is `-1` (0xFFFF) |
+| — | 2 | parentHandle | `spawnFlags & 0x0100` | resolved → entity+368 (`occupantEntity` pool ptr) — a driver/occupant BACK-REFERENCE, not a transform parent (D-NET-195). Resolve nulls only `0xFFFF`/pool ≥ 5/capacity overflow — `0x0000` is a VALID pool-0 slot-0 ref `[orig: read @ 0x432e35..0x432e53, resolve+store @ 0x43326d..0x433289]`. Live AS witness: retail-vehicle-session carries a Dune Buggy (slot 0x1006, flags 0x1d77) with parent `0x0000` = "Player #1 (Multiplayer)"; the entity's client-side motion still rides its §5.13 compacts exclusively. Flag-clear default is `-1` (0xFFFF) |
 | — | 2 | targetHandle | `spawnFlags & 0x0200` | resolved → entity+40 (pool ptr) |
 | — | 1 | weaponSlotMask | `spawnFlags & 0x0400` | (the weapon block; reads u16 per set bit, 0xFFFF on a set bit skips storage but still consumes the wire u16) |
 | — | 2 ea | weaponHandle\[bit\] | `mask & (1<<bit)` (bits 0..7) | entity+400+2·bit (capped at +414); 0xFFFF skips storage |
@@ -2447,7 +2447,7 @@ weapon-aim from `vehicleData[136/135/132]` while the read side lands the
 decompressed values into a *different* slot triple `vehicleData[177/178/179]`
 (write-source ≠ read-dest — the earlier single "landing" column conflated them).
 
-**Read-side carrier semantics (2026-07-27, D-NET-190).** The off-0
+**Read-side carrier semantics (2026-07-27, D-NET-195).** The off-0
 `parentSlotHandle` is the CARRIER (deck/ground entity) and is consumed per
 record, not latched: the reader resolves it (`0xFFFF`, pool ≥ 5, or a
 capacity overflow → null `[orig: @ 0x46085d..0x46086c]`), and
@@ -2468,7 +2468,7 @@ capacity overflow → null `[orig: @ 0x46085d..0x46086c]`), and
 This is the same lift D-NET-67 witnessed for rider records. It is distinct
 from the §5.11 spawn `parentHandle`, which lands at `entity+368`
 (`occupantEntity`) and carries NO transform semantics — conflating the two
-glued world vehicles to players (D-NET-190).
+glued world vehicles to players (D-NET-195).
 
 **Field labels corrected 2026-06-17 (D-NET-63); off-13 re-corrected 2026-07-02.** The
 `eulerZ/eulerY/eulerX` triple (Z pre-branch always; X/Y mounted-only) feeds
