@@ -9,19 +9,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 "$root/scripts/bootstrap_godot.sh"
 
-if [[ -z "${GODOT_BIN:-}" ]]; then
-  for candidate in \
-    "$root/.godot-bin/Godot_v4.6.1-stable_win64_console.exe" \
-    "$root/.godot-bin/Godot_v4.6.1-stable_win64.exe" \
-    "$root/.godot-bin/Godot_v4.6.1-stable_linux.x86_64" \
-    "$root/.godot-bin/Godot_v4.6.1-stable_macos.universal"
-  do
-    if [[ -x "$candidate" ]]; then
-      GODOT_BIN="$candidate"
-      break
-    fi
-  done
-fi
+source "$root/scripts/godot_bin.sh"
+resolve_godot_bin "$root"
 
 if [[ -z "${GODOT_BIN:-}" || ! -x "$GODOT_BIN" ]]; then
   echo "error: set GODOT_BIN to a Godot 4.6.1 binary (or drop one in .godot-bin/)" >&2

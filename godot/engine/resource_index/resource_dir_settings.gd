@@ -23,10 +23,7 @@ const CROSSHAIR_STYLE_MAX := 24
 
 ## The persisted resource directory, or "" when unset / no longer a valid dir.
 static func get_resource_dir() -> String:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return ""
-	var dir := String(config.get_value(SECTION, DIR_KEY, ""))
+	var dir := String(NovaConfigStore.read(CONFIG_PATH, SECTION, DIR_KEY, ""))
 	return dir if is_valid_root(dir) else ""
 
 
@@ -37,69 +34,50 @@ static func get_resource_dir() -> String:
 ## editor (via resource_library.save_state) and the runtime (main_game) go
 ## through, so recording is automatic for both with one disk write.
 static func set_resource_dir(path: String) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
 	var clean := path.strip_edges()
-	config.set_value(SECTION, DIR_KEY, clean)
-	if not clean.is_empty() and is_valid_root(clean):
-		_merge_recent(config, clean)
-	config.save(CONFIG_PATH)
+	NovaConfigStore.update(CONFIG_PATH, func(config: ConfigFile) -> void:
+		config.set_value(SECTION, DIR_KEY, clean)
+		if not clean.is_empty() and is_valid_root(clean):
+			_merge_recent(config, clean))
 
 
 ## The persisted expansion name (e.g. "jox01"), or "" for the base game. Not validated
 ## here (there is no dir context); resource_library.gd drops a name that no longer matches
 ## an expansion under the live root.
 static func get_expansion() -> String:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return ""
-	return String(config.get_value(SECTION, EXPANSION_KEY, ""))
+	return String(NovaConfigStore.read(CONFIG_PATH, SECTION, EXPANSION_KEY, ""))
 
 
 ## Persist the expansion name, preserving any other sections in the config.
 static func set_expansion(name: String) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(SECTION, EXPANSION_KEY, name.strip_edges())
-	config.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, EXPANSION_KEY, name.strip_edges())
 
 
 ## The persisted game code (e.g. "jodemo"), or "jo" when unset. Selects the SCR decode
 ## key. A `/game` launch flag overrides this (see NovaLaunchFlags.game).
 static func get_game() -> String:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return "jo"
-	var code := String(config.get_value(SECTION, GAME_KEY, "jo")).strip_edges().to_lower()
+	var code := String(NovaConfigStore.read(CONFIG_PATH, SECTION, GAME_KEY, "jo")) 			.strip_edges().to_lower()
 	return code if not code.is_empty() else "jo"
 
 
 ## Persist the game code, preserving any other sections in the config.
 static func set_game(code: String) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(SECTION, GAME_KEY, code.strip_edges().to_lower())
-	config.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, GAME_KEY, code.strip_edges().to_lower())
 
 
 ## The player's retail crosshair index (0 = cross01.tga, 24 = cross25.tga).
 ## Clamp corrupt or out-of-range values so HUD asset lookup always stays inside
 ## the authored XHAIR_APPEARANCE table.
 static func get_crosshair_style() -> int:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return CROSSHAIR_STYLE_MIN
-	return clampi(int(config.get_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY, CROSSHAIR_STYLE_MIN)),
+	return clampi(int(NovaConfigStore.read(
+			CONFIG_PATH, PLAYER_SECTION, CROSSHAIR_STYLE_KEY, CROSSHAIR_STYLE_MIN)),
 		CROSSHAIR_STYLE_MIN, CROSSHAIR_STYLE_MAX)
 
 
 ## Persist the selected retail crosshair index, preserving every other setting.
 static func set_crosshair_style(style: int) -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
+	NovaConfigStore.write(CONFIG_PATH, PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
 		clampi(style, CROSSHAIR_STYLE_MIN, CROSSHAIR_STYLE_MAX))
-	config.save(CONFIG_PATH)
 
 
 ## A resource library is a real asset directory on disk, never inside the app's
@@ -112,10 +90,7 @@ static func is_valid_root(path: String) -> bool:
 ## otherwise invalid entries are dropped on read (never written back), so the list
 ## a caller sees always points at real directories.
 static func get_recent_dirs() -> PackedStringArray:
-	var config := ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		return PackedStringArray()
-	return _sanitize(config.get_value(SECTION, RECENT_KEY, PackedStringArray()))
+	return _sanitize(NovaConfigStore.read(CONFIG_PATH, SECTION, RECENT_KEY, PackedStringArray()))
 
 
 ## Record a directory at the front of the recently used list. Empty or invalid
@@ -126,18 +101,13 @@ static func add_recent_dir(path: String) -> void:
 	var clean := path.strip_edges()
 	if clean.is_empty() or not is_valid_root(clean):
 		return
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	_merge_recent(config, clean)
-	config.save(CONFIG_PATH)
+	NovaConfigStore.update(CONFIG_PATH, func(config: ConfigFile) -> void:
+		_merge_recent(config, clean))
 
 
 ## Forget every recently used directory, preserving any other sections.
 static func clear_recent_dirs() -> void:
-	var config := ConfigFile.new()
-	config.load(CONFIG_PATH)
-	config.set_value(SECTION, RECENT_KEY, PackedStringArray())
-	config.save(CONFIG_PATH)
+	NovaConfigStore.write(CONFIG_PATH, SECTION, RECENT_KEY, PackedStringArray())
 
 
 ## A case/slash-insensitive comparison key for a directory path. Mirrors the C++
