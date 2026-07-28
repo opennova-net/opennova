@@ -2895,52 +2895,88 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
 // @ 0x606720].
 namespace {
 
-terrain::TerrainRaycastSample los_field_sample(const terrain::TerrainHeightField &f,
-                                               int32_t x, int32_t y, bool bilinear) {
-    const float wx = static_cast<float>(x) / 65536.0f;
-    const float wz = -static_cast<float>(y) / 65536.0f; // engine Y -> sampler z
-    int32_t height_1616 = 0;
-    if (bilinear) {
-        const float h = terrain::height_field_height_world_bilinear(f, wx, wz);
-        height_1616 = static_cast<int32_t>(h * 65536.0f);
-    } else {
-        // This LOS variant reads the nearest render-cache texel and expands its
-        // half-unit byte (raw16 >> 7, then sample << 15), not the generic
-        // floor-sampled full-precision height-field point contract.
-        // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback]
-        const terrain::CoordsResult<float> r = terrain::coords_world_to_source<float>(
-            f.layout, wx, wz, terrain::coords_runtime_options());
-        if (r.valid && f.valid()) {
-            const int mask = f.dim - 1;
-            const int hx = static_cast<int>(std::floor(r.source_x + 0.5f)) & mask;
-            const int hz = static_cast<int>(std::floor(r.source_z + 0.5f)) & mask;
-            const uint8_t cache_height =
-                static_cast<uint8_t>(f.heightmap[hz * f.dim + hx] >> 7);
-            height_1616 = static_cast<int32_t>(cache_height) << 15;
-        }
-    }
+// The LOS march calls the point sampler once per 4-unit texel step — up to
+// ~250 times per ray, three rays per re-probed entity per frame (§3.4) — so
+// the per-sample work must stay retail-cheap (the original's inner loop is a
+// flat heightmap index). The sector half of the world->source transform is
+// invariant across the ~128 steps a ray spends inside one 512 u sector, so
+// the context memoizes coords_resolve_sector and per sample only derives the
+// sector-local offset. The sector index comes from the EXACT fixed-point
+// coordinate (arithmetic >>25 == floor(world/512)); the local offset is a
+// <2^25 integer whose float form is exact to ~1e-5 u — at least as precise as
+// the previous whole-coordinate /65536.0f float path it replaces.
+struct LosSamplerCtx {
+    const terrain::TerrainHeightField *field = nullptr;
+    int32_t cached_sx = INT32_MIN;
+    int32_t cached_sz = INT32_MIN;
+    bool sector_valid = false;
+    float base_x = 0.0f; // quadrant offset (source/atlas units)
+    float base_z = 0.0f;
+};
+
+terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t y) {
+    LosSamplerCtx &ctx = *static_cast<LosSamplerCtx *>(vctx);
+    const terrain::TerrainHeightField &f = *ctx.field;
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
-    s.height_1616 = height_1616;
+    s.height_1616 = 0;
+    // world = (x, -y) / 65536; sector = floor(world / 512). -y stays clear of
+    // overflow: march coordinates are bounded by mission extent + the budgeted
+    // overshoot, far under 2^31.
+    const int32_t fx = x;
+    const int32_t fy = -y;
+    const int32_t sx = fx >> 25;
+    const int32_t sz = fy >> 25;
+    if (sx != ctx.cached_sx || sz != ctx.cached_sz) {
+        ctx.cached_sx = sx;
+        ctx.cached_sz = sz;
+        const terrain::CoordsSectorResolve sector = terrain::coords_resolve_sector(
+            f.layout, sx, sz, terrain::coords_runtime_options());
+        ctx.sector_valid = sector.valid && f.valid();
+        ctx.base_x = static_cast<float>(sector.quadrant_x);
+        ctx.base_z = static_cast<float>(sector.quadrant_z);
+    }
+    if (!ctx.sector_valid) return s; // height 0, matching the invalid-coords branch
+    // This LOS variant reads the nearest render-cache texel and expands its
+    // half-unit byte (raw16 >> 7, then sample << 15), not the generic
+    // floor-sampled full-precision height-field point contract.
+    // [orig: Terrain_RaycastHeightmapHiRes @ 0x60c760 point callback]
+    const float local_x = static_cast<float>(fx - (sx << 25)) / 65536.0f;
+    const float local_z = static_cast<float>(fy - (sz << 25)) / 65536.0f;
+    const int mask = f.dim - 1;
+    const int hx = static_cast<int>(std::floor(ctx.base_x + local_x + 0.5f)) & mask;
+    const int hz = static_cast<int>(std::floor(ctx.base_z + local_z + 0.5f)) & mask;
+    const uint8_t cache_height = static_cast<uint8_t>(f.heightmap[hz * f.dim + hx] >> 7);
+    s.height_1616 = static_cast<int32_t>(cache_height) << 15;
     return s;
 }
 
-terrain::TerrainRaycastSample los_field_point_cb(void *ctx, int32_t x, int32_t y) {
-    return los_field_sample(*static_cast<const terrain::TerrainHeightField *>(ctx), x, y, false);
+terrain::TerrainRaycastSample los_field_bilinear_sample(const terrain::TerrainHeightField &f,
+                                                        int32_t x, int32_t y) {
+    const float wx = static_cast<float>(x) / 65536.0f;
+    const float wz = -static_cast<float>(y) / 65536.0f; // engine Y -> sampler z
+    const float h = terrain::height_field_height_world_bilinear(f, wx, wz);
+    terrain::TerrainRaycastSample s;
+    s.kind = terrain::TerrainRaycastSample::kHeight;
+    s.height_1616 = static_cast<int32_t>(h * 65536.0f);
+    return s;
 }
 
-terrain::TerrainRaycastSample los_field_bilinear_cb(void *ctx, int32_t x, int32_t y) {
-    return los_field_sample(*static_cast<const terrain::TerrainHeightField *>(ctx), x, y, true);
+terrain::TerrainRaycastSample los_field_bilinear_cb(void *vctx, int32_t x, int32_t y) {
+    const LosSamplerCtx &ctx = *static_cast<const LosSamplerCtx *>(vctx);
+    return los_field_bilinear_sample(*ctx.field, x, y);
 }
 
 } // namespace
 
 bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t a[3],
                          const int32_t b[3]) {
+    LosSamplerCtx ctx;
+    ctx.field = &field;
     terrain::TerrainRaycastSampler sampler;
     sampler.point = &los_field_point_cb;
     sampler.bilinear = &los_field_bilinear_cb;
-    sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
+    sampler.ctx = &ctx;
     return !terrain::terrain_raycast_los_clear(sampler, a, b);
 }
 
@@ -2948,10 +2984,12 @@ bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_
                           const int32_t b[3], int32_t out_hit[3]) {
     // [orig: raycast_entity_collision @ 0x413760 -> Terrain_RaycastHeightmapHiRes_0
     // @ 0x60e710, called (start, end, end) so the ray end clips in place]
+    LosSamplerCtx ctx;
+    ctx.field = &field;
     terrain::TerrainRaycastSampler sampler;
     sampler.point = &los_field_point_cb;
     sampler.bilinear = &los_field_bilinear_cb;
-    sampler.ctx = const_cast<terrain::TerrainHeightField *>(&field);
+    sampler.ctx = &ctx;
     return terrain::terrain_raycast_refined(sampler, a, b, out_hit);
 }
 
@@ -3166,9 +3204,9 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
             // bilinear surface for the ray to run at all — an under-surface
             // endpoint reads as terrain-clear. [orig: @ 0x53b0f1-0x53b100]
             const terrain::TerrainRaycastSample hs =
-                    los_field_sample(*terrain, start_in[0], start_in[1], true);
+                    los_field_bilinear_sample(*terrain, start_in[0], start_in[1]);
             const terrain::TerrainRaycastSample he =
-                    los_field_sample(*terrain, end_in[0], end_in[1], true);
+                    los_field_bilinear_sample(*terrain, end_in[0], end_in[1]);
             if (hs.height_1616 > start_in[2] || he.height_1616 > end_in[2]) {
                 terrain_clear = true;
             }
