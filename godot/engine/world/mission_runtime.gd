@@ -59,6 +59,10 @@ var _perf_sim_us: int = 0
 var _perf_present_us: int = 0
 var _perf_effects_us: int = 0
 var _perf_did_tick := false
+# The shared F3 frame-stats board (null outside the game shell). While its
+# Stats tab captures, the sim/net legs and each present pass land their spans
+# on it; otherwise all extra clock reads are skipped.
+var _frame_stats: FrameStatsBoard = null
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
@@ -587,9 +591,20 @@ func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
 
+## The host hands the shared FrameStatsBoard here (game shell -> GameWorld ->
+## each runtime it creates).
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	_frame_stats = board
+
+
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}
+
+
+# Wire-presentation counters (spawned/unresolved/live; empty when the pass is absent).
+func get_wire_present_stats() -> Dictionary:
+	return _wire_present.get_stats() if _wire_present != null else {}
 
 
 func get_throwable_present_stats() -> RefCounted:
@@ -722,7 +737,7 @@ func is_playing() -> bool:
 	return _playing
 
 
-func _present_entity_rows() -> void:
+func _present_entity_rows(stats_on := false) -> void:
 	if _sim == null or (_present == null and _wire_present == null):
 		return
 	var stride := int(_sim.get_present_stride())
@@ -731,19 +746,58 @@ func _present_entity_rows() -> void:
 	# Both entity presenters consume the same immutable row buffer. Fetching it
 	# once also makes their topology revision refer to exactly the same layout.
 	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
+	if stats_on:
+		# The native buffer build the fetch above just paid for.
+		_frame_stats.add(FrameStatsBoard.PRESENT_SNAPSHOT,
+				int(_sim.get_last_present_snapshot_us()))
 	var layout_revision := -1
 	if _sim.has_method("get_present_layout_revision"):
 		layout_revision = int(_sim.get_present_layout_revision())
 	if _present != null:
+		var mission_start := Time.get_ticks_usec() if stats_on else 0
 		if _present.has_method("present_snapshot"):
 			_present.present_snapshot(snapshot, stride, layout_revision)
 		else:
 			_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
+					Time.get_ticks_usec() - mission_start)
 	if _wire_present != null:
+		var wire_start := Time.get_ticks_usec() if stats_on else 0
 		if _wire_present.has_method("present_snapshot"):
 			_wire_present.present_snapshot(snapshot, stride, layout_revision)
 		else:
 			_wire_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_WIRE,
+					Time.get_ticks_usec() - wire_start)
+
+
+# One whole present frame: the entity rows plus the tick-driven passes, each
+# pass timed onto the stats board while the Stats tab captures. Owns the
+# bundled _perf_present_us the probe scripts read.
+func _present_frame(fire_ticks: int, stats_on: bool) -> void:
+	var present_start := Time.get_ticks_usec()
+	_present_entity_rows(stats_on)
+	if _fire_present != null:
+		var fire_start := Time.get_ticks_usec() if stats_on else 0
+		_fire_present.present(fire_ticks)
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_FIRE,
+					Time.get_ticks_usec() - fire_start)
+	if _destruction_present != null:
+		var destruction_start := Time.get_ticks_usec() if stats_on else 0
+		_destruction_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_DESTRUCTION,
+					Time.get_ticks_usec() - destruction_start)
+	if _throwable_present != null:
+		var throwable_start := Time.get_ticks_usec() if stats_on else 0
+		_throwable_present.present()
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.PRESENT_THROWABLE,
+					Time.get_ticks_usec() - throwable_start)
+	_perf_present_us = Time.get_ticks_usec() - present_start
 
 
 ## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
@@ -758,19 +812,17 @@ func tick() -> bool:
 		_perf_did_tick = false
 		_ticks_last_frame = 0
 		return false
+	var stats_on := _frame_stats != null and _frame_stats.enabled
 	var tick_start := Time.get_ticks_usec()
 	var did_tick := _advance_one_tick_no_present()
 	_perf_present_us = 0
 	if did_tick:
-		var present_start := Time.get_ticks_usec()
-		_present_entity_rows()
-		if _fire_present != null:
-			_fire_present.present(1)
-		if _destruction_present != null:
-			_destruction_present.present()
-		if _throwable_present != null:
-			_throwable_present.present()
-		_perf_present_us = Time.get_ticks_usec() - present_start
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
+			_frame_stats.add(FrameStatsBoard.SIM_NET, int(_sim.get_last_net_tick_us()))
+			_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
+			_frame_stats.add(FrameStatsBoard.SIM_TICKS, 1)
+		_present_frame(1, stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
 	_ticks_last_frame = 1 if did_tick else 0
@@ -817,6 +869,7 @@ func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
 		_ticks_last_frame = 0
 		return 0
+	var stats_on := _frame_stats != null and _frame_stats.enabled
 	var tick_start := Time.get_ticks_usec()
 	_accum += delta
 	var n := int(_accum / TICK_DT)
@@ -828,7 +881,7 @@ func tick_realtime(delta: float) -> int:
 		_perf_present_us = 0
 		if _present != null or _wire_present != null:
 			var present_start := Time.get_ticks_usec()
-			_present_entity_rows()
+			_present_entity_rows(stats_on)
 			_perf_present_us = Time.get_ticks_usec() - present_start
 		_ticks_last_frame = 0
 		_perf_tick_us = Time.get_ticks_usec() - tick_start
@@ -840,24 +893,21 @@ func tick_realtime(delta: float) -> int:
 		_accum = 0.0  # drop the backlog so a load hitch doesn't spiral into the next frames
 	var sim_us := 0
 	var effects_us := 0
+	var net_us := 0
 	for _i in range(n):
 		_advance_one_tick_no_present()
 		sim_us += _perf_sim_us
 		effects_us += _perf_effects_us
+		if stats_on:
+			net_us += int(_sim.get_last_net_tick_us())
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
-	_perf_present_us = 0
-	if (_present != null or _wire_present != null or _fire_present != null
-			or _destruction_present != null or _throwable_present != null):
-		var present_start := Time.get_ticks_usec()
-		_present_entity_rows()
-		if _fire_present != null:
-			_fire_present.present(n)
-		if _destruction_present != null:
-			_destruction_present.present()
-		if _throwable_present != null:
-			_throwable_present.present()
-		_perf_present_us = Time.get_ticks_usec() - present_start
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.SIM_STEP, sim_us)
+		_frame_stats.add(FrameStatsBoard.SIM_NET, net_us)
+		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, effects_us)
+		_frame_stats.add(FrameStatsBoard.SIM_TICKS, n)
+	_present_frame(n, stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
 	_ticks_last_frame = n

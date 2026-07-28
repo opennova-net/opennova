@@ -125,6 +125,12 @@ var _status_label: Label
 # Perf pane (C11): the PerfTimeline ring + live monitors.
 var _perf_pane: DebugPerfPane
 
+# Stats pane: the per-system frame stats surface over the host-fed
+# FrameStatsBoard (window-averaged ms per system + live counters). The board
+# arrives from the host via set_frame_stats_board; hosts without one (editor
+# preview) leave the tab in its empty state.
+var _stats_pane: DebugStatsPane
+
 # View pane: render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
 var _skeleton_check: CheckBox
 var _user_points_check: CheckBox
@@ -218,8 +224,21 @@ func set_effect_world_source(source: Callable) -> void:
 func toggle() -> void:
 	visible = not visible
 	_sync_timer()
+	# Controls under a hidden CanvasLayer don't observe the layer hide; tell the
+	# stats pane explicitly so its capture window closes with the overlay.
+	_stats_pane.set_capture_active(visible)
 	if visible:
 		_refresh()
+
+
+## The host-owned FrameStatsBoard feeding the Stats tab (null detaches).
+func set_frame_stats_board(board) -> void:
+	_stats_pane.set_frame_stats_board(board)
+
+
+## Supplier of the world host (GameWorld or null) for the Stats tab's counters.
+func set_world_source(source: Callable) -> void:
+	_stats_pane.set_world_source(source)
 
 
 ## One-way lock on the variable-edit toggle, for hosts that must not let the
@@ -288,6 +307,7 @@ func _build_panel() -> void:
 	_build_particles_tab()
 	_build_occlusion_tab()
 	_build_rounds_tab()
+	_build_stats_tab()
 	_build_perf_tab()
 	_build_player_tab()
 	_build_view_tab()
@@ -297,6 +317,12 @@ func _build_perf_tab() -> void:
 	_perf_pane = DebugPerfPane.new()
 	_perf_pane.name = "Perf"
 	_tabs.add_child(_perf_pane)
+
+
+func _build_stats_tab() -> void:
+	_stats_pane = DebugStatsPane.new()
+	_stats_pane.name = "Stats"
+	_tabs.add_child(_stats_pane)
 
 func _build_player_tab() -> void:
 	var tab := VBoxContainer.new()
@@ -631,6 +657,9 @@ func _refresh() -> void:
 	# monitors), not the sim — it refreshes regardless, so "that load was slow,
 	# let me look" works from the menu after returning from a mission.
 	_perf_pane.refresh()
+	# The stats pane drains the host-fed FrameStatsBoard window; it self-gates
+	# on its own tab visibility and no-ops without a board.
+	_stats_pane.refresh(runtime, sim)
 	# The particles pane rides its own effect-world source (the effect world is
 	# render-side, not the sim) and null-clears itself, so it also refreshes
 	# regardless of the sim.

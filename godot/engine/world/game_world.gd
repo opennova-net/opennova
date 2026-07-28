@@ -1481,6 +1481,25 @@ var _perf_probe_skip_effect_tick := false
 var _perf_probe_skip_fixed_handlers := false
 var _perf_probe_occlusion_skipped := false
 
+# The shared F3 frame-stats board (null outside the game shell). Feeds gate on
+# board.enabled so a closed Stats tab costs nothing; the occlusion split spans
+# land from _apply_occlusion_frame, the tick legs from tick() below.
+var _frame_stats: FrameStatsBoard = null
+# The two _apply_occlusion_frame halves, valid while probe/stats timing runs:
+# the native run_occlusion_frame call and the GDScript node application.
+var _perf_occl_native_us := 0
+var _perf_occl_apply_us := 0
+# Weakref edge latch for measured render time on the water reflection RTT.
+var _stats_water_vp_ref: WeakRef = null
+
+
+## The game shell hands its FrameStatsBoard here; the world re-hands it to
+## every MissionRuntime it creates and feeds its own tick legs.
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	_frame_stats = board
+	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
+		_runtime.set_frame_stats_board(board)
+
 
 ## Enables the manual frame-span/A-B probe. Disabling restores every skip
 ## request to its retail default and drops any sampled frame transport.
@@ -1497,6 +1516,10 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	_sample_panm_clock()
 	var probe_enabled := _perf_probe_enabled
+	var stats_on := _frame_stats != null and _frame_stats.enabled
+	# One shared gate for the per-leg clock reads: the manual A/B probe and the
+	# F3 Stats capture consume the same measurements.
+	var timing := probe_enabled or stats_on
 	var skip_occlusion := probe_enabled and _perf_probe_skip_occl
 	if probe_enabled:
 		_perf_probe_spans.clear()
@@ -1528,7 +1551,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# present, it never force-shows a node the sim wants hidden. Safe while
 	# paused too: the culled/hidden sets only ever contain nodes occlusion
 	# itself hid while they were visible.
-	var probe_phase_start := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_phase_start := Time.get_ticks_usec() if timing else 0
 	if _loaded:
 		_restore_occlusion_overrides()
 		# Section masks persist on the de-batched model nodes. On the edge into
@@ -1542,8 +1565,12 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			_perf_probe_occlusion_skipped = skip_occlusion
 	elif probe_enabled:
 		_perf_probe_occlusion_skipped = false
-	if probe_enabled:
-		_perf_probe_spans["occl_restore"] = Time.get_ticks_usec() - probe_phase_start
+	if timing:
+		var restore_us := Time.get_ticks_usec() - probe_phase_start
+		if probe_enabled:
+			_perf_probe_spans["occl_restore"] = restore_us
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.OCCL_RESTORE, restore_us)
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -1567,33 +1594,45 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
-	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		_advance_hosted_weather(delta)
-	if probe_enabled:
-		_perf_probe_spans["weather"] = Time.get_ticks_usec() - probe_phase_start
+	if timing:
+		var weather_us := Time.get_ticks_usec() - probe_phase_start
+		if probe_enabled:
+			_perf_probe_spans["weather"] = weather_us
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.WORLD_WEATHER, weather_us)
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
-	probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if _loaded and runtime_ticks > 0:
 		_apply_blink_frame_gates()
-	if probe_enabled:
-		_perf_probe_spans["blink"] = Time.get_ticks_usec() - probe_phase_start
+	if timing:
+		var blink_us := Time.get_ticks_usec() - probe_phase_start
+		if probe_enabled:
+			_perf_probe_spans["blink"] = blink_us
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if _loaded:
-		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		if not skip_occlusion:
 			_apply_occlusion_frame(camera_xform)
 		if probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
-		probe_phase_start = Time.get_ticks_usec() if probe_enabled else 0
+		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		_stamp_iris_samples(camera_xform)
-		if probe_enabled:
-			_perf_probe_spans["iris"] = Time.get_ticks_usec() - probe_phase_start
+		if timing:
+			var iris_us := Time.get_ticks_usec() - probe_phase_start
+			if probe_enabled:
+				_perf_probe_spans["iris"] = iris_us
+			if stats_on:
+				_frame_stats.add(FrameStatsBoard.WORLD_IRIS, iris_us)
 	elif probe_enabled:
 		_perf_probe_spans["occl_frame"] = 0
 		_perf_probe_spans["iris"] = 0
@@ -1607,6 +1646,38 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
+		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
+	_sample_water_render_stats(stats_on)
+
+
+# Water-reflection RTT sampling for the Stats tab: flip measured render time on
+# the reflection SubViewport only while the tab captures, then land the
+# previous frame's CPU/GPU times on the board. Weakref-latched so a freed
+# viewport never sees a stale-RID RenderingServer call.
+func _sample_water_render_stats(stats_on: bool) -> void:
+	var viewport: SubViewport = null
+	if stats_on and _water != null:
+		var viewport_v: Variant = _water.get("reflection_viewport")
+		if viewport_v is SubViewport and is_instance_valid(viewport_v):
+			viewport = viewport_v
+	var previous: Object = _stats_water_vp_ref.get_ref() if _stats_water_vp_ref != null else null
+	if previous != viewport:
+		if previous is SubViewport:
+			RenderingServer.viewport_set_measure_render_time(
+					(previous as SubViewport).get_viewport_rid(), false)
+		_stats_water_vp_ref = weakref(viewport) if viewport != null else null
+		if viewport != null:
+			RenderingServer.viewport_set_measure_render_time(
+					viewport.get_viewport_rid(), true)
+	if viewport == null:
+		return
+	var rid := viewport.get_viewport_rid()
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_CPU,
+			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_GPU,
+			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
 
 
 func get_runtime_perf_counters() -> Dictionary:
@@ -2367,6 +2438,8 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
 	add_child(_runtime)
+	if _frame_stats != null:
+		_runtime.set_frame_stats_board(_frame_stats)
 	var mission_file := bms_name.get_file()
 	if mission_file.is_empty():
 		mission_file = bms_name
@@ -2609,7 +2682,13 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
 	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
 			and not skip_effect_tick:
-		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		if _frame_stats != null and _frame_stats.enabled:
+			var fx_start := Time.get_ticks_usec()
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+			_frame_stats.add(FrameStatsBoard.EFFECTS_TICK,
+					Time.get_ticks_usec() - fx_start)
+		else:
+			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 
 
 func _on_runtime_simulation_restarted() -> void:
@@ -3320,8 +3399,12 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 		var wh = _water.get("water_height")
 		if wh != null:
 			water_z = float(wh)
+	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var timing := _perf_probe_enabled or stats_on
+	var native_start := Time.get_ticks_usec() if timing else 0
 	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
 			_mission_forces_indoors)
+	var native_end := Time.get_ticks_usec() if timing else 0
 
 	# Building batch visibility + per-section masks (bit N = render part N,
 	# forced-visible def bits already merged by the sim). Hide-only: a building
@@ -3360,6 +3443,24 @@ func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
 	# @ 0x29ACE40]
 	if _water != null and sim.has_method("occlusion_water_visible"):
 		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
+
+	if timing:
+		_perf_occl_native_us = native_end - native_start
+		_perf_occl_apply_us = Time.get_ticks_usec() - native_end
+	if stats_on:
+		_frame_stats.add(FrameStatsBoard.OCCL_APPLY, _perf_occl_apply_us)
+		# The native call's internal split; the remainder of the bound call
+		# (marshalling + the handle collection) lands in the glue slot so the
+		# pane's Occlusion group still sums to the whole frame cost.
+		if sim.has_method("get_last_occlusion_build_us"):
+			var build_us := int(sim.get_last_occlusion_build_us())
+			var probe_us := int(sim.get_last_occlusion_probe_us())
+			_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
+			_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
+			_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
+					maxi(_perf_occl_native_us - build_us - probe_us, 0))
+		else:
+			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
 
 
 # Undo the previous occlusion frame's visibility writes: last frame's gated

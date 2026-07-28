@@ -755,6 +755,8 @@ void NovaSimulation::reset_world() {
 	have_baseline_ = false;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
+	last_occlusion_build_us_ = 0;
+	last_occlusion_probe_us_ = 0;
 	last_present_snapshot_us_ = 0;
 	last_present_entity_count_ = 0;
 	present_layout_.clear();
@@ -2394,7 +2396,10 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 	cam.local_blink_flags =
 			collision_world_.local_player_blink_flags | (p_force_indoors ? 0x2u : 0u);
 
+	const uint64_t occl_build_start = perf_now_us();
 	occlusion_world_.build_frame(*world_, collision_world_, cam);
+	const uint64_t occl_probe_start = perf_now_us();
+	last_occlusion_build_us_ = occl_probe_start - occl_build_start;
 
 	// The entity collectors' render gates over the non-building entities the
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
@@ -2414,6 +2419,7 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 		if (!occlusion_world_.entity_render_visible(*world_, collision_world_, *e, cam))
 			occlusion_culled_bms_.push_back(e->bms_id);
 	}
+	last_occlusion_probe_us_ = perf_now_us() - occl_probe_start;
 }
 
 PackedInt64Array NovaSimulation::get_building_visibility() const {
@@ -4836,6 +4842,14 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("get_wac_state"), &NovaSimulation::get_wac_state);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &NovaSimulation::get_runtime_perf_counters);
+	ClassDB::bind_method(D_METHOD("get_last_sim_tick_us"), &NovaSimulation::get_last_sim_tick_us);
+	ClassDB::bind_method(D_METHOD("get_last_net_tick_us"), &NovaSimulation::get_last_net_tick_us);
+	ClassDB::bind_method(D_METHOD("get_last_present_snapshot_us"),
+			&NovaSimulation::get_last_present_snapshot_us);
+	ClassDB::bind_method(D_METHOD("get_last_occlusion_build_us"),
+			&NovaSimulation::get_last_occlusion_build_us);
+	ClassDB::bind_method(D_METHOD("get_last_occlusion_probe_us"),
+			&NovaSimulation::get_last_occlusion_probe_us);
 	ClassDB::bind_method(D_METHOD("set_wac_paused", "paused"), &NovaSimulation::set_wac_paused);
 	ClassDB::bind_method(D_METHOD("is_wac_paused"), &NovaSimulation::is_wac_paused);
 	ClassDB::bind_method(D_METHOD("set_mission_variable", "index", "value"), &NovaSimulation::set_mission_variable);
@@ -5318,7 +5332,13 @@ void NovaSimulation::host_pump() {
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
+	// The host's measurable net leg for the F3 Stats board: the ClientState
+	// fold. The S2C serialize/emit half rides inside np::host_session_pump
+	// (fused with the logic tick) and stays inside the Sim step number until
+	// npruntime grows a phase seam.
+	const uint64_t net_start = perf_now_us();
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
+	last_net_tick_us_ = perf_now_us() - net_start;
 }
 
 // host_pump's dispatch_event + admit_peer were promoted into libs/npruntime (np::dispatch_event /
@@ -5403,6 +5423,9 @@ void NovaSimulation::joiner_pump() {
 	namespace np = opennova::np;
 	if (!runtime_) return;
 	const uint32_t now = now_tick_;
+	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
+	// uplink ship, ending where the local (non-authority) world work begins.
+	const uint64_t net_start = perf_now_us();
 	// ClientHello once (Idle -> Hello) the first armed frame.
 	if (!joiner_started_) {
 		const std::vector<uint8_t> hello = runtime_->start();
@@ -5444,6 +5467,7 @@ void NovaSimulation::joiner_pump() {
 		outs = runtime_->Client_ProcessNetworkFrame(now);
 	}
 	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
+	last_net_tick_us_ = perf_now_us() - net_start;
 	apply_joiner_authoritative_loadout();
 	// The team selector may only just have become known (the S2C 0x04 latch landing
 	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
@@ -8113,6 +8137,8 @@ Dictionary NovaSimulation::get_runtime_perf_counters() const {
 	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
 	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
 	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
+	out["occlusion_build_us"] = static_cast<int64_t>(last_occlusion_build_us_);
+	out["occlusion_probe_us"] = static_cast<int64_t>(last_occlusion_probe_us_);
 	return out;
 }
 

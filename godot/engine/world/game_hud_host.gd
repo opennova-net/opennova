@@ -152,6 +152,14 @@ func _load_rtxt(root: NovaResourceRoot, name: String) -> RtxtStringFile:
 var _perf_probe_enabled := false
 var _perf_probe_spans: Dictionary = {}
 
+# The shared F3 frame-stats board (null outside the game shell): while its
+# Stats tab captures, the tick's phase spans land there as HUD_* slots.
+var _frame_stats: FrameStatsBoard = null
+
+
+func set_frame_stats_board(board: FrameStatsBoard) -> void:
+	_frame_stats = board
+
 
 ## Enables the intentionally costly per-phase clock sampling used by the manual
 ## fire probe. Normal HUD frames leave the span transport untouched and empty.
@@ -162,6 +170,8 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 func tick() -> void:
 	var probe_enabled := _perf_probe_enabled
+	var stats_on := _frame_stats != null and _frame_stats.enabled
+	var timing := probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
@@ -211,7 +221,7 @@ func tick() -> void:
 		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
 		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
 			reserve += clip
-	var probe_t0 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	var scope_engaged := false
 	var scope_fraction := 0.0
 	var scope_card := false
@@ -234,11 +244,11 @@ func tick() -> void:
 			and _player_host.has_method("aim_range_units"):
 		binocular_range = clampi(int(_player_host.aim_range_units()), 1, 1000)
 
-	var probe_t1 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var attach_labels := _build_attach_labels()
-	var probe_t2 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	var waypoint := _waypoint_info_dict()
-	var probe_t3 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t3 := Time.get_ticks_usec() if timing else 0
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
 		"stance": stance,
@@ -277,17 +287,24 @@ func tick() -> void:
 		"waypoint": waypoint,
 		"objectives": _build_objectives() if _objectives_visible else [],
 	})
-	var probe_t4 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
-	if probe_enabled:
+	if timing:
 		var probe_t5 := Time.get_ticks_usec()
-		_perf_probe_spans["scalars"] = probe_t1 - probe_t0
-		_perf_probe_spans["attach"] = probe_t2 - probe_t1
-		_perf_probe_spans["waypoint"] = probe_t3 - probe_t2
-		_perf_probe_spans["update_info"] = probe_t4 - probe_t3
-		_perf_probe_spans["flush"] = probe_t5 - probe_t4
+		if probe_enabled:
+			_perf_probe_spans["scalars"] = probe_t1 - probe_t0
+			_perf_probe_spans["attach"] = probe_t2 - probe_t1
+			_perf_probe_spans["waypoint"] = probe_t3 - probe_t2
+			_perf_probe_spans["update_info"] = probe_t4 - probe_t3
+			_perf_probe_spans["flush"] = probe_t5 - probe_t4
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.HUD_SCALARS, probe_t1 - probe_t0)
+			_frame_stats.add(FrameStatsBoard.HUD_ATTACH, probe_t2 - probe_t1)
+			_frame_stats.add(FrameStatsBoard.HUD_WAYPOINT, probe_t3 - probe_t2)
+			_frame_stats.add(FrameStatsBoard.HUD_INFO, probe_t4 - probe_t3)
+			_frame_stats.add(FrameStatsBoard.HUD_FLUSH, probe_t5 - probe_t4)
 
 
 # The HUD's 62 Hz presentation clock driving the fade/message timers.

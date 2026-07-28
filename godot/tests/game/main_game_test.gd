@@ -132,6 +132,38 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 			"probe teardown cannot leave stale measurements behind")
 
 
+func test_main_frame_stats_feeds_gate_on_the_board() -> void:
+	# The F3 Stats capture rides the same frame-leg measurements as the probe
+	# but lands on the FrameStatsBoard, and only while the board is enabled.
+	var game := _make()
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	world.add_child(terrain)
+	add_child_autofree(world)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	world.set("_loaded", true)
+	game.set("_world", world)
+	game.set("_camera", camera)
+	game.set("_state", MainGameScript.State.WORLD)
+
+	var board: FrameStatsBoard = game.get("_frame_stats")
+	assert_not_null(board, "the shell owns a frame-stats board from construction")
+	game.call("_process", 0.0)
+	assert_eq(board.window_counts()[FrameStatsBoard.FRAME_WORLD], 0,
+			"ordinary main frames feed nothing")
+
+	board.enabled = true
+	game.call("_process", 0.0)
+	var counts := board.window_counts()
+	for slot in [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
+			FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]:
+		assert_eq(counts[slot], 1, "an enabled board captures each main-frame leg")
+	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"stats capture never writes the probe span dictionary")
+
+
 func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	_shell = await _make_packed_shell("jodemo")
 	if _shell == null:

@@ -290,6 +290,10 @@ private:
 	bool listen_server_ = false;
 	uint64_t last_sim_tick_us_ = 0;
 	uint64_t last_net_tick_us_ = 0;
+	// The two halves of run_occlusion_frame: the portal/section build
+	// (OcclusionWorld::build_frame) and the per-entity render-gate probe loop.
+	uint64_t last_occlusion_build_us_ = 0;
+	uint64_t last_occlusion_probe_us_ = 0;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
 	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
@@ -1223,6 +1227,19 @@ public:
 	Dictionary get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
 	Dictionary get_runtime_perf_counters() const;
+	// Allocation-free int forms of the same last-frame counters, for per-frame
+	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
+	int64_t get_last_sim_tick_us() const { return static_cast<int64_t>(last_sim_tick_us_); }
+	int64_t get_last_net_tick_us() const { return static_cast<int64_t>(last_net_tick_us_); }
+	int64_t get_last_present_snapshot_us() const {
+		return static_cast<int64_t>(last_present_snapshot_us_);
+	}
+	int64_t get_last_occlusion_build_us() const {
+		return static_cast<int64_t>(last_occlusion_build_us_);
+	}
+	int64_t get_last_occlusion_probe_us() const {
+		return static_cast<int64_t>(last_occlusion_probe_us_);
+	}
 	// Script-disable gate [orig: dword_C6EB28].
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;

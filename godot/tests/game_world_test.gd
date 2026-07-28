@@ -2529,6 +2529,49 @@ func test_tick_never_emits_session_lost_for_a_non_joiner_or_a_silent_seam() -> v
 	_detach_runtime(world)
 
 
+func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
+	# The F3 Stats feeds (FrameStatsBoard): a disabled board costs the tick
+	# nothing and receives nothing; an enabled one gets every world leg — the
+	# occlusion restore/apply split included — without touching the probe dicts.
+	var world := _make_world()
+	var water := Node3D.new()
+	water.name = "NovaWater"
+	world.add_child(water)
+	add_child_autofree(world)
+	var runtime := OcclusionRuntimeStub.new()
+	add_child_autofree(runtime)
+	var building := MaskedBuildingStub.new()
+	world.add_child(building)
+	runtime.registry.nodes[42] = building
+	runtime.sim.building_vis = PackedInt64Array([42, (1 << 32) | 0x5])
+	_install_runtime(world, runtime)
+	var board := FrameStatsBoard.new()
+	world.set_frame_stats_board(board)
+
+	world.tick(Vector3.ZERO)
+	assert_eq(board.window_counts()[FrameStatsBoard.OCCL_APPLY], 0,
+			"a disabled board sees no feeds")
+	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"stats feeds never write the probe span dictionary")
+
+	board.enabled = true
+	world.tick(Vector3.ZERO)
+	var counts := board.window_counts()
+	assert_gt(counts[FrameStatsBoard.OCCL_RESTORE], 0, "the restore leg lands")
+	assert_gt(counts[FrameStatsBoard.OCCL_APPLY], 0, "the GDScript apply leg lands")
+	assert_gt(counts[FrameStatsBoard.OCCL_GLUE], 0,
+			"a sim without the native split feeds the whole native call as glue")
+	assert_eq(counts[FrameStatsBoard.OCCL_BUILD], 0,
+			"no native split getters -> no build slot")
+	assert_gt(counts[FrameStatsBoard.WORLD_WEATHER], 0)
+	assert_gt(counts[FrameStatsBoard.WORLD_BLINK], 0)
+	assert_gt(counts[FrameStatsBoard.WORLD_IRIS], 0)
+	assert_gt(counts[FrameStatsBoard.WORLD_FOLIAGE], 0)
+	assert_gt(counts[FrameStatsBoard.WORLD_AUDIO], 0)
+	assert_true((world.get("_perf_probe_spans") as Dictionary).is_empty(),
+			"the probe transport stays opt-in even while stats capture")
+
+
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()

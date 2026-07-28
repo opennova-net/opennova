@@ -63,6 +63,13 @@ var _net_killfeed   # net spectator kill feed, built while in a net session
 # player is in-world.
 var _hud_host: NovaGameHudHost
 var _player_host: LocalPlayerHost = null
+# The per-system frame-stats board behind F3 -> Stats. Created with the shell
+# and handed to every feeding host; it costs nothing until the tab opens
+# (enabled stays false, every feed site gates on it).
+var _frame_stats := FrameStatsBoard.new()
+# Edge latch for RenderingServer render-time measurement on the root viewport
+# (only measured while the Stats tab captures).
+var _stats_render_measured := false
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -151,6 +158,10 @@ func _ready() -> void:
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
 	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
+	# One shared frame-stats board across the shell, the world host and the HUD
+	# host; the world re-hands it to each mission runtime it creates.
+	_world.set_frame_stats_board(_frame_stats)
+	_hud_host.set_frame_stats_board(_frame_stats)
 	# The shell's own round-outcome tap (the HUD host keeps its separate connection
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if _world.has_signal("mission_effects") \
@@ -292,6 +303,8 @@ func toggle_debug_overlay() -> void:
 		host.add_child(_debug_overlay)
 		_debug_overlay.set_runtime_source(_current_runtime)
 		_debug_overlay.set_view_context_source(_current_player_view_context)
+		_debug_overlay.set_frame_stats_board(_frame_stats)
+		_debug_overlay.set_world_source(func(): return _world)
 		# The View tab toggles: the overlay only emits intent; we own the world.
 		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
 		_debug_overlay.user_points_toggled.connect(_on_user_points_toggled)
@@ -1184,8 +1197,13 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 func _process(delta: float) -> void:
 	var probe_enabled := _perf_probe_enabled
+	var stats_on: bool = _frame_stats.enabled
+	# One shared gate for the frame-leg clock reads: the manual A/B probe and
+	# the F3 Stats capture both consume the same measurements.
+	var timing := probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
+	_sample_render_stats(stats_on)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state == State.PAUSED or _state == State.ARMORY or _state == State.DEPLOY \
@@ -1211,30 +1229,58 @@ func _process(delta: float) -> void:
 		return
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
-	var probe_t0 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	if _player_host != null:
 		var player_live := is_gameplay_input_active()
 		_player_host.before_world_tick(delta, player_live, player_live)
-	var probe_t1 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe_skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
-	var probe_t2 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	if _player_host != null:
 		_player_host.after_world_tick()
-	var probe_t3 := Time.get_ticks_usec() if probe_enabled else 0
+	var probe_t3 := Time.get_ticks_usec() if timing else 0
 	# The shared HUD host rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe_skip_hud
 	if _hud_host != null and (_state == State.WORLD or _state == State.ARMORY \
 			or _state == State.DEPLOY) and not skip_hud:
 		_hud_host.tick()
-	if probe_enabled:
+	if timing:
 		var probe_t4 := Time.get_ticks_usec()
-		_perf_probe_spans["before"] = probe_t1 - probe_t0
-		_perf_probe_spans["world"] = probe_t2 - probe_t1
-		_perf_probe_spans["after"] = probe_t3 - probe_t2
-		_perf_probe_spans["hud"] = probe_t4 - probe_t3
+		if probe_enabled:
+			_perf_probe_spans["before"] = probe_t1 - probe_t0
+			_perf_probe_spans["world"] = probe_t2 - probe_t1
+			_perf_probe_spans["after"] = probe_t3 - probe_t2
+			_perf_probe_spans["hud"] = probe_t4 - probe_t3
+		if stats_on:
+			_frame_stats.add(FrameStatsBoard.FRAME_PLAYER_BEFORE, probe_t1 - probe_t0)
+			_frame_stats.add(FrameStatsBoard.FRAME_WORLD, probe_t2 - probe_t1)
+			_frame_stats.add(FrameStatsBoard.FRAME_PLAYER_AFTER, probe_t3 - probe_t2)
+			_frame_stats.add(FrameStatsBoard.FRAME_HUD, probe_t4 - probe_t3)
+
+
+# Root-viewport render-time sampling for the Stats tab: measurement flips on
+# only while the tab captures (it is not free), then the previous frame's
+# CPU/GPU times land on the board each frame.
+func _sample_render_stats(stats_on: bool) -> void:
+	if not stats_on and not _stats_render_measured:
+		return
+	var viewport := get_viewport()
+	if viewport == null:
+		return
+	if stats_on != _stats_render_measured:
+		_stats_render_measured = stats_on
+		RenderingServer.viewport_set_measure_render_time(
+				viewport.get_viewport_rid(), stats_on)
+	if not stats_on:
+		return
+	var rid := viewport.get_viewport_rid()
+	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_CPU,
+			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
+	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_GPU,
+			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
 
 
 # Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);
