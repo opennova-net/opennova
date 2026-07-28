@@ -64,7 +64,7 @@ func _run() -> void:
 			int(stats.get("dialogs", 0))])
 		# Materialize only the current top-eight candidates, then verify the physical
 		# pool's loop regions. A loop_end <= loop_begin wraps at sample 0 forever.
-		audio.tick(Vector3.ZERO)
+		audio.tick(Vector3.ZERO, 0.2)
 		var loop_voices := 0
 		var loop_empty := 0
 		for p in container.find_children("*", "AudioStreamPlayer3D", true, false):
