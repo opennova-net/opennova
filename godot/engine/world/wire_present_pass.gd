@@ -108,9 +108,11 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 			return -1
 
 
-# defer_index: on the HOST, the MissionEntityRegistry — any wire row that resolves to a placed
-# node is rendered by MissionPresentPass instead, so this pass only draws the un-placed remote
-# players (admitted joiners). Pass null on the JOINER, where nothing is placed (render all).
+# defer_index: the MissionEntityRegistry — any wire row that resolves to a placed node is
+# rendered by MissionPresentPass instead, so this pass only draws the un-placed rows. On the
+# HOST that means admitted joiners; on the JOINER (which places the mission minus organics and
+# stamps rows with the local defer identity for pools 1-3) it means players, streamed AI, and
+# anything without a placed node.
 func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 		options: Dictionary = {}) -> void:
 	_sim = sim
@@ -318,15 +320,21 @@ func present_snapshot(
 		var visual_item_id := type_id
 		if _placer.has_method("resolve_player_visual_item_id"):
 			visual_item_id = int(_placer.resolve_player_visual_item_id(type_id))
-		# Host: defer any wire row that resolves to a PLACED mission node to MissionPresentPass,
-		# so a placed NPC isn't drawn twice. The joiner passes no index and renders every row.
+		# Defer any row that carries a PLACED .bms identity: the placed representation —
+		# an individual node (animated entities, driven by MissionPresentPass) or a
+		# static MultiMesh batch instance (which deliberately has NO per-entity node) —
+		# owns the rendering, so this pass must not spawn a wire duplicate. The node
+		# resolve is bookkeeping for row-plan validity, not the defer condition; a
+		# batched static resolves to null and still defers. Rows without placed
+		# identity (kind -1 wire-only rows, 255 runtime synthetics) render here.
 		if _defer_index != null:
-			var placed = _defer_index.resolve(
-				int(snap[base + NovaSimulation.PF_BMS_ID]),
-				int(snap[base + NovaSimulation.PF_KIND]),
-				int(snap[base + NovaSimulation.PF_INDEX]))
-			if placed != null and is_instance_valid(placed):
-				_deferred_nodes.append(placed)
+			var d_kind := int(snap[base + NovaSimulation.PF_KIND])
+			var d_index := int(snap[base + NovaSimulation.PF_INDEX])
+			if d_kind >= 0 and d_kind <= 3 and d_index >= 0 and d_index != 0xFFFFFF:
+				var placed = _defer_index.resolve(
+					int(snap[base + NovaSimulation.PF_BMS_ID]), d_kind, d_index)
+				if placed != null and is_instance_valid(placed):
+					_deferred_nodes.append(placed)
 				continue
 		live[handle] = true
 		if _unresolved.has(handle):

@@ -663,6 +663,7 @@ private:
 	// Project the requester-local decoded 0x0A mount relationship onto L only
 	// after the host confirms C2S 0x26/0x27.
 	void sync_joiner_authoritative_mount();
+	void mirror_client_view_mission_entities();
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
 	// load [orig: Entity_BuildSpawnZoneList @0x43EAE0].
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();

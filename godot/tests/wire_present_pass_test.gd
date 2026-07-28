@@ -404,9 +404,43 @@ func test_stable_host_layout_skips_repeat_defer_resolution() -> void:
 	}
 	sim.layout_revision += 1
 	presenter.present()
-	assert_eq(index.resolve_calls, 2)
+	assert_eq(index.resolve_calls, 1,
+			"identity-less wire rows never consult the defer index")
 	assert_eq(placer.attempts, [167],
 			"same-size placed-to-wire replacement rebuilds classification")
+
+
+func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
+	# A batched static (MultiMesh instance) deliberately has NO per-entity node,
+	# so the registry resolves null — yet the row carries its placed .bms
+	# identity, and the placed representation owns the render. The wire pass must
+	# not spawn a duplicate (the joiner's pre-convergence double-render). Rows
+	# without placed identity (the joiner's players/streamed AI) still spawn.
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 164,
+		"handle": 0x1004,
+		"bms_id": 11,
+		"kind": 1,
+		"index": 3,
+	}, {
+		"type_id": 166,
+		"handle": 0x0010,
+		"bms_id": 0,
+		"kind": -1,
+		"index": -1,
+	}]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new())
+	presenter.present()
+	assert_eq(placer.built.size(), 1,
+			"the batched-static row defers; only the identity-less row materializes")
+	assert_null(presenter.resolve_wire_handle(0x1004),
+			"no wire duplicate exists for the placed identity")
+	assert_not_null(presenter.resolve_wire_handle(0x0010))
 
 
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:

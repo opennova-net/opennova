@@ -224,23 +224,24 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_self_tick = bool(options.get("self_tick", false))
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
-	# The registry present drives placed mission nodes (host listen-server / SP / editor preview);
-	# a joiner has none, so it skips it.
-	if not is_joiner:
-		_present = MissionPresentPass.new()
-		_present.setup(_sim, _index, options.get("present_options", {}))
+	# The registry present drives placed mission nodes on EVERY role. A joiner places the
+	# mission too (minus organics), and its snapshot rows carry the local defer identity for
+	# pools 1-3, so this pass drives its placed vehicles/buildings exactly as on the host —
+	# the wire pass below defers those rows and renders only what has no placed node.
+	_present = MissionPresentPass.new()
+	_present.setup(_sim, _index, options.get("present_options", {}))
 	# Co-op needs remote PLAYERS rendered WIRE-DIRECT: a dynamically-spawned player (an admitted
 	# joiner on the host, or — on the joiner — the host + everyone) has no .bms placement, so
-	# MissionPresentPass can't resolve it. The host keeps MissionPresentPass for its placed NPCs and
-	# adds this pass for the spawned players, deferring any row that resolves to a placed node (via
-	# _index) so nothing double-renders. The joiner places nothing (index null -> render every row).
+	# MissionPresentPass can't resolve it. Both net roles keep MissionPresentPass for their
+	# placed entities and add this pass for the spawned players/organics, deferring any row
+	# that resolves to a placed node (via _index) so nothing double-renders.
 	var full_wire_present := is_joiner or _sim.is_host_listening()
 	var sp_attachment_present := (
 			not full_wire_present and options.get("placer") != null)
 	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
-			null if is_joiner else _index, {
+			_index, {
 				"synthetic_origin_only": sp_attachment_present,
 			})
 		simulation_restarted.connect(

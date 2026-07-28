@@ -1062,19 +1062,17 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	_placer = MissionObjectPlacer.new(_resource_root)
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	# A co-op joiner renders all dynamic entities WIRE-DIRECT (the faithful client model), so
-	# it does NOT place the .bms organics/vehicles — they would be frozen duplicates of the
-	# wire avatars. Still build the placer (the local-player avatar + the wire present pass
-	# resolve models through it) and an empty MissionObjects container (the wire avatars'
-	# parent + the unload() teardown target). Statics/buildings (S2C 0x10) are a follow-up.
-	if _is_joiner():
-		var wire_container := Node3D.new()
-		wire_container.name = MissionObjectPlacer.CONTAINER_NAME
-		add_child(wire_container)
-		_mission_stats = {}
-		print("GameWorld(joiner): mission objects render wire-direct — local placement skipped.")
-		return
 	var options := { "environment_node": _env }
+	# A joiner places the mission like any other client of it — the retail client
+	# loads and renders its local .bms through the normal pipeline, applying net
+	# state on top — MINUS the organics: players and streamed AI have no stable
+	# .bms identity on the wire and render wire-direct. Placed pools 1-3 share the
+	# host's pool/slot handle space (promote order mirrors Mission_LoadBMSFile
+	# @0x40f4e0 on both sides), so the wire present pass defers their rows onto
+	# these placed nodes by identity, restoring MultiMesh batching, occlusion,
+	# and registry resolution to the joiner.
+	if _is_joiner():
+		options["skip_kinds"] = [NovaMissionData.KIND_ORGANIC]
 	if timeline != null:
 		options["timeline"] = timeline
 	# Pulse the load-progress screen from inside the model-load loop at the

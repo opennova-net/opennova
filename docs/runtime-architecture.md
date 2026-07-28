@@ -53,10 +53,13 @@ The editor "Play the mission" goes through the **same** `MissionRuntime` and the
 one entity index, and one present *step* — see
 [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has grown into a fixed
 sequence of per-system passes, each owning one drain of the sim, and each installed only where its
-role applies: a joiner places nothing and so runs the decode-driven passes only
-(`WirePresentPass`, plus the fire/throwable presentation of decoded S2C events), while a host or
-single-player session runs the full ladder. Adding a system means adding a pass to that sequence,
-not a second present loop.
+role applies: a host or single-player session runs the full ladder, and a joiner runs
+`MissionPresentPass` over its locally placed mission (everything except organics — placed pools
+1-3 share the host's pool/slot handle space because promote order mirrors
+`Mission_LoadBMSFile @0x40f4e0` on both sides, so streamed rows carry the local defer identity
+and drive the placed nodes) plus the decode-driven passes (`WirePresentPass` for players,
+streamed AI, and anything without a placed node, and the fire/throwable presentation of decoded
+S2C events). Adding a system means adding a pass to that sequence, not a second present loop.
 The single-tick `MissionRuntime.tick()` survives as the deterministic primitive for editor Step,
 the MCP, and tests; it runs the identical pass sequence with `n = 1`.
 `GameWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one

@@ -5370,6 +5370,33 @@ void NovaSimulation::sync_joiner_authoritative_mount() {
 	sync_local_usegun_weapon_transition();
 }
 
+// Mirror the decoded wire positions of mission entities (pools 1-3) back onto
+// the joiner's locally promoted registry rows. The local sim is NOT authoritative
+// for any of them — this write-back exists so position CONSUMERS of the local
+// world stay truthful on a joiner: the occlusion frame evaluates entity
+// visibility from registry positions (a driven-off vehicle must occlude at its
+// live position, not its spawn point), and the collision tick tables pick up the
+// same fix. Type-guarded on the same promote-order identity the mount reconcile
+// above relies on; synthetic children (spawn_origin sentinel) are skipped.
+// Orientation is deliberately NOT mirrored (nothing position-critical consumes
+// it locally; the render pose rides the present rows).
+void NovaSimulation::mirror_client_view_mission_entities() {
+	if (!joiner_ || !world_ || runtime_ == nullptr) return;
+	for (const opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		const opennova::world::EntityHandle h{es.handle};
+		const int pool = h.pool();
+		if (pool < 1 || pool > 3) continue;
+		opennova::world::Entity *local = world_->registry.get(h);
+		if (local == nullptr || local->spawn_origin == 0xFFFFFFFFu ||
+				static_cast<uint16_t>(local->item_id) != es.type_id)
+			continue;
+		local->position.x = static_cast<float>(es.x) / 65536.0f;
+		local->position.y = static_cast<float>(es.y) / 65536.0f;
+		local->position.z = static_cast<float>(es.z) / 65536.0f;
+	}
+}
+
 void NovaSimulation::joiner_pump() {
 	namespace np = opennova::np;
 	if (!runtime_) return;
@@ -5745,6 +5772,7 @@ void NovaSimulation::joiner_pump() {
 		}
 	}
 	sync_joiner_authoritative_mount();
+	mirror_client_view_mission_entities();
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
@@ -9434,10 +9462,30 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the registry
 		// entity behind the decoded handle (host == authoritative client, so the placed-node
 		// mapping still resolves through MissionEntityRegistry exactly as the AI-pool path
-		// does). A joiner's decoded handles live in the HOST's handle space and would resolve
-		// to the wrong local entity, so the joiner skips this and renders wire-direct (b2).
+		// does). A joiner resolves the DEFER IDENTITY the same way for mission pools 1-3:
+		// its locally promoted world shares the host's pool/slot handle space for .bms
+		// entities — promote order mirrors Mission_LoadBMSFile @0x40f4e0 on both sides, the
+		// same identity assumption sync_joiner_authoritative_mount already relies on — so a
+		// streamed vehicle/building/marker row maps onto its locally PLACED node and renders
+		// batched + occludable through MissionPresentPass instead of wire-direct. The fill is
+		// type-guarded (a drifted slot must never adopt a wrong node), skips synthetic
+		// children (spawn_origin sentinel), and fills ONLY the identity: hidden/alive/anim
+		// state keep coming from the wire bytes below, because the joiner's local sim is not
+		// authoritative for any of them. Pool-0 organics (players + streamed AI) stay
+		// wire-rendered — their body-anim path is remote-request-shaped, which the mission
+		// pass does not model.
 		const opennova::world::EntityHandle h{es.handle};
 		const opennova::world::Entity *ent = (!joiner_) ? world_->registry.get(h) : nullptr;
+		if (joiner_ && h.pool() >= 1 && h.pool() <= 3) {
+			const opennova::world::Entity *local = world_->registry.get(h);
+			if (local != nullptr && local->spawn_origin != 0xFFFFFFFFu &&
+					static_cast<uint16_t>(local->item_id) == es.type_id) {
+				r[PF_KIND] = static_cast<float>(local->spawn_origin >> 24);
+				r[PF_INDEX] = static_cast<float>(local->spawn_origin & 0xFFFFFF);
+				r[PF_BMS_ID] = static_cast<float>(local->bms_id);
+				r[PF_NET_ID] = static_cast<float>(local->net_id);
+			}
+		}
 		if (ent) {
 			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);
 			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
