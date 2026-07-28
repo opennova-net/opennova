@@ -679,12 +679,7 @@ bool HttpListener::start(const ServerConfig &config) {
 			e["identity"]      = c.identity;
 			e["created_ms"]    = c.created_ms;
 			e["last_seen_ms"]  = c.last_seen_ms;
-			// PeerAddr.ip is LE (ip_to_le) — read low->high for a.b.c.d.
-			e["addr"]          = std::to_string( c.addr.ip         & 0xff) + "." +
-			                     std::to_string((c.addr.ip >>  8) & 0xff) + "." +
-			                     std::to_string((c.addr.ip >> 16) & 0xff) + "." +
-			                     std::to_string((c.addr.ip >> 24) & 0xff) + ":" +
-			                     std::to_string(c.addr.port);
+			e["addr"]          = peer_addr_to_string(c.addr);
 			entries.push_back(std::move(e));
 		}
 		out["connections"] = std::move(entries);
