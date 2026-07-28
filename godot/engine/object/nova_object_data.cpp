@@ -10,6 +10,7 @@
 #include <threedi/threedi_panm_runtime.h>
 
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/plane.hpp>
@@ -1417,6 +1418,8 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
 	ClassDB::bind_method(D_METHOD("compute_anim_frame", "index", "time_ms", "ctrl_values"), &NovaObjectData::compute_anim_frame);
 	ClassDB::bind_method(D_METHOD("evaluate_panm", "lod_index", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_panm);
+	ClassDB::bind_method(D_METHOD("apply_panm_to_nodes", "lod_index", "time_ms",
+			"ctrl_values", "nodes", "applied_revision"), &NovaObjectData::apply_panm_to_nodes);
 	ClassDB::bind_method(D_METHOD("evaluate_lights", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_lights);
 	ClassDB::bind_method(D_METHOD("set_material_shader", "material_index", "shader_name"), &NovaObjectData::set_material_shader);
 	ClassDB::bind_method(D_METHOD("set_material_texture", "material_index", "texture_index", "texture_name"), &NovaObjectData::set_material_texture);
@@ -1467,6 +1470,7 @@ void NovaObjectData::_clear() {
 	_clear_source_model();
 	_clear_source_project();
 	submesh_cache.clear();
+	_invalidate_panm_cache();
 	threedi_ir_free(&ir);
 	threedi_ir_init(&ir);
 	has_ir = false;
@@ -1507,8 +1511,9 @@ uint8_t NovaObjectData::_normalize_oed_update_mask(int p_update_mask) const {
 void NovaObjectData::_notify_object_changed(uint8_t p_update_mask) {
 	// Every document mutation (all OED setters, opens, LOD/scene swaps) funnels
 	// through here or _clear() — the memoized submesh builds die with the data
-	// they were built from.
+	// they were built from, and the PANM frame cache re-arms a full re-apply.
 	submesh_cache.clear();
+	_invalidate_panm_cache();
 	last_oed_update_mask = p_update_mask & UPDATE_ALL;
 	_mark_oed_dirty(p_update_mask);
 	emit_signal("object_changed");
@@ -3617,6 +3622,147 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, con
 		out[static_cast<int>(i)] = panm_matrix_to_transform(src);
 	}
 	return out;
+}
+
+// Order-independent hash of the per-instance control registers; empty (the
+// common mission case - census: commanded part anims are rare) hashes to 0.
+static uint64_t panm_ctrl_hash(const Dictionary &p_ctrl_values) {
+	if (p_ctrl_values.is_empty()) {
+		return 0;
+	}
+	uint64_t h = 0;
+	const Array keys = p_ctrl_values.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		uint64_t e = 1469598103934665603ull;
+		const CharString utf = key.utf8();
+		for (int c = 0; c < utf.length(); ++c) {
+			e = (e ^ static_cast<uint8_t>(utf[c])) * 1099511628211ull;
+		}
+		e ^= static_cast<uint64_t>(static_cast<int64_t>(p_ctrl_values[keys[i]]) + 1) *
+				0x9E3779B97F4A7C15ull;
+		h += e;
+	}
+	return h == 0 ? 1 : h;
+}
+
+// (Re)build the lod-fixed evaluation state after an invalidation or LOD swap.
+// The next evaluation after this re-arms a full apply (time sentinel).
+bool NovaObjectData::_panm_cache_prepare(int p_lod_index) const {
+	if (!has_ir || ir.lods == nullptr || p_lod_index < 0 ||
+			static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return false;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	if (lod.part_count == 0 || lod.parts == nullptr) {
+		return false;
+	}
+	PanmEvalCache &c = panm_cache_;
+	if (c.valid && c.lod == p_lod_index) {
+		return true;
+	}
+	c.lod = p_lod_index;
+	c.time_ms = INT64_MIN; // sentinel: next evaluation marks every part changed
+	c.ctrl_hash = 0;
+	c.valid = true;
+	_effective_panm_for_lod(p_lod_index, c.anims);
+	size_t input_count = std::max(static_cast<size_t>(lod.part_count), c.anims.size());
+	for (const ThreediPartAnimation &anim : c.anims) {
+		input_count = std::max(input_count, static_cast<size_t>(anim.subobject_index) + 1);
+		input_count = std::max(input_count, static_cast<size_t>(anim.parent_subobject) + 1);
+	}
+	c.base_transforms.assign(input_count, ThreediMatrix4x4{});
+	c.pivots.assign(input_count, ThreediVec3{0, 0, 0});
+	for (size_t i = 0; i < input_count; ++i) {
+		threedi_mat4_identity(&c.base_transforms[i]);
+	}
+	for (size_t i = 0; i < lod.part_count; ++i) {
+		const ThreediIRPart &part = lod.parts[i];
+		c.base_transforms[i].m[12] = part.abs_position[0];
+		c.base_transforms[i].m[13] = part.abs_position[1];
+		c.base_transforms[i].m[14] = part.abs_position[2];
+		c.pivots[i] = ThreediVec3{part.abs_position[0], part.abs_position[1], part.abs_position[2]};
+	}
+	c.node_matrices.assign(c.anims.size(), ThreediMatrix4x4{});
+	c.part_to_node.assign(lod.part_count, -1);
+	for (size_t i = 0; i < c.anims.size(); ++i) {
+		const uint8_t sub = c.anims[i].subobject_index;
+		if (sub < lod.part_count) {
+			c.part_to_node[sub] = static_cast<int>(i);
+		}
+	}
+	c.part_transforms.assign(lod.part_count, Transform3D());
+	c.part_revision.assign(lod.part_count, 0);
+	return true;
+}
+
+int64_t NovaObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
+		const Dictionary &p_ctrl_values, const Array &p_nodes,
+		int64_t p_applied_revision) const {
+	if (!_panm_cache_prepare(p_lod_index)) {
+		return 0;
+	}
+	PanmEvalCache &c = panm_cache_;
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	const uint64_t ctrl_hash = panm_ctrl_hash(p_ctrl_values);
+	const bool first_eval = c.time_ms == INT64_MIN;
+	if (first_eval || c.time_ms != p_time_ms || c.ctrl_hash != ctrl_hash) {
+		uint16_t ctrl_table[512];
+		std::memset(ctrl_table, 0, sizeof(ctrl_table));
+		if (!p_ctrl_values.is_empty()) {
+			const Array keys = p_ctrl_values.keys();
+			for (int i = 0; i < keys.size(); ++i) {
+				const std::string name = to_std(keys[i]);
+				for (size_t r = 0; r < ir.control_register_count && r < 256; ++r) {
+					if (name == ir.control_registers[r].name) {
+						ctrl_table[r * 2] = static_cast<uint16_t>(std::clamp(
+								static_cast<int>(p_ctrl_values[keys[i]]), 0, 65535));
+						break;
+					}
+				}
+			}
+		}
+		if (!c.anims.empty()) {
+			threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(),
+					c.pivots.data(), nullptr, c.base_transforms.data(), nullptr,
+					retail_runtime_time_ms(p_time_ms), ctrl_table,
+					c.node_matrices.data());
+		}
+		bool any_changed = false;
+		const uint64_t next_revision = c.revision + 1;
+		for (size_t i = 0; i < lod.part_count; ++i) {
+			const int node_index = c.part_to_node[i];
+			const Transform3D next = panm_matrix_to_transform(
+					(node_index >= 0) ? c.node_matrices[node_index] : c.base_transforms[i]);
+			if (first_eval || next != c.part_transforms[i]) {
+				c.part_transforms[i] = next;
+				c.part_revision[i] = next_revision;
+				any_changed = true;
+			}
+		}
+		if (any_changed) {
+			c.revision = next_revision;
+		}
+		c.time_ms = p_time_ms;
+		c.ctrl_hash = ctrl_hash;
+	}
+	const uint64_t applied =
+			p_applied_revision <= 0 ? 0 : static_cast<uint64_t>(p_applied_revision);
+	if (applied == c.revision) {
+		return static_cast<int64_t>(c.revision);
+	}
+	const int node_limit =
+			std::min(static_cast<int>(lod.part_count), static_cast<int>(p_nodes.size()));
+	for (int i = 0; i < node_limit; ++i) {
+		if (c.part_revision[i] <= applied) {
+			continue;
+		}
+		Node3D *node = Object::cast_to<Node3D>(static_cast<Object *>(p_nodes[i]));
+		if (node != nullptr) {
+			node->set_transform(c.part_transforms[i]);
+		}
+	}
+	return static_cast<int64_t>(c.revision);
 }
 
 Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {

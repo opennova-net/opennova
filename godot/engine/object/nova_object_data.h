@@ -67,6 +67,33 @@ private:
 	mutable std::unordered_map<uint64_t, Array> submesh_cache;
 	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame);
 
+	// Per-frame PANM evaluation cache behind apply_panm_to_nodes: one data
+	// instance is SHARED across every placed model of the same graphic (the
+	// placer's per-graphic cache) and mission models ride one presentation
+	// clock, so the second instance of a graphic in the same frame reuses this
+	// evaluation verbatim. `changed` marks parts whose transform moved since
+	// the PREVIOUS evaluation; `revision` bumps when any did, letting a caller
+	// that already applied this revision skip every node write. Invalidated by
+	// _notify_object_changed()/_clear() like the submesh cache. Main-thread
+	// only.
+	struct PanmEvalCache {
+		int lod = -1;
+		int64_t time_ms = -1;
+		uint64_t ctrl_hash = 0;
+		bool valid = false;
+		uint64_t revision = 0;
+		std::vector<ThreediPartAnimation> anims;         // effective set for `lod`
+		std::vector<ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
+		std::vector<ThreediVec3> pivots;
+		std::vector<ThreediMatrix4x4> node_matrices;     // scratch, per anim node
+		std::vector<int> part_to_node;
+		std::vector<Transform3D> part_transforms;        // per part, godot frame
+		std::vector<uint64_t> part_revision;             // revision at last change
+	};
+	mutable PanmEvalCache panm_cache_;
+	void _invalidate_panm_cache() { panm_cache_.valid = false; panm_cache_.lod = -1; }
+	bool _panm_cache_prepare(int p_lod_index) const;
+
 	void _clear();
 	void _clear_oed_session();
 	void _clear_source_model();
@@ -225,6 +252,15 @@ public:
 	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	int compute_anim_frame(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	// The hot-path form of evaluate_panm: evaluates through the shared
+	// per-graphic frame cache and writes ONLY changed part transforms onto the
+	// caller's node array (index = part index; null/absent entries skipped).
+	// p_applied_revision is what the caller last applied: the returned
+	// revision equal to it means nothing was written; 0 forces a full apply
+	// (fresh nodes). No per-call allocations, no Dictionary boxing.
+	int64_t apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
+			const Dictionary &p_ctrl_values, const Array &p_nodes,
+			int64_t p_applied_revision) const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 
 	Error set_material_shader(int p_material_index, const String &p_shader_name);

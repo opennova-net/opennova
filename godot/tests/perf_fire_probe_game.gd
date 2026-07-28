@@ -291,6 +291,39 @@ func _run() -> void:
 		if is_instance_valid(restored_node):
 			(restored_node as Node).set_process(true)
 
+	# Finer attribution of the remaining _process share: the placed-model set
+	# alone, then just their live-PANM evaluation (the Dictionary-building
+	# evaluate_panm path).
+	var models: Array = []
+	var model_walk: Array = [root]
+	while not model_walk.is_empty():
+		var walk_node2: Node = model_walk.pop_back()
+		for walk_child2 in walk_node2.get_children():
+			model_walk.push_back(walk_child2)
+		if walk_node2 is NovaObjectModel:
+			models.append(walk_node2)
+	var modelprocoff := {avg = -1.0}
+	for m in models:
+		(m as Node).set_process(false)
+	await _settle_ms(500)
+	modelprocoff = await _measure("modelprocoff", 3000)
+	for m in models:
+		if is_instance_valid(m):
+			(m as Node).set_process(true)
+	var panmoff := {avg = -1.0}
+	var panm_disabled: Array = []
+	for m in models:
+		if is_instance_valid(m) and bool(m.get("_has_live_panm")):
+			m.set("_has_live_panm", false)
+			panm_disabled.append(m)
+	print("[pfg] panmoff: suspended live PANM on %d of %d model(s)" % [
+			panm_disabled.size(), models.size()])
+	await _settle_ms(500)
+	panmoff = await _measure("panmoff", 3000)
+	for m in panm_disabled:
+		if is_instance_valid(m):
+			m.set("_has_live_panm", true)
+
 	_report("BASELINE", base)
 	_report("FIRING1 ", fire1)
 	_report("FIRING2 ", fire2)
@@ -328,6 +361,12 @@ func _run() -> void:
 	if float(otherprocoff.avg) >= 0.0:
 		print("[pfg] OTHERPROCOFF avg=%.2fms (other nodes' _process share vs cooldown: %+.2fms)" % [
 				float(otherprocoff.avg), float(cool.avg) - float(otherprocoff.avg)])
+	if float(modelprocoff.avg) >= 0.0:
+		print("[pfg] MODELPROCOFF avg=%.2fms (placed-model _process share vs cooldown: %+.2fms)" % [
+				float(modelprocoff.avg), float(cool.avg) - float(modelprocoff.avg)])
+	if float(panmoff.avg) >= 0.0:
+		print("[pfg] PANMOFF  avg=%.2fms (live-PANM evaluation share vs cooldown: %+.2fms)" % [
+				float(panmoff.avg), float(cool.avg) - float(panmoff.avg)])
 	var base_avg: float = base.avg
 	var base_p95: float = base.p95
 	var cool_avg: float = cool.avg

@@ -48,6 +48,11 @@ var _od_has_eval := false
 var _od_has_frame := false
 var _env_has_generation := false
 var _last_light_push: Array = []
+# Dense part-index -> Node3D array + the PANM revision this model last applied
+# (apply_panm_to_nodes skips every node write while the shared evaluation's
+# revision is unchanged; 0 forces the fresh-node full apply after rebuild).
+var _robj_dense: Array = []
+var _panm_applied_revision := 0
 # The applied per-section render mask (-1 = everything visible); see
 # set_section_visibility_mask.
 var _section_visibility_mask: int = -1
@@ -880,6 +885,8 @@ func rebuild() -> void:
 	_last_env_gen = -1
 	_last_env_values = null
 	_last_light_push = []
+	_robj_dense = []
+	_panm_applied_revision = 0
 	if object_data == null or not object_data.has_document():
 		_od_has_eval = false
 		_od_has_frame = false
@@ -1127,6 +1134,11 @@ func _get_or_create_robj_node(robj_index: int) -> Node3D:
 		node.visible = (_section_visibility_mask >> robj_index) & 1 == 1
 	add_child(node)
 	_robj_nodes[robj_index] = node
+	# The dense part-index -> node array apply_panm_to_nodes writes through
+	# (nulls for parts without a node).
+	while _robj_dense.size() <= robj_index:
+		_robj_dense.append(null)
+	_robj_dense[robj_index] = node
 	return node
 
 
@@ -1213,7 +1225,22 @@ func _apply_runtime_state(delta: float, renderable := true) -> void:
 
 
 func _apply_robj_transforms() -> bool:
-	if object_data == null or not object_data.has_method("evaluate_panm") or _robj_nodes.is_empty():
+	if object_data == null or _robj_nodes.is_empty():
+		return false
+	# The shared-evaluation hot path: one native call evaluates PANM at most
+	# once per graphic per frame (the placer shares one NovaObjectData across
+	# every instance of a graphic, all riding one presentation clock) and
+	# writes only the parts whose transforms changed since this model last
+	# applied. No Dictionary boxing, no per-frame allocations.
+	if object_data.has_method("apply_panm_to_nodes"):
+		var revision := int(object_data.apply_panm_to_nodes(
+				_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
+				_panm_applied_revision))
+		var changed := revision != _panm_applied_revision
+		_panm_applied_revision = revision
+		return changed
+	# Dictionary fallback for duck-typed data doubles (tests).
+	if not object_data.has_method("evaluate_panm"):
 		return false
 	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
 	var changed := false
