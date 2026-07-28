@@ -105,7 +105,7 @@ Error ResourceFormatSaverTRN::_save(const Ref<Resource> &p_resource, const Strin
 	std::ostringstream oss;
 	std::string error;
 	if (!opennova::save_trn(oss, trn_copy, error)) {
-		UtilityFunctions::printerr("ResourceFormatSaverTRN: ", error.c_str());
+		UtilityFunctions::push_warning("ResourceFormatSaverTRN: ", error.c_str());
 		return ERR_FILE_CANT_WRITE;
 	}
 

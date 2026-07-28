@@ -499,7 +499,7 @@ void NovaTerrain::_notification(int p_what) {
 		if (terrain_data.is_valid() && !terrain_data->is_loaded()) {
 			Error err = terrain_data->load();
 			if (err != OK) {
-				UtilityFunctions::printerr("NovaTerrain: Failed to auto-load terrain data");
+				UtilityFunctions::push_warning("NovaTerrain: Failed to auto-load terrain data");
 				return;
 			}
 		}
@@ -688,7 +688,7 @@ void NovaTerrain::build() {
 	_clear_terrain();
 
 	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
-		UtilityFunctions::printerr("NovaTerrain::build() — terrain_data not loaded");
+		UtilityFunctions::push_warning("NovaTerrain::build() — terrain_data not loaded");
 		return;
 	}
 

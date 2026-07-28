@@ -56,17 +56,17 @@ Variant MusResourceFormatLoader::_load(const String &p_path, const String &p_ori
 		bool p_use_sub_threads, int32_t p_cache_mode) const {
 	PackedByteArray bytes;
 	if (!read_nova_payload_file(p_path, bytes)) {
-		UtilityFunctions::printerr("MusResourceFormatLoader: cannot open ", p_path);
+		UtilityFunctions::push_warning("MusResourceFormatLoader: cannot open ", p_path);
 		return Variant();
 	}
 
 	if (bytes.is_empty()) {
-		UtilityFunctions::printerr("MusResourceFormatLoader: empty file ", p_path);
+		UtilityFunctions::push_warning("MusResourceFormatLoader: empty file ", p_path);
 		return Variant();
 	}
 
 	if (!is_plain_mus(bytes)) {
-		UtilityFunctions::printerr(
+		UtilityFunctions::push_warning(
 				"MusResourceFormatLoader: ", p_path,
 				" is not a valid SCR0 MUS file after generic payload decode");
 		return Variant();

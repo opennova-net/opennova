@@ -409,7 +409,7 @@ PackedByteArray RtxtStringFile::to_byte_array() const {
 	std::string error;
 	PackedByteArray out;
 	if (!opennova::rtxt::write(file_, bytes, error)) {
-		UtilityFunctions::printerr("RtxtStringFile: serialize failed: ", error.c_str());
+		UtilityFunctions::push_warning("RtxtStringFile: serialize failed: ", error.c_str());
 		return out;
 	}
 	out.resize(static_cast<int64_t>(bytes.size()));
@@ -427,7 +427,7 @@ Error RtxtStringFile::load_from_byte_array(const PackedByteArray &p_bytes) {
 	opennova::rtxt::File parsed;
 	std::string error;
 	if (!opennova::rtxt::parse(bytes.data(), bytes.size(), parsed, error)) {
-		UtilityFunctions::printerr("RtxtStringFile: parse failed: ", error.c_str());
+		UtilityFunctions::push_warning("RtxtStringFile: parse failed: ", error.c_str());
 		return ERR_FILE_CORRUPT;
 	}
 	file_ = std::move(parsed);

@@ -59,16 +59,16 @@ void NovaSbfBank::load_from_path(const String &p_path) {
 	_file_bytes = PackedByteArray();
 
 	if (!read_nova_payload_file(p_path, _file_bytes)) {
-		UtilityFunctions::printerr("NovaSbfBank: could not open ", p_path);
+		UtilityFunctions::push_warning("NovaSbfBank: could not open ", p_path);
 		return;
 	}
 
 	if (_file_bytes.size() <= 0) {
-		UtilityFunctions::printerr("NovaSbfBank: empty file ", p_path);
+		UtilityFunctions::push_warning("NovaSbfBank: empty file ", p_path);
 		return;
 	}
 	if (sbf_open_memory(&_arc, _file_bytes.ptr(), (size_t)_file_bytes.size()) != 0) {
-		UtilityFunctions::printerr("NovaSbfBank: sbf_open_memory failed for ", p_path);
+		UtilityFunctions::push_warning("NovaSbfBank: sbf_open_memory failed for ", p_path);
 		_file_bytes = PackedByteArray();
 		return;
 	}

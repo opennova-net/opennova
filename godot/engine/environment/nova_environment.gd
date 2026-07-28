@@ -167,7 +167,7 @@ func _ensure_loaded() -> void:
 	if environment_data and not environment_data.is_loaded():
 		var err := environment_data.load()
 		if err != OK:
-			printerr("NovaEnvironment: failed to load .env: ", err)
+			push_warning("NovaEnvironment: failed to load .env: ", err)
 
 
 func is_loaded() -> bool:

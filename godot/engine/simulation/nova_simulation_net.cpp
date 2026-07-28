@@ -5,6 +5,7 @@
 
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace novasim;
 
@@ -517,7 +518,7 @@ NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame(
 							static_cast<int64_t>(lae->heading >> 16),
 							static_cast<int64_t>(le ? le->net_move_input : 0));
 			}
-			print_line(vformat(
+			UtilityFunctions::print_verbose(vformat(
 					"joiner net: in=%d out=%d rec=%d gap=%d retained=%d match=%d deployed=%d%s%s",
 					static_cast<int64_t>(frontier), static_cast<int64_t>(out_seq),
 					static_cast<int64_t>(records), static_cast<int64_t>(gap_depth),

@@ -306,7 +306,7 @@ Error NovaMnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	mnu::Document parsed;
 	std::string error;
 	if (!mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
-		UtilityFunctions::printerr("NovaMnuDocument: parse failed: ", error.c_str());
+		UtilityFunctions::push_warning("NovaMnuDocument: parse failed: ", error.c_str());
 		return ERR_FILE_CORRUPT;
 	}
 	doc_ = std::move(parsed);
@@ -1355,7 +1355,7 @@ void NovaMnuDocument::apply_state(const Dictionary &p_state) {
 	mnu::Document parsed;
 	std::string error;
 	if (!mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
-		UtilityFunctions::printerr("NovaMnuDocument::apply_state: parse failed: ", error.c_str());
+		UtilityFunctions::push_warning("NovaMnuDocument::apply_state: parse failed: ", error.c_str());
 		return;
 	}
 	doc_ = std::move(parsed);
@@ -1398,7 +1398,7 @@ void NovaMnuDocument::apply_state(const Dictionary &p_state) {
 		const int stored_next = static_cast<int>(p_state.get("next_id", max_id + 1));
 		next_id_ = stored_next > max_id + 1 ? stored_next : max_id + 1;
 	} else {
-		UtilityFunctions::printerr("NovaMnuDocument::apply_state: id list desync, falling back to positional ids");
+		UtilityFunctions::push_warning("NovaMnuDocument::apply_state: id list desync, falling back to positional ids");
 		rebuild_ids();
 	}
 

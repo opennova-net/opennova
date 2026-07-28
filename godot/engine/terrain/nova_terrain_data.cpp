@@ -1006,13 +1006,13 @@ Error NovaTerrainData::load() {
 	resource_root.unref();
 
 	if (trn_path.is_empty()) {
-		UtilityFunctions::printerr("NovaTerrainData: trn_path must be set before loading");
+		UtilityFunctions::push_warning("NovaTerrainData: trn_path must be set before loading");
 		return ERR_INVALID_PARAMETER;
 	}
 
 	PackedByteArray trn_bytes;
 	if (!read_nova_payload_file(trn_path, trn_bytes)) {
-		UtilityFunctions::printerr("NovaTerrainData: Cannot open TRN: ", trn_path);
+		UtilityFunctions::push_warning("NovaTerrainData: Cannot open TRN: ", trn_path);
 		return ERR_FILE_CANT_READ;
 	}
 	std::string trn_content(reinterpret_cast<const char *>(trn_bytes.ptr()), static_cast<size_t>(trn_bytes.size()));
@@ -1027,17 +1027,17 @@ Error NovaTerrainData::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	resource_root.unref();
 
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
-		UtilityFunctions::printerr("NovaTerrainData: resource root must be configured before loading");
+		UtilityFunctions::push_warning("NovaTerrainData: resource root must be configured before loading");
 		return ERR_INVALID_PARAMETER;
 	}
 	const String file = p_name.get_file();
 	if (file.is_empty()) {
-		UtilityFunctions::printerr("NovaTerrainData: resource filename is empty");
+		UtilityFunctions::push_warning("NovaTerrainData: resource filename is empty");
 		return ERR_INVALID_PARAMETER;
 	}
 	const PackedByteArray trn_bytes = p_resource_root->read_file(file);
 	if (trn_bytes.is_empty()) {
-		UtilityFunctions::printerr("NovaTerrainData: Cannot open TRN from resource root: ", file);
+		UtilityFunctions::push_warning("NovaTerrainData: Cannot open TRN from resource root: ", file);
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -1052,7 +1052,7 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 	std::string error;
 	std::istringstream trn_stream(trn_content);
 	if (!opennova::load_trn(trn_stream, trn, error)) {
-		UtilityFunctions::printerr("NovaTerrainData: TRN parse failed: ", error.c_str());
+		UtilityFunctions::push_warning("NovaTerrainData: TRN parse failed: ", error.c_str());
 		return ERR_FILE_CANT_READ;
 	}
 
@@ -1182,7 +1182,7 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 	}
 
 	if (!opennova::load_cpt(cpt_bytes.ptr(), cpt_bytes.size(), cpt, error)) {
-		UtilityFunctions::printerr("NovaTerrainData: CPT parse failed: ", error.c_str());
+		UtilityFunctions::push_warning("NovaTerrainData: CPT parse failed: ", error.c_str());
 		return ERR_FILE_CANT_READ;
 	}
 

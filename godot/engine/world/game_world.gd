@@ -2894,7 +2894,7 @@ func _warm_effect_world_catalog() -> int:
 	if _effect_world.has_method("get_unresolved_texture_names"):
 		unresolved = PackedStringArray(
 				_effect_world.get_unresolved_texture_names()).size()
-	print("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
+	print_verbose("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
 			spawned, unresolved])
 	return spawned
 

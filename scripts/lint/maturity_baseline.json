@@ -10,6 +10,8 @@
     "vfs"
   ],
   "counters": {
+    "cpp_binding_console_writes": 0,
+    "gd_prints_outside_debug": 0,
     "libs_stdout_prints": 0,
     "libs_uncited_src_files": 57,
     "test_private_pokes": 1378

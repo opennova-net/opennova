@@ -972,7 +972,6 @@ func dump_local_player_pose(path_override: String = "") -> String:
 	_apply_player_pose_to_ui(snapshot)
 	_player_dump_button.disabled = false
 	_player_dump_status.text = "Saved:\n%s" % target_path
-	print("OpenNova player pose: %s" % target_path)
 	local_player_pose_dumped.emit(target_path)
 	return target_path
 

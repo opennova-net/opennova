@@ -64,12 +64,12 @@ void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {
 			return; // no-op: equal value, no dirty flip
 		}
 		if (!doc_.set_value(name, value, &error)) {
-			UtilityFunctions::printerr("MnsStyleSheet: set_variable failed: ", error.c_str());
+			UtilityFunctions::push_warning("MnsStyleSheet: set_variable failed: ", error.c_str());
 			return;
 		}
 	} else {
 		if (!doc_.add_define(name, value, -1, std::string(), &error)) {
-			UtilityFunctions::printerr("MnsStyleSheet: set_variable failed: ", error.c_str());
+			UtilityFunctions::push_warning("MnsStyleSheet: set_variable failed: ", error.c_str());
 			return;
 		}
 	}
@@ -93,7 +93,7 @@ void MnsStyleSheet::set_variables(const Dictionary &p_variables) {
 		const String key = keys[i];
 		std::string error;
 		if (!doc_.add_define(to_std(key), to_std(p_variables[key]), -1, std::string(), &error)) {
-			UtilityFunctions::printerr("MnsStyleSheet: set_variables skipped '", key, "': ", error.c_str());
+			UtilityFunctions::push_warning("MnsStyleSheet: set_variables skipped '", key, "': ", error.c_str());
 		}
 	}
 	_refresh();
@@ -167,14 +167,14 @@ bool MnsStyleSheet::add_variable(const String &p_name, const String &p_value, co
 	if (!p_after_name.is_empty()) {
 		const int after = doc_.find_entry(to_std(p_after_name));
 		if (after < 0) {
-			UtilityFunctions::printerr("MnsStyleSheet: add_variable: no variable named '", p_after_name, "'");
+			UtilityFunctions::push_warning("MnsStyleSheet: add_variable: no variable named '", p_after_name, "'");
 			return false;
 		}
 		before_node = doc_.entries()[static_cast<size_t>(after)].node_index + 1;
 	}
 	std::string error;
 	if (!doc_.add_define(to_std(p_name), to_std(p_value), before_node, std::string(), &error)) {
-		UtilityFunctions::printerr("MnsStyleSheet: add_variable failed: ", error.c_str());
+		UtilityFunctions::push_warning("MnsStyleSheet: add_variable failed: ", error.c_str());
 		return false;
 	}
 	_refresh();
@@ -185,7 +185,7 @@ bool MnsStyleSheet::add_variable(const String &p_name, const String &p_value, co
 bool MnsStyleSheet::rename_variable(const String &p_old_name, const String &p_new_name) {
 	std::string error;
 	if (!doc_.rename_define(to_std(p_old_name), to_std(p_new_name), &error)) {
-		UtilityFunctions::printerr("MnsStyleSheet: rename_variable failed: ", error.c_str());
+		UtilityFunctions::push_warning("MnsStyleSheet: rename_variable failed: ", error.c_str());
 		return false;
 	}
 	_refresh();
@@ -200,7 +200,7 @@ bool MnsStyleSheet::move_variable(const String &p_name, int p_to_entry_index) {
 			: entries[static_cast<size_t>(p_to_entry_index)].node_index;
 	std::string error;
 	if (!doc_.move_define(to_std(p_name), before_node, &error)) {
-		UtilityFunctions::printerr("MnsStyleSheet: move_variable failed: ", error.c_str());
+		UtilityFunctions::push_warning("MnsStyleSheet: move_variable failed: ", error.c_str());
 		return false;
 	}
 	_refresh();
@@ -211,7 +211,7 @@ bool MnsStyleSheet::move_variable(const String &p_name, int p_to_entry_index) {
 bool MnsStyleSheet::set_inline_comment(const String &p_name, const String &p_comment) {
 	std::string error;
 	if (!doc_.set_inline_comment(to_std(p_name), to_std(p_comment), &error)) {
-		UtilityFunctions::printerr("MnsStyleSheet: set_inline_comment failed: ", error.c_str());
+		UtilityFunctions::push_warning("MnsStyleSheet: set_inline_comment failed: ", error.c_str());
 		return false;
 	}
 	_refresh();
