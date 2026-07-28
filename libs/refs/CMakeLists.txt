@@ -16,7 +16,7 @@ target_include_directories(opennova_refs
 )
 
 target_link_libraries(opennova_refs
-    PRIVATE
+    PRIVATE opennova_io
         opennova_env
         opennova_cbin
         opennova_def

@@ -5,6 +5,8 @@
 #include <cstring>
 #include <string>
 
+#include <io/strutil.h>
+
 namespace opennova {
 
 // Witnessed against the retail GSB parser NapiGameList_ProcessEncryptedResponse
@@ -277,12 +279,7 @@ bool magic_is(const GsbChunk &c, const char (&tag)[5]) {
 	       c.magic[2] == tag[2] && c.magic[3] == tag[3];
 }
 
-std::string to_lower(std::string s) {
-	for (char &c : s) {
-		if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-	}
-	return s;
-}
+using opennova::strutil::to_lower;
 
 int parse_int_or_zero(const std::string &s) {
 	try { return std::stoi(s); } catch (...) { return 0; }

@@ -7,17 +7,11 @@
 #include <numeric>
 #include <utility>
 
+#include <io/strutil.h>
+
 namespace renderer {
 namespace {
 
-std::string lower_ascii(std::string_view value) {
-	std::string folded(value);
-	for (char &c : folded) {
-		if (c >= 'A' && c <= 'Z')
-			c = static_cast<char>(c - 'A' + 'a');
-	}
-	return folded;
-}
 
 int atlas_page_size(std::uint8_t type) {
 	return type <= 2 ? 1024 : 256;
@@ -131,7 +125,7 @@ std::string retail_particle_frame_name(std::string_view authored,
 		int frame_count, int one_based_frame) {
 	if (frame_count <= 1)
 		return std::string(authored);
-	std::string base = lower_ascii(authored);
+	std::string base = opennova::strutil::to_lower(authored);
 	const std::size_t extension = base.find(".tga");
 	if (extension != std::string::npos)
 		base.resize(extension);
@@ -217,7 +211,7 @@ ParticleAtlasAllocation allocate_retail_particle_atlas_rect(
 
 ParticleAtlasEntryId ParticleAtlasBuilder::register_frame(std::string name,
 		std::uint8_t type, ParticleRgbaImage image) {
-	const std::string folded_name = lower_ascii(name);
+	const std::string folded_name = opennova::strutil::to_lower(name);
 	for (ParticleAtlasEntryId id = 0; id < frames_.size(); ++id) {
 		const RegisteredFrame &registered = frames_[id];
 		if (registered.type == type && registered.folded_name == folded_name)

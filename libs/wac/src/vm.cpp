@@ -7,16 +7,12 @@
 #include "wac/command.h"
 #include "world/world.h"
 
+#include <io/strutil.h>
+
 namespace opennova::wac {
 namespace {
 
-bool ieq(const char *a, const char *b) {
-    while (*a && *b) {
-        if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b)) return false;
-        ++a; ++b;
-    }
-    return *a == *b;
-}
+bool ieq(const char *a, const char *b) { return opennova::strutil::iequals(a, b); }
 
 uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 

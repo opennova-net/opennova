@@ -3,14 +3,12 @@
 #include <cctype>
 #include <cstdlib> // std::atoi
 
+#include <io/strutil.h>
+
 namespace opennova {
 namespace {
 
-// Small std::string helpers (the Godot String methods the binding used, ported 1:1).
-std::string to_lower(std::string s) {
-	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return s;
-}
+using opennova::strutil::to_lower;
 bool begins_with(const std::string &s, const std::string &prefix) {
 	return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
@@ -23,12 +21,7 @@ std::string replace_all(std::string s, const std::string &from, const std::strin
 	}
 	return s;
 }
-std::string strip_edges(const std::string &s) {
-	std::size_t a = 0, b = s.size();
-	while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
-	while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
-	return s.substr(a, b - a);
-}
+std::string strip_edges(const std::string &s) { return opennova::strutil::trim(s); }
 std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
 }

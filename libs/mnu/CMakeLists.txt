@@ -9,3 +9,4 @@ target_include_directories(opennova_mnu
 )
 
 target_compile_features(opennova_mnu PUBLIC cxx_std_17)
+target_link_libraries(opennova_mnu PRIVATE opennova_io)

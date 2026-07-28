@@ -14,7 +14,7 @@ target_include_directories(opennova_renderer
 )
 
 # material_eval.h (public) includes threedi_3di3.h -> real PUBLIC dependency.
-target_link_libraries(opennova_renderer PUBLIC opennova_threedi)
+target_link_libraries(opennova_renderer PUBLIC opennova_io opennova_threedi)
 
 # oed/material_descriptor.h provides the exact OED shader descriptor table used
 # by material_classify.cpp - a header-only use, so we take the include dir

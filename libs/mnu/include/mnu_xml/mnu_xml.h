@@ -95,13 +95,4 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 bool parse_file(const std::string &path, Document &out, std::string &error,
                 const ParseOptions &options = {});
 
-// Case-insensitive string comparison.
-bool iequals(const std::string &a, const std::string &b);
-
-// Convert string to uppercase (ASCII only).
-std::string to_upper(const std::string &s);
-
-// Convert string to lowercase (ASCII only).
-std::string to_lower(const std::string &s);
-
 }  // namespace mnu_xml

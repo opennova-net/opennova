@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <io/strutil.h>
+
 namespace opennova {
 namespace dbf {
 
@@ -23,18 +25,7 @@ std::string read_cstring(const char *data, size_t max_len) {
 	return std::string(data, len);
 }
 
-bool iequals(const std::string &a, const std::string &b) {
-	if (a.size() != b.size()) {
-		return false;
-	}
-	for (size_t i = 0; i < a.size(); ++i) {
-		if (std::tolower(static_cast<unsigned char>(a[i])) !=
-				std::tolower(static_cast<unsigned char>(b[i]))) {
-			return false;
-		}
-	}
-	return true;
-}
+using opennova::strutil::iequals;
 
 }  // namespace
 

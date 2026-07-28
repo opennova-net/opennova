@@ -7,35 +7,12 @@
 #include <fstream>
 #include <sstream>
 
+#include <io/strutil.h>
+
 namespace mnu_xml {
 
-// Case-insensitive string comparison.
-bool iequals(const std::string &a, const std::string &b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i) {
-    if (std::tolower(static_cast<unsigned char>(a[i])) !=
-        std::tolower(static_cast<unsigned char>(b[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
+using opennova::strutil::iequals;
 
-std::string to_upper(const std::string &s) {
-  std::string result = s;
-  for (char &c : result) {
-    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  }
-  return result;
-}
-
-std::string to_lower(const std::string &s) {
-  std::string result = s;
-  for (char &c : result) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  return result;
-}
 
 // Node methods.
 const Attribute *Node::find_attr(const std::string &name) const {

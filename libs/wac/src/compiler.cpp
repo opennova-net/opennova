@@ -11,19 +11,12 @@
 #include "world/entity_registry.h"
 #include "world/var_store.h"
 
+#include <io/strutil.h>
+
 namespace opennova::wac {
 namespace {
 
-bool ieq(std::string_view a, const char *b) {
-    size_t i = 0;
-    for (; i < a.size() && b[i]; ++i) {
-        if (std::tolower(static_cast<unsigned char>(a[i])) !=
-            std::tolower(static_cast<unsigned char>(b[i]))) {
-            return false;
-        }
-    }
-    return i == a.size() && b[i] == '\0';
-}
+bool ieq(std::string_view a, const char *b) { return opennova::strutil::iequals(a, b); }
 
 bool all_digits(std::string_view s) {
     if (s.empty()) return false;

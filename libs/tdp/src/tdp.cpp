@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <io/strutil.h>
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -20,14 +22,7 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
     dst[len] = '\0';
 }
 
-static bool iequals(const char *a, const char *b) {
-    for (;; ++a, ++b) {
-        if (std::tolower(static_cast<unsigned char>(*a)) !=
-            std::tolower(static_cast<unsigned char>(*b)))
-            return false;
-        if (*a == '\0') return true;
-    }
-}
+using opennova::strutil::iequals;
 
 static int to_int(const char *s) {
     if (!s || !*s) return 0;

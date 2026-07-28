@@ -49,6 +49,23 @@ inline bool iless(std::string_view a, std::string_view b)
     return a.size() < b.size();
 }
 
+// Both-ends ASCII whitespace trim (the C-locale isspace set, spelled out so
+// behavior never depends on the process locale).
+inline std::string_view trim_view(std::string_view s)
+{
+    const char *ws = " \t\r\n\v\f";
+    const size_t b = s.find_first_not_of(ws);
+    if (b == std::string_view::npos)
+        return std::string_view();
+    const size_t e = s.find_last_not_of(ws);
+    return s.substr(b, e - b + 1);
+}
+
+inline std::string trim(std::string_view s)
+{
+    return std::string(trim_view(s));
+}
+
 inline bool ends_with_icase(std::string_view s, std::string_view suffix)
 {
     if (suffix.size() > s.size())
