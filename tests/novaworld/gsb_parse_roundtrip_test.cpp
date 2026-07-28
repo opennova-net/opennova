@@ -1,9 +1,10 @@
 // gsb_parse_response is the exact client-side inverse of gsb_build_response, in
 // the retail GSB format (NapiGameList_ProcessEncryptedResponse @ 0x63d740, docs
-// §8 Wave 7). Build a GSB blob from known entries, parse it back, and assert
-// every serialized field round-trips: the SVRS row carries [u32 ip][u32 port]
-// then the positional FLDS values then the [u16 count][player names] tail — so
-// ip, port, the named fields, AND the player list all survive the wire.
+// §7 Waves 7+9). Build a GSB blob from known entries, parse it back, and assert
+// every serialized field round-trips: the SVRS row carries [u32 rid][4-byte
+// IPv4 in_addr] then the positional FLDS values then the [u16 count][player
+// names] tail — so rid, ip, the named fields, AND the player list all survive
+// the wire.
 
 #include <novaworld/gsb.h>
 
@@ -27,7 +28,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 bool entries_match(const GsbServerEntry &a, const GsbServerEntry &b) {
-	return a.rid == b.rid && a.port == b.port &&
+	return a.rid == b.rid && a.ip == b.ip &&
 	       a.server_name == b.server_name && a.game_type == b.game_type &&
 	       a.mission_name == b.mission_name && a.region == b.region &&
 	       a.players == b.players && a.max_players == b.max_players &&
@@ -49,7 +50,7 @@ int main() {
 	// positional/ordering bug or a wrong field mapping is caught.
 	GsbServerEntry a{};
 	a.rid = 0x0A000123u;
-	a.port = 17479;
+	a.ip = "10.0.1.35";
 	a.server_name = "Alpha Base";
 	a.game_type = "AAS";
 	a.mission_name = "ASH_G11A";
@@ -80,7 +81,7 @@ int main() {
 
 	GsbServerEntry b{};
 	b.rid = 0x0A000456u;
-	b.port = 64206;
+	b.ip = "192.0.2.254";
 	b.server_name = "Bravo";
 	b.game_type = "COOP";
 	b.mission_name = "DESERT";
@@ -109,7 +110,7 @@ int main() {
 	expect(parsed.total_servers == 2, "total_servers == row count (2)");
 	expect(parsed.total_players == 3, "total_players == sum of player-name lists (3 + 0)");
 	if (expect(parsed.servers.size() == 2, "two servers parsed")) {
-		expect(entries_match(parsed.servers[0], a), "server[0] fields round-trip (incl. port + players)");
+		expect(entries_match(parsed.servers[0], a), "server[0] fields round-trip (incl. ip + players)");
 		expect(entries_match(parsed.servers[1], b), "server[1] fields round-trip");
 	}
 

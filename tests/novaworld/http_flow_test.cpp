@@ -206,7 +206,7 @@ static bool test_gsb_request_and_parse() {
 	// Build a one-server GSB blob and round-trip it through the flow's parser.
 	nw::GsbServerEntry s;
 	s.rid = 777;
-	s.port = 17479;
+	s.ip = "198.51.100.23";
 	s.server_name = "Test Host";
 	s.mission_name = "Island";
 	s.players = 3;
@@ -214,7 +214,8 @@ static bool test_gsb_request_and_parse() {
 	const std::vector<uint8_t> blob = nw::gsb_build_response({s});
 	nw::GsbResponse out;
 	if (!expect(f.on_gsb_response(true, 200, blob, out), "gsb parse ok")) return false;
-	expect(out.servers.size() == 1 && out.servers[0].rid == 777 && out.servers[0].port == 17479,
+	expect(out.servers.size() == 1 && out.servers[0].rid == 777 &&
+	           out.servers[0].ip == "198.51.100.23",
 	       "gsb decoded the server row");
 	// A failed fetch parses nothing.
 	nw::GsbResponse out2;

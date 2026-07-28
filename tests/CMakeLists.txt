@@ -1285,6 +1285,13 @@ target_link_libraries(gsb_parse_roundtrip_test PRIVATE opennova_novaworld openno
 target_include_directories(gsb_parse_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_parse_roundtrip COMMAND gsb_parse_roundtrip_test)
 
+# Retail dispatcher semantics (D-NET-190..193): SVRS accumulation, the gated
+# "GSB " reset, undersized-record skips, and the XXXX-terminator hardening.
+add_executable(gsb_retail_semantics_test novaworld/gsb_retail_semantics_test.cpp)
+target_link_libraries(gsb_retail_semantics_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_retail_semantics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gsb_retail_semantics COMMAND gsb_retail_semantics_test)
+
 # Byte-level oracle: decode the genuine .204 server-browser blob
 # (fixtures/novaworld/nw204_jop_2.gsb) through our retail-faithful parser.
 add_executable(gsb_real204_decode_test novaworld/gsb_real204_decode_test.cpp)

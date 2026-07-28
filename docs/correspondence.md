@@ -214,7 +214,13 @@ Newly-grilled originals (join key = addr):
 | `NapiNPConnection_DispatchMessage` | `0x622570` | high-table 0x80 selector | D-NET-5 | fixed |
 | `NapiNPConnection_ParseMessages` | `0x625bc0` | LEN8/LEN16 precedence | D-NET-6 | fixed |
 | `CNapiGameSession_HandleConnectVerifyResponse` | `0x4d5800` | Success = atol != 0 | D-NET-19 | fixed |
-| `NapiGameList_ProcessEncryptedResponse` | `0x63d740` | GSB chunk format (prefix magic) | D-NET-32..35 | divergent |
+| `NapiGameList_ProcessEncryptedResponse` | `0x63d740` | GSB chunk stream (prefix magic; row `[rid][host IPv4]`; SVRS accumulate; gated GSB reset; undersized skip) | D-NET-32..36, 190..193 | fixed (2026-07-27 grill, §7 Wave 9) |
+| `NapiGameList_StartPingSweep` | `0x63bcf0` | XXXX finalize: formats row entry+4 as in_addr, pings every row | D-NET-190 | witnessed (ping sweep itself unported — browse UI shows no ping yet) |
+| `NapiGameList_OnPingResult` | `0x63bc60` | per-row ping result store (-4→-3, -3/-2/-1→-2, 0→ms; event 2) | D-NET-190 | witnessed (unported, same scope) |
+| `NapiGameList_StartFetch` | `0x63dd10` | GSB fetch start (stores ctx+68 ping-sweep gate flags); renamed from curated misnomer `load_xml_content` | D-NET-193 | matching (our `trigger_gsb`/`gsb_request` seam) |
+| `Observable_NotifyListeners` | `0x63b140` | game-list event fan (2 ping / 6 list-updated / 7 reset / 8 kv) | D-NET-193 | matching (binding emits `server_list_updated` on parse) |
+| `NapiGameList_AppendKeyValuePair` | `0x63dea0` | event-8 kv append into the list ctx | D-NET-193 | witnessed (no kv consumer in our browser) |
+| `CLanServerBrowser_UpdateServerList_0` | `0x660200` | case 3: row dword0 `sprintf %d` over `@RID@` in the markup NWJoin URL | D-NET-190/193 | matching (our join sends `rid=` from the row; signed-%d vs `stoul` wrap noted in D-NET-193) |
 | `CNapiGameSession_SendPlayRequest` | `0x4d3920` | ClientPlayRequest shape (CurrentlyPlaying + ClientVarList) | D-NET-37..39 | fixed |
 | `NapiStatement_SerializeVarList` | `0x4d0660` | ClientVarList(VarList)+ClientVar(VarFNum/VarName/VarValue) | D-NET-38 | fixed |
 | `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | fixed |

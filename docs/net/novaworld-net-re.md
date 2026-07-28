@@ -63,6 +63,19 @@ The `NW*.dll` routes as implemented in the reverted stack, matching retail wire 
 
 ### GSB server row (positional, 26 fields)
 
+Stream = flat `[magic:4][len:u32 LE][payload]` chunks, each payload encrypted independently
+under the 22-digit GSB key. Tags: `GSB ` = init/**reset** (honored only when payload dword0
+== `0x00010000`, else the record is skipped), `FLDS` = field-name table (replaces), `SVRS` =
+server rows (**accumulate** across records — a multi-SVRS stream yields the union), `XXXX` =
+finalize. Undersized records (FLDS/SVRS payload < 2, `GSB ` payload < 4) are skipped, never
+errors. Row = `[u32 rid][4-byte host IPv4, in_addr order]`, then one NUL-terminated ASCII
+value per FLDS name, then `[u16 playerCount][playerCount × name]`. `rid` is the `@RID@` join
+substitution in the markup NWJoin URL, printed `%d` [orig: CLanServerBrowser_UpdateServerList_0
+@ 0x660200, sprintf @ 0x660386]; the IPv4 is the ping target the browser formats from entry+4
+on the XXXX finalize [orig: NapiGameList_StartPingSweep @ 0x63bcf0]. Full semantics:
+D-NET-32..36 + D-NET-190..193, §7 Wave 9.
+
+Field names:
 `ServerName`, `GameType`, `MissionName`, `Region`, `Players`, `MaxPlayers`, `Dedicated`,
 `TimeLeft`, `Password`, `Country`, `Msg`, `Age`, `TimeOfDay`, `Stat`, `LevelRange`, `Locked`,
 `Tracers`, `Skins`, `BBMode`, `Mod`, `PIX`, `PBSERVER`, `VER1`, `Exp`, `Expbits`, `Joicon2`.
@@ -9171,7 +9184,8 @@ phase-1 query. `http_login_test` gains an all-encrypted-body case; 20/20 scoped 
 GDExtension builds clean.
 
 **CONFIRMED LIVE against `.204` (2026-06-12, `~/Desktop/capture_opennova2.pcapng`):** the full
-out-game flow ran end to end — `GET /jop_2.gsb?a=1` (unauth on connect, 7 real servers) →
+out-game flow ran end to end — `GET /jop_2.gsb?a=1` (unauth on connect; logged as "7 real
+servers", an UNDERCOUNT: the then-parser kept only the final SVRS record, D-NET-191) →
 `GET /nwprepare.dll?ver1=3&cc=us&gt=jop:cus2` (substituted template) → `GET /NWStart.dll` →
 `POST /NWLogin.dll` (all-encrypted) → two `GET /NWLogin.dll?tag=…` polls → auth as **ljim**
 (`PCID A-A02-085D18`, matching the retail capture) → authenticated `jop_2.gsb` → two-phase
@@ -9252,6 +9266,36 @@ their `dword_2550xxx` cfg shadows → `g_cfg_*`, `dword_2550A04` → `g_mpattrib
 `dword_2550CA4` → `g_mp_allowsniperscopezoom`; `sub_502B30` → `NetPacket_WriteSlotAssignment`;
 `CNapiNPConnection_SendSessionPacket @ 0x61edd0` prototype corrected to
 `(NapiNPConnection *conn, unsigned int packet_seq)` (was a bogus `__thiscall(int *)`). IDB saved.
+
+### Wave 9 — 2026-07-27 GSB row/stream-semantics grill (`worktree-gsb`)
+
+Re-grilled C4 gsb (`libs/novaworld` `gsb.{h,cpp}` + the `http_listener` emit + the
+`NovaWorldClient` consume) after the live browser showed a partial server list. Wave 7's C4
+"matching" verdict was premature on two axes; both fixed (D-NET-190..193, D-NET-35 amended):
+
+| Finding | Witness |
+|---|---|
+| Row dword1 = the host IPv4 (ping target), NOT a port | XXXX finalize → `NapiGameList_StartPingSweep @ 0x63bcf0` formats entry+4 (`Network_FormatIPAddressToString @ 0x62de80`) → `NapiPingEntry_Create @ 0x62ffb0` per row; results land per row via `NapiGameList_OnPingResult @ 0x63bc60` (raw -4→-3, -3/-2/-1→-2, 0→ms from transferInfo[11]) |
+| Row dword0 = rid, the `@RID@` join substitution | `CLanServerBrowser_UpdateServerList_0 @ 0x660200` case 3 reads entries[row] dword0, `sprintf "%d"` @ 0x660386 splices it over `@RID@` (str @ 0x7e258c) in the markup NWJoin URL (`jop_2_main.mnx:818`, GLB_JOIN source="SERVER_LIST") |
+| SVRS records accumulate; "GSB " = gated reset; undersized records skip | SVRS append loop @ 0x63dbec..0x63dc0d (no per-record clear); reset gate `payload dword0 == 0x00010000` @ 0x63d8f2 (frees fields + rows, zeroes ctx+120/+124, frees ping array ctx+136, event 7); FLDS/SVRS payload<2 skips @ 0x63d7c2 / @ 0x63da43; no record-level error path exists |
+| Game-list ctx layout | +96 field names / +100 count / +104 cap / +108 entries (stride 20: rid, ip, values, playerCnt, names) / +112 count / +116 cap / +120 totalServers (+= declared) / +124 totalPlayers (+= row u16) / +128 parse offset (incremental HTTP callback; XXXX branch returns without advancing) / +132 ping conn / +136 ping results (init -1). Events: 2 ping-result, 6 list-updated (per SVRS when count 0 + on XXXX), 7 reset, 8 kv-append (`NapiGameList_AppendKeyValuePair @ 0x63dea0`) via `Observable_NotifyListeners @ 0x63b140` |
+
+Live proof: the genuine `.204` fixture = **8 SVRS records / 58 rows**, all 58 decoding to
+public IPv4s; a live `GET /jop_2.gsb?a=1` (2026-07-27) = 8 records / 52 rows whose FINAL
+record holds one row — the old clear-per-record parser surfaced exactly that one server
+(the reported symptom). Evidence tests: `gsb_roundtrip` (positional in_addr byte assert),
+`gsb_parse_roundtrip`, `gsb_retail_semantics` (NEW — accumulate / gated reset / undersized
+skip / terminator, via real-builder chunk splices), `gsb_real204_decode` (58/58 non-zero-IP
+oracle; argv override runs the same decoder on live blobs), `http_flow`, and
+`novaworld_panel_test.gd` (browser rows carry the address).
+
+IDB changes made during the session: renames `NapiGameList_StartPingSweep @ 0x63bcf0`,
+`NapiGameList_OnPingResult @ 0x63bc60`, `Observable_NotifyListeners @ 0x63b140`,
+`NapiGameList_AppendKeyValuePair @ 0x63dea0`, `NapiGameList_StartFetch @ 0x63dd10`
+(user-approved rename of the curated misnomer `load_xml_content` — it starts the GSB HTTP
+fetch and stores the ping-sweep gate flags at ctx+68, nothing XML), locals
+`rowRid`/`rowIpAddr` in 0x63d740; 15 corrected comments incl. the 0x660333 `@RID@` witness
+and replacing a wrong FVNG/GRTG/SVHX tag comment (real tags: GSB /FLDS/SVRS/XXXX). IDB saved.
 
 ## 8. D-NET divergence catalog
 
@@ -9345,13 +9389,19 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-31** [LOW, DOC] login URLs/params are markup-derived (`nw_startup.mnx`), not C literals; `[CC]`/`[GT]` tokens and the `[domainname]` lower-casing are non-retail. [orig: gate STARTUPURL via 0x4ced20]
 
 `gsb.cpp` (C4) — FIXED, **byte-verified against the genuine `.204` blob**
-(`fixtures/novaworld/nw204_jop_2.gsb`, `gsb_real204_decode_test` — 8 servers, 26
-FLDS columns, decoded through the XXXX terminator):
+(`fixtures/novaworld/nw204_jop_2.gsb`, `gsb_real204_decode_test` — 8 SVRS records /
+58 servers, all with public IPv4s, 26 FLDS columns, decoded through the XXXX
+terminator; the earlier "8 servers" reading here was itself the D-NET-191
+clear-per-record artifact):
 - **D-NET-32** [HIGH, FIXED] no bare "GSB " file header — "GSB " (0x20425347) is the FIRST chunk's TAG (reset/init; payload dword0==0x00010000). [orig: NapiGameList_ProcessEncryptedResponse @ 0x63d740]
 - **D-NET-33** [HIGH, FIXED] chunk layout is `[magic:4 @+0][len:u32 @+4][payload @+8]`, advance len+8 — magic is a PREFIX, not the suffix we emitted. [orig: 0x63d740 (@ 0x63d78b / 0x63d76c / 0x63d781)]
 - **D-NET-34** [HIGH, FIXED] tags: GSB =init, FLDS=field-names, SVRS=rows, XXXX=terminator; dropped the bogus FLDS-as-summary/TotalServers chunk. The 26 FLDS column names+order are confirmed IDENTICAL to retail. (`.204` also sends an "IVAR" chunk between GSB and FLDS, but the retail parser — and ours — ignore unknown tags, so the builder omits it harmlessly.) [orig: 0x63d740]
-- **D-NET-35** [HIGH, FIXED] SVRS row = `[u32 rid][u32 port]` then 26 positional NUL-term values (FLDS-keyed) then `[u16 playerCount]` then player names. The first u32 is the host id / join `rid` — retail's "serverIP" is a misnomer; the `.204` values (e.g. 0x0A0027A0 = 167782304, in the Wave-6 join-`rid` range) are NOT IPv4, the host IP arrives via the NK join token. We previously misread it as an IP and dropped the player list. [orig: 0x63d740 (@ 0x63da60..)]
+- **D-NET-35** [HIGH, FIXED; **AMENDED 2026-07-27**] SVRS row = `[u32 rid][4-byte host IPv4]` then 26 positional NUL-term values (FLDS-keyed) then `[u16 playerCount]` then player names. The FIRST u32 is the host id / join `rid` — retail's "serverIP" parser local is a misnomer for THAT dword (the `.204` values, e.g. 0x0A0027A0, sit in the Wave-6 join-`rid` range and are not addresses), and the CONNECT address still arrives via the NK join token. This entry originally called the SECOND dword a `u32 port`; that was wrong — it is the host's IPv4 in in_addr byte order, the ping target (see D-NET-190). We previously misread dword0 as an IP and dropped the player list. [orig: 0x63d740 (@ 0x63da60..)]
 - **D-NET-36** [LOW, DISPLAY] GSB strings are Latin-1 — transcode to UTF-8 at the Godot display layer, not the parser. [orig: 0x63d740]
+- **D-NET-190** [HIGH, FIXED 2026-07-27] Row dword1 is the host's IPv4 in in_addr byte order — NOT a port. On the XXXX finalize retail walks every accumulated row and pings entry+4: `NapiGameList_StartPingSweep @ 0x63bcf0` formats it via `Network_FormatIPAddressToString @ 0x62de80` and creates one ping entry per row (`NapiPingEntry_Create @ 0x62ffb0`); results land per row via `NapiGameList_OnPingResult @ 0x63bc60` (raw -4→-3, -3/-2/-1→-2, 0→ms from transferInfo[11]; event 2). Our builder emitted the u16 host port as a LE u32 there, so a retail browser pointed at an OpenNova list pinged garbage addresses (port 64206 → 206.250.0.0). `GsbServerEntry.port` → `std::string ip` (dotted; emitted/parsed as the raw 4 in_addr bytes, unparseable → 0.0.0.0); `http_listener` fills it from `HostRow.host_ip`; the `NovaWorldClient` row dict carries `ip` (the dead `port` key is dropped). Pinned by the positional in_addr byte assert in `gsb_roundtrip_test` and the 58/58 non-zero public IPv4s of the genuine `.204` fixture. [orig: NapiGameList_StartPingSweep @ 0x63bcf0]
+- **D-NET-191** [HIGH, FIXED 2026-07-27] SVRS records ACCUMULATE across the stream — retail's SVRS arm appends rows to the ctx entry array with NO per-record clear (append loop @ 0x63dbec..0x63dc0d; totals ctx+120/+124 both `+=`). Our parser reset the list per record, so only the final SVRS chunk survived — the live "missing servers" symptom: the genuine `.204` fixture carries 8 SVRS records / 58 rows, and the 2026-07-27 live `jop_2.gsb?a=1` carried 8 records / 52 rows whose final record holds ONE row (the old parser showed exactly that one server). `parse_servers` now appends; only a valid "GSB " reset (or a new fetch) empties the list. Pinned by `gsb_retail_semantics_test` (multi-SVRS splice of real builder chunks). [orig: NapiGameList_ProcessEncryptedResponse @ 0x63d740 (@ 0x63dbec..0x63dc0d)]
+- **D-NET-192** [MED, FIXED 2026-07-27] The "GSB " record is the RESET, gated: when its payload begins with u32 0x00010000 (@ 0x63d8f2) retail frees the field table + every accumulated row, zeroes the totals (ctx+120/+124), frees the ping-results array (ctx+136), and fires event 7; ANY other "GSB " payload (short or mismatched) is skipped with no reset. FLDS/SVRS records with payload < 2 are likewise skipped in place (@ 0x63d7c2 / @ 0x63da43) — retail has no record-level error path at all. Ported: mid-stream gated reset + undersized-record skips in `gsb_parse_response`; pinned by `gsb_retail_semantics_test` (valid reset clears, mismatched "GSB " does not, undersized FLDS/SVRS/GSB records skip without clobbering state). [orig: 0x63d740 (@ 0x63d8f2 / @ 0x63d7c2 / @ 0x63da43)]
+- **D-NET-193** [LOW, DOC — deliberate host hardening] Retail's parser is an incremental HTTP callback with NO failure return: the parse offset persists at ctx+128, the XXXX branch returns without advancing, and a short buffer simply waits for more body. `NapiGameList_StartFetch @ 0x63dd10` (renamed this session from the curated misnomer `load_xml_content`) starts the fetch and stores the ctx+68 flags that gate the ping sweep; UI events flow through `Observable_NotifyListeners @ 0x63b140` (list-updated fires per SVRS record when count is 0 and on XXXX; kv pairs via `NapiGameList_AppendKeyValuePair @ 0x63dea0`). Our `gsb_parse_response` is deliberately ONE-SHOT and bounds-checked — it requires the XXXX terminator and rejects short/forged buffers (64-bit length check) — documented hardening on server-supplied bytes, not a parity bug. rid signedness note: `CLanServerBrowser_UpdateServerList_0 @ 0x660200` prints the rid `%d` (SIGNED) into the `@RID@` splice; our server-side `std::stoul` wraps negative text back to the same u32, so values round-trip. [orig: 0x63dd10 / 0x63b140 / 0x63dea0 / 0x660200]
 
 `napi/session.cpp` (D2 ClientPlayRequest) — FIXED (now parseable by our own server):
 - **D-NET-37** [HIGH, FIXED] `make_client_play_request` now emits the top-level `CurrentlyPlaying` field (decimal of the flag) FIRST. [orig: CNapiGameSession_SendPlayRequest @ 0x4d3920]
