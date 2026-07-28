@@ -41,7 +41,7 @@ static func name_for_type(type: int) -> String:
 # A stable, well-separated color per collidable type. The golden-ratio hue step
 # keeps any type -- even ones with no known name -- visually distinct.
 static func color_for_type(type: int) -> Color:
-	var hue := fposmod(float(type) * 0.61803398875, 1.0)
+	var hue := IndexHue.hue_for_index(type)
 	return Color.from_hsv(hue, 0.7, 1.0, 0.9)
 
 

@@ -11,6 +11,9 @@ extends Node
 #   fog/skyfog render colors are doubled with saturation (@ 0x57f17c).
 
 const HOURS_PER_DAY := 24
+# One day in the HHMM time-of-day encoding (0..2400): the wrap modulus every
+# HHMM consumer shares.
+const HHMM_DAY := 2400.0
 const MINUTES_PER_HOUR := 60.0
 const HHMM_HOUR_SCALE := 100.0
 const FIXED24_ONE_HOUR := 1 << 24
@@ -37,7 +40,7 @@ const DEFAULT_START_HOUR := 12
 
 @export_range(0, 2359, 1) var time_of_day: float = 1200.0:
 	set(value):
-		time_of_day = fposmod(value, 2400.0)
+		time_of_day = fposmod(value, HHMM_DAY)
 		if is_loaded():
 			_update_tod()
 

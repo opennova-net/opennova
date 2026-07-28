@@ -696,7 +696,7 @@ func teardown() -> void:
 # --- Internals ---
 
 static func _hhmm_to_hours(hhmm: float) -> float:
-	var wrapped := fposmod(hhmm, 2400.0)
+	var wrapped := fposmod(hhmm, NovaEnvironment.HHMM_DAY)
 	var hour := floorf(wrapped / 100.0)
 	var minute := clampf(fmod(wrapped, 100.0), 0.0, 59.999999)
 	return hour + minute / 60.0
