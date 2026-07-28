@@ -8,6 +8,8 @@ target_include_directories(opennova_vfs
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_compile_features(opennova_vfs PUBLIC cxx_std_17)
+
 # pff/scr/bfc1 are implementation details (not exposed in the public headers).
 target_link_libraries(opennova_vfs
     PRIVATE opennova_pff opennova_scr opennova_bfc1

@@ -4,15 +4,12 @@
 
 #include "extractors.h"
 
+#include <io/strutil.h>
+
 namespace opennova::refs {
 namespace detail {
 
-std::string lower_ascii(std::string s) {
-    for (char& c : s) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return s;
-}
+std::string lower_ascii(std::string s) { return opennova::strutil::to_lower(s); }
 
 namespace {
 

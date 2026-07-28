@@ -11,15 +11,14 @@
 #include <fstream>
 #include <unordered_map>
 
+#include <io/strutil.h>
+
 namespace fs = std::filesystem;
 
 namespace opennova {
 namespace {
 
-std::string to_lower(std::string s) {
-    for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-}
+using opennova::strutil::to_lower;
 
 // Flat, lowercased lookup key from a possibly path-qualified name (matches the engine's
 // basename-for-archive behavior and the existing flat asset model).

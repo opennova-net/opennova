@@ -8,6 +8,7 @@ target_include_directories(opennova_dbf
 )
 
 target_compile_features(opennova_dbf PUBLIC cxx_std_17)
+target_link_libraries(opennova_dbf PRIVATE opennova_io)
 
 set_target_properties(opennova_dbf PROPERTIES
     POSITION_INDEPENDENT_CODE ON

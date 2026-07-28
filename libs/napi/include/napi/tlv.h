@@ -38,6 +38,19 @@ struct NapiField {
 	std::vector<uint8_t> data;
 };
 
+// The wire's NUL-padded string fields, decoded: trailing NULs are padding,
+// never content (the one primitive behind the per-lib field_to_string /
+// strip_nul copies this replaced).
+inline std::string field_to_string(const uint8_t *data, size_t len) {
+	while (len > 0 && data[len - 1] == 0) --len;
+	return std::string(reinterpret_cast<const char *>(data), len);
+}
+
+inline std::string field_to_string(const NapiField &f) {
+	return f.data.empty() ? std::string()
+	                      : field_to_string(f.data.data(), f.data.size());
+}
+
 struct NapiMessage {
 	std::string name;
 	std::vector<NapiField> fields;

@@ -55,6 +55,8 @@
 #include <utility>
 #include <vector>
 
+#include <io/strutil.h>
+
 using namespace opennova;
 
 namespace {
@@ -83,16 +85,7 @@ bool hex_to_bytes(const std::string &hex, std::vector<uint8_t> &out) {
 	return true;
 }
 
-bool ends_with_icase(const std::string &s, const char *suffix) {
-	const size_t sl = std::strlen(suffix);
-	if (s.size() < sl) return false;
-	for (size_t i = 0; i < sl; ++i) {
-		const char a = std::tolower(static_cast<unsigned char>(s[s.size() - sl + i]));
-		const char b = std::tolower(static_cast<unsigned char>(suffix[i]));
-		if (a != b) return false;
-	}
-	return true;
-}
+using opennova::strutil::ends_with_icase;
 
 bool is_pcap_path(const std::string &p) {
 	return ends_with_icase(p, ".pcap") || ends_with_icase(p, ".pcapng");

@@ -9,23 +9,15 @@
 #include <iomanip>
 #include <sstream>
 
+#include <io/strutil.h>
+
 namespace opennova::env {
 
 namespace {
 
 constexpr const char *NL = "\r\n";
 
-std::string trim(const std::string &value) {
-	size_t begin = 0;
-	while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-		++begin;
-	}
-	size_t end = value.size();
-	while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-		--end;
-	}
-	return value.substr(begin, end - begin);
-}
+using opennova::strutil::trim;
 
 std::string unquote(const std::string &value) {
 	if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {

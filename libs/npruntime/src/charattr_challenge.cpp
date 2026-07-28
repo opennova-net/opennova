@@ -15,6 +15,8 @@
 #include <string>
 #include <string_view>
 
+#include <io/strutil.h>
+
 namespace opennova::np {
 
 namespace {
@@ -52,19 +54,7 @@ constexpr std::array<Field, 13> kFields{{
 		{"RUN_MODIFIER", 56, ValueKind::Integer, 1u << 12},
 }};
 
-bool ascii_iequals(std::string_view a, std::string_view b) {
-	if (a.size() != b.size()) return false;
-	for (std::size_t i = 0; i < a.size(); ++i) {
-		const unsigned char ac = static_cast<unsigned char>(a[i]);
-		const unsigned char bc = static_cast<unsigned char>(b[i]);
-		const unsigned char af =
-				ac >= 'A' && ac <= 'Z' ? static_cast<unsigned char>(ac + ('a' - 'A')) : ac;
-		const unsigned char bf =
-				bc >= 'A' && bc <= 'Z' ? static_cast<unsigned char>(bc + ('a' - 'A')) : bc;
-		if (af != bf) return false;
-	}
-	return true;
-}
+bool ascii_iequals(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
 bool ascii_istarts_with(std::string_view value, std::string_view prefix) {
 	return value.size() >= prefix.size() &&

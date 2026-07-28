@@ -12,7 +12,7 @@ target_include_directories(opennova_wac
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(opennova_wac PUBLIC opennova_world)
+target_link_libraries(opennova_wac PUBLIC opennova_io opennova_world)
 
 target_compile_features(opennova_wac PUBLIC cxx_std_17)
 

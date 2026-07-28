@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <system_error>
 
+#include <io/strutil.h>
+
 namespace fs = std::filesystem;
 
 namespace opennova {
@@ -29,24 +31,9 @@ int64_t file_modified_unix_seconds(const fs::path &path) {
 	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
 }
 
-std::string to_lower_ascii(std::string value) {
-	for (char &ch : value) {
-		ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-	}
-	return value;
-}
+std::string to_lower_ascii(std::string value) { return opennova::strutil::to_lower(value); }
 
-std::string trim_copy(const std::string &value) {
-	size_t begin = 0;
-	while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-		++begin;
-	}
-	size_t end = value.size();
-	while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-		--end;
-	}
-	return value.substr(begin, end - begin);
-}
+std::string trim_copy(const std::string &value) { return opennova::strutil::trim(value); }
 
 bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
 	return bytes.size() >= 4 &&

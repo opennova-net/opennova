@@ -57,14 +57,6 @@ bool decode_session_inbound(const uint8_t *raw, size_t raw_len,
 	return true;
 }
 
-std::string field_to_string(const NapiField &f) {
-	if (f.data.empty()) return {};
-	const char *p = reinterpret_cast<const char *>(f.data.data());
-	size_t n = f.data.size();
-	while (n > 0 && p[n - 1] == '\0') --n;
-	return std::string(p, n);
-}
-
 // A 61-char [A-Z0-9] client SCRK matching retail's length + alphabet
 // (notes/retail_capture_findings.md). Retail randomizes per session; we
 // derive deterministically from the client key so dev/test runs are

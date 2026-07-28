@@ -11,6 +11,8 @@
 #include <new>
 #include <sstream>
 
+#include <io/strutil.h>
+
 namespace opennova::mission {
 
 namespace {
@@ -598,17 +600,7 @@ struct MisLine {
 	std::vector<std::string> tokens;
 };
 
-std::string trim_copy(const std::string &value) {
-	size_t first = 0;
-	while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first]))) {
-		++first;
-	}
-	size_t last = value.size();
-	while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1]))) {
-		--last;
-	}
-	return value.substr(first, last - first);
-}
+std::string trim_copy(const std::string &value) { return opennova::strutil::trim(value); }
 
 std::vector<std::string> tokenize_mis_line(const std::string &line) {
 	std::vector<std::string> tokens;

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include <io/strutil.h>
+
 namespace opennova::particle {
 
 namespace {
@@ -33,19 +35,9 @@ std::string_view trim(std::string_view value) noexcept {
 	return value.substr(begin, end - begin);
 }
 
-std::string trim_str(std::string_view value) {
-	const std::string_view view = trim(value);
-	return std::string(view.begin(), view.end());
-}
+std::string trim_str(std::string_view value) { return opennova::strutil::trim(value); }
 
-std::string lowercase(std::string_view value) {
-	std::string out;
-	out.reserve(value.size());
-	for (char c : value) {
-		out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-	}
-	return out;
-}
+std::string lowercase(std::string_view value) { return opennova::strutil::to_lower(value); }
 
 // Split on a single delimiter, trimming each part. Empty parts are kept (an
 // empty texture in `graphic1 = , additive;` is a valid value, not a missing one).

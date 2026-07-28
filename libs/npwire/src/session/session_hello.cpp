@@ -1,6 +1,7 @@
 #include <npwire/session_hello.h>
 
 #include <cstring>
+#include <napi/tlv.h>
 
 namespace opennova {
 
@@ -75,10 +76,7 @@ void append_bytes_field(std::vector<uint8_t> &buf, const char *name, const uint8
 }
 
 std::string strip_nul(const uint8_t *data, size_t len) {
-	while (len > 0 && data[len - 1] == 0) {
-		--len;
-	}
-	return std::string(reinterpret_cast<const char *>(data), len);
+	return opennova::field_to_string(data, len);
 }
 
 uint32_t read_u32_le(const uint8_t *data, size_t len) {

@@ -5,21 +5,15 @@
 #include <string>
 #include <vector>
 
+#include <io/strutil.h>
+
 namespace opennova {
 
 namespace {
 
 constexpr const char *LINE_TAG = "VAR";
 
-bool ieq(std::string_view a, std::string_view b) {
-	if (a.size() != b.size()) return false;
-	for (size_t i = 0; i < a.size(); ++i) {
-		const char ca = static_cast<char>(std::tolower(static_cast<unsigned char>(a[i])));
-		const char cb = static_cast<char>(std::tolower(static_cast<unsigned char>(b[i])));
-		if (ca != cb) return false;
-	}
-	return true;
-}
+bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
 bool is_ws(char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }

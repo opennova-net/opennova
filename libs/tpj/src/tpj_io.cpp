@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include <io/strutil.h>
+
 namespace opennova {
 
 namespace {
@@ -35,17 +37,7 @@ std::vector<std::string> tokenize(const std::string &line) {
 	return tokens;
 }
 
-bool iequals(const std::string &a, const std::string &b) {
-	if (a.size() != b.size()) {
-		return false;
-	}
-	for (size_t i = 0; i < a.size(); ++i) {
-		if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
-			return false;
-		}
-	}
-	return true;
-}
+using opennova::strutil::iequals;
 
 bool has_metadata_fields(const TpjProject &project) {
 	return project.has_metadata

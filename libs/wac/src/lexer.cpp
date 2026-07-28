@@ -3,15 +3,12 @@
 #include <array>
 #include <cctype>
 
+#include <io/strutil.h>
+
 namespace opennova::wac {
 namespace {
 
-std::string to_lower(std::string_view s) {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    return out;
-}
+using opennova::strutil::to_lower;
 
 bool is_word_char(char c) {
     unsigned char u = static_cast<unsigned char>(c);

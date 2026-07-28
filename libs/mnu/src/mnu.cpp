@@ -10,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <io/strutil.h>
+
 namespace mnu {
 
 namespace {
@@ -23,7 +25,7 @@ namespace {
 // unmodelled type survives round-trip verbatim. window_type_name() emits the
 // canonical spellings so from-scratch documents stay original-valid.
 WindowType parse_type_string(const std::string &s) {
-  std::string lower = mnu_xml::to_lower(s);
+  std::string lower = opennova::strutil::to_lower(s);
   if (lower == "window") return WindowType::Window;
   if (lower == "static") return WindowType::Static;
   if (lower == "button") return WindowType::Button;
@@ -250,7 +252,7 @@ Font parse_font(const mnu_xml::Node *font_node) {
   for (const auto &child : font_node->children) {
     if (!child->is_element()) continue;
 
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
     std::string fg = child->attr("foreground");
     std::string bg = child->attr("background");
 
@@ -284,7 +286,7 @@ Frame parse_frame(const mnu_xml::Node *frame_node) {
 
   // Check for child elements first (the actual format in MNU files).
   for (const auto &child : frame_node->children) {
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
     if (tag == "stencil") {
       frame.stencil = child->get_direct_text();
       frame.stencil_size = parse_int(child->attr("size"));
@@ -342,12 +344,12 @@ Items parse_items(const mnu_xml::Node *items_node) {
 
   for (const auto &child : items_node->children) {
     if (!child->is_element()) continue;
-    if (mnu_xml::iequals(child->tag, "item")) {
+    if (opennova::strutil::iequals(child->tag, "item")) {
       items.items.push_back(parse_item(child.get()));
-    } else if (mnu_xml::iequals(child->tag, "appearance")) {
+    } else if (opennova::strutil::iequals(child->tag, "appearance")) {
       // Extract selection color from appearance (state="selected", type="color")
       Appearance app = parse_appearance(child.get());
-      if (mnu_xml::iequals(app.state, "selected") && mnu_xml::iequals(app.type, "color")) {
+      if (opennova::strutil::iequals(app.state, "selected") && opennova::strutil::iequals(app.type, "color")) {
         items.selection_color = app.value;
       }
     }
@@ -365,7 +367,7 @@ ListBoxScrollbar parse_listbox_scrollbar(const mnu_xml::Node *node) {
 
   for (const auto &child : node->children) {
     if (!child->is_element()) continue;
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "position") {
       scrollbar.position = parse_position(child.get());
@@ -401,7 +403,7 @@ ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
 
   for (const auto &child : listbox_node->children) {
     if (!child->is_element()) continue;
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "position") {
       listbox.position = parse_position(child.get());
@@ -451,7 +453,7 @@ SpinButton parse_spinbutton(const mnu_xml::Node *spin_node) {
 
   // Parse appearances.
   for (const auto &child : spin_node->children) {
-    if (child->is_element() && mnu_xml::iequals(child->tag, "appearance")) {
+    if (child->is_element() && opennova::strutil::iequals(child->tag, "appearance")) {
       spin.appearances.push_back(parse_appearance(child.get()));
     }
   }
@@ -521,7 +523,7 @@ TableColumn parse_table_column(const mnu_xml::Node *node) {
 
   for (const auto &child : node->children) {
     if (!child->is_element()) continue;
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "header") {
       col.headers.push_back(parse_table_header(child.get()));
@@ -544,7 +546,7 @@ TableScrollbar parse_table_scrollbar(const mnu_xml::Node *node) {
 
   for (const auto &child : node->children) {
     if (!child->is_element()) continue;
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "position") {
       scrollbar.position = parse_position(child.get());
@@ -628,7 +630,7 @@ Window parse_window(const mnu_xml::Node *window_node) {
   for (const auto &child : window_node->children) {
     if (!child->is_element()) continue;
 
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "position") {
       win.position = parse_position(child.get());
@@ -708,19 +710,19 @@ Window parse_window(const mnu_xml::Node *window_node) {
   if (win.type == WindowType::Table) {
     for (const auto &child : window_node->children) {
       if (!child->is_element()) continue;
-      if (mnu_xml::iequals(child->tag, "items")) {
+      if (opennova::strutil::iequals(child->tag, "items")) {
         // Check for MULTISELECT attribute (bare attribute).
         win.table_data.multiselect = child->has_attr("multiselect");
 
         for (const auto &item_child : child->children) {
           if (!item_child->is_element()) continue;
-          if (mnu_xml::iequals(item_child->tag, "appearance")) {
+          if (opennova::strutil::iequals(item_child->tag, "appearance")) {
             Appearance app = parse_appearance(item_child.get());
-            if (mnu_xml::iequals(app.state, "default") &&
-                mnu_xml::iequals(app.type, "outline")) {
+            if (opennova::strutil::iequals(app.state, "default") &&
+                opennova::strutil::iequals(app.type, "outline")) {
               win.table_data.outline_color = app.value;
-            } else if (mnu_xml::iequals(app.state, "selected") &&
-                       mnu_xml::iequals(app.type, "color")) {
+            } else if (opennova::strutil::iequals(app.state, "selected") &&
+                       opennova::strutil::iequals(app.type, "color")) {
               win.table_data.selection_color = app.value;
             }
           }
@@ -753,7 +755,7 @@ Screen parse_screen(const mnu_xml::Node *screen_node) {
   for (const auto &child : screen_node->children) {
     if (!child->is_element()) continue;
 
-    std::string tag = mnu_xml::to_lower(child->tag);
+    std::string tag = opennova::strutil::to_lower(child->tag);
 
     if (tag == "cursor") {
       Cursor c = parse_cursor(child.get());
@@ -826,7 +828,7 @@ const char *window_type_name(WindowType type) {
 
 const Screen *Document::find_screen(const std::string &name) const {
   for (const auto &screen : screens) {
-    if (mnu_xml::iequals(screen.name, name)) {
+    if (opennova::strutil::iequals(screen.name, name)) {
       return &screen;
     }
   }
@@ -861,14 +863,14 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
   for (const auto &root : xml_doc.roots) {
     if (!root->is_element()) continue;
 
-    std::string tag = mnu_xml::to_lower(root->tag);
+    std::string tag = opennova::strutil::to_lower(root->tag);
 
     if (tag == "screen") {
       out.screens.push_back(parse_screen(root.get()));
     } else if (tag == "mnu" || tag == "menu") {
       // Container element, process children.
       for (const auto &child : root->children) {
-        if (child->is_element() && mnu_xml::iequals(child->tag, "screen")) {
+        if (child->is_element() && opennova::strutil::iequals(child->tag, "screen")) {
           out.screens.push_back(parse_screen(child.get()));
         }
       }

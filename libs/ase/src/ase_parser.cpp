@@ -7,6 +7,8 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+
+#include <io/strutil.h>
 #include <vector>
 
 namespace ase {
@@ -22,12 +24,7 @@ static inline float parse_float(const char* s) {
   return static_cast<float>(std::strtod(s, nullptr));
 }
 
-static inline bool iequals(std::string_view a, std::string_view b) {
-  return a.size() == b.size() &&
-         std::equal(a.begin(), a.end(), b.begin(), b.end(),
-                    [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) ==
-                                                std::tolower(static_cast<unsigned char>(y)); });
-}
+using opennova::strutil::iequals;
 
 // Tokenize a line similarly to AseTokenizeLine: splits on space/comma/tab,
 // respects quotes, trims comments starting with ';' or '//'.

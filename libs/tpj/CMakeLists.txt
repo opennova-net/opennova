@@ -8,7 +8,7 @@ target_include_directories(opennova_tpj
 )
 
 target_link_libraries(opennova_tpj
-    PUBLIC
+    PUBLIC opennova_io
         opennova_trn
 )
 

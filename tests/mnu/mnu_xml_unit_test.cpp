@@ -249,16 +249,6 @@ bool test_utf8_bom() {
   return true;
 }
 
-// Test iequals utility function.
-bool test_iequals() {
-  CHECK(mnu_xml::iequals("HELLO", "hello"), "iequals should match");
-  CHECK(mnu_xml::iequals("Hello", "hElLo"), "iequals should match");
-  CHECK(!mnu_xml::iequals("hello", "world"), "iequals should not match");
-  CHECK(!mnu_xml::iequals("hello", "hell"), "iequals length mismatch");
-
-  return true;
-}
-
 // Test attr_int helper.
 bool test_attr_int() {
   const std::string xml = R"(<TAG num="42" invalid="abc" empty=""/>)";
@@ -410,7 +400,6 @@ int main() {
   RUN_TEST(test_self_closing);
   RUN_TEST(test_whitespace_normalization);
   RUN_TEST(test_utf8_bom);
-  RUN_TEST(test_iequals);
   RUN_TEST(test_attr_int);
   RUN_TEST(test_mnu_patterns);
 
