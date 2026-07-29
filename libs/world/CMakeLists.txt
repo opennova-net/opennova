@@ -2,7 +2,10 @@ add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
     src/waypoint_track.cpp
-    src/ai.cpp
+    src/ai_combat.cpp     # acquisition, engagement, commands
+    src/ai_handlers.cpp   # scoring, state names, per-state handlers + the table
+    src/ai_system.cpp     # event queue + the AiSystem core and tick
+    src/ai_waypoints.cpp  # waypoint targeting/movement + vehicle drive staging
     src/collision_los.cpp      # ground casts, LOS, sound occlusion
     src/collision_model.cpp    # model bounds + the fixed-point matrix ops
     src/collision_query.cpp    # the stateless target queries
