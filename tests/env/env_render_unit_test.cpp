@@ -1,6 +1,8 @@
 // Engine-faithful atmosphere math, asserted against the exact fixed-point
 // behavior witnessed in Jointops.exe. RE record: docs/env/env-tod-re.md.
-#include <env/env_render.h>
+#include <env/env_celestial.h>
+#include <env/env_water_render.h>
+#include <env/env_weather.h>
 
 #include <cmath>
 #include <cstdio>

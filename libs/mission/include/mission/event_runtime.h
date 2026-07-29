@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "mission/bms.h"
-#include "world/world.h"
+#include "world/system.h"
 
 namespace opennova::mission {
 

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include <world/world.h>
+#include <world/net_command_sink.h>
 
 #include "netsim/session_transport.h"
 
@@ -12,7 +12,7 @@ namespace opennova::netsim {
 // authoritative for every entity (is_authority stays true), but send_command — the
 // entity-targeted command boundary WAC/BMS funnel through — routes onto the loopback
 // instead of the LocalSink no-op [orig: the entity-command serialize ->
-// NapiNPServer_SendFiltered(..., 0x23, ...) path, world.h replication seam]. ADR 0009
+// NapiNPServer_SendFiltered(..., 0x23, ...) path, the world/net_command_sink.h seam]. ADR 0009
 // Decision 2: gameplay systems keep calling the same INetCommandSink and stay
 // network-unaware.
 //

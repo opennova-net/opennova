@@ -117,5 +117,27 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 
 Vec3 compute_sun_direction(float tod_time);
 Vec3 compute_moon_direction(float tod_time);
+// ---------------------------------------------------------------------------
+// BMS mission overrides [orig: Game_LoadTerrainDuringConnect @ 0x520710]
+//                       [orig: Game_StartMission @ 0x525371..0x525399]
+
+struct BmsEnvOverrides {
+	bool has_water_height = false; // attrib bit 0x1
+	float water_height = 0.0f;     // file s16, world half-units (engine <<15)
+	bool has_fog_level = false;    // attrib bit 0x2
+	float fog_level = 0.0f;        // world units
+	bool has_fog_color = false;    // attrib bit 0x4
+	Rgb fog_color;
+	bool has_water_color = false; // any RGB byte nonzero
+	Rgb water_color;
+	bool has_water_murk = false; // murk byte nonzero
+	float water_murk = 0.0f;     // byte * 0.01
+	bool has_start_time = false; // local play only
+	int start_time = 0;          // HHMM
+};
+
+// Applies the override layer onto a parsed Config (the engine mutates its
+// globals; we mutate a copy so the base file stays authoritative).
+void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 
 } // namespace opennova::env

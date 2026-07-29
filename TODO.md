@@ -82,7 +82,13 @@ of job, not the TU-split recipe:
 - [x] W3-6 `nova_object_data.cpp` split (DONE: the clamp copies collapsed onto
       `clamp_to_i16`, then the 3,991-line binding cut into seven one-concern TUs +
       `nova_object_data_internal.h`, following the `nova_simulation_*` family shape)
-- [ ] W3-7 header-width pass
+- [x] W3-7 header-width pass (DONE across two PRs: the net half extracted
+      `npwire/entity_class.h`, dropped two dead includes, and gave session_hello's
+      identity defaults one home; the sim half split `env_render.h` into
+      `env_weather.h`/`env_celestial.h`/`env_water_render.h` (+ BMS overrides into
+      `env.h`), trimmed the `world.h` umbrella by extracting `system.h`,
+      `net_command_sink.h`, `vehicle_mount.h`, `entity_commands.h`, and landed the
+      `oversize_cpp_files` ratchet at its residual floor of 2)
 - [ ] W4 GDScript: `game_world.gd` forwarder-delete + extractions, typed fields to
       retire the ~90 `has_method` guards, F3 overlay per-tab, modtools splits
 - [ ] W5 consolidations + push-downs: perf-span unify, sim debug-snapshot

@@ -8,7 +8,8 @@
 #include "util/pcx_texture_bridge.h"
 #include "util/texture_path_resolver.h"
 
-#include <env/env_render.h>
+#include <env/env_celestial.h>
+#include <env/env_weather.h>
 
 #include <algorithm>
 #include <sstream>

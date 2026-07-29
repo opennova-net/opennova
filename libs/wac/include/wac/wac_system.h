@@ -8,7 +8,7 @@
 
 #include "wac/program.h"
 #include "wac/vm.h"
-#include "world/world.h"
+#include "world/system.h"
 
 namespace opennova::wac {
 

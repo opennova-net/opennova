@@ -6,7 +6,7 @@ dynamic point-light path, the terrain/foliage lighting constants, and the
 lighting texture/cubemap resources — witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`; all addresses are that
 binary's). Implementing code: `libs/renderer/light_runtime.{h,cpp}` (the
-witnessed chain as pure functions), `libs/env/env_render.{h,cpp}`
+witnessed chain as pure functions), `libs/env` `env_weather.h`/`env_render.cpp`
 (`ModulatorChain`, `WeatherColorBlock::set_step_deltas`, `iris_gain`),
 `libs/renderer/object_shader_template.cpp` (the composed FF lighting model),
 `godot/engine/env/nova_weather_core.cpp` (the ticked chain),

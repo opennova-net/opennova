@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 
-#include <env/env_render.h>
+#include <env/env_weather.h>
 
 namespace godot {
 
@@ -17,7 +17,7 @@ namespace godot {
 // fill, directional light, fog, sky ambient, skyfog, ceiling/cloud/floor, and
 // the six dome ramps). All
 // math lives in libs/env
-// (env/env_render.h); this binding owns state and the witnessed
+// (env/env_weather.h); this binding owns state and the witnessed
 // order-of-operations only. NovaWeather (the node) drives one tick() per
 // 62 Hz frame and reads the results back. RE record: docs/env/env-tod-re.md.
 class NovaWeatherCore : public RefCounted {

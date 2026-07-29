@@ -1,4 +1,6 @@
-#include "env/env_render.h"
+#include "env/env_celestial.h"
+#include "env/env_water_render.h"
+#include "env/env_weather.h"
 
 #include <algorithm>
 #include <cmath>

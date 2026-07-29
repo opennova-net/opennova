@@ -21,7 +21,7 @@ Classifications:
 Chains below run editor inspector → `EnvFile` (godot/engine/env/env_file.h) →
 runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 `NovaCelestial`, godot/engine/environment/) → shader. The portable math lives in
-`libs/env` (`env.h`, `env_render.h`).
+`libs/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
 
 ## Scalars, fog, water
 
@@ -40,7 +40,7 @@ runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 | `water_murk` | `NovaWater` → `u_water_alpha` + underwater fog distance | HONORED | [orig: Environment_SetWaterMurk @ 0x57d4f0] | |
 | `iris_percent` / `iris_center` | `EnvFile` properties only | UNCONSUMED | [orig: terrain_sector_compute_lighting @ 0x5c7550 tail; compute_ambient_light_along_direction @ 0x5c7a00] | **Curve recovered (C6, G2)** — it is the engine's *global auto-exposure*: `gain = iris_center·64·((p/100)/(2·maxSceneLum) + 1 − p/100)`, clamped 0..255, 64 = identity, averaged over 3 view-ray samples and chased by the modulator that scales **every** color block. Consumer system (modulator chain) unbuilt — still do not fake (env-tod-re.md §Iris auto-exposure, divergence #17). |
 | `ceiling_color` / `floor_color` | `NovaWeather` computes `_outdoor_color` / `_indoor_color` | PARTIAL | [orig: indoor exposure inputs @ 0x5c7646..0x5c76fe; Env_CeilingFloorBlend → effect world @ 0x5f7163] | **Consumers pinned (C6, G4)**: indoors they replace sky/ground as the iris-exposure inputs, and their 0.707+0.707 blend is the effects/particles *indoor ambient* (stored beside the outdoor combined light). Keep the computation — it becomes live when the modulator chain / effects ambient land. |
-| `lightning_color` | `NovaWeather` additive injection into smoothed sky/fog/fill | PARTIAL | [orig: Environment_SetLightningFlash @ 0x57d320; thunder @ 0x57ecfb/0x57edc4; SETFLASH1 @ 0x429ec9] | Injection math and both sequencer tables ported (`env_render.h`). **Trigger + thunder fully specced (C6, G6)**: retail fires sequencer A via the `SETFLASH1 [n]` net text command (default 16); thunder = SoundBank trigger 0 (A) / 0x80 (B) on the bank at `dword_24E0914`; sequencer B is unreachable in retail (no SETFLASH2, debug hooks orphaned). Wiring lands with WAC weather. |
+| `lightning_color` | `NovaWeather` additive injection into smoothed sky/fog/fill | PARTIAL | [orig: Environment_SetLightningFlash @ 0x57d320; thunder @ 0x57ecfb/0x57edc4; SETFLASH1 @ 0x429ec9] | Injection math and both sequencer tables ported (`env_weather.h`). **Trigger + thunder fully specced (C6, G6)**: retail fires sequencer A via the `SETFLASH1 [n]` net text command (default 16); thunder = SoundBank trigger 0 (A) / 0x80 (B) on the bank at `dword_24E0914`; sequencer B is unreachable in retail (no SETFLASH2, debug hooks orphaned). Wiring lands with WAC weather. |
 
 ## Sky dome, clouds, celestial
 
