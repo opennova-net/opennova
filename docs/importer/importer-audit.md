@@ -13,8 +13,8 @@ converts the **Importer pipeline** from `UNAUDITED` to *tracked-by-composition*
 `onimport.exe` = `apps/importer/` (the CLI, dispatcher, job runner, and Blender
 `scene_builder`) over `pyopennova/` (the Python FFI layer to the native `libs`).
 The dispatcher (`dispatcher.py`) is a worker pool; `import_runner.py` /
-`jobs.py` / `scene_builder.py` orchestrate reading an asset and building a
-Blender scene / glTF component.
+`jobs.py` / the `scene_builder/` package orchestrate reading an asset and
+building a Blender scene / glTF component.
 
 ## Parity surface = the composed format readers (each already RE'd)
 

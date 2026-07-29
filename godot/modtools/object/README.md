@@ -35,7 +35,7 @@ The `.3di` export session itself is driven by [`libs/oed`](../../../libs/oed).
 Object meshes are authored in Blender or 3ds Max and exchanged as ASE. Each
 object's 3DI role is encoded in its **scene-object name**: the importer assigns
 these names when it brings a model in
-([`apps/importer/scene_builder.py`](../../../apps/importer/scene_builder.py)), and
+([`apps/importer/scene_builder/`](../../../apps/importer/scene_builder/)), and
 the exporter classifies objects by the same names on the way out
 ([`blender/ase_exporter.py`](../../../blender/ase_exporter.py)), so a round trip is
 lossless. Keep names exactly as below. Indices are two-digit and 1-based.

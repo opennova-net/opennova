@@ -1489,7 +1489,7 @@ bool build_render_geometry(const LodHeader &lod,
 
     // When tangents are in the output, override SG=0 faces to SG=1 so that
     // compute_smoothed_vectors averages tangent/bitangent correctly.
-    // SG=0 faces come from the flat-component heuristic in scene_builder.py
+    // SG=0 faces come from the flat-component heuristic in scene_builder/meshes.py
     // which is only useful for stride-40 (no-tangent) dedup accuracy.
     std::vector<Face> face_overrides;
     SubObject subobj_for_smooth = subobj;

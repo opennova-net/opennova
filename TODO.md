@@ -73,7 +73,9 @@ of job, not the TU-split recipe:
 
 - [ ] W3-4 `http_listener::start` — a ~2,200-line FUNCTION decomposition in a net
       lib (the wire byte-gate applies)
-- [ ] W3-5 `apps/importer/scene_builder.py` split (gate = `scripts/test_python.sh`)
+- [x] W3-5 `apps/importer/scene_builder.py` split (DONE: 2,209 lines → the
+      `apps/importer/scene_builder/` package — five concern mixins + core facade +
+      helpers, public import surface unchanged; gate held at `scripts/test_python.sh`)
 - [x] W3-6 `nova_object_data.cpp` split (DONE: the clamp copies collapsed onto
       `clamp_to_i16`, then the 3,991-line binding cut into seven one-concern TUs +
       `nova_object_data_internal.h`, following the `nova_simulation_*` family shape)
