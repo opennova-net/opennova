@@ -306,7 +306,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	var overlay = _shell.find_child("DebugOverlay", true, false)
 	assert_not_null(overlay)
 	var pose_path := _temp_dir.path_join("f3-player-pose.json")
-	var dumped_path: String = overlay.dump_local_player_pose(pose_path)
+	var dumped_path: String = overlay.dump_debug_snapshot(pose_path)
 	assert_eq(dumped_path, pose_path)
 	var pose_file := FileAccess.open(dumped_path, FileAccess.READ)
 	assert_not_null(pose_file)
@@ -329,11 +329,42 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_almost_eq(float(dumped_camera.get("z", 0.0)),
 			actual_camera.global_position.z, 0.0001)
 
+	# The option registry drives the real world end to end: one programmatic
+	# flip rides debug_option_changed through the shell's generic handler and
+	# builds the world's skeleton view; the counter-flip frees it.
+	overlay.set_option(&"show_skeletons", true)
+	assert_not_null(world.get_node_or_null("SkeletonDebug"),
+			"the registry flip built the world's skeleton debug view")
+	overlay.set_option(&"show_skeletons", false)
+	await get_tree().process_frame
+	assert_null(world.get_node_or_null("SkeletonDebug"),
+			"...and the counter-flip freed it")
+
+	# The pick stack, end to end: the world load installed the highlight view
+	# for the shell's list, F3-open flipped the click catcher on, and the
+	# sim-authoritative ray is terrain-occluded exactly like a bullet.
+	assert_not_null(world.get_node_or_null("PickDebug"),
+			"the world renders the shell's pick list")
+	assert_not_null(world.get_node_or_null("PickClickCatcher"),
+			"overlay open: world clicks ray-pick")
+	var pick_sim = runtime.get_sim()
+	var player_pos: Vector3 = pick_sim.get_local_player_position()
+	var down: Dictionary = pick_sim.debug_pick_entity(
+			player_pos + Vector3(0, 20, 0), Vector3.DOWN, 100.0)
+	assert_false(bool(down.get("hit", true)))
+	assert_eq(String(down.get("blocked", "")), "terrain",
+			"terrain blocks the pick exactly like a bullet")
+	_shell.pick_at_crosshair()
+	assert_not_null(_shell.find_child("PickToast", true, false),
+			"the crosshair pick confirms every attempt with a toast")
+
 	_shell.toggle_debug_overlay()
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open())
 	assert_true(_shell.is_gameplay_input_active(),
 			"closing F3 restores the gameplay-input policy")
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"overlay closed: clicks are gameplay again")
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

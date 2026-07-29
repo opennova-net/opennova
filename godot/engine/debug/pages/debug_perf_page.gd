@@ -1,6 +1,6 @@
-class_name DebugPerfPane
-extends VBoxContainer
-## The debug overlay's Perf tab: renders the PerfTimeline ring (recent mission
+class_name DebugPerfPage
+extends NovaDebugPage
+## The debug overlay's Perf page: renders the PerfTimeline ring (recent mission
 ## loads as a span tree with per-stage milliseconds) plus a small set of live
 ## Performance monitors. A separate script from the overlay so tests drive it
 ## directly with fabricated timelines. Host-neutral: engine deps only.
@@ -25,7 +25,15 @@ var _history: Array = []
 var _shown: PerfTimeline = null
 
 
-func _init() -> void:
+func page_id() -> StringName:
+	return &"Perf"
+
+
+func page_category() -> StringName:
+	return CATEGORY_DIAGNOSTICS
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	var loads_label := Label.new()

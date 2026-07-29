@@ -1636,6 +1636,14 @@ public:
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the local
 	// player) from a Godot-space origin along a Godot-space direction, firing
 	// the named ammo ("AMMO_556", "AMMO_M203_40MM_NADE", ...). The world tick
+	// The F3 entity picker: one plain geometric trace_projectile segment
+	// (terrain / water / static + dynamic CFAC / person bone spheres, nearest
+	// wins) along a camera or crosshair ray. Read-only — never affects the
+	// sim. Stable-shape Dictionary; hit=false with blocked =
+	// "terrain"/"water"/"proxy" names why the ray stopped without a pickable
+	// entity (proxies = wire-decoded geometry on joined visual-only clients).
+	Dictionary debug_pick_entity(const Vector3 &p_from_godot,
+			const Vector3 &p_dir_godot, float p_max_range_units);
 	// flies it and the F3 Rounds ring records the outcome — the pose-replay
 	// probe's seam. Returns the round slot, -1 on bad ammo/full pool.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,

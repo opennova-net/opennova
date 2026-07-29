@@ -12,7 +12,9 @@ Two things live here, and both must stay host-neutral — consumable by the game
     `local_player_host.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
     ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.
-  - `debug/` (F3 overlay tabs), `environment/` (time-of-day / water / sky / weather —
+  - `debug/` (the F3 overlay: a NovaDebugPage-per-system framework — sidebar shell,
+    NovaDebugOptions registry, the pick/snapshot stack; add pages per
+    `debug/pages/README.md`), `environment/` (time-of-day / water / sky / weather —
     heavily `[orig]`-cited, shared by the game and the Terrain/Object editors),
     `mission/` (object placer + model resolver; the editor-only authoring overlays
     live in `modtools/mission/`), `object/` (`nova_object_model.gd`, collision

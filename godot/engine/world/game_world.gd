@@ -47,6 +47,8 @@ const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
 const HITBOX_DEBUG_NAME := "HitboxDebug"
+const PICK_DEBUG_NAME := "PickDebug"
+const PICK_CATCHER_NAME := "PickClickCatcher"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
@@ -2419,6 +2421,47 @@ func set_hitbox_debug(enabled: bool) -> void:
 	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
 
 
+# --- Pick debug (the F3 pick list: world highlight + overlay-open clicking) --
+# The pick list itself is HOST-owned (crosshair picks work before F3 ever
+# opens); this world only renders it and, while the overlay is up, feeds it
+# from clicks. Same build/free contract as every debug view.
+
+var _pick_list: NovaDebugPickList = null
+
+
+## Install (or clear, with null) the host's pick list: builds the world
+## highlight view that follows it. The click catcher (see below) picks into
+## the same list.
+func set_pick_debug(pick_list: NovaDebugPickList) -> void:
+	_pick_list = pick_list
+	var existing := get_node_or_null(NodePath(PICK_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if pick_list == null:
+		set_pick_click_enabled(false)
+		return
+	var view := PickDebugView.new()
+	view.name = PICK_DEBUG_NAME
+	view.set_pick_list(pick_list)
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
+
+
+## While the F3 overlay is open (mouse released), a world click ray-picks the
+## entity under the cursor into the installed pick list. The catcher lives in
+## this subtree so ONED PIE's SubViewportContainer forwarding works unchanged.
+func set_pick_click_enabled(enabled: bool) -> void:
+	var existing := get_node_or_null(NodePath(PICK_CATCHER_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not enabled or _pick_list == null:
+		return
+	var catcher := PickClickCatcher.new()
+	catcher.name = PICK_CATCHER_NAME
+	add_child(catcher)
+	catcher.setup(self, _pick_list)
+
+
 # --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
 # Build / free a child OcclusionDebugView drawing the render-occlusion portal
 # faces (type-colored outlines + section labels) over the world — the
@@ -2942,6 +2985,36 @@ func _start_effect_world() -> void:
 
 func get_effect_world() -> NovaEffectWorld:
 	return _effect_world
+
+
+## The live terrain node, for the F3 Terrain & foliage page's counters/knobs.
+func get_terrain_node() -> NovaTerrain:
+	return _terrain
+
+
+## The live foliage dispatcher (null until a mission builds one), same consumer.
+func get_foliage_dispatcher() -> NovaFoliageDispatcher:
+	return _dispatcher
+
+
+## The mounted item database (null before a mission), for the F3 snapshot
+## writer's display-name/graphic enrichment.
+func get_item_db() -> NovaItemDatabase:
+	return _placer.get_item_db() if _placer != null else null
+
+
+## The live environment / weather / water nodes, for the F3 Environment
+## page's readouts and scrub knobs.
+func get_environment_node() -> Node:
+	return _env
+
+
+func get_weather_node() -> Node:
+	return get_node_or_null("NovaWeather")
+
+
+func get_water_node() -> Node:
+	return _water
 
 
 # Owner-transform provider for the effect world's owned/attached groups. Int keys are

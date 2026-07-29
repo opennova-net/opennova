@@ -436,9 +436,10 @@ func test_debug_button_summons_a_locked_overlay_over_the_shell() -> void:
 	var overlay = shell.find_child("MissionDebugOverlay", true, false)
 	assert_not_null(overlay, "the first press builds the overlay under the shell")
 	assert_true(overlay.visible)
-	assert_true(overlay._writes_check.disabled,
+	var writes_check := overlay.find_child("VarsAllowWrites", true, false) as CheckButton
+	assert_true(writes_check.disabled,
 		"the editor's overlay mounts write-locked")
-	assert_string_contains(overlay._writes_check.tooltip_text, "simulating from the editor")
+	assert_string_contains(writes_check.tooltip_text, "simulating from the editor")
 	assert_true(btn.button_pressed, "the toggle stays latched while open")
 
 	btn.button_pressed = false
@@ -447,6 +448,20 @@ func test_debug_button_summons_a_locked_overlay_over_the_shell() -> void:
 	btn.button_pressed = true
 	assert_eq(shell.find_child("MissionDebugOverlay", true, false), overlay,
 		"a re-summon reuses the same instance (tab/filter state survives)")
+
+
+func test_overlay_options_are_wired_to_the_generic_relay() -> void:
+	# One generic handler consumes the SAME NovaDebugOptions rows the game
+	# shell does — the per-signal hand wiring that drifted is gone.
+	var ws := _shelled_workspace()
+	ws.toggle_debug_overlay()
+	assert_true(ws._debug_overlay.debug_option_changed.is_connected(
+			ws._on_debug_option_changed),
+		"the summoned overlay's option channel feeds the one generic handler")
+	# Idle editor (no PIE world): a flip is inert by design, never an error.
+	ws._on_debug_option_changed(&"show_skeletons", true)
+	assert_false(ws.is_playing_mission(),
+		"idle: nothing was playing, so the flip had nothing to act on")
 
 
 func test_debug_button_does_not_latch_without_a_shell() -> void:

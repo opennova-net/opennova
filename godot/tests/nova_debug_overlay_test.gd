@@ -7,28 +7,22 @@ extends GutTest
 
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-const COLLISION_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewCollision")
-const PLAYER_POSITION_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerPosition")
-const PLAYER_ORIENTATION_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerOrientation")
-const PLAYER_DUMP_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/DumpPlayerPose")
-const PLAYER_DUMP_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerDumpStatus")
-const USER_POINTS_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewUserPoints")
-const OCCLUSION_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionShowPortals")
-const OCCLUSION_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionStatus")
-const OCCLUSION_LIST_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionBuildings")
-const ROUNDS_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundsStatus")
-const ROUNDS_LIST_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundEvents")
+# Pages mount under the sidebar shell's page host; option checkboxes are
+# named after their registry id.
+const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
+const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/Rounds/show_collision")
+const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
+const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
+const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpSnapshot")
+const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
+const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_user_points")
+const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
+const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
+const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
+const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
+const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
+const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_skeletons")
+const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/Terrain/hide_foliage")
 
 
 class FakePoseSim:
@@ -161,7 +155,11 @@ func _make_pose_runtime() -> FakePoseRuntime:
 
 
 func _make_overlay() -> CanvasLayer:
-	var overlay: CanvasLayer = OverlayScript.new()
+	# A unique scratch config per overlay: page/width persistence must never
+	# leak between tests through the shared user:// store.
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
 	add_child_autofree(overlay)
 	return overlay
 
@@ -193,6 +191,7 @@ func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Rounds")
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "1 person bone hits")
@@ -222,6 +221,7 @@ func test_rounds_tab_names_unresolved_person_fallback() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Rounds")
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "0 person bone hits")
@@ -239,9 +239,11 @@ func test_without_runtime_reports_no_mission() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no source - the overlay says so")
-	assert_true(overlay._tabs.visible,
-		"the tabs stay usable (the perf pane works from host-wide state, no sim needed)")
-	assert_eq(overlay._entity_list.item_count, 0, "the sim-fed panes sit empty")
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	assert_true(page_list.visible,
+		"the page list stays usable (the perf page works from host-wide state, no sim needed)")
+	var entity_list := overlay.find_child("EntityList", true, false) as ItemList
+	assert_eq(entity_list.item_count, 0, "the sim-fed pages sit empty")
 
 	overlay.set_runtime_source(func(): return null)
 	overlay.refresh_now()
@@ -258,8 +260,8 @@ func test_transport_signal_stays_quiet_without_a_runtime() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	watch_signals(overlay)
-	overlay._play_button.pressed.emit()
-	overlay._stop_button.pressed.emit()
+	(overlay.find_child("SimPlay", true, false) as Button).pressed.emit()
+	(overlay.find_child("SimStop", true, false) as Button).pressed.emit()
 	assert_signal_not_emitted(overlay, "transport_used",
 		"a press with nothing to act on announces nothing")
 
@@ -274,26 +276,28 @@ func test_transport_signal_stays_quiet_without_a_runtime() -> void:
 
 
 
-func test_view_tab_skeleton_toggle_emits() -> void:
-	# The View tab's "Show skeletons" checkbox is a pure view toggle: it needs no
-	# runtime and only emits intent for the host to act on (build/free the 3D view).
+func test_skeleton_toggle_lives_on_the_animation_page() -> void:
+	# Registry toggles need no runtime and only emit intent for the host to act
+	# on (build/free the 3D view) — everything rides ONE generic channel now.
+	# The View page is gone; the bone views live with the animation data.
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._tabs.get_node_or_null("View"), "a View tab exists")
-	assert_not_null(overlay._skeleton_check, "the skeleton checkbox is reachable as a member")
-	assert_eq(overlay._skeleton_check.name, "ViewSkeletons")
-	assert_false(overlay._skeleton_check.button_pressed, "it defaults off")
+	assert_null(overlay.find_child("View", true, false),
+			"the View page is fully dissolved")
+	var skeleton_check := overlay.get_node_or_null(SKELETON_TOGGLE_PATH) as CheckBox
+	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
+	assert_false(skeleton_check.button_pressed, "it defaults off")
 
 	watch_signals(overlay)
-	overlay._skeleton_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [true])
-	overlay._skeleton_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [false])
+	skeleton_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_skeletons", true])
+	skeleton_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_skeletons", false])
 
 
-func test_view_tab_user_points_toggle_emits() -> void:
-	# Named user points are another host-owned 3D view; the overlay exposes a
-	# stable path and emits intent without requiring a running mission.
+func test_user_points_toggle_lives_on_the_animation_page() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var user_points_check := overlay.get_node_or_null(USER_POINTS_TOGGLE_PATH) as CheckBox
@@ -302,15 +306,13 @@ func test_view_tab_user_points_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	user_points_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "user_points_toggled", [true])
-	user_points_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "user_points_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_user_points", true])
 
 
-func test_view_tab_collision_toggle_emits() -> void:
-	# The View tab's "Show collision" checkbox: same host-neutral, runtime-free
-	# contract as the skeleton toggle -- it only emits intent; the host builds/frees
-	# the collision debug view.
+func test_collision_toggle_lives_on_the_rounds_page() -> void:
+	# "Show collision" belongs with the other what-geometry-does-the-world-test
+	# views on Rounds & collision, not on the dissolving View page.
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var collision_check := overlay.get_node_or_null(COLLISION_TOGGLE_PATH) as CheckBox
@@ -319,14 +321,11 @@ func test_view_tab_collision_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	collision_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
-	collision_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_collision", true])
 
 
-func test_occlusion_tab_portal_toggle_emits() -> void:
-	# The Occlusion tab's "Show portal faces" checkbox: the collision-toggle
-	# contract — it only emits intent; the host builds/frees the 3D view.
+func test_occlusion_page_portal_toggle_rides_the_option_registry() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var portals_check := overlay.get_node_or_null(OCCLUSION_TOGGLE_PATH) as CheckBox
@@ -335,9 +334,25 @@ func test_occlusion_tab_portal_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	portals_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [true])
-	portals_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_portal_faces", true])
+
+
+func test_set_option_syncs_the_owning_control_and_emits() -> void:
+	# The programmatic write path is the SAME path a click takes: one emission,
+	# and the page's control re-syncs without re-firing.
+	var overlay := _make_overlay()
+	watch_signals(overlay)
+	overlay.set_option(&"hide_foliage", true)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", true])
+	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1)
+	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
+	assert_true(foliage_check.button_pressed, "the page control re-synced")
+	assert_eq(overlay.get_option_value(&"hide_foliage"), true)
+	overlay.set_option(&"hide_foliage", true)
+	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1,
+			"a repeated value never re-fires")
 
 
 func test_occlusion_tab_reports_frame_state() -> void:
@@ -372,6 +387,7 @@ func test_occlusion_tab_reports_frame_state() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Occlusion")
 
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
 	assert_string_contains(status.text, "indoors", "the camera line reports the blink state")
@@ -393,25 +409,26 @@ func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Occlusion")
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
 	assert_string_contains(status.text, "No occlusion data")
 	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
 
 
-func test_view_tab_hide_foliage_toggle_emits() -> void:
-	# The View tab's "Hide foliage" checkbox: same host-neutral, runtime-free contract as
-	# the skeleton toggle -- it only emits intent for the host to act on.
+func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._foliage_check, "the foliage checkbox is reachable as a member")
-	assert_eq(overlay._foliage_check.name, "ViewHideFoliage")
-	assert_false(overlay._foliage_check.button_pressed, "it defaults off (foliage shown)")
+	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
+	assert_not_null(foliage_check, "the foliage checkbox has a stable public node path")
+	assert_false(foliage_check.button_pressed, "it defaults off (foliage shown)")
 
 	watch_signals(overlay)
-	overlay._foliage_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [true])
-	overlay._foliage_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [false])
+	foliage_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", true])
+	foliage_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", false])
 
 
 
@@ -419,6 +436,7 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(_make_pose_runtime())
 	overlay.toggle()
+	overlay.select_page(&"Player")
 
 	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
 	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
@@ -430,8 +448,8 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	assert_eq(orientation_label.text, "")
 	assert_true(dump_button.disabled)
 	watch_signals(overlay)
-	assert_eq(overlay.dump_local_player_pose(), "")
-	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+	assert_eq(overlay.dump_debug_snapshot(), "")
+	assert_signal_not_emitted(overlay, "debug_snapshot_dumped")
 
 
 func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
@@ -454,10 +472,10 @@ func test_player_dump_reports_an_unwritable_target_without_success_signal() -> v
 	_dumped_paths.append(blocker_path)
 
 	watch_signals(overlay)
-	var result: String = overlay.dump_local_player_pose(
+	var result: String = overlay.dump_debug_snapshot(
 			blocker_path.path_join("pose.json"))
 	assert_eq(result, "")
-	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+	assert_signal_not_emitted(overlay, "debug_snapshot_dumped")
 	assert_string_contains(status.text, "Could not")
 
 
@@ -481,6 +499,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	overlay.set_runtime(runtime)
 	overlay.set_view_context_source(func(): return view_context)
 	overlay.toggle()
+	overlay.select_page(&"Player")
 
 	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
 	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
@@ -508,13 +527,13 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	var camera_godot := Vector3(124.0, 6.0, -70.0)
 	camera.global_position = camera_godot
 	assert_ne(sampled_yaw, displayed_yaw)
-	overlay.local_player_pose_dumped.connect(
+	overlay.debug_snapshot_dumped.connect(
 			func(path: String): _dumped_paths.append(path))
 	watch_signals(overlay)
 	dump_button.pressed.emit()
-	assert_signal_emitted(overlay, "local_player_pose_dumped")
+	assert_signal_emitted(overlay, "debug_snapshot_dumped")
 	var dumped_path := String(
-			get_signal_parameters(overlay, "local_player_pose_dumped", 0)[0])
+			get_signal_parameters(overlay, "debug_snapshot_dumped", 0)[0])
 	assert_true(FileAccess.file_exists(dumped_path))
 	assert_string_contains(dumped_path.get_file(), "00TRe")
 
@@ -525,9 +544,11 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 		file.close()
 	assert_typeof(payload_variant, TYPE_DICTIONARY)
 	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
-	assert_eq(String(payload.get("schema", "")), "opennova.player_pose.v1")
+	assert_eq(String(payload.get("schema", "")), "opennova.debug_snapshot.v1")
 	assert_true(String(payload.get("captured_at_utc", "")).ends_with("Z"))
 	assert_eq(int(payload.get("logic_tick", -1)), 4242)
+	assert_eq(payload.get("picks", null), [], "no pick list injected -> an empty picks array")
+	assert_eq(int(payload.get("pick_count", -1)), 0)
 	var mission: Dictionary = payload.get("mission", {})
 	assert_eq(String(mission.get("file", "")), "00TRe.bms")
 	assert_eq(String(mission.get("name", "")), "Training Grounds")
@@ -586,15 +607,16 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_almost_eq(float(camera_snapshot.get("viewport_aspect", 0.0)),
 			viewport_width / viewport_height, 0.0001)
 
-	var second_path: String = overlay.dump_local_player_pose()
+	var second_path: String = overlay.dump_debug_snapshot()
 	assert_ne(second_path, dumped_path, "rapid consecutive snapshots never overwrite")
 	assert_true(FileAccess.file_exists(second_path))
+	_dumped_paths.append(second_path)
 
 	var next_runtime := _make_pose_runtime()
 	next_runtime.set_mission_identity("00TRa.bms", "Second Training Area")
 	next_runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
 	overlay.set_runtime(next_runtime)
-	assert_string_contains(dump_status.text, "No pose snapshot saved",
+	assert_string_contains(dump_status.text, "No snapshot saved",
 			"a live mission swap clears the previous mission's Saved path")
 	assert_false(dump_status.text.contains(dumped_path))
 
@@ -623,15 +645,15 @@ func after_all() -> void:
 
 # --- Particles tab (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
 
-func test_particles_tab_toggles_emit() -> void:
-	# Same host-neutral contract as the View toggles: the checkboxes only emit
-	# intent; the host hides the effect world / builds the box view. All access
-	# rides stable node names (ADR 0018 — no private pokes).
+func test_particles_page_toggles_ride_the_option_registry() -> void:
+	# Same host-neutral contract as every registry toggle: the checkboxes only
+	# emit intent; the host hides the effect world / builds the box view. All
+	# access rides stable node names (ADR 0018 — no private pokes).
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay.find_child("Particles", true, false), "a Particles tab exists")
-	var hide_check := overlay.find_child("ParticlesHide", true, false) as CheckBox
-	var boxes_check := overlay.find_child("ParticlesBoxes", true, false) as CheckBox
+	assert_not_null(overlay.find_child("Particles", true, false), "a Particles page exists")
+	var hide_check := overlay.find_child("hide_particles", true, false) as CheckBox
+	var boxes_check := overlay.find_child("show_effect_boxes", true, false) as CheckBox
 	assert_not_null(hide_check, "the hide checkbox has a stable node name")
 	assert_not_null(boxes_check, "the boxes checkbox has a stable node name")
 	assert_false(hide_check.button_pressed, "hide defaults off")
@@ -639,9 +661,11 @@ func test_particles_tab_toggles_emit() -> void:
 
 	watch_signals(overlay)
 	hide_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "particles_hidden_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_particles", true])
 	boxes_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "particle_boxes_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_effect_boxes", true])
 
 
 func test_particles_tab_reports_counts_and_peak_reset() -> void:
@@ -650,6 +674,7 @@ func test_particles_tab_reports_counts_and_peak_reset() -> void:
 	# @ 0x44c840 — dword_A895E0 zeroes with the count].
 	var overlay := _make_overlay()
 	overlay.toggle()
+	overlay.select_page(&"Particles")
 	var stub := _StubEffectWorld.new()
 	add_child_autofree(stub)
 	overlay.set_effect_world_source(func(): return stub)
@@ -692,3 +717,166 @@ class _StubEffectWorld extends Node3D:
 
 	func get_unresolved_texture_names() -> PackedStringArray:
 		return PackedStringArray(["SMOKE1.TGA"])
+
+
+# --- The sidebar shell (page framework) --------------------------------------
+
+func _page_list_texts(overlay: CanvasLayer) -> PackedStringArray:
+	var list := overlay.find_child("PageList", true, false) as ItemList
+	var texts := PackedStringArray()
+	for i in range(list.item_count):
+		texts.append(list.get_item_text(i).strip_edges())
+	return texts
+
+
+func test_sidebar_lists_every_page_under_its_category() -> void:
+	var overlay := _make_overlay()
+	var list := overlay.find_child("PageList", true, false) as ItemList
+	assert_not_null(list, "the shell carries the page list")
+	var texts := _page_list_texts(overlay)
+	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
+		assert_has(texts, header, "the %s section header is present" % header)
+	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
+			"Rounds & collision", "Terrain & foliage", "Environment", "Audio",
+			"Animation & models", "Player", "Stats", "Perf"]:
+		assert_has(texts, page_title, "the %s page is listed" % page_title)
+	assert_false(texts.has("View"), "the dissolved View page is gone")
+	var header_row := texts.find("SIMULATION")
+	assert_false(list.is_item_selectable(header_row), "section headers are not rows")
+
+
+func test_selection_and_width_persist_across_instances() -> void:
+	var config_path := "user://test_debug_overlay_persist_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var first: CanvasLayer = OverlayScript.new(config_path)
+	add_child(first)
+	assert_eq(String(first.get_active_page_id()), "Entities",
+			"a fresh config lands on the first page")
+	assert_true(first.select_page(&"Rounds"))
+	# Resize through the public handle node: press, drag 80 px left, release.
+	var handle := first.find_child("DebugResizeHandle", true, false) as Control
+	var panel := first.find_child("DebugPanel", true, false) as Control
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	handle.gui_input.emit(press)
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(-80, 0)
+	handle.gui_input.emit(motion)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	handle.gui_input.emit(release)
+	var widened := -panel.offset_left
+	assert_gt(widened, 560.0, "dragging the handle left widens the panel")
+	remove_child(first)
+	first.free()
+
+	var second: CanvasLayer = OverlayScript.new(config_path)
+	add_child_autofree(second)
+	assert_eq(String(second.get_active_page_id()), "Rounds",
+			"the last-selected page survives a relaunch")
+	var second_panel := second.find_child("DebugPanel", true, false) as Control
+	assert_almost_eq(-second_panel.offset_left, widened, 0.01,
+			"the panel width survives a relaunch")
+
+
+class TestHostPage:
+	extends NovaDebugPage
+	var refreshed := 0
+
+	func page_id() -> StringName:
+		return &"HostExtras"
+
+	func page_title() -> String:
+		return "Host extras"
+
+	func page_category() -> StringName:
+		return &"Host"
+
+	func refresh() -> void:
+		refreshed += 1
+
+
+func test_register_page_appends_a_host_page() -> void:
+	var overlay := _make_overlay()
+	var page := TestHostPage.new()
+	overlay.register_page(page)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"HostExtras"), "the registered page selects by id")
+	assert_gt(page.refreshed, 0, "selection refreshes the newly active page")
+	var texts := _page_list_texts(overlay)
+	assert_has(texts, "HOST", "a custom category grows its own section")
+	assert_has(texts, "Host extras", "the page lists under it")
+
+
+# --- The pick list + snapshot embedding ---------------------------------------
+
+func _fabricated_pick(handle: int, pick_name: String) -> Dictionary:
+	return {
+		"hit": true, "entity_handle": handle, "pool": 2, "kind": 2,
+		"index": handle, "bms_id": 1400 + handle, "net_id": 0, "item_id": 55,
+		"name": pick_name, "position_godot": Vector3(10, 2, -30),
+		"bound_radius": 4.0, "hit_position_godot": Vector3(10, 3, -30),
+		"hit_normal_godot": Vector3.UP, "distance_units": 45.5,
+		"hit_class": "static", "section": 1, "face": 17, "bone": -1,
+		"hit_zone": -1, "surface_type": 3, "material_flags": 0, "tick": 777,
+		"source": "crosshair", "ray_origin_godot": Vector3(0, 2, 0),
+		"ray_dir_godot": Vector3(0, 0, -1),
+	}
+
+
+func test_snapshot_embeds_the_pick_list() -> void:
+	var runtime := _make_pose_runtime()
+	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 90.0, 0.0, 0.0)
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	var picks := NovaDebugPickList.new()
+	picks.add(_fabricated_pick(9, "RckS07"))
+	overlay.set_pick_list(picks)
+
+	var target := OS.get_cache_dir().path_join(
+			"opennova_snapshot_%d.json" % Time.get_ticks_usec())
+	_dumped_paths.append(target)
+	var path: String = overlay.dump_debug_snapshot(target)
+	assert_ne(path, "", "the dump succeeded")
+	var file := FileAccess.open(path, FileAccess.READ)
+	var payload: Dictionary = JSON.parse_string(file.get_as_text())
+	file.close()
+
+	assert_eq(int(payload.get("pick_count", -1)), 1)
+	var entry: Dictionary = (payload.get("picks", []) as Array)[0]
+	var identity: Dictionary = entry.get("identity", {})
+	assert_eq(int(identity.get("bms_id", 0)), 1409)
+	assert_eq(String(identity.get("name", "")), "RckS07")
+	var pick_block: Dictionary = entry.get("pick", {})
+	assert_eq(String(pick_block.get("source", "")), "crosshair",
+			"the card keeps its input provenance")
+	assert_almost_eq(float(pick_block.get("distance_units", 0.0)), 45.5, 0.001)
+	var hit_bms: Dictionary = pick_block.get("hit_position_bms", {})
+	assert_almost_eq(float(hit_bms.get("y", 0.0)), 30.0, 0.001,
+			"the hit point converts to BMS space (y = -Godot z)")
+	assert_true(bool(entry.get("stale", false)),
+			"the pose fake exposes no live cards, so the pick reports stale")
+
+
+func test_entities_page_renders_and_curates_the_pick_list() -> void:
+	var overlay := _make_overlay()
+	var picks := NovaDebugPickList.new()
+	picks.add(_fabricated_pick(1, "crate_a"))
+	picks.add(_fabricated_pick(2, "crate_b"))
+	overlay.set_pick_list(picks)
+	overlay.toggle()  # Entities is the default page; opening refreshes it
+
+	var rows := overlay.find_child("PickRows", true, false)
+	assert_eq(rows.get_child_count(), 2, "one row per pick")
+	var header := overlay.find_child("PicksHeader", true, false) as Label
+	assert_string_contains(header.text, "(2/8)")
+	assert_string_contains(
+			(rows.get_child(0).get_node("PickLabel") as Label).text, "crate_a")
+
+	(rows.get_child(0).get_node("RemovePick") as Button).pressed.emit()
+	assert_eq(picks.size(), 1, "the row's X removes exactly that pick")
+	assert_eq(int(picks.get_picks()[0].get("entity_handle", -1)), 2)
+	(overlay.find_child("ClearPicks", true, false) as Button).pressed.emit()
+	assert_eq(picks.size(), 0, "Clear picks empties the set")

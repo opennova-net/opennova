@@ -1,6 +1,6 @@
-class_name DebugStatsPane
-extends VBoxContainer
-## The debug overlay's Stats tab: one row per major runtime system with
+class_name DebugStatsPage
+extends NovaDebugPage
+## The debug overlay's Stats page: one row per major runtime system with
 ## window-averaged per-frame milliseconds (avg + worst frame in the window)
 ## and live counters beside them. The numbers come from the shared
 ## FrameStatsBoard the hosts feed; this pane only opens/closes the capture
@@ -126,14 +126,21 @@ var status_label: Label
 var stats_tree: Tree
 
 var _board: FrameStatsBoard = null
-var _world_source := Callable()
 var _host_visible := false
 var _capture_active := false
 var _refresh_count := 0
 var _items: Dictionary = {}  # row id -> TreeItem
 
 
-func _init() -> void:
+func page_id() -> StringName:
+	return &"Stats"
+
+
+func page_category() -> StringName:
+	return CATEGORY_DIAGNOSTICS
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	status_label = Label.new()
@@ -150,13 +157,15 @@ func _init() -> void:
 	stats_tree.set_column_title(1, "avg ms/frame")
 	stats_tree.set_column_title(2, "peak ms/frame")
 	stats_tree.set_column_title(3, "info")
+	# Column minimums total 344 px so the page fits the panel-width floor
+	# beside the sidebar (the NovaDebugPage <= 360 px rule).
 	stats_tree.set_column_expand(0, true)
-	stats_tree.set_column_custom_minimum_width(0, 148)
+	stats_tree.set_column_custom_minimum_width(0, 120)
 	for column in [1, 2]:
 		stats_tree.set_column_expand(column, false)
-		stats_tree.set_column_custom_minimum_width(column, 88)
+		stats_tree.set_column_custom_minimum_width(column, 72)
 	stats_tree.set_column_expand(3, true)
-	stats_tree.set_column_custom_minimum_width(3, 110)
+	stats_tree.set_column_custom_minimum_width(3, 80)
 	stats_tree.hide_root = true
 	stats_tree.focus_mode = Control.FOCUS_NONE
 	stats_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -174,11 +183,6 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 	_refresh_count = 0
 	status_label.text = "No frame stats source." if board == null else "Stats capture paused."
 	_sync_capture()
-
-
-## Supplier of the world host (GameWorld or null) for the counter pulls.
-func set_world_source(source: Callable) -> void:
-	_world_source = source
 
 
 ## The overlay's explicit visibility edge: Controls under a hidden CanvasLayer
@@ -222,7 +226,7 @@ func _sync_capture() -> void:
 
 ## One overlay-cadence refresh. Reads the window only every _REFRESH_DIVIDER
 ## calls so displayed means cover ~0.5 s of frames.
-func refresh(runtime: Object, sim: Object) -> void:
+func refresh() -> void:
 	_sync_capture()
 	if _board == null:
 		status_label.text = "No frame stats source."
@@ -236,6 +240,8 @@ func refresh(runtime: Object, sim: Object) -> void:
 	if window.frames <= 0:
 		return
 	status_label.text = "Captured %d render frames; overlay cost is included." % window.frames
+	var runtime: Object = _ctx.runtime() if _ctx != null else null
+	var sim: Object = _ctx.sim() if _ctx != null else null
 	render_window(window.frames, window.sums, window.peaks,
 			window.sample_frames, runtime, sim)
 
@@ -344,11 +350,7 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 		int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
 	])
 
-	var world: Object = null
-	if _world_source.is_valid():
-		var world_v: Variant = _world_source.call()
-		if world_v is Object and is_instance_valid(world_v):
-			world = world_v
+	var world: Object = _ctx.world() if _ctx != null else null
 
 	# Sim row: ticks/frame from the value slot + entity/role counters.
 	var sim_info := ""
