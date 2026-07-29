@@ -9,6 +9,7 @@
 #include "common/test_paths.h"
 #include "mission/bms.h"
 #include "mission/mission.h"
+#include "mission/mission_capi.h"
 
 namespace {
 
