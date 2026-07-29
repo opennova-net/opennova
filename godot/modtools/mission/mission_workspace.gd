@@ -482,7 +482,7 @@ func _debug_runtime_source():
 	return _controller.get_sim_runtime() if _controller != null else null
 
 
-## Exact PIE camera context consumed by the shared F3 pose dump.
+## Exact PIE camera context consumed by the shared F3 debug snapshot.
 func get_debug_view_context() -> DebugViewContext:
 	if not is_playing_mission():
 		return null

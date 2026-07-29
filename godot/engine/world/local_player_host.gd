@@ -157,7 +157,7 @@ var _cycle_prev_was_down := false
 var _cycle_next_was_down := false
 var _view: PlayerLocalView = null   # the sim's per-tick view snapshot (null = no sim)
 var _camera_saved_fov := -1.0
-# Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
+# Debug experiments (the F3 overlay's Player page): keep the FP arms drawn in every
 # camera mode, and/or draw the player's own body in first person — the "see our
 # feet" probe (the §14 aim overlay bends the spine away from the eye, so looking
 # down shows your legs; the head/shoulders will clip the near plane until a
