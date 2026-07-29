@@ -10,7 +10,8 @@ add_library(opennova_threedi STATIC
     src/threedi_ir.cpp
     src/threedi_ir_ground_anchor.cpp
     src/threedi_ir_from_3di3.cpp
-    src/threedi_gp.cpp
+    src/threedi_gp_read.cpp     # GP (GPM/GPS/GPP) -> ThreediGpFile
+    src/threedi_gp_write.cpp    # ThreediGpFile -> GP (parity writer, ADR 0003)
     src/threedi_ir_from_gp.cpp
 )
 
