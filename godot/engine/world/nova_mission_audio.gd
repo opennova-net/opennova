@@ -448,7 +448,11 @@ func set_simulation(sim: Object) -> void:
 ## The per-frame ambient emitter mix [orig: SoundEmitter_UpdateAndMixTop8
 ## @ 0x5284a0]: every virtual layer computes its witnessed distance volume for
 ## the CURRENT time-of-day slot and the loudest MIX_CHANNELS bind to reusable
-## players. Everything else remains data. Volume = member volume x the region crossfade blend through the
+## players. CADENCE DIVERGENCE D-SND-16 (docs/audio/lwf-dbf-sound-re.md
+## §driver cadence): retail evals+registers each placed marker every 8th
+## 62.5 Hz tick (pool-2 tick&7 stagger) and per-frame touches only LIVE slots;
+## this runs the full marker x layer eval every render frame instead — the
+## cadence-faithful port is the tracked libs/audio slice. Everything else remains data. Volume = member volume x the region crossfade blend through the
 ## two-radius curve; a voice at or beyond its falloff radius is hard silent
 ## (which is also the cull [orig: @ 0x5285da]). Stable candidate IDs let selected
 ## incumbents continue while an entrant restarts, matching transient registration —

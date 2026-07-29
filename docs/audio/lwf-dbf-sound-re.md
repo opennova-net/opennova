@@ -324,9 +324,15 @@ each voice's volume/pan.
 **The marker update (`Entity_UpdateEnvSoundEmitter @ 0x4a8080`).** Sound markers are
 entities whose items.def `move_function`/`ai_function` tag is **`envs`** (corrected
 2026-07-11; earlier notes said "ai envsnd" — the string `envsnd` does not appear in JO
-data); the per-class dispatch table (12-byte `{tag, func}` entries @ 0x82ABD4, `envs`
-entry first) routes their tick here. JOX ships 166 `envs`-class items; the `snd:`
-markers are `type marker` + `move_function envs` blocks in ITEMS.DEF. Each tick it:
+data). The class table (refined 2026-07-28) is 34 12-byte `{name[8], callback}` entries
+@ 0x82ABC8 (count @ 0x82AD60; entry 0 `null` -> `nullsub_2 @ 0x4a8070`, which the pool
+walks skip; entry 1 `envs` -> this function, its name string @ 0x82ABD4; entry 2 `ewep`).
+`EntityDef_LookupPhysicsCallback @ 0x4a9240` resolves each def's `move_function` name
+into `def+0x158` at init (`EntityDef_InitAllCallbacks`, `"Null"` default), and
+`Entity_SpawnFromBMSRecord` copies `def+0x158 -> entity+0x1C4` (`updateCallback`) and
+`def+0x138 -> entity+0x1C8` (`deathCallback`) at placed-item spawn (@ 0x40ec5a..0x40ec7a).
+JOX ships 166 `envs`-class items; the `snd:` markers are `type marker` +
+`move_function envs` blocks in ITEMS.DEF. Each visit (cadence below) it:
 
 - picks the time-of-day region (below) and takes `soundLoopId[region]` — soundloop_1..4 are
   the **morning/day/evening/night** ambient variants (a flourescent-light marker fills only
@@ -336,15 +342,50 @@ markers are `type marker` + `move_function envs` blocks in ITEMS.DEF. Each tick 
   as the ROUNDED word `(0xFFFF * blend_q16 + 0x8000) >> 16` (@ 0x4a81c6; full blend is
   the 0xFFFF sentinel → word 0xFFFE → high byte 255; the mixer reads the word's HIGH
   byte as the emitter volume, slot byte +25 @ 0x52865e), pitch 1.0 (0x10000), and a
-  per-class keep-alive lifetime (`*(def+92)`: classes 2/5/6 = 31 ms, 4 = 72 ms,
-  7 = 62 ms, else 10 ms) — continuous sound = re-register every tick, letting dead
-  owners expire in milliseconds. The slot-type byte is the REGION index, so a region
+  per-class keep-alive lifetime (`*(def+92)`: classes 2/5/6 = 31, 4 = 72, 7 = 62,
+  else 10 — in **62.5 Hz TICKS**, not ms (corrected 2026-07-28): the mixer decrements
+  lifetimes by elapsed `current_tick` deltas @ 0x528541, so these are ~0.5 s / 1.15 s /
+  1 s / 160 ms) — continuous sound = re-register every pool-2 visit (every 8th tick,
+  cadence below); the marker default of 10 ticks outlives the 128 ms revisit gap by
+  exactly two ticks, and dead owners expire within their keep-alive. The slot-type
+  byte is the REGION index, so a region
   flip re-registers under a new key and the old region's slots expire through those
   lifetimes — that is the audible crossfade mechanism.
 - suppresses the crossfade when the adjacent region's slot is the SAME set (@ 0x4a819d;
   the compare is on the resolved set pointers, null == null included).
 - markers with a def bone index (`def+1354`) register at the bone-transformed position;
   placed `snd:` markers have none and use the entity position + attach offset.
+
+**The driver cadence (witnessed 2026-07-28).** `Game_MainLoop @ 0x52b630` banks wall
+clock in 1/16-ms fixed point and drains it in 4 ms quanta (`frame_time -= 64` @ 0x52ba21),
+firing the active mode's UPDATE callback (mode struct +36) only on quanta where the
+phase counter `& 3 == 0` (@ 0x52ba47) — every 16 ms = 62.5 Hz; the RENDER callback
+(+40) runs ONCE per outer frame after the drain (@ 0x52bab8-0x52bac6). (A Sleep(1)
+loop @ 0x52b8a6 caps the outer frame at 16 ms when `dword_2550744` is set — an
+optional whole-loop limiter, off in the fast-retail reference configs.) The in-mission
+mode struct is `"Game Loop"` @ 0x82f340: its update is `Game_ProcessMainFrame
+@ 0x5263f0` (increments `current_tick` @ 0x5265b4, pumps net, runs
+`Entity_UpdateAllEntities @ 0x4c2100`), its render is `GameLoop_RenderFrame
+@ 0x521310` (renamed 2026-07-28 from the `render_loading_frame` misnomer, maintainer
+OK) — the per-frame in-mission render callback:
+listener update `Audio_UpdateListenerFromView @ 0x43b400` ->
+`Audio_UpdateListenerPosition @ 0x527960`, engine sounds, the Top8 mix @ 0x521341
+gated off for dedicated servers via `dword_A87050`, then the scene render).
+
+`Entity_UpdateAllEntities` runs per-pool cadences inside the 62.5 Hz update: pool 0
+(players/organics) calls `updateCallback` (+0x1C4) every tick (@ 0x4c2460); pool 1
+(vehicles/mounted items) gets the per-tick parent-chain transform walk; **pool 2
+(statics — the placed markers) is walked starting at `tick & 7` with stride 8
+(@ 0x4c225a-0x4c228c): each pool-2 entity's `updateCallback` runs every 8th tick
+(~7.8 Hz), cohort-staggered so 1/8 of the pool is visited per tick**, with the age
+word (+0x2AC) decremented by 8 per visit gating the separate `deathCallback` think;
+pool 3 (projectiles) strides `tick & 0x3F` (every 64th tick) as a fallback lane. So a
+placed `snd:` marker's TOD/crossfade/registration eval runs at ~7.8 Hz — NOT per tick
+and NOT per render frame — on top of the per-marker clock stagger below, while
+attached/vehicle emitters re-register per tick through the direct legs
+(`Entity_UpdateParentTransform @ 0x4a8d4f`, `Entity_UpdateWaterPhysicsAndEffects
+@ 0x4a93d6`). `Entity_UpdateEnvSoundEmitter` itself has no internal rate gate — the
+caller defines the cadence.
 
 **Time of day (`Entity_CalcTimeOfDayRegion @ 0x408110`).** The env clock
 (`Env_GetTimeOfDayHoursQ16 @ 0x57d5b0` = `Env_CurTimeFixed24 >> 8`, hours Q16.16) is cut at
@@ -369,9 +410,11 @@ the (entity, type) slots — the witnessed unregister (`SoundEmitter_ClearByEnti
 gate `g_napi_np_ctx.is_mp_session_peer` guards registration like the rest of the sound
 stack (our D-MUS-SPGATE decision applies: we play in ALL sessions).
 
-**The per-frame mix (`SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`, called from the main frame
-loop @ 0x521341).** Every frame, each live slot: decrements its lifetime (expired slots
-self-clear), lazily caches the layer's `falloff_radius << 16` as its range (@ 0x52856a),
+**The per-frame mix (`SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`, called once per RENDER
+frame from the "Game Loop" mode's render callback @ 0x521341 — cadence above).** Its
+clock argument is `current_tick` (pushed @ 0x52133a), so lifetimes advance in ticks
+regardless of frame rate. Every frame, each live slot: decrements its lifetime by the
+elapsed ticks (@ 0x5284aa / 0x528541; expired slots self-clear), lazily caches the layer's `falloff_radius << 16` as its range (@ 0x52856a),
 culls axis-wise then euclidean against it, inflates the distance by occlusion (below),
 computes the volume through the two-radius curve on the layer's **member 0** — the emitter
 path does NOT run the member-selection machine (@ 0x528649 reads layer+16). The arms pass
@@ -469,6 +512,7 @@ slots / crossfade), and the `dialog_vs_ambient_probe.gd` bed-vs-dialog gate.
 | D-SND-7 | **PORTED 2026-07-16** (reviewed 2026-07-17): `CollisionWorld::sound_occlusion_inflate` (libs/world/collision.cpp) + `terrain_raycast_los_clear` (libs/terrain_query) implement the compounding two-ray form; `NovaSimulation.sound_occlusion_distance_q16` feeds the emitter mix (`NovaMissionAudio.tick`, rays only for markers already audible at the raw distance) and the one-shot cull recheck + volume snapshot (`NovaSoundBank.play_oneshot_3d`). Authored marker ids, remote-fire ids, and the local-player sentinel now preserve source exclusion and the both-indoors terrain bypass; static emitters refresh blink state at this boundary. | compounding two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970` — the corrected form above; terrain leg + building-only entity leg with the -0x8000 radius-slot reuse on ray 2) in both the emitter mix and positional one-shots | evidence: `collision` ctest sound-occlusion cases (both-blocked/one-blocked/clear/clamp), `collision` nearest-point bias, `terrain_raycast` LOS cases, and GUT ambient/one-shot provider wiring; residue = D-SND-9. |
 | D-SND-9 | the entity-leg clip applies the raw radius to EVERY plane | flagged planes (BPLN flags byte nonzero) clamp the clip radius at 0 (`@ 0x538bd8-0x538e1b` — only flag-0 planes read 0.5u thin on ray 2) | plane flags aren't plumbed through the collision feed yet; the remaining difference is sub-0.5u in the ray-2 entity clip. The LOS terrain callback now reads the witnessed nearest 0.5u-quantized texel. |
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to host territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | host playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
+| D-SND-16 | `NovaMissionAudio.tick` runs the FULL pipeline once per render frame, in GDScript: every marker x active-set layer eval (TOD region, crossfade, distance volume, lazy LOS) + candidate build + loudest-8 selection | registration and mix run at different cadences on different clocks (§driver cadence): each placed marker's eval+registration every 8th 62.5 Hz tick (pool-2 `tick & 7` stagger @ 0x4c225a; attached emitters per tick), keep-alive lifetimes in ticks; the per-render-frame mix (@ 0x521341) touches only LIVE slots — range cull, occlusion, member-0 curve, top-8 sort | audibly equivalent above ~8 Hz (a per-frame ranked mix serves both), but we pay O(markers x layers) eval every frame where retail pays it per 128 ms per marker — the measured 1.2-1.5 ms/frame F3 "Audio" row. The port slice moves eval+registration to the witnessed staggered tick cadence (sim-side, portable C++) and keeps a thin per-frame live-slot mix. Minted 2026-07-28. |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
 `Entity_CalcTerrainRegion -> Entity_CalcTimeOfDayRegion @ 0x408110`, `Env_GetTimeOfDayHoursQ16 ->
@@ -494,6 +538,16 @@ the register-convention IMA-ADPCM stepper inlined into the SBF stream split and 
 debug channel), `0x4edb50` (WAC text -> player chat feed, color -1/type 0x3A2),
 `0x4a4767` (the pff-only music-pair reselect), `0x75cf88` (no-falloff one-shot volume
 source), `0x766735` (AOA1 device-relative pitch ratio / 44100 device rate). IDB saved.
+
+**IDB changes (2026-07-28 cadence session):** renamed `sub_43B400 ->
+Audio_UpdateListenerFromView @ 0x43b400` (the render-cb listener leg: cinematic/fade
+camera transform else `g_view_pos_x`, MP-session-gated); cadence witness comments at
+`0x4a8080` (pool-2 stagger + tick-unit lifetimes), `0x5284a0` (`current_tick` time
+base), `0x521310` (the "Game Loop" mode-table witness + misnomer note), and the class
+table `0x82abc8` (layout + `def+0x158 -> entity+0x1C4` plumbing). Applied with
+maintainer OK (same day): the curated misnomer `render_loading_frame @ 0x521310 ->
+GameLoop_RenderFrame`, entry comment rewritten to the mode-table witness (the old
+"loading frame / previous name confirmed correct" note was wrong). IDB saved.
 
 ## Verdict
 
@@ -525,6 +579,14 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   globals/pan/doppler — now explicitly including the wave channel's
   `(voiceVolume * 0xD2 + 0x80) >> 8` option fold and the dead-in-retail
   `g_SoundEmitterMixScale`).
+- ambient driver cadence (witnessed 2026-07-28): the split clock is pinned — marker
+  eval/registration every 8th 62.5 Hz tick per placed marker (pool-2 `tick & 7`
+  stagger in `Entity_UpdateAllEntities @ 0x4c2100`; per tick for attached emitters),
+  keep-alive lifetimes in TICKS (the old ms reading corrected), the Top8 mix once per
+  render frame on a `current_tick` clock from the "Game Loop" mode render callback
+  (`0x521310`), listener per frame. Ours evals everything per render frame —
+  divergence D-SND-16 (open; the cadence-faithful port folds into the tracked
+  libs/audio slice).
 - one-shot view gating and set-pitch compose (witnessed 2026-07-11, unported,
   data-inert): the `& 6` view-flag gate and `set_flags` bit0 filter fires on 8 of 6464
   JOX layers (vehicle-view scope) and 0 sets; the set pitch compose is unity across all
