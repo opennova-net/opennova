@@ -3,7 +3,7 @@ extends SceneTree
 # Manual probe: boots main_game.tscn through the NW_SP_MISSION single-player
 # start flow (same recipe as perf_fire_probe_game.gd), warms up, then samples the
 # world tick's AUDIO leg for a fixed window — the D-SND-16 cadence-port A/B meter.
-# Reports avg/p95/max of game_world._perf_audio_us (the ambient advance + mix +
+# Reports avg/p95/max of the game_world audio perf counter (the ambient advance + mix +
 # voice binds + music pump span) plus the mission-audio counters and frame wall
 # time. Windowed:
 #   NW_SP_MISSION=ASH_I5A.bms NW_RESOURCE_DIR=<pff install> "$GODOT_BIN" \
