@@ -1,5 +1,7 @@
 #include "npwire/ingame_decode.h"
 
+#include "../wire_cursor.h"
+
 #include <cmath>
 #include <cstring>
 
@@ -77,47 +79,13 @@ WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
 
 namespace {
 
+using opennova::npwire_detail::Cursor;
+
 // Bounded cursor — every read is bounds-checked vs `end`. On underflow we
 // flip `ok=false` and stop advancing; the caller sees the exact byte where
 // the decode ran out. Mirrors the retail handlers' `cursor + N <= end`
 // pattern (NapiNPClientMsg_0x00D / _0x020 both bail to a final-return on
 // short reads, leaving whatever was already stored in place).
-struct Cursor {
-	const uint8_t *p = nullptr;
-	const uint8_t *end = nullptr;
-	bool ok = true;
-
-	uint8_t u8() {
-		if (!ok || p + 1 > end) { ok = false; return 0; }
-		return *p++;
-	}
-	uint16_t u16() {
-		if (!ok || p + 2 > end) { ok = false; return 0; }
-		uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8; p += 2; return v;
-	}
-	uint32_t u32() {
-		if (!ok || p + 4 > end) { ok = false; return 0; }
-		uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
-		             uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-		p += 4; return v;
-	}
-	int16_t i16() { return int16_t(u16()); }
-	int32_t i32() { return int32_t(u32()); }
-	void skip(size_t n) {
-		if (!ok || p + n > end) { ok = false; p = end; return; }
-		p += n;
-	}
-	std::string cstr() {
-		std::string s;
-		while (ok && p < end) {
-			uint8_t c = *p++;
-			if (c == 0) return s;
-			s.push_back(char(c));
-		}
-		ok = false;
-		return s;
-	}
-};
 
 } // namespace
 

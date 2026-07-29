@@ -35,12 +35,27 @@
   exactly the libs they use.
 - Shared infrastructure lives in `libs/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
-  `BitWriter`, `io/le.h` primitives, `io/fixed.h` (16.16 / 2.14), `io/strutil.h`
-  ASCII case-insensitive helpers. Do not hand-roll a new byte reader or export-macro
-  block; migrate existing per-lib copies on-touch (delegate the body, keep the local
-  signature, gated on that lib's byte-exact roundtrip tests). Excluded from migration:
-  the `mus`/`wac` VM program-counter cursors (witnessed faithful-port surface with
-  their own clamp semantics).
+  `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every
+  streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
+  sink), `io/strutil.h` ASCII case-insensitive helpers. Do not hand-roll a new byte
+  reader or export-macro block; migrate existing per-lib copies on-touch (delegate the
+  body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
+- Two byte-cursor CONTRACTS exist on purpose, and a copy is only duplication if it
+  matches one of them. `io::ByteReader` is the FORMAT-PARSER contract: a clipped read
+  yields 0, the cursor does not advance, and parsing continues, so a file still
+  round-trips byte-exactly; `ok()` reports truncation without changing that. A PROTOCOL
+  decoder wants the opposite — the first short read poisons the cursor so a truncated
+  datagram cannot half-decode into plausible state; that is
+  `libs/npwire/src/wire_cursor.h`, and it must not be folded into `ByteReader`.
+- Migration exceptions, each with its reason (do not "clean these up" casually):
+  the `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with
+  their own clamp semantics. `libs/cpt`'s bit codec and `io/bit_stream.h` have DIVERGED
+  since the latter was lifted (high-water tracking here, a normalizing `set_position`
+  there) — adopting the shared one in cpt is a real migration needing a CPT-corpus byte
+  diff, not a swap. `libs/mission`'s BMS `Reader` is likewise not a straight swap: its
+  `has_bytes` is `pos_ + count <= size_`, which can overflow where `io::ByteReader`'s
+  `count <= size_ - pos_` cannot, so that migration is a hardening change to a
+  parity-critical parser and belongs in a slice that can prove it.
 - Ports are faithful structural translations of the original engine — implementing "our
   own version" of engine behavior is never allowed unless a tracked decision (ADR or an
   RE-record divergence entry) says otherwise. CRT/OS/platform primitives (strcpy/sprintf/

@@ -4,6 +4,15 @@
 // Reader): out-of-range reads return 0 and do NOT advance; bulk reads
 // zero-fill on overflow; skip clamps to the end. Format parsers rely on
 // those exact recovery semantics, so they are the contract here.
+//
+// ok() reports whether any read has run past the end. It is OBSERVATIONAL:
+// it never changes what a read returns or whether the cursor advances, so
+// adding it cannot alter an existing parser's recovery path. It exists
+// because the lenient contract above cannot distinguish a truncated field
+// from a legitimate zero -- protocol decoders need that distinction, and
+// each was carrying its own cursor to get it. A decoder that must STOP at
+// the first truncation (rather than keep reading) wants a latching cursor
+// instead; see libs/npwire/src/wire_cursor.h.
 
 #ifndef OPENNOVA_IO_BYTE_READER_H
 #define OPENNOVA_IO_BYTE_READER_H
@@ -26,9 +35,15 @@ public:
     size_t position() const { return pos_; }
     size_t remaining() const { return size_ - pos_; }
 
+    // False once any read or skip has been clipped by the end of the buffer.
+    bool ok() const { return ok_; }
+    // For callers that detect a SEMANTIC error (a bad magic, an impossible
+    // count) and want it to travel with the cursor's own truncation state.
+    void mark_failed() { ok_ = false; }
+
     uint8_t read_u8()
     {
-        if (!has_bytes(1)) return 0;
+        if (!has_bytes(1)) { ok_ = false; return 0; }
         return data_[pos_++];
     }
 
@@ -36,7 +51,7 @@ public:
 
     uint16_t read_u16()
     {
-        if (!has_bytes(2)) return 0;
+        if (!has_bytes(2)) { ok_ = false; return 0; }
         uint16_t v = read_u16_le(data_ + pos_);
         pos_ += 2;
         return v;
@@ -46,7 +61,7 @@ public:
 
     uint32_t read_u32()
     {
-        if (!has_bytes(4)) return 0;
+        if (!has_bytes(4)) { ok_ = false; return 0; }
         uint32_t v = read_u32_le(data_ + pos_);
         pos_ += 4;
         return v;
@@ -67,6 +82,7 @@ public:
     void read_bytes(uint8_t *out, size_t count)
     {
         if (!has_bytes(count)) {
+            ok_ = false;
             std::memset(out, 0, count);
             return;
         }
@@ -89,6 +105,7 @@ public:
     void skip(size_t count)
     {
         if (count > size_ - pos_) {
+            ok_ = false;
             pos_ = size_;
         } else {
             pos_ += count;
@@ -99,6 +116,7 @@ private:
     const uint8_t *data_;
     size_t size_;
     size_t pos_;
+    bool ok_ = true;
 };
 
 } // namespace io

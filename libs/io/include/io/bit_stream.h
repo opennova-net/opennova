@@ -1,8 +1,15 @@
 // Bit-level LSB-first stream reader/writer.
 //
 // The shape is lifted from libs/cpt's CDEP bit codec (the proven consumer);
-// shipped here for NEW code. cpt itself keeps its local copy until its next
-// substantive touch — bit-exact output is parity-gated there.
+// shipped here for NEW code.
+//
+// cpt still has its own copy, and the two have since DIVERGED — this one
+// tracks a high-water mark the writer needs, cpt's reader carries a
+// normalizing set_position (a bit_offset > 8 folds into byte+bit) that has no
+// consumer here. So they are no longer interchangeable: adopting this header
+// in cpt is a real migration that has to be byte-diffed against the CPT
+// corpus, not a swap. (Verified 2026-07-28, quality campaign W2-4 — the
+// earlier "token-identical copy" note was wrong.)
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
