@@ -1,5 +1,10 @@
 add_library(opennova_def STATIC
-    src/def.cpp
+    src/def.cpp          # the .def umbrella + loadout weight/encumbrance
+    src/def_ammo.cpp     # AMMO.DEF
+    src/def_hudpos.cpp   # HUDPOS.DEF
+    src/def_items.cpp    # ITEMS.DEF
+    src/def_scan.cpp     # the shared .def text scanner
+    src/def_weapons.cpp  # WEAPONS.DEF
 )
 
 target_include_directories(opennova_def
