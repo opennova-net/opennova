@@ -75,8 +75,21 @@ class ActionParticleHostHarness:
 		return _action_particle_world_forward(userpoint)
 
 
+# Stands in for NovaTerrainData's raycast_terrain: the ported retail heightmap
+# raycast the binocular rangefinder measures against. A miss reports all-NAN.
+class FakeTerrainData:
+	extends RefCounted
+	var hit := Vector3(NAN, NAN, NAN)
+	var calls: Array = []
+
+	func raycast_terrain(from: Vector3, to: Vector3) -> Vector3:
+		calls.append({"from": from, "to": to})
+		return hit
+
+
 class FakeWorld:
 	extends Node3D
+	var terrain_data: FakeTerrainData = null
 	var input_calls: Array = []
 	var avatar_count := 0
 	var viewmodel_count := 0
@@ -137,6 +150,9 @@ class FakeWorld:
 	func request_local_player_stance(stance: int) -> bool:
 		stance_requests.append(stance)
 		return true
+
+	func get_terrain_data() -> FakeTerrainData:
+		return terrain_data
 
 	func local_player_position() -> Vector3:
 		return player_position
@@ -1277,3 +1293,63 @@ func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 		assert_eq(world.last_weapon_part.times.size(), 1)
 		if world.last_weapon_part.times.size() == 1:
 			assert_almost_eq(world.last_weapon_part.times[0], 0.032, 0.00001)
+
+
+# --- Binocular rangefinder ----------------------------------------------------
+# The range readout traces the ported retail terrain raycast, not a Godot physics
+# query. The physics query could only ever have hit the terrain heightfield in the
+# runtime (object pick bodies are editor-only), so this measures the same surface
+# through the same sampler the fired round uses.
+
+func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.player_position = Vector3.ZERO
+	world.player_yaw_deg = 0.0
+	world.player_pitch_deg = 0.0
+	world.terrain_data = FakeTerrainData.new()
+	# Yaw 0 / pitch 0 looks down -Z; the eye sits PLAYER_EYE_HEIGHT above the feet,
+	# so a hit 250 u ahead at eye height is 250 u from the player position too.
+	var eye_h: float = host.PLAYER_EYE_HEIGHT
+	world.terrain_data.hit = Vector3(0.0, eye_h, -250.0)
+	host.setup(world, camera)
+
+	assert_eq(host.aim_range_units(), 250)
+	assert_eq(world.terrain_data.calls.size(), 1, "one terrain trace per query")
+	var call: Dictionary = world.terrain_data.calls[0]
+	assert_almost_eq(float(call["from"].y), eye_h, 0.001, "traced from the eye")
+	assert_almost_eq(float(call["to"].z), -host.AIM_PROJECT_RANGE, 0.001,
+			"traced out to the retail 1000-unit projection")
+
+
+func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.player_position = Vector3.ZERO
+	world.terrain_data = FakeTerrainData.new()  # all-NAN = miss
+	host.setup(world, camera)
+
+	# Retail clamps the four-digit readout to 1..1000, and the projection is 1000.
+	assert_eq(host.aim_range_units(), 1000)
+
+
+func test_aim_range_survives_a_world_with_no_terrain() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.player_position = Vector3.ZERO
+	world.terrain_data = null
+	host.setup(world, camera)
+
+	assert_eq(host.aim_range_units(), 1000)
