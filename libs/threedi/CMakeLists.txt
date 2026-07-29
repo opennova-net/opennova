@@ -1,6 +1,7 @@
 add_library(opennova_threedi STATIC
     src/threedi.cpp
-    src/threedi_3di3.cpp
+    src/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
+    src/threedi_3di3_write.cpp  # Threedi3di3 -> 3DI3 (parity writer, ADR 0003)
     src/threedi_compare.cpp
     src/threedi_panm.cpp
     src/threedi_panm_runtime.cpp
