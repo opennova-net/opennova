@@ -302,7 +302,7 @@ func _build_default_pages() -> void:
 	register_page(DebugOcclusionPage.new())
 	register_page(DebugRoundsPage.new())
 	register_page(DebugTerrainPage.new())
-	register_page(DebugViewPage.new())
+	register_page(DebugAnimationPage.new())
 
 	_player_pane = DebugPlayerPage.new()
 	_player_pane.local_player_pose_dumped.connect(

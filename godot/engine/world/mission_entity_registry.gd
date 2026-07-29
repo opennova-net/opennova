@@ -70,6 +70,16 @@ func get_generation() -> int:
 	return _generation
 
 
+## The node column of the animatable set, for the F3 Animation & models page's
+## per-model rows. Rows can hold freed instances after a reload — callers
+## is_instance_valid-guard each entry, matching the resolver contract.
+func get_animatable_nodes() -> Array:
+	var out: Array = []
+	for record in _nodes:
+		out.append(record["node"])
+	return out
+
+
 ## Resolve one entity's node for the present pass: by file id (bms_id) first -- stable when a mission
 ## loads from disk -- then by (kind, index) -- the editor sims the in-memory bms::File where bms_id may
 ## be 0. Returns the live node or null. This is THE present-path resolver shared by game + editor;

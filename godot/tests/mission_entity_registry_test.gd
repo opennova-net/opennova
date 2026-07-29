@@ -42,6 +42,22 @@ func test_resolve_single_by_bms_id() -> void:
 	assert_null(reg.resolve_single(0), "bms_id 0 -> null (no entity has SSN 0)")
 
 
+func test_get_animatable_nodes_returns_the_indexed_node_column() -> void:
+	var container := Node.new()
+	add_child_autofree(container)
+	var a := _node(container, 1001, 0, 0, Vector3.ZERO)
+	var b := _node(container, 1002, 0, 0, Vector3.ZERO)
+	var plain := Node.new()  # no play_part_anim/entity_ref: never indexed
+	container.add_child(plain)
+	var reg := Registry.new()
+	reg.build(container, null)
+	var nodes := reg.get_animatable_nodes()
+	assert_eq(nodes.size(), 2, "only the animatable set is listed")
+	assert_has(nodes, a)
+	assert_has(nodes, b)
+	assert_does_not_have(nodes, plain)
+
+
 func test_kind_index_fallback_uses_distinct_packed_integer_keys() -> void:
 	var container := Node.new()
 	add_child_autofree(container)

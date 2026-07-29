@@ -15,13 +15,13 @@ const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
 const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpPlayerPose")
 const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
-const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/View/show_user_points")
+const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_user_points")
 const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
 const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
 const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
 const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
-const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/View/show_skeletons")
+const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_skeletons")
 const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/Terrain/hide_foliage")
 
 
@@ -276,12 +276,14 @@ func test_transport_signal_stays_quiet_without_a_runtime() -> void:
 
 
 
-func test_view_page_skeleton_toggle_rides_the_option_registry() -> void:
+func test_skeleton_toggle_lives_on_the_animation_page() -> void:
 	# Registry toggles need no runtime and only emit intent for the host to act
 	# on (build/free the 3D view) — everything rides ONE generic channel now.
+	# The View page is gone; the bone views live with the animation data.
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay.find_child("View", true, false), "a View page exists")
+	assert_null(overlay.find_child("View", true, false),
+			"the View page is fully dissolved")
 	var skeleton_check := overlay.get_node_or_null(SKELETON_TOGGLE_PATH) as CheckBox
 	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
 	assert_false(skeleton_check.button_pressed, "it defaults off")
@@ -295,7 +297,7 @@ func test_view_page_skeleton_toggle_rides_the_option_registry() -> void:
 			[&"show_skeletons", false])
 
 
-func test_view_page_user_points_toggle_rides_the_option_registry() -> void:
+func test_user_points_toggle_lives_on_the_animation_page() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var user_points_check := overlay.get_node_or_null(USER_POINTS_TOGGLE_PATH) as CheckBox
@@ -732,9 +734,10 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
 		assert_has(texts, header, "the %s section header is present" % header)
 	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
-			"Rounds & collision", "Terrain & foliage", "View", "Player", "Stats",
-			"Perf"]:
+			"Rounds & collision", "Terrain & foliage", "Animation & models",
+			"Player", "Stats", "Perf"]:
 		assert_has(texts, page_title, "the %s page is listed" % page_title)
+	assert_false(texts.has("View"), "the dissolved View page is gone")
 	var header_row := texts.find("SIMULATION")
 	assert_false(list.is_item_selectable(header_row), "section headers are not rows")
 
