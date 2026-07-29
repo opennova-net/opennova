@@ -1,7 +1,7 @@
 #include "mission_mis.h"
 
 // Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged, and each original-code citation moved with the code it annotates.
 //
 // Emits the .mis text form of a mission. Section order and field spelling are the
 // contract; see mission_mis_parser.cpp for the inverse.

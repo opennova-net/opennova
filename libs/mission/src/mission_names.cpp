@@ -1,7 +1,7 @@
 #include "mission_names.h"
 
 // Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged, and each original-code citation moved with the code it annotates.
 //
 // Display names for the BMS event-logic enums. The three sub-tables are file-local:
 // each is reached only through the dispatcher above it.
@@ -177,6 +177,9 @@ std::string action_type_name(int value) {
 	return unknown_label("Unknown", value);
 }
 
+// The AI sub-type display names, ported from the retail mission editor's table.
+// [orig: dfx2med Med_ActionSubTypeName @0x445EE0] — the same witness bms.h cites on
+// AIActionSubType, whose values this switch enumerates.
 static std::string ai_action_sub_type_name(int value) {
 	switch (static_cast<bms::AIActionSubType>(value)) {
 		case bms::AIActionSubType::GuardBit: return "GuardBit";

@@ -3,7 +3,8 @@
 #include "mission/mission.h"
 
 // Split out of mission.cpp (quality campaign W3-1). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged. Nothing here cites an original: the flat C ABI is our own interop
+// layer over MissionDocument, not a port of witnessed engine code.
 //
 // The flat C ABI and the struct copies that feed it. Consumers are the Python FFI
 // (ctypes, no header) and tests/mission/mission_c_abi_test.cpp; see libs/CLAUDE.md
