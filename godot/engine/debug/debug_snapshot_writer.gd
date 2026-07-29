@@ -276,22 +276,41 @@ static func _enrich_pick(pick: Dictionary, ctx: NovaDebugContext) -> Dictionary:
 			entry["entity_debug"] = _jsonable(card)
 			break
 	if net_id > 0 and sim.has_method("get_world_entity_debug"):
-		var world_card: Dictionary = sim.get_world_entity_debug(net_id)
-		if not world_card.is_empty():
-			entry["world_entity_debug"] = _jsonable(world_card)
+		_store_card(entry, "world_entity_debug", sim.get_world_entity_debug(net_id))
 	if bms_id != 0 and sim.has_method("get_destruction_debug"):
-		var destruction: Dictionary = sim.get_destruction_debug(bms_id)
-		if not destruction.is_empty():
-			entry["destruction"] = _jsonable(destruction)
+		_store_card(entry, "destruction", sim.get_destruction_debug(bms_id))
 	if bms_id != 0 and sim.has_method("get_present_effect_state_for_bms_id"):
-		var effect_state: Dictionary = sim.get_present_effect_state_for_bms_id(bms_id)
-		if not effect_state.is_empty():
-			entry["effect_state"] = _jsonable(effect_state)
-	entry["stale"] = (entry["entity_debug"] as Dictionary).is_empty() \
-			and (entry["world_entity_debug"] as Dictionary).is_empty() \
-			and (entry["destruction"] as Dictionary).is_empty() \
-			and (entry["effect_state"] as Dictionary).is_empty()
+		# NOT a Dictionary: this accessor returns the present-pass effect
+		# transform vectors as a PackedVector3Array (empty when the entity
+		# drives no effect). _store_card takes any shape.
+		_store_card(entry, "effect_state",
+				sim.get_present_effect_state_for_bms_id(bms_id))
+	var stale := true
+	for card_key in ["entity_debug", "world_entity_debug", "destruction", "effect_state"]:
+		if not _card_is_empty(entry[card_key]):
+			stale = false
+			break
+	entry["stale"] = stale
 	return entry
+
+
+## Store one live debug card, whatever container the accessor returns
+## (Dictionary cards, PackedVector3Array effect state, ...): empties keep the
+## entry's typed default, everything else lands JSON-converted. Duck-typed on
+## purpose — a mistyped assumption here must degrade, never abort the dump.
+static func _store_card(entry: Dictionary, key: String, card: Variant) -> void:
+	if _card_is_empty(card):
+		return
+	entry[key] = _jsonable(card)
+
+
+static func _card_is_empty(card: Variant) -> bool:
+	if card is Dictionary:
+		return (card as Dictionary).is_empty()
+	var listed: Variant = _jsonable(card)
+	if listed is Array:
+		return (listed as Array).is_empty()
+	return listed == null
 
 
 # --- JSON plumbing -----------------------------------------------------------
