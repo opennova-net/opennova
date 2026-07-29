@@ -40,6 +40,10 @@ var _reground_dialog: ConfirmationDialog
 # edits are write-locked for its whole life; the runtime source follows the
 # active mode per refresh (see _debug_runtime_source).
 var _debug_overlay: NovaDebugOverlay
+# The debug pick list shared with play-in-editor (click-picked while the
+# overlay is up; snapshots embed it). Workspace-lifetime; PIE worlds are
+# freed on stop, so stale cards just report stale in a later snapshot.
+var _pick_list := NovaDebugPickList.new()
 
 # Mission-only terrain/foliage inputs are scoped to activation because the
 # Terrain and Mission workspaces share one TerrainEditor scene.
@@ -407,14 +411,22 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.debug_option_changed.connect(_on_debug_option_changed)
 		_debug_overlay.set_effect_world_source(Callable(self, "_debug_effect_world_source"))
 		_debug_overlay.set_world_source(Callable(self, "_debug_world_source"))
+		_debug_overlay.set_pick_list(_pick_list)
 		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
 	# While the overlay is up during play, the play session frees the mouse so
 	# the overlay takes clicks (the game shell gets this via its pause menu;
-	# play-in-editor has none).
+	# play-in-editor has none). The freed mouse also click-picks: install the
+	# workspace's pick list on the PIE world and flip its click catcher with
+	# the overlay (the SubViewportContainer forwards only play-view clicks).
 	var play = _play_node()
 	if play != null and play.has_method("set_capture_suspended"):
 		play.set_capture_suspended(is_debug_overlay_open())
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null and world.has_method("set_pick_debug"):
+			world.set_pick_debug(_pick_list)
+			world.set_pick_click_enabled(is_debug_overlay_open())
 
 
 # Debug options act on the PIE world / player host (game_world.tscn) the same

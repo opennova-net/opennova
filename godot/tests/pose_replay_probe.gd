@@ -1,14 +1,19 @@
 extends Node
 
 # Pose-replay hit-detection probe: boots ONED play-in-editor on the mission a
-# NOVA_POSE_JSON dump names, then re-fires the dumped camera ray through the
-# REAL RoundSim (NovaSimulation.debug_spawn_round) as a small fan around the
-# dumped forward, and reports every outcome the F3 Rounds debug ring recorded
-# — face hits with section/face/material, sphere stand-ins, terrain stops,
-# and the face-miss fly-ons. The tool for "I was standing HERE and the shot
-# did something weird": dump the pose (F3 -> Player -> Dump pose), then
-#   NOVA_POSE_JSON=<dump.json> [NOVA_PR_AMMO=AMMO_M203_40MM_NADE] \
+# NOVA_POSE_JSON snapshot names, then re-fires the dumped camera ray through
+# the REAL RoundSim (NovaSimulation.debug_spawn_round) as a small fan around
+# the dumped forward, and reports every outcome the F3 Rounds debug ring
+# recorded — face hits with section/face/material, sphere stand-ins, terrain
+# stops, and the face-miss fly-ons. The tool for "I was standing HERE and the
+# shot did something weird": dump a snapshot (F3 -> Player -> Dump snapshot),
+# then
+#   NOVA_POSE_JSON=<snapshot.json> [NOVA_PR_AMMO=AMMO_M203_40MM_NADE] \
+#     [NOVA_PR_PICK=<bms_id>|first] \
 #     "$GODOT_BIN" --path godot res://tests/pose_replay_probe.tscn
+# NOVA_PR_PICK re-aims the whole fan at a PICKED entity's exact hit point
+# (the snapshot's picks[] section) and live-checks that entity before firing
+# — the "I picked THAT thing and the shot did something weird" loop.
 # Also lists the mission entities within 80 u of the camera as context for
 # what SHOULD be along the ray.
 
@@ -51,6 +56,38 @@ func _ready() -> void:
 		push_error("[pr] pose dump missing mission/camera fields")
 		get_tree().quit(1)
 		return
+
+	# NOVA_PR_PICK: select a picks[] row (bms_id, or "first") and aim the fan
+	# at its recorded hit point instead of the dumped forward.
+	var pick_target: Dictionary = {}
+	var pick_sel := OS.get_environment("NOVA_PR_PICK").strip_edges()
+	if not pick_sel.is_empty():
+		for p_v in (pose.get("picks", []) as Array):
+			var p: Dictionary = p_v
+			var identity: Dictionary = p.get("identity", {})
+			if pick_sel.to_lower() == "first" \
+					or int(identity.get("bms_id", -1)) == pick_sel.to_int():
+				pick_target = p
+				break
+		if pick_target.is_empty():
+			push_error("[pr] NOVA_PR_PICK '%s' matched no snapshot pick" % pick_sel)
+			get_tree().quit(1)
+			return
+		var pid: Dictionary = pick_target.get("identity", {})
+		var pick_info: Dictionary = pick_target.get("pick", {})
+		print("[pr] pick target: %s #%d (%d:%d) item %d handle %d %s" % [
+				String(pid.get("name", "?")), int(pid.get("bms_id", 0)),
+				int(pid.get("kind", -1)), int(pid.get("index", -1)),
+				int(pid.get("item_id", 0)), int(pid.get("entity_handle", -1)),
+				String(pick_info.get("hit_class", ""))])
+		var hit_g := _v3(pick_info.get("hit_position_godot", {}))
+		if hit_g == Vector3.ZERO or (hit_g - from_g).length() < 0.01:
+			push_error("[pr] pick carries no usable hit point")
+			get_tree().quit(1)
+			return
+		fwd_g = (hit_g - from_g).normalized()
+		print("[pr] fan re-aimed at the picked hit point %s (dist %.1fu)" % [
+				str(hit_g), (hit_g - from_g).length()])
 
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
@@ -165,6 +202,22 @@ func _ready() -> void:
 				shot_cam.queue_free()
 		else:
 			print("[pr] no world with set_hitbox_debug found")
+
+	# The picked entity's live state before firing: is it still there, and in
+	# what shape? (A husked/removed target explains a changed outcome.)
+	if not pick_target.is_empty():
+		var pid2: Dictionary = (pick_target.get("identity", {}) as Dictionary)
+		var pick_bms := int(pid2.get("bms_id", 0))
+		if pick_bms != 0 and sim.has_method("get_destruction_debug"):
+			var live_card: Dictionary = sim.get_destruction_debug(pick_bms)
+			if live_card.is_empty():
+				print("[pr] picked entity bms %d: NOT PRESENT in the live world" % pick_bms)
+			else:
+				print("[pr] picked entity bms %d live: health %s/%s husk %s collision %s" % [
+						pick_bms, str(live_card.get("health", "?")),
+						str(live_card.get("health_max", "?")),
+						str(live_card.get("has_husk", "?")),
+						str(live_card.get("has_collision_instance", "?"))])
 
 	var ammo := OS.get_environment("NOVA_PR_AMMO").strip_edges()
 	if ammo.is_empty():

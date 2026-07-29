@@ -32,6 +32,11 @@ const OBJECTIVES_KEY := KEY_O
 const ARMORY_KEY := KEY_SHIFT
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
+# F6: pick the entity under the crosshair into the debug pick list (the F3
+# Entities page renders it; snapshots embed it). Works while playing, no
+# overlay needed; a brief toast confirms what was picked.
+const PICK_KEY := KEY_F6
+const PICK_TOAST_SECONDS := 1.6
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -54,6 +59,10 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
+# The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
+# the set survives overlay toggles; cleared on every world load.
+var _pick_list := NovaDebugPickList.new()
+var _pick_toast: Label = null
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld/replay + env hooks)
 # The in-game HUD rides the SHARED NovaGameHudHost — the same component ONED
 # play-in-editor mounts, so both shells run one HUD code path (editor-runtime
@@ -274,6 +283,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
 		return
+	if key.keycode == PICK_KEY and is_gameplay_input_active() \
+			and _world != null and _world.is_loaded():
+		pick_at_crosshair()
+		get_viewport().set_input_as_handled()
+		return
 	# The MISSION OBJECTIVES panel toggle, in-world only.
 	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
 	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_host != null:
@@ -334,7 +348,12 @@ func toggle_debug_overlay() -> void:
 		# Debug options: the overlay only emits intent; we own the hosts.
 		_debug_overlay.debug_option_changed.connect(_on_debug_option_changed)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
+		_debug_overlay.set_pick_list(_pick_list)
 	_debug_overlay.toggle()
+	# While the overlay is up the mouse is free: clicks on the world ray-pick
+	# into the same list F6 feeds.
+	if _world != null:
+		_world.set_pick_click_enabled(is_debug_overlay_open())
 	if is_debug_overlay_open():
 		# A press begun before F3 must not turn into a mount action when Shift is
 		# released behind the overlay.
@@ -344,6 +363,54 @@ func toggle_debug_overlay() -> void:
 func is_debug_overlay_open() -> bool:
 	return _debug_overlay != null and is_instance_valid(_debug_overlay) \
 			and _debug_overlay.visible
+
+
+## F6 (and the probe/test seam): pick whatever the crosshair is on into the
+## debug pick list, with a brief on-screen confirmation.
+func pick_at_crosshair() -> void:
+	var sim = _world.get_sim() \
+			if _world != null and _world.has_method("get_sim") else null
+	var pick := DebugEntityPicker.pick_at_crosshair(sim, _camera)
+	if pick.is_empty():
+		return
+	if not bool(pick.get("hit", false)):
+		var blocked := String(pick.get("blocked", ""))
+		if blocked.is_empty():
+			_show_pick_toast("No entity in range.")
+		else:
+			_show_pick_toast("No entity (%s, %.0fu)." % [
+					blocked, float(pick.get("distance_units", 0.0))])
+		return
+	var row := _pick_list.add(pick)
+	if row < 0:
+		_show_pick_toast("Pick list full (%d) — remove one on the F3 Entities page." %
+				NovaDebugPickList.MAX_PICKS)
+		return
+	var pick_name := String(pick.get("name", ""))
+	if pick_name.is_empty():
+		pick_name = String(pick.get("hit_class", "entity"))
+	_show_pick_toast("Picked: %s #%d  (%.0fu)" % [
+			pick_name, int(pick.get("bms_id", 0)),
+			float(pick.get("distance_units", 0.0))])
+
+
+func _show_pick_toast(text: String) -> void:
+	if _pick_toast != null and is_instance_valid(_pick_toast):
+		_pick_toast.queue_free()
+	var label := Label.new()
+	label.name = "PickToast"
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	label.offset_top = 96.0
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var host: Node = _hud if _hud != null else self
+	host.add_child(label)
+	_pick_toast = label
+	var tween := label.create_tween()
+	tween.tween_interval(PICK_TOAST_SECONDS)
+	tween.tween_property(label, "modulate:a", 0.0, 0.4)
+	tween.tween_callback(label.queue_free)
 
 
 func get_debug_overlay() -> NovaDebugOverlay:
@@ -764,6 +831,10 @@ func _on_world_loaded() -> void:
 	# && !is_in_session, is a follow-up [orig: show_start_mission_splash
 	# @ 0x520820, called @ 0x525d42] (docs/interface/loading-screen-re.md
 	# D-LOADSCR-4, the load-flow case matrix).
+	# A fresh mission gets a fresh pick set (stale handles never cross
+	# sessions); the world renders/curates the shell-owned list from here on.
+	_pick_list.clear()
+	_world.set_pick_debug(_pick_list)
 	var sim = _world.get_sim() if _world.has_method("get_sim") else null
 	if sim != null and sim.has_method("is_joiner") and bool(sim.is_joiner()) \
 			and (not sim.has_method("is_joined_in_match")
