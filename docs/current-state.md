@@ -20,8 +20,9 @@ ledger's open rows rather than by a wave calendar.
 One structural workstream runs in parallel with the fidelity slices: the
 **2026-07 quality campaign** (approved 2026-07-28) — small independent PRs
 straight to master for dead-code removal, duplication collapse, and god-file
-splits. Waves 1–3 landed as #310–#350; the remaining slices are tracked in
-[`TODO.md`](../TODO.md) § "Quality campaign — remaining slices".
+splits. Waves 1–3 landed as #310–#355 (Wave 3 closed with the header-width
+pass and the `oversize_cpp_files` ratchet); the remaining W4/W5 slices are
+tracked in [`TODO.md`](../TODO.md) § "Quality campaign — remaining slices".
 
 ## The standing loop for a fidelity slice
 

@@ -20,8 +20,13 @@
 #include <vector>
 
 #include "mission/bms.h"
-#include "world/ai.h"
-#include "world/world.h"
+#include "world/entity.h"
+#include "world/geom.h"
+
+namespace opennova::world {
+class AiSystem;
+class World;
+} // namespace opennova::world
 
 namespace opennova::mission {
 

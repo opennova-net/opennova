@@ -13,7 +13,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <env/env_render.h>
+#include <env/env_water_render.h>
 
 namespace godot {
 
@@ -22,7 +22,7 @@ namespace godot {
 // derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360], plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
 // [orig: render_water_strip_detailed @ 0x5c27d0]. All math lives in libs/env
-// (env/env_render.h); this binding owns the static tables (built once with
+// (env/env_water_render.h); this binding owns the static tables (built once with
 // the witnessed init, from the boot PRNG state), the frame buffers, and the
 // Godot<->render basis conversion for the strip view state. NovaWater updates
 // once per frame, blits the textures into ImageTextures, and rebuilds its

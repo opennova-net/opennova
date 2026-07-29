@@ -138,6 +138,28 @@ def count_gd_prints_outside_debug() -> int:
     return count
 
 
+OVERSIZE_CPP_LINE_LIMIT = 2500
+
+
+def count_oversize_cpp_files() -> int:
+    """Oversized translation units (W3-7, the W3 closer): the god-file splits
+    leave two residual offenders; no .cpp under libs/, apps/, or godot/engine
+    may grow past 2500 lines without splitting first."""
+    count = 0
+    for root in ("libs", "apps", "godot/engine"):
+        for path in (REPO / root).rglob("*.cpp"):
+            parts = path.relative_to(REPO).parts
+            if "build" in parts:  # local CMake/godot-cpp build output, not source
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if len(text.splitlines()) > OVERSIZE_CPP_LINE_LIMIT:
+                count += 1
+    return count
+
+
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
@@ -179,6 +201,7 @@ def main() -> int:
         "libs_stdout_prints": count_libs_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
+        "oversize_cpp_files": count_oversize_cpp_files(),
     }
 
     if args.write_baseline:

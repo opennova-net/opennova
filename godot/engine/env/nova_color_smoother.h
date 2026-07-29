@@ -3,7 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
-#include <env/env_render.h>
+#include <env/env_weather.h>
 
 namespace godot {
 

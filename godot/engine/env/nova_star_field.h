@@ -5,7 +5,7 @@
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <env/env_render.h>
+#include <env/env_celestial.h>
 
 namespace godot {
 

@@ -1,6 +1,9 @@
 // Mission -> world promotion. See mission/promote.h + notes/world/ai_movement.md §10.
 #include "mission/promote.h"
 
+#include "world/ai.h"
+#include "world/world.h"
+
 #include <algorithm>
 #include <cmath>
 #include <vector>
