@@ -726,6 +726,29 @@ int main() {
 		TEST_EXPECT(!opennova::bms::parse(corrupt.data(), corrupt.size(), f, err));
 	}
 
+	// --- Regression (quality campaign W2-7): every truncation of a valid mission has to be
+	// handled by the byte cursor, not just the lengths the corpus happens to contain. The BMS
+	// Reader's bounds check was `pos_ + count <= size_`; that sum wraps for a large count and
+	// then admits a read past the buffer. It is now phrased as `count <= size_ - pos_`, which
+	// cannot overflow (pos_ <= size_ is an invariant of every mutator). Walking the prefixes is
+	// what exercises that boundary — under ASan/UBSan an out-of-range read here is a finding,
+	// not a silent pass. Truncated input stays LENIENT by design (io::ByteReader's
+	// format-parser contract: a clipped read yields 0 and does not advance), so what is pinned
+	// is "handled without reading out of bounds", not "rejected". ---
+	{
+		for (size_t take = 0; take < original.size(); take += 97) {
+			opennova::bms::File truncated;
+			std::string err;
+			bool threw = false;
+			try {
+				(void)opennova::bms::parse(original.data(), take, truncated, err);
+			} catch (...) {
+				threw = true;
+			}
+			TEST_EXPECT(!threw);
+		}
+	}
+
 	// --- Regression (review #3): an empty-name loadout entry is REJECTED (set_weapon_loadout returns
 	// false and leaves the loadout untouched), not silently dropped. The format serializes an empty name
 	// as the chunk terminator, so a nameless weapon cannot be stored; silently skipping the row was itself

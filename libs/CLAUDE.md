@@ -50,12 +50,15 @@
 - Migration exceptions, each with its reason (do not "clean these up" casually):
   the `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with
   their own clamp semantics. `libs/cpt`'s bit codec and `io/bit_stream.h` have DIVERGED
-  since the latter was lifted (high-water tracking here, a normalizing `set_position`
-  there) — adopting the shared one in cpt is a real migration needing a CPT-corpus byte
-  diff, not a swap. `libs/mission`'s BMS `Reader` is likewise not a straight swap: its
-  `has_bytes` is `pos_ + count <= size_`, which can overflow where `io::ByteReader`'s
-  `count <= size_ - pos_` cannot, so that migration is a hardening change to a
-  parity-critical parser and belongs in a slice that can prove it.
+  since the latter was lifted (cpt's writer carries a normalizing `set_position` and a
+  `write_to_file`; its reader carries `remaining_bits`) — adopting the shared one in cpt
+  is a real migration needing a CPT-corpus byte diff, not a swap. The byte diff is
+  available: `tests/terrain/parametric_parity_test` asserts byte-identical CPT output
+  across four fixtures (it is registered but DISABLED in CI for runtime, so run the
+  built exe directly whenever you touch the CPT encoder). `libs/mission`'s BMS `Reader`
+  is still its own class; its `has_bytes`/`skip` overflow was fixed in place (2026-07-28,
+  W2-7) by phrasing the bound as `count <= size_ - pos_`, so what remains is a mechanical
+  migration, not a hardening one.
 - Ports are faithful structural translations of the original engine — implementing "our
   own version" of engine behavior is never allowed unless a tracked decision (ADR or an
   RE-record divergence entry) says otherwise. CRT/OS/platform primitives (strcpy/sprintf/

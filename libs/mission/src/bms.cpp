@@ -40,7 +40,11 @@ class Reader {
 public:
     Reader(const uint8_t* data, size_t size) : data_(data), size_(size), pos_(0) {}
 
-    bool has_bytes(size_t count) const { return pos_ + count <= size_; }
+    // Asked against the bytes left, not as `pos_ + count <= size_`: that sum
+    // overflows for a large stream-derived count and wraps to a value that
+    // passes, which would let a malformed .bms read past the buffer. Every
+    // mutator below keeps pos_ <= size_, so remaining() never underflows.
+    bool has_bytes(size_t count) const { return count <= remaining(); }
     size_t position() const { return pos_; }
     size_t remaining() const { return size_ - pos_; }
 
@@ -109,7 +113,7 @@ public:
     }
 
     void skip(size_t count) {
-        if (pos_ + count > size_) {
+        if (!has_bytes(count)) { // was `pos_ + count > size_` — same overflow
             pos_ = size_;
         } else {
             pos_ += count;

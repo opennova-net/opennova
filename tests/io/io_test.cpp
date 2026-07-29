@@ -151,6 +151,33 @@ static int test_bit_stream_roundtrip()
     return 0;
 }
 
+// Golden bytes for fields landing at 1-, 2-, and 3-byte offsets inside the
+// dword. The writer used to store through a `uint32_t *` aimed at an arbitrary
+// byte offset — strict-aliasing and alignment UB that x86 tolerated and UBSan
+// flags. These are the exact bytes that store produced, so the byte-wise
+// little-endian replacement is pinned as bit-for-bit identical.
+static int test_bit_stream_unaligned_golden()
+{
+    io::BitWriter w;
+    w.write_field(8, 0xA1);       // byte 0, aligned
+    w.write_field(16, 0xBEEF);    // byte 1  -> 1-byte offset
+    w.write_field(16, 0x1234);    // byte 3  -> 3-byte offset (crosses the dword)
+    w.write_field(12, 0xABC);     // byte 5  -> 1-byte offset, ends mid-byte
+    w.write_field(12, 0xDEF);     // byte 6 bit 4 -> 2-byte offset, unaligned in both axes
+
+    static const uint8_t kGolden[] = {0xA1, 0xEF, 0xBE, 0x34, 0x12, 0xBC, 0xFA, 0xDE};
+    TEST_EXPECT(w.high_water() >= sizeof(kGolden));
+    TEST_EXPECT(std::memcmp(w.data(), kGolden, sizeof(kGolden)) == 0);
+
+    io::BitReader r(w.data(), w.high_water());
+    TEST_EXPECT(r.read_bits(8) == 0xA1);
+    TEST_EXPECT(r.read_bits(16) == 0xBEEF);
+    TEST_EXPECT(r.read_bits(16) == 0x1234);
+    TEST_EXPECT(r.read_bits(12) == 0xABC);
+    TEST_EXPECT(r.read_bits(12) == 0xDEF);
+    return 0;
+}
+
 static int test_strutil()
 {
     TEST_EXPECT(strutil::ascii_tolower('A') == 'a');
@@ -303,6 +330,7 @@ int main()
     if (test_byte_reader_bounds()) return 1;
     if (test_byte_writer_roundtrip()) return 1;
     if (test_bit_stream_roundtrip()) return 1;
+    if (test_bit_stream_unaligned_golden()) return 1;
     if (test_strutil()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;

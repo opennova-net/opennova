@@ -21,6 +21,7 @@
 // --validate    : decode each role's stream + (with --items) report the motion
 //                 that role would render; no sockets.
 
+#include "nw_replay_cli.h"
 #include "nw_replay_partition.h"
 
 #include "net_sockets.h"
@@ -36,6 +37,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <string>
 #include <thread>
@@ -45,41 +47,6 @@ using namespace opennova;
 using namespace std::chrono;
 
 namespace {
-
-struct Args {
-	std::string pcap;
-	std::string items; // items.def for the --validate motion check
-	uint16_t control_port = 42000;
-	double speed = 1.0;
-	int max_gap_ms = 250;
-	int spectator_timeout_ms = 120000;
-	bool print_roles = false;
-	bool validate = false;
-	bool loop = false;
-};
-
-bool parse_args(int argc, char **argv, Args &a) {
-	for (int i = 1; i < argc; ++i) {
-		const std::string s = argv[i];
-		auto next = [&](const char *what) -> const char * {
-			if (i + 1 >= argc) { std::fprintf(stderr, "missing value for %s\n", what); return nullptr; }
-			return argv[++i];
-		};
-		if (s == "--items") { const char *v = next("--items"); if (!v) return false; a.items = v; }
-		else if (s == "--control-port") { const char *v = next("--control-port"); if (!v) return false; a.control_port = uint16_t(std::atoi(v)); }
-		else if (s == "--speed") { const char *v = next("--speed"); if (!v) return false; a.speed = std::atof(v); }
-		else if (s == "--max-gap-ms") { const char *v = next("--max-gap-ms"); if (!v) return false; a.max_gap_ms = std::atoi(v); }
-		else if (s == "--spectator-timeout-ms") { const char *v = next("--spectator-timeout-ms"); if (!v) return false; a.spectator_timeout_ms = std::atoi(v); }
-		else if (s == "--print-roles") a.print_roles = true;
-		else if (s == "--validate") a.validate = true;
-		else if (s == "--loop") a.loop = true;
-		else if (!s.empty() && s[0] == '-') { std::fprintf(stderr, "unknown flag %s\n", s.c_str()); return false; }
-		else if (a.pcap.empty()) a.pcap = s;
-		else { std::fprintf(stderr, "unexpected arg %s\n", s.c_str()); return false; }
-	}
-	if (a.speed <= 0.0) a.speed = 1.0;
-	return !a.pcap.empty();
-}
 
 void print_roles(const replay::Roles &r) {
 	std::printf("roles: host=:%d", r.host_port);
@@ -206,8 +173,10 @@ int run_validate(const std::vector<net::PcapDatagram> &pkts, const replay::Roles
 } // namespace
 
 int main(int argc, char **argv) {
-	Args args;
-	if (!parse_args(argc, argv, args)) {
+	replay::Args args;
+	std::string parse_error;
+	if (!replay::parse_args(argc, argv, args, parse_error)) {
+		std::fprintf(stderr, "nw_replay: %s\n", parse_error.c_str());
 		std::fprintf(stderr,
 		    "usage: nw_replay <capture.pcapng> [--control-port N] [--speed X]\n"
 		    "       [--max-gap-ms N] [--spectator-timeout-ms N] [--loop]\n"
@@ -306,24 +275,34 @@ int main(int argc, char **argv) {
 	// spectator, read straight off disk — flat memory even for a multi-GB capture.
 	do {
 		const auto wall0 = steady_clock::now();
-		uint64_t prev_ts = 0;
-		bool first = true;
-		double sched_ns = 0.0;
-		size_t sent = 0;
-		net::stream_pcap_udp_file(args.pcap, [&](const net::PcapDatagram &d) -> bool {
-			if (!is_spectator_datagram(d, roles)) return true;
-			if (first) { first = false; prev_ts = d.ts_nanos; }
-			const uint64_t gap = d.ts_nanos >= prev_ts ? d.ts_nanos - prev_ts : 0;
-			double gap_ms = double(gap) / 1.0e6 / args.speed;
-			if (gap_ms > double(args.max_gap_ms)) gap_ms = double(args.max_gap_ms);
-			sched_ns += gap_ms * 1.0e6;
-			prev_ts = d.ts_nanos;
-			std::this_thread::sleep_until(wall0 + nanoseconds(int64_t(sched_ns)));
-			net::udp_send_to(sock.get(), spectator, d.payload.data(), d.payload.size());
-			++sent;
-			return true;
-		});
-		std::printf("playback complete (%zu datagrams)\n", sent);
+		const replay::PlaybackReport report = replay::run_playback(
+		    [&](const std::function<bool(const net::PcapDatagram &)> &on) {
+			    return net::stream_pcap_udp_file(args.pcap, on);
+		    },
+		    [&](const net::PcapDatagram &d) { return is_spectator_datagram(d, roles); },
+		    [&](const net::PcapDatagram &d) {
+			    return net::udp_send_to(sock.get(), spectator, d.payload.data(),
+			                            d.payload.size());
+		    },
+		    [&](int64_t ns) { std::this_thread::sleep_until(wall0 + nanoseconds(ns)); },
+		    args.speed, args.max_gap_ms);
+
+		// Report what actually happened. Previously both the capture read and
+		// every send were discarded, so a mid-file read error or a dead
+		// spectator socket still printed "playback complete" and exited 0.
+		if (!report.read_ok) {
+			std::fprintf(stderr, "playback FAILED: could not read %s (%zu datagram(s) sent)\n",
+			             args.pcap.c_str(), report.sent);
+			net::shutdown();
+			return 1;
+		}
+		if (report.send_failures > 0) {
+			std::fprintf(stderr, "playback FAILED: %zu send error(s) after %zu datagram(s)\n",
+			             report.send_failures, report.sent);
+			net::shutdown();
+			return 1;
+		}
+		std::printf("playback complete (%zu datagrams)\n", report.sent);
 		std::fflush(stdout);
 	} while (args.loop);
 

@@ -1593,6 +1593,18 @@ target_include_directories(nw_replay_partition_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
 add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
 
+# nw_replay CLI + playback core — every numeric option must convert whole (no
+# NaN/inf/partial values reaching the pacing math) and a playback pass must
+# report capture-read and UDP-send failures instead of printing "complete".
+# Compiles apps/nw_replay/nw_replay_cli.cpp directly. No fixtures, runs in CI.
+add_executable(nw_replay_cli_test
+    novaworld/nw_replay_cli_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/nw_replay/nw_replay_cli.cpp)
+target_link_libraries(nw_replay_cli_test PRIVATE opennova_pcapio)
+target_include_directories(nw_replay_cli_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
+add_test(NAME nw_replay_cli COMMAND nw_replay_cli_test)
+
 # Streaming pcap reader — stream_pcap_udp_file must match the whole-file
 # read_pcap_udp byte-for-byte and honor early-exit (the basis for nw_replay
 # handling multi-GB captures without loading them into RAM). No fixtures, CI.

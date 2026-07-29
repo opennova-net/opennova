@@ -7,11 +7,16 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
+#include <io/le.h>
 #include <io/log.h>
 
 namespace opennova {
 
 namespace {
+
+// The depth image is a fixed 1024x1024 grid: DPTH stores it raw, and the CDEP
+// writer splits exactly that buffer into 4096 blocks (write_depth_section).
+static constexpr size_t kDepthPixels = 1024u * 1024u;
 
 static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
@@ -71,6 +76,16 @@ public:
 
 	bool at_end() const { return byte_pos_ >= size_; }
 
+	// Bits still readable from the cursor. Lets a decoder reject a declared
+	// count the section cannot possibly encode BEFORE it allocates for it.
+	uint64_t remaining_bits() const {
+		if (byte_pos_ >= size_) {
+			return 0;
+		}
+		return (static_cast<uint64_t>(size_ - byte_pos_) * 8u) -
+		       static_cast<uint64_t>(bit_pos_);
+	}
+
 private:
 	const uint8_t *data_;
 	size_t size_;
@@ -129,9 +144,16 @@ public:
 
 	void write_bits(uint32_t value) {
 		ensure_capacity(byte_pos_ + 32u);
-		uint32_t *dst = reinterpret_cast<uint32_t *>(buffer_.data() + byte_pos_);
+		// Byte-wise little-endian read-modify-write. This was a dword store through a
+		// reinterpret_cast at an arbitrary byte offset: strict-aliasing and alignment
+		// UB that merely happened to work on x86, and that UBSan flags. io/le.h is
+		// also the layout contract — the stream packs LSB-first within a
+		// little-endian dword — so being explicit makes the codec correct rather
+		// than accidentally correct. Identical bytes on a little-endian host.
+		uint8_t *dst = buffer_.data() + byte_pos_;
+		const uint32_t cur = opennova::io::read_u32_le(dst);
 		const uint32_t mask = bitmask_ << bit_pos_;
-		*dst = ((value & bitmask_) << bit_pos_) | (*dst & ~mask);
+		opennova::io::write_u32_le(dst, ((value & bitmask_) << bit_pos_) | (cur & ~mask));
 
 		const uint32_t total_bits = bit_pos_ + bit_width_;
 		byte_pos_ += total_bits >> 3;
@@ -335,19 +357,40 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 	if (section_magic == DPTH_MAGIC) {
 		out.depth_format = DepthFormat::DPTH;
 		const size_t depth_offset = 164;
-		const size_t depth_bytes = 1024u * 1024u * sizeof(uint16_t);
+		const size_t depth_bytes = kDepthPixels * sizeof(uint16_t);
 		if (size < depth_offset + depth_bytes) {
 			error = "DPTH section truncated";
 			return false;
 		}
-		out.depth_buffer.resize(1024u * 1024u);
+		out.depth_buffer.resize(kDepthPixels);
 		std::memcpy(out.depth_buffer.data(), data + depth_offset, depth_bytes);
 	} else if (section_magic == CDEP_MAGIC) {
 		out.depth_format = DepthFormat::CDEP;
 		BitReader bits(data + 164, size - 164);
 		const uint32_t num_blocks = bits.read_bits(16);
 		const uint32_t block_width = bits.read_bits(16);
-		out.depth_buffer.resize(static_cast<size_t>(num_blocks * block_width));
+		// Both counts come straight off the bitstream, and the product used to be
+		// computed in 32 bits and handed to resize(): a corrupt 4-byte header
+		// (0xffff blocks of 0xffff pixels) demanded ~8 GB before a single delta
+		// was read. Two bounds, both taken from the format rather than guessed:
+		//   * the depth image is 1024x1024 — DPTH above resizes to exactly that,
+		//     and the writer emits 4096 blocks of depth_buffer.size()/4096;
+		//   * each block costs at least its 4-bit width + 16-bit base, so the
+		//     block count is bounded by the bits actually present. Pixels are NOT
+		//     bounded that way: bits_per_delta may legitimately be 0, encoding a
+		//     whole block in 20 bits, so a per-pixel bit budget would reject
+		//     valid files.
+		const uint64_t declared_pixels =
+				static_cast<uint64_t>(num_blocks) * static_cast<uint64_t>(block_width);
+		if (declared_pixels > kDepthPixels) {
+			error = "CDEP declares more depth pixels than the 1024x1024 image holds";
+			return false;
+		}
+		if (static_cast<uint64_t>(num_blocks) * 20u > bits.remaining_bits()) {
+			error = "CDEP declares more blocks than the section's bits can encode";
+			return false;
+		}
+		out.depth_buffer.resize(static_cast<size_t>(declared_pixels));
 		uint32_t pixel_index = 0;
 
 		for (uint32_t block = 0; block < num_blocks; ++block) {
@@ -389,7 +432,11 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 			const uint32_t is_single = bits.read_bits(1);
 			const uint32_t chunk_size = bits.read_bits(8);
 
-			if (vertex_count == 0 || lod_count != 8 || chunk_size != 48) {
+			// bit_width == 0 joins the structural guards: the writer derives it
+			// from tile_size and refuses a non-positive width, so zero never
+			// appears in a real tile — and reaching tile_size below would shift
+			// by (0 - 1), which is undefined.
+			if (vertex_count == 0 || bit_width == 0 || lod_count != 8 || chunk_size != 48) {
 				break;
 			}
 
@@ -399,7 +446,14 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 			tile.vertex_count = static_cast<uint16_t>(vertex_count);
 			tile.tile_size = static_cast<uint16_t>(1u << (bit_width - 1));
 			tile.is_single = is_single != 0;
-			tile.vertex_indices.resize(static_cast<size_t>(vertex_count * 2));
+			// Each vertex costs 2 * bit_width bits. A declared count the section
+			// cannot encode means the file is truncated — say so instead of
+			// fabricating that many zero vertices out of absent data.
+			if (static_cast<uint64_t>(vertex_count) * 2u * bit_width > bits.remaining_bits()) {
+				error = "POLY tile declares more vertices than the section can encode";
+				return false;
+			}
+			tile.vertex_indices.resize(static_cast<size_t>(vertex_count) * 2u);
 
 			for (uint32_t i = 0; i < vertex_count; ++i) {
 				tile.vertex_indices[static_cast<size_t>(i * 2 + 0)] = static_cast<uint16_t>(bits.read_bits(static_cast<int>(bit_width)));
