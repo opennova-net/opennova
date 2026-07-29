@@ -1010,12 +1010,19 @@ func aim_range_units() -> int:
 	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var endpoint := eye + forward * AIM_PROJECT_RANGE
-	var world_3d := _camera.get_world_3d()
-	if world_3d != null:
-		var query := PhysicsRayQueryParameters3D.create(eye, endpoint)
-		var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
-		if not hit.is_empty():
-			endpoint = hit.get("position", endpoint)
+	# The terrain surface, through the ported retail raycast
+	# (NovaTerrainData.raycast_terrain -> libs/terrain_query/terrain_raycast.h
+	# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]) rather than a Godot
+	# physics query. The terrain heightfield was the only thing that query could
+	# ever hit in the runtime -- object pick bodies are editor-only -- so this
+	# measures the same surface, and it is now the SAME sampler the round the
+	# player fires traces, so the readout and the bullet agree by construction.
+	var terrain = _world.get_terrain_data() if _world.has_method("get_terrain_data") else null
+	if terrain != null and terrain.has_method("raycast_terrain"):
+		var hit: Vector3 = terrain.raycast_terrain(eye, endpoint)
+		# A miss reports all-NAN.
+		if not (is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z)):
+			endpoint = hit
 	return clampi(int(pos.distance_to(endpoint)), 1, 1000)
 
 
