@@ -6,7 +6,12 @@
 add_library(opennova_mission_format STATIC
     src/authoring.cpp
     src/bms.cpp
-    src/mission.cpp
+    src/mission.cpp          # MissionDocument — the document and its edit operations
+    src/mission_capi.cpp     # the flat C ABI over it
+    src/mission_mis_parser.cpp
+    src/mission_mis_writer.cpp
+    src/mission_names.cpp    # BMS event-logic enum display names
+    src/mission_records.cpp  # bms:: structs <-> typed editor records
     src/mission_schema.cpp
 )
 
