@@ -2,7 +2,7 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `libs/`.
   Godot binding code lives only in `godot/engine/`. Blender-only scene assembly lives in
-  `apps/importer/scene_builder.py` and `blender/`.
+  `apps/importer/scene_builder/` and `blender/`.
 - Layout per library: `libs/<domain>/{CMakeLists.txt, include/<domain>/, src/}`; CMake
   target `opennova_<domain>`; namespace `opennova`. C ABI exports stay flat and
   domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI

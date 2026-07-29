@@ -1,7 +1,7 @@
 # ONED object naming convention (reference)
 
 An object's 3DI role is encoded in its **scene-object name**. The importer assigns these
-names (`apps/importer/scene_builder.py`), the exporter classifies by them
+names (`apps/importer/scene_builder/`), the exporter classifies by them
 (`blender/ase_exporter.py`), and the authoritative parser is `classify_name()` in
 `libs/oed/src/convert_internal.cpp` (a port of `[orig: ConvertToInternal @ 0x4268B3]`).
 Keep names exactly as below. **Indices are two-digit and 1-based** in the name (`01` is the
@@ -52,7 +52,7 @@ classification.
 
 These are **not** decorative and they are **not** all at the origin — they carry the
 subobject's transforms. Position them in part-local space the way the importer does
-(`apps/importer/scene_builder.py` `create_scene_markers`):
+(`apps/importer/scene_builder/overlays.py` `create_scene_markers`):
 
 - **Center `_NN center`** — parented to its `PN##`, sitting at the **part node origin** (the
   subobject's pivot/center). If the part is part-animated it also carries the rotation from
@@ -112,7 +112,7 @@ base-26 letter suffix (`CB01`, `CB01a`, `CB01b`, …).
 | `OP` | 22 | occlusion | portal — reads a connecting subobject after `-`: `OP01-02-occonly` |
 | `OH` | 23 | occlusion | — |
 
-Writer side (`scene_builder.CollisionType`) emits `CB CS CC CL CV CA VC BB CD CT CM VK CF
+Writer side (`pyopennova.scene_naming.CollisionType`) emits `CB CS CC CL CV CA VC BB CD CT CM VK CF
 LP CP` and assigns each a debug color; occlusion is emitted via `OcclusionType`
 (`OB OS OP OP2`) with the `-occonly` suffix.
 
