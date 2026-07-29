@@ -323,6 +323,19 @@ crow::json::wvalue rows_to_json(const std::vector<opennova::db::Row> &rows) {
 	return out;
 }
 
+// Serialize a user row to JSON (no password_hash). Shared by the
+// public /api/register response and the admin user CRUD routes.
+crow::json::wvalue user_to_json(const UserRecord &u) {
+	crow::json::wvalue e;
+	e["id"]       = u.id;
+	e["username"] = u.username;
+	e["pcid"]     = u.pcid;
+	e["nwh"]      = u.nwh;
+	e["nwhandle"] = u.nwhandle;
+	e["account_status"] = u.account_status;
+	return e;
+}
+
 } // namespace
 
 struct HttpListener::Impl {
@@ -340,6 +353,7 @@ HttpListener::HttpListener(ConnectionManager &manager, db::Database &db,
 }
 
 HttpListener::~HttpListener() { stop(); }
+
 
 bool HttpListener::start(const ServerConfig &config) {
 	if (running_.load()) return true;
@@ -380,6 +394,38 @@ bool HttpListener::start(const ServerConfig &config) {
 	            expansion_github_token.empty()  ? "DISABLED" : "ENABLED",
 	            expansion_publish_token.empty() ? "DISABLED" : "ENABLED");
 
+	register_admin_api_routes(admin_token, public_host, expansion_github_token);
+	register_publish_callback_routes(expansion_publish_token);
+	register_public_api_routes(public_host);
+	register_legacy_login_routes(templates_dir);
+	register_legacy_host_join_routes(templates_dir);
+	// The catch-all /<path> wildcard must register last: Crow rejects a
+	// more-specific route registered after a wildcard with "handler
+	// already exists", so the static family always closes registration.
+	register_static_routes(web_dist, static_dir, templates_dir);
+
+	const uint16_t port = config.http_port;
+	worker_ = std::thread([this, port] {
+		std::printf("[http] listening on :%u\n", static_cast<unsigned>(port));
+		try {
+			impl_->app.port(port).multithreaded().run();
+		} catch (const std::exception &e) {
+			std::fprintf(stderr, "[http] crashed: %s\n", e.what());
+		}
+		running_.store(false);
+		std::printf("[http] loop exiting\n");
+	});
+	running_.store(true);
+	return true;
+}
+
+// Admin REST API (Bearer ADMIN_API_TOKEN): server status, dev host
+// injection, connection dump, expansion catalogue/releases, user CRUD.
+void HttpListener::register_admin_api_routes(const std::string &admin_token,
+                                             const std::string &public_host,
+                                             const std::string &expansion_github_token) {
+	auto &app = impl_->app;
+
 	// Constant-time string compare (timing-safe). Returns false on length
 	// mismatch or any byte difference. Used by admin endpoints below.
 	auto admin_authorized = [admin_token](const crow::request &req) {
@@ -395,25 +441,6 @@ bool HttpListener::start(const ServerConfig &config) {
 			      ^ static_cast<unsigned>(admin_token[i]);
 		}
 		return diff == 0;
-	};
-
-	// Bearer-token gate for the /admin/internal/* publish callback. Distinct
-	// from admin_authorized — it checks EXPANSION_PUBLISH_TOKEN, not the admin
-	// token. Returns the HTTP status to send (0 == authorized), preserving
-	// onnet's distinct codes (admin_internal.py:17-27): 500 token unset, 401
-	// malformed/absent header, 403 mismatch.
-	auto publish_authorized = [expansion_publish_token](const crow::request &req) -> int {
-		if (expansion_publish_token.empty()) return 500;
-		std::string auth = req.get_header_value("Authorization");
-		if (auth.rfind("Bearer ", 0) != 0) return 401;
-		const std::string presented = auth.substr(7);
-		if (presented.size() != expansion_publish_token.size()) return 403;
-		unsigned diff = 0;
-		for (size_t i = 0; i < presented.size(); ++i) {
-			diff |= static_cast<unsigned>(presented[i])
-			      ^ static_cast<unsigned>(expansion_publish_token[i]);
-		}
-		return diff == 0 ? 0 : 403;
 	};
 
 	// Serialize a release row to JSON. Shared by GET /api/admin/releases and
@@ -434,34 +461,6 @@ bool HttpListener::start(const ServerConfig &config) {
 		if (r.notes)         e["notes"]        = *r.notes;
 		if (r.published_at)  e["publishedAt"]  = *r.published_at;
 		if (r.error_message) e["errorMessage"] = *r.error_message;
-		return e;
-	};
-
-	// Public expansion serialization (camelCase + files[]), faithful to onnet's
-	// onnw/api.py. The launcher's Expansion Manager consumes files[].downloadUrl
-	// to stage the package. Shared by GET /api/games (embedded per game) and
-	// GET /api/expansions.
-	auto expansion_card_json = [this](const catalog::ExpansionRow &x) {
-		crow::json::wvalue e;
-		e["slug"]        = x.slug;
-		e["displayName"] = x.display_name;
-		e["summary"]     = x.summary;
-		e["version"]     = x.version;
-		e["packageType"] = x.package_type;
-		e["featured"]    = x.featured;
-		crow::json::wvalue install;
-		install["target"] = x.install_subdir;
-		e["install"] = std::move(install);
-		std::vector<crow::json::wvalue> files;
-		for (const auto &f : catalog::list_expansion_files(db_, x.id)) {
-			crow::json::wvalue fj;
-			fj["downloadUrl"] = f.download_url;
-			fj["sha256"]      = f.sha256;
-			if (f.size_bytes) fj["sizeBytes"] = *f.size_bytes;
-			fj["fileType"]    = f.file_type;
-			files.push_back(std::move(fj));
-		}
-		e["files"] = std::move(files);
 		return e;
 	};
 
@@ -593,68 +592,6 @@ bool HttpListener::start(const ServerConfig &config) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
-	});
-
-	CROW_ROUTE(app, "/api/lobbies")([this]() {
-		// Phase I.4: game-centric format mirroring onnet's api.py:21-49.
-		// {"games":[{"slug","displayName","hosts":[...]}]}
-		// Vue lobby browser keys off this exact shape.
-		std::vector<crow::json::wvalue> games_json;
-		try {
-			auto games     = catalog::list_games(db_);
-			auto host_rows = hostdb::list_hosts(db_);
-			games_json.reserve(games.size());
-			for (const auto &g : games) {
-				crow::json::wvalue game;
-				game["slug"]        = g.slug;
-				game["displayName"] = g.display_name;
-				std::vector<crow::json::wvalue> hosts;
-				for (const auto &h : host_rows) {
-					if (h.game != g.slug) continue;
-					// camelCase to match the web LobbyHost type + the
-					// /api/expansions convention (snake_case here rendered
-					// every host as "Unnamed Server 0/0" — the Vue card reads
-					// serverName/maxPlayers). hostIp/hostPort surface the join
-					// address so a host is identifiable, not just named.
-					crow::json::wvalue hj;
-					hj["id"]          = h.rid;
-					hj["serverName"]  = h.server_name;
-					hj["hostIp"]      = h.host_ip;
-					hj["hostPort"]    = h.host_port;
-					hj["players"]     = h.player_count;
-					hj["maxPlayers"]  = h.max_players;
-					hj["region"]      = h.region;
-					hosts.push_back(std::move(hj));
-				}
-				game["hosts"] = std::move(hosts);
-				games_json.push_back(std::move(game));
-			}
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
-		}
-		crow::json::wvalue out;
-		out["games"] = std::move(games_json);
-		return out;
-	});
-
-	// Phase I.5: aggregate counts for the Vue dashboard.
-	CROW_ROUTE(app, "/api/stats")([this]() {
-		crow::json::wvalue out;
-		try {
-			auto agg = hostdb::aggregate(db_);
-			crow::json::wvalue stats;
-			stats["games"]    = agg.games;
-			stats["lobbies"]  = agg.lobbies;
-			stats["players"]  = agg.players;
-			using namespace std::chrono;
-			const auto now_ms = duration_cast<milliseconds>(
-				system_clock::now().time_since_epoch()).count();
-			stats["updatedAtMs"] = static_cast<int64_t>(now_ms);
-			out["stats"] = std::move(stats);
-		} catch (const db::SqliteError &e) {
-			out["error"] = e.what();
-		}
-		return out;
 	});
 
 	// Connection-registry debug dump. Admin-token gated.
@@ -859,6 +796,206 @@ bool HttpListener::start(const ServerConfig &config) {
 		}
 	});
 
+	// ----- Phase J: admin user CRUD ------------------------------------
+	// GET /api/admin/users — list every player (no password_hash).
+	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
+	    [this, admin_authorized](const crow::request &req) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		std::vector<crow::json::wvalue> arr;
+		for (const auto &u : list_users(db_)) arr.push_back(user_to_json(u));
+		crow::json::wvalue out;
+		out["users"] = std::move(arr);
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
+	// POST /api/admin/users — create. Body JSON:
+	//   {username, password, pcid, nwhandle, nwh? (default "1")}
+	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
+	    [this, admin_authorized](const crow::request &req) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto body = crow::json::load(req.body);
+		if (!body) {
+			crow::response res(400);
+			res.body = "{\"error\":\"invalid_json\"}";
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		auto js = [&](const char *k, const char *fallback) {
+			return body.has(k) ? std::string(body[k].s())
+			                   : std::string(fallback);
+		};
+		CreateUserParams p;
+		p.username = js("username", "");
+		p.password = js("password", "");
+		p.pcid     = js("pcid",     "");
+		p.nwh      = js("nwh",      "1");
+		p.nwhandle = js("nwhandle", "");
+		auto result = create_user(db_, p);
+		crow::json::wvalue out;
+		if (!result.ok) {
+			out["error"]   = result.error_code;
+			out["message"] = result.error_message;
+			crow::response res(result.error_code == "db_error" ? 500 : 400);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		auto created = get_user_by_id(db_, result.id);
+		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
+		crow::response res(201);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
+	// DELETE /api/admin/users/<id>
+	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
+	    [this, admin_authorized](const crow::request &req, int id) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto result = delete_user(db_, id);
+		crow::response res(result.ok ? 204 :
+		                   result.error_code == "not_found" ? 404 : 500);
+		if (!result.ok) {
+			crow::json::wvalue err;
+			err["error"]   = result.error_code;
+			err["message"] = result.error_message;
+			res.body = err.dump();
+			res.set_header("Content-Type", "application/json");
+		}
+		return res;
+	});
+
+	// PUT /api/admin/users/<id> — partial update. Any field omitted is
+	// left untouched. password (plaintext) triggers a fresh bcrypt hash.
+	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
+	    [this, admin_authorized](const crow::request &req, int id) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto body = crow::json::load(req.body);
+		if (!body) {
+			crow::response res(400);
+			res.body = "{\"error\":\"invalid_json\"}";
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		UpdateUserParams p;
+		if (body.has("username")) p.username           = std::string(body["username"].s());
+		if (body.has("password")) p.password_plaintext = std::string(body["password"].s());
+		if (body.has("pcid"))     p.pcid               = std::string(body["pcid"].s());
+		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
+		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
+		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
+		auto result = update_user(db_, id, p);
+		crow::json::wvalue out;
+		if (!result.ok) {
+			out["error"]   = result.error_code;
+			out["message"] = result.error_message;
+			crow::response res(
+				result.error_code == "not_found" ? 404 :
+				result.error_code == "db_error"  ? 500 : 400);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		auto updated = get_user_by_id(db_, id);
+		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
+	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
+	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
+	    [this, admin_authorized](const crow::request &req, int id) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto body = crow::json::load(req.body);
+		if (!body) {
+			crow::response res(400);
+			res.body = "{\"error\":\"invalid_json\"}";
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		UpdateGameAccessParams p;
+		p.game_slug = body.has("game_slug") ? std::string(body["game_slug"].s()) : "";
+		p.status    = body.has("status")    ? std::string(body["status"].s())    : "active";
+		p.exp_bits  = body.has("exp_bits")  ? std::string(body["exp_bits"].s())  : "";
+		auto result = update_game_access(db_, id, p);
+		crow::json::wvalue out;
+		if (!result.ok) {
+			out["error"] = result.error_code;
+			out["message"] = result.error_message;
+			crow::response res(result.error_code == "not_found" ? 404 :
+			                   result.error_code == "db_error"  ? 500 : 400);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		}
+		auto access = get_game_access(db_, id, p.game_slug);
+		if (access) {
+			out["game_slug"] = access->game_slug;
+			out["status"] = access->status;
+			out["exp_bits"] = access->exp_bits;
+		}
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+}
+
+// CI publish callbacks (Bearer EXPANSION_PUBLISH_TOKEN): the expansion
+// repo's build workflow reports publish success/failure here.
+void HttpListener::register_publish_callback_routes(
+		const std::string &expansion_publish_token) {
+	auto &app = impl_->app;
+
+	// Bearer-token gate for the /admin/internal/* publish callback. Distinct
+	// from admin_authorized — it checks EXPANSION_PUBLISH_TOKEN, not the admin
+	// token. Returns the HTTP status to send (0 == authorized), preserving
+	// onnet's distinct codes (admin_internal.py:17-27): 500 token unset, 401
+	// malformed/absent header, 403 mismatch.
+	auto publish_authorized = [expansion_publish_token](const crow::request &req) -> int {
+		if (expansion_publish_token.empty()) return 500;
+		std::string auth = req.get_header_value("Authorization");
+		if (auth.rfind("Bearer ", 0) != 0) return 401;
+		const std::string presented = auth.substr(7);
+		if (presented.size() != expansion_publish_token.size()) return 403;
+		unsigned diff = 0;
+		for (size_t i = 0; i < presented.size(); ++i) {
+			diff |= static_cast<unsigned>(presented[i])
+			      ^ static_cast<unsigned>(expansion_publish_token[i]);
+		}
+		return diff == 0 ? 0 : 403;
+	};
+
 	// Internal: CI publish callback. The expansion repo's build workflow
 	// calls this after uploading the package to S3. Bearer-gated by
 	// EXPANSION_PUBLISH_TOKEN. Ports onnet admin_internal.py:37-82.
@@ -989,25 +1126,110 @@ bool HttpListener::start(const ServerConfig &config) {
 			return res;
 		}
 	});
+}
 
-	// ----- Phase J: admin user CRUD ------------------------------------
-	auto user_to_json = [](const UserRecord &u) {
+// Public JSON API consumed by the web portal and the launcher: lobbies,
+// stats, self-signup, games/expansions/hosts, health, unknowns,
+// server-info.
+void HttpListener::register_public_api_routes(const std::string &public_host) {
+	auto &app = impl_->app;
+
+	// Public expansion serialization (camelCase + files[]), faithful to onnet's
+	// onnw/api.py. The launcher's Expansion Manager consumes files[].downloadUrl
+	// to stage the package. Shared by GET /api/games (embedded per game) and
+	// GET /api/expansions.
+	auto expansion_card_json = [this](const catalog::ExpansionRow &x) {
 		crow::json::wvalue e;
-		e["id"]       = u.id;
-		e["username"] = u.username;
-		e["pcid"]     = u.pcid;
-		e["nwh"]      = u.nwh;
-		e["nwhandle"] = u.nwhandle;
-		e["account_status"] = u.account_status;
+		e["slug"]        = x.slug;
+		e["displayName"] = x.display_name;
+		e["summary"]     = x.summary;
+		e["version"]     = x.version;
+		e["packageType"] = x.package_type;
+		e["featured"]    = x.featured;
+		crow::json::wvalue install;
+		install["target"] = x.install_subdir;
+		e["install"] = std::move(install);
+		std::vector<crow::json::wvalue> files;
+		for (const auto &f : catalog::list_expansion_files(db_, x.id)) {
+			crow::json::wvalue fj;
+			fj["downloadUrl"] = f.download_url;
+			fj["sha256"]      = f.sha256;
+			if (f.size_bytes) fj["sizeBytes"] = *f.size_bytes;
+			fj["fileType"]    = f.file_type;
+			files.push_back(std::move(fj));
+		}
+		e["files"] = std::move(files);
 		return e;
 	};
+
+	CROW_ROUTE(app, "/api/lobbies")([this]() {
+		// Phase I.4: game-centric format mirroring onnet's api.py:21-49.
+		// {"games":[{"slug","displayName","hosts":[...]}]}
+		// Vue lobby browser keys off this exact shape.
+		std::vector<crow::json::wvalue> games_json;
+		try {
+			auto games     = catalog::list_games(db_);
+			auto host_rows = hostdb::list_hosts(db_);
+			games_json.reserve(games.size());
+			for (const auto &g : games) {
+				crow::json::wvalue game;
+				game["slug"]        = g.slug;
+				game["displayName"] = g.display_name;
+				std::vector<crow::json::wvalue> hosts;
+				for (const auto &h : host_rows) {
+					if (h.game != g.slug) continue;
+					// camelCase to match the web LobbyHost type + the
+					// /api/expansions convention (snake_case here rendered
+					// every host as "Unnamed Server 0/0" — the Vue card reads
+					// serverName/maxPlayers). hostIp/hostPort surface the join
+					// address so a host is identifiable, not just named.
+					crow::json::wvalue hj;
+					hj["id"]          = h.rid;
+					hj["serverName"]  = h.server_name;
+					hj["hostIp"]      = h.host_ip;
+					hj["hostPort"]    = h.host_port;
+					hj["players"]     = h.player_count;
+					hj["maxPlayers"]  = h.max_players;
+					hj["region"]      = h.region;
+					hosts.push_back(std::move(hj));
+				}
+				game["hosts"] = std::move(hosts);
+				games_json.push_back(std::move(game));
+			}
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
+		}
+		crow::json::wvalue out;
+		out["games"] = std::move(games_json);
+		return out;
+	});
+
+	// Phase I.5: aggregate counts for the Vue dashboard.
+	CROW_ROUTE(app, "/api/stats")([this]() {
+		crow::json::wvalue out;
+		try {
+			auto agg = hostdb::aggregate(db_);
+			crow::json::wvalue stats;
+			stats["games"]    = agg.games;
+			stats["lobbies"]  = agg.lobbies;
+			stats["players"]  = agg.players;
+			using namespace std::chrono;
+			const auto now_ms = duration_cast<milliseconds>(
+				system_clock::now().time_since_epoch()).count();
+			stats["updatedAtMs"] = static_cast<int64_t>(now_ms);
+			out["stats"] = std::move(stats);
+		} catch (const db::SqliteError &e) {
+			out["error"] = e.what();
+		}
+		return out;
+	});
 
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted. Returns the new user's public record on
 	// success; 400 on conflict / missing fields, 500 on DB error.
 	CROW_ROUTE(app, "/api/register").methods("POST"_method)(
-	    [this, user_to_json](const crow::request &req) {
+	    [this](const crow::request &req) {
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);
@@ -1059,179 +1281,6 @@ bool HttpListener::start(const ServerConfig &config) {
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
 		            username.c_str(), static_cast<long long>(result.id));
 		crow::response res(201);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// GET /api/admin/users — list every player (no password_hash).
-	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
-	    [this, admin_authorized, user_to_json](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		std::vector<crow::json::wvalue> arr;
-		for (const auto &u : list_users(db_)) arr.push_back(user_to_json(u));
-		crow::json::wvalue out;
-		out["users"] = std::move(arr);
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// POST /api/admin/users — create. Body JSON:
-	//   {username, password, pcid, nwhandle, nwh? (default "1")}
-	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
-	    [this, admin_authorized, user_to_json](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto js = [&](const char *k, const char *fallback) {
-			return body.has(k) ? std::string(body[k].s())
-			                   : std::string(fallback);
-		};
-		CreateUserParams p;
-		p.username = js("username", "");
-		p.password = js("password", "");
-		p.pcid     = js("pcid",     "");
-		p.nwh      = js("nwh",      "1");
-		p.nwhandle = js("nwhandle", "");
-		auto result = create_user(db_, p);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"]   = result.error_code;
-			out["message"] = result.error_message;
-			crow::response res(result.error_code == "db_error" ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto created = get_user_by_id(db_, result.id);
-		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
-		crow::response res(201);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// DELETE /api/admin/users/<id>
-	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto result = delete_user(db_, id);
-		crow::response res(result.ok ? 204 :
-		                   result.error_code == "not_found" ? 404 : 500);
-		if (!result.ok) {
-			crow::json::wvalue err;
-			err["error"]   = result.error_code;
-			err["message"] = result.error_message;
-			res.body = err.dump();
-			res.set_header("Content-Type", "application/json");
-		}
-		return res;
-	});
-
-	// PUT /api/admin/users/<id> — partial update. Any field omitted is
-	// left untouched. password (plaintext) triggers a fresh bcrypt hash.
-	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
-	    [this, admin_authorized, user_to_json](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		UpdateUserParams p;
-		if (body.has("username")) p.username           = std::string(body["username"].s());
-		if (body.has("password")) p.password_plaintext = std::string(body["password"].s());
-		if (body.has("pcid"))     p.pcid               = std::string(body["pcid"].s());
-		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
-		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
-		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
-		auto result = update_user(db_, id, p);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"]   = result.error_code;
-			out["message"] = result.error_message;
-			crow::response res(
-				result.error_code == "not_found" ? 404 :
-				result.error_code == "db_error"  ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto updated = get_user_by_id(db_, id);
-		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
-	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		UpdateGameAccessParams p;
-		p.game_slug = body.has("game_slug") ? std::string(body["game_slug"].s()) : "";
-		p.status    = body.has("status")    ? std::string(body["status"].s())    : "active";
-		p.exp_bits  = body.has("exp_bits")  ? std::string(body["exp_bits"].s())  : "";
-		auto result = update_game_access(db_, id, p);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"] = result.error_code;
-			out["message"] = result.error_message;
-			crow::response res(result.error_code == "not_found" ? 404 :
-			                   result.error_code == "db_error"  ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto access = get_game_access(db_, id, p.game_slug);
-		if (access) {
-			out["game_slug"] = access->game_slug;
-			out["status"] = access->status;
-			out["exp_bits"] = access->exp_bits;
-		}
-		crow::response res(200);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
@@ -1390,6 +1439,12 @@ bool HttpListener::start(const ServerConfig &config) {
 		res.set_header("Content-Type", "application/json");
 		return res;
 	});
+}
+
+// Retail NW*.dll login/session chain: prepare, start, the EPASK login
+// POST + relay GET, logout, and the character/account template pages.
+void HttpListener::register_legacy_login_routes(const std::string &templates_dir) {
+	auto &app = impl_->app;
 
 	// ----- Phase E.1: Legacy NW*.dll login chain ---------------------------
 	// Routes registered for both lowercase (retail capture) and Title-case
@@ -1830,6 +1885,162 @@ bool HttpListener::start(const ServerConfig &config) {
 	CROW_ROUTE(app, "/NWLogin.dll").methods("GET"_method)(handle_login_get);
 	CROW_ROUTE(app, "/nwlogin.dll").methods("GET"_method)(handle_login_get);
 
+	// ----- Phase I.1: /NWLogout.dll real teardown ------------------------
+	// Drops the HTTP-side LoginSession and the persistent-cookie pin so
+	// the same retail process won't auto-resume as the prior identity.
+	// UDP side keeps running until GOODBYE/heartbeat-timeout — that's the
+	// protocol's contract; logout here is HTTP-only.
+	auto handle_logout = [this, templates_dir](const crow::request &req) {
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
+		std::string tag;
+		if (req.url_params.get("tag")) {
+			tag = req.url_params.get("tag");
+		} else if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
+			tag = it->second;
+		}
+		if (!tag.empty()) {
+			sessions_.erase_login(tag);
+			try { clear_active_user_session_by_tag(db_, tag); }
+			catch (const std::exception &e) {
+				std::fprintf(stderr, "[http] WARN active_user_sessions clear by tag failed: %s\n",
+				             e.what());
+			}
+		}
+
+		const auto persist_it = cookies.find("PERSISTENTEXPRESSLOGINDATA");
+		if (persist_it != cookies.end() && !persist_it->second.empty()) {
+			int64_t pinned_id = 0;
+			std::lock_guard<std::mutex> lk(persistent_user_mu_);
+			auto pin_it = persistent_to_user_id_.find(persist_it->second);
+			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
+			persistent_to_user_id_.erase(persist_it->second);
+			if (pinned_id != 0) {
+				try { clear_active_user_session(db_, pinned_id); }
+				catch (const std::exception &e) {
+					std::fprintf(stderr, "[http] WARN active_user_sessions clear failed: %s\n",
+					             e.what());
+				}
+			}
+		}
+
+		const std::string success_tpl = req.url_params.get("success")
+		                                  ? req.url_params.get("success")
+		                                  : "jop_2_login.htm";
+		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
+		            tag.c_str(),
+		            persist_it != cookies.end() ? 1 : 0,
+		            success_tpl.c_str());
+
+		const std::filesystem::path tpl_path =
+			std::filesystem::path(templates_dir) / success_tpl;
+		TemplateVars vars{
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
+			{"JOINLAN_URL", ""},
+		};
+		crow::response res(200);
+		if (std::filesystem::exists(tpl_path)) {
+			res.body = render_template_file(templates_dir, success_tpl, vars);
+			res.set_header("Content-Type", "text/html");
+		} else {
+			res.body = "Logged out.";
+			res.set_header("Content-Type", "text/plain");
+		}
+		add_standard_headers(res);
+		add_cookie(res, "YOURIP", req.remote_ip_address);
+		// Clear identity cookies so retail's IB3 doesn't auto-resume.
+		// (We don't explicitly clear PERSISTENTEXPRESSLOGINDATA — retail
+		// owns that one.)
+		for (const char *name : {"NWH","NWHANDLE","CHAR","NWI","NWV","NWD",
+		                          "STATSDISPLAYCHID","PCID","EXPBITS",
+		                          "LOGINSESSIONTAG"}) {
+			add_cookie(res, name, "");
+		}
+		return res;
+	};
+	app.route_dynamic("/NWLogout.dll")(handle_logout);
+	app.route_dynamic("/nwlogout.dll")(handle_logout);
+
+	// Phase I.6: per-user template renderer for /NWCharacter.dll and
+	// /NWAccount.dll. Both are retail's "tell me about my account/char"
+	// queries; onnet doesn't even route them but retail's IB3 expects
+	// them to return a template populated with the current user's
+	// identity (so the in-game UI can show "Logged in as X").
+	//
+	// Identity resolution mirrors the auth path: NWHANDLE cookie → DB
+	// lookup, fall back to PERSISTENTEXPRESSLOGINDATA pin.
+	auto handle_generic = [this, templates_dir](const crow::request &req) {
+		const std::string tpl = req.url_params.get("success")
+		                          ? req.url_params.get("success")
+		                          : "jop_2_main.htm";
+		const auto tpl_path = std::filesystem::path(templates_dir) / tpl;
+		const bool exists = std::filesystem::exists(tpl_path);
+
+		// Resolve identity. Best-effort — if neither cookie resolves we
+		// just render with empty identity vars (the template can still
+		// be served for unauthenticated paths).
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
+		std::optional<UserRecord> user;
+		if (auto it = cookies.find("NWHANDLE"); it != cookies.end() && !it->second.empty()) {
+			user = get_user_by_username(db_, it->second);
+		}
+		if (!user) {
+			if (auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA"); it != cookies.end()) {
+				int64_t pinned_id = 0;
+				{
+					std::lock_guard<std::mutex> lk(persistent_user_mu_);
+					auto pin_it = persistent_to_user_id_.find(it->second);
+					if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
+				}
+				if (pinned_id != 0) user = get_user_by_id(db_, pinned_id);
+			}
+		}
+		std::printf("[http] %s -> %s%s user=%s\n",
+		            req.url.c_str(), tpl.c_str(),
+		            exists ? "" : " (MISSING — 404)",
+		            user ? user->username.c_str() : "(unknown)");
+		if (!exists) {
+			crow::response res(404);
+			res.body = "template not found: " + tpl;
+			res.set_header("Content-Type", "text/plain");
+			return res;
+		}
+		TemplateVars vars{
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
+			{"JOINLAN_URL", ""},
+			{"NWHANDLE",    user ? user->nwhandle : std::string()},
+			{"PCID",        user ? user->pcid     : std::string()},
+			{"NWH",         user ? user->nwh      : std::string()},
+		};
+		crow::response res(200);
+		res.body = render_template_file(templates_dir, tpl, vars);
+		res.set_header("Content-Type", "text/html");
+		add_standard_headers(res);
+		add_cookie(res, "YOURIP", req.remote_ip_address);
+		// Refresh identity cookies so retail keeps consistent state.
+		if (user) {
+			add_cookie(res, "NWHANDLE", user->nwhandle);
+			add_cookie(res, "CHAR",     user->nwhandle);
+			add_cookie(res, "PCID",     user->pcid);
+			add_cookie(res, "NWH",      user->nwh);
+		}
+		return res;
+	};
+	for (const char *route : {"/NWCharacter.dll","/nwcharacter.dll",
+	                          "/NWAccount.dll","/nwaccount.dll"}) {
+		app.route_dynamic(route)(handle_generic);
+	}
+}
+
+// Retail host/join flow: the per-game GSB binary browser blobs, the
+// /NWJoin.dll two-phase relay, and the /NWHost.dll host-key mint. Join and
+// host register both lowercase and Title-case spellings for the same reason
+// as the login chain: Crow routes are case-sensitive.
+void HttpListener::register_legacy_host_join_routes(
+		const std::string &templates_dir) {
+	auto &app = impl_->app;
+
 	// ----- Phase E.2: GSB (Game Server Browser) ---------------------------
 	// Build a GSB binary blob from the in-memory hosted-server list (every
 	// connection that issued ClientHostRequest in the lobby session). Wire
@@ -2192,153 +2403,6 @@ bool HttpListener::start(const ServerConfig &config) {
 	CROW_ROUTE(app, "/NWJoin.dll").methods("GET"_method)(handle_join);
 	CROW_ROUTE(app, "/nwjoin.dll").methods("GET"_method)(handle_join);
 
-	// ----- Phase I.1: /NWLogout.dll real teardown ------------------------
-	// Drops the HTTP-side LoginSession and the persistent-cookie pin so
-	// the same retail process won't auto-resume as the prior identity.
-	// UDP side keeps running until GOODBYE/heartbeat-timeout — that's the
-	// protocol's contract; logout here is HTTP-only.
-	auto handle_logout = [this, templates_dir](const crow::request &req) {
-		const auto cookies = parse_cookie_header(request_cookie_header(req));
-		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
-			tag = it->second;
-		}
-		if (!tag.empty()) {
-			sessions_.erase_login(tag);
-			try { clear_active_user_session_by_tag(db_, tag); }
-			catch (const std::exception &e) {
-				std::fprintf(stderr, "[http] WARN active_user_sessions clear by tag failed: %s\n",
-				             e.what());
-			}
-		}
-
-		const auto persist_it = cookies.find("PERSISTENTEXPRESSLOGINDATA");
-		if (persist_it != cookies.end() && !persist_it->second.empty()) {
-			int64_t pinned_id = 0;
-			std::lock_guard<std::mutex> lk(persistent_user_mu_);
-			auto pin_it = persistent_to_user_id_.find(persist_it->second);
-			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-			persistent_to_user_id_.erase(persist_it->second);
-			if (pinned_id != 0) {
-				try { clear_active_user_session(db_, pinned_id); }
-				catch (const std::exception &e) {
-					std::fprintf(stderr, "[http] WARN active_user_sessions clear failed: %s\n",
-					             e.what());
-				}
-			}
-		}
-
-		const std::string success_tpl = req.url_params.get("success")
-		                                  ? req.url_params.get("success")
-		                                  : "jop_2_login.htm";
-		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
-		            tag.c_str(),
-		            persist_it != cookies.end() ? 1 : 0,
-		            success_tpl.c_str());
-
-		const std::filesystem::path tpl_path =
-			std::filesystem::path(templates_dir) / success_tpl;
-		TemplateVars vars{
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
-			{"JOINLAN_URL", ""},
-		};
-		crow::response res(200);
-		if (std::filesystem::exists(tpl_path)) {
-			res.body = render_template_file(templates_dir, success_tpl, vars);
-			res.set_header("Content-Type", "text/html");
-		} else {
-			res.body = "Logged out.";
-			res.set_header("Content-Type", "text/plain");
-		}
-		add_standard_headers(res);
-		add_cookie(res, "YOURIP", req.remote_ip_address);
-		// Clear identity cookies so retail's IB3 doesn't auto-resume.
-		// (We don't explicitly clear PERSISTENTEXPRESSLOGINDATA — retail
-		// owns that one.)
-		for (const char *name : {"NWH","NWHANDLE","CHAR","NWI","NWV","NWD",
-		                          "STATSDISPLAYCHID","PCID","EXPBITS",
-		                          "LOGINSESSIONTAG"}) {
-			add_cookie(res, name, "");
-		}
-		return res;
-	};
-	app.route_dynamic("/NWLogout.dll")(handle_logout);
-	app.route_dynamic("/nwlogout.dll")(handle_logout);
-
-	// Phase I.6: per-user template renderer for /NWCharacter.dll and
-	// /NWAccount.dll. Both are retail's "tell me about my account/char"
-	// queries; onnet doesn't even route them but retail's IB3 expects
-	// them to return a template populated with the current user's
-	// identity (so the in-game UI can show "Logged in as X").
-	//
-	// Identity resolution mirrors the auth path: NWHANDLE cookie → DB
-	// lookup, fall back to PERSISTENTEXPRESSLOGINDATA pin.
-	auto handle_generic = [this, templates_dir](const crow::request &req) {
-		const std::string tpl = req.url_params.get("success")
-		                          ? req.url_params.get("success")
-		                          : "jop_2_main.htm";
-		const auto tpl_path = std::filesystem::path(templates_dir) / tpl;
-		const bool exists = std::filesystem::exists(tpl_path);
-
-		// Resolve identity. Best-effort — if neither cookie resolves we
-		// just render with empty identity vars (the template can still
-		// be served for unauthenticated paths).
-		const auto cookies = parse_cookie_header(request_cookie_header(req));
-		std::optional<UserRecord> user;
-		if (auto it = cookies.find("NWHANDLE"); it != cookies.end() && !it->second.empty()) {
-			user = get_user_by_username(db_, it->second);
-		}
-		if (!user) {
-			if (auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA"); it != cookies.end()) {
-				int64_t pinned_id = 0;
-				{
-					std::lock_guard<std::mutex> lk(persistent_user_mu_);
-					auto pin_it = persistent_to_user_id_.find(it->second);
-					if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-				}
-				if (pinned_id != 0) user = get_user_by_id(db_, pinned_id);
-			}
-		}
-		std::printf("[http] %s -> %s%s user=%s\n",
-		            req.url.c_str(), tpl.c_str(),
-		            exists ? "" : " (MISSING — 404)",
-		            user ? user->username.c_str() : "(unknown)");
-		if (!exists) {
-			crow::response res(404);
-			res.body = "template not found: " + tpl;
-			res.set_header("Content-Type", "text/plain");
-			return res;
-		}
-		TemplateVars vars{
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
-			{"JOINLAN_URL", ""},
-			{"NWHANDLE",    user ? user->nwhandle : std::string()},
-			{"PCID",        user ? user->pcid     : std::string()},
-			{"NWH",         user ? user->nwh      : std::string()},
-		};
-		crow::response res(200);
-		res.body = render_template_file(templates_dir, tpl, vars);
-		res.set_header("Content-Type", "text/html");
-		add_standard_headers(res);
-		add_cookie(res, "YOURIP", req.remote_ip_address);
-		// Refresh identity cookies so retail keeps consistent state.
-		if (user) {
-			add_cookie(res, "NWHANDLE", user->nwhandle);
-			add_cookie(res, "CHAR",     user->nwhandle);
-			add_cookie(res, "PCID",     user->pcid);
-			add_cookie(res, "NWH",      user->nwh);
-		}
-		return res;
-	};
-	for (const char *route : {"/NWCharacter.dll","/nwcharacter.dll",
-	                          "/NWAccount.dll","/nwaccount.dll"}) {
-		app.route_dynamic(route)(handle_generic);
-	}
-
 	// ----- Phase F.2: /NWHost.dll two-phase relay -------------------------
 	// Mirrors onnet's onnw/controllers/nova_world/host.py.
 	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
@@ -2456,6 +2520,16 @@ bool HttpListener::start(const ServerConfig &config) {
 	};
 	CROW_ROUTE(app, "/NWHost.dll").methods("GET"_method)(handle_host);
 	CROW_ROUTE(app, "/nwhost.dll").methods("GET"_method)(handle_host);
+}
+
+// Static serving: web/dist index + assets, retail /static/* client
+// assets, bare .htm/.mnx/.joi template GETs, and the catch-all that
+// records 404s into the unknown tracker. MUST register last (see the
+// wildcard note at the call site in start()).
+void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
+                                          const std::string &static_dir,
+                                          const std::string &templates_dir) {
+	auto &app = impl_->app;
 
 	// (Static asset serving for the legacy /static/<game>/* paths is folded
 	//  into the catch-all /<path> route below — Crow rejects more-specific
@@ -2557,20 +2631,6 @@ bool HttpListener::start(const ServerConfig &config) {
 		res.body = read_file_text(path);
 		return res;
 	});
-
-	const uint16_t port = config.http_port;
-	worker_ = std::thread([this, port] {
-		std::printf("[http] listening on :%u\n", static_cast<unsigned>(port));
-		try {
-			impl_->app.port(port).multithreaded().run();
-		} catch (const std::exception &e) {
-			std::fprintf(stderr, "[http] crashed: %s\n", e.what());
-		}
-		running_.store(false);
-		std::printf("[http] loop exiting\n");
-	});
-	running_.store(true);
-	return true;
 }
 
 void HttpListener::stop() {

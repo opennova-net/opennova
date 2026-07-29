@@ -6,7 +6,8 @@
 // request — including the GSB browse fetch (grill NW-S5/B3).
 //
 // The body parsing below replicates the server's parse_form_body + EPASK decode
-// (apps/novaworld_server/http_listener.cpp:92, :1042-1087) so a green here means
+// (apps/novaworld_server/http_listener.cpp: the anon-ns form helpers and
+// handle_login_post in register_legacy_login_routes) so a green here means
 // a real POST from this body authenticates without booting a socket.
 
 #include <novacrypto/epask.h>

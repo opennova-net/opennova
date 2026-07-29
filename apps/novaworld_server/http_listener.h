@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -23,11 +24,14 @@ struct ServerConfig;
 class NwUdpListener;
 class SessionStore;
 
-// Crow-backed HTTP listener serving:
-//   GET /api/lobbies     — live connections from the ConnectionManager
-//   GET /api/games       — DB-backed catalogue
-//   GET /api/expansions  — DB-backed catalogue
-//   GET /*               — fallback static-file serve from web/dist/
+// Crow-backed HTTP listener. start() registers six route families, each in
+// its own private registrar (bodies in http_listener.cpp):
+//   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject
+//   publish callbacks   — Bearer EXPANSION_PUBLISH_TOKEN /admin/internal/*
+//   public JSON API     — /api/* for the web portal + launcher
+//   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
+//   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
+//   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
 //
 // Crow is async + multi-threaded internally; we just hand it a thread to
 // own. start() spawns that thread; stop() terminates the Crow loop and
@@ -52,6 +56,23 @@ public:
 	bool running() const { return running_.load(); }
 
 private:
+	// Route-family registrars called once from start(), in registration
+	// order; the static/catch-all family must stay last (Crow rejects a
+	// specific route registered after the /<path> wildcard). Parameters are
+	// the config-derived strings the handlers capture by value.
+	void register_admin_api_routes(const std::string &admin_token,
+	                               const std::string &public_host,
+	                               const std::string &expansion_github_token);
+	void register_publish_callback_routes(
+			const std::string &expansion_publish_token);
+	void register_public_api_routes(const std::string &public_host);
+	void register_legacy_login_routes(const std::string &templates_dir);
+	void register_legacy_host_join_routes(
+			const std::string &templates_dir);
+	void register_static_routes(const std::filesystem::path &web_dist,
+	                            const std::string &static_dir,
+	                            const std::string &templates_dir);
+
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 	ConnectionManager &manager_;
