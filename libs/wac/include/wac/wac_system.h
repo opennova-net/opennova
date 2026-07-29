@@ -15,7 +15,7 @@ namespace opennova::wac {
 class WacSystem : public opennova::world::ISystem {
 public:
     // The VM executes the whole program once every 62nd tick — the 0x3E divider.
-    // [orig: sub_4F81A0 @0x4f81a0: ++dword_C6EAD4, cmp 0x3E @0x4f81b1, reset, execute]
+    // [orig: WacScript_AdvanceTick @0x4f81a0: ++dword_C6EAD4, cmp 0x3E @0x4f81b1, reset, execute]
     static constexpr int kTicksPerExecution = 0x3E; // 62
 
     const char *name() const override { return "wac"; }

@@ -111,7 +111,7 @@ std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
 	return out;
 }
 
-// [orig: sub_666600 @ 0x666600 (retail) — per byte modular_exponentiation(byte+2,exp,mod)
+// [orig: EPASK_ModexpEncrypt @ 0x666600 (retail) — per byte modular_exponentiation(byte+2,exp,mod)
 //        @ 0x666470, stored as a 32-bit little-endian word. The "+2" is byte-confirmed.]
 std::vector<uint8_t> modexp_encrypt(const std::vector<uint8_t> &data,
                                     uint32_t exponent, uint32_t modulus) {
@@ -223,8 +223,8 @@ std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &para
 }
 
 std::string epask_encrypt(const std::string &plaintext, const EpaskParams &params) {
-	// [orig: sub_6669A0 @ 0x6669a0 (retail) — NWU(NapiNP_EncryptBufferAlt@0x6668e0, == 0x6187b0)
-	//        -> modexp(sub_666600) -> NWU -> A-P(NapiNP_EncodeToHexAlpha@0x666570). Dispatched from the
+	// [orig: EPASK_Encrypt @ 0x6669a0 (retail) — NWU(NapiNP_EncryptBufferAlt@0x6668e0, == 0x6187b0)
+	//        -> modexp(EPASK_ModexpEncrypt) -> NWU -> A-P(NapiNP_EncodeToHexAlpha@0x666570). Dispatched from the
 	//        edit-widget vtable +0x38 build_form_field_query_string@0x657760 (out buf = 8*len) <-
 	//        build_url_and_submit_request@0x63e3f0 ("?EPASK=exp:mod:key"). grill wave 3 NW-C2, MATCHING.]
 	// Mirror onnw/protocol/crypto.py::epask_encrypt:

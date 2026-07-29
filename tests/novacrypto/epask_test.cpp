@@ -44,7 +44,7 @@ bool fixtures_match_python() {
 		// nwu_encrypt/nwu_decrypt label-swap is a pure naming inversion of
 		// identical byte transforms, so our epask_encrypt reproduces Python's
 		// ciphertext exactly. Confirmed in grill wave 3 (NW-C2) against retail
-		// (sub_6669A0@0x6669a0) and by compiling this source against the
+		// (EPASK_Encrypt@0x6669a0) and by compiling this source against the
 		// production-proven onnw Python — the two agree byte-for-byte.
 		const std::string ct = opennova::epask_encrypt(c.plaintext, params);
 		if (!expect_eq(ct, c.ciphertext, "encrypt fixture")) return false;

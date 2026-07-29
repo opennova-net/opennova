@@ -13,7 +13,7 @@ namespace opennova::mission {
 //
 // Order: WAC -> BMS -> AI — verified against the original frame.
 // [orig: Game_ProcessMainFrame @0x5263f0 calls Server_TickUpdate @0x51d7e0 (which runs
-// the WAC executor sub_4F81A0 @0x51d8bf first, then the BMS event quarter pass
+// the WAC executor WacScript_AdvanceTick @0x51d8bf first, then the BMS event quarter pass
 // @0x51d8f4) BEFORE Entity_UpdateAllEntities @0x4c2100 (the AI/motor pass).] AI is
 // registered last so it consumes the entity state the scripts mutate this tick. Each
 // system carries its own cadence gate (WAC every 62nd tick, BMS quarters every 16th);

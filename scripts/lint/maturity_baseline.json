@@ -14,8 +14,8 @@
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
     "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 60,
-    "test_private_pokes": 1378
+    "libs_uncited_src_files": 61,
+    "test_private_pokes": 1366
   },
   "dict_contract_allowlist": [
     "to_drag_data",

@@ -1,7 +1,7 @@
 #include "world/collision.h"
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged, and each original-code citation moved with the code it annotates.
 //
 // CollisionModel bounds and the fixed-point matrix operations: the section AABB /
 // bound-sphere derivation plus the Q22 transform, inverse and pose builders.
@@ -162,24 +162,6 @@ void CollisionModel::finalize_sections() {
 // Matrix helpers (row-major 3x4, Q22 rotation rows, 16.16 translation at
 // [3]/[7]/[11], [15] flags).
 // ----------------------------------------------------------------------------
-
-// [orig: Math_TransformPointWithTranslation22 @ 0x412f60 — translate THEN rotate:
-// used with the inverse matrix (t = -t_fwd) so local = R^T * (p - t_fwd).]
-static void transform_translate_then_rotate(const int32_t m[16], const int32_t in[3],
-                                            int32_t out[3]) {
-    const int32_t tx = in[0] + m[3];
-    const int32_t ty = in[1] + m[7];
-    const int32_t tz = in[2] + m[11];
-    out[0] = static_cast<int32_t>((static_cast<int64_t>(ty) * m[1] +
-                                   static_cast<int64_t>(tx) * m[0] +
-                                   static_cast<int64_t>(tz) * m[2] + 0x200000) >> 22);
-    out[1] = static_cast<int32_t>((static_cast<int64_t>(ty) * m[5] +
-                                   static_cast<int64_t>(tx) * m[4] +
-                                   static_cast<int64_t>(tz) * m[6] + 0x200000) >> 22);
-    out[2] = static_cast<int32_t>((static_cast<int64_t>(ty) * m[9] +
-                                   static_cast<int64_t>(tx) * m[8] +
-                                   static_cast<int64_t>(tz) * m[10] + 0x200000) >> 22);
-}
 
 // [orig: Math_FixedPointTransformPoint22 @ 0x615810 — rotate THEN translate.]
 void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const {

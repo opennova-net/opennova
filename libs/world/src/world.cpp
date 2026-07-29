@@ -829,7 +829,7 @@ void World::load_systems() {
 }
 
 void World::run_logic_tick(bool is_authority, bool pre_mission) {
-    // [orig: sub_4F81A0 refreshes the per-tick local-player cache via
+    // [orig: WacScript_AdvanceTick refreshes the per-tick local-player cache via
     // WacScript_CacheLocalPlayerState @0x4f5780 at the top of the tick, before the
     // script evaluators read it. Deferred: the mission sim has no local-player avatar
     // yet, so `cached` stays host-populated and the WAC near-* builtins read it as-is.]

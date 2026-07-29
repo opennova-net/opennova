@@ -44,7 +44,7 @@ public:
     // The WAC time base: completed program executions, NOT 62 Hz engine ticks. At
     // the original cadence one execution ~= one second; `past(n)`/`elapse(n)` and
     // the Ticks builtin count in these units. [orig: dword_C6EAD8 — the run counter
-    // sub_4F81A0 advances after each execution @0x4f81d3]
+    // WacScript_AdvanceTick advances after each execution @0x4f81d3]
     uint32_t time() const { return time_; }
 
 private:

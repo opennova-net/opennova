@@ -70,7 +70,7 @@ def count_libs_uncited_src_files(allowlist: set[str]) -> int:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if "[orig" not in text:
+            if "[orig:" not in text:
                 count += 1
     return count
 
