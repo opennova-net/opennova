@@ -23,7 +23,7 @@
 #include "netsim/connection.h"
 #include "netsim/entity_wire_bridge.h" // build_player_uplink (joiner-side C2S 0x0C body)
 
-#include <npwire/ingame_decode.h> // class_from_tag (§5.10b *_function -> wire class)
+#include <npwire/entity_class.h> // class_from_tag (§5.10b *_function -> wire class)
 #include <npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <npruntime/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)

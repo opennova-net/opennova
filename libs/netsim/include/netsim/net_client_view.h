@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <npwire/ingame_decode.h> // EntityClass
+#include <npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
 #include "netsim/client_state.h"
 #include "netsim/session_transport.h"

@@ -9,7 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <npwire/ingame_decode.h>
+#include <npwire/entity_class.h>
 #include <npwire/replay_timeline.h>
 #include <npwire/wire_capture.h>
 
