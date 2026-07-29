@@ -23,6 +23,16 @@ var request_refresh := Callable()
 ## `debug_option_changed` for the hosts.
 var options: NovaDebugOptionState = null
 
+## The HOST-owned debug pick list (null until the host injects one). Pages
+## render and curate it; the host feeds it from the crosshair hotkey and the
+## overlay-open click catcher.
+var pick_list: NovaDebugPickList = null
+
+## The overlay's snapshot orchestration: call with a path override ("" for
+## the timestamped default) and receive the writer's {path, error} — pages
+## put either on their own status labels.
+var dump_snapshot := Callable()
+
 
 ## The current MissionRuntime, or null. Duck-typed: anything with get_sim().
 func runtime() -> Object:

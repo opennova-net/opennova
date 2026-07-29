@@ -1,27 +1,18 @@
 class_name DebugPlayerPage
 extends NovaDebugPage
-## The authoritative local-player pose plus a one-click disk dump. The dump
-## resamples the live runtime at click time (never the 0.25-Hz label cache) and
-## writes one exact JSON snapshot under the OpenNova user-data folder; the
-## camera arrives through the host's NovaDebugViewContext so the file
-## reproduces the visual viewpoint, not just the player root.
-
-## Fired after a fresh local-player pose snapshot lands on disk. The path is
-## absolute so it can be pasted into an issue or opened directly.
-signal local_player_pose_dumped(path: String)
-
-const PLAYER_POSE_DUMP_DIR := "user://debug/player_locations"
-const PLAYER_POSE_SCHEMA := "opennova.player_pose.v1"
-const DEFAULT_PLAYER_FOV_H_DEG := 80.0
-const MICROSECONDS_PER_SECOND := 1_000_000.0
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+## The authoritative local-player pose plus the one-click debug snapshot. The
+## dump (DebugSnapshotWriter, orchestrated by the overlay through
+## ctx.dump_snapshot) resamples the live runtime at click time — never the
+## 0.25-Hz label cache — and writes pose + picked entities as one JSON file
+## under the OpenNova user-data folder; the camera arrives through the host's
+## NovaDebugViewContext so the file reproduces the visual viewpoint, not just
+## the player root.
 
 var _player_mission_label: Label
 var _player_position_label: Label
 var _player_orientation_label: Label
 var _player_dump_button: Button
 var _player_dump_status: Label
-var _player_dump_sequence := 0
 var _player_context_key := ""
 
 
@@ -46,12 +37,12 @@ func _build() -> void:
 	_player_orientation_label.text = ""
 
 	_player_dump_button = Button.new()
-	_player_dump_button.name = "DumpPlayerPose"
-	_player_dump_button.text = "Dump pose to disk"
+	_player_dump_button.name = "DumpSnapshot"
+	_player_dump_button.text = "Dump snapshot"
 	_player_dump_button.tooltip_text = \
-			"Write a fresh local-player position/orientation snapshot as JSON."
+			"Write your position, view and every picked entity's live state as one JSON file."
 	_player_dump_button.disabled = true
-	_player_dump_button.pressed.connect(_on_dump_player_pose_pressed)
+	_player_dump_button.pressed.connect(_on_dump_pressed)
 	add_child(_player_dump_button)
 
 	_player_dump_status = Label.new()
@@ -66,13 +57,11 @@ func _build() -> void:
 
 
 func refresh() -> void:
-	var runtime := _ctx.runtime()
-	var sim := _ctx.sim()
-	var snapshot := _capture_local_player_pose(runtime, sim)
+	var snapshot := DebugSnapshotWriter.capture(_ctx)
 	if snapshot.is_empty():
 		_clear_live()
 		return
-	_sync_player_context(runtime, snapshot)
+	_sync_player_context(snapshot)
 	_apply_player_pose_to_ui(snapshot)
 	_player_dump_button.disabled = false
 
@@ -86,48 +75,6 @@ func _clear_live() -> void:
 	_player_dump_status.text = "Start a playable mission to capture the local player."
 
 
-## Sample the live runtime now and write one exact JSON pose snapshot. An
-## optional target is useful for automation; the button uses the timestamped
-## user-data location. Returns the absolute file path, or an empty string.
-func dump_local_player_pose(path_override: String = "") -> String:
-	var runtime := _ctx.runtime()
-	var sim := _ctx.sim()
-	var snapshot := _capture_local_player_pose(runtime, sim)
-	if snapshot.is_empty():
-		_clear_live()
-		return ""
-
-	_sync_player_context(runtime, snapshot)
-	var target_path := path_override
-	if target_path.is_empty():
-		target_path = _default_player_pose_path(snapshot)
-	target_path = ProjectSettings.globalize_path(target_path)
-	var directory := target_path.get_base_dir()
-	var mkdir_error := DirAccess.make_dir_recursive_absolute(directory)
-	if mkdir_error != OK:
-		_player_dump_status.text = "Could not create dump folder: %s" % error_string(mkdir_error)
-		return ""
-	var file := FileAccess.open(target_path, FileAccess.WRITE)
-	if file == null:
-		_player_dump_status.text = "Could not write pose dump: %s" % \
-				error_string(FileAccess.get_open_error())
-		return ""
-	file.store_string(JSON.stringify(snapshot, "\t") + "\n")
-	file.flush()
-	var write_error := file.get_error()
-	file.close()
-	if write_error != OK:
-		DirAccess.remove_absolute(target_path)
-		_player_dump_status.text = "Could not finish pose dump: %s" % error_string(write_error)
-		return ""
-
-	_apply_player_pose_to_ui(snapshot)
-	_player_dump_button.disabled = false
-	_player_dump_status.text = "Saved:\n%s" % target_path
-	local_player_pose_dumped.emit(target_path)
-	return target_path
-
-
 func _info_label(node_name: String) -> Label:
 	var label := Label.new()
 	label.name = node_name
@@ -135,7 +82,12 @@ func _info_label(node_name: String) -> Label:
 	return label
 
 
-func _sync_player_context(runtime: Object, snapshot: Dictionary) -> void:
+## A mission swap clears the previous mission's "Saved:" path so the status
+## never advertises another world's file.
+func _sync_player_context(snapshot: Dictionary) -> void:
+	var runtime := _ctx.runtime()
+	if runtime == null:
+		return
 	var mission: Dictionary = snapshot.get("mission", {})
 	var context_key := "%d|%s|%s" % [
 		runtime.get_instance_id(),
@@ -145,16 +97,15 @@ func _sync_player_context(runtime: Object, snapshot: Dictionary) -> void:
 	if context_key == _player_context_key:
 		return
 	_player_context_key = context_key
-	_player_dump_status.text = "No pose snapshot saved for this mission yet."
+	_player_dump_status.text = "No snapshot saved for this mission yet."
 
 
 func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 	var mission: Dictionary = snapshot.get("mission", {})
 	var mission_file := String(mission.get("file", ""))
-	var mission_name := String(mission.get("name", ""))
 	var mission_display := mission_file.get_file()
 	if mission_display.is_empty():
-		mission_display = mission_name
+		mission_display = String(mission.get("name", ""))
 	if mission_display.is_empty():
 		mission_display = "unknown"
 	_player_mission_label.text = "Mission: %s" % mission_display
@@ -183,137 +134,16 @@ func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 		_player_orientation_label.text += "\nView camera: %s" % camera_mode.replace("_", " ")
 
 
-func _capture_local_player_pose(runtime: Object, sim: Object) -> Dictionary:
-	if runtime == null or sim == null or not sim.has_method("has_local_player") \
-			or not bool(sim.has_local_player()):
-		return {}
-	if not sim.has_method("get_local_player_position") \
-			or not sim.has_method("get_local_player_yaw_deg") \
-			or not sim.has_method("get_local_player_pitch_deg"):
-		return {}
-
-	var position_godot: Vector3 = sim.get_local_player_position()
-	var position_bms: Vector3 = MissionObjectPlacer.godot_to_bms_position(position_godot)
-	var yaw_deg := float(sim.get_local_player_yaw_deg())
-	var pitch_deg := float(sim.get_local_player_pitch_deg())
-	var view: Dictionary = sim.get_local_player_view() \
-			if sim.has_method("get_local_player_view") else {}
-	var view_roll_deg := float(view.get("fp_roll_deg", 0.0))
-	var yaw_rad := deg_to_rad(yaw_deg)
-	var pitch_rad := deg_to_rad(pitch_deg)
-	var forward_godot := Vector3(
-			sin(yaw_rad) * cos(pitch_rad),
-			sin(pitch_rad),
-			-cos(yaw_rad) * cos(pitch_rad))
-	var mission_file := String(runtime.get_mission_file()) \
-			if runtime.has_method("get_mission_file") else ""
-	var mission_name := String(runtime.get_mission_name()) \
-			if runtime.has_method("get_mission_name") else ""
-
-	return {
-		"schema": PLAYER_POSE_SCHEMA,
-		"captured_at_utc": Time.get_datetime_string_from_system(true, false) + "Z",
-		"logic_tick": int(sim.get_logic_tick()) if sim.has_method("get_logic_tick") else -1,
-		"mission": {
-			"file": mission_file,
-			"name": mission_name,
-		},
-		"player": {
-			"position_bms": _vector3_record(position_bms),
-			"position_godot": _vector3_record(position_godot),
-			"orientation_mission_deg": {
-				"yaw": yaw_deg,
-				"pitch": pitch_deg,
-				"view_roll": view_roll_deg,
-			},
-			"forward_godot": _vector3_record(forward_godot),
-		},
-		"view": {
-			"fov_horizontal_deg": float(view.get(
-					"fov_h_deg", DEFAULT_PLAYER_FOV_H_DEG)),
-			"scope_engaged": bool(view.get("scope_engaged", false)),
-			"mounted": bool(view.get("mounted", false)),
-			"camera": _capture_camera_snapshot(),
-		},
-		"coordinate_conventions": {
-			"bms": "Mission coordinates (x, y horizontal; z up)",
-			"godot": "Global world coordinates (x, z horizontal; y up)",
-			"yaw": "Mission yaw: 0 faces BMS +Y / Godot -Z",
-			"pitch": "Positive looks up",
-			"camera_rotation": "Godot world-space quaternion",
-		},
-	}
+func _on_dump_pressed() -> void:
+	if _ctx.dump_snapshot.is_valid():
+		_ctx.dump_snapshot.call("")  # the overlay pushes the result back below
 
 
-func _capture_camera_snapshot() -> Dictionary:
-	var context := _ctx.view_context()
-	if context == null:
-		return {}
-	var camera := context.camera
-	if camera == null or not is_instance_valid(camera):
-		return {}
-	var camera_transform := camera.global_transform
-	var camera_basis := camera_transform.basis.orthonormalized()
-	var camera_position := camera_transform.origin
-	var viewport_size := Vector2.ZERO
-	var viewport := camera.get_viewport()
-	if viewport != null:
-		viewport_size = viewport.get_visible_rect().size
-	var viewport_aspect := viewport_size.x / viewport_size.y \
-			if viewport_size.y > 0.0 else 0.0
-	var mode := "unknown"
-	if context.camera_mode_known:
-		mode = "third_person" if context.third_person else "first_person"
-	return {
-		"mode": mode,
-		"position_godot": _vector3_record(camera_position),
-		"position_bms": _vector3_record(
-				MissionObjectPlacer.godot_to_bms_position(camera_position)),
-		"orientation_quaternion_godot": _quaternion_record(
-				camera_basis.get_rotation_quaternion()),
-		"right_godot": _vector3_record(camera_basis.x),
-		"up_godot": _vector3_record(camera_basis.y),
-		"forward_godot": _vector3_record(-camera_basis.z),
-		"godot_fov_deg": camera.fov,
-		"projection": int(camera.projection),
-		"keep_aspect": int(camera.keep_aspect),
-		"viewport_size": _vector2_record(viewport_size),
-		"viewport_aspect": viewport_aspect,
-		"near": camera.near,
-		"far": camera.far,
-	}
-
-
-func _vector2_record(value: Vector2) -> Dictionary:
-	return {"x": value.x, "y": value.y}
-
-
-func _vector3_record(value: Vector3) -> Dictionary:
-	return {"x": value.x, "y": value.y, "z": value.z}
-
-
-func _quaternion_record(value: Quaternion) -> Dictionary:
-	return {"x": value.x, "y": value.y, "z": value.z, "w": value.w}
-
-
-func _default_player_pose_path(snapshot: Dictionary) -> String:
-	var mission: Dictionary = snapshot.get("mission", {})
-	var mission_stem := String(mission.get("file", "")).get_file().get_basename()
-	if mission_stem.is_empty():
-		mission_stem = String(mission.get("name", ""))
-	if mission_stem.is_empty():
-		mission_stem = "mission"
-	mission_stem = mission_stem.validate_filename().replace(" ", "_")
-	var stamp := String(snapshot.get("captured_at_utc", "")) \
-			.replace("-", "").replace(":", "")
-	var unix_usec := int(Time.get_unix_time_from_system() * MICROSECONDS_PER_SECOND)
-	var target_path := ""
-	while target_path.is_empty() or FileAccess.file_exists(target_path):
-		_player_dump_sequence += 1
-		target_path = PLAYER_POSE_DUMP_DIR.path_join("%s_%s_%d_%03d.json" % [
-			mission_stem, stamp, unix_usec, _player_dump_sequence])
-	return target_path
-
-
-func _on_dump_player_pose_pressed() -> void:
-	dump_local_player_pose()
+## Every dump (button or programmatic) reports here so the status label always
+## carries the newest outcome.
+func show_dump_result(result: Dictionary) -> void:
+	var path := String(result.get("path", ""))
+	if path.is_empty():
+		_player_dump_status.text = String(result.get("error", "Could not write the snapshot."))
+	else:
+		_player_dump_status.text = "Saved:\n%s" % path

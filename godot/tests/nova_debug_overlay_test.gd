@@ -13,7 +13,7 @@ const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
 const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/Rounds/show_collision")
 const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
-const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpPlayerPose")
+const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpSnapshot")
 const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
 const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_user_points")
 const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
@@ -448,8 +448,8 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	assert_eq(orientation_label.text, "")
 	assert_true(dump_button.disabled)
 	watch_signals(overlay)
-	assert_eq(overlay.dump_local_player_pose(), "")
-	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+	assert_eq(overlay.dump_debug_snapshot(), "")
+	assert_signal_not_emitted(overlay, "debug_snapshot_dumped")
 
 
 func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
@@ -472,10 +472,10 @@ func test_player_dump_reports_an_unwritable_target_without_success_signal() -> v
 	_dumped_paths.append(blocker_path)
 
 	watch_signals(overlay)
-	var result: String = overlay.dump_local_player_pose(
+	var result: String = overlay.dump_debug_snapshot(
 			blocker_path.path_join("pose.json"))
 	assert_eq(result, "")
-	assert_signal_not_emitted(overlay, "local_player_pose_dumped")
+	assert_signal_not_emitted(overlay, "debug_snapshot_dumped")
 	assert_string_contains(status.text, "Could not")
 
 
@@ -527,13 +527,13 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	var camera_godot := Vector3(124.0, 6.0, -70.0)
 	camera.global_position = camera_godot
 	assert_ne(sampled_yaw, displayed_yaw)
-	overlay.local_player_pose_dumped.connect(
+	overlay.debug_snapshot_dumped.connect(
 			func(path: String): _dumped_paths.append(path))
 	watch_signals(overlay)
 	dump_button.pressed.emit()
-	assert_signal_emitted(overlay, "local_player_pose_dumped")
+	assert_signal_emitted(overlay, "debug_snapshot_dumped")
 	var dumped_path := String(
-			get_signal_parameters(overlay, "local_player_pose_dumped", 0)[0])
+			get_signal_parameters(overlay, "debug_snapshot_dumped", 0)[0])
 	assert_true(FileAccess.file_exists(dumped_path))
 	assert_string_contains(dumped_path.get_file(), "00TRe")
 
@@ -544,9 +544,11 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 		file.close()
 	assert_typeof(payload_variant, TYPE_DICTIONARY)
 	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
-	assert_eq(String(payload.get("schema", "")), "opennova.player_pose.v1")
+	assert_eq(String(payload.get("schema", "")), "opennova.debug_snapshot.v1")
 	assert_true(String(payload.get("captured_at_utc", "")).ends_with("Z"))
 	assert_eq(int(payload.get("logic_tick", -1)), 4242)
+	assert_eq(payload.get("picks", null), [], "no pick list injected -> an empty picks array")
+	assert_eq(int(payload.get("pick_count", -1)), 0)
 	var mission: Dictionary = payload.get("mission", {})
 	assert_eq(String(mission.get("file", "")), "00TRe.bms")
 	assert_eq(String(mission.get("name", "")), "Training Grounds")
@@ -605,15 +607,16 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_almost_eq(float(camera_snapshot.get("viewport_aspect", 0.0)),
 			viewport_width / viewport_height, 0.0001)
 
-	var second_path: String = overlay.dump_local_player_pose()
+	var second_path: String = overlay.dump_debug_snapshot()
 	assert_ne(second_path, dumped_path, "rapid consecutive snapshots never overwrite")
 	assert_true(FileAccess.file_exists(second_path))
+	_dumped_paths.append(second_path)
 
 	var next_runtime := _make_pose_runtime()
 	next_runtime.set_mission_identity("00TRa.bms", "Second Training Area")
 	next_runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
 	overlay.set_runtime(next_runtime)
-	assert_string_contains(dump_status.text, "No pose snapshot saved",
+	assert_string_contains(dump_status.text, "No snapshot saved",
 			"a live mission swap clears the previous mission's Saved path")
 	assert_false(dump_status.text.contains(dumped_path))
 
@@ -805,3 +808,75 @@ func test_register_page_appends_a_host_page() -> void:
 	var texts := _page_list_texts(overlay)
 	assert_has(texts, "HOST", "a custom category grows its own section")
 	assert_has(texts, "Host extras", "the page lists under it")
+
+
+# --- The pick list + snapshot embedding ---------------------------------------
+
+func _fabricated_pick(handle: int, pick_name: String) -> Dictionary:
+	return {
+		"hit": true, "entity_handle": handle, "pool": 2, "kind": 2,
+		"index": handle, "bms_id": 1400 + handle, "net_id": 0, "item_id": 55,
+		"name": pick_name, "position_godot": Vector3(10, 2, -30),
+		"bound_radius": 4.0, "hit_position_godot": Vector3(10, 3, -30),
+		"hit_normal_godot": Vector3.UP, "distance_units": 45.5,
+		"hit_class": "static", "section": 1, "face": 17, "bone": -1,
+		"hit_zone": -1, "surface_type": 3, "material_flags": 0, "tick": 777,
+		"source": "crosshair", "ray_origin_godot": Vector3(0, 2, 0),
+		"ray_dir_godot": Vector3(0, 0, -1),
+	}
+
+
+func test_snapshot_embeds_the_pick_list() -> void:
+	var runtime := _make_pose_runtime()
+	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 90.0, 0.0, 0.0)
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	var picks := NovaDebugPickList.new()
+	picks.add(_fabricated_pick(9, "RckS07"))
+	overlay.set_pick_list(picks)
+
+	var target := OS.get_cache_dir().path_join(
+			"opennova_snapshot_%d.json" % Time.get_ticks_usec())
+	_dumped_paths.append(target)
+	var path: String = overlay.dump_debug_snapshot(target)
+	assert_ne(path, "", "the dump succeeded")
+	var file := FileAccess.open(path, FileAccess.READ)
+	var payload: Dictionary = JSON.parse_string(file.get_as_text())
+	file.close()
+
+	assert_eq(int(payload.get("pick_count", -1)), 1)
+	var entry: Dictionary = (payload.get("picks", []) as Array)[0]
+	var identity: Dictionary = entry.get("identity", {})
+	assert_eq(int(identity.get("bms_id", 0)), 1409)
+	assert_eq(String(identity.get("name", "")), "RckS07")
+	var pick_block: Dictionary = entry.get("pick", {})
+	assert_eq(String(pick_block.get("source", "")), "crosshair",
+			"the card keeps its input provenance")
+	assert_almost_eq(float(pick_block.get("distance_units", 0.0)), 45.5, 0.001)
+	var hit_bms: Dictionary = pick_block.get("hit_position_bms", {})
+	assert_almost_eq(float(hit_bms.get("y", 0.0)), 30.0, 0.001,
+			"the hit point converts to BMS space (y = -Godot z)")
+	assert_true(bool(entry.get("stale", false)),
+			"the pose fake exposes no live cards, so the pick reports stale")
+
+
+func test_entities_page_renders_and_curates_the_pick_list() -> void:
+	var overlay := _make_overlay()
+	var picks := NovaDebugPickList.new()
+	picks.add(_fabricated_pick(1, "crate_a"))
+	picks.add(_fabricated_pick(2, "crate_b"))
+	overlay.set_pick_list(picks)
+	overlay.toggle()  # Entities is the default page; opening refreshes it
+
+	var rows := overlay.find_child("PickRows", true, false)
+	assert_eq(rows.get_child_count(), 2, "one row per pick")
+	var header := overlay.find_child("PicksHeader", true, false) as Label
+	assert_string_contains(header.text, "(2/8)")
+	assert_string_contains(
+			(rows.get_child(0).get_node("PickLabel") as Label).text, "crate_a")
+
+	(rows.get_child(0).get_node("RemovePick") as Button).pressed.emit()
+	assert_eq(picks.size(), 1, "the row's X removes exactly that pick")
+	assert_eq(int(picks.get_picks()[0].get("entity_handle", -1)), 2)
+	(overlay.find_child("ClearPicks", true, false) as Button).pressed.emit()
+	assert_eq(picks.size(), 0, "Clear picks empties the set")

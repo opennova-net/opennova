@@ -33,9 +33,10 @@ signal transport_used(action: String)
 ## host, wiring that cannot drift between the game and the editor.
 signal debug_option_changed(id: StringName, value: Variant)
 
-## Fired after the Player page writes a fresh local-player pose snapshot. The
-## path is absolute so it can be pasted into an issue or opened directly.
-signal local_player_pose_dumped(path: String)
+## Fired after a fresh debug snapshot lands on disk — the local-player pose
+## plus every picked entity's live state. The path is absolute so it can be
+## pasted into an issue or opened directly.
+signal debug_snapshot_dumped(path: String)
 
 const REFRESH_INTERVAL := 0.25
 const DEFAULT_PANEL_WIDTH := 560.0
@@ -73,6 +74,7 @@ var _stats_pane: DebugStatsPage
 var _perf_pane: DebugPerfPage
 var _vars_pane: DebugVarsPage
 var _player_pane: DebugPlayerPage
+var _entities_pane: DebugEntitiesPage
 
 
 func _init(config_path: String = DEFAULT_CONFIG_PATH) -> void:
@@ -82,6 +84,7 @@ func _init(config_path: String = DEFAULT_CONFIG_PATH) -> void:
 	_ctx.options = NovaDebugOptionState.new()
 	_ctx.options.changed.connect(
 			func(id: StringName, value: Variant): debug_option_changed.emit(id, value))
+	_ctx.dump_snapshot = _dump_snapshot_internal
 	_build_panel()
 	_build_default_pages()
 	_timer = Timer.new()
@@ -128,6 +131,14 @@ func set_effect_world_source(source: Callable) -> void:
 ## Stats page's counters today).
 func set_world_source(source: Callable) -> void:
 	_ctx.world_source = source
+
+
+## The host-owned debug pick list (see NovaDebugPickList): the Entities page
+## renders/curates it and snapshots embed it. Null detaches.
+func set_pick_list(pick_list: NovaDebugPickList) -> void:
+	_ctx.pick_list = pick_list
+	if visible:
+		_refresh()
 
 
 func toggle() -> void:
@@ -201,11 +212,35 @@ func lock_writes(reason: String) -> void:
 		_refresh()
 
 
-## Sample the live runtime now and write one exact JSON pose snapshot. An
-## optional target is useful for automation; the button uses the timestamped
+## Sample the live runtime now and write one exact JSON debug snapshot — the
+## local-player pose plus every picked entity's live state. An optional
+## target is useful for automation; the pages' buttons use the timestamped
 ## user-data location. Returns the absolute file path, or an empty string.
-func dump_local_player_pose(path_override: String = "") -> String:
-	return _player_pane.dump_local_player_pose(path_override)
+func dump_debug_snapshot(path_override: String = "") -> String:
+	return String(_dump_snapshot_internal(path_override).get("path", ""))
+
+
+## The page-facing dump seam (ctx.dump_snapshot): capture + write + announce.
+## Every dump — a page button OR the programmatic API — pushes its outcome
+## back onto both dump-hosting pages' status labels, so the newest result is
+## always visible wherever the developer is looking.
+func _dump_snapshot_internal(path_override: String) -> Dictionary:
+	var picks: Array = _ctx.pick_list.get_picks() if _ctx.pick_list != null else []
+	var snapshot := DebugSnapshotWriter.capture(_ctx, picks)
+	var result: Dictionary
+	if snapshot.is_empty():
+		result = {"path": "",
+				"error": "Start a playable mission to capture the local player."}
+	else:
+		var target := path_override
+		if target.is_empty():
+			target = DebugSnapshotWriter.default_path(snapshot)
+		result = DebugSnapshotWriter.write(snapshot, target)
+	_player_pane.show_dump_result(result)
+	_entities_pane.show_dump_result(result)
+	if not String(result.get("path", "")).is_empty():
+		debug_snapshot_dumped.emit(result["path"])
+	return result
 
 
 func refresh_now() -> void:
@@ -287,7 +322,8 @@ func _build_panel() -> void:
 ## themselves through ctx.options; only the two page-specific signals
 ## (transport, pose dump) are re-emitted here.
 func _build_default_pages() -> void:
-	register_page(DebugEntitiesPage.new())
+	_entities_pane = DebugEntitiesPage.new()
+	register_page(_entities_pane)
 
 	var sim_page := DebugSimPage.new()
 	sim_page.transport_used.connect(
@@ -305,8 +341,6 @@ func _build_default_pages() -> void:
 	register_page(DebugAnimationPage.new())
 
 	_player_pane = DebugPlayerPage.new()
-	_player_pane.local_player_pose_dumped.connect(
-			func(path: String): local_player_pose_dumped.emit(path))
 	register_page(_player_pane)
 
 	_stats_pane = DebugStatsPage.new()

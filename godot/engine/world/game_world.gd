@@ -2988,6 +2988,12 @@ func get_foliage_dispatcher() -> NovaFoliageDispatcher:
 	return _dispatcher
 
 
+## The mounted item database (null before a mission), for the F3 snapshot
+## writer's display-name/graphic enrichment.
+func get_item_db() -> NovaItemDatabase:
+	return _placer.get_item_db() if _placer != null else null
+
+
 # Owner-transform provider for the effect world's owned/attached groups. Int keys are
 # WAC fx2ssn SSNs (the runtime resolves the live entity transform; null = entity gone,
 # the group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]); String keys

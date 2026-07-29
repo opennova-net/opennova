@@ -306,7 +306,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	var overlay = _shell.find_child("DebugOverlay", true, false)
 	assert_not_null(overlay)
 	var pose_path := _temp_dir.path_join("f3-player-pose.json")
-	var dumped_path: String = overlay.dump_local_player_pose(pose_path)
+	var dumped_path: String = overlay.dump_debug_snapshot(pose_path)
 	assert_eq(dumped_path, pose_path)
 	var pose_file := FileAccess.open(dumped_path, FileAccess.READ)
 	assert_not_null(pose_file)

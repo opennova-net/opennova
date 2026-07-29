@@ -641,7 +641,8 @@ func _equip_clip_weapon() -> void:
 	print("[pfg] WARNING: no rifle kit applied; firing whatever is equipped")
 
 
-# Apply an F3 Player-tab pose dump (opennova.player_pose.v1): teleport the
+# Apply an F3 debug snapshot (opennova.debug_snapshot.v1; the mission/player
+# blocks are unchanged from the old pose dumps): teleport the
 # local player to its mission position + yaw/pitch via the sim's debug seam.
 func _apply_pose_dump(path: String) -> bool:
 	var text := FileAccess.get_file_as_string(path)
