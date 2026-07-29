@@ -3,7 +3,12 @@ add_library(opennova_world STATIC
     src/world.cpp
     src/waypoint_track.cpp
     src/ai.cpp
-    src/collision.cpp
+    src/collision_los.cpp      # ground casts, LOS, sound occlusion
+    src/collision_model.cpp    # model bounds + the fixed-point matrix ops
+    src/collision_query.cpp    # the stateless target queries
+    src/collision_resolve.cpp  # contact resolution + the debug views
+    src/collision_trace.cpp    # target views, broad phase, trace_projectile
+    src/collision_world.cpp    # instance registry + the proximity table build
     src/occlusion.cpp
     src/infantry.cpp
     src/infantry_tables.cpp
