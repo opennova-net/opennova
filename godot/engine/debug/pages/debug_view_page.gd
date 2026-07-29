@@ -1,5 +1,5 @@
 class_name DebugViewPage
-extends VBoxContainer
+extends NovaDebugPage
 ## Render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
 ## Unlike the sim-fed panes this never reads the runtime: each checkbox holds
 ## its own state and only emits intent, which the overlay re-emits for the host
@@ -20,8 +20,15 @@ var _viewmodel_check: CheckBox
 var _body_fp_check: CheckBox
 
 
-func _init() -> void:
-	name = "View"
+func page_id() -> StringName:
+	return &"View"
+
+
+func page_category() -> StringName:
+	return CATEGORY_WORLD
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_skeleton_check = CheckBox.new()

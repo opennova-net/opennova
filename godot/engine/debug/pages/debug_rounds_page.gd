@@ -1,5 +1,5 @@
 class_name DebugRoundsPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The round hit-test inspector: the RoundSim debug ring (libs/world
 ## round_sim.cpp), newest first — what each recently resolved round actually
 ## did (which entity, which COBJ section/face or reaction-bone/damage-zone
@@ -23,8 +23,15 @@ var _rnd_trails_check: CheckBox
 var _rnd_hitbox_check: CheckBox
 
 
-func _init() -> void:
-	name = "Rounds"
+func page_id() -> StringName:
+	return &"Rounds"
+
+
+func page_category() -> StringName:
+	return CATEGORY_WORLD
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_rnd_status_label = Label.new()
@@ -85,7 +92,8 @@ static func _round_bone_pair(ev: Dictionary) -> String:
 	return "reaction bone %d  damage zone %s" % [primary, secondary_text]
 
 
-func refresh(sim: Object) -> void:
+func refresh() -> void:
+	var sim := _ctx.sim()
 	if sim == null or not sim.has_method("get_round_debug"):
 		_clear_pane("No round data.")
 		return

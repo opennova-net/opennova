@@ -1,5 +1,5 @@
 class_name DebugOcclusionPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The render-occlusion inspector: what the portal/section-mask engine decided
 ## this frame — the camera's blink state, the frame-wide latches, the batch
 ## split, and the per-building section masks (docs/render/render-occlusion-re.md
@@ -18,8 +18,15 @@ var _occ_list: ItemList
 var _occ_portals_check: CheckBox
 
 
-func _init() -> void:
-	name = "Occlusion"
+func page_id() -> StringName:
+	return &"Occlusion"
+
+
+func page_category() -> StringName:
+	return CATEGORY_WORLD
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_occ_status_label = Label.new()
@@ -43,7 +50,8 @@ func _init() -> void:
 	add_child(_occ_portals_check)
 
 
-func refresh(sim: Object) -> void:
+func refresh() -> void:
+	var sim := _ctx.sim()
 	if sim == null or not sim.has_method("get_occlusion_debug"):
 		_clear_pane("No occlusion data.")
 		return

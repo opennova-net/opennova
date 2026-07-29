@@ -1,5 +1,5 @@
 class_name DebugParticlesPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The retail particle debug pages, mimicked (ptl-format-re.md §11 —
 ## Debug_DrawParticleStats @ 0x44c840 counts + entry list;
 ## Debug_DrawEffectBrowser @ 0x44c950 name + source file). Fed by its own
@@ -15,7 +15,6 @@ signal particles_hidden_toggled(hidden: bool)
 ## ParticleDebugView (per-emitter wireframe bounds + effect-name labels).
 signal particle_boxes_toggled(enabled: bool)
 
-var _effect_world_source := Callable()
 var _ptl_count_label: Label
 var _ptl_list: ItemList
 var _ptl_hide_check: CheckBox
@@ -23,8 +22,15 @@ var _ptl_boxes_check: CheckBox
 var _ptl_peak := 0
 
 
-func _init() -> void:
-	name = "Particles"
+func page_id() -> StringName:
+	return &"Particles"
+
+
+func page_category() -> StringName:
+	return CATEGORY_WORLD
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_ptl_count_label = Label.new()
@@ -55,16 +61,9 @@ func _init() -> void:
 	add_child(_ptl_boxes_check)
 
 
-## The effect-world supplier: a Callable returning the live NovaEffectWorld
-## (or null). Re-resolved every refresh — mission loads free and rebuild the
-## effect world.
-func set_effect_world_source(source: Callable) -> void:
-	_effect_world_source = source
-
-
 func refresh() -> void:
-	var world = _effect_world_source.call() if _effect_world_source.is_valid() else null
-	if world == null or not is_instance_valid(world):
+	var world := _ctx.effect_world()
+	if world == null:
 		_ptl_peak = 0
 		_ptl_count_label.text = "Current Particle Count:  0 / 0"
 		if _ptl_list.item_count > 0:

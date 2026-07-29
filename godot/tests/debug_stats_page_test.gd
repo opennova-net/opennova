@@ -1,10 +1,10 @@
 extends GutTest
 
-# DebugStatsPane: semantic rows and capture lifecycle are exercised through the
-# public value interface. The Tree and TabContainer remain implementation
+# DebugStatsPage: semantic rows and capture lifecycle are exercised through the
+# public value interface. The Tree and the page host remain implementation
 # details of the F3 overlay.
 
-const PaneScript := preload("res://engine/debug/debug_stats_pane.gd")
+const PaneScript := preload("res://engine/debug/pages/debug_stats_page.gd")
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 
 
@@ -59,8 +59,9 @@ class SimInfoStub:
 		}
 
 
-func _make_pane() -> DebugStatsPane:
-	var pane: DebugStatsPane = PaneScript.new()
+func _make_pane(ctx: NovaDebugContext = NovaDebugContext.new()) -> DebugStatsPage:
+	var pane: DebugStatsPage = PaneScript.new()
+	pane.setup(ctx)
 	add_child_autofree(pane)
 	return pane
 
@@ -75,7 +76,7 @@ func _blank_window() -> Array:
 	return [sums, peaks, counts]
 
 
-func _row(pane: DebugStatsPane, id: StringName) -> DebugStatsDisplayRow:
+func _row(pane: DebugStatsPage, id: StringName) -> DebugStatsDisplayRow:
 	for row in pane.get_display_snapshot():
 		if row.id == id:
 			return row
@@ -155,7 +156,8 @@ func test_capture_follows_visibility_and_board_replacement() -> void:
 
 
 func test_exit_tree_closes_capture() -> void:
-	var pane: DebugStatsPane = PaneScript.new()
+	var pane: DebugStatsPage = PaneScript.new()
+	pane.setup(NovaDebugContext.new())
 	add_child(pane)
 	var board := FrameStatsBoard.new()
 	pane.set_frame_stats_board(board)
@@ -167,19 +169,20 @@ func test_exit_tree_closes_capture() -> void:
 	pane.free()
 
 
-func test_overlay_selects_stats_without_exposing_tabs() -> void:
-	var overlay = add_child_autofree(OverlayScript.new())
+func test_overlay_selects_stats_without_exposing_pages() -> void:
+	var overlay = add_child_autofree(OverlayScript.new(
+			"user://test_stats_overlay_%d.cfg" % Time.get_ticks_usec()))
 	var board := FrameStatsBoard.new()
 	overlay.set_frame_stats_board(board)
 	overlay.toggle()
 	await get_tree().process_frame
 	assert_false(board.is_capture_active(),
-			"opening on another tab leaves capture off")
-	assert_true(overlay.select_tab(&"Stats"))
+			"opening on another page leaves capture off")
+	assert_true(overlay.select_page(&"Stats"))
 	await get_tree().process_frame
 	assert_true(overlay.is_stats_capturing())
 	assert_true(board.is_capture_active())
-	assert_false(overlay.select_tab(&"DoesNotExist"))
+	assert_false(overlay.select_page(&"DoesNotExist"))
 	assert_gt(overlay.get_stats_display_snapshot().size(), 0)
 	overlay.toggle()
 	assert_false(board.is_capture_active())
@@ -194,17 +197,18 @@ func test_refresh_drains_the_board_window() -> void:
 	await get_tree().process_frame
 	board.add(FrameStatsBoard.SIM_STEP, 4_000)
 	await get_tree().process_frame
-	pane.refresh(null, null)
-	pane.refresh(null, null)
+	pane.refresh()
+	pane.refresh()
 	assert_ne(_row(pane, &"sim").average, "-")
 	assert_eq(board.drain().sums[FrameStatsBoard.SIM_STEP], 0,
 			"the pane atomically drained the prior window")
 
 
 func test_mission_scoped_info_clears_when_sources_disappear() -> void:
-	var pane := _make_pane()
+	var ctx := NovaDebugContext.new()
+	var pane := _make_pane(ctx)
 	var world := WorldInfoStub.new()
-	pane.set_world_source(func(): return world)
+	ctx.world_source = func(): return world
 	var window := _blank_window()
 	var sums: PackedInt64Array = window[0]
 	var counts: PackedInt32Array = window[2]
@@ -216,7 +220,7 @@ func test_mission_scoped_info_clears_when_sources_disappear() -> void:
 			&"wire_rows", &"occl"]:
 		assert_ne(_row(pane, id).info, "", "%s received live mission info" % id)
 
-	pane.set_world_source(Callable())
+	ctx.world_source = Callable()
 	pane.render_window(1, sums, window[1], counts, null, null)
 	for id in [&"effects", &"fire", &"destruction", &"throwable",
 			&"wire_rows", &"occl"]:

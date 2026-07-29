@@ -1,5 +1,5 @@
 class_name DebugSimPage
-extends VBoxContainer
+extends NovaDebugPage
 ## Sim transport (play / pause / step / stop) + the tick/entity/event/WAC
 ## status lines. The transport drives the runtime directly (the overlay is
 ## host-neutral); hosts whose own UI mirrors transport state listen to the
@@ -8,10 +8,6 @@ extends VBoxContainer
 ## Fired after a transport press (play/pause/step/stop) or the script pause
 ## toggle acted on the runtime.
 signal transport_used(action: String)
-
-var _resolve_runtime := Callable()
-var _resolve_sim := Callable()
-var _request_refresh := Callable()
 
 var _play_button: Button
 var _pause_button: Button
@@ -24,8 +20,15 @@ var _wac_label: Label
 var _wac_pause_check: CheckBox
 
 
-func _init() -> void:
-	name = "Sim"
+func page_id() -> StringName:
+	return &"Sim"
+
+
+func page_category() -> StringName:
+	return CATEGORY_SIM
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	var transport := HBoxContainer.new()
@@ -50,16 +53,12 @@ func _init() -> void:
 	add_child(_wac_pause_check)
 
 
-## The transport re-resolves the runtime/sim on every press (reloads recreate
-## them); `request_refresh` is the overlay-wide refresh so a press repaints
-## every pane, not just this one.
-func setup(resolve_runtime: Callable, resolve_sim: Callable, request_refresh: Callable) -> void:
-	_resolve_runtime = resolve_runtime
-	_resolve_sim = resolve_sim
-	_request_refresh = request_refresh
-
-
-func refresh(runtime: Object, sim: Object) -> void:
+func refresh() -> void:
+	var runtime := _ctx.runtime()
+	var sim := _ctx.sim()
+	if runtime == null or sim == null:
+		_clear_live()
+		return
 	_tick_label.text = "tick %d%s" % [int(sim.get_logic_tick()),
 			"" if bool(runtime.is_playing()) else "  (paused)"]
 	_entities_label.text = "%d units" % int(sim.get_entity_count())
@@ -78,7 +77,7 @@ func refresh(runtime: Object, sim: Object) -> void:
 	_wac_pause_check.set_pressed_no_signal(bool(wac.get("paused", false)))
 
 
-func clear_live() -> void:
+func _clear_live() -> void:
 	_tick_label.text = ""
 	_entities_label.text = ""
 	_events_label.text = ""
@@ -103,44 +102,45 @@ func _info_label(node_name: String) -> Label:
 	return label
 
 
-func _runtime() -> Object:
-	return _resolve_runtime.call() if _resolve_runtime.is_valid() else null
+func _request_refresh() -> void:
+	if _ctx.request_refresh.is_valid():
+		_ctx.request_refresh.call()
 
 
 func _on_play_pressed() -> void:
-	var runtime := _runtime()
+	var runtime := _ctx.runtime()
 	if runtime != null:
 		runtime.play()
-		_request_refresh.call()
+		_request_refresh()
 		transport_used.emit("play")
 
 
 func _on_pause_pressed() -> void:
-	var runtime := _runtime()
+	var runtime := _ctx.runtime()
 	if runtime != null:
 		runtime.pause()
-		_request_refresh.call()
+		_request_refresh()
 		transport_used.emit("pause")
 
 
 func _on_step_pressed() -> void:
-	var runtime := _runtime()
+	var runtime := _ctx.runtime()
 	if runtime != null:
 		runtime.step_once()
-		_request_refresh.call()
+		_request_refresh()
 		transport_used.emit("step")
 
 
 func _on_stop_pressed() -> void:
-	var runtime := _runtime()
+	var runtime := _ctx.runtime()
 	if runtime != null:
 		runtime.stop()
-		_request_refresh.call()
+		_request_refresh()
 		transport_used.emit("stop")
 
 
 func _on_wac_pause_toggled(pressed: bool) -> void:
-	var sim: Object = _resolve_sim.call() if _resolve_sim.is_valid() else null
+	var sim := _ctx.sim()
 	if sim != null:
 		sim.set_wac_paused(pressed)
 		transport_used.emit("wac_pause")

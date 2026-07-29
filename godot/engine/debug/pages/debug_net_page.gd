@@ -1,5 +1,5 @@
 class_name DebugNetPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The net-session inspector: which net role this sim runs (every session is a
 ## listen server — ADR 0011), the host's session row + bound port + peer count,
 ## and the joiner's connect phase / self wire handle / error. Read-only, no
@@ -13,8 +13,15 @@ var _net_list: ItemList
 var _net_rows_signature := ""
 
 
-func _init() -> void:
-	name = "Net"
+func page_id() -> StringName:
+	return &"Net"
+
+
+func page_category() -> StringName:
+	return CATEGORY_SIM
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_net_status_label = Label.new()
@@ -30,9 +37,10 @@ func _init() -> void:
 	add_child(_net_list)
 
 
-func refresh(sim: Object) -> void:
+func refresh() -> void:
 	if _net_status_label == null:
 		return
+	var sim := _ctx.sim()
 	if sim == null or not sim.has_method("is_joiner"):
 		_clear_pane("No net session.")
 		return

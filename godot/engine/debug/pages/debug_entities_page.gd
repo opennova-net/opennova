@@ -1,17 +1,23 @@
 class_name DebugEntitiesPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The present-snapshot entity list + a scalar detail card for the selection.
 ## The list reads ONE packed snapshot per refresh and only the selected entity
 ## pays for the detail card.
 
-var _resolve_sim := Callable()
 var _entity_list: ItemList
 var _entity_detail: Label
 var _selected_entity := -1
 
 
-func _init() -> void:
-	name = "Entities"
+func page_id() -> StringName:
+	return &"Entities"
+
+
+func page_category() -> StringName:
+	return CATEGORY_SIM
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_entity_list = ItemList.new()
@@ -27,13 +33,11 @@ func _init() -> void:
 	add_child(_entity_detail)
 
 
-## `resolve_sim` returns the live validated sim (or null); re-resolved on every
-## selection because mission reloads recreate it.
-func setup(resolve_sim: Callable) -> void:
-	_resolve_sim = resolve_sim
-
-
-func refresh(sim: Object) -> void:
+func refresh() -> void:
+	var sim := _ctx.sim()
+	if sim == null:
+		_clear_live()
+		return
 	var snap: PackedFloat32Array = sim.get_present_snapshot()
 	var stride: int = sim.get_present_stride()
 	var count := 0 if stride <= 0 else snap.size() / stride
@@ -61,7 +65,7 @@ func refresh(sim: Object) -> void:
 	_refresh_entity_detail(sim)
 
 
-func clear_live() -> void:
+func _clear_live() -> void:
 	if _entity_list.item_count > 0:
 		_entity_list.clear()
 	_selected_entity = -1
@@ -117,6 +121,6 @@ func _refresh_entity_detail(sim: Object) -> void:
 
 func _on_entity_selected(index: int) -> void:
 	_selected_entity = index
-	var sim: Object = _resolve_sim.call() if _resolve_sim.is_valid() else null
+	var sim := _ctx.sim()
 	if sim != null:
 		_refresh_entity_detail(sim)

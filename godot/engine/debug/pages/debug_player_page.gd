@@ -1,5 +1,5 @@
 class_name DebugPlayerPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The authoritative local-player pose plus a one-click disk dump. The dump
 ## resamples the live runtime at click time (never the 0.25-Hz label cache) and
 ## writes one exact JSON snapshot under the OpenNova user-data folder; the
@@ -15,11 +15,6 @@ const PLAYER_POSE_SCHEMA := "opennova.player_pose.v1"
 const DEFAULT_PLAYER_FOV_H_DEG := 80.0
 const MICROSECONDS_PER_SECOND := 1_000_000.0
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-
-var _resolve_runtime := Callable()
-var _resolve_sim := Callable()
-var _view_context_source := Callable()
 
 var _player_mission_label: Label
 var _player_position_label: Label
@@ -30,8 +25,15 @@ var _player_dump_sequence := 0
 var _player_context_key := ""
 
 
-func _init() -> void:
-	name = "Player"
+func page_id() -> StringName:
+	return &"Player"
+
+
+func page_category() -> StringName:
+	return CATEGORY_PLAYER
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 8)
 
 	_player_mission_label = _info_label("PlayerMission")
@@ -59,31 +61,19 @@ func _init() -> void:
 	add_child(_player_dump_status)
 
 
-## The dump re-resolves the runtime/sim at click time so it never serializes a
-## stale reference across a mission reload.
-func setup(resolve_runtime: Callable, resolve_sim: Callable) -> void:
-	_resolve_runtime = resolve_runtime
-	_resolve_sim = resolve_sim
-
-
-## Optional supplier for the exact NovaDebugViewContext used to render and
-## dispatch foliage. It is sampled with the player pose so a disk snapshot
-## reproduces the visual viewpoint, not just the player root.
-func set_view_context_source(source: Callable) -> void:
-	_view_context_source = source
-
-
-func refresh(runtime: Object, sim: Object) -> void:
+func refresh() -> void:
+	var runtime := _ctx.runtime()
+	var sim := _ctx.sim()
 	var snapshot := _capture_local_player_pose(runtime, sim)
 	if snapshot.is_empty():
-		clear_live()
+		_clear_live()
 		return
 	_sync_player_context(runtime, snapshot)
 	_apply_player_pose_to_ui(snapshot)
 	_player_dump_button.disabled = false
 
 
-func clear_live() -> void:
+func _clear_live() -> void:
 	_player_context_key = ""
 	_player_mission_label.text = "Mission: --"
 	_player_position_label.text = "No local player."
@@ -96,11 +86,11 @@ func clear_live() -> void:
 ## optional target is useful for automation; the button uses the timestamped
 ## user-data location. Returns the absolute file path, or an empty string.
 func dump_local_player_pose(path_override: String = "") -> String:
-	var runtime: Object = _resolve_runtime.call() if _resolve_runtime.is_valid() else null
-	var sim: Object = _resolve_sim.call() if _resolve_sim.is_valid() else null
+	var runtime := _ctx.runtime()
+	var sim := _ctx.sim()
 	var snapshot := _capture_local_player_pose(runtime, sim)
 	if snapshot.is_empty():
-		clear_live()
+		_clear_live()
 		return ""
 
 	_sync_player_context(runtime, snapshot)
@@ -252,12 +242,9 @@ func _capture_local_player_pose(runtime: Object, sim: Object) -> Dictionary:
 
 
 func _capture_camera_snapshot() -> Dictionary:
-	if not _view_context_source.is_valid():
+	var context := _ctx.view_context()
+	if context == null:
 		return {}
-	var context_value: Variant = _view_context_source.call()
-	if not (context_value is DebugViewContext):
-		return {}
-	var context := context_value as DebugViewContext
 	var camera := context.camera
 	if camera == null or not is_instance_valid(camera):
 		return {}

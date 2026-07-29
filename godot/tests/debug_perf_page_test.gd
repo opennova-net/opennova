@@ -1,17 +1,18 @@
 extends GutTest
 
-# DebugPerfPane: the overlay's Perf tab over the PerfTimeline ring + live
+# DebugPerfPage: the overlay's Perf page over the PerfTimeline ring + live
 # monitors. Fabricated timelines pin the span-tree shape and the
 # rebuild-only-on-change contract. The static ring is shared and append-only
 # across the whole GUT run, so tests use UNIQUE labels and never assert ring
 # totals or ordering beyond their own entries.
 
-const PaneScript := preload("res://engine/debug/debug_perf_pane.gd")
+const PaneScript := preload("res://engine/debug/pages/debug_perf_page.gd")
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 
 
-func _make_pane() -> DebugPerfPane:
-	var pane: DebugPerfPane = PaneScript.new()
+func _make_pane() -> DebugPerfPage:
+	var pane: DebugPerfPage = PaneScript.new()
+	pane.setup(NovaDebugContext.new())
 	add_child_autofree(pane)
 	return pane
 
@@ -130,17 +131,22 @@ func test_refresh_is_the_overlays_entry_point() -> void:
 func test_overlay_refreshes_perf_without_a_live_sim() -> void:
 	# The ring is host-wide state: "that load was slow, let me look" must work
 	# from the menu, after the mission (and its runtime) are gone.
-	var overlay = add_child_autofree(OverlayScript.new())
+	var overlay = add_child_autofree(OverlayScript.new(
+			"user://test_perf_overlay_%d.cfg" % Time.get_ticks_usec()))
 	var _timeline := _fabricate("perf pane menu state")
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no sim - the overlay says so")
-	assert_true(overlay._tabs.visible, "...but the tabs stay usable")
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	assert_true(page_list.visible, "...but the page list stays usable")
+	assert_true(overlay.select_page(&"Perf"),
+		"the Perf page selects with no runtime at all")
 	assert_has(_tree_texts(overlay._perf_pane.span_tree), "perf pane menu state",
-		"the perf pane renders the retained load with no runtime at all")
+		"the perf page renders the retained load with no runtime at all")
 
 
-func test_overlay_grows_a_perf_tab() -> void:
-	var overlay = add_child_autofree(OverlayScript.new())
-	var perf = overlay._tabs.get_node_or_null("Perf")
-	assert_not_null(perf, "the overlay's fourth tab is the perf pane")
-	assert_true(perf is DebugPerfPane)
+func test_overlay_grows_a_perf_page() -> void:
+	var overlay = add_child_autofree(OverlayScript.new(
+			"user://test_perf_overlay_%d.cfg" % Time.get_ticks_usec()))
+	var perf = overlay.find_child("Perf", true, false)
+	assert_not_null(perf, "the overlay carries the perf page")
+	assert_true(perf is DebugPerfPage)

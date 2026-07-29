@@ -78,7 +78,7 @@ func _run() -> void:
 		push_error("[fsp] no debug overlay after toggle")
 		_finish(1)
 		return
-	if not overlay.select_tab(&"Stats"):
+	if not overlay.select_page(&"Stats"):
 		push_error("[fsp] overlay carries no Stats tab")
 		_finish(1)
 		return

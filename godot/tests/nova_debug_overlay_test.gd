@@ -7,32 +7,21 @@ extends GutTest
 
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-const COLLISION_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewCollision")
-const PLAYER_POSITION_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerPosition")
-const PLAYER_ORIENTATION_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerOrientation")
-const PLAYER_DUMP_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/DumpPlayerPose")
-const PLAYER_DUMP_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Player/PlayerDumpStatus")
-const USER_POINTS_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewUserPoints")
-const OCCLUSION_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionShowPortals")
-const OCCLUSION_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionStatus")
-const OCCLUSION_LIST_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Occlusion/OcclusionBuildings")
-const ROUNDS_STATUS_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundsStatus")
-const ROUNDS_LIST_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundEvents")
-const SKELETON_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewSkeletons")
-const FOLIAGE_TOGGLE_PATH := NodePath(
-	"DebugPanel/DebugContent/DebugTabs/View/ViewHideFoliage")
+# Pages mount under the sidebar shell's page host.
+const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
+const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/View/ViewCollision")
+const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
+const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
+const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpPlayerPose")
+const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
+const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/View/ViewUserPoints")
+const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/OcclusionShowPortals")
+const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
+const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
+const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
+const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
+const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/View/ViewSkeletons")
+const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/View/ViewHideFoliage")
 
 
 class FakePoseSim:
@@ -165,7 +154,11 @@ func _make_pose_runtime() -> FakePoseRuntime:
 
 
 func _make_overlay() -> CanvasLayer:
-	var overlay: CanvasLayer = OverlayScript.new()
+	# A unique scratch config per overlay: page/width persistence must never
+	# leak between tests through the shared user:// store.
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
 	add_child_autofree(overlay)
 	return overlay
 
@@ -197,6 +190,7 @@ func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Rounds")
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "1 person bone hits")
@@ -226,6 +220,7 @@ func test_rounds_tab_names_unresolved_person_fallback() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Rounds")
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "0 person bone hits")
@@ -243,10 +238,11 @@ func test_without_runtime_reports_no_mission() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no source - the overlay says so")
-	assert_true(overlay._tabs.visible,
-		"the tabs stay usable (the perf pane works from host-wide state, no sim needed)")
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	assert_true(page_list.visible,
+		"the page list stays usable (the perf page works from host-wide state, no sim needed)")
 	var entity_list := overlay.find_child("EntityList", true, false) as ItemList
-	assert_eq(entity_list.item_count, 0, "the sim-fed panes sit empty")
+	assert_eq(entity_list.item_count, 0, "the sim-fed pages sit empty")
 
 	overlay.set_runtime_source(func(): return null)
 	overlay.refresh_now()
@@ -284,7 +280,7 @@ func test_view_tab_skeleton_toggle_emits() -> void:
 	# runtime and only emits intent for the host to act on (build/free the 3D view).
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._tabs.get_node_or_null("View"), "a View tab exists")
+	assert_not_null(overlay.find_child("View", true, false), "a View page exists")
 	var skeleton_check := overlay.get_node_or_null(SKELETON_TOGGLE_PATH) as CheckBox
 	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
 	assert_false(skeleton_check.button_pressed, "it defaults off")
@@ -377,6 +373,7 @@ func test_occlusion_tab_reports_frame_state() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Occlusion")
 
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
 	assert_string_contains(status.text, "indoors", "the camera line reports the blink state")
@@ -398,6 +395,7 @@ func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
+	overlay.select_page(&"Occlusion")
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
 	assert_string_contains(status.text, "No occlusion data")
 	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
@@ -424,6 +422,7 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	var overlay := _make_overlay()
 	overlay.set_runtime(_make_pose_runtime())
 	overlay.toggle()
+	overlay.select_page(&"Player")
 
 	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
 	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
@@ -486,6 +485,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	overlay.set_runtime(runtime)
 	overlay.set_view_context_source(func(): return view_context)
 	overlay.toggle()
+	overlay.select_page(&"Player")
 
 	var position_label := overlay.get_node_or_null(PLAYER_POSITION_PATH) as Label
 	var orientation_label := overlay.get_node_or_null(PLAYER_ORIENTATION_PATH) as Label
@@ -655,6 +655,7 @@ func test_particles_tab_reports_counts_and_peak_reset() -> void:
 	# @ 0x44c840 — dword_A895E0 zeroes with the count].
 	var overlay := _make_overlay()
 	overlay.toggle()
+	overlay.select_page(&"Particles")
 	var stub := _StubEffectWorld.new()
 	add_child_autofree(stub)
 	overlay.set_effect_world_source(func(): return stub)
@@ -697,3 +698,92 @@ class _StubEffectWorld extends Node3D:
 
 	func get_unresolved_texture_names() -> PackedStringArray:
 		return PackedStringArray(["SMOKE1.TGA"])
+
+
+# --- The sidebar shell (page framework) --------------------------------------
+
+func _page_list_texts(overlay: CanvasLayer) -> PackedStringArray:
+	var list := overlay.find_child("PageList", true, false) as ItemList
+	var texts := PackedStringArray()
+	for i in range(list.item_count):
+		texts.append(list.get_item_text(i).strip_edges())
+	return texts
+
+
+func test_sidebar_lists_every_page_under_its_category() -> void:
+	var overlay := _make_overlay()
+	var list := overlay.find_child("PageList", true, false) as ItemList
+	assert_not_null(list, "the shell carries the page list")
+	var texts := _page_list_texts(overlay)
+	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
+		assert_has(texts, header, "the %s section header is present" % header)
+	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
+			"Rounds", "View", "Player", "Stats", "Perf"]:
+		assert_has(texts, page_title, "the %s page is listed" % page_title)
+	var header_row := texts.find("SIMULATION")
+	assert_false(list.is_item_selectable(header_row), "section headers are not rows")
+
+
+func test_selection_and_width_persist_across_instances() -> void:
+	var config_path := "user://test_debug_overlay_persist_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var first: CanvasLayer = OverlayScript.new(config_path)
+	add_child(first)
+	assert_eq(String(first.get_active_page_id()), "Entities",
+			"a fresh config lands on the first page")
+	assert_true(first.select_page(&"Rounds"))
+	# Resize through the public handle node: press, drag 80 px left, release.
+	var handle := first.find_child("DebugResizeHandle", true, false) as Control
+	var panel := first.find_child("DebugPanel", true, false) as Control
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	handle.gui_input.emit(press)
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(-80, 0)
+	handle.gui_input.emit(motion)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	handle.gui_input.emit(release)
+	var widened := -panel.offset_left
+	assert_gt(widened, 560.0, "dragging the handle left widens the panel")
+	remove_child(first)
+	first.free()
+
+	var second: CanvasLayer = OverlayScript.new(config_path)
+	add_child_autofree(second)
+	assert_eq(String(second.get_active_page_id()), "Rounds",
+			"the last-selected page survives a relaunch")
+	var second_panel := second.find_child("DebugPanel", true, false) as Control
+	assert_almost_eq(-second_panel.offset_left, widened, 0.01,
+			"the panel width survives a relaunch")
+
+
+class TestHostPage:
+	extends NovaDebugPage
+	var refreshed := 0
+
+	func page_id() -> StringName:
+		return &"HostExtras"
+
+	func page_title() -> String:
+		return "Host extras"
+
+	func page_category() -> StringName:
+		return &"Host"
+
+	func refresh() -> void:
+		refreshed += 1
+
+
+func test_register_page_appends_a_host_page() -> void:
+	var overlay := _make_overlay()
+	var page := TestHostPage.new()
+	overlay.register_page(page)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"HostExtras"), "the registered page selects by id")
+	assert_gt(page.refreshed, 0, "selection refreshes the newly active page")
+	var texts := _page_list_texts(overlay)
+	assert_has(texts, "HOST", "a custom category grows its own section")
+	assert_has(texts, "Host extras", "the page lists under it")

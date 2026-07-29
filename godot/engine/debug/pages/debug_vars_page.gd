@@ -1,11 +1,8 @@
 class_name DebugVarsPage
-extends VBoxContainer
+extends NovaDebugPage
 ## The V/G/M script-variable banks with the changed-only filter and the
 ## (lockable) live-edit toggle. Rows rebuild only when the visible set or the
 ## writes mode changes; steady-state refreshes update values in place.
-
-var _resolve_sim := Callable()
-var _request_refresh := Callable()
 
 var _nonzero_check: CheckBox
 var _writes_check: CheckButton
@@ -17,8 +14,15 @@ var _var_controls: Dictionary = {}
 var _var_rows_signature := ""
 
 
-func _init() -> void:
-	name = "Vars"
+func page_id() -> StringName:
+	return &"Vars"
+
+
+func page_category() -> StringName:
+	return CATEGORY_SIM
+
+
+func _build() -> void:
 	add_theme_constant_override("separation", 6)
 
 	_nonzero_check = CheckBox.new()
@@ -48,11 +52,6 @@ func _init() -> void:
 	scroll.add_child(_vars_rows)
 
 
-func setup(resolve_sim: Callable, request_refresh: Callable) -> void:
-	_resolve_sim = resolve_sim
-	_request_refresh = request_refresh
-
-
 ## One-way lock on the variable-edit toggle, for hosts that must not let the
 ## overlay mutate the live sim (the editor summons it over a mission preview).
 ## `reason` is the caller's artist-facing tooltip copy. Deliberately no
@@ -66,7 +65,11 @@ func lock_writes(reason: String) -> void:
 		_writes_check.tooltip_text = reason
 
 
-func refresh(sim: Object) -> void:
+func refresh() -> void:
+	var sim := _ctx.sim()
+	if sim == null:
+		_clear_live()
+		return
 	var banks := [
 		["V", sim.get_mission_variables_snapshot(), true],
 		["G", sim.get_global_variables_snapshot(), false],
@@ -125,7 +128,7 @@ func refresh(sim: Object) -> void:
 			(control as Label).text = str(int(entry[2]))
 
 
-func clear_live() -> void:
+func _clear_live() -> void:
 	if _var_rows_signature != "":
 		_var_rows_signature = ""
 		_var_controls.clear()
@@ -166,8 +169,8 @@ func _add_var_row(bank: String, index: int, value: int, writable: bool) -> void:
 
 
 func _on_vars_filter_toggled(_pressed: bool) -> void:
-	if _request_refresh.is_valid():
-		_request_refresh.call()
+	if _ctx.request_refresh.is_valid():
+		_ctx.request_refresh.call()
 
 
 func _on_var_submitted(text: String, index: int) -> void:
@@ -175,8 +178,8 @@ func _on_var_submitted(text: String, index: int) -> void:
 	# before lock_writes() would otherwise still commit on Enter.
 	if _writes_locked or not _writes_check.button_pressed:
 		return
-	var sim: Object = _resolve_sim.call() if _resolve_sim.is_valid() else null
+	var sim := _ctx.sim()
 	if sim != null and text.is_valid_int():
 		sim.set_mission_variable(index, int(text))
-		if _request_refresh.is_valid():
-			_request_refresh.call()
+		if _ctx.request_refresh.is_valid():
+			_ctx.request_refresh.call()
