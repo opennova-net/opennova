@@ -14,7 +14,7 @@ Two related on-disk model formats:
   attributed `0x50bd0b` to `jodemo.exe`; every later probe cites the same range in
   dfvas, and it is treated as dfvas here.
 
-Reimplementation: `libs/threedi` (`threedi_gp.h` / `threedi_gp.cpp` for GP;
+Reimplementation: `libs/threedi` (`threedi_gp.h` with `threedi_gp_read.cpp` + `threedi_gp_write.cpp` for GP;
 the Threedi3di3 reader/writer for 3DI3). Probe harnesses live in
 `tests/threedi/_dump_gp_*.cpp` (non-ctest executables) plus
 `scripts/probe_gp_field.py`.

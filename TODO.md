@@ -60,6 +60,31 @@ hardening, and project health. Divergences from the original engine belong in
 - [x] Reject backward RTXT text ranges (owner: `libs/rtxt/src/rtxt.cpp`): require `text_data_end` to be at or after the entry table before treating it as section metadata. Acceptance (`tests/rtxt/roundtrip_test.cpp`): a one-entry file whose `text_data_end` points inside the entry table is rejected with a stable parse error. (Done 2026-07-28, W2-7.)
 - [x] Harden replay numeric input and playback I/O (owner: `apps/nw_replay/nw_replay.cpp`): reject non-finite or partially parsed numeric arguments and propagate capture-read / UDP-send failures instead of reporting playback complete. Acceptance (new `tests/novaworld/nw_replay_cli_test.cpp`): `--speed nan`, `inf`, junk, and overflow fail parsing, while injected stream/read and send failures produce a non-zero playback result. (Done 2026-07-28, W2-7: the CLI and the paced playback core moved into `apps/nw_replay/nw_replay_cli.{h,cpp}` — `parse_args` reports through an out-param instead of printing, and `run_playback` takes its capture reader, its send and its clock as parameters, so the test injects the failures directly.)
 
+## Quality campaign — remaining slices
+
+The 2026-07 quality campaign (approved 2026-07-28) runs as small independent PRs
+straight to master. Waves 1–3 are DONE (#310–#350): Phase 0 relanded the stranded
+#303 audit; W1 hygiene (dead code, print-zero + ratchets, the io/log.h sink,
+canonical constants); W2 duplication collapse (strutil, framers + PeerAddr, io
+primitives, gd helpers, tooling, pcapio, W2-7 hardening; W2-3 retired as refuted);
+W3 split the six god files into one-concern TUs (mission, collision, 3DI3, GP,
+ai, def) and fixed the citation ratchet (#349). Remaining — each a different kind
+of job, not the TU-split recipe:
+
+- [ ] W3-4 `http_listener::start` — a ~2,200-line FUNCTION decomposition in a net
+      lib (the wire byte-gate applies)
+- [ ] W3-5 `apps/importer/scene_builder.py` split (gate = `scripts/test_python.sh`)
+- [ ] W3-6 `nova_object_data.cpp` split — first collapse its 9
+      `std::clamp(..., -32768, 32767)` copies onto the file's int16 helper, or the
+      promoted-literal lint fires on all nine
+- [ ] W3-7 header-width pass
+- [ ] W4 GDScript: `game_world.gd` forwarder-delete + extractions, typed fields to
+      retire the ~90 `has_method` guards, F3 overlay per-tab, modtools splits
+- [ ] W5 consolidations + push-downs: perf-span unify, sim debug-snapshot
+      narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
+      push-downs (ItemSeatSpecs, camera, armory/catalog) — opportunistic, under
+      the standing "new engine logic starts in libs/" rule
+
 ## Project health follow-ups
 
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.

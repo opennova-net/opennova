@@ -7,7 +7,7 @@ extends Node
 #
 # Per-tick order (single-sourced here, faithful to the original main loop's server-tick-then-render):
 #   advance logic (sim) -> present entity state onto nodes -> drain + emit side effects.
-# [orig: sub_4F81A0 runs the logic systems; the client then renders the entities. Terrain/foliage/audio
+# [orig: WacScript_AdvanceTick runs the logic systems; the client then renders the entities. Terrain/foliage/audio
 #  are host render passes the caller composes around this.]
 #
 # Cadence: NovaSimulation.step() runs ONE logic tick (the original's 62 Hz engine tick) — the

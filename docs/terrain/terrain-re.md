@@ -203,8 +203,12 @@ to literal `trn` at `0x57dbb6`; shipped `DVD4.TRN` contains all four
 pairs. For each quadrant/axis, a nonzero component selects mask 511 plus that
 quadrant's base, while zero selects mask 1023/base zero and crosses the internal
 seam (`0x60327a..0x6032ec`). These values are not `polytrn_wrapx/y`.
-`TrnConfig`, TPJ build flow, `NovaTerrainData`, and
-`build_heightfield_normal_map` now preserve and apply all four pairs.
+`TrnConfig`, the TPJ build flow, and `NovaTerrainData` preserve all four pairs;
+at runtime `height_field_apply_trn` stamps them onto every `TerrainHeightField`
+(the `NovaTerrainData` samplers/raycast and `NovaSimulation`'s grounding field),
+and `build_heightfield_normal_map` plus the `nova_terrain.cpp` render mesh and
+seam normals tap the same `CoordsTaps` kernel. The former Godot-physics
+heightfield consumer was removed (#330; range-find rides the ported raycast).
 
 `PolyTrn_InitTextures` splits the 1024 atlas into four 512 textures
 `TrnNMap0..3` (creator calls from `0x60b3fa`; split loop from

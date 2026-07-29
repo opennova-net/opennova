@@ -6,8 +6,8 @@ Two things live here, and both must stay host-neutral — consumable by the game
 - **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `libs/` to
   Godot. Thin wrappers only — format/runtime logic belongs in `libs/`. Register new
   classes in `register_types.cpp`.
-- **The shared GDScript engine layer** (~25k LOC across 92 scripts) both hosts run on:
-  - `world/` — THE runtime, and by far the largest slice (~12k LOC): `game_world.gd` (the
+- **The shared GDScript engine layer** (~30k LOC across 124 scripts) both hosts run on:
+  - `world/` — THE runtime, and by far the largest slice (~15k LOC): `game_world.gd` (the
     GameWorld host scene), `mission_runtime.gd`, `mission_present_pass.gd`,
     `local_player_host.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.

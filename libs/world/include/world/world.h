@@ -567,7 +567,7 @@ public:
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
     //  Per-system cadences divide it: the WAC VM executes every 62nd tick
-    //  (sub_4F81A0 @0x4f81b1), the BMS normal-event quarter pass runs every 16th
+    //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
 
@@ -575,7 +575,7 @@ public:
     void load_systems();       // calls on_load for each
 
     // One authoritative logic tick: cache transient state, tick all systems,
-    // advance the tick counter (post-execution, faithful to sub_4F81A0 @0x4f81d3).
+    // advance the tick counter (post-execution, faithful to WacScript_AdvanceTick @0x4f81d3).
     void run_logic_tick(bool is_authority = true, bool pre_mission = false);
 
     // End the round: the double-run latch, the winning team, and the SP presentation

@@ -73,7 +73,7 @@ class NovaResourceRoot;
 // 0..N of those: the wall-clock accumulator lives in the driver (MissionRuntime.
 // tick_realtime), faithful to Game_MainLoop @0x52b630. The per-system
 // cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
-// 62nd tick (sub_4F81A0 @0x4f81b1) and the BMS evaluator quarter-passes every 16th
+// 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
 // (Server_TickUpdate @0x51d7e0). Both the editor "Play the mission" preview and the game
 // runtime go through this one path: promote a parsed BMS mission into the world
 // (mission/promote.h), register the systems in the faithful order

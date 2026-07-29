@@ -1,7 +1,7 @@
 #include "world/collision.h"
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged, and each original-code citation moved with the code it annotates.
 //
 // The stateless target queries: point-vs-blink, the segment-vs-solid clip, the
 // projectile face and polygon raycasts, and the contact-force accumulation. Each

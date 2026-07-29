@@ -1,7 +1,7 @@
 #include "world/collision.h"
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
-// unchanged, and the [orig] citations moved with the code they annotate.
+// unchanged, and each original-code citation moved with the code it annotates.
 //
 // Contact resolution — the vehicle hull and entity resolvers — plus the debug views
 // the F3 overlay reads.

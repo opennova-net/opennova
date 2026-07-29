@@ -125,6 +125,7 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-191 | GSB SVRS records ACCUMULATE (retail appends with no per-record clear, `@0x63dbec..0x63dc0d`); our parser cleared per record so only the final SVRS chunk survived — the live missing-server-list symptom (the `.204` fixture is 8 records / 58 rows; the 2026-07-27 live blob's final record holds ONE row, exactly what the old parser showed). `parse_servers` now appends; `gsb_retail_semantics` pins it | A | FIXED 2026-07-27 | PAR-NET |
 | D-NET-192 | The "GSB " record is a GATED reset (frees fields + rows only when payload dword0 == 0x00010000 `@0x63d8f2`, else skipped) and undersized FLDS/SVRS records (payload < 2, `@0x63d7c2`/`@0x63da43`) skip in place — retail has no record-level error path; our dispatcher now mirrors the reset + skips | B | FIXED 2026-07-27 | PAR-NET |
 | D-NET-193 | Retail's GSB parser is an incremental HTTP callback with NO failure return (offset persists at ctx+128; XXXX returns without advancing); our `gsb_parse_response` is deliberately one-shot + bounds-checked (XXXX required, forged lengths rejected) — documented hardening on server-supplied bytes. Also notes the `%d`-signed `@RID@` splice vs our `stoul` wrap (value-preserving) | C | PERMANENT (deliberate host hardening) | PAR-NET |
+| D-NET-194 | Retail's joiner NEVER opens the mission `.bms`: `Game_StartMission @0x524360` authority-gates every mission-file leg (exists-check `@0x524751`, both `Mission_LoadBMSFile @0x40F4E0` sites `@0x524b5d`/`@0x524ffa`), and the non-authority arm builds terrain/env from the wire S2C 0x0B header (`g_BmsHeaderBlock @0xA761D0`: map basename +0x44 = env/TOD key via `Terrain_LoadEnvironmentConfig @0x610940`, env +0xDC, tile-set +0x118 → .TGA/.TSD) with world contents from the spawn stream — no map download exists or is needed (custom missions name stock assets). OUR joiner requires the local `.bms` and aborts, which is the live custom-map join blocker; one such abort also segfaulted in native teardown after the in-match hello handoff. Port = wire-driven joiner world bring-up (net-re §5.28 correction + D-NET-194) | A | OPEN (witnessed 2026-07-27) | PAR-NET |
 
 Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
 per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
@@ -735,7 +736,7 @@ the catalog below.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-RLIT-1 | Hosted weather runs 4 color blocks through the modulator; retail modulates 16 (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | A | OPEN (partial — the hosted subset is the rendered set) | joins as consumers are hosted (skyfog rides frame-clear/horizon) |
+| D-RLIT-1 | Hosted weather ran only 4 color blocks through the modulator; retail modulates 16 in witnessed order (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]`. Closed by #285: `SkyWeatherColorBlocks` runs the complete 16-block chain, skyfog gains its lightning additive/horizon blend/tail double, and `NovaEnvironment` writes every color current back ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED 2026-07-21 | fidelity/water-sky (#285) |
 | D-RLIT-2 | Iris exposure targets the OUTDOOR sample each tick; retail averages 3 samples marched back from the camera-ray hit with interior detection + sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00]` | A | OPEN (partial — curve/chase/chain exact) | rides the interior system + host raycast wiring |
 | D-RLIT-3 | Object materials light at full sun visibility; retail dims DirLightColor per entity (3-ray occlusion, 1.0..0.25) and lerps interior-parented entities to floor/ceiling ambience by the interior's daylight openness `[orig: @ 0x5c6800; @ 0x5d98a0]` | A | WITNESSED-READY-DEFERRED (math ported + T1-pinned) | runtime/interior slices |
 | D-RLIT-4 | Dynamic point lights (≤4 D3D lights, owner/interior group culling, modulator-scaled colors, {1,0,15/r²,1}) unhosted beyond the editor LGHT preview `[orig: @ 0x5a9180; @ 0x5abc50]` | A | WITNESSED-READY-DEFERRED (color/attenuation math ported) | EffectWorld/particle track |
@@ -758,7 +759,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 21 | 1 | 11 | 33 | 19 |
+| Net | 22 | 1 | 11 | 34 | 19 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 56 | 4 | 6 | 66 | 27 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 6 | 21 | 9 |
@@ -774,8 +775,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
-| Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **105** | **13** | **32** | **150** | 106 |
+| Render — lighting | 3 | 0 | 2 | 5 | 1 |
+| **Total** | **105** | **13** | **32** | **150** | 107 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 

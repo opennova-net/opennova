@@ -2064,7 +2064,7 @@ helper. The two `libs/world/src/ai.cpp` citations updated in the same commit.
 Rounds do NOT hit the BVOL volume solids the movement/LOS queries walk — they hit the
 collision block's **CFAC triangle mesh**, per section. Ported as
 `collision_raycast_faces` + `CollisionWorld::raycast_entity_faces`
-(libs/world/src/collision.cpp), consumed by the RoundSim item leg; ctest `collision`
+(libs/world/src/collision_query.cpp), consumed by the RoundSim item leg; ctest `collision`
 (`test_face_raycast*`).
 
 - **Dispatch** `[orig: Projectile_UpdatePhysics @ 0x4e9d70]`: the 5-way closest-hit
@@ -2535,7 +2535,7 @@ PORT (same day): the infantry pass = `AiSystem::infantry_combat_think` /
 `infantry_fire_pass` (`libs/world/src/infantry.cpp`), the feed =
 `AiSystem::acquire_target` + `infantry_scan_nearest_threat`, the relation apply =
 `apply_engage_relations` / `ai_set_target`, the SM rows = `h_enter_ground_combat` /
-`h_enter_ground_evade` / `h_ground_combat_tick` (`libs/world/src/ai.cpp`), AI fire →
+`h_enter_ground_evade` / `h_ground_combat_tick` (`libs/world/src/ai_handlers.cpp`), AI fire →
 ring + RoundSim = `fire_ai_round`. Exit pin: the `ai` ctest's NPC-kills-player block.
 Residual deviations: ledger D-AI-1/2/4 (residuals), D-AI-5/6 (open); the §17.4
 presentation tail and the D-AI-7 LOS collision leg landed 2026-07-16 session 4 (§18).
@@ -2858,7 +2858,7 @@ drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` �
 replaced by the witnessed trail channels, §24); the presentation itself =
 `godot/engine/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
 effect + the §24 tracer ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
-`los_terrain_blocked` (`libs/world/src/collision.cpp`) behind
+`los_terrain_blocked` (`libs/world/src/collision_los.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
 `npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent + the trail
 channels), the `collision` ctest (`test_raycast_clear_los`), and the

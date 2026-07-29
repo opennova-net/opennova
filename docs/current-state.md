@@ -17,6 +17,12 @@ structural (move code, draw boundaries, add gates) and had a schedule. The
 current phase is behavioral (make it act like retail) and is driven by the
 ledger's open rows rather than by a wave calendar.
 
+One structural workstream runs in parallel with the fidelity slices: the
+**2026-07 quality campaign** (approved 2026-07-28) — small independent PRs
+straight to master for dead-code removal, duplication collapse, and god-file
+splits. Waves 1–3 landed as #310–#350; the remaining slices are tracked in
+[`TODO.md`](../TODO.md) § "Quality campaign — remaining slices".
+
 ## The standing loop for a fidelity slice
 
 Every recent slice ran this same shape, and a new one should too:

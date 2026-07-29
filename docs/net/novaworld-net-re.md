@@ -295,7 +295,7 @@ sweep; blank = not yet characterized.
 | 0x07 | 0x422730 | `_0x007` | per-frame keep-alive stub |
 | 0x08 | 0x4281D0 | `_HandleSessionConfig` | SESSION CONFIG, fixed 51 B (the old "~2 KB snapshot" note was wrong): [10×i32 (f3=gameType→g_GameType)][7×u8][u32 bitflags, bits 13/15/16 latched]. Field map §5.54 (decoded) |
 | 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + round-event loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
-| 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
+| 0x0B | 0x422660 | `_HandleBMSHeader` | copies the 616-byte BMS header into `g_BmsHeaderBlock @ 0xA761D0` (field map §5.4) — a JOINER's only mission-identity source; it never opens the `.bms` (§5.28 correction, D-NET-194) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): i32 sessionTick + 3×i32 spawn pos, 3×i16 angles, u8 flags, **fixed 128-i32 score block**, then waypoint records (off-wire gametype gate) + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B. Full field map **§5.29** (decoded) |
@@ -1563,7 +1563,9 @@ tag's appearance in one direction says nothing about the other. The 0x25-vs-0x1D
 ### 5.4 Tag 0x0B — 616-byte BMS header field map
 
 All observed blobs are 616 bytes (the size hardcoded into the handler's copy into
-`byte_A761D0`). Cross-capture diff over three maps (dvxi5 / dvxc1 / g11), sourced from the
+`g_BmsHeaderBlock @ 0xA761D0` — renamed from `byte_A761D0` 2026-07-27; for a JOINER this wire
+copy is the ONLY mission-identity source, §5.28 correction / D-NET-194). Cross-capture diff
+over three maps (dvxi5 / dvxc1 / g11), sourced from the
 fragment-aware dissector (`tools/wireshark/jointops_udp.lua`); never diff from
 non-reassembled per-fragment extracts:
 
@@ -1572,7 +1574,7 @@ non-reassembled per-fragment extracts:
 | 0-3 | 4 | Signature | `42 4d 53 13` | same | same | structural (invariant) |
 | 4-35 | 32 | Mission display name | "AS - Dormant Volcano Isle" | "TD - Tenaga Delta" | "AS - Kendari Airport" | map-specific |
 | 36-67 | 32 | Designer | "Brophy / Brent / BB" | "Brent Houston / James Payne" | "Brent" | map-specific |
-| 68-99 | 32 | Map basename | "dvxi5" | "dvxc1" | "g11" | map-specific — **the BMS file the client must load** |
+| 68-99 | 32 | Map basename | "dvxi5" | "dvxc1" | "g11" | map-specific — `Bms_MapBaseName @ 0xA76214`, the env/TOD-config key (`Terrain_LoadEnvironmentConfig @ 0x610940` arg1 → `Environment_LoadTimeOfDayConfig @ 0x57db30`). **NOT "the BMS file the client must load"** — a joiner never opens a `.bms` (corrected 2026-07-27, §5.28 / D-NET-194) |
 | 116-127 | ~12 | "Default" + padding | "Default\0..." | same | same | structural (invariant string) |
 | 136 | 1 | Game-mode primary | 0x03 | 0x03 | 0x02 | map-specific (3=AS-asym, 2=AS-sym?) |
 | 138 | 1 | Game-mode secondary | 0x01 | 0x00 | 0x01 | map-specific |
@@ -1585,7 +1587,7 @@ non-reassembled per-fragment extracts:
 | 184 | 1 | flag/count | 2 | 0 | 11 | map-specific |
 | 192-215 | 24 | 12-slot ID table? | filled with `ff` | zeros | zeros | map-specific |
 | 246-253 | 8 | Icon key | "full_00" | same | same | structural (invariant string) |
-| 276-307 | 32 | Atlas key | "trntile10" | "trntile10" | "trntilea1" | atlas-specific |
+| 276-307 | 32 | Atlas key | "trntile10" | "trntile10" | "trntilea1" | atlas-specific — the tile-SET basename (field anchor +0x118 = `Bms_TileSetName @ 0xA762E8`, renamed from the misnomer `Bms_TerrainBaseName` 2026-07-27): derives `<name>.TGA` / `<name>.TSD` (ext @ 0x7df3e4) and feeds `XML_ParseTileInfo @ 0x4cc830` |
 | 308-615 | 308 | tail metadata + zeros | sparse non-zero | mostly zeros | mostly zeros | map-specific |
 
 Consequence: any fixture blob of this tag is **map-locked** (the basename at +68 names the BMS
@@ -3305,6 +3307,20 @@ the `0x60` handler imposes — the handler only `memcpy`s raw bytes into a strea
 - `0x64` @ f899: `id=1 total=180 offset=0 chunk=180 [FINAL]` — a binary mission-metadata blob.
 Both consume to the byte; this matches the host emit order in §5.2a
 (`Server_SendInitialGameStateToPlayer @ 0x51bba0`).
+
+**Correction (2026-07-27 — the joiner needs NO mission file; supersedes this section's opening
+framing).** The 0x60/0x64 transfers are SMALL metadata blobs (163/180 B in probe2), not the
+mission file, and nothing else delivers one: a retail joiner never opens a `.bms` at all.
+`Game_StartMission @ 0x524360` authority-gates every mission-file leg — the early exists-check
+@ 0x524751 and both `Mission_LoadBMSFile @ 0x40F4E0` call sites (@ 0x524b5d / @ 0x524ffa) — and
+the in-session non-authority arm (@ 0x524d8f → @ 0x524df1) drives terrain/env entirely from the
+wire 0x0B header (`g_BmsHeaderBlock @ 0xA761D0`: map basename +0x44 = the env/TOD-config key,
+env name +0xDC, tile-set +0x118 → `.TGA`/`.TSD`), then waits for game start
+(`NapiClient_WaitForGameStart @ 0x42cc10`) while the world contents arrive as the spawn
+batches listed above. "The host streams it" was probe2's inference from the joiner lacking
+`probe2.bms` and still joining — true, but what the host streams is the HEADER + metadata +
+entities, never the file. Custom missions reference stock terrain/tile-set/env assets by
+name, so nothing else must exist client-side. Full witness chain + our divergence: D-NET-194.
 
 ### 5.29 Tag 0x0F — world-state-load (joiner spawn + scores + location names; probe2, 2026-06-18; server writer + field roles witnessed 2026-07-03)
 
@@ -9297,6 +9313,20 @@ fetch and stores the ping-sweep gate flags at ctx+68, nothing XML), locals
 `rowRid`/`rowIpAddr` in 0x63d740; 15 corrected comments incl. the 0x660333 `@RID@` witness
 and replacing a wrong FVNG/GRTG/SVHX tag comment (real tags: GSB /FLDS/SVRS/XXXX). IDB saved.
 
+**Wave 9 addendum — joiner mission bring-up (same day, after live custom-map joins failed).**
+Engine-research pass answering "why can't we join custom-map servers": retail's joiner NEVER
+opens the mission `.bms` — `Game_StartMission @ 0x524360` authority-gates every mission-file
+leg, and the non-authority arm builds terrain/env from the wire 0x0B header
+(`g_BmsHeaderBlock @ 0xA761D0`) with the world contents arriving as the §5.2a spawn stream.
+There is NO map-download mechanism in JO retail and none is needed. Full chain + our
+divergence (local-`.bms` requirement + a native teardown segfault on the abort path):
+D-NET-194; §5.28 correction; §5.4 field notes. Second IDB batch: renames
+`NapiNPClientMsg_0x00B @ 0x422660` → `NapiNPClientMsg_HandleBMSHeader`,
+`MultiByteStr @ 0xA76214` → `Bms_MapBaseName`, `byte_A761D0` → `g_BmsHeaderBlock`; witness
+comments @ 0x524751 / 0x524d8f / 0x524df1 / 0x40e250 / 0x6109ce; user-approved rename
+`Bms_TerrainBaseName @ 0xA762E8` → `Bms_TileSetName` (it derives `<name>.TGA`/`<name>.TSD`
+and feeds `XML_ParseTileInfo @ 0x4cc830` — the tile set, not the terrain). IDB saved.
+
 ## 8. D-NET divergence catalog
 
 Every D-NET divergence, grouped by reimpl area. IDs are stable and never renumbered;
@@ -9421,6 +9451,7 @@ clear-per-record artifact):
 - **D-NET-47** [MED, FIXED] JointOperations game-host hello PV1 must be "0.0.0 1/12/2004 EM" (NOT the lobby PV1 "0.0.0 2/10/2004 EM"); wrong PV1 = hard reject. PN casing still needs a direct host witness; code keeps the existing `JointOperations` casing. [orig: CNapiNetwork_Init @ 0x4ca4a0 / NapiNPProtocol_HandleClientJoin @ 0x62B750]
 - **D-NET-48** [LOW, FIXED] dial the host from DECODED NK (url-cipher, split ':'), not plaintext NI/NP (NI/NP feed only the proxy slots). [orig: parse_connection_query_string @ 0x54dfb0 / CNapiGameSession_ConnectOrHost @ 0x4d4f10]
 - **D-NET-49** [OPEN] `jointoperations_pg()` is a placeholder; the in-match PG (16B @ proto+284) is unwitnessed (source `NapiNPVarBlock_Copy @ 0x4ca7af`, not sub_62E750). Re-discover.
+- **D-NET-194** [HIGH, OPEN — the custom-map join blocker, witnessed 2026-07-27] Our joiner REQUIRES the host's mission `.bms` locally (`GameWorld.load_mission_as_joiner` → `load_mission` aborts "not found in <root>"), where retail's joiner NEVER opens the mission file at all. `Game_StartMission @ 0x524360` gates every mission-file leg on authority: the early exists-check (@ 0x524751, abort exit-reason 0x14) and BOTH `Mission_LoadBMSFile @ 0x40F4E0` call sites (@ 0x524b5d fresh-load arm, @ 0x524ffa SP/authority-restart arm) are authority/SP-only. The in-session NON-authority arm (@ 0x524d8f) instead runs a sync-wait (`NapiClient_WaitForDisconnect @ 0x42cb20`), `Game_LoadTerrainDuringConnect @ 0x520710` (call @ 0x524df1), minimap slot models, then `NapiClient_WaitForGameStart @ 0x42cc10` — and every mission-identity input is a field of `g_BmsHeaderBlock @ 0xA761D0`, the 616-byte header S2C 0x0B stored (`NapiNPClientMsg_HandleBMSHeader @ 0x422660`, renamed this session): map basename +0x44 (`Bms_MapBaseName @ 0xA76214`, the env/TOD-config key — `Terrain_LoadEnvironmentConfig @ 0x610940` arg1 → `Environment_LoadTimeOfDayConfig @ 0x57db30`), environment name +0xDC (`Bms_EnvironmentName @ 0xA762AC`), tile-set basename +0x118 (@ 0xA762E8 → `<name>.TGA` / `<name>.TSD`, ext @ 0x7df3e4), plus the §5.4 water/fog/TOD override fields. The world CONTENTS arrive as the §5.2a initial-state stream (§5.28's small 0x60/0x64 metadata transfers, 0x0F, and the 0x10/0x0D/0x0C/0x20 spawn batches). There is NO map-download mechanism in JO retail and none is needed — custom missions reference stock terrain/tile-set/env assets by name, so a joiner resolves everything from shipped data. CONSEQUENCE, live 2026-07-27: joins to custom-map servers on the live service abort at mission load ("HmS Eastern Islands T.bms" / "Operation: Glass Arro.bms" / "AS - Flooded Village.bms" not found) — a failure retail cannot exhibit — and one such abort segfaulted in native teardown after the in-match hello handoff (the abort path itself is divergence-only code with a crash of its own). Port = drive the joiner's world bring-up from the wire 0x0B header + spawn stream instead of the local `.bms` (terrain/env/tile-set identity from the header; zones/entities already arrive via the decoded spawn batches — `Entity_BuildSpawnZoneList @ 0x43EAE0` scans POOLS, not the file, §5.29).
 
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
 - **D-NET-50** [HIGH, FIXED] `build_tag_0a_world_reference` shipped a 623-byte verbatim retail blob (`kRetailTag0aPayload`, only bytes 0-11 patched) on a 300 ms gameplay cadence — an ADR-0003 raw-passthrough violation. Replaced with a **field-driven builder**: it constructs a `FrameUpdate` from the host's `PlayerReplicationState` + `config_.replicated_entities` (anchor = subject world position; one tag=1 compact record per replicated entity, positions 16-bit compressed relative to the anchor via the new `network_compress_fixedpoint`, classed by `GameEntitySnapshot.entity_class`) and emits it via the new `encode_frame_update` — the exact inverse of `decode_frame_update`. Ported `network_compress_fixedpoint` (with a documented zero-guard divergence) + added `encode_frame_update` / `encode_weapon_hit_record` (ingame_encode). Validated by encode↔decode round-trips (compressor + whole-frame) and a `game_session` end-to-end assertion that the tick's 0x0A `decode_frame_update`-cleans. Guided/Unknown classes are skipped (no 0x0A compact form). Vehicle-local (mounted) compression + env/timer sub-block rotation are tracked follow-ups. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop / Network_CompressFixedPoint @ 0x4C2780]
