@@ -1809,53 +1809,6 @@ func get_destruction_present_stats() -> RefCounted:
 	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else null
 
 
-# --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
-func has_local_player() -> bool:
-	return _runtime != null and _runtime.has_player()
-
-func local_player_position() -> Vector3:
-	return _runtime.local_player_position() if _runtime != null else Vector3.ZERO
-
-func local_player_yaw_deg() -> float:
-	return _runtime.local_player_yaw_deg() if _runtime != null else 0.0
-
-func local_player_pitch_deg() -> float:
-	return _runtime.local_player_pitch_deg() if _runtime != null else 0.0
-
-func local_player_body_anim_slot() -> int:
-	return _runtime.local_player_body_anim_slot() if _runtime != null else -1
-
-func local_player_anim_key() -> String:
-	return _runtime.local_player_anim_key() if _runtime != null else ""
-
-func local_player_anim_phase_ticks() -> int:
-	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
-
-func local_player_aim_overlay() -> PlayerAimOverlay:
-	return _runtime.local_player_aim_overlay() if _runtime != null else null
-
-func local_player_health() -> int:
-	return _runtime.local_player_health() if _runtime != null else 0
-
-func local_player_max_health() -> int:
-	return _runtime.local_player_max_health() if _runtime != null else 100
-
-func local_player_team() -> int:
-	return _runtime.local_player_team() if _runtime != null else 0
-
-func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
-	if _runtime != null:
-		_runtime.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
-
-## One frame of raw mouse pixels -> the sim-owned look (see mission_runtime).
-func add_local_player_look(dx_px: float, dy_px: float) -> void:
-	if _runtime != null:
-		_runtime.add_player_look(dx_px, dy_px)
-
-## Stance SELECT request: 0 stand / 1 crouch / 2 prone.
-func request_local_player_stance(stance: int) -> bool:
-	return _runtime.request_player_stance(stance) if _runtime != null else false
-
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third
 ## person: in first person the body stays renderable on the reflection-only layer, because the
@@ -2118,62 +2071,10 @@ func _setup_local_player_weapon(model) -> void:
 			_local_weapon_dict, clip_seconds, _local_weapon_preserve_slot_state)
 
 
-## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload
-## edge — the dispatch gates (full-magazine/empty-reserve refusal) run in the sim
-## [orig: the binding-149/reload input dispatch, Input_HandleActionBinding_0 @0x4e0420].
-func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed)
-
-
-## The category keys 1..9 [orig: input actions 201-209 -> Player_SwitchToWeaponByHandle
-## ((action-200)*65) @ 0x4e1144]; the sim runs the witnessed walk and answers through
-## the event drain.
-func request_local_player_weapon_category(category: int) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.request_local_player_weapon_category(category)
-
-
-## Next/previous weapon [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70].
-func request_local_player_weapon_cycle(direction: int) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.request_local_player_weapon_cycle(direction)
-
-
 ## The installed FP weapon dict's name (empty when none) — the switch-event guard
 ## against redundant viewmodel reinstalls.
 func local_player_weapon_name() -> String:
 	return String(_local_weapon_dict.get("name", ""))
-
-
-## The ADS toggle request; the sim applies the dispatcher gates and owns the engaged
-## state [orig: input case 6 @0x4e0420; Player_ToggleWeaponScope @0x4df0c0].
-func request_local_player_scope_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_scope_toggle())
-
-
-## Retail Binoculars action 26 (default B). The sim owns the persistent request
-## and its movement/life/round/camera-derived effective states.
-func request_local_player_binoculars_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_binoculars_toggle())
-
-
-## Retail Night Vision action 41 (default N); mission EnableNVG is night
-## semantics, not an input permission gate.
-func request_local_player_nvg_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_nvg_toggle())
-
-
-## Retail NVG gain actions 56/57 (default +/-), clamped sim-side to 0..4.
-func request_local_player_nvg_gain(delta: int) -> int:
-	var sim := get_sim()
-	return int(sim.request_local_player_nvg_gain(delta)) if sim != null else 0
 
 
 ## Feed only the first-person-visible NVG state into world lighting. The raw
@@ -2181,22 +2082,6 @@ func request_local_player_nvg_gain(delta: int) -> int:
 func set_local_player_nvg_view(active: bool, gain: int) -> void:
 	if _env != null and _env.has_method("set_nvg_view"):
 		_env.set_nvg_view(active, gain)
-
-
-## The host camera mode, driving the sim-side fov suppression + anchor chase
-## [orig: g_camera_mode @0xA890C8].
-func set_local_player_camera_third_person(third_person: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_camera_third_person(third_person)
-
-
-## The host-sampled head-bone eye (Godot space) — the sim's 3P anchor-chase target
-## [orig: ThirdPersonCamera_Update @0x437b70 target = Position + CameraOffset].
-func set_local_player_eye(eye: Vector3, valid: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_eye(eye, valid)
 
 
 ## The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once at this
@@ -3526,13 +3411,13 @@ func get_mission_audio() -> NovaMissionAudio:
 # Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode ids not yet
 # mapped to our sessions).
 func _music_var_pump() -> void:
-	if not has_local_player():
+	if _runtime == null or not _runtime.has_player():
 		return
-	var max_h := local_player_max_health()
-	var cur_h := local_player_health()
+	var max_h: int = _runtime.local_player_max_health()
+	var cur_h: int = _runtime.local_player_health()
 	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
 		(cur_h * 100 / max_h) if max_h > cur_h else 100)
-	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
+	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, _runtime.local_player_team())
 
 
 # --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------

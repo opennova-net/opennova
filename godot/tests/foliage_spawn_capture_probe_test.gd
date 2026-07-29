@@ -12,9 +12,9 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 		"Probe should boot the real play-in-editor GameWorld.")
 	assert_true(source.contains("_mission_workspace.play_controller()"),
 		"Probe should bind the workspace's public live-play seam.")
-	assert_true(source.contains("world.has_local_player()"),
+	assert_true(source.contains("world.get_sim().has_local_player()"),
 		"Probe should fail unless the mission spawned a local player.")
-	assert_true(source.contains("world.local_player_position()"),
+	assert_true(source.contains("world.get_sim().get_local_player_position()"),
 		"Probe should record the real local-player anchor.")
 	assert_true(source.contains("world.set_foliage_hidden(true)"),
 		"Foliage-hidden A/B should use GameWorld's public API.")

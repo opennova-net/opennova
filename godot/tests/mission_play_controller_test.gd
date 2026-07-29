@@ -10,27 +10,20 @@ const PlayController := preload("res://modtools/mission/mission_play_controller.
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 
 
-class FakeWorld:
-	extends Node3D
+# The value-only sim double behind FakeWorld.get_sim(): NovaSimulation's native
+# names, recording the same state the old GameWorld-forwarder stubs recorded.
+class FakeSim:
+	extends RefCounted
 	var input_calls: Array = []
-
-	func is_loaded() -> bool:
-		return true
+	var look_calls: Array = []
+	var stance_requests: Array = []
+	var eye_calls: Array = []
+	var weapon_input_calls: Array = []
 
 	func has_local_player() -> bool:
 		return true
 
-	func build_local_player_avatar() -> Node3D:
-		var node := Node3D.new()
-		add_child(node)
-		return node
-
-	func build_local_player_viewmodel() -> Node3D:
-		var node := Node3D.new()
-		add_child(node)
-		return node
-
-	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool,
+	func set_player_input(forward: bool, back: bool, left: bool, right: bool,
 			lean_left: bool, lean_right: bool, jump: bool) -> void:
 		input_calls.append({
 			"forward": forward,
@@ -42,32 +35,74 @@ class FakeWorld:
 			"jump": jump,
 		})
 
-	var look_calls: Array = []
 	func add_local_player_look(dx_px: float, dy_px: float) -> void:
 		look_calls.append(Vector2(dx_px, dy_px))
 
-	var stance_requests: Array = []
 	func request_local_player_stance(stance: int) -> bool:
 		stance_requests.append(stance)
 		return true
 
-	func local_player_position() -> Vector3:
+	func set_local_player_eye(eye: Vector3, valid: bool) -> void:
+		eye_calls.append([eye, valid])
+
+	func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool,
+			reload_pressed: bool) -> void:
+		weapon_input_calls.append([fire_held, fire_pressed, reload_pressed])
+
+	func request_local_player_weapon_category(_category: int) -> void:
+		pass
+
+	func request_local_player_weapon_cycle(_direction: int) -> void:
+		pass
+
+	func request_local_player_scope_toggle() -> bool:
+		return true
+
+	func set_local_player_camera_third_person(_third_person: bool) -> void:
+		pass
+
+	func get_local_player_position() -> Vector3:
 		return Vector3.ZERO
 
-	func local_player_yaw_deg() -> float:
+	func get_local_player_yaw_deg() -> float:
 		return 0.0
 
-	func local_player_pitch_deg() -> float:
+	func get_local_player_pitch_deg() -> float:
 		return 0.0
 
-	func local_player_anim_key() -> String:
+	func get_local_player_anim_key() -> String:
 		return ""
 
-	func local_player_anim_phase_ticks() -> int:
+	func get_local_player_anim_phase_ticks() -> int:
 		return 0
 
-	func local_player_body_anim_slot() -> int:
+	func get_local_player_body_anim_slot() -> int:
 		return -1
+
+
+class FakeWorld:
+	extends Node3D
+	var sim := FakeSim.new()
+
+	func is_loaded() -> bool:
+		return true
+
+	func get_sim() -> FakeSim:
+		return sim
+
+	# No MissionRuntime in the harness: the aim-overlay seam reads null (no overlay).
+	func get_runtime():
+		return null
+
+	func build_local_player_avatar() -> Node3D:
+		var node := Node3D.new()
+		add_child(node)
+		return node
+
+	func build_local_player_viewmodel() -> Node3D:
+		var node := Node3D.new()
+		add_child(node)
+		return node
 
 
 func after_each() -> void:
@@ -115,9 +150,9 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	assert_true(play.handle_viewport_input(motion), "SubViewport input path must feed gameplay look")
 	host.before_world_tick(0.016)
 
-	assert_eq(world.input_calls.size(), 1)
-	assert_eq(world.look_calls.size(), 1, "mouse motion forwards raw pixels to the sim pipeline")
-	assert_eq(world.look_calls[0], Vector2(40.0, -20.0))
+	assert_eq(world.sim.input_calls.size(), 1)
+	assert_eq(world.sim.look_calls.size(), 1, "mouse motion forwards raw pixels to the sim pipeline")
+	assert_eq(world.sim.look_calls[0], Vector2(40.0, -20.0))
 
 	# The stance/camera keys ride the same route the input-stage interception
 	# feeds: F4 flips the shared host's first/third person...
@@ -130,7 +165,7 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_X)), "X (crouch) is claimed")
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_Z)), "Z (prone) is claimed")
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_C)), "C (stand) is claimed")
-	assert_eq(world.stance_requests, [1, 2, 0])
+	assert_eq(world.sim.stance_requests, [1, 2, 0])
 
 	# While playing the game owns the keyboard: a key pushed through the root
 	# viewport's real input pipeline is claimed at the input stage, before the
@@ -140,7 +175,7 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	editor_box.grab_focus()
 	get_tree().root.push_input(_pressed_key(KEY_C, "c"))
 	host.before_world_tick(0.016)
-	assert_eq(world.stance_requests, [1, 2, 0, 0],
+	assert_eq(world.sim.stance_requests, [1, 2, 0, 0],
 		"the pushed key reached the player host as a stance request, not the editor UI")
 	assert_eq(editor_box.text, "", "the focused control never saw the key while playing")
 

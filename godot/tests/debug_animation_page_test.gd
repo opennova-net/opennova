@@ -31,12 +31,28 @@ class StubRegistry:
 		return nodes
 
 
+# The value-only sim double the page reads through _ctx.sim(): the local
+# player's animation scalars under NovaSimulation's native getter names.
+class StubSim:
+	extends RefCounted
+
+	func get_local_player_anim_key() -> String:
+		return "prone_crawl"
+
+	func get_local_player_body_anim_slot() -> int:
+		return 17
+
+	func get_local_player_anim_phase_ticks() -> int:
+		return 42
+
+
 class StubRuntime:
 	extends Node
 	var registry := StubRegistry.new()
+	var sim := StubSim.new()
 
 	func get_sim() -> Object:
-		return null
+		return sim
 
 	func get_registry() -> StubRegistry:
 		return registry
@@ -44,15 +60,6 @@ class StubRuntime:
 
 class StubWorld:
 	extends Node
-
-	func local_player_anim_key() -> String:
-		return "prone_crawl"
-
-	func local_player_body_anim_slot() -> int:
-		return 17
-
-	func local_player_anim_phase_ticks() -> int:
-		return 42
 
 
 func _make_page(world: Node = null, runtime: Node = null) -> DebugAnimationPage:

@@ -141,6 +141,9 @@ class FirstOpenArmorySimProxy:
 	func is_joiner() -> bool:
 		return false
 
+	func get_local_player_team() -> int:
+		return inner.get_local_player_team()
+
 	func get_local_player_class() -> int:
 		return inner.get_local_player_class()
 
@@ -177,9 +180,6 @@ class FirstOpenArmoryWorldProxy:
 
 	func get_weapon_database() -> NovaWeaponDatabase:
 		return inner.get_weapon_database()
-
-	func local_player_team() -> int:
-		return inner.local_player_team()
 
 	func local_player_viewmodel_def():
 		return inner.local_player_viewmodel_def()

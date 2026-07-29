@@ -44,7 +44,7 @@ func _mission_wait(seconds: float) -> void:
 
 
 func _nearest_npc(sim, world) -> Dictionary:
-	var player_pos: Vector3 = world.local_player_position()
+	var player_pos: Vector3 = world.get_sim().get_local_player_position()
 	var best := {}
 	var best_dist := INF
 	for i in AI_SCAN_CAP:
@@ -98,7 +98,7 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("ai_corpse_probe: player never spawned (mission load stalled?)")
@@ -120,7 +120,7 @@ func _run() -> void:
 	var seconds := 0
 	var px_per_deg := 8.0
 	var prev_err := 0.0
-	var prev_pos: Vector3 = world.local_player_position()
+	var prev_pos: Vector3 = world.get_sim().get_local_player_position()
 	var target_index := -1
 	var target_net := -1
 	var target_hp0 := -1
@@ -140,7 +140,7 @@ func _run() -> void:
 					[target_net, target_hp0, dist, int(npc.get("deathtime_ticks", -1)),
 					str(npc.get("leave_corpse", false))])
 			break
-		var pos: Vector3 = world.local_player_position()
+		var pos: Vector3 = world.get_sim().get_local_player_position()
 		var moved := Vector2(pos.x - prev_pos.x, pos.z - prev_pos.z)
 		var tgt: Vector3 = npc.get("position", pos)
 		var want := Vector2(tgt.x - pos.x, tgt.z - pos.z)
@@ -148,12 +148,12 @@ func _run() -> void:
 			var err := rad_to_deg(moved.angle_to(want))
 			if abs(err) > abs(prev_err) + 1.0 and abs(prev_err) > 0.5:
 				px_per_deg = -px_per_deg
-			world.add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
+			world.get_sim().add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
 			prev_err = err
 		prev_pos = pos
 		if seconds % 10 == 0:
 			print("PROBE approach t=%ds dist=%.1fu hp=%d" %
-					[seconds, dist, world.local_player_health()])
+					[seconds, dist, world.get_sim().get_local_player_health()])
 	_forward = false
 
 	if target_index < 0:
@@ -173,11 +173,11 @@ func _run() -> void:
 		quit(1)
 		return
 	var yaw0 := cam.global_rotation.y
-	world.add_local_player_look(50.0, 0.0)
+	world.get_sim().add_local_player_look(50.0, 0.0)
 	await _mission_wait(0.2)
 	var yaw_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.y - yaw0, -PI, PI))
 	var pitch0 := cam.global_rotation.x
-	world.add_local_player_look(0.0, 50.0)
+	world.get_sim().add_local_player_look(0.0, 50.0)
 	await _mission_wait(0.2)
 	var pitch_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.x - pitch0, -PI, PI))
 	print("PROBE aim gains: yaw %.1f px/deg, pitch %.1f px/deg" % [yaw_gain, pitch_gain])
@@ -196,7 +196,7 @@ func _run() -> void:
 	var hp_prev := 10
 	var fire_ticks := 0
 	var stalled := 0
-	world.set_local_player_weapon_input(true, true, false)
+	world.get_sim().set_local_player_weapon_input(true, true, false)
 	while seconds < MAX_MISSION_SECONDS:
 		# One mission-second burst: re-aim at the live chest EVERY frame (a hit
 		# NPC reacts and moves) and close distance while far (aim is camera-based,
@@ -210,7 +210,7 @@ func _run() -> void:
 				# look, not the camera eye — aim the camera ray at the chest PLUS the
 				# eye-muzzle vertical offset so the round line crosses the chest
 				# sphere (a straight eye-ray at the chest passes ~0.7u under it).
-				var muzzle_y: float = world.local_player_position().y + 0.9
+				var muzzle_y: float = world.get_sim().get_local_player_position().y + 0.9
 				var aim_bias := cam.global_position.y - muzzle_y
 				var chest := tpos + Vector3(0.0, 0.9 + aim_bias, 0.0)
 				var to := chest - cam.global_position
@@ -218,11 +218,11 @@ func _run() -> void:
 				var err_yaw := rad_to_deg(wrapf(atan2(-to.x, -to.z) - atan2(-fwd.x, -fwd.z), -PI, PI))
 				var err_pitch := rad_to_deg(atan2(to.y, Vector2(to.x, to.z).length())
 						- atan2(fwd.y, Vector2(fwd.x, fwd.z).length()))
-				world.add_local_player_look(
+				world.get_sim().add_local_player_look(
 						clampf(err_yaw * yaw_gain, -400.0, 400.0),
 						clampf(err_pitch * pitch_gain, -400.0, 400.0))
 				_forward = Vector2(to.x, to.z).length() > 8.0
-			world.set_local_player_weapon_input(true, false, false)
+			world.get_sim().set_local_player_weapon_input(true, false, false)
 			await process_frame
 		seconds += 1
 		fire_ticks += 1
@@ -237,16 +237,16 @@ func _run() -> void:
 		if not bool(row.get("alive", true)) or hp <= 0:
 			killed_at = seconds
 			_forward = false
-			world.set_local_player_weapon_input(false, false, false)
+			world.get_sim().set_local_player_weapon_input(false, false, false)
 			print("PROBE KILLED t=%ds — player rounds killed net=%d" % [seconds, target_net])
 			break
-		if world.local_player_health() <= 0:
+		if world.get_sim().get_local_player_health() <= 0:
 			print("PROBE FAIL: the NPC killed the PLAYER first (t=%ds) — rerun" % seconds)
 			quit(1)
 			return
 		if stalled > 0 and stalled % 10 == 0:
 			var tp2: Vector3 = row.get("position", Vector3.INF)
-			var d2 := tp2.distance_to(world.local_player_position()) if tp2 != Vector3.INF else -1.0
+			var d2 := tp2.distance_to(world.get_sim().get_local_player_position()) if tp2 != Vector3.INF else -1.0
 			print("PROBE stall t=%ds hp=%d dist=%.1fu state=%d" %
 					[seconds, hp, d2, int(row.get("state", -1))])
 		if fire_ticks > 60:

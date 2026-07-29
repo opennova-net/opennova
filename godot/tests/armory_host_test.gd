@@ -10,10 +10,14 @@ class FakeSim:
 	var multiplayer := false
 	var player_class := 8
 	var weapon := ""
+	var entity_team := 2
 	var applies: Array = []
 
 	func local_player_in_armory_zone() -> bool:
 		return in_zone
+
+	func get_local_player_team() -> int:
+		return entity_team
 
 	func is_host_listening() -> bool:
 		return multiplayer
@@ -49,7 +53,6 @@ class FakeWorld:
 	var root: NovaResourceRoot
 	var weapons: NovaWeaponDatabase
 	var sim
-	var entity_team := 2
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
@@ -61,9 +64,6 @@ class FakeWorld:
 
 	func get_weapon_database() -> NovaWeaponDatabase:
 		return weapons
-
-	func local_player_team() -> int:
-		return entity_team
 
 	func local_player_viewmodel_def():
 		return null
@@ -99,6 +99,9 @@ class ArmoryZoneSimProxy:
 
 	func is_joiner() -> bool:
 		return false
+
+	func get_local_player_team() -> int:
+		return inner.get_local_player_team()
 
 	func get_local_player_class() -> int:
 		return inner.get_local_player_class()

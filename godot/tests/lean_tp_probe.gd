@@ -130,13 +130,13 @@ func _ready() -> void:
 func _dump(tag: String) -> void:
 	var view = _world.local_player_view()
 	var roll: float = view.fp_roll_deg if view != null else -999.0
-	var anim := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else "?"
+	var anim := String(_world.get_sim().get_local_player_anim_key()) if _world.get_sim() != null else "?"
 	var right: Vector3 = _cam.global_transform.basis.x
 	var roll_deg := rad_to_deg(asin(clampf(right.y, -1.0, 1.0)))
-	var pos: Vector3 = _world.local_player_position()
+	var pos: Vector3 = _world.get_sim().get_local_player_position()
 	print("[leantp] %s: fp_roll_deg=%.2f cam_roll=%.2f cam_pos=%s player=%s anim=%s yaw=%.1f pitch=%.1f third=%s" % [
 		tag, roll, roll_deg, str(_cam.global_position), str(pos), anim,
-		_world.local_player_yaw_deg(), _world.local_player_pitch_deg(),
+		_world.get_sim().get_local_player_yaw_deg(), _world.get_sim().get_local_player_pitch_deg(),
 		str(_host.is_third_person())])
 
 

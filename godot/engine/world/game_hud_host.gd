@@ -176,7 +176,8 @@ func tick() -> void:
 		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
 		return
-	if not _world.has_local_player():
+	var sim = _world.get_sim()
+	if sim == null or not sim.has_local_player():
 		if not _warned_no_player:
 			_warned_no_player = true
 			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
@@ -184,12 +185,12 @@ func tick() -> void:
 	_ensure_game_hud()
 	if _game_hud == null:
 		return
-	var max_h: int = _world.local_player_max_health()
-	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
+	var max_h: int = sim.get_local_player_max_health()
+	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
 	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip
 	# key). Icon indices: 0=stand, 1=crouch, 2=prone. [orig: HUD_BuildEntityInfo
 	# @0x4b860c — entity+300 flags 0x200=crouch->1, 0x100=prone->2]
-	var anim_key: String = _world.local_player_anim_key()
+	var anim_key: String = sim.get_local_player_anim_key()
 	var stance := 0
 	if "prone" in anim_key:
 		stance = 2
@@ -252,7 +253,7 @@ func tick() -> void:
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
 		"stance": stance,
-		"team": _world.local_player_team(),
+		"team": sim.get_local_player_team(),
 		"objective": "",
 		"weapon_active": weapon_active,
 		"clip": clip,
