@@ -28,6 +28,12 @@ class NovaTerrainFoliageDef;
 class NovaTerrainFoliageMap;
 class NovaTerrainTileInfo;
 
+// The .trn's four lock_* pairs as the portable neighbour-tap policy. One converter
+// for every heightmap tap in the runtime: the height samplers (via the height field),
+// the render mesh, and the collision heightfield — so no site can silently keep the
+// old unconditional full-atlas wrap.
+opennova::terrain::CoordsQuadrantLocks coords_locks_from(const opennova::TrnConfig &trn);
+
 class NovaTerrainData : public Resource {
 	GDCLASS(NovaTerrainData, Resource)
 

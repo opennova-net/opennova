@@ -784,6 +784,15 @@ target_link_libraries(coords_test PRIVATE opennova_terrain)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME coords COMMAND coords_test)
 
+# Per-quadrant neighbour-tap locks (the .trn lock_* pairs) in the shared tap
+# kernel: the masking against a verbatim copy of the original, the lock-table
+# index, the sampler at a sector seam locked vs unlocked, and the all-zero
+# default that keeps unlocked terrains rendering exactly as before.
+add_executable(quadrant_lock_test terrain/quadrant_lock_test.cpp)
+target_link_libraries(quadrant_lock_test PRIVATE opennova_terrain_query)
+target_include_directories(quadrant_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME quadrant_lock COMMAND quadrant_lock_test)
+
 # The retail terrain segment raycast (libs/terrain_query/terrain_raycast):
 # the Terrain_RaycastHeightmapLoRes march + HiRes_0 refine structural
 # translation over a synthetic sampler — step normalization/budget, ray-z hit

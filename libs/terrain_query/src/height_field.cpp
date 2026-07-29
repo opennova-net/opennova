@@ -40,9 +40,9 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 	if (!r.valid) return 0.0f;
 
 	const int hm_size = f.dim;
-	const int mask = hm_size - 1;
-	const int hx = static_cast<int>(std::floor(r.source_x)) & mask;
-	const int hz = static_cast<int>(std::floor(r.source_z)) & mask;
+	const CoordsTaps taps = coords_taps_for_sector(f.locks, r.sector_id, hm_size);
+	const int hx = taps.x(static_cast<int>(std::floor(r.source_x)));
+	const int hz = taps.z(static_cast<int>(std::floor(r.source_z)));
 	return f.heightmap[hz * hm_size + hx] / 256.0f;
 }
 
@@ -54,15 +54,17 @@ float height_field_height_world_bilinear(const TerrainHeightField &f, float worl
 	if (!r.valid) return 0.0f;
 
 	const int hm_size = f.dim;
-	const int mask = hm_size - 1;
 	const int ix = static_cast<int>(std::floor(r.source_x));
 	const int iz = static_cast<int>(std::floor(r.source_z));
 	const float fx = r.source_x - static_cast<float>(ix);
 	const float fz = r.source_z - static_cast<float>(iz);
-	const int x0 = ix & mask;
-	const int x1 = (ix + 1) & mask;
-	const int z0 = iz & mask;
-	const int z1 = (iz + 1) & mask;
+	// The +1 taps are the ones that reach the quadrant's far edge: on a locked axis
+	// they wrap back to its own row/column 0 instead of crossing into the neighbour.
+	const CoordsTaps taps = coords_taps_for_sector(f.locks, r.sector_id, hm_size);
+	const int x0 = taps.x(ix);
+	const int x1 = taps.x(ix + 1);
+	const int z0 = taps.z(iz);
+	const int z1 = taps.z(iz + 1);
 	const float h00 = static_cast<float>(f.heightmap[z0 * hm_size + x0]);
 	const float h10 = static_cast<float>(f.heightmap[z0 * hm_size + x1]);
 	const float h01 = static_cast<float>(f.heightmap[z1 * hm_size + x0]);

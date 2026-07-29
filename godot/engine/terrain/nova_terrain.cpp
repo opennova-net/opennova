@@ -554,13 +554,17 @@ void NovaTerrain::_strip_to_list(const std::vector<uint16_t>& strip,
 // Normal from heightmap gradient
 // ---------------------------------------------------------------------------
 
-Vector3 NovaTerrain::_heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz) const {
+Vector3 NovaTerrain::_heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
+                                       const opennova::terrain::CoordsTaps& taps) const {
 	const int size = 1024;
 	const float scale = 1.0f / 256.0f;
-	int x0 = (gx - 1) & (size - 1);
-	int x1 = (gx + 1) & (size - 1);
-	int z0 = (gz - 1) & (size - 1);
-	int z1 = (gz + 1) & (size - 1);
+	// Same lock policy as the vertex heights: a gradient tap at the quadrant edge
+	// wraps inside it rather than reading the neighbouring quadrant's shoreline,
+	// which would tilt the seam row's normals into a false cliff face.
+	int x0 = taps.x(gx - 1);
+	int x1 = taps.x(gx + 1);
+	int z0 = taps.z(gz - 1);
+	int z1 = taps.z(gz + 1);
 	float hL = depth[gz * size + x0] * scale;
 	float hR = depth[gz * size + x1] * scale;
 	float hD = depth[z0 * size + gx] * scale;
@@ -740,6 +744,8 @@ bool NovaTerrain::_build_terrain() {
 		return false;
 	}
 	const float height_scale = 1.0f / 256.0f;
+	const opennova::terrain::CoordsQuadrantLocks quadrant_locks =
+		coords_locks_from(terrain_data->get_trn());
 
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
@@ -772,21 +778,29 @@ bool NovaTerrain::_build_terrain() {
 		int local_base_x = tile.tile_x & 0x1FF;
 		int local_base_z = tile.tile_y & 0x1FF;
 
+		// The tile's own quadrant decides the lock policy for every one of its
+		// vertices; a tile whose last row/column lands on the quadrant boundary is
+		// exactly the case the .trn locks exist for.
+		// [orig: sub_402D20 — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
+		const opennova::terrain::CoordsTaps taps =
+			opennova::terrain::coords_taps_for_quadrant(
+				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);
+
 		for (int vi = 0; vi < tile.vertex_count; vi++) {
 			uint16_t rel_x = tile.vertex_indices[vi * 2 + 0];
 			uint16_t rel_y = tile.vertex_indices[vi * 2 + 1];
 
 			int wx = tile.tile_x + rel_x;
 			int wz = tile.tile_y + rel_y;
-			int hx = wx & (hm_size - 1);
-			int hz = wz & (hm_size - 1);
+			int hx = taps.x(wx);
+			int hz = taps.z(wz);
 			float hy = cpt.depth_buffer[hz * hm_size + hx] * height_scale;
 
 			float lx = static_cast<float>(local_base_x + rel_x);
 			float lz = static_cast<float>(local_base_z + rel_y);
 
 			positions.set(vi, Vector3(lx, hy, lz));
-			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz));
+			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz, taps));
 			uvs.set(vi, Vector2(static_cast<float>(wx) / 1024.0f,
 			                    static_cast<float>(wz) / 1024.0f));
 
@@ -964,6 +978,7 @@ void NovaTerrain::_build_collision() {
 	const int HM_SIZE = 1024;
 	const float HEIGHT_SCALE = 1.0f / 256.0f;
 	const int SHAPE_DIM = 513;
+	const opennova::terrain::CoordsQuadrantLocks quadrant_locks = coords_locks_from(trn);
 
 	int rows = trn.sector_rows > 0 ? trn.sector_rows : 1;
 	int cols = trn.sector_count > 0 ? trn.sector_count : 1;
@@ -979,14 +994,21 @@ void NovaTerrain::_build_collision() {
 			int qx = (sector_id == 3 || sector_id == 4) ? 512 : 0;
 			int qz = (sector_id == 2 || sector_id == 4) ? 512 : 0;
 
+			// The shape is 513 wide to close the gap to the next sector, so its last
+			// row and column are the boundary taps the .trn locks govern — collision
+			// has to wrap them the same way the render mesh does or the player falls
+			// into a trench that isn't drawn.
+			const opennova::terrain::CoordsTaps taps =
+				opennova::terrain::coords_taps_for_quadrant(quadrant_locks, qx, qz, HM_SIZE);
+
 			// Extract 513x513 height data
 			PackedFloat32Array map_data;
 			map_data.resize(SHAPE_DIM * SHAPE_DIM);
 			float* dst = map_data.ptrw();
 			for (int z = 0; z < SHAPE_DIM; z++) {
+				const int hz = taps.z(qz + z);
 				for (int x = 0; x < SHAPE_DIM; x++) {
-					int hx = (qx + x) & (HM_SIZE - 1);
-					int hz = (qz + z) & (HM_SIZE - 1);
+					const int hx = taps.x(qx + x);
 					dst[z * SHAPE_DIM + x] =
 						static_cast<float>(cpt.depth_buffer[hz * HM_SIZE + hx]) * HEIGHT_SCALE;
 				}

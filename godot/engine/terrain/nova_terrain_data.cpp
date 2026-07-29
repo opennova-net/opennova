@@ -211,6 +211,7 @@ opennova::terrain::TerrainHeightField height_field_from(const opennova::CptFile 
 	field.layout.sector_grid = &trn.sector_grid[0][0];
 	field.layout.origin_x = trn.origin_x;
 	field.layout.origin_y = trn.origin_y;
+	field.locks = coords_locks_from(trn);
 	return field;
 }
 
@@ -385,6 +386,15 @@ opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32
 }
 
 } // namespace
+
+opennova::terrain::CoordsQuadrantLocks godot::coords_locks_from(const opennova::TrnConfig &trn) {
+	const opennova::TerrainQuadrantLocks source = trn.get_quadrant_locks();
+	opennova::terrain::CoordsQuadrantLocks locks{};
+	for (int quadrant = 0; quadrant < static_cast<int>(source.size()); ++quadrant) {
+		locks.set(quadrant, source[quadrant].x != 0, source[quadrant].y != 0);
+	}
+	return locks;
+}
 
 // ---------------------------------------------------------------------------
 // Macros for texture property boilerplate
