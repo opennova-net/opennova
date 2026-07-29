@@ -301,6 +301,7 @@ func _build_default_pages() -> void:
 	register_page(DebugParticlesPage.new())
 	register_page(DebugOcclusionPage.new())
 	register_page(DebugRoundsPage.new())
+	register_page(DebugTerrainPage.new())
 	register_page(DebugViewPage.new())
 
 	_player_pane = DebugPlayerPage.new()

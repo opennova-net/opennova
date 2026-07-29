@@ -22,7 +22,7 @@ const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
 const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
 const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/View/show_skeletons")
-const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/View/hide_foliage")
+const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/Terrain/hide_foliage")
 
 
 class FakePoseSim:
@@ -413,7 +413,7 @@ func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
 	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
 
 
-func test_view_page_hide_foliage_toggle_rides_the_option_registry() -> void:
+func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
@@ -732,7 +732,8 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
 		assert_has(texts, header, "the %s section header is present" % header)
 	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
-			"Rounds & collision", "View", "Player", "Stats", "Perf"]:
+			"Rounds & collision", "Terrain & foliage", "View", "Player", "Stats",
+			"Perf"]:
 		assert_has(texts, page_title, "the %s page is listed" % page_title)
 	var header_row := texts.find("SIMULATION")
 	assert_false(list.is_item_selectable(header_row), "section headers are not rows")

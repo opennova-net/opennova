@@ -2935,6 +2935,16 @@ func get_effect_world() -> NovaEffectWorld:
 	return _effect_world
 
 
+## The live terrain node, for the F3 Terrain & foliage page's counters/knobs.
+func get_terrain_node() -> NovaTerrain:
+	return _terrain
+
+
+## The live foliage dispatcher (null until a mission builds one), same consumer.
+func get_foliage_dispatcher() -> NovaFoliageDispatcher:
+	return _dispatcher
+
+
 # Owner-transform provider for the effect world's owned/attached groups. Int keys are
 # WAC fx2ssn SSNs (the runtime resolves the live entity transform; null = entity gone,
 # the group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]); String keys
