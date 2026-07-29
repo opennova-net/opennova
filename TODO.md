@@ -71,8 +71,11 @@ W3 split the six god files into one-concern TUs (mission, collision, 3DI3, GP,
 ai, def) and fixed the citation ratchet (#349). Remaining — each a different kind
 of job, not the TU-split recipe:
 
-- [ ] W3-4 `http_listener::start` — a ~2,200-line FUNCTION decomposition in a net
-      lib (the wire byte-gate applies)
+- [x] W3-4 `http_listener::start` (DONE: the 2,230-line function became six
+      per-family registrar methods — admin API, publish callbacks, public API,
+      legacy login chain, legacy host/join, static/catch-all — handler bodies
+      verbatim; gate = the Linux HTTP-ON compile + boot smoke, since no ctest
+      links this TU and the HTTP surface has no goldens)
 - [x] W3-5 `apps/importer/scene_builder.py` split (DONE: 2,209 lines → the
       `apps/importer/scene_builder/` package — five concern mixins + core facade +
       helpers, public import surface unchanged; gate held at `scripts/test_python.sh`)
