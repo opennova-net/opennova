@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -113,6 +114,11 @@ uint8_t to_u8_color(float value) {
 uint8_t to_u8_255(float value) {
 	const int rounded = static_cast<int>(std::lround(std::clamp(value, 0.0f, 255.0f)));
 	return static_cast<uint8_t>(std::clamp(rounded, 0, 255));
+}
+
+int16_t clamp_to_i16(int value) {
+	return static_cast<int16_t>(std::clamp<int>(value,
+			std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max()));
 }
 
 float dict_float(const Dictionary &dict, const char *key, float fallback) {
@@ -514,8 +520,8 @@ void apply_alpha_gen(ThreediIRAlphaGen &dst, const Dictionary &params) {
 	dst.phase = dict_float(params, "phase", dst.phase);
 	dst.reg = dict_int(params, "reg", dst.reg);
 	dst.rate = dict_float(params, "rate", dst.rate);
-	dst.start = static_cast<int16_t>(std::clamp(dict_int(params, "start", dst.start), -32768, 32767));
-	dst.end = static_cast<int16_t>(std::clamp(dict_int(params, "end", dst.end), -32768, 32767));
+	dst.start = clamp_to_i16(dict_int(params, "start", dst.start));
+	dst.end = clamp_to_i16(dict_int(params, "end", dst.end));
 }
 
 void apply_rgb_gen(ThreediIRRgbGen &dst, const Dictionary &params) {
@@ -693,7 +699,7 @@ int16_t panm_clamp_i16_from_double(double value) {
 	if (!std::isfinite(value)) {
 		return 0;
 	}
-	return static_cast<int16_t>(std::clamp(static_cast<int>(std::lround(value)), -32768, 32767));
+	return clamp_to_i16(static_cast<int>(std::lround(value)));
 }
 
 uint32_t panm_pack_flags_from_parts(uint8_t scale_type, uint8_t rotation_type, uint8_t rotation_reversed, uint8_t translate_type) {
@@ -2310,8 +2316,8 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 	if (key == "alpha_gen_style") { mat.alpha_gen.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
 	if (key == "alpha_gen_rate") { mat.alpha_gen.rate = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
 	if (key == "alpha_gen_phase") { mat.alpha_gen.phase = static_cast<float>(p_value); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_start") { mat.alpha_gen.start = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(UPDATE_MTRL); return true; }
-	if (key == "alpha_gen_end") { mat.alpha_gen.end = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_start") { mat.alpha_gen.start = clamp_to_i16(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
+	if (key == "alpha_gen_end") { mat.alpha_gen.end = clamp_to_i16(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
 	if (key == "alpha_gen_reg") { mat.alpha_gen.reg = static_cast<int32_t>(static_cast<int>(p_value)); _notify_object_changed(UPDATE_MTRL); return true; }
 	if (key == "alpha_gen_reg_name") { if (!resolve_reg(String(p_value), mat.alpha_gen.reg)) return false; _notify_object_changed(UPDATE_MTRL); return true; }
 	if (key == "uv_u_style") { mat.u_params.style = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255)); _notify_object_changed(UPDATE_MTRL); return true; }
@@ -3162,17 +3168,17 @@ bool NovaObjectData::set_part_anim_track_field(int p_lod_index, int p_anim_index
 		return true;
 	}
 	if (key == "rate") {
-		track->rate = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767));
+		track->rate = clamp_to_i16(static_cast<int>(p_value));
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	if (key == "start") {
-		track->start = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767));
+		track->start = clamp_to_i16(static_cast<int>(p_value));
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	if (key == "end") {
-		track->end = static_cast<int16_t>(std::clamp(static_cast<int>(p_value), -32768, 32767));
+		track->end = clamp_to_i16(static_cast<int>(p_value));
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
@@ -3957,7 +3963,7 @@ Error NovaObjectData::set_material_texture_animation(int p_material_index, const
 	ThreediIRTexAnim &animation = ir.materials[p_material_index].animation;
 	animation.num_frames = static_cast<uint8_t>(std::clamp(dict_int(p_params, "num_frames", animation.num_frames), 0, 255));
 	animation.animation_type = static_cast<uint8_t>(std::clamp(dict_int(p_params, "animation_type", animation.animation_type), 0, 255));
-	animation.cycle_frame_time = static_cast<int16_t>(std::clamp(dict_int(p_params, "cycle_frame_time", animation.cycle_frame_time), -32768, 32767));
+	animation.cycle_frame_time = clamp_to_i16(dict_int(p_params, "cycle_frame_time", animation.cycle_frame_time));
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
