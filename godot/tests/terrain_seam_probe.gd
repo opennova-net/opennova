@@ -128,6 +128,31 @@ func _ready() -> void:
 	print("[seam] worst boundary-vs-2u-back drop along 480 u of seam: %.3f u at x %.1f"
 			% [along_worst, along_worst_x])
 
+	# End-to-end grounding. The height the PLAYER stands on comes from
+	# NovaSimulation's OWN TerrainHeightField, not NovaTerrainData's — a second
+	# construction of the same struct, and the one that decides whether you fall
+	# through. Teleport across the boundary and read back where the motor settles.
+	var runtime := _find_by_method(get_tree().root, "get_sim")
+	var sim = runtime.get_sim() if runtime != null else null
+	if sim != null and sim.has_method("debug_teleport_local_player") \
+			and sim.has_method("get_local_player_position"):
+		print("[seam] player grounding across the boundary (bms y = -godot z):")
+		var fell := 0
+		for i in range(-6, 10):
+			var by: float = -seam_z + float(i) * 0.25
+			var h: float = terrain_data.get_height_world_bilinear(Vector3(from_g.x, 0.0, -by))
+			sim.debug_teleport_local_player(Vector3(from_g.x, by, h + 3.0), 0.0, 0.0)
+			await _settle(30)
+			var p: Vector3 = sim.get_local_player_position()
+			var bad := p.y < h - 1.0
+			if bad:
+				fell += 1
+			print("[seam]   bms y %8.3f   terrain %8.3f   settled %8.3f%s"
+					% [by, h, p.y, "   <- FELL THROUGH" if bad else ""])
+		print("[seam] fell through at %d of 16 samples across the boundary" % fell)
+	else:
+		print("[seam] no sim / debug_teleport_local_player (stale DLL?); grounding not checked")
+
 	# Screenshots: the dumped eye, then a side-on view 40 u off the seam looking
 	# along it, which is the angle a boundary trench cannot hide from.
 	await _shoot("eye", from_g, from_g + fwd_g)

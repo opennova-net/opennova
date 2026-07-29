@@ -209,9 +209,7 @@ opennova::terrain::TerrainHeightField height_field_from(const opennova::CptFile 
 	field.heightmap = cpt.depth_buffer.data();
 	field.dim = static_cast<int>(std::sqrt(static_cast<double>(cpt.depth_buffer.size())));
 	field.layout.sector_grid = &trn.sector_grid[0][0];
-	field.layout.origin_x = trn.origin_x;
-	field.layout.origin_y = trn.origin_y;
-	field.locks = coords_locks_from(trn);
+	height_field_apply_trn(field, trn);
 	return field;
 }
 
@@ -394,6 +392,13 @@ opennova::terrain::CoordsQuadrantLocks godot::coords_locks_from(const opennova::
 		locks.set(quadrant, source[quadrant].x != 0, source[quadrant].y != 0);
 	}
 	return locks;
+}
+
+void godot::height_field_apply_trn(opennova::terrain::TerrainHeightField &field,
+                                   const opennova::TrnConfig &trn) {
+	field.layout.origin_x = trn.origin_x;
+	field.layout.origin_y = trn.origin_y;
+	field.locks = coords_locks_from(trn);
 }
 
 // ---------------------------------------------------------------------------
