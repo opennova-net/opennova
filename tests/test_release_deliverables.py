@@ -10,6 +10,16 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+FIXTURE_SOURCES = {
+    "asset-importer": "onimport-v0.1.4.exe",
+    "blender-ase-exporter": "opennova_blender-v0.0.4.zip",
+    "max-ase-exporter": "opennova_max-v0.1.4.mzp",
+    "modding-editor": "opennova-modtools-windows-v0.0.9.zip",
+    "game-runtime": "opennova-runtime-windows-v0.0.9.zip",
+    "modding-editor-macos": "opennova-modtools-macos-v0.0.9.zip",
+    "game-runtime-macos": "opennova-runtime-macos-v0.0.9.zip",
+}
+
 
 def _load_validator():
     path = ROOT / "scripts" / "validate_release_deliverables.py"
@@ -96,6 +106,12 @@ def _write_deliverable_fixtures(dist: Path) -> None:
     )
 
 
+def _keep_deliverable_fixtures(dist: Path, deliverable_ids: set[str]) -> None:
+    for deliverable_id, source_name in FIXTURE_SOURCES.items():
+        if deliverable_id not in deliverable_ids:
+            (dist / source_name).unlink()
+
+
 def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path) -> None:
     validator = _load_validator()
     dist = tmp_path / "dist"
@@ -131,6 +147,124 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert "Use:" in text
     assert "Blender" in text
     assert "3ds Max" in text
+
+
+def test_release_validator_selects_manifest_deliverables_in_manifest_order(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    stage = dist / "release-assets"
+    body = tmp_path / "release-body.md"
+    selected_ids = {"modding-editor", "game-runtime"}
+    dist.mkdir()
+    _write_deliverable_fixtures(dist)
+    _keep_deliverable_fixtures(dist, selected_ids)
+
+    result = validator.validate_release_deliverables(
+        repo_root=ROOT,
+        dist_dir=dist,
+        stage_dir=stage,
+        release_body=body,
+        release_version="v0.0.9",
+        deliverable_ids=["game-runtime", "modding-editor"],
+    )
+
+    assert [item.id for item in result.items] == ["modding-editor", "game-runtime"]
+    assert {path.name for path in stage.iterdir()} == {
+        "opennova-modding-editor-windows-v0.0.9.zip",
+        "opennova-game-runtime-windows-v0.0.9.zip",
+    }
+    body_text = body.read_text(encoding="utf-8")
+    assert "opennova-modding-editor-windows-v0.0.9.zip" in body_text
+    assert "opennova-game-runtime-windows-v0.0.9.zip" in body_text
+    assert "opennova-asset-importer-windows-v0.0.9.exe" not in body_text
+    assert "macos" not in body_text.lower()
+
+
+def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    stage = dist / "release-assets"
+    body = tmp_path / "release-body.md"
+    selected_ids = {"modding-editor", "game-runtime"}
+    dist.mkdir()
+    _write_deliverable_fixtures(dist)
+    _keep_deliverable_fixtures(dist, selected_ids)
+
+    exit_code = validator.main(
+        [
+            "--repo-root",
+            str(ROOT),
+            "--dist",
+            str(dist),
+            "--stage-dir",
+            str(stage),
+            "--release-body",
+            str(body),
+            "--release-version",
+            "v0.0.9",
+            "--only-id",
+            "modding-editor",
+            "--only-id",
+            "game-runtime",
+        ]
+    )
+
+    assert exit_code == 0
+    assert {path.name for path in stage.iterdir()} == {
+        "opennova-modding-editor-windows-v0.0.9.zip",
+        "opennova-game-runtime-windows-v0.0.9.zip",
+    }
+
+
+@pytest.mark.parametrize(
+    ("deliverable_ids", "message"),
+    [
+        (["not-a-deliverable"], "Unknown deliverable IDs: not-a-deliverable"),
+        (
+            ["modding-editor", "modding-editor"],
+            "Duplicate deliverable IDs: modding-editor",
+        ),
+        ([], "At least one deliverable ID must be selected"),
+    ],
+)
+def test_release_validator_rejects_invalid_selection(
+    tmp_path: Path,
+    deliverable_ids: list[str],
+    message: str,
+) -> None:
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _write_deliverable_fixtures(dist)
+
+    with pytest.raises(validator.DeliverableValidationError, match=message):
+        validator.validate_release_deliverables(
+            repo_root=ROOT,
+            dist_dir=dist,
+            stage_dir=dist / "release-assets",
+            release_body=tmp_path / "release-body.md",
+            release_version="0.0.9",
+            deliverable_ids=deliverable_ids,
+        )
+
+
+def test_release_validator_rejects_unselected_dist_files(tmp_path: Path) -> None:
+    validator = _load_validator()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _write_deliverable_fixtures(dist)
+
+    with pytest.raises(validator.DeliverableValidationError, match="Unexpected files"):
+        validator.validate_release_deliverables(
+            repo_root=ROOT,
+            dist_dir=dist,
+            stage_dir=dist / "release-assets",
+            release_body=tmp_path / "release-body.md",
+            release_version="0.0.9",
+            deliverable_ids=["modding-editor", "game-runtime"],
+        )
 
 
 def test_release_validator_rejects_missing_archive_entry(tmp_path: Path) -> None:
@@ -199,7 +333,7 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     assert "artifact-ids:" in release_job
 
 
-def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> None:
+def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     package_jobs = [
         "package-addon",
@@ -207,51 +341,57 @@ def test_ci_validates_package_artifacts_and_uses_versioned_upload_globs() -> Non
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]
-    godot_package_jobs = [
-        "package-godot-windows-editor",
-        "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
-    ]
+    deferred_pr_jobs = ["package-addon", "package-max-mzp", "package-importer"]
+    godot_package_jobs = ["package-godot-windows-editor", "package-godot-windows-runtime"]
 
     assert "validate-deliverables:" in workflow
     assert "package-godot-windows-editor:" in workflow
     assert "package-godot-windows-runtime:" in workflow
-    assert "package-godot-macos-editor:" in workflow
-    assert "package-godot-macos-runtime:" in workflow
+    assert "package-godot-macos-editor:" not in workflow
+    assert "package-godot-macos-runtime:" not in workflow
     assert "package-godot:" not in workflow
     assert "package-godot-editor:" not in workflow
     assert "package-godot-runtime:" not in workflow
     assert "package-godot-macos:" not in workflow
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "scripts/package_godot_editor_macos.sh" in workflow
-    assert "scripts/package_godot_runtime_macos.sh" in workflow
+    assert "scripts/package_godot_editor_macos.sh" not in workflow
+    assert "scripts/package_godot_runtime_macos.sh" not in workflow
     assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
-    # The non-Godot package jobs run independently (no needs).
-    for package_job in package_jobs:
-        if package_job in godot_package_jobs:
-            continue  # these now need their build-gdextension-<os> job (asserted below)
+
+    # Tool packages are retained for master/manual runs but leave the PR hot path.
+    for package_job in deferred_pr_jobs:
+        body = _workflow_job(workflow, package_job)
+        assert "if: github.event_name != 'pull_request'" in body
         assert "needs:" not in _workflow_job(workflow, package_job)
-    # The Godot package jobs reuse a prebuilt GDExtension (compiled once per OS by
-    # build-gdextension-<os>) instead of recompiling it, so each needs its build job.
+
+    # Windows preview packages reuse the prebuilt GDExtension.
     assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-editor")
     assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "package-godot-windows-runtime")
-    assert "needs: [build-gdextension-macos]" in _workflow_job(workflow, "package-godot-macos-editor")
-    assert "needs: [build-gdextension-macos]" in _workflow_job(workflow, "package-godot-macos-runtime")
-    assert (
-        "needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, "
-        "package-godot-windows-editor, package-godot-windows-runtime, "
-        "package-godot-macos-editor, package-godot-macos-runtime]"
-    ) in _workflow_job(workflow, "validate-deliverables")
+
     for package_job in godot_package_jobs:
         body = _workflow_job(workflow, package_job)
         assert "Cache Godot binary" in body
         assert "Cache Godot export templates" in body
-    assert "scripts/validate_release_deliverables.py --release-version 0.0.0-ci" in workflow
+
+    validate_job = _workflow_job(workflow, "validate-deliverables")
+    assert (
+        "needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, "
+        "package-godot-windows-editor, package-godot-windows-runtime]"
+    ) in validate_job
+    assert "always()" in validate_job
+    for package_job in package_jobs:
+        assert f"needs.{package_job}" in validate_job
+    assert "Download pull request package artifacts" in validate_job
+    assert "Download non-PR package artifacts" in validate_job
+    assert "--release-version 0.0.0-ci" in validate_job
+    assert "--only-id asset-importer" in validate_job
+    assert "--only-id blender-ase-exporter" in validate_job
+    assert "--only-id max-ase-exporter" in validate_job
+    assert validate_job.count("--only-id modding-editor") == 2
+    assert validate_job.count("--only-id game-runtime") == 2
+
     assert "dist/onimport-v*.exe" in workflow
     assert "dist/opennova-modtools-windows-v*.zip" in workflow
     assert "dist/opennova-runtime-windows-v*.zip" in workflow
@@ -274,37 +414,35 @@ def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
     )
 
 
-def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
+def test_ci_builds_windows_gdextension_once_and_caches_with_sccache() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    # The GDExtension (godot/engine + libs/ + the pinned godot-cpp submodule) is
-    # compiled once per OS in dedicated jobs, not in every consumer.
+    # Regular CI is Windows-only; tag release CI retains the macOS deliverables.
+    assert "os: [windows-latest]" in _workflow_job(workflow, "test")
+    assert "os: [windows-latest]" in _workflow_job(workflow, "godot-tests")
+    assert "macos-latest" not in workflow
     assert "build-gdextension-windows:" in workflow
-    assert "build-gdextension-macos:" in workflow
+    assert "build-gdextension-macos:" not in workflow
+    assert "gdext_macos" not in workflow
 
-    # Those build jobs cache godot-cpp's objects across runs via sccache.
+    # The Windows build caches godot-cpp's objects and uses the optimized
+    # symbol-bearing configuration for the template_debug test DLL.
     assert "mozilla-actions/sccache-action" in workflow
     assert "SCCACHE_GHA_ENABLED" in workflow
     assert "CMAKE_CXX_COMPILER_LAUNCHER: sccache" in workflow
 
-    # Windows must use the Ninja generator (the Visual Studio generator ignores
-    # CMAKE_*_COMPILER_LAUNCHER) with the MSVC environment activated.
     win_build = _workflow_job(workflow, "build-gdextension-windows")
     assert "-G Ninja" in win_build
     assert "ilammy/msvc-dev-cmd" in win_build
+    assert 'b = "RelWithDebInfo"' in win_build
+    assert 'b = "Debug"' not in win_build
 
-    # godot-tests and the Godot package jobs consume the prebuilt DLLs: each needs a
-    # build job and downloads the artifact rather than recompiling.
-    assert (
-        "needs: [build-gdextension-windows, build-gdextension-macos]"
-        in _workflow_job(workflow, "godot-tests")
-    )
+    # Godot tests no longer wait for a macOS build.
+    assert "needs: [build-gdextension-windows]" in _workflow_job(workflow, "godot-tests")
     consumers = [
         "godot-tests",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]
     for job in consumers:
         body = _workflow_job(workflow, job)
@@ -318,8 +456,6 @@ def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]:
         body = _workflow_job(workflow, job)
         assert "uses: actions/upload-artifact@v7" in body
@@ -333,6 +469,14 @@ def test_ci_builds_gdextension_once_per_os_and_caches_with_sccache() -> None:
     assert "uses: actions/download-artifact@v8" in validate_job
     assert "artifact-ids:" in validate_job
     assert "pattern: opennova_*" not in validate_job
+
+
+def test_ci_runs_ctest_in_parallel() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    build_script = (ROOT / "scripts/build.sh").read_text(encoding="utf-8")
+
+    assert '--parallel "$jobs"' in build_script
+    assert '--parallel "$(nproc)"' in _workflow_job(workflow, "novaworld-server")
 
 
 def test_godot_test_wrapper_allows_fixture_inner_classes() -> None:

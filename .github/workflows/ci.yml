@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -74,9 +74,9 @@ jobs:
 
   # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
   # plus the net-scoped ctests. This mirrors what the deploy image builds; the
-  # win/mac `test` matrix compiles the same net libs and runs the same tests
+  # Windows `test` job compiles the same net libs and runs the same tests
   # with BUILD_NOVAWORLD_HTTP=OFF (no Crow/asio FetchContent on the hot legs).
-  # Target-scoped build: the wider lib corpus is win/mac-covered and this repo
+  # Target-scoped build: the wider lib corpus is Windows-covered and this repo
   # has no other Linux leg yet.
   novaworld-server:
     runs-on: ubuntu-latest
@@ -113,7 +113,7 @@ jobs:
 
       - name: Run net ctests
         run: |
-          ctest --test-dir build-server --output-on-failure -R \
+          ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
             "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
 
   modsuperoed-smoke:
@@ -206,10 +206,10 @@ jobs:
           path: web/dist
 
   # Compile the GDExtension (godot/engine + libs/ + the pinned third_party/godot-cpp)
-  # ONCE per OS. godot-tests and the four package jobs download these DLLs instead of
-  # recompiling. sccache caches godot-cpp's objects across runs, so after one warm-up
-  # only changed engine/libs sources recompile. Windows must use Ninja: the Visual
-  # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
+  # once. godot-tests and the two Windows package jobs download these DLLs instead
+  # of recompiling. sccache caches godot-cpp's objects across runs, so after one
+  # warm-up only changed engine/libs sources recompile. Windows must use Ninja:
+  # the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
     runs-on: windows-latest
     env:
@@ -240,13 +240,14 @@ jobs:
           ninja --version
           Write-Host "cl: $((Get-Command cl -ErrorAction SilentlyContinue).Source)"
           foreach ($c in @(
-            @{ t = "template_debug";   d = "build-godot-debug";   b = "Debug" },
+            @{ t = "template_debug";   d = "build-godot-debug";   b = "RelWithDebInfo" },
             @{ t = "template_release"; d = "build-godot-release"; b = "Release" }
           )) {
             # -G Ninja so the sccache compiler launcher is honored. /Z7 (embedded
             # debug info via CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded) makes the
-            # Debug objects cacheable; the default /Zi separate-PDB is not. CMP0141=NEW
-            # forces that policy into godot-cpp (its CMake policy ceiling is < 3.25).
+            # RelWithDebInfo objects cacheable; the default /Zi separate-PDB is not.
+            # CMP0141=NEW forces that policy into godot-cpp (its CMake policy ceiling
+            # is < 3.25).
             cmake -S godot/engine -B $c.d -G Ninja `
               "-DGODOTCPP_TARGET=$($c.t)" `
               "-DCMAKE_BUILD_TYPE=$($c.b)" `
@@ -276,61 +277,13 @@ jobs:
             godot/bin/libopennova.windows.template_debug.x86_64.dll
             godot/bin/libopennova.windows.template_release.x86_64.dll
 
-  build-gdextension-macos:
-    runs-on: macos-latest
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      CMAKE_CXX_COMPILER_LAUNCHER: sccache
-      CMAKE_C_COMPILER_LAUNCHER: sccache
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          lfs: false   # the build consumes no LFS game assets
-
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Build GDExtension (debug arm64 + release universal)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Unix Makefiles already honor CMAKE_*_COMPILER_LAUNCHER; no generator change.
-          # -j 3 is deliberate: a bare -j OOM/swap-thrashes the 3-core macOS runner.
-          cmake -S godot/engine -B build-godot-debug \
-            -DGODOTCPP_TARGET=template_debug -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build-godot-debug --target opennova -j 3
-          cmake -S godot/engine -B build-godot-release \
-            -DGODOTCPP_TARGET=template_release -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-          cmake --build build-godot-release --target opennova -j 3
-          for f in godot/bin/libopennova.macos.template_debug.arm64.dylib \
-                   godot/bin/libopennova.macos.template_release.universal.dylib; do
-            [[ -f "$f" ]] || { echo "missing GDExtension dylib: $f" >&2; exit 1; }
-          done
-          lipo -archs godot/bin/libopennova.macos.template_release.universal.dylib
-
-      - name: sccache stats
-        run: sccache --show-stats
-
-      - name: Upload macOS GDExtension
-        uses: actions/upload-artifact@v4
-        with:
-          name: gdext_macos
-          if-no-files-found: error
-          path: |
-            godot/bin/libopennova.macos.template_debug.arm64.dylib
-            godot/bin/libopennova.macos.template_release.universal.dylib
-
   godot-tests:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
-    # Matrix legs can't have per-OS needs; depending on both build jobs is harmless
-    # (each leg only downloads its own artifact below).
-    needs: [build-gdextension-windows, build-gdextension-macos]
+    needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -379,20 +332,6 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
-      - name: Install Godot (macOS)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # macOS Godot ships as a .app bundle; the binary lives inside it.
-          if [ ! -x ".godot-bin/Godot.app/Contents/MacOS/Godot" ]; then
-            mkdir -p .godot-bin
-            curl -fL -o .godot-bin/godot.zip \
-              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_macos.universal.zip"
-            unzip -o .godot-bin/godot.zip -d .godot-bin
-            chmod +x ".godot-bin/Godot.app/Contents/MacOS/Godot"
-          fi
-
       - name: Download GDExtension (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/download-artifact@v4
@@ -400,20 +339,11 @@ jobs:
           name: gdext_windows
           path: godot/bin
 
-      - name: Download GDExtension (macOS)
-        if: matrix.os == 'macos-latest'
-        uses: actions/download-artifact@v4
-        with:
-          name: gdext_macos
-          path: godot/bin
-
       - name: Prime Godot import cache
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
             GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
@@ -437,14 +367,13 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            export GODOT_BIN="${PWD}/.godot-bin/Godot.app/Contents/MacOS/Godot"
           else
             export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
           bash scripts/test_godot.sh
 
   package-addon:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       artifact_id: ${{ steps.upload_blender.outputs.artifact-id }}
@@ -475,6 +404,7 @@ jobs:
           if-no-files-found: error
 
   package-max-mzp:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_max.outputs.artifact-id }}
@@ -507,6 +437,7 @@ jobs:
           if-no-files-found: error
 
   package-importer:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_importer.outputs.artifact-id }}
@@ -642,115 +573,27 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  package-godot-macos-editor:
-    runs-on: macos-latest
-    needs: [build-gdextension-macos]
-    outputs:
-      artifact_id: ${{ steps.upload_modtools_macos.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Download GDExtension
-        uses: actions/download-artifact@v4
-        with:
-          name: gdext_macos
-          path: godot/bin
-
-      - name: Package Godot macOS editor export
-        shell: bash
-        env:
-          SKIP_BUILD: "1"
-        run: scripts/package_godot_editor_macos.sh
-
-      - name: Upload opennova-modtools macOS zip
-        id: upload_modtools_macos
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-modtools-macos-v*.zip
-          archive: false
-          if-no-files-found: error
-
-  package-godot-macos-runtime:
-    runs-on: macos-latest
-    needs: [build-gdextension-macos]
-    outputs:
-      artifact_id: ${{ steps.upload_runtime_macos.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Download GDExtension
-        uses: actions/download-artifact@v4
-        with:
-          name: gdext_macos
-          path: godot/bin
-
-      - name: Package Godot macOS runtime export
-        shell: bash
-        env:
-          SKIP_BUILD: "1"
-        run: scripts/package_godot_runtime_macos.sh
-
-      - name: Upload opennova runtime macOS zip
-        id: upload_runtime_macos
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-macos-v*.zip
-          archive: false
-          if-no-files-found: error
-
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]
+    needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
+    # Tool-package jobs are skipped on PRs. always() avoids implicit skip
+    # propagation; the explicit result checks still block failed dependencies.
+    if: >-
+      ${{
+        always() &&
+        needs.test.result == 'success' &&
+        needs.godot-tests.result == 'success' &&
+        needs.package-godot-windows-editor.result == 'success' &&
+        needs.package-godot-windows-runtime.result == 'success' &&
+        (
+          github.event_name == 'pull_request' ||
+          (
+            needs.package-addon.result == 'success' &&
+            needs.package-max-mzp.result == 'success' &&
+            needs.package-importer.result == 'success'
+          )
+        )
+      }}
     steps:
       - uses: actions/checkout@v4
 
@@ -758,7 +601,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download package artifacts
+      - name: Download pull request package artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          artifact-ids: >-
+            ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
+            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
+          merge-multiple: true
+          skip-decompress: true
+
+      - name: Download non-PR package artifacts
+        if: github.event_name != 'pull_request'
         uses: actions/download-artifact@v8
         with:
           path: dist
@@ -767,9 +622,7 @@ jobs:
             ${{ needs.package-max-mzp.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
             ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }},
-            ${{ needs.package-godot-macos-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-macos-runtime.outputs.artifact_id }}
+            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -778,8 +631,24 @@ jobs:
           # validation fails. skip-decompress keeps each artifact as its raw file.
           skip-decompress: true
 
-      - name: Validate release deliverables
-        run: python scripts/validate_release_deliverables.py --release-version 0.0.0-ci
+      - name: Validate pull request deliverables
+        if: github.event_name == 'pull_request'
+        run: >-
+          python scripts/validate_release_deliverables.py
+          --release-version 0.0.0-ci
+          --only-id modding-editor
+          --only-id game-runtime
+
+      - name: Validate non-PR deliverables
+        if: github.event_name != 'pull_request'
+        run: >-
+          python scripts/validate_release_deliverables.py
+          --release-version 0.0.0-ci
+          --only-id asset-importer
+          --only-id blender-ase-exporter
+          --only-id max-ase-exporter
+          --only-id modding-editor
+          --only-id game-runtime
 
   # Surface the two Windows builds on the PR as a single comment that updates in
   # place. Depends on the Windows package jobs (not the test jobs), so links only
