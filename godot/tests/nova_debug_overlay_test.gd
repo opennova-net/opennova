@@ -737,8 +737,8 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
 		assert_has(texts, header, "the %s section header is present" % header)
 	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
-			"Rounds & collision", "Terrain & foliage", "Animation & models",
-			"Player", "Stats", "Perf"]:
+			"Rounds & collision", "Terrain & foliage", "Environment",
+			"Animation & models", "Player", "Stats", "Perf"]:
 		assert_has(texts, page_title, "the %s page is listed" % page_title)
 	assert_false(texts.has("View"), "the dissolved View page is gone")
 	var header_row := texts.find("SIMULATION")

@@ -2994,6 +2994,20 @@ func get_item_db() -> NovaItemDatabase:
 	return _placer.get_item_db() if _placer != null else null
 
 
+## The live environment / weather / water nodes, for the F3 Environment
+## page's readouts and scrub knobs.
+func get_environment_node() -> Node:
+	return _env
+
+
+func get_weather_node() -> Node:
+	return get_node_or_null("NovaWeather")
+
+
+func get_water_node() -> Node:
+	return _water
+
+
 # Owner-transform provider for the effect world's owned/attached groups. Int keys are
 # WAC fx2ssn SSNs (the runtime resolves the live entity transform; null = entity gone,
 # the group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]); String keys
