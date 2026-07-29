@@ -50,6 +50,7 @@
 #include "object/nova_skeletal_anim.h"
 #include "hud/nova_hud_pos.h"
 #include "mission/nova_mission_data.h"
+#include "simulation/nova_present_applier.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
 #include "lwf/nova_lwf_data.h"
@@ -182,6 +183,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaSkeletalAnim);
 	GDREGISTER_CLASS(NovaHudPos);
 	GDREGISTER_CLASS(NovaMissionData);
+	GDREGISTER_CLASS(NovaPresentApplier);
 	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_CLASS(NovaEditHistory);
 	GDREGISTER_CLASS(NovaWacProgram);

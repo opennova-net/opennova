@@ -615,3 +615,18 @@ func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
 	present_pass.set_output_channels(channels)
 	present_pass.present()
 	assert_eq(model.body_calls.size(), 2, "restoring the seam resumes dispatch")
+
+
+func test_native_basis_matches_the_placement_convention() -> void:
+	# The native walk carries its own port of bms_to_godot_basis (the godot-cpp
+	# Basis(axis, angle) parity gotcha): pin the two implementations together
+	# across the angle space so they can never drift.
+	for pitch in [-90.0, -30.0, 0.0, 15.0, 90.0, 180.0]:
+		for yaw in [-180.0, -45.0, 0.0, 90.0, 135.0, 270.0]:
+			for roll in [-60.0, 0.0, 30.0, 180.0]:
+				var rot := Vector3(pitch, yaw, roll)
+				var expected := MissionObjectPlacer.bms_to_godot_basis(rot)
+				var got: Basis = NovaPresentApplier.bms_to_godot_basis(rot)
+				assert_true(got.is_equal_approx(expected),
+						"basis parity at %s: native %s vs placer %s" % [
+								rot, got, expected])
