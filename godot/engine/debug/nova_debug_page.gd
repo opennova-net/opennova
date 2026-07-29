@@ -57,3 +57,21 @@ func refresh() -> void:
 
 func set_capture_active(_active: bool) -> void:
 	pass
+
+
+## Build the standard checkbox for a NovaDebugOptions registry row and wire it
+## through the shared option state (single write path: toggling routes into
+## set_value, programmatic set_option re-syncs the control). The node is named
+## after the option id — the stable test/query path.
+func add_option_check(id: StringName) -> CheckBox:
+	var option := NovaDebugOptions.find(id)
+	var check := CheckBox.new()
+	check.name = String(id)
+	check.text = String(option.get("label", String(id)))
+	check.tooltip_text = String(option.get("tooltip", ""))
+	if _ctx != null and _ctx.options != null:
+		check.button_pressed = bool(_ctx.options.value(id))
+		check.toggled.connect(func(pressed: bool): _ctx.options.set_value(id, pressed))
+		_ctx.options.register_control(id, check)
+	add_child(check)
+	return check

@@ -2,23 +2,14 @@ class_name DebugParticlesPage
 extends NovaDebugPage
 ## The retail particle debug pages, mimicked (ptl-format-re.md §11 —
 ## Debug_DrawParticleStats @ 0x44c840 counts + entry list;
-## Debug_DrawEffectBrowser @ 0x44c950 name + source file). Fed by its own
-## effect-world source (the effect world is render-side, not the sim); the
-## peak latch lives here like retail's debug global.
-
-## Fired when "Hide particles" is toggled — the retail master particle switch,
-## mimicked [orig: byte_24D261D — every effect facade no-ops when set]. Host
-## acts on the re-emitted intent.
-signal particles_hidden_toggled(hidden: bool)
-
-## Fired when "Show effect boxes" is toggled. The host builds/frees the
-## ParticleDebugView (per-emitter wireframe bounds + effect-name labels).
-signal particle_boxes_toggled(enabled: bool)
+## Debug_DrawEffectBrowser @ 0x44c950 name + source file). Fed by the
+## context's effect world (render-side, not the sim); the peak latch lives
+## here like retail's debug global. The hide/effect-box toggles ride the
+## NovaDebugOptions registry ("hide_particles" mimics the retail master
+## particle switch [orig: byte_24D261D]).
 
 var _ptl_count_label: Label
 var _ptl_list: ItemList
-var _ptl_hide_check: CheckBox
-var _ptl_boxes_check: CheckBox
 var _ptl_peak := 0
 
 
@@ -44,21 +35,8 @@ func _build() -> void:
 	_ptl_list.focus_mode = Control.FOCUS_NONE
 	add_child(_ptl_list)
 
-	_ptl_hide_check = CheckBox.new()
-	_ptl_hide_check.name = "ParticlesHide"
-	_ptl_hide_check.text = "Hide particles"
-	_ptl_hide_check.tooltip_text = "Hide every particle effect (the retail master particle switch) — flip it to check whether an artifact is particles at all."
-	_ptl_hide_check.button_pressed = false
-	_ptl_hide_check.toggled.connect(_on_particles_hidden_toggled)
-	add_child(_ptl_hide_check)
-
-	_ptl_boxes_check = CheckBox.new()
-	_ptl_boxes_check.name = "ParticlesBoxes"
-	_ptl_boxes_check.text = "Show effect boxes"
-	_ptl_boxes_check.tooltip_text = "Draw a red wireframe box (retail's debug box color) + effect name over every live emitter; effects with missing textures list them on the label."
-	_ptl_boxes_check.button_pressed = false
-	_ptl_boxes_check.toggled.connect(_on_particle_boxes_toggled)
-	add_child(_ptl_boxes_check)
+	add_option_check(&"hide_particles")
+	add_option_check(&"show_effect_boxes")
 
 
 func refresh() -> void:
@@ -98,11 +76,3 @@ func refresh() -> void:
 			_ptl_list.add_item("      %s  alive %d  drawn %d" % [
 					String(emitter.get("name", "")), int(emitter.get("alive", 0)),
 					int(emitter.get("rendered", 0))], null, false)
-
-
-func _on_particles_hidden_toggled(pressed: bool) -> void:
-	particles_hidden_toggled.emit(pressed)
-
-
-func _on_particle_boxes_toggled(pressed: bool) -> void:
-	particle_boxes_toggled.emit(pressed)

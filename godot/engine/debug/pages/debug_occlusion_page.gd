@@ -6,16 +6,10 @@ extends NovaDebugPage
 ## §3/§5) — plus the "Show portal faces" world-view toggle. Row states name the
 ## culling stage: "not batched" (distance/frustum), "occluder-culled"
 ## (render_TOC), "drawn". Developer window into our port, not a mimicked retail
-## debug page.
-
-## Fired when "Show portal faces" is toggled. The host builds/frees the
-## OcclusionDebugView (type-colored portal-face outlines + section labels over
-## the world), the collision-view contract.
-signal occlusion_debug_toggled(enabled: bool)
+## debug page. "Show portal faces" rides the NovaDebugOptions registry.
 
 var _occ_status_label: Label
 var _occ_list: ItemList
-var _occ_portals_check: CheckBox
 
 
 func page_id() -> StringName:
@@ -41,13 +35,7 @@ func _build() -> void:
 	_occ_list.focus_mode = Control.FOCUS_NONE
 	add_child(_occ_list)
 
-	_occ_portals_check = CheckBox.new()
-	_occ_portals_check.name = "OcclusionShowPortals"
-	_occ_portals_check.text = "Show portal faces"
-	_occ_portals_check.tooltip_text = "Draw every nearby building's occlusion faces over the world — windows, portals and welded links as colored outlines with section labels, plain occluder faces in gray."
-	_occ_portals_check.button_pressed = false
-	_occ_portals_check.toggled.connect(_on_occlusion_debug_toggled)
-	add_child(_occ_portals_check)
+	add_option_check(&"show_portal_faces")
 
 
 func refresh() -> void:
@@ -118,7 +106,3 @@ func _clear_pane(message: String) -> void:
 	_occ_status_label.text = message
 	if _occ_list.item_count > 0:
 		_occ_list.clear()
-
-
-func _on_occlusion_debug_toggled(pressed: bool) -> void:
-	occlusion_debug_toggled.emit(pressed)

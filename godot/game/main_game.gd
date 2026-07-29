@@ -303,24 +303,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-# The F3 View-tab intent signals -> the setter each drives (the overlay only
-# emits intent; the shell owns the hosts). Data-driven so a new toggle is one
-# table row, not another boilerplate relay method.
-const WORLD_DEBUG_RELAYS := {
-	"skeleton_debug_toggled": "set_skeleton_debug",
-	"user_points_toggled": "set_user_point_debug",
-	"collision_debug_toggled": "set_collision_debug",
-	"foliage_hidden_toggled": "set_foliage_hidden",
-	"particles_hidden_toggled": "set_particles_hidden",
-	"particle_boxes_toggled": "set_particle_debug",
-	"occlusion_debug_toggled": "set_occlusion_debug",
-	"round_debug_toggled": "set_round_debug",
-	"hitbox_debug_toggled": "set_hitbox_debug",
-}
-const PLAYER_DEBUG_RELAYS := {
-	"viewmodel_forced_toggled": "set_debug_force_viewmodel",
-	"body_in_first_person_toggled": "set_debug_body_in_first_person",
-}
+# The F3 option registry -> host wiring: the overlay only emits intent
+# (debug_option_changed); the row's target/setter live in NovaDebugOptions, so
+# this handler is generic and the editor host wires the SAME rows — the two
+# hosts cannot drift. A new toggle is one registry row, zero shell edits.
+func _on_debug_option_changed(id: StringName, value: Variant) -> void:
+	var option := NovaDebugOptions.find(id)
+	if option.is_empty():
+		return
+	var target: Object = _world if option["target"] == NovaDebugOptions.TARGET_WORLD \
+			else _player_host
+	if target != null and is_instance_valid(target) \
+			and target.has_method(option["setter"]):
+		target.callv(option["setter"], [value])
 
 
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
@@ -336,11 +331,8 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.set_view_context_source(_current_player_view_context)
 		_debug_overlay.set_frame_stats_board(_frame_stats)
 		_debug_overlay.set_world_source(func(): return _world)
-		# The View tab toggles: the overlay only emits intent; we own the world.
-		for signal_name in WORLD_DEBUG_RELAYS:
-			_debug_overlay.connect(signal_name, Callable(_world, WORLD_DEBUG_RELAYS[signal_name]))
-		for signal_name in PLAYER_DEBUG_RELAYS:
-			_debug_overlay.connect(signal_name, Callable(_player_host, PLAYER_DEBUG_RELAYS[signal_name]))
+		# Debug options: the overlay only emits intent; we own the hosts.
+		_debug_overlay.debug_option_changed.connect(_on_debug_option_changed)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 	_debug_overlay.toggle()
 	if is_debug_overlay_open():

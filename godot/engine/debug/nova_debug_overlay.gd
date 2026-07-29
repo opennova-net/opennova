@@ -24,67 +24,18 @@ extends CanvasLayer
 ## (the game's F3 overlay) ignore it.
 signal transport_used(action: String)
 
-## Fired when the View page's "Show skeletons" checkbox is toggled. The overlay is
-## host-neutral (no reach into the 3D scene), so it only emits intent; the host that owns
-## the world (the game's main_game, the editor's mission workspace) builds/frees the bone
-## debug view in response.
-signal skeleton_debug_toggled(enabled: bool)
-
-## Fired when the View page's "Show user points" checkbox is toggled. The host
-## builds/frees the world-wide labeled user-point view in response; the overlay
-## itself remains independent of the 3D scene.
-signal user_points_toggled(enabled: bool)
-
-## Fired when the View page's "Show collision" checkbox is toggled. Same host-neutral
-## contract as skeleton_debug_toggled: the host that owns the world builds/frees the
-## collision debug view (object collision volumes + the player capsule) in response.
-signal collision_debug_toggled(enabled: bool)
-
-## Fired when the View page's "Hide foliage" checkbox is toggled. Same host-neutral
-## contract as skeleton_debug_toggled: the host hides/shows the world's foliage.
-signal foliage_hidden_toggled(hidden: bool)
-
-## Fired when the View page's "Always draw FP arms" checkbox is toggled. Debug
-## experiment: the host keeps the first-person arms viewmodel visible in every
-## camera mode instead of first person only.
-signal viewmodel_forced_toggled(enabled: bool)
-
-## Fired when the View page's "Show body in first person" checkbox is toggled. Debug
-## experiment (the "see our feet" probe): the host moves the player's third-person
-## body onto the world layer even in first person, so looking down shows your own
-## torso/legs/feet posed by the aim overlay (world-wac-ai-re.md §14).
-signal body_in_first_person_toggled(enabled: bool)
+## Fired when any NovaDebugOptions registry option changes value — every
+## host-actionable debug toggle (world debug views, foliage/particle hiding,
+## the FP viewmodel experiments) rides this ONE channel. The overlay is
+## host-neutral (no reach into the 3D scene), so it only emits intent; each
+## host resolves the row's `target` to its own object (GameWorld /
+## LocalPlayerHost) and calls the row's `setter` — one generic handler per
+## host, wiring that cannot drift between the game and the editor.
+signal debug_option_changed(id: StringName, value: Variant)
 
 ## Fired after the Player page writes a fresh local-player pose snapshot. The
 ## path is absolute so it can be pasted into an issue or opened directly.
 signal local_player_pose_dumped(path: String)
-
-## Fired when the Particles page's "Hide particles" checkbox is toggled — the
-## retail master particle switch, mimicked [orig: byte_24D261D — every effect
-## facade no-ops when set]. Same host-neutral contract: the host that owns the
-## effect world hides/shows it.
-signal particles_hidden_toggled(hidden: bool)
-
-## Fired when the Particles page's "Show effect boxes" checkbox is toggled. The
-## host builds/frees the ParticleDebugView (per-emitter wireframe bounds +
-## effect-name labels), the collision-view contract.
-signal particle_boxes_toggled(enabled: bool)
-
-## Fired when the Occlusion page's "Show portal faces" checkbox is toggled. The
-## host builds/frees the OcclusionDebugView (type-colored portal-face outlines +
-## section labels over the world), the collision-view contract.
-signal occlusion_debug_toggled(enabled: bool)
-
-## Fired when the Rounds page's "Show round trails" checkbox is toggled. The
-## host builds/frees the RoundDebugView (flight segments + hit markers +
-## detail labels over the world), the collision-view contract.
-signal round_debug_toggled(enabled: bool)
-
-## Fired when the Rounds page's "Show hit meshes" checkbox is toggled. The host
-## builds/frees the HitboxDebugView (the CFAC bullet-mesh wireframes rounds
-## actually test, bound spheres, posed organic bone spheres), the collision-view
-## contract.
-signal hitbox_debug_toggled(enabled: bool)
 
 const REFRESH_INTERVAL := 0.25
 const DEFAULT_PANEL_WIDTH := 560.0
@@ -128,6 +79,9 @@ func _init(config_path: String = DEFAULT_CONFIG_PATH) -> void:
 	layer = 90
 	_config_path = config_path
 	_ctx.request_refresh = refresh_now
+	_ctx.options = NovaDebugOptionState.new()
+	_ctx.options.changed.connect(
+			func(id: StringName, value: Variant): debug_option_changed.emit(id, value))
 	_build_panel()
 	_build_default_pages()
 	_timer = Timer.new()
@@ -215,6 +169,17 @@ func select_page(page_id: StringName) -> bool:
 
 func get_active_page_id() -> StringName:
 	return _active_page.page_id() if _active_page != null else &""
+
+
+## Programmatic option write (tests, automation): routes through the shared
+## state, so the owning page's control re-syncs and debug_option_changed fires
+## exactly like a click.
+func set_option(id: StringName, value: Variant) -> void:
+	_ctx.options.set_value(id, value)
+
+
+func get_option_value(id: StringName) -> Variant:
+	return _ctx.options.value(id)
 
 
 func is_stats_capturing() -> bool:
@@ -318,11 +283,11 @@ func _build_panel() -> void:
 	body.add_child(_page_host)
 
 
-## The built-in page set, in registration order. Pane-local toggle signals are
-## re-emitted from the overlay so hosts keep one connection point.
+## The built-in page set, in registration order. Registry toggles wire
+## themselves through ctx.options; only the two page-specific signals
+## (transport, pose dump) are re-emitted here.
 func _build_default_pages() -> void:
-	var entities := DebugEntitiesPage.new()
-	register_page(entities)
+	register_page(DebugEntitiesPage.new())
 
 	var sim_page := DebugSimPage.new()
 	sim_page.transport_used.connect(
@@ -332,42 +297,11 @@ func _build_default_pages() -> void:
 	_vars_pane = DebugVarsPage.new()
 	register_page(_vars_pane)
 
-	var net_page := DebugNetPage.new()
-	register_page(net_page)
-
-	var particles := DebugParticlesPage.new()
-	particles.particles_hidden_toggled.connect(
-			func(hidden: bool): particles_hidden_toggled.emit(hidden))
-	particles.particle_boxes_toggled.connect(
-			func(enabled: bool): particle_boxes_toggled.emit(enabled))
-	register_page(particles)
-
-	var occlusion := DebugOcclusionPage.new()
-	occlusion.occlusion_debug_toggled.connect(
-			func(enabled: bool): occlusion_debug_toggled.emit(enabled))
-	register_page(occlusion)
-
-	var rounds := DebugRoundsPage.new()
-	rounds.round_debug_toggled.connect(
-			func(enabled: bool): round_debug_toggled.emit(enabled))
-	rounds.hitbox_debug_toggled.connect(
-			func(enabled: bool): hitbox_debug_toggled.emit(enabled))
-	register_page(rounds)
-
-	var view := DebugViewPage.new()
-	view.skeleton_debug_toggled.connect(
-			func(enabled: bool): skeleton_debug_toggled.emit(enabled))
-	view.user_points_toggled.connect(
-			func(enabled: bool): user_points_toggled.emit(enabled))
-	view.collision_debug_toggled.connect(
-			func(enabled: bool): collision_debug_toggled.emit(enabled))
-	view.foliage_hidden_toggled.connect(
-			func(hidden: bool): foliage_hidden_toggled.emit(hidden))
-	view.viewmodel_forced_toggled.connect(
-			func(enabled: bool): viewmodel_forced_toggled.emit(enabled))
-	view.body_in_first_person_toggled.connect(
-			func(enabled: bool): body_in_first_person_toggled.emit(enabled))
-	register_page(view)
+	register_page(DebugNetPage.new())
+	register_page(DebugParticlesPage.new())
+	register_page(DebugOcclusionPage.new())
+	register_page(DebugRoundsPage.new())
+	register_page(DebugViewPage.new())
 
 	_player_pane = DebugPlayerPage.new()
 	_player_pane.local_player_pose_dumped.connect(

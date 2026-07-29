@@ -18,6 +18,11 @@ var world_source := Callable()
 ## whose action changes what other rows show (sim transport, var edits).
 var request_refresh := Callable()
 
+## The shared NovaDebugOptions value store. Pages build controls against it
+## (NovaDebugPage.add_option_check); the overlay re-emits its `changed` as
+## `debug_option_changed` for the hosts.
+var options: NovaDebugOptionState = null
+
 
 ## The current MissionRuntime, or null. Duck-typed: anything with get_sim().
 func runtime() -> Object:

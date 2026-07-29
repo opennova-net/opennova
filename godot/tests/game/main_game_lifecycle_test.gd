@@ -329,6 +329,17 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_almost_eq(float(dumped_camera.get("z", 0.0)),
 			actual_camera.global_position.z, 0.0001)
 
+	# The option registry drives the real world end to end: one programmatic
+	# flip rides debug_option_changed through the shell's generic handler and
+	# builds the world's skeleton view; the counter-flip frees it.
+	overlay.set_option(&"show_skeletons", true)
+	assert_not_null(world.get_node_or_null("SkeletonDebug"),
+			"the registry flip built the world's skeleton debug view")
+	overlay.set_option(&"show_skeletons", false)
+	await get_tree().process_frame
+	assert_null(world.get_node_or_null("SkeletonDebug"),
+			"...and the counter-flip freed it")
+
 	_shell.toggle_debug_overlay()
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open())

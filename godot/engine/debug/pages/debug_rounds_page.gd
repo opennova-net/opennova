@@ -5,26 +5,20 @@ extends NovaDebugPage
 ## did (which entity, which COBJ section/face or reaction-bone/damage-zone
 ## pair, which material -> impact tag, husk state), with the face-miss fly-ons
 ## called out. Developer window into both retail narrow phases (item CFAC faces
-## and person bone spheres), not a mimicked retail page.
-
-## Fired when "Show round trails" is toggled. The host builds/frees the
-## RoundDebugView (flight segments + hit markers + detail labels over the
-## world), the collision-view contract.
-signal round_debug_toggled(enabled: bool)
-
-## Fired when "Show hit meshes" is toggled. The host builds/frees the
-## HitboxDebugView (the CFAC bullet-mesh wireframes rounds actually test,
-## bound spheres, posed organic bone spheres), the collision-view contract.
-signal hitbox_debug_toggled(enabled: bool)
+## and person bone spheres), not a mimicked retail page. The world-geometry
+## toggles ride the NovaDebugOptions registry: round trails, the hit meshes
+## rounds actually test, and the object collision volumes + player capsule.
 
 var _rnd_status_label: Label
 var _rnd_list: ItemList
-var _rnd_trails_check: CheckBox
-var _rnd_hitbox_check: CheckBox
 
 
 func page_id() -> StringName:
 	return &"Rounds"
+
+
+func page_title() -> String:
+	return "Rounds & collision"
 
 
 func page_category() -> StringName:
@@ -46,21 +40,9 @@ func _build() -> void:
 	_rnd_list.focus_mode = Control.FOCUS_NONE
 	add_child(_rnd_list)
 
-	_rnd_trails_check = CheckBox.new()
-	_rnd_trails_check.name = "RoundsShowTrails"
-	_rnd_trails_check.text = "Show round trails"
-	_rnd_trails_check.tooltip_text = "Draw the recent round outcomes over the world — flight segments and hit markers colored by result (green = face hit, amber = sphere stand-in, red ring = a graze whose face test missed and flew on)."
-	_rnd_trails_check.button_pressed = false
-	_rnd_trails_check.toggled.connect(_on_round_debug_toggled)
-	add_child(_rnd_trails_check)
-
-	_rnd_hitbox_check = CheckBox.new()
-	_rnd_hitbox_check.name = "RoundsShowHitMeshes"
-	_rnd_hitbox_check.text = "Show hit meshes"
-	_rnd_hitbox_check.tooltip_text = "Hit geometry is sampled at 6 Hz. Draw nearby hit geometry within 80 mission units of the local player: object bullet meshes and broad-phase spheres, plus posed person bone spheres (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback."
-	_rnd_hitbox_check.button_pressed = false
-	_rnd_hitbox_check.toggled.connect(_on_hitbox_debug_toggled)
-	add_child(_rnd_hitbox_check)
+	add_option_check(&"show_round_trails")
+	add_option_check(&"show_hit_meshes")
+	add_option_check(&"show_collision")
 
 
 # Kind colors mirror RoundDebugView.kind_color so the list rows and the world
@@ -160,11 +142,3 @@ func _clear_pane(message: String) -> void:
 	_rnd_status_label.text = message
 	if _rnd_list.item_count > 0:
 		_rnd_list.clear()
-
-
-func _on_round_debug_toggled(pressed: bool) -> void:
-	round_debug_toggled.emit(pressed)
-
-
-func _on_hitbox_debug_toggled(pressed: bool) -> void:
-	hitbox_debug_toggled.emit(pressed)

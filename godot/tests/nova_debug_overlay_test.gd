@@ -7,21 +7,22 @@ extends GutTest
 
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-# Pages mount under the sidebar shell's page host.
+# Pages mount under the sidebar shell's page host; option checkboxes are
+# named after their registry id.
 const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
-const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/View/ViewCollision")
+const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/Rounds/show_collision")
 const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
 const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpPlayerPose")
 const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
-const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/View/ViewUserPoints")
-const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/OcclusionShowPortals")
+const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/View/show_user_points")
+const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
 const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
 const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
 const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
-const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/View/ViewSkeletons")
-const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/View/ViewHideFoliage")
+const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/View/show_skeletons")
+const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/View/hide_foliage")
 
 
 class FakePoseSim:
@@ -275,9 +276,9 @@ func test_transport_signal_stays_quiet_without_a_runtime() -> void:
 
 
 
-func test_view_tab_skeleton_toggle_emits() -> void:
-	# The View tab's "Show skeletons" checkbox is a pure view toggle: it needs no
-	# runtime and only emits intent for the host to act on (build/free the 3D view).
+func test_view_page_skeleton_toggle_rides_the_option_registry() -> void:
+	# Registry toggles need no runtime and only emit intent for the host to act
+	# on (build/free the 3D view) — everything rides ONE generic channel now.
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_not_null(overlay.find_child("View", true, false), "a View page exists")
@@ -287,14 +288,14 @@ func test_view_tab_skeleton_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	skeleton_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_skeletons", true])
 	skeleton_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_skeletons", false])
 
 
-func test_view_tab_user_points_toggle_emits() -> void:
-	# Named user points are another host-owned 3D view; the overlay exposes a
-	# stable path and emits intent without requiring a running mission.
+func test_view_page_user_points_toggle_rides_the_option_registry() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var user_points_check := overlay.get_node_or_null(USER_POINTS_TOGGLE_PATH) as CheckBox
@@ -303,15 +304,13 @@ func test_view_tab_user_points_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	user_points_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "user_points_toggled", [true])
-	user_points_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "user_points_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_user_points", true])
 
 
-func test_view_tab_collision_toggle_emits() -> void:
-	# The View tab's "Show collision" checkbox: same host-neutral, runtime-free
-	# contract as the skeleton toggle -- it only emits intent; the host builds/frees
-	# the collision debug view.
+func test_collision_toggle_lives_on_the_rounds_page() -> void:
+	# "Show collision" belongs with the other what-geometry-does-the-world-test
+	# views on Rounds & collision, not on the dissolving View page.
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var collision_check := overlay.get_node_or_null(COLLISION_TOGGLE_PATH) as CheckBox
@@ -320,14 +319,11 @@ func test_view_tab_collision_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	collision_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
-	collision_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_collision", true])
 
 
-func test_occlusion_tab_portal_toggle_emits() -> void:
-	# The Occlusion tab's "Show portal faces" checkbox: the collision-toggle
-	# contract — it only emits intent; the host builds/frees the 3D view.
+func test_occlusion_page_portal_toggle_rides_the_option_registry() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var portals_check := overlay.get_node_or_null(OCCLUSION_TOGGLE_PATH) as CheckBox
@@ -336,9 +332,25 @@ func test_occlusion_tab_portal_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	portals_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [true])
-	portals_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "occlusion_debug_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_portal_faces", true])
+
+
+func test_set_option_syncs_the_owning_control_and_emits() -> void:
+	# The programmatic write path is the SAME path a click takes: one emission,
+	# and the page's control re-syncs without re-firing.
+	var overlay := _make_overlay()
+	watch_signals(overlay)
+	overlay.set_option(&"hide_foliage", true)
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", true])
+	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1)
+	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
+	assert_true(foliage_check.button_pressed, "the page control re-synced")
+	assert_eq(overlay.get_option_value(&"hide_foliage"), true)
+	overlay.set_option(&"hide_foliage", true)
+	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1,
+			"a repeated value never re-fires")
 
 
 func test_occlusion_tab_reports_frame_state() -> void:
@@ -401,9 +413,7 @@ func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
 	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
 
 
-func test_view_tab_hide_foliage_toggle_emits() -> void:
-	# The View tab's "Hide foliage" checkbox: same host-neutral, runtime-free contract as
-	# the skeleton toggle -- it only emits intent for the host to act on.
+func test_view_page_hide_foliage_toggle_rides_the_option_registry() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
@@ -412,9 +422,11 @@ func test_view_tab_hide_foliage_toggle_emits() -> void:
 
 	watch_signals(overlay)
 	foliage_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", true])
 	foliage_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [false])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_foliage", false])
 
 
 
@@ -628,15 +640,15 @@ func after_all() -> void:
 
 # --- Particles tab (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
 
-func test_particles_tab_toggles_emit() -> void:
-	# Same host-neutral contract as the View toggles: the checkboxes only emit
-	# intent; the host hides the effect world / builds the box view. All access
-	# rides stable node names (ADR 0018 — no private pokes).
+func test_particles_page_toggles_ride_the_option_registry() -> void:
+	# Same host-neutral contract as every registry toggle: the checkboxes only
+	# emit intent; the host hides the effect world / builds the box view. All
+	# access rides stable node names (ADR 0018 — no private pokes).
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay.find_child("Particles", true, false), "a Particles tab exists")
-	var hide_check := overlay.find_child("ParticlesHide", true, false) as CheckBox
-	var boxes_check := overlay.find_child("ParticlesBoxes", true, false) as CheckBox
+	assert_not_null(overlay.find_child("Particles", true, false), "a Particles page exists")
+	var hide_check := overlay.find_child("hide_particles", true, false) as CheckBox
+	var boxes_check := overlay.find_child("show_effect_boxes", true, false) as CheckBox
 	assert_not_null(hide_check, "the hide checkbox has a stable node name")
 	assert_not_null(boxes_check, "the boxes checkbox has a stable node name")
 	assert_false(hide_check.button_pressed, "hide defaults off")
@@ -644,9 +656,11 @@ func test_particles_tab_toggles_emit() -> void:
 
 	watch_signals(overlay)
 	hide_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "particles_hidden_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"hide_particles", true])
 	boxes_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "particle_boxes_toggled", [true])
+	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+			[&"show_effect_boxes", true])
 
 
 func test_particles_tab_reports_counts_and_peak_reset() -> void:
@@ -718,7 +732,7 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
 		assert_has(texts, header, "the %s section header is present" % header)
 	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
-			"Rounds", "View", "Player", "Stats", "Perf"]:
+			"Rounds & collision", "View", "Player", "Stats", "Perf"]:
 		assert_has(texts, page_title, "the %s page is listed" % page_title)
 	var header_row := texts.find("SIMULATION")
 	assert_false(list.is_item_selectable(header_row), "section headers are not rows")

@@ -60,6 +60,10 @@ func _build() -> void:
 	_player_dump_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_player_dump_status)
 
+	# The FP viewmodel debug experiments live with the player they act on.
+	add_option_check(&"force_fp_arms")
+	add_option_check(&"body_in_first_person")
+
 
 func refresh() -> void:
 	var runtime := _ctx.runtime()

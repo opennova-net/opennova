@@ -404,18 +404,9 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
 		_debug_overlay.set_view_context_source(Callable(self, "get_debug_view_context"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
-		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
-		_debug_overlay.user_points_toggled.connect(_on_overlay_user_points)
-		_debug_overlay.collision_debug_toggled.connect(_on_overlay_collision_debug)
-		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
-		_debug_overlay.viewmodel_forced_toggled.connect(_on_overlay_viewmodel_forced)
-		_debug_overlay.body_in_first_person_toggled.connect(_on_overlay_body_in_first_person)
-		_debug_overlay.particles_hidden_toggled.connect(_on_overlay_particles_hidden)
-		_debug_overlay.particle_boxes_toggled.connect(_on_overlay_particle_boxes)
-		_debug_overlay.occlusion_debug_toggled.connect(_on_overlay_occlusion_debug)
-		_debug_overlay.round_debug_toggled.connect(_on_overlay_round_debug)
-		_debug_overlay.hitbox_debug_toggled.connect(_on_overlay_hitbox_debug)
+		_debug_overlay.debug_option_changed.connect(_on_debug_option_changed)
 		_debug_overlay.set_effect_world_source(Callable(self, "_debug_effect_world_source"))
+		_debug_overlay.set_world_source(Callable(self, "_debug_world_source"))
 		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
 	# While the overlay is up during play, the play session frees the mouse so
@@ -426,86 +417,33 @@ func toggle_debug_overlay() -> void:
 		play.set_capture_suspended(is_debug_overlay_open())
 
 
-# The View tab toggles act on the PIE world (game_world.tscn) the same way the game host
-# does. Only Play Mission has a GameWorld; the in-place Simulate driver has none, so the
-# toggles are inert there (consistent with the editor's read-only overlay stance).
-func _on_overlay_skeleton_debug(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_skeleton_debug(enabled)
+# Debug options act on the PIE world / player host (game_world.tscn) the same
+# way the game host does: the row's target/setter live in NovaDebugOptions, so
+# this handler is the same generic shape as main_game's — the two hosts cannot
+# drift. Only Play Mission has a GameWorld; the in-place Simulate driver has
+# none, so options are inert there (consistent with the editor's read-only
+# overlay stance).
+func _on_debug_option_changed(id: StringName, value: Variant) -> void:
+	if not is_playing_mission():
+		return
+	var option := NovaDebugOptions.find(id)
+	if option.is_empty():
+		return
+	var play = _play_node()
+	var target: Object = play.get_world() \
+			if option["target"] == NovaDebugOptions.TARGET_WORLD \
+			else play.get_player_host()
+	if target != null and is_instance_valid(target) \
+			and target.has_method(option["setter"]):
+		target.callv(option["setter"], [value])
 
 
-func _on_overlay_user_points(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_user_point_debug(enabled)
-
-
-func _on_overlay_collision_debug(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_collision_debug(enabled)
-
-
-func _on_overlay_round_debug(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_round_debug(enabled)
-
-
-func _on_overlay_hitbox_debug(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_hitbox_debug(enabled)
-
-
-func _on_overlay_foliage_hidden(hidden: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_foliage_hidden(hidden)
-
-
-# The FP-viewmodel debug toggles live on the shared LocalPlayerHost (the same
-# host the game shell drives from its F3 overlay); only Play Mission has one.
-func _on_overlay_viewmodel_forced(enabled: bool) -> void:
-	if is_playing_mission():
-		var host = _play_node().get_player_host()
-		if host != null:
-			host.set_debug_force_viewmodel(enabled)
-
-
-func _on_overlay_body_in_first_person(enabled: bool) -> void:
-	if is_playing_mission():
-		var host = _play_node().get_player_host()
-		if host != null:
-			host.set_debug_body_in_first_person(enabled)
-
-
-func _on_overlay_particles_hidden(hidden: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_particles_hidden(hidden)
-
-
-func _on_overlay_particle_boxes(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_particle_debug(enabled)
-
-
-func _on_overlay_occlusion_debug(enabled: bool) -> void:
-	if is_playing_mission():
-		var world = _play_node().get_world()
-		if world != null:
-			world.set_occlusion_debug(enabled)
+# The world-fed pages' data source (Stats counters and friends): only Play
+# Mission has a GameWorld; the in-place Simulate driver renders none.
+func _debug_world_source():
+	if not is_playing_mission():
+		return null
+	return _play_node().get_world()
 
 
 # The Particles tab's data source: only Play Mission has a GameWorld (and so
