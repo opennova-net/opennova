@@ -8,54 +8,11 @@
 #include <array>
 #include <cstdlib>
 #include <utility>
+#include <npwire/nw_session_framing.h>
 
 namespace opennova {
 
 namespace {
-
-// Encode an outbound NW-UDP datagram: NWU-encrypt the body (client-side
-// encrypt is our nwu_decrypt — names swapped vs onnet), opcode-prefix, then
-// CRC-envelope. Identical flow to the server's encode_outbound()
-// (apps/novaworld_server/nw_udp_listener.cpp) and what the binding inlined
-// before this extraction.
-std::vector<uint8_t> encode_session_outbound(uint8_t opcode, std::vector<uint8_t> body) {
-	if (!body.empty()) {
-		nwu_decrypt(body.data(), body.size(), SESSION_NWU_KEY);
-	}
-	std::vector<uint8_t> with_opcode;
-	with_opcode.reserve(1 + body.size());
-	with_opcode.push_back(opcode);
-	with_opcode.insert(with_opcode.end(), body.begin(), body.end());
-	std::vector<uint8_t> packet(with_opcode.size() + 4);
-	size_t out_size = 0;
-	if (napi_envelope_encode(with_opcode.data(), with_opcode.size(),
-	                         packet.data(), packet.size(), &out_size) != 0) {
-		return {};
-	}
-	packet.resize(out_size);
-	return packet;
-}
-
-// Decode an inbound NW-UDP datagram: strip the CRC envelope, peel the
-// plaintext opcode (byte 0), then NWU-decrypt the remaining body (client-side
-// decrypt is our nwu_encrypt). Inverse of encode_session_outbound.
-bool decode_session_inbound(const uint8_t *raw, size_t raw_len,
-                            uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
-	std::vector<uint8_t> stripped(raw_len);
-	size_t out_size = 0;
-	if (napi_envelope_decode(raw, raw_len, stripped.data(), stripped.size(),
-	                         &out_size) != 0) {
-		return false;
-	}
-	stripped.resize(out_size);
-	if (stripped.empty()) return false;
-	opcode_out = stripped[0];
-	body_out.assign(stripped.begin() + 1, stripped.end());
-	if (!body_out.empty()) {
-		nwu_encrypt(body_out.data(), body_out.size(), SESSION_NWU_KEY);
-	}
-	return true;
-}
 
 // A 61-char [A-Z0-9] client SCRK matching retail's length + alphabet
 // (notes/retail_capture_findings.md). Retail randomizes per session; we
@@ -219,12 +176,12 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 }
 
 std::vector<uint8_t> ClientSession::build_client_hello() {
-	return encode_session_outbound(SESSION_OPCODE_CLIENT_HELLO,
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
 	                               client_hello_to_bytes(make_client_hello(cfg_, cfg_.co)));
 }
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
-	return encode_session_outbound(
+	return nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_AUTH,
 			client_auth_to_bytes(make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_)));
 }
@@ -256,7 +213,7 @@ std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &contai
 	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {pm}, body_out)) {
 		return {};
 	}
-	return encode_session_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
+	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
 	                               std::move(body_out));
 }
 
@@ -314,7 +271,7 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
                                     std::vector<std::vector<uint8_t>> &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
-	if (!decode_session_inbound(data, len, opcode, body)) {
+	if (!nw_decode_inbound(data, len, opcode, body)) {
 		fail("bad session envelope");
 		return false;
 	}
@@ -485,7 +442,7 @@ std::vector<uint8_t> ClientSession::build_heartbeat() {
 	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {}, body_out)) {
 		return {};
 	}
-	return encode_session_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
+	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
 	                               std::move(body_out));
 }
 
@@ -495,7 +452,7 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	// packet and using it makes a keyed receiver reject the leave.
 	std::vector<uint8_t> body = client_goodbye_to_bytes(server_sk_);
 	state_ = State::Closed;
-	return encode_session_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }
 
 void ClientSession::fail(std::string reason) {

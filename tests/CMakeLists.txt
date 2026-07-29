@@ -186,6 +186,15 @@ target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(sound_selector_test PRIVATE cxx_std_17)
 add_test(NAME sound_selector COMMAND sound_selector_test)
 
+# Ambient marker emitter system: the staggered tick&7 registration cadence, tick-unit
+# slot keep-alives, and the per-frame live-slot mix, pushed down from
+# nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
+add_executable(ambient_mixer_test audio/ambient_mixer_test.cpp)
+target_link_libraries(ambient_mixer_test PRIVATE opennova_audio)
+target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
+add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
+
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
 target_link_libraries(sound_profile_test PRIVATE opennova_audio)
@@ -784,6 +793,15 @@ target_link_libraries(coords_test PRIVATE opennova_terrain)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME coords COMMAND coords_test)
 
+# Per-quadrant neighbour-tap locks (the .trn lock_* pairs) in the shared tap
+# kernel: the masking against a verbatim copy of the original, the lock-table
+# index, the sampler at a sector seam locked vs unlocked, and the all-zero
+# default that keeps unlocked terrains rendering exactly as before.
+add_executable(quadrant_lock_test terrain/quadrant_lock_test.cpp)
+target_link_libraries(quadrant_lock_test PRIVATE opennova_terrain_query)
+target_include_directories(quadrant_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME quadrant_lock COMMAND quadrant_lock_test)
+
 # The retail terrain segment raycast (libs/terrain_query/terrain_raycast):
 # the Terrain_RaycastHeightmapLoRes march + HiRes_0 refine structural
 # translation over a synthetic sampler — step normalization/budget, ray-z hit
@@ -1311,6 +1329,11 @@ add_executable(lobby_vars_test novaworld/lobby_vars_test.cpp)
 target_link_libraries(lobby_vars_test PRIVATE opennova_novaworld opennova_napi)
 add_test(NAME lobby_vars COMMAND lobby_vars_test)
 
+add_executable(peer_addr_test npwire/peer_addr_test.cpp)
+target_link_libraries(peer_addr_test PRIVATE opennova_npwire)
+target_include_directories(peer_addr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME peer_addr COMMAND peer_addr_test)
+
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1457,7 +1480,7 @@ add_test(NAME nw_serverlog_decode COMMAND nw_serverlog_decode_test)
 # real pcap directly via the shared apps/common reader; skips unless the capture
 # is present (NW_DVXI5_PCAP, else the in-tree .scratch path).
 add_executable(nw_pool_groundtruth_test novaworld/nw_pool_groundtruth_test.cpp)
-target_link_libraries(nw_pool_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_pool_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_pool_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_pool_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
@@ -1469,7 +1492,7 @@ add_test(NAME nw_pool_groundtruth COMMAND nw_pool_groundtruth_test)
 # (armory, oil pump, oil-field) against the authored statics. Skips unless the
 # capture is present (NW_DVXI3_PCAP, else the in-tree .scratch path).
 add_executable(nw_dvxi3_groundtruth_test novaworld/nw_dvxi3_groundtruth_test.cpp)
-target_link_libraries(nw_dvxi3_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_dvxi3_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_dvxi3_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_dvxi3_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
@@ -1481,7 +1504,7 @@ add_test(NAME nw_dvxi3_groundtruth COMMAND nw_dvxi3_groundtruth_test)
 # + C2S 0x33, 0x7B gameName + g_GameType). Gated on NW_DVXC1_PCAP / the .scratch
 # capture; skips clean when absent.
 add_executable(nw_dvxc1_groundtruth_test novaworld/nw_dvxc1_groundtruth_test.cpp)
-target_link_libraries(nw_dvxc1_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_dvxc1_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_dvxc1_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_dvxc1_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
@@ -1495,7 +1518,7 @@ add_test(NAME nw_dvxc1_groundtruth COMMAND nw_dvxc1_groundtruth_test)
 # (no guided 0x0C sub_ops, AI-static 0x20, Co-op roster teams==0). Gated on
 # NW_PROBE3AGAIN_PCAP / the .scratch capture; skips clean when absent.
 add_executable(nw_probe3again_lifecycle_test novaworld/nw_probe3again_lifecycle_test.cpp)
-target_link_libraries(nw_probe3again_lifecycle_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_probe3again_lifecycle_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_probe3again_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_probe3again_lifecycle_test PRIVATE
     DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng"
@@ -1509,7 +1532,7 @@ add_test(NAME nw_probe3again_lifecycle COMMAND nw_probe3again_lifecycle_test)
 # only) and the confirmed negatives (C2S 0x0C all sub_op 0x0A, no 0x44 / 0x59).
 # Gated on NW_WHITENOISE_PCAP / the .scratch capture; skips clean when absent.
 add_executable(nw_whitenoise_coverage_test novaworld/nw_whitenoise_coverage_test.cpp)
-target_link_libraries(nw_whitenoise_coverage_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_whitenoise_coverage_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_whitenoise_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_whitenoise_coverage_test PRIVATE
     DEFAULT_WHITENOISE_PCAP="${CMAKE_SOURCE_DIR}/.scratch/operation_whitenoise.pcapng")
@@ -1520,7 +1543,7 @@ add_test(NAME nw_whitenoise_coverage COMMAND nw_whitenoise_coverage_test)
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture
 # fixtures, so it runs unconditionally in CI.
 add_executable(nw_pool_decode_unit_test novaworld/nw_pool_decode_unit_test.cpp)
-target_link_libraries(nw_pool_decode_unit_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_pool_decode_unit_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_pool_decode_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 
@@ -1529,7 +1552,7 @@ add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 # (decode_capture_to_messages) into build_replay_timeline, and asserts the
 # assembled entities + tracks. No capture fixtures, so it runs in CI.
 add_executable(nw_replay_timeline_test novaworld/nw_replay_timeline_test.cpp)
-target_link_libraries(nw_replay_timeline_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_replay_timeline_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_replay_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_replay_timeline COMMAND nw_replay_timeline_test)
 
@@ -1539,7 +1562,7 @@ add_test(NAME nw_replay_timeline COMMAND nw_replay_timeline_test)
 # two-session capture unconditionally; also checks the real 3-player probe3_again
 # capture when present (NW_PROBE3AGAIN_PCAP / .scratch), skipping clean otherwise.
 add_executable(nw_capture_decoder_test novaworld/nw_capture_decoder_test.cpp)
-target_link_libraries(nw_capture_decoder_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_capture_decoder_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_capture_decoder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_capture_decoder_test PRIVATE
     DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng")
@@ -1552,7 +1575,7 @@ add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
 # diff_vs_golden.ps1 harness. Skips clean when NW_GOLDEN_OURS is unset (no
 # committed "ours" oracle). Golden defaults to the gitignored .scratch/golden.
 add_executable(nw_golden_diff_test novaworld/nw_golden_diff_test.cpp)
-target_link_libraries(nw_golden_diff_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_golden_diff_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_golden_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_golden_diff_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
@@ -1565,7 +1588,7 @@ add_test(NAME nw_golden_diff COMMAND nw_golden_diff_test)
 add_executable(nw_replay_partition_test
     novaworld/nw_replay_partition_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/nw_replay/nw_replay_partition.cpp)
-target_link_libraries(nw_replay_partition_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_link_libraries(nw_replay_partition_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
 target_include_directories(nw_replay_partition_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
 add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
@@ -1574,7 +1597,7 @@ add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
 # read_pcap_udp byte-for-byte and honor early-exit (the basis for nw_replay
 # handling multi-GB captures without loading them into RAM). No fixtures, CI.
 add_executable(nw_pcap_stream_test novaworld/nw_pcap_stream_test.cpp)
-target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common)
+target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common opennova_pcapio)
 target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pcap_stream COMMAND nw_pcap_stream_test)
 
@@ -1619,7 +1642,7 @@ add_test(NAME nw_codec_identity COMMAND nw_codec_identity_test)
 add_executable(nw_self_capture_test novaworld/nw_self_capture_test.cpp)
 target_link_libraries(nw_self_capture_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld
-            opennova_mission opennova_app_common)
+            opennova_mission opennova_app_common opennova_pcapio)
 target_include_directories(nw_self_capture_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_self_capture_test PRIVATE
     SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap")
@@ -1744,7 +1767,7 @@ add_executable(netsim_client_view_capture_parent_follow_test
     netsim/client_view_capture_parent_follow_test.cpp)
 target_link_libraries(netsim_client_view_capture_parent_follow_test
     PRIVATE opennova_netsim opennova_npwire opennova_def opennova_scr
-    opennova_app_common)
+    opennova_app_common opennova_pcapio)
 target_compile_definitions(netsim_client_view_capture_parent_follow_test PRIVATE
     DEFAULT_VEHICLE_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-vehicle-session.pcapng")
 add_test(NAME netsim_client_view_capture_parent_follow
@@ -1843,7 +1866,7 @@ add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test
 # (no committed derived oracle); DEFAULT path points at the gitignored .scratch golden.
 add_executable(npruntime_golden_lan_join_session_test npruntime/golden_lan_join_session_test.cpp)
 target_link_libraries(npruntime_golden_lan_join_session_test
-    PRIVATE opennova_npruntime opennova_novaworld opennova_app_common)
+    PRIVATE opennova_npruntime opennova_novaworld opennova_app_common opennova_pcapio)
 target_compile_definitions(npruntime_golden_lan_join_session_test PRIVATE
     DEFAULT_LAN_JOIN_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join-session.pcapng")
 add_test(NAME npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_join_session_test)
@@ -1852,7 +1875,7 @@ add_test(NAME npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_joi
 # (handshake + world-load). Env-gated + skip-if-absent (no committed derived oracle).
 add_executable(npruntime_golden_lan_join_test npruntime/golden_lan_join_test.cpp)
 target_link_libraries(npruntime_golden_lan_join_test
-    PRIVATE opennova_novaworld opennova_app_common)
+    PRIVATE opennova_novaworld opennova_app_common opennova_pcapio)
 target_compile_definitions(npruntime_golden_lan_join_test PRIVATE
     DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
 add_test(NAME npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)
@@ -1863,7 +1886,7 @@ add_test(NAME npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)
 # so it links opennova_npruntime + opennova_netsim + opennova_world.
 add_executable(npruntime_golden_gameplay_test npruntime/golden_gameplay_test.cpp)
 target_link_libraries(npruntime_golden_gameplay_test
-    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common)
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common opennova_pcapio)
 target_compile_definitions(npruntime_golden_gameplay_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
 add_test(NAME npruntime_golden_gameplay COMMAND npruntime_golden_gameplay_test)
@@ -1910,7 +1933,7 @@ add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshak
 # resolves the gitignored golden under .scratch/golden; env-gated NW_GOLDEN_GAMEPLAY; skip-if-absent.
 add_executable(npruntime_golden_client_test npruntime/golden_client_test.cpp)
 target_link_libraries(npruntime_golden_client_test
-    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common)
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common opennova_pcapio)
 target_compile_definitions(npruntime_golden_client_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
 add_test(NAME npruntime_golden_client COMMAND npruntime_golden_client_test)
@@ -1924,7 +1947,7 @@ add_test(NAME npruntime_golden_client COMMAND npruntime_golden_client_test)
 add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
 target_link_libraries(npruntime_two_endpoint_socket_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld
-            opennova_mission opennova_app_common)
+            opennova_mission opennova_app_common opennova_pcapio)
 target_compile_definitions(npruntime_two_endpoint_socket_test PRIVATE
     DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
 if(WIN32)

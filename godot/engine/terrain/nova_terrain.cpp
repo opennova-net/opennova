@@ -8,9 +8,7 @@
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
 // docs/engine_spec_terrain.md 7.1-7.2
 
-#include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
-#include <godot_cpp/classes/height_map_shape3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -59,20 +57,6 @@ void NovaTerrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_weather_path"), &NovaTerrain::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 		"set_weather_path", "get_weather_path");
-
-	ClassDB::bind_method(D_METHOD("set_collision_enabled", "enabled"), &NovaTerrain::set_collision_enabled);
-	ClassDB::bind_method(D_METHOD("get_collision_enabled"), &NovaTerrain::get_collision_enabled);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collision_enabled"), "set_collision_enabled", "get_collision_enabled");
-
-	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &NovaTerrain::set_collision_layer);
-	ClassDB::bind_method(D_METHOD("get_collision_layer"), &NovaTerrain::get_collision_layer);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS),
-		"set_collision_layer", "get_collision_layer");
-
-	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &NovaTerrain::set_collision_mask);
-	ClassDB::bind_method(D_METHOD("get_collision_mask"), &NovaTerrain::get_collision_mask);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS),
-		"set_collision_mask", "get_collision_mask");
 
 	ClassDB::bind_method(D_METHOD("build"), &NovaTerrain::build);
 
@@ -206,12 +190,6 @@ NodePath NovaTerrain::get_weather_path() const {
 	return weather_path;
 }
 
-void NovaTerrain::set_collision_enabled(bool p_enabled) { collision_enabled = p_enabled; }
-bool NovaTerrain::get_collision_enabled() const { return collision_enabled; }
-void NovaTerrain::set_collision_layer(uint32_t p_layer) { collision_layer = p_layer; }
-uint32_t NovaTerrain::get_collision_layer() const { return collision_layer; }
-void NovaTerrain::set_collision_mask(uint32_t p_mask) { collision_mask = p_mask; }
-uint32_t NovaTerrain::get_collision_mask() const { return collision_mask; }
 
 // ---------------------------------------------------------------------------
 // Notifications (_process)
@@ -554,13 +532,17 @@ void NovaTerrain::_strip_to_list(const std::vector<uint16_t>& strip,
 // Normal from heightmap gradient
 // ---------------------------------------------------------------------------
 
-Vector3 NovaTerrain::_heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz) const {
+Vector3 NovaTerrain::_heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
+                                       const opennova::terrain::CoordsTaps& taps) const {
 	const int size = 1024;
 	const float scale = 1.0f / 256.0f;
-	int x0 = (gx - 1) & (size - 1);
-	int x1 = (gx + 1) & (size - 1);
-	int z0 = (gz - 1) & (size - 1);
-	int z1 = (gz + 1) & (size - 1);
+	// Same lock policy as the vertex heights: a gradient tap at the quadrant edge
+	// wraps inside it rather than reading the neighbouring quadrant's shoreline,
+	// which would tilt the seam row's normals into a false cliff face.
+	int x0 = taps.x(gx - 1);
+	int x1 = taps.x(gx + 1);
+	int z0 = taps.z(gz - 1);
+	int z1 = taps.z(gz + 1);
 	float hL = depth[gz * size + x0] * scale;
 	float hR = depth[gz * size + x1] * scale;
 	float hD = depth[z0 * size + gx] * scale;
@@ -625,18 +607,6 @@ void NovaTerrain::_on_terrain_changed() {
 	_load_textures();
 }
 
-void NovaTerrain::_clear_collision_bodies() {
-	for (StaticBody3D* body : collision_bodies) {
-		if (body) {
-			if (body->get_parent() == this) {
-				remove_child(body);
-			}
-			body->queue_free();
-		}
-	}
-	collision_bodies.clear();
-}
-
 void NovaTerrain::_hide_visible_patches() {
 	RenderingServer* rs = RenderingServer::get_singleton();
 	for (int i = 0; i < PATCH_POOL_SIZE; i++) {
@@ -669,7 +639,6 @@ void NovaTerrain::_clear_patch_pool() {
 }
 
 void NovaTerrain::_clear_terrain() {
-	_clear_collision_bodies();
 	_clear_patch_pool();
 	_clear_tile_overlay_texture();
 	_clear_derived_textures();
@@ -697,7 +666,6 @@ void NovaTerrain::build() {
 		return;
 	}
 	_build_quadtree();
-	_build_collision();
 
 	// Create lightweight RenderingServer instances for the patch pool
 	RenderingServer* rs = RenderingServer::get_singleton();
@@ -740,6 +708,8 @@ bool NovaTerrain::_build_terrain() {
 		return false;
 	}
 	const float height_scale = 1.0f / 256.0f;
+	const opennova::terrain::CoordsQuadrantLocks quadrant_locks =
+		coords_locks_from(terrain_data->get_trn());
 
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
@@ -772,21 +742,29 @@ bool NovaTerrain::_build_terrain() {
 		int local_base_x = tile.tile_x & 0x1FF;
 		int local_base_z = tile.tile_y & 0x1FF;
 
+		// The tile's own quadrant decides the lock policy for every one of its
+		// vertices; a tile whose last row/column lands on the quadrant boundary is
+		// exactly the case the .trn locks exist for.
+		// [orig: sub_402D20 — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
+		const opennova::terrain::CoordsTaps taps =
+			opennova::terrain::coords_taps_for_quadrant(
+				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);
+
 		for (int vi = 0; vi < tile.vertex_count; vi++) {
 			uint16_t rel_x = tile.vertex_indices[vi * 2 + 0];
 			uint16_t rel_y = tile.vertex_indices[vi * 2 + 1];
 
 			int wx = tile.tile_x + rel_x;
 			int wz = tile.tile_y + rel_y;
-			int hx = wx & (hm_size - 1);
-			int hz = wz & (hm_size - 1);
+			int hx = taps.x(wx);
+			int hz = taps.z(wz);
 			float hy = cpt.depth_buffer[hz * hm_size + hx] * height_scale;
 
 			float lx = static_cast<float>(local_base_x + rel_x);
 			float lz = static_cast<float>(local_base_z + rel_y);
 
 			positions.set(vi, Vector3(lx, hy, lz));
-			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz));
+			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz, taps));
 			uvs.set(vi, Vector2(static_cast<float>(wx) / 1024.0f,
 			                    static_cast<float>(wz) / 1024.0f));
 
@@ -948,81 +926,6 @@ void NovaTerrain::_build_quadtree() {
 
 	UtilityFunctions::print_verbose("NovaTerrain: Quadtree built — ", static_cast<int>(quad_nodes.size()),
 		" nodes, leaf_size=", leaf_size, ", mipchain levels=", mipchain.level_count);
-}
-
-// ---------------------------------------------------------------------------
-// Collision
-// ---------------------------------------------------------------------------
-
-void NovaTerrain::_build_collision() {
-	if (!collision_enabled) return;
-
-	const auto& trn = terrain_data->get_trn();
-	const auto& cpt = terrain_data->get_cpt();
-	if (cpt.depth_buffer.empty()) return;
-
-	const int HM_SIZE = 1024;
-	const float HEIGHT_SCALE = 1.0f / 256.0f;
-	const int SHAPE_DIM = 513;
-
-	int rows = trn.sector_rows > 0 ? trn.sector_rows : 1;
-	int cols = trn.sector_count > 0 ? trn.sector_count : 1;
-
-	collision_bodies.reserve(rows * cols);
-
-	for (int row = 0; row < rows; row++) {
-		for (int col = 0; col < cols; col++) {
-			int sector_id = trn.sector_grid[row][col];
-			if (sector_id <= 0) continue;
-
-			// Quadrant offset in heightmap
-			int qx = (sector_id == 3 || sector_id == 4) ? 512 : 0;
-			int qz = (sector_id == 2 || sector_id == 4) ? 512 : 0;
-
-			// Extract 513x513 height data
-			PackedFloat32Array map_data;
-			map_data.resize(SHAPE_DIM * SHAPE_DIM);
-			float* dst = map_data.ptrw();
-			for (int z = 0; z < SHAPE_DIM; z++) {
-				for (int x = 0; x < SHAPE_DIM; x++) {
-					int hx = (qx + x) & (HM_SIZE - 1);
-					int hz = (qz + z) & (HM_SIZE - 1);
-					dst[z * SHAPE_DIM + x] =
-						static_cast<float>(cpt.depth_buffer[hz * HM_SIZE + hx]) * HEIGHT_SCALE;
-				}
-			}
-
-			Ref<HeightMapShape3D> hshape;
-			hshape.instantiate();
-			hshape->set_map_width(SHAPE_DIM);
-			hshape->set_map_depth(SHAPE_DIM);
-			hshape->set_map_data(map_data);
-
-			CollisionShape3D* cshape = memnew(CollisionShape3D);
-			cshape->set_shape(hshape);
-
-			StaticBody3D* body = memnew(StaticBody3D);
-			body->set_name(String("TerrainCol_") + String::num_int64(row) + "_" + String::num_int64(col));
-			body->set_collision_layer(collision_layer);
-			body->set_collision_mask(collision_mask);
-
-			// Grid (row, col) -> world sector position
-			// row = gz -> world Z axis
-			// col = gx -> world X axis
-			int sx = trn.origin_x + col;
-			int sz = trn.origin_y + row;
-			float world_x = static_cast<float>(sx * 512);
-			float world_z = static_cast<float>(sz * 512);
-			// HeightMapShape3D is centered; offset by half sector to align with visual mesh
-			body->set_position(Vector3(world_x + 256.0f, 0.0f, world_z + 256.0f));
-
-			body->add_child(cshape);
-			add_child(body);
-			collision_bodies.push_back(body);
-		}
-	}
-
-	UtilityFunctions::print_verbose("NovaTerrain: Built ", static_cast<int>(collision_bodies.size()), " collision bodies");
 }
 
 // ---------------------------------------------------------------------------

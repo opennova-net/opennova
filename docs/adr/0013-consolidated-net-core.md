@@ -127,6 +127,29 @@ single `Server_InitNewRoundState` call.
     the shared machinery requires a `ctx.world`, so the service now carries the minimal
     infrastructure world described in Context, with the admission-depth caution recorded
     there.
-  - **Remaining:** collapsing the two byte-identical outer framers (`encode_session_outbound` /
-    `nw_encode_outbound`); folding `nw_udp_listener`'s app-side server-direction `lobby_state` onto the
-    shared helper. Both optional, wire-neutral, low priority.
+  - **DONE (2026-07-28, quality campaign W2-2):** the byte-identical outer framers are collapsed —
+    `libs/novaworld`'s `encode_session_outbound` / `decode_session_inbound` are deleted and their
+    call sites use npwire's `nw_encode_outbound` / `nw_decode_inbound` (it was four functions, both
+    directions, not two). And `nw_udp_listener`'s server-direction **framing** leg now calls the
+    shared `frame_session_packet` instead of hand-stamping a `ProtocolPacketHeader` beside the raw
+    `encode_protocol_packet_plaintext` — the last copy of the stamping `npruntime`'s
+    `frame_session_replies` already owned. Wire-neutral, proven before/after against the local
+    goldens (472 decoded S2C tags, 2351 C2S `0x0C` / 2361 S2C `0x0A`, the `0x2A` byte-exact records,
+    and the `0x81`/`0x82` first-diff offsets all unchanged; `golden_client`'s re-framed-datagram
+    byte assertion covers the framing path directly).
+  - **CLOSED (2026-07-28, quality campaign W2-3) — REFUTED, not implemented.** The remaining
+    item read as "fold `nw_udp_listener`'s per-connection lobby state into the shared
+    registry". Doing that would REGRESS the retransmit path, so the item is retired rather
+    than done. `LobbyConnState` is not a duplicate of `ConnectionRegistry`: the two are a
+    deliberate LIFETIME split. A `ClientHello` re-inserts the peer as Handshaking and clears
+    the registry's session keys; the lobby record survives that and RESTORES them when an
+    exact `ClientAuth` repeat arrives (`notify_active_addr` with the cached scrk) — the
+    D-NET-104 invariant that a repeated `0x42` replays the cached `0x82` and never re-mints
+    session material. One merged store cannot express "wire row reset, session material
+    kept". Two supporting facts found while checking: eviction is ALREADY single
+    (`erase_lobby_state` is the ConnectionManager `on_lost` sink, so there is one teardown
+    entry point), and `ConnectionRegistry::find_by_addr` returns `Connection` BY VALUE on the
+    per-datagram path, so moving the auth-datagram cache and reassembly buffers into it would
+    copy kilobytes per packet. `HostedSnapshot` vs `HostRow` is likewise not duplication —
+    `row_from_lobby` is the documented DB projection of the live view. The invariant is now
+    recorded at both struct definitions so a later cleanup cannot merge it away.

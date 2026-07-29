@@ -218,7 +218,8 @@ private:
 // Shared identity-message builders — the ClientHello / ClientAuth struct-fill that BOTH the lobby
 // ClientSession (above) and the in-match np::JoinerConnection (libs/npruntime) use. The two builders
 // differ ONLY in the CO source (lobby company vs the joiner's player name) and which envelope frames
-// the bytes (encode_session_outbound vs nw_encode_outbound), so the struct-fill is dedup'd here.
+// the bytes (both directions now share npwire's nw_encode_outbound / nw_decode_inbound), so the
+// struct-fill is dedup'd here.
 // [orig: one CNapiNPConnection identity block — NapiNPConnection_SendClientHello @0x61fe20 sources it
 // from the same protocol config for both the 0x41 hello and the 0x42 join; the lobby/game paths split
 // AFTER 0x82, not in the identity emit.]

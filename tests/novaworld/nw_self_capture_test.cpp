@@ -49,7 +49,7 @@
 #include <world/geom.h>
 #include <world/world.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <algorithm>
 #include <cstdint>

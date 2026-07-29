@@ -8,6 +8,7 @@
 #define OPENNOVA_IO_LE_H
 
 #include <cstdint>
+#include <vector>
 #include <cstring>
 
 namespace opennova {
@@ -68,6 +69,47 @@ inline void write_f32_le(uint8_t *p, float f)
     uint32_t v;
     std::memcpy(&v, &f, sizeof(v));
     write_u32_le(p, v);
+}
+
+
+// Append-to-vector writers. The pointer writers above need the caller to have
+// already sized the buffer; every streaming encoder instead grows a
+// std::vector as it goes, which is why the same push_back chain kept being
+// re-rolled per lib (npwire's Writer, npruntime's put_u16/put_u32, ...).
+inline void append_u8(std::vector<uint8_t> &out, uint8_t v)
+{
+    out.push_back(v);
+}
+
+inline void append_u16_le(std::vector<uint8_t> &out, uint16_t v)
+{
+    out.push_back((uint8_t)(v & 0xFFu));
+    out.push_back((uint8_t)((v >> 8) & 0xFFu));
+}
+
+inline void append_u32_le(std::vector<uint8_t> &out, uint32_t v)
+{
+    out.push_back((uint8_t)(v & 0xFFu));
+    out.push_back((uint8_t)((v >> 8) & 0xFFu));
+    out.push_back((uint8_t)((v >> 16) & 0xFFu));
+    out.push_back((uint8_t)((v >> 24) & 0xFFu));
+}
+
+inline void append_i16_le(std::vector<uint8_t> &out, int16_t v)
+{
+    append_u16_le(out, (uint16_t)v);
+}
+
+inline void append_i32_le(std::vector<uint8_t> &out, int32_t v)
+{
+    append_u32_le(out, (uint32_t)v);
+}
+
+inline void append_f32_le(std::vector<uint8_t> &out, float f)
+{
+    uint32_t bits = 0;
+    std::memcpy(&bits, &f, sizeof(bits));
+    append_u32_le(out, bits);
 }
 
 } // namespace io

@@ -123,6 +123,7 @@ add_library(${TARGET_NAME} SHARED
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
+    simulation/nova_present_applier.cpp
     simulation/nova_simulation.cpp
     simulation/nova_simulation_assets.cpp
     simulation/nova_simulation_bind.cpp
@@ -133,6 +134,7 @@ add_library(${TARGET_NAME} SHARED
     wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
+    audio/nova_ambient_mixer.cpp
     audio/nova_sound_selector.cpp
     dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp

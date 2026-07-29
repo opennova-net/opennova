@@ -50,10 +50,12 @@
 #include "object/nova_skeletal_anim.h"
 #include "hud/nova_hud_pos.h"
 #include "mission/nova_mission_data.h"
+#include "simulation/nova_present_applier.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
 #include "lwf/nova_lwf_data.h"
 #include "lwf/nova_wav_loader.h"
+#include "audio/nova_ambient_mixer.h"
 #include "audio/nova_sound_selector.h"
 #include "dbf/nova_dbf_data.h"
 #include "cbin/cbin_credits_resource.h"
@@ -181,11 +183,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaSkeletalAnim);
 	GDREGISTER_CLASS(NovaHudPos);
 	GDREGISTER_CLASS(NovaMissionData);
+	GDREGISTER_CLASS(NovaPresentApplier);
 	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_CLASS(NovaEditHistory);
 	GDREGISTER_CLASS(NovaWacProgram);
 	GDREGISTER_CLASS(NovaLwfData);
 	GDREGISTER_CLASS(NovaWavLoader);
+	GDREGISTER_CLASS(NovaAmbientMixer);
 	GDREGISTER_CLASS(NovaSoundSelector);
 	GDREGISTER_CLASS(NovaDbfData);
 	GDREGISTER_ABSTRACT_CLASS(CbinEntry);

@@ -116,7 +116,7 @@ func _run() -> void:
 	listener.global_position = listen_pos
 	listener.make_current()
 	# The real game culls voices beyond 240u from the camera each frame.
-	audio.tick(listen_pos)
+	audio.tick(listen_pos, 0.2)
 	var marker_players: Array = container.find_children(
 		"*", "AudioStreamPlayer3D", true, false)
 	var near := 0

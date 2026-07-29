@@ -36,7 +36,7 @@
 #include <npwire/ingame_message_catalog.h>
 #include <npwire/wire_capture.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -215,6 +215,86 @@ static int test_log_sink()
     return 0;
 }
 
+
+// --- W2-4: the vector-append writers + the ByteReader truncation latch ------
+static int test_append_writers()
+{
+    std::vector<uint8_t> out;
+    io::append_u8(out, 0xAB);
+    io::append_u16_le(out, 0x1234);
+    io::append_u32_le(out, 0xDEADBEEFu);
+    io::append_i16_le(out, (int16_t)-2);
+    io::append_i32_le(out, (int32_t)-2);
+
+    const uint8_t want[] = {
+        0xAB,
+        0x34, 0x12,
+        0xEF, 0xBE, 0xAD, 0xDE,
+        0xFE, 0xFF,
+        0xFE, 0xFF, 0xFF, 0xFF,
+    };
+    TEST_EXPECT(out.size() == sizeof(want));
+    TEST_EXPECT(std::memcmp(out.data(), want, sizeof(want)) == 0);
+
+    // The appenders and the pointer writers must agree byte for byte -- the
+    // whole point is that a streaming encoder and a fixed-buffer encoder
+    // produce the same wire bytes.
+    uint8_t via_ptr[4] = {0, 0, 0, 0};
+    io::write_u32_le(via_ptr, 0xDEADBEEFu);
+    TEST_EXPECT(std::memcmp(via_ptr, want + 3, 4) == 0);
+
+    // Float appends round-trip through the reader.
+    std::vector<uint8_t> fbuf;
+    io::append_f32_le(fbuf, 0.5f);
+    TEST_EXPECT(fbuf.size() == 4);
+    io::ByteReader fr(fbuf.data(), fbuf.size());
+    TEST_EXPECT(fr.read_f32() == 0.5f);
+    return 0;
+}
+
+static int test_byte_reader_truncation_latch()
+{
+    const uint8_t data[3] = {0x01, 0x02, 0x03};
+
+    // A clean read leaves the cursor ok.
+    io::ByteReader clean(data, sizeof(data));
+    TEST_EXPECT(clean.ok());
+    TEST_EXPECT(clean.read_u8() == 0x01);
+    TEST_EXPECT(clean.read_u16() == 0x0302);
+    TEST_EXPECT(clean.ok());
+
+    // A clipped read latches -- and this is what a legitimate zero could not
+    // be told apart from before.
+    io::ByteReader trunc(data, sizeof(data));
+    TEST_EXPECT(trunc.read_u32() == 0);
+    TEST_EXPECT(!trunc.ok());
+    // OBSERVATIONAL: the latch must not change the lenient recovery contract
+    // format parsers depend on -- the cursor did not advance, so the next
+    // read still returns real data.
+    TEST_EXPECT(trunc.position() == 0);
+    TEST_EXPECT(trunc.read_u8() == 0x01);
+
+    // skip past the end latches and clamps.
+    io::ByteReader skipper(data, sizeof(data));
+    skipper.skip(99);
+    TEST_EXPECT(!skipper.ok());
+    TEST_EXPECT(skipper.remaining() == 0);
+
+    // Bulk reads zero-fill AND latch.
+    io::ByteReader bulk(data, sizeof(data));
+    uint8_t dst[8] = {9, 9, 9, 9, 9, 9, 9, 9};
+    bulk.read_bytes(dst, sizeof(dst));
+    TEST_EXPECT(!bulk.ok());
+    TEST_EXPECT(dst[0] == 0 && dst[7] == 0);
+
+    // A caller-declared semantic failure joins the same state.
+    io::ByteReader semantic(data, sizeof(data));
+    TEST_EXPECT(semantic.ok());
+    semantic.mark_failed();
+    TEST_EXPECT(!semantic.ok());
+    return 0;
+}
+
 int main()
 {
     if (test_le_primitives()) return 1;
@@ -224,6 +304,8 @@ int main()
     if (test_byte_writer_roundtrip()) return 1;
     if (test_bit_stream_roundtrip()) return 1;
     if (test_strutil()) return 1;
+    if (test_append_writers()) return 1;
+    if (test_byte_reader_truncation_latch()) return 1;
     if (test_log_sink()) return 1;
     std::printf("io_test: all checks passed\n");
     return 0;

@@ -67,11 +67,6 @@ private:
 
 	bool built = false;
 
-	// Collision
-	bool collision_enabled = true;
-	uint32_t collision_layer = 1;
-	uint32_t collision_mask = 1;
-	std::vector<StaticBody3D*> collision_bodies;
 
 	// Cached node pointers — avoids per-frame get_node_or_null()
 	Node *cached_env_node = nullptr;
@@ -88,13 +83,11 @@ private:
 
 	bool _build_terrain();
 	void _build_quadtree();
-	void _build_collision();
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_texture();
 	void _clear_tile_overlay_texture();
 	void _clear_terrain();
-	void _clear_collision_bodies();
 	void _hide_visible_patches();
 	void _clear_patch_pool();
 	void _on_terrain_changed();
@@ -103,7 +96,8 @@ private:
 	static void _strip_to_list(const std::vector<uint16_t>& strip,
 	                           PackedInt32Array& out);
 
-	Vector3 _heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz) const;
+	Vector3 _heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
+	                          const opennova::terrain::CoordsTaps& taps) const;
 
 protected:
 	static void _bind_methods();
@@ -138,12 +132,6 @@ public:
 
 	void build();
 
-	void set_collision_enabled(bool p_enabled);
-	bool get_collision_enabled() const;
-	void set_collision_layer(uint32_t p_layer);
-	uint32_t get_collision_layer() const;
-	void set_collision_mask(uint32_t p_mask);
-	uint32_t get_collision_mask() const;
 
 	// Debug API
 	Dictionary get_traversal_stats() const;

@@ -108,11 +108,7 @@ bool validates_jointoperations_game_environment(const ParsedClientGameEnvironmen
 // is LE octet packing (a | b<<8 | c<<16 | d<<24); print low->high so the label reads a.b.c.d (matches
 // nw_udp_listener's client_label). [orig: HostSessionAccept::peer_session_id]
 std::string peer_session_id(const PeerAddr &peer) {
-	char buf[32];
-	std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u:%u",
-	              peer.ip & 0xffu, (peer.ip >> 8) & 0xffu,
-	              (peer.ip >> 16) & 0xffu, (peer.ip >> 24) & 0xffu, peer.port);
-	return buf;
+	return peer_addr_to_string(peer);
 }
 
 NapiNPConnection *find_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {

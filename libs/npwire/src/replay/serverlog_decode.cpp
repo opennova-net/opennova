@@ -1,5 +1,7 @@
 #include "npwire/serverlog_decode.h"
 
+#include "../wire_cursor.h"
+
 #include <cstring>
 
 // `/PROFILE` .sph server-log decoder — see docs/net/novaworld-net-re.md §5.22.
@@ -13,27 +15,8 @@ namespace {
 
 // Bounded cursor — mirrors ingame_decode.cpp. Every read is checked vs `end`;
 // underflow flips ok=false and stops advancing.
-struct Cursor {
-	const uint8_t *p = nullptr;
-	const uint8_t *end = nullptr;
-	bool ok = true;
 
-	uint8_t u8() {
-		if (!ok || p + 1 > end) { ok = false; return 0; }
-		return *p++;
-	}
-	uint16_t u16() {
-		if (!ok || p + 2 > end) { ok = false; return 0; }
-		uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8; p += 2; return v;
-	}
-	uint32_t u32() {
-		if (!ok || p + 4 > end) { ok = false; return 0; }
-		uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
-		             uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-		p += 4; return v;
-	}
-	int32_t i32() { return int32_t(u32()); }
-};
+using opennova::npwire_detail::Cursor;
 
 inline bool tag_is(const uint8_t *p, const char (&t)[5]) {
 	return std::memcmp(p, t, 4) == 0;

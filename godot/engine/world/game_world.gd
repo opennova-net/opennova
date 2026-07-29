@@ -1714,7 +1714,16 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		# Entity_CalcTimeOfDayRegion @ 0x408110].
 		if _env != null and _env.get("time_of_day") != null:
 			_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
-		_mission_audio.tick(camera_pos)
+		# Marker eval/registration rides the sim's logic-tick clock — the witnessed
+		# pool-2 stagger [orig: Entity_UpdateAllEntities @ 0x4c225a]; the per-frame
+		# call below is only the live-slot mix + voice binds [orig:
+		# SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A host with no ticking runtime
+		# (editor idle) free-runs the eval clock off render delta instead.
+		if runtime_ticks > 0 and _runtime != null and _runtime.has_method("get_sim"):
+			var audio_sim = _runtime.get_sim()
+			if audio_sim != null and audio_sim.has_method("get_logic_tick"):
+				_mission_audio.advance_ticks(int(audio_sim.get_logic_tick()))
+		_mission_audio.tick(camera_pos, delta)
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start

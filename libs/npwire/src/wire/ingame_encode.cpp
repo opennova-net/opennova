@@ -1,4 +1,5 @@
 #include "npwire/ingame_encode.h"
+#include <io/le.h>
 
 // Encoders for the in-match S2C replication tags — the symmetric partners to
 // ingame_decode.cpp. Faithful structural ports of the original server-side
@@ -18,17 +19,9 @@ namespace {
 // exact records handed to it.
 struct Writer {
 	std::vector<uint8_t> &out;
-	void u8(uint8_t v) { out.push_back(v); }
-	void u16(uint16_t v) {
-		out.push_back(uint8_t(v));
-		out.push_back(uint8_t(v >> 8));
-	}
-	void u32(uint32_t v) {
-		out.push_back(uint8_t(v));
-		out.push_back(uint8_t(v >> 8));
-		out.push_back(uint8_t(v >> 16));
-		out.push_back(uint8_t(v >> 24));
-	}
+	void u8(uint8_t v) { opennova::io::append_u8(out, v); }
+	void u16(uint16_t v) { opennova::io::append_u16_le(out, v); }
+	void u32(uint32_t v) { opennova::io::append_u32_le(out, v); }
 	// NUL-terminated string — the inverse of Cursor::cstr().
 	void cstr(const std::string &s) {
 		for (char ch : s) out.push_back(uint8_t(ch));

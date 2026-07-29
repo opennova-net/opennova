@@ -28,7 +28,7 @@ target_include_directories(opennova_npwire
 )
 
 target_link_libraries(opennova_npwire
-    PUBLIC opennova_novacrypto opennova_napi
+    PUBLIC opennova_io opennova_novacrypto opennova_napi
 )
 
 target_compile_features(opennova_npwire PUBLIC cxx_std_17)

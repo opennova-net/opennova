@@ -32,7 +32,7 @@
 #include <world/player_spawn.h>
 #include <world/world.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstddef>
 #include <cstdint>

@@ -8,25 +8,17 @@ const GUN_YAW := "EWEAP_GUNYAW"
 const GUN_PITCH := "EWEAP_GUNPITCH"
 
 
+# Bodies live in the native walk (NovaPresentApplier) so the mission pass's
+# per-row hot path and this shared adapter cannot diverge; these statics are the
+# stable GDScript seams other passes and tests keep calling.
+
 static func clear(node) -> void:
-	if not node.has_method("clear_ctrl_value"):
-		return
-	node.clear_ctrl_value(GUN_YAW)
-	node.clear_ctrl_value(GUN_PITCH)
+	NovaPresentApplier.emplaced_clear(node)
 
 
 static func apply(
 		node, snap: PackedFloat32Array, base: int, clear_when_invalid: bool = true) -> int:
-	if not node.has_method("set_ctrl_value"):
-		return 0
-	if int(snap[base + NovaSimulation.PF_EMPLACED_CONTROLS_VALID]) == 1:
-		node.set_ctrl_value(
-				GUN_YAW, int(snap[base + NovaSimulation.PF_EWEAP_GUNYAW]))
-		node.set_ctrl_value(
-				GUN_PITCH, int(snap[base + NovaSimulation.PF_EWEAP_GUNPITCH]))
-		return 2
-	# Nodes persist across dismount/death, so remove only the two controls this
-	# presenter owns. clear_ctrl_values() would also erase live WAC channels.
-	if clear_when_invalid:
-		clear(node)
-	return 0
+	# Nodes persist across dismount/death, so the invalid leg removes only the
+	# two controls this presenter owns — clear_ctrl_values() would also erase
+	# live WAC channels.
+	return NovaPresentApplier.emplaced_apply(node, snap, base, clear_when_invalid)
