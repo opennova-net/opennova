@@ -3,13 +3,16 @@
 // The shape is lifted from libs/cpt's CDEP bit codec (the proven consumer);
 // shipped here for NEW code.
 //
-// cpt still has its own copy, and the two have since DIVERGED — this one
-// tracks a high-water mark the writer needs, cpt's reader carries a
-// normalizing set_position (a bit_offset > 8 folds into byte+bit) that has no
-// consumer here. So they are no longer interchangeable: adopting this header
-// in cpt is a real migration that has to be byte-diffed against the CPT
-// corpus, not a swap. (Verified 2026-07-28, quality campaign W2-4 — the
-// earlier "token-identical copy" note was wrong.)
+// cpt still has its own copy, and the two have since DIVERGED. Both track a
+// high-water mark; what differs is the surface each grew for its own consumer:
+// cpt's writer has a normalizing set_position (a bit_offset > 8 folds into
+// byte+bit) and a write_to_file, and its reader has a remaining_bits used to
+// bound declared counts, while this one has byte_position instead. So they are
+// not interchangeable: adopting this header in cpt is a real migration that
+// has to be byte-diffed against the CPT corpus (tests/terrain's
+// parametric_parity_test does exactly that), not a swap. (Verified 2026-07-28,
+// quality campaign W2-4/W2-7 — the earlier "token-identical copy" note was
+// wrong, and so was W2-4's account of which class held what.)
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
@@ -21,6 +24,8 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+
+#include <io/le.h>
 
 namespace opennova {
 namespace io {
@@ -104,9 +109,16 @@ public:
     void write_bits(uint32_t value)
     {
         ensure_capacity(byte_pos_ + 32u);
-        uint32_t *dst = reinterpret_cast<uint32_t *>(buffer_.data() + byte_pos_);
+        // Byte-wise little-endian read-modify-write. This was a dword store through a
+        // reinterpret_cast at an arbitrary byte offset: strict-aliasing and alignment
+        // UB that merely happened to work on x86, and that UBSan flags. io/le.h is
+        // also the layout contract — the stream packs LSB-first within a
+        // little-endian dword — so being explicit makes the codec correct rather
+        // than accidentally correct. Identical bytes on a little-endian host.
+        uint8_t *dst = buffer_.data() + byte_pos_;
+        const uint32_t cur = read_u32_le(dst);
         const uint32_t mask = bitmask_ << bit_pos_;
-        *dst = ((value & bitmask_) << bit_pos_) | (*dst & ~mask);
+        write_u32_le(dst, ((value & bitmask_) << bit_pos_) | (cur & ~mask));
 
         const uint32_t total_bits = bit_pos_ + bit_width_;
         byte_pos_ += total_bits >> 3;

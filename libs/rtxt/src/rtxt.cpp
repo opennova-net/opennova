@@ -219,6 +219,15 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
   // Text data starts after entry table.
   size_t text_data_start = HEADER_SIZE + entry_table_size;
 
+  // ...and text_data_end must not point back INTO the entry table. Only the
+  // upper bound (> size) was checked, so a backward end offset was accepted and
+  // the section count was then read out of the entry table's own bytes —
+  // parsing structure out of unrelated data instead of failing.
+  if (text_data_end < text_data_start) {
+    error = "RTXT text data end precedes the text data start";
+    return false;
+  }
+
   // Parse entry table (we'll fill in keys later).
   struct RawEntry {
     uint32_t text_offset;
