@@ -436,9 +436,10 @@ func test_debug_button_summons_a_locked_overlay_over_the_shell() -> void:
 	var overlay = shell.find_child("MissionDebugOverlay", true, false)
 	assert_not_null(overlay, "the first press builds the overlay under the shell")
 	assert_true(overlay.visible)
-	assert_true(overlay._writes_check.disabled,
+	var writes_check := overlay.find_child("VarsAllowWrites", true, false) as CheckButton
+	assert_true(writes_check.disabled,
 		"the editor's overlay mounts write-locked")
-	assert_string_contains(overlay._writes_check.tooltip_text, "simulating from the editor")
+	assert_string_contains(writes_check.tooltip_text, "simulating from the editor")
 	assert_true(btn.button_pressed, "the toggle stays latched while open")
 
 	btn.button_pressed = false

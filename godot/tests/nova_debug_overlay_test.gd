@@ -29,6 +29,10 @@ const ROUNDS_STATUS_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(
 	"DebugPanel/DebugContent/DebugTabs/Rounds/RoundEvents")
+const SKELETON_TOGGLE_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/View/ViewSkeletons")
+const FOLIAGE_TOGGLE_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/View/ViewHideFoliage")
 
 
 class FakePoseSim:
@@ -241,7 +245,8 @@ func test_without_runtime_reports_no_mission() -> void:
 	assert_true(overlay._status_label.visible, "no source - the overlay says so")
 	assert_true(overlay._tabs.visible,
 		"the tabs stay usable (the perf pane works from host-wide state, no sim needed)")
-	assert_eq(overlay._entity_list.item_count, 0, "the sim-fed panes sit empty")
+	var entity_list := overlay.find_child("EntityList", true, false) as ItemList
+	assert_eq(entity_list.item_count, 0, "the sim-fed panes sit empty")
 
 	overlay.set_runtime_source(func(): return null)
 	overlay.refresh_now()
@@ -258,8 +263,8 @@ func test_transport_signal_stays_quiet_without_a_runtime() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	watch_signals(overlay)
-	overlay._play_button.pressed.emit()
-	overlay._stop_button.pressed.emit()
+	(overlay.find_child("SimPlay", true, false) as Button).pressed.emit()
+	(overlay.find_child("SimStop", true, false) as Button).pressed.emit()
 	assert_signal_not_emitted(overlay, "transport_used",
 		"a press with nothing to act on announces nothing")
 
@@ -280,14 +285,14 @@ func test_view_tab_skeleton_toggle_emits() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_not_null(overlay._tabs.get_node_or_null("View"), "a View tab exists")
-	assert_not_null(overlay._skeleton_check, "the skeleton checkbox is reachable as a member")
-	assert_eq(overlay._skeleton_check.name, "ViewSkeletons")
-	assert_false(overlay._skeleton_check.button_pressed, "it defaults off")
+	var skeleton_check := overlay.get_node_or_null(SKELETON_TOGGLE_PATH) as CheckBox
+	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
+	assert_false(skeleton_check.button_pressed, "it defaults off")
 
 	watch_signals(overlay)
-	overlay._skeleton_check.toggled.emit(true)
+	skeleton_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [true])
-	overlay._skeleton_check.toggled.emit(false)
+	skeleton_check.toggled.emit(false)
 	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [false])
 
 
@@ -403,14 +408,14 @@ func test_view_tab_hide_foliage_toggle_emits() -> void:
 	# the skeleton toggle -- it only emits intent for the host to act on.
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._foliage_check, "the foliage checkbox is reachable as a member")
-	assert_eq(overlay._foliage_check.name, "ViewHideFoliage")
-	assert_false(overlay._foliage_check.button_pressed, "it defaults off (foliage shown)")
+	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
+	assert_not_null(foliage_check, "the foliage checkbox has a stable public node path")
+	assert_false(foliage_check.button_pressed, "it defaults off (foliage shown)")
 
 	watch_signals(overlay)
-	overlay._foliage_check.toggled.emit(true)
+	foliage_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [true])
-	overlay._foliage_check.toggled.emit(false)
+	foliage_check.toggled.emit(false)
 	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [false])
 
 
