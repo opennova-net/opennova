@@ -13,7 +13,7 @@ cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$root/build" --config Release -j "$jobs"
 
 echo "Running tests..."
-ctest --test-dir "$root/build" --output-on-failure -C Release
+ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs"
 
 # Build the Godot GDExtension too, so the editor doesn't load a stale DLL
 # missing classes that engine/ has since added. Skippable via BUILD_GODOT=0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Collection
 import re
 import shutil
 import sys
@@ -210,6 +211,7 @@ def validate_release_deliverables(
     release_body: str | Path,
     release_version: str,
     manifest_path: str | Path | None = None,
+    deliverable_ids: Collection[str] | None = None,
 ) -> DeliverableValidationResult:
     root = Path(repo_root)
     dist = Path(dist_dir)
@@ -222,6 +224,39 @@ def validate_release_deliverables(
 
     context = _version_context(root, release_version)
     deliverables = _manifest_deliverables(manifest, context)
+
+    if deliverable_ids is not None:
+        requested_ids = list(deliverable_ids)
+        if not requested_ids:
+            raise DeliverableValidationError("At least one deliverable ID must be selected")
+
+        seen_ids: set[str] = set()
+        duplicate_ids: list[str] = []
+        for deliverable_id in requested_ids:
+            if deliverable_id in seen_ids and deliverable_id not in duplicate_ids:
+                duplicate_ids.append(deliverable_id)
+            seen_ids.add(deliverable_id)
+        if duplicate_ids:
+            raise DeliverableValidationError(
+                f"Duplicate deliverable IDs: {', '.join(duplicate_ids)}"
+            )
+
+        known_ids = {item["id"] for item in deliverables}
+        unknown_ids = [
+            deliverable_id for deliverable_id in requested_ids
+            if deliverable_id not in known_ids
+        ]
+        if unknown_ids:
+            raise DeliverableValidationError(
+                f"Unknown deliverable IDs: {', '.join(unknown_ids)}"
+            )
+
+        requested_id_set = set(requested_ids)
+        deliverables = [
+            item for item in deliverables
+            if item["id"] in requested_id_set
+        ]
+
     expected_sources = {item["source"] for item in deliverables}
     _assert_exact_dist_files(dist, expected_sources)
 
@@ -257,6 +292,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--release-body", default="release-body.md")
     parser.add_argument("--release-version", required=True)
     parser.add_argument("--manifest", default=None)
+    parser.add_argument(
+        "--only-id",
+        action="append",
+        dest="deliverable_ids",
+        metavar="ID",
+        help="Validate only this manifest deliverable ID; may be repeated.",
+    )
     return parser.parse_args(argv)
 
 
@@ -270,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             release_body=Path(args.release_body),
             release_version=args.release_version,
             manifest_path=Path(args.manifest) if args.manifest else None,
+            deliverable_ids=args.deliverable_ids,
         )
     except DeliverableValidationError as exc:
         print(f"release deliverable validation failed: {exc}", file=sys.stderr)
