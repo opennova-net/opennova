@@ -40,7 +40,7 @@
 
 #include <world/geom.h> // from_fixed
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cmath>
 #include <cstddef>

@@ -24,7 +24,7 @@
 #include "nw_replay_partition.h"
 
 #include "net_sockets.h"
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <def/def.h>
 #include <npwire/ingame_decode.h>

@@ -32,7 +32,7 @@
 #include <def/def.h>
 #include <scr/scr.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cmath>
 #include <cstdint>

@@ -38,7 +38,7 @@
 #include <npwire/wire_capture.h>
 #include <scr/scr.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <algorithm>
 #include <cstdint>

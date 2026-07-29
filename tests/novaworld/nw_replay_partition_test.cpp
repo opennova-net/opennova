@@ -20,7 +20,7 @@
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>
