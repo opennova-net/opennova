@@ -74,9 +74,9 @@ of job, not the TU-split recipe:
 - [ ] W3-4 `http_listener::start` — a ~2,200-line FUNCTION decomposition in a net
       lib (the wire byte-gate applies)
 - [ ] W3-5 `apps/importer/scene_builder.py` split (gate = `scripts/test_python.sh`)
-- [ ] W3-6 `nova_object_data.cpp` split — first collapse its 9
-      `std::clamp(..., -32768, 32767)` copies onto the file's int16 helper, or the
-      promoted-literal lint fires on all nine
+- [x] W3-6 `nova_object_data.cpp` split (DONE: the clamp copies collapsed onto
+      `clamp_to_i16`, then the 3,991-line binding cut into seven one-concern TUs +
+      `nova_object_data_internal.h`, following the `nova_simulation_*` family shape)
 - [ ] W3-7 header-width pass
 - [ ] W4 GDScript: `game_world.gd` forwarder-delete + extractions, typed fields to
       retire the ~90 `has_method` guards, F3 overlay per-tab, modtools splits
