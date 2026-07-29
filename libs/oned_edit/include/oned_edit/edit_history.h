@@ -2,7 +2,6 @@
 #define OPENNOVA_ONED_EDIT_EDIT_HISTORY_H
 
 #include <cstddef>
-#include <functional>
 #include <utility>
 #include <vector>
 

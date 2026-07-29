@@ -40,11 +40,22 @@ struct ClientHello {
 	uint32_t epn = 0; // External Port Number
 };
 
+// Server-identity name defaults — ONE home for the three name-bearing wire
+// fields, which deliberately differ: the 0x81 ServerHello carries our own
+// AP/SN identity, while the 0x82 ServerAuth CU "NovaworldName" must stay the
+// literal "NWServer" retail emits (notes/retail_capture_findings.md; the
+// earlier "OpenNova" value there was retired for retail parity). Keeping all
+// three side by side is what stops one being rebranded without the others
+// being reconsidered.
+inline constexpr char kServerHelloAppName[] = "OpenNova NWServer"; // 0x81 AP
+inline constexpr char kServerHelloServerName[] = "OpenNova";       // 0x81 SN
+inline constexpr char kNovaworldNameDefault[] = "NWServer";        // 0x82 CU "NovaworldName"
+
 // ServerHello, sent S2C as opcode 0x81 payload.
 struct ServerHello {
 	uint32_t ci = 0;
 	std::string co = "NovaLogic Inc, Calabasas CA U.S.A.";
-	std::string ap = "OpenNova NWServer";
+	std::string ap = kServerHelloAppName;
 	std::string bdat = "Jan  1 2026 00:00:00";
 	uint32_t ut = 0; // uptime / unix time
 	std::string pn = "NOVAWORLDUDP";
@@ -53,7 +64,7 @@ struct ServerHello {
 	std::string pv2 = "1";
 	std::string pv3 = "1.6.4r opennova";
 	uint32_t hk = 0x0FE0E112u; // host key (opaque to the client beyond echo in ClientJoin)
-	std::string sn = "OpenNova";
+	std::string sn = kServerHelloServerName;
 	std::string pl = "WIN32";
 	uint32_t nc = 0; // node count
 	uint32_t rip = 0; // reflected IP (client's apparent IP)
@@ -312,7 +323,7 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              uint16_t client_port,
                              uint32_t server_sk,
                              std::string_view server_scrk,
-                             std::string_view novaworld_name = "NWServer",
+                             std::string_view novaworld_name = kNovaworldNameDefault,
                              std::string_view novaworld_web_url = "http://127.0.0.1:8080",
                              std::string_view nwuid = "0accd1b2cffac0e3f1efe6c80000000000000000000000000000000000000000",
                              bool include_novaworld_cu = true);

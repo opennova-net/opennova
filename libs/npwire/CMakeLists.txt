@@ -12,6 +12,7 @@
 # is not part of the flat C ABI (opennova_shared).
 
 add_library(opennova_npwire STATIC
+    src/wire/entity_class.cpp
     src/wire/ingame_decode.cpp
     src/wire/ingame_encode.cpp
     src/session/session_hello.cpp
