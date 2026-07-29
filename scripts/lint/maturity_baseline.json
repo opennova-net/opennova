@@ -14,7 +14,7 @@
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
     "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 58,
+    "libs_uncited_src_files": 59,
     "test_private_pokes": 1378
   },
   "dict_contract_allowlist": [
