@@ -23,6 +23,7 @@
 // (NovaTerrainData) converts to/from Vector2 / Rect2i at the boundary.
 
 #include <cmath>
+#include <cstdint>
 
 namespace opennova::terrain {
 
@@ -85,6 +86,88 @@ inline int coords_quadrant_offset_x(int sector_id) {
 
 inline int coords_quadrant_offset_z(int sector_id) {
 	return (sector_id == 2 || sector_id == 4) ? COORDS_SECTOR_SIZE : 0;
+}
+
+// Per-quadrant neighbour-tap locks, from the .trn's lock_topleft / lock_topright /
+// lock_bottomleft / lock_bottomright pairs (TrnConfig::lock_*, TerrainQuadrantLocks).
+// A LOCKED axis makes a neighbour tap wrap inside the quadrant's own 512 window; an
+// unlocked one lets it cross the atlas-internal seam into the neighbouring quadrant.
+// Quadrant order matches TerrainQuadrantLocks: 0 top-left, 1 top-right, 2 bottom-left,
+// 3 bottom-right.
+//
+// Sector tiling puts the same quadrant next to itself, so on a locked axis the
+// authored heightmap is only seamless when the tap wraps within the quadrant: on
+// Dvxc2 (05TR) the locked wrap breaks by a median 0.004 u across the seam while the
+// atlas-crossing tap breaks by 13.5 u, dropping the boundary vertex row to the
+// neighbouring quadrant's shoreline.
+//
+// Packed one bit per quadrant per axis, not a four-entry {int x, int y} array:
+// TerrainHeightField is a by-value POD that lands in some very deep stack frames, so
+// 2 bytes fits the padding it already had where 32 overflowed tests/world/infantry_test.
+//
+// [orig: sub_402D20 @0x402D20, ported in libs/terrain/src/terrain_mesh.cpp: picks the
+//  entry with (tile_x >= 0x200) + 2 * (tile_y >= 0x200), then sets mask 511 / offset
+//  (tile_xy & 0x200) on a locked axis and taps (offset + (abs & mask)) & 0x3FF.]
+struct CoordsQuadrantLocks {
+	uint8_t x = 0; // bit q set: the X neighbour tap wraps inside quadrant q
+	uint8_t z = 0; // bit q set: the Z neighbour tap wraps inside quadrant q
+
+	bool locked_x(int quadrant) const { return ((x >> quadrant) & 1u) != 0; }
+	bool locked_z(int quadrant) const { return ((z >> quadrant) & 1u) != 0; }
+
+	void set(int quadrant, bool lock_x, bool lock_z) {
+		const uint8_t bit = static_cast<uint8_t>(1u << quadrant);
+		x = static_cast<uint8_t>(lock_x ? (x | bit) : (x & ~bit));
+		z = static_cast<uint8_t>(lock_z ? (z | bit) : (z & ~bit));
+	}
+};
+
+// Lock-table index for a tap whose quadrant origin is (quadrant_x, quadrant_z),
+// each 0 or COORDS_SECTOR_SIZE. Equivalent to the original's tile_x/tile_y test.
+inline int coords_quadrant_index(int quadrant_x, int quadrant_z) {
+	return (quadrant_x != 0 ? 1 : 0) + (quadrant_z != 0 ? 2 : 0);
+}
+
+// One heightmap axis tap. `atlas` is an absolute atlas coordinate (quadrant offset
+// included) and may be one past the quadrant's last row/column — that is exactly the
+// crossing the lock governs. `quadrant_offset` is the tap's own quadrant origin on
+// that axis. Unlocked reduces to `atlas & (dim - 1)`, which is what every call site
+// did unconditionally before the locks were honored.
+inline int coords_locked_tap(int atlas, int quadrant_offset, bool locked, int dim) {
+	const int atlas_mask = dim - 1;
+	if (!locked) {
+		return atlas & atlas_mask;
+	}
+	return (quadrant_offset + (atlas & (COORDS_SECTOR_SIZE - 1))) & atlas_mask;
+}
+
+// The resolved tap policy for one quadrant: which quadrant a sample landed in and
+// whether each axis wraps inside it. Resolve once per sample/tile and tap through
+// it, so a bilinear's four taps (or a tile's vertex rows) can never disagree about
+// the quadrant they belong to. Every heightmap tap in the runtime goes through this.
+struct CoordsTaps {
+	int quadrant_x = 0;
+	int quadrant_z = 0;
+	bool lock_x = false;
+	bool lock_z = false;
+	int dim = 0;
+
+	int x(int atlas) const { return coords_locked_tap(atlas, quadrant_x, lock_x, dim); }
+	int z(int atlas) const { return coords_locked_tap(atlas, quadrant_z, lock_z, dim); }
+};
+
+// Taps for a quadrant named by its atlas origin (each component 0 or 512) — the
+// original's form, where the quadrant comes from the tile's own base coordinates.
+inline CoordsTaps coords_taps_for_quadrant(const CoordsQuadrantLocks &locks, int quadrant_x,
+                                           int quadrant_z, int dim) {
+	const int quadrant = coords_quadrant_index(quadrant_x, quadrant_z);
+	return CoordsTaps{quadrant_x, quadrant_z, locks.locked_x(quadrant), locks.locked_z(quadrant), dim};
+}
+
+// Taps for a quadrant named by the sector id (1..4) a world sample resolved through.
+inline CoordsTaps coords_taps_for_sector(const CoordsQuadrantLocks &locks, int sector_id, int dim) {
+	return coords_taps_for_quadrant(locks, coords_quadrant_offset_x(sector_id),
+	                                coords_quadrant_offset_z(sector_id), dim);
 }
 
 // Sector id at an explicit grid cell using the editor's guards: reject (return

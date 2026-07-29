@@ -30,12 +30,33 @@ namespace opennova::terrain {
 struct TerrainHeightField {
 	const uint16_t *heightmap = nullptr;
 	int dim = 0;             // heightmap side (atlas = 1024)
+	// Per-quadrant neighbour-tap locks (.trn lock_*). Default all-zero = every tap
+	// wraps across the full atlas, the behavior before the locks were honored.
+	// Sits here, next to `dim`, so it lands in that member's tail padding: this is a
+	// by-value POD copied into deep stack frames and it must not grow.
+	CoordsQuadrantLocks locks{};
 	SectorLayout layout;     // world->source sector remap (the *_world variants)
 	int32_t water_y = 0;     // [orig: worldY @0x26C6454] water plane, 16.16 fixed
 	bool has_water = false;
 
 	bool valid() const { return heightmap != nullptr && dim > 0; }
 };
+
+namespace detail {
+// The same layout minus the locks. They are free only if they fit its padding.
+struct TerrainHeightFieldNoLocks {
+	const uint16_t *heightmap;
+	int dim;
+	SectorLayout layout;
+	int32_t water_y;
+	bool has_water;
+};
+} // namespace detail
+
+static_assert(sizeof(TerrainHeightField) == sizeof(detail::TerrainHeightFieldNoLocks),
+              "TerrainHeightField grew: the packed locks no longer fit its padding. This is a "
+              "by-value POD copied into deep stack frames — a 32-byte lock array here overflowed "
+              "tests/world/infantry_test's stack.");
 
 // Direct bilinear sample of the square buffer with (dim-1) wrap and NO sector remap.
 // [orig: NovaTerrainData::get_height / gobj_trn_sample_height_bilinear 0x100314A1.]

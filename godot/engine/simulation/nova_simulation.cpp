@@ -239,8 +239,12 @@ void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terr
 			terrain_field_.heightmap = terrain_heightmap_.data();
 			terrain_field_.dim = static_cast<int>(std::sqrt(static_cast<double>(terrain_heightmap_.size())));
 			terrain_field_.layout.sector_grid = terrain_sector_grid_.data();
-			terrain_field_.layout.origin_x = trn.origin_x;
-			terrain_field_.layout.origin_y = trn.origin_y;
+			// Sector origins + the per-quadrant neighbour-tap locks, through the same
+			// helper the render/editor field uses. Without the locks every 512-unit
+			// sector boundary reads the neighbouring quadrant and grounding drops into
+			// a one-unit trench the terrain mesh does not draw — you fall through
+			// ground that looks solid.
+			height_field_apply_trn(terrain_field_, trn);
 			// Water clamp deferred: water_height units (vs the 16.16 worldY @0x26C6454 the original
 			// compares) are not yet verified, so leave has_water off rather than float entities onto
 			// a wrong plane. The ground-following path (the Phase 1 goal) does not need it.

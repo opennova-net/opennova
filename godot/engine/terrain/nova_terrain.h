@@ -103,7 +103,8 @@ private:
 	static void _strip_to_list(const std::vector<uint16_t>& strip,
 	                           PackedInt32Array& out);
 
-	Vector3 _heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz) const;
+	Vector3 _heightmap_normal(const std::vector<uint16_t>& depth, int gx, int gz,
+	                          const opennova::terrain::CoordsTaps& taps) const;
 
 protected:
 	static void _bind_methods();

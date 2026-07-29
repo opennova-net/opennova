@@ -14,6 +14,7 @@
 
 #include <cpt/cpt_io.h>
 #include <terrain/coords.h>
+#include <terrain/height_field.h>
 #include <trn/trn_io.h>
 
 #include "resource_index/nova_resource_root.h"
@@ -27,6 +28,21 @@ namespace godot {
 class NovaTerrainFoliageDef;
 class NovaTerrainFoliageMap;
 class NovaTerrainTileInfo;
+
+// The .trn's four lock_* pairs as the portable neighbour-tap policy. One converter
+// for every heightmap tap in the runtime: the height samplers (via the height field),
+// the render mesh, and the collision heightfield — so no site can silently keep the
+// old unconditional full-atlas wrap.
+opennova::terrain::CoordsQuadrantLocks coords_locks_from(const opennova::TrnConfig &trn);
+
+// Everything a TerrainHeightField takes from the TRN: the sector origins and the
+// neighbour-tap locks. The heightmap and sector-grid POINTERS stay the caller's
+// (NovaSimulation owns copies that outlive the resource), but the derived members
+// live here so a second field builder cannot silently miss one — which is exactly
+// how the sim's grounding field kept the pre-lock full-atlas wrap, and the player
+// kept falling through ground the mesh drew as solid.
+void height_field_apply_trn(opennova::terrain::TerrainHeightField &field,
+                            const opennova::TrnConfig &trn);
 
 class NovaTerrainData : public Resource {
 	GDCLASS(NovaTerrainData, Resource)
