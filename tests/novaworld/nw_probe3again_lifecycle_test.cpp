@@ -23,7 +23,7 @@
 #include <npwire/serverlog_decode.h>
 #include <npwire/wire_capture.h>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

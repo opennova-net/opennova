@@ -44,7 +44,7 @@
 #include <world/world.h>
 
 #include "net_sockets.h"
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstddef>
 #include <cstdint>

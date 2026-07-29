@@ -28,7 +28,7 @@
 #include <npwire/wire_capture.h> // CaptureDatagram / InGameMessage / decode_capture_to_messages
 #include <npwire/ingame_message_catalog.h> // ingame_message_name
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

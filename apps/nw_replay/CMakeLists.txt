@@ -19,6 +19,6 @@ target_link_libraries(nw_replay
         opennova_def
         opennova_scr
         opennova_app_common
-)
+ opennova_pcapio)
 
 target_compile_features(nw_replay PRIVATE cxx_std_17)

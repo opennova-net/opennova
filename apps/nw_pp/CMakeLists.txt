@@ -20,6 +20,6 @@ target_link_libraries(nw_pp
         opennova_def
         opennova_scr
         opennova_app_common
-)
+ opennova_pcapio)
 
 target_compile_features(nw_pp PRIVATE cxx_std_17)

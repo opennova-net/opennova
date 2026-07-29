@@ -9,7 +9,7 @@
 #include <map>
 #include <vector>
 
-#include "pcap_reader.h"
+#include <pcapio/pcap_reader.h>
 
 namespace opennova::replay {
 
