@@ -87,7 +87,7 @@ func _ready() -> void:
 		return
 	var world = _play_controller.get_world()
 	var camera: Camera3D = _play_controller.get_play_camera()
-	if world == null or not world.is_loaded() or not world.has_local_player():
+	if world == null or not world.is_loaded() or not (world.get_sim() != null and world.get_sim().has_local_player()):
 		_fail("GameWorld has no loaded local-player spawn anchor")
 		return
 	if camera == null or not camera.is_inside_tree():
@@ -111,7 +111,7 @@ func _ready() -> void:
 	_input_router = _play_controller.find_child("PlayInputRouter", true, false)
 	if _input_router != null:
 		_input_router.set_process_unhandled_input(false)
-	world.set_local_player_input(false, false, false, false, false, false, false)
+	world.get_sim().set_player_input(false, false, false, false, false, false, false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	await _settle(PLAY_SETTLE_FRAMES)
 
@@ -427,9 +427,9 @@ func _masked_flicker_diff(hidden: Image, first: Image, current: Image) -> Dictio
 
 func _snapshot(world, camera: Camera3D, environment, viewport: Viewport) -> Dictionary:
 	return {
-		"position": world.local_player_position(),
-		"yaw": float(world.local_player_yaw_deg()),
-		"pitch": float(world.local_player_pitch_deg()),
+		"position": world.get_sim().get_local_player_position(),
+		"yaw": float(world.get_sim().get_local_player_yaw_deg()),
+		"pitch": float(world.get_sim().get_local_player_pitch_deg()),
 		"camera": camera.global_transform,
 		"fov": camera.fov,
 		"tod": float(environment.get("time_of_day")),

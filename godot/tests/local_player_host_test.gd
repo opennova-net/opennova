@@ -87,26 +87,120 @@ class FakeTerrainData:
 		return hit
 
 
+# The value-only sim double behind FakeWorld.get_sim(): records the same state
+# the old GameWorld-forwarder stubs recorded, under NovaSimulation's native names.
+class FakeSim:
+	extends RefCounted
+	var has_player := true
+	var player_position := Vector3.ZERO
+	var player_yaw_deg := 0.0
+	var player_pitch_deg := 0.0
+	var input_calls: Array = []
+	var look_calls: Array = []
+	var stance_requests: Array = []
+	var eye_calls: Array = []
+	var weapon_input_calls: Array = []
+	var weapon_category_requests: Array[int] = []
+	var weapon_cycle_requests: Array[int] = []
+	var scope_toggle_requests := 0
+	var binocular_toggle_requests := 0
+	var nvg_toggle_requests := 0
+	var nvg_gain_requests: Array[int] = []
+	var camera_mode_calls: Array = []
+
+	func has_local_player() -> bool:
+		return has_player
+
+	func get_local_player_position() -> Vector3:
+		return player_position
+
+	func get_local_player_yaw_deg() -> float:
+		return player_yaw_deg
+
+	func get_local_player_pitch_deg() -> float:
+		return player_pitch_deg
+
+	func get_local_player_anim_key() -> String:
+		return ""
+
+	func get_local_player_anim_phase_ticks() -> int:
+		return 0
+
+	func get_local_player_body_anim_slot() -> int:
+		return -1
+
+	func set_player_input(forward: bool, back: bool, left: bool, right: bool,
+			lean_left: bool, lean_right: bool, jump: bool) -> void:
+		input_calls.append({
+			"forward": forward,
+			"back": back,
+			"left": left,
+			"right": right,
+			"lean_left": lean_left,
+			"lean_right": lean_right,
+			"jump": jump,
+		})
+
+	func add_local_player_look(dx_px: float, dy_px: float) -> void:
+		look_calls.append(Vector2(dx_px, dy_px))
+
+	func request_local_player_stance(stance: int) -> bool:
+		stance_requests.append(stance)
+		return true
+
+	func set_local_player_eye(eye: Vector3, valid: bool) -> void:
+		eye_calls.append([eye, valid])
+
+	func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool,
+			reload_pressed: bool) -> void:
+		weapon_input_calls.append([fire_held, fire_pressed, reload_pressed])
+
+	func request_local_player_weapon_category(category: int) -> void:
+		weapon_category_requests.append(category)
+
+	func request_local_player_weapon_cycle(direction: int) -> void:
+		weapon_cycle_requests.append(direction)
+
+	func request_local_player_scope_toggle() -> bool:
+		scope_toggle_requests += 1
+		return true
+
+	func request_local_player_binoculars_toggle() -> bool:
+		binocular_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_toggle() -> bool:
+		nvg_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_gain(delta: int) -> int:
+		nvg_gain_requests.append(delta)
+		return delta
+
+	func set_local_player_camera_third_person(third_person: bool) -> void:
+		camera_mode_calls.append(third_person)
+
+
 class FakeWorld:
 	extends Node3D
 	var terrain_data: FakeTerrainData = null
-	var input_calls: Array = []
 	var avatar_count := 0
 	var viewmodel_count := 0
 	var last_avatar: Node3D = null
 	var last_viewmodel: Node3D = null
 	var last_weapon_part: FakeWeaponPart = null
-	var _has_player := true
 	var _loaded := true
-	var player_position := Vector3.ZERO
-	var player_yaw_deg := 0.0
-	var player_pitch_deg := 0.0
+	var sim := FakeSim.new()
 
 	func is_loaded() -> bool:
 		return _loaded
 
-	func has_local_player() -> bool:
-		return _has_player
+	func get_sim() -> FakeSim:
+		return sim
+
+	# No MissionRuntime in the harness: the aim-overlay seam reads null (no overlay).
+	func get_runtime():
+		return null
 
 	# The real builders return NovaObjectModel subtrees whose MeshInstance3D
 	# children hang under container/Robj/Skeleton3D nodes; a plain child mesh
@@ -130,47 +224,8 @@ class FakeWorld:
 		last_weapon_part = part
 		return node
 
-	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool,
-			lean_left: bool, lean_right: bool, jump: bool) -> void:
-		input_calls.append({
-			"forward": forward,
-			"back": back,
-			"left": left,
-			"right": right,
-			"lean_left": lean_left,
-			"lean_right": lean_right,
-			"jump": jump,
-		})
-
-	var look_calls: Array = []
-	func add_local_player_look(dx_px: float, dy_px: float) -> void:
-		look_calls.append(Vector2(dx_px, dy_px))
-
-	var stance_requests: Array = []
-	func request_local_player_stance(stance: int) -> bool:
-		stance_requests.append(stance)
-		return true
-
 	func get_terrain_data() -> FakeTerrainData:
 		return terrain_data
-
-	func local_player_position() -> Vector3:
-		return player_position
-
-	func local_player_yaw_deg() -> float:
-		return player_yaw_deg
-
-	func local_player_pitch_deg() -> float:
-		return player_pitch_deg
-
-	func local_player_anim_key() -> String:
-		return ""
-
-	func local_player_anim_phase_ticks() -> int:
-		return 0
-
-	func local_player_body_anim_slot() -> int:
-		return -1
 
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
@@ -180,12 +235,7 @@ class FakeWorld:
 	var weapon_clear_calls := 0
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
-	var scope_toggle_requests := 0
-	var binocular_toggle_requests := 0
-	var nvg_toggle_requests := 0
-	var nvg_gain_requests: Array[int] = []
 	var nvg_view_calls: Array = []
-	var camera_mode_calls: Array = []
 	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
 	var effect_world = null   # FakeEffectWorld
@@ -240,27 +290,8 @@ class FakeWorld:
 	func local_player_view():
 		return view
 
-	func request_local_player_scope_toggle() -> bool:
-		scope_toggle_requests += 1
-		return true
-
-	func request_local_player_binoculars_toggle() -> bool:
-		binocular_toggle_requests += 1
-		return true
-
-	func request_local_player_nvg_toggle() -> bool:
-		nvg_toggle_requests += 1
-		return true
-
-	func request_local_player_nvg_gain(delta: int) -> int:
-		nvg_gain_requests.append(delta)
-		return delta
-
 	func set_local_player_nvg_view(active: bool, gain: int) -> void:
 		nvg_view_calls.append([active, gain])
-
-	func set_local_player_camera_third_person(third_person: bool) -> void:
-		camera_mode_calls.append(third_person)
 
 
 func after_each() -> void:
@@ -280,8 +311,8 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 
 	host.before_world_tick(0.016)
 
-	assert_eq(world.input_calls.size(), 1)
-	var call: Dictionary = world.input_calls[0]
+	assert_eq(world.sim.input_calls.size(), 1)
+	var call: Dictionary = world.sim.input_calls[0]
 	assert_true(call["forward"])
 	assert_true(call["left"])
 	assert_true(call["lean_left"])
@@ -372,8 +403,8 @@ func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking()
 
 	host.before_world_tick(0.016, false, false)
 
-	assert_eq(world.input_calls.size(), 1, "the live overlay still submits one input frame")
-	var call: Dictionary = world.input_calls[0]
+	assert_eq(world.sim.input_calls.size(), 1, "the live overlay still submits one input frame")
+	var call: Dictionary = world.sim.input_calls[0]
 	for key in ["forward", "back", "left", "right", "lean_left", "lean_right", "jump"]:
 		assert_false(bool(call[key]), "%s is neutral while the armory owns input" % key)
 
@@ -394,10 +425,10 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 	var motion := InputEventMouseMotion.new()
 	motion.relative = Vector2(17.0, -6.0)
 	assert_true(host.handle_input(motion, true))
-	assert_eq(world.look_calls.size(), 1)
-	assert_eq(world.look_calls[0], Vector2(17.0, -6.0))
+	assert_eq(world.sim.look_calls.size(), 1)
+	assert_eq(world.sim.look_calls[0], Vector2(17.0, -6.0))
 	assert_false(host.handle_input(motion, false), "inactive input is not forwarded")
-	assert_eq(world.look_calls.size(), 1)
+	assert_eq(world.sim.look_calls.size(), 1)
 
 
 func test_stance_keys_are_three_key_select_requests() -> void:
@@ -417,7 +448,7 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 		key.keycode = keycode
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
-	assert_eq(world.stance_requests, [2, 1, 0])
+	assert_eq(world.sim.stance_requests, [2, 1, 0])
 
 
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
@@ -434,9 +465,9 @@ func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 		key.physical_keycode = keycode
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
-	assert_eq(world.binocular_toggle_requests, 1)
-	assert_eq(world.nvg_toggle_requests, 1)
-	assert_eq(world.nvg_gain_requests, [1, -1])
+	assert_eq(world.sim.binocular_toggle_requests, 1)
+	assert_eq(world.sim.nvg_toggle_requests, 1)
+	assert_eq(world.sim.nvg_gain_requests, [1, -1])
 
 
 func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
@@ -562,15 +593,15 @@ func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	host.setup(world, camera)  # _reset_state syncs the initial mode
-	world.camera_mode_calls.clear()
+	world.sim.camera_mode_calls.clear()
 
 	var f4 := InputEventKey.new()
 	f4.keycode = KEY_F4
 	f4.pressed = true
 	assert_true(host.handle_key_input(f4, true))
-	assert_eq(world.camera_mode_calls, [true], "F4 pushes third person into the sim")
+	assert_eq(world.sim.camera_mode_calls, [true], "F4 pushes third person into the sim")
 	assert_true(host.handle_key_input(f4, true))
-	assert_eq(world.camera_mode_calls, [true, false], "and back")
+	assert_eq(world.sim.camera_mode_calls, [true, false], "and back")
 
 
 # The game shell calls setup() from its own _ready — while the player camera's
@@ -790,8 +821,8 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	add_child_autofree(fx)
-	world.player_position = Vector3(17.0, 2.0, -9.0)
-	world.player_yaw_deg = 35.0
+	world.sim.player_position = Vector3(17.0, 2.0, -9.0)
+	world.sim.player_yaw_deg = 35.0
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
@@ -818,7 +849,7 @@ func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> 
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	add_child_autofree(fx)
-	world.player_position = Vector3(6.0, 1.0, -4.0)
+	world.sim.player_position = Vector3(6.0, 1.0, -4.0)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
@@ -1308,9 +1339,9 @@ func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
-	world.player_yaw_deg = 0.0
-	world.player_pitch_deg = 0.0
+	world.sim.player_position = Vector3.ZERO
+	world.sim.player_yaw_deg = 0.0
+	world.sim.player_pitch_deg = 0.0
 	world.terrain_data = FakeTerrainData.new()
 	# Yaw 0 / pitch 0 looks down -Z; the eye sits PLAYER_EYE_HEIGHT above the feet,
 	# so a hit 250 u ahead at eye height is 250 u from the player position too.
@@ -1333,7 +1364,7 @@ func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> 
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
+	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = FakeTerrainData.new()  # all-NAN = miss
 	host.setup(world, camera)
 
@@ -1348,7 +1379,7 @@ func test_aim_range_survives_a_world_with_no_terrain() -> void:
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
+	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = null
 	host.setup(world, camera)
 

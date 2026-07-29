@@ -166,6 +166,13 @@ var debug_force_viewmodel := false
 var debug_body_in_first_person := false
 
 
+# The sim, re-resolved per use: mission reloads free the runtime and its sim,
+# so a cached reference would go stale (the debug views follow the same rule).
+# Untyped: GUT harness worlds serve value-only sim doubles.
+func _sim():
+	return _world.get_sim() if _world != null else null
+
+
 func set_debug_force_viewmodel(enabled: bool) -> void:
 	debug_force_viewmodel = enabled
 
@@ -335,8 +342,9 @@ func set_third_person(enabled: bool) -> void:
 # The sim owns the camera-mode-dependent view state (fov suppression + the 3P
 # anchor chase) [orig: g_camera_mode @0xA890C8]; tell it whenever the mode flips.
 func _sync_camera_mode() -> void:
-	if _world != null and _world.has_method("set_local_player_camera_third_person"):
-		_world.set_local_player_camera_third_person(_third_person)
+	var sim = _sim()
+	if sim != null:
+		sim.set_local_player_camera_third_person(_third_person)
 
 
 func is_third_person() -> bool:
@@ -358,21 +366,22 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 	# movement frame. Skipping this call leaves the sim holding its previous input,
 	# so a player who opened the armory while running would keep running under it.
 	var state := _read_input_state() if gameplay_input_active else {}
-	_world.set_local_player_input(
-		_bool(state, "forward"),
-		_bool(state, "back"),
-		_bool(state, "left"),
-		_bool(state, "right"),
-		_bool(state, "lean_left"),
-		_bool(state, "lean_right"),
-		_bool(state, "jump"))
-	# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
-	# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
-	# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
-	# the sample source (D-INF-18)].
-	if _world.has_method("set_local_player_eye"):
+	var sim = _sim()
+	if sim != null:
+		sim.set_player_input(
+			_bool(state, "forward"),
+			_bool(state, "back"),
+			_bool(state, "left"),
+			_bool(state, "right"),
+			_bool(state, "lean_left"),
+			_bool(state, "lean_right"),
+			_bool(state, "jump"))
+		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
+		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
+		# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+		# the sample source (D-INF-18)].
 		var head := _avatar_head_world()
-		_world.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
+		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
 	_send_weapon_input()
 
@@ -384,8 +393,7 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 # 0x95 fire / 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420 —
 # ported in libs/world weapon_fsm + NovaSimulation]
 func _send_weapon_input() -> void:
-	if _world == null or not _world.has_method("set_local_player_weapon_input"):
-		return
+	var sim = _sim()
 	var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var fire_edge := fire_held and not _fire_was_held
@@ -394,10 +402,14 @@ func _send_weapon_input() -> void:
 	var reload_edge := reload_down and not _reload_was_down
 	_reload_was_down = reload_down
 	var scope_down := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	if scope_down and not _scope_was_down and _world.has_method("request_local_player_scope_toggle"):
-		_world.request_local_player_scope_toggle()
+	if scope_down and not _scope_was_down and sim != null:
+		sim.request_local_player_scope_toggle()
 	_scope_was_down = scope_down
-	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
+	# Latches update even with no sim (the deleted forwarders no-op'd downstream):
+	# a key held across a mission reload must not fire a spurious edge on the
+	# first frame the new sim appears.
+	if sim != null:
+		sim.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
 	_send_weapon_switch_input(captured)
 
 
@@ -405,22 +417,21 @@ func _send_weapon_input() -> void:
 # into the sim's switch walks; the sim applies the witnessed stance/FSM gates and
 # answers through the event drain (switch_to_weapon / switch_denied).
 func _send_weapon_switch_input(captured: bool) -> void:
-	if _world == null or not _world.has_method("request_local_player_weapon_category"):
-		return
+	var sim = _sim()
 	var down_mask := 0
 	for i in _WEAPON_CATEGORY_KEYS.size():
 		if captured and Input.is_physical_key_pressed(_WEAPON_CATEGORY_KEYS[i]):
 			down_mask |= 1 << i
-			if (_category_was_down & (1 << i)) == 0:
-				_world.request_local_player_weapon_category(i + 1)
+			if (_category_was_down & (1 << i)) == 0 and sim != null:
+				sim.request_local_player_weapon_category(i + 1)
 	_category_was_down = down_mask
 	var prev_down := captured and Input.is_physical_key_pressed(KEY_BRACKETLEFT)
-	if prev_down and not _cycle_prev_was_down:
-		_world.request_local_player_weapon_cycle(-1)
+	if prev_down and not _cycle_prev_was_down and sim != null:
+		sim.request_local_player_weapon_cycle(-1)
 	_cycle_prev_was_down = prev_down
 	var next_down := captured and Input.is_physical_key_pressed(KEY_BRACKETRIGHT)
-	if next_down and not _cycle_next_was_down:
-		_world.request_local_player_weapon_cycle(1)
+	if next_down and not _cycle_next_was_down and sim != null:
+		sim.request_local_player_weapon_cycle(1)
 	_cycle_next_was_down = next_down
 
 
@@ -748,7 +759,8 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 	# Retail's deepest fallback is the ENTITY ORIGIN [orig: loc_401867 @0x401867..0x401887
 	# copies entity+4/+8/+0xC]. The eye was our own invention and put the flash on the
 	# player's face whenever a userpoint failed to resolve.
-	return _world.local_player_position()
+	var sim = _sim()
+	return sim.get_local_player_position() if sim != null else Vector3.ZERO
 
 
 func _action_particle_world_forward(userpoint: String) -> Vector3:
@@ -833,21 +845,22 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_sync_camera_mode()
 		return true
 	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
+	var sim = _sim()
 	if physical == KEY_B:
-		if _world.has_method("request_local_player_binoculars_toggle"):
-			_world.request_local_player_binoculars_toggle()
+		if sim != null:
+			sim.request_local_player_binoculars_toggle()
 		return true
 	if physical == KEY_N:
-		if _world.has_method("request_local_player_nvg_toggle"):
-			_world.request_local_player_nvg_toggle()
+		if sim != null:
+			sim.request_local_player_nvg_toggle()
 		return true
 	if physical == KEY_EQUAL or physical == KEY_PLUS or physical == KEY_KP_ADD:
-		if _world.has_method("request_local_player_nvg_gain"):
-			_world.request_local_player_nvg_gain(1)
+		if sim != null:
+			sim.request_local_player_nvg_gain(1)
 		return true
 	if physical == KEY_MINUS or physical == KEY_KP_SUBTRACT:
-		if _world.has_method("request_local_player_nvg_gain"):
-			_world.request_local_player_nvg_gain(-1)
+		if sim != null:
+			sim.request_local_player_nvg_gain(-1)
 		return true
 	if key.keycode == KEY_Z:
 		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
@@ -862,8 +875,9 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 
 
 func _request_stance(stance: int) -> void:
-	if _world != null and _world.has_method("request_local_player_stance"):
-		_world.request_local_player_stance(stance)
+	var sim = _sim()
+	if sim != null:
+		sim.request_local_player_stance(stance)
 
 
 # Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline (the sim
@@ -872,10 +886,11 @@ func _request_stance(stance: int) -> void:
 func handle_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventMouseMotion):
 		return false
-	if not _world.has_method("add_local_player_look"):
+	var sim = _sim()
+	if sim == null:
 		return false
 	var mm := event as InputEventMouseMotion
-	_world.add_local_player_look(mm.relative.x, mm.relative.y)
+	sim.add_local_player_look(mm.relative.x, mm.relative.y)
 	return true
 
 
@@ -901,7 +916,8 @@ func _has_player() -> bool:
 		return false
 	if _world.has_method("is_loaded") and not _world.is_loaded():
 		return false
-	return _world.has_method("has_local_player") and _world.has_local_player()
+	var sim = _sim()
+	return sim != null and sim.has_local_player()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe);
@@ -990,7 +1006,8 @@ func aim_screen_point() -> Vector2:
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye := _eye_position(_world.local_player_position())
+	var sim = _sim()
+	var eye := _eye_position(sim.get_local_player_position() if sim != null else Vector3.ZERO)
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
@@ -1003,7 +1020,8 @@ func aim_screen_point() -> Vector2:
 func aim_range_units() -> int:
 	if _world == null or _camera == null or not _has_player():
 		return 1
-	var pos: Vector3 = _world.local_player_position()
+	var sim = _sim()
+	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var eye := _eye_position(pos)
 	var angles := _aim_angles_deg()
 	var yr := deg_to_rad(angles.x)
@@ -1027,8 +1045,9 @@ func aim_range_units() -> int:
 
 
 func _aim_angles_deg() -> Vector2:
-	var yaw := float(_world.local_player_yaw_deg())
-	var pitch := float(_world.local_player_pitch_deg())
+	var sim = _sim()
+	var yaw := float(sim.get_local_player_yaw_deg()) if sim != null else 0.0
+	var pitch := float(sim.get_local_player_pitch_deg()) if sim != null else 0.0
 	if _view != null and _view.binoculars_view_active:
 		yaw += _view.binocular_yaw_offset_deg
 		pitch += _view.binocular_pitch_offset_deg
@@ -1131,7 +1150,8 @@ func _find_skeleton(root: Node) -> Skeleton3D:
 func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
-	var pos: Vector3 = _world.local_player_position()
+	var sim = _sim()
+	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var angles := _aim_angles_deg()
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
@@ -1202,8 +1222,9 @@ func _update_avatar(pos: Vector3) -> void:
 	# the body-class delta is identity by construction so the hips stay glued to the node.
 	# [orig: Entity_BuildBoneTransformMatrices @0x4b1290 — every overlay blends toward
 	# bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14 (D-INF-11)]
-	var overlay: PlayerAimOverlay = _world.local_player_aim_overlay() \
-			if _world.has_method("local_player_aim_overlay") else null
+	var runtime = _world.get_runtime()
+	var overlay: PlayerAimOverlay = runtime.local_player_aim_overlay() \
+			if runtime != null else null
 	if overlay != null:
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
 		_avatar.global_basis = body_basis
@@ -1214,8 +1235,9 @@ func _update_avatar(pos: Vector3) -> void:
 				deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
 			_avatar.set_aim_overlay(deltas)
 	else:
+		var sim_yaw = _sim()
 		_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
 		if _avatar.has_method("set_aim_overlay"):
 			_avatar.set_aim_overlay([])
 	# The body renders in BOTH modes; first person hides it from the player
@@ -1233,8 +1255,9 @@ func _update_avatar(pos: Vector3) -> void:
 			if (_third_person or debug_body_in_first_person)
 			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 	_update_held_weapon(overlay)
-	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
-	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
+	var sim = _sim()
+	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""
+	var anim_phase := int(sim.get_local_player_anim_phase_ticks()) if sim != null else 0
 	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed
 	# at its own playhead onto the mask bones, composed under the aim overlay. Equal
 	# state ids still carry the secondary playhead; an empty key means the gate is off.
@@ -1249,9 +1272,11 @@ func _update_avatar(pos: Vector3) -> void:
 	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):
 		_avatar.play_body_clip(anim_key)
 	elif _avatar.has_method("play_body_anim_at"):
-		_avatar.play_body_anim_at(_world.local_player_body_anim_slot(), anim_phase)
+		_avatar.play_body_anim_at(
+				sim.get_local_player_body_anim_slot() if sim != null else -1, anim_phase)
 	elif _avatar.has_method("play_body_anim"):
-		_avatar.play_body_anim(_world.local_player_body_anim_slot())
+		_avatar.play_body_anim(
+				sim.get_local_player_body_anim_slot() if sim != null else -1)
 
 
 # First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1,

@@ -562,27 +562,12 @@ func _ensure_present_effect_poses() -> void:
 			_effect_poses_by_ssn[ssn] = transform
 
 
-# --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---
+# --- the local player (Phase 2; ADR 0012). W4-1 removed the pass-through
+# delegates: consumers reach the sim natively via get_sim(). What remains here
+# either composes (has_player), decodes (aim overlay, ADR 0017), or feeds
+# GameWorld's own _music_var_pump. ---
 func has_player() -> bool:
 	return _sim != null and _sim.has_local_player()
-
-func local_player_position() -> Vector3:
-	return _sim.get_local_player_position() if _sim != null else Vector3.ZERO
-
-func local_player_yaw_deg() -> float:
-	return _sim.get_local_player_yaw_deg() if _sim != null else 0.0
-
-func local_player_pitch_deg() -> float:
-	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
-
-func local_player_body_anim_slot() -> int:
-	return _sim.get_local_player_body_anim_slot() if _sim != null else -1
-
-func local_player_anim_key() -> String:
-	return String(_sim.get_local_player_anim_key()) if _sim != null else ""
-
-func local_player_anim_phase_ticks() -> int:
-	return int(_sim.get_local_player_anim_phase_ticks()) if _sim != null else 0
 
 # Decoded at the NovaSimulation transport edge (ADR 0017); null when absent/invalid.
 func local_player_aim_overlay() -> PlayerAimOverlay:
@@ -664,26 +649,6 @@ func get_destruction_present_stats() -> RefCounted:
 	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
 	# host mission runs with the pass.
 	return _destruction_present.get_stats() if _destruction_present != null else null
-
-func set_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
-	if _sim != null:
-		_sim.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
-
-
-## One frame of raw mouse pixels onto the sim-owned look angles (the witnessed
-## integer pipeline: sensitivity, scoped zoom reduction, prone pitch clamp).
-## [orig: Input_ProcessMouseAxisBindings @0x499680; cases 166/164]
-func add_player_look(dx_px: float, dy_px: float) -> void:
-	if _sim != null:
-		_sim.add_local_player_look(dx_px, dy_px)
-
-
-## Stance SELECT request: 0 stand / 1 crouch / 2 prone (the 3-key semantics,
-## refused while the equipped weapon has ForceCrouch). [orig: cases 169/170/172
-## -> C2S 0x1D -> NapiNPServerMsg_HandleStanceChange @0x501c60]
-func request_player_stance(stance: int) -> bool:
-	return _sim.request_local_player_stance(stance) if _sim != null else false
-
 
 func get_sim() -> NovaSimulation:
 	return _sim

@@ -270,7 +270,7 @@ func _fire_diag() -> void:
 	if audio != null:
 		for set_name in ["GS_M4", "GF_RL_AR15_2", "SHELLDROP", "DRY_TRIGGER"]:
 			print("[wr] bank probe %-14s -> %s" % [set_name,
-					str(audio.fire_soundset(set_name, _world.local_player_position()))])
+					str(audio.fire_soundset(set_name, _world.get_sim().get_local_player_position()))])
 	var t0 = _world.local_player_weapon_view()
 	print("[wr] pre-fire: active=%s clip=%s reserve=%s act=%s" % [
 			str(t0.active), str(t0.clip), str(t0.reserve), str(t0.current_action)])
