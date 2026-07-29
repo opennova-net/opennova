@@ -137,7 +137,19 @@ single `Server_InitNewRoundState` call.
     goldens (472 decoded S2C tags, 2351 C2S `0x0C` / 2361 S2C `0x0A`, the `0x2A` byte-exact records,
     and the `0x81`/`0x82` first-diff offsets all unchanged; `golden_client`'s re-framed-datagram
     byte assertion covers the framing path directly).
-  - **Remaining:** `nw_udp_listener` still owns the per-connection lobby REGISTRY lifecycle
-    (`LobbyConnState`, `erase_lobby_state`, `snapshot_hosted`) beside `libs/novaworld`'s own
-    `LobbyState` / `row_from_lobby` — the app-side state half of that consolidation item, distinct
-    from the framing half closed above. Optional, wire-neutral, low priority.
+  - **CLOSED (2026-07-28, quality campaign W2-3) — REFUTED, not implemented.** The remaining
+    item read as "fold `nw_udp_listener`'s per-connection lobby state into the shared
+    registry". Doing that would REGRESS the retransmit path, so the item is retired rather
+    than done. `LobbyConnState` is not a duplicate of `ConnectionRegistry`: the two are a
+    deliberate LIFETIME split. A `ClientHello` re-inserts the peer as Handshaking and clears
+    the registry's session keys; the lobby record survives that and RESTORES them when an
+    exact `ClientAuth` repeat arrives (`notify_active_addr` with the cached scrk) — the
+    D-NET-104 invariant that a repeated `0x42` replays the cached `0x82` and never re-mints
+    session material. One merged store cannot express "wire row reset, session material
+    kept". Two supporting facts found while checking: eviction is ALREADY single
+    (`erase_lobby_state` is the ConnectionManager `on_lost` sink, so there is one teardown
+    entry point), and `ConnectionRegistry::find_by_addr` returns `Connection` BY VALUE on the
+    per-datagram path, so moving the auth-datagram cache and reassembly buffers into it would
+    copy kilobytes per packet. `HostedSnapshot` vs `HostRow` is likewise not duplication —
+    `row_from_lobby` is the documented DB projection of the live view. The invariant is now
+    recorded at both struct definitions so a later cleanup cannot merge it away.

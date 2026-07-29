@@ -30,6 +30,23 @@ namespace opennova::server {
 
 // Per-connection state owned by NwUdpListener (in addition to the wire-level
 // info ConnectionRegistry tracks). Keyed by peer address.
+//
+// WHY THIS IS NOT A DUPLICATE REGISTRY (checked 2026-07-28; a quality-campaign
+// slice proposed folding it into ConnectionRegistry and that would regress):
+//   * LIFETIME. A ClientHello re-inserts the peer into ConnectionRegistry as
+//     Handshaking, clearing its keys. THIS record survives that, and the 0x42
+//     retransmit leg restores the registry from it (notify_active_addr with the
+//     cached scrk). That is the D-NET-104 invariant — an exact ClientAuth
+//     repeat replays the cached ServerAuth and never re-mints session material.
+//     One merged store cannot express "wire row reset, session material kept".
+//   * EVICTION IS ALREADY SINGLE. erase_lobby_state is the ConnectionManager
+//     on_lost sink as well as the local cleanup hook, so there is one teardown
+//     entry point, not two to keep in sync.
+//   * COST. ConnectionRegistry::find_by_addr returns Connection BY VALUE and
+//     runs per datagram; moving the auth-datagram cache and reassembly buffers
+//     into it would copy kilobytes on the hot path.
+// lobby_peers_ is likewise deliberate: the ConnectionManager may be shared
+// across listeners, so teardown is scoped to the peers this listener admitted.
 struct LobbyConnState {
 	LobbyState lobby;
 	// Lobby has no two-way 0x44/0x84 retained-resend pump, so it uses the
