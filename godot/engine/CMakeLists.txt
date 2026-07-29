@@ -133,6 +133,7 @@ add_library(${TARGET_NAME} SHARED
     wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp
     lwf/nova_wav_loader.cpp
+    audio/nova_ambient_mixer.cpp
     audio/nova_sound_selector.cpp
     dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp

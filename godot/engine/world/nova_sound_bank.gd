@@ -349,16 +349,9 @@ static func volume_db_from_255(vol255: int) -> float:
 ## like the original's; both arms of the engine pass a consistent scale so only
 ## the ratio matters.
 static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, clamp_vol: int) -> int:
-	if radius_q16 <= 0 or dist_q16 >= radius_q16:
-		return 0
-	if dist_q16 < 0:
-		dist_q16 = 0
-	var ratio := (dist_q16 << 16) / radius_q16  # d/r as Q0.16
-	var inv := ratio ^ 0xFFFF                   # (1 - d/r) as Q0.16
-	var v := (((vol255 * 255) >> 8) * (inv * inv)) >> 32
-	if v >= clamp_vol:
-		v = clamp_vol
-	return v
+	# The integer form lives in libs/audio (ambient_mixer.cpp) — one implementation
+	# for the native mix, this one-shot path, and the GUT pins.
+	return NovaAmbientMixer.calc_distance_volume(dist_q16, radius_q16, vol255, clamp_vol)
 
 
 ## Layer volume for the looping ambient-emitter path. `dist_q16` is the
@@ -372,23 +365,10 @@ static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, cl
 ## falloff REBASES to run min..falloff; inside min_distance the volume RISES
 ## as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff.
 static func emitter_layer_volume(dist_q16: int, falloff_u: int, min_u: int, vol_byte: int, member_vol: int, clamp_vol: int) -> int:
-	var vol_in := (vol_byte * member_vol) >> 8
-	var clamp_in := (vol_byte * clamp_vol) >> 8
-	if min_u > 0:
-		if dist_q16 >= min_u << 16:
-			# Rebased falloff, whole-unit args [orig: @ 0x528693-0x5286b9
-			# CalcDistanceVolPan(HIWORD(d - min), HIWORD(falloff - min), ...)].
-			return calc_distance_volume((dist_q16 - (min_u << 16)) >> 16, falloff_u - min_u, vol_in, clamp_in)
-		# Proximity fade [orig: @ 0x528691 ((min<<16) - d) >> 16, HIWORD(min<<16)].
-		return calc_distance_volume(((min_u << 16) - dist_q16) >> 16, min_u, vol_in, clamp_in)
-	if falloff_u > 0:
-		# Plain falloff [orig: @ 0x5286df HIWORD(d), HIWORD(falloff<<16)].
-		return calc_distance_volume(dist_q16 >> 16, falloff_u, vol_in, clamp_in)
-	# Both radii zero: the emitter mix unpacks the volume byte of the packed
-	# (vol << 8 | pan) result; with no curve run the raw byte's >> 8 is 0, so a
-	# no-radius layer is SILENT as a looping emitter [orig: @ 0x528704 volume_low
-	# == 0 -> skip] (one-shots differ — see oneshot_distance_volume).
-	return 0
+	# The arm forms live in libs/audio (ambient_mixer.cpp) beside the mix that
+	# consumes them natively; this seam stays for the one-shot path and the pins.
+	return NovaAmbientMixer.emitter_layer_volume(
+			dist_q16, falloff_u, min_u, vol_byte, member_vol, clamp_vol)
 
 
 ## One-shot volume at fire time [orig: SoundBank_PlayTriggerEntries @ 0x75cf14..

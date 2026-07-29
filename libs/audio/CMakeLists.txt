@@ -1,4 +1,5 @@
 add_library(opennova_audio STATIC
+    src/ambient_mixer.cpp
     src/sound_selector.cpp
     src/sound_profile.cpp
 )

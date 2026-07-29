@@ -390,7 +390,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-PLAYERINFO-10 | Voice preview host wiring now binds `TESTPLAYERVOICE` and requests the selected avatar's `VOICE_%d` through `menu.lwf` `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]`; `test_voice_preview_requests_selected_avatar_voice` pins the public sound request (persisted profile override remains under D-PLAYERINFO-9) | A | FIXED 2026-07-22 | PAR-UI |
 | D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-SND-16 | Ambient marker eval runs per render frame in `NovaMissionAudio.tick`; retail registers each placed marker every 8th 62.5 Hz tick (pool-2 `tick&7` stagger in `Entity_UpdateAllEntities @ 0x4c2100`, keep-alive lifetimes in ticks) and only the live-slot Top8 mix runs per render frame (audio record §driver cadence) | A | OPEN (minted 2026-07-28) | perf: F3 ranked slice 1 + the tracked libs/audio port |
+| D-SND-16 | Ambient marker eval RAN per render frame in `NovaMissionAudio.tick`; retail registers each placed marker every 8th 62.5 Hz tick (pool-2 `tick&7` stagger in `Entity_UpdateAllEntities @ 0x4c2100`, keep-alive lifetimes in ticks) and only the live-slot Top8 mix runs per render frame (audio record §driver cadence) | A | FIXED 2026-07-28 (ported same day: `libs/audio` `AmbientMixer` staggered eval + 767-slot table + live-slot mix + the curve statics; `ambient_mixer` ctest + the GUT audio suites) | perf: F3 ranked slice 1 |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename to `HUD_DrawStanceIndicator` applied 2026-07-16 | A | FIXED (2026-07-09 port; IDB rename applied 2026-07-16) | PAR-UI |
 | D-HUD-2 | Stance widget = frame-swap + fade; do not port a rotating compass ring — 2026-07-18 resolution: JO:CA has NO in-HUD radar/compass at all (the old "radar `@ 0x599700`" pointer is the weapon HEAT BAR `HUD_DrawWeaponHeatBar`; the compass strip `@ 0x595470` and the in-world waypoint labels `@ 0x593820` are dead code); heading/map display lives only in the map overlay (`HUD_DrawMapOverlay @ 0x5a5f40`, its own follow-up) | A | FIXED (2026-07-18 witness: no radar element exists to port; the stance leg was fixed by the 2026-07-09 port) | PAR-UI |
 | D-HUD-3 | HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) | A | FIXED (`hud_layout.gd`) | PAR-UI |
@@ -761,7 +761,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 21 | 1 | 11 | 33 | 19 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 56 | 4 | 6 | 66 | 27 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 15 | 1 | 6 | 22 | 8 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 6 | 21 | 9 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
@@ -775,7 +775,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **106** | **13** | **32** | **151** | 105 |
+| **Total** | **105** | **13** | **32** | **150** | 106 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 
