@@ -254,6 +254,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &NovaSimulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &NovaSimulation::debug_spawn_round);
+	ClassDB::bind_method(D_METHOD("debug_pick_entity", "from_godot", "dir_godot", "max_range_units"),
+	                     &NovaSimulation::debug_pick_entity);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &NovaSimulation::get_hitbox_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
 	                     &NovaSimulation::get_occlusion_portal_debug);

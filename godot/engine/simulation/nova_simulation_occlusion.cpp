@@ -558,6 +558,128 @@ int NovaSimulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3
 	return world_->round_sim.spawn(*world_, params);
 }
 
+Dictionary NovaSimulation::debug_pick_entity(const Vector3 &p_from_godot,
+                                             const Vector3 &p_dir_godot,
+                                             float p_max_range_units) {
+	Dictionary out;
+	// Typed defaults on every key so the shape is stable for every outcome
+	// (the get_entity_debug convention).
+	out["hit"] = false;
+	out["blocked"] = String();
+	out["hit_class"] = String();
+	out["entity_handle"] = -1;
+	out["pool"] = -1;
+	out["kind"] = -1;
+	out["index"] = -1;
+	out["bms_id"] = 0;
+	out["net_id"] = 0;
+	out["item_id"] = 0;
+	out["name"] = String();
+	out["position_godot"] = Vector3();
+	out["bound_radius"] = 0.0f;
+	out["hit_position_godot"] = Vector3();
+	out["hit_normal_godot"] = Vector3();
+	out["distance_units"] = 0.0f;
+	out["section"] = -1;
+	out["face"] = -1;
+	out["bone"] = -1;
+	out["hit_zone"] = -1;
+	out["surface_type"] = -1;
+	out["material_flags"] = 0;
+	out["tick"] = 0;
+	if (!world_) return out;
+	out["tick"] = static_cast<int64_t>(world_->logic_tick);
+
+	// Godot world (x, up, z) -> mission (x, -z, up) — the debug_spawn_round
+	// conversion; the direction is normalized in doubles.
+	const double dx = p_dir_godot.x;
+	const double dy = -static_cast<double>(p_dir_godot.z);
+	const double dz = p_dir_godot.y;
+	const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (len <= 0.0) return out;
+	double range = static_cast<double>(p_max_range_units);
+	if (range < 1.0) range = 1.0;
+	if (range > 2000.0) range = 2000.0;
+	const double fx = p_from_godot.x;
+	const double fy = -static_cast<double>(p_from_godot.z);
+	const double fz = p_from_godot.y;
+
+	opennova::world::ProjectileTrace trace;
+	trace.start = opennova::world::FixedVec3{
+	    opennova::world::to_fixed(static_cast<float>(fx)),
+	    opennova::world::to_fixed(static_cast<float>(fy)),
+	    opennova::world::to_fixed(static_cast<float>(fz))};
+	trace.end = opennova::world::FixedVec3{
+	    opennova::world::to_fixed(static_cast<float>(fx + dx / len * range)),
+	    opennova::world::to_fixed(static_cast<float>(fy + dy / len * range)),
+	    opennova::world::to_fixed(static_cast<float>(fz + dz / len * range))};
+	// A plain geometric ray, exactly what a bullet would test: ammo_flags
+	// stays 0 (0x80 would bypass terrain, 0x4000000 would skip material-17
+	// faces), persons are walked, wire proxies excluded. The local player is
+	// the owner, so an eye ray never picks the picker — or the vehicle they
+	// are mounted in (the ray[18] mount exclusion).
+	trace.owner = world_->cached.local_player;
+	trace.radius_q16 = 0;
+	trace.ammo_flags = 0;
+	const opennova::world::ProjectileHit hit =
+	    collision_world_.trace_projectile(*world_, trace);
+	if (!hit.hit()) return out;
+
+	const int32_t hp[3] = {hit.position_q16.x, hit.position_q16.y, hit.position_q16.z};
+	const int32_t hn[3] = {hit.normal_q16.x, hit.normal_q16.y, hit.normal_q16.z};
+	out["hit_position_godot"] = godot_from_fixed3(hp);
+	out["hit_normal_godot"] = godot_from_fixed3(hn);
+	out["distance_units"] =
+	    static_cast<float>(range * (static_cast<double>(hit.t_q16) / 65536.0));
+	out["section"] = hit.section_index;
+	out["face"] = hit.face_index;
+	out["bone"] = hit.bone_index;
+	out["hit_zone"] = hit.hit_zone;
+	out["surface_type"] = hit.surface_type;
+	out["material_flags"] = static_cast<int64_t>(hit.material_flags);
+
+	switch (hit.hit_class) {
+		case opennova::world::ProjectileHitClass::Terrain:
+			out["blocked"] = "terrain";
+			return out;
+		case opennova::world::ProjectileHitClass::Water:
+			out["blocked"] = "water";
+			return out;
+		default:
+			break;
+	}
+	const opennova::world::Entity *ent = world_->registry.get(hit.geometry_entity);
+	if (ent == nullptr) {
+		// A decoded wire proxy or an already-freed slot: the geometry hit but
+		// carries no pickable identity (joined visual-only clients).
+		out["blocked"] = "proxy";
+		return out;
+	}
+	out["hit"] = true;
+	switch (hit.hit_class) {
+		case opennova::world::ProjectileHitClass::StaticEntity:
+			out["hit_class"] = "static";
+			break;
+		case opennova::world::ProjectileHitClass::DynamicEntity:
+			out["hit_class"] = "dynamic";
+			break;
+		default:
+			out["hit_class"] = "person";
+			break;
+	}
+	out["entity_handle"] = static_cast<int>(hit.geometry_entity.packed);
+	out["pool"] = hit.geometry_entity.pool();
+	out["kind"] = static_cast<int>(ent->spawn_origin >> 24);
+	out["index"] = static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+	out["bms_id"] = ent->bms_id;
+	out["net_id"] = static_cast<int>(ent->net_id);
+	out["item_id"] = ent->item_id;
+	out["name"] = String(ent->name.c_str());
+	out["position_godot"] = godot_from_mission_vec3(ent->position);
+	out["bound_radius"] = ent->bound_radius;
+	return out;
+}
+
 Dictionary NovaSimulation::get_round_debug() const {
 	Dictionary out;
 	Array events;
