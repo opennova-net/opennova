@@ -6,7 +6,7 @@ extends ObjectListDetailInspector
 
 # Part-animation drivers reuse the shared generator-style enum, but only the control
 # bytes the C++ panm mode API round-trips (panm_control_for_mode in
-# nova_object_data.cpp) are exposed. Friendly labels come from GeneratorStyleCatalog;
+# nova_object_data_panm_edit.cpp) are exposed. Friendly labels come from GeneratorStyleCatalog;
 # MOTION_MODE_KEYS maps each id to the mode string that C++ API expects.
 const MOTION_MODE_IDS := [0, 16, 17, 24, 32, 33, 50, 52, 53, 113, 114]
 const MOTION_MODE_KEYS := {

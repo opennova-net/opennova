@@ -5,7 +5,7 @@ byte) to device render state, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `libs/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
 `libs/renderer` (`material_classify`, `object_shader_template`),
-`godot/engine/object/{nova_object_shader_cache,nova_object_data}.cpp`,
+`godot/engine/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
 `godot/engine/object/nova_object_model.gd`. Landed by maturity REN-2
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md)). The T1 parity instrument
