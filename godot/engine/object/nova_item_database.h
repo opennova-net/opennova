@@ -161,6 +161,14 @@ public:
 		EMPLACEMENT_ADDEWEAP_C = 2,
 	};
 
+	// ItemDefAttrib bits GDScript composes against get_attrib()/get_attrib2()
+	// results — mirrors DEF_ITEM_ATTRIB_* (static_asserts in the .cpp pin them).
+	enum {
+		ATTRIB_POWERUP = 0x2,
+		ATTRIB_PLAYER_CONTROL = 0x40,
+		ATTRIB_ARMORY = 0x80000,
+	};
+
 	Error load(const String &path);
 	// Load items.def by flat name through the mounted resource root (VFS), so the item
 	// database resolves from PFF archives at runtime. Mirrors the other *_from_resource_root.

@@ -1,11 +1,45 @@
 #include "npruntime/weapon_table_build.h"
 
+#include <world/ammo_table.h>
+#include <world/entity.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 
 namespace opennova::np {
+
+// libs/world mirrors these DEF_* bits beside their consumers (world stays
+// def-parser-free). npruntime legally sees both headers, so this TU pins every
+// mirror to the canonical def.h value; renumbering either side breaks the build.
+static_assert(static_cast<uint32_t>(world::weapon_flag::kScoped) == DEF_WEAPON_FLAG_SCOPED);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kSighted) == DEF_WEAPON_FLAG_SIGHTED);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kUnderwater) == DEF_WEAPON_FLAG_UNDERWATER);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kEmplaced) == DEF_WEAPON_FLAG_EMPLACED);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kArmor) == DEF_WEAPON_FLAG_ARMOR);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kForceCrouch) == DEF_WEAPON_FLAG_FORCECROUCH);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kNoCardSwitch) == DEF_WEAPON_FLAG_NOCARDSWITCH);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kForceScoped) == DEF_WEAPON_FLAG_FORCESCOPED);
+static_assert(static_cast<uint32_t>(world::weapon_flag2::kInset) == DEF_WEAPON_FLAG2_INSET);
+static_assert(static_cast<uint32_t>(world::weapon_flag2::kInvisible) == DEF_WEAPON_FLAG2_INVISIBLE);
+static_assert(world::kAmmoFlagIgnore == DEF_AMMO_FLAG_IGNORE);
+static_assert(world::kAmmoFlagDetonateSatchels == DEF_AMMO_FLAG_DETONATESATCHELS);
+static_assert(world::kAmmoFlagNoGravity == DEF_AMMO_FLAG_NOGRAVITY);
+static_assert(world::kAmmoFlagHasItem == DEF_AMMO_FLAG_HASITEM);
+static_assert(world::kAmmoFlagInstantKillZone == DEF_AMMO_FLAG_INSTANTKILLZONE);
+static_assert(world::kAmmoFlagUseOwnMove == DEF_AMMO_FLAG_USEOWNMOVE);
+static_assert(world::kAmmoFlagNoAge == DEF_AMMO_FLAG_NOAGE);
+static_assert(world::kAmmoFlagForceTracer == DEF_AMMO_FLAG_FORCETRACER);
+static_assert(world::kAmmoFlagClaymore == DEF_AMMO_FLAG_CLAYMORE);
+static_assert(world::kAmmoFlagNoOItems == DEF_AMMO_FLAG_NOOITEMS);
+static_assert(world::kAmmoFlagNoMItems == DEF_AMMO_FLAG_NOMITEMS);
+static_assert(world::kAmmoFlagNoDItems == DEF_AMMO_FLAG_NODITEMS);
+static_assert(world::kAmmoFlagIgnorFoilage == DEF_AMMO_FLAG_IGNORFOILAGE);
+static_assert(world::kItemAttribEweap == DEF_ITEM_ATTRIB_EWEAP);
+static_assert(world::kItemAttribLandable == DEF_ITEM_ATTRIB_LANDABLE);
+static_assert(world::kItemAttribAIData == DEF_ITEM_ATTRIB_AIDATA);
+static_assert(world::kItemAttribNoDie == DEF_ITEM_ATTRIB_NODIE);
 
 namespace {
 
@@ -201,8 +235,8 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		}
 		world::weapon_fsm_bake(action_rows.data(), action_rows.size(), nullptr, nullptr,
 		                       nullptr, e.action_fsm);
-		e.action_fsm.auto_fire = (d.flags & 0x100) != 0;
-		e.action_fsm.burst3 = (d.flags & 0x20) != 0;
+		e.action_fsm.auto_fire = (d.flags & DEF_WEAPON_FLAG_AUTO) != 0;
+		e.action_fsm.burst3 = (d.flags & DEF_WEAPON_FLAG_BURST) != 0;
 		e.action_fsm.clip_capacity = e.clipsize;
 		e.action_fsm.flags = d.flags;
 		e.action_fsm.flags2 = d.flags2;

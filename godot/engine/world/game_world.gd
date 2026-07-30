@@ -504,7 +504,7 @@ func _on_net_mission(mission_name: String) -> void:
 	# only after the complete map is renderable. A partial load publishes neither.
 	_apply_mission_environment_overrides(mission)
 	_loaded_mission = mission
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
 	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
@@ -563,7 +563,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_loaded_mission = mission
 	# The mission attribute that forces the indoors accum bit every frame.
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
@@ -1348,7 +1348,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 	var arms_name := "armsG"
 	if def != null and not def.gfx1a.is_empty():
 		arms_name = def.gfx1a
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	if not gun_name.is_empty():
 		_placer.object_data_for(gun_name)
 	if show_arms and not arms_name.is_empty():
@@ -1505,7 +1505,7 @@ func build_local_player_viewmodel() -> Node3D:
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
 	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
 	# character-arms model. [orig: Player_RenderFirstPersonViewModel @0x4dedc7]
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]

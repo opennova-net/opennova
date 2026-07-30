@@ -91,8 +91,9 @@ SpawnPointResult select_player_spawn_for_team(const World &world, uint8_t team,
 const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
                                    uint16_t handle) {
     // [orig: Server_ResolveSpawnTargetHandle @0x4fe110]
-    if (handle == 0xFFFF) return nullptr;
-    const int pool = (handle >> 12) & 0xF;
+    const EntityHandle handle_view{handle};
+    if (!handle_view.valid()) return nullptr;
+    const int pool = handle_view.pool();
     if (pool != 0 && pool != 1 && pool != 2) return nullptr; // [orig: @0x4fe12f]
     EntityHandle h;
     h.packed = handle;

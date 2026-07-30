@@ -106,7 +106,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
 
     if (traits.player_control) {
-        if (occ == nullptr || wrecked || (veh.flags & 0x2u) != 0) {
+        if (occ == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
             // No controller (or dead/locked vehicle): steer holds the current heading,
             // commanded speed decays to zero through the decel clamps below.
             // [orig: @0x48c002-0x48c02d — `+528 = entity->Yaw; [136] = 0; [137] = 0;
@@ -148,8 +148,8 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             }
 
             // Modifier bits [orig: LABEL_123 @0x48b490-0x48b4d8].
-            if ((move_order & 0x200u) != 0) m.cmd_speed >>= 1;
-            if ((move_order & 0x100u) != 0) m.cmd_speed >>= 2;
+            if ((move_order & Entity::kMoveOrderCrouch) != 0) m.cmd_speed >>= 1;
+            if ((move_order & Entity::kMoveOrderProne) != 0) m.cmd_speed >>= 2;
             if ((move_order & 0x20u) != 0) veh.flags |= 0x80u;
             else veh.flags &= ~0x80u;
             if ((move_order & 0x40u) != 0) veh.flags |= 0x20u;
@@ -160,7 +160,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             // Steer target: the driver's replicated heading (mouse steer), or the
             // vehicle's own heading under free-look [orig: @0x48b4a8-0x48b4c0].
             if (analog_sum == 0) {
-                m.steer_target_bam = (move_order & 0x10u) != 0 ? m.yaw_bam : driver_yaw_bam;
+                m.steer_target_bam = (move_order & Entity::kMoveOrderFreeLook) != 0 ? m.yaw_bam : driver_yaw_bam;
             }
 
             // Key-steer ramp + the 8-way direction cases [orig: @0x48b4e0-0x48b57a;
@@ -247,7 +247,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // Airborne: the command opposes the current motion (a coast brake)
         // [orig: @0x48ba64-0x48ba8a, gated `BYTE2(aiRef0) == 0 && !(Flags & 0x2000)`].
         int32_t cmd = m.cmd_speed;
-        if (!m.grounded && (veh.flags & 0x2000u) == 0) {
+        if (!m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
                 if (cmd < 0) cmd = -cmd;
             } else if (cmd > 0) {

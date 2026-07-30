@@ -3,6 +3,8 @@
 // spawn, pose getters, and the equipped-weapon FSM (net-re §5.62).
 #include "simulation/nova_simulation_internal.h"
 
+#include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+
 #include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
 
 using namespace novasim;
@@ -1430,9 +1432,9 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	const bool move_held = p_forward || p_back || p_left || p_right;
 	if (opennova::world::player_view_move_input(player_view_, move_held,
 			weapon_active_ ? weapon_def_.flags : 0) &&
-			(weapon_def_.flags & 0x20000000) == 0) {
+			(weapon_def_.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
 		if (opennova::world::player_view_set_engaged(player_view_, false,
-				(weapon_def_.flags2 & 0x200) != 0))
+				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
 			opennova::world::weapon_fsm_queue_scope_down(
 					*active_local_weapon_slot());
 	}
@@ -1640,7 +1642,7 @@ bool NovaSimulation::local_held_weapon_visible(
 	// The ammo leg, for defs that carry the flag: an empty pool hides the weapon.
 	// [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0, ported as
 	//  weapon_pool_get]
-	if ((def->flags & 0x10) != 0 &&
+	if ((def->flags & DEF_WEAPON_FLAG_NOCLIPSNODRAW) != 0 &&
 			opennova::world::weapon_pool_get(local_inventory_, def->ammo_class_id) == 0 &&
 			slot->clip <= 0)
 		return false;
@@ -1795,8 +1797,8 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), resolve_fn, clip_fn, this,
 			weapon_def_);
 	const int flags = int(p_def.get("flags", 0));
-	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
-	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
+	weapon_def_.auto_fire = (flags & DEF_WEAPON_FLAG_AUTO) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
+	weapon_def_.burst3 = (flags & DEF_WEAPON_FLAG_BURST) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
 	weapon_def_.flags2 = int(p_def.get("flags2", 0)); // Inset (0x200) picks the 7-step ease
 	// The heat model [orig: WeaponDef +0x36C/+0x370/+0x374]. Absent keys leave 0,
@@ -1814,7 +1816,7 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	// The run-gait class [orig: 'run_anim' -> AdmDefs +0xAC; promotion @ 0x4b729d] and
 	// ForceCrouch (0x40000): idle_mortar promotion + stance-change refusal.
 	weapon_run_anim_ = int(int64_t(p_def.get("run_anim", 0)));
-	weapon_force_crouch_ = (flags & 0x40000) != 0;
+	weapon_force_crouch_ = (flags & DEF_WEAPON_FLAG_FORCECROUCH) != 0;
 	// A held-AnimMap CHANGE advances a host serial; the local InfantryState observes
 	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
 	// resolved map identity, not the weapon name: two weapon records sharing one
@@ -1978,18 +1980,18 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	// Inset optics cannot be raised under NVG. Non-Inset sights retain the
 	// original independent behavior.
 	if (!player_view_.scope_engaged && player_view_.nvg_active &&
-			(weapon_def_.flags2 & 0x200) != 0)
+			(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
 		return false;
 	// ForceScoped pins the raised sight: un-scoping is refused once settled
 	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
-	if (player_view_.scope_engaged && (weapon_def_.flags & 0x20000000) != 0 &&
+	if (player_view_.scope_engaged && (weapon_def_.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 &&
 			!opennova::world::player_view_scope_ease_active(player_view_))
 		return false;
 	// The toggle latches this ease's step count (7 for Inset weapons, else 15;
 	// 1 on the hipfire-return leg) and REFUSES while the previous ease runs
 	// [orig: Player_ToggleWeaponScope @ 0x4df177 !activeFlag; Setup @ 0x4df1b3..0x4df36e].
 	if (!opennova::world::player_view_set_engaged(player_view_, !player_view_.scope_engaged,
-			(weapon_def_.flags2 & 0x200) != 0))
+			(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
 		return false;
 	if (player_view_.scope_engaged)
 		opennova::world::weapon_fsm_queue_scope_up(*active_slot);
@@ -2040,7 +2042,7 @@ bool NovaSimulation::request_local_player_nvg_toggle() {
 	if (!player_view_.nvg_active) {
 		nvg_scope_restore_ = false;
 		if (weapon_active_ && player_view_.scope_engaged &&
-				(weapon_def_.flags2 & 0x200) != 0 &&
+				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0 &&
 				!opennova::world::player_view_scope_ease_active(player_view_)) {
 			nvg_scope_restore_ = request_local_player_scope_toggle();
 		}
@@ -2211,7 +2213,7 @@ void NovaSimulation::tick_local_player_weapon() {
 	// g_fireChargeStartTick = tick), release @ 0x4e07e9 -> WeaponSlot_RequestFire
 	// with the computed charge; world-wac-ai-re §27.]
 	bool power_throw_release = false;
-	if ((weapon_def_.flags & 0x80000000u) != 0) {
+	if ((weapon_def_.flags & DEF_WEAPON_FLAG_POWERTHROW) != 0) {
 		if (!accept_weapon_input) {
 			power_throw_start_tick_ = 0;
 			pending_throw_charge_ = 0;
@@ -2429,7 +2431,7 @@ void NovaSimulation::tick_local_player_weapon() {
 				// the same 12. Settled-FP/mounted zoom levels remain D-WPN-8.
 				if (player_view_.third_person ||
 						(!scope_settled && !vehicle_attack_context &&
-								(weapon_def_.flags & 0x20000000) == 0)) {
+								(weapon_def_.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)) {
 					round_event.subtype = 12;
 				}
 				round_event.adm_index = adm_index;
@@ -2647,12 +2649,12 @@ void NovaSimulation::tick_local_player_weapon() {
 		// the scope (rare: a reload requested inside the raise ease)
 		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
 		opennova::world::player_view_set_engaged(player_view_, false,
-				(weapon_def_.flags2 & 0x200) != 0);
+				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0);
 	}
 	if (ev.rescope) {
 		++weapon_rescope_serial_;
 		opennova::world::player_view_set_engaged(player_view_, true,
-				(weapon_def_.flags2 & 0x200) != 0);
+				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0);
 	}
 }
 
@@ -2708,7 +2710,7 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
 	// windup): gates = def+8 sign bit, g_fireChargeStartTick != 0, ammo available;
 	// the drawer derives the fill from held ticks].
-	const bool windup_active = (weapon_def_.flags & 0x80000000u) != 0 &&
+	const bool windup_active = (weapon_def_.flags & DEF_WEAPON_FLAG_POWERTHROW) != 0 &&
 			power_throw_start_tick_ != 0 && world_ != nullptr &&
 			(active_slot.clip > 0 || weapon_def_.clip_capacity < 0);
 	out["windup_active"] = windup_active;

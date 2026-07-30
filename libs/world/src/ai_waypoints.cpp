@@ -194,7 +194,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     AiBrain &b = ve->brain;
 
     const bool wrecked = veh.health <= 0 || !veh.alive;
-    if (controller == nullptr || wrecked || (veh.flags & 0x2u) != 0) {
+    if (controller == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
         // Parked/no driver: the motor's no-controller branch holds heading + zeroes the
         // command; the brain drops into the player-mode/parked state. The stuck-state
         // check is unported (D-NET-161). [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,

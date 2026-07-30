@@ -30,14 +30,16 @@ void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
 ProtocolMessageFlags decode_flags(uint8_t raw) {
 	ProtocolMessageFlags f;
 	f.raw = raw;
-	f.settings_update = (raw & 0x80u) != 0;
-	f.len16 = (raw & 0x40u) != 0;
-	f.len8 = (raw & 0x20u) != 0;
-	f.skip2 = (raw & 0x10u) != 0;
-	f.skip1 = (raw & 0x08u) != 0;
-	f.frag_cont = (raw & 0x04u) != 0;
-	f.frag_end = (raw & 0x02u) != 0;
-	f.msg_type_high_bit = (raw & 0x80u) != 0;
+	f.settings_update = (raw & PROTOCOL_MSG_FLAG_SETTINGS_UPDATE) != 0;
+	f.len16 = (raw & PROTOCOL_MSG_FLAG_LEN16) != 0;
+	f.len8 = (raw & PROTOCOL_MSG_FLAG_LEN8) != 0;
+	f.skip2 = (raw & PROTOCOL_MSG_FLAG_SKIP2) != 0;
+	f.skip1 = (raw & PROTOCOL_MSG_FLAG_SKIP1) != 0;
+	f.frag_cont = (raw & PROTOCOL_MSG_FLAG_FRAG_CONT) != 0;
+	f.frag_end = (raw & PROTOCOL_MSG_FLAG_FRAG_END) != 0;
+	// Deliberately the same 0x80 as settings_update — both views of one bit
+	// exist on purpose (see the ProtocolMessageFlags doc block).
+	f.msg_type_high_bit = (raw & PROTOCOL_MSG_FLAG_SETTINGS_UPDATE) != 0;
 	return f;
 }
 
@@ -57,11 +59,11 @@ ProtocolMessage make_protocol_message(uint8_t tag, std::vector<uint8_t> payload,
 	// [orig: NapiNP_WriteMessageRecord @0x61da90 length-flag gating;
 	//  CNapiNPConnection_ParseMessages @0x625bc0 zero-flag read]
 	if (flags_raw == 0 && !msg.payload.empty()) {
-		flags_raw = msg.payload.size() > 0xFFu ? 0x40u : 0x20u;
+		flags_raw = msg.payload.size() > 0xFFu ? PROTOCOL_MSG_FLAG_LEN16 : PROTOCOL_MSG_FLAG_LEN8;
 	}
 	msg.flags = decode_flags(flags_raw);
 	if (msg.flags.msg_type_high_bit) {
-		msg.full_tag = static_cast<uint16_t>(0x100u | tag);
+		msg.full_tag = static_cast<uint16_t>(PROTOCOL_FULL_TAG_HIGH_BASE | tag);
 	}
 	return msg;
 }
@@ -100,7 +102,7 @@ bool parse_protocol_messages(const uint8_t *data, size_t len,
 		msg.flags = decode_flags(flags_raw);
 		msg.tag = data[pos + 1];
 		msg.full_tag = static_cast<uint16_t>(
-				(msg.flags.msg_type_high_bit ? 0x100u : 0u) | msg.tag);
+				(msg.flags.msg_type_high_bit ? PROTOCOL_FULL_TAG_HIGH_BASE : 0u) | msg.tag);
 		pos += 2;
 
 		// [D-NET-8] On a truncated inner stream the original substitutes 0 for the missing field and
@@ -167,7 +169,7 @@ bool append_protocol_message(std::vector<uint8_t> &out,
 	// Honor that shape; only auto-pick a length flag when there is a
 	// payload that needs one.
 	if (flags_raw == 0 && !msg.payload.empty()) {
-		flags_raw = msg.payload.size() > 0xFFu ? 0x40u : 0x20u;
+		flags_raw = msg.payload.size() > 0xFFu ? PROTOCOL_MSG_FLAG_LEN16 : PROTOCOL_MSG_FLAG_LEN8;
 	}
 	ProtocolMessageFlags flags = decode_flags(flags_raw);
 	out.push_back(flags_raw);
@@ -492,7 +494,10 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
 				!state.buffer.empty();
 	}
 	payload_out.clear();
-	if ((msg.flags.raw & 0x06u) == 0x04u) {
+	static_assert((PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END) == 0x06u,
+	              "the witnessed fragment-state mask");
+	if ((msg.flags.raw & (PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END)) ==
+	    PROTOCOL_MSG_FLAG_FRAG_CONT) {
 		state.buffer.clear();
 	}
 	state.buffer.insert(state.buffer.end(), msg.payload.begin(), msg.payload.end());

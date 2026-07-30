@@ -15,7 +15,7 @@ const ParticleTableInspectorScript = preload("res://modtools/particle/inspectors
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 
 const OUTPUT_DIR_NAME := "particle_editor_workstation_test"
-const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
+const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
 
 
 class DirtyGuardShell:
@@ -427,7 +427,7 @@ func test_particle_renderer_keeps_blend_mode_and_depth_counts() -> void:
 # def.flags & 0x100 (= particle_flag::YawAndPitch, bit 8) is set. The static
 # path renders WORLD-ORIENTED quads through the per-particle (yaw, pitch,
 # roll) Euler matrix [orig: @ 0x5f5068] — not rotation-suppressed billboards.
-const PARTICLE_FLAG_YAW_AND_PITCH := 1 << 8
+const PARTICLE_FLAG_YAW_AND_PITCH := NovaParticleDef.FLAG_YAW_AND_PITCH
 
 
 func test_yaw_and_pitch_renders_world_oriented_quads() -> void:
@@ -610,7 +610,7 @@ func test_color_tint_zeroes_channel() -> void:
 	assert_gt(rendered.b, 0.5, "tint.b=1 preserves blue channel (got %f)" % rendered.b)
 
 
-const PARTICLE_FLAG_POSITION_RELATIVE := 1 << 19  # particle_flag::PositionRelative = 0x80000 (engine flag-table idx 19, post-HAZE)
+const PARTICLE_FLAG_POSITION_RELATIVE := NovaParticleDef.FLAG_POSITION_RELATIVE
 
 
 # CParticleEmitter_BuildBillboardQuads @ 0x5e6d60: lit-color path triggered

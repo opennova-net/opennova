@@ -205,7 +205,7 @@ func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
 	if spawn_origin_v == null:
 		return Vector2i(-1, -1)
 	var spawn_origin := int(spawn_origin_v)
-	return Vector2i((spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
+	return Vector2i(SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
 
 
 func _uses_dynamic_husk_identity(bms_id: int, spawn_origin_v: Variant,
@@ -387,7 +387,7 @@ func _present_transform_for_identity(bms_id: int,
 			and _sim.has_method('get_present_effect_state_for_origin'):
 		var spawn_origin := int(spawn_origin_v)
 		state = _sim.get_present_effect_state_for_origin(
-				(spawn_origin >> 24) & 0xff, spawn_origin & 0xffffff)
+				SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
 	if state.size() != PRESENT_EFFECT_STATE_COUNT:
 		return null
 	var rotation_deg := state[PRESENT_EFFECT_ROTATION_DEG]

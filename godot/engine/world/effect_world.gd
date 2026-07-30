@@ -5,7 +5,7 @@ extends Node3D
 ## Effects, emitters, and particles are values owned by NovaEffectScene; this
 ## node owns one NovaParticleRenderer for both render domains.
 
-const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18
+const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
 const ADMISSION_ALWAYS := 0
 const ADMISSION_REPLACE_OWNED := 1
 const ADMISSION_SUPPRESS_WHILE_OWNED := 2

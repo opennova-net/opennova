@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <npwire/ingame_message_id.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/ai.h>                  // AiEntity / AiSystem::for_handle (the motor store)
@@ -24,9 +25,10 @@ namespace {
 // Pool-0 index byte for the S2C 0x1E kill-feed actor fields (§5.26: u8 pool-0 index,
 // 0xFF = none).
 uint8_t pool0_index_byte(uint16_t handle) {
-	if (handle == 0xFFFF || (handle & 0xF000u) != 0) return 0xFF;
-	const uint16_t slot = handle & 0xFFFu;
-	return slot <= 0xFEu ? static_cast<uint8_t>(slot) : 0xFF;
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() != 0) return 0xFF;
+	const int slot = h.slot();
+	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
@@ -93,8 +95,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				if (!is_in_match(c) || c.link.transport == nullptr) continue;
 				// mask 0x90 NOT_HOST: the host's in-process view skips the wire.
 				if (c.link.mode == netsim::TransportMode::Loopback) continue;
-				c.link.transport->host_send(0x13, body13);
-				if (!body1e.empty()) c.link.transport->host_send(0x1E, body1e);
+				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
+				if (!body1e.empty()) c.link.transport->host_send(s2c::GAME_EVENT, body1e);
 			}
 		}
 
@@ -178,7 +180,7 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	const bool dead = !local->alive || (local->flags & 2u) != 0;
-	if (dead && (world.mission_attrib_flags & 0x40u) == 0)
+	if (dead && (world.mission_attrib_flags & world::World::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
 }
 
@@ -406,7 +408,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 			for (const auto &zb : zone_6f) {
 				const bool changed = std::find(changed_6f.begin(), changed_6f.end(),
 				                               zb.first) != changed_6f.end();
-				if (changed || deploy_screen) conn.link.transport->host_send(0x6F, zb.second);
+				if (changed || deploy_screen) conn.link.transport->host_send(s2c::ZONE_TIMER_VALUE, zb.second);
 			}
 
 			// 0x1E secure edges (to all in-match) [orig: @0x519839/@0x51988E].
@@ -419,7 +421,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 			// Flip events + 0x53 windows.
 			for (size_t fi = 0; fi < ev.flips.size(); ++fi) {
 				const auto &f = ev.flips[fi];
-				conn.link.transport->host_send(0x53, flip_53[fi]);
+				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, flip_53[fi]);
 				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
 				const uint8_t zone_idx = chain_index_of(f.zone);
 				if (conn_team == f.capturer_team) {
@@ -448,7 +450,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				std::vector<uint8_t> body;
 				body.push_back(static_cast<uint8_t>(count));
 				body.insert(body.end(), entries.begin(), entries.end());
-				conn.link.transport->host_send(0x40, body);
+				conn.link.transport->host_send(s2c::CAPTURE_ZONE_STATE, body);
 				entries.clear();
 				count = 0;
 			};
@@ -496,7 +498,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				dead = e != nullptr && e->health <= 0;
 			}
 			if (conn.link.respawn_pending || dead)
-				conn.link.transport->host_send(0x6E, kEmptyWaveStatus);
+				conn.link.transport->host_send(s2c::ROSTER_SYNC, kEmptyWaveStatus);
 		}
 	}
 

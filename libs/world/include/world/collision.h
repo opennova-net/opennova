@@ -286,16 +286,63 @@ struct BlinkAccum {
             hits[hit_count++] =
                 static_cast<uint32_t>(((section_index & 0x1F) + (pool_entity_index << 8)) << 12);
     }
+    // Decoders for the packed key add_hit writes (consumed by the occlusion
+    // camera-containment walk [orig: @0x5c88c9-0x5c8938]).
+    static constexpr int32_t hit_section(uint32_t key) {
+        return static_cast<int32_t>((key >> 12) & 0x1F);
+    }
+    static constexpr int32_t hit_pool_entity_index(uint32_t key) {
+        return static_cast<int32_t>(key >> 20);
+    }
 };
 
-inline constexpr uint32_t kBlinkIndoorsBit = 0x2;        // accum bit -> Flags 0x800000
-inline constexpr uint32_t kEntityFlagIndoors = 0x800000; // entity+36 bit
-// Raw entity Flags bit written by a CL/type-4 touch. Retail also uses it to lock
-// the upper-body pose and skip gravity while aligned to a ladder. The reimpl
-// currently extracts the contact frame but does not implement climb locomotion.
-inline constexpr uint32_t kEntityFlagLadderContact = 0x100000;
-inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;  // type-6 volume touch
-inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800; // type-11 volume touch
+inline constexpr uint32_t kBlinkIndoorsBit = 0x2;  // accum bit -> kEntityFlagIndoors
+inline constexpr uint32_t kBlinkWaterOffBit = 0x8; // authored water letter — both water passes
+                                                   // skipped [orig: Terrain_RenderSceneWithReflection
+                                                   // @0x5c93cb; docs/render/render-occlusion-re.md §4]
+// The entity Flags bit constants the touch dispatch writes (kEntityFlagIndoors/
+// LadderContact/ArmoryZone/VehicleLoadoutZone) live in world/entity.h — the one
+// home beside the field they describe.
+
+// Bounding-volume type codes — the contained-point dispatch [orig: the switch
+// @0x4ae887; the letter names are the Super OED manual's volume suffixes,
+// docs/world/world-wac-ai-re.md §15.4].
+namespace bvol_type {
+enum : int32_t {
+    kContactMarker = 5,   // contact, no force
+    kLadderCL = 4,
+    kArmoryCA = 6,        // gates weapon.mnu on action 218
+    kVehicleVC = 7,       // vehicle-collision solid (mask 0x8 pass)
+    kBlinkBB = 8,
+    kDoorCD = 9,
+    kChangeTeamCT = 10,
+    kVehicleLoadout = 11, // gates vehicle.mnu
+    kVehicleExt = 12,     // optional extension of the VC pass
+    kFlagCF = 13,         // grounded-touch special function
+    kDamageHighDH = 16,
+    kDamageMediumDM = 17,
+    kDamageLowDL = 18,
+};
+} // namespace bvol_type
+
+// Touch-accum bits the dispatch ORs into CollisionQueryResult::flags — one bit
+// per volume family [orig: the |= writes @0x4ae894..0x4aebb3].
+inline constexpr uint32_t kTouchLadder = 0x1;
+inline constexpr uint32_t kTouchArmory = 0x4;
+inline constexpr uint32_t kTouchBlink = 0x10;
+inline constexpr uint32_t kTouchDoor = 0x20;
+inline constexpr uint32_t kTouchDamageLow = 0x40;
+inline constexpr uint32_t kTouchDamageMedium = 0x80;
+inline constexpr uint32_t kTouchDamageHigh = 0x100;
+inline constexpr uint32_t kTouchChangeTeam = 0x200;
+inline constexpr uint32_t kTouchVehicleLoadout = 0x400;
+inline constexpr uint32_t kTouchFlagGrounded = 0x800;
+
+// Collision-face flag bits [orig: face tests @0x4e5073-family; the GDScript
+// debug view mirrors these in hitbox_debug_view.gd].
+inline constexpr uint32_t kFaceFlagBothSides = 0x1;
+inline constexpr uint32_t kFaceFlagNeverHit = 0x100;
+inline constexpr uint32_t kFaceFlagDoubleSided = 0x800;
 
 // A test point (stride-4 record, xyz + spare — faithful to the caller layout).
 struct CollisionPoint {

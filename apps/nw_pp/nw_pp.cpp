@@ -31,6 +31,7 @@
 #include <novacrypto/nwu.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_catalog.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/serverlog_decode.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_hello.h>
@@ -139,7 +140,7 @@ std::string handle_str(uint16_t h) {
 }
 
 // Tag labels come from the shared in-game message catalog
-// (libs/novaworld/.../ingame_message_catalog.h) — the single source of truth
+// (libs/npwire/.../ingame_message_catalog.h) — the single source of truth
 // shared with the nw_message_coverage CI gate, so names can't drift between the
 // printer and the coverage test. nullptr (uncatalogued) renders as a bare hex tag.
 const char *tag_label(char dir, int tag) {
@@ -669,12 +670,12 @@ void print_tag_0c_c2s(const std::vector<uint8_t> &body) {
 	            handle_str(hdr.handle).c_str(),
 	            type_str(hdr.item_type_id).c_str(),
 	            unsigned(hdr.sub_op),
-	            hdr.sub_op == 0x0A ? "extended" :
-	            hdr.sub_op == 0x0B ? "compact" : "?",
+	            hdr.sub_op == ENTITY_SUB_OP_EXTENDED ? "extended" :
+	            hdr.sub_op == ENTITY_SUB_OP_COMPACT ? "compact" : "?",
 	            body.size() - consumed);
 	const uint8_t *rest = body.data() + consumed;
 	const size_t   rest_len = body.size() - consumed;
-	if (hdr.sub_op == 0x0A) {
+	if (hdr.sub_op == ENTITY_SUB_OP_EXTENDED) {
 		PlayerExtendedUplink r;
 		size_t used = 0;
 		if (decode_player_extended_uplink(rest, rest_len, r, used)) {
@@ -688,7 +689,7 @@ void print_tag_0c_c2s(const std::vector<uint8_t> &body) {
 			            used, rest_len,
 			            to_hex_sample(rest, rest_len).c_str());
 		}
-	} else if (hdr.sub_op == 0x0B) {
+	} else if (hdr.sub_op == ENTITY_SUB_OP_COMPACT) {
 		PlayerCompactRecord r;
 		size_t used = 0;
 		if (decode_player_compact_record(rest, rest_len, r, used)) {
@@ -1008,7 +1009,8 @@ void print_tag_file_xfer(int tag, const std::vector<uint8_t> &body) {
 	            "(re-request C2S 0x%02X if incomplete): %s\n",
 	            tag, ft.transfer_id, ft.total_size, ft.chunk_offset, ft.chunk_size,
 	            ft.is_final() ? "[FINAL]" : "[more]",
-	            tag == 0x60 ? 0x33 : 0x37,
+	            tag == s2c::FILE_TRANSFER_CHUNK ? c2s::FILE_CHUNK_REQUEST
+	                                            : c2s::MISSION_CHUNK_REQUEST,
 	            to_hex_sample(ft.chunk_data, ft.chunk_size).c_str());
 }
 
@@ -1396,61 +1398,62 @@ void print_payload(char dir, int frame, int tag,
 		}
 		return; // raw view replaces the structured decode (keeps diffs purely byte-level)
 	}
-	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
-	else if (dir == 'S' && tag == 0x0C) print_tag_0c(payload);
-	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
-	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
-	else if (dir == 'S' && tag == 0x10) print_tag_10(payload);
-	else if (dir == 'S' && tag == 0x40) print_tag_40(payload);
-	else if (dir == 'S' && tag == 0x16) print_tag_16(payload);
-	else if (dir == 'S' && tag == 0x18) print_tag_18(payload);
-	else if (dir == 'S' && tag == 0x46) print_tag_46(payload);
-	else if (dir == 'S' && tag == 0x1E) print_tag_1e(payload);
-	else if (dir == 'S' && tag == 0x26) print_tag_26(payload);
-	else if (dir == 'S' && tag == 0x4E) print_tag_4e(payload);
-	else if (dir == 'S' && tag == 0x0F) print_tag_0f(payload);
-	else if (dir == 'S' && tag == 0x5A) print_tag_5a(payload);
-	else if (dir == 'S' && tag == 0x6E) print_tag_6e(payload);
-	else if (dir == 'S' && tag == 0x7B) print_tag_7b(payload);
-	else if (dir == 'S' && (tag == 0x60 || tag == 0x64)) print_tag_file_xfer(tag, payload);
-	else if (dir == 'S' && tag == 0x57) print_tag_57(payload);
-	else if (dir == 'S' && tag == 0x68) print_tag_68(payload);
-	else if (dir == 'S' && tag == 0x43) print_tag_43(payload);
-	else if (dir == 'S' && tag == 0x39) print_tag_39(payload);
-	else if (dir == 'S' && tag == 0x6B) print_tag_6b(payload);
-	else if (dir == 'S' && tag == 0x49) print_tag_49(payload);
-	else if (dir == 'S' && tag == 0x13) print_tag_13(payload);
-	else if (dir == 'S' && tag == 0x30) print_tag_30(payload);
-	else if (dir == 'S' && tag == 0x31) print_tag_31(payload);
-	else if (dir == 'S' && tag == 0x42) print_tag_42(payload);
-	else if (dir == 'S' && tag == 0x79) print_tag_79(payload);
-	else if (dir == 'S' && tag == 0x2A) print_tag_2a(payload);
-	else if (dir == 'S' && tag == 0x59) print_tag_59(payload);
-	else if (dir == 'S' && tag == 0x45) print_tag_45(payload);
-	else if (dir == 'S' && tag == 0x44) print_tag_44(payload);
-	else if (dir == 'S' && tag == 0x58) print_tag_58(payload);
-	else if (dir == 'S' && tag == 0x6F) print_tag_6f(payload);
-	else if (dir == 'S' && tag == 0x53) print_tag_53(payload);
-	else if (dir == 'S' && tag == 0x34) print_tag_34(payload);
-	else if (dir == 'S' && tag == 0x2C) print_tag_2c_s2c(payload);
-	else if (dir == 'S' && tag == 0x14) print_tag_14(payload);
-	else if (dir == 'S' && tag == 0x04) print_tag_04(payload);
-	else if (dir == 'S' && tag == 0x08) print_tag_08_s2c(payload);
-	else if (dir == 'S' && tag == 0x02) print_tag_02_s2c(payload);
-	else if (dir == 'S' && tag == 0x19) print_tag_19(payload);
-	else if (dir == 'C' && tag == 0x0D) print_tag_0d_c2s(payload);
-	else if (dir == 'C' && tag == 0x0F) print_tag_0f_c2s(payload);
-	else if (dir == 'C' && tag == 0x2F) print_tag_2f_c2s(payload);
-	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
-	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
-	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
-	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);
-	else if (dir == 'C' && tag == 0x22) print_tag_22_c2s(payload);
-	else if (dir == 'C' && tag == 0x23) print_tag_23_c2s(payload);
-	else if (dir == 'C' && tag == 0x28) print_tag_28_c2s(payload);
-	else if (dir == 'C' && tag == 0x29) print_tag_29_c2s(payload);
-	else if (dir == 'C' && tag == 0x25) print_tag_25_c2s(payload);
-	else if (dir == 'C' && tag == 0x4C) print_tag_4c_c2s(payload);
+	if (dir == 'S' && tag == s2c::PER_FRAME_UPDATE) print_tag_0a(payload);
+	else if (dir == 'S' && tag == s2c::ENTITY_SPAWN_BATCH) print_tag_0c(payload);
+	else if (dir == 'S' && tag == s2c::POOL_SPAWN) print_tag_0d(payload);
+	else if (dir == 'S' && tag == s2c::POOL3_SYNC) print_tag_20(payload);
+	else if (dir == 'S' && tag == s2c::STATIC_ENTITY_BATCH) print_tag_10(payload);
+	else if (dir == 'S' && tag == s2c::CAPTURE_ZONE_STATE) print_tag_40(payload);
+	else if (dir == 'S' && tag == s2c::PLAYER_LIST) print_tag_16(payload);
+	else if (dir == 'S' && tag == s2c::FULL_ENTITY_SPAWN) print_tag_18(payload);
+	else if (dir == 'S' && tag == s2c::PLAYER_SYNC) print_tag_46(payload);
+	else if (dir == 'S' && tag == s2c::GAME_EVENT) print_tag_1e(payload);
+	else if (dir == 'S' && tag == s2c::KILL_SYNC) print_tag_26(payload);
+	else if (dir == 'S' && tag == s2c::KILL_BY_SLOT) print_tag_4e(payload);
+	else if (dir == 'S' && tag == s2c::WORLD_STATE_LOAD) print_tag_0f(payload);
+	else if (dir == 'S' && tag == s2c::WEAPON_LOADOUT) print_tag_5a(payload);
+	else if (dir == 'S' && tag == s2c::ROSTER_SYNC) print_tag_6e(payload);
+	else if (dir == 'S' && tag == s2c::FULL_PLAYER_INFO) print_tag_7b(payload);
+	else if (dir == 'S' && (tag == s2c::FILE_TRANSFER_CHUNK || tag == s2c::MISSION_DATA_CHUNK))
+		print_tag_file_xfer(tag, payload);
+	else if (dir == 'S' && tag == s2c::RTT_ECHO) print_tag_57(payload);
+	else if (dir == 'S' && tag == s2c::LOADED_MODEL_PAGE_REQUEST) print_tag_68(payload);
+	else if (dir == 'S' && tag == s2c::TIME_SYNC_PING) print_tag_43(payload);
+	else if (dir == 'S' && tag == s2c::CHARATTR_CRC_CHALLENGE) print_tag_39(payload);
+	else if (dir == 'S' && tag == s2c::MINIMAP_OVERLAY) print_tag_6b(payload);
+	else if (dir == 'S' && tag == s2c::WEAPON_RELOAD) print_tag_49(payload);
+	else if (dir == 'S' && tag == s2c::ENTITY_DEATH) print_tag_13(payload);
+	else if (dir == 'S' && tag == s2c::ENTITY_CHECKSUM_REQ) print_tag_30(payload);
+	else if (dir == 'S' && tag == s2c::LOADOUT_CRC_REQ) print_tag_31(payload);
+	else if (dir == 'S' && tag == s2c::INPUT_STATE_FLAGS) print_tag_42(payload);
+	else if (dir == 'S' && tag == s2c::SPECTATOR_FLAG) print_tag_79(payload);
+	else if (dir == 'S' && tag == s2c::CHAT_HISTORY) print_tag_2a(payload);
+	else if (dir == 'S' && tag == s2c::DEPLOYED_ITEM) print_tag_59(payload);
+	else if (dir == 'S' && tag == s2c::TERRAIN_LOAD) print_tag_45(payload);
+	else if (dir == 'S' && tag == s2c::ENTITY_ROUTED) print_tag_44(payload);
+	else if (dir == 'S' && tag == s2c::SESSION_STATUS) print_tag_58(payload);
+	else if (dir == 'S' && tag == s2c::ZONE_TIMER_VALUE) print_tag_6f(payload);
+	else if (dir == 'S' && tag == s2c::ZONE_TIMER_WINDOW) print_tag_53(payload);
+	else if (dir == 'S' && tag == s2c::PLAY_SOUND) print_tag_34(payload);
+	else if (dir == 'S' && tag == s2c::MISSION_MAP_NAMES) print_tag_2c_s2c(payload);
+	else if (dir == 'S' && tag == s2c::CHAT_BROADCAST) print_tag_14(payload);
+	else if (dir == 'S' && tag == s2c::SESSION_SLOT_CONFIG) print_tag_04(payload);
+	else if (dir == 'S' && tag == s2c::SESSION_CONFIG) print_tag_08_s2c(payload);
+	else if (dir == 'S' && tag == s2c::JOIN_PADDING_PROBE) print_tag_02_s2c(payload);
+	else if (dir == 'S' && tag == s2c::SPAWN_ACK_TIMESTAMP) print_tag_19(payload);
+	else if (dir == 'C' && tag == c2s::CHAT_MESSAGE) print_tag_0d_c2s(payload);
+	else if (dir == 'C' && tag == c2s::ENTITY_INFO_QUERY) print_tag_0f_c2s(payload);
+	else if (dir == 'C' && tag == c2s::LOADOUT_SUBMIT) print_tag_2f_c2s(payload);
+	else if (dir == 'C' && tag == c2s::RTT_CONSUMED) print_tag_2c_c2s(payload);
+	else if (dir == 'C' && tag == c2s::ENTITY_UPLINK) print_tag_0c_c2s(payload);
+	else if (dir == 'C' && tag == c2s::FIRED_ROUND) print_tag_06_c2s(payload);
+	else if (dir == 'C' && tag == c2s::CHECKSUM_REPLY) print_tag_21_c2s(payload);
+	else if (dir == 'C' && tag == c2s::PLAYER_SYNC_REQUEST) print_tag_22_c2s(payload);
+	else if (dir == 'C' && tag == c2s::VISIBLE_PLAYERS_REQUEST) print_tag_23_c2s(payload);
+	else if (dir == 'C' && tag == c2s::LOADOUT_REQUEST) print_tag_28_c2s(payload);
+	else if (dir == 'C' && tag == c2s::TEAM_SPAWN_ACK) print_tag_29_c2s(payload);
+	else if (dir == 'C' && tag == c2s::WEAPON_RELOAD_REQUEST) print_tag_25_c2s(payload);
+	else if (dir == 'C' && tag == c2s::CLIENT_QUALITY) print_tag_4c_c2s(payload);
 	else if (tag == 0x00 && print_tag_00_kv(payload)) { /* NWU KV rendered */ }
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
@@ -1532,14 +1535,14 @@ int run_handshake(const char *path) {
 		stripped.resize(out_len);
 		if (stripped.empty()) return true;
 		const uint8_t opcode = stripped[0];
-		if (opcode != 0x41 && opcode != 0x42 && opcode != 0x81 && opcode != 0x82) return true;
+		if (opcode != SESSION_OPCODE_CLIENT_HELLO && opcode != SESSION_OPCODE_CLIENT_AUTH && opcode != SESSION_OPCODE_SERVER_HELLO && opcode != SESSION_OPCODE_SERVER_AUTH) return true;
 		std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
 		// Outer NWU transform: decrypt-on-receive is nwu_encrypt (names swapped).
 		if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
 		++shown;
 		std::printf("[f=%d %d->%d op=0x%02x len=%zu]\n", pk.frame_index, pk.srcport,
 		            pk.dstport, unsigned(opcode), body.size());
-		if (opcode == 0x42) {
+		if (opcode == SESSION_OPCODE_CLIENT_AUTH) {
 			ClientAuth auth;
 			if (!parse_client_auth(body.data(), body.size(), auth)) {
 				std::printf("        ClientAuth: PARSE FAILED  raw=%s\n",
@@ -1563,7 +1566,7 @@ int run_handshake(const char *path) {
 					            to_hex_sample(cu.data(), cu.size()).c_str());
 				}
 			}
-		} else if (opcode == 0x41) {
+		} else if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
 			ClientHello hello;
 			if (parse_client_hello(body.data(), body.size(), hello))
 				std::printf("        ClientHello co=\"%s\" pn=\"%s\"\n", hello.co.c_str(),

@@ -80,7 +80,8 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 	// The mission-attribute force-indoors override ORs the indoors bit into the
 	// frame's accum view. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 	cam.local_blink_flags =
-			collision_world_.local_player_blink_flags | (p_force_indoors ? 0x2u : 0u);
+			collision_world_.local_player_blink_flags |
+			(p_force_indoors ? opennova::world::kBlinkIndoorsBit : 0u);
 
 	const uint64_t occl_build_start =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
@@ -222,6 +223,11 @@ bool NovaSimulation::local_player_indoors() const {
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	return e != nullptr && (e->flags & opennova::world::kEntityFlagIndoors) != 0;
 }
+
+static_assert(NovaSimulation::BLINK_INDOORS == opennova::world::kBlinkIndoorsBit,
+              "BLINK_INDOORS drifted from collision.h");
+static_assert(NovaSimulation::BLINK_WATER_OFF == opennova::world::kBlinkWaterOffBit,
+              "BLINK_WATER_OFF drifted from collision.h");
 
 int NovaSimulation::local_player_blink_flags() const {
 	return static_cast<int>(collision_world_.local_player_blink_flags);

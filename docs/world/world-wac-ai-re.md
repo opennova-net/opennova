@@ -5275,3 +5275,56 @@ each + inner-site comments at `@ 0x4e08fd` (press gate), `@ 0x4e07e9` (charge
 curve), `@ 0x4ec5bb` (speed scale), `@ 0x4ec234/0x4ec288/0x4ec79b` (spawn
 dispatches), `@ 0x4e9f06` (useownmove leg), `@ 0x4c2288` (pool-2 think loop).
 IDB saved.
+
+## 28. The entity Flags dword (consolidation, 2026-07-29)
+
+One table for the retail entity Flags dword (`entity+36`; reimpl
+`Entity::engine_flags` + the organic low-byte legacy `flags` mirror). This
+section consolidates witnesses already scattered through this record (§3, §13,
+§15, §16, §17, §23, §24) and backs the `kEntityFlag*` constants in
+`libs/world/include/world/entity.h` — no new IDA work. Spawn composition:
+BMS `Indestructible(1<<21) -> 0x4000000`, `Reflective(1<<23) -> 0x400`,
+`NoShadow(1<<24) -> 0x1000000` `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]`;
+kind Building `-> 0x20000` `[orig: Entity_InitFromModel @ 0x40e105]`;
+items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
+
+| Bit | Constant | Meaning | Witness |
+|---|---|---|---|
+| 0x2 | `kEntityFlagDead` | dead (kill writes `Flags \|= 6`) | `[orig: @ 0x43fbf6]`; the SP dead gate reads `entity+36 & 2` (§20) |
+| 0x4 | `kEntityFlagHusk` | items/buildings: husk swap (with 0x2 on kill) | `[orig: @ 0x43fbf6]`; §24 |
+| 0x4 | `kEntityFlagNVGWorn` | organics: NVG worn — draw gate for the goggle model; same bit, kind-dependent read | `[orig: draw @ 0x4e3b54]`; §13.1 draw 3 |
+| 0x8 | `kEntityFlagBinoculars` | binoculars raised (bits 2-4 refresh from the local `g_binocularsRaised` global; peers receive them over the wire) | `[orig: draw @ 0x4e3c04; refresh gate @ 0x4b5d77]`; §13.1 draw 4 |
+| 0x10 | `kEntityFlagScopeRaised` | weapon scope raised (`g_weaponScopeActive` refresh) | `[orig: test @ 0x4b5deb]`; §13.2 |
+| 0x20 | `kEntityFlagParachute` | parachute deployed (system unmodeled, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
+| 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
+| 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
+| 0x400 | `kEntityFlagReflective` | BMS Reflective trait | `[orig: @ 0x40e9f0]` |
+| 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the damage path also writes an entity `Flags \|= 0x800` critical-hit latch (`round_sim.cpp` seat/head branches) — same value, distinct unnamed meaning; that site stays raw |
+| 0x2000 | `kEntityFlagInAir` | airborne / swimming | `[orig: grounded selector @ 0x4b78ab]`; §3, §15.3 |
+| 0x4000 | `kEntityFlagPriorityTarget` | set on every fire; decays per perception scan (the §16.2 x6 scoring flag) | `[orig: set @ 0x4bf370; clear @ 0x4bbfa4]` |
+| 0x8000 | `kEntityFlagDrowning` | drowning — zeroes vertical swim input | §3 movement clamps |
+| 0x20000 | `kEntityFlagBuilding` | kind Building | `[orig: Entity_InitFromModel @ 0x40e105]` |
+| 0x100000 | `kEntityFlagLadderContact` | CL/type-4 ladder touch; locks upper-body pose + skips gravity while aligned | `[orig: @ 0x4b3291]`; §14, §15.4 |
+| 0x400000 | `kEntityFlagArmoryZone` | type-6 (CA) volume touch — gates weapon.mnu on action 218 | `[orig: @ 0x4aea45, @ 0x49b848]`; §15.4 |
+| 0x800000 | `kEntityFlagIndoors` | indoors (blink accum bit 2 -> Flags); render + AI retry gates | §4 (render-occlusion-re), §15.4, §17 |
+| 0x1000000 | `kEntityFlagNoShadow` | BMS NoShadow trait | `[orig: @ 0x40e9f0]` |
+| 0x4000000 | `kEntityFlagIndestructible` | BMS Indestructible / hp==0 item | `[orig: @ 0x40e9f0; @ 0x40dc8e]`; §15.3 force skip |
+
+Known-but-unnamed bits (witnessed IN USE but the meaning is not pinned — the
+code keeps raw hex at these sites; do not name without a new witness):
+
+| Bit | Where it appears | Note |
+|---|---|---|
+| 0x1 | destruction sweeps skip `engine_flags & 0x1` targets; part of the `0x2000001`/`0x43` composites | reads as an "inactive/exempt" family; unpinned |
+| 0x80 | (reserved in the spawn composition) | unpinned |
+| 0x10000 | `!(Flags & 0x112002)` comment-only gate (§3) | unpinned |
+| 0x2000000 | the `0x2000001` skip composite (collision/throwables/LOS) | unpinned |
+| 0x8000000 | AI combat candidate skip; `0x8000001` composite | unpinned |
+| 0x8 / 0x20 (vehicle context) | `vehicle_motor` writes on the vehicle's own Flags dword from MoveOrder | different, unwitnessed meanings on vehicles — distinct from the infantry binocular/parachute reads |
+
+Composite masks the original uses as units (kept composed-with-static_assert or
+raw per the partially-witnessed rule): dismount scrub `~0xA000`
+(`Drowning|InAir`), mount scrub-and-set `& 0xFFFF5FBF | 0x40`
+(`~(Drowning|InAir|Mounted) | Mounted`) `[orig: @ 0x546c56-0x546c7c;
+@ 0x494752-0x494775]`; repulsion exemption `0x43` and skip composites
+`0x2000001`/`0x8000001` stay raw (constituent bits unpinned).

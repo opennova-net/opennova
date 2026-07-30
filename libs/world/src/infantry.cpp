@@ -732,7 +732,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
     // draggers 137-139), or a grounded corpse. The original's dead leg also requires
     // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
-    const bool conform = (e.def_attrib & 0x200u) != 0 ||
+    const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
                          (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
     if (!conform) {
         // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
@@ -893,7 +893,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
             // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
             emit_slot_sound(world, e,
-                            (world.mission_attrib_flags & 0x100000u) != 0
+                            (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0
                                 ? audio::kSlotNightDeath
                                 : audio::kSlotDeath,
                             e.pos);
@@ -1148,7 +1148,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // targets = target — the alternating shuffle while walking/turning.
         // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
         if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
-            (e.def_attrib & 0x200u) != 0) {
+            (e.def_attrib & kItemAttribLandable) != 0) {
             const int32_t tgt = inf.target_heading;
             inf.leg_yaw[0] = io::bam_add(
                 inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
@@ -1178,7 +1178,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
             // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
             const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-            int32_t lstep = (e.def_attrib & 0x200u) != 0
+            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
                                 ? io::bam_sar(io::bam_add(ldiff, 8), 4)
                                 : io::bam_sar(io::bam_add(ldiff, 2), 2);
             if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
@@ -1606,7 +1606,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         }
         // The own priority-target mark decays each scan; firing re-arms it.
         // [orig: Flags &= ~0x4000 @0x4bbfa4]
-        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~0x4000u;
+        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
     // --- Behavior + aim (per tick with a live target). [orig: §17.3/§17.5] ---
@@ -2034,8 +2034,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // and the equipped ADM index at +0x2B0 [orig: read @0x4b5dba]. Without this a
     // remote player holds a rifle pose whatever it carries, and never adopts the
     // scoped stance the wire is already reporting.
-    inf.scope_raised = (ent->flags & 0x10u) != 0;
-    inf.binoculars_raised = (ent->flags & 0x08u) != 0;
+    inf.scope_raised = (ent->flags & kEntityFlagScopeRaised) != 0;
+    inf.binoculars_raised = (ent->flags & kEntityFlagBinoculars) != 0;
     infantry_weapon_channel(e, world, logic_tick);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real

@@ -12,9 +12,8 @@
 
 namespace opennova::netsim {
 
-// S2C in-match message tag carried on a transport (the inner-message tag, not the session opcode):
-// the per-frame world reference §5.9.
-inline constexpr uint8_t kTag0aFrameUpdate = 0x0A;
+// In-match message tags (the inner-message tag, not the session opcode) are the
+// direction-scoped constants in npwire/ingame_message_id.h (s2c::PER_FRAME_UPDATE etc.).
 
 // The per-connection in-match replication primitives. A host owns a CONNECTION TABLE (the reimpl of
 // the original's per-connection fan); both the legacy listen-server binding and npruntime's

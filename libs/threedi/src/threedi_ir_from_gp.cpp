@@ -456,7 +456,7 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
         // GP tex_addressing_mode: bit 0 = U clamp, bit 8 = V clamp
         // If either axis is clamped, mark texture as clamped
         if (dm->texture_count > 0 && (sm->tex_addressing_mode & 0x0101u) != 0) {
-            dm->textures[0].flags |= 0x02;  // CLAMPED
+            dm->textures[0].flags |= THREEDI_TEX_FLAG_CLAMPED;
         }
 
         // Decode shader animation parameters

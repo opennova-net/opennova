@@ -1240,13 +1240,13 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         EntityHandle hit_entities[4];
         for (int32_t i = 0; i < 4; ++i) {
             if ((hits.hits[i] & 0xFFFF) != 0)
-                hit_entities[i] = EntityHandle::make(2, static_cast<int32_t>(hits.hits[i] >> 20));
+                hit_entities[i] = EntityHandle::make(2, BlinkAccum::hit_pool_entity_index(hits.hits[i]));
         }
         // Camera-containing buildings: traverse from the camera's section.
         // [orig: @ 0x5c88c9-0x5c8938]
         for (int32_t i = 0; i < hits.hit_count && i < 4; ++i) {
             if (!hit_entities[i].valid()) continue;
-            const int32_t section = static_cast<int32_t>((hits.hits[i] >> 12) & 0x1F);
+            const int32_t section = BlinkAccum::hit_section(hits.hits[i]);
             const int32_t mi = hit_entities[i].slot() & (kMaskSlots - 1);
             masks_[mi] |= traverse_from_section(world, hit_entities[i], section, cam);
             if (water_straddle(hit_entities[i])) water_visible_ = true;

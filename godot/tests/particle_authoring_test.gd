@@ -11,7 +11,7 @@ const ParticleDefInspectorScript = preload("res://modtools/particle/inspectors/p
 const ParticleTableInspectorScene = preload("res://modtools/particle/inspectors/table_inspector.tscn")
 
 const OUTPUT_DIR_NAME := "particle_authoring_test"
-const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18
+const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
 const RESOURCE_FIXTURE := "res://tests/particle_resource_smoke.ptl"
 const USER_RESOURCE_PATH := "user://particle_authoring_test/resource_saver_roundtrip.ptl"
 

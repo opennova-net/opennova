@@ -7,6 +7,7 @@
 // projectile face and polygon raycasts, and the contact-force accumulation. Each
 // takes a CollisionTargetView and touches no world state.
 
+#include "world/ammo_table.h" // kAmmoFlagIgnorFoilage
 #include "world/angle.h"
 #include <algorithm>
 #include <cmath>
@@ -357,8 +358,8 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
             if (smin[0] > face.max[0] || smax[0] < face.min[0] || smin[1] > face.max[1] ||
                 smax[1] < face.min[1] || smin[2] > face.max[2] || smax[2] < face.min[2])
                 continue;
-            if ((face.flags & 0x100u) != 0) continue;
-            if (face.material == 17 && (ammo_flags & 0x4000000u) != 0) continue;
+            if ((face.flags & kFaceFlagNeverHit) != 0) continue;
+            if (face.material == 17 && (ammo_flags & kAmmoFlagIgnorFoilage) != 0) continue;
             // Plane side at both endpoints (Q14 dot, signed >> 14). [orig: @ 0x4e50b6 shrd]
             const int32_t d0 =
                     static_cast<int32_t>((static_cast<int64_t>(ls[0]) * face.normal[0] +
@@ -377,7 +378,7 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
             // 0x800 branch rides the witnessed nonzero stack-residue arg; else
             // enter-front only].
             if ((face.flags & 1u) == 0) {
-                if ((face.flags & 0x800u) == 0 && !(d0 > 0 && d1 <= 0)) continue;
+                if ((face.flags & kFaceFlagDoubleSided) == 0 && !(d0 > 0 && d1 <= 0)) continue;
             }
             const int32_t a0 = abs32(d0);
             const int32_t total = a0 + abs32(d1);
@@ -616,7 +617,7 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 segment_min[2] > face.max[2] || segment_max[2] < face.min[2])
                 continue;
             if ((face.material_flags & 0x100u) != 0) continue;
-            if (face.poly_type == 17 && (ammo_flags & 0x04000000u) != 0) continue;
+            if (face.poly_type == 17 && (ammo_flags & kAmmoFlagIgnorFoilage) != 0) continue;
 
             const int32_t normal_index = sec.normal_start + face.normal_index;
             if (face.normal_index < 0 || normal_index < 0 ||
@@ -860,11 +861,11 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
 
                 // Type dispatch on a contained point. [orig: the switch @ 0x4ae887]
                 switch (type) {
-                    case 5:
+                    case bvol_type::kContactMarker:
                         has_collision = true; // contact, no force [orig: @ 0x4ae874]
                         break;
-                    case 4: { // CL ladder alignment frame [orig: @ 0x4ae894-0x4aea30]
-                        out.flags |= 0x1u;
+                    case bvol_type::kLadderCL: { // ladder alignment frame [orig: @ 0x4ae894-0x4aea30]
+                        out.flags |= kTouchLadder;
                         // Two rotations through the section matrix: x/y from
                         // (mid, mid, the point's local z), z from (mid, mid,
                         // maxZ - 1.0u). [orig: the paired
@@ -917,12 +918,12 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         ladder.valid = true;
                         break;
                     }
-                    case 6: // "CA" touch volume [orig: @ 0x4aea45]
-                        if (pi < 2) out.flags |= 0x4u;
+                    case bvol_type::kArmoryCA: // touch volume [orig: @ 0x4aea45]
+                        if (pi < 2) out.flags |= kTouchArmory;
                         break;
-                    case 8: // blink box [orig: @ 0x4aea68-0x4aeae8]
+                    case bvol_type::kBlinkBB: // blink box [orig: @ 0x4aea68-0x4aeae8]
                         if (pi < 2) {
-                            out.flags |= 0x10u;
+                            out.flags |= kTouchBlink;
                             if (target.is_building) {
                                 blink.flags |= vol.flags ^ 6u;
                                 if (blink.hit_count != -1 && blink.hit_count < 4 &&
@@ -931,20 +932,20 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             }
                         }
                         break;
-                    case 9: // CD: door touch [orig: @ 0x4aeb0f-0x4aeb22]
-                        out.flags |= 0x20u;
+                    case bvol_type::kDoorCD: // door touch [orig: @ 0x4aeb0f-0x4aeb22]
+                        out.flags |= kTouchDoor;
                         out.door_sections |= 1u << (si & 31);
                         break;
-                    case 16: out.flags |= 0x100u; break; // DH damage high [orig: @ 0x4aeb39]
-                    case 17: out.flags |= 0x80u; break;  // DM damage medium [orig: @ 0x4aeb50]
-                    case 18: out.flags |= 0x40u; break;  // DL damage low [orig: @ 0x4aeb67]
-                    case 10: out.flags |= 0x200u; break; // CT: change team [orig: @ 0x4aeb7b]
-                    case 11: out.flags |= 0x400u; break; // [orig: @ 0x4aeb92]
-                    case 13: // CF: flag/special function, grounded touch [orig: @ 0x4aebb3]
-                        if (target.is_ground_of_source) out.flags |= 0x800u;
+                    case bvol_type::kDamageHighDH: out.flags |= kTouchDamageHigh; break; // [orig: @ 0x4aeb39]
+                    case bvol_type::kDamageMediumDM: out.flags |= kTouchDamageMedium; break; // [orig: @ 0x4aeb50]
+                    case bvol_type::kDamageLowDL: out.flags |= kTouchDamageLow; break; // [orig: @ 0x4aeb67]
+                    case bvol_type::kChangeTeamCT: out.flags |= kTouchChangeTeam; break; // [orig: @ 0x4aeb7b]
+                    case bvol_type::kVehicleLoadout: out.flags |= kTouchVehicleLoadout; break; // [orig: @ 0x4aeb92]
+                    case bvol_type::kFlagCF: // grounded touch [orig: @ 0x4aebb3]
+                        if (target.is_ground_of_source) out.flags |= kTouchFlagGrounded;
                         break;
-                    case 7:  // VC: vehicle-collision solid (reachable only on mask 0x8)
-                    case 12: // optional extension of the same vehicle pass
+                    case bvol_type::kVehicleVC:  // vehicle-collision solid (reachable only on mask 0x8)
+                    case bvol_type::kVehicleExt: // optional extension of the same vehicle pass
                     default: {
                         // Solid: accumulate the SAT push-out. [orig: @ 0x4aebdd-0x4aed0c]
                         if (prev_has_collision && (q.mask & 1) != 0) break;

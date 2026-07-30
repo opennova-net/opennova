@@ -320,7 +320,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
 	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required
 	// one-byte empty cstr. [orig: serialize_object_to_buffer @0x504e20..0x504e7c]
-	if (e.has_item_def && (e.item_attrib & 0x100000u) != 0) rec.entity_name = e.name;
+	if (e.has_item_def && (e.item_attrib & world::kItemAttribAIData) != 0) rec.entity_name = e.name;
 	// The three live relationship pointers serialize independently; do not infer one from
 	// mounted, because the original simply resolves each stored pointer to its pool handle.
 	// [orig: serialize_object_to_buffer @0x504e8c..0x504fb4]

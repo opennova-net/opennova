@@ -23,10 +23,11 @@
 // NW_GOLDEN_VEHICLE_SESSION (capture, DEFAULT_* fallback) + NW_ITEMS_DEF (the
 // §5.10b class table); skips clean when either is absent.
 
-#include <netsim/connection_fan.h> // kTag0aFrameUpdate
+#include <netsim/connection_fan.h>
 #include <netsim/net_client_view.h>
 
 #include <npwire/ingame_decode.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/wire_capture.h>
 
 #include <def/def.h>
@@ -196,7 +197,7 @@ int main() {
 
 		view.apply(tag, m.payload);
 
-		if (tag != ns::kTag0aFrameUpdate || tracked.empty()) continue;
+		if (tag != opennova::s2c::PER_FRAME_UPDATE || tracked.empty()) continue;
 		++s2c_frames;
 		FrameUpdate fu;
 		decode_frame_update(m.payload.data(), m.payload.size(), classify, fu,

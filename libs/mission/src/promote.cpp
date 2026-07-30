@@ -12,6 +12,14 @@ namespace opennova::mission {
 
 using namespace opennova::world;
 
+// libs/world mirrors these bms::AttribFlags bits beside its mission_attrib_flags
+// field (world stays mission-parser-free); this TU sees both headers, so it pins
+// the mirror values to the canonical enum.
+static_assert(World::kMissionAttribSinglePlayerRespawn ==
+              static_cast<uint32_t>(bms::AttribFlags::SinglePlayerRespawn));
+static_assert(World::kMissionAttribEnableNVG ==
+              static_cast<uint32_t>(bms::AttribFlags::EnableNVG));
+
 namespace {
 
 // degrees -> 32-bit binary angle (the entity-heading unit, entity+16). [orig: AI_HandleCommand
@@ -110,14 +118,14 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // item-traits sweep [orig: Entity_InitFromModel @0x40e105 / @0x40dc8e].
     using bms::BmsiAttributeFlags;
     const uint32_t attrib = e.bmsi_attributes;
-    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= 0x4000000u;
-    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= 0x400u;
-    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= 0x1000000u;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= kEntityFlagIndestructible;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= kEntityFlagReflective;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= kEntityFlagNoShadow;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Guarding)) {
-        s.engine_flags |= 0x40u;
-        s.flags |= 0x40u;
+        s.engine_flags |= kEntityFlagMounted;
+        s.flags |= kEntityFlagMounted;
     }
-    if (kind == EntityKind::Building) s.engine_flags |= 0x20000u;
+    if (kind == EntityKind::Building) s.engine_flags |= kEntityFlagBuilding;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
     // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
@@ -403,7 +411,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
-            uint32_t origin = (static_cast<uint32_t>(kind) << 24) | (idx & 0xFFFFFF);
+            uint32_t origin = spawn_origin_pack(static_cast<uint32_t>(kind), idx);
             ++idx;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);

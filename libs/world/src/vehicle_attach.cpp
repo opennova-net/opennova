@@ -79,13 +79,20 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     presnap_vehicle_attach_heading(world, occ, veh, veh.seats[seat_idx]);
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type;
+    static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
+                  "the witnessed gunner-mount scrub mask");
+    static_assert((kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted) == 0xA040u,
+                  "the witnessed vehicle-mount scrub+set mask (~mask == 0xFFFF5FBF)");
     if (occ.mount_type == SeatType::Gunner) {
-        occ.flags &= ~0xA000u;
-        occ.engine_flags &= ~0xA000u;
+        occ.flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
+        occ.engine_flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
         // [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
     } else {
-        occ.flags = (occ.flags & 0xFFFF5FBFu) | 0x40u;
-        occ.engine_flags = (occ.engine_flags & 0xFFFF5FBFu) | 0x40u;
+        occ.flags = (occ.flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                    kEntityFlagMounted;
+        occ.engine_flags =
+                (occ.engine_flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                kEntityFlagMounted;
         // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
     }
     occ.mount_target = veh.handle;                 // [orig: parentEntity(0x16C) = vehicle]
@@ -211,8 +218,8 @@ bool entity_detach_from_vehicle(World &world, EntityHandle player) {
         }
     }
     vehicle_release_use_gun_slot(*occ, veh);
-    occ->flags &= ~0x40u;          // [orig: Flags &= ~0x40]
-    occ->engine_flags &= ~0x40u;
+    occ->flags &= ~kEntityFlagMounted;          // [orig: Flags &= ~0x40]
+    occ->engine_flags &= ~kEntityFlagMounted;
     occ->mount_target = EntityHandle{}; // [orig: +0x16C = 0]
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;

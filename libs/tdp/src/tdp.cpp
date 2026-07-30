@@ -943,7 +943,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
                 default: continue;
                 }
 
-                if (tex->flags & 0x01 /*ANIMATED*/) {
+                if (tex->flags & THREEDI_TEX_FLAG_ANIMATED) {
                     // Animated frame
                     if (tex->frame < TDP_MAX_ANIM_FRAMES) {
                         TdpAnimFrame *af = is_normal
@@ -1126,9 +1126,9 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
             dst->colorgen_end[0] = clamp_255(src->color_end[0]);
             dst->colorgen_end[1] = clamp_255(src->color_end[1]);
             dst->colorgen_end[2] = clamp_255(src->color_end[2]);
-            dst->disable_corona       = (src->flags & 0x01) ? 1 : 0;
-            dst->disable_lightterrain = (src->flags & 0x02) ? 1 : 0;
-            dst->disable_lightobjects = (src->flags & 0x04) ? 1 : 0;
+            dst->disable_corona       = (src->flags & THREEDI_IR_LIGHT_FLAG_DISABLE_CORONA) ? 1 : 0;
+            dst->disable_lightterrain = (src->flags & THREEDI_IR_LIGHT_FLAG_DISABLE_TERRAIN) ? 1 : 0;
+            dst->disable_lightobjects = (src->flags & THREEDI_IR_LIGHT_FLAG_DISABLE_OBJECTS) ? 1 : 0;
         }
     }
 

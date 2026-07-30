@@ -49,6 +49,8 @@ enum : int32_t {
     kSighted = 0x00000002,
     kUnderwater = 0x00000004, // keeps firing (and keeps its heat window) submerged
     kEmplaced = 0x00000080,
+    kArmor = 0x00001000,      // carry-weight class [orig: @0x5415aa]
+    kForceCrouch = 0x00040000,
     kNoCardSwitch = 0x02000000,
     kForceScoped = 0x20000000,
 };

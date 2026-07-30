@@ -24,6 +24,7 @@
 #include "conn_fan_test_util.h"
 
 #include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
@@ -414,7 +415,7 @@ bool run_0a_subblock_phase_cycle() {
 		ns::test::emit_all(world, conns, fallback);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
-		if (!expect(dg.tag == ns::kTag0aFrameUpdate, "tag 0x0A")) return false;
+		if (!expect(dg.tag == nw::s2c::PER_FRAME_UPDATE, "tag 0x0A")) return false;
 		nw::FrameUpdate fu;
 		if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
 		            "0x0A frame decodes as a well-formed frame")) return false;
@@ -1092,7 +1093,7 @@ bool run_round_event_fanout() {
 
 	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
 		ns::Datagram dg;
-		if (!ch.client_recv(dg) || dg.tag != ns::kTag0aFrameUpdate) return false;
+		if (!ch.client_recv(dg) || dg.tag != nw::s2c::PER_FRAME_UPDATE) return false;
 		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
 		                               fu);
 	};

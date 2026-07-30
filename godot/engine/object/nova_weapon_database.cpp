@@ -8,6 +8,9 @@
 
 using namespace godot;
 
+static_assert(NovaWeaponDatabase::FLAG_EMPLACED == DEF_WEAPON_FLAG_EMPLACED,
+              "FLAG_EMPLACED drifted from def.h");
+
 void NovaWeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaWeaponDatabase::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"),
@@ -26,6 +29,7 @@ void NovaWeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(SLOT_PRIMARY);
 	BIND_CONSTANT(SLOT_SECONDARY);
 	BIND_CONSTANT(SLOT_GRENADE);
+	BIND_CONSTANT(FLAG_EMPLACED);
 }
 
 Error NovaWeaponDatabase::load(const String &path) {

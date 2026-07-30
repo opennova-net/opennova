@@ -106,7 +106,8 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 	# The mission force-indoors attribute ORs the indoors letter into the frame
 	# view for BOTH consumers, matching run_occlusion_frame's camera input
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	var flags := int(sim.local_player_blink_flags()) | (0x2 if forces_indoors else 0)
+	var flags := int(sim.local_player_blink_flags()) | (
+			NovaSimulation.BLINK_INDOORS if forces_indoors else 0)
 	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
 	# near-detail and far-foliage tiers are terrain children here, matching
 	# retail where the detail cells ride the skipped terrain traversal and the
@@ -114,7 +115,7 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
 	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
 	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	var indoors := (flags & 0x2) != 0
+	var indoors := (flags & NovaSimulation.BLINK_INDOORS) != 0
 	if indoors != blink_indoors:
 		blink_indoors = indoors
 		var terrain: NovaTerrain = _world.get_terrain_node()
@@ -132,7 +133,7 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 	# (a camera building straddling the water plane, the window latch) ride
 	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
 	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
-	var water_off := (flags & 0x8) != 0
+	var water_off := (flags & NovaSimulation.BLINK_WATER_OFF) != 0
 	if water_off != _blink_water_suppressed:
 		_blink_water_suppressed = water_off
 		var water: Node = _world.get_water_node()

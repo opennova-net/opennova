@@ -246,7 +246,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // [orig: Entity_HandleDamageTrigger @0x4073c8..0x4073ea]
             const Entity *victim_entity = world.registry.get(victim->handle);
             if (victim_entity != nullptr &&
-                (victim_entity->engine_flags & 0x100u) == 0) {
+                (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
                 victim->slot.bytes()[AiSlot::kMoveFlagByte] = 2;
                 world.relations.group(victim_entity->group_id).alert =
                         TriggerRelations::kAlertRed;
@@ -558,8 +558,10 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
         // split is ours) [orig: the MoveOrder packer @0x4df68f-0x4df741].
         occ->net_move_input = static_cast<uint8_t>(
-                (e.inf.player_move_dir_index & 7) | (e.inf.player_moving ? 8 : 0) |
-                (e.inf.lean_left ? 0x40 : 0) | (e.inf.lean_right ? 0x80 : 0));
+                (e.inf.player_move_dir_index & Entity::kMoveOrderDirMask) |
+                (e.inf.player_moving ? Entity::kMoveOrderMoving : 0) |
+                (e.inf.lean_left ? Entity::kMoveOrderLeanLeft : 0) |
+                (e.inf.lean_right ? Entity::kMoveOrderLeanRight : 0));
         occ->net_stance_bits = 0; // seated stance stays cleared [orig: @0x435c42]
         // Drop any pending jump: the input latch is set-only (its consumer is
         // tick_infantry's jump block, skipped for the whole ride) and the witnessed

@@ -274,7 +274,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
 
     // Firing marks the shooter a priority target until the next perception scan clears
     // it [orig: Flags |= 0x4000 after every fire @0x4bf370; the §16.2 x6 scoring flag].
-    if (Entity *se = world.registry.get(e.handle)) se->engine_flags |= 0x4000u;
+    if (Entity *se = world.registry.get(e.handle)) se->engine_flags |= kEntityFlagPriorityTarget;
     return true;
 }
 

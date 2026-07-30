@@ -93,6 +93,10 @@ target_link_libraries(def_comment_strip_test PRIVATE opennova_def)
 target_include_directories(def_comment_strip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME def_comment_strip COMMAND def_comment_strip_test)
 
+add_executable(def_flag_parity_test def/def_flag_parity_test.cpp)
+target_link_libraries(def_flag_parity_test PRIVATE opennova_def)
+add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
+
 foreach(test items weapons ammo hudpos item_attrib item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_def)

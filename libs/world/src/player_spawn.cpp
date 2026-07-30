@@ -70,7 +70,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Both local and remote player bodies carry the retail player classifier. The
     // damage trigger uses this bit—not local ownership—to bypass NPC move/group alerts.
     // [orig: Entity_HandleDamageTrigger test victim Flags,100h @0x4073c8]
-    seed.engine_flags |= 0x100u;
+    seed.engine_flags |= kEntityFlagPlayer;
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
     // 0x0C organic-spawn carries it so the client self-matches its own player. [orig: Server_PlayerAdd
     // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2b]

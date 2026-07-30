@@ -20,6 +20,9 @@ static_assert(NovaItemDatabase::TYPE_PERSON == DEF_ITEM_TYPE_PERSON, "TYPE_PERSO
 static_assert(NovaItemDatabase::TYPE_MARKER == DEF_ITEM_TYPE_MARKER, "TYPE_MARKER drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_BUILDING == DEF_ITEM_TYPE_BUILDING, "TYPE_BUILDING drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_POWERUP == DEF_ITEM_TYPE_POWERUP, "TYPE_POWERUP drifted from DefItemType");
+static_assert(NovaItemDatabase::ATTRIB_POWERUP == DEF_ITEM_ATTRIB_POWERUP, "ATTRIB_POWERUP drifted from def.h");
+static_assert(NovaItemDatabase::ATTRIB_PLAYER_CONTROL == DEF_ITEM_ATTRIB_PLAYERCONTROL, "ATTRIB_PLAYER_CONTROL drifted from def.h");
+static_assert(NovaItemDatabase::ATTRIB_ARMORY == DEF_ITEM_ATTRIB_ARMORY, "ATTRIB_ARMORY drifted from def.h");
 static_assert(NovaItemDatabase::TYPE_OBJECT == DEF_ITEM_TYPE_OBJECT, "TYPE_OBJECT drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_EFFECT == DEF_ITEM_TYPE_EFFECT, "TYPE_EFFECT drifted from DefItemType");
 static_assert(NovaItemDatabase::EMPLACEMENT_ADDEWEAP == DEF_ITEM_EMPLACEMENT_ADDEWEAP,
@@ -79,6 +82,9 @@ void NovaItemDatabase::_bind_methods() {
 	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
 	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
 	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
+	BIND_CONSTANT(ATTRIB_POWERUP);
+	BIND_CONSTANT(ATTRIB_PLAYER_CONTROL);
+	BIND_CONSTANT(ATTRIB_ARMORY);
 }
 
 Error NovaItemDatabase::load(const String &path) {

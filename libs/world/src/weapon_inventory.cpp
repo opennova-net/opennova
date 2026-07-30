@@ -202,7 +202,7 @@ WeaponFillResult weapon_inventory_load_from_display(
             result.warnings.emplace_back(msg);
             continue;
         }
-        if ((def->flags & 0x1000) != 0) inv.carry_flags |= 8u;   // [orig: @ 0x5415aa]
+        if ((def->flags & weapon_flag::kArmor) != 0) inv.carry_flags |= 8u;   // [orig: @ 0x5415aa]
         if ((def->flags2 & 2) != 0) inv.carry_flags |= 0x10u;    // [orig: @ 0x5415ba]
         int32_t combo = def->rank + weapon_combo::kRanksPerCategory * def->category;
         WeaponInventorySlot *slot = inv.slot(combo); // bounds guard only; the

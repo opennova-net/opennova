@@ -242,16 +242,18 @@ func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
 # mission kind enum is Marker=0, Item=1, Building=2, Organic=3.
 func _item_effect_pool_allows(kind: int, attrib: int) -> bool:
 	if kind == NovaMissionData.KIND_ITEM:
-		return (attrib & 0x42) == 0
+		return (attrib & (NovaItemDatabase.ATTRIB_POWERUP | NovaItemDatabase.ATTRIB_PLAYER_CONTROL)) == 0
 	if kind == NovaMissionData.KIND_BUILDING or kind == NovaMissionData.KIND_MARKER:
-		return (attrib & 0x2) == 0
+		return (attrib & NovaItemDatabase.ATTRIB_POWERUP) == 0
 	return false
 
 
 func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
-	# The occupied-controller pass bypasses only PlayerControl (0x40). The
-	# independent 0x2 exclusion remains intact.
-	return kind == NovaMissionData.KIND_ITEM and (attrib & 0x42) == 0x40
+	# The occupied-controller pass bypasses only PlayerControl. The
+	# independent powerup exclusion remains intact.
+	return kind == NovaMissionData.KIND_ITEM and \
+			(attrib & (NovaItemDatabase.ATTRIB_POWERUP | NovaItemDatabase.ATTRIB_PLAYER_CONTROL)) \
+			== NovaItemDatabase.ATTRIB_PLAYER_CONTROL
 
 
 func _item_fx_identity_aliases(net_id: int, bms_id: int,
@@ -264,7 +266,7 @@ func _item_fx_identity_aliases(net_id: int, bms_id: int,
 	# authored BMS/net identity. Their packed runtime handle is therefore the only
 	# alias that distinguishes siblings on the same carrier.
 	if has_wire_identity and bms_id == 0 and (
-			spawn_origin == -1 or spawn_origin == 0xffffffff):
+			spawn_origin == -1 or spawn_origin == SpawnOrigin.NONE):
 		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
@@ -293,7 +295,7 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var index := int(ref.get("index", -1))
 	var spawn_origin := 0
 	if origin_kind >= 0 and index >= 0:
-		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
+		spawn_origin = SpawnOrigin.pack(origin_kind, index)
 	return _item_fx_identity_aliases(
 			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
 

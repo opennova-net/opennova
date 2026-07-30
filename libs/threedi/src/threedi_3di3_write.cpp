@@ -12,8 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LENGTH_MASK 0x00FFFFFFu
-#define PARENT_FLAG 0x80000000u
 #define THREEDI_DEFAULT_VERSION 259u
 
 typedef struct ChunkBuilder ChunkBuilder;
@@ -262,7 +260,7 @@ static int chunk_total_length(const ChunkBuilder *chunk, size_t *out_total)
             content_len += child_total;
         }
     }
-    if (content_len > LENGTH_MASK) {
+    if (content_len > THREEDI_3DI3_LENGTH_MASK) {
         return -1;
     }
     size_t total = content_len + 8u;
@@ -283,9 +281,9 @@ static int chunk_builder_serialize(const ChunkBuilder *chunk, BufferBuilder *out
         return -1;
     }
     uint32_t content_len = (uint32_t)(total_len - 8u);
-    uint32_t flags = content_len & LENGTH_MASK;
+    uint32_t flags = content_len & THREEDI_3DI3_LENGTH_MASK;
     if (chunk->child_count > 0 || chunk->is_parent) {
-        flags |= PARENT_FLAG;
+        flags |= THREEDI_3DI3_PARENT_FLAG;
     }
     if (buffer_append(out, chunk->id, 4) != 0) {
         return -1;

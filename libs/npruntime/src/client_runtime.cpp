@@ -1,6 +1,7 @@
 #include "npruntime/client_runtime.h"
 
 #include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 
 #include <utility>
 
@@ -128,7 +129,7 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 	// [orig: NetPacket_WriteEntityPositionUpdate @0x42A62F]
 	stamped.current_tick = current_tick_;
 	gameplay_send_queue_.push_back(
-			make_protocol_message(0x06, encode_client_fired_round(stamped)));
+			make_protocol_message(c2s::FIRED_ROUND, encode_client_fired_round(stamped)));
 	return true;
 }
 
@@ -138,7 +139,7 @@ bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 	    reload.entity_handle != joiner_->self_handle())
 		return false;
 	gameplay_send_queue_.push_back(
-			make_protocol_message(0x25, encode_weapon_reload(reload)));
+			make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload)));
 	return true;
 }
 
@@ -227,7 +228,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	if (joiner_ != nullptr && !replay_mode_ && current_tick_ != 0 &&
 	    current_tick_ - last_keepalive_tick_ > kKeepaliveInterval) {
 		pre_send_queue_.push_back(
-				make_protocol_message(0x34, le32(current_tick_)));
+				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
 	}
 
@@ -418,7 +419,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			std::vector<uint8_t> ping = le32(joiner_->monotonic_milliseconds32());
 			ping.push_back(0x01);
 			send_messages.push_back(
-					make_protocol_message(0x2C, std::move(ping)));
+					make_protocol_message(c2s::RTT_CONSUMED, std::move(ping)));
 		}
 
 		// (0x0C) the C2S player uplink — unchanged P5 path, same deploy gate. [orig @0x42c46f..0x42c4a3]
@@ -426,12 +427,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			EntityPacketSubHeader sub;
 			sub.handle = joiner_->self_handle();
 			sub.item_type_id = joiner_->spawn_pose().item_type_id;
-			sub.sub_op = 0x0A;
+			sub.sub_op = ENTITY_SUB_OP_EXTENDED;
 			std::vector<uint8_t> payload = encode_entity_packet_sub_header(sub);
 			std::vector<uint8_t> extended = encode_player_extended_uplink(*uplink);
 			payload.insert(payload.end(), extended.begin(), extended.end());
 			send_messages.push_back(
-					make_protocol_message(0x0C, std::move(payload)));
+					make_protocol_message(c2s::ENTITY_UPLINK, std::move(payload)));
 		}
 		for (std::vector<uint8_t> &datagram : joiner_->frame_messages(send_messages))
 			outbound.push_back(std::move(datagram));

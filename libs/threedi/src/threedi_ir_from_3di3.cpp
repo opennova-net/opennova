@@ -253,7 +253,7 @@ static int convert_lights(const Threedi3di3 *model, ThreediModelIR *ir) {
         dl->rotation[2] = sl->rotation[2];
 
         // Light type from flags bit 3
-        dl->light_type = (sl->flags >> 3) & 1;
+        dl->light_type = (sl->flags & THREEDI_IR_LIGHT_FLAG_TYPE_TARGET) ? 1 : 0;
     }
 
     return 0;
