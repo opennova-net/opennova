@@ -29,23 +29,7 @@ const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
-const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
-const UserPointDebugView := preload("res://engine/debug/user_point_debug_view.gd")
-const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
-const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
-const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
-const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
-const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
-const SKELETON_DEBUG_NAME := "SkeletonDebug"
-const USER_POINT_DEBUG_NAME := "UserPointDebug"
-const COLLISION_DEBUG_NAME := "CollisionDebug"
-const PARTICLE_DEBUG_NAME := "ParticleDebug"
-const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
-const ROUND_DEBUG_NAME := "RoundDebug"
-const HITBOX_DEBUG_NAME := "HitboxDebug"
-const PICK_DEBUG_NAME := "PickDebug"
-const PICK_CATCHER_NAME := "PickClickCatcher"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
@@ -168,26 +152,23 @@ var _net_event_view # NetEventView: draws the decoded event stream over the worl
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
 var _injected_root: NovaResourceRoot = null
-# Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
-var _skeleton_debug := false
-# Debug: draw named model user points, including static-batched objects. Off by default.
-var _user_point_debug := false
-# Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
-var _collision_debug := false
-var _occlusion_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
 # Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
 # master particle switch, mimicked). Off by default; survives mission reloads.
 var _particles_hidden := false
-# Debug: draw live emitter bounds + effect names (F3 overlay's "Show effect boxes").
-var _particle_debug := false
 var _playable := true
 # The net-session drive: typed request staging, the joiner preload/admission
 # coroutines, the ESC aborts, and NovaWorld gate registration (see
 # net_session_drive.gd). The session signals live on THIS node — the shell
 # contract pins them here — and the drive emits them through its world reference.
 var _net_drive: NetSessionDrive
+# The F3 debug-view set: the world-space debug views + the pick stack, an
+# internal child node on the same pattern (see debug_view_set.gd). The views
+# it builds attach to THIS world node — hosts and tests pin them as
+# world-relative lookups — and the moved public toggles keep one-line
+# delegates below so the host-facing surface never moved.
+var _debug_views: DebugViewSet
 var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
@@ -247,6 +228,21 @@ func _init() -> void:
 			Callable(self, "_resolve_root"),
 			func() -> Dictionary: return _local_player_spawn_loadout)
 	add_child(_net_drive)
+	# The debug-view set follows the same internal-child pattern. Its two
+	# Callables lend the private internals the views need without widening
+	# GameWorld's API: the placer's grouped static user-point sources, and a
+	# weakref-guarded effect-world getter (the ParticleDebugView outlives
+	# mission reloads, so it must never hold this world strongly).
+	_debug_views = DebugViewSet.new()
+	_debug_views.name = "DebugViewSet"
+	var ref: WeakRef = weakref(self)
+	var user_point_sources := func() -> Array:
+		return _placer.get_static_user_point_sources() if _placer != null else []
+	var effect_world_getter := func():
+		var world = ref.get_ref()
+		return world.get_effect_world() if world != null else null
+	_debug_views.setup(self, user_point_sources, effect_world_getter)
+	add_child(_debug_views)
 
 
 func _ready() -> void:
@@ -308,8 +304,7 @@ func load_world(dir: String = "") -> int:
 	_loaded = true
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -455,8 +450,7 @@ func load_net_session(opts: Dictionary) -> int:
 
 	_net_client.connect_to_replay()
 	_loaded = true
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -601,8 +595,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_loaded = true
 	_set_water_host_rendering_enabled(true)
 	load_progress.emit(100)
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -614,7 +607,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 # decodes correctly. Emits load_failed and returns null on a bad root.
 # The expansion here is the LOCAL choice, which is only authoritative for single-player and
 # for hosting. A joiner's is the HOST's, learned after this mount and reconciled by
-# _reconcile_join_expansion before any host data is read (D-NET-178).
+# NetSessionDrive._reconcile_join_expansion before any host data is read (D-NET-178).
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var resource_root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
@@ -734,24 +727,9 @@ func unload() -> void:
 	_item_fx_control_nodes.clear()
 	_item_fx_control_instances.clear()
 	_present_visibility.clear()
-	# The user-point view retains its toggle and re-arms on the next successful load.
-	_remove_user_point_debug_view()
-	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
-	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if skel_debug != null:
-		skel_debug.queue_free()
-	var col_debug := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if col_debug != null:
-		col_debug.queue_free()
-	var occ_debug := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if occ_debug != null:
-		occ_debug.queue_free()
-	var rnd_debug := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if rnd_debug != null:
-		rnd_debug.queue_free()
-	var hb_debug := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if hb_debug != null:
-		hb_debug.queue_free()
+	# Debug-view teardown: the retain/free split (user-point re-arm vs freed
+	# overlays vs the deliberately surviving particle/pick stack) lives in the set.
+	_debug_views.on_unload()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -1664,75 +1642,60 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
-# --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------
-# Build / free a child SkeletonDebugView that draws every character's bones over the world.
-# Mirrors the editor's set_pick_debug -> _refresh_pick_debug build/free toggle flow.
+# --- F3 debug views (world-space overlays + the pick stack) ------------------
+# The build/teardown lifecycle lives in DebugViewSet (debug_view_set.gd), an
+# internal child constructed in _init; the views it builds still attach under
+# THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
+# unchanged. These one-line delegates keep the host-facing names on GameWorld:
+# the F3 option registry dispatches its setters against the world script
+# (nova_debug_options), and probes duck-find the world by these methods.
 
 func set_skeleton_debug(enabled: bool) -> void:
-	_skeleton_debug = enabled
-	_refresh_skeleton_debug()
+	_debug_views.set_skeleton_debug(enabled)
+
 
 func is_skeleton_debug() -> bool:
-	return _skeleton_debug
+	return _debug_views.is_skeleton_debug()
 
-func _refresh_skeleton_debug() -> void:
-	var existing := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not _skeleton_debug:
-		return
-	var view := SkeletonDebugView.new()
-	view.name = SKELETON_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # walks this GameWorld's subtree for Skeleton3D nodes each frame
-
-
-# --- User-point debug view (F3 overlay's "Show user points") ------------------
-# Live models are discovered under this world. Static mission objects have no
-# per-entity nodes after batching, so the placer supplies the exact grouped
-# placement-time sources that successfully rendered.
 
 func set_user_point_debug(enabled: bool) -> void:
-	_user_point_debug = enabled
-	_refresh_user_point_debug()
+	_debug_views.set_user_point_debug(enabled)
 
 
 func is_user_point_debug() -> bool:
-	return _user_point_debug
+	return _debug_views.is_user_point_debug()
 
-
-func _refresh_user_point_debug() -> void:
-	_remove_user_point_debug_view()
-	if not _user_point_debug:
-		return
-	var view := UserPointDebugView.new()
-	view.name = USER_POINT_DEBUG_NAME
-	add_child(view)
-	var static_sources: Array = []
-	if _placer != null:
-		static_sources = _placer.get_static_user_point_sources()
-	view.setup(self, static_sources)
-
-
-func _remove_user_point_debug_view() -> void:
-	var existing := get_node_or_null(NodePath(USER_POINT_DEBUG_NAME))
-	if existing == null:
-		return
-	# Detach before deferred destruction so an unload+reload in one frame can
-	# create the same stable child name without stale-source/name collisions.
-	remove_child(existing)
-	existing.queue_free()
-
-
-# --- Collision debug view (F3 overlay's "Show collision") --------------------
-# Build / free a child CollisionDebugView drawing the sim's collision volumes +
-# the local player's capsule test points over the world. Same build/free toggle
-# flow as the skeleton view; the view re-resolves the sim through this
-# GameWorld every frame, so mission reloads never leave it stale.
 
 func set_collision_debug(enabled: bool) -> void:
-	_collision_debug = enabled
-	_refresh_collision_debug()
+	_debug_views.set_collision_debug(enabled)
+
+
+func set_particle_debug(enabled: bool) -> void:
+	_debug_views.set_particle_debug(enabled)
+
+
+func set_round_debug(enabled: bool) -> void:
+	_debug_views.set_round_debug(enabled)
+
+
+func set_hitbox_debug(enabled: bool) -> void:
+	_debug_views.set_hitbox_debug(enabled)
+
+
+func set_pick_debug(pick_list: NovaDebugPickList) -> void:
+	_debug_views.set_pick_debug(pick_list)
+
+
+func set_pick_click_enabled(enabled: bool) -> void:
+	_debug_views.set_pick_click_enabled(enabled)
+
+
+func set_occlusion_debug(enabled: bool) -> void:
+	_debug_views.set_occlusion_debug(enabled)
+
+
+func is_occlusion_debug() -> bool:
+	return _debug_views.is_occlusion_debug()
 
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
@@ -1744,132 +1707,6 @@ func set_particles_hidden(hidden: bool) -> void:
 		_effect_world.set_particles_hidden(hidden)
 	if was_hidden and not hidden:
 		_retry_pending_item_effects()
-
-
-# Build / free a child ParticleDebugView drawing every live emitter's bounds +
-# effect name, on the overlay's "Show effect boxes" toggle (the collision-view
-# contract; survives mission reloads by re-resolving the effect world).
-func set_particle_debug(enabled: bool) -> void:
-	_particle_debug = enabled
-	var existing := get_node_or_null(NodePath(PARTICLE_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := ParticleDebugView.new()
-	view.name = PARTICLE_DEBUG_NAME
-	add_child(view)
-	var ref: WeakRef = weakref(self)
-	view.setup(func():
-		var world = ref.get_ref()
-		return world.get_effect_world() if world != null else null)
-
-func _refresh_collision_debug() -> void:
-	var existing := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not _collision_debug:
-		return
-	var view := CollisionDebugView.new()
-	view.name = COLLISION_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# --- Round debug view (F3 overlay's "Show round trails") ---------------------
-# Build / free a child RoundDebugView drawing the RoundSim debug ring (flight
-# segments + hit markers + labels) over the world — the collision-view
-# contract: the view re-resolves the sim through this GameWorld every frame,
-# so mission reloads never leave it stale.
-
-func set_round_debug(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := RoundDebugView.new()
-	view.name = ROUND_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# Build / free a child HitboxDebugView drawing the round hit-detection reality
-# (bullet-mesh wireframes + bound spheres + posed organic bone spheres) — the
-# collision-view contract, on the overlay's "Show hit meshes" toggle.
-func set_hitbox_debug(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := HitboxDebugView.new()
-	view.name = HITBOX_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# --- Pick debug (the F3 pick list: world highlight + overlay-open clicking) --
-# The pick list itself is HOST-owned (crosshair picks work before F3 ever
-# opens); this world only renders it and, while the overlay is up, feeds it
-# from clicks. Same build/free contract as every debug view.
-
-var _pick_list: NovaDebugPickList = null
-
-
-## Install (or clear, with null) the host's pick list: builds the world
-## highlight view that follows it. The click catcher (see below) picks into
-## the same list.
-func set_pick_debug(pick_list: NovaDebugPickList) -> void:
-	_pick_list = pick_list
-	var existing := get_node_or_null(NodePath(PICK_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if pick_list == null:
-		set_pick_click_enabled(false)
-		return
-	var view := PickDebugView.new()
-	view.name = PICK_DEBUG_NAME
-	view.set_pick_list(pick_list)
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-## While the F3 overlay is open (mouse released), a world click ray-picks the
-## entity under the cursor into the installed pick list. The catcher lives in
-## this subtree so ONED PIE's SubViewportContainer forwarding works unchanged.
-func set_pick_click_enabled(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(PICK_CATCHER_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled or _pick_list == null:
-		return
-	var catcher := PickClickCatcher.new()
-	catcher.name = PICK_CATCHER_NAME
-	add_child(catcher)
-	catcher.setup(self, _pick_list)
-
-
-# --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
-# Build / free a child OcclusionDebugView drawing the render-occlusion portal
-# faces (type-colored outlines + section labels) over the world — the
-# collision-view contract: the view re-resolves the sim through this GameWorld
-# every frame, so mission reloads never leave it stale.
-
-func set_occlusion_debug(enabled: bool) -> void:
-	_occlusion_debug = enabled
-	var existing := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := OcclusionDebugView.new()
-	view.name = OCCLUSION_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-func is_occlusion_debug() -> bool:
-	return _occlusion_debug
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
