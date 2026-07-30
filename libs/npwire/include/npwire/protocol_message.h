@@ -84,9 +84,46 @@ namespace opennova {
 // correct (verified against retail captures and re-confirmed via the
 // Jointops decompile chain above).
 
-constexpr uint8_t PROTOCOL_OPCODE_CLIENT = 0x43;
-constexpr uint8_t PROTOCOL_OPCODE_SERVER = 0x83;
+// The 0x43/0x83 session opcodes that carry protocol messages are named in
+// npwire/session_keys.h (SESSION_OPCODE_PROTOCOL_MESSAGE /
+// SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE) — one home, no duplicates here.
 constexpr size_t PROTOCOL_PACKET_HEADER_SIZE = 13;
+
+// The flag-byte bits documented above, as named masks. ProtocolMessageFlags
+// (below) is the decoded bool view; raw composers/parsers use these.
+// [orig: CNapiNPConnection_ParseMessages @0x625BC0 body branches;
+//  CNapiNPConnection_DispatchMessage @0x622570 fragment handling]
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_SETTINGS_UPDATE = 0x80; // selects the msginfo_high_* dispatch table
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_LEN16 = 0x40;
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_LEN8 = 0x20;
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_SKIP2 = 0x10;
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_SKIP1 = 0x08;
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_FRAG_CONT = 0x04;
+inline constexpr uint8_t PROTOCOL_MSG_FLAG_FRAG_END = 0x02;
+
+// full_tag = (SETTINGS_UPDATE ? 0x100 : 0) | tag — the 9-bit dispatch key.
+// Tags at/above this base dispatch through the high (settings/control) table,
+// never the in-game msg-id tables (docs/net/novaworld-net-re.md §4).
+inline constexpr uint16_t PROTOCOL_FULL_TAG_HIGH_BASE = 0x100;
+
+// The four registered high-table control messages (§4 "High-table control
+// messages"; NAPI control, not gameplay — in-game msg ids live in
+// npwire/ingame_message_id.h).
+namespace hightag {
+inline constexpr uint8_t CS_CONFIG_UPDATE = 0x00;      // [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940]
+inline constexpr uint8_t NAME_TAG_UPDATE = 0x01;       // [orig: CNapiNPConnection_HandleNameTagUpdate @0x6219F0]
+inline constexpr uint8_t DATA_TRANSFER_CONTROL = 0x02; // [orig: CNapiNPConnection_ProcessDataTransferControl @0x62A040]
+inline constexpr uint8_t DESCRIPTION_PACKET = 0x03;    // the DISCONNECT/PUNT carrier (§5.64)
+                                                       // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621AE0]
+} // namespace hightag
+
+// Full-tag form of hightag::DESCRIPTION_PACKET — the §5.64 disconnect/punt TLV
+// carrier. Lives here because this header owns full_tag and the high bit; the
+// TLV body parser (DisconnectEvent) stays in session_hello.h.
+inline constexpr uint16_t PROTOCOL_TAG_CONNECTION_DESCRIPTION =
+        PROTOCOL_FULL_TAG_HIGH_BASE | hightag::DESCRIPTION_PACKET;
+static_assert(PROTOCOL_TAG_CONNECTION_DESCRIPTION == 0x103,
+              "witnessed wire value; the composition must not drift");
 
 // Per-packet connection header (13 bytes, little-endian dwords).
 struct ProtocolPacketHeader {
