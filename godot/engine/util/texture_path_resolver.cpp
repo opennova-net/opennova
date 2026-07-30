@@ -38,6 +38,35 @@ void append_unique(std::vector<godot::String> &items, const godot::String &value
 	items.push_back(value);
 }
 
+bool is_texture_extension(const godot::String &extension) {
+	const godot::String lower = extension.to_lower();
+	if (lower.is_empty()) {
+		return false;
+	}
+	for (const char *ext : tex_ext_priority) {
+		const godot::String candidate(ext);
+		if (candidate.find(".") == -1 && candidate == lower) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void append_collapsed_texture_filenames(std::vector<godot::String> &items, const godot::String &filename) {
+	godot::String collapsed = filename;
+	if (!is_texture_extension(collapsed.get_extension())) {
+		return;
+	}
+
+	while (true) {
+		collapsed = collapsed.get_basename();
+		if (!is_texture_extension(collapsed.get_extension())) {
+			return;
+		}
+		append_unique(items, collapsed);
+	}
+}
+
 std::vector<godot::String> texture_stems(const godot::String &filename) {
 	std::vector<godot::String> stems;
 	const godot::String stem = filename.get_file().get_basename();
@@ -163,7 +192,8 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 } // namespace
 
 // Candidate FILENAMES (not full paths) to try, in priority order: the requested
-// name as-is first, then every stem casing x extension.
+// name as-is first, exact inner texture filenames exposed by compound extensions,
+// then every existing stem x extension fallback.
 std::vector<godot::String> texture_candidate_filenames(const godot::String &filename) {
 	std::vector<godot::String> candidates;
 	const godot::String file = filename.get_file();
@@ -172,6 +202,7 @@ std::vector<godot::String> texture_candidate_filenames(const godot::String &file
 	}
 
 	append_unique(candidates, file);
+	append_collapsed_texture_filenames(candidates, file);
 	for (const godot::String &stem : texture_stems(filename)) {
 		for (const char *ext : tex_ext_priority) {
 			append_unique(candidates, stem + godot::String(".") + ext);
