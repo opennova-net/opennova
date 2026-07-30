@@ -269,6 +269,17 @@ func capture_control_snapshot(filter_text: String = "") -> Variant:
 	return _session.capture_snapshot(filter_text)
 
 
+## The complete payload used by Copy. Search is navigational and deliberately
+## does not filter this snapshot.
+func capture_clipboard_snapshot() -> Variant:
+	var snapshot: Dictionary = _session.capture_snapshot()
+	var picks: Array = _ctx.pick_list.get_picks() if _ctx.pick_list != null else []
+	var mission_snapshot := DebugSnapshotWriter.capture(_ctx, picks)
+	if not mission_snapshot.is_empty():
+		snapshot["mission"] = mission_snapshot
+	return snapshot
+
+
 func is_stats_capturing() -> bool:
 	return _stats_pane.is_capturing()
 
@@ -882,17 +893,8 @@ func _on_edit_unlock_changed(unlocked: bool) -> void:
 		_refresh()
 
 
-func _build_clipboard_snapshot() -> Dictionary:
-	var snapshot: Dictionary = _session.capture_snapshot()
-	var picks: Array = _ctx.pick_list.get_picks() if _ctx.pick_list != null else []
-	var mission_snapshot := DebugSnapshotWriter.capture(_ctx, picks)
-	if not mission_snapshot.is_empty():
-		snapshot["mission"] = mission_snapshot
-	return snapshot
-
-
 func _on_copy_snapshot_pressed() -> void:
-	var snapshot := _build_clipboard_snapshot()
+	var snapshot: Dictionary = capture_clipboard_snapshot()
 	DisplayServer.clipboard_set(JSON.stringify(snapshot, "\t"))
 	_copy_button.text = "Copied"
 	_copy_button.tooltip_text = \

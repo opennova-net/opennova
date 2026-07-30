@@ -1297,7 +1297,7 @@ func test_search_reports_page_matches_and_copy_always_captures_every_control() -
 	assert_eq(result_count.text, "1 match")
 	var filtered_control_count: int = overlay.list_controls(&"", search.text).size()
 	assert_lt(filtered_control_count, full_control_count)
-	var copied_payload: Dictionary = overlay._build_clipboard_snapshot()
+	var copied_payload: Dictionary = overlay.capture_clipboard_snapshot()
 	assert_eq((copied_payload.get("controls", []) as Array).size(),
 			full_control_count,
 			"search navigates pages but never silently filters the copied snapshot")
