@@ -17,6 +17,7 @@
     "libs_stdout_prints": 0,
     "libs_uncited_src_files": 61,
     "oversize_cpp_files": 2,
+    "oversize_gd_files": 7,
     "test_private_pokes": 1363
   },
   "dict_contract_allowlist": [
