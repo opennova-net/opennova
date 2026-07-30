@@ -10,13 +10,14 @@ const PartAnimsInspectorScript = preload("res://modtools/object/ui/inspectors/pa
 
 func _catalog_ids() -> Array:
 	var ids := []
-	for style in GeneratorStyleCatalog.STYLES:
-		ids.append(int(style.get("id", -1)))
+	for id in GeneratorStyleCatalog.style_ids():
+		ids.append(int(id))
 	return ids
 
 
 func _label(consumer: String, id: int) -> String:
-	return String(GeneratorStyleCatalog.style_info(consumer, id).get("label", ""))
+	var info := GeneratorStyleCatalog.style_info(consumer, id)
+	return info.label if info != null else ""
 
 
 func _canonical_codes_from_cpp() -> Array:
@@ -53,9 +54,10 @@ func test_catalog_matches_canonical_cpp_table() -> void:
 
 
 func test_catalog_labels_are_real_names() -> void:
-	for style in GeneratorStyleCatalog.STYLES:
-		var id := int(style.get("id", -1))
-		var label := String(style.get("label", ""))
+	for id in GeneratorStyleCatalog.style_ids():
+		var info := GeneratorStyleCatalog.style_info(GeneratorStyleCatalog.CONSUMER_UV, id)
+		assert_not_null(info, "Style %d should have typed metadata." % id)
+		var label := info.label if info != null else ""
 		assert_false(label.is_empty(), "Style %d should have a label." % id)
 		assert_false(label.begins_with("Custom"), "Style %d label should be a real name, got '%s'." % [id, label])
 
@@ -110,15 +112,35 @@ func test_control_style_labels_follow_each_consumer() -> void:
 func test_consumer_options_carry_dispatch_metadata() -> void:
 	for consumer in GeneratorStyleCatalog.CONSUMERS:
 		var options := GeneratorStyleCatalog.options_for_consumer(consumer)
-		assert_eq(options.size(), GeneratorStyleCatalog.STYLES.size())
+		assert_eq(options.size(), GeneratorStyleCatalog.style_count())
 		for option in options:
-			var id := int(option.get("id", -1))
+			var id := option.id
 			assert_eq(
-					bool(option.get("reads_control_value", false)),
+					option.reads_control_value,
 					GeneratorStyleCatalog.reads_control_value(consumer, id))
 			assert_eq(
-					bool(option.get("parameter_is_ctrl_reference", false)),
+					option.parameter_is_ctrl_reference,
 					GeneratorStyleCatalog.parameter_is_ctrl_reference(id))
+
+
+func test_typed_catalog_options_populate_inspector_dropdown() -> void:
+	var dropdown: OptionButton = add_child_autofree(OptionButton.new())
+	InspectorForms.populate_id_option(
+			dropdown,
+			GeneratorStyleCatalog.options_for_ids(
+					GeneratorStyleCatalog.CONSUMER_ALPHA,
+					[
+						GeneratorStyleCatalog.STYLE_CONTROL_SET,
+						GeneratorStyleCatalog.STYLE_CONTROL_ADD,
+					]),
+			GeneratorStyleCatalog.STYLE_CONTROL_ADD)
+
+	assert_eq(dropdown.get_item_count(), 2)
+	assert_eq(dropdown.get_item_id(0), GeneratorStyleCatalog.STYLE_CONTROL_SET)
+	assert_eq(dropdown.get_item_text(0), "Set (control register)")
+	assert_eq(dropdown.get_item_id(1), GeneratorStyleCatalog.STYLE_CONTROL_ADD)
+	assert_eq(dropdown.get_item_text(1), "Wave: sine")
+	assert_eq(dropdown.get_selected_id(), GeneratorStyleCatalog.STYLE_CONTROL_ADD)
 
 
 func test_part_anim_motion_modes_are_catalog_subset() -> void:

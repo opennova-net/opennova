@@ -1,10 +1,13 @@
 extends GutTest
 
 # NovaObjectModel.play_part_anim drives a per-channel phase sweep onto the retail
-# VEHICLE_SPECIAL1/2 CTRL bus. The resolver is overridden here only to test the
-# integrator asset-free.
+# VEHICLE_SPECIAL1/2 CTRL bus. The resolver is overridden for the missing-register
+# case; time advancement uses the same public deterministic-frame seam as runtime
+# hosts, backed by the smallest committed object fixture.
 # [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22; integrator @0x456710,
 #  velocity-from-current, wrapping dword arithmetic, and strict overshoot clamps.]
+
+const RUNTIME_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 
 
 class PartAnimModel:
@@ -24,32 +27,44 @@ func _model() -> PartAnimModel:
 	return m
 
 
+func _runtime_model() -> PartAnimModel:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(RUNTIME_3DI)), OK,
+			"the committed runtime fixture opens")
+	var m := PartAnimModel.new()
+	add_child_autofree(m)
+	m.set_process(false)
+	m.set_object_data(data)
+	m.visible = false
+	return m
+
+
 func test_play_forward_sweeps_register_to_max() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.play_part_anim(1, 1, 1.0)
-	m._advance_part_anims(0.5)
+	m.advance_runtime_frame(0.5)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 32488,
 			"31 retail 16 ms ticks use the truncated 1048 phase rate")
-	m._advance_part_anims(0.6)   # past the end
+	m.advance_runtime_frame(0.6)   # past the end
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 65536, "keeps retail's exact 1.0 endpoint")
 	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"), "a finished sweep is dropped")
 
 
 func test_play_reverse_sweeps_to_zero() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 65536)   # start at the top
 	m.play_part_anim(1, -1, 1.0)      # reverse over 1 second
-	m._advance_part_anims(0.5)
+	m.advance_runtime_frame(0.5)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 33048,
 			"reverse uses the same 31 fixed ticks")
-	m._advance_part_anims(0.6)
+	m.advance_runtime_frame(0.6)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0, "clamps at zero")
 
 
 func test_channel_2_uses_the_second_register() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.play_part_anim(2, 1, 1.0)
-	m._advance_part_anims(0.5)
+	m.advance_runtime_frame(0.5)
 	assert_true(m.get_ctrl_values().has("VEHICLE_SPECIAL2"), "channel 2 drives the second register")
 	assert_false(m.get_ctrl_values().has("VEHICLE_SPECIAL1"), "and leaves the first untouched")
 
@@ -57,9 +72,12 @@ func test_channel_2_uses_the_second_register() -> void:
 func test_production_channels_use_retail_semantic_registers() -> void:
 	var m := NovaObjectModel.new()
 	autofree(m)
-	assert_eq(m._resolve_anim_channel_register(0), "VEHICLE_SPECIAL1")
-	assert_eq(m._resolve_anim_channel_register(1), "VEHICLE_SPECIAL2")
-	assert_eq(m._resolve_anim_channel_register(2), "")
+	m.set_part_phase(1, 0x1111)
+	m.set_part_phase(2, 0x2222)
+	m.set_part_phase(3, 0x3333)
+	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0x1111)
+	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL2", -1)), 0x2222)
+	assert_eq(m.get_ctrl_values().size(), 2, "channels outside retail's pair are ignored")
 
 
 func test_control_values_preserve_signed_dwords() -> void:
@@ -114,13 +132,13 @@ func test_part_phase_overwrites_instead_of_stacking_a_base_value() -> void:
 
 
 func test_stop_freezes_and_clears_the_sweep() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.play_part_anim(1, 1, 1.0)
-	m._advance_part_anims(0.25)
+	m.advance_runtime_frame(0.25)
 	var frozen := int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1))
 	m.play_part_anim(1, 0, 1.0)       # Stop (play_type 0)
 	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"), "stop drops the running sweep")
-	m._advance_part_anims(1.0)        # no further movement
+	m.advance_runtime_frame(1.0)        # no further movement
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), frozen, "value is frozen at the stop point")
 
 
@@ -148,9 +166,9 @@ func test_unknown_register_is_a_noop() -> void:
 
 
 func test_reissue_replaces_the_sweep_from_current_value() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.play_part_anim(1, 1, 4.0)       # slow
-	m._advance_part_anims(0.5)
+	m.advance_runtime_frame(0.5)
 	var after_slow := int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1))
 	m.play_part_anim(1, 1, 1.0)       # faster, resuming from the current value (no reset)
 	var anims := m.get_active_part_anims()
@@ -160,22 +178,22 @@ func test_reissue_replaces_the_sweep_from_current_value() -> void:
 
 
 func test_zero_time_uses_retail_wrapping_add_sub() -> void:
-	var m := _model()
+	var m := _runtime_model()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 0)
 	m.play_part_anim(1, 1, 0.0)
-	m._advance_part_anims(0.016)
+	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", 0)), -2147483648,
 			"zero-time forward adds INT_MIN without a lower clamp")
 	assert_true(m.get_active_part_anims().has("VEHICLE_SPECIAL1"),
 			"the negative wrapped value does not satisfy the strict upper clamp")
-	m._advance_part_anims(0.016)
+	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0,
 			"a second wrapping ADD returns to zero")
 	assert_true(m.get_active_part_anims().has("VEHICLE_SPECIAL1"))
 	m.clear_part_anims()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 0)
 	m.play_part_anim(1, -1, 0.0)
-	m._advance_part_anims(0.016)
+	m.advance_runtime_frame(0.016)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0,
 			"zero-time reverse subtracts INT_MIN, sees a negative result, and clamps low")
 	assert_false(m.get_active_part_anims().has("VEHICLE_SPECIAL1"),
@@ -185,11 +203,11 @@ func test_zero_time_uses_retail_wrapping_add_sub() -> void:
 func test_restart_seeds_start_then_plays() -> void:
 	# restart_part_anim is the editor-preview variant: it seeds the channel at its rest start so a
 	# preview shows the full motion regardless of where the part currently sits.
-	var m := _model()
+	var m := _runtime_model()
 	m.set_ctrl_value("VEHICLE_SPECIAL1", 40000)   # part sitting partway through
 	m.restart_part_anim(1, 1, 1.0)    # forward restart -> seed 0
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 0, "forward restart seeds the start at 0")
-	m._advance_part_anims(0.5)
+	m.advance_runtime_frame(0.5)
 	assert_eq(int(m.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 32488,
 			"then advances on retail's fixed 16 ms cadence")
 

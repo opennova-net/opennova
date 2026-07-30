@@ -27,8 +27,6 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://engine/world/aim_overlay_present_pass.gd")
-const PresentEmplacedWeapon := preload(
-		"res://engine/world/emplaced_weapon_present_pass.gd")
 
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
@@ -71,8 +69,11 @@ const CAP_RHC := 256
 const CAP_WPN := 512
 const CAP_BODY_BLEND_AT := 1024
 const CAP_REMOTE_BLEND_TICK := 2048
+const CAP_PART_CLEAR := 4096
+const CAP_CTRL_BATCH := 8192
 const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # MissionRuntime.MAX_CATCHUP_TICKS
 var _row_caps := PackedInt32Array()
+var _row_visual_ctrl_caps := PackedInt32Array()
 var _row_aim_valid := PackedInt32Array()
 var _row_rhc := PackedInt32Array()
 # state id -> "anim_<name>" String, memoized once per process (the same cache
@@ -329,18 +330,17 @@ func _apply_body_anim_gated(
 # must still be written and a suppressed channel must release its prior value.
 # set_part_phase publishes to retail's fixed VEHICLE_SPECIAL1/2 registers;
 # semantic EWEAP controls remain independent.
-func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
-	if not node.has_method("set_part_phase"):
-		return
+func _apply_procedural_part(
+		node, snap: PackedFloat32Array, base: int, caps: int) -> void:
 	if int(snap[base + NovaSimulation.PF_ACTIVE1]) > 0:
 		node.set_part_phase(1,
 				NovaSimulation.decode_present_part_anim_phase(snap, base, 1))
-	elif node.has_method("clear_part_phase"):
+	elif (caps & CAP_PART_CLEAR) != 0:
 		node.clear_part_phase(1)
 	if int(snap[base + NovaSimulation.PF_ACTIVE2]) > 0:
 		node.set_part_phase(2,
 				NovaSimulation.decode_present_part_anim_phase(snap, base, 2))
-	elif node.has_method("clear_part_phase"):
+	elif (caps & CAP_PART_CLEAR) != 0:
 		node.clear_part_phase(2)
 
 
@@ -519,6 +519,7 @@ func _clear_row_plan() -> void:
 	_row_nodes.clear()
 	_deferred_nodes.clear()
 	_row_caps.clear()
+	_row_visual_ctrl_caps.clear()
 	_row_aim_valid.clear()
 	_row_rhc.clear()
 	_row_anim_state.clear()
@@ -539,14 +540,21 @@ func _begin_row_plan(
 	_row_plan_local_handle = local_handle
 
 
-static func _node_caps(node: Variant) -> int:
+static func _node_caps(node: Variant, visual_ctrl_caps: int) -> int:
 	var caps := 0
 	if node.has_method("set_aim_overlay"):
 		caps |= CAP_AIM
-	if node.has_method("set_ctrl_value") and node.has_method("clear_ctrl_value"):
+	if (visual_ctrl_caps & (
+			NovaPresentApplier.VISUAL_CTRL_OWNED
+			| NovaPresentApplier.VISUAL_CTRL_LEGACY)) != 0:
 		caps |= CAP_CTRL
-	if node.has_method("set_part_phase"):
+	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_PART_PHASE) != 0:
 		caps |= CAP_PART
+	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_PART_CLEAR) != 0:
+		caps |= CAP_PART_CLEAR
+	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_CTRL_BATCH) != 0 \
+			and (caps & (CAP_CTRL | CAP_PART)) != 0:
+		caps |= CAP_CTRL_BATCH
 	if node.has_method("apply_remote_body_state"):
 		caps |= CAP_REMOTE_BODY
 	if node.has_method("play_body_clip"):
@@ -590,7 +598,10 @@ func _append_row_plan(
 	_row_kinds.append(int(snap[base + NovaSimulation.PF_KIND]))
 	_row_indices.append(int(snap[base + NovaSimulation.PF_INDEX]))
 	_row_nodes.append(node)
-	_row_caps.append(_node_caps(node))
+	var visual_ctrl_caps := int(
+			NovaPresentApplier.get_visual_control_capabilities(node))
+	_row_visual_ctrl_caps.append(visual_ctrl_caps)
+	_row_caps.append(_node_caps(node, visual_ctrl_caps))
 	# Last-applied edge state (-1 = unknown, first hot frame always applies).
 	_row_aim_valid.append(-1)
 	_row_rhc.append(-1)
@@ -662,7 +673,13 @@ func _present_wire_row(
 		runtime_kind: int,
 		visual_item_id: int,
 		row: int = -1) -> void:
-	var caps := int(_row_caps[row]) if row >= 0 else _node_caps(node)
+	var visual_ctrl_caps := (
+			int(_row_visual_ctrl_caps[row])
+			if row >= 0 else int(
+					NovaPresentApplier.get_visual_control_capabilities(node)))
+	var caps := (
+			int(_row_caps[row])
+			if row >= 0 else _node_caps(node, visual_ctrl_caps))
 	var respawn_revision := int(
 			snap[base + NovaSimulation.PF_RESPAWN_REVISION])
 	var respawned_since_present := (
@@ -701,31 +718,22 @@ func _present_wire_row(
 			node.set_aim_overlay([])
 		if row >= 0:
 			_row_aim_valid[row] = aim_valid
-	var ctrl_batch: bool = ((caps & (CAP_CTRL | CAP_PART)) != 0
-			and node.has_method("begin_ctrl_update")
-			and node.has_method("end_ctrl_update"))
+	var ctrl_batch := (caps & CAP_CTRL_BATCH) != 0
 	if ctrl_batch:
 		node.begin_ctrl_update()
 	if caps & CAP_CTRL:
 		if caps & CAP_PART:
-			_apply_procedural_part(node, snap, base)
-		PresentEmplacedWeapon.apply(node, snap, base, true)
-		# Only authoritative host rows can set VALID: compact joiner rows do not
-		# carry cveh steer/currentSpeed and release this owner instead.
-		# [orig: Entity_CacheVehicleHUDStats @0x4929B0]
-		NovaPresentApplier.vehicle_motion_apply(node, snap, base)
-		# A wire-direct numbered-zone model still runs the generic-world
-		# callback. Ordinary pool-0 wire organics leave every validity bit clear,
-		# so this releases rather than inventing sector/global-bus writes.
-		# [orig: BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
-		NovaPresentApplier.zone_team_apply(node, snap, base)
-		# Host wire-direct/synthetic carrier rows consume the same scoped
-		# parent-slot heat value as placed rows. Joiner compact rows leave VALID
-		# clear and therefore release this writer.
-		# [orig: parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
-		NovaPresentApplier.world_heat_apply(node, snap, base)
+			_apply_procedural_part(node, snap, base, caps)
+		# Apply all four semantic CTRL writers through the cached dispatch mode:
+		# compact joiner rows release absent authoritative fields, while direct
+		# host/synthetic rows publish vehicle, zone and attachment heat values.
+		# [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+		#  BoneCallback_gnrc_World @0x4E288B..0x4E28FB;
+		#  parent UseGun attachment @0x546518 -> cache @0x440930]
+		NovaPresentApplier.wire_controls_apply_with_capabilities(
+				node, snap, base, visual_ctrl_caps)
 	elif caps & CAP_PART:
-		_apply_procedural_part(node, snap, base)
+		_apply_procedural_part(node, snap, base, caps)
 	if ctrl_batch:
 		node.end_ctrl_update()
 	if respawned_since_present and node.has_method("reset_remote_body_state"):

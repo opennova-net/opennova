@@ -18,6 +18,20 @@ extends RefCounted
 ## generator_style_catalog_test.gd parity-checks that every canonical code is named
 ## and pins the consumer-specific control-register matrix.
 
+
+class StyleInfo:
+	extends InspectorForms.IdOption
+
+	var reads_control_value: bool
+	var parameter_is_ctrl_reference: bool
+
+	func _init(p_id: int, p_label: String, p_reads_control_value: bool,
+			p_parameter_is_ctrl_reference: bool) -> void:
+		super(p_id, p_label)
+		reads_control_value = p_reads_control_value
+		parameter_is_ctrl_reference = p_parameter_is_ctrl_reference
+
+
 const CONSUMER_UV := "uv"
 const CONSUMER_RGB := "rgb"
 const CONSUMER_ALPHA := "alpha"
@@ -31,8 +45,17 @@ const CONSUMERS := [
 	CONSUMER_PANM,
 ]
 
-# {id, label} for every code in kControlEntries, in canonical order.
-const STYLES := [
+# Raw codes whose 0x7X interpretation varies by retail consumer.
+const STYLE_CONTROL_SET := 0x71
+const STYLE_CONTROL_ADD := 0x72
+const STYLE_CONTROL_SKEW := 0x73
+const STYLE_CONTROL_MULTIPLY := 0x74
+const STYLE_CONTROL_ROTATE := 0x75
+
+# Private storage for every code in kControlEntries, in canonical order. Typed
+# StyleInfo records are the cross-object contract; dictionaries do not escape
+# this module.
+const _STYLES := [
 	{"id": 0, "label": "None"},
 	{"id": 16, "label": "Slide"},
 	{"id": 17, "label": "Slide inverse"},
@@ -99,84 +122,95 @@ const STYLES := [
 # [orig: compute_uv_transform_matrix @ 0x5B1990; RgbGen_EvaluateColor
 # @ 0x5B23D0; AlphaGen_EvaluateValue @ 0x5B2320; PANM_SampleTrack @ 0x5B2270;
 # loader fixup sub_5B4640 @ 0x5B4640]
-const VALUE_READ_STYLE_IDS_BY_CONSUMER := {
-	CONSUMER_UV: [113, 114, 115, 116, 117],
-	CONSUMER_RGB: [113, 114],
-	CONSUMER_ALPHA: [113],
-	CONSUMER_LIGHT: [113, 114],
-	CONSUMER_PANM: [113],
-}
-
-# The generic names above describe the UV operation family. Other consumers
-# route the same raw codes through either their direct CTRL branch or the wave
-# table selected by the low nibble.
-const LABEL_OVERRIDES_BY_CONSUMER := {
-	CONSUMER_RGB: {
-		115: "Wave: triangle",
-		116: "Wave: saw",
-		117: "Wave: inverse saw",
-	},
-	CONSUMER_ALPHA: {
-		114: "Wave: sine",
-		115: "Wave: triangle",
-		116: "Wave: saw",
-		117: "Wave: inverse saw",
-	},
-	CONSUMER_LIGHT: {
-		115: "Wave: triangle",
-		116: "Wave: saw",
-		117: "Wave: inverse saw",
-	},
-	CONSUMER_PANM: {
-		114: "Wave: sine",
-		115: "Wave: triangle",
-		116: "Wave: saw",
-		117: "Wave: inverse saw",
-	},
-}
-
-
-static func style_info(consumer: String, id: int) -> Dictionary:
-	if not CONSUMERS.has(consumer):
-		return {}
-	for base_style in STYLES:
+static func style_info(consumer: String, id: int) -> StyleInfo:
+	if not _is_consumer(consumer):
+		return null
+	for base_style in _STYLES:
 		if int(base_style.get("id", -1)) != id:
 			continue
-		var result: Dictionary = base_style.duplicate(true)
-		var overrides: Dictionary = LABEL_OVERRIDES_BY_CONSUMER.get(consumer, {})
-		if overrides.has(id):
-			result["label"] = String(overrides[id])
-		result["reads_control_value"] = reads_control_value(consumer, id)
-		result["parameter_is_ctrl_reference"] = parameter_is_ctrl_reference(id)
-		return result
-	return {}
+		return StyleInfo.new(
+				id,
+				_label_for_consumer(consumer, id, String(base_style.get("label", ""))),
+				reads_control_value(consumer, id),
+				parameter_is_ctrl_reference(id))
+	return null
 
 
-# Full option list for one retail consumer (duplicated so callers may mutate it).
-static func options_for_consumer(consumer: String) -> Array:
-	var result := []
-	for style in STYLES:
+# Canonical ids are copied so callers cannot mutate the catalog implementation.
+static func style_ids() -> PackedInt32Array:
+	var result := PackedInt32Array()
+	result.resize(_STYLES.size())
+	for index in range(_STYLES.size()):
+		result[index] = int(_STYLES[index].get("id", -1))
+	return result
+
+
+static func style_count() -> int:
+	return _STYLES.size()
+
+
+# Full typed option list for one retail consumer.
+static func options_for_consumer(consumer: String) -> Array[StyleInfo]:
+	var result: Array[StyleInfo] = []
+	for style in _STYLES:
 		var info := style_info(consumer, int(style.get("id", -1)))
-		if not info.is_empty():
+		if info != null:
 			result.append(info)
 	return result
 
 
 # Options filtered to the given ids, in the order ids are listed. Used by PANM,
 # whose semantic authoring interface intentionally exposes a smaller subset.
-static func options_for_ids(consumer: String, ids: Array) -> Array:
-	var result := []
+static func options_for_ids(consumer: String, ids: Array) -> Array[StyleInfo]:
+	var result: Array[StyleInfo] = []
 	for id in ids:
 		var info := style_info(consumer, int(id))
-		if not info.is_empty():
+		if info != null:
 			result.append(info)
 	return result
 
 
 static func reads_control_value(consumer: String, id: int) -> bool:
-	var ids: Array = VALUE_READ_STYLE_IDS_BY_CONSUMER.get(consumer, [])
-	return ids.has(id)
+	match consumer:
+		CONSUMER_UV:
+			return id >= STYLE_CONTROL_SET and id <= STYLE_CONTROL_ROTATE
+		CONSUMER_RGB, CONSUMER_LIGHT:
+			return id == STYLE_CONTROL_SET or id == STYLE_CONTROL_ADD
+		CONSUMER_ALPHA, CONSUMER_PANM:
+			return id == STYLE_CONTROL_SET
+		_:
+			return false
 
 
 static func parameter_is_ctrl_reference(id: int) -> bool:
 	return id > 0x70
+
+
+static func _is_consumer(consumer: String) -> bool:
+	return CONSUMERS.has(consumer)
+
+
+# The generic names describe UV operations. Retail's other consumers route the
+# same raw codes either through their direct CTRL branch or through the wave
+# table selected by the low nibble.
+static func _label_for_consumer(consumer: String, id: int, base_label: String) -> String:
+	match consumer:
+		CONSUMER_RGB, CONSUMER_LIGHT:
+			match id:
+				STYLE_CONTROL_SKEW:
+					return "Wave: triangle"
+				STYLE_CONTROL_MULTIPLY:
+					return "Wave: saw"
+				STYLE_CONTROL_ROTATE:
+					return "Wave: inverse saw"
+		CONSUMER_ALPHA, CONSUMER_PANM:
+			match id:
+				STYLE_CONTROL_ADD:
+					return "Wave: sine"
+				STYLE_CONTROL_SKEW:
+					return "Wave: triangle"
+				STYLE_CONTROL_MULTIPLY:
+					return "Wave: saw"
+				STYLE_CONTROL_ROTATE:
+					return "Wave: inverse saw"
+	return base_label

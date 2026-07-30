@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <array>
@@ -42,6 +43,19 @@ public:
 				OUTPUT_BODY_ANIM,
 	};
 
+	// The one compatibility adapter for the visual CTRL/PANM surface. Production
+	// NovaObjectModel exposes owner-aware CTRL writes; older third-party nodes and
+	// test doubles expose the original set_ctrl_value pair. Presenters resolve
+	// this bitset once when they build their node plan, then dispatch without
+	// repeating string-based capability probes in their hot loops.
+	enum VisualControlCapabilities {
+		VISUAL_CTRL_OWNED = 1,
+		VISUAL_CTRL_LEGACY = 2,
+		VISUAL_CTRL_BATCH = 4,
+		VISUAL_PART_PHASE = 8,
+		VISUAL_PART_CLEAR = 16,
+	};
+
 	// `sim` is duck-typed (NovaSimulation or a test fake): consulted only for the
 	// muzzle feedback push. `index` resolves rows to nodes (MissionEntityRegistry
 	// or a fake); called only on plan rebuilds plus one get_generation per frame.
@@ -77,6 +91,16 @@ public:
 			bool drive_root_basis);
 	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
 			int base, bool drive_root_basis);
+
+	static int get_visual_control_capabilities(Object *node);
+	// Capability-aware dispatch for presenters that already resolved the visual
+	// surface at model/row-plan construction. These never probe the node.
+	static void ctrl_set_with_capabilities(Object *node, int capabilities,
+			const String &owner, const String &reg, int value);
+	static void ctrl_clear_with_capabilities(Object *node, int capabilities,
+			const String &owner, const String &reg);
+	static int wire_controls_apply_with_capabilities(Object *node,
+			const PackedFloat32Array &snap, int base, int capabilities);
 
 	// Emplaced-weapon CTRL registers (emplaced_weapon_present_pass.gd delegates
 	// here): EWEAP_GUNYAW/EWEAP_GUNPITCH only — clear_ctrl_values() would also
@@ -129,6 +153,7 @@ private:
 		int base = 0;
 		ObjectID node_id;
 		int caps = 0;
+		int visual_ctrl_caps = 0;
 		int32_t bms_id = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
@@ -196,3 +221,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::NovaPresentApplier::OutputChannels);
+VARIANT_ENUM_CAST(godot::NovaPresentApplier::VisualControlCapabilities);

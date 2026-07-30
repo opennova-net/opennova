@@ -36,12 +36,11 @@ const LIGHTING_CONTEXT_INTERIOR_SECTION := 1
 const SUN_SHADOW_CATCHER_SHADER := preload(
 		"res://shaders/sun_shadow_catcher.gdshader")
 
-# W4-6c split: the main-body skeletal-animation cluster and the material
-# factory / environment-lighting cluster live in two RefCounted helpers
-# (nova_object_body_anim.gd / nova_object_materials.gd). ALL state stays
-# here; every moved method keeps a delegate below.
+# W4-6c split: cohesive animation, material/environment, and retained-scene
+# construction clusters live in RefCounted helpers; ALL state stays here.
 const NovaObjectBodyAnim := preload("res://engine/object/nova_object_body_anim.gd")
 const NovaObjectMaterials := preload("res://engine/object/nova_object_materials.gd")
+const NovaObjectSceneBuilder := preload("res://engine/object/nova_object_scene_builder.gd")
 # The ADR 0017 typed env record moved with the materials helper; this alias
 # keeps NovaObjectModel.EnvLightValues the public type (mission_object_placer,
 # tests) and the host annotations unchanged.
@@ -208,11 +207,13 @@ var _model_light_preview_enabled := false
 # exist before any pre-_ready set_object_data/rebuild.
 var _body_anim: NovaObjectBodyAnim
 var _materials: NovaObjectMaterials
+var _scene_builder: NovaObjectSceneBuilder
 
 
 func _init() -> void:
 	_body_anim = NovaObjectBodyAnim.new(self)
 	_materials = NovaObjectMaterials.new(self)
+	_scene_builder = NovaObjectSceneBuilder.new(self)
 
 
 func _ready() -> void:
@@ -727,96 +728,7 @@ func advance_body_animation(delta: float, write_pose := true) -> void:
 
 
 func rebuild() -> void:
-	for child in get_children():
-		remove_child(child)
-		child.queue_free()
-	_robj_nodes.clear()
-	_robj_rest_transforms.clear()
-	_skeleton = null
-	_skeleton_skin = null
-	_muzzle_bone = -1
-	_surface_material_indices.clear()
-	_surface_materials.clear()
-	_surface_lighting_contexts.clear()
-	_alpha_materials.clear()
-	_anim_frames_by_mat.clear()
-	_material_cache.clear()
-	_material_defs.clear()
-	_body_pose_dirty = true
-	_bounds_dirty = true
-	_has_lights = false
-	_has_live_panm = false
-	_material_needs_eval.clear()
-	_dynamic_material_slots = PackedInt32Array()
-	_last_env_gen = -1
-	_last_env_values = null
-	_last_section_env_values = null
-	_last_light_push_valid = false
-	_robj_dense = []
-	_panm_applied_revision = 0
-	if object_data == null or not object_data.has_document():
-		_od_has_eval = false
-		_od_has_frame = false
-		_set_model_bounds(AABB())
-		return
-	_od_has_eval = true
-	_od_has_frame = true
-
-	_material_defs = _build_material_defs()
-	_active_lod = _clamp_lod_index(_active_lod)
-	_refresh_live_panm_classification()
-	# A loaded .adm drives the model: build a Skeleton3D from its .bad skeleton. This applies to
-	# BOTH per-vertex skinned models (organic bodies/arms) AND rigid models (first-person weapons) --
-	# rigid parts ride a bone via "fake skinning" (build_lod_submeshes(skeletal=true)). Without a
-	# .adm, no skeleton is built and the model renders static exactly as before.
-	var skeletal_mode: bool = _skeletal != null and _skeletal.is_loaded()
-	if skeletal_mode:
-		_build_skeleton()
-		_resolve_muzzle_userpoint()
-	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame)
-	if submeshes.is_empty():
-		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
-	for entry in submeshes:
-		var submesh: Dictionary = entry
-		var mesh := submesh.get("mesh") as ArrayMesh
-		if mesh == null:
-			continue
-		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
-		var material_index := int(submesh.get("material_index", 0))
-		if not _robj_rest_transforms.has(robj_index):
-			_robj_rest_transforms[robj_index] = Transform3D(
-					Basis.IDENTITY, submesh.get("abs", Vector3.ZERO))
-		var lighting_context := _lighting_context_for_robj(robj_index)
-		var instance := MeshInstance3D.new()
-		instance.mesh = mesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
-				if _shadow_caster_layers != 0 \
-				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.layers = (
-				instance.layers
-				& ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK
-				) | _shadow_caster_layers
-		var material := _material_for_index(material_index, lighting_context)
-		instance.material_override = material
-		# Skinned + rigid-fake-skinned submeshes bind to the shared Skeleton3D; everything else
-		# stays under its render-object (Robj) part node so PANM part transforms keep working.
-		if skeletal_mode and _skeleton != null and bool(submesh.get("is_skinned", false)):
-			_skeleton.add_child(instance)
-			instance.skin = _skeleton_skin
-			instance.skeleton = instance.get_path_to(_skeleton)
-		else:
-			var node := _get_or_create_robj_node(robj_index)
-			node.add_child(instance)
-		_surface_material_indices.append(material_index)
-		_surface_materials.append(material)
-		_surface_lighting_contexts.append(lighting_context)
-		_collect_anim_frames(material_index)
-
-	_classify_materials()
-	_has_lights = int(object_data.get_light_count()) > 0
-	_apply_runtime_state(0.0)
-	refresh_render_order()
+	_scene_builder.rebuild()
 
 
 # Blended materials take their water-side transparency rung from the witnessed
@@ -834,51 +746,6 @@ func refresh_render_order() -> void:
 	for material in _alpha_materials:
 		if material != null:
 			material.render_priority = rung
-
-
-# Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
-# the .bad skeleton (names/parents/parent-local bind rest). The Skin binds each bone with its
-# global-rest inverse (create_skin_from_rest_transforms), so a skinned mesh renders exactly at
-# rest when the pose equals the rest -- making the rest render independent of the (animated)
-# coordinate convention. [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
-func _build_skeleton() -> void:
-	_skeleton = Skeleton3D.new()
-	_skeleton.name = "Skeleton3D"
-	# This model writes final bone poses directly and only parents skinned
-	# MeshInstance3D nodes below the skeleton; it never installs a
-	# SkeletonModifier3D, BoneAttachment3D, or physical-bone simulator. Godot's
-	# default IDLE modifier mode registers an internal process callback anyway.
-	# MANUAL removes that empty per-frame modifier pass; pose setters still queue
-	# the independent deferred skeleton/skin update.
-	_skeleton.modifier_callback_mode_process = (
-			Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL)
-	add_child(_skeleton)
-	var bones: Array = _skeletal.get_skeleton_bones()
-	# The rig is INDEX-driven (the model bone table pairs channels/parts by row —
-	# net-re §5.40; empty or duplicate row names are legal in shipped models, e.g.
-	# the REVX M82_1st carries unnamed rows). Godot's Skeleton3D refuses empty/
-	# duplicate/':'/'/' names, and a refused add_bone SHIFTS every later index —
-	# the whole rig past the first bad row then binds to the wrong bones. Sanitize
-	# to unique placeholders so row i is ALWAYS bone i.
-	var used := {}
-	for i in range(bones.size()):
-		var n := String((bones[i] as Dictionary).get("name", "")).strip_edges()
-		n = n.replace(":", "_").replace("/", "_")
-		if n.is_empty():
-			n = "bone_%d" % i
-		if used.has(n):
-			n = "%s_%d" % [n, i]
-		used[n] = true
-		_skeleton.add_bone(n)
-	for i in range(bones.size()):
-		var bd: Dictionary = bones[i]
-		var parent := int(bd.get("parent_index", -1))
-		if parent >= 0 and parent < _skeleton.get_bone_count() and parent != i:
-			_skeleton.set_bone_parent(i, parent)
-		_skeleton.set_bone_rest(i, bd.get("rest", Transform3D()))
-	for i in range(_skeleton.get_bone_count()):
-		_skeleton.reset_bone_pose(i)
-	_skeleton_skin = _skeleton.create_skin_from_rest_transforms()
 
 
 func _on_object_changed() -> void:
@@ -1118,27 +985,11 @@ func _apply_robj_transforms() -> bool:
 	# writes only the parts whose transforms changed since this model last
 	# applied. The common empty-control path allocates nothing and no output
 	# Dictionary is boxed.
-	if object_data.has_method("apply_panm_to_nodes"):
-		var revision := int(object_data.apply_panm_to_nodes(
-				_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
-				_panm_applied_revision))
-		var changed := revision != _panm_applied_revision
-		_panm_applied_revision = revision
-		return changed
-	# Dictionary fallback for duck-typed data doubles (tests).
-	if not object_data.has_method("evaluate_panm"):
-		return false
-	var transforms: Dictionary = object_data.evaluate_panm(
-			_active_lod, _anim_time_ms, _ctrl_values)
-	var changed := false
-	for key in transforms.keys():
-		var robj_index := int(key)
-		if _robj_nodes.has(robj_index):
-			var node := _robj_nodes[robj_index] as Node3D
-			var next_transform: Transform3D = transforms[key]
-			if node.transform != next_transform:
-				node.transform = next_transform
-				changed = true
+	var revision := int(object_data.apply_panm_to_nodes(
+			_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
+			_panm_applied_revision))
+	var changed := revision != _panm_applied_revision
+	_panm_applied_revision = revision
 	return changed
 
 

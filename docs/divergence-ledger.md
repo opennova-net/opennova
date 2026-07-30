@@ -784,6 +784,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
+| 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
 | VFS / PFF mount stack | 0 | 1 | 0 | 1 | 4 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 3 | 0 | 0 | 3 | 7 |
@@ -794,7 +795,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 3 | 0 | 2 | 5 | 1 |
-| **Total** | **105** | **13** | **32** | **150** | 107 |
+| **Total** | **105** | **14** | **32** | **151** | 107 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 
