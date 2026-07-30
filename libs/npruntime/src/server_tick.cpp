@@ -408,7 +408,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 			for (const auto &zb : zone_6f) {
 				const bool changed = std::find(changed_6f.begin(), changed_6f.end(),
 				                               zb.first) != changed_6f.end();
-				if (changed || deploy_screen) conn.link.transport->host_send(0x6F, zb.second);
+				if (changed || deploy_screen) conn.link.transport->host_send(s2c::ZONE_TIMER_VALUE, zb.second);
 			}
 
 			// 0x1E secure edges (to all in-match) [orig: @0x519839/@0x51988E].
@@ -421,7 +421,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 			// Flip events + 0x53 windows.
 			for (size_t fi = 0; fi < ev.flips.size(); ++fi) {
 				const auto &f = ev.flips[fi];
-				conn.link.transport->host_send(0x53, flip_53[fi]);
+				conn.link.transport->host_send(s2c::ZONE_TIMER_WINDOW, flip_53[fi]);
 				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
 				const uint8_t zone_idx = chain_index_of(f.zone);
 				if (conn_team == f.capturer_team) {
@@ -450,7 +450,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				std::vector<uint8_t> body;
 				body.push_back(static_cast<uint8_t>(count));
 				body.insert(body.end(), entries.begin(), entries.end());
-				conn.link.transport->host_send(0x40, body);
+				conn.link.transport->host_send(s2c::CAPTURE_ZONE_STATE, body);
 				entries.clear();
 				count = 0;
 			};
@@ -498,7 +498,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				dead = e != nullptr && e->health <= 0;
 			}
 			if (conn.link.respawn_pending || dead)
-				conn.link.transport->host_send(0x6E, kEmptyWaveStatus);
+				conn.link.transport->host_send(s2c::ROSTER_SYNC, kEmptyWaveStatus);
 		}
 	}
 

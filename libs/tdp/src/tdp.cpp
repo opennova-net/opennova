@@ -943,7 +943,7 @@ int tdp_from_ir(const ThreediModelIR *ir, TdpProject *out) {
                 default: continue;
                 }
 
-                if (tex->flags & 0x01 /*ANIMATED*/) {
+                if (tex->flags & THREEDI_TEX_FLAG_ANIMATED) {
                     // Animated frame
                     if (tex->frame < TDP_MAX_ANIM_FRAMES) {
                         TdpAnimFrame *af = is_normal

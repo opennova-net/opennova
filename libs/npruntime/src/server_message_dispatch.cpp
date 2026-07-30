@@ -1227,7 +1227,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const std::vector<uint8_t> body = encode_weapon_reload(req); // rebuilt, never raw (ADR 0003)
 				for (NapiNPConnection &c : roster) {
 					if (!is_in_match(c) || c.link.transport == nullptr) continue;
-					c.link.transport->host_send(0x49, body);
+					c.link.transport->host_send(s2c::WEAPON_RELOAD, body);
 				}
 				// The 3P RELOAD POSE for a remote requester. Retail's host, unlike a pure
 				// client, does run the refill on its own copy of the peer, and that stamps
@@ -1379,7 +1379,7 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	const std::vector<uint8_t> body = encode_player_sync(rep, 0x1CF7);
 	for (NapiNPConnection &c : roster) {
 		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
-		c.link.transport->host_send(0x46, body);
+		c.link.transport->host_send(s2c::PLAYER_SYNC, body);
 	}
 }
 
