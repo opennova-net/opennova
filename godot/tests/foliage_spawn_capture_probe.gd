@@ -4,7 +4,9 @@ extends Node
 ## This uses ONED's real Play Mission path and never searches foliage-painted
 ## cells, teleports the camera, or synthesizes input.
 ##
-## NOVA_RESOURCE_DIR=<asset-dir> NOVA_MISSION_BMS=00TRe.bms \
+## NOVA_MISSION_RESOURCE_DIR=<loose-authoring-dir> \
+## NOVA_RUNTIME_RESOURCE_DIR=<packed-game-dir> NOVA_EXPANSION=revx02 \
+## NOVA_MISSION_BMS=00TRe.bms \
 ##   "$GODOT_BIN" --path godot res://tests/foliage_spawn_capture_probe.tscn
 ## Optional output override: NOVA_SPAWN_CAPTURE_DIR=<absolute-or-res://-path>
 
@@ -12,6 +14,7 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 const DEFAULT_MISSION := "00TRe.bms"
+const DEFAULT_EXPANSION := "revx02"
 const DEFAULT_OUT_DIR := "res://../.scratch/00tre-spawn"
 const EDITOR_BOOT_FRAMES := 9
 const MISSION_OPEN_FRAMES := 30
@@ -30,12 +33,19 @@ var _capture_stem := "00TRe"
 
 
 func _ready() -> void:
-	var resource_dir := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
-	if resource_dir.is_empty():
-		resource_dir = ResourceDirSettings.get_resource_dir()
-	if not ResourceDirSettings.is_valid_root(resource_dir):
-		_fail("no valid resource dir; set NOVA_RESOURCE_DIR")
+	var mission_resource_dir := OS.get_environment("NOVA_MISSION_RESOURCE_DIR").strip_edges()
+	if mission_resource_dir.is_empty():
+		mission_resource_dir = ResourceDirSettings.get_resource_dir()
+	if not ResourceDirSettings.is_valid_root(mission_resource_dir):
+		_fail("no valid loose authoring root; set NOVA_MISSION_RESOURCE_DIR")
 		return
+	var runtime_resource_dir := OS.get_environment("NOVA_RUNTIME_RESOURCE_DIR").strip_edges()
+	if not NovaResourceRoot.is_valid_root(runtime_resource_dir):
+		_fail("no valid packed runtime root; set NOVA_RUNTIME_RESOURCE_DIR")
+		return
+	var requested_expansion := OS.get_environment("NOVA_EXPANSION").strip_edges()
+	if requested_expansion.is_empty():
+		requested_expansion = DEFAULT_EXPANSION
 	var configured_out := OS.get_environment("NOVA_SPAWN_CAPTURE_DIR").strip_edges()
 	_out_abs = ProjectSettings.globalize_path(
 		DEFAULT_OUT_DIR if configured_out.is_empty() else configured_out)
@@ -48,11 +58,13 @@ func _ready() -> void:
 	if mission_name.is_empty():
 		mission_name = DEFAULT_MISSION
 	_capture_stem = mission_name.get_file().get_basename()
-	var mission_path := NovaPaths.resolve_file(resource_dir, mission_name)
+	var mission_path := NovaPaths.resolve_file(mission_resource_dir, mission_name)
 	if mission_path.is_empty():
-		_fail("%s not found in %s" % [mission_name, resource_dir])
+		_fail("%s not found in loose authoring root %s" % [
+			mission_name, mission_resource_dir])
 		return
-	print("[spawn-capture] resource dir: ", resource_dir)
+	print("[spawn-capture] mission authoring root: ", mission_resource_dir)
+	print("[spawn-capture] packed runtime root: ", runtime_resource_dir)
 	print("[spawn-capture] mission: ", mission_name, " -> ", mission_path)
 	print("[spawn-capture] input: disabled before first played frame; none synthesized")
 
@@ -63,7 +75,7 @@ func _ready() -> void:
 	if workstation == null:
 		_fail("ONED workstation unavailable")
 		return
-	workstation.set_resource_root_dir(resource_dir, false)
+	workstation.set_resource_root_dir(mission_resource_dir, false)
 	_mission_workspace = workstation.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
 	if _mission_workspace == null or not _mission_workspace.has_method("play_mission"):
 		_fail("mission workspace unavailable")
@@ -74,6 +86,25 @@ func _ready() -> void:
 		return
 	workstation.set_active_workspace(EditorWorkstation.Workspace.MISSION)
 	await _settle(MISSION_OPEN_FRAMES)
+	# The editor first opens the loose mission into its in-memory authoring
+	# document. Replace that same injected root with the packed retail mount
+	# before Play so the live GameWorld resolves every dependency through the
+	# requested expansion, while preserving the exact loose mission document.
+	var runtime_root: NovaResourceRoot = workstation.get_resource_root()
+	var mount_err := int(runtime_root.mount_runtime(runtime_resource_dir, requested_expansion,
+		false, "jo"))
+	if mount_err != OK:
+		_fail("packed runtime mount failed (%d): %s" % [
+			mount_err, runtime_root.get_last_error()])
+		return
+	var mount_validation_error := runtime_mount_validation_error(
+		requested_expansion, runtime_root.get_expansion(),
+		runtime_root.is_runtime_mount())
+	if not mount_validation_error.is_empty():
+		_fail(mount_validation_error)
+		return
+	print("[spawn-capture] runtime expansion: requested=%s actual=%s mount=packed" % [
+		requested_expansion, runtime_root.get_expansion()])
 	var play_err := int(_mission_workspace.play_mission())
 	if play_err != OK:
 		_fail("play_mission failed (%d): %s" % [play_err, mission_name])
@@ -138,6 +169,23 @@ func _ready() -> void:
 	if not _valid_snapshot(spawn_state):
 		_fail("spawn state failed validation")
 		return
+	var loaded_mission = world.get_loaded_mission()
+	var winning_entries := _winning_source_entries(runtime_root, PackedStringArray([
+		mission_name,
+		String(loaded_mission.get_terrain_ref()) + ".trn",
+		String(loaded_mission.get_environment_ref()) + ".env",
+	]))
+	var source_validation_error := runtime_source_validation_error(
+		requested_expansion, mission_name, winning_entries)
+	if not source_validation_error.is_empty():
+		_fail(source_validation_error)
+		return
+	for entry in winning_entries:
+		print("[spawn-capture] runtime source: logical_name=%s source_type=%s archive_path=%s" % [
+			entry.get("logical_name", ""),
+			entry.get("source_type", ""),
+			entry.get("archive_path", ""),
+		])
 	_print_snapshot(spawn_state)
 	_print_runtime_metadata(world, environment)
 	_print_model_lighting_trace(world, camera, environment)
@@ -193,6 +241,63 @@ static func runtime_foliage_validation_error(
 	if total_instances <= 0:
 		return "00TRe exact spawn produced no dispatcher foliage instances"
 	return ""
+
+
+static func runtime_mount_validation_error(
+		requested_expansion: String, actual_expansion: String,
+		is_runtime_mount: bool) -> String:
+	var requested := requested_expansion.strip_edges().to_lower()
+	var actual := actual_expansion.strip_edges().to_lower()
+	if requested.is_empty():
+		return "runtime comparison requires an explicit expansion"
+	if not is_runtime_mount:
+		return "comparison root is not a packed runtime mount"
+	if actual != requested:
+		return "requested expansion %s silently fell back to %s" % [
+			requested, "base assets" if actual.is_empty() else actual]
+	return ""
+
+
+static func runtime_source_validation_error(
+		requested_expansion: String, mission_name: String,
+		winning_entries: Array) -> String:
+	if winning_entries.is_empty():
+		return "runtime comparison reported no winning source entries"
+	var mission_key := mission_name.get_file().to_lower()
+	var mission_found := false
+	if requested_expansion.strip_edges().is_empty():
+		return "runtime comparison source validation requires an explicit expansion"
+	for value in winning_entries:
+		var entry := value as Dictionary
+		var logical_name := String(entry.get("logical_name", "")).get_file()
+		var source_type := String(entry.get("source_type", "")).to_lower()
+		var archive_path := String(entry.get("archive_path", "")).replace("\\", "/")
+		if logical_name.is_empty():
+			return "runtime comparison has a missing winning source entry"
+		if source_type != "pff" or archive_path.is_empty():
+			return "%s did not resolve from a packed archive" % logical_name
+		if logical_name.to_lower() == mission_key:
+			mission_found = true
+	if not mission_found:
+		return "runtime comparison did not report the %s mission winner" % mission_name
+	return ""
+
+
+static func _winning_source_entries(
+		root: NovaResourceRoot, logical_names: PackedStringArray) -> Array:
+	var winners_by_name := {}
+	for value in root.list_file_entries():
+		var entry := value as Dictionary
+		winners_by_name[String(entry.get("logical_name", "")).get_file().to_lower()] = entry
+	var winners: Array = []
+	for logical_name in logical_names:
+		var key := String(logical_name).get_file().to_lower()
+		winners.append(winners_by_name.get(key, {
+			"logical_name": String(logical_name).get_file(),
+			"source_type": "",
+			"archive_path": "",
+		}))
+	return winners
 
 
 func _run_foliage_flicker_probe(

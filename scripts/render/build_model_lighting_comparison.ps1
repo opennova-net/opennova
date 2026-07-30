@@ -10,14 +10,28 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+function ConvertTo-RepoAbsolutePath([string]$Path) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
+}
+
 if ([string]::IsNullOrWhiteSpace($RetailImage)) {
     $RetailImage = Join-Path $repoRoot `
-        "screenshots\parity\foliage-terrain-regrill\courtyard-retail-vs-ours.png"
+        "screenshots\parity\model-lighting\courtyard-retail-revx02.png"
+}
+else {
+    $RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
 }
 if ([string]::IsNullOrWhiteSpace($OutputImage)) {
     $OutputImage = Join-Path $repoRoot `
         "screenshots\parity\model-lighting\courtyard-retail-vs-opennova.png"
 }
+else {
+    $OutputImage = ConvertTo-RepoAbsolutePath $OutputImage
+}
+$CurrentImage = ConvertTo-RepoAbsolutePath $CurrentImage
 
 function Resolve-InputFile([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -28,7 +42,7 @@ function Resolve-InputFile([string]$Path, [string]$Label) {
 
 $retailPath = Resolve-InputFile $RetailImage "Retail comparison"
 $currentPath = Resolve-InputFile $CurrentImage "OpenNova capture"
-$outputPath = [System.IO.Path]::GetFullPath($OutputImage)
+$outputPath = $OutputImage
 $outputDir = [System.IO.Path]::GetDirectoryName($outputPath)
 [void](New-Item -ItemType Directory -Path $outputDir -Force)
 
@@ -37,13 +51,14 @@ Add-Type -AssemblyName System.Drawing
 $panelWidth = 1280
 $panelHeight = 720
 $headerHeight = 36
-$retailSource = [System.Drawing.Rectangle]::new(1, 36, $panelWidth, $panelHeight)
 $leftTarget = [System.Drawing.Rectangle]::new(0, $headerHeight, $panelWidth, $panelHeight)
 $rightTarget = [System.Drawing.Rectangle]::new(
     $panelWidth, $headerHeight, $panelWidth, $panelHeight)
 
 $retail = [System.Drawing.Bitmap]::new($retailPath)
 $current = [System.Drawing.Bitmap]::new($currentPath)
+$retailSource = [System.Drawing.Rectangle]::new(
+    0, 0, $retail.Width, $retail.Height)
 $canvas = [System.Drawing.Bitmap]::new(
     2 * $panelWidth, $headerHeight + $panelHeight,
     [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
@@ -60,9 +75,8 @@ $dividerPen = [System.Drawing.Pen]::new(
 $pngStream = [System.IO.MemoryStream]::new()
 
 try {
-    if ($retail.Width -lt ($retailSource.X + $retailSource.Width) -or
-        $retail.Height -lt ($retailSource.Y + $retailSource.Height)) {
-        throw "Retail source no longer contains the expected 1280x720 left panel."
+    if ($retail.Width * 9 -ne $retail.Height * 16) {
+        throw "Retail capture must be 16:9, got $($retail.Width)x$($retail.Height)."
     }
     if ($current.Width * 9 -ne $current.Height * 16) {
         throw "OpenNova capture must be 16:9, got $($current.Width)x$($current.Height)."
@@ -88,11 +102,11 @@ try {
     $graphics.DrawLine(
         $dividerPen, $panelWidth, 0, $panelWidth, $canvas.Height)
     $graphics.DrawString(
-        "RETAIL Jointops.exe (JO:TR 1.7.5.7) - 00TRa training courtyard",
+        "RETAIL revx02 - Jointops.exe 1.7.5.7 - 00TRa frozen spawn",
         $font, $labelBrush,
         [System.Drawing.PointF]::new([float]8.0, [float]9.0))
     $graphics.DrawString(
-        "OPENNOVA - light_transfer, retail LGHT gating, and isolated shadow paths",
+        "OPENNOVA revx02 - packed mount asserted - same 00TRa pose",
         $font, $labelBrush,
         [System.Drawing.PointF]::new([float]($panelWidth + 8), [float]9.0))
 

@@ -1,8 +1,11 @@
 [CmdletBinding()]
 param(
     [string]$GodotPath = $env:GODOT_BIN,
-    [string]$ResourceDir = $env:NOVA_RESOURCE_DIR,
+    [string]$MissionResourceDir = $env:NOVA_MISSION_RESOURCE_DIR,
+    [string]$RuntimeResourceDir = $env:NOVA_RUNTIME_RESOURCE_DIR,
+    [string]$Expansion = "revx02",
     [string]$Mission = "00TRa.bms",
+    [string]$RetailImage,
     [string]$OutputDir,
     [string]$CurrentImage,
     [int]$ExpectedInteriorItemId = 101216,
@@ -13,13 +16,31 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$retailImage = Join-Path $repoRoot `
-    "screenshots\parity\foliage-terrain-regrill\courtyard-retail-vs-ours.png"
+function ConvertTo-RepoAbsolutePath([string]$Path) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
+}
+
+if ([string]::IsNullOrWhiteSpace($RetailImage)) {
+    $RetailImage = Join-Path $repoRoot `
+        "screenshots\parity\model-lighting\courtyard-retail-revx02.png"
+}
+else {
+    $RetailImage = ConvertTo-RepoAbsolutePath $RetailImage
+}
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $repoRoot ".scratch\model-lighting-parity"
 }
+else {
+    $OutputDir = ConvertTo-RepoAbsolutePath $OutputDir
+}
 if ([string]::IsNullOrWhiteSpace($CurrentImage)) {
     $CurrentImage = Join-Path $OutputDir "00TRa_spawn_default.png"
+}
+else {
+    $CurrentImage = ConvertTo-RepoAbsolutePath $CurrentImage
 }
 
 function Assert-FileExists([string]$Path, [string]$Label) {
@@ -71,27 +92,48 @@ function Get-Median([double[]]$Values) {
 }
 
 if (-not $SkipCapture) {
+    if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
+        $MissionResourceDir = $env:NOVA_RESOURCE_DIR
+    }
+    if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
+        $RuntimeResourceDir = $env:OPENNOVA_JO_DIR
+    }
     if ([string]::IsNullOrWhiteSpace($GodotPath)) {
         throw "Set GODOT_BIN or pass -GodotPath to run the capture."
     }
-    if ([string]::IsNullOrWhiteSpace($ResourceDir)) {
-        throw "Set NOVA_RESOURCE_DIR or pass -ResourceDir to locate retail assets."
+    if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
+        throw "Set NOVA_MISSION_RESOURCE_DIR or pass -MissionResourceDir " +
+            "to locate the loose authoring mission."
+    }
+    if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
+        throw "Set NOVA_RUNTIME_RESOURCE_DIR or pass -RuntimeResourceDir " +
+            "to locate the packed retail install."
+    }
+    if ([string]::IsNullOrWhiteSpace($Expansion)) {
+        throw "Pass an explicit -Expansion for the comparison capture."
     }
     Assert-FileExists $GodotPath "Godot executable"
-    if (-not (Test-Path -LiteralPath $ResourceDir -PathType Container)) {
-        throw "Retail resource directory not found: $ResourceDir"
+    if (-not (Test-Path -LiteralPath $MissionResourceDir -PathType Container)) {
+        throw "Loose mission authoring directory not found: $MissionResourceDir"
+    }
+    if (-not (Test-Path -LiteralPath $RuntimeResourceDir -PathType Container)) {
+        throw "Packed runtime directory not found: $RuntimeResourceDir"
     }
 
     [void](New-Item -ItemType Directory -Path $OutputDir -Force)
     $captureStarted = [DateTime]::UtcNow
     $savedEnvironment = @{
-        NOVA_RESOURCE_DIR = $env:NOVA_RESOURCE_DIR
+        NOVA_MISSION_RESOURCE_DIR = $env:NOVA_MISSION_RESOURCE_DIR
+        NOVA_RUNTIME_RESOURCE_DIR = $env:NOVA_RUNTIME_RESOURCE_DIR
+        NOVA_EXPANSION = $env:NOVA_EXPANSION
         NOVA_MISSION_BMS = $env:NOVA_MISSION_BMS
         NOVA_SPAWN_CAPTURE_DIR = $env:NOVA_SPAWN_CAPTURE_DIR
         NOVA_MODEL_LIGHTING_TRACE = $env:NOVA_MODEL_LIGHTING_TRACE
     }
     try {
-        $env:NOVA_RESOURCE_DIR = $ResourceDir
+        $env:NOVA_MISSION_RESOURCE_DIR = $MissionResourceDir
+        $env:NOVA_RUNTIME_RESOURCE_DIR = $RuntimeResourceDir
+        $env:NOVA_EXPANSION = $Expansion
         $env:NOVA_MISSION_BMS = $Mission
         $env:NOVA_SPAWN_CAPTURE_DIR = $OutputDir
         $env:NOVA_MODEL_LIGHTING_TRACE = "1"
@@ -140,6 +182,31 @@ if (-not $SkipCapture) {
         "\[spawn-capture\] PASS: exact frozen player-spawn state in both images")) {
         throw "Capture probe did not report PASS (native exit $probeExitCode)."
     }
+    $expansionPattern = (
+        "\[spawn-capture\] runtime expansion: requested={0} " +
+        "actual={0} mount=packed"
+    ) -f [regex]::Escape($Expansion)
+    if (-not ($probeOutput -match $expansionPattern)) {
+        throw "Capture did not prove the requested packed expansion '$Expansion'."
+    }
+    $sourceLines = @($probeOutput | Where-Object {
+        "$_" -match "^\[spawn-capture\] runtime source:"
+    })
+    if ($sourceLines.Count -lt 3) {
+        throw "Capture did not report all packed winning source entries."
+    }
+    foreach ($line in $sourceLines) {
+        if ("$line" -notmatch "\ssource_type=pff\sarchive_path=.+") {
+            throw "Capture reported a non-packed or missing winning source: $line"
+        }
+    }
+    $missionPattern = (
+        "^\[spawn-capture\] runtime source: logical_name={0} " +
+        "source_type=pff archive_path=.+"
+    ) -f [regex]::Escape((Split-Path -Leaf $Mission))
+    if (-not ($sourceLines -match $missionPattern)) {
+        throw "Capture did not report the packed winning source for $Mission."
+    }
     if ($ExpectedInteriorItemId -gt 0) {
         $interiorPattern = '"local_player_interior_item_id":\s*{0}\b' -f
             $ExpectedInteriorItemId
@@ -155,22 +222,22 @@ if (-not $SkipCapture) {
     }
 }
 
-Assert-FileExists $retailImage "Committed retail comparison"
+Assert-FileExists $RetailImage "Committed retail revx02 capture"
 Assert-FileExists $CurrentImage "OpenNova capture"
 Add-Type -AssemblyName System.Drawing
 
-$retail = [System.Drawing.Bitmap]::new($retailImage)
+$retail = [System.Drawing.Bitmap]::new($RetailImage)
 $current = [System.Drawing.Bitmap]::new($CurrentImage)
 try {
-    if ($retail.Width -lt 1281 -or $retail.Height -lt 756) {
-        throw "Retail comparison no longer contains its 1280x720 panel."
+    if ($retail.Width * 9 -ne $retail.Height * 16) {
+        throw "Retail capture must be 16:9, got $($retail.Width)x$($retail.Height)."
     }
     if ($current.Width * 9 -ne $current.Height * 16) {
         throw "OpenNova capture must be 16:9, got $($current.Width)x$($current.Height)."
     }
 
     # These broad, texture-stable regions avoid the HUD and viewmodel. Retail is
-    # the left 1280x720 panel at (1,36); the live probe is scaled from that frame.
+    # the fresh borderless revx02 client; both frames scale from 1280x720.
     $modelRegions = [ordered]@{
         ceiling = [int[]]@(280, 20, 500, 120)
         center_wall = [int[]]@(560, 190, 250, 130)
@@ -179,8 +246,9 @@ try {
         crate_left = [int[]]@(30, 300, 100, 230)
     }
     $grassRegion = [int[]]@(230, 470, 270, 100)
+    $retailScale = $retail.Width / 1280.0
     $retailGrass = Get-MeanLuma $retail (
-        Convert-CanonicalRoi $grassRegion 1.0 1 36)
+        Convert-CanonicalRoi $grassRegion $retailScale 0 0)
     $currentScale = $current.Width / 1280.0
     $currentGrass = Get-MeanLuma $current (
         Convert-CanonicalRoi $grassRegion $currentScale 0 0)
@@ -190,7 +258,7 @@ try {
     Write-Host "Model brightness (normalized to same-frame outdoor grass)"
     foreach ($entry in $modelRegions.GetEnumerator()) {
         $retailMean = Get-MeanLuma $retail (
-            Convert-CanonicalRoi $entry.Value 1.0 1 36)
+            Convert-CanonicalRoi $entry.Value $retailScale 0 0)
         $currentMean = Get-MeanLuma $current (
             Convert-CanonicalRoi $entry.Value $currentScale 0 0)
         $factor = ($currentMean / $currentGrass) / ($retailMean / $retailGrass)
