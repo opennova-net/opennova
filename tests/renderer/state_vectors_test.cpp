@@ -299,9 +299,11 @@ std::string generate() {
 	for (const UvCase &c : uv_cases) {
 		for (uint16_t tm : uv_times) {
 			const renderer::UvAnimTransform tu =
-				renderer::uv_anim_transform(c.ch, identity, tm, 0x8000, 0, 0x0741);
+				renderer::uv_anim_transform(
+						c.ch, identity, tm, 0x8000, 0, 0x0741, 0x0741);
 			const renderer::UvAnimTransform tv =
-				renderer::uv_anim_transform(identity, c.ch, tm, 0, 0x8000, 0x0741);
+				renderer::uv_anim_transform(
+						identity, c.ch, tm, 0, 0x8000, 0x0741, 0x0741);
 			std::snprintf(line, sizeof(line),
 			              "uvU %-11s t=%04x m=[%.6f %.6f %.6f %.6f %.6f %.6f]\n",
 			              c.label, tm,

@@ -352,7 +352,8 @@ static void test_playpartanim_mutates_brain() {
         // direction = play_type; rate = trunc(0.016/1.0 * 65536) = 1048.
         CHECK(ae->brain.f[world::AiBrain::kPartAnimDir0] == 1);
         CHECK(ae->brain.f[world::AiBrain::kPartAnimRate0] == 1048);
-        // The integrator advances the phase by rate*dir each tick (clamped [0,65535]).
+        // The +1 branch advances with wrapping ADD and clamps only a strict
+        // upper overshoot; these first two ticks stay in range.
         ai.advance_part_anim(*ae);
         ai.advance_part_anim(*ae);
         CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
@@ -607,19 +608,54 @@ static void test_event_trigger_reads_window() {
     CHECK(w.effects.count("text") == 2);
 }
 
-// PLAYPARTANIM with ANIMTIME=0: rate = INT_MIN (ftol of +inf), so advance_part_anim saturates the
-// channel to a clamp endpoint on the first tick (0 forward / 65535 reverse), matching the original.
-static void test_playpartanim_zero_time_saturates() {
+// PLAYPARTANIM with ANIMTIME=0 gets INT_MIN from x87 ftol(+inf). Retail then
+// uses wrapping 32-bit ADD/SUB with asymmetric strict clamps.
+static void test_playpartanim_zero_time_wraps_like_retail() {
     world::AiBrain b;
     world::ai_apply_command(b, 0x22, /*channel=*/1, /*play_type=*/1, /*time=*/0);
     CHECK(b.f[world::AiBrain::kPartAnimDir0] == 1);
     CHECK(b.f[world::AiBrain::kPartAnimRate0] == static_cast<int32_t>(0x80000000)); // INT_MIN
     world::AiSystem ai;
-    // advance integrates phase += rate*dir (int64), clamped: INT_MIN * +1 -> 0.
     world::AiEntity tmp;
     tmp.brain = b;
     ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] ==
+          static_cast<int32_t>(0x80000000));
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
+    ai.advance_part_anim(tmp);
     CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
+
+    world::AiBrain reverse;
+    world::ai_apply_command(
+            reverse, 0x22, /*channel=*/1, /*play_type=*/-1, /*time=*/0);
+    tmp.brain = reverse;
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+
+    // Exact endpoints do not stop; only the following strict overshoot does.
+    world::AiBrain endpoint;
+    endpoint.f[world::AiBrain::kPartAnimDir0] = 1;
+    endpoint.f[world::AiBrain::kPartAnimRate0] = 1048;
+    endpoint.f[world::AiBrain::kPartAnimPhase0] = 0x10000 - 1048;
+    tmp.brain = endpoint;
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 1);
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0x10000);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
+
+    endpoint.f[world::AiBrain::kPartAnimDir0] = -1;
+    endpoint.f[world::AiBrain::kPartAnimPhase0] = 1048;
+    tmp.brain = endpoint;
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == -1);
+    ai.advance_part_anim(tmp);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
+    CHECK(tmp.brain.f[world::AiBrain::kPartAnimDir0] == 0);
 }
 
 // A trigger record with just a main/sub type and params.
@@ -1047,7 +1083,7 @@ int main() {
     test_subgoal_state();
     test_output_text_and_reset_event();
     test_event_trigger_reads_window();
-    test_playpartanim_zero_time_saturates();
+    test_playpartanim_zero_time_wraps_like_retail();
     test_second_time_through_parity();
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();

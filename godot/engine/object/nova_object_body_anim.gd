@@ -584,106 +584,180 @@ func get_animation_time() -> float:
 # [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22] PLAYPARTANIM(channel, play_type, time):
 # ANIMNUM (channel) in {1,2} selects one of two part-anim channels (slot = channel-1); ANIMPLAYTYPE
 # +1/0/-1 = forward/stop/reverse; ANIMTIME seconds = how long the part takes to cross its full range.
-# The original stores a per-channel direction + per-tick rate on the AI struct and a per-frame consumer
-# sweeps a 16.16 phase (0..65536, full range in ANIMTIME at 62.5Hz), clamping at the ends; it is
-# velocity-from-current (it does NOT reset the phase). We drive part channel `slot` through the model's
-# PANM control register at index `slot`, value 0..65535 == that phase, fed to evaluate_panm() each frame.
-# See notes/mission/anim-ai-grill-2026-06-07.md.
+# The original stores a per-channel direction + truncated rate on the AI struct
+# and a fixed-16-ms consumer applies wrapping signed ADD/SUB. It clamps only
+# after strict upper/negative overshoot (so exact endpoints remain active for
+# one more tick); it is velocity-from-current and does not reset the phase.
+# Before drawing, retail publishes channel 1/2 to the fixed global CTRL names
+# VEHICLE_SPECIAL1/VEHICLE_SPECIAL2. It never selects a model-local CTRL entry
+# by ordinal.
+# [orig: Jointops HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38]
+
+const _PART_ANIM_CTRL_NAMES: Array[String] = [
+	"VEHICLE_SPECIAL1",
+	"VEHICLE_SPECIAL2",
+]
+const _PART_ANIM_CTRL_OWNERS: Array[String] = [
+	"present:part_anim:1",
+	"present:part_anim:2",
+]
+const _PART_ANIM_TICK_S := 0.016
 
 
-## Play a model part animation, mirroring the runtime PLAYPARTANIM action so editor preview and host
-## playback share one path. channel: 1 or 2. play_type: 1 play / 0 stop / -1 reverse. time_s: seconds
-## for the part to traverse its full range (ANIMTIME).
+func _part_anim_rate_for_seconds(time_s: float) -> int:
+	# x87 FISTP returns the integer-indefinite INT_MIN for infinity, NaN,
+	# or an out-of-range result. A zero finite result is then promoted to 1.
+	# [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]
+	if time_s == 0.0:
+		return -2147483648
+	var rate_f := (_PART_ANIM_TICK_S / time_s) * 65536.0
+	if is_nan(rate_f) or rate_f >= 2147483648.0 or rate_f < -2147483648.0:
+		return -2147483648
+	var rate := int(rate_f)
+	return 1 if rate == 0 else _m._ctrl_dword(rate)
+
+
+## Play a model part animation for the editor/legacy mission-controller path.
+## The authoritative runtime integrates the same fields in AiSystem and presents
+## them through set_part_phase(). channel: 1 or 2; play_type: -1, 0, or 1.
 func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	var slot := channel - 1
 	if slot < 0 or slot > 1:
 		return  # the original validates channel in {1,2}; anything else is ignored
+	if play_type < -1 or play_type > 1:
+		return
 	var register: String = _m._resolve_anim_channel_register(slot)
 	if register.is_empty():
 		return
 	if play_type == 0:
 		_m._part_anims.erase(register)  # Stop: freeze the part at its current value
 		return
-	var dir := 1 if play_type > 0 else -1
-	var speed := 65535.0 / time_s if time_s > 0.0 else 1.0e9  # full range crossed in time_s seconds
+	if _m._part_anims.is_empty():
+		_m._part_anim_tick_accum_s = 0.0
 	_m._part_anims[register] = {
 		"register": register,
-		"dir": dir,
-		"speed": speed,
-		"value": float(int(_m._ctrl_values.get(register, 0))),  # velocity from current (no reset)
+		"dir": play_type,
+		"rate": _part_anim_rate_for_seconds(time_s),
+		"value": int(_m._ctrl_values.get(register, 0)),  # velocity from current
 	}
 
 
 ## Editor-preview convenience: seed the channel at its rest start (0 forward / max reverse) then play,
-## so a preview always shows the full motion from rest. The runtime uses play_part_anim directly
-## (velocity-from-current, faithful to the action); only the editor preview restarts.
+## so a preview always shows the full motion from rest. Production presentation
+## receives the authoritative phase through set_part_phase().
 func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	var slot := channel - 1
-	if slot < 0 or slot > 1:
+	if slot < 0 or slot > 1 or play_type < -1 or play_type > 1:
 		return
 	var register: String = _m._resolve_anim_channel_register(slot)
 	# Stop (play_type == 0) must freeze the part where it is, so do NOT reseed the register: reseeding
 	# to 0 would jump the part to its 0 pose before play_part_anim's stop erases the channel. Only the
 	# forward/reverse previews seed a rest start (0 forward / max reverse).
 	if not register.is_empty() and play_type != 0:
-		_m._ctrl_values[register] = 0 if play_type >= 0 else 65535
+		_m._ctrl_values[register] = 0 if play_type >= 0 else 65536
+		_m._ctrl_value_owners.erase(register)
+		_m._finish_ctrl_change(register, false)
 	play_part_anim(channel, play_type, time_s)
 
 
-## Pose a part channel directly to an engine-computed phase (0..65535 == 0..1 over the part's range).
+## Pose a part channel directly to the engine-computed signed dword. Ordinary
+## sweeps live in 0..0x10000, but zero-time retail arithmetic can wrap outside
+## that range and the publisher copies it without another clamp.
 ## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
 ## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
 ## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
 func set_part_phase(channel: int, phase: int) -> void:
-	var register: String = _m._resolve_anim_channel_register(channel - 1)
-	if register.is_empty():
+	var slot := channel - 1
+	var register: String = _m._resolve_anim_channel_register(slot)
+	var owner := _resolve_anim_channel_owner(slot)
+	if register.is_empty() or owner.is_empty():
 		return
-	var next_phase := clampi(phase, 0, 65535)
-	if int(_m._ctrl_values.get(register, -1)) == next_phase and not _m._part_anims.has(register):
-		return
+	var next_phase: int = int(_m._ctrl_dword(phase))
 	_m._part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
-	_m._ctrl_values[register] = next_phase
-	_m._bounds_dirty = true
+	# Keep the source tag so stale teardown cannot clear a newer writer. Retail
+	# has one current slot value, not a rollback stack: clearing this current
+	# publication removes it instead of resurrecting an older authored value.
+	_m.set_ctrl_override(owner, register, next_phase)
+
+
+## Release PLAYPARTANIM's ownership of one semantic register. This is distinct
+## from publishing zero: retail suppresses VEHICLE_SPECIAL1 altogether for
+## ItemDefAttrib FastRope (0x1000), while it still publishes SPECIAL2.
+func clear_part_phase(channel: int) -> void:
+	var slot := channel - 1
+	var register: String = _m._resolve_anim_channel_register(slot)
+	var owner := _resolve_anim_channel_owner(slot)
+	if register.is_empty() or owner.is_empty():
+		return
+	_m._part_anims.erase(register)
+	_m.clear_ctrl_override(owner, register)
 
 
 func clear_part_anims() -> void:
 	_m._part_anims.clear()
+	_m._part_anim_tick_accum_s = 0.0
 
 
 func get_active_part_anims() -> Dictionary:
 	return _m._part_anims.duplicate(true)
 
 
-# [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
+# [orig: Jointops HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38:
+#  comp[113]/comp[114] -> global CTRL VEHICLE_SPECIAL1/VEHICLE_SPECIAL2.]
 func _resolve_anim_channel_register(slot: int) -> String:
-	if _m.object_data == null:
+	if slot < 0 or slot >= _PART_ANIM_CTRL_NAMES.size():
 		return ""
-	var regs: Array = _m.object_data.get_control_registers()
-	if slot < 0 or slot >= regs.size():
-		return ""
-	return String((regs[slot] as Dictionary).get("name", ""))
+	return _PART_ANIM_CTRL_NAMES[slot]
 
 
-# Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
+func _resolve_anim_channel_owner(slot: int) -> String:
+	if slot < 0 or slot >= _PART_ANIM_CTRL_OWNERS.size():
+		return ""
+	return _PART_ANIM_CTRL_OWNERS[slot]
+
+
+# Advance at retail's fixed 16 ms cadence with wrapping signed-dword ADD/SUB.
+# Only strict overshoot clamps and stops; landing exactly on an endpoint keeps
+# the direction live for one more tick.
+# [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]
 # Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
 # the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
 func _advance_part_anims(delta: float) -> bool:
 	if _m._part_anims.is_empty() or delta <= 0.0:
 		return false
-	var finished: Array = []
+	_m._part_anim_tick_accum_s += delta
+	var tick_count := int(floor(
+			(_m._part_anim_tick_accum_s + 0.000000001) / _PART_ANIM_TICK_S))
+	if tick_count <= 0:
+		return false
+	_m._part_anim_tick_accum_s -= float(tick_count) * _PART_ANIM_TICK_S
 	var changed := false
-	for register in _m._part_anims.keys():
-		var anim: Dictionary = _m._part_anims[register]
-		var old_value := int(_m._ctrl_values.get(register, 0))
-		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
-		anim["value"] = value
-		var next_value := int(round(value))
-		_m._ctrl_values[register] = next_value
-		changed = changed or old_value != next_value
-		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
-			finished.append(register)  # reached the clamp endpoint; the part holds there
-	for register in finished:
-		_m._part_anims.erase(register)
+	for _tick in range(tick_count):
+		if _m._part_anims.is_empty():
+			break
+		for register in _m._part_anims.keys():
+			var anim: Dictionary = _m._part_anims[register]
+			var previous := int(anim["value"])
+			var direction := int(anim["dir"])
+			var rate := int(anim["rate"])
+			var next_value: int
+			var finished := false
+			if direction == 1:
+				next_value = _m._ctrl_dword(previous + rate)
+				if next_value > 65536:
+					next_value = 65536
+					finished = true
+			else:
+				next_value = _m._ctrl_dword(previous - rate)
+				if next_value < 0:
+					next_value = 0
+					finished = true
+			anim["value"] = next_value
+			_m._ctrl_values[register] = next_value
+			_m._ctrl_value_owners.erase(register)
+			changed = changed or next_value != previous
+			if finished:
+				_m._part_anims.erase(register)
 	_m._bounds_dirty = _m._bounds_dirty or changed
 	return changed
 

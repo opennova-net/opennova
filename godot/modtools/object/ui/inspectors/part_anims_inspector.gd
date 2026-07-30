@@ -4,11 +4,11 @@ extends ObjectListDetailInspector
 ## selected LOD plus a right detail dock with rotation / scale / translation
 ## channel cards for the selected entry.
 
-# Part-animation drivers reuse the shared generator-style enum, but only the control
-# bytes the C++ panm mode API round-trips (panm_control_for_mode in
-# nova_object_data_panm_edit.cpp) are exposed. Friendly labels come from GeneratorStyleCatalog;
-# MOTION_MODE_KEYS maps each id to the mode string that C++ API expects.
-const MOTION_MODE_IDS := [0, 16, 17, 24, 32, 33, 50, 52, 53, 113, 114]
+# Part-animation drivers reuse the shared generator-style enum, but PANM is a
+# consumer-specific subset: retail's sampler reads a register only for code 113.
+# Codes 114..117 are ordinary wave lookups and are not present in the retail PANM
+# corpus, so the editor does not mislabel or author them as register operations.
+const MOTION_MODE_IDS := [0, 16, 17, 24, 32, 33, 50, 52, 53, 113]
 const MOTION_MODE_KEYS := {
 	0: "none",
 	16: "slide",
@@ -20,7 +20,6 @@ const MOTION_MODE_KEYS := {
 	52: "saw_wave",
 	53: "inverse_saw_wave",
 	113: "control_register",
-	114: "control_register_add",
 }
 const PART_ANIM_SCALE_STYLE_OPTIONS := [
 	{"id": 1, "label": "Uniform"},
@@ -35,7 +34,6 @@ const PANM_TRANSLATION_VALUE_MIN := -128.0
 const PANM_TRANSLATION_VALUE_MAX := 127.99609375
 # Motion-mode IDs that bind a control register (see _motion_mode_options()).
 const CONTROL_REGISTER_MODE_ID := 113
-const CONTROL_REGISTER_ADD_MODE_ID := 114
 
 var _part_anim_lod_index := 0
 var _part_anim_selected_index := 0
@@ -60,7 +58,8 @@ func refresh() -> void:
 
 
 func _motion_mode_options() -> Array:
-	return GeneratorStyleCatalog.options_for_ids(MOTION_MODE_IDS)
+	return GeneratorStyleCatalog.options_for_ids(
+			GeneratorStyleCatalog.CONSUMER_PANM, MOTION_MODE_IDS)
 
 
 func _mode_name_for_id(mode_id: int) -> String:
@@ -424,7 +423,7 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		add_translation.visible = not translation_enabled.button_pressed and supported
 		remove_translation.visible = translation_enabled.button_pressed and supported
 		if translation_register != null and translation_register.get_parent() != null:
-			translation_register.get_parent().visible = translation_mode.get_selected_id() == CONTROL_REGISTER_MODE_ID or translation_mode.get_selected_id() == CONTROL_REGISTER_ADD_MODE_ID
+			translation_register.get_parent().visible = translation_mode.get_selected_id() == CONTROL_REGISTER_MODE_ID
 	update_visibility.call()
 
 	var refresh_after_edit := func() -> void:
@@ -546,5 +545,3 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	translation_from.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
 	translation_to.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
 	translation_speed.value_changed.connect(func(_value: float) -> void: set_translation_values.call())
-
-

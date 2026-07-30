@@ -36,12 +36,11 @@ const LIGHTING_CONTEXT_INTERIOR_SECTION := 1
 const SUN_SHADOW_CATCHER_SHADER := preload(
 		"res://shaders/sun_shadow_catcher.gdshader")
 
-# W4-6c split: the main-body skeletal-animation cluster and the material
-# factory / environment-lighting cluster live in two RefCounted helpers
-# (nova_object_body_anim.gd / nova_object_materials.gd). ALL state stays
-# here; every moved method keeps a delegate below.
+# W4-6c split: cohesive animation, material/environment, and retained-scene
+# construction clusters live in RefCounted helpers; ALL state stays here.
 const NovaObjectBodyAnim := preload("res://engine/object/nova_object_body_anim.gd")
 const NovaObjectMaterials := preload("res://engine/object/nova_object_materials.gd")
+const NovaObjectSceneBuilder := preload("res://engine/object/nova_object_scene_builder.gd")
 # The ADR 0017 typed env record moved with the materials helper; this alias
 # keeps NovaObjectModel.EnvLightValues the public type (mission_object_placer,
 # tests) and the host annotations unchanged.
@@ -82,8 +81,16 @@ var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _surface_lighting_contexts: PackedByteArray = PackedByteArray()
 var _anim_frames_by_mat: Dictionary = {}
+# This retained model stores the latest CTRL snapshot applied to it.
 var _ctrl_values: Dictionary = {}
+# Presentation ownership is bookkeeping around retail's single current value,
+# not a stack of values. It prevents an older presenter's teardown from
+# clearing a later store, but never resurrects an overwritten value.
+var _ctrl_value_owners: Dictionary = {} # register -> current presentation owner
+var _ctrl_batch_depth := 0
+var _ctrl_batch_dirty := false
 var _part_anims: Dictionary = {}
+var _part_anim_tick_accum_s := 0.0
 var _anim_time_ms: int = 0
 var _panm_clock
 var _active_lod: int = 0
@@ -200,11 +207,13 @@ var _model_light_preview_enabled := false
 # exist before any pre-_ready set_object_data/rebuild.
 var _body_anim: NovaObjectBodyAnim
 var _materials: NovaObjectMaterials
+var _scene_builder: NovaObjectSceneBuilder
 
 
 func _init() -> void:
 	_body_anim = NovaObjectBodyAnim.new(self)
 	_materials = NovaObjectMaterials.new(self)
+	_scene_builder = NovaObjectSceneBuilder.new(self)
 
 
 func _ready() -> void:
@@ -219,6 +228,7 @@ func set_object_data(value: NovaObjectData) -> void:
 	object_data = value
 	reset_remote_body_state()
 	_part_anims.clear()
+	_part_anim_tick_accum_s = 0.0
 	_active_lod = _clamp_lod_index(_active_lod)
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.connect(_on_object_changed, CONNECT_DEFERRED)
@@ -543,37 +553,106 @@ func get_active_lod() -> int:
 	return _active_lod
 
 
-func set_ctrl_value(name: String, value: int) -> void:
-	if name.is_empty():
-		return
-	var next_value := clampi(value, 0, 65535)
-	if int(_ctrl_values.get(name, -1)) == next_value:
-		return
-	_ctrl_values[name] = next_value
+func _ctrl_dword(value: int) -> int:
+	# Retail's global CTRL bus stores signed dwords. Keep exact 0x10000
+	# endpoints and negative angular controls instead of narrowing to uint16.
+	var next_value := value & 0xFFFFFFFF
+	if next_value >= 0x80000000:
+		next_value -= 0x100000000
+	return next_value
+
+
+func _finish_ctrl_change(_register: String, apply_now: bool) -> void:
 	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	if apply_now:
+		if _ctrl_batch_depth > 0:
+			_ctrl_batch_dirty = true
+		else:
+			_apply_runtime_state(0.0)
+
+
+## Batch the ordered register stores that precede one retained-model sample.
+## Retail writes every relevant global slot and then consumes the model once;
+## this avoids advancing shared waveform/random consumers once per individual
+## store. Nested callers are supported.
+func begin_ctrl_update() -> void:
+	_ctrl_batch_depth += 1
+
+
+func end_ctrl_update() -> void:
+	if _ctrl_batch_depth <= 0:
+		return
+	_ctrl_batch_depth -= 1
+	if _ctrl_batch_depth == 0 and _ctrl_batch_dirty:
+		_ctrl_batch_dirty = false
+		_apply_runtime_state(0.0)
+
+
+func set_ctrl_value(name: String, value: int) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if register.is_empty():
+		return
+	var next_value := _ctrl_dword(value)
+	if (_ctrl_values.has(register)
+			and int(_ctrl_values[register]) == next_value
+			and not _ctrl_value_owners.has(register)):
+		return
+	_ctrl_values[register] = next_value
+	_ctrl_value_owners.erase(register)
+	_finish_ctrl_change(register, true)
 
 
 func clear_ctrl_value(name: String) -> void:
-	if not _ctrl_values.has(name):
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if register.is_empty() or not _ctrl_values.has(register):
 		return
-	_ctrl_values.erase(name)
-	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	_ctrl_values.erase(register)
+	_ctrl_value_owners.erase(register)
+	_finish_ctrl_change(register, true)
+
+
+## Publish one dedicated retail writer into the register's single current
+## value. The owner tag is lifecycle bookkeeping only: a stale teardown cannot
+## clear a later writer's store, and overwritten values are never stacked or
+## restored. [orig: global CTRL value slots @0x83FCE8, stride 8]
+func set_ctrl_override(owner: String, name: String, value: int) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if owner.is_empty() or register.is_empty():
+		return
+	var next_value := _ctrl_dword(value)
+	if (_ctrl_values.has(register)
+			and int(_ctrl_values[register]) == next_value
+			and String(_ctrl_value_owners.get(register, "")) == owner):
+		return
+	_ctrl_values[register] = next_value
+	_ctrl_value_owners[register] = owner
+	_finish_ctrl_change(register, true)
+
+
+func clear_ctrl_override(owner: String, name: String) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if (owner.is_empty() or register.is_empty()
+			or String(_ctrl_value_owners.get(register, "")) != owner):
+		return
+	_ctrl_value_owners.erase(register)
+	_ctrl_values.erase(register)
+	_finish_ctrl_change(register, true)
 
 
 func clear_ctrl_values() -> void:
-	if _ctrl_values.is_empty():
+	if _ctrl_values.is_empty() and _ctrl_value_owners.is_empty():
 		return
 	_ctrl_values.clear()
-	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	_ctrl_value_owners.clear()
+	_finish_ctrl_change("", true)
 
 
 func get_ctrl_values() -> Dictionary:
 	return _ctrl_values.duplicate(true)
 
 
+# PLAYPARTANIM and its fixed VEHICLE_SPECIAL1/2 CTRL publication live in the
+# body-animation helper. These delegates retain the NovaEntityVisual surface.
 func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	_body_anim.play_part_anim(channel, play_type, time_s)
 
@@ -584,6 +663,10 @@ func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 
 func set_part_phase(channel: int, phase: int) -> void:
 	_body_anim.set_part_phase(channel, phase)
+
+
+func clear_part_phase(channel: int) -> void:
+	_body_anim.clear_part_phase(channel)
 
 
 func clear_part_anims() -> void:
@@ -645,96 +728,7 @@ func advance_body_animation(delta: float, write_pose := true) -> void:
 
 
 func rebuild() -> void:
-	for child in get_children():
-		remove_child(child)
-		child.queue_free()
-	_robj_nodes.clear()
-	_robj_rest_transforms.clear()
-	_skeleton = null
-	_skeleton_skin = null
-	_muzzle_bone = -1
-	_surface_material_indices.clear()
-	_surface_materials.clear()
-	_surface_lighting_contexts.clear()
-	_alpha_materials.clear()
-	_anim_frames_by_mat.clear()
-	_material_cache.clear()
-	_material_defs.clear()
-	_body_pose_dirty = true
-	_bounds_dirty = true
-	_has_lights = false
-	_has_live_panm = false
-	_material_needs_eval.clear()
-	_dynamic_material_slots = PackedInt32Array()
-	_last_env_gen = -1
-	_last_env_values = null
-	_last_section_env_values = null
-	_last_light_push_valid = false
-	_robj_dense = []
-	_panm_applied_revision = 0
-	if object_data == null or not object_data.has_document():
-		_od_has_eval = false
-		_od_has_frame = false
-		_set_model_bounds(AABB())
-		return
-	_od_has_eval = true
-	_od_has_frame = true
-
-	_material_defs = _build_material_defs()
-	_active_lod = _clamp_lod_index(_active_lod)
-	_refresh_live_panm_classification()
-	# A loaded .adm drives the model: build a Skeleton3D from its .bad skeleton. This applies to
-	# BOTH per-vertex skinned models (organic bodies/arms) AND rigid models (first-person weapons) --
-	# rigid parts ride a bone via "fake skinning" (build_lod_submeshes(skeletal=true)). Without a
-	# .adm, no skeleton is built and the model renders static exactly as before.
-	var skeletal_mode: bool = _skeletal != null and _skeletal.is_loaded()
-	if skeletal_mode:
-		_build_skeleton()
-		_resolve_muzzle_userpoint()
-	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame)
-	if submeshes.is_empty():
-		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
-	for entry in submeshes:
-		var submesh: Dictionary = entry
-		var mesh := submesh.get("mesh") as ArrayMesh
-		if mesh == null:
-			continue
-		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
-		var material_index := int(submesh.get("material_index", 0))
-		if not _robj_rest_transforms.has(robj_index):
-			_robj_rest_transforms[robj_index] = Transform3D(
-					Basis.IDENTITY, submesh.get("abs", Vector3.ZERO))
-		var lighting_context := _lighting_context_for_robj(robj_index)
-		var instance := MeshInstance3D.new()
-		instance.mesh = mesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
-				if _shadow_caster_layers != 0 \
-				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.layers = (
-				instance.layers
-				& ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK
-				) | _shadow_caster_layers
-		var material := _material_for_index(material_index, lighting_context)
-		instance.material_override = material
-		# Skinned + rigid-fake-skinned submeshes bind to the shared Skeleton3D; everything else
-		# stays under its render-object (Robj) part node so PANM part transforms keep working.
-		if skeletal_mode and _skeleton != null and bool(submesh.get("is_skinned", false)):
-			_skeleton.add_child(instance)
-			instance.skin = _skeleton_skin
-			instance.skeleton = instance.get_path_to(_skeleton)
-		else:
-			var node := _get_or_create_robj_node(robj_index)
-			node.add_child(instance)
-		_surface_material_indices.append(material_index)
-		_surface_materials.append(material)
-		_surface_lighting_contexts.append(lighting_context)
-		_collect_anim_frames(material_index)
-
-	_classify_materials()
-	_has_lights = int(object_data.get_light_count()) > 0
-	_apply_runtime_state(0.0)
-	refresh_render_order()
+	_scene_builder.rebuild()
 
 
 # Blended materials take their water-side transparency rung from the witnessed
@@ -752,51 +746,6 @@ func refresh_render_order() -> void:
 	for material in _alpha_materials:
 		if material != null:
 			material.render_priority = rung
-
-
-# Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
-# the .bad skeleton (names/parents/parent-local bind rest). The Skin binds each bone with its
-# global-rest inverse (create_skin_from_rest_transforms), so a skinned mesh renders exactly at
-# rest when the pose equals the rest -- making the rest render independent of the (animated)
-# coordinate convention. [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
-func _build_skeleton() -> void:
-	_skeleton = Skeleton3D.new()
-	_skeleton.name = "Skeleton3D"
-	# This model writes final bone poses directly and only parents skinned
-	# MeshInstance3D nodes below the skeleton; it never installs a
-	# SkeletonModifier3D, BoneAttachment3D, or physical-bone simulator. Godot's
-	# default IDLE modifier mode registers an internal process callback anyway.
-	# MANUAL removes that empty per-frame modifier pass; pose setters still queue
-	# the independent deferred skeleton/skin update.
-	_skeleton.modifier_callback_mode_process = (
-			Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_MANUAL)
-	add_child(_skeleton)
-	var bones: Array = _skeletal.get_skeleton_bones()
-	# The rig is INDEX-driven (the model bone table pairs channels/parts by row —
-	# net-re §5.40; empty or duplicate row names are legal in shipped models, e.g.
-	# the REVX M82_1st carries unnamed rows). Godot's Skeleton3D refuses empty/
-	# duplicate/':'/'/' names, and a refused add_bone SHIFTS every later index —
-	# the whole rig past the first bad row then binds to the wrong bones. Sanitize
-	# to unique placeholders so row i is ALWAYS bone i.
-	var used := {}
-	for i in range(bones.size()):
-		var n := String((bones[i] as Dictionary).get("name", "")).strip_edges()
-		n = n.replace(":", "_").replace("/", "_")
-		if n.is_empty():
-			n = "bone_%d" % i
-		if used.has(n):
-			n = "%s_%d" % [n, i]
-		used[n] = true
-		_skeleton.add_bone(n)
-	for i in range(bones.size()):
-		var bd: Dictionary = bones[i]
-		var parent := int(bd.get("parent_index", -1))
-		if parent >= 0 and parent < _skeleton.get_bone_count() and parent != i:
-			_skeleton.set_bone_parent(i, parent)
-		_skeleton.set_bone_rest(i, bd.get("rest", Transform3D()))
-	for i in range(_skeleton.get_bone_count()):
-		_skeleton.reset_bone_pose(i)
-	_skeleton_skin = _skeleton.create_skin_from_rest_transforms()
 
 
 func _on_object_changed() -> void:
@@ -833,14 +782,15 @@ func advance_runtime_frame(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
 		return
 	# Retail evaluates material constants / PANM transforms / light state per
-	# SUBMITTED model only [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the
-	# batch computes constants for the models it draws]. A model that cannot
-	# render this frame (occlusion-hidden building, hidden prop) skips all
-	# clock-DERIVED work; every skipped value re-derives from the absolute
-	# clock on its next visible frame. Time-ACCUMULATING state (commanded part
-	# anims, an internally-timed skeletal clip, the private preview clock)
-	# still advances inside _apply_runtime_state — a door commanded open while
-	# culled is open when next seen.
+	# SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the batch
+	# computes constants for the models it draws]. is_visible_in_tree() is only
+	# the retained host's hierarchy-visibility gate: it skips explicitly hidden
+	# props/buildings, but it does not prove camera/frustum submission. Exact
+	# noise-call cadence therefore remains a renderer-scheduling gap (D-3DI-2),
+	# not something this SceneTree callback can reconstruct. Time-ACCUMULATING
+	# state (commanded part anims, an internally-timed skeletal clip, the private
+	# preview clock) still advances inside _apply_runtime_state — a door
+	# commanded open while hidden is open when next seen.
 	var renderable := is_visible_in_tree()
 	if not _needs_runtime_frame_work():
 		# Keep the private preview clock continuous even while the model has no
@@ -982,6 +932,15 @@ func _apply_runtime_state(delta: float, renderable := true) -> void:
 		# state advanced above; it re-derives on the next visible frame, with
 		# the pending dirt (_bounds_dirty, _body_pose_dirty) staying latched.
 		return
+	# Retail poses PANM during entity submission before the later render-batch
+	# flush evaluates material generators. Preserve that order because noise
+	# waveforms share one random stream.
+	# [orig: Render_SubmitEntity @0x5DAD80 -> Model_TransformBoneMatrices
+	#  @0x58E390; CRenderBatchQueue_SortAndFlush @0x5DAE40 ->
+	#  apply_shader_parameters @0x58DB80]
+	var robj_changed := false
+	if _has_live_panm or _bounds_dirty:
+		robj_changed = _apply_robj_transforms()
 	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
 	# advances) need a per-frame push; a fully-static material already carries its identity
 	# values from _create_material, so re-evaluating it each frame just re-writes identical
@@ -994,26 +953,22 @@ func _apply_runtime_state(delta: float, renderable := true) -> void:
 			continue
 		var material_index := int(_surface_material_indices[i])
 		if _material_needs_eval[i] and _od_has_eval:
-			var runtime: Dictionary = object_data.eval_material_runtime(material_index, _anim_time_ms, _ctrl_values)
+			var runtime: Dictionary = object_data.eval_material_runtime(
+					material_index, _anim_time_ms, _ctrl_values)
 			if not runtime.is_empty():
-				material.set_shader_parameter("u_uv_offset", runtime.get("uv_offset", Vector2.ZERO))
-				material.set_shader_parameter("u_uv_scale", runtime.get("uv_scale", Vector2.ONE))
-				material.set_shader_parameter("u_uv_rotation", runtime.get("uv_rotation", 0.0))
+				material.set_shader_parameter("u_uv_transform_u",
+						runtime.get("uv_transform_u", Vector3(1.0, 0.0, 0.0)))
+				material.set_shader_parameter("u_uv_transform_v",
+						runtime.get("uv_transform_v", Vector3(0.0, 1.0, 0.0)))
 				var rgb: Vector3 = runtime.get("rgb_mod", Vector3.ONE)
 				material.set_shader_parameter("u_rgb_mod", rgb)
 				material.set_shader_parameter("u_alpha_mod", runtime.get("alpha_mod", 1.0))
 		var frames: Array = _anim_frames_by_mat.get(material_index, [])
 		if frames.size() > 1 and _od_has_frame:
-			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
+			var frame_index := int(object_data.compute_anim_frame(
+					material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
-	# evaluate_panm builds native vectors plus a Dictionary of every ROBJ
-	# transform. For an inert PANM block those transforms are immutable: rebuild
-	# (or an exact mutator, via _bounds_dirty) applies the base pose once. Only a
-	# live time/register/view track needs this allocation-heavy call every frame.
-	var robj_changed := false
-	if _has_live_panm or _bounds_dirty:
-		robj_changed = _apply_robj_transforms()
 	_apply_lights()
 	_apply_environment_to_materials()
 	if _bounds_dirty or part_changed or robj_changed:
@@ -1046,7 +1001,8 @@ func _apply_lights() -> void:
 		return
 	if object_data == null:
 		return
-	var lights: Array = object_data.evaluate_lights(_anim_time_ms, _ctrl_values)
+	var lights: Array = object_data.evaluate_lights(
+			_anim_time_ms, _ctrl_values)
 	var dominant := {}
 	var best_intensity := -1.0
 	for light in lights:

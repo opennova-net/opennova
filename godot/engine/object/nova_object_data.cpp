@@ -666,6 +666,30 @@ Error NovaObjectData::_apply_ir_to_source_model() {
 		copy_ir_light(ir.lights[i], source_model.lights[i]);
 	}
 
+	if (source_model.ctrl.count != ir.control_register_count ||
+			(source_model.ctrl.count > 0 &&
+			 source_model.ctrl.registers == nullptr)) {
+		std::free(source_model.ctrl.registers);
+		source_model.ctrl.registers = nullptr;
+		source_model.ctrl.count =
+				static_cast<uint32_t>(ir.control_register_count);
+		if (ir.control_register_count > 0) {
+			source_model.ctrl.registers =
+					static_cast<ThreediControlRegister *>(std::calloc(
+							ir.control_register_count,
+							sizeof(ThreediControlRegister)));
+			if (source_model.ctrl.registers == nullptr) {
+				return ERR_OUT_OF_MEMORY;
+			}
+		}
+	}
+	source_model.ctrl.record_size = 24;
+	for (size_t i = 0; i < ir.control_register_count; ++i) {
+		copy_cstr(source_model.ctrl.registers[i].name,
+				sizeof(source_model.ctrl.registers[i].name),
+				ir.control_registers[i].name);
+	}
+
 	const size_t lod_count = std::min(source_model.lod_count, ir.lod_count);
 	for (size_t lod_index = 0; lod_index < lod_count; ++lod_index) {
 		ThreediLod &dst_lod = source_model.lods[lod_index];

@@ -52,9 +52,8 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	if (has_flag(key, OSCAP_NORMAL_MAP))
 		u += "uniform sampler2D u_normal_map : hint_normal, filter_linear_mipmap, repeat_enable;\n";
 
-	u += "uniform vec2 u_uv_offset = vec2(0.0);\n";
-	u += "uniform vec2 u_uv_scale = vec2(1.0);\n";
-	u += "uniform float u_uv_rotation = 0.0;\n";
+	u += "uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);\n";
+	u += "uniform vec3 u_uv_transform_v = vec3(0.0, 1.0, 0.0);\n";
 	u += "uniform vec3 u_rgb_mod = vec3(1.0);\n";
 	u += "uniform float u_alpha_mod = 1.0;\n";
 
@@ -112,12 +111,12 @@ std::string compose_uniforms(ObjectShaderKey key) {
 		u += "varying vec3 v_world_binormal;\n";
 	}
 
+	// Full D3D COUNT2 affine transform. The U and V coefficient vectors carry
+	// {m00,m10,m20} and {m01,m11,m21}, preserving SET and shear as well as
+	// scroll/scale/center rotation. [orig: compute_uv_transform_matrix @ 0x5B1990]
 	u += "vec2 obj_transform_uv(vec2 uv) {\n";
-	u += "\tvec2 out_uv = (uv - vec2(0.5)) * u_uv_scale;\n";
-	u += "\tfloat c = cos(u_uv_rotation);\n";
-	u += "\tfloat s = sin(u_uv_rotation);\n";
-	u += "\tout_uv = vec2(c * out_uv.x - s * out_uv.y, s * out_uv.x + c * out_uv.y);\n";
-	u += "\treturn out_uv + vec2(0.5) + u_uv_offset;\n";
+	u += "\tvec3 uv1 = vec3(uv, 1.0);\n";
+	u += "\treturn vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v));\n";
 	u += "}\n\n";
 
 	// The FF hemisphere: AmbientColor = (sky + ground)/2 applied as the

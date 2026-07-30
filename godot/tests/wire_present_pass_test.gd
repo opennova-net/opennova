@@ -17,6 +17,7 @@ class FakeModel:
 	var remote_apply_results: Array[bool] = []
 	var reset_remote_body_calls := 0
 	var part_calls: Array = []
+	var cleared_part_channels: Array[int] = []
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
@@ -48,6 +49,10 @@ class FakeModel:
 				if not remote_tick_results.is_empty() else false
 	func set_part_phase(channel: int, phase: int) -> void:
 		part_calls.append([channel, phase])
+		ctrl_values["VEHICLE_SPECIAL%d" % channel] = phase
+	func clear_part_phase(channel: int) -> void:
+		cleared_part_channels.append(channel)
+		ctrl_values.erase("VEHICLE_SPECIAL%d" % channel)
 	func set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
 		pose_call_order.append("overlay")
@@ -85,6 +90,15 @@ class FakeSim:
 	func get_local_player_wire_handle() -> int:
 		return local_player_handle
 
+	func _write_phase(out: PackedFloat32Array, base: int,
+			channel: int, phase: int, active: bool) -> void:
+		var phase_field := NovaSimulation.PF_PHASE1 + (channel - 1) * 2
+		var active_field := NovaSimulation.PF_ACTIVE1 + (channel - 1) * 2
+		var bits := phase & 0xFFFFFFFF
+		out[base + phase_field] = float(bits & 0xFFFF)
+		out[base + active_field] = (
+				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
+
 	func get_present_snapshot() -> PackedFloat32Array:
 		var stride := NovaSimulation.PF_STRIDE
 		var out := PackedFloat32Array()
@@ -109,10 +123,10 @@ class FakeSim:
 			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
 			out[base + NovaSimulation.PF_RESPAWN_REVISION] = float(
 					entity.get("respawn_revision", 0))
-			out[base + NovaSimulation.PF_ACTIVE1] = float(entity.get("active1", 0))
-			out[base + NovaSimulation.PF_PHASE1] = float(entity.get("phase1", 0))
-			out[base + NovaSimulation.PF_ACTIVE2] = float(entity.get("active2", 0))
-			out[base + NovaSimulation.PF_PHASE2] = float(entity.get("phase2", 0))
+			_write_phase(out, base, 1, int(entity.get("phase1", 0)),
+					int(entity.get("active1", 0)) != 0)
+			_write_phase(out, base, 2, int(entity.get("phase2", 0)),
+					int(entity.get("active2", 0)) != 0)
 			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
 					entity.get("anim_phase", -1))
@@ -140,6 +154,22 @@ class FakeSim:
 					entity.get("emplaced_gun_yaw", 0))
 			out[base + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
 					entity.get("emplaced_gun_pitch", 0))
+			out[base + NovaSimulation.PF_TEX_TEAM_VALID] = float(
+					entity.get("tex_team_valid", 0))
+			out[base + NovaSimulation.PF_TEX_TEAM] = float(
+					entity.get("tex_team", 0))
+			out[base + NovaSimulation.PF_ZONE_CTRL_VALID] = float(
+					entity.get("zone_ctrl_valid", 0))
+			out[base + NovaSimulation.PF_TEAMSWING] = float(
+					entity.get("team_swing", 0))
+			out[base + NovaSimulation.PF_LFP_CAMPPERCENT_VALID] = float(
+					entity.get("lfp_camp_percent_valid", 0))
+			out[base + NovaSimulation.PF_LFP_CAMPPERCENT] = float(
+					entity.get("lfp_camp_percent", 0))
+			out[base + NovaSimulation.PF_WORLD_HEAT_GLOW_VALID] = float(
+					entity.get("world_heat_glow_valid", 0))
+			out[base + NovaSimulation.PF_WORLD_HEAT_GLOW] = float(
+					entity.get("world_heat_glow", 0))
 			out[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					entity.get("right_hand_collapsed", 0))
 			out[base + NovaSimulation.PF_HELD_WEAPON_ADM] = float(
@@ -587,6 +617,14 @@ func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> voi
 	var model := placer.built[0] as FakeModel
 	assert_eq(model.part_calls, [[1, 0x2345], [2, 0x6789]],
 			"attached items consume the same two PANM channels as placed items")
+	sim.entities[0]["active1"] = 0
+	sim.entities[0]["phase2"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("VEHICLE_SPECIAL1"),
+			"wire presentation releases a no-longer-owned SPECIAL1 value")
+	assert_eq(model.ctrl_values.get("VEHICLE_SPECIAL2"), 0,
+			"wire presentation submits an owned zero endpoint")
+	assert_has(model.cleared_part_channels, 1)
 	assert_true(model.visible,
 			"a dead attached item retains its graphic or husk until explicitly hidden")
 	sim.entities[0]["hidden"] = 1
@@ -984,6 +1022,74 @@ func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
 	assert_true(model.ctrl_values.is_empty())
 	assert_has(model.cleared_controls, "EWEAP_GUNYAW")
 	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
+
+
+func test_wire_direct_carrier_applies_and_releases_scoped_world_heat() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"world_heat_glow_valid": 1,
+		"world_heat_glow": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.ctrl_values.get("HEAT_GLOW", -1), 0,
+			"the live UseGun carrier scope owns retail's cold zero")
+
+	sim.entities[0]["world_heat_glow"] = 0xFFFF
+	presenter.present()
+	assert_eq(model.ctrl_values.get("HEAT_GLOW", -1), 0xFFFF,
+			"wire-direct carrier presentation keeps the world unsigned-word cap")
+
+	sim.entities[0]["world_heat_glow_valid"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("HEAT_GLOW"),
+			"an unscoped/joiner row releases rather than synthesizes heat")
+	assert_has(model.cleared_controls, "HEAT_GLOW")
+
+
+func test_wire_direct_numbered_zone_applies_and_releases_callback_controls() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x1004,
+		"tex_team_valid": 1,
+		"tex_team": 2,
+		"zone_ctrl_valid": 1,
+		"team_swing": 0x10000,
+		"lfp_camp_percent_valid": 1,
+		"lfp_camp_percent": 0x4000,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.ctrl_values, {
+		"TEX_TEAM": 2,
+		"TEAMSWING": 0x10000,
+		"LFP_CAMPPERCENT": 0x4000,
+	}, "an unresolved pool-1 zone still runs the generic-world CTRL callback")
+
+	sim.entities[0]["lfp_camp_percent_valid"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("LFP_CAMPPERCENT"),
+			"missing timer entry is an omitted write, not a fabricated zero")
+	assert_true(model.ctrl_values.has("TEAMSWING"))
+	sim.entities[0]["tex_team_valid"] = 0
+	sim.entities[0]["zone_ctrl_valid"] = 0
+	presenter.present()
+	assert_true(model.ctrl_values.is_empty())
+	assert_has(model.cleared_controls, "TEX_TEAM")
+	assert_has(model.cleared_controls, "TEAMSWING")
 
 
 func test_wire_model_honors_local_first_person_parent_cull() -> void:

@@ -215,6 +215,10 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_entity_owner_connection_id);
 	ClassDB::bind_method(D_METHOD("get_entity_wire_handle", "index"),
 	                     &NovaSimulation::get_entity_wire_handle);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("decode_present_part_anim_phase",
+					"snapshot", "base", "channel"),
+			&NovaSimulation::decode_present_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("get_entity_body_anim_slot", "index"), &NovaSimulation::get_entity_body_anim_slot);
@@ -360,6 +364,17 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_EMPLACED_CONTROLS_VALID);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNYAW);
 	BIND_ENUM_CONSTANT(PF_EWEAP_GUNPITCH);
+	BIND_ENUM_CONSTANT(PF_VEHICLE_MOTION_VALID);
+	BIND_ENUM_CONSTANT(PF_VEHICLE_STEERING);
+	BIND_ENUM_CONSTANT(PF_VEHICLE_SPEED);
+	BIND_ENUM_CONSTANT(PF_TEX_TEAM_VALID);
+	BIND_ENUM_CONSTANT(PF_TEX_TEAM);
+	BIND_ENUM_CONSTANT(PF_ZONE_CTRL_VALID);
+	BIND_ENUM_CONSTANT(PF_TEAMSWING);
+	BIND_ENUM_CONSTANT(PF_LFP_CAMPPERCENT_VALID);
+	BIND_ENUM_CONSTANT(PF_LFP_CAMPPERCENT);
+	BIND_ENUM_CONSTANT(PF_WORLD_HEAT_GLOW_VALID);
+	BIND_ENUM_CONSTANT(PF_WORLD_HEAT_GLOW);
 	BIND_ENUM_CONSTANT(PF_RIGHT_HAND_COLLAPSED);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_POSITION);

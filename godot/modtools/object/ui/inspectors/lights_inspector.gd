@@ -8,9 +8,9 @@ const LIGHT_FLAG_DISABLE_CORONA := 0x01
 const LIGHT_FLAG_DISABLE_TERRAIN := 0x02
 const LIGHT_FLAG_DISABLE_OBJECTS := 0x04
 
-# Light color animates with the shared NovaLogic generator-style enum (see
-# GeneratorStyleCatalog). colorgen_style reuses the same byte as material RGB
-# generators; the canonical names live in the catalog.
+# Light color uses the RGB generator dispatch. Styles 113 and 114 read CTRL;
+# 115..117 remain low-nibble waveform lookups.
+# [orig: RgbGen_EvaluateColor @ 0x5B23D0]
 
 
 func _lights() -> Array:
@@ -78,9 +78,20 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 
 	_add_section_heading(detail_box, "Animation")
 
-	var style := _add_detail_id_option_row(detail_box, "LightStyle", "Style", GeneratorStyleCatalog.options())
+	var style := _add_detail_id_option_row(detail_box, "LightStyle", "Style", GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_LIGHT))
 	var phase := _add_detail_spin_row(detail_box, "LightPhase", "Phase", 0, 255, 1)
+	var control_reference = _add_detail_ctrl_reg_row(
+			detail_box, "LightControlRegister", "Control reference")
 	var rate := _add_detail_spin_row(detail_box, "LightRate", "Rate", 0, ObjectEditorWorkspace.U16_VALUE_MAX, 1)
+	var sync_parameter_visibility := func(style_id: int) -> void:
+		# The loader resolves every style > 0x70 through the model-local CTRL
+		# table. Waveform fallbacks consume the resolved ordinal as phase, so
+		# the authored field remains a reference even though no CTRL value is
+		# read. [orig: loader fixup sub_5B4640 @ 0x5B4640]
+		var is_reference := GeneratorStyleCatalog.parameter_is_ctrl_reference(style_id)
+		(phase.get_parent() as Control).visible = not is_reference
+		if control_reference != null and control_reference.get_parent() != null:
+			(control_reference.get_parent() as Control).visible = is_reference
 
 	_add_section_heading(detail_box, "Output")
 
@@ -140,10 +151,15 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 	# (FieldBinder has no option helper) and populated in `sync` below. OptionButton
 	# does not emit item_selected on programmatic select(), so no guard is needed.
 	style.item_selected.connect(func(index: int) -> void:
-		set_field.call("colorgen_style", style.get_item_id(index)))
+		var style_id := style.get_item_id(index)
+		set_field.call("colorgen_style", style_id)
+		sync_parameter_visibility.call(style_id))
 	binder.bind_spin(phase,
 		func(info): return float(int(info.get("colorgen_phase", info.get("phase", 0)))),
 		func(value): set_field.call("colorgen_phase", int(value)))
+	if control_reference != null:
+		control_reference.register_selected.connect(func(reg: int) -> void:
+			set_field.call("colorgen_phase", maxi(0, reg)))
 	binder.bind_spin(rate,
 		func(info): return float(int(info.get("colorgen_rate", info.get("rate", 0)))),
 		func(value): set_field.call("colorgen_rate", int(value)))
@@ -172,6 +188,11 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 			return
 		var info: Dictionary = light_info.call(index)
 		binder.sync_from(info)
-		_populate_id_option(style, GeneratorStyleCatalog.options(), int(info.get("colorgen_style", info.get("style", 0))))
+		var style_id := int(info.get("colorgen_style", info.get("style", 0)))
+		var parameter := int(info.get("colorgen_phase", info.get("phase", 0)))
+		_populate_id_option(style, GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_LIGHT), style_id)
+		if control_reference != null:
+			control_reference.setup(_control_registers(), parameter)
+		sync_parameter_visibility.call(style_id)
 
 	sync.call(_selected_index)

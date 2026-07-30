@@ -77,6 +77,32 @@ const ThreediControlFuncInfo *threedi_control_func_info(uint8_t code) {
     return NULL;
 }
 
+const char *threedi_panm_control_name(uint8_t code) {
+    switch (code) {
+        case 114: return "WAVE_SINE_RAW_114";
+        case 115: return "WAVE_TRIANGLE_RAW_115";
+        case 116: return "WAVE_SAW_RAW_116";
+        case 117: return "WAVE_INVERSE_SAW_RAW_117";
+        default: {
+            const ThreediControlFuncInfo *info =
+                    threedi_control_func_info(code);
+            return info ? info->name : NULL;
+        }
+    }
+}
+
+int threedi_panm_control_uses_register(uint8_t code) {
+    // [orig: PANM_SampleTrack @ 0x5B2270]
+    return code == 113;
+}
+
+int threedi_panm_parameter_is_ctrl_reference(uint8_t code) {
+    // The model loader fixes up the parameter field before PANM dispatch. Its
+    // structural threshold is broader than the one runtime value-read case.
+    // [orig: ThreediGp_LoadFromFile PANM fixups @ 0x5B5E0B..0x5B5EF6]
+    return code > 0x70;
+}
+
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx) {
     if (!ctrl || !ctrl->registers || idx >= ctrl->count) {
         return NULL;
@@ -111,12 +137,9 @@ int threedi_decode_transform(const ThreediTransform *t,
     out->control_param = t->control_param;
     out->is_rotation = is_rotation ? 1 : 0;
 
-    const ThreediControlFuncInfo *info = threedi_control_func_info(t->control);
-    if (info) {
-        out->control_name = info->name;
-        if (info->is_register_func) {
-            out->ctrl_reg_name = threedi_ctrl_reg_name(ctrl, t->control_param);
-        }
+    out->control_name = threedi_panm_control_name(t->control);
+    if (threedi_panm_parameter_is_ctrl_reference(t->control)) {
+        out->ctrl_reg_name = threedi_ctrl_reg_name(ctrl, t->control_param);
     }
 
     out->phase = (float)t->control_param / 256.0f;
@@ -276,4 +299,3 @@ void threedi_format_panm(const ThreediPartAnimation *p,
         (void)snprintf(buf + cursor, buf_sz - cursor, "\n  %s: %s", label, tmp);
     }
 }
-

@@ -14,8 +14,9 @@ const TEXTURE_SLOTS := [
 	{"slot": 3, "label": "Normal A"},
 	{"slot": 4, "label": "Normal B"},
 ]
-# Generator style names come from the shared GeneratorStyleCatalog (the canonical
-# NovaLogic enum); the style id passes straight through to set_material_*_generator.
+# Generator style names come from GeneratorStyleCatalog's consumer-specific
+# views; the raw style id still passes straight through to
+# set_material_*_generator.
 # Material "flags" bitfield.
 const MATERIAL_FLAG_ALPHA := 0x01
 # Texture-slot "flags" bitfield.
@@ -688,7 +689,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 		section.add_child(header)
 		var axis_controls := {
 			"box": section,
-			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GeneratorStyleCatalog.options()),
+			"style_option": _add_id_option_row(section, "%sGeneratorStyleOption" % axis.to_upper(), "Style", GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_UV)),
 			"phase": _add_spin_row(section, "%sGeneratorPhase" % axis.to_upper(), "Phase", -100000, 100000, 0.01),
 			"reg_picker": _add_ctrl_reg_row(section, "%sGeneratorControlReg" % axis.to_upper(), "Control reg"),
 			"rate": _add_spin_row(section, "%sGeneratorRate" % axis.to_upper(), "Rate", -100000, 100000, 0.01),
@@ -705,7 +706,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	rgb_header.text = "RGB gen"
 	rgb_section.add_child(rgb_header)
 	controls["rgb_box"] = rgb_section
-	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GeneratorStyleCatalog.options())
+	controls["rgb_style_option"] = _add_id_option_row(rgb_section, "RgbGeneratorStyleOption", "Style", GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_RGB))
 	controls["rgb_phase"] = _add_spin_row(rgb_section, "RgbGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["rgb_reg_picker"] = _add_ctrl_reg_row(rgb_section, "RgbGeneratorControlReg", "Control reg")
 	controls["rgb_rate"] = _add_spin_row(rgb_section, "RgbGeneratorRate", "Rate", -100000, 100000, 0.01)
@@ -724,7 +725,7 @@ func _build_generator_controls(box: VBoxContainer) -> Dictionary:
 	alpha_header.text = "Alpha gen"
 	alpha_section.add_child(alpha_header)
 	controls["alpha_box"] = alpha_section
-	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GeneratorStyleCatalog.options())
+	controls["alpha_style_option"] = _add_id_option_row(alpha_section, "AlphaGeneratorStyleOption", "Style", GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_ALPHA))
 	controls["alpha_phase"] = _add_spin_row(alpha_section, "AlphaGeneratorPhase", "Phase", -100000, 100000, 0.01)
 	controls["alpha_reg_picker"] = _add_ctrl_reg_row(alpha_section, "AlphaGeneratorControlReg", "Control reg")
 	controls["alpha_rate"] = _add_spin_row(alpha_section, "AlphaGeneratorRate", "Rate", -100000, 100000, 0.01)
@@ -758,7 +759,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 	var rgb_gen: Dictionary = material.get("rgb_gen", {})
 	var rgb_style := int(rgb_gen.get("style", 0))
-	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GeneratorStyleCatalog.options(), rgb_style)
+	_populate_id_option(controls.get("rgb_style_option") as OptionButton, GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_RGB), rgb_style)
 	_set_spin(controls.get("rgb_phase"), float(rgb_gen.get("phase", 0.0)))
 	var rgb_reg_picker = controls.get("rgb_reg_picker")
 	if rgb_reg_picker != null:
@@ -772,8 +773,8 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	if rgb_end != null:
 		var end_rgb: Color = rgb_gen.get("end_color", Color.WHITE)
 		rgb_end.color = Color(end_rgb.r, end_rgb.g, end_rgb.b, 1.0)
-	_apply_generator_row_visibility(rgb_style, [
-		controls.get("rgb_phase"), controls.get("rgb_rate"),
+	_apply_generator_row_visibility(rgb_style, controls.get("rgb_phase"), [
+		controls.get("rgb_rate"),
 		controls.get("rgb_start_color"), controls.get("rgb_end_color"),
 	], rgb_reg_picker)
 	var rgb_enabled := bool(shader_info.get("is_luminance", false))
@@ -782,7 +783,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 	var alpha_gen: Dictionary = material.get("alpha_gen", {})
 	var alpha_style := int(alpha_gen.get("style", 0))
-	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GeneratorStyleCatalog.options(), alpha_style)
+	_populate_id_option(controls.get("alpha_style_option") as OptionButton, GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_ALPHA), alpha_style)
 	_set_spin(controls.get("alpha_phase"), float(alpha_gen.get("phase", 0.0)))
 	var alpha_reg_picker = controls.get("alpha_reg_picker")
 	if alpha_reg_picker != null:
@@ -790,8 +791,8 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 	_set_spin(controls.get("alpha_rate"), float(alpha_gen.get("rate", 0.0)))
 	_set_spin(controls.get("alpha_start"), int(alpha_gen.get("start", 0)))
 	_set_spin(controls.get("alpha_end"), int(alpha_gen.get("end", 0)))
-	_apply_generator_row_visibility(alpha_style, [
-		controls.get("alpha_phase"), controls.get("alpha_rate"),
+	_apply_generator_row_visibility(alpha_style, controls.get("alpha_phase"), [
+		controls.get("alpha_rate"),
 		controls.get("alpha_start"), controls.get("alpha_end"),
 	], alpha_reg_picker)
 	var alpha_enabled := bool(shader_info.get("is_alpha", false))
@@ -809,7 +810,7 @@ func _sync_generator_controls(controls: Dictionary, material: Dictionary, shader
 
 func _sync_uv_axis_controls(axis_controls: Dictionary, params: Dictionary) -> void:
 	var style := int(params.get("style", 0))
-	_populate_id_option(axis_controls.get("style_option") as OptionButton, GeneratorStyleCatalog.options(), style)
+	_populate_id_option(axis_controls.get("style_option") as OptionButton, GeneratorStyleCatalog.options_for_consumer(GeneratorStyleCatalog.CONSUMER_UV), style)
 	_set_spin(axis_controls.get("phase"), float(params.get("phase", 0.0)))
 	var reg_picker = axis_controls.get("reg_picker")
 	if reg_picker != null:
@@ -817,8 +818,8 @@ func _sync_uv_axis_controls(axis_controls: Dictionary, params: Dictionary) -> vo
 	_set_spin(axis_controls.get("rate"), float(params.get("rate", 0.0)))
 	_set_spin(axis_controls.get("start"), float(params.get("start", 0.0)))
 	_set_spin(axis_controls.get("end"), float(params.get("end", 0.0)))
-	_apply_generator_row_visibility(style, [
-		axis_controls.get("phase"), axis_controls.get("rate"),
+	_apply_generator_row_visibility(style, axis_controls.get("phase"), [
+		axis_controls.get("rate"),
 		axis_controls.get("start"), axis_controls.get("end"),
 	], reg_picker)
 
@@ -856,15 +857,18 @@ func _set_row_visible(control, visible: bool) -> void:
 		row.visible = visible
 
 
-# A generator only shows its parameter rows when it has a style; the control
-# register row appears only for register-driven styles. Keeps the panel to the
-# few fields that actually apply.
-func _apply_generator_row_visibility(style: int, param_controls: Array, reg_picker) -> void:
+# Every style > 0x70 stores a model-local CTRL reference in the packed parameter
+# byte and is rewritten to a global ordinal by the loader. A consumer may later
+# use that ordinal as waveform phase rather than read the CTRL value, but the
+# authored field is still the register picker; exposing `phase` there would be a
+# no-op. [orig: loader fixup sub_5B4640 @ 0x5B4640]
+func _apply_generator_row_visibility(style: int, phase_control, param_controls: Array, reg_picker) -> void:
 	var active := style != 0
-	var is_register := GeneratorStyleCatalog.uses_register(style)
+	var parameter_is_reference := GeneratorStyleCatalog.parameter_is_ctrl_reference(style)
+	_set_row_visible(phase_control, active and not parameter_is_reference)
 	for control in param_controls:
 		_set_row_visible(control, active)
-	_set_row_visible(reg_picker, active and is_register)
+	_set_row_visible(reg_picker, active and parameter_is_reference)
 
 
 func _connect_uv_generator_spin(spin: SpinBox, axis: String, key: String, controls: Dictionary, apply: Callable) -> void:
@@ -976,5 +980,3 @@ func _object_folder_filename(path: String) -> String:
 	if not selected_lower.begins_with(source_lower + "/"):
 		return ""
 	return selected.get_file()
-
-

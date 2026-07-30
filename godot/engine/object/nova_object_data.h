@@ -69,9 +69,10 @@ private:
 
 	// Per-frame PANM evaluation cache behind apply_panm_to_nodes: one data
 	// instance is SHARED across every placed model of the same graphic (the
-	// placer's per-graphic cache) and mission models ride one presentation
-	// clock, so the second instance of a graphic in the same frame reuses this
-	// evaluation verbatim. `changed` marks parts whose transform moved since
+	// placer's per-graphic cache). Deterministic tracks at the same clock/bus
+	// reuse an evaluation; noise tracks deliberately re-evaluate per instance
+	// because retail consumes one CRT sample per submitted model. `changed`
+	// marks parts whose transform moved since
 	// the PREVIOUS evaluation; `revision` bumps when any did, letting a caller
 	// that already applied this revision skip every node write. Invalidated by
 	// _notify_object_changed()/_clear() like the submesh cache. Main-thread
@@ -81,6 +82,11 @@ private:
 		int64_t time_ms = -1;
 		uint64_t ctrl_hash = 0;
 		bool valid = false;
+		bool has_noise = false;
+		// Diagnostic serial: increments whenever node matrices are actually
+		// evaluated, even if a random sample happens to reproduce the prior
+		// transform and therefore does not mint a changed-pose revision.
+		uint64_t evaluation_serial = 0;
 		uint64_t revision = 0;
 		std::vector<ThreediPartAnimation> anims;         // effective set for `lod`
 		std::vector<ThreediMatrix4x4> base_transforms;   // rebuilt on invalidation
@@ -188,7 +194,10 @@ public:
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	bool set_material_anim_frame(int p_index, int p_slot, int p_frame_idx, const String &p_path);
 	Array get_shader_catalog() const;
+	static Array get_global_control_register_catalog();
+	static String canonical_control_register_name(const String &p_name);
 	Array get_control_registers() const;
+	bool set_control_register_name(int p_index, const String &p_name);
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;
 	String resolve_texture_name(const String &p_texture_name) const;
@@ -262,6 +271,7 @@ public:
 	int64_t apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 			const Dictionary &p_ctrl_values, const Array &p_nodes,
 			int64_t p_applied_revision) const;
+	int64_t get_panm_evaluation_serial() const;
 	Array evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 
 	Error set_material_shader(int p_material_index, const String &p_shader_name);

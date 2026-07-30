@@ -106,10 +106,10 @@ public:
 		               // client attachment pose for a mounted entity)
 		PF_YAW_DEG,
 		PF_ROLL_DEG,   // live: Entity.roll / the client attachment pose
-		PF_PHASE1,     // PANM channel 1 phase 0..65535
-		PF_ACTIVE1,    // 1 when channel 1 has a live part-anim to render, else 0
-		PF_PHASE2,     // PANM channel 2 phase
-		PF_ACTIVE2,
+		PF_PHASE1,     // channel 1 signed dword low16, exact as numeric float
+		PF_ACTIVE1,    // 0 unpublished; otherwise high16+1 (FastRope may suppress)
+		PF_PHASE2,     // channel 2 signed dword low16
+		PF_ACTIVE2,    // 0 unpublished; otherwise high16+1
 		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
@@ -156,11 +156,42 @@ public:
 		PF_AIM_ANGLES, // nine contiguous (pitch,yaw,roll) triples, OverlayClass order
 		PF_AIM_CLASS_STRIDE = 3,
 		// Semantic emplaced-weapon PANM registers. These are deliberately not
-		// PF_PHASE1/2: CTRL order is model-specific (B50Cal starts with HEAT_GLOW).
+		// PF_PHASE1/2: PLAYPARTANIM publishes those on VEHICLE_SPECIAL1/2.
 		PF_EMPLACED_CONTROLS_VALID =
 				PF_AIM_ANGLES + 9 * PF_AIM_CLASS_STRIDE,
 		PF_EWEAP_GUNYAW,
 		PF_EWEAP_GUNPITCH,
+		// Ground-vehicle render controls projected from the authoritative cveh
+		// motor state. Joiner compacts do not carry either source field, so those
+		// rows remain invalid rather than inferring motion from lossy transforms.
+		// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+		//  VEHICLE_STEERING @ 0x4929C0..0x4929D7;
+		//  VEHICLE_SPEED @ 0x4929DC..0x4929F1]
+		PF_VEHICLE_MOTION_VALID,
+		PF_VEHICLE_STEERING,
+		PF_VEHICLE_SPEED,
+		// Retail CTRL writers around a rendered world model. TEX_TEAM is written
+		// for every sector-model submission and again by the generic callback for
+		// numbered zones. TEAMSWING is owned by that zone callback. LFP is a
+		// conditional write: the packed zone byte and a client timer-list entry
+		// must both exist, so its own validity bit cannot be collapsed into
+		// PF_ZONE_CTRL_VALID.
+		// [orig: render_sector_entity @0x5C424F..0x5C425F;
+		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
+		PF_TEX_TEAM_VALID,
+		PF_TEX_TEAM,
+		PF_ZONE_CTRL_VALID,
+		PF_TEAMSWING,
+		PF_LFP_CAMPPERCENT_VALID,
+		PF_LFP_CAMPPERCENT,
+		// Attachment-scoped carrier HEAT_GLOW. VALID means this carrier owns a
+		// live UseGun child/bone relation; that scope publishes cold zero too.
+		// Other authoritative entities and joiner compact rows leave it invalid.
+		// The value saturates at 0xFFFF; the separate FP path reaches 0x10000.
+		// [orig: attachment call @ 0x546518;
+		//  HUD_CacheWeaponSlotInfo @ 0x44095B..0x440991]
+		PF_WORLD_HEAT_GLOW_VALID,
+		PF_WORLD_HEAT_GLOW,
 		// Retail's derived skeletal clipping verdict. For a non-player organic in
 		// controller/gunner/driver (never passenger), presentation zero-scales
 		// BN17 at its animated joint while collision emits its literal zero row.
@@ -1489,11 +1520,19 @@ public:
 	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
 	// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]
 	PackedVector3Array get_foliage_mask_anchor_positions() const;
-	// Part-anim channel phase 0..65535 (PLAYPARTANIM); channel is 1 or 2. The host renders the
-	// model part from this (the engine computes it; the host only reads it).
+	// PF_PHASE/PF_ACTIVE jointly encode one exact signed dword: PHASE carries
+	// low16 and ACTIVE carries high16+1 (zero means unpublished). This avoids
+	// float32 precision loss in the otherwise-float presentation snapshot.
+	static int32_t decode_present_part_anim_phase(
+			const PackedFloat32Array &p_snapshot, int p_base, int p_channel);
+	// Raw signed part-anim channel dword (PLAYPARTANIM); channel is 1 or 2.
+	// Ordinary sweeps occupy 0..0x10000, while zero-time wrapping states are
+	// preserved. The host renders the model part from this value.
 	int get_entity_part_anim_phase(int p_index, int channel) const;
-	// True when channel has a live part-anim to render (rate set or phase moved off rest), so the
-	// host only poses commanded channels and leaves untouched parts at their default.
+	// True when the authority publishes this semantic channel. This is an
+	// ownership predicate, not a movement predicate: owned endpoints, including
+	// zero, must overwrite a prior pose. Channel 1 is suppressed by
+	// ItemDefAttrib 0x1000; channel 2 is unconditional.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
 	// Entity.body_anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written
 	// by EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam

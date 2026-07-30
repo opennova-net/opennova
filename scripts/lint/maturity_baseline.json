@@ -13,12 +13,12 @@
   "counters": {
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 585,
+    "has_method_guards": 579,
     "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 61,
+    "libs_uncited_src_files": 57,
     "oversize_cpp_files": 2,
     "oversize_gd_files": 7,
-    "test_private_pokes": 1363
+    "test_private_pokes": 1353
   },
   "dict_contract_allowlist": [
     "to_drag_data",

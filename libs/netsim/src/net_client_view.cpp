@@ -216,6 +216,12 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
+		// Flag-gated values are zero in the decoded record when omitted.
+		// Assign unconditionally: retail's receive slot is zero-initialized, so
+		// omission denotes zero rather than "preserve the previous value".
+		es.team = rec.team_byte;
+		es.zone_number_rank = rec.zone_number_rank;
+		es.zone_radius = rec.zone_radius;
 		es.parent_handle = rec.parent_handle;
 		es.parent_pose_valid = false;
 		es.state_flags = static_cast<uint8_t>(rec.entity_flags & 0xFFu);
@@ -365,6 +371,7 @@ void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
+		es.team = rec.team_byte;
 	}
 }
 
@@ -382,6 +389,7 @@ void NetClientView::apply_pool3_batch(const std::vector<uint8_t> &body) {
 		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
 		es.pitch_bam = 0; // pool-3 sync carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
+		es.team = rec.team_byte;
 	}
 }
 

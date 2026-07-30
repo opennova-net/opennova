@@ -4,7 +4,7 @@ extends RefCounted
 # The local player's first-person viewmodel presentation, split out of
 # LocalPlayerHost (W4-4): the FP render pass (SubViewport + renderfov camera),
 # the viewmodel node + parts lifetime, the weapon.def placement (pos/tpos ADS
-# lerp, rotation bias, axis map), and the emplaced-weapon control registers.
+# lerp, rotation bias, axis map), and the first-person control-register writers.
 # The host keeps the player camera, the avatar/held-weapon presentation, and
 # the third-person flag; per-frame inputs (the view snapshot, the weapon view,
 # the camera mode, the debug force flag) arrive as update_viewmodel arguments.
@@ -59,6 +59,9 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
+const CTRL_OWNER_FP_HEAT := "first_person:heat"
+const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
+const CTRL_OWNER_FP_TEAM := "first_person:team"
 
 # The world serves the viewmodel builder + def; the host serves the weapon
 # effects (play-serial resync on rebuild). Untyped for the same reason as the
@@ -72,6 +75,7 @@ var _vm_pass_layer: CanvasLayer = null
 var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
+var _vm_ctrl_caps := {}             # instance id -> caps, resolved once per build
 
 
 func setup(world, host, camera: Camera3D) -> void:
@@ -116,9 +120,13 @@ func ensure_viewmodel() -> void:
 		if _viewmodel != null:
 			_apply_viewmodel_def()
 			_vm_parts.clear()
+			_vm_ctrl_caps.clear()
 			for child in _viewmodel.get_children():
 				if child.has_method("play_body_clip"):
 					_vm_parts.append(child)
+					_vm_ctrl_caps[child.get_instance_id()] = (
+							NovaPresentApplier.get_visual_control_capabilities(
+									child))
 			# re-sync the clip serial: fresh parts replay the active clip
 			_host.weapon_effects().reset_play_serial()
 
@@ -140,6 +148,7 @@ func clear_viewmodel() -> void:
 		_viewmodel.queue_free()
 	_viewmodel = null
 	_vm_parts.clear()
+	_vm_ctrl_caps.clear()
 
 
 # Build the dedicated FP render pass (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG): a SubViewport
@@ -244,7 +253,6 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
-	_apply_emplaced_viewmodel_controls(weapon_view)
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
@@ -255,25 +263,79 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := view != null and view.scope_card_active
 	var binoculars := view != null and view.binoculars_view_active
-	_viewmodel.visible = (
-			((not third_person) and not carded and not binoculars)
-			or force_visible)
+	var retail_submit := not third_person and not carded and not binoculars
+	# The debug override intentionally extends retail's submission scope, but a
+	# model made visible by that probe still needs a coherent CTRL snapshot.
+	var submit_viewmodel := retail_submit or force_visible
+	_viewmodel.visible = submit_viewmodel
+	_apply_viewmodel_control_registers(submit_viewmodel, weapon_view)
 	_update_viewmodel_pass()
 
 
-func _apply_emplaced_viewmodel_controls(weapon_view: PlayerWeaponView) -> void:
+func _apply_viewmodel_control_registers(submit_viewmodel: bool,
+		weapon_view: PlayerWeaponView) -> void:
+	# setup()'s world contract already includes get_sim; LocalPlayerHost and its
+	# value-only harness doubles both use that same explicit seam.
+	var sim = _world.get_sim() if _world != null else null
 	for part in _vm_parts:
-		if part == null or not is_instance_valid(part) or \
-				not part.has_method("set_ctrl_value"):
+		if part == null or not is_instance_valid(part):
 			continue
-		if weapon_view != null and weapon_view.emplaced_controls_valid:
-			part.set_ctrl_value(
+		var caps := int(_vm_ctrl_caps.get(part.get_instance_id(), 0))
+		if (caps & (
+						NovaPresentApplier.VISUAL_CTRL_OWNED
+						| NovaPresentApplier.VISUAL_CTRL_LEGACY)) == 0:
+			continue
+		var batch := (
+				caps & NovaPresentApplier.VISUAL_CTRL_BATCH) != 0
+		if batch:
+			part.begin_ctrl_update()
+		# TEX_TEAM is a signed-byte store immediately before the FP lighting,
+		# heat and model-submit path. Hidden/carded/binocular/third-person frames
+		# never execute that retail writer.
+		# [orig: Player_RenderFirstPersonViewModel @0x4DEE96..0x4DEE9F]
+		if submit_viewmodel and sim != null:
+			var team := int(sim.get_local_player_team()) & 0xFF
+			if team >= 0x80:
+				team -= 0x100
+			_set_viewmodel_ctrl(
+					part, caps, CTRL_OWNER_FP_TEAM, "TEX_TEAM", team)
+		else:
+			_clear_viewmodel_ctrl(
+					part, caps, CTRL_OWNER_FP_TEAM, "TEX_TEAM")
+		# Retail publishes accumulated heat independently for every FP model
+		# submit, clamped through the exact 0x10000 endpoint.
+		# [orig: Player_RenderFirstPersonViewModel @0x4DEEC2..0x4DEEF5]
+		if submit_viewmodel and weapon_view != null:
+			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_HEAT,
+					"HEAT_GLOW", weapon_view.heat_glow)
+		else:
+			_clear_viewmodel_ctrl(
+					part, caps, CTRL_OWNER_FP_HEAT, "HEAT_GLOW")
+		if submit_viewmodel and weapon_view != null \
+				and weapon_view.emplaced_controls_valid:
+			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNYAW", weapon_view.emplaced_gun_yaw)
-			part.set_ctrl_value(
+			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNPITCH", weapon_view.emplaced_gun_pitch)
-		elif part.has_method("clear_ctrl_value"):
-			part.clear_ctrl_value("EWEAP_GUNYAW")
-			part.clear_ctrl_value("EWEAP_GUNPITCH")
+		else:
+			_clear_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+					"EWEAP_GUNYAW")
+			_clear_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+					"EWEAP_GUNPITCH")
+		if batch:
+			part.end_ctrl_update()
+
+
+func _set_viewmodel_ctrl(
+		part, caps: int, owner: String, register: String, value: int) -> void:
+	NovaPresentApplier.ctrl_set_with_capabilities(
+			part, caps, owner, register, value)
+
+
+func _clear_viewmodel_ctrl(
+		part, caps: int, owner: String, register: String) -> void:
+	NovaPresentApplier.ctrl_clear_with_capabilities(
+			part, caps, owner, register)
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

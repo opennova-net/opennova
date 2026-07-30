@@ -1,17 +1,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include "threedi/threedi.h"
 #include "threedi/threedi_3di3.h"
 #include "common/test_paths.h"
-
-static int has_extension(const char *name, const char *ext) {
-    size_t nlen = strlen(name);
-    size_t elen = strlen(ext);
-    if (nlen < elen) return 0;
-    return strcmp(name + nlen - elen, ext) == 0;
-}
 
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk,
                                              const char id[4]) {
@@ -106,21 +100,37 @@ static int roundtrip_and_compare(const char *path, const char id[4]) {
 
 int main(void) {
     const char *repo_root = test_paths_repo_root(__FILE__);
-    char fixtures_dir[4096];
-    char bird1[4096], charmodel[4096];
+    static const char *kControlledFixtures[] = {
+        "fixtures/3dp/B50Cal/B50Cal.3di",
+        "fixtures/3dp/CarierU/CarierU.3di",
+        "fixtures/3dp/DLCAC2/DLCAC2.3di",
+        "fixtures/3dp/dm1a1/dm1a1.3di",
+        "fixtures/3dp/dsuv1/dsuv1.3di",
+        "fixtures/3dp/m1trret/M1trret.3di",
+    };
+    char path[4096];
     struct stat st;
+    size_t tested = 0;
     int ok = 1;
 
-    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/fixtures/threedi", repo_root);
-
-    snprintf(bird1, sizeof(bird1), "%s/Bird1.3di", fixtures_dir);
-    if (stat(bird1, &st) == 0) {
-        ok &= roundtrip_and_compare(bird1, "PANM");
+    for (size_t i = 0;
+         i < sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0]);
+         ++i) {
+        snprintf(path, sizeof(path), "%s/%s", repo_root, kControlledFixtures[i]);
+        if (stat(path, &st) != 0) {
+            fprintf(stderr, "required controlled PANM fixture missing: %s\n", path);
+            ok = 0;
+            continue;
+        }
+        ++tested;
+        ok &= roundtrip_and_compare(path, "PANM");
+        ok &= roundtrip_and_compare(path, "CTRL");
     }
-
-    snprintf(charmodel, sizeof(charmodel), "%s/CharModel.3di", fixtures_dir);
-    if (stat(charmodel, &st) == 0) {
-        ok &= roundtrip_and_compare(charmodel, "CTRL");
+    if (tested != sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0])) {
+        fprintf(stderr, "controlled PANM fixture coverage was incomplete (%zu/%zu)\n",
+                tested,
+                sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0]));
+        ok = 0;
     }
 
     return ok ? 0 : 1;

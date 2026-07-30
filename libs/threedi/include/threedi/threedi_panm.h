@@ -90,11 +90,24 @@ static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget t
 
 typedef struct ThreediControlFuncInfo {
     const char *name;     // Static string for the control function (or NULL).
-    int is_register_func; // 1 if this control uses a control register (0x71..0x75).
+    // Generic generator-family metadata. Individual consumers dispatch the
+    // 0x71..0x75 range differently; PANM uses only 0x71 as a register read.
+    int is_register_func;
 } ThreediControlFuncInfo;
 
 // Lookup control function metadata. Returns NULL if the code is unknown.
 const ThreediControlFuncInfo *threedi_control_func_info(uint8_t code);
+
+// PANM-specific dispatch metadata. Codes 114..117 are raw waveform lookups
+// selected by their low nibble, not additional register operations.
+const char *threedi_panm_control_name(uint8_t code);
+int threedi_panm_control_uses_register(uint8_t code);
+
+// Structural loader metadata, distinct from runtime dispatch. Retail treats
+// every PANM style above 0x70 as carrying a model-local CTRL reference and
+// rewrites that parameter to a global ordinal during model load. Only style
+// 113 subsequently reads the referenced register value.
+int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
 
 // Resolve a control register name by index. Returns NULL if out of range or missing.
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);
@@ -103,7 +116,7 @@ typedef struct ThreediTransformDecoded {
     uint8_t control;
     const char *control_name;   // NULL if unknown.
     uint8_t control_param;
-    const char *ctrl_reg_name;  // Non-NULL only for register-based controls.
+    const char *ctrl_reg_name;  // CTRL name when style structurally references one.
     float phase;                // control_param / 256.0f
     float rate;                 // rate / 256.0f
     float start;                // degrees for rotations; /256 for others.

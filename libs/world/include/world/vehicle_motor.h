@@ -99,6 +99,18 @@ struct VehicleDriveCmd {
     int32_t cmd_speed = 0;        // [orig: aiComp[136] = min(brain outSpeed, playerSpeed)]
 };
 
+// The two semantic CTRL values published by the retail cveh render path from
+// the vehicle's live motor fields. Keeping this projection beside the state
+// owner gives rendering and native tests one implementation of the original
+// word selection, wrapping absolute value, and saturation rules.
+struct VehicleCtrlRegisters {
+    int32_t steering = 0;
+    int32_t speed = 0;
+};
+
+VehicleCtrlRegisters vehicle_ctrl_registers(
+        const Entity::VehicleMotorState &state);
+
 // One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
 // traits carry a non-zero `physics` selector). Consumes the controlling occupant's
 // replicated input (or the AI-driver command when the controller is an NPC), advances

@@ -575,8 +575,14 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 	assert_not_null(_find_textured_shader_material(preview), "Object preview should bind diffuse textures to mesh materials.")
 	var material := _find_textured_shader_material(preview)
 	assert_true(material.get_shader_parameter("u_diffuse") is Texture2D, "Textured preview materials should bind renderer diffuse uniforms.")
+	assert_true(material.get_shader_parameter("u_uv_transform_u") is Vector3,
+			"Preview materials should bind the affine U coefficients.")
+	assert_true(material.get_shader_parameter("u_uv_transform_v") is Vector3,
+			"Preview materials should bind the affine V coefficients.")
 	var shader_code := material.shader.code
 	assert_string_contains(shader_code, "obj_transform_uv(UV2)", "Preview shader should carry secondary UVs into renderer materials.")
+	assert_string_contains(shader_code, "dot(uv1, u_uv_transform_u)",
+			"Preview shader should preserve the full affine UV transform.")
 	assert_false(shader_code.contains("uv_rate"), "Preview shader should not duplicate renderer UV generator evaluation.")
 	assert_false(shader_code.contains("rgb_gen_enabled"), "Preview shader should not duplicate renderer RGB generator evaluation.")
 	var material_entry := _find_textured_preview_material_entry(preview)
@@ -680,8 +686,8 @@ func test_object_data_exposes_renderer_runtime_inputs() -> void:
 	var material_info: Dictionary = data.get_material_info(0)
 	assert_false(String(material_info.get("shader_tag", "")).is_empty(), "Material info should expose shader tags.")
 	var runtime: Dictionary = data.eval_material_runtime(0, 250, {})
-	assert_true(runtime.get("uv_offset") is Vector2, "Material runtime should expose UV offset.")
-	assert_true(runtime.get("uv_scale") is Vector2, "Material runtime should expose UV scale.")
+	assert_true(runtime.get("uv_transform_u") is Vector3, "Material runtime should expose the affine U coefficients.")
+	assert_true(runtime.get("uv_transform_v") is Vector3, "Material runtime should expose the affine V coefficients.")
 	assert_true(runtime.get("rgb_mod") is Vector3, "Material runtime should expose RGB modulation.")
 	assert_eq(typeof(runtime.get("alpha_mod")), TYPE_FLOAT, "Material runtime should expose alpha modulation.")
 
@@ -697,6 +703,90 @@ func test_object_data_exposes_renderer_runtime_inputs() -> void:
 		assert_true(light.get("position") is Vector3, "Runtime lights should expose positions.")
 
 
+func test_global_control_register_catalog_and_local_rename_surface() -> void:
+	var catalog: Array = NovaObjectData.get_global_control_register_catalog()
+	assert_eq(catalog.size(), 96)
+	assert_eq(catalog[0], {"ordinal": 0, "name": "LOD_FRAC"})
+	assert_eq(catalog[95], {"ordinal": 95, "name": "TEX_CAMO3"})
+	assert_eq(NovaObjectData.canonical_control_register_name("eWeAp_GuNyAw"),
+			"EWEAP_GUNYAW")
+	assert_eq(NovaObjectData.canonical_control_register_name("not_retail"), "")
+
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_true(data.set_control_register_name(0, "VEHICLE_SPECIAL1"))
+	var registers: Array = data.get_control_registers()
+	assert_eq(String((registers[0] as Dictionary).get("name", "")),
+			"VEHICLE_SPECIAL1")
+	assert_eq(int((registers[0] as Dictionary).get("runtime_ordinal", -1)), 71)
+	assert_eq(String((registers[0] as Dictionary).get("runtime_name", "")),
+			"VEHICLE_SPECIAL1")
+
+	assert_true(data.set_control_register_name(0, "NOT_A_RETAIL_REGISTER"))
+	registers = data.get_control_registers()
+	assert_eq(String((registers[0] as Dictionary).get("name", "")),
+			"NOT_A_RETAIL_REGISTER",
+			"Metadata must preserve the model-authored spelling.")
+	assert_eq(int((registers[0] as Dictionary).get("runtime_ordinal", -1)), 0,
+			"Retail loader misses alias global ordinal zero.")
+	assert_eq(String((registers[0] as Dictionary).get("runtime_name", "")),
+			"LOD_FRAC")
+
+	assert_true(data.set_control_register_name(0, ""))
+	registers = data.get_control_registers()
+	assert_eq(String((registers[0] as Dictionary).get("name", "sentinel")), "")
+	assert_eq(int((registers[0] as Dictionary).get("runtime_ordinal", -1)), 0)
+	assert_eq(String((registers[0] as Dictionary).get("runtime_name", "")),
+			"LOD_FRAC",
+			"An empty local CTRL name follows retail's ordinal-zero alias.")
+	assert_false(data.set_control_register_name(0, "X".repeat(25)),
+			"a 24-byte CTRL record cannot silently truncate an authored name")
+
+
+func test_object_light_control_register_colors_resolve_local_slot_name() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_gt(data.get_light_count(), 0, "Fixture should expose a light for runtime evaluation.")
+	var registers: Array = data.get_control_registers()
+	assert_gt(registers.size(), 0, "Fixture should expose its FLICKER control register.")
+	var register_name := String((registers[0] as Dictionary).get("name", ""))
+	assert_eq(register_name, "FLICKER")
+
+	assert_true(data.set_light_field(0, "disable_lightobjects", false))
+	assert_true(data.set_light_field(0, "colorgen_phase", 0))
+	assert_true(data.set_light_field(0, "color_start", Color.BLACK))
+	assert_true(data.set_light_field(0, "color_end", Color.WHITE))
+	for style in [113, 114]:
+		assert_true(data.set_light_field(0, "colorgen_style", style))
+		var at_zero: Array = data.evaluate_lights(0, {register_name: 0})
+		var at_half: Array = data.evaluate_lights(0, {register_name: 32768})
+		var at_end: Array = data.evaluate_lights(0, {register_name: 65536})
+		var below_start: Array = data.evaluate_lights(0, {register_name: -32768})
+		assert_gt(at_zero.size(), 0)
+		assert_gt(at_half.size(), 0)
+		assert_gt(at_end.size(), 0)
+		assert_gt(below_start.size(), 0)
+		var zero_color: Color = (at_zero[0] as Dictionary).get("color", Color.WHITE)
+		var half_color: Color = (at_half[0] as Dictionary).get("color", Color.BLACK)
+		var end_color: Color = (at_end[0] as Dictionary).get("color", Color.BLACK)
+		var negative_color: Color = (below_start[0] as Dictionary).get("color", Color.BLACK)
+		assert_true(zero_color.is_equal_approx(Color.BLACK),
+				"Controlled light style %d should sample the register's zero endpoint." % style)
+		assert_almost_eq(half_color.r, 127.0 / 255.0, 0.00001,
+				"Controlled light style %d should use byte-exact half interpolation." % style)
+		assert_true(end_color.is_equal_approx(Color.WHITE),
+				"Controlled light style %d should preserve the 0x10000 endpoint." % style)
+		assert_almost_eq(negative_color.r, -128.0 / 255.0, 0.00001,
+				"Controlled light style %d should preserve negative signed values." % style)
+
+	# Other codes keep the packed byte as waveform phase and do not consume CTRL.
+	assert_true(data.set_light_field(0, "colorgen_style", 115))
+	var wave_low: Color = (data.evaluate_lights(733, {register_name: 0})[0] as Dictionary).get("color")
+	var wave_high: Color = (data.evaluate_lights(733, {register_name: 65535})[0] as Dictionary).get("color")
+	assert_true(wave_low.is_equal_approx(wave_high),
+			"Light style 115 should remain a waveform when a same-index CTRL value changes.")
+
+
 func test_object_preview_runtime_controls_update_state() -> void:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
@@ -705,13 +795,23 @@ func test_object_preview_runtime_controls_update_state() -> void:
 
 	preview.set_playing(false)
 	preview.set_wireframe(true)
-	preview.set_ctrl_value("door", 70000)
+	preview.set_ctrl_value("DOOR_00", 65536)
+	preview.set_ctrl_value("EWEAP_GUNYAW", -32768)
+	preview.set_ctrl_value("LOD_FRAC", -2147483648)
+	preview.set_ctrl_value("TEX_CAMO3", 2147483647)
 	preview.reset_animation_time()
 
 	var ctrl_values: Dictionary = preview.get_ctrl_values()
 	assert_false(preview.is_playing(), "Preview playback should be controllable from the inspector.")
 	assert_true(preview.is_wireframe(), "Preview wireframe state should be controllable from the inspector.")
-	assert_eq(int(ctrl_values.get("door", -1)), 65535, "Preview control register values should clamp to uint16.")
+	assert_eq(int(ctrl_values.get("DOOR_00", -1)), 65536,
+			"Preview controls preserve retail's exact 0x10000 endpoint.")
+	assert_eq(int(ctrl_values.get("EWEAP_GUNYAW", 0)), -32768,
+			"Preview controls preserve signed retail dwords.")
+	assert_eq(int(ctrl_values.get("LOD_FRAC", 0)), -2147483648,
+			"Preview controls preserve INT32_MIN.")
+	assert_eq(int(ctrl_values.get("TEX_CAMO3", 0)), 2147483647,
+			"Preview controls preserve INT32_MAX.")
 	assert_eq(preview.get_animation_time_ms(), 0, "Preview reset should rewind animation time.")
 
 
@@ -729,10 +829,15 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	var play := _find_node_by_name(host, "PreviewPlayButton") as Button
 	var reset := _find_node_by_name(host, "PreviewResetButton") as Button
 	var wire := _find_node_by_name(host, "PreviewWireCheck") as CheckBox
+	var ctrl_value := _find_node_by_name(host, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(preview)
 	assert_not_null(play)
 	assert_not_null(reset)
 	assert_not_null(wire)
+	assert_not_null(ctrl_value)
+	if ctrl_value != null:
+		assert_eq(int(ctrl_value.min_value), -2147483648)
+		assert_eq(int(ctrl_value.max_value), 2147483647)
 
 	play.toggled.emit(false)
 	wire.toggled.emit(true)
@@ -741,6 +846,56 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	assert_false(preview.is_playing(), "Preview inspector play toggle should update the preview.")
 	assert_true(preview.is_wireframe(), "Preview inspector wire toggle should update the preview.")
 	assert_eq(preview.get_animation_time_ms(), 0, "Preview inspector reset should rewind the preview.")
+
+
+func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_retail() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+	assert_true(workspace.object_editor.object_data.set_control_register_name(
+			0, "NOT_A_RETAIL_REGISTER"))
+
+	var viewport_host = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_host)
+	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
+	assert_not_null(preview)
+
+	var unknown_host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(
+			ObjectEditorWorkspace.Workflow.PREVIEW, unknown_host)
+	var unknown_label := _find_node_by_name(
+			unknown_host, "ControlRegisterLabel_0") as Label
+	var unknown_value := _find_node_by_name(
+			unknown_host, "ControlRegisterValue_0") as SpinBox
+	assert_not_null(unknown_label)
+	assert_not_null(unknown_value)
+	if unknown_label != null:
+		assert_eq(unknown_label.text, "NOT_A_RETAIL_REGISTER",
+				"The inspector preserves the authored name for display.")
+	if unknown_value != null and preview != null:
+		unknown_value.value_changed.emit(123)
+		assert_eq(preview.get_ctrl_values(), {"LOD_FRAC": 123},
+				"An unknown authored name drives retail's ordinal-zero alias.")
+
+	assert_true(workspace.object_editor.object_data.set_control_register_name(0, ""))
+	if preview != null:
+		preview.clear_ctrl_values()
+	var empty_host = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(
+			ObjectEditorWorkspace.Workflow.PREVIEW, empty_host)
+	var empty_label := _find_node_by_name(
+			empty_host, "ControlRegisterLabel_0") as Label
+	var empty_value := _find_node_by_name(
+			empty_host, "ControlRegisterValue_0") as SpinBox
+	assert_not_null(empty_label,
+			"Empty CTRL records remain visible rather than being dropped.")
+	assert_not_null(empty_value)
+	if empty_label != null:
+		assert_eq(empty_label.text, "<empty>")
+	if empty_value != null and preview != null:
+		empty_value.value_changed.emit(-456)
+		assert_eq(preview.get_ctrl_values(), {"LOD_FRAC": -456},
+				"An empty authored name drives retail's ordinal-zero alias.")
 
 
 func test_object_preview_shows_labeled_userpoints_by_default() -> void:
@@ -1401,6 +1556,31 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 	assert_not_null(list, "Light inspector should expose the light list.")
 	if list == null:
 		return
+	var first_style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
+	assert_not_null(first_style, "Light inspector should expose its consumer-specific style options.")
+	if first_style != null:
+		assert_eq(
+				_option_text_by_id(first_style, 114),
+				"Add (control register)",
+				"Light style 114 should retain its witnessed CTRL dispatch.")
+		assert_eq(
+				_option_text_by_id(first_style, 115),
+				"Wave: triangle",
+				"Light style 115 should be labeled as its waveform fallback.")
+		var phase := _find_node_by_name(detail_host, "LightPhase") as SpinBox
+		var control_reference := _find_node_by_name(
+				detail_host, "LightControlRegister") as OptionButton
+		assert_not_null(phase)
+		assert_not_null(control_reference)
+		var wave_index := _option_index_by_id(first_style, 115)
+		assert_gte(wave_index, 0)
+		first_style.select(wave_index)
+		first_style.item_selected.emit(wave_index)
+		await get_tree().process_frame
+		assert_false((phase.get_parent() as Control).visible,
+				"Light style 115 phase comes from the loader-resolved reference.")
+		assert_true((control_reference.get_parent() as Control).visible,
+				"Light style 115 should expose its model-local CTRL reference.")
 	for i in range(light_count):
 		list.select(i)
 		list.item_selected.emit(i)
@@ -1595,13 +1775,40 @@ func test_object_materials_inspector_generator_rows_follow_style() -> void:
 	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
 	var u_section := _find_node_by_name(detail_host, "UGeneratorSection") as Control
 	var u_style := _find_node_by_name(detail_host, "UGeneratorStyleOption") as OptionButton
+	var u_phase := _find_node_by_name(detail_host, "UGeneratorPhase") as SpinBox
 	var u_rate := _find_node_by_name(detail_host, "UGeneratorRate") as SpinBox
 	var u_reg := _find_node_by_name(detail_host, "UGeneratorControlReg") as OptionButton
+	var rgb_style := _find_node_by_name(detail_host, "RgbGeneratorStyleOption") as OptionButton
+	var rgb_phase := _find_node_by_name(detail_host, "RgbGeneratorPhase") as SpinBox
+	var rgb_reg := _find_node_by_name(detail_host, "RgbGeneratorControlReg") as OptionButton
+	var alpha_style := _find_node_by_name(detail_host, "AlphaGeneratorStyleOption") as OptionButton
+	var alpha_phase := _find_node_by_name(detail_host, "AlphaGeneratorPhase") as SpinBox
+	var alpha_reg := _find_node_by_name(detail_host, "AlphaGeneratorControlReg") as OptionButton
 	assert_not_null(u_section)
 	assert_not_null(u_style)
+	assert_not_null(u_phase)
 	assert_not_null(u_rate)
 	assert_not_null(u_reg)
+	assert_not_null(rgb_style)
+	assert_not_null(rgb_phase)
+	assert_not_null(rgb_reg)
+	assert_not_null(alpha_style)
+	assert_not_null(alpha_phase)
+	assert_not_null(alpha_reg)
 	assert_true(u_section.visible, "UV generator controls should be visible for #UV shaders.")
+	if u_style != null and rgb_style != null and alpha_style != null:
+		assert_eq(
+				_option_text_by_id(u_style, 115),
+				"Skew (control register)",
+				"UV style 115 should retain its controlled skew meaning.")
+		assert_eq(
+				_option_text_by_id(rgb_style, 115),
+				"Wave: triangle",
+				"RGB style 115 should be labeled as its waveform fallback.")
+		assert_eq(
+				_option_text_by_id(alpha_style, 114),
+				"Wave: sine",
+				"Alpha style 114 should be labeled as its waveform fallback.")
 
 	# The raw numeric twins are internal and must not be user-facing.
 	assert_null(_find_node_by_name(detail_host, "UGeneratorStyle"), "Raw generator style number should be gone from the UI.")
@@ -1636,6 +1843,31 @@ func test_object_materials_inspector_generator_rows_follow_style() -> void:
 	u_style.item_selected.emit(reg_index)
 	await get_tree().process_frame
 	assert_true((u_reg.get_parent() as Control).visible, "Control reg row should appear for register-driven styles.")
+	assert_false((u_phase.get_parent() as Control).visible,
+			"The loader-reference byte replaces authored phase for UV style 113.")
+
+	# RGB/alpha waveform fallbacks do not read the CTRL value, but their packed
+	# parameter is still a model-local CTRL reference which the loader resolves
+	# to the waveform phase ordinal.
+	var rgb_wave_index := _option_index_by_id(rgb_style, 115)
+	assert_gte(rgb_wave_index, 0)
+	rgb_style.select(rgb_wave_index)
+	rgb_style.item_selected.emit(rgb_wave_index)
+	await get_tree().process_frame
+	assert_true((rgb_reg.get_parent() as Control).visible,
+			"RGB style 115 should author the loader's CTRL reference.")
+	assert_false((rgb_phase.get_parent() as Control).visible,
+			"RGB style 115 should not expose the phase value ignored by the loader.")
+
+	var alpha_wave_index := _option_index_by_id(alpha_style, 114)
+	assert_gte(alpha_wave_index, 0)
+	alpha_style.select(alpha_wave_index)
+	alpha_style.item_selected.emit(alpha_wave_index)
+	await get_tree().process_frame
+	assert_true((alpha_reg.get_parent() as Control).visible,
+			"Alpha style 114 should author the loader's CTRL reference.")
+	assert_false((alpha_phase.get_parent() as Control).visible,
+			"Alpha style 114 should not expose the phase value ignored by the loader.")
 
 
 func test_object_materials_inspector_uses_compact_layout_and_named_generator_controls() -> void:
@@ -2028,6 +2260,11 @@ func _option_index_by_id(option: OptionButton, item_id: int) -> int:
 		if option.get_item_id(i) == item_id:
 			return i
 	return -1
+
+
+func _option_text_by_id(option: OptionButton, item_id: int) -> String:
+	var index := _option_index_by_id(option, item_id)
+	return option.get_item_text(index) if index >= 0 else ""
 
 
 func _field_label_for_control(control: Control) -> Label:

@@ -164,6 +164,48 @@ std::vector<uint8_t> retail_transfer_chunk(
 	return body;
 }
 
+std::vector<uint8_t> zone_timer_value_body(
+		uint16_t handle, uint8_t mode, int32_t value_s,
+		int32_t limit_s, int16_t rate,
+		uint8_t byte544 = 0, uint8_t byte545 = 0) {
+	std::vector<uint8_t> body;
+	body.reserve(15);
+	auto append_u16 = [&](uint16_t value) {
+		body.push_back(static_cast<uint8_t>(value));
+		body.push_back(static_cast<uint8_t>(value >> 8));
+	};
+	auto append_u32 = [&](uint32_t value) {
+		body.push_back(static_cast<uint8_t>(value));
+		body.push_back(static_cast<uint8_t>(value >> 8));
+		body.push_back(static_cast<uint8_t>(value >> 16));
+		body.push_back(static_cast<uint8_t>(value >> 24));
+	};
+	append_u16(handle);
+	body.push_back(mode);
+	append_u32(static_cast<uint32_t>(value_s));
+	append_u32(static_cast<uint32_t>(limit_s));
+	append_u16(static_cast<uint16_t>(rate));
+	body.push_back(byte544);
+	body.push_back(byte545);
+	return body;
+}
+
+std::vector<uint8_t> zone_timer_window_body(
+		uint16_t handle, uint8_t mode_a, uint8_t mode_b,
+		uint16_t start_s, uint16_t end_s, uint8_t rate) {
+	return {
+			static_cast<uint8_t>(handle),
+			static_cast<uint8_t>(handle >> 8),
+			mode_a,
+			mode_b,
+			static_cast<uint8_t>(start_s),
+			static_cast<uint8_t>(start_s >> 8),
+			static_cast<uint8_t>(end_s),
+			static_cast<uint8_t>(end_s >> 8),
+			rate,
+	};
+}
+
 bool matches_client_header(const ProtocolPacketHeader &header,
 		uint32_t session_id, uint32_t sequence, uint32_t ack) {
 	return header.session_id == session_id &&
@@ -1960,6 +2002,224 @@ bool run_host_client_discards_authority_owned_reload_echoes() {
 	              "host client does not retain authority-owned reload notifications");
 }
 
+bool run_host_zone_timer_value_matches_retail_entry() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	constexpr uint16_t kZone = 0x3001;
+
+	int32_t percent = -1;
+	if (!expect(!host_view.lfp_cam_percent(kZone, percent),
+	            "zone value: absent entry has no LFP_CAMPPERCENT writer"))
+		return false;
+
+	// A new 0x6F seeds current from value, then the one per-client-frame
+	// ZoneTimerList advance applies rate before presentation reads the entry.
+	host_loop.host_send(
+			0x6F, zone_timer_value_body(kZone, 2, 10, 20, 2, 0xAA, 0xBB));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.lfp_cam_percent(kZone, percent) && percent == 32873,
+	            "zone value: new entry seeds 620, advances to 622, and scales to 16.16"))
+		return false;
+
+	// An existing entry is re-targeted without snapping current to the new wire
+	// value. Only the replacement rate advances it this frame: 622 - 3 = 619.
+	host_loop.host_send(
+			0x6F, zone_timer_value_body(kZone, 4, 19, 20, -3, 0xCC, 0xDD));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.lfp_cam_percent(kZone, percent) && percent == 32715,
+	            "zone value: later 0x6F re-targets without replacing current"))
+		return false;
+
+	// Two messages in one receive pump apply in FIFO order, then the list advances
+	// exactly once with the final message's rate: 619 - 9 = 610.
+	host_loop.host_send(0x6F, zone_timer_value_body(kZone, 5, 1, 20, 7));
+	host_loop.host_send(0x6F, zone_timer_value_body(kZone, 6, 3, 20, -9));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.lfp_cam_percent(kZone, percent) && percent == 32239,
+	            "zone value: receive burst advances once after the final ordered update"))
+		return false;
+
+	const auto live = host_view.zone_states().find(kZone);
+	return expect(live != host_view.zone_states().end() &&
+	                      live->second.has_value &&
+	                      live->second.value.mode == 6 &&
+	                      live->second.value.value_s == 3 &&
+	                      live->second.value.byte544 == 0 &&
+	                      live->second.value.byte545 == 0,
+	              "zone value: legacy latest-wire record remains available to UI callers");
+}
+
+bool run_zone_timer_channels_share_one_retail_entry() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	constexpr uint16_t kZone = 0x3002;
+
+	host_loop.host_send(
+			0x53, zone_timer_window_body(kZone, 1, 4, 10, 40, 2));
+	host_view.Client_ProcessNetworkFrame();
+	const auto first = host_view.zone_states().find(kZone);
+	if (!expect(first != host_view.zone_states().end() &&
+	                    first->second.entry.mode_a == 1 &&
+	                    first->second.entry.mode_b == 4 &&
+	                    first->second.entry.window_current == 622 &&
+	                    first->second.entry.window_target == 620 &&
+	                    first->second.entry.window_limit == 2480 &&
+	                    first->second.entry.window_rate == 2 &&
+	                    first->second.entry.window_active &&
+	                    first->second.entry.value_current == 0 &&
+	                    !first->second.entry.value_active,
+	            "zone channels: new 0x53 seeds and advances the shared entry window"))
+		return false;
+
+	// Because 0x53 already created the entry, this first 0x6F must not seed
+	// DWORD 8 from its wire value. It activates value, disables window, and the
+	// frame advance changes zero to one.
+	host_loop.host_send(
+			0x6F, zone_timer_value_body(kZone, 7, 30, 60, 1));
+	host_view.Client_ProcessNetworkFrame();
+	const auto &after_value = host_view.zone_states().at(kZone);
+	int32_t percent = -1;
+	if (!expect(after_value.entry.mode_a == 7 &&
+	                    after_value.entry.mode_b == 7 &&
+	                    !after_value.entry.window_active &&
+	                    after_value.entry.value_current == 1 &&
+	                    after_value.entry.value_target == 1860 &&
+	                    after_value.entry.value_limit == 3720 &&
+	                    after_value.entry.value_rate == 1 &&
+	                    after_value.entry.value_active &&
+	                    host_view.lfp_cam_percent(kZone, percent) &&
+	                    percent == 17,
+	            "zone channels: window-first entry prevents later 0x6F current seeding"))
+		return false;
+
+	// Same mode_b leaves the prior window current alone; 0x53 clears the value
+	// target/limit and disables its channel without clearing DWORD 8.
+	host_loop.host_send(
+			0x53, zone_timer_window_body(kZone, 2, 7, 20, 40, 3));
+	host_view.Client_ProcessNetworkFrame();
+	const auto &same_mode = host_view.zone_states().at(kZone);
+	if (!expect(same_mode.entry.window_current == 625 &&
+	                    same_mode.entry.window_target == 1240 &&
+	                    same_mode.entry.window_active &&
+	                    same_mode.entry.value_current == 1 &&
+	                    same_mode.entry.value_target == 0 &&
+	                    same_mode.entry.value_limit == 0 &&
+	                    !same_mode.entry.value_active &&
+	                    host_view.lfp_cam_percent(kZone, percent) &&
+	                    percent == 0x10000,
+	            "zone channels: 0x53 preserves currents, clears value program, and advances window"))
+		return false;
+
+	// A changed mode_b resets DWORD 3 to the new start before this frame's tick.
+	host_loop.host_send(
+			0x53, zone_timer_window_body(kZone, 2, 8, 20, 40, 4));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().at(kZone).entry.window_current == 1244,
+	            "zone channels: changed window mode resets current before advance"))
+		return false;
+
+	// Retail only deactivates the window channel under its peculiar
+	// target==limit && current==limit && positive-rate condition.
+	host_loop.host_send(
+			0x53, zone_timer_window_body(kZone, 2, 9, 40, 40, 2));
+	host_view.Client_ProcessNetworkFrame();
+	const auto &finished = host_view.zone_states().at(kZone);
+	return expect(finished.entry.window_current == 2480 &&
+	                      !finished.entry.window_active &&
+	                      finished.has_value && finished.has_window,
+	              "zone channels: exact window completion condition deactivates DWORD 7");
+}
+
+bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
+	ns::LoopbackChannel host_loop;
+	np::ClientRuntime host_view(host_loop);
+	int32_t percent = -1;
+
+	// 34,636,833 * 62 = INT32_MAX-1. Adding two wraps to INT32_MIN,
+	// then the signed low clamp sets current to zero.
+	host_loop.host_send(
+			0x6F,
+			zone_timer_value_body(
+					0x3003, 1, 34636833, 34636833, 2));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().at(0x3003).entry.value_current == 0 &&
+	                    host_view.lfp_cam_percent(0x3003, percent) &&
+	                    percent == 0,
+	            "zone arithmetic: per-frame ADD wraps as a retail signed DWORD"))
+		return false;
+
+	// 0x40000000 * 62 wraps to INT32_MIN before the signed low clamp.
+	host_loop.host_send(
+			0x6F,
+			zone_timer_value_body(
+					0x3004, 1, 0x40000000, 1, 0));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.zone_states().at(0x3004).entry.value_current == 0,
+	            "zone arithmetic: wire-to-tick multiply wraps at 32 bits"))
+		return false;
+
+	host_loop.host_send(
+			0x6F, zone_timer_value_body(0x3005, 1, 0, 20, 32767));
+	host_view.Client_ProcessNetworkFrame();
+	if (!expect(host_view.lfp_cam_percent(0x3005, percent) &&
+	                    percent == 0x10000,
+	            "zone arithmetic: positive overflow past limit high-clamps"))
+		return false;
+	host_loop.host_send(
+			0x6F, zone_timer_value_body(0x3005, 1, 19, 20, -32768));
+	host_view.Client_ProcessNetworkFrame();
+	return expect(host_view.lfp_cam_percent(0x3005, percent) && percent == 0,
+	              "zone arithmetic: signed negative rate low-clamps");
+}
+
+bool run_joiner_zone_timer_preserves_mixed_wire_order() {
+	const std::string client_scrk = "CLIENT-ZONE-TIMER-SCRK";
+	const std::string server_scrk = "SERVER-ZONE-TIMER-SCRK";
+	np::ClientRuntime client("ZoneJoiner");
+	client.seed_session(
+			0x66778899u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/true);
+
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> mixed = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{
+					// Window then value: the value sees an existing entry, does
+					// not seed current, and is the sole active channel at tick.
+					make_protocol_message(
+							0x53, zone_timer_window_body(0x3006, 1, 4, 1, 10, 3)),
+					make_protocol_message(
+							0x6F, zone_timer_value_body(0x3006, 7, 8, 10, 5)),
+					// Reverse order on another entry: window wins and value
+					// current is retained but inactive.
+					make_protocol_message(
+							0x6F, zone_timer_value_body(0x3007, 2, 10, 20, 9)),
+					make_protocol_message(
+							0x53, zone_timer_window_body(0x3007, 3, 6, 1, 10, 4)),
+			});
+	client.receive(mixed.data(), mixed.size());
+	(void)client.Client_ProcessNetworkFrame();
+
+	const auto &window_then_value = client.zone_states().at(0x3006).entry;
+	const auto &value_then_window = client.zone_states().at(0x3007).entry;
+	int32_t percent = -1;
+	if (!expect(window_then_value.value_current == 5 &&
+	                    window_then_value.value_active &&
+	                    !window_then_value.window_active &&
+	                    client.lfp_cam_percent(0x3006, percent) &&
+	                    percent == 528,
+	            "zone joiner: 0x53 then 0x6F remains in packet order and ticks once"))
+		return false;
+	return expect(value_then_window.value_current == 620 &&
+	                      !value_then_window.value_active &&
+	                      value_then_window.window_current == 66 &&
+	                      value_then_window.window_active &&
+	                      client.lfp_cam_percent(0x3007, percent) &&
+	                      percent == 0x10000,
+	              "zone joiner: 0x6F then 0x53 remains in packet order and ticks once");
+}
+
 bool run_host_as_client() {
 	np::NapiNPServerCtx ctx;
 	ns::LoopbackChannel host_loop; // the in-process channel the host emits its own S2C onto
@@ -3555,6 +3815,10 @@ int main() {
 	                run_roundtrip_with_spawn_zones(/*player_paced=*/false) &&
 	                run_roundtrip_with_spawn_zones(/*player_paced=*/true) &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_host_zone_timer_value_matches_retail_entry() &&
+	                run_zone_timer_channels_share_one_retail_entry() &&
+	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
+	                run_joiner_zone_timer_preserves_mixed_wire_order() &&
 	                run_host_as_client() &&
 	                run_host_startup_seeds_mounted_no_callback_carrier() &&
 	                run_host_startup_maps_claymore_preference() &&

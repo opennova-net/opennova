@@ -234,48 +234,101 @@ inline uint16_t wire_carrier_exclusion_for(
 
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";
+inline constexpr char kVehicleSpecial1Register[] = "VEHICLE_SPECIAL1";
+inline constexpr char kVehicleSpecial2Register[] = "VEHICLE_SPECIAL2";
 inline constexpr char kHeatGlowRegister[] = "HEAT_GLOW";
 
-// CTRL registers that a dedicated engine system owns, so a generic PLAYPARTANIM
-// phase must never be placed on one.
-//
-// In retail these are two unrelated arrays on the AI comp: PLAYPARTANIM integrates
-// its two channels into comp[113]/comp[114] (direction comp[109/110] + rate
-// comp[111/112], clamped to [0, 0x10000]), while the named CTRL registers live at
-// comp+0x1D4 + 4*index and are written by their own systems — the emplaced turret
-// writes the yaw/pitch pair directly, and HEAT_GLOW is only ever driven by an ACTION
-// row carrying a `ctrlreg` key. Our PANM evaluation binds by NAME, so without this
-// rule the model-order walk below drops a part phase onto whichever register happens
-// to come first. B50Cal is exactly that case: its CTRL list is
-// [HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH], so all three are owned and it takes no
-// generic phase at all.
-//
-// Deliberately only the three names witnessed as non-PLAYPARTANIM. Other entries in
-// the global 32-byte table (LOD_*, HELO_*, VEHICLE_*, PARTICLE_*) are very likely
-// engine-owned too, but their writers are unwalked and guessing would be inventing.
-// [orig: PLAYPARTANIM case 34 @ 0x43b192 (slot = ANIMNUM-1, direction @ comp+0x1B4,
-//  rate @ comp+0x1BC); the integrator @ 0x456710; the CTRL name table @ 0x83dce8
-//  (HEAT_GLOW ordinal 54); the turret writer @ 0x441007/@ 0x44101a; the only CTRL
-//  animator ActionSlot_ExecuteAction @ 0x4020cc -> CtrlRegAnimSlot_Allocate
-//  @ 0x401ca0 -> CtrlRegAnimSlot_UpdateAll @ 0x401bf0]
-inline bool ctrl_register_is_engine_owned(const String &p_name) {
-	return p_name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
-			p_name.nocasecmp_to(kEmplacedGunPitchRegister) == 0 ||
-			p_name.nocasecmp_to(kHeatGlowRegister) == 0;
+// Derive HEAT_GLOW only for the carrier model participating in a live UseGun
+// bone attachment. Retail does not publish this for every entity: infantry
+// player/AI update calls Entity_AttachToBoneAndUpdateTransform only for
+// parentSlot 3, and that helper caches the PARENT carrier's inline MountSlot
+// immediately before transforming the parent's PANM/bones. Our retained model
+// and collision paths therefore use the same validated carrier/child relation.
+// The separate first-person writer has its own 0x10000 endpoint.
+// [orig: Entity_UpdateInfantryPlayerBody @ 0x4B63BF..0x4B63C7;
+//  Entity_UpdateInfantryAI @ 0x4BEC1B..0x4BEC23;
+//  Entity_AttachToBoneAndUpdateTransform @ 0x546424..0x54652B;
+//  HUD_CacheWeaponSlotInfo @ 0x440930]
+inline bool world_model_heat_glow_for(
+		const opennova::world::World &world,
+		const opennova::world::Entity &carrier,
+		int32_t &r_heat_glow) {
+	r_heat_glow = 0;
+	if (!carrier.primary_weapon_owner.valid()) return false;
+	const opennova::world::Entity *child =
+			world.registry.get(carrier.primary_weapon_owner);
+	if (child == nullptr || !child->alive || child->health <= 0 ||
+			!child->mounted ||
+			child->mount_type != opennova::world::SeatType::Gunner ||
+			child->mount_target != carrier.handle ||
+			child->mount_seat < 0 ||
+			child->mount_seat >= static_cast<int>(carrier.seats.size()))
+		return false;
+	const opennova::world::Seat &seat =
+			carrier.seats[static_cast<size_t>(child->mount_seat)];
+	if (seat.type != opennova::world::SeatType::Gunner ||
+			seat.bone_index == 0 || seat.occupant != child->handle)
+		return false;
+	const opennova::world::WeaponTableEntry *weapon =
+			world.weapons.by_index(carrier.primary_weapon_slot_adm);
+	if (weapon == nullptr) return false;
+	const int32_t tick = static_cast<int32_t>(world.logic_tick);
+	r_heat_glow = opennova::world::weapon_slot_world_heat_glow(
+			weapon->action_fsm, carrier.primary_weapon_slot, tick);
+	return true;
 }
 
-// Place the two generic PLAYPARTANIM phases onto the model's CTRL registers in model
-// order, skipping engine-owned names. `p_phase_for` yields the phase for channel i.
+inline void assign_world_model_heat_glow(Dictionary &r_controls,
+		const opennova::world::World &world,
+		const opennova::world::Entity &entity) {
+	int32_t heat_glow = 0;
+	if (world_model_heat_glow_for(world, entity, heat_glow))
+		r_controls[String(kHeatGlowRegister)] = heat_glow;
+}
+
+inline void write_present_world_model_heat_glow(float *record,
+		const opennova::world::World &world,
+		const opennova::world::Entity &entity) {
+	int32_t heat_glow = 0;
+	if (!world_model_heat_glow_for(world, entity, heat_glow)) return;
+	record[NovaSimulation::PF_WORLD_HEAT_GLOW_VALID] = 1.0f;
+	record[NovaSimulation::PF_WORLD_HEAT_GLOW] = static_cast<float>(heat_glow);
+}
+
+// Publish the two PLAYPARTANIM accumulators onto retail's semantic CTRL bus.
+// The action writes direction/rate at comp[109..112] and the integrator advances
+// comp[113]/comp[114]. HUD_CacheEntityDisplayInfo then publishes those exact
+// phase fields as VEHICLE_SPECIAL1/2; it never walks the model's CTRL list.
+// SPECIAL1 alone is suppressed by ItemDefAttrib 0x1000 (FastRope), while
+// SPECIAL2 is unconditional.
+// [orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator @ 0x456710;
+//  HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38; global CTRL ordinals
+//  VEHICLE_SPECIAL1=71 / VEHICLE_SPECIAL2=72]
 template <typename PhaseFn>
-inline void assign_part_anim_phases(const ThreediModelIR &p_ir, Dictionary &r_controls,
-		PhaseFn p_phase_for) {
-	int channel = 0;
-	for (size_t slot = 0; slot < p_ir.control_register_count && channel < 2; ++slot) {
-		const String name = String::utf8(p_ir.control_registers[slot].name);
-		if (name.is_empty() || ctrl_register_is_engine_owned(name)) continue;
-		r_controls[name] = p_phase_for(channel);
-		++channel;
+inline void assign_part_anim_phases(Dictionary &r_controls,
+		bool p_publish_special1, PhaseFn p_phase_for) {
+	if (p_publish_special1) {
+		r_controls[String(kVehicleSpecial1Register)] = p_phase_for(0);
 	}
+	r_controls[String(kVehicleSpecial2Register)] = p_phase_for(1);
+}
+
+inline void write_present_vehicle_motion_controls(float *record,
+		const opennova::world::World &world,
+		const opennova::world::Entity &entity) {
+	// This is the modeled ground-vehicle/cveh scope, not a heuristic over every
+	// moving item. Only the authority owns the full steer and currentSpeed
+	// fields; ClientEntityState carries neither and must leave VALID clear.
+	if (entity.handle.pool() != 1 ||
+			world.vehicle_traits.get(entity.item_id) == nullptr)
+		return;
+	const opennova::world::VehicleCtrlRegisters controls =
+			opennova::world::vehicle_ctrl_registers(entity.veh);
+	record[NovaSimulation::PF_VEHICLE_MOTION_VALID] = 1.0f;
+	record[NovaSimulation::PF_VEHICLE_STEERING] =
+			static_cast<float>(controls.steering);
+	record[NovaSimulation::PF_VEHICLE_SPEED] =
+			static_cast<float>(controls.speed);
 }
 
 struct EmplacedWeaponControls {

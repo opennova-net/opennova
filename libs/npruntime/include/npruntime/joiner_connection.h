@@ -13,6 +13,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // P2 — the CLIENT mirror of the np server legs. JoinerConnection is the bytes-in / bytes-out state
@@ -77,6 +78,11 @@ public:
 		uint16_t net_id = 0;                      // packed character/minimap id (entity+0x15C)
 	};
 
+	// S2C 0x53 and 0x6F mutate one shared retail timer-list entry. Keeping them in
+	// one typed FIFO preserves message order when both tags share a protocol packet;
+	// separate per-tag vectors would necessarily reorder that packet at the runtime fold.
+	using ZoneTimerUpdate = std::variant<ZoneTimerValue, ZoneTimerWindow>;
+
 	struct PollResult {
 		std::vector<std::vector<uint8_t>> outbound;   // datagrams to send back to the host
 		// Receive handlers queue reliable semantic replies here. ClientRuntime folds all state
@@ -104,8 +110,7 @@ public:
 		bool send_holdoff_set = false;
 		uint32_t send_holdoff = 0;
 		std::vector<WeaponLoadout> loadout_grants;
-		std::vector<ZoneTimerValue> zone_timer_values;
-		std::vector<ZoneTimerWindow> zone_timer_windows;
+		std::vector<ZoneTimerUpdate> zone_timer_updates;
 		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same byte_A85B48
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.
 		// [orig: NapiNPClientMsg_0x050 @0x431910 — byte_A85B48 store @0x4319db]

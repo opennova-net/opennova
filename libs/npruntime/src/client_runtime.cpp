@@ -14,6 +14,23 @@ constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks
 constexpr uint32_t kNetQualityInterval = 310;  // 0x4C net-quality report period [orig @0x42c23e]
 constexpr uint32_t kTag2CCooldown = 62;        // 0x2C vestigial/telemetry set-value [orig @0x42c412], never a gate
 
+// Retail's x86 IMUL/ADD timer arithmetic wraps at 32 bits. Perform the
+// operations in unsigned space, then recover the same signed two's-complement
+// value without relying on implementation-defined unsigned-to-signed casts.
+int32_t signed_dword(uint32_t bits) {
+	if (bits <= 0x7FFFFFFFu) return static_cast<int32_t>(bits);
+	return -1 - static_cast<int32_t>(0xFFFFFFFFu - bits);
+}
+
+int32_t timer_scale_62(int32_t value) {
+	return signed_dword(static_cast<uint32_t>(value) * 62u);
+}
+
+int32_t timer_add(int32_t value, int32_t delta) {
+	return signed_dword(
+			static_cast<uint32_t>(value) + static_cast<uint32_t>(delta));
+}
+
 // Little-endian u32 body (the 0x34 currentTick body and the 0x2C timestamp prefix). Mirrors the inline
 // LE write the 0x48 ack uses (joiner_connection.cpp); there is no NetPacket_Write* helper in libs.
 std::vector<uint8_t> le32(uint32_t v) {
@@ -59,6 +76,119 @@ const std::string &ClientRuntime::expansion() const {
 
 const std::string &ClientRuntime::last_error() const {
 	return joiner_ ? joiner_->last_error() : empty_runtime_string();
+}
+
+bool ClientRuntime::lfp_cam_percent(uint16_t zone_handle, int32_t &out) const {
+	const auto it = zone_states_.find(zone_handle);
+	if (it == zone_states_.end()) return false;
+	const ZoneState::Entry &entry = it->second.entry;
+	if (entry.value_limit == 0) {
+		out = 0x10000;
+		return true;
+	}
+	// BoneCallback_gnrc_World loads the two signed DWORDs through x87 FILD,
+	// divides, multiplies by exactly 65536, then truncates through _ftol2_sse.
+	// The accumulator is clamped before presentation, so this integer rational
+	// form gives the same fixed-point truncation without host-FPU dependence.
+	out = static_cast<int32_t>(
+			(static_cast<int64_t>(entry.value_current) * 0x10000ll) /
+			static_cast<int64_t>(entry.value_limit));
+	return true;
+}
+
+void ClientRuntime::apply_zone_timer_value(const ZoneTimerValue &value) {
+	auto inserted = zone_states_.try_emplace(value.zone_handle);
+	ZoneState &zone = inserted.first->second;
+	zone.has_value = true;
+	zone.value = value;
+
+	ZoneState::Entry &entry = zone.entry;
+	entry.mode_a = value.mode;
+	entry.mode_b = value.mode;
+	const int32_t scaled_value = timer_scale_62(value.value_s);
+	if (inserted.second) entry.value_current = scaled_value;
+	entry.value_target = scaled_value;
+	entry.value_limit = timer_scale_62(value.limit_s);
+	entry.value_rate = value.rate; // i16 is sign-extended by the retail handler
+	entry.window_active = false;
+	entry.value_active = true;
+}
+
+void ClientRuntime::apply_zone_timer_window(const ZoneTimerWindow &window) {
+	auto inserted = zone_states_.try_emplace(window.zone_handle);
+	ZoneState &zone = inserted.first->second;
+	zone.has_window = true;
+	zone.window = window;
+
+	ZoneState::Entry &entry = zone.entry;
+	const int32_t scaled_start =
+			timer_scale_62(static_cast<int32_t>(window.start_s));
+	const int32_t scaled_end =
+			timer_scale_62(static_cast<int32_t>(window.end_s));
+	if (inserted.second) {
+		entry.window_current = scaled_start;
+		entry.value_current = 0;
+		entry.value_rate = 0;
+	} else if (entry.mode_b != window.mode_b) {
+		entry.window_current = scaled_start;
+	}
+	entry.mode_a = window.mode_a;
+	entry.mode_b = window.mode_b;
+	entry.window_target = scaled_start;
+	entry.window_limit = scaled_end;
+	entry.window_rate = window.rate; // the wire byte is zero-extended
+	entry.value_target = 0;
+	entry.value_limit = 0;
+	entry.window_active = true;
+	entry.value_active = false;
+}
+
+bool ClientRuntime::apply_zone_timer_body(
+		uint8_t tag, const std::vector<uint8_t> &body) {
+	std::size_t consumed = 0;
+	if (tag == 0x6F) {
+		ZoneTimerValue value;
+		if (decode_zone_timer_value(
+					body.data(), body.size(), value, consumed) &&
+		    consumed == body.size())
+			apply_zone_timer_value(value);
+		return true;
+	}
+	if (tag == 0x53) {
+		ZoneTimerWindow window;
+		if (decode_zone_timer_window(
+					body.data(), body.size(), window, consumed) &&
+		    consumed == body.size())
+			apply_zone_timer_window(window);
+		return true;
+	}
+	return false;
+}
+
+void ClientRuntime::advance_zone_timers() {
+	for (auto &kv : zone_states_) {
+		ZoneState::Entry &entry = kv.second.entry;
+		if (entry.window_active) {
+			const int32_t delta = entry.window_rate;
+			entry.window_current = timer_add(entry.window_current, delta);
+			// Exact @0x537D81..0x537D8F order: high clamp, then low clamp.
+			if (entry.window_current > entry.window_limit)
+				entry.window_current = entry.window_limit;
+			if (entry.window_current < 0) entry.window_current = 0;
+			if (entry.window_target == entry.window_limit &&
+			    entry.window_current == entry.window_limit &&
+			    delta > 0)
+				entry.window_active = false;
+		}
+		if (entry.value_active) {
+			entry.value_current =
+					timer_add(entry.value_current, entry.value_rate);
+			// Exact @0x537DB1..0x537DC0 order: high clamp, then low clamp.
+			if (entry.value_current > entry.value_limit)
+				entry.value_current = entry.value_limit;
+			if (entry.value_current < 0) entry.value_current = 0;
+		}
+	}
 }
 
 std::vector<uint8_t> ClientRuntime::start() {
@@ -236,7 +366,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// @0x42c228 runs before the SEND block].
 	if (role_ == Role::HostClient) {
 		// The SP host's own loopback carries inner {tag,body} (ADR 0011 §3 SP crypto bypass).
-		if (loopback_ != nullptr) view_.pump(*loopback_);
+		if (loopback_ != nullptr) {
+			netsim::Datagram datagram;
+			while (loopback_->client_recv(datagram)) {
+				if (!apply_zone_timer_body(datagram.tag, datagram.body))
+					view_.apply(datagram.tag, datagram.body);
+			}
+		}
 		// Host authority already spawned every accepted round/refill. Its decoded
 		// listen-client view must not retain duplicate visual gameplay events.
 		view_.drain_round_events();
@@ -277,15 +413,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 				authoritative_loadout_ = grant;
 				++authoritative_loadout_revision_;
 			}
-			for (const ZoneTimerValue &value : pr.zone_timer_values) {
-				ZoneState &zone = zone_states_[value.zone_handle];
-				zone.has_value = true;
-				zone.value = value;
-			}
-			for (const ZoneTimerWindow &window : pr.zone_timer_windows) {
-				ZoneState &zone = zone_states_[window.zone_handle];
-				zone.has_window = true;
-				zone.window = window;
+			for (const JoinerConnection::ZoneTimerUpdate &update :
+			     pr.zone_timer_updates) {
+				if (const auto *value = std::get_if<ZoneTimerValue>(&update))
+					apply_zone_timer_value(*value);
+				else if (const auto *window =
+				         std::get_if<ZoneTimerWindow>(&update))
+					apply_zone_timer_window(*window);
 			}
 			// S2C 0x50 leg 2 — the decoded entity's Team on a non-authority client.
 			// [orig: NapiNPClientMsg_0x050 @0x431910 team store @0x4319ee]
@@ -331,6 +465,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
 	}
+
+	// Retail advances this shared list once after the complete receive pump,
+	// including on the authority's HostClient loopback path.
+	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
+	advance_zone_timers();
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp

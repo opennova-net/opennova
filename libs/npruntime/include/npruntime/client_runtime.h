@@ -277,10 +277,32 @@ public:
 		ZoneTimerValue value;
 		bool has_window = false;
 		ZoneTimerWindow window;
+
+		// Exact semantic image of the retail 13-DWORD shared timer-list entry
+		// (the map key supplies DWORD 0). The raw latest records above remain for
+		// existing UI callers; these fields are the live, per-frame state.
+		struct Entry {
+			int32_t mode_a = 0;              // DWORD 1
+			int32_t mode_b = 0;              // DWORD 2
+			int32_t window_current = 0;      // DWORD 3
+			int32_t window_target = 0;       // DWORD 4
+			int32_t window_limit = 0;        // DWORD 5
+			int32_t window_rate = 0;         // DWORD 6
+			bool window_active = false;      // DWORD 7
+			int32_t value_current = 0;       // DWORD 8
+			int32_t value_target = 0;        // DWORD 9
+			int32_t value_limit = 0;         // DWORD 10
+			int32_t value_rate = 0;          // DWORD 11
+			bool value_active = false;       // DWORD 12
+		} entry;
 	};
 	const std::unordered_map<uint16_t, ZoneState> &zone_states() const {
 		return zone_states_;
 	}
+	// Generic-world control-register consumer. False means retail has no entry
+	// and therefore performs no LFP_CAMPPERCENT write. A zero limit is the
+	// witnessed full-scale special case.
+	bool lfp_cam_percent(uint16_t zone_handle, int32_t &out) const;
 	uint64_t authoritative_loadout_revision() const {
 		return authoritative_loadout_revision_;
 	}
@@ -298,6 +320,10 @@ private:
 	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
 	// frame.
 	std::vector<std::vector<uint8_t>> run_frame(const PlayerExtendedUplink *uplink, uint32_t now_tick);
+	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
+	void apply_zone_timer_value(const ZoneTimerValue &value);
+	void apply_zone_timer_window(const ZoneTimerWindow &window);
+	void advance_zone_timers();
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only

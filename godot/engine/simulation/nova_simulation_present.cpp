@@ -3,6 +3,8 @@
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
 
+#include <cstring>
+
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
 using namespace novasim;
@@ -916,6 +918,25 @@ int NovaSimulation::get_entity_wire_handle(int p_index) const {
 	return e ? static_cast<int>(e->handle.packed) : 0;
 }
 
+int32_t NovaSimulation::decode_present_part_anim_phase(
+		const PackedFloat32Array &p_snapshot, int p_base, int p_channel) {
+	if (p_channel < 1 || p_channel > 2 || p_base < 0) return 0;
+	const int phase_field = PF_PHASE1 + (p_channel - 1) * 2;
+	const int active_field = PF_ACTIVE1 + (p_channel - 1) * 2;
+	if (p_base + active_field >= p_snapshot.size()) return 0;
+	const float *p = p_snapshot.ptr();
+	const int32_t high_code =
+			static_cast<int32_t>(p[p_base + active_field]);
+	if (high_code <= 0 || high_code > 0x10000) return 0;
+	const uint32_t low = static_cast<uint32_t>(
+			static_cast<int32_t>(p[p_base + phase_field])) & 0xFFFFu;
+	const uint32_t bits =
+			(static_cast<uint32_t>(high_code - 1) << 16) | low;
+	int32_t value;
+	std::memcpy(&value, &bits, sizeof(value));
+	return value;
+}
+
 int NovaSimulation::get_entity_part_anim_phase(int p_index, int channel) const {
 	if (!ai_ || channel < 1 || channel > 2) return 0;
 	AiEntity *e = ai_->at(p_index);
@@ -927,9 +948,13 @@ bool NovaSimulation::get_entity_part_anim_active(int p_index, int channel) const
 	if (!ai_ || channel < 1 || channel > 2) return false;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return false;
-	const int slot = channel - 1;
-	return e->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
-	       e->brain.f[AiBrain::kPartAnimPhase0 + slot] != 0;
+	if (channel == 1 && world_ != nullptr) {
+		const opennova::world::Entity *entity =
+				world_->registry.get(e->handle);
+		if (entity != nullptr && (entity->item_attrib & 0x1000u) != 0)
+			return false;
+	}
+	return true;
 }
 
 int NovaSimulation::get_entity_body_anim_slot(int p_index) const {
@@ -1049,6 +1074,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		// pass does not model.
 		const opennova::world::EntityHandle h{es.handle};
 		const opennova::world::Entity *ent = (!joiner_) ? world_->registry.get(h) : nullptr;
+		// Retail's terrain collector sends pool-1 model rows through
+		// render_sector_entity; pool-2 statics and pool-3 marker models join the
+		// same sector list through their dedicated collectors. Pool-0 skeletal
+		// organics take the general/body list and do not execute this writer.
+		// Keep validity independent of whether this client resolves the row to a
+		// placed node: a wire-fallback model still executes the same callback,
+		// while a failed model build has no CTRL surface on which to apply it.
+		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
 		if (joiner_ && h.pool() >= 1 && h.pool() <= 3) {
 			const opennova::world::Entity *local = world_->registry.get(h);
 			if (local != nullptr && local->spawn_origin != opennova::world::kSpawnOriginNone &&
@@ -1071,6 +1104,19 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
+			// The cveh render callback publishes directly from the live entity
+			// motor fields. Do this only for the authoritative registry row:
+			// the compact view has no steer/currentSpeed source to reconstruct.
+			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+			//  stores @0x4929D7 / @0x4929F1]
+			write_present_vehicle_motion_controls(r, *world_, *ent);
+			// Only a carrier in the witnessed live UseGun attachment relation
+			// publishes its inline MountSlot's HEAT_GLOW, including owned cold
+			// zero. A joiner has no heat-window/ownership state in its compact
+			// row and must not synthesize one.
+			// [orig: attachment call @ 0x546518;
+			//  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
+			write_present_world_model_heat_glow(r, *world_, *ent);
 			if (local_first_person_usegun &&
 					local_player->mount_target == h) {
 				const opennova::world::WeaponTableEntry *mount_def =
@@ -1092,6 +1138,36 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 						 (mount_def->flags2 &
 						  opennova::world::weapon_flag2::kInvisible) != 0))
 					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
+			}
+		}
+		// Two retail callbacks write this three-register family. The sector
+		// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that
+		// reaches its model callback. The generic-world callback publishes the
+		// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
+		// LFP only when the client-side shared timer-list entry exists.
+		// Values come from the decoded client row for BOTH authority and joiner:
+		// this preserves the exact 0x0D/0x10/0x20 bytes and later S2C 0x50 team
+		// mutations instead of reaching around the client view.
+		// [orig: render_sector_entity @0x5C424F..0x5C425F;
+		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
+		const bool zone_ctrl = es.zone_number_rank != 0;
+		const int32_t signed_team = es.team < 0x80u
+				? static_cast<int32_t>(es.team)
+				: static_cast<int32_t>(es.team) - 0x100;
+		if (sector_model_row || zone_ctrl) {
+			r[PF_TEX_TEAM_VALID] = 1.0f;
+			r[PF_TEX_TEAM] = static_cast<float>(signed_team);
+		}
+		if (zone_ctrl) {
+			r[PF_ZONE_CTRL_VALID] = 1.0f;
+			const int32_t team_swing = es.team == 1u
+					? 0
+					: (es.team == 2u ? 0x10000 : 0x8000);
+			r[PF_TEAMSWING] = static_cast<float>(team_swing);
+			int32_t camp_percent = 0;
+			if (runtime_->lfp_cam_percent(es.handle, camp_percent)) {
+				r[PF_LFP_CAMPPERCENT_VALID] = 1.0f;
+				r[PF_LFP_CAMPPERCENT] = static_cast<float>(camp_percent);
 			}
 		}
 		// A joiner cannot resolve host wire handles through its local registry.
@@ -1167,14 +1243,25 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			const AiEntity *ae = world_->ai->for_handle(h);
 			if (ae != nullptr) {
 				for (int slot = 0; slot < 2; ++slot) {
-					const int phase = std::clamp(
-							ae->brain.f[AiBrain::kPartAnimPhase0 + slot],
-							0, 65535);
-					const bool active =
-							ae->brain.f[AiBrain::kPartAnimRate0 + slot] != 0 ||
-							phase != 0;
-					r[PF_PHASE1 + slot * 2] = static_cast<float>(phase);
-					r[PF_ACTIVE1 + slot * 2] = active ? 1.0f : 0.0f;
+					// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
+					// signed dwords. Do not normalize wrapping zero-time states.
+					// [orig: stores @0x4A3E2D/@0x4A3E38]
+					const int32_t phase =
+							ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
+					const bool publish =
+							slot != 0 || ent == nullptr ||
+							(ent->item_attrib & 0x1000u) == 0;
+					uint32_t phase_bits;
+					std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
+					// The float snapshot transports both 16-bit words as exact
+					// integers. ACTIVE zero means unpublished; otherwise it is
+					// high16+1. A numeric float32 could lose signed-dword low
+					// bits for fast/malformed PLAYPARTANIM rates.
+					r[PF_PHASE1 + slot * 2] =
+							static_cast<float>(phase_bits & 0xFFFFu);
+					r[PF_ACTIVE1 + slot * 2] = publish
+							? static_cast<float>((phase_bits >> 16) + 1u)
+							: 0.0f;
 				}
 			}
 			if (ae && ae->inf.active) {

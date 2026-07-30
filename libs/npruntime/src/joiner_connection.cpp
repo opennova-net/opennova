@@ -1136,14 +1136,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_zone_timer_value(
 					m.payload.data(), m.payload.size(), value, consumed) &&
 			    consumed == m.payload.size())
-				out.zone_timer_values.push_back(value);
+				out.zone_timer_updates.emplace_back(value);
 		} else if (m.tag == s2c::ZONE_TIMER_WINDOW) {
 			ZoneTimerWindow window;
 			std::size_t consumed = 0;
 			if (decode_zone_timer_window(
 					m.payload.data(), m.payload.size(), window, consumed) &&
 			    consumed == m.payload.size())
-				out.zone_timer_windows.push_back(window);
+				out.zone_timer_updates.emplace_back(window);
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
 			// S2C 0x11 is the terminal pre-world admission marker. Its cumulative ACK is the safe
 			// point at which the binding may pause progress for synchronous mission loading. Hold

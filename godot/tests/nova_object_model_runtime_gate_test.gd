@@ -17,7 +17,7 @@ const ANIM_FIXTURES := "res://../fixtures/anim"
 
 class GateSpyModel:
 	extends NovaObjectModel
-	var regs: Array = ["reg0"]
+	var regs: Array = ["VEHICLE_SPECIAL1"]
 	var env_applies := 0
 	var light_applies := 0
 	var robj_applies := 0
@@ -78,15 +78,18 @@ func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
 	model.advance_runtime_frame(0.5)
 	assert_eq(model.light_applies, 0, "a hidden model pushes no light state")
 	assert_eq(model.env_applies, 0, "a hidden model pushes no environment state")
-	assert_almost_eq(int(model.get_ctrl_values().get("reg0", -1)), 32768, 2,
+	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
 			"the commanded part anim still advanced while hidden")
 
 	model.visible = true
 	model.advance_runtime_frame(0.5)
 	assert_eq(model.light_applies, 1, "render work resumes on the visible frame")
 	assert_eq(model.env_applies, 1)
-	assert_eq(int(model.get_ctrl_values().get("reg0", -1)), 65535,
-			"the sweep completed across the hidden/visible boundary")
+	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 62 * 1048,
+			"two half-second host frames preserve retail's fixed 16 ms tick count")
+	model.advance_runtime_frame(0.008)
+	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 65536,
+			"the 63rd retail tick strictly overshoots and clamps the sweep endpoint")
 
 
 func test_hidden_fast_path_skips_the_env_push() -> void:

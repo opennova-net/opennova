@@ -3,9 +3,12 @@
 #include <math.h>
 #include <string.h>
 
-// Port of sub_4350B0 from the original tool. Builds the 11x256-byte wave table
-// used by PANM_SampleTrack into byte_1446660. The generator is deterministic:
-// it uses the MSVC rand() LCG seeded with 1 and no external inputs.
+// Port of the waveform-table builder used by PANM_SampleTrack. This committed
+// table is the deterministic result of the MSVC default seed, but retail
+// constructs it by consuming 256 calls from the process-wide CRT rand stream.
+// Keeping only the resulting bytes does not reproduce that stream's later
+// state or its unrelated callers; runtime RNG lifetime/order remains D-3DI-2.
+// [orig: CWaveformTable_Build @ 0x5DE360]
 
 #define TABLE_BYTES THREEDI_PANM_WAVE_TABLE_SIZE
 
@@ -31,7 +34,8 @@ static const uint8_t kByte5C1230[256] = {
     0x09, 0x07, 0x03, 0x01, 0x03, 0x04, 0x04, 0x03, 0x03, 0x03, 0x03, 0x02, 0x01, 0x01, 0x16, 0x16,
 };
 
-// Precomputed “random” band from sub_4350B0 (rand()&0xFFF smoothed), seed=1.
+// Precomputed "random" band from the 256 default-seed rand() calls and the
+// retail smoothing pass. Copying it preserves table bytes, not CRT call history.
 static const uint8_t kRandBand[256] = {
     0x6f, 0xb7, 0xfd, 0x4a, 0xac, 0x0e, 0x52, 0x88, 0xe0, 0x5d, 0xe1, 0x4e, 0x8e, 0xaa, 0xbb, 0xdf,
     0x30, 0x99, 0xee, 0x2c, 0x6e, 0xaf, 0xd6, 0xe3, 0xe8, 0xf8, 0x27, 0x78, 0xe1, 0x4a, 0x99, 0xda,

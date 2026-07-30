@@ -23,13 +23,12 @@ static int expect_near(const char *label, float got, float expected) {
 
 int main(void) {
     int ok = 1;
-    uint16_t ctrl[512];
+    int32_t ctrl[THREEDI_CTRL_REGISTER_COUNT];
     const uint8_t *table;
-    ThreediTransform t_set, t_ctrl, t_sin, t_sin_small, t_rand;
+    ThreediTransform t_set, t_ctrl, t_ctrl_add, t_sin, t_sin_small, t_rand;
     int32_t delta_sin;
 
     memset(ctrl, 0, sizeof(ctrl));
-    ctrl[0] = 200; // ctrl register 0
 
     table = threedi_panm_wave_table();
     ok &= expect_eq("table_sin0", table[256], 0x7F);
@@ -40,11 +39,63 @@ int main(void) {
     t_set.control = 24; t_set.start = 10; t_set.end = 20;
     ok &= expect_eq("set", threedi_panm_sample_track_raw(&t_set, 0, NULL), 10 << 8);
 
-    // Control-register wave (control=113): uses ctrl[2*param]
+    // Retail PANM code 113 indexes the signed value dwords directly by the
+    // already-resolved global ordinal.
     memset(&t_ctrl, 0, sizeof(t_ctrl));
-    t_ctrl.control = 113; t_ctrl.end = 10; // delta = 10
-    // wave_fp8 = ctrl[0]=200; sample = (200*10)>>8 = 7
-    ok &= expect_eq("ctrl", threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 7);
+    t_ctrl.control = 113;
+    t_ctrl.control_param = 7;
+    t_ctrl.rate = 321;
+    t_ctrl.start = 30;
+    t_ctrl.end = 10; // negative delta
+    ctrl[14] = 0x1234;
+
+    ctrl[7] = 0;
+    ok &= expect_eq("ctrl_reg7_zero",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 30 << 8);
+    ctrl[7] = 0x8000;
+    ok &= expect_eq("ctrl_reg7_mid_negative_delta",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 20 << 8);
+    ctrl[7] = 0x10000;
+    ok &= expect_eq("ctrl_reg7_exact_endpoint",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 10 << 8);
+    ctrl[7] = -0x8000;
+    ok &= expect_eq("ctrl_reg7_signed_negative",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 40 << 8);
+    ctrl[7] = 0x4000;
+    ok &= expect_eq("ctrl_reg7_time_zero",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 25 << 8);
+    ok &= expect_eq("ctrl_reg7_time_independent",
+                    threedi_panm_sample_track_raw(&t_ctrl, 9000, ctrl), 25 << 8);
+    ok &= expect_eq("ctrl_reg7_null_table",
+                    threedi_panm_sample_track_raw(&t_ctrl, 9000, NULL), 30 << 8);
+    t_ctrl.control_param = 0xFF;
+    ok &= expect_eq("ctrl_invalid_resolved_ordinal_is_safe",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), 30 << 8);
+    t_ctrl.control_param = 7;
+
+    // Retail's 32-bit IMUL intentionally wraps before SAR. A widened multiply
+    // would produce the positive endpoint instead.
+    t_ctrl.start = -32768;
+    t_ctrl.end = 32767;
+    ctrl[7] = 0x10000;
+    ok &= expect_eq("ctrl_reg7_low32_imul_wrap",
+                    threedi_panm_sample_track_raw(&t_ctrl, 0, ctrl), -8388864);
+
+    // Despite its shared catalog name, PANM code 114 is not a second control
+    // operation in retail. It follows wave_lookup (low nibble 2: sine) and
+    // ignores the supplied control table.
+    memset(&t_ctrl_add, 0, sizeof(t_ctrl_add));
+    t_ctrl_add.control = 114;
+    t_ctrl_add.rate = 1;
+    t_ctrl_add.end = 256;
+    ctrl[0] = 0xFFFF;
+    ok &= expect_eq("ctrl_114_sine_t0",
+                    threedi_panm_sample_track_raw(&t_ctrl_add, 0, ctrl), 0x7F00);
+    ok &= expect_eq("ctrl_114_sine_t1000",
+                    threedi_panm_sample_track_raw(&t_ctrl_add, 1000, ctrl), 0x8200);
+    ctrl[0] = 0;
+    ok &= expect_eq("ctrl_114_ignores_register",
+                    threedi_panm_sample_track_raw(&t_ctrl_add, 0, ctrl), 0x7F00);
 
     // Sine wave (control=0x12): start=0, end=256 -> delta=256
     memset(&t_sin, 0, sizeof(t_sin));

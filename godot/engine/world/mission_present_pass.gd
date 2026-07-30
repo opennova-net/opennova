@@ -11,7 +11,8 @@ extends RefCounted
 # (NovaPresentApplier, godot/engine/simulation) owns the plan + per-row reads + change-gated
 # dispatch; each resolved node's duck-typed NovaEntityVisual surface (ADR 0007) keeps its GDScript
 # implementation:
-#   transform (Node3D), set_part_phase(channel, phase), visible (Node3D),
+#   transform (Node3D), set_part_phase(channel, phase),
+#   clear_part_phase(channel), visible (Node3D),
 #   play_body_clip_at(key, phase_ticks) / play_body_anim_at(slot, phase_ticks).
 #
 # Two animation systems, distinct on purpose:

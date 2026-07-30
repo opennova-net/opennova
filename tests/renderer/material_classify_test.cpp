@@ -261,6 +261,15 @@ int main() {
 		expect(contains(ff_glsl, "shader_type spatial"), "FF GLSL is spatial");
 		expect(contains(ff_glsl, "obj_ff_lighting"), "FF GLSL uses ff lighting helper");
 		expect(contains(ff_glsl, "cull_back"), "FF cull_back default");
+		expect(contains(ff_glsl, "uniform vec3 u_uv_transform_u"),
+		       "Object GLSL exposes the retail affine U coefficients");
+		expect(contains(ff_glsl, "uniform vec3 u_uv_transform_v"),
+		       "Object GLSL exposes the retail affine V coefficients");
+		expect(contains(ff_glsl,
+		                "vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v))"),
+		       "Object GLSL applies the full affine UV transform");
+		expect(!contains(ff_glsl, "u_uv_rotation"),
+		       "Object GLSL should not collapse the retail affine matrix to rotation");
 
 		const auto mk = build_object_shader_key(classify_object_material("FF_MT_OP", 0, 0, 0, 128));
 		const std::string mt_glsl = compose_object_shader_glsl(mk);

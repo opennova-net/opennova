@@ -54,12 +54,14 @@ int32_t uv_anim_wave_lookup(uint8_t type, uint16_t phase16, uint16_t rand16);
 // time_units16: low 16 bits of (tick_ms << 8) / 1000 [orig: @ 0x58dd49].
 // controlled_u/_v: the controlled-animation table value for each channel's
 // slot (dword_83FCE8[2*phase] — driven by scripted material animation).
-// rand16: noise source for waveform type 6.
+// rand16_u/_v: independent noise samples for waveform type 6. Retail calls
+// CRT rand() from wave_lookup once per channel lookup, in U-then-V order.
 UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
                                   const UvAnimChannel &v_channel,
                                   uint16_t time_units16,
                                   int32_t controlled_u,
                                   int32_t controlled_v,
-                                  uint16_t rand16);
+                                  uint16_t rand16_u,
+                                  uint16_t rand16_v);
 
 } // namespace renderer

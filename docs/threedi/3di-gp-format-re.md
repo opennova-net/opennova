@@ -14,8 +14,9 @@ Two related on-disk model formats:
   attributed `0x50bd0b` to `jodemo.exe`; every later probe cites the same range in
   dfvas, and it is treated as dfvas here.
 
-Reimplementation: `libs/threedi` (`threedi_gp.h` with `threedi_gp_read.cpp` + `threedi_gp_write.cpp` for GP;
-the Threedi3di3 reader/writer for 3DI3). Probe harnesses live in
+Reimplementation: `libs/threedi` (`threedi_gp.h` with `threedi_gp_read.cpp` +
+`threedi_gp_write.cpp` for GP; the Threedi3di3 reader/writer for 3DI3; and
+`threedi_panm_runtime.cpp` for live PANM sampling). Probe harnesses live in
 `tests/threedi/_dump_gp_*.cpp` (non-ctest executables) plus
 `scripts/probe_gp_field.py`.
 
@@ -122,6 +123,236 @@ A byte-exact OED-parity sub-build must call `_controlfp(_PC_24, _MCW_PC)` early
 in `main()`. The only other `_controlfp` sites in OED are local save/restore
 wrappers (D3DX shader preprocessor and a few math helpers) that do not change the
 process-wide state.
+
+### Retail PANM control-register sampling (Jointops.exe)
+
+This subsection is the live runtime complement to the OED format findings
+above. Its addresses are from retail `Jointops.exe` (imagebase `0x400000`, IDB
+`Jointops.exe.kong.i64`), freshly witnessed and completed by the
+catalog/loader/writer audit on 2026-07-29.
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Global CTRL catalog (`libs/threedi/src/threedi_ctrl_catalog.cpp`) | **MATCHING** | all 96 populated 32-byte descriptors at `0x83DCE8..0x83E8E7` are preserved in ordinal order; the next descriptor at `0x83E8E8` is zero and terminates the scan, so 96 is the complete retail list. Case-insensitive lookup is pinned by `threedi_ctrl_catalog` `[orig: CtrlName_ToOrdinal @ 0x57B290]` |
+| Loader-compatible name resolution | **MATCHING** | ordinary lookup reports a miss unambiguously, while `threedi_ctrl_register_loader_ordinal` deliberately reproduces retail's miss → ordinal-0 alias `[orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6]` |
+| Structural loader remap | witnessed / represented | model-local CTRL references in material/texture animation, PANM, and lights become global ordinals during `ThreediGp_LoadFromFile` `[orig: @ 0x5B5C80..0x5B5DA2; @ 0x5B5E0B..0x5B5EF6; @ 0x5B5F4F..0x5B5F62]` |
+| PANM scalar-track sampler (`libs/threedi/src/threedi_panm_runtime.cpp`) | **MATCHING MATH / PARTIAL RNG LIFETIME** | `threedi_panm_sample_track_raw` structurally translates `[orig: PANM_SampleTrack @ 0x5b2270]`; controlled and deterministic waveform paths are pinned, and noise dispatch consumes per submitted instance, but its LCG is not yet retail's whole-process CRT stream |
+| Controlled PANM mode catalog | **MATCHING** | only type 113 reads a control register; 114–117 remain ordinary waveform types `[orig: PANM_SampleTrack @ 0x5b2270; wave_lookup @ 0x5de6b0]`; all known shipped controlled PANM tracks are type 113 |
+| Runtime slot layout and consumer math | **MATCHING** | each global slot is an 8-byte pair: signed value dword at `0x83FCE8 + 8·ordinal`, adjacent state dword at `0x83FCEC + 8·ordinal`; PANM reads the signed value with retail low-dword `IMUL`/arithmetic-shift behavior |
+| Process-global bus lifetime/arbitration | **OPEN** | retail keeps one persistent 96-slot array shared by every model draw; the retained OpenNova path currently constructs a zero-based array from each model's current Dictionary, so unwritten values do not flow across models in retail draw order. Retail's later batch snapshot/restore preserves written material values but does not erase that submission-time persistence requirement (D-3DI-2) |
+| Noise RNG lifetime/call order | **OPEN** | retail `CWaveformTable_Build @0x5DE360` consumes 256 calls from the same process CRT `rand()` later used by PANM/material/light noise, interleaved with unrelated engine callers. OpenNova shares one MSVC-formula stream only among the ported waveform consumers and uses a precomputed table, so dispatch/math and intra-consumer order match but the runtime sample sequence does not (D-3DI-2) |
+| Retail CTRL producers | **PARTIAL PORT** | the complete dedicated-writer census is recorded below; the catalog, remap semantics, and consumers are implemented, but several retail semantic producers remain separate port gaps |
+
+#### Canonical global catalog
+
+`CtrlName_ToOrdinal` scans this table case-insensitively. Its return value is
+zero both for the real `LOD_FRAC` entry and for an unknown name. Retail's model
+loader stores that result unchanged, so an unknown or empty inline model CTRL
+name aliases global ordinal 0. OpenNova additionally treats a null API input as
+ordinal 0 for safety; retail's loader passes a non-null inline name buffer.
+OpenNova keeps an unambiguous ordinary lookup
+(`-1` for a miss) and isolates the retail alias in
+`threedi_ctrl_register_loader_ordinal`.
+
+| Ordinal | Retail name | Ordinal | Retail name |
+|---:|---|---:|---|
+| 0 | `LOD_FRAC` | 48 | `HELO_PILOTYAW` |
+| 1 | `LOD_FADE_IN` | 49 | `HELO_PILOTPITCH` |
+| 2 | `LOD_FADE_OUT` | 50 | `HELO_CPILOTYAW` |
+| 3 | `FLICKER` | 51 | `HELO_CPILOTPITCH` |
+| 4 | `SWING` | 52 | `HELO_GUNYAW` |
+| 5 | `TALK` | 53 | `HELO_GUNPITCH` |
+| 6 | `DEATH` | 54 | `HEAT_GLOW` |
+| 7 | `NVG_FLIP` | 55 | `EWEAP_GUNYAW` |
+| 8 | `TEAMSWING` | 56 | `EWEAP_GUNPITCH` |
+| 9 | `HUD_HEALTH` | 57 | `WEAP_SPIN` |
+| 10 | `HUD_MANA` | 58 | `TRACER_SCALE` |
+| 11 | `HUD_COMPASS` | 59 | `TRACER_WIDTH` |
+| 12 | `WPN_TRIGGER` | 60 | `VEHICLE_WHEELS` |
+| 13 | `WPN_HAMMER` | 61 | `VEHICLE_STEERING` |
+| 14 | `PARA` | 62 | `VEHICLE_SPEED` |
+| 15 | `PARA_O` | 63 | `VEHICLE_GUNYAW` |
+| 16 | `DOOR_00` | 64 | `VEHICLE_GUNPITCH` |
+| 17 | `DOOR_01` | 65 | `OBJECT_DESTROY` |
+| 18 | `DOOR_02` | 66 | `OBJECT_DESTROY01` |
+| 19 | `DOOR_03` | 67 | `OBJECT_DESTROY02` |
+| 20 | `DOOR_04` | 68 | `OBJECT_DESTROY03` |
+| 21 | `DOOR_05` | 69 | `OBJECT_DESTROY04` |
+| 22 | `DOOR_06` | 70 | `OBJECT_DESTROY05` |
+| 23 | `DOOR_07` | 71 | `VEHICLE_SPECIAL1` |
+| 24 | `DOOR_08` | 72 | `VEHICLE_SPECIAL2` |
+| 25 | `DOOR_09` | 73 | `VEHICLE_TIRE00` |
+| 26 | `DOOR_10` | 74 | `VEHICLE_TIRE01` |
+| 27 | `DOOR_11` | 75 | `VEHICLE_TIRE02` |
+| 28 | `DOOR_12` | 76 | `VEHICLE_TIRE03` |
+| 29 | `DOOR_13` | 77 | `VEHICLE_TIRE04` |
+| 30 | `DOOR_14` | 78 | `VEHICLE_TIRE05` |
+| 31 | `DOOR_15` | 79 | `VEHICLE_TIRE06` |
+| 32 | `UPL_INTENSITY` | 80 | `VEHICLE_TIRE07` |
+| 33 | `LIGHTSWITCH0` | 81 | `VEHICLE_TIRE08` |
+| 34 | `LIGHTSWITCH1` | 82 | `VEHICLE_TIRE09` |
+| 35 | `LIGHTSWITCH2` | 83 | `VEHICLE_TIRE10` |
+| 36 | `LIGHTSWITCH3` | 84 | `VEHICLE_TIRE11` |
+| 37 | `PARTICLE_ALPHA` | 85 | `VEHICLE_TIRE12` |
+| 38 | `PARTICLE_RGB` | 86 | `VEHICLE_TIRE13` |
+| 39 | `HELO_REAR_GEAR` | 87 | `VEHICLE_WHEELS00` |
+| 40 | `HELO_GEARDOORS` | 88 | `VEHICLE_WHEELS01` |
+| 41 | `HELO_GEAR` | 89 | `VEHICLE_WHEELS02` |
+| 42 | `HELO_GEARB` | 90 | `VEHICLE_WHEELS03` |
+| 43 | `HELO_BAYDOORS` | 91 | `LFP_CAMPPERCENT` |
+| 44 | `HELO_PCANOPY` | 92 | `TEX_TEAM` |
+| 45 | `HELO_CPCANOPY` | 93 | `TEX_CAMO1` |
+| 46 | `HELO_ROTOR` | 94 | `TEX_CAMO2` |
+| 47 | `HELO_TAILROTOR` | 95 | `TEX_CAMO3` |
+
+#### Loader remap and runtime bus
+
+The CTRL chunk is a model-local list of authored names, but its list order is
+not the runtime bus layout. `[orig: sub_5B4640 @ 0x5B4640]` resolves each name
+through the global catalog and stores the global ordinal in the runtime CTRL
+record at `0x5B46E6`. `ThreediGp_LoadFromFile` then follows each file-local
+reference through that record and patches the consuming field to the global
+ordinal: material/texture-animation references at
+`0x5B5C80..0x5B5DA2`, PANM references at `0x5B5E0B..0x5B5EF6`, and light
+references at `0x5B5F4F..0x5B5F62`. Consequently B50Cal's local order
+`[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]` never makes yaw global ordinal 1;
+the patched values are 54, 55, and 56. Unknown authored names follow the same
+path and become ordinal 0.
+
+The global bus has 96 pairs. The even dword at
+`0x83FCE8 + 8·ordinal` is a **signed `int32` value**, not a clamped `uint16`;
+`0x10000` is the exact 16.16 endpoint and negative values remain meaningful.
+The odd dword at `0x83FCEC + 8·ordinal` is adjacent state. PANM ignores it;
+controlled texture animation reads it to choose fractional-frame versus
+modulo-frame interpretation. No writer to that odd dword was found, so its
+static zero selects the fractional-frame branch. Integer consumers retain
+two-operand `IMUL`'s wrapping low 32 bits before an arithmetic right shift
+rather than widening the product.
+
+Sorted material rendering does not simply observe whichever writer happened to
+touch the global bus last. During submission,
+`[orig: collect_render_objects_for_batch @ 0x5D8F20]` walks the four register
+ordinal bytes in the render-material record and copies each nonzero ordinal's
+current value into the 68-byte batch entry
+`[orig: snapshot @ 0x5D91AB..0x5D91DE]`. The sorted flush restores those
+captured values to the global slots before calling
+`apply_shader_parameters`
+`[orig: CRenderBatchQueue_FlushBatches @ 0x5D9F50; restore
+@ 0x5DA1B8..0x5DA1FD; shader call @ 0x5DA436]`. Ordinal zero is the byte-level
+sentinel and is not copied by that loop. This explains why a retained
+per-model value snapshot can reproduce a controlled material's written inputs,
+but it does not reproduce the persistent bus value inherited by an unwritten
+slot or the submission/flush RNG schedule.
+
+`PANM_SampleTrack`, called while building posed matrices by
+`[orig: Model_TransformBoneMatrices @ 0x58e390]`, first handles constant type
+24.
+Type 113 then treats the track parameter as a control-register ordinal and
+interpolates the signed start/end window from the slot's even value dword.
+Every other active type, including 114–117, evaluates
+`wave_lookup(type, phase + time * rate)` instead. The low-nibble waveform
+dispatch is shared with material animation through
+`[orig: wave_lookup @ 0x5de6b0]`;
+the fact that the UV-matrix consumer assigns special meanings to all five
+types 113–117 does **not** extend those meanings to PANM.
+
+The corpus agrees with that consumer-specific branch:
+
+| Corpus | Controlled PANM tracks | Models | Type 113 | Types 114–117 |
+|---|---:|---:|---:|---:|
+| checked-in canonical `.3di` set | 93 (97 if the duplicate temporary fixture is included) | — | all | 0 |
+| retail base install | 1,740 | 178 | all | 0 |
+| retail `RevX02` expansion | 253 | 42 | all | 0 |
+
+#### Retail writer coverage and port boundary
+
+The complete global-bus xref audit, including literal stores and indexed range
+writers, found dedicated retail writers for ordinals **3–10, 14–36, 41,
+46–47, and 52–95**. It found no dedicated writer for **0–2, 11–13, 37–40,
+42–45, or 48–51**. Absence from that second set does not make ordinals 1–95
+unreachable: the generic ACTION `ctrlreg <NAME>` path can animate any
+successfully resolved nonzero ordinal
+`[orig: ActionDef_ParseScriptLine @ 0x4027FA; ActionSlot_ExecuteAction
+@ 0x4020CC; CtrlRegAnimSlot_Allocate @ 0x401CA0;
+CtrlRegAnimSlot_UpdateAll @ 0x401BF0]`. Ordinal 0 cannot be addressed through
+that generic path because zero is also the resolver's miss sentinel.
+
+The producer census partitions all 96 ordinals without an unclassified tail:
+
+| Producer status | Count | Ordinals |
+|---|---:|---|
+| exact value/state projection hosted in its bounded semantic scope | 10 | **8, 54–56, 61–62, 71–72, 91–92** |
+| dedicated retail writer exists; exact host publisher remains open | 68 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90, 93–95** |
+| no dedicated writer found; only the generic path can reach nonzero members | 18 | **0–2, 11–13, 37–40, 42–45, 48–51** |
+
+This is a producer-status partition, not a format-support partition: every one
+of the 96 names is present in the canonical catalog and can be resolved by the
+loader and consumed by a model. The names for every ordinal are in the
+canonical table above.
+
+That ACTION path is not safe to approximate from the weapon FSM's phase.
+`CtrlRegAnimSlot_Allocate` stores four dwords per slot: the ActionDef pointer,
+repeat count, its third argument, and `ctrlreginc`; all witnessed callers pass
+the live `MountSlot *` as that third argument
+`[orig: ActionSlot_BeginActivePhase @ 0x53F878..0x53F87B]`. The updater then
+treats the same dword as the initial numeric accumulator before clamping and
+reversing it. No shipped `weapon.def` in the audited corpora authors `ctrlreg`,
+so this address-dependent dormant behavior has no retail-data witness. OpenNova
+therefore leaves the animator explicitly unported instead of substituting an
+action counter or normalized clip phase.
+
+The currently hosted writer-value families are:
+
+- PLAYPARTANIM channel 1 publishes `VEHICLE_SPECIAL1` (71) only when item
+  attribute `0x1000` is clear; channel 2 always publishes
+  `VEHICLE_SPECIAL2` (72). The integrator uses wrapping signed-dword ADD/SUB
+  and clamps only on strict upper/negative overshoot; ordinary sweeps retain
+  the exact `0x10000` endpoint, while zero-time states can leave that range.
+  This is a fixed semantic mapping, not a walk over model
+  CTRL order `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator
+  @ 0x456710; HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38]`.
+- `HEAT_GLOW` (54) is live: the attachment path writes it at `0x440969` and
+  `0x440991` while resolving the parent carrier's PANM/bones for a live UseGun
+  child, and the first-person viewmodel writes it at `0x4DEEC2..0x4DEEF5`
+  `[orig: HUD_CacheWeaponSlotInfo @ 0x440930, sole caller
+  Entity_AttachToBoneAndUpdateTransform @ 0x546518;
+  Player_RenderFirstPersonViewModel @ 0x4DED60]`.
+- `EWEAP_GUNYAW`/`EWEAP_GUNPITCH` (55/56) retain the witnessed emplaced-weapon
+  angular stores in world and first-person presentation scopes.
+- `VEHICLE_STEERING` (61) zero-extends the high word of the live cveh steering
+  state. `VEHICLE_SPEED` (62) reproduces the `CDQ`/`XOR`/`SUB` absolute value
+  and unsigned `0x10000` cap, including the `INT_MIN → 0x10000` edge. They are
+  published only for authority rows with the modeled cveh state; compact
+  joiner rows carry neither source and do not synthesize it
+  `[orig: Entity_CacheVehicleHUDStats @ 0x4929B0; stores
+  @ 0x4929D7 / @ 0x4929F1]`.
+- The numbered-zone generic callback publishes `TEAMSWING` (8), signed-byte
+  `TEX_TEAM` (92), and conditionally `LFP_CAMPPERCENT` (91). The latter is an
+  omitted write when the shared 13-dword timer entry is absent; when present,
+  it is `limit ? trunc(current/limit × 65536) : 0x10000`. OpenNova applies
+  mixed S2C `0x53`/`0x6F` updates in wire order and advances the shared entry
+  once after the complete client receive pump. Sector-model and first-person
+  submissions also retain their separate signed `TEX_TEAM` writers
+  `[orig: BoneCallback_gnrc_World @ 0x4E2860; render_sector_entity
+  @ 0x5C4190; Player_RenderFirstPersonViewModel @ 0x4DED60]`.
+
+OpenNova now has the exact catalog, lookup/loader alias, global-reference
+ordinals, signed value layout, and audited per-call consumer math. The retained
+runtime still lacks retail's process-global persistent bus lifetime and
+cross-model last-writer ordering. This is therefore **catalog and consumer-math
+fidelity**, not full bus/producer fidelity. The 10 value/state projections
+listed above are landed in bounded semantic scopes, while exact frustum
+submission timing remains part of the global-bus gap. The generic ACTION
+animator, the other 68 dedicated-writer ordinals, unavailable compact-joiner
+source fields, and the separate overheat particle emitter are bounded by
+D-3DI-2/D-WPN-28 in the divergence ledger.
+
+OED export now preserves the loader's structural rule for every style
+`> 0x70`: even a raw PANM style 114 reference is collected into CTRL and its
+local index is serialized before retail remaps it. `oed_export_3di_test` pins
+that behavior. The current editor generator catalog still does not offer PANM
+114–117 as authoring choices, so this is load/runtime/export fidelity, not a
+claim of retail OED UI parity for those unused PANM styles.
 
 ---
 

@@ -28,6 +28,12 @@ target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)
 target_include_directories(threedi_gp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_gp_roundtrip COMMAND threedi_gp_roundtrip_test)
 
+# Retail global control-register catalog.
+add_executable(threedi_ctrl_catalog_test threedi/ctrl_catalog_test.cpp)
+target_link_libraries(threedi_ctrl_catalog_test PRIVATE opennova_threedi)
+target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
+
 # PANM unit tests
 foreach(test ctrl decode runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)

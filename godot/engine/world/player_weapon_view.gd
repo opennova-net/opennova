@@ -48,6 +48,10 @@ var reserve := 0           # carried pool, rounds
 # (all infantry arms) and for a cold emplaced gun.
 # [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, clamp @0x4b854d]
 var heat := 0
+# The first-person model's separate CTRL publication keeps the exact 1.0
+# endpoint instead of the HUD's 0xFFFF cap.
+# [orig: Player_RenderFirstPersonViewModel @ 0x4DEEC2..0x4DEEF5]
+var heat_glow := 0
 var kick := 0              # recoil kick intensity 0..20 [orig: MountSlot+0x5B]
 # The PowerThrow windup, feeding the HUD charge bar [orig: g_fireChargeStartTick
 # @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
@@ -93,6 +97,7 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.clip = int(d.get("clip", 0))
 	out.reserve = int(d.get("reserve", 0))
 	out.heat = int(d.get("heat", 0))
+	out.heat_glow = int(d.get("heat_glow", 0))
 	out.kick = int(d.get("kick", 0))
 	out.windup_active = bool(d.get("windup_active", false))
 	out.windup_held_ticks = int(d.get("windup_held_ticks", 0))

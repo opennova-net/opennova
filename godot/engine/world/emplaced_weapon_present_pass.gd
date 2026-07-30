@@ -1,8 +1,8 @@
 extends RefCounted
 
 ## Apply retail's semantic emplaced-weapon CTRL registers. These are independent
-## of PLAYPARTANIM's model-order channels: B50Cal's CTRL[0] is HEAT_GLOW, while
-## its turret and barrel bind the exact names below.
+## of PLAYPARTANIM, which publishes only VEHICLE_SPECIAL1/2. B50Cal's turret
+## and barrel bind the exact names below.
 
 const GUN_YAW := "EWEAP_GUNYAW"
 const GUN_PITCH := "EWEAP_GUNPITCH"

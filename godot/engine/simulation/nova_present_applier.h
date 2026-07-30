@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <array>
@@ -42,6 +43,19 @@ public:
 				OUTPUT_BODY_ANIM,
 	};
 
+	// The one compatibility adapter for the visual CTRL/PANM surface. Production
+	// NovaObjectModel exposes owner-aware CTRL writes; older third-party nodes and
+	// test doubles expose the original set_ctrl_value pair. Presenters resolve
+	// this bitset once when they build their node plan, then dispatch without
+	// repeating string-based capability probes in their hot loops.
+	enum VisualControlCapabilities {
+		VISUAL_CTRL_OWNED = 1,
+		VISUAL_CTRL_LEGACY = 2,
+		VISUAL_CTRL_BATCH = 4,
+		VISUAL_PART_PHASE = 8,
+		VISUAL_PART_CLEAR = 16,
+	};
+
 	// `sim` is duck-typed (NovaSimulation or a test fake): consulted only for the
 	// muzzle feedback push. `index` resolves rows to nodes (MissionEntityRegistry
 	// or a fake); called only on plan rebuilds plus one get_generation per frame.
@@ -78,12 +92,38 @@ public:
 	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
 			int base, bool drive_root_basis);
 
+	static int get_visual_control_capabilities(Object *node);
+	// Capability-aware dispatch for presenters that already resolved the visual
+	// surface at model/row-plan construction. These never probe the node.
+	static void ctrl_set_with_capabilities(Object *node, int capabilities,
+			const String &owner, const String &reg, int value);
+	static void ctrl_clear_with_capabilities(Object *node, int capabilities,
+			const String &owner, const String &reg);
+	static int wire_controls_apply_with_capabilities(Object *node,
+			const PackedFloat32Array &snap, int base, int capabilities);
+
 	// Emplaced-weapon CTRL registers (emplaced_weapon_present_pass.gd delegates
 	// here): EWEAP_GUNYAW/EWEAP_GUNPITCH only — clear_ctrl_values() would also
 	// erase live WAC channels.
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
 	static void emplaced_clear(Object *node);
+	// Authoritative ground-vehicle VEHICLE_STEERING/VEHICLE_SPEED pair.
+	// Invalid compact/non-vehicle rows release only this semantic writer.
+	static int vehicle_motion_apply(Object *node,
+			const PackedFloat32Array &snap, int base);
+	static void vehicle_motion_clear(Object *node);
+	// Bounded per-model projection of the retail sector/generic-zone CTRL
+	// writers. Validity bits distinguish an omitted global-bus write from a
+	// literal zero store; clears affect only these presentation owners.
+	static int zone_team_apply(Object *node,
+			const PackedFloat32Array &snap, int base);
+	static void zone_team_clear(Object *node);
+	// Attachment-scoped carrier HEAT_GLOW. A valid row includes cold zero;
+	// invalid/unavailable rows release only this dedicated writer.
+	static int world_heat_apply(Object *node, const PackedFloat32Array &snap,
+			int base);
+	static void world_heat_clear(Object *node);
 
 protected:
 	static void _bind_methods();
@@ -97,10 +137,23 @@ private:
 		BODY_SLOT_PLAY,
 	};
 
+	enum CtrlPublishField {
+		CTRL_PUBLISH_PART1 = 0,
+		CTRL_PUBLISH_PART2,
+		CTRL_PUBLISH_EMPLACED,
+		CTRL_PUBLISH_VEHICLE,
+		CTRL_PUBLISH_TEX_TEAM,
+		CTRL_PUBLISH_ZONE,
+		CTRL_PUBLISH_LFP,
+		CTRL_PUBLISH_HEAT,
+		CTRL_PUBLISH_COUNT,
+	};
+
 	struct Row {
 		int base = 0;
 		ObjectID node_id;
 		int caps = 0;
+		int visual_ctrl_caps = 0;
 		int32_t bms_id = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
@@ -110,8 +163,12 @@ private:
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
 		std::array<float, 30> aim_payload = {};
-		bool part_stamp_valid = false;
-		std::array<int32_t, 7> part_stamp = {};
+		// Validity/ownership edges for the semantic CTRL publishers. Active
+		// retail writers are reasserted on every submission so another owner
+		// cannot leave a retained value behind; omitted writers clear only on
+		// the cold/falling edge.
+		bool ctrl_publish_state_valid = false;
+		std::array<int32_t, CTRL_PUBLISH_COUNT> ctrl_publish_state = {};
 		bool body_stamp_valid = false;
 		int32_t body_mode = BODY_NONE;
 		int32_t body_selector = -1;
@@ -125,6 +182,7 @@ private:
 			int64_t layout_revision);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
+	void release_part_anim_outputs();
 	int64_t current_index_generation();
 	const String &infantry_key(int state);
 
@@ -163,3 +221,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::NovaPresentApplier::OutputChannels);
+VARIANT_ENUM_CAST(godot::NovaPresentApplier::VisualControlCapabilities);

@@ -131,7 +131,7 @@ struct AiBrain {
         kPartAnimDir1 = 110,   // comp+440 channel-2 sweep direction
         kPartAnimRate0 = 111,  // comp+444 channel-1 rate (16.16 phase units / tick)
         kPartAnimRate1 = 112,  // comp+448 channel-2 rate
-        kPartAnimPhase0 = 113, // comp+452 channel-1 phase 0..65535 [our integrator; inferred slot]
+        kPartAnimPhase0 = 113, // comp+452 signed phase dword (ordinary range 0..0x10000)
         kPartAnimPhase1 = 114, // comp+456 channel-2 phase
         kTargetRef = 127,  // primary target ref [byte +508]
         kOutSpeed = 128,   // mover output speed [byte +512]
@@ -723,9 +723,11 @@ public:
     void vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                           const VehicleTraits &traits, VehicleDriveCmd &out);
 
-    // Integrate the part-anim channel phases: phase[slot] += rate[slot] * dir[slot], clamped to
-    // [0,65535] (one-shot door/turret sweep). The per-frame consumer of PLAYPARTANIM, which writes
-    // only direction + rate (ai_apply_command case 0x22). Runs regardless of the AI budget gate.
+    // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
+    // and wrapping SUB for every other nonzero direction. Clamp/stop only on
+    // strict upper/negative overshoot; an exact endpoint remains active.
+    // PLAYPARTANIM writes only direction + rate (ai_apply_command case 0x22).
+    // Runs regardless of the AI budget gate. [orig: integrator @ 0x456710]
     void advance_part_anim(AiEntity &e);
 
     // ---- Infantry motor [orig: Entity_UpdateInfantryAI @0x4b9910] ----

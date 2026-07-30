@@ -6,6 +6,18 @@ extends RefCounted
 ## function returns the control(s) it adds and never reads instance state, so
 ## callers own the data. The object-only ctrl-reg builders live in ObjectForms.
 
+
+class IdOption:
+	extends RefCounted
+
+	var id: int
+	var label: String
+
+	func _init(p_id: int, p_label: String) -> void:
+		id = p_id
+		label = p_label
+
+
 # Panel/detail container margin and inner card margin, in pixels.
 const PANEL_MARGIN := 10
 const CARD_MARGIN := 8
@@ -129,8 +141,18 @@ static func populate_id_option(option: OptionButton, options: Array, current_id:
 	var selected_index := 0
 	var matched := false
 	for item in options:
-		var item_id := int(item.get("id", 0))
-		option.add_item(String(item.get("label", str(item_id))), item_id)
+		var item_id := 0
+		var item_label := ""
+		if item is IdOption:
+			var typed_item := item as IdOption
+			item_id = typed_item.id
+			item_label = typed_item.label
+		elif item is Dictionary:
+			item_id = int(item.get("id", 0))
+			item_label = String(item.get("label", str(item_id)))
+		else:
+			continue
+		option.add_item(item_label, item_id)
 		var option_index := option.get_item_count() - 1
 		if item_id == current_id:
 			selected_index = option_index

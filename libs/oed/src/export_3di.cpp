@@ -314,7 +314,11 @@ static std::vector<std::string> collect_control_registers(
   }
 
   auto maybe_add_part_anim_reg = [&](const PartAnimFunc &func) {
-    if (func.func == 113 && func.ctrlReg[0] != '\0') {
+    // PANM's runtime value consumer reads the bus only for style 113, but the
+    // file parameter structurally names a CTRL record for every style >0x70.
+    // The exporter must collect exactly the names fill_transform indexes.
+    // [orig: ThreediGp_LoadFromFile PANM fixups @ 0x5B5E0B..0x5B5EF6]
+    if (func.func > 0x70 && func.ctrlReg[0] != '\0') {
       add_reg(std::string(func.ctrlReg));
     }
   };

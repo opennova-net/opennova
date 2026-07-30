@@ -109,9 +109,10 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
 	var reflect: Color = info.get("reflect_color", Color(0.7, 0.8, 0.9, 0.35))
 	material.set_shader_parameter("u_reflect_color", reflect)
-	material.set_shader_parameter("u_uv_offset", Vector2.ZERO)
-	material.set_shader_parameter("u_uv_scale", Vector2.ONE)
-	material.set_shader_parameter("u_uv_rotation", 0.0)
+	# The PANM evaluator supplies the complete two-row affine transform, including
+	# the coupled off-diagonal terms retail's style 113..117 paths can produce.
+	material.set_shader_parameter("u_uv_transform_u", Vector3(1.0, 0.0, 0.0))
+	material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
 	material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 	material.set_shader_parameter("u_alpha_mod", 1.0)
 	material.set_shader_parameter("u_emissive", 1.0 if bool(info.get("emissive", false)) else 0.0)

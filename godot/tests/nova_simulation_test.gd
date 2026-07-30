@@ -16,6 +16,74 @@ const NATIVE_RUNTIME_TIMING_KEYS := [
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
 
+
+func _model_with_special1_in_local_slot_zero(
+		source_res_path: String) -> NovaObjectData:
+	var result := NovaObjectData.new()
+	assert_eq(result.open_file(
+			ProjectSettings.globalize_path(source_res_path)), OK)
+	assert_true(result.set_control_register_name(0, "VEHICLE_SPECIAL1"),
+			"author the semantic local CTRL name through NovaObjectData")
+	return result
+
+
+func _fast_rope_item_db() -> NovaItemDatabase:
+	var path := ProjectSettings.globalize_path(
+			"res://.godot/ctrl_fast_rope_items.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return null
+	file.store_string("""begin "Fast Rope Control Fixture"
+  id 105006
+  type object
+  graphic StaticCrate1
+  sid fastropectrl
+  hp 50
+  attrib: FastRope
+end
+""")
+	file.close()
+	var result := NovaItemDatabase.new()
+	assert_eq(result.load(path), OK)
+	assert_eq(int(result.get_attrib(105006)) & 0x1000, 0x1000,
+			"fixture carries retail's FastRope item attribute")
+	return result
+
+
+func _vehicle_ctrl_item_db() -> NovaItemDatabase:
+	var path := ProjectSettings.globalize_path(
+			"res://.godot/ctrl_vehicle_items.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return null
+	file.store_string("""begin "CTRL Vehicle Fixture"
+  id 105007
+  type vehicle
+  graphic StaticCrate1
+  sid ctrlvehicle
+  ai_function cveh
+  render_function cveh
+  move_function cveh
+  attrib: AIData neutral PlayerControl
+  hp 3000
+  turn_rate 65
+  turn_rate2 41
+  acceleration 15
+  deceleration 70
+  player_speed 94
+  physics 1
+  torque 3
+end
+""")
+	file.close()
+	var result := NovaItemDatabase.new()
+	assert_eq(result.load(path), OK)
+	assert_eq(int(result.get_vehicle_physics(105007)[0]), 1)
+	return result
+
+
 func test_host_projectile_options_roundtrip() -> void:
 	var sim := NovaSimulation.new()
 	sim.configure_host_session({"fat_bullets": true, "one_shot_kill": true})
@@ -340,6 +408,88 @@ func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
 				and int(snapshot[base + NovaSimulation.PF_INDEX]) == index:
 			return int(snapshot[base + field])
 	return -1
+
+
+func _present_phase_for_origin(sim: NovaSimulation, kind: int, index: int,
+		channel: int) -> int:
+	var snapshot := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for record in range(snapshot.size() / stride):
+		var base := record * stride
+		if int(snapshot[base + NovaSimulation.PF_KIND]) == kind \
+				and int(snapshot[base + NovaSimulation.PF_INDEX]) == index:
+			return NovaSimulation.decode_present_part_anim_phase(
+					snapshot, base, channel)
+	return 0
+
+
+func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105007,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(placed.is_empty())
+	assert_true(md.set_entity_property_int(
+			NovaMissionData.KIND_ITEM, int(placed["index"]), "team", 2))
+	var item_db := _vehicle_ctrl_item_db()
+	assert_not_null(item_db)
+	if item_db == null:
+		return
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 5007,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	sim.step()
+	var index := int(placed["index"])
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_VEHICLE_MOTION_VALID), 1,
+			"a resolved authority cveh row owns both registers at rest")
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_VEHICLE_STEERING), 0)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_VEHICLE_SPEED), 0)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_TEX_TEAM_VALID), 1,
+			"a pool-1 sector-model row executes the retail TEX_TEAM writer")
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_TEX_TEAM), 2)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_ZONE_CTRL_VALID), 0,
+			"a non-zone sector model does not synthesize the generic-zone writers")
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.set_player_input(true, false, true, false, false, false, false)
+	for _tick in range(40):
+		sim.step()
+	var steering := _present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_VEHICLE_STEERING)
+	var speed := _present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, index,
+			NovaSimulation.PF_VEHICLE_SPEED)
+	assert_ne(steering, 0,
+			"the snapshot carries the zero-extended live steer high word")
+	assert_gt(speed, 0,
+			"the snapshot carries the live currentSpeed magnitude")
+	assert_lte(speed, 0x10000,
+			"the retail speed publisher saturates at its fixed-point endpoint")
+	sim.free()
 
 
 func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
@@ -2018,6 +2168,139 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	sim.free()
 
 
+func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
+	# Give the emplacement a deterministic HEAT_GLOW collision track. The
+	# scoped parent visual/collision frame must sample its embedded MountSlot
+	# only while a live UseGun child is attached; the local FP state is the
+	# comparison witness for the intentionally different endpoint.
+	# [orig: attachment caller @ 0x546518;
+	#  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
+	var object_data := NovaObjectData.new()
+	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	assert_true(object_data.set_control_register_name(0, "HEAT_GLOW"))
+	for index in range(object_data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(object_data.delete_part_anim(0, index))
+	var anim := object_data.add_part_anim(0, 1)
+	assert_eq(anim, 0)
+	assert_true(object_data.set_part_anim_channel_enabled(
+			0, anim, "translation", true))
+	assert_true(object_data.set_part_anim_channel_mode(
+			0, anim, "translation", "x", "control_register", 0))
+	assert_true(object_data.set_part_anim_channel_values(
+			0, anim, "translation", "x", 0.0, 4.0, 0.0))
+
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	var gun_index := int(gun["index"])
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(object_data)
+	assert_eq(seat_specs.size(), 1)
+	sim.set_item_seat_specs([{
+		"type_id": 1419,
+		"seats": seat_specs,
+		"primary_weapon": "WPN_EMPLCD50NA",
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(item_db)
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	# Listen-host player creation rebuilds the authoritative registry. Bind the
+	# collision instance to that final registry identity, as GameWorld does.
+	var collision_placer := GraphicDataPlacerStub.new({
+		"B50cal": object_data,
+	})
+	assert_eq(sim.resolve_collision_instances(
+			item_db, collision_placer), 1)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
+	var weapons := NovaWeaponDatabase.new()
+	assert_eq(weapons.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/weapon.def")), OK)
+	var personal: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_M4AUTO"))
+	var mounted: Dictionary = weapons.get_weapon(
+			weapons.find_weapon("WPN_EMPLCD50NA"))
+	sim.set_local_player_weapon(personal, {})
+	sim.drain_local_player_weapon_events()
+	sim.step()
+
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_WORLD_HEAT_GLOW_VALID), 0,
+			"an unoccupied carrier is outside retail's attachment writer scope")
+	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_rows.size(), 1)
+	if before_rows.size() != 1:
+		sim.free()
+		return
+	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+
+	assert_true(sim.local_player_toggle_mount())
+	sim.step()
+	var mounted_switch := false
+	for raw in sim.drain_local_player_weapon_events():
+		if String((raw as Dictionary).get(
+				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+			mounted_switch = true
+	assert_true(mounted_switch)
+	sim.set_local_player_weapon(mounted, {}, true)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_WORLD_HEAT_GLOW_VALID), 1)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_WORLD_HEAT_GLOW), 0,
+			"a live UseGun carrier owns the cold zero branch")
+
+	sim.set_local_player_weapon_input(true, true, false)
+	var fp_heat_glow := 0
+	for _tick in range(3000):
+		sim.step()
+		fp_heat_glow = int(sim.get_local_player_weapon_state().get(
+				"heat_glow", 0))
+		if fp_heat_glow >= 0x10000:
+			break
+	sim.set_local_player_weapon_input(false, false, false)
+	assert_eq(fp_heat_glow, 0x10000,
+			"the mounted first-person consumer reaches its distinct endpoint")
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_WORLD_HEAT_GLOW_VALID), 1)
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, gun_index,
+			NovaSimulation.PF_WORLD_HEAT_GLOW), 0xFFFF,
+			"the same inline slot saturates the world model at 0xFFFF")
+
+	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(after_rows.size(), 1)
+	if after_rows.size() != 1:
+		sim.free()
+		return
+	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	for index in before.size():
+		if before[index].distance_to(after[index]) > 3.9:
+			moved += 1
+	assert_gt(moved, 0,
+			"headless collision consumes the same authoritative HEAT_GLOW frame")
+	sim.free()
+
+
 func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	# B50Cal's authored PANM binds its turret and barrel to the semantic
 	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
@@ -3192,24 +3475,107 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	for _tick in range(80):
 		sim.step()
-	assert_eq(_present_field_for_origin(
+	assert_gt(_present_field_for_origin(
 			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
-			NovaSimulation.PF_ACTIVE1), 1)
-	assert_eq(_present_field_for_origin(
-			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
-			NovaSimulation.PF_PHASE1), 65535,
+			NovaSimulation.PF_ACTIVE1), 0)
+	assert_eq(_present_phase_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
 			"SP/host presentation receives the authoritative PLAYPARTANIM pose")
 	sim.free()
 
 
+func test_present_part_anim_phase_transport_preserves_every_dword_bit() -> void:
+	# PackedFloat32 cannot carry every signed dword numerically. The snapshot
+	# schema transports two exact 16-bit integers, with high16+1 reserving zero
+	# for "unpublished", so wrapping PLAYPARTANIM states survive unchanged.
+	var snapshot := PackedFloat32Array()
+	snapshot.resize(NovaSimulation.PF_ACTIVE2 + 1)
+	var phases := [
+		0,
+		65536,
+		0x041893ab, # not exactly representable as one numeric float32
+		2147483647,
+		-1,
+		-2147482600,
+		-2147483648,
+	]
+	for channel in [1, 2]:
+		var phase_field: int = NovaSimulation.PF_PHASE1 + (channel - 1) * 2
+		var active_field: int = NovaSimulation.PF_ACTIVE1 + (channel - 1) * 2
+		for phase in phases:
+			snapshot[phase_field] = float(int(phase) & 0xffff)
+			snapshot[active_field] = float(((int(phase) >> 16) & 0xffff) + 1)
+			assert_eq(
+				NovaSimulation.decode_present_part_anim_phase(
+					snapshot, 0, channel),
+				int(phase),
+				"channel %d preserves signed dword %d" % [channel, phase])
+		snapshot[active_field] = 0.0
+		assert_eq(
+			NovaSimulation.decode_present_part_anim_phase(
+				snapshot, 0, channel),
+			0,
+			"zero high-word code remains the unpublished sentinel")
+
+
+func test_fast_rope_suppresses_only_special1_publication() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	for channel in [1, 2]:
+		assert_false(md.add_event_action(0, {
+			"action_type": 21,
+			"action_sub_type": 34,
+			"param1": ssn,
+			"param2": channel,
+			"param3": 1,
+			"param4": 65536,
+		}).is_empty())
+
+	var item_db := _fast_rope_item_db()
+	assert_not_null(item_db)
+	if item_db == null:
+		return
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	sim.set_item_seat_specs([{
+		"type_id": 5006,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	for _tick in range(80):
+		sim.step()
+	assert_eq(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_ACTIVE1), 0,
+			"FastRope releases VEHICLE_SPECIAL1 ownership")
+	assert_gt(_present_field_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
+			NovaSimulation.PF_ACTIVE2), 0,
+			"VEHICLE_SPECIAL2 remains unconditionally published")
+	assert_eq(_present_phase_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]), 2), 65536)
+	assert_false(sim.get_entity_part_anim_active(0, 1))
+	assert_true(sim.get_entity_part_anim_active(0, 2))
+	sim.free()
+
+
 func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
-	# Build a deterministic PLAYPARTANIM track on the M1A1's real turret part,
+	# Build a deterministic VEHICLE_SPECIAL1 track on the M1A1's real turret part,
 	# then hang the synthetic ewep from a userpoint owned by that part. A rigid
 	# parent-local reconstruction stays at the authored point; the authoritative
 	# mounted pose carries it four metres with the live part.
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/dm1a1/dm1a1.3di")), OK)
+	var data := _model_with_special1_in_local_slot_zero(
+			"res://../fixtures/3dp/dm1a1/dm1a1.3di")
 	var anchor_index := -1
 	var anchor_info := {}
 	for index in range(data.get_user_point_count()):
@@ -3284,6 +3650,9 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 		}],
 	}])
 	assert_true(sim.load_from_mission_data(md))
+	# This attachment lifecycle needs the real carrier/child rows (health,
+	# class, and NoNetworkCallback), not the isolated FastRope fixture used by
+	# the neighboring publication tests.
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -3307,9 +3676,8 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_true(initial_position.is_finite(), "synthetic ewep reached the listen client")
 	for _tick in range(79):
 		sim.step()
-	assert_eq(_present_field_for_origin(
-			sim, NovaMissionData.KIND_ITEM, int(placed["index"]),
-			NovaSimulation.PF_PHASE1), 65535,
+	assert_eq(_present_phase_for_origin(
+			sim, NovaMissionData.KIND_ITEM, int(placed["index"]), 1), 65536,
 			"carrier reached the scripted live PANM endpoint")
 	snapshot = sim.get_present_snapshot()
 	var final_position := Vector3.INF
@@ -3373,6 +3741,86 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	sim.free()
 
 
+func _fast_rope_collision_moved_vertices(register_name: String, channel: int) -> int:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105006, Vector3.ZERO, Vector3.ZERO)
+	var ssn := int(placed.get("bms_id", 0))
+	assert_gt(ssn, 0)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {
+		"action_type": 21, "action_sub_type": 34,
+		"param1": ssn, "param2": channel,
+		"param3": 1, "param4": 65536,
+	}).is_empty())
+
+	var item_db := _fast_rope_item_db()
+	assert_not_null(item_db)
+	if item_db == null:
+		return 0
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/armry01/Armry01.3di")), OK)
+	assert_true(data.set_control_register_name(0, register_name))
+	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
+		assert_true(data.delete_part_anim(0, i))
+	var anim := data.add_part_anim(0, 1)
+	assert_eq(anim, 0)
+	assert_true(data.set_part_anim_channel_enabled(
+			0, anim, "translation", true))
+	assert_true(data.set_part_anim_channel_mode(
+			0, anim, "translation", "x", "control_register", 0))
+	assert_true(data.set_part_anim_channel_values(
+			0, anim, "translation", "x", 0.0, 4.0, 0.0))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([{
+		"type_id": 5006,
+		"seats": [{
+			"type": 2,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}])
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	var collision_placer := GraphicDataPlacerStub.new({
+		"StaticCrate1": data,
+	})
+	assert_eq(sim.resolve_collision_instances(item_db, collision_placer), 1)
+	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(before_rows.size(), 1)
+	if before_rows.size() != 1:
+		sim.free()
+		return 0
+	var before: PackedVector3Array = (before_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	for _tick in range(80):
+		sim.step()
+	var after_rows: Array = sim.get_hitbox_debug().get("entities", [])
+	assert_eq(after_rows.size(), 1)
+	if after_rows.size() != 1:
+		sim.free()
+		return 0
+	var after: PackedVector3Array = (after_rows[0] as Dictionary).get(
+			"tris", PackedVector3Array())
+	assert_eq(after.size(), before.size())
+	var moved := 0
+	for i in before.size():
+		if before[i].distance_to(after[i]) > 3.99:
+			moved += 1
+	sim.free()
+	return moved
+
+
+func test_fast_rope_collision_publishes_special2_but_not_special1() -> void:
+	assert_eq(_fast_rope_collision_moved_vertices("VEHICLE_SPECIAL1", 1), 0,
+			"FastRope suppresses SPECIAL1 in authoritative collision evaluation")
+	assert_eq(_fast_rope_collision_moved_vertices("VEHICLE_SPECIAL2", 2), 639,
+			"SPECIAL2 remains published through the same collision CTRL dictionary")
+
+
 func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	# Armry COBJ parents are all 0; face counts are [24, 213, 1, 12].
 	var md := NovaMissionData.new()
@@ -3391,9 +3839,8 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 		'res://../fixtures/def/items.def')), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-		'res://../fixtures/3dp/armry01/Armry01.3di')), OK)
+	var data := _model_with_special1_in_local_slot_zero(
+			"res://../fixtures/3dp/armry01/Armry01.3di")
 	assert_true(data.has_collision())
 	for i in range(data.get_part_anim_count(0) - 1, -1, -1):
 		assert_true(data.delete_part_anim(0, i))
@@ -3433,7 +3880,7 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	# No present pass/render node: collision reads authoritative AI state.
 	for _tick in range(80):
 		sim.step()
-	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65535)
+	assert_eq(sim.get_entity_part_anim_phase(0, 1), 65536)
 	var after_debug: Array = sim.get_hitbox_debug().get(
 		'entities', [])
 	assert_eq(after_debug.size(), 1)

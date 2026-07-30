@@ -11,7 +11,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <array>
-#include <unordered_map>
+#include <cstring>
 #include <vector>
 
 using namespace novaobj;
@@ -48,6 +48,30 @@ bool panm_animation_is_live(const Animation &anim) {
 			track_is_live(anim.translation);
 }
 
+template <typename Animation>
+bool panm_animation_uses_noise(const Animation &anim) {
+	const auto track_uses_noise = [](const auto &track) {
+		return (track.control & 0xF0u) != 0 &&
+				(track.control & 0x0Fu) == 6;
+	};
+	const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
+	if (rotation_type == 2 &&
+			(track_uses_noise(anim.rotation_x) ||
+			 track_uses_noise(anim.rotation_y) ||
+			 track_uses_noise(anim.rotation_z)))
+		return true;
+	const uint8_t scale_type = threedi_panm_scale_type(anim.flags);
+	if (scale_type == 1 && track_uses_noise(anim.scale_x))
+		return true;
+	if (scale_type == 2 &&
+			(track_uses_noise(anim.scale_x) ||
+			 track_uses_noise(anim.scale_y) ||
+			 track_uses_noise(anim.scale_z)))
+		return true;
+	return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
+			track_uses_noise(anim.translation);
+}
+
 uint32_t retail_runtime_time_ms(int64_t time_ms) {
 	return time_ms < 0 ? 0u : static_cast<uint32_t>(time_ms);
 }
@@ -61,14 +85,63 @@ std::vector<std::string> control_register_names(const ThreediModelIR &ir) {
 	return names;
 }
 
-std::unordered_map<std::string, uint16_t> control_values_from_dict(const Dictionary &dict) {
-	std::unordered_map<std::string, uint16_t> values;
+int32_t control_value_from_variant(const Variant &value) {
+	const int64_t raw = static_cast<int64_t>(value);
+	const uint32_t low_dword = static_cast<uint32_t>(raw);
+	int32_t signed_value = 0;
+	std::memcpy(&signed_value, &low_dword, sizeof(signed_value));
+	return signed_value;
+}
+
+using GlobalCtrlValues = renderer::ControlRegisterValues;
+
+GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
+	GlobalCtrlValues values = {};
 	const Array keys = dict.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
-		values[to_std(key)] = static_cast<uint16_t>(std::clamp(static_cast<int>(dict[keys[i]]), 0, 65535));
+		const CharString utf8 = key.utf8();
+		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
+		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
+			continue;
+		}
+		values[static_cast<size_t>(ordinal)] =
+				control_value_from_variant(dict[keys[i]]);
 	}
 	return values;
+}
+
+void resolve_panm_track_register(const ThreediModelIR &ir, ThreediTransform &track) {
+	if (track.control <= 0x70) {
+		return;
+	}
+	const char *name = nullptr;
+	const size_t local_ordinal = track.control_param;
+	if (ir.control_registers != nullptr &&
+			local_ordinal < ir.control_register_count) {
+		name = ir.control_registers[local_ordinal].name;
+	}
+	// PANM stores a file-local CTRL index. Retail's model loader resolves the
+	// parameter on every style above 0x70 before any track is sampled. Only
+	// style 113 later reads the register bus; 114..117 keep the resolved ordinal
+	// as their waveform phase. An absent or unknown authored name inherits
+	// CtrlName_ToOrdinal's zero result and therefore aliases LOD_FRAC.
+	// [orig: model CTRL loader @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290;
+	//  PANM_SampleTrack @ 0x5B2270]
+	track.control_param = threedi_ctrl_register_loader_ordinal(name);
+}
+
+void resolve_panm_registers(const ThreediModelIR &ir,
+		std::vector<ThreediPartAnimation> &animations) {
+	for (ThreediPartAnimation &anim : animations) {
+		resolve_panm_track_register(ir, anim.rotation_x);
+		resolve_panm_track_register(ir, anim.rotation_y);
+		resolve_panm_track_register(ir, anim.rotation_z);
+		resolve_panm_track_register(ir, anim.scale_x);
+		resolve_panm_track_register(ir, anim.scale_y);
+		resolve_panm_track_register(ir, anim.scale_z);
+		resolve_panm_track_register(ir, anim.translation);
+	}
 }
 
 Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
@@ -145,12 +218,12 @@ Dictionary NovaObjectData::eval_material_runtime(int p_index, int64_t p_time_ms,
 	ThreediMaterial material = {};
 	copy_ir_material(ir.materials[p_index], material);
 	const std::vector<std::string> ctrl_names = control_register_names(ir);
-	const std::unordered_map<std::string, uint16_t> ctrl_values = control_values_from_dict(p_ctrl_values);
+	const GlobalCtrlValues ctrl_values =
+			global_control_values_from_dict(p_ctrl_values);
 	const renderer::MaterialRuntime runtime = renderer::eval_material_runtime(
 			material, retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
-	out["uv_offset"] = Vector2(runtime.uv.offset_u, runtime.uv.offset_v);
-	out["uv_scale"] = Vector2(runtime.uv.scale_u, runtime.uv.scale_v);
-	out["uv_rotation"] = runtime.uv.rotation;
+	out["uv_transform_u"] = Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20);
+	out["uv_transform_v"] = Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21);
 	out["rgb_mod"] = Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b);
 	out["alpha_mod"] = runtime.alpha;
 	return out;
@@ -163,7 +236,8 @@ int NovaObjectData::compute_anim_frame(int p_index, int64_t p_time_ms, const Dic
 	ThreediMaterial material = {};
 	copy_ir_material(ir.materials[p_index], material);
 	const std::vector<std::string> ctrl_names = control_register_names(ir);
-	const std::unordered_map<std::string, uint16_t> ctrl_values = control_values_from_dict(p_ctrl_values);
+	const GlobalCtrlValues ctrl_values =
+			global_control_values_from_dict(p_ctrl_values);
 	return renderer::compute_anim_frame(material, 0,
 			retail_runtime_time_ms(p_time_ms), ctrl_names, ctrl_values);
 }
@@ -178,22 +252,12 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, con
 		return out;
 	}
 
-	uint16_t ctrl_table[512];
-	std::memset(ctrl_table, 0, sizeof(ctrl_table));
-	const Array keys = p_ctrl_values.keys();
-	for (int i = 0; i < keys.size(); ++i) {
-		const String key = keys[i];
-		const std::string name = to_std(key);
-		for (size_t r = 0; r < ir.control_register_count && r < 256; ++r) {
-			if (name == ir.control_registers[r].name) {
-				ctrl_table[r * 2] = static_cast<uint16_t>(std::clamp(static_cast<int>(p_ctrl_values[keys[i]]), 0, 65535));
-				break;
-			}
-		}
-	}
+	const GlobalCtrlValues ctrl_table =
+			global_control_values_from_dict(p_ctrl_values);
 
 	std::vector<ThreediPartAnimation> effective_anims;
 	_effective_panm_for_lod(p_lod_index, effective_anims);
+	resolve_panm_registers(ir, effective_anims);
 	const ThreediPartAnimation *anims =
 			effective_anims.empty() ? nullptr : effective_anims.data();
 	const size_t node_count = effective_anims.size();
@@ -228,7 +292,7 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, con
 				base_transforms.data(),
 				nullptr,
 				retail_runtime_time_ms(p_time_ms),
-				ctrl_table,
+				ctrl_table.data(),
 				panm_matrices.data());
 		if (rc == 0) {
 			for (size_t i = 0; i < node_count; ++i) {
@@ -250,26 +314,22 @@ Dictionary NovaObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, con
 	return out;
 }
 
-// Order-independent hash of the per-instance control registers; empty (the
-// common mission case - census: commanded part anims are rare) hashes to 0.
-static uint64_t panm_ctrl_hash(const Dictionary &p_ctrl_values) {
-	if (p_ctrl_values.is_empty()) {
-		return 0;
-	}
-	uint64_t h = 0;
-	const Array keys = p_ctrl_values.keys();
-	for (int i = 0; i < keys.size(); ++i) {
-		const String key = keys[i];
-		uint64_t e = 1469598103934665603ull;
-		const CharString utf = key.utf8();
-		for (int c = 0; c < utf.length(); ++c) {
-			e = (e ^ static_cast<uint8_t>(utf[c])) * 1099511628211ull;
+// Hash the effective retail bus, not the caller's spelling. Unknown keys,
+// case variants, and duplicate aliases therefore share cache semantics with
+// the values PANM actually consumes.
+static uint64_t panm_ctrl_hash(const GlobalCtrlValues &values) {
+	uint64_t h = 1469598103934665603ull;
+	bool any_nonzero = false;
+	for (size_t ordinal = 0; ordinal < values.size(); ++ordinal) {
+		const uint32_t bits = static_cast<uint32_t>(values[ordinal]);
+		any_nonzero |= bits != 0;
+		h = (h ^ static_cast<uint8_t>(ordinal)) * 1099511628211ull;
+		for (unsigned shift = 0; shift < 32; shift += 8) {
+			h = (h ^ static_cast<uint8_t>(bits >> shift)) *
+					1099511628211ull;
 		}
-		e ^= static_cast<uint64_t>(static_cast<int64_t>(p_ctrl_values[keys[i]]) + 1) *
-				0x9E3779B97F4A7C15ull;
-		h += e;
 	}
-	return h == 0 ? 1 : h;
+	return any_nonzero ? h : 0;
 }
 
 // (Re)build the lod-fixed evaluation state after an invalidation or LOD swap.
@@ -292,6 +352,11 @@ bool NovaObjectData::_panm_cache_prepare(int p_lod_index) const {
 	c.ctrl_hash = 0;
 	c.valid = true;
 	_effective_panm_for_lod(p_lod_index, c.anims);
+	resolve_panm_registers(ir, c.anims);
+	c.has_noise = false;
+	for (const ThreediPartAnimation &anim : c.anims) {
+		c.has_noise = c.has_noise || panm_animation_uses_noise(anim);
+	}
 	size_t input_count = std::max(static_cast<size_t>(lod.part_count), c.anims.size());
 	for (const ThreediPartAnimation &anim : c.anims) {
 		input_count = std::max(input_count, static_cast<size_t>(anim.subobject_index) + 1);
@@ -330,28 +395,17 @@ int64_t NovaObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 	}
 	PanmEvalCache &c = panm_cache_;
 	const ThreediIRLod &lod = ir.lods[p_lod_index];
-	const uint64_t ctrl_hash = panm_ctrl_hash(p_ctrl_values);
+	const GlobalCtrlValues ctrl_table =
+			global_control_values_from_dict(p_ctrl_values);
+	const uint64_t ctrl_hash = panm_ctrl_hash(ctrl_table);
 	const bool first_eval = c.time_ms == INT64_MIN;
-	if (first_eval || c.time_ms != p_time_ms || c.ctrl_hash != ctrl_hash) {
-		uint16_t ctrl_table[512];
-		std::memset(ctrl_table, 0, sizeof(ctrl_table));
-		if (!p_ctrl_values.is_empty()) {
-			const Array keys = p_ctrl_values.keys();
-			for (int i = 0; i < keys.size(); ++i) {
-				const std::string name = to_std(keys[i]);
-				for (size_t r = 0; r < ir.control_register_count && r < 256; ++r) {
-					if (name == ir.control_registers[r].name) {
-						ctrl_table[r * 2] = static_cast<uint16_t>(std::clamp(
-								static_cast<int>(p_ctrl_values[keys[i]]), 0, 65535));
-						break;
-					}
-				}
-			}
-		}
+	if (first_eval || c.has_noise ||
+			c.time_ms != p_time_ms || c.ctrl_hash != ctrl_hash) {
+		++c.evaluation_serial;
 		if (!c.anims.empty()) {
 			threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(),
 					c.pivots.data(), nullptr, c.base_transforms.data(), nullptr,
-					retail_runtime_time_ms(p_time_ms), ctrl_table,
+					retail_runtime_time_ms(p_time_ms), ctrl_table.data(),
 					c.node_matrices.data());
 		}
 		bool any_changed = false;
@@ -391,12 +445,17 @@ int64_t NovaObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 	return static_cast<int64_t>(c.revision);
 }
 
+int64_t NovaObjectData::get_panm_evaluation_serial() const {
+	return static_cast<int64_t>(panm_cache_.evaluation_serial);
+}
+
 Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Array out;
 	if (!has_ir || ir.light_count == 0) {
 		return out;
 	}
-	(void)p_ctrl_values;
+	const GlobalCtrlValues ctrl_values =
+			global_control_values_from_dict(p_ctrl_values);
 	for (size_t i = 0; i < ir.light_count; ++i) {
 		const ThreediIRLight &light = ir.lights[i];
 		if ((light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_OBJECTS) != 0) {
@@ -404,12 +463,35 @@ Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctr
 		}
 		ThreediLight runtime_light = {};
 		copy_ir_light(light, runtime_light);
+		if (runtime_light.style > 0x70) {
+			const char *name = nullptr;
+			const size_t local_ordinal = runtime_light.phase;
+			if (ir.control_registers != nullptr &&
+					local_ordinal < ir.control_register_count) {
+				name = ir.control_registers[local_ordinal].name;
+			}
+			// The light loader applies the same local-name -> global-ordinal
+			// rewrite as PANM. Controlled styles read that bus slot; waveform
+			// styles retain the resolved ordinal as their phase byte.
+			// [orig: model light fixups @ 0x5B5F4F..0x5B5F62;
+			//  RgbGen_EvaluateColor @ 0x5B23D0]
+			runtime_light.phase =
+					threedi_ctrl_register_loader_ordinal(name);
+		}
 		const std::array<uint8_t, 4> color_start = {
 			runtime_light.color_start[0], runtime_light.color_start[1], runtime_light.color_start[2], runtime_light.color_start[3]
 		};
 		const std::array<uint8_t, 4> color_end = {
 			runtime_light.color_end[0], runtime_light.color_end[1], runtime_light.color_end[2], runtime_light.color_end[3]
 		};
+		int32_t ctrl_value = 0;
+		// Light RgbGen shares the material RGB evaluator: only 113/114 read
+		// the resolved global CTRL slot.
+		// [orig: Light_GetPointLightParams @ 0x5A9180;
+		//  RgbGen_EvaluateColor @ 0x5B23D0]
+		if (runtime_light.style == 113 || runtime_light.style == 114) {
+			ctrl_value = ctrl_values[runtime_light.phase];
+		}
 		const renderer::LightRuntime runtime = renderer::eval_light_runtime(
 				runtime_light.style,
 				runtime_light.phase,
@@ -417,7 +499,7 @@ Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctr
 				color_start,
 				color_end,
 				retail_runtime_time_ms(p_time_ms),
-				0);
+				ctrl_value);
 		Dictionary entry;
 		entry["position"] = godot_vec3(light.offset);
 		entry["color"] = Color(runtime.r, runtime.g, runtime.b, 1.0f);

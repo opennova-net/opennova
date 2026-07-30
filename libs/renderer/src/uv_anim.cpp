@@ -17,8 +17,11 @@ constexpr double kFrom8_8 = 0.00390625;          // base/range 8.8 [orig: @ 0x5b
 // Channel phase accumulator: (phase << 8) + time * speed, wrapping uint16
 // [orig: @ 0x5b19c8..0x5b19e2].
 uint16_t channel_phase16(const UvAnimChannel &ch, uint16_t time_units16) {
-	return static_cast<uint16_t>((static_cast<uint16_t>(ch.phase) << 8) +
-	                             static_cast<uint16_t>(time_units16 * static_cast<uint16_t>(ch.speed)));
+	const uint32_t sum =
+			(static_cast<uint32_t>(ch.phase) << 8) +
+			static_cast<uint32_t>(time_units16) *
+					static_cast<uint32_t>(static_cast<uint16_t>(ch.speed));
+	return static_cast<uint16_t>(sum);
 }
 
 // Waveform/controlled value in [base, base+range] as float
@@ -64,7 +67,8 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
                                   uint16_t time_units16,
                                   int32_t controlled_u,
                                   int32_t controlled_v,
-                                  uint16_t rand16) {
+                                  uint16_t rand16_u,
+                                  uint16_t rand16_v) {
 	// memset-zero start; m00/m11 become 1 only where a path sets them
 	// [orig: @ 0x5b19a4 memset 0x40; identity diag fill 0x28E09B8/0x28E09CC].
 	UvAnimTransform t;
@@ -105,7 +109,9 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 			} else if (ch.type <= 0x70) {
 				// waveform value in [base, end], wave/65535
 				// [orig: @ 0x5b1ae6..0x5b1c1c]
-				const double w = static_cast<double>(uv_anim_wave_lookup(ch.type, phase16, rand16)) * kInv65535;
+				const double w = static_cast<double>(
+						uv_anim_wave_lookup(ch.type, phase16, rand16_u)) *
+						kInv65535;
 				const double base = static_cast<double>(ch.base) * kFrom8_8;
 				const double range = static_cast<double>(ch.range) * kFrom8_8 - base;
 				const float v = static_cast<float>(w * range + base);
@@ -172,7 +178,9 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 				}
 			} else if (ch.type <= 0x70) {
 				// [orig: @ 0x5b1da6..0x5b1e4a]
-				const double w = static_cast<double>(uv_anim_wave_lookup(ch.type, phase16, rand16)) * kInv65535;
+				const double w = static_cast<double>(
+						uv_anim_wave_lookup(ch.type, phase16, rand16_v)) *
+						kInv65535;
 				const double base = static_cast<double>(ch.base) * kFrom8_8;
 				const double range = static_cast<double>(ch.range) * kFrom8_8 - base;
 				const float v = static_cast<float>(w * range + base);

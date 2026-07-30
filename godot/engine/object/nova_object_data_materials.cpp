@@ -4,6 +4,7 @@
 #include "object/nova_object_data_internal.h"
 
 #include <oed/material_descriptor.h>
+#include <threedi/threedi_ctrl_catalog.h>
 
 #include "util/texture_path_resolver.h"
 
@@ -506,18 +507,68 @@ Array NovaObjectData::get_shader_catalog() const {
 	return result;
 }
 
+Array NovaObjectData::get_global_control_register_catalog() {
+	Array result;
+	for (size_t ordinal = 0; ordinal < THREEDI_CTRL_REGISTER_COUNT; ++ordinal) {
+		Dictionary item;
+		item["ordinal"] = static_cast<int64_t>(ordinal);
+		item["name"] = from_native(threedi_ctrl_register_name(ordinal));
+		result.push_back(item);
+	}
+	return result;
+}
+
+String NovaObjectData::canonical_control_register_name(const String &p_name) {
+	const CharString utf8 = p_name.utf8();
+	const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
+	return ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
+			? String()
+			: from_native(threedi_ctrl_register_name(
+					  static_cast<size_t>(ordinal)));
+}
+
 Array NovaObjectData::get_control_registers() const {
 	Array result;
 	if (!has_ir) {
 		return result;
 	}
 	for (size_t i = 0; i < ir.control_register_count; ++i) {
+		const char *authored_name = ir.control_registers[i].name;
+		const uint8_t runtime_ordinal =
+				threedi_ctrl_register_loader_ordinal(authored_name);
 		Dictionary item;
 		item["index"] = static_cast<int64_t>(i);
-		item["name"] = from_native(ir.control_registers[i].name);
+		item["name"] = from_native(authored_name);
+		item["runtime_ordinal"] = static_cast<int64_t>(runtime_ordinal);
+		item["runtime_name"] =
+				from_native(threedi_ctrl_register_name(runtime_ordinal));
+		// Keep the authored model-local spelling available to editors, but
+		// expose the exact global slot selected by retail's loader fixup.
+		// Unknown and empty names intentionally resolve to ordinal zero.
+		// [orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6;
+		//  CtrlName_ToOrdinal @ 0x57B290]
 		result.push_back(item);
 	}
 	return result;
+}
+
+bool NovaObjectData::set_control_register_name(
+		int p_index, const String &p_name) {
+	if (!has_ir || ir.control_registers == nullptr || p_index < 0 ||
+			static_cast<size_t>(p_index) >= ir.control_register_count) {
+		return false;
+	}
+	const std::string name = to_std(p_name);
+	if (name.size() > 24) {
+		return false;
+	}
+	copy_cstr(ir.control_registers[p_index].name,
+			sizeof(ir.control_registers[p_index].name), name.c_str());
+	// A local CTRL rename can retarget material, texture, PANM, and light
+	// references after the retail loader-name fixup, so invalidate every
+	// dependent view rather than guessing which blocks cite this slot.
+	_notify_object_changed(UPDATE_ALL);
+	return true;
 }
 
 String NovaObjectData::resolve_material_texture_path(int p_material_index, int p_texture_index) const {
