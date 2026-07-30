@@ -178,7 +178,7 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
 	const bool dead = !local->alive || (local->flags & 2u) != 0;
-	if (dead && (world.mission_attrib_flags & 0x40u) == 0)
+	if (dead && (world.mission_attrib_flags & world::World::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
 }
 

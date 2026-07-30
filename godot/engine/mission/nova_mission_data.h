@@ -96,6 +96,8 @@ public:
 		// game-mode bits (surfaced as the single-select Game mode dropdown via get/set_game_mode).
 		// ATTRIB_GAME_MODE_MASK is the union of the 11 mode bits [orig: 0xFF830000, the complement of
 		// the engine's `and 0x7CFFFF` clear in sub_402770 @0x4031cd, dfx2med.exe].
+		ATTRIB_FORCE_INDOORS = 0x10, // game-side witness (forces the indoors blink bit every frame);
+		                             // not a dfx2med checkbox. Pinned to bms::AttribFlags in the .cpp.
 		ATTRIB_ROTATE_MAP_180 = 0x20,
 		ATTRIB_ENABLE_NVG = 0x100000,
 		ATTRIB_START_WITH_NVG_ON = 0x400000,

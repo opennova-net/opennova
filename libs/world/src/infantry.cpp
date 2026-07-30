@@ -893,7 +893,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
             // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
             emit_slot_sound(world, e,
-                            (world.mission_attrib_flags & 0x100000u) != 0
+                            (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0
                                 ? audio::kSlotNightDeath
                                 : audio::kSlotDeath,
                             e.pos);

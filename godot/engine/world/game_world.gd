@@ -503,7 +503,7 @@ func _on_net_mission(mission_name: String) -> void:
 	# only after the complete map is renderable. A partial load publishes neither.
 	_apply_mission_environment_overrides(mission)
 	_loaded_mission = mission
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
 	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
@@ -562,7 +562,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_loaded_mission = mission
 	# The mission attribute that forces the indoors accum bit every frame.
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()

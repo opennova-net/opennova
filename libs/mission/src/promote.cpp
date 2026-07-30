@@ -12,6 +12,14 @@ namespace opennova::mission {
 
 using namespace opennova::world;
 
+// libs/world mirrors these bms::AttribFlags bits beside its mission_attrib_flags
+// field (world stays mission-parser-free); this TU sees both headers, so it pins
+// the mirror values to the canonical enum.
+static_assert(World::kMissionAttribSinglePlayerRespawn ==
+              static_cast<uint32_t>(bms::AttribFlags::SinglePlayerRespawn));
+static_assert(World::kMissionAttribEnableNVG ==
+              static_cast<uint32_t>(bms::AttribFlags::EnableNVG));
+
 namespace {
 
 // degrees -> 32-bit binary angle (the entity-heading unit, entity+16). [orig: AI_HandleCommand

@@ -80,6 +80,9 @@ enum class AttribFlags : uint32_t {
     FogDistanceOverrideEnable = 0x2,
     FogColorOverrideEnable = 0x4,
     WeatherOverrideEnable = 0x8,
+    ForceIndoors = 0x10, // forces the indoors blink bit every frame — a game-side witness, not a dfx2med
+                         // option checkbox [orig: Bms_AttribFlags & 0x10 -> accum |= 2,
+                         // Render_ProcessMainSceneFrame @0x5ca1c8-0x5ca1cd; docs/render/render-occlusion-re.md §4]
     RotateMap180 = 0x20,
     SinglePlayerRespawn = 0x40,
     AdvanceAndSecure = 0x10000, // [orig: dfx2med string literal "ATTACK_AND_SECURE"; classic-DF/JO name is Advance & Secure]
@@ -620,9 +623,12 @@ struct AreaTrigger {
     float get_z_min() const { return z_min / 65536.0f; }
     float get_z_max() const { return z_max / 65536.0f; }
     // bit0 is the MISSION_AREA / mission-boundary flag (editor label, see flags note above), not a generic
-    // "enabled" toggle; *IsWithinArea trigger zones ignore it. Name kept to avoid an editor/binding ripple.
-    bool is_active() const { return (flags & 0x1u) != 0; }
-    bool constrains_z() const { return (flags & 0x2u) != 0; }
+    // "enabled" toggle; *IsWithinArea trigger zones ignore it. Accessor name kept to avoid an editor/binding
+    // ripple.
+    static constexpr uint32_t kFlagMissionArea = 0x1u; // editor "MISSION_AREA" checkbox 1175
+    static constexpr uint32_t kFlagConstrainZ = 0x2u;  // editor constrain-Z checkbox 1169
+    bool is_active() const { return (flags & kFlagMissionArea) != 0; }
+    bool constrains_z() const { return (flags & kFlagConstrainZ) != 0; }
 };
 
 // [orig: EventTrigger_UpdateEntry @0x454c30; passes: PreMission = UpdateAllWithFlag2 @0x454dc0
@@ -663,9 +669,12 @@ struct Trigger {
     // [orig: condition fold sub_454050 @0x454050] Each trigger's result is negated by ITS bit0; the combine
     // operator (or/xor/else and) is taken from the PREVIOUS trigger, i.e. these bits control how the NEXT
     // trigger joins. Last trigger's or/xor bits are unused; zero triggers => TRUE.
-    bool is_negated() const { return (condition_flags & 1) != 0; }
-    bool is_or() const { return (condition_flags & 2) != 0; }
-    bool is_xor() const { return (condition_flags & 4) != 0; }
+    static constexpr int32_t kConditionNegated = 0x1;
+    static constexpr int32_t kConditionOr = 0x2;
+    static constexpr int32_t kConditionXor = 0x4;
+    bool is_negated() const { return (condition_flags & kConditionNegated) != 0; }
+    bool is_or() const { return (condition_flags & kConditionOr) != 0; }
+    bool is_xor() const { return (condition_flags & kConditionXor) != 0; }
 
     std::string get_logic_operator() const {
         if (is_or()) return "or";

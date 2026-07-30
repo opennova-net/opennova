@@ -277,6 +277,11 @@ public:
     // SP auto-lose win-condition leg and by the infantry death scream's night
     // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
     // [orig: Bms_AttribFlags @0xa76258]
+    // The named bits below mirror bms::AttribFlags (libs/world stays
+    // mission-parser-free; parity pinned by static_asserts in
+    // libs/mission/src/promote.cpp).
+    static constexpr uint32_t kMissionAttribSinglePlayerRespawn = 0x40u;
+    static constexpr uint32_t kMissionAttribEnableNVG = 0x100000u;
     uint32_t mission_attrib_flags = 0;
 
     // The Advance & Secure zone-slot chain (empty until the host builds it after the
