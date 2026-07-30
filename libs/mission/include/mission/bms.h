@@ -460,7 +460,7 @@ inline int32_t to_fixed_16_16(float v) {
 //  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)
 //  is from the graphic .def table (not per-entity); ai_textfile = name2; unk42b@166/unk43@168 are NEVER written
 //  (zero-filled) -> reserved/pad. write_mis_item in mission.cpp already uses the canonical names below; this is
-//  validated against the original .mis writer. Full table: notes/mission/unmodeled-grill-2026-06-06.md.
+//  validated against the original .mis writer. The full name table follows inline (2026-06-06 grill).
 //  Canonical names: perception2/perfectionist2/wp_distance/wp_adv_trigger/wp_number/w_accuracy1,2/obliqueness/
 //  alert_state/map_symbol/team_budget/color_override/max_attack_distance are CORRECT as-is. CORRECTIONS (raw
 //  field -> canonical): spawns@62=movetimer; unk19@76=weapon_type(b0)|sweapon_type(b1); unk23/24@84-87=
@@ -581,7 +581,7 @@ struct WaypointRecord {
 
 // [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
-//  the literal 10, @0 a 2-bit flags, @8 the only free int. See notes/mission/unmodeled-grill-2026-06-06.md.]
+//  the literal 10, @0 a 2-bit flags, @8 the only free int (2026-06-06 grill).]
 struct GroupRecord {
     int32_t flags;
     int32_t value;
@@ -602,7 +602,7 @@ struct LayerRecord {
 // [orig editor: dfx2med.exe AREA_TRIGGERS dialog Med_AreaTriggerDialogProc @0x40f400 confirms off-0 = the
 //  designer zone id 1..99 (zones listed/addressed by id, `unk_221DEC4 + 312*id`, markers store it at
 //  entity+144) and flags bit0 = "MISSION_AREA" boundary (CheckDlgButton 1175), bit1 = constrain-Z
-//  (CheckDlgButton 1169). See notes/mission/unmodeled-grill-2026-06-06.md.]
+//  (CheckDlgButton 1169) (2026-06-06 grill).]
 struct AreaTrigger {
     int32_t id;                        // off 0: designer zone id 1..99 (editor-confirmed; markers reference it)
     int32_t x_min, x_max;              // off 4, 8   Fixed-point 16.16
