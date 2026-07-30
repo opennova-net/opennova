@@ -191,6 +191,114 @@ static void seed_test_rifle_ammo(World &w) {
     w.ammo.entries[1].valid = true;
 }
 
+// Exact-symptom feedback loop for a lethal hit at the live -> death-animation edge.
+// The root values are the first half-frame samples measured from E_STAND.adm's
+// I_idle1.bad and Dt2DeTFC.bad tracks. Retail retains the old clip for the death-edge
+// tick, then advances both channels and blends their five numeric root lanes at 0.1.
+struct DeathTransitionRootSource final : IRootMotionSource {
+    static constexpr int32_t kIdleBottom = 66245;
+    static constexpr int32_t kDeathBottom = 60145;
+    static constexpr int32_t kDeathDx = -412;
+    static constexpr int32_t kDeathDz = -555;
+    static constexpr int32_t kFirstBlendDx = -41;
+    static constexpr int32_t kFirstBlendBottom = 65635;
+    static constexpr int32_t kFirstBlendDz = kFirstBlendBottom - kIdleBottom;
+
+    bool has_clip(int, int id) const override {
+        return id == anim_state::kIdle || (id >= 173 && id <= 239);
+    }
+    int32_t clip_length_ticks(int, int) const override { return -1; }
+    bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+        if (!has_clip(0, id)) return false;
+        ++phase;
+        out = RootMotionFrame{};
+        if (id == anim_state::kIdle) {
+            out.capsule_bottom = kIdleBottom;
+        } else {
+            out.dx = kDeathDx;
+            out.dz = kDeathDz;
+            out.capsule_bottom = kDeathBottom;
+        }
+        return true;
+    }
+};
+
+static void test_lethal_hit_blends_into_death_animation_without_position_jump() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    seed_test_rifle_ammo(w);
+
+    Entity shooter_seed;
+    shooter_seed.team = 1;
+    const EntityHandle shooter_h = w.registry.spawn(0, shooter_seed);
+
+    Entity victim_seed;
+    victim_seed.kind = EntityKind::Organic;
+    victim_seed.has_item_def = true;
+    victim_seed.item_type = 3;
+    victim_seed.team = 2;
+    victim_seed.health = 10;
+    victim_seed.health_max = 10;
+    victim_seed.net_id = 0x21;
+    victim_seed.group_id = 2;
+    victim_seed.position = {20.0f, 0.0f, 0.0f};
+    const EntityHandle victim_h = w.registry.spawn(0, victim_seed);
+
+    DeathTransitionRootSource root;
+    AiSystem ai;
+    ai.root_motion = &root;
+    const int victim_index = ai.attach(victim_h);
+    AiEntity &victim = *ai.at(victim_index);
+    victim.inf.active = true;
+    victim.inf.anim_state = anim_state::kIdle;
+    victim.health = 10;
+    victim.team = 2;
+    victim.net_id = 0x21;
+    victim.pos[0] = 20 << 16;
+
+    TickContext tick{};
+    tick.world = &w;
+    tick.is_authority = true; // the SP/listen-server authority path the NPC runs on.
+    tick.logic_tick = 1;
+    ai.tick(w, tick);
+
+    RoundSpawnParams shot;
+    shot.owner = shooter_h;
+    shot.shooter_handle = shooter_h.packed;
+    shot.origin = {0.0f, 0.0f, w.registry.get(victim_h)->position.z + 0.9f};
+    shot.ammo_index = 1;
+    CHECK(w.round_sim.spawn(w, shot) >= 0);
+    for (int i = 0; i < 4 && w.registry.get(victim_h)->health > 0; ++i)
+        w.round_sim.tick(w, nullptr, nullptr);
+    CHECK(w.registry.get(victim_h)->health == 0);
+    CHECK(!w.round_sim.deaths.empty());
+
+    const int32_t transition_x = victim.pos[0];
+    const int32_t transition_z = victim.pos[2];
+    tick.logic_tick = 2;
+    ai.tick(w, tick);
+
+    CHECK(victim.inf.anim_state >= 173 && victim.inf.anim_state <= 239);
+    CHECK(victim.inf.clip_phase == 0);
+    CHECK(victim.inf.anim_blend_weight == 0.0f);
+    CHECK(victim.pos[0] == transition_x);
+    CHECK(victim.pos[2] == transition_z);
+
+    const int32_t blend_x = victim.pos[0];
+    const int32_t blend_z = victim.pos[2];
+    tick.logic_tick = 3;
+    ai.tick(w, tick);
+
+    CHECK(victim.inf.clip_phase == 1);
+    CHECK(victim.inf.anim_blend_weight == 0.1f);
+    CHECK(victim.pos[0] - blend_x == DeathTransitionRootSource::kFirstBlendDx);
+    if (victim.pos[2] - blend_z != DeathTransitionRootSource::kFirstBlendDz) {
+        std::printf("first death blend position jump: dz=%d, expected blended dz=%d\n",
+                    victim.pos[2] - blend_z, DeathTransitionRootSource::kFirstBlendDz);
+        ++failures;
+    }
+}
+
 static void configure_test_emplacement_weapon(WeaponTableEntry &weapon) {
     weapon.clipsize = -1;
     weapon.action_fsm.clip_capacity = -1;
@@ -696,7 +804,8 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     CHECK(npc.inf.anim_state == kSelectedDeath);
     CHECK(w->registry.get(npc_h)->death_anim_state == 0);
     CHECK(w->registry.get(npc_h)->corpse_timer == 123);
-    CHECK(npc.inf.clip_phase == 1);
+    CHECK(npc.inf.clip_phase == 0); // death edge retains the mounted channel this tick
+    CHECK(npc.inf.anim_blend_weight == 0.0f);
 }
 
 static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
@@ -1844,6 +1953,7 @@ int main() {
     test_mounted_gunner_dismounts_into_death_animation();
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();
     test_joiner_evaluates_vehicle_idle_without_integrating_motor();
+    test_lethal_hit_blends_into_death_animation_without_position_jump();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;

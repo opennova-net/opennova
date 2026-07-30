@@ -1005,6 +1005,9 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
 		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = -1.0f;
+		r[PF_ANIM_SOURCE_STATE] = -1.0f;
+		r[PF_ANIM_SOURCE_PHASE_TICKS] = -1.0f;
+		r[PF_ANIM_BLEND_WEIGHT] = 1.0f;
 		r[PF_ANIM_REMOTE_REQUEST] = 0.0f;
 		r[PF_ANIM_STATE_PULSE] = -1.0f; r[PF_ANIM_PULSE_TICKS] = -1.0f;
 		r[PF_WPN_ANIM_STATE] = -1.0f; r[PF_WPN_PHASE_TICKS] = -1.0f;
@@ -1175,6 +1178,13 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			if (ae && ae->inf.active) {
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+				if (ae->inf.body_blend_active()) {
+					r[PF_ANIM_SOURCE_STATE] =
+							static_cast<float>(ae->inf.anim_prev);
+					r[PF_ANIM_SOURCE_PHASE_TICKS] =
+							static_cast<float>(ae->inf.anim_prev_clip_phase);
+					r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
+				}
 				// The upper-body weapon channel this body derived for itself —
 				// for the host's OWN player and for every wire peer alike, since
 				// remote_player_body_anim now runs the same selection. The gate is

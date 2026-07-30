@@ -113,6 +113,12 @@ public:
 		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
+		// The authoritative outgoing PRIMARY channel and exact float32 target
+		// weight. Host/NPC rows carry the live AnimMap tuple; remote-request rows
+		// leave source=-1/weight=1 and reconstruct it at the receive-side FSM.
+		PF_ANIM_SOURCE_STATE,
+		PF_ANIM_SOURCE_PHASE_TICKS,
+		PF_ANIM_BLEND_WEIGHT,
 		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
 		// A transition state observed and then OVERWRITTEN within one decode fold
 		// (several 0x0A datagrams can apply between present drains). Retail applies
@@ -1112,6 +1118,9 @@ public:
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
 	int get_local_player_anim_phase_ticks() const;
+	String get_local_player_anim_source_key() const;
+	int get_local_player_anim_source_phase_ticks() const;
+	float get_local_player_anim_blend_weight() const;
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;

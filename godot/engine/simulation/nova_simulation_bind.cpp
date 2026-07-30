@@ -85,6 +85,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &NovaSimulation::get_local_player_anim_source_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &NovaSimulation::get_local_player_anim_source_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_blend_weight"), &NovaSimulation::get_local_player_anim_blend_weight);
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
 	ClassDB::bind_method(
 			D_METHOD("set_local_player_weapon", "def", "clip_seconds",
@@ -327,6 +330,9 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_BODY_ANIM_SLOT);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_ANIM_SOURCE_STATE);
+	BIND_ENUM_CONSTANT(PF_ANIM_SOURCE_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_ANIM_BLEND_WEIGHT);
 	BIND_ENUM_CONSTANT(PF_ANIM_REMOTE_REQUEST);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE_PULSE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PULSE_TICKS);

@@ -148,6 +148,11 @@ class FakeSim:
 	var nvg_gain_requests: Array[int] = []
 	var camera_mode_calls: Array = []
 	var interior_item_id := 0
+	var anim_key := ""
+	var anim_phase_ticks := 0
+	var anim_source_key := ""
+	var anim_source_phase_ticks := 0
+	var anim_blend_weight := 1.0
 
 	func has_local_player() -> bool:
 		return has_player
@@ -162,10 +167,19 @@ class FakeSim:
 		return player_pitch_deg
 
 	func get_local_player_anim_key() -> String:
-		return ""
+		return anim_key
 
 	func get_local_player_anim_phase_ticks() -> int:
-		return 0
+		return anim_phase_ticks
+
+	func get_local_player_anim_source_key() -> String:
+		return anim_source_key
+
+	func get_local_player_anim_source_phase_ticks() -> int:
+		return anim_source_phase_ticks
+
+	func get_local_player_anim_blend_weight() -> float:
+		return anim_blend_weight
 
 	func get_local_player_body_anim_slot() -> int:
 		return -1
@@ -225,6 +239,20 @@ class FakeSim:
 		return interior_item_id
 
 
+class FakeAvatar:
+	extends FakeWeaponPart
+	var body_calls: Array = []
+
+	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+		body_calls.append(["at", key, phase_ticks])
+
+	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+			target_key: String, target_phase_ticks: int, weight: float) -> void:
+		body_calls.append([
+			"blend", source_key, source_phase_ticks,
+			target_key, target_phase_ticks, weight])
+
+
 class FakeWorld:
 	extends Node3D
 	var terrain_data: FakeTerrainData = null
@@ -252,7 +280,7 @@ class FakeWorld:
 	# models that shape (layers live on the VisualInstance3D, not the root).
 	func build_local_player_avatar() -> Node3D:
 		avatar_count += 1
-		var node := FakeWeaponPart.new()
+		var node := FakeAvatar.new()
 		node.add_child(MeshInstance3D.new())
 		add_child(node)
 		last_avatar = node
@@ -405,6 +433,32 @@ func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> voi
 	assert_eq(world.last_weapon_part.lighting_contexts.back(),
 			[1.0, false, 0.0],
 			"walking out refreshes the model lighting on the live render frame")
+
+
+func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
+	var world := FakeWorld.new()
+	world.sim.anim_source_key = "anim_idle"
+	world.sim.anim_source_phase_ticks = 12
+	world.sim.anim_key = "anim_death_bullet_head_left"
+	world.sim.anim_phase_ticks = 0
+	world.sim.anim_blend_weight = 0.0
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	var avatar := world.last_avatar as FakeAvatar
+	assert_not_null(avatar)
+	assert_eq(avatar.body_calls[0].slice(0, 5), [
+		"blend", "anim_idle", 12, "anim_death_bullet_head_left", 0])
+	assert_almost_eq(float(avatar.body_calls[0][5]), 0.0, 0.000001,
+			"the local third-person avatar keeps the outgoing death-switch pose")
 
 
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:

@@ -77,6 +77,12 @@ private:
 	// robust when a variant's .bad failed to load on one part). p_variant <= 0 or a
 	// single-clip key serve the first match.
 	const LoadedClip *find_clip_variant(const String &p_key, int p_variant) const;
+	Array apply_pose_overlay(Array p_pose,
+			const PackedInt32Array &p_classes, const Array &p_deltas,
+			const String &p_wpn_key, double p_wpn_playhead_seconds,
+			bool p_collapse_right_hand) const;
+	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose,
+			bool p_collapse_right_hand) const;
 
 	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
 	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
@@ -163,6 +169,13 @@ public:
 	// Per-bone parent-local pose at playhead t (seconds), Godot space. Size == bone count.
 	// Returns the bind pose for an unknown clip / empty result.
 	Array eval_pose(const String &p_key, double p_playhead_seconds, int p_variant = 0) const;
+	// Blend two PRIMARY channels before any weapon-mask or aim-overlay
+	// composition. Missing semantic channels use anim_reset when the ADM carries
+	// it; without RESET, a valid remaining channel is retained so an unresolved
+	// key never leaves a stale Skeleton3D pose resident.
+	Array eval_pose_blended(const String &p_source_key,
+			double p_source_playhead_seconds, const String &p_target_key,
+			double p_target_playhead_seconds, float p_weight) const;
 
 	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
@@ -196,6 +209,13 @@ public:
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
 			bool p_collapse_right_hand = false) const;
+	Array eval_pose_blended_overlay(const String &p_source_key,
+			double p_source_playhead_seconds, const String &p_target_key,
+			double p_target_playhead_seconds, float p_weight,
+			const PackedInt32Array &p_classes, const Array &p_deltas,
+			const String &p_wpn_key = String(),
+			double p_wpn_playhead_seconds = 0.0,
+			bool p_collapse_right_hand = false) const;
 
 	// The whole per-frame body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
@@ -208,6 +228,13 @@ public:
 			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
+			bool p_collapse_right_hand = false) const;
+	void pose_skeleton_blended(Skeleton3D *p_skeleton,
+			const String &p_source_key, double p_source_playhead_seconds,
+			const String &p_target_key, double p_target_playhead_seconds,
+			float p_weight, const PackedInt32Array &p_classes,
+			const Array &p_deltas, const String &p_wpn_key = String(),
+			double p_wpn_playhead_seconds = 0.0,
 			bool p_collapse_right_hand = false) const;
 
 	NovaSkeletalAnim() = default;

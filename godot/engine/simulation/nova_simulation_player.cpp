@@ -1548,6 +1548,25 @@ int NovaSimulation::get_local_player_anim_phase_ticks() const {
 	return p ? p->inf.clip_phase : 0;
 }
 
+String NovaSimulation::get_local_player_anim_source_key() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return String();
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p || !p->inf.body_blend_active()) return String();
+	return infantry_anim_key(p->inf.anim_prev);
+}
+
+int NovaSimulation::get_local_player_anim_source_phase_ticks() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	return p ? p->inf.anim_prev_clip_phase : 0;
+}
+
+float NovaSimulation::get_local_player_anim_blend_weight() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 1.0f;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	return p ? p->inf.anim_blend_weight : 1.0f;
+}
+
 // The THIRD-PERSON model name for an ADM index, resolved through the SAME table the
 // wire's index refers to (world::WeaponTable, 1-based with the engine's null row 0).
 // Presentation asks by index rather than by name because that is what the entity and the

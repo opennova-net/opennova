@@ -66,12 +66,14 @@ int InfantryRootMotion::parse_adm(const Ref<NovaResourceRoot> &p_resource_root,
 				const size_t n = bf.num_events;
 				t.fwd.resize(n);
 				t.lat.resize(n);
+				t.vert.resize(n);
 				t.bottom.resize(n);
 				t.top.resize(n);
 				t.trigger.resize(n);
 				for (size_t i = 0; i < n; ++i) {
 					t.fwd[i] = bf.events[i].velocity[2];
 					t.lat[i] = bf.events[i].velocity[0];
+					t.vert[i] = bf.events[i].velocity[1];
 					t.bottom[i] = bf.events[i].bottom;
 					t.top[i] = bf.events[i].top;
 					t.trigger[i] = static_cast<uint32_t>(bf.events[i].trigger);
@@ -128,75 +130,122 @@ int InfantryRootMotion::register_adm(const Ref<NovaResourceRoot> &p_resource_roo
 }
 
 bool InfantryRootMotion::has_clip(int adm_id, int state_id) const {
+	return resolve_track(adm_id, state_id) != nullptr;
+}
+
+const InfantryRootMotion::Track *InfantryRootMotion::resolve_track(int adm_id,
+                                                                   int state_id) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
-		return false;
+		return nullptr;
 	}
 	const auto &tracks = sets_[adm_id].tracks;
-	return tracks.find(state_id) != tracks.end();
+	auto it = tracks.find(state_id);
+	if (it != tracks.end()) {
+		return &it->second;
+	}
+	// Missing semantic keys are bound to state-0 RESET's channel during retail
+	// AnimMap registration; the requested semantic state id itself is retained.
+	it = tracks.find(opennova::world::anim_state::kReset);
+	return it != tracks.end() ? &it->second : nullptr;
+}
+
+int32_t InfantryRootMotion::position_of(const Track &track, int32_t phase_ticks) {
+	const int32_t total_half = track.frame_count * 2;
+	if (track.loop) {
+		phase_ticks %= total_half;
+		return phase_ticks < 0 ? phase_ticks + total_half : phase_ticks;
+	}
+	return phase_ticks >= total_half ? total_half - 1 : (phase_ticks < 0 ? 0 : phase_ticks);
+}
+
+float InfantryRootMotion::sample(const Track &track, const std::vector<float> &channel,
+                                 int32_t phase_ticks) {
+	const int32_t position = position_of(track, phase_ticks);
+	const size_t frame = static_cast<size_t>(position >> 1);
+	return (position & 1) ? (channel[frame] + channel[frame + 1]) * 0.5f
+	                      : channel[frame];
+}
+
+uint32_t InfantryRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) {
+	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks) >> 1)];
 }
 
 bool InfantryRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
                                  opennova::world::RootMotionFrame &out) {
-	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+	const Track *track = resolve_track(adm_id, state_id);
+	if (track == nullptr) {
 		return false;
 	}
-	const auto &tracks = sets_[adm_id].tracks;
-	auto it = tracks.find(state_id);
-	if (it == tracks.end()) {
-		return false;
-	}
-	const Track &t = it->second;
-	const int32_t prev = phase_ticks;
 	++phase_ticks;
 
 	// Half-frame playhead positions, wrapped (loop) or clamped just below the end
 	// [orig: AnimChannel_AdvancePlayback parks t at 0.99999 on one-shot clip end].
-	const int32_t total_half = t.frame_count * 2;
-	auto pos_of = [&](int32_t ph) -> int32_t {
-		if (t.loop) {
-			ph %= total_half;
-			return ph < 0 ? ph + total_half : ph;
-		}
-		return ph >= total_half ? total_half - 1 : (ph < 0 ? 0 : ph);
-	};
-	auto sample = [&](const std::vector<float> &chan, int32_t ph) -> float {
-		const int32_t p = pos_of(ph);
-		const size_t frame = static_cast<size_t>(p >> 1);
-		return (p & 1) ? (chan[frame] + chan[frame + 1]) * 0.5f : chan[frame];
-	};
-
 	out = opennova::world::RootMotionFrame{};
-	out.dx = static_cast<int32_t>(sample(t.fwd, phase_ticks) * 32768.0f);
-	out.dy = static_cast<int32_t>(sample(t.lat, phase_ticks) * 32768.0f);
-	// Vertical = delta of the scaled capsule-bottom track between this tick's sample and
-	// the previous one — derived from the caller-owned phase, so a clip switch (phase
-	// reset) starts with no cross-clip delta [orig: anim_slot[19] prev, reset semantics].
-	out.dz = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f) -
-	         static_cast<int32_t>(sample(t.bottom, prev) * 65536.0f);
+	out.dx = static_cast<int32_t>(sample(*track, track->fwd, phase_ticks) * 32768.0f);
+	out.dy = static_cast<int32_t>(sample(*track, track->lat, phase_ticks) * 32768.0f);
+	// Raw vertical fallback. The motor overwrites this with blended-bottom history
+	// whenever anim_slot[19] is live; reset-state families clear that history first.
+	out.dz = static_cast<int32_t>(sample(*track, track->vert, phase_ticks) * 32768.0f);
 	// Absolute capsule extents for THIS frame — the on-foot ground settle floors pos[2] to
 	// ground + capsule_bottom (origin->feet) [orig: AnimMap_UpdateEntity @0x40b82f
 	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
 	// tick_infantry's ground clamp — docs/world/world-wac-ai-re.md D-INF-6].
-	out.capsule_bottom = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f);
-	out.capsule_top = static_cast<int32_t>(sample(t.top, phase_ticks) * 65536.0f) + 0x2000;
+	out.capsule_bottom =
+			static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * 65536.0f);
+	out.capsule_top =
+			static_cast<int32_t>(sample(*track, track->top, phase_ticks) * 65536.0f) + 0x2000;
 	// Event bits from the lower keyframe of the current position [orig: trigger unlerped;
 	// consumers sample on alternating ticks, so the per-frame repeat is faithful].
-	out.events = t.trigger[static_cast<size_t>(pos_of(phase_ticks) >> 1)];
+	out.events = sample_trigger(*track, phase_ticks);
+	return true;
+}
+
+bool InfantryRootMotion::advance_blended(
+		int adm_id,
+		int primary_state, int32_t &primary_phase_ticks,
+		int target_state, int32_t &target_phase_ticks,
+		float target_weight,
+		opennova::world::RootMotionFrame &out) {
+	const Track *primary = resolve_track(adm_id, primary_state);
+	const Track *target = resolve_track(adm_id, target_state);
+	if (primary == nullptr || target == nullptr) {
+		return opennova::world::IRootMotionSource::advance_blended(
+				adm_id, primary_state, primary_phase_ticks,
+				target_state, target_phase_ticks, target_weight, out);
+	}
+
+	++primary_phase_ticks;
+	++target_phase_ticks;
+	const float primary_weight = 1.0f - target_weight;
+	auto blend = [&](const std::vector<float> &primary_channel,
+	                 const std::vector<float> &target_channel) {
+		const float primary_value = sample(*primary, primary_channel, primary_phase_ticks);
+		const float target_value = sample(*target, target_channel, target_phase_ticks);
+		// The original x87 path keeps both products and the sum live, then spills one
+		// float32 result. Products of float32 inputs are exact in double, so this
+		// reproduces that single-rounding boundary on modern SSE builds.
+		return static_cast<float>(
+				static_cast<double>(primary_value) * static_cast<double>(primary_weight) +
+				static_cast<double>(target_value) * static_cast<double>(target_weight));
+	};
+
+	out = opennova::world::RootMotionFrame{};
+	out.dx = static_cast<int32_t>(blend(primary->fwd, target->fwd) * 32768.0f);
+	out.dy = static_cast<int32_t>(blend(primary->lat, target->lat) * 32768.0f);
+	out.dz = static_cast<int32_t>(blend(primary->vert, target->vert) * 32768.0f);
+	out.capsule_bottom =
+			static_cast<int32_t>(blend(primary->bottom, target->bottom) * 65536.0f);
+	out.capsule_top =
+			static_cast<int32_t>(blend(primary->top, target->top) * 65536.0f) + 0x2000;
+	out.events = sample_trigger(*target, target_phase_ticks);
 	return true;
 }
 
 int32_t InfantryRootMotion::clip_length_ticks(int adm_id, int state_id) const {
 	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the
 	// state has no track — the weapon channel's deferred promotion then never length-fires.
-	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
-		return -1;
-	}
-	const auto &tracks = sets_[adm_id].tracks;
-	auto it = tracks.find(state_id);
-	if (it == tracks.end()) {
-		return -1;
-	}
-	return it->second.frame_count * 2;
+	const Track *track = resolve_track(adm_id, state_id);
+	return track != nullptr ? track->frame_count * 2 : -1;
 }
 
 int InfantryRootMotion::clip_count(int adm_id) const {

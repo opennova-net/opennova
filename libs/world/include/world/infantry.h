@@ -169,6 +169,14 @@ public:
     virtual ~IRootMotionSource() = default;
     virtual bool has_clip(int adm_id, int state_id) const = 0;
     virtual bool advance(int adm_id, int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
+    // Advance a stable primary plus the current target and return their blended
+    // output. The default composes already-quantized RootMotionFrames for test and
+    // headless providers. Asset-backed providers may override this to blend raw
+    // track floats before fixed conversion, as retail does.
+    virtual bool advance_blended(int adm_id,
+                                 int primary_state, int32_t &primary_phase_ticks,
+                                 int target_state, int32_t &target_phase_ticks,
+                                 float target_weight, RootMotionFrame &out);
     // Clip length for a state's track, in the phase-tick convention advance() uses
     // (half-frame ticks), or -1 when the state has no track. The weapon channel's
     // deferred-state promotion fires when the playhead reaches this — the original's
@@ -201,6 +209,50 @@ struct InfantryState {
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
     int32_t clip_phase = 0;
+    // The primary AnimMap keeps both playheads alive while it cross-fades state
+    // changes. The target channel is anim_state/clip_phase; anim_prev owns this
+    // independent old-channel phase. The float32 weight is accumulated by 0.1
+    // normally, or 1/15 when the target state has flag 0x400.
+    // [orig: AnimMap_UpdateEntity @0x40b5f0; AnimMap_InitFromParams @0x410640]
+    int32_t anim_prev_clip_phase = 0;
+    float anim_blend_weight = 1.0f;
+    float anim_blend_step = 0.0f;
+
+    bool body_blend_active() const { return anim_blend_weight < 1.0f; }
+
+    void begin_body_transition(int target_state) {
+        if (target_state == anim_state) {
+            anim_pending = 0;
+            return;
+        }
+        // Retargeting an in-flight A->B blend keeps primary A alive and replaces
+        // only secondary B with C. Once a blend has completed, the playing target
+        // becomes the next transition's primary.
+        if (!body_blend_active()) {
+            anim_prev = anim_state;
+            anim_prev_clip_phase = clip_phase;
+        }
+        anim_state = target_state;
+        anim_pending = 0;
+        clip_phase = 0;
+        anim_blend_weight = 0.0f;
+        anim_blend_step =
+                (infantry_anim_flags(target_state) & 0x400u) != 0
+                        ? (1.0f / 15.0f)
+                        : 0.1f;
+    }
+
+    void reset_body_animation(int state = opennova::world::anim_state::kIdle) {
+        anim_state = state;
+        anim_pending = 0;
+        anim_prev = state;
+        clip_phase = 0;
+        anim_prev_clip_phase = 0;
+        anim_blend_weight = 1.0f;
+        anim_blend_step = 0.0f;
+        last_events = 0;
+        prev_capsule_bottom = 0;
+    }
     // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
     // target state, clip-end-deferred state, and its own playhead — the entity
     // +0x2C8/+0x2C4 pair the dual-channel update swaps through the shared machinery.

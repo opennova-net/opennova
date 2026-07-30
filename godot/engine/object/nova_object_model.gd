@@ -150,6 +150,15 @@ var _remote_pending_state := -1
 var _remote_pending_key := ""
 var _remote_pending_flags := 0
 var _remote_pending_end_time := INF
+# Receive-side fixed-tick blend reconstruction retains the outgoing channel
+# for 10/15 ticks; WirePresentPass, never _process, advances these clocks.
+var _remote_blend_active := false
+var _remote_blend_source_key := ""
+var _remote_blend_source_phase_ticks := 0
+var _remote_blend_source_time := 0.0
+var _remote_blend_target_phase_ticks := 0
+var _remote_blend_weight := 1.0
+var _remote_blend_step := 0.0
 var _body_pose_dirty := true
 var _bounds_dirty := true
 # Applied-phase stamp for the external-phase body path: play_body_clip_at() can
@@ -158,6 +167,10 @@ var _bounds_dirty := true
 # key/playhead/external state drops the stamp (directly or via _set_body_playhead).
 var _body_phase_stamp_valid := false
 var _body_phase_ticks_applied := 0
+# Empty source / weight 1 selects the steady-state single-channel path.
+var _body_blend_source_key := ""
+var _body_blend_source_time := 0.0
+var _body_blend_weight := 1.0
 # Single-entry slot->key cache for the per-frame play_body_anim_at() path; a
 # skeletal swap invalidates it.
 var _last_slot_resolved := -1
@@ -437,6 +450,13 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	_body_anim.play_body_clip_at(key, phase_ticks)
 
 
+func play_body_blend_at(source_key: String, source_phase_ticks: int,
+		target_key: String, target_phase_ticks: int,
+		weight: float) -> void:
+	_body_anim.play_body_blend_at(source_key, source_phase_ticks,
+			target_key, target_phase_ticks, weight)
+
+
 func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
 	_body_anim.play_body_clip_seeded(key, phase_ticks)
 
@@ -446,8 +466,8 @@ func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
 
 
 func apply_remote_body_state(state_id: int, key: String, flags: int,
-		phase_ticks: int = -1) -> void:
-	_body_anim.apply_remote_body_state(state_id, key, flags, phase_ticks)
+		phase_ticks: int = -1) -> bool:
+	return _body_anim.apply_remote_body_state(state_id, key, flags, phase_ticks)
 
 
 func reset_remote_body_state() -> void:
@@ -465,6 +485,14 @@ func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
 
 func _clear_remote_body_pending() -> void:
 	_body_anim._clear_remote_body_pending()
+
+
+func advance_remote_body_blend_tick(state_id: int) -> bool:
+	return _body_anim.advance_remote_body_blend_tick(state_id)
+
+
+func remote_body_needs_fixed_tick() -> bool:
+	return _body_anim.remote_body_needs_fixed_tick()
 
 
 func _promote_remote_body_pending_if_due() -> bool:

@@ -193,14 +193,40 @@ Everything below was decompiled and read this session (pseudocode dumps:
   per-frame events): bit0/bit1 = footstep L/R (surface-typed sound-profile slots
   17–23, §17.4b — NPC body odd ticks, player body even ticks), 0x20..0x400 =
   the SSAudio foley sounds (24–29), bit2 = attachment event.
+- **Primary-channel port status (2026-07-29, D-INF-1 primary leg: FIXED):**
+  `InfantryState` now retains the outgoing channel and its playhead independently from
+  the requested target. A retarget during A→B therefore keeps A as the stable primary
+  and replaces only B with C, exactly as `AnimMap_UpdateEntity @ 0x40b5f0` does. The
+  target weight is accumulated in float32 by `0.1f` or `1.0f/15.0f` before each sample;
+  the five raw `.bad` numeric lanes are blended before fixed-point conversion, while
+  the trigger word is copied only from the target channel. Missing semantic state keys
+  resolve to the registered RESET channel, matching the registration backfill
+  `[orig: AnimMap_RegisterEntity @ 0x40bb60, backfill @ 0x40bc24 / 0x40bd2e]`.
+  The same source/target playheads and weight now drive the body pose before the
+  weapon-mask and aim-overlay composition
+  `[orig: AnimChannel_BlendTwoChannels @ 0x410740]`, including authoritative organic
+  collision. The **secondary weapon channel's own state-change blend remains open**
+  under D-INF-1; its mask composition is live, but its transitions still switch
+  immediately.
 
 ### 3.5 Integration (per tick, the motor core)
-1. Rotate anim root delta by heading: `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = π/2^31,
+1. Rotate the already blended primary-channel root delta by heading:
+   `sin/cos(entity[4]) · 2^22` (FPU, dbl_7C3608 = π/2^31,
    dbl_7C3600 = 4194304.0); `fwd' = fwd·cos − strafe·sin; strafe' = fwd·sin + strafe·cos` (>>22).
    State 31 (jump_loop) forces fwd = 1024.
 2. **`pos.xy += rotated_delta + vel(entity[38..39])`; `pos.z += vertical_delta`.**
    Flag 0x8000 (drowning) zeroes vertical; 0x100000 (CL ladder contact) zeroes
    horizontal root motion while the body is aligned to the ladder.
+   On a death edge, the death callback stores the replacement target only **after**
+   the already-playing channel tuple has advanced and its events have been consumed
+   `[orig: death caller tail @ 0x4b9d55]`. The port now stages death in that same
+   order: the edge tick keeps the current A or A→B sample, exposes death at phase zero
+   and weight zero at the end of the tick, then the next tick consumes the first
+   A→death blend. Consequently `anim_slot[19]` reconciles consecutive **blended**
+   capsule-bottom samples instead of subtracting the first death bottom from the last
+   idle bottom—the cross-clip delta that caused the visible position snap. The same
+   ordering is used for authoritative NPC/local-player bodies and wire-owned remote
+   player bodies.
 3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
    byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
    `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; ladder/climb
@@ -345,8 +371,13 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 
 - **Infantry ground locomotion** (`Entity_UpdateInfantryAI @ 0x4b9910` → `AiSystem::tick_infantry`,
   libs/world/src/infantry.cpp): **MATCHING**, with the named, cited deviations —
-  - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
-    root motion included) — rides the skeletal/blend pass.
+  - **D-INF-1 — PRIMARY FIXED 2026-07-29; SECONDARY OPEN.** Primary locomotion/body
+    switches now retain independent source/target playheads, accumulate the exact
+    float32 10/15-tick weight, blend raw root/capsule lanes before conversion, carry
+    only target events, and pose render plus authoritative collision from the same
+    blend `[orig: AnimMap_UpdateEntity @ 0x40b5f0;
+    AnimChannel_BlendTwoChannels @ 0x410740]`. The secondary weapon channel still
+    changes state without its retail transition blend.
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
     partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
     target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
@@ -1534,8 +1565,9 @@ anim_javelin_scoped`, `anim_binoculars`, `anim_reload/reload2`,
 `anim_knife_attack/grenade_attack`, 185 `anim_*` keys total). The AI bodies
 (Eindo/FSldr/pilots/ESTAND) carry `anim_reload` only; the Cindo family not even that.
 With the original's RESET backfill (§14.8.1), an AI body in a hold state plays the
-reset pose; our host's unknown-key no-op is therefore invisible for the local-player
-slice and only becomes observable with NPC/remote threading (D-INF-11).
+reset pose. The primary body path now mirrors that backfill for local, NPC, remote,
+render, and posed-collision sampling; the secondary weapon-channel fallback remains a
+separate follow-up.
 
 ### 14.8.5 The reload window and the FSM sync
 
@@ -1631,16 +1663,16 @@ steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
 locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at
 idle, `anim_reload`, 73.4° mask-bone delta).
 
-Deferred (later slices): NPC/remote threading (D-INF-11 — includes the AI-body RESET
-backfill question, see the data-coverage note in §14.8.4), the binoculars input toggle
-(case-26 binding + forced-clear rules; the ladder side is ported), blend windows on
-channel re-init (D-INF-1), the audio-level pitch kick (needs a mixer level tap —
+Deferred (later slices): the binoculars input toggle
+(case-26 binding + forced-clear rules; the ladder side is ported), **secondary
+weapon-channel** blend windows on channel re-init (the remaining D-INF-1 leg; primary
+body/root blends fixed 2026-07-29), the audio-level pitch kick (needs a mixer level tap —
 §14.3/§14.5), and the per-entity BODY-adm variant rings — multi-clip .adm rows rotate
 round-robin per animState (net-re §5.62 "Multi-clip variant rings", ported for the FP
-weapon adm 2026-07-11); the 3P weapon channel and AI body clips still play variant 0. Reimpl divergence to note: unknown body keys NO-OP in our host
-(`play_body_clip`) where the original backfills to the RESET clip (§14.8.1) —
-invisible for the local-player slice (US01 ships every key), observable only for AI
-bodies once threading lands.
+weapon adm 2026-07-11); the 3P weapon channel and AI body clips still play variant 0.
+Primary body keys now backfill to RESET as retail does (§14.8.1), including both
+independent channels during a blend. Missing-key behavior for the secondary weapon
+channel is not generalized by that fix.
 
 Follow-ups: `NapiNPClientMsg_0x02D` (+0x2C8 writer) semantics; the org1 AI writer
 `@ 0x4b9a28`; `WeaponSlot_InitFromAvatarDef`'s spawn-time window stamp (does retail
@@ -4827,8 +4859,9 @@ item database, resolves host admissions after connection spawning but before `Se
 resolves direct local/joiner spawn paths before their first body update. Rebuilding the animation
 registry rewinds the resolver high-water and repopulates all live ids; Play→Stop restore independently
 rewinds the AI array and resolver mark before re-resolving the baseline, including the equal-count case.
-This mounted-selector fallback happened before playback and is distinct from §14.8.1's still-open
-missing-key NO-OP versus retail RESET behavior.
+This mounted-selector fallback happened before playback and is distinct from §14.8.1's
+primary-body missing-key behavior, which now resolves to retail's RESET binding. The
+secondary weapon channel's missing-key behavior remains separate.
 
 ### 26.6 Fire request and global action-FSM phase
 
