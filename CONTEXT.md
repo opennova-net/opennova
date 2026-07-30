@@ -56,7 +56,10 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim host scene (`godot/engine/world/game_world.tscn`): terrain, environment, mission runtime, and audio under one embeddable root. The game shell and play-in-editor both instance it. Formerly named `NovaWorld`.
+The runtime world-sim host scene (`godot/engine/world/game_world.tscn`): terrain,
+environment, mission runtime, and audio under one embeddable root. The standalone
+game is the sole live mission host; ONED authoring previews do not run gameplay
+(ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
@@ -181,8 +184,8 @@ _Avoid_: core assets, base game files
 
 **Promote**:
 Reserved for `mission::promote_mission` — spawning a parsed mission into the live world
-(entities, AI brains, nav), the IDA-cited spawn path shared by the game, play-in-editor,
-and the dev host. Other historical uses of the word (old-title format upliftment, 3DI→IR
+(entities, AI brains, nav), the IDA-cited spawn path used by the standalone game
+and dedicated dev hosts. Other historical uses of the word (old-title format upliftment, 3DI→IR
 normalization, fixture curation, code relocation) should be phrased as *migrate*,
 *normalize*, *whitelist*, and *move* respectively.
 _Avoid_: promote (for anything but the mission→world spawn)
@@ -207,5 +210,6 @@ _Avoid_: overlay (that is the debug overlay), UI (too broad)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes
-(`MissionPresentPass`), one pass shared by the game host and play-in-editor (ADR 0006).
+(`MissionPresentPass`). It runs once in the standalone game host; F6 tests the
+current saved loose mission through that same game path (ADRs 0006 and 0025).
 _Avoid_: render pass, sync pass

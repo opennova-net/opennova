@@ -5,14 +5,11 @@ extends Node3D
 # resource root and wires it onto the engine nodes it contains (NovaTerrain,
 # NovaEnvironment, NovaWater). The data core is shared engine code
 # (NovaTerrainData, EnvFile, NovaFoliageDispatcher, VegAssets); this node is just
-# the orchestration both the runtime (game/main_game.tscn) and the editor's Play
-# mode go through — one loader, one root, no fallbacks. The scene lives in
-# game_world.tscn so hosts instance it; the game mounts its root from the
-# persisted resource directory, the editor injects its own via
-# set_resource_root() and plays the live document via load_mission_data().
+# runtime orchestration — one loader, one root, no fallbacks. The scene lives
+# in game_world.tscn so the game shell and focused engine tests can instance it;
+# production play mounts the selected runtime resource directory.
 #
-# HOST CONTRACT (duck-typed on purpose — two hosts do not justify a formal
-# interface): a host instances game_world.tscn, optionally injects a root,
+# HOST CONTRACT: a shell or focused test instances game_world.tscn, optionally injects a root,
 # calls one load_* entry, then
 #   * drives tick(camera_position) once per frame while playing (foliage ->
 #     runtime logic+present -> audio, in that order; pausing = not ticking),
@@ -165,8 +162,8 @@ var _weather_tick_credit := 0.0
 var _perf_audio_us: int = 0
 
 
-## Inject the resource root the next load resolves through (play-in-editor hands
-## the editor's root over so play uses exactly the assets being authored). Null
+## Inject the resource root the next load resolves through. Runtime hosts and
+## focused tests use this to keep one already-mounted resource session. Null
 ## returns to the game's settings-driven mount.
 func set_resource_root(root: NovaResourceRoot) -> void:
 	_injected_root = root
@@ -345,6 +342,31 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
+## Load the exact saved, top-level loose BMS from the selected resource root.
+## This is ONED's standalone F6 path: it deliberately differs from load_mission(),
+## whose retail contract remains archive-only even when the session has /d.
+## Only the BMS itself is forced to disk; terrain, environment, objects and
+## sidecars continue through the mounted runtime root and its normal /d policy.
+func load_loose_mission(bms_name: String, dir: String = "") -> int:
+	var mission_name := bms_name.strip_edges().replace("\\", "/")
+	if mission_name.is_empty() or mission_name != mission_name.get_file() \
+			or mission_name.get_extension().to_lower() != "bms":
+		load_failed.emit("loose mission must be a top-level .bms file")
+		return ERR_INVALID_PARAMETER
+	var resource_root := _resolve_root(dir)
+	if resource_root == null:
+		return ERR_CANT_OPEN
+	var mission_path := resource_root.get_root_dir().path_join(mission_name)
+	if not FileAccess.file_exists(mission_path):
+		load_failed.emit("%s not found in %s" % [mission_name, resource_root.get_root_dir()])
+		return ERR_FILE_NOT_FOUND
+	var mission := NovaMissionData.new()
+	if mission.open_file(mission_path) != OK:
+		load_failed.emit("failed to parse %s: %s" % [mission_name, mission.get_last_error()])
+		return ERR_CANT_OPEN
+	return _load_mission_internal(mission, mission_name, resource_root)
+
+
 ## Load a mission as a LAN co-op HOST: the typed session request (ADR 0017) is
 ## staged and driven by NetSessionDrive through the same load path as
 ## load_mission. Returns the same codes as load_mission.
@@ -384,12 +406,9 @@ func is_net_session() -> bool:
 	return bool(sim.is_joiner()) or bool(sim.is_host_listening())
 
 
-## Load an IN-MEMORY mission (the editor's live document, unsaved edits included):
-## terrain + environment resolve from the injected (or mounted) root by the
-## mission's own header refs, then the one shared load path runs. `bms_name` is
-## the document's file name, used for the co-named audio lookups (.DBF/.LWF) and
-## error messages. This is the play-in-editor entry: the world renders exactly
-## the document being authored.
+## Load an in-memory mission through the shared world pipeline. This is retained
+## as a focused engine-test/tool seam; normal game and ONED launches always use
+## a saved .bms through load_mission() or load_loose_mission().
 func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String = "") -> int:
 	if mission == null or not mission.is_loaded():
 		load_failed.emit("no mission document to load")
@@ -526,8 +545,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 
 	_set_weather_host_tick_driven(true)
 	_set_water_host_rendering_enabled(false)
-	# Same stage attribution as the editor's mission open, so the two hosts'
-	# load costs stay comparable (one timeline ring serves both).
+	# Keep stage attribution stable so load timelines remain comparable.
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
 	# Game_StartMission destroys the previous shared .3DI definition cache before
@@ -1135,9 +1153,8 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_probe_occlusion_skipped = false
 	var probe_phase_start := 0
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
-	# in both hosts: the debug overlay's Pause/Step work in the game too, not
-	# just the editor preview. _start_runtime calls play(), so normal missions
-	# run exactly as before.
+	# for the real game: F3 and runtime MCP Pause/Step share this public flag.
+	# _start_runtime calls play(), so normal missions run exactly as before.
 	if _loaded and _runtime != null and _runtime.is_playing():
 		# Fixed-timestep accumulator: the sim runs at a constant 62.5 Hz regardless of render rate.
 		# Guard keeps the duck-typed test stubs (game_world_test.gd) that only implement tick() green.
@@ -1679,16 +1696,32 @@ func set_collision_debug(enabled: bool) -> void:
 	_debug_views.set_collision_debug(enabled)
 
 
+func is_collision_debug() -> bool:
+	return _debug_views.is_collision_debug()
+
+
 func set_particle_debug(enabled: bool) -> void:
 	_debug_views.set_particle_debug(enabled)
+
+
+func is_particle_debug() -> bool:
+	return _debug_views.is_particle_debug()
 
 
 func set_round_debug(enabled: bool) -> void:
 	_debug_views.set_round_debug(enabled)
 
 
+func is_round_debug() -> bool:
+	return _debug_views.is_round_debug()
+
+
 func set_hitbox_debug(enabled: bool) -> void:
 	_debug_views.set_hitbox_debug(enabled)
+
+
+func is_hitbox_debug() -> bool:
+	return _debug_views.is_hitbox_debug()
 
 
 func set_pick_debug(pick_list: NovaDebugPickList) -> void:
@@ -1713,6 +1746,10 @@ func is_occlusion_debug() -> bool:
 ## F3 option registry dispatch (nova_debug_options) + probe duck-calls.
 func set_particles_hidden(hidden: bool) -> void:
 	_item_fx.set_particles_hidden(hidden)
+
+
+func is_particles_hidden() -> bool:
+	return _item_fx.particles_hidden()
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
@@ -2019,8 +2056,8 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 			int(mission_info.get("minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
 	# Sound occlusion runs LOS through the sim's collision world + terrain
-	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; PIE/menu hosts without a
-	# sim mix unoccluded.
+	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix
+	# unoccluded.
 	_mission_audio.set_simulation(get_sim())
 	var stats := _mission_audio.setup(mission, bms_name, self)
 	if _env != null and _env.get("time_of_day") != null:
@@ -2157,6 +2194,32 @@ func get_environment_node() -> Node:
 
 func get_weather_node() -> Node:
 	return get_node_or_null("NovaWeather")
+
+
+## Hosted mission-clock knob used by F3 and runtime MCP. NovaEnvironment owns
+## the fixed-point clock; GameWorld coordinates the weather/audio consumers so
+## a paused scrub is an immediate visible state change rather than just a
+## readback value waiting for the next simulation tick.
+func get_debug_mission_minute_of_day() -> float:
+	if _env == null or not _env.is_loaded():
+		return 0.0
+	return _env.get_mission_minute_of_day()
+
+
+func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
+	if _env == null or not _env.is_loaded():
+		return ERR_UNAVAILABLE
+	var err: Error = _env.debug_set_mission_minute_of_day(minute_of_day)
+	if err != OK:
+		return err
+	var weather := get_weather_node()
+	if weather != null and weather.has_method("resync_colors_now"):
+		weather.resync_colors_now()
+	elif weather != null and weather.has_method("resync_colors"):
+		weather.resync_colors()
+	if _mission_audio != null:
+		_mission_audio.set_time_of_day_hhmm(_env.time_of_day)
+	return OK
 
 
 func get_water_node() -> Node:

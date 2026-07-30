@@ -16,6 +16,7 @@ const HOURS_PER_DAY := 24
 const HHMM_DAY := 2400.0
 const MINUTES_PER_HOUR := 60.0
 const HHMM_HOUR_SCALE := 100.0
+const CLOCK_MINUTES_PER_DAY := HOURS_PER_DAY * MINUTES_PER_HOUR
 const FIXED24_ONE_HOUR := 1 << 24
 const TOD_DAY_FIXED24 := HOURS_PER_DAY * FIXED24_ONE_HOUR
 const TOD_TICKS_PER_REAL_MINUTE := 3720  # 60 seconds * 62 logic ticks
@@ -154,6 +155,38 @@ func advance_mission_clock(ticks: int) -> void:
 		_mission_time_fixed24 + ticks * _mission_advance_per_tick
 	) % TOD_DAY_FIXED24
 	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
+
+
+## Public debug clock seam. The catalog exposes minute-of-day rather than raw
+## HHMM so its linear slider/JSON range contains no impossible values such as
+## 12:79. Updating the fixed-point accumulator is essential: merely assigning
+## time_of_day would be overwritten by the next hosted weather tick.
+func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
+	if not is_finite(minute_of_day) \
+			or minute_of_day < 0.0 \
+			or minute_of_day >= CLOCK_MINUTES_PER_DAY:
+		return ERR_INVALID_PARAMETER
+	_mission_time_fixed24 = int(roundf(
+			minute_of_day * float(FIXED24_ONE_HOUR) / MINUTES_PER_HOUR
+	)) % TOD_DAY_FIXED24
+	time_of_day = minute_of_day_to_hhmm(minute_of_day)
+	return OK
+
+
+func get_mission_minute_of_day() -> float:
+	return hhmm_to_minute_of_day(time_of_day)
+
+
+static func minute_of_day_to_hhmm(minute_of_day: float) -> float:
+	var wrapped := fposmod(minute_of_day, CLOCK_MINUTES_PER_DAY)
+	var hour := floorf(wrapped / MINUTES_PER_HOUR)
+	return hour * HHMM_HOUR_SCALE + fposmod(wrapped, MINUTES_PER_HOUR)
+
+
+static func hhmm_to_minute_of_day(hhmm: float) -> float:
+	var wrapped := fposmod(hhmm, HHMM_DAY)
+	var hour := floorf(wrapped / HHMM_HOUR_SCALE)
+	return hour * MINUTES_PER_HOUR + (wrapped - hour * HHMM_HOUR_SCALE)
 
 
 static func _fixed24_to_hhmm(value: int) -> float:

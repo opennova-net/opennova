@@ -45,14 +45,18 @@ func refresh() -> void:              # 0.25 s cadence, ONLY while active
   world()/effect_world()/view_context()`), re-resolved on every call and
   `has_method`-guarded — mission reloads must never leave a stale reference,
   and harness stubs must degrade to empty states.
-- **Host-actionable toggles** (the host must build/free a world view or flip
-  host-owned state) are declarative: one row in `nova_debug_options.gd` +
-  `add_option_check(&"my_option")` in `_build()`. Both hosts consume the row
-  through one generic handler — zero host edits per new toggle.
-- **Page-local knobs** that poke a live object directly (terrain draw mode,
-  env time-of-day, AudioServer mutes) skip the registry: poke in the control
-  handler, and re-mirror the live value each `refresh()` (`select()` /
-  `set_value_no_signal`) so an external poke never fights the UI.
+- **Every mutation goes through the shared `NovaDebugSession`.** This includes
+  transport, vars, terrain draw modes, environment values, and dynamic
+  AudioServer bus controls. Register a typed control with a re-resolving
+  public target, then invoke it through the session from the page.
+- The F3 overlay is only one presentation of that session. Runtime automation
+  must see and exercise the same controls, policy checks, live readback, and
+  errors. Pages render state; they never call engine setters or `AudioServer`
+  mutations directly.
+- Original host-owned checks remain declarative rows in
+  `nova_debug_options.gd` and use `add_option_check(&"my_option")` in
+  `_build()`. Page-specific and dynamic controls may register outside that
+  legacy table, but still belong to the shared session catalog.
 - If a system is not observable yet, add a minimal accessor to its owner
   (a `get_*_debug() -> Dictionary` on NovaSimulation, or a one-line node
   getter on GameWorld) — never reach into privates.

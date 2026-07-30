@@ -23,6 +23,9 @@ const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
 const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_skeletons")
 const FOLIAGE_TOGGLE_PATH := NodePath(PAGES + "/Terrain/hide_foliage")
+const ENTITY_LIST_PATH := NodePath(PAGES + "/Entities/EntityList")
+const ENTITY_HEALTH_PATH := NodePath(PAGES + "/Entities/EntityEditHealth/EntityHealthValue")
+const ENTITY_SET_HEALTH_PATH := NodePath(PAGES + "/Entities/EntityEditHealth/SetEntityHealth")
 
 
 class FakePoseSim:
@@ -124,6 +127,125 @@ class FakePoseRuntime:
 		return _mission_name
 
 
+class FakeEntitySim:
+	extends FakePoseSim
+
+	var cards := [
+		{
+			"name": "AI zero",
+			"net_id": 111,
+			"position": Vector3(10.0, 2.0, -30.0),
+			"pool": 0,
+			"wire_handle": 1001,
+			"alive": true,
+			"hidden": false,
+			"health": 80,
+			"ai_health": 80,
+			"team": 1,
+			"state_name": "guard",
+		},
+		{
+			"name": "AI one",
+			"net_id": 222,
+			"position": Vector3(20.0, 3.0, -40.0),
+			"pool": 1,
+			"wire_handle": 1002,
+			"alive": true,
+			"hidden": false,
+			"health": 60,
+			"ai_health": 60,
+			"team": 2,
+			"state_name": "patrol",
+		},
+	]
+	var present_snapshot_reads := 0
+	var edited_health := {}
+
+	func get_entity_count() -> int:
+		return cards.size()
+
+	func get_entity_debug(index: int) -> Dictionary:
+		return cards[index].duplicate(true) \
+				if index >= 0 and index < cards.size() else {}
+
+	func get_present_stride() -> int:
+		return NovaSimulation.PF_STRIDE
+
+	func get_present_snapshot() -> PackedFloat32Array:
+		present_snapshot_reads += 1
+		var snapshot := PackedFloat32Array()
+		# Deliberately reverse client-view order relative to the AI pool and
+		# include one visible entity that has no AI edit record.
+		snapshot.append_array(_present_row(
+				222, 1002, 502, Vector3(22.0, 4.0, -44.0)))
+		snapshot.append_array(_present_row(
+				333, 2001, 703, Vector3(30.0, 5.0, -50.0)))
+		snapshot.append_array(_present_row(
+				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
+		return snapshot
+
+	func get_world_entity_debug(net_id: int) -> Dictionary:
+		if net_id != 333:
+			return {}
+		return {
+			"name": "Client vehicle",
+			"state_name": "driving",
+			"health": 400,
+			"team": 3,
+			"alive": true,
+		}
+
+	func debug_set_entity_health(index: int, health: int) -> Error:
+		if index < 0 or index >= cards.size():
+			return ERR_INVALID_PARAMETER
+		edited_health = {"index": index, "health": health}
+		cards[index]["health"] = health
+		return OK
+
+	func debug_set_entity_position(_index: int, _position: Vector3) -> Error:
+		return OK
+
+	func _present_row(
+			net_id: int,
+			wire_handle: int,
+			type_id: int,
+			position: Vector3) -> PackedFloat32Array:
+		var row := PackedFloat32Array()
+		row.resize(NovaSimulation.PF_STRIDE)
+		row[NovaSimulation.PF_TYPE_ID] = type_id
+		row[NovaSimulation.PF_NET_ID] = net_id
+		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
+		row[NovaSimulation.PF_KIND] = 1
+		row[NovaSimulation.PF_INDEX] = net_id
+		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
+		row[NovaSimulation.PF_POS_X] = position.x
+		row[NovaSimulation.PF_POS_Y] = position.y
+		row[NovaSimulation.PF_POS_Z] = position.z
+		row[NovaSimulation.PF_ALIVE] = 1.0
+		return row
+
+
+class FakeEntityRuntime:
+	extends Node
+
+	var sim := FakeEntitySim.new()
+
+	func _init() -> void:
+		add_child(sim)
+
+	func get_sim() -> FakeEntitySim:
+		return sim
+
+	func is_playing() -> bool:
+		return true
+
+	func get_mission_file() -> String:
+		return "entities.bms"
+
+	func get_mission_name() -> String:
+		return "Entity Identity"
+
+
 # A pose sim that also carries the occlusion debug surface, so the Occlusion
 # tab has state to render while every other pane keeps its pose-fake behavior.
 class FakeOcclusionSim:
@@ -146,6 +268,33 @@ class FakeOcclusionRuntime:
 		return "00TRe.bms"
 	func get_mission_name() -> String:
 		return "Training Grounds"
+
+
+class AuthorityTarget:
+	extends RefCounted
+	var calls := 0
+	func mutate() -> void:
+		calls += 1
+
+
+class FakeTransportHost:
+	extends Node
+	var actions: Array[String] = []
+
+	func mcp_game_control(action: String) -> Error:
+		actions.append(action)
+		return OK
+
+	func debug_return_to_menu() -> Error:
+		return OK
+
+
+class FakeTransportWorld:
+	extends Node
+	var networked := false
+
+	func is_net_session() -> bool:
+		return networked
 
 
 func _make_pose_runtime() -> FakePoseRuntime:
@@ -250,20 +399,128 @@ func test_without_runtime_reports_no_mission() -> void:
 	assert_true(overlay._status_label.visible, "a null-returning source reads as no mission")
 
 
+func test_runtime_context_rejects_non_object_sources() -> void:
+	var ctx := NovaDebugContext.new()
+	ctx.runtime_source = func(): return 42
+	assert_null(ctx.runtime(),
+			"a malformed supplier degrades to no runtime instead of validating a scalar instance")
+
+
+func test_entity_rows_follow_client_present_order_and_edits_use_ai_index() -> void:
+	var runtime := FakeEntityRuntime.new()
+	add_child_autofree(runtime)
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	overlay.select_page(&"Entities")
+
+	var entity_list := overlay.get_node(ENTITY_LIST_PATH) as ItemList
+	assert_eq(entity_list.item_count, 3)
+	assert_string_contains(entity_list.get_item_text(0), "ssn 222")
+	assert_string_contains(entity_list.get_item_text(1), "ssn 333")
+	assert_string_contains(entity_list.get_item_text(2), "ssn 111")
+	assert_gt(runtime.sim.present_snapshot_reads, 0,
+			"the visible list is the client-present view")
+
+	overlay.set_edit_unlocked(true)
+	entity_list.item_selected.emit(1)
+	var set_health := overlay.get_node(ENTITY_SET_HEALTH_PATH) as Button
+	assert_true(set_health.disabled,
+			"a presented vehicle without an AI record is visible but read-only")
+
+	entity_list.item_selected.emit(0)
+	var health := overlay.get_node(ENTITY_HEALTH_PATH) as SpinBox
+	health.value = 37
+	assert_false(set_health.disabled)
+	set_health.pressed.emit()
+	assert_eq(runtime.sim.edited_health, {"index": 1, "health": 37},
+			"client row zero maps its edit to AI pool entry one")
+
+
+func test_shared_session_keeps_host_status_and_authority_sources() -> void:
+	var session := NovaDebugSession.new()
+	session.set_status_source(func():
+		return {"label": "host status", "logic_tick": 77, "authority": false})
+	session.set_authority_source(func(): return false)
+	var target := AuthorityTarget.new()
+	session.set_target_source(&"authority_test", func(): return target)
+	var action := NovaDebugControlDef.action_control(
+			&"authority_test", &"Test", "Mutate", "Host-only test.",
+			&"authority_test", &"mutate")
+	action.requires_unlock = true
+	action.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	assert_true(session.register_control(action))
+	session.set_edit_unlocked(true)
+
+	var config_path := "user://test_shared_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path, session)
+	add_child_autofree(overlay)
+	var unlock_edits := overlay.find_child("UnlockEdits", true, false) as CheckButton
+	assert_true(unlock_edits.button_pressed,
+			"the overlay initializes Edit from the already-unlocked shared session")
+	session.set_edit_unlocked(false)
+	assert_false(unlock_edits.button_pressed,
+			"an external session lock immediately updates the overlay")
+	session.set_edit_unlocked(true)
+	assert_true(unlock_edits.button_pressed,
+			"an external session unlock immediately updates the overlay")
+
+	assert_eq(session.capture_snapshot()["runtime"], {
+		"label": "host status", "logic_tick": 77, "authority": false,
+	})
+	assert_eq(int(session.invoke_control(
+			&"authority_test", null, true)["error"]), ERR_UNAUTHORIZED)
+	assert_eq(target.calls, 0)
 
 
 
 
 
 
-func test_transport_signal_stays_quiet_without_a_runtime() -> void:
+
+
+func test_transport_controls_are_disabled_without_a_runtime() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
-	watch_signals(overlay)
-	(overlay.find_child("SimPlay", true, false) as Button).pressed.emit()
-	(overlay.find_child("SimStop", true, false) as Button).pressed.emit()
-	assert_signal_not_emitted(overlay, "transport_used",
-		"a press with nothing to act on announces nothing")
+	assert_true((overlay.find_child("SimPlay", true, false) as Button).disabled)
+	assert_true((overlay.find_child("SimStop", true, false) as Button).disabled)
+
+
+func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
+	var session := NovaDebugSession.new()
+	NovaDebugCatalog.install(session)
+	var game_host := FakeTransportHost.new()
+	add_child_autofree(game_host)
+	session.set_target_source(
+			NovaDebugCatalog.TARGET_GAME_HOST, func(): return game_host)
+	session.set_authority_source(func(): return true)
+	session.set_edit_unlocked(true)
+
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path, session)
+	add_child_autofree(overlay)
+	var runtime := _make_pose_runtime()
+	var world := FakeTransportWorld.new()
+	world.networked = true
+	add_child_autofree(world)
+	overlay.set_runtime(runtime)
+	overlay.set_world_source(func(): return world)
+	overlay.toggle()
+	overlay.select_page(&"Sim")
+
+	var play := overlay.find_child("SimPlay", true, false) as Button
+	var pause := overlay.find_child("SimPause", true, false) as Button
+	var step := overlay.find_child("SimStep", true, false) as Button
+	assert_false(play.disabled, "resume keeps the network pump recovery path")
+	assert_true(pause.disabled, "a listen host cannot pause its network pump")
+	assert_true(step.disabled, "a listen host cannot single-step its network pump")
+	assert_string_contains(pause.tooltip_text, "multiplayer")
+	assert_string_contains(step.tooltip_text, "multiplayer")
+
+	play.pressed.emit()
+	assert_eq(game_host.actions, ["resume"])
 
 
 
@@ -743,6 +1000,30 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	assert_false(texts.has("View"), "the dissolved View page is gone")
 	var header_row := texts.find("SIMULATION")
 	assert_false(list.is_item_selectable(header_row), "section headers are not rows")
+
+
+func test_empty_search_hides_the_active_page_and_restores_it_when_cleared() -> void:
+	var overlay := _make_overlay()
+	assert_true(overlay.select_page(&"Rounds"))
+	var rounds := overlay.get_node(PAGES + "/Rounds") as Control
+	assert_true(rounds.visible)
+	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
+	var title := overlay.find_child("ActivePageTitle", true, false) as Label
+	var list := overlay.find_child("PageList", true, false) as ItemList
+
+	search.text = "definitely-no-debug-page-matches-this"
+	search.text_changed.emit(search.text)
+	assert_eq(list.item_count, 0)
+	assert_eq(String(overlay.get_active_page_id()), "")
+	assert_false(rounds.visible, "the previously active page is not left behind")
+	assert_eq(title.text, "No matching page")
+
+	search.text = ""
+	search.text_changed.emit(search.text)
+	assert_eq(String(overlay.get_active_page_id()), "Rounds",
+			"clearing the filter restores the page active before the empty result")
+	assert_true(rounds.visible)
+	assert_eq(title.text, "Rounds & collision")
 
 
 func test_selection_and_width_persist_across_instances() -> void:

@@ -1,7 +1,7 @@
 class_name FieldBinder
 extends RefCounted
-## Lives in engine/ui (not modtools): host-neutral by contract, so runtime hosts
-## (the game's debug overlay, PIE) can use it without shipping the editor.
+## Lives in engine/ui (not modtools): host-neutral by contract, so both the
+## game's debug overlay and editor inspectors can use it.
 ## Declarative inspector field binding. Each bind_*(control, getter, setter) pairs
 ## a control with a getter(info_dict)->value (read from the model snapshot) and a
 ## setter(value)->void (write to the model). The change signal is auto-wired and

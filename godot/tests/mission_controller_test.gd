@@ -1733,8 +1733,7 @@ func test_undo_redo_ride_the_document_api_not_the_viewport() -> void:
 	# B6 moved Ctrl+Z/Y routing into the shell's _shortcut_input
 	# (editor_shortcuts_test.gd pins the guard matrix); the controller keeps
 	# the document API the shell drives, and its viewport router no longer
-	# claims the keys. The sim gate stays inside undo() itself
-	# (test_sim_locks_out_document_edits_until_stop).
+	# claims the keys.
 	var controller := _loaded_with_item_db()
 	var m := controller.get_mission()
 	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
@@ -2685,84 +2684,16 @@ func test_deselect_stops_preview() -> void:
 	assert_gt(model.cleared, cleared_before, "a selection change stops any running preview")
 
 
-# --- Live-sim edit lockout (PIE M0) + game cadence (PIE M1) --------------------
-# While the sim runs, the present pass owns the placed nodes' transforms, so every
-# mutating path (viewport gestures, inspector setters via _edit_step, undo/redo,
-# delete/place) is rejected with a status line, and the transform gizmo hides.
-# The sim itself runs the game's options: the default loco_scale. (Tick cadence needs no
-# assert — there is ONE step() path, so the preview cannot diverge from the game by
-# construction.)
-
-# A loaded controller with one organic added directly to the document (so the sim
-# has an AI entity regardless of the fixture's content), already simulating.
-func _simulating_controller() -> MissionController:
+# The mission controller owns authoring only. Game execution is launched by the
+# editor shell from saved loose assets, so no runtime transport leaks into this API.
+func test_controller_exposes_no_in_editor_runtime_transport() -> void:
 	var controller := _loaded_with_item_db()
-	controller._mission.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
-	controller.sim_play()
-	assert_true(controller.is_simulating(), "the mission simulates (one organic promoted)")
-	return controller
-
-
-func test_sim_runs_the_game_cadence_options() -> void:
-	var controller := _simulating_controller()
-	var sim: NovaSimulation = controller._sim_driver.get_sim()
-	assert_eq(sim.get_loco_scale(), 32768,
-		"no editor loco_scale override: the sim default (the IDA-pinned 32768) applies")
-	controller.sim_stop()
-
-
-func test_sim_locks_out_document_edits_until_stop() -> void:
-	var controller := _simulating_controller()
-	var before: Dictionary = controller._mission.structure_fingerprint()
-
-	assert_false(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)),
-		"placement is rejected while simulating")
-	assert_string_contains(controller.get_last_status(), "Stop the simulation")
-	assert_false(controller.delete_selected(), "delete is rejected while simulating")
-	controller.undo()
-	assert_eq(controller._mission.structure_fingerprint(), before,
-		"undo while simulating changes nothing")
-
-	controller.sim_stop()
-	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)),
-		"editing unlocks after Stop")
-
-
-func test_sim_swallows_viewport_clicks_and_mutator_keys() -> void:
-	var controller := _simulating_controller()
-	var before: Dictionary = controller._mission.structure_fingerprint()
-
-	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
-	press.pressed = true
-	controller.handle_viewport_input(press)
-	assert_string_contains(controller.get_last_status(), "Stop the simulation")
-	assert_eq(controller.get_selection_summary(), {}, "a click selects nothing while simulating")
-
-	var key := InputEventKey.new()
-	key.keycode = KEY_Z
-	key.ctrl_pressed = true
-	key.pressed = true
-	controller.handle_viewport_input(key)
-	assert_eq(controller._mission.structure_fingerprint(), before,
-		"Ctrl+Z through the viewport changes nothing while simulating")
-	controller.sim_stop()
-
-
-func test_gizmo_hides_while_simulating_and_returns_on_stop() -> void:
-	var controller := _loaded_with_item_db()
-	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)),
-		"placing a non-marker object selects it and shows the gizmo")
-	assert_not_null(controller._gizmo, "the transform gizmo exists for the selection")
-	assert_true(controller._gizmo.visible, "the gizmo shows before simulating")
-
-	controller._mission.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
-	controller.sim_play()
-	assert_true(controller.is_simulating())
-	assert_false(controller._gizmo.visible, "the gizmo hides while the sim owns the nodes")
-
-	controller.sim_stop()
-	assert_true(controller._gizmo.visible, "the gizmo returns for the surviving selection on Stop")
+	for method in [
+		"can_simulate", "is_simulating", "is_sim_playing", "get_sim_runtime",
+		"sim_play", "sim_pause", "sim_step", "sim_stop",
+		"notify_sim_transport_changed",
+	]:
+		assert_false(controller.has_method(method), "authoring controller must not expose %s" % method)
 
 
 # --- MCP seams: save_as_path / reground_all / grounded move / env reload -------
@@ -2866,15 +2797,12 @@ func test_move_selected_to_world_grounded_marker_stores_hit() -> void:
 	assert_almost_eq(pos.z, 10.0, 0.001, "BMS z = world height")
 
 
-func test_move_selected_grounded_rejected_without_selection_or_while_simulating() -> void:
+func test_move_selected_grounded_rejected_without_selection_then_edits_selected() -> void:
 	var controller := _new_with_item_db()
 	assert_false(controller.move_selected_to_world_grounded(Vector3(1, 10, 1)), "no selection -> false")
-	controller.get_mission().add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
 	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
-	controller.sim_play()
-	assert_true(controller.is_simulating())
-	assert_false(controller.move_selected_to_world_grounded(Vector3(1, 10, 1)), "sim locks the seam")
-	controller.sim_stop()
+	assert_true(controller.move_selected_to_world_grounded(Vector3(1, 10, 1)),
+		"a selected authored object can always move")
 
 
 # Env reload: the stub gains an environment editor so _load_environment runs; the

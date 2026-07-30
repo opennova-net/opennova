@@ -14,8 +14,6 @@ extends "res://modtools/mission/controller/controller_section.gd"
 func delete_selected() -> bool:
 	if _c._selected_ref.is_empty() or _c._mission == null:
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	var kind := int(_c._selected_ref["kind"])
 	var index := int(_c._selected_ref["index"])
 	# Capture a readable label before the removal: after the re-bake the selection (and its
@@ -104,7 +102,7 @@ func set_mode(mode: int) -> void:
 	_c._flush_edit()
 	_c._mode = mode
 	# A mode switch is a fresh context: stop any running part-animation preview.
-	_c._sim.stop_preview()
+	_c._preview.stop_preview()
 	_c._viewport._clear_selected_user_points()
 	# Exclusive selection: clear the object selection refs + its box, the marker selection,
 	# the zone selection, and any armed placement tool.

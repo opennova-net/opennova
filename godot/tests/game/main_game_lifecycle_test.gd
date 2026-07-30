@@ -67,11 +67,173 @@ const ISOLATED_ENV := [
 	"NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
 ]
 
+
+class EntitySimStub:
+	extends RefCounted
+
+	var present_snapshot_reads := 0
+	var cards := [
+		{
+			"name": "AI zero",
+			"net_id": 111,
+			"position": Vector3(10.0, 2.0, -30.0),
+			"pool": 0,
+			"wire_handle": 1001,
+			"alive": true,
+			"hidden": false,
+			"health": 80,
+			"team": 1,
+			"state_name": "guard",
+		},
+		{
+			"name": "AI one",
+			"net_id": 222,
+			"position": Vector3(20.0, 3.0, -40.0),
+			"pool": 1,
+			"wire_handle": 1002,
+			"alive": false,
+			"hidden": true,
+			"health": 0,
+			"team": 2,
+			"state_name": "dead",
+		},
+	]
+
+	func get_entity_count() -> int:
+		return cards.size()
+
+	func get_entity_debug(index: int) -> Dictionary:
+		return cards[index].duplicate(true) \
+				if index >= 0 and index < cards.size() else {}
+
+	func get_present_snapshot() -> PackedFloat32Array:
+		present_snapshot_reads += 1
+		var snapshot := PackedFloat32Array()
+		snapshot.append_array(_present_row(
+				222, 1002, 502, Vector3(22.0, 4.0, -44.0)))
+		snapshot.append_array(_present_row(
+				333, 2001, 703, Vector3(30.0, 5.0, -50.0)))
+		snapshot.append_array(_present_row(
+				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
+		return snapshot
+
+	func get_present_stride() -> int:
+		return NovaSimulation.PF_STRIDE
+
+	func get_world_entity_debug(net_id: int) -> Dictionary:
+		if net_id != 333:
+			return {}
+		return {
+			"name": "Client vehicle",
+			"state_name": "driving",
+			"health": 400,
+			"team": 3,
+			"alive": true,
+		}
+
+	func _present_row(
+			net_id: int,
+			wire_handle: int,
+			type_id: int,
+			position: Vector3) -> PackedFloat32Array:
+		var row := PackedFloat32Array()
+		row.resize(NovaSimulation.PF_STRIDE)
+		row[NovaSimulation.PF_TYPE_ID] = type_id
+		row[NovaSimulation.PF_NET_ID] = net_id
+		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
+		row[NovaSimulation.PF_KIND] = 1
+		row[NovaSimulation.PF_INDEX] = net_id
+		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
+		row[NovaSimulation.PF_POS_X] = position.x
+		row[NovaSimulation.PF_POS_Y] = position.y
+		row[NovaSimulation.PF_POS_Z] = position.z
+		row[NovaSimulation.PF_ALIVE] = 1.0
+		return row
+
+
+class EntityRuntimeStub:
+	extends RefCounted
+
+	var sim := EntitySimStub.new()
+
+	func get_sim() -> EntitySimStub:
+		return sim
+
+
+class EntityHostHarness:
+	extends "res://game/main_game.gd"
+
+	var runtime_stub := EntityRuntimeStub.new()
+
+	func _current_runtime():
+		return runtime_stub
+
+
 var _saved_config := PackedByteArray()
 var _had_config := false
 var _saved_env := {}
 var _temp_dir := ""
 var _shell: Node = null
+
+
+func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
+	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
+	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	assert_eq(debug_host.debug_set_audio_bus_mute("__missing_bus__", true),
+			ERR_INVALID_PARAMETER)
+	assert_eq(debug_host.debug_set_audio_bus_volume("Master", INF),
+			ERR_INVALID_PARAMETER)
+	assert_eq(debug_host.debug_set_audio_bus_volume(
+			"Master", NovaDebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+			ERR_INVALID_PARAMETER)
+	var bus := AudioServer.get_bus_index("SFX")
+	if bus < 0:
+		pass_test("no SFX bus in this layout")
+		return
+	var previous := {
+		"volume": AudioServer.get_bus_volume_db(bus),
+		"mute": AudioServer.is_bus_mute(bus),
+		"solo": AudioServer.is_bus_solo(bus),
+		"bypass": AudioServer.is_bus_bypassing_effects(bus),
+	}
+	assert_eq(debug_host.debug_set_audio_bus_volume("SFX", -14.5), OK)
+	assert_eq(debug_host.debug_set_audio_bus_mute("SFX", true), OK)
+	assert_eq(debug_host.debug_set_audio_bus_solo("SFX", true), OK)
+	assert_eq(debug_host.debug_set_audio_bus_bypass("SFX", true), OK)
+	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
+	assert_true(AudioServer.is_bus_mute(bus))
+	assert_true(AudioServer.is_bus_solo(bus))
+	assert_true(AudioServer.is_bus_bypassing_effects(bus))
+	AudioServer.set_bus_volume_db(bus, float(previous["volume"]))
+	AudioServer.set_bus_mute(bus, bool(previous["mute"]))
+	AudioServer.set_bus_solo(bus, bool(previous["solo"]))
+	AudioServer.set_bus_bypass_effects(bus, bool(previous["bypass"]))
+
+
+func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
+	var shell = autofree(EntityHostHarness.new())
+	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+
+	var page: Dictionary = debug_host.get_mcp_game_entities(0, 64)
+
+	assert_eq(page["total"], 3)
+	assert_eq(page["entities"][0]["index"], 0)
+	assert_eq(page["entities"][0]["net_id"], 222)
+	assert_eq(page["entities"][0]["ai_index"], 1)
+	assert_true(page["entities"][0]["editable"])
+	assert_eq(page["entities"][0]["mission_position"],
+			Vector3(22.0, 44.0, 4.0))
+	assert_eq(page["entities"][1]["index"], 1)
+	assert_eq(page["entities"][1]["net_id"], 333)
+	assert_eq(page["entities"][1]["name"], "Client vehicle")
+	assert_eq(page["entities"][1]["ai_index"], -1)
+	assert_false(page["entities"][1]["editable"],
+			"non-AI client entities remain discoverable without becoming editable")
+	assert_eq(page["entities"][2]["net_id"], 111)
+	assert_eq(page["entities"][2]["ai_index"], 0)
+	assert_gt(shell.runtime_stub.sim.present_snapshot_reads, 0)
+	assert_eq(debug_host.get_mcp_game_entity(0)["name"], "AI one")
+	assert_eq(debug_host.get_mcp_game_entity(0)["ai_index"], 1)
 
 
 func before_each() -> void:
@@ -120,6 +282,132 @@ func after_each() -> void:
 			file.close()
 	elif FileAccess.file_exists(STATE_CONFIG_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+
+
+func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
+	# A loose-only directory (no packed archives) fails the runtime mount when no
+	# --loose-root flag sanctions the editor fallback. The boot continuations
+	# (NW_SP_MISSION here, --loose-mission in an editor-managed run) must gate on
+	# that failure instead of starting a world load with no mounted root.
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
+	var loose := FileAccess.open(_temp_dir.path_join("Alpha.TRN"), FileAccess.WRITE)
+	assert_not_null(loose)
+	loose.store_string("loose trn")
+	loose.close()
+	NovaResourceDirSettings.set_resource_dir(_temp_dir)
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+			"the persisted dir round-trips, so the boot below reads THIS dir")
+	NovaResourceDirSettings.set_game("jo")
+	OS.set_environment("NW_SP_MISSION", "mnml.bms")
+	_shell = MAIN_GAME_SCENE.instantiate()
+	assert_not_null(_shell)
+	add_child(_shell)
+	await get_tree().process_frame
+	assert_false(_shell.is_world_loading(),
+			"no load handoff may start without a mounted root")
+	assert_null(_shell.current_resource_root(),
+			"the failed mount leaves the shell without a resource session")
+	assert_false(_shell.get_node("World").is_loaded())
+	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "menu",
+			"the shell stays on the front-end state the picker contract needs")
+
+
+func test_session_loss_with_no_mounted_root_returns_shell_to_menu_state() -> void:
+	# The NW_REPLAY spectate entry runs a world with no mounted root; losing
+	# that session must land the shell back on the front-end state (the
+	# picker/F9 contract is MENU-only) instead of parking it in WORLD forever.
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
+	NovaResourceDirSettings.set_resource_dir(_temp_dir)  # empty dir: unmountable
+	NovaResourceDirSettings.set_game("jo")
+	_shell = MAIN_GAME_SCENE.instantiate()
+	assert_not_null(_shell)
+	add_child(_shell)
+	await get_tree().process_frame
+	_shell.enter_net_world()
+	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "world",
+			"the spectate entry is in-world with no mounted root")
+	_shell.get_node("World").session_lost.emit("test: replay stream ended")
+	state = _shell.get_game_debug_host().get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "menu",
+			"a rootless teardown lands on the front-end state, not WORLD")
+	assert_false(_shell.is_world_loading())
+
+
+func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
+	# The picker's accept leg (apply_picked_resource_dir, the ADR-0018 seam
+	# behind _on_dir_selected): an editor-managed run must never write its
+	# picker escape into the SHARED editor+game resource_dir key, an unmanaged
+	# first-launch pick must, and an unmountable pick changes nothing.
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var picked_dir := _temp_dir.path_join("picked")
+	assert_eq(DirAccess.make_dir_recursive_absolute(picked_dir), OK)
+	_write_pff(picked_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
+	_write_pff(picked_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
+	_write_pff(picked_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir)
+
+	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
+			"an editor-managed pick mounts and enters the menu")
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+			"an editor-managed pick never writes the shared editor+game key")
+	assert_false(_shell.apply_picked_resource_dir(
+			_temp_dir.path_join("does-not-exist"), false),
+			"an unmountable pick is refused")
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+			"a refused pick changes nothing")
+	assert_true(_shell.apply_picked_resource_dir(picked_dir, false),
+			"an unmanaged pick mounts")
+	assert_eq(NovaResourceDirSettings.get_resource_dir(), picked_dir,
+			"the unmanaged first-launch pick persists")
+
+
+func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
+	# The ONED play-test contract (ADR 0025): with --loose-root, a directory
+	# holding none of the packed archives mounts as the loose file set being
+	# authored; without it, retail's no-archives fatal stands. Parameterized
+	# entry so the contract is testable without process arguments (ADR 0018).
+	_temp_dir = OS.get_cache_dir().path_join(
+			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
+	var loose_dir := _temp_dir.path_join("loose")
+	var packed_dir := _temp_dir.path_join("packed")
+	assert_eq(DirAccess.make_dir_recursive_absolute(loose_dir), OK)
+	assert_eq(DirAccess.make_dir_recursive_absolute(packed_dir), OK)
+	var loose := FileAccess.open(loose_dir.path_join("Alpha.TRN"), FileAccess.WRITE)
+	assert_not_null(loose)
+	loose.store_string("loose trn")
+	loose.close()
+	# The packed variant satisfies the boot manifest the same way _make_shell's
+	# fixture does — a partial runtime install would report missing boot
+	# resources as engine errors and fail this test about mounting.
+	_write_pff(packed_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
+	_write_pff(packed_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
+	_write_pff(packed_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
+	NovaResourceDirSettings.set_game("jo")
+	var shell = autofree(preload("res://game/main_game.gd").new())
+
+	assert_null(shell.mount_boot_root(loose_dir, false),
+			"without the flag a loose-only dir keeps retail's fatal mount error")
+	var fallback: NovaResourceRoot = shell.mount_boot_root(loose_dir, true)
+	assert_not_null(fallback, "--loose-root plays the loose authoring dir")
+	if fallback != null:
+		assert_false(fallback.is_runtime_mount(),
+				"the fallback is the editor's loose mount, not a packed install")
+		assert_eq(fallback.read_file("alpha.trn").get_string_from_utf8(), "loose trn")
+		fallback.clear()
+	var packed: NovaResourceRoot = shell.mount_boot_root(packed_dir, true)
+	assert_not_null(packed)
+	if packed != null:
+		assert_true(packed.is_runtime_mount(),
+				"a dir with archives keeps the normal runtime mount even under the flag")
+		packed.clear()
 
 
 func test_mission_return_restores_menu_frame_and_supports_another_load() -> void:
@@ -358,13 +646,39 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_not_null(_shell.find_child("PickToast", true, false),
 			"the crosshair pick confirms every attempt with a toast")
 
-	_shell.toggle_debug_overlay()
+	(overlay.find_child("CloseDebug", true, false) as Button).pressed.emit()
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open())
 	assert_true(_shell.is_gameplay_input_active(),
-			"closing F3 restores the gameplay-input policy")
+			"the cockpit Close button restores the gameplay-input policy")
 	assert_null(world.get_node_or_null("PickClickCatcher"),
-			"overlay closed: clicks are gameplay again")
+			"Close removes the click picker")
+
+	_shell.toggle_debug_overlay()
+	await get_tree().process_frame
+	assert_not_null(world.get_node_or_null("PickClickCatcher"))
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	assert_true(overlay.handle_key_input(escape))
+	await get_tree().process_frame
+	assert_false(_shell.is_debug_overlay_open())
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"Escape removes the click picker through the same visibility edge")
+	assert_false(overlay.get_debug_session().is_presented())
+
+	menu_host.return_to_menu_requested.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(_shell.is_debug_overlay_open(),
+			"returning to the menu cannot blanket-show a closed F3 layer")
+	assert_false(overlay.get_debug_session().is_presented())
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	assert_false(_shell.is_debug_overlay_open(),
+			"the next mission keeps the overlay's own closed lifecycle")
+	assert_false(overlay.get_debug_session().is_presented())
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

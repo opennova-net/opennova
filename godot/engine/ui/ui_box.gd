@@ -1,7 +1,7 @@
 class_name UiBox
 extends RefCounted
-# Lives in engine/ui (not modtools): host-neutral by contract, so runtime hosts
-# (the game's debug overlay, PIE) can use it without shipping the editor.
+# Lives in engine/ui (not modtools): host-neutral by contract, so both the
+# game's debug overlay and editor inspectors can use it.
 # The margin + scroll + VBox column every inspector pane starts from. Extracted
 # from the ~95%-identical copies in InspectorForms and MnuUiHelpers (which now
 # delegate here); the only divergence was the box's node name, kept as a

@@ -235,9 +235,9 @@ func test_caches_self_clear_when_epoch_moves() -> void:
 	assert_false(VegAssetsScript._graphics_cache_by_root.is_empty(),
 		"Listing should fill the graphics cache.")
 
-	# Any mount/rescan/clear in the process (game + editor coexist) bumps the
-	# global epoch; the next cache access self-clears before refilling, so a
-	# rescanned resource dir is never served a stale listing or mesh.
+	# Any mount/rescan/clear in this process bumps the global epoch; the next
+	# cache access self-clears before refilling, so a rescanned resource dir is
+	# never served a stale listing or mesh.
 	NovaResourceRoot.bump_cache_epoch()
 	VegAssetsScript._check_epoch()
 	assert_true(VegAssetsScript._graphics_cache_by_root.is_empty(),

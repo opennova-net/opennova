@@ -1,7 +1,7 @@
 # godot/engine/ — the engine layer (GDExtension glue + shared GDScript)
 
-Two things live here, and both must stay host-neutral — consumable by the game shell
-(`godot/game/`) and by ONED play-in-editor (`godot/modtools/`) alike:
+Two things live here, and both must stay host-neutral — consumable by the game
+shell (`godot/game/`) and ONED's authoring/preview surfaces (`godot/modtools/`):
 
 - **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `libs/` to
   Godot. Thin wrappers only — format/runtime logic belongs in `libs/`. Register new
@@ -28,8 +28,8 @@ Two things live here, and both must stay host-neutral — consumable by the game
     `simulation/` (`nova_simulation.cpp`) is the biggest of them: the World binding,
     the present snapshot, and the host-side asset resolution the portable systems consume.
 
-Placement rule: GDScript lands here only if both hosts can consume it. Game-shell-only
-code goes in `godot/game/`; editor-only code goes in `godot/modtools/`.
+Placement rule: GDScript lands here only when it is engine-level and host-neutral.
+Game-shell-only code goes in `godot/game/`; editor-only code goes in `godot/modtools/`.
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
 `cpp_binding_console_writes`): a failure the caller already receives through the

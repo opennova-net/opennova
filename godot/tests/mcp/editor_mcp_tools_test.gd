@@ -136,7 +136,7 @@ func test_mission_tools_error_actionably_without_a_mission() -> void:
 	# agent at open_in_workspace instead of failing obscurely.
 	for name in ["list_items", "place_entities", "get_mission_entities", "edit_mission_entity",
 			"edit_waypoint_path", "set_mission_header", "reground_mission", "save_mission",
-			"sim_control", "analyze_mission"]:
+			"analyze_mission"]:
 		var result: McpToolResult = await _call(name, _minimal_args(name))
 		assert_true(result.is_error, "%s without a mission is an error" % name)
 		assert_true(String(result.content[0]["text"]).contains("open_in_workspace"),
@@ -153,8 +153,6 @@ func _minimal_args(name: String) -> Dictionary:
 			return { "op": "new_path" }
 		"set_mission_header":
 			return { "fields": { "mission_name": "x" } }
-		"sim_control":
-			return { "action": "play" }
 		"sample_terrain":
 			return { "points": [[0, 0]] }
 	return {}
@@ -191,11 +189,11 @@ func _minimal_menu_args(name: String) -> Dictionary:
 	return {}
 
 
-func test_get_sim_state_inactive_shape() -> void:
-	var result: McpToolResult = await _call("get_sim_state")
+func test_game_state_without_managed_session_is_actionable() -> void:
+	var result: McpToolResult = await _call("game_state")
 	assert_false(result.is_error)
-	assert_false(bool(result.structured["active"]))
-	assert_true(String(result.structured["hint"]).contains("sim_control"))
+	assert_false(bool(result.structured["run"]["running"]))
+	assert_eq(result.structured["run"]["state"], "unavailable")
 
 
 func test_set_camera_without_camera_errors() -> void:

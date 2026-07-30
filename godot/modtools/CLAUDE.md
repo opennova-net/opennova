@@ -9,8 +9,7 @@
   [README.md](README.md), plus one README per workspace directory.
 - UI copy is artist-facing: physical/visual language ("draw distance", "blend layer"),
   not engine internals ("CDEP", "LOD bitstream", "mip slot").
-- Mission play-in-editor shares the game's runtime: one mission runtime + one present
-  pass (docs/runtime-architecture.md and docs/adr/). Read those before touching
-  `mission_runtime.gd` / `mission_present_pass.gd`. The editor/runtime sharing seams are
-  in docs/oned/editor-runtime-parity.md.
+- Mission testing always launches the standalone game from saved loose assets:
+  F5 runs normal boot, F6 runs the current saved loose mission, and F8 stops the
+  one managed child. ONED has no play-in-editor or in-place simulation.
 - Workspace tests live in `godot/tests/` (GUT), suffix `_test.gd`.

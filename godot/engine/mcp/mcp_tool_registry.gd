@@ -1,9 +1,8 @@
 class_name McpToolRegistry
 extends RefCounted
 
-## The MCP server's tool table: built-in tools registered at boot by the host
-## service, plus agent-defined tools added at runtime. Owns the tools/list
-## payload and the one place a tool handler actually runs.
+## The MCP server's curated tool table, registered by its host service at boot.
+## Owns the tools/list payload and the one place a tool handler actually runs.
 ##
 ## call_tool never directly awaits a handler bare: handlers run fire-and-forget
 ## into a shared state dict and call_tool polls it with a deadline. Script
@@ -53,8 +52,8 @@ func source_of(name: String) -> String:
 	return String(_tools[name]["source"]) if _tools.has(name) else ""
 
 
-## The tools/list payload: builtins first, then customs, each group in
-## registration order.
+## The tools/list payload: builtins first, then any non-builtin host
+## registrations, each group in registration order.
 func list_tools() -> Array:
 	var entries := _tools.values()
 	entries.sort_custom(func(a, b):

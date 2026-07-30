@@ -1,10 +1,8 @@
 extends GutTest
 
 ## Capability-hook coverage for the Environment workspace adapter: identity,
-## open filters, the save-needs-a-path gate, undo/redo delegation, and the
-## See-in-game launch note (ENV-1: the game loads the same .env, so Save into
-## the launch dir is the staging step). Mirrors sound_workspace_test /
-## credits_workspace_test.
+## open filters, the save-needs-a-path gate, and undo/redo delegation. Mirrors
+## sound_workspace_test / credits_workspace_test.
 
 const EnvironmentWorkspaceAdapter = preload("res://modtools/environment/environment_workspace.gd")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
@@ -59,42 +57,6 @@ func test_undo_redo_delegates_to_editor() -> void:
 	assert_true(ws.can_redo(), "Adapter should report redo available after undo.")
 	ws.redo()
 	assert_almost_eq(editor.env_file.get_fog_level(), 222.0, 0.5, "Adapter redo should reapply via the editor.")
-
-
-func test_game_launch_note_stages_on_save_into_the_launch_dir() -> void:
-	var pair := _make_workspace()
-	var ws = pair[0]
-	var editor = pair[1]
-
-	var unsaved = ws.get_game_launch_note("C:/games/jo")
-	assert_not_null(unsaved, "environment always speaks to the See-in-game gesture")
-	if unsaved == null:
-		return
-	assert_false(unsaved.staged, "a never-saved environment is not in the game")
-	assert_string_contains(unsaved.detail, "Save your environment",
-		"the pointer says what to do first, in artist terms")
-
-	editor.set_current_path("C:/elsewhere/full_08.env")
-	assert_false(ws.get_game_launch_note("C:/games/jo").staged,
-		"a save outside the launch dir does not stage the file")
-
-	editor.set_current_path("C:/games/jo/full_08.env")
-	var staged = ws.get_game_launch_note("C:\\Games\\JO")
-	assert_true(staged.staged,
-		"a clean save into the launch dir stages the file (separator- and case-insensitive)")
-	assert_string_contains(staged.detail, "full_08.env",
-		"the pointer names the file missions reference")
-
-	editor.env_file.set_env_name("Dirtied")
-	assert_true(editor.is_dirty, "editing should dirty the document")
-	var dirty = ws.get_game_launch_note("C:/games/jo")
-	assert_false(dirty.staged, "unsaved changes un-stage — the game reads the file on disk")
-	assert_string_contains(dirty.detail, "Save \"full_08.env\" first",
-		"the pointer says the disk copy is behind")
-
-	var unbound = EnvironmentWorkspaceAdapter.new(null)
-	assert_null(unbound.get_game_launch_note("C:/games/jo"),
-		"no editor bound = no note (the launcher keeps its generic copy)")
 
 
 func test_inspector_builds_and_shows_model_fields() -> void:

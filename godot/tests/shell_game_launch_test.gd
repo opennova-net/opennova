@@ -1,58 +1,21 @@
 extends GutTest
 
-# F3 gate (docs/oned/workspace-maturity-program.md): the "See in game" shell
+const GameSession := preload("res://modtools/editor/shell/shell_game_session.gd")
+
+# Managed standalone run shell
 # action launches the game runtime over the shared authoring directory with
 # the engine's own `/d` loose-file override ([orig: `/d` loose-override
 # @ 0x4a7310], NovaLaunchFlags). Seams are injected Callables, so the whole
 # composition is asserted without touching the OS. Public API only (ADR 0018).
 
 
-func _exists_none(_path: String) -> bool:
-	return false
-
-
-func test_runtime_flags_always_carry_the_loose_override() -> void:
-	assert_eq(ShellGameLaunch.runtime_flags("", "jo"), PackedStringArray(["/d", "/game", "jo"]),
-		"The base launch is /d plus an explicit game code — the loose override IS the gesture.")
-	assert_eq(ShellGameLaunch.runtime_flags("jox01", "jo"),
-		PackedStringArray(["/d", "/exp", "jox01", "/game", "jo"]),
-		"A mounted expansion rides along as the retail /exp flag.")
-	assert_eq(ShellGameLaunch.runtime_flags("  ", " JODEMO "), PackedStringArray(["/d", "/game", "jodemo"]),
-		"Whitespace expansion is dropped; the game code normalizes lowercase.")
-	assert_eq(ShellGameLaunch.runtime_flags("", ""), PackedStringArray(["/d", "/game", "jo"]),
-		"An empty game code resolves to the JO default, matching NovaLaunchFlags.")
-
-
-func test_launch_plan_prefers_the_packaged_runtime_beside_the_editor() -> void:
-	var exe := "C:/install/opennova-modtools.exe"
-	var plan := ShellGameLaunch.launch_plan(exe, "C:/proj", true, "", "jo",
-		func(path: String) -> bool: return path == "C:/install/opennova.exe")
-	assert_eq(plan.path, "C:/install/opennova.exe",
-		"The shipped two-product layout launches the sibling game exe.")
-	assert_eq(plan.args, PackedStringArray(["/d", "/game", "jo"]),
-		"The packaged runtime takes the retail-style flags directly.")
-
-
-func test_launch_plan_falls_back_to_the_dev_binary_on_the_game_scene() -> void:
-	var plan := ShellGameLaunch.launch_plan("C:/godot/godot.exe", "C:/repo/godot", true, "jox01", "jo",
-		Callable(self, "_exists_none"))
-	assert_eq(plan.path, "C:/godot/godot.exe", "Running from source re-runs this binary.")
-	assert_eq(plan.args[0], "--path", "The dev fallback targets the project.")
-	assert_eq(plan.args[1], "C:/repo/godot", "The project dir rides the --path flag.")
-	assert_eq(plan.args[2], ShellGameLaunch.RUNTIME_SCENE, "The game scene is the launch target.")
-	assert_eq(plan.args[3], "--", "Runtime flags sit behind the user-args separator.")
-	assert_eq(plan.args.slice(4), PackedStringArray(["/d", "/exp", "jox01", "/game", "jo"]),
-		"The same retail flags follow the separator.")
-
-
-func test_launch_plan_reports_unavailable_outside_dev_without_a_packaged_exe() -> void:
-	var plan := ShellGameLaunch.launch_plan("C:/install/opennova-modtools.exe", "C:/proj", false, "", "jo",
-		Callable(self, "_exists_none"))
-	assert_null(plan, "No sibling exe and no dev binary means the action is honestly unavailable.")
-
-
 func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array,
-		spawn_result: int = 1234, launch_note: Callable = Callable()) -> ShellGameLaunch:
+		spawn_result: int = 1234,
+		unsaved_workspaces: Callable = Callable(),
+		mission_button: Button = null,
+		stop_button: Button = null,
+		current_mission: Callable = Callable(),
+		file_exists: Callable = Callable()) -> ShellGameLaunch:
 	var launcher := ShellGameLaunch.new()
 	launcher.setup(
 		button,
@@ -62,21 +25,35 @@ func _make_launcher(button: Button, dir: String, spawned: Array, statuses: Array
 		func(path: String, args: PackedStringArray) -> int:
 			spawned.append({"path": path, "args": args})
 			return spawn_result,
-		Callable(self, "_exists_none"),
-		launch_note,
+		file_exists if file_exists.is_valid() \
+				else func(_path: String) -> bool: return false,
+		unsaved_workspaces,
 		func(text: String, _duration: float = 0.0, kind: StringName = &"info") -> void:
-			statuses.append({"text": text, "kind": kind})
+			statuses.append({"text": text, "kind": kind}),
+		current_mission,
+		func(_pid: int) -> bool: return false,
+		func(_pid: int) -> int: return OK,
+		Callable(),
+		mission_button,
+		stop_button
 	)
 	return launcher
 
 
 func test_button_gates_on_the_resource_dir() -> void:
 	var no_dir_button := Button.new()
+	var no_dir_mission_button := Button.new()
 	add_child_autofree(no_dir_button)
-	_make_launcher(no_dir_button, "", [], [])
+	add_child_autofree(no_dir_mission_button)
+	_make_launcher(no_dir_button, "", [], [], 1234, Callable(),
+			no_dir_mission_button)
 	assert_true(no_dir_button.disabled, "No authoring directory disables the gesture.")
 	assert_eq(no_dir_button.tooltip_text, ShellGameLaunch.TOOLTIP_NEEDS_DIR,
 		"The tooltip says what to do about it, in artist terms.")
+	assert_string_contains(no_dir_button.tooltip_text, "F5")
+	assert_eq(no_dir_mission_button.tooltip_text,
+			ShellGameLaunch.TOOLTIP_MISSION_NEEDS_DIR)
+	assert_string_contains(no_dir_mission_button.tooltip_text, "F6")
 
 	var ready_button := Button.new()
 	add_child_autofree(ready_button)
@@ -98,7 +75,7 @@ func test_launch_routes_the_plan_through_the_spawn_seam() -> void:
 	assert_eq(spawned.size(), 1, "Exactly one process spawn per gesture.")
 	var args := spawned[0]["args"] as PackedStringArray
 	assert_true(args.has("/d"), "The spawned runtime gets the loose-override flag.")
-	assert_true(args.has(ShellGameLaunch.RUNTIME_SCENE), "The dev plan targets the game scene.")
+	assert_true(args.has(GameSession.RUNTIME_SCENE), "The dev plan targets the game scene.")
 	assert_eq(statuses.size(), 1, "The status line reports the launch.")
 
 	# The button press is the same public path.
@@ -127,61 +104,70 @@ func test_launch_without_a_dir_refuses_before_spawning() -> void:
 	assert_eq(spawned.size(), 0, "Nothing spawns without a directory.")
 
 
-# --- The per-workspace See-in-game note (TER-1/ENV-1 F3 wiring) --------------
-# The active workspace can refine the gesture's copy through a typed
-# EditorWorkspace.GameLaunchNote; the launch itself never changes.
-
-
-func test_staged_workspace_note_rides_the_tooltip_and_launch_status() -> void:
-	var button := Button.new()
-	add_child_autofree(button)
-	var spawned: Array = []
-	var statuses: Array = []
-	var asked_dirs: Array = []
-	var launcher := _make_launcher(button, "C:/assets", spawned, statuses, 1234,
-		func(launch_dir: String) -> EditorWorkspace.GameLaunchNote:
-			asked_dirs.append(launch_dir)
-			return EditorWorkspace.GameLaunchNote.make(true,
-				"Load a mission on \"alpha\" to walk your terrain."))
-
-	assert_true(button.tooltip_text.begins_with(ShellGameLaunch.TOOLTIP_READY),
-		"The generic gesture explanation stays first.")
-	assert_string_contains(button.tooltip_text, "Load a mission on \"alpha\"",
-		"The workspace's pointer rides the tooltip.")
-	assert_true(asked_dirs.size() > 0 and String(asked_dirs[0]) == "C:/assets",
-		"The note is asked about the actual launch directory.")
-
-	assert_true(launcher.launch(), "A staged workspace launches normally.")
-	assert_eq(String(statuses[0]["text"]), "Game launched — Load a mission on \"alpha\" to walk your terrain.",
-		"The post-launch status carries the workspace's pointer.")
-	assert_eq(statuses[0]["kind"], &"info", "Staged data reports as plain info.")
-
-
-func test_unstaged_workspace_note_still_launches_but_warns() -> void:
+func test_unsaved_workspaces_warn_at_launch_without_changing_the_tooltip() -> void:
 	var button := Button.new()
 	add_child_autofree(button)
 	var spawned: Array = []
 	var statuses: Array = []
 	var launcher := _make_launcher(button, "C:/assets", spawned, statuses, 1234,
-		func(_launch_dir: String) -> EditorWorkspace.GameLaunchNote:
-			return EditorWorkspace.GameLaunchNote.make(false,
-				"Export your terrain into the game folder to see it in game."))
+		func() -> PackedStringArray:
+			return PackedStringArray(["Terrain", "Environment"]))
 
-	assert_true(launcher.launch(), "Unstaged data never blocks the launch — the game boots fine without it.")
-	assert_eq(spawned.size(), 1, "The spawn happens regardless of staging.")
-	assert_eq(statuses[0]["kind"], &"warn", "Unstaged data warns instead of celebrating.")
-	assert_string_contains(String(statuses[0]["text"]), "Export your terrain",
-		"The warning says what to do about it, in artist terms.")
+	assert_eq(button.tooltip_text, ShellGameLaunch.TOOLTIP_READY,
+		"The button describes the invariant saved-assets run path.")
+	assert_true(launcher.launch(), "Dirty work never blocks a saved-assets run.")
+	assert_eq(spawned.size(), 1)
+	assert_eq(statuses[0]["kind"], &"warn")
+	assert_string_contains(String(statuses[0]["text"]), "Terrain, Environment")
 
 
-func test_without_a_note_the_generic_copy_stands() -> void:
+func test_clean_launch_uses_the_generic_saved_assets_copy() -> void:
 	var button := Button.new()
 	add_child_autofree(button)
 	var statuses: Array = []
 	var launcher := _make_launcher(button, "C:/assets", [], statuses)
 
 	assert_eq(button.tooltip_text, ShellGameLaunch.TOOLTIP_READY,
-		"No note supplier leaves the generic ready tooltip untouched.")
+		"The ready tooltip has no workspace staging/export advice.")
 	assert_true(launcher.launch(), "The generic gesture still launches.")
-	assert_string_contains(String(statuses[0]["text"]), "your saved files override",
-		"The generic launch status survives for note-less workspaces.")
+	assert_string_contains(String(statuses[0]["text"]), "saved loose assets",
+		"The clean launch status reports the saved-assets run path.")
+
+
+func test_optional_f6_and_f8_buttons_share_the_managed_session() -> void:
+	var game_button := add_child_autofree(Button.new()) as Button
+	var mission_button := add_child_autofree(Button.new()) as Button
+	var stop_button := add_child_autofree(Button.new()) as Button
+	var spawned: Array = []
+	var launcher := _make_launcher(
+		game_button,
+		"C:/assets",
+		spawned,
+		[],
+		1234,
+		Callable(),
+		mission_button,
+		stop_button,
+		func() -> Dictionary: return {"path": "C:/assets/current.bms"},
+		func(path: String) -> bool: return path.ends_with("current.bms"))
+
+	assert_false(game_button.disabled)
+	assert_false(mission_button.disabled,
+			"an existing saved top-level BMS arms the visible F6 gesture")
+	assert_true(stop_button.disabled)
+
+	game_button.pressed.emit()
+	assert_eq(spawned.size(), 1)
+	assert_false(stop_button.disabled,
+			"the visible F8 gesture arms while the managed child is owned")
+
+	mission_button.pressed.emit()
+	assert_eq(spawned.size(), 2,
+			"F6 replaces the same managed child through the session")
+	var args := spawned[1]["args"] as PackedStringArray
+	assert_true(args.has("--loose-mission"))
+	assert_true(args.has("current.bms"))
+
+	stop_button.pressed.emit()
+	assert_true(stop_button.disabled)
+	assert_false(launcher.get_session().is_running())

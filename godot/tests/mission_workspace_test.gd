@@ -361,55 +361,6 @@ func test_workspace_switch_dismisses_the_prompt_without_answering() -> void:
 		"the unanswered question re-poses on the next activate")
 
 
-# --- C12: the editor debug-overlay summon ---------------------------------------
-# The sim bar's Debug toggle summons the SAME NovaDebugOverlay the game opens
-# with F3, parented under the shell with variable edits write-locked; its
-# runtime source follows the active mode (PIE first, else the in-place sim).
-
-class StubDebugController:
-	extends RefCounted
-	# Only what _debug_runtime_source / _on_overlay_transport touch; the real
-	# controller is replaced wholesale so no mission/terrain needs standing up.
-	var sim_runtime: Object = null
-	var stop_calls := 0
-	var notify_calls := 0
-	func get_sim_runtime():
-		return sim_runtime
-	func sim_stop() -> void:
-		stop_calls += 1
-	func notify_sim_transport_changed() -> void:
-		notify_calls += 1
-
-
-class StubPlayerHost:
-	extends RefCounted
-	var third_person := false
-	func is_third_person() -> bool:
-		return third_person
-
-
-class StubPlayNode:
-	extends Control
-	# Doubles as the play controller AND its world: is_playing()/get_world()
-	# come from MissionPlayController, get_runtime() from GameWorld.
-	var playing := false
-	var runtime: Object = null
-	var camera := Camera3D.new()
-	var player_host := StubPlayerHost.new()
-	func _init() -> void:
-		add_child(camera)
-	func is_playing() -> bool:
-		return playing
-	func get_world():
-		return self
-	func get_runtime():
-		return runtime
-	func get_play_camera() -> Camera3D:
-		return camera
-	func get_player_host() -> StubPlayerHost:
-		return player_host
-
-
 func _shelled_workspace() -> MissionWorkspace:
 	var ws = MissionWorkspace.new()
 	var shell := Control.new()
@@ -418,166 +369,18 @@ func _shelled_workspace() -> MissionWorkspace:
 	return ws
 
 
-func test_debug_button_summons_a_locked_overlay_over_the_shell() -> void:
+func test_workspace_has_no_embedded_game_runtime_or_debug_ui() -> void:
 	var ws := _shelled_workspace()
-	var shell: Control = ws.editor_shell
 	var host := Control.new()
 	add_child_autofree(host)
 	ws.build_inspector(host)
 
-	var btn := host.find_child("MissionDebugBtn", true, false) as Button
-	assert_not_null(btn, "build_inspector wires the Debug toggle through set_debug_hooks")
-	assert_true(btn.visible, "valid hooks show the toggle")
-	var bar := host.find_child("MissionSimBar", true, false) as Control
-	assert_true(bar != null and bar.visible,
-		"the sim bar stays up with no mission so the Debug toggle is actually REACHABLE — it is the overlay's only close affordance in the editor")
-
-	btn.button_pressed = true  # user press (emits toggled)
-	var overlay = shell.find_child("MissionDebugOverlay", true, false)
-	assert_not_null(overlay, "the first press builds the overlay under the shell")
-	assert_true(overlay.visible)
-	var writes_check := overlay.find_child("VarsAllowWrites", true, false) as CheckButton
-	assert_true(writes_check.disabled,
-		"the editor's overlay mounts write-locked")
-	assert_string_contains(writes_check.tooltip_text, "simulating from the editor")
-	assert_true(btn.button_pressed, "the toggle stays latched while open")
-
-	btn.button_pressed = false
-	assert_false(overlay.visible, "the second press hides it")
-	assert_true(is_instance_valid(overlay), "...without freeing")
-	btn.button_pressed = true
-	assert_eq(shell.find_child("MissionDebugOverlay", true, false), overlay,
-		"a re-summon reuses the same instance (tab/filter state survives)")
-
-
-func test_overlay_options_are_wired_to_the_generic_relay() -> void:
-	# One generic handler consumes the SAME NovaDebugOptions rows the game
-	# shell does — the per-signal hand wiring that drifted is gone.
-	var ws := _shelled_workspace()
-	ws.toggle_debug_overlay()
-	assert_true(ws._debug_overlay.debug_option_changed.is_connected(
-			ws._on_debug_option_changed),
-		"the summoned overlay's option channel feeds the one generic handler")
-	# Idle editor (no PIE world): a flip is inert by design, never an error.
-	ws._on_debug_option_changed(&"show_skeletons", true)
-	assert_false(ws.is_playing_mission(),
-		"idle: nothing was playing, so the flip had nothing to act on")
-
-
-func test_debug_button_does_not_latch_without_a_shell() -> void:
-	# Headless host (no editor_shell): the summon has nothing to float over, so
-	# the toggle must re-sync to off instead of latching pressed.
-	var ws = MissionWorkspace.new()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.build_inspector(host)
-
-	var btn := host.find_child("MissionDebugBtn", true, false) as Button
-	assert_not_null(btn)
-	btn.button_pressed = true
-	assert_false(ws.is_debug_overlay_open())
-	assert_false(btn.button_pressed, "the failed summon re-syncs the toggle off")
-
-
-func test_debug_runtime_source_prefers_pie_then_sim() -> void:
-	var ws := _shelled_workspace()
-	var stub_controller := StubDebugController.new()
-	ws._controller = stub_controller
-	var sim_rt := Node.new()
-	add_child_autofree(sim_rt)
-	stub_controller.sim_runtime = sim_rt
-	assert_eq(ws._debug_runtime_source(), sim_rt,
-		"no PIE -> the in-place Simulate driver")
-
-	var play_rt := Node.new()
-	add_child_autofree(play_rt)
-	var stub_play := StubPlayNode.new()
-	stub_play.runtime = play_rt
-	var play_host := Control.new()
-	add_child_autofree(play_host)
-	ws._play_mount = ViewportMount.new(&"MissionPlayViewport", func() -> Control: return stub_play)
-	ws._play_mount.mount(play_host)
-	stub_play.playing = true
-	stub_play.player_host.third_person = true
-	assert_eq(ws._debug_runtime_source(), play_rt,
-		"Play Mission wins while playing (play_mission() sim_stops first, so both can never be live)")
-	var view_context = ws.get_debug_view_context()
-	assert_not_null(view_context)
-	assert_eq(view_context.camera, stub_play.camera,
-			"ONED forwards the exact PIE camera to the shared pose dump")
-	assert_true(view_context.camera_mode_known)
-	assert_true(view_context.third_person, "ONED forwards the active F4 mode")
-
-	stub_play.playing = false
-	assert_eq(ws._debug_runtime_source(), sim_rt, "Stop falls back to the sim driver")
-	assert_null(ws.get_debug_view_context(),
-			"in-place simulation has no gameplay camera to mislabel")
-
-	stub_controller.sim_runtime = null
-	assert_null(ws._debug_runtime_source(),
-		"idle editor -> null (the overlay shows its no-mission state)")
-
-
-func test_overlay_transport_relays_to_the_controller() -> void:
-	# The overlay drives the runtime directly (it is host-neutral), bypassing
-	# the controller's sim_* methods whose `changed` is all the sim bar listens
-	# to. The workspace relay keeps them in step: Stop completes the editor-side
-	# stop (frees the driver -> editing unlocks), everything else re-emits
-	# changed via notify_sim_transport_changed.
-	var ws := _shelled_workspace()
-	var stub_controller := StubDebugController.new()
-	ws._controller = stub_controller
-
-	ws._on_overlay_transport("pause")
-	assert_eq(stub_controller.notify_calls, 1, "pause relays a changed re-emit")
-	ws._on_overlay_transport("play")
-	ws._on_overlay_transport("step")
-	ws._on_overlay_transport("wac_pause")
-	assert_eq(stub_controller.notify_calls, 4, "play/step/script-pause relay too")
-	assert_eq(stub_controller.stop_calls, 0)
-
-	ws._on_overlay_transport("stop")
-	assert_eq(stub_controller.stop_calls, 1,
-		"overlay Stop completes the editor stop (sim_stop frees the driver, unlocking edits)")
-	assert_eq(stub_controller.notify_calls, 4, "...and does not double-notify")
-
-	# The summoned overlay is WIRED to the relay (not just the method existing).
-	ws.toggle_debug_overlay()
-	assert_true(ws._debug_overlay.transport_used.is_connected(ws._on_overlay_transport),
-		"the summoned overlay's transport_used feeds the relay")
-
-	# PIE: the play world owns its transport; the editor controller must not hear it.
-	var stub_play := StubPlayNode.new()
-	stub_play.playing = true
-	var play_host := Control.new()
-	add_child_autofree(play_host)
-	ws._play_mount = ViewportMount.new(&"MissionPlayViewport", func() -> Control: return stub_play)
-	ws._play_mount.mount(play_host)
-	ws._on_overlay_transport("stop")
-	ws._on_overlay_transport("pause")
-	assert_eq(stub_controller.stop_calls, 1, "PIE transport never reaches the in-place controller")
-	assert_eq(stub_controller.notify_calls, 4)
-
-
-func test_deactivate_hides_the_overlay_and_release_frees_it() -> void:
-	var ws := _shelled_workspace()
-	var shell: Control = ws.editor_shell
-	ws.toggle_debug_overlay()
-	var overlay = shell.find_child("MissionDebugOverlay", true, false)
-	assert_not_null(overlay)
-	assert_true(ws.is_debug_overlay_open())
-
-	ws.deactivate()
-	assert_false(overlay.visible,
-		"leaving the workspace hides the overlay (it must not float over other workspaces)")
-	assert_true(is_instance_valid(overlay), "hidden, not freed: one click brings it back")
-	assert_true(overlay._timer.paused, "hidden pauses its refresh timer too")
-
-	ws.toggle_debug_overlay()
-	assert_true(ws.is_debug_overlay_open(), "re-summon after deactivate reuses the instance")
-
-	ws.release_viewport()
-	await get_tree().process_frame  # queue_free lands
-	assert_null(shell.find_child("MissionDebugOverlay", true, false),
-		"release_viewport tears the overlay down with the workspace")
-	assert_false(ws.is_debug_overlay_open())
+	assert_null(host.find_child("MissionDebugBtn", true, false),
+		"F3 belongs to the separately launched game")
+	assert_null(host.find_child("MissionSimBar", true, false),
+		"mission testing is launched from the editor toolbar")
+	for method in [
+		"play_mission", "stop_play_mission", "is_playing_mission", "play_controller",
+		"toggle_debug_overlay", "is_debug_overlay_open", "get_active_runtime",
+	]:
+		assert_false(ws.has_method(method), "workspace must not expose %s" % method)

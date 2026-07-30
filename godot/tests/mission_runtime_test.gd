@@ -1,9 +1,9 @@
 extends GutTest
 
-# MissionRuntime is the shared driver both the game and the editor go through: it owns a real
-# NovaSimulation + the present pass + the entity index, ticks them in one order, and restores authored
-# transforms on Stop. This drives the REAL sim (not a fake) over fake placed nodes to prove the whole
-# path: setup builds the index, tick presents sim state onto the nodes, Stop rewinds + restores.
+# MissionRuntime is GameWorld's live mission driver: it owns a real
+# NovaSimulation, present pass, and entity index and ticks them in one order.
+# These focused tests instantiate it directly over fixture nodes to prove the
+# engine path without introducing a second editor gameplay host.
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
@@ -273,12 +273,12 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 	assert_false(bool(closed_counters.get("trace_profiling_enabled", true)))
 
 
-# The world tick is the ONLY pump for the session socket, so the Play/Step/Stop
-# transport must not be able to halt a live net session: the F3 overlay ships in
+# The world tick is the ONLY pump for the session socket, so runtime transport
+# must not be able to halt a live net session: the F3 overlay ships in
 # the game shell, and a paused joiner (or a stopped listen host) starves the
 # uplink until the peer reaps at cs_dir0.timeout_ms = 120000
-# [orig: CNapiNetwork_Init @0x4ca4a0]. A single-player runtime keeps the
-# editor/preview transport it has always had.
+# [orig: CNapiNetwork_Init @0x4ca4a0]. A local single-player runtime remains
+# controllable for F3 diagnostics and focused fixtures.
 func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var joiner := NovaSimulation.new()
@@ -301,19 +301,19 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	assert_true(rt.is_playing(), "F3 Stop cannot rewind the world under a live peer")
 
 
-func test_transport_still_works_without_a_net_session() -> void:
+func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container)), 0)
-	# P7 stands every preview up as an in-process listen server, but with no bound
-	# socket and no peers it is not a live net session and keeps its transport.
+	# A directly instantiated runtime has no bound socket or peers, so it is not
+	# a live net session and keeps its transport.
 	assert_false(rt.is_transport_locked(),
-			"a local preview is not a live net session")
+			"a local runtime is not a live net session")
 	rt.play()
 	assert_true(rt.is_playing())
 	rt.pause()
-	assert_false(rt.is_playing(), "the editor/preview transport still pauses")
+	assert_false(rt.is_playing(), "the local runtime transport still pauses")
 
 
 func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
@@ -432,16 +432,16 @@ func test_tick_presents_sim_position_onto_node() -> void:
 		"node left its authored position while playing")
 
 
-# (P7: test_stop_restores_authored_transform deleted — the editor Stop's node-transform restore
-#  is de-scoped; Stop still rewinds the sim via NovaSimulation.restart(). The present is the
-#  listen-server ClientState, empty pre-tick, so the setup-time capture no longer applies.)
+# (Historical transform-restore test deleted: MissionRuntime.stop() still
+# rewinds NovaSimulation for teardown/fixtures, but ONED no longer owns a live
+# runtime whose Stop must restore authored editor nodes.)
 
 
 
 func test_tick_and_step_advance_and_present_like_the_game() -> void:
-	# The game and the editor preview share ONE cadence: tick() dispatches exactly one logic tick
+	# The standalone driver's tick() dispatches exactly one logic tick
 	# (the engine's own dividers — WAC every 62nd tick, BMS quarter-pass every 16th — gate inside
-	# the systems), so tick() and Step must both advance + present.
+	# the systems), so direct fixture tick() and Step must both advance + present.
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)

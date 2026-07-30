@@ -104,7 +104,24 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 36)
 layout_mode = 2
 focus_mode = 0
-tooltip_text = "See in game"
+tooltip_text = "Run game (F5)"
+flat = false
+
+[node name="PlayCurrentMissionButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+tooltip_text = "Run current saved mission (F6)"
+flat = false
+
+[node name="StopGameButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 0
+disabled = true
+tooltip_text = "No managed game is running."
 flat = false
 
 [node name="BrowserToggleButton" type="Button" parent="WorkstationLayout/TopBar/TopMargin/TopRow/GlobalButtonRail"]
@@ -580,7 +597,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 button_pressed = true
 text = "Enable on port"
-tooltip_text = "Serve the MCP agent endpoint on 127.0.0.1 while ONED runs. Connected agents can inspect assets, control the editor, and run scripts in-process."
+tooltip_text = "Serve the MCP agent endpoint on 127.0.0.1 while ONED runs. Connected agents can inspect assets, control the editor, and debug editor-launched games. Turning this off also retires the running game's debug endpoint."
 
 [node name="SettingsMcpPortEdit" type="LineEdit" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection/SettingsMcpRow"]
 unique_name_in_owner = true

@@ -1,9 +1,10 @@
 extends Node
 
-# THE shared mission runtime driver. Owns the sim (NovaSimulation) + the present pass + the entity
-# index, and runs the ONE faithful per-tick loop both the game and the editor go through. Consolidates
-# the two divergent stacks it replaces: the game's hand-wired NovaSimulation + MissionCommandHost, and
-# the editor's separate MissionSimDriver. Both now load + tick + present + restore through this.
+# THE shared mission runtime driver. Owns the sim (NovaSimulation), present pass, entity index, and
+# one faithful tick pipeline. `GameWorld`, under `MainGame`, is its sole live mission host; ONED has
+# no PIE or in-place mission simulation. Tests and non-gameplay tooling previews may still instantiate
+# this component directly. It consolidated the historical game's hand-wired NovaSimulation +
+# MissionCommandHost stack and the editor's separate MissionSimDriver.
 #
 # Per-tick order (single-sourced here, faithful to the original main loop's server-tick-then-render):
 #   advance logic (sim) -> present entity state onto nodes -> drain + emit side effects.
@@ -14,9 +15,9 @@ extends Node
 # engine's dividers gate INSIDE the systems (the WAC VM fires every 62nd tick, the BMS evaluator
 # quarter-passes every 16th). Deciding HOW MANY ticks a host frame runs is this driver's job, not
 # the sim's: tick_realtime() banks wall-clock and dispatches 0..N of them; tick() dispatches exactly
-# one. The game and the editor preview share the sim's default loco_scale. The driver can self-tick
-# via _process (editor) or be driven by an explicit tick() call so a host can order it against its
-# other passes (game). Stop rewinds the world (World::restore) AND restores the authored node
+# one. Live cadence is driven explicitly by GameWorld so it can order the runtime against its other
+# passes. `_process` self-tick remains an opt-in seam for isolated tests/tooling previews; ONED does
+# not use it for gameplay. Stop rewinds the world (World::restore) AND restores the authored node
 # transforms captured at setup.
 
 signal effects_drained(effects: Array)
@@ -45,13 +46,13 @@ const TICK_DT := 1.0 / 62.5          # 0.016 s; matches AiEventQueue::kFrameDt (
 const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms / 16 ms accumulator cap
 
 var _sim: NovaSimulation
-var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
+var _present                          # MissionPresentPass: placed nodes on every role or tooling/test preview
 var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
 var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
 var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
-var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
+var _self_tick := false              # tooling/tests only; live GameWorld calls tick_realtime()
 var _playing := false
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
@@ -86,7 +87,7 @@ var _effect_poses_by_ssn: Dictionary = {}
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
-## the present pass. options: { loco_scale, self_tick, present_options, and for a net
+## the present pass. options: { loco_scale, self_tick (tooling/tests only), present_options, and for a net
 ## session the typed request under "host_session" (HostSessionConfig) or "join_target"
 ## (JoinTarget) }. Returns the AI entity count, or 0 on load failure (the orphan sim is
 ## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
@@ -96,8 +97,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_setup_error = OK
 	# A remote join may already own the live socket + NP session while it waits
 	# for S2C 0x7B to identify the mission. Keep that exact connection across the
-	# local map load instead of reconnecting after discovery. Normal host/SP/editor
-	# callers do not provide a simulation and retain the fresh-instance path.
+	# local map load instead of reconnecting after discovery. Standalone host/SP and
+	# isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = NovaSimulation.new()
@@ -117,9 +118,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_has_native_present_effect_pose_lookup = _sim != null
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
-	# P7: EVERY play/preview path is the in-process listen server (ADR 0011) — stood up BEFORE load,
-	# the host player auto-spawns at bring-up (faithful §5.0 mode-3). The editor preview goes through
-	# it too (the no-net AI-pool present is retired). A co-op LAN host additionally binds a real UDP
+	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
+	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
+	# sole live host (ADR 0025); F5/F6 launch that standalone path. Isolated tests/tooling previews may
+	# instantiate this same seam, but ONED does not. A co-op LAN host additionally binds a real UDP
 	# socket; a joiner is the non-authority client.
 	var playable := bool(options.get("playable", false))
 	var join_target: JoinTarget = options.get("join_target")
@@ -174,7 +176,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			_has_native_present_effect_pose_lookup = false
 			return 0
 	else:
-		# SP / editor preview: the in-process listen server. The host player auto-spawns at bring-up.
+		# Standalone SP (or an isolated tooling/test preview): the in-process listen server. ONED live
+		# play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
 		_sim.enable_listen_server(true)
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		_sim.set_item_seat_specs(_build_item_seat_specs(mission, options["resource_root"], options["item_db"]))
@@ -191,8 +194,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		return 0
 	if _presentation_time_ms >= 0:
 		_sim.set_panm_time_ms(_presentation_time_ms)
-	# Ground the AI on the host's terrain (editor preview + game share this one call). Entities hug
-	# the terrain instead of floating; absent/unloaded terrain leaves their authored Z untouched.
+	# Ground the AI on the supplied terrain. Standalone GameWorld and isolated tooling/test previews
+	# share this seam; absent/unloaded terrain leaves authored Z untouched.
 	if options.get("terrain") != null:
 		_sim.set_terrain_height_field(options["terrain"])
 	# The sound-profile chain: SndProf.def feeds the sim's footstep/foley/landing/
@@ -224,8 +227,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 				options["wac_basename"], wac.get_error_count()])
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
-	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it, and
-	# self_tick only decides whether _process here calls tick() or the host does.
+	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it. Live
+	# GameWorld leaves self_tick false and drives tick_realtime() explicitly; the option survives only
+	# for isolated tests/tooling previews, not an ONED gameplay host.
 	_self_tick = bool(options.get("self_tick", false))
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
@@ -774,8 +778,9 @@ func _present_frame(fire_ticks: int, stats_on: bool) -> void:
 
 
 ## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
-## were drained). The deterministic single-tick primitive: editor Step, the MCP, and tests use this.
-## Real-time hosts (game + editor preview) use tick_realtime() instead, which accumulates wall-clock.
+## were drained). The deterministic single-tick primitive: standalone F3/MCP Step and isolated
+## tests/tooling previews use this. GameWorld is the sole live real-time host and calls
+## tick_realtime(), which accumulates wall-clock; ONED has no self-ticking mission host.
 func tick() -> bool:
 	if _sim == null:
 		_perf_tick_us = 0
@@ -938,7 +943,7 @@ func _process(delta: float) -> void:
 		tick_realtime(delta)
 
 
-# --- Editor transport (Play / Step / Stop) ------------------------------------
+# --- Debug/tooling transport (Play / Step / Stop) -----------------------------
 
 ## True while a live net session owns this runtime, i.e. the Play/Step/Stop
 ## transport is locked out. The world tick is the
@@ -968,11 +973,11 @@ func pause() -> void:
 	_accum = 0.0
 
 
-## One manual tick (editor Step): one logic tick + present, without running the self-tick loop.
-## Both tick modes advance one logic tick per call, so Step behaves identically under DIVIDED.
+## One manual debug/tooling tick: one logic tick + present, outside the real-time loop.
+## The standalone game's F3/MCP Step and isolated tests/tooling previews share this primitive.
 func step_once() -> void:
-	# Stepping drops out of the self-tick loop, which starves the socket between
-	# steps just as pause() does. See is_transport_locked().
+	# Stepping pauses real-time cadence (and any opt-in tooling self-tick), which starves
+	# the socket between steps just as pause() does. See is_transport_locked().
 	if is_transport_locked():
 		return
 	_playing = false

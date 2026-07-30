@@ -24,10 +24,12 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
 	// D-NET-124). serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
 	// fold it into ClientState (runtime_) to render the host's own view.
-	// Serve-and-play (default) vs dedicated. SP / editor preview are ALWAYS serve-and-play (they render
-	// the host's own player); a LAN host honors the UI server-type (host_serve_and_play_, from
-	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn + the
-	// local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
+	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
+	// host's own player); isolated test/tooling MissionRuntime instantiations keep that default too.
+	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission host
+	// (ADR 0025). A LAN host honors the UI server-type (host_serve_and_play_, from
+	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +
+	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
 	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].
 	const bool serve_and_play = host_listen_ ? host_serve_and_play_ : true;
 	host_owner_ = np::HostOwner{};

@@ -75,35 +75,84 @@ func test_ctrl_p_opens_quick_open_browser() -> void:
 # --- Unsaved-changes close guard ---------------------------------------------
 
 
-class DirtyWorkspaceStub:
-	extends EditorWorkspace
+func _configure_failed_running_game(shell: Node) -> ShellGameSession:
+	var session: ShellGameSession = shell.get_game_run_session()
+	session.setup(
+			func() -> String: return "C:/assets",
+			func() -> String: return "",
+			func() -> String: return "jo",
+			Callable(),
+			Callable(),
+			func(_path: String, _args: PackedStringArray) -> int: return 4017,
+			func(_path: String) -> bool: return false,
+			Callable(),
+			func(pid: int) -> bool: return pid == 4017,
+			func(_pid: int) -> int: return FAILED)
+	assert_true(session.start_mode("game"))
+	return session
 
-	func has_unsaved_changes() -> bool:
-		return true
 
-	func get_workspace_label() -> String:
-		return "Scratch"
+func _configure_dirty_environment(shell: Node) -> EnvironmentEditor:
+	var environment_editor: EnvironmentEditor = add_child_autofree(
+			EnvironmentEditor.new())
+	environment_editor.create_default_environment(false)
+	environment_editor.env_file.set_env_name("Dirty")
+	shell.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT) \
+			.set_environment_editor(environment_editor)
+	return environment_editor
+
+
+func test_clean_close_aborts_when_managed_game_cannot_stop() -> void:
+	var shell := _shell()
+	var session := _configure_failed_running_game(shell)
+
+	shell.request_close()
+	await get_tree().process_frame
+
+	assert_eq(session.get_state()["state"], "running")
+	assert_true(shell.is_inside_tree(),
+			"a failed child shutdown keeps the editor alive")
+	assert_string_contains(
+			(shell.get_node("%StatusToolLabel") as Label).text,
+			"Could not stop")
 
 
 func test_close_guard_prompts_when_a_workspace_is_dirty() -> void:
 	var shell := _shell()
-	# Inject a dirty workspace so the guard has something to report. Without it,
-	# _handle_close_request would quit the test runner (nothing unsaved).
-	shell._workspaces[4242] = DirtyWorkspaceStub.new()
-	shell._handle_close_request()
+	_configure_dirty_environment(shell)
+	shell.request_close()
 	await get_tree().process_frame
-	var dialog: ConfirmationDialog = shell._close_guard_dialog
+	var dialog := shell.get_node_or_null("CloseGuardDialog") as ConfirmationDialog
 	assert_not_null(dialog, "a dirty workspace builds the close-guard dialog")
 	if dialog == null:
-		shell._workspaces.erase(4242)
 		return
 	assert_true(dialog.visible, "the guard is shown instead of quitting")
-	assert_string_contains(dialog.dialog_text, "Scratch")
+	assert_string_contains(dialog.dialog_text, "Environment")
 	# Cancel dismisses without quitting; never emit confirmed (it quits the runner).
 	dialog.get_cancel_button().pressed.emit()
 	await get_tree().process_frame
 	assert_false(dialog.visible, "Keep editing dismisses the guard and leaves the editor open")
-	shell._workspaces.erase(4242)
+
+
+func test_dirty_close_confirmation_also_aborts_on_game_shutdown_failure() -> void:
+	var shell := _shell()
+	var session := _configure_failed_running_game(shell)
+	_configure_dirty_environment(shell)
+	shell.request_close()
+	await get_tree().process_frame
+	var dialog := shell.get_node_or_null("CloseGuardDialog") as ConfirmationDialog
+	assert_not_null(dialog)
+	if dialog == null:
+		return
+
+	dialog.confirmed.emit()
+	await get_tree().process_frame
+
+	assert_eq(session.get_state()["state"], "running")
+	assert_true(shell.is_inside_tree())
+	assert_string_contains(
+			(shell.get_node("%StatusToolLabel") as Label).text,
+			"Could not stop")
 
 
 # --- Inspector empty state ----------------------------------------------------
@@ -168,47 +217,59 @@ func test_theme_carries_all_four_severity_variations() -> void:
 			"%s label variation exists in the editor theme" % variation)
 
 
-# --- See in game: popup-workspace note routing (ENV-1) ------------------------
-# Environment is a popup over the active view (never the active workspace), so
-# while its panel is open the launcher's See-in-game note comes from it; closed,
-# the gesture returns to the active workspace's copy. Public seams only.
+# --- Standalone run: shell-wide unsaved summary ------------------------------
 
-func test_open_environment_panel_supplies_the_see_in_game_note() -> void:
+func test_run_toolbar_exposes_the_f5_f6_f8_session_gestures() -> void:
+	var shell := _shell()
+	var game_button: Button = shell.get_node("%PlayInGameButton")
+	var mission_button: Button = shell.get_node("%PlayCurrentMissionButton")
+	var stop_button: Button = shell.get_node("%StopGameButton")
+	assert_not_null(game_button)
+	assert_not_null(mission_button)
+	assert_not_null(stop_button)
+	assert_string_contains(game_button.tooltip_text, "F5")
+	assert_string_contains(mission_button.tooltip_text, "F6")
+	assert_string_contains(stop_button.tooltip_text, "managed game")
+
+
+func test_dirty_popup_workspace_joins_run_warning_without_changing_tooltip() -> void:
 	var shell := _shell()
 	var environment_editor: EnvironmentEditor = add_child_autofree(EnvironmentEditor.new())
 	environment_editor.create_default_environment(false)
+	environment_editor.env_file.set_env_name("Dirty")
 	shell.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT) \
 		.set_environment_editor(environment_editor)
 
 	# A real (non-user-data) resource dir arms the gesture; the GUT run is the
 	# editor binary, so the dev-runtime fallback is available.
 	var root: String = OS.get_cache_dir().path_join(
-		"opennova_shell_launch_note_%d" % Time.get_ticks_usec())
+		"opennova_shell_dirty_summary_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
 	shell.set_resource_root_dir(root, false, false)
 
 	var play_button: Button = shell.get_node("%PlayInGameButton")
-	assert_false(play_button.disabled, "a mounted directory arms the See-in-game button")
-	assert_false(play_button.tooltip_text.contains("Save your environment"),
-		"with the panel closed, the active workspace (Mission, no note) keeps the generic copy")
+	assert_false(play_button.disabled, "a mounted directory arms the run button")
+	var ready_tooltip := play_button.tooltip_text
+	assert_string_contains(ready_tooltip, "saved loose assets")
+	assert_true(shell.get_unsaved_workspace_labels().has("Environment"),
+		"popup workspaces participate in the same shell-wide dirty summary")
 
 	var sun_button: Button = shell.get_node("%EnvironmentToggleButton")
 	sun_button.toggled.emit(true)
 	await get_tree().process_frame
 	shell.sync_from_editor_state()
-	assert_string_contains(play_button.tooltip_text, "Save your environment",
-		"an open environment panel's staging note rides the launch tooltip")
+	assert_eq(play_button.tooltip_text, ready_tooltip,
+		"opening a dirty workspace cannot add staging/export advice to F5")
 
 	environment_editor.set_current_path(root.path_join("full_08.env"))
 	shell.sync_from_editor_state()
-	assert_string_contains(play_button.tooltip_text, "full_08.env",
-		"a clean save into the game folder flips the note to the staged pointer")
+	assert_eq(play_button.tooltip_text, ready_tooltip,
+		"document paths do not change the invariant saved-assets tooltip")
 
 	sun_button.toggled.emit(false)
 	await get_tree().process_frame
 	shell.sync_from_editor_state()
-	assert_false(play_button.tooltip_text.contains("full_08.env"),
-		"closing the panel returns the gesture to the active workspace's copy")
+	assert_eq(play_button.tooltip_text, ready_tooltip)
 
 	shell.set_resource_root_dir("", false, false)
 	DirAccess.remove_absolute(root)

@@ -1,7 +1,7 @@
 extends Node
 
 # Live probe for the 3P body's upper-body weapon channel (D-INF-11 §14.8): boots ONED
-# play-in-editor (JOX root, 05TR), switches to THIRD person (F4), fires a short burst and
+# standalone game (JOX root, 05TR), switches to THIRD person (F4), fires a short burst and
 # reloads through the REAL input path (R while the mouse is captured), then verifies the
 # sim exposes body_anim_key="anim_reload" with an advancing playhead, the avatar model
 # carries the weapon channel, and a mask bone (R forearm) visibly leaves the locomotion
@@ -10,9 +10,8 @@ extends Node
 # [orig: producer @0x4b5dad + WeaponSlot_ReloadAmmo @0x54173c; world-wac-ai-re.md §14.8]
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/body"
-const ENV_NAME := "full_00.env"
 
 var _play_viewport: Viewport = null
 var _out_abs := ""
@@ -25,39 +24,19 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
-	if app.environment_editor != null:
-		var env_path := NovaPaths.resolve_file(root, ENV_NAME)
-		if not env_path.is_empty():
-			app.environment_editor.open_env(env_path)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	var path := NovaPaths.resolve_file(root, bms)
-	if ws.open_file(path) != OK:
-		push_error("[body] open failed"); get_tree().quit(1); return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-	if int(ws.play_mission()) != OK:
-		push_error("[body] play failed"); get_tree().quit(1); return
-	await _settle(120)
-	var cam := _find_play_camera(get_tree().root)
-	if cam != null:
-		_play_viewport = cam.get_viewport()
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, bms, ResourceDirSettings.get_expansion())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[body] " + String(session.error)); get_tree().quit(1); return
+	_play_viewport = session.viewport
 
-	var world := _find_by_method(get_tree().root, "local_player_weapon_view")
+	var world: GameWorld = session.world
 	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if world == null or host == null:
 		push_error("[body] no weapon world/host"); get_tree().quit(1); return
@@ -118,7 +97,6 @@ func _ready() -> void:
 			"post-reload: body channel mirrors the primary state again")
 	await _capture("03_tp_post.png")
 
-	ws.stop_play_mission()
 	print("[body] done -> ", _out_abs, "  failures=", _fail)
 	get_tree().quit(1 if _fail > 0 else 0)
 
@@ -185,15 +163,3 @@ func _capture(name: String) -> void:
 	if img != null:
 		img.save_png(_out_abs.path_join(name))
 		print("[body] wrote ", name)
-
-
-func _find_play_camera(node: Node) -> Camera3D:
-	if node.has_method("get_play_camera"):
-		var c = node.call("get_play_camera")
-		if c is Camera3D:
-			return c
-	for ch in node.get_children():
-		var f := _find_play_camera(ch)
-		if f != null:
-			return f
-	return null

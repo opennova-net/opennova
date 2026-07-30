@@ -76,6 +76,8 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _right_split: SplitContainer = %RightSplit
 @onready var _browser_toggle_button: Button = %BrowserToggleButton
 @onready var _play_in_game_button: Button = %PlayInGameButton
+@onready var _play_current_mission_button: Button = %PlayCurrentMissionButton
+@onready var _stop_game_button: Button = %StopGameButton
 @onready var _browser_pane_host: PanelContainer = %ResourceBrowserPaneHost
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -118,7 +120,7 @@ var _workflow_buttons: Dictionary = {}
 var _inspector_workspace_id: int = -1
 var _save_export := ShellSaveExportFlow.new()
 var _export_progress := ShellExportProgress.new()
-# F3: the "See in game" launcher (game runtime + /d loose-override).
+# Managed standalone game launcher (F5/F6/F8, runtime + /d loose override).
 var _game_launch := ShellGameLaunch.new()
 # App-close guard: one prompt covering every workspace with unsaved work,
 # separate from the flow module's per-action UnsavedChangesDialog.
@@ -217,18 +219,20 @@ func _ready() -> void:
 		func() -> String: return NovaResourceDirSettings.get_game(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
-		func(launch_dir: String) -> EditorWorkspace.GameLaunchNote:
-			# Environment is a popup over the active view (never the active
-			# workspace), so while its panel is open the gesture speaks to
-			# what the user is editing in it.
-			if _popovers.environment_open():
-				var popup_ws := _popup_workspace()
-				var popup_note := popup_ws.get_game_launch_note(launch_dir) if popup_ws != null else null
-				if popup_note != null:
-					return popup_note
-			var note_workspace := _get_active_workspace()
-			return note_workspace.get_game_launch_note(launch_dir) if note_workspace != null else null,
-		show_status_message
+		get_unsaved_workspace_labels,
+		show_status_message,
+		func() -> Dictionary:
+			var mission_workspace := _get_workspace(Workspace.MISSION)
+			if mission_workspace == null:
+				return {}
+			return {
+				"path": mission_workspace.get_current_resource_path(),
+			},
+		func(pid: int) -> bool: return OS.is_process_running(pid),
+		func(pid: int) -> int: return OS.kill(pid),
+		func() -> int: return Time.get_ticks_msec(),
+		_play_current_mission_button,
+		_stop_game_button
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
 	_tile_gizmo_overlay.wire_buttons(
@@ -316,6 +320,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_game_launch.shutdown()
 	_popovers.save_floating_states()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).release_viewport()
@@ -339,18 +344,23 @@ func request_close() -> void:
 	_handle_close_request()
 
 
-func _handle_close_request() -> void:
+## Stable shell-wide dirty summary shared by run warnings and the close guard.
+## F5/F6 only read it; saving remains an explicit editor action.
+func get_unsaved_workspace_labels() -> PackedStringArray:
+	_ensure_workspaces()
 	var dirty := PackedStringArray()
-	for workspace in _workspaces.values():
-		var ws := workspace as EditorWorkspace
-		if ws != null and ws.has_unsaved_changes():
-			dirty.append(ws.get_workspace_label())
-	for workspace in _popup_workspaces.values():
-		var ws := workspace as EditorWorkspace
-		if ws != null and ws.has_unsaved_changes():
-			dirty.append(ws.get_workspace_label())
+	for def_v in _workspace_defs_cache:
+		var def := def_v as WorkspaceDef
+		var workspace := _workspace_for_id(def.id)
+		if workspace != null and workspace.has_unsaved_changes():
+			dirty.append(workspace.get_workspace_label())
+	return dirty
+
+
+func _handle_close_request() -> void:
+	var dirty := get_unsaved_workspace_labels()
 	if dirty.is_empty():
-		get_tree().quit()
+		_quit_after_game_shutdown()
 		return
 	_ensure_close_guard_dialog()
 	_close_guard_dialog.dialog_text = "Unsaved changes in: %s.\n\nQuit without saving?" % ", ".join(dirty)
@@ -369,8 +379,27 @@ func _ensure_close_guard_dialog() -> void:
 	add_child(_close_guard_dialog)
 	_close_guard_dialog.get_ok_button().text = "Quit without saving"
 	_close_guard_dialog.get_cancel_button().text = "Keep editing"
-	# OK quits; Cancel/Escape dismisses and leaves the editor open.
-	_close_guard_dialog.confirmed.connect(func() -> void: get_tree().quit())
+	# OK first proves the editor-owned child is gone; Cancel/Escape dismisses.
+	_close_guard_dialog.confirmed.connect(_quit_after_game_shutdown)
+
+
+func _quit_after_game_shutdown() -> void:
+	if not _shutdown_game_for_close():
+		return
+	get_tree().quit()
+
+
+func _shutdown_game_for_close() -> bool:
+	if _game_launch.shutdown():
+		return true
+	var session: Variant = _game_launch.get_session() \
+			if _game_launch.has_method("get_session") else null
+	var reason := String(session.get_last_error()) \
+			if session != null and session.has_method("get_last_error") else ""
+	if reason.is_empty():
+		reason = "Could not stop the running game; the editor remains open."
+	show_status_message(reason, 0.0, &"error")
+	return false
 
 
 func set_editor(value: Node) -> void:
@@ -394,6 +423,25 @@ func set_editor(value: Node) -> void:
 	sync_from_editor_state()
 
 
+## The single standalone game session consumed by toolbar, shortcuts and MCP.
+## Callers observe/control it through its public JSON-safe surface.
+func get_game_run_session() -> ShellGameSession:
+	return _game_launch.get_session()
+
+
+func run_game(mode: String = "game") -> bool:
+	var normalized := mode.strip_edges().to_lower()
+	if normalized != "game" and normalized != "mission":
+		show_status_message("Unknown run mode '%s'." % mode, 0.0, &"error")
+		return false
+	return _game_launch.run_current_mission() \
+			if normalized == "mission" else _game_launch.launch()
+
+
+func stop_game() -> bool:
+	return _game_launch.stop()
+
+
 func sync_from_editor_state() -> void:
 	_ensure_workspaces()
 	_refresh_workspace_buttons()
@@ -404,8 +452,6 @@ func sync_from_editor_state() -> void:
 	_export_progress.sync()
 	_popovers.refresh_camera_state()
 	_popovers.refresh_environment_state()
-	# The See-in-game tooltip carries the ACTIVE workspace's staging note, so it
-	# follows workspace switches and save/export state changes.
 	_game_launch.refresh()
 	var workspace := _get_active_workspace()
 	if workspace != null:
@@ -416,6 +462,7 @@ func sync_from_editor_state() -> void:
 
 
 func _process(_delta: float) -> void:
+	_game_launch.poll()
 	_refresh_shell_state()
 	_export_progress.sync()
 	_status.refresh()
@@ -1176,13 +1223,28 @@ func _on_pff_extracted(dir: String) -> void:
 # focused text field keeps its native Ctrl+Z — and before _unhandled_input,
 # so viewport routers never see claimed keys. ONE focus guard, for undo/redo
 # only: Ctrl+S is deliberately unguarded (the save flow flushes pending
-# edits, which covers half-typed buffers). Mission's sim gate lives inside
-# its own undo() (_reject_edit_while_simulating), so no sim awareness here.
+# edits, which covers half-typed buffers).
 func _shortcut_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
-	if not key.pressed or key.is_echo() or not key.ctrl_pressed or key.alt_pressed:
+	if not key.pressed or key.is_echo():
+		return
+	if not key.ctrl_pressed and not key.alt_pressed:
+		match key.keycode:
+			KEY_F5:
+				run_game("game")
+				get_viewport().set_input_as_handled()
+				return
+			KEY_F6:
+				run_game("mission")
+				get_viewport().set_input_as_handled()
+				return
+			KEY_F8:
+				stop_game()
+				get_viewport().set_input_as_handled()
+				return
+	if not key.ctrl_pressed or key.alt_pressed:
 		return
 	var workspace := _get_active_workspace()
 	match key.keycode:
@@ -1530,4 +1592,3 @@ func on_export_started(dir_path: String) -> void:
 
 func on_export_completed(err: Error, message: String) -> void:
 	_export_progress.on_export_completed(err, message)
-

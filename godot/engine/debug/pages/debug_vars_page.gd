@@ -6,7 +6,6 @@ extends NovaDebugPage
 
 var _nonzero_check: CheckBox
 var _writes_check: CheckButton
-var _writes_locked := false
 var _vars_rows: VBoxContainer
 # (bank, index) key -> the row's value Control, so steady-state refreshes
 # update text in place instead of rebuilding ~800 rows.
@@ -52,31 +51,29 @@ func _build() -> void:
 	scroll.add_child(_vars_rows)
 
 
-## One-way lock on the variable-edit toggle, for hosts that must not let the
-## overlay mutate the live sim (the editor summons it over a mission preview).
-## `reason` is the caller's artist-facing tooltip copy. Deliberately no
-## unlock: a locked pane stays read-only for its whole life, so a host mode
-## change can never silently re-arm edits.
-func lock_writes(reason: String) -> void:
-	_writes_locked = true
-	_writes_check.set_pressed_no_signal(false)
-	_writes_check.disabled = true
-	if not reason.is_empty():
-		_writes_check.tooltip_text = reason
-
-
 func refresh() -> void:
 	var sim := _ctx.sim()
 	if sim == null:
 		_clear_live()
 		return
+	var write_state: NovaDebugControlState = _ctx.session.get_control_state(
+			&"set_mission_variable") if _ctx.session != null else null
+	var policy_writable := write_state != null \
+			and write_state.available and write_state.writable
+	_writes_check.disabled = not policy_writable
+	if _writes_check.disabled:
+		_writes_check.set_pressed_no_signal(false)
+	var policy_reason := write_state.reason if write_state != null else ""
+	_writes_check.tooltip_text = policy_reason if not policy_reason.is_empty() \
+			else "Editing changes the LIVE mission (V values only)."
 	var banks := [
 		["V", sim.get_mission_variables_snapshot(), true],
 		["G", sim.get_global_variables_snapshot(), false],
 		["M", sim.get_music_variables_snapshot(), false],
 	]
 	var nonzero_only: bool = _nonzero_check.button_pressed
-	var writable: bool = _writes_check.button_pressed and not _writes_locked
+	var writable: bool = _writes_check.button_pressed \
+			and policy_writable
 
 	# Decide what should be visible, then rebuild only when that set (or the
 	# writes mode) changed; otherwise update values in place.
@@ -129,6 +126,8 @@ func refresh() -> void:
 
 
 func _clear_live() -> void:
+	_writes_check.set_pressed_no_signal(false)
+	_writes_check.disabled = true
 	if _var_rows_signature != "":
 		_var_rows_signature = ""
 		_var_controls.clear()
@@ -174,12 +173,10 @@ func _on_vars_filter_toggled(_pressed: bool) -> void:
 
 
 func _on_var_submitted(text: String, index: int) -> void:
-	# Re-check the lock at submit time (not just at row build): rows built
-	# before lock_writes() would otherwise still commit on Enter.
-	if _writes_locked or not _writes_check.button_pressed:
+	if not _writes_check.button_pressed:
 		return
-	var sim := _ctx.sim()
-	if sim != null and text.is_valid_int():
-		sim.set_mission_variable(index, int(text))
+	if _ctx.session != null and text.is_valid_int():
+		_ctx.session.invoke_control(
+				&"set_mission_variable", [index, int(text)])
 		if _ctx.request_refresh.is_valid():
 			_ctx.request_refresh.call()

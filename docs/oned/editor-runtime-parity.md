@@ -1,11 +1,12 @@
 # Editor–runtime parity: the shared-node patterns
 
-How the OpenNova Editor (ONED) and the game runtime share one implementation per
-visual/simulation surface instead of maintaining two. These patterns were
+How the OpenNova Editor (ONED) reuses game rendering and data systems for
+authoring previews without becoming a second gameplay host. These patterns were
 confirmed by an architecture survey of the editor/engine split (2026-06-10) and
-are the template for every new surface: **instantiate the runtime node, flip a
-flag or swap a sampler for editing — never reimplement the surface for the
-editor.**
+updated when embedded mission play was removed (2026-07-29). The template for
+new authoring surfaces is: **reuse the runtime node, public engine function, or
+sampler behind an editor-owned preview seam; launch the standalone game for
+live behavior.**
 
 ## The patterns, by surface
 
@@ -44,48 +45,37 @@ scatter follows unsaved terrain edits.
 Use this shape when the editor must preview *unsaved* state: keep the engine
 system shared and abstract only the data source behind a sampler seam.
 
-### Mission simulation — one runtime driver, two transports
+### Mission execution — one standalone runtime
 
-`godot/engine/world/mission_runtime.gd` is THE driver both hosts go through:
-the game (`GameWorld`) drives it with explicit `tick()` calls ordered against
-its other passes; the Mission workspace self-ticks it via `_process`. Both run
-the one `NovaSimulation.step()` cadence with the sim's default `loco_scale`, so
-the editor preview is the game's pacing — the sim exposes no tick-mode knob to
-diverge on. While simulating, editing is locked out (the present pass is
-the sole transform authority); Stop rewinds the world and restores authored
-transforms.
+`godot/engine/world/mission_runtime.gd` has one live host: `GameWorld`, entered
+through `MainGame`. ONED does not self-tick a mission, create a local-player
+host, or embed the F3 debug overlay. This removes the editor-specific transport
+and lifecycle state that could make an apparently shared simulation behave
+differently from the shipped game.
 
-Use this shape for live behavior: one driver, host-chosen transport, mutual
-exclusion between the simulation's writes and the editor's.
+The editor instead launches one managed standalone child over its mounted
+resource directory:
 
-### Local player & play-in-editor — one host, two boot shapes
+- F5 starts the normal game from the saved loose assets.
+- F6 starts the Mission workspace's current saved, top-level loose `.bms`.
+- F8 stops the child. Another F5 or F6 restarts that same managed child.
 
-`godot/engine/world/local_player_host.gd` is THE local-player host both hosts
-instance: the game shell (`main_game.gd`) and the Mission workspace's play
-controller (`mission_play_controller.gd`) each create one, call `setup(world,
-camera)`, and drive the same `before_world_tick` / `after_world_tick` pair
-around `GameWorld.tick()`. The gameplay keys (F4 camera, C/Z stance), the
-mouse-look, the FP viewmodel (and its dedicated render pass), and the debug
-overlay's View toggles all live on the shared host — the shells only route
-input and decide when the player is live. F3 summons the same
-`NovaDebugOverlay` in both hosts (the game shell binds the key directly; the
-play controller forwards it to the workspace's overlay).
+Run never saves, exports, copies, or stages data. Every dirty workspace is
+reported, but the child always observes disk state. This is the parity
+boundary: the thing used for mission validation literally is the game runtime.
+See [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md).
 
-Two lessons this surface carries:
+Use this shape for live behavior: save the loose asset and launch the product,
+rather than adding an editor-owned transport around the simulation.
 
-- **The hosts enter the tree differently.** The game shell wires the host from
-  its scene `_ready`, while the player camera's viewport is still making its
-  children ready — a direct `add_child` into that viewport is rejected
-  ("parent busy"), so anything the host mounts into `camera.get_viewport()`
-  must mount deferred. ONED's play controller enters an already-running tree
-  and never sees the rejection; only the runtime boot does. Symptom when
-  violated: a feature that "works in ONED but not in the game" with identical
-  shared code.
-- **Freeing the mouse is a host decision.** The game shell frees the captured
-  mouse through its pause menu (Esc); play-in-editor has no pause state
-  (Esc stops), so the workspace suspends the play session's per-tick capture
-  while the debug overlay is up and resumes it on close. Same shared overlay,
-  host-appropriate mouse ownership.
+### Local player and debug UI — game-owned surfaces
+
+`godot/engine/world/local_player_host.gd` is instantiated only by the game
+shell. Gameplay input, mouse ownership, the viewmodel render pass, HUD feeds,
+and F3 therefore have one boot path and one lifecycle. Editor automation may
+control or inspect the managed child through the runtime debug/MCP seam, but
+that seam calls the same public runtime controls as F3; it does not recreate a
+player or world inside ONED.
 
 ### Terrain shaders — intentional, contained divergence
 
@@ -102,7 +92,8 @@ the runtime path cannot serve, and sharing the fidelity-bearing core.
 2. If the editor must show unsaved state, add a sampler/data seam, not a fork.
 3. Editor-only interaction (gizmos, hover, pick bodies) lives in modtools and
    attaches *around* the shared node; it never leaks into the runtime path.
-4. While a simulation owns nodes, editing is locked out — two writers over one
-   node is a race, not a feature.
-5. A genuine divergence (terrain shaders) is a tracked decision: document why,
-   and share the fidelity-bearing math.
+4. Live mission behavior belongs to the standalone game. The explicit
+   save-to-loose-assets boundary keeps editor state from becoming a second
+   runtime state model.
+5. A genuine preview divergence (terrain shaders) is a tracked decision:
+   document why, and share the fidelity-bearing math.

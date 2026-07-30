@@ -79,8 +79,6 @@ func set_selected_zone_flags(active: bool, constrain_z: bool) -> void:
 func delete_selected_area_trigger() -> bool:
 	if _c._mission == null or _c._selected_zone_index < 0:
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	_c._flush_edit()
 	_c._mission.begin_edit()
 	if not _c._mission.remove_area_trigger(_c._selected_zone_index):

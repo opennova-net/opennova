@@ -1,15 +1,14 @@
 class_name McpToolContext
 extends RefCounted
 
-## The `ctx` object handed to every MCP tool handler, execute_script body, and
-## agent-defined tool. One object, two audiences: built-in handlers use the
-## editor/shell refs directly; agent scripts reach the live editor through the
-## accessor methods (documented by the describe_api tool's "ctx" topic).
+## The `ctx` object handed to every curated MCP tool handler. Editor handlers
+## use the editor/shell refs directly; shared engine handlers can use the
+## narrow accessor methods without importing modtools.
 ##
 ## Everything editor-side is duck-typed Node/Object access — this class lives
 ## in engine/ and must not import modtools (the game runtime export excludes
 ## modtools/* but ships engine/*). Accessors return null when the surface is
-## missing instead of erroring, so scripts can probe.
+## missing instead of erroring, so handlers can probe.
 
 var editor: Node = null
 var shell: Node = null
@@ -42,8 +41,8 @@ func status(message: String) -> void:
 		shell.show_status_message(message)
 
 
-## Await `count` process frames: `await ctx.frames(2)`. Lets scripts yield to
-## the editor (UI updates, deferred work, the tool watchdog).
+## Await `count` process frames: `await ctx.frames(2)`. Lets asynchronous
+## handlers yield to UI updates, deferred work, and the tool watchdog.
 func frames(count: int) -> void:
 	var scene_tree := main_tree()
 	if scene_tree == null:
@@ -89,23 +88,6 @@ func mission() -> Variant:
 	var mission_workspace: Variant = workspace("mission")
 	if mission_workspace != null and mission_workspace.has_method("get_editor_document"):
 		return mission_workspace.get_editor_document()
-	return null
-
-
-## The live MissionRuntime (Play-in-Editor first, else the in-place sim), or
-## null when nothing is running.
-func runtime() -> Variant:
-	var mission_workspace: Variant = workspace("mission")
-	if mission_workspace != null and mission_workspace.has_method("get_active_runtime"):
-		return mission_workspace.get_active_runtime()
-	return null
-
-
-## The live NovaSimulation behind runtime(), or null.
-func sim() -> Variant:
-	var live: Variant = runtime()
-	if live != null and live.has_method("get_sim"):
-		return live.get_sim()
 	return null
 
 

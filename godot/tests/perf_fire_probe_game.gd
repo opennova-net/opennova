@@ -1,10 +1,9 @@
 extends SceneTree
 
-# Game-shell twin of perf_fire_probe.gd: boots main_game.tscn (no ONED editor
-# chrome) through the NW_SP_MISSION single-player start flow, then measures the
+# Full-auto game-shell performance probe: boots main_game.tscn through the
+# NW_SP_MISSION single-player start flow, then measures the
 # same three phases — BASELINE / FIRING x2 (reload between) / COOLDOWN — with
-# vsync off and per-second counter rows. Splits "editor chrome cost" from
-# "engine cost" against the play-in-editor probe on the same mission. Windowed:
+# vsync off and per-second counter rows. Windowed:
 #   NW_SP_MISSION=03TR.bms NW_RESOURCE_DIR=<pff install> "$GODOT_BIN" --path godot \
 #       -s res://tests/perf_fire_probe_game.gd
 # The game runtime cannot mount flat extracts — NW_RESOURCE_DIR must be a PFF

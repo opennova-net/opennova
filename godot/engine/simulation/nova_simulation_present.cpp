@@ -976,11 +976,13 @@ bool NovaSimulation::get_entity_hidden(int p_index) const {
 PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 	const uint64_t start_us =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
-	// P7 (ADR 0011 Decision 1): every play path is the in-process listen server — the present pass
-	// reads the state the LOCAL CLIENT decoded off the wire (ClientState), not the authoritative sim
-	// directly. SP, a LAN host, and the editor preview all render exactly what a networked peer would;
-	// a joiner renders remote entities wire-direct. The old no-net AI-pool present is retired. Empty
-	// when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the AI pool for tooling.
+	// P7 (ADR 0011 Decision 1): every authoritative live mission is an in-process listen server in
+	// standalone MainGame/GameWorld. The present pass reads the state the LOCAL CLIENT decoded off the
+	// wire (ClientState), not the authoritative sim directly. Standalone SP and LAN hosts therefore
+	// render exactly what a networked peer would; a joiner renders remote entities wire-direct.
+	// ADR 0025 retired ONED's live editor preview, while bare sims remain available to tests/tooling.
+	// The old no-net AI-pool present is retired. Empty when no runtime is active (a bare sim) — scalar
+	// getters (get_entity_*) read the AI pool for tooling.
 	PackedFloat32Array out;
 	if (runtime_) {
 		out = present_snapshot_from_client_view();

@@ -10,6 +10,7 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
+const GameDebugHostScript := preload("res://game/game_debug_host.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
@@ -59,14 +60,14 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
+var _debug_host: GameDebugHost
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives overlay toggles; cleared on every world load.
 var _pick_list := NovaDebugPickList.new()
 var _pick_toast: Label = null
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld/replay + env hooks)
-# The in-game HUD rides the SHARED NovaGameHudHost — the same component ONED
-# play-in-editor mounts, so both shells run one HUD code path (editor-runtime
-# parity). It owns the lazy GameHud build, the per-frame info rebuild, and the
+# The in-game HUD rides NovaGameHudHost. It owns the lazy GameHud build, the
+# per-frame info rebuild, and the
 # mission text feed (queued until the HUD exists); this shell only says when the
 # player is in-world.
 var _hud_host: NovaGameHudHost
@@ -75,13 +76,9 @@ var _player_host: LocalPlayerHost = null
 # and handed to every feeding host; it costs nothing until the tab opens
 # (capture stays inactive, every feed site gates on it).
 var _frame_stats := FrameStatsBoard.new()
-# Edge latch for RenderingServer render-time measurement on the root viewport
-# (only measured while the Stats tab captures).
-var _stats_render_measured := false
-var _stats_render_viewport_ref: WeakRef = null
-# Previous shell-frame timestamp for the Stats tab's wall frame row (0 = no
-# prior frame in this capture window).
-var _stats_last_frame_usec := 0
+# Root-viewport render-time sampling for the Stats tab; the sampler owns the
+# RenderingServer measurement edge latch and the wall-frame clock.
+var _render_stats := RootRenderStatsSampler.new()
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -108,15 +105,14 @@ var _end_screen: MissionEndScreen = null
 
 
 func _init() -> void:
-	# Render-time measurement is RenderingServer state, not Node-owned state.
-	# Observe the capture close edge directly so it cannot survive until some
-	# later process frame (or outlive this scene).
-	_frame_stats.capture_changed.connect(_on_frame_stats_capture_changed)
+	# The sampler observes the board's capture close edge directly (render-time
+	# measurement is RenderingServer state, not Node-owned state).
+	_render_stats.setup(_frame_stats)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_EXIT_TREE:
-		_stop_root_render_stats()
+		_render_stats.stop()
 
 
 ## True from the menu-to-loading handoff until the world reports success or
@@ -157,6 +153,9 @@ func enter_net_world() -> void:
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
+	var debug_host := get_game_debug_host()
+	add_child(debug_host)
+	debug_host.start_runtime_endpoint()
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
@@ -165,9 +164,8 @@ func _ready() -> void:
 	_player_host.name = "LocalPlayerHost"
 	add_child(_player_host)
 	_player_host.setup(_world, _camera)
-	# The in-world armory + HUD ride the SHARED hosts — the same components ONED
-	# play-in-editor mounts, so both shells run one armory/HUD code path
-	# (editor-runtime parity). Created here, not in _wire_host, so the NW_REPLAY
+	# The in-world armory + HUD ride their shared engine hosts. Created here,
+	# not in _wire_host, so the NW_REPLAY
 	# spectator path (which never enters the menu) still gets them; the HUD host's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
@@ -218,11 +216,22 @@ func _ready() -> void:
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if _net.maybe_launch_replay_from_env():
 		return
-	var dir := ResourceDirSettings.get_resource_dir()
+	# Editor-managed runs pass an exact process-local directory. It wins over
+	# persisted settings but is never written back.
+	var dir := NovaLaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
 	if dir.is_empty():
 		_request_resource_dir()
 		return
-	_enter_menu(dir)
+	if not _enter_menu(dir):
+		# The picker is up and the shell holds no root: none of the boot
+		# continuations below could load anything.
+		return
+	# F6 is still the real standalone game and normal loading presentation; it
+	# only selects the exact saved top-level loose BMS instead of an archive row.
+	var loose_mission := NovaLaunchFlags.loose_mission()
+	if not loose_mission.is_empty():
+		start_loose_mission(loose_mission)
+		return
 	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
 	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
 	# exercised without menu navigation. Off by default; mirrors the NW_REPLAY direct-launch above.
@@ -306,26 +315,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
-	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
-	# LocalPlayerHost — the same host ONED play-in-editor routes to.
+	# The gameplay keys (F4 first/third person, C/Z stance) live on LocalPlayerHost.
 	if _player_host != null and _player_host.handle_key_input(
 			event, is_gameplay_input_active()):
 		get_viewport().set_input_as_handled()
-
-
-# The F3 option registry -> host wiring: the overlay only emits intent
-# (debug_option_changed); the row's target/setter live in NovaDebugOptions, so
-# this handler is generic and the editor host wires the SAME rows — the two
-# hosts cannot drift. A new toggle is one registry row, zero shell edits.
-func _on_debug_option_changed(id: StringName, value: Variant) -> void:
-	var option := NovaDebugOptions.find(id)
-	if option.is_empty():
-		return
-	var target: Object = _world if option["target"] == NovaDebugOptions.TARGET_WORLD \
-			else _player_host
-	if target != null and is_instance_valid(target) \
-			and target.has_method(option["setter"]):
-		target.callv(option["setter"], [value])
 
 
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
@@ -333,24 +326,32 @@ func _on_debug_option_changed(id: StringName, value: Variant) -> void:
 # refresh, so reloads and menu round-trips never leave it stale).
 func toggle_debug_overlay() -> void:
 	if _debug_overlay == null:
-		_debug_overlay = DebugOverlayScript.new()
+		_debug_overlay = DebugOverlayScript.new(
+				NovaDebugOverlay.DEFAULT_CONFIG_PATH,
+				get_debug_session())
 		_debug_overlay.name = "DebugOverlay"
 		var host: Node = _hud if _hud != null else self
 		host.add_child(_debug_overlay)
+		_debug_overlay.visibility_changed.connect(
+				_on_debug_overlay_visibility_changed)
 		_debug_overlay.set_runtime_source(_current_runtime)
 		_debug_overlay.set_view_context_source(_current_player_view_context)
 		_debug_overlay.set_frame_stats_board(_frame_stats)
 		_debug_overlay.set_world_source(func(): return _world)
-		# Debug options: the overlay only emits intent; we own the hosts.
-		_debug_overlay.debug_option_changed.connect(_on_debug_option_changed)
+		_debug_overlay.set_player_source(func(): return _player_host)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 		_debug_overlay.set_pick_list(_pick_list)
 	_debug_overlay.toggle()
+
+
+func _on_debug_overlay_visibility_changed() -> void:
+	var open := is_debug_overlay_open()
 	# While the overlay is up the mouse is free: clicks on the world ray-pick
-	# into the same list F6 feeds.
+	# into the same list F6 feeds. Every close path (F3, Escape, Close button)
+	# reaches this inherited visibility edge.
 	if _world != null:
-		_world.set_pick_click_enabled(is_debug_overlay_open())
-	if is_debug_overlay_open():
+		_world.set_pick_click_enabled(open)
+	if open:
 		# A press begun before F3 must not turn into a mount action when Shift is
 		# released behind the overlay.
 		_use_latched = false
@@ -411,16 +412,27 @@ func _show_pick_toast(text: String) -> void:
 func get_debug_overlay() -> NovaDebugOverlay:
 	return _debug_overlay if _debug_overlay != null \
 			and is_instance_valid(_debug_overlay) else null
-
-
+func get_debug_session() -> NovaDebugSession:
+	return get_game_debug_host().get_debug_session()
+func get_game_debug_host() -> GameDebugHost:
+	if _debug_host == null:
+		_debug_host = GameDebugHostScript.new()
+		_debug_host.configure(
+			_current_runtime,
+			func(): return _world,
+			func(): return _player_host,
+			_shell_state_name,
+			func(): return _world_load_pending,
+			is_debug_overlay_open,
+			_on_resume,
+			_on_return_to_menu,
+			request_quit)
+	return _debug_host
 func get_frame_stats_board() -> FrameStatsBoard:
 	return _frame_stats
 
-
 func is_root_render_stats_measured() -> bool:
-	return _stats_render_measured \
-			and _stats_render_viewport_ref != null \
-			and is_instance_valid(_stats_render_viewport_ref.get_ref())
+	return _render_stats.is_measured()
 
 
 func is_gameplay_input_active() -> bool:
@@ -482,6 +494,20 @@ func _current_runtime():
 	return _world.get_runtime() if _world != null else null
 
 
+func _shell_state_name() -> String:
+	match _state:
+		State.WORLD:
+			return "world"
+		State.PAUSED:
+			return "paused"
+		State.ARMORY:
+			return "armory"
+		State.DEPLOY:
+			return "deploy"
+		_:
+			return "menu"
+
+
 func _current_player_view_context() -> DebugViewContext:
 	var context := DebugViewContext.new()
 	if _camera != null and is_instance_valid(_camera):
@@ -517,12 +543,14 @@ func _can_summon_dir_picker() -> bool:
 
 # --- Menu state ---------------------------------------------------------------
 
-func _enter_menu(dir: String) -> void:
+# Returns false when the directory would not mount (the picker is raised and
+# the shell holds no root) so boot continuations can gate on it.
+func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := _mount_runtime_root(dir)
+		var root := mount_boot_root(dir, NovaLaunchFlags.loose_root_allowed())
 		if root == null:
 			_request_resource_dir()
-			return
+			return false
 		_root = root
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
@@ -534,6 +562,7 @@ func _enter_menu(dir: String) -> void:
 	if not _menu_host.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_host.main_menu_file)
 	_menu_host.show_menu()
+	return true
 
 
 func _wire_host() -> void:
@@ -636,22 +665,49 @@ func _request_resource_dir() -> void:
 
 func _on_dir_selected(dir: String) -> void:
 	_cleanup_picker()
-	var root := _mount_runtime_root(dir)
+	apply_picked_resource_dir(dir, not NovaLaunchFlags.resource_dir().is_empty())
+
+
+## The picker's accept leg. `editor_managed` is resolved from --resource-dir at
+## the signal callback above: an editor-managed run's directory is process-local,
+## so persisting a picker escape would overwrite the SHARED editor+game key and
+## repoint ONED's authoring root at whatever was picked here. Parameterized for
+## the same ADR-0018 reason as mount_boot_root; returns false when the pick
+## would not mount (the picker is re-raised).
+func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
+	var root := mount_boot_root(dir, NovaLaunchFlags.loose_root_allowed())
 	if root == null:
 		_request_resource_dir()
-		return
+		return false
 	_root = root
-	ResourceDirSettings.set_resource_dir(dir)
+	if not editor_managed:
+		ResourceDirSettings.set_resource_dir(dir)
 	_enter_menu(dir)
+	return true
 
 
-# Mount `dir` as the runtime resource root (packed PFFs, `/exp` expansion, `/d` loose
-# override, and `/game` SCR policy). Warns and returns null on failure.
-func _mount_runtime_root(dir: String) -> NovaResourceRoot:
+## Mount `dir` as this shell's resource root: packed PFFs, `/exp` expansion,
+## `/d` loose override, and `/game` SCR policy. With `allow_loose_root` (the
+## `--loose-root` flag, passed by every ONED-managed run) a directory holding
+## none of the packed archives falls back to the editor's loose mount — the
+## same data contract ONED authors against, so F5/F6 can play-test a loose
+## extract (ADR 0025). The no-archives fatal stays the standalone default
+## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
+## Warns and returns null on failure. Public and parameterized so the fallback
+## contract is testable without process arguments (ADR 0018).
+func mount_boot_root(dir: String, allow_loose_root: bool) -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
 	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var err: int = root.mount_runtime(
+			dir, expansion, NovaLaunchFlags.loose_override_enabled(), game)
+	if err != OK:
+		# ERR_FILE_NOT_FOUND is specifically the zero-archives fatal; other
+		# errors (missing dir, unreadable root) fail the loose mount too.
+		if err == ERR_FILE_NOT_FOUND and allow_loose_root \
+				and root.set_root_dir(dir) == OK:
+			_report_missing_boot_resources(root)
+			return root
 		push_warning("MainGame: %s" % root.get_last_error())
 		return null
 	_report_missing_boot_resources(root)
@@ -662,11 +718,17 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 # docs/required-resources.md): name each missing fatal-set file with retail's
 # witnessed failure behavior instead of dead-ending silently later. Reported,
 # not enforced — this shell keeps running so a partial dir stays inspectable
-# (the picker flow), where retail shows a MessageBox and exits.
+# (the picker flow), where retail shows a MessageBox and exits. On the
+# sanctioned loose-root play-test mount an authoring extract is expectedly
+# partial, so the same report warns instead of erroring.
 func _report_missing_boot_resources(root: NovaResourceRoot) -> void:
 	for name in root.list_missing_boot_resources():
-		push_error("MainGame: boot-required resource missing: %s — retail: %s"
-				% [name, root.boot_resource_failure_text(name)])
+		var text := "MainGame: boot-required resource missing: %s — retail: %s" \
+				% [name, root.boot_resource_failure_text(name)]
+		if root.is_runtime_mount():
+			push_error(text)
+		else:
+			push_warning(text)
 
 
 func _on_dir_canceled() -> void:
@@ -688,6 +750,19 @@ func _on_start_requested(bms_name: String) -> void:
 	start_world_load(
 		{"mission_file": bms_name},
 		Callable(_world, "load_mission").bind(bms_name))
+
+
+## Public F6 entry: boot the exact saved loose mission through the same loading
+## presentation and GameWorld lifecycle as menu play.
+func start_loose_mission(bms_name: String) -> void:
+	start_world_load(
+		{"mission_file": bms_name},
+		Callable(_world, "load_loose_mission").bind(bms_name))
+
+
+## Graceful cross-process stop seam used by an editor-managed runtime peer.
+func request_quit() -> void:
+	get_tree().quit()
 
 
 ## Public delegate for "join this server" — kept on the shell so lifecycle tests
@@ -812,9 +887,9 @@ func _dismiss_loading_screen() -> void:
 
 func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
-	# calls NovaMusicService.open_game_context — host-neutral, so ONED play gets
-	# the same music); nothing to do here for audio. The witnessed release then
-	# reveals the world + HUD at the tail
+	# calls NovaMusicService.open_game_context, so every live mission entry path
+	# gets the same music); nothing to do here for audio. The witnessed release
+	# then reveals the world + HUD at the tail
 	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final
 	# call @ 0x525d45]. For SP/host this fires at true load completion. For a
 	# joiner this is only LOCAL-load completion; keep pumping the hidden runtime
@@ -828,6 +903,7 @@ func _on_world_loaded() -> void:
 	# sessions); the world renders/curates the shell-owned list from here on.
 	_pick_list.clear()
 	_world.set_pick_debug(_pick_list)
+	_on_debug_overlay_visibility_changed()
 	var sim := _world.get_sim()
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
@@ -984,8 +1060,13 @@ func _teardown_world_to_menu() -> void:
 		_net.on_world_teardown()
 	if _hud_host != null:
 		_hud_host.teardown()
-	if _root != null:
-		_enter_menu(_root.get_root_dir())
+	if _root != null and _enter_menu(_root.get_root_dir()):
+		return
+	# No mountable root to return to: land on the pre-mount front-end state so
+	# the picker/F9 contract (MENU-only) holds, with the picker as the only
+	# recovery surface.
+	_state = State.MENU
+	_request_resource_dir()
 
 
 func _on_exit_to_desktop() -> void:
@@ -1031,7 +1112,7 @@ func _process(delta: float) -> void:
 	var timing := probe_enabled or stats_on
 	if probe_enabled:
 		_perf_probe_spans.clear()
-	_sample_render_stats(stats_on)
+	_render_stats.sample(get_viewport(), stats_on)
 	var debug_overlay_open := is_debug_overlay_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state == State.PAUSED or _state == State.ARMORY or _state == State.DEPLOY \
@@ -1087,61 +1168,6 @@ func _process(delta: float) -> void:
 			_frame_stats.add(FrameStatsBoard.FRAME_WORLD, probe_t2 - probe_t1)
 			_frame_stats.add(FrameStatsBoard.FRAME_PLAYER_AFTER, probe_t3 - probe_t2)
 			_frame_stats.add(FrameStatsBoard.FRAME_HUD, probe_t4 - probe_t3)
-
-
-# Root-viewport render-time sampling for the Stats tab: measurement flips on
-# only while the tab captures (it is not free), then the previous frame's
-# CPU/GPU times land on the board each frame.
-func _sample_render_stats(stats_on: bool) -> void:
-	if not stats_on and not _stats_render_measured:
-		return
-	if not stats_on:
-		_stop_root_render_stats()
-		return
-	var viewport := get_viewport()
-	if viewport == null:
-		_stop_root_render_stats()
-		return
-	var previous: Object = (
-			_stats_render_viewport_ref.get_ref()
-			if _stats_render_viewport_ref != null else null)
-	if not _stats_render_measured or previous != viewport:
-		_stop_root_render_stats()
-		_stats_render_measured = true
-		_stats_render_viewport_ref = weakref(viewport)
-		RenderingServer.viewport_set_measure_render_time(
-				viewport.get_viewport_rid(), true)
-	# The TRUE wall time between consecutive shell frames (matches fps exactly;
-	# Godot's TIME_PROCESS monitor does not). The Stats tab derives its
-	# "outside shell spans" residual from this minus the measured frame legs —
-	# the number that exposes work outside our spans (other nodes' _process,
-	# engine internals, render/present on this thread).
-	var now_usec := Time.get_ticks_usec()
-	if _stats_last_frame_usec > 0:
-		_frame_stats.add(FrameStatsBoard.FRAME_WALL, now_usec - _stats_last_frame_usec)
-	_stats_last_frame_usec = now_usec
-	var rid := viewport.get_viewport_rid()
-	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_CPU,
-			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
-	_frame_stats.add(FrameStatsBoard.RENDER_ROOT_GPU,
-			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
-
-
-func _on_frame_stats_capture_changed(active: bool) -> void:
-	if not active:
-		_stop_root_render_stats()
-
-
-func _stop_root_render_stats() -> void:
-	var previous: Object = (
-			_stats_render_viewport_ref.get_ref()
-			if _stats_render_viewport_ref != null else null)
-	if previous is Viewport:
-		RenderingServer.viewport_set_measure_render_time(
-				(previous as Viewport).get_viewport_rid(), false)
-	_stats_render_viewport_ref = null
-	_stats_render_measured = false
-	_stats_last_frame_usec = 0
 
 
 # Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);

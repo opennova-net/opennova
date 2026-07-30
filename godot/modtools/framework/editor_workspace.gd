@@ -40,8 +40,6 @@ extends RefCounted
 #                get_export_dialog_* + get_export_progress_*
 #     jump     : focus_reference(focus) — focus an element after a cross-workspace
 #                jump (shell open_in_workspace); reads its own FocusPayload fields
-#     see in game : get_game_launch_note(launch_dir) — how the authored data
-#                reaches the game the shell's launcher spawns (maturity F3)
 #
 #   Edit + state: override get_editor_document() to return the domain
 #     document/controller owning edit history + dirty state; the base derives
@@ -500,46 +498,6 @@ func get_export_dialog_title() -> String:
 
 func get_export_dialog_dir() -> String:
 	return ""
-
-
-# --- See in game (the maturity program's F3 launcher) ------------------------
-# The shell's one launch gesture (ShellGameLaunch) boots the game over the
-# mounted resource directory with the engine's loose-file override. A workspace
-# whose authored data needs a specific step to reach that directory (terrain's
-# Export, the environment's Save into the game folder) tells the launcher about
-# it through this note, so the gesture's copy stays honest per workspace.
-
-## One "See in game" note (typed record, ADR 0017). `staged` is true when the
-## authored data already sits in the launch directory — the loose-file override
-## reads files beside the packed archives only, never subfolders. `detail` is
-## the artist-facing pointer: what to look at after launching when staged, or
-## what to do first when not.
-class GameLaunchNote:
-	extends RefCounted
-
-	var staged: bool
-	var detail: String
-
-	static func make(note_staged: bool, note_detail: String) -> GameLaunchNote:
-		var note := GameLaunchNote.new()
-		note.staged = note_staged
-		note.detail = note_detail
-		return note
-
-	## True when the two paths name the same directory (separator- and
-	## case-insensitive — resource dirs are Windows paths). Staging checks
-	## compare exact directories because the loose-file override never scans
-	## subfolders.
-	static func same_dir(dir: String, launch_dir: String) -> bool:
-		var a := dir.strip_edges().replace("\\", "/").rstrip("/").to_lower()
-		var b := launch_dir.strip_edges().replace("\\", "/").rstrip("/").to_lower()
-		return not a.is_empty() and a == b
-
-
-## Workspaces with a staging step override this; null keeps the launcher's
-## generic copy. `launch_dir` is the directory the launched game will mount.
-func get_game_launch_note(_launch_dir: String) -> GameLaunchNote:
-	return null
 
 
 func build_inspector(_host: Control) -> void:

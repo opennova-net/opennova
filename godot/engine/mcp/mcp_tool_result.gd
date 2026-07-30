@@ -49,6 +49,27 @@ static func error(message: String, details: Variant = null) -> McpToolResult:
 	return result
 
 
+## Rehydrate a tools/call result received from another MCP endpoint. The
+## editor's game-session proxy uses this to forward text, image, error and
+## structured blocks without decoding/re-encoding them or flattening the
+## child's result into JSON text.
+static func from_payload(payload: Variant) -> McpToolResult:
+	if not (payload is Dictionary):
+		return error("The remote MCP tool returned an invalid result payload.")
+	var result := McpToolResult.new()
+	var blocks: Variant = payload.get("content", [])
+	if blocks is Array:
+		for block in blocks:
+			if block is Dictionary:
+				result.content.append((block as Dictionary).duplicate(true))
+	result.is_error = bool(payload.get("isError", false))
+	if payload.has("structuredContent"):
+		result.structured = payload["structuredContent"]
+	if result.content.is_empty() and result.structured == null:
+		result.add_text("(The remote MCP tool returned no content.)")
+	return result
+
+
 func add_text(message: String) -> void:
 	content.append({ "type": "text", "text": message })
 

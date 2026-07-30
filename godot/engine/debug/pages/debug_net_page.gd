@@ -58,6 +58,34 @@ func refresh() -> void:
 		rows.append("server: %s" % String(sim.get_join_server_name()))
 		rows.append("mission: %s (%s)" % [String(sim.get_join_mission_name()),
 				String(sim.get_join_mission_file())])
+		if sim.has_method("get_joiner_network_diagnostics"):
+			var diagnostics: Dictionary = sim.get_joiner_network_diagnostics()
+			rows.append("sequence: inbound %d  outbound %d  retained %d" % [
+				int(diagnostics.get("frontier_seq", 0)),
+				int(diagnostics.get("outbound_seq", 0)),
+				int(diagnostics.get("retained_outbound", 0))])
+			rows.append("records applied: %d  gap depth: %d" % [
+				int(diagnostics.get("records_applied", 0)),
+				int(diagnostics.get("gap_depth", 0))])
+			rows.append("traffic flat: %.1f s%s" % [
+				float(diagnostics.get("flat_seconds", 0.0)),
+				"  [freeze suspected]"
+				if bool(diagnostics.get("freeze_suspected", false)) else ""])
+			rows.append("diagnostic capture: %s" % [
+				"enabled" if bool(diagnostics.get("enabled", false)) else "off"])
+		if sim.has_method("get_session_loss_reason"):
+			var loss_reason := String(sim.get_session_loss_reason())
+			if not loss_reason.is_empty():
+				rows.append("session ended: %s" % loss_reason)
+		if sim.has_method("is_join_deploy_pick_pending") \
+				and bool(sim.is_join_deploy_pick_pending()):
+			var team := int(sim.get_join_assigned_team()) \
+					if sim.has_method("get_join_assigned_team") else 0
+			var zone_count := 0
+			if sim.has_method("get_deploy_spawn_zones"):
+				zone_count = sim.get_deploy_spawn_zones().size()
+			rows.append("deployment pending: team %d  %d spawn zone(s)" % [
+				team, zone_count])
 	elif bool(sim.is_host_listening()):
 		_net_status_label.text = "Host — listening on UDP %d, %d peer(s)" % [
 				int(sim.get_host_listen_port()), int(sim.get_host_peer_count())]

@@ -2,11 +2,11 @@ extends Node
 
 # Diagnostic probe for the #239 runtime reports: (A) FP lean not moving the camera,
 # (B) prone roll never rolling the camera, (C) FP->TP crosshair aim discontinuity.
-# Boots ONED play-in-editor on open ground and prints the sim view (lean_deg etc.),
+# Boots the standalone game on open ground and prints the sim view (lean_deg etc.),
 # the camera basis roll, the head-bone eye, and the aim projections at each stage.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/leantp"
 
 var _out_abs := ""
@@ -21,34 +21,20 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	var path := NovaPaths.resolve_file(root, bms)
-	if ws.open_file(path) != OK:
-		push_error("[leantp] open failed"); get_tree().quit(1); return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-	if int(ws.play_mission()) != OK:
-		push_error("[leantp] play failed"); get_tree().quit(1); return
-	await _settle(120)
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, bms, ResourceDirSettings.get_expansion())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[leantp] " + String(session.error)); get_tree().quit(1); return
 
-	_world = _find_by_method(get_tree().root, "local_player_view")
+	_world = session.world
 	_host = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-	_cam = _find_play_camera(get_tree().root)
+	_cam = session.camera
 	print("[leantp] world=%s host=%s cam=%s" % [str(_world != null), str(_host != null), str(_cam != null)])
 	if _world == null or _host == null or _cam == null:
 		get_tree().quit(1); return
@@ -120,7 +106,6 @@ func _ready() -> void:
 		if not _host.is_third_person():
 			break
 
-	ws.stop_play_mission()
 	print("[leantp] done -> ", _out_abs)
 	get_tree().quit()
 
@@ -165,18 +150,6 @@ func _find_by_method(node: Node, method: String) -> Node:
 		return node
 	for ch in node.get_children():
 		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _find_play_camera(node: Node) -> Camera3D:
-	if node.has_method("get_play_camera"):
-		var c = node.call("get_play_camera")
-		if c is Camera3D:
-			return c
-	for ch in node.get_children():
-		var f := _find_play_camera(ch)
 		if f != null:
 			return f
 	return null

@@ -86,5 +86,10 @@ func _init_mcp_service() -> void:
 	var service := EditorMcpService.new()
 	service.name = "McpService"
 	add_child(service)
-	service.setup(terrain_editor, workstation)
+	service.setup(
+			terrain_editor,
+			workstation,
+			workstation.get_game_run_session(),
+			workstation.run_game,
+			workstation.stop_game)
 	mcp_service = service

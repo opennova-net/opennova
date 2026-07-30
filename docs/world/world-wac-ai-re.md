@@ -860,7 +860,8 @@ of the floating-AI bug. Shipped: portable `terrain/height_field` (the three `Nov
 samplers lifted verbatim, NovaTerrainData delegates); `world::calc_average_ground_height` (the
 0x457230 math, 16.16); `AiSystem::apply_ground_clamp` SETs `brain[131]` + snaps
 `pos[2] = ground + 0x50000` (SET not max — the lean mover leaves brain[131] stale; a max would strand
-a float); `NovaSimulation::set_terrain_height_field` wired in game + editor preview. Tracked
+a float); `NovaSimulation::set_terrain_height_field` wired through GameWorld
+and direct test/tooling fixtures. Tracked
 deviations: (1) bilinear column height vs the hi-res along-ray bisection (faithful for grounding);
 (2) GroundClearance def fields (def+0x2C/+0x30, def+216/+232, the aiComp[108] node-Z gate) default 0
 until those def fields are RE'd; (3) pos[2] snaps (no climb-rate physics); (4) water clamp wired off
@@ -1397,9 +1398,11 @@ The local controller train remains, and mounted selection is now an animation-ow
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
   uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
-- **Verified**: `godot/tests/bend_capture_probe.gd(.tscn)` — boots ONED play-in-editor,
-  injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
-  arches back (05TR.bms, JOX root).
+- **Historical verification**: `godot/tests/bend_capture_probe.gd(.tscn)`
+  originally booted ONED play-in-editor, injected F4 + mouse-look, and
+  captured poses; look-down bent the spine/head forward and look-up arched
+  back (05TR.bms, JOX root). That probe now enters the standalone game through
+  `MainGame` and a saved loose mission; ONED no longer hosts PIE.
 
 The mounted slice is verified by table-driven coverage of every witnessed seated/
 gunner branch (including unknown versus valid zero), metadata extraction, snapshot/restore and dismount
@@ -1642,8 +1645,8 @@ independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
 in `libs/anim` (`kWeaponChannelMaskBones`) + `NovaSkeletalAnim::splice_weapon_channel`
 composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
 `NovaObjectModel.set_weapon_channel` and `LocalPlayerHost._update_avatar` consumption.
-Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, ONED PIE, JOX 05TR, F4 + R
-through the real input path, completion waited by state): mid-reload
+Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, historical ONED PIE,
+JOX 05TR, F4 + R through the real input path, completion waited by state): mid-reload
 `body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
 locomotion pose, clean mirror return post-reload.
 
@@ -1663,7 +1666,7 @@ until a binoculars item exists), reload 65 / reload2 66 by kind==2 — plus the 
 20 on a weapon-switch mount edge. ctest `infantry` (`test_player_weapon_hold_kinds`,
 `test_player_weapon_attack_stamp`, `test_player_arms_dip` + the original
 `test_player_weapon_channel`). Live-verified (`godot/tests/body_holds_probe.gd(.tscn)`,
-ONED PIE, JOX 05TR, NOVA_VM_WEAPON, completion by state): WPN_colt45 —
+historical ONED PIE, JOX 05TR, NOVA_VM_WEAPON, completion by state): WPN_colt45 —
 steady `anim_pistol`, reload plays `anim_reload2`, clean hold return; WPN_KNIFE —
 steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
 locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at

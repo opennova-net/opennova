@@ -46,8 +46,6 @@ func _flush_edit() -> void:
 func _edit_step(do: Callable, err := "", on_success := Callable()) -> bool:
 	if _c._mission == null:
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	_flush_edit()
 	_c._mission.begin_edit()
 	var result: Variant = do.call()
@@ -87,8 +85,6 @@ func redo() -> void:
 # _restoring guards re-entrancy: a restore -> rebake -> `changed` -> inspector roundtrip must not recurse.
 func _restore_step(is_undo: bool) -> void:
 	if _c._restoring:
-		return
-	if _c._sim._reject_edit_while_simulating():
 		return
 	_c._viewport.cancel_drag()
 	if _c._mission == null:

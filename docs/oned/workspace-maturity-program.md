@@ -42,19 +42,20 @@ decision (ADR / RE-record entry) saying why not:
   nodes/code the game runs, not an editor-drawn approximation (ADR 0016).
   (The terrain viewport and the credits `NovaCreditsPlayer` are the
   exemplars; the HUD's hand-drawn `_draw()` canvas is the anti-pattern.)
-- **G — Game loop.** One gesture takes the authored data into the real game:
-  play-in-editor where the workspace has a world (mission), and the
-  override launcher (F3) everywhere else. Authoring that cannot be seen in
-  the running game is not done.
+- **G — Game loop.** The author saves canonical loose assets, then launches
+  the real game: F5 runs the normal standalone game and F6 runs the current
+  saved, top-level loose mission. F3 is the standalone game's debug UI, not
+  an editor launcher. Authoring that cannot be seen in the running game is
+  not done.
 
-## Current matrix (verified 2026-07-04)
+## Current matrix (verified 2026-07-04; live-run policy refreshed 2026-07-29)
 
 | Workspace | R | W | E | G | Weakest axis today |
 |---|---|---|---|---|---|
-| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (mission PIE + the F3 launcher's terrain staging note) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
-| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (the F3 launcher carries the .env staging note) | at bar (ENV-1, 2026-07-12) |
+| Terrain | ✓ | ✓ | ✓ (viewport is the renderer) | ✓ (save loose assets, then F5/F6 runs the standalone game) | at bar — the E/G exemplar (TER-1, 2026-07-12) |
+| Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (save loose assets, then F5/F6 runs the standalone game) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
-| Mission | ✓ | ✓ | ✓ (PIE runs the real runtime) | ✓ | data semantics (heading, ANIMNUM) |
+| Mission | ✓ | ✓ | ✓ (authoring previews reuse runtime seams) | ✓ (F6 runs the current saved loose `.bms` in the standalone game) | data semantics (heading, ANIMNUM) |
 | Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
 | Fonts | ✓ | ✓ | ✓ (type-a-line sample through the game's draw path beside the glyph paint canvas, FNT-1 2026-07-12) | — | G (F3 wiring = FNT-3) |
 | Strings | ✓ | ✓ | ✓ (selected entry rendered through the engine path with a font picker, STR-1 2026-07-12; encoding pinned by STR-2, D-FNT-4 minted) | — | G (F3 wiring = STR-3) |
@@ -258,7 +259,7 @@ The artist's loop, in order — this ordering is what the screen must mirror:
    sections are unreachable dead content — the Jump affordance exists exactly
    for auditioning those); watch the meter and the activity feed.
 6. **Iterate live.** Edits are parity-gated and undoable while playing; Save;
-   **See in game** (the shell's F3 launcher; MUS-G rides MUS-I's tail).
+   run the standalone game with F5 (MUS-G rides MUS-I's tail).
 
 Two hats, one canvas: *composing* (2–4) and *auditioning* (5) both stare at the
 same map + program; audition just lights them up. That observation drives the
@@ -275,7 +276,7 @@ bottom log strip. The redesign:
 
 ```
 +--------------------------------------------------------------------------------+
-| Shell top bar (Save / See in game / ...)                                        |
+| Shell top bar (Save / Run game (F5) / Run current mission (F6) / ...)            |
 +----------------+---------------------------------------------------+-----------+
 | SHELL LEFT     |  Transport: ▶ Play  ⏹ Stop | PLAYING | ▮▮ meter    | TRACKS    |
 | LANE           |  Now playing: Combat (♪ combat1) | [x] Follow      | (asset    |
@@ -503,45 +504,43 @@ along seams that already exist as signal boundaries in the code.
 
 ### Terrain (bar-setter; verification only)
 
-- TER-1: bar audit — confirm all four axes against this doc's definitions,
-  wire the F3 launcher entry ("open the exported terrain's mission in game"),
-  and record terrain as the E/G exemplar. No new capability. Gate: existing
+- TER-1: historical bar audit — confirm all four axes against this doc's
+  definitions, wire the former staged-terrain launcher entry ("open the
+  exported terrain's mission in game"), and record terrain as the E/G
+  exemplar. No new capability. Gate: existing
   terrain suites; driver overview shot. **DONE 2026-07-12.** Audit: R ✓
   (loose `.trn` projects and imported game assets, plus VFS/PFF opens via
   `open_trn`'s resource-root branch); W ✓ (F4 practiced: from-scratch
   TrnGen-parity bake + the roundtrip/import-export suites); E ✓ (the editor
-  viewport IS the ported terrain renderer — the E exemplar); G ✓ (mission
-  PIE runs the real runtime on the terrain, and the See-in-game launcher now
-  carries terrain's staging note: exported-into-the-game-folder → "load a
-  mission on it", otherwise an honest export-first pointer). One correction
-  to the phase's wording: terrain's export bakes the terrain data set
-  (`.trn`/`.cpt`/`.til`/maps), not a mission dir — there is no "exported
-  terrain's mission" to boot directly, so the launcher entry points at the
-  game's mission list over the staged terrain instead. The wiring introduced
-  the per-workspace seam every later F3 phase reuses:
+  viewport IS the ported terrain renderer — the E exemplar); G ✓ (after an
+  explicit save, F5/F6 run the standalone game over the mounted loose assets).
+  The historical terrain staging launcher described below was superseded by
+  the saved-loose-assets boundary in ADR 0025: Run no longer exports, copies,
+  or stages terrain data. One correction to the phase's wording remains:
+  terrain export bakes the terrain data set (`.trn`/`.cpt`/`.til`/maps), not a
+  mission dir — there is no "exported terrain's mission" to boot directly.
+  The retired launcher introduced a per-workspace seam used by later
+  game-launch phases:
   `EditorWorkspace.get_game_launch_note(launch_dir)` returning a typed
   `GameLaunchNote` (staged + artist-facing detail), consumed by
   `ShellGameLaunch` in the tooltip and post-launch status.
 
 ### Environment
 
-- ENV-1: bar audit (E already exemplary — direct runtime-node reuse). Wire F3
-  (authored `.env` override → launch; the runtime loads the same file). Gate:
+- ENV-1: bar audit (E already exemplary — direct runtime-node reuse). Verify G
+  (authored `.env` override → standalone launch; the runtime loads the same
+  saved file). Gate:
   environment suite. **DONE 2026-07-12.** Audit: R ✓ (loose opens plus
   VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
   through libs/env `EnvFile.save_to_path`, roundtrip-pinned by
   env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
   `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
-  editor-runtime-parity.md: water parameterized, not forked); G ✓ (the
-  launcher's env note over TER-1's `GameLaunchNote` seam: the launched game
-  reads `<mission env ref>.env` from the mounted root, so Save into the
-  launch dir IS the staging step — the note stages on a clean save there and
-  un-stages on unsaved edits, since the game reads the disk copy). Because
-  Environment is a popup workspace (never the active one), the shell routes
-  the launcher's note through the open panel: panel open = the environment's
-  note, panel closed = the active workspace's. No LaunchPlan change was
-  needed: "the launch carries the authored .env" resolves to the
-  `/d`-mounted directory carrying it.
+  editor-runtime-parity.md: water parameterized, not forked); G ✓ (after an
+  explicit save, F5/F6 launch the standalone game against the mounted loose
+  root, and the mission resolves `<mission env ref>.env` from that same disk
+  state). Unsaved popup edits are warned about and excluded exactly like
+  unsaved edits in the active workspace. The former per-workspace launch note
+  and staging language is retired by ADR 0025.
 
 ### Object
 
@@ -756,8 +755,9 @@ private-poking tests.
 4. **Flow-run sandbox escape** (MNU-1): the interceptor must catch every
    host-policy verb (quit/launch/cross-file) or a menu action closes the
    editor; the flow-run test enumerates the verbs.
-5. **Scope creep toward a game-launcher IDE** (F3): the launcher is one
-   gesture + docs, not a session manager; anything more is a new program.
+5. **Game-session scope creep** (F3): the shell owns exactly one standalone
+   child, three lifecycle gestures (F5/F6/F8), and the stable loopback debug
+   proxy. It does not host gameplay, stage assets, or mirror runtime state.
 6. **Avatars drift** (AVA): the branch predates the editor-layer program AND
    this program's standards — expect adapter-contract and framework deltas;
    the merge train budgets a conformance pass, not a blind rebase.

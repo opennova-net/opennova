@@ -1,14 +1,13 @@
 extends Node
 
 # Minimal clean first-person capture of the arms+gun viewmodel on OPEN ground (away from
-# the 05TR spawn tent/foliage), to judge the viewmodel fix without occlusion. Boots ONED
-# play-in-editor, walks forward to clear the tents, stays first person, captures level + a
-# slight look-down. Fullscreen + clean play SubViewport (same as bend_capture_probe).
+# the 05TR spawn tent/foliage), to judge the viewmodel fix without occlusion. Boots the
+# standalone game, walks forward to clear the tents, stays first person, and captures
+# level plus a slight look-down.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/fp"
-const ENV_NAME := "full_00.env"
 
 var _play_viewport: Viewport = null
 var _out_abs := ""
@@ -20,37 +19,17 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
-	if app.environment_editor != null:
-		var env_path := NovaPaths.resolve_file(root, ENV_NAME)
-		if not env_path.is_empty():
-			app.environment_editor.open_env(env_path)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	var path := NovaPaths.resolve_file(root, bms)
-	if ws.open_file(path) != OK:
-		push_error("[fp] open failed"); get_tree().quit(1); return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-	if int(ws.play_mission()) != OK:
-		push_error("[fp] play failed"); get_tree().quit(1); return
-	await _settle(120)
-	var cam := _find_play_camera(get_tree().root)
-	if cam != null:
-		_play_viewport = cam.get_viewport()
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, bms, ResourceDirSettings.get_expansion())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[fp] " + String(session.error)); get_tree().quit(1); return
+	_play_viewport = session.viewport
 
 	# Walk out to open ground, stay first person.
 	_hold(KEY_W, true)
@@ -97,7 +76,6 @@ func _ready() -> void:
 	# stage and capturing frames. [net-re §5.62]
 	if OS.get_environment("NOVA_VM_FSM") == "1":
 		await _fsm_sequence()
-		ws.stop_play_mission()
 		print("[fp] done -> ", _out_abs)
 		get_tree().quit()
 		return
@@ -144,7 +122,6 @@ func _ready() -> void:
 		await _settle(24)
 		await _capture("03_fp_up.png")
 
-	ws.stop_play_mission()
 	print("[fp] done -> ", _out_abs)
 	get_tree().quit()
 
@@ -261,22 +238,8 @@ func _look(total: Vector2) -> void:
 
 func _capture(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	# The WINDOW viewport: the play SubViewport composites into it and the shared
-	# HUD host (crosshair/ammo cluster) draws over the container — capturing the
-	# play viewport alone would miss every HUD element.
+	# The standalone window carries both the world and shared HUD host.
 	var img: Image = get_viewport().get_texture().get_image()
 	if img != null:
 		img.save_png(_out_abs.path_join(name))
 		print("[fp] wrote ", name)
-
-
-func _find_play_camera(node: Node) -> Camera3D:
-	if node.has_method("get_play_camera"):
-		var c = node.call("get_play_camera")
-		if c is Camera3D:
-			return c
-	for ch in node.get_children():
-		var f := _find_play_camera(ch)
-		if f != null:
-			return f
-	return null

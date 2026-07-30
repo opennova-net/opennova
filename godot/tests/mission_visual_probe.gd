@@ -191,7 +191,7 @@ func _pick_in_camera_world(candidates: Array, camera: Camera3D):
 
 
 # In the editor shell the terrain lives on the ONED terrain domain editor
-# (get_data + sample_height_world), not a NovaTerrain node; play-in-editor and
+# (get_data + sample_height_world), not a NovaTerrain node; standalone game and
 # runtime worlds hang a NovaTerrain (or another get_terrain_data holder).
 # Sweep all three shapes; the first loaded NovaTerrainData wins.
 func _find_terrain_data() -> NovaTerrainData:

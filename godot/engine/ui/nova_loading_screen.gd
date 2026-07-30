@@ -18,8 +18,8 @@ extends Control
 ## texture stretched and draw the text in image space under the same scale
 ## transform — the same net result.
 ##
-## Host-neutral: the game shell mounts it around GameWorld loads; ONED can
-## mount it for play-in-editor parity later. No world/menu knowledge here.
+## Host-neutral presentation mounted by the game shell around GameWorld loads.
+## No world/menu knowledge lives here.
 
 ## Fallback background when the mission has no sidecar image
 ## [orig: "loadscrn.pcx" @ 0x521e20].

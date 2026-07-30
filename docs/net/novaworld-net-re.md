@@ -4737,16 +4737,19 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    native-frame meshes; the net-replay model resolver passes model origins like the mission
    placer's body path. The only reader left anywhere is `NovaSkeletalAnim`'s no-model
    fallback, the original's own no-override shape `[orig: @ 0x410de3]`.
-4. **Evidence.** Play-in-Editor on both SKUs through the def path: REVX root (00TRa) draws
-   the AKM_1st/ARMSG composed hold, JOX root (05TR) the ak47_1st/armsG one. Preview↔lib
+4. **Historical evidence (before ADR 0025 retired PIE).** The then-current Play-in-Editor
+   on both SKUs exercised the def path: REVX root (00TRa) draws the AKM_1st/ARMSG composed
+   hold, JOX root (05TR) the ak47_1st/armsG one. Preview↔lib
    numeric parity: the posed AKM idle (the 46-channel/45-row rig) dumps 0/45 joint
    mismatches against the plain-file evaluator, and the ak47 preview's canonical-camera
    idle matches `vm_mesh_probe`'s j37 discriminator (barrel → +Z, belly → −Y). A US01 body
    previews through the same semantics. ctest `def_parse_weapons` pins the renderfov
    default + override; GUT `anims_inspector`/`local_player_host`/`game_world`/
-   `object_editor` green in isolation. The drive surface is new curated ONED MCP tools
+   `object_editor` green in isolation. The drive surface at the time was curated ONED MCP tools
    (`object_load_anims`/`object_play_clip`/`object_rig_state` rest+posed joint dumps;
-   `mission_play` for Play-in-Editor).
+   `mission_play` for the now-retired Play-in-Editor path). Current live mission validation
+   launches the exact saved loose `.bms` in the standalone game with F6 and attaches runtime
+   MCP to that child.
 5. **Still open** (unchanged): the D-INF-14 tail — def `rot` bias signs + reload direction
    + left-hand/finger pose vs retail footage; the `pos`→`tpos` ADS swap (value plumbed,
    swap unwired) *(landed — the §5.62 FSM/ADS pass)*; velocity lead + prone drop; D-INF-13 (bodies onto the world table
@@ -4774,9 +4777,12 @@ broken twelve it substitutes exact reconstructed values — the model computes w
 `.bad` should have said, and nothing trusts the shipped field. `sample_clip`'s
 `model_bind` mode survives as the witnessed-composition reference implementation
 (ctest `anim_sample`, incl. a `positions_from_model` exactness case); the knob left the
-Godot binding (all callers updated). Validated in ONED Play-in-Editor on both SKUs:
-REVX `AKM_1st` and JOX `ak47_1st` (fully broken shipped positions) render the
-master-identical close-up hold, user-confirmed live against retail memory.
+Godot binding (all callers updated). Historical validation used the then-current ONED
+Play-in-Editor on both SKUs: REVX `AKM_1st` and JOX `ak47_1st` (fully broken shipped
+positions) render the master-identical close-up hold, user-confirmed live against retail
+memory. [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md) later
+retired PIE; the current equivalent runs the exact saved loose mission through F6 and the
+standalone `MainGame`/`GameWorld` lifecycle.
 
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 

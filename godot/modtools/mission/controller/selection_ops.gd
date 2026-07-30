@@ -72,7 +72,7 @@ func is_selected_user_points_visible() -> bool:
 
 
 func set_selected_user_points_visible(value: bool) -> void:
-	_c._selected_user_points_visible = value and selected_has_user_points() and not _c._sim.is_simulating()
+	_c._selected_user_points_visible = value and selected_has_user_points()
 	_c._viewport._refresh_selected_user_points_overlay()
 	_c._notify_changed()
 

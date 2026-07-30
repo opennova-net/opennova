@@ -1,9 +1,8 @@
 class_name NovaGameHudHost
 extends Node
 
-## Hosts the in-game HUD (GameHud) over a live GameWorld for BOTH shells — the game
-## (main_game) and ONED play-in-editor (mission_play_controller) — one HUD code path
-## (editor-runtime parity). Owns the lazy build (hudpos.def layout + string tables),
+## Hosts the in-game HUD (GameHud) over a live GameWorld for the game shell.
+## Owns the lazy build (hudpos.def layout + string tables),
 ## the per-frame info rebuild from the authoritative local player, and the mission
 ## text feed. The shells only say when the player is in-world (they gate tick()).
 ## [orig: HUD_RenderAllOverlays @0x5a8070; HUD_BuildEntityInfo @0x4b8440;
@@ -89,8 +88,8 @@ func _ensure_game_hud() -> void:
 	var host: Node = _ui_parent if _ui_parent != null else self
 	host.add_child(_game_hud)
 	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
-	# zero rect, and a clipping parent (ONED's GameplayOverlay) then clips
-	# every HUD element to nothing.
+	# zero rect, and a clipping UI parent can then clip every HUD element to
+	# nothing.
 	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var hudpos := NovaHudPos.new()
 	var root: NovaResourceRoot = _world.get_resource_root() \
@@ -113,7 +112,7 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 	if root == null:
 		return
 	# Refresh this global registry from the current world's root every build.
-	# Otherwise a second ONED play session can silently reuse the first root's
+	# Otherwise a second runtime or direct-host test can silently reuse the first root's
 	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
 	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].

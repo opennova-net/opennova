@@ -158,7 +158,7 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 	# The regression that took the shell's own join test red: a loose authoring mount reports an
 	# EMPTY installed set by construction (it layers no archives), so an expansion-running host
 	# always looks "not installed" from it. Policing an install we do not own would abort every
-	# editor / fixture / play-in-editor join against such a host. The stand-down must therefore
+	# fixture or standalone debug join against such a host. The stand-down must therefore
 	# precede the abort — the abort belongs to runtime mounts, which are what the shipping game
 	# always joins on.
 	var dir := _make_install()
@@ -185,8 +185,8 @@ func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 	var dir := _make_install()
 	NovaResourceDirSettings.set_expansion("")
 
-	# Play-in-editor / fixture shape: a loose authoring mount layers no expansion archives, so
-	# there is nothing to switch and the authored data set stands.
+	# Injected-fixture shape: a loose authoring mount layers no expansion
+	# archives, so there is nothing to switch and the authored data set stands.
 	var loose_root := NovaResourceRoot.new()
 	assert_eq(loose_root.set_root_dir(dir), OK)
 	assert_false(loose_root.is_runtime_mount())

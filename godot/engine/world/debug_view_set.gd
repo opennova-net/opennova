@@ -49,6 +49,8 @@ var _collision_debug := false
 var _occlusion_debug := false
 # Debug: draw live emitter bounds + effect names (F3 overlay's "Show effect boxes").
 var _particle_debug := false
+var _round_debug := false
+var _hitbox_debug := false
 
 
 ## One-time wiring from the owning GameWorld: the world node the views attach
@@ -60,11 +62,21 @@ func setup(world, user_point_sources: Callable, effect_world_getter: Callable) -
 	_effect_world_getter = effect_world_getter
 
 
-## A load completed: re-arm the retained user-point toggle against the freshly
-## loaded world (its sources come from the new placer).
+## A load completed: rebuild every retained view whose data belongs to the
+## freshly loaded world.
 func on_loaded() -> void:
+	if _skeleton_debug:
+		_refresh_skeleton_debug()
 	if _user_point_debug:
 		_refresh_user_point_debug()
+	if _collision_debug:
+		_refresh_collision_debug()
+	if _occlusion_debug:
+		set_occlusion_debug(true)
+	if _round_debug:
+		set_round_debug(true)
+	if _hitbox_debug:
+		set_hitbox_debug(true)
 
 
 ## Mission teardown — preserves the exact retain/free split the world's unload
@@ -72,24 +84,26 @@ func on_loaded() -> void:
 ## survive: they re-resolve the effect world / sim through the world every
 ## frame, so mission reloads never leave them stale (see their build comments).
 func on_unload() -> void:
-	# The user-point view retains its toggle and re-arms on the next successful load.
-	_remove_user_point_debug_view()
-	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
-	var skel_debug: Node = _world.get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if skel_debug != null:
-		skel_debug.queue_free()
-	var col_debug: Node = _world.get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if col_debug != null:
-		col_debug.queue_free()
-	var occ_debug: Node = _world.get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if occ_debug != null:
-		occ_debug.queue_free()
-	var rnd_debug: Node = _world.get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if rnd_debug != null:
-		rnd_debug.queue_free()
-	var hb_debug: Node = _world.get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if hb_debug != null:
-		hb_debug.queue_free()
+	# Retain the toggles but detach every world-fed visualizer immediately. A
+	# successful next load rebuilds the enabled set under the same stable names,
+	# even when unload+load happens within one frame.
+	for debug_name in [
+		SKELETON_DEBUG_NAME,
+		USER_POINT_DEBUG_NAME,
+		COLLISION_DEBUG_NAME,
+		OCCLUSION_DEBUG_NAME,
+		ROUND_DEBUG_NAME,
+		HITBOX_DEBUG_NAME,
+	]:
+		_remove_debug_view(debug_name)
+
+
+func _remove_debug_view(debug_name: String) -> void:
+	var existing: Node = _world.get_node_or_null(NodePath(debug_name))
+	if existing == null:
+		return
+	_world.remove_child(existing)
+	existing.queue_free()
 
 
 # --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------
@@ -104,9 +118,7 @@ func is_skeleton_debug() -> bool:
 	return _skeleton_debug
 
 func _refresh_skeleton_debug() -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(SKELETON_DEBUG_NAME)
 	if not _skeleton_debug:
 		return
 	var view := SkeletonDebugView.new()
@@ -142,13 +154,7 @@ func _refresh_user_point_debug() -> void:
 
 
 func _remove_user_point_debug_view() -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(USER_POINT_DEBUG_NAME))
-	if existing == null:
-		return
-	# Detach before deferred destruction so an unload+reload in one frame can
-	# create the same stable child name without stale-source/name collisions.
-	_world.remove_child(existing)
-	existing.queue_free()
+	_remove_debug_view(USER_POINT_DEBUG_NAME)
 
 
 # --- Collision debug view (F3 overlay's "Show collision") --------------------
@@ -162,15 +168,17 @@ func set_collision_debug(enabled: bool) -> void:
 	_refresh_collision_debug()
 
 
+func is_collision_debug() -> bool:
+	return _collision_debug
+
+
 # Build / free a child ParticleDebugView drawing every live emitter's bounds +
 # effect name, on the overlay's "Show effect boxes" toggle (the collision-view
 # contract; survives mission reloads by re-resolving the effect world through
 # the world-lent getter).
 func set_particle_debug(enabled: bool) -> void:
 	_particle_debug = enabled
-	var existing: Node = _world.get_node_or_null(NodePath(PARTICLE_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(PARTICLE_DEBUG_NAME)
 	if not enabled:
 		return
 	var view := ParticleDebugView.new()
@@ -178,10 +186,13 @@ func set_particle_debug(enabled: bool) -> void:
 	_world.add_child(view)
 	view.setup(_effect_world_getter)
 
+
+func is_particle_debug() -> bool:
+	return _particle_debug
+
+
 func _refresh_collision_debug() -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(COLLISION_DEBUG_NAME)
 	if not _collision_debug:
 		return
 	var view := CollisionDebugView.new()
@@ -197,9 +208,8 @@ func _refresh_collision_debug() -> void:
 # so mission reloads never leave it stale.
 
 func set_round_debug(enabled: bool) -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_round_debug = enabled
+	_remove_debug_view(ROUND_DEBUG_NAME)
 	if not enabled:
 		return
 	var view := RoundDebugView.new()
@@ -208,19 +218,26 @@ func set_round_debug(enabled: bool) -> void:
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
 
 
+func is_round_debug() -> bool:
+	return _round_debug
+
+
 # Build / free a child HitboxDebugView drawing the round hit-detection reality
 # (bullet-mesh wireframes + bound spheres + posed organic bone spheres) — the
 # collision-view contract, on the overlay's "Show hit meshes" toggle.
 func set_hitbox_debug(enabled: bool) -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_hitbox_debug = enabled
+	_remove_debug_view(HITBOX_DEBUG_NAME)
 	if not enabled:
 		return
 	var view := HitboxDebugView.new()
 	view.name = HITBOX_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+
+
+func is_hitbox_debug() -> bool:
+	return _hitbox_debug
 
 
 # --- Pick debug (the F3 pick list: world highlight + overlay-open clicking) --
@@ -236,9 +253,7 @@ var _pick_list: NovaDebugPickList = null
 ## the same list.
 func set_pick_debug(pick_list: NovaDebugPickList) -> void:
 	_pick_list = pick_list
-	var existing: Node = _world.get_node_or_null(NodePath(PICK_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(PICK_DEBUG_NAME)
 	if pick_list == null:
 		set_pick_click_enabled(false)
 		return
@@ -250,13 +265,9 @@ func set_pick_debug(pick_list: NovaDebugPickList) -> void:
 
 
 ## While the F3 overlay is open (mouse released), a world click ray-picks the
-## entity under the cursor into the installed pick list. The catcher lives in
-## the world's subtree so ONED PIE's SubViewportContainer forwarding works
-## unchanged.
+## entity under the cursor into the installed pick list.
 func set_pick_click_enabled(enabled: bool) -> void:
-	var existing: Node = _world.get_node_or_null(NodePath(PICK_CATCHER_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(PICK_CATCHER_NAME)
 	if not enabled or _pick_list == null:
 		return
 	var catcher := PickClickCatcher.new()
@@ -273,9 +284,7 @@ func set_pick_click_enabled(enabled: bool) -> void:
 
 func set_occlusion_debug(enabled: bool) -> void:
 	_occlusion_debug = enabled
-	var existing: Node = _world.get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
+	_remove_debug_view(OCCLUSION_DEBUG_NAME)
 	if not enabled:
 		return
 	var view := OcclusionDebugView.new()

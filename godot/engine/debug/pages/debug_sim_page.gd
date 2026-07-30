@@ -1,13 +1,8 @@
 class_name DebugSimPage
 extends NovaDebugPage
 ## Sim transport (play / pause / step / stop) + the tick/entity/event/WAC
-## status lines. The transport drives the runtime directly (the overlay is
-## host-neutral); hosts whose own UI mirrors transport state listen to the
-## re-emitted `transport_used` and re-read.
-
-## Fired after a transport press (play/pause/step/stop) or the script pause
-## toggle acted on the runtime.
-signal transport_used(action: String)
+## status lines. Every mutation goes through the shared debug session, so F3
+## and runtime automation use the same unlock and multiplayer-authority policy.
 
 var _play_button: Button
 var _pause_button: Button
@@ -51,9 +46,12 @@ func _build() -> void:
 	_wac_pause_check.tooltip_text = "Stops the mission's scripts while the world keeps running."
 	_wac_pause_check.toggled.connect(_on_wac_pause_toggled)
 	add_child(_wac_pause_check)
+	_debug_controls[&"runtime_wac_paused"] = _wac_pause_check
+	_refresh_transport_policy()
 
 
 func refresh() -> void:
+	_refresh_transport_policy()
 	var runtime := _ctx.runtime()
 	var sim := _ctx.sim()
 	if runtime == null or sim == null:
@@ -108,39 +106,70 @@ func _request_refresh() -> void:
 
 
 func _on_play_pressed() -> void:
-	var runtime := _ctx.runtime()
-	if runtime != null:
-		runtime.play()
-		_request_refresh()
-		transport_used.emit("play")
+	_use_transport("resume")
 
 
 func _on_pause_pressed() -> void:
-	var runtime := _ctx.runtime()
-	if runtime != null:
-		runtime.pause()
-		_request_refresh()
-		transport_used.emit("pause")
+	_use_transport("pause")
 
 
 func _on_step_pressed() -> void:
-	var runtime := _ctx.runtime()
-	if runtime != null:
-		runtime.step_once()
-		_request_refresh()
-		transport_used.emit("step")
+	_use_transport("step")
 
 
 func _on_stop_pressed() -> void:
-	var runtime := _ctx.runtime()
-	if runtime != null:
-		runtime.stop()
+	if _ctx.session == null:
+		return
+	var result: Dictionary = _ctx.session.invoke_control(
+			&"runtime_return_to_menu")
+	if int(result.get("error", ERR_UNAVAILABLE)) == OK:
 		_request_refresh()
-		transport_used.emit("stop")
 
 
 func _on_wac_pause_toggled(pressed: bool) -> void:
-	var sim := _ctx.sim()
-	if sim != null:
-		sim.set_wac_paused(pressed)
-		transport_used.emit("wac_pause")
+	if _ctx.session != null \
+			and _ctx.session.set_control_value(
+					&"runtime_wac_paused", pressed) == OK:
+		_request_refresh()
+
+
+func _use_transport(action: String) -> void:
+	if _ctx.session == null:
+		return
+	var result: Dictionary = _ctx.session.invoke_control(
+			&"runtime_transport", action)
+	if int(result.get("error", ERR_UNAVAILABLE)) != OK:
+		return
+	_request_refresh()
+
+
+func _refresh_transport_policy() -> void:
+	var transport_buttons: Array[Button] = [
+		_play_button, _pause_button, _step_button]
+	if _ctx.session == null:
+		for button in transport_buttons:
+			button.disabled = true
+		_stop_button.disabled = true
+		return
+	var state := _ctx.session.get_control_state(&"runtime_transport")
+	var disabled := not state.available or not state.writable
+	var reason := state.reason
+	_play_button.disabled = disabled
+	_play_button.tooltip_text = reason
+	var world := _ctx.world()
+	var is_network_session := world != null \
+			and world.has_method("is_net_session") \
+			and bool(world.call("is_net_session"))
+	var pause_disabled := disabled or is_network_session
+	var pause_reason := reason
+	if not disabled and is_network_session:
+		pause_reason = (
+				"Pause and step are unavailable during multiplayer because "
+				+ "the network pump must keep running.")
+	for button in [_pause_button, _step_button]:
+		button.disabled = pause_disabled
+		button.tooltip_text = pause_reason
+	var stop_state := _ctx.session.get_control_state(&"runtime_return_to_menu")
+	_stop_button.disabled = _ctx.sim() == null \
+			or not stop_state.available or not stop_state.writable
+	_stop_button.tooltip_text = stop_state.reason

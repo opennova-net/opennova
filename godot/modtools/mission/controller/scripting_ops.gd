@@ -88,8 +88,6 @@ func add_event_default() -> int:
 func delete_selected_event() -> bool:
 	if _c._mission == null or get_selected_event_index() < 0:
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	_c._flush_edit()
 	_c._mission.begin_edit()
 	if not _c._mission.remove_event(_c._selected_event_index):

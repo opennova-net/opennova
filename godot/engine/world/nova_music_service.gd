@@ -8,7 +8,7 @@ extends Node
 ## by the front end [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60] and the
 ## game context at mission start [orig: Game_StartMission @ 0x525581-0x52561b] —
 ## so the menu shell and the game world both open THEIR context through this one
-## service, and ONED play-in-editor gets the same game context the shell gets.
+## service.
 ##
 ## Full driving witness: docs/audio/mus-sbf-re.md §Game music driving.
 

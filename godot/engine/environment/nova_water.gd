@@ -64,8 +64,8 @@ var _height_override: float = NAN
 # including an explicit BMS zero (which disables water instead of falling
 # through to terrain).
 var _mission_water_height_override: float = NAN
-# GameWorld retains this node across unload/reload; editor previews do not need
-# to opt in, so standalone water starts enabled.
+# GameWorld retains this node across unload/reload; unhosted authoring previews
+# do not need to opt in, so a standalone water node starts enabled.
 var _host_rendering_enabled := true
 
 

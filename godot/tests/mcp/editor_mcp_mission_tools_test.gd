@@ -381,8 +381,11 @@ func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -
 	var result: McpToolResult = await _call("analyze_mounts", { "include_live": false })
 	assert_false(result.is_error, str(result.content))
 	var out: Dictionary = result.structured
-	assert_eq(String(out["runtime_parity"]["shared_driver"]), "MissionRuntime",
-		"the diagnostic documents that editor play and game use the shared mission runtime")
+	assert_eq(String(out["runtime_parity"]["shared_rules"]), "MissionRuntime")
+	assert_eq(String(out["runtime_parity"]["editor_mode"]), "static_analysis",
+		"the editor predicts from authored data instead of hosting gameplay")
+	assert_eq(String(out["runtime_parity"]["live_host"]), "GameWorld",
+		"only the standalone GameWorld hosts the live mission")
 	var mounts: Array = out["mounts"]
 	assert_eq(mounts.size(), 1)
 	var row: Dictionary = mounts[0]
@@ -416,7 +419,3 @@ func test_set_camera_frame_point_and_entity() -> void:
 	assert_false(entity.is_error)
 	var modeless: McpToolResult = await _call("set_camera", {})
 	assert_true(modeless.is_error)
-
-
-# (P7: test_sim_control_locks_editing_and_steps deleted — editor MCP sim control is de-scoped under
-#  the listen-server preview unification.)

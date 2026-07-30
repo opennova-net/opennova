@@ -46,14 +46,6 @@ class FakeController:
 	var preview_calls: Array = []
 	var stop_preview_calls: int = 0
 	var can_preview: bool = false
-	# Live simulation transport state.
-	var sim_can: bool = false
-	var simulating: bool = false
-	var sim_playing: bool = false
-	var sim_play_calls: int = 0
-	var sim_pause_calls: int = 0
-	var sim_step_calls: int = 0
-	var sim_stop_calls: int = 0
 	# Selected-object userpoint overlay hooks.
 	var selected_user_points_available: bool = false
 	var selected_user_points_visible: bool = false
@@ -185,44 +177,12 @@ class FakeController:
 		armed_id = 0
 		changed.emit()
 
-	func can_simulate() -> bool:
-		return sim_can
-
-	func is_simulating() -> bool:
-		return simulating
-
 	# B8: the Mission-tab bulk re-ground button delegates here.
 	var reground_calls := 0
 
 	func reground_drifted() -> int:
 		reground_calls += 1
 		return 0
-
-	func is_sim_playing() -> bool:
-		return sim_playing
-
-	func sim_play() -> void:
-		sim_play_calls += 1
-		simulating = true
-		sim_playing = true
-		changed.emit()
-
-	func sim_pause() -> void:
-		sim_pause_calls += 1
-		sim_playing = false
-		changed.emit()
-
-	func sim_step() -> void:
-		sim_step_calls += 1
-		simulating = true
-		sim_playing = false
-		changed.emit()
-
-	func sim_stop() -> void:
-		sim_stop_calls += 1
-		simulating = false
-		sim_playing = false
-		changed.emit()
 
 	func selected_has_user_points() -> bool:
 		return selected_user_points_available
@@ -1229,27 +1189,19 @@ func test_mode_tabs_hidden_without_a_mission() -> void:
 	assert_false(ctx.inspector._mode_tabs.visible, "the edit-mode tabs hide when no mission is open")
 
 
-func test_simulation_transport_stays_compact() -> void:
+func test_inspector_has_no_embedded_runtime_controls() -> void:
 	var fake := FakeController.new()
 	fake.mission_ref = NovaMissionData.new()
-	fake.sim_can = true
 	var inspector = MissionInspector.new()
 	inspector.size = Vector2(280, 640)
 	add_child_autofree(inspector)
 	inspector.setup(fake)
 	await get_tree().process_frame
-	await get_tree().process_frame
 
-	var bar := inspector.find_child("MissionSimBar", true, false) as HBoxContainer
-	assert_not_null(bar, "the simulation transport row is built")
-	if bar == null:
-		return
-	assert_true(bar.visible, "simulation controls show when the controller can simulate")
-	assert_lte(bar.size.y, 40.0, "simulation controls should be a compact toolbar row")
-	for child in bar.get_children():
-		if child is Button:
-			assert_lte((child as Button).size.y, 36.0,
-				"transport buttons should not stretch into tall columns")
+	assert_null(inspector.find_child("MissionSimBar", true, false),
+		"mission testing is launched by the editor toolbar, not hosted by the inspector")
+	assert_null(inspector.find_child("MissionDebugBtn", true, false),
+		"F3 belongs to the launched game")
 
 
 func test_waypoint_panel_shows_and_lists_paths_in_waypoint_mode() -> void:
@@ -2424,12 +2376,7 @@ func test_reground_button_shows_with_a_mission_and_delegates() -> void:
 	ctx.fake.mission_ref = NovaMissionData.new()
 	ctx.fake.changed.emit()
 	assert_true(button.visible, "a loaded mission shows the button")
-	assert_false(button.disabled, "enabled while not simulating")
+	assert_false(button.disabled, "authoring controls remain available in the editor")
 
 	button.pressed.emit()
 	assert_eq(ctx.fake.reground_calls, 1, "the press delegates to the controller once")
-
-	# Editing is locked during a live simulation; the button greys out with it.
-	ctx.fake.simulating = true
-	ctx.fake.changed.emit()
-	assert_true(button.disabled, "disabled while the simulation runs")

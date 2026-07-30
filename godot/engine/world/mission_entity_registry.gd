@@ -80,10 +80,11 @@ func get_animatable_nodes() -> Array:
 	return out
 
 
-## Resolve one entity's node for the present pass: by file id (bms_id) first -- stable when a mission
-## loads from disk -- then by (kind, index) -- the editor sims the in-memory bms::File where bms_id may
-## be 0. Returns the live node or null. This is THE present-path resolver shared by game + editor;
-## resolve_single/group/zone below remain for the editor's single-action preview.
+## Resolve one entity's node for the present pass: by file id (bms_id) first -- stable for saved loose
+## missions -- then by (kind, index), which also supports an in-memory bms::File with bms_id 0 in
+## isolated tests/tooling previews. Returns the live node or null. This is THE resolver for the
+## standalone GameWorld present path; resolve_single/group/zone below also serve live effect routing
+## and non-gameplay authoring previews.
 func resolve(bms_id: int, kind: int, index: int) -> Node:
 	var node: Variant = null
 	if bms_id != 0:
