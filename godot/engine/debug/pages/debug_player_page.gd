@@ -65,10 +65,20 @@ func _build() -> void:
 	var edit_header := Label.new()
 	edit_header.text = "Teleport (mission coordinates)"
 	add_child(edit_header)
-	var edit_row := HBoxContainer.new()
-	edit_row.name = "PlayerTeleportValues"
-	add_child(edit_row)
+	var edit_grid := GridContainer.new()
+	edit_grid.name = "PlayerTeleportValues"
+	edit_grid.columns = 3
+	add_child(edit_grid)
 	for axis in ["X", "Y", "Z", "Yaw", "Pitch"]:
+		var field := VBoxContainer.new()
+		field.name = "Teleport%sField" % axis
+		field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		field.add_theme_constant_override("separation", 2)
+		edit_grid.add_child(field)
+		var field_label := Label.new()
+		field_label.name = "Teleport%sLabel" % axis
+		field_label.text = axis
+		field.add_child(field_label)
 		var value := SpinBox.new()
 		value.name = "Teleport%s" % axis
 		if axis in ["X", "Y", "Z"]:
@@ -84,7 +94,7 @@ func _build() -> void:
 		value.custom_arrow_step = 1.0
 		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		value.tooltip_text = axis
-		edit_row.add_child(value)
+		field.add_child(value)
 		_teleport_values.append(value)
 	_teleport_button = Button.new()
 	_teleport_button.name = "TeleportPlayer"

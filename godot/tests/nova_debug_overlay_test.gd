@@ -709,6 +709,74 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	assert_signal_not_emitted(overlay, "debug_snapshot_dumped")
 
 
+func test_player_tab_stays_docked_and_sidebar_remains_clickable() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(560, 900)
+	add_child_autofree(viewport)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Player"))
+	await wait_process_frames(2)
+
+	var panel := overlay.find_child("DebugPanel", true, false) as Control
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	var viewport_rect := viewport.get_visible_rect()
+	assert_eq(viewport_rect.size, Vector2(560, 900),
+			"the repro uses the minimum width that fits the configured dock")
+	var panel_rect := panel.get_global_rect()
+	assert_gte(panel_rect.position.x, viewport_rect.position.x,
+			"opening Player must not push the dock past the viewport's left edge")
+	assert_almost_eq(panel_rect.size.x, 552.0, 1.0,
+			"opening Player must preserve the configured 560 px dock with 8 px edge inset")
+	var page_list_rect := page_list.get_global_rect()
+	assert_gte(page_list_rect.position.x, viewport_rect.position.x,
+			"opening Player must not push the sidebar off the left edge")
+
+	# At 520 px the configured dock is wider than the window, but a conforming
+	# page still leaves the center of every sidebar row onscreen. The old
+	# five-SpinBox row pushed that center past the left edge and trapped Player.
+	viewport.size = Vector2i(520, 900)
+	await wait_process_frames(2)
+	viewport_rect = viewport.get_visible_rect()
+	var stats_row := -1
+	for row in range(page_list.item_count):
+		if page_list.get_item_text(row).strip_edges() == "Stats":
+			stats_row = row
+			break
+	assert_gte(stats_row, 0, "the Stats destination row exists")
+	if stats_row < 0:
+		return
+	var stats_rect := page_list.get_item_rect(stats_row)
+	var click_position := page_list.get_global_transform_with_canvas() * stats_rect.get_center()
+	assert_true(page_list.get_global_rect().has_point(click_position),
+			"the destination tab is visibly inside the sidebar")
+	assert_true(viewport_rect.has_point(click_position),
+			"the destination tab's clickable center remains on screen")
+
+	var motion := InputEventMouseMotion.new()
+	motion.position = click_position
+	motion.global_position = click_position
+	viewport.push_input(motion, true)
+	var press := InputEventMouseButton.new()
+	press.position = click_position
+	press.global_position = click_position
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.button_mask = MOUSE_BUTTON_MASK_LEFT
+	press.pressed = true
+	viewport.push_input(press, true)
+	var release := press.duplicate() as InputEventMouseButton
+	release.button_mask = 0
+	release.pressed = false
+	viewport.push_input(release, true)
+	await wait_process_frames(2)
+
+	assert_eq(String(overlay.get_active_page_id()), "Stats",
+			"a real sidebar click must still leave the Player page")
+
+
 func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
 	var runtime := _make_pose_runtime()
 	runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
