@@ -12,6 +12,7 @@ extends RefCounted
 # and net paths share one copy.)
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 var _root: NovaResourceRoot
 var _item_db: NovaItemDatabase
@@ -45,6 +46,10 @@ func make_model(item_id: int, parent: Node, env_node: Node = null) -> Node3D:
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
+	model.set_shadow_caster_enabled(MissionObjectPlacer.item_casts_dynamic_shadow(
+			_item_db.get_item_type(item_id),
+			_item_db.get_attrib(item_id),
+			_item_db.get_attrib2(item_id)))
 	_apply_skeletal_anim(model, item_id, data.get_bone_origins())
 	model.set_object_data(data)
 	return model

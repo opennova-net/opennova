@@ -591,9 +591,13 @@ runs opposite world y (samplers negate y internally).
   ([render-occlusion-re.md](../render/render-occlusion-re.md)). Callers:
   `Physics_RaycastTerrainAndSectors @ 0x539910` (`CollisionWorld::raycast_clear`,
   now on this port), `Physics_CheckTerrainLineOfSight @ 0x53b080` (the sound
-  occlusion LOS), `HUD_RenderAllOverlays`, `terrain_occlusion_check_three_rays
-  @ 0x610ed0` (the D-RLIT 3-ray sun-visibility source and the entity
-  visibility latch).
+  occlusion LOS), `HUD_RenderAllOverlays`, and
+  `terrain_occlusion_check_three_rays @ 0x610ed0` (the camera-to-entity
+  terrain visibility latch). This last caller is not D-RLIT's directional
+  lighting query: per-entity sun visibility instead uses collision-entity
+  candidate slices through `Entity_ComputeSunVisibility @ 0x5c6800` →
+  `raycast_find_collision_entity @ 0x539a70`; see
+  [render-lighting-re.md](../render/render-lighting-re.md#d-rlit-divergence-catalog).
 
 ### B1 port (landed 2026-07-07)
 
