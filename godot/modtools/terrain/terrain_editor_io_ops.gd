@@ -235,6 +235,10 @@ func _check_loaded_cdep_violations() -> void:
 
 
 func _auto_fix_cdep_violations() -> void:
+	# The prompt Callable binds this RefCounted section and keeps it alive even
+	# if the editor node is freed while the CDEP dialog is pending.
+	if not is_instance_valid(_te):
+		return
 	if _te._data == null or not _te._heightmap_image:
 		return
 	var clamped: int = _te._data.cdep_clamp_all_violations()
