@@ -36,6 +36,17 @@ const LIGHTING_CONTEXT_INTERIOR_SECTION := 1
 const SUN_SHADOW_CATCHER_SHADER := preload(
 		"res://shaders/sun_shadow_catcher.gdshader")
 
+# W4-6c split: the main-body skeletal-animation cluster and the material
+# factory / environment-lighting cluster live in two RefCounted helpers
+# (nova_object_body_anim.gd / nova_object_materials.gd). ALL state stays
+# here; every moved method keeps a delegate below.
+const NovaObjectBodyAnim := preload("res://engine/object/nova_object_body_anim.gd")
+const NovaObjectMaterials := preload("res://engine/object/nova_object_materials.gd")
+# The ADR 0017 typed env record moved with the materials helper; this alias
+# keeps NovaObjectModel.EnvLightValues the public type (mission_object_placer,
+# tests) and the host annotations unchanged.
+const EnvLightValues = NovaObjectMaterials.EnvLightValues
+
 var object_data: NovaObjectData
 
 var _material_cache: Dictionary = {}
@@ -169,6 +180,18 @@ var _last_section_env_values: EnvLightValues = null
 # [orig: parse_lights_chunk @0x5B47B0; model field +0xCC has no post-load
 #  renderer read in Jointops.exe]
 var _model_light_preview_enabled := false
+
+
+# The W4-6c section helpers (RefCounted; a plain back-ref cannot cycle --
+# the host is a manually-managed Node3D). Constructed in _init so they
+# exist before any pre-_ready set_object_data/rebuild.
+var _body_anim: NovaObjectBodyAnim
+var _materials: NovaObjectMaterials
+
+
+func _init() -> void:
+	_body_anim = NovaObjectBodyAnim.new(self)
+	_materials = NovaObjectMaterials.new(self)
 
 
 func _ready() -> void:
@@ -363,355 +386,121 @@ func reset_animation_time() -> void:
 	_apply_runtime_state(0.0)
 
 
-# --- Main-body skeletal animation (.bad/.adm) -----------------------------------
-# A NovaSkeletalAnim carries the parsed/sampled skeleton + clips for this model. Setting
-# it (then a skinned model) makes rebuild() build the Skeleton3D + Skin; play_body_clip
-# selects the active clip the per-frame pass poses. Both the object-editor preview and the
-# mission present pass drive these, so organic bodies animate from one path.
+# --- W4-6c: the main-body skeletal-animation cluster (clip play/variant/
+# seeded selection, remote body-state arbitration, muzzle userpoint,
+# playhead scrub, PLAYPARTANIM part-anim channels, aim overlay, pose
+# evaluation) moved verbatim to nova_object_body_anim.gd. ALL state stays
+# on this host; the delegates below preserve the external surface and
+# test-subclass override dispatch.
+
 func set_skeletal_anim(skeletal) -> void:
-	_skeletal = skeletal
-	reset_remote_body_state()
-	_anim_key = ""
-	_anim_variant = 0
-	_anim_time = 0.0
-	_anim_playing = false
-	_anim_external_phase = false
-	_body_phase_stamp_valid = false
-	_last_slot_resolved = -1
-	_last_slot_key = ""
-	_body_pose_dirty = true
-	rebuild()
+	_body_anim.set_skeletal_anim(skeletal)
 
 
 func get_skeletal_anim():
-	return _skeletal
+	return _body_anim.get_skeletal_anim()
 
 
 func get_skeleton() -> Skeleton3D:
-	return _skeleton
+	return _body_anim.get_skeleton()
 
 
 func has_skeleton() -> bool:
-	return _skeleton != null
+	return _body_anim.has_skeleton()
 
 
-## Whether this model resolved a gun-flash muzzle userpoint onto its skeleton
-## (the D-AI-6 fire-origin seam; infantry body models author one — US01
-## "GFlash01", SASBODY1 "MFlash01").
 func has_muzzle() -> bool:
-	return _muzzle_bone >= 0 and _skeleton != null
+	return _body_anim.has_muzzle()
 
 
-## The POSED muzzle world position: the authored model-space userpoint carried
-## through its bone's live pose — the same rest-to-pose attachment transform the
-## userpoint debug overlay and the action-particle attachments use.
-## [orig: Entity_GetAttachmentWorldPosition @0x4b2670 — userpoint local position
-## x the animated bone matrix]
 func get_muzzle_world_position() -> Vector3:
-	var model_to_world := (_skeleton.global_transform
-			* _skeleton.get_bone_global_pose(_muzzle_bone)
-			* _skeleton.get_bone_global_rest(_muzzle_bone).affine_inverse())
-	return model_to_world * _muzzle_model_pos
+	return _body_anim.get_muzzle_world_position()
 
 
-# Resolve the muzzle userpoint against the built skeleton. Name preference:
-# a "*flash*" userpoint (the gun-flash convention) over "bullet"/"*muzzle*";
-# LOOK/CAMERA/etc never match. The rig is index-driven, so the userpoint's
-# subobject row IS the skeleton bone index; rows past the bone count (padding
-# rows exist in shipped models) disqualify the point.
 func _resolve_muzzle_userpoint() -> void:
-	_muzzle_bone = -1
-	if _skeleton == null or object_data == null:
-		return
-	var best := -1
-	var best_rank := 99
-	for i in range(int(object_data.get_user_point_count())):
-		var info: Dictionary = object_data.get_user_point_info(i)
-		var n := String(info.get("name", "")).to_lower()
-		var rank := 99
-		if n.contains("flash"):
-			rank = 0
-		elif n == "bullet" or n.contains("muzzle"):
-			rank = 1
-		if rank < best_rank:
-			best_rank = rank
-			best = i
-	if best < 0:
-		return
-	var info2: Dictionary = object_data.get_user_point_info(best)
-	var bone := int(info2.get("subobject", -1))
-	if bone < 0 or bone >= _skeleton.get_bone_count():
-		return
-	_muzzle_bone = bone
-	_muzzle_model_pos = info2.get("position", Vector3.ZERO)
+	_body_anim._resolve_muzzle_userpoint()
 
 
-## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
 func play_body_clip(key: String) -> void:
-	play_body_clip_variant(key, 0)
+	_body_anim.play_body_clip(key)
 
 
-## play_body_clip selecting a same-key VARIANT (multi-clip .adm rows): the FSM owner's
-## ring serves the index and playback follows that latch until the next play — a
-## variant change re-poses even on the same key. [orig: AnimMap_PlayAnimBySlot
-## @0x40bda0 latches the served ring entry at animState+68]
 func play_body_clip_variant(key: String, variant: int) -> void:
-	if _skeletal == null or not _skeletal.has_clip(key):
-		return
-	if key == _anim_key and variant == _anim_variant:
-		_anim_external_phase = false
-		_body_phase_stamp_valid = false
-		_anim_playing = true
-		return
-	_anim_key = key
-	_anim_variant = variant
-	_anim_time = 0.0
-	_anim_playing = true
-	_anim_external_phase = false
-	_body_phase_stamp_valid = false
-	_body_pose_dirty = true
+	_body_anim.play_body_clip_variant(key, variant)
 
 
-## Pose a selected clip variant at an authoritative time. Unlike
-## set_animation_time(), this keeps render-frame _process(delta) from advancing
-## the playhead; the fixed-tick weapon presenter supplies every later phase.
 func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
-	if _skeletal == null or not _skeletal.has_clip(key):
-		return
-	var same_external := (_anim_external_phase and key == _anim_key
-			and variant == _anim_variant
-			and is_equal_approx(_anim_time, seconds))
-	_anim_key = key
-	_anim_variant = variant
-	_set_body_playhead(seconds)
-	_anim_playing = false
-	_anim_external_phase = true
-	if same_external and not _body_pose_dirty:
-		return
-	_body_pose_dirty = true
-	advance_body_animation(0.0)
+	_body_anim.play_body_clip_variant_at_time(key, variant, seconds)
 
 
-## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
-## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
-## The model does not free-run this clip between sim snapshots.
 func play_body_clip_at(key: String, phase_ticks: int) -> void:
-	# Repeat-call fast path: the stamp proves this exact (key, tick) pair is what
-	# posed the skeleton last, nothing else touched the playhead since, and no
-	# other input dirtied the pose — the full body below would be a no-op.
-	if (_body_phase_stamp_valid and _anim_external_phase
-			and not _body_pose_dirty
-			and phase_ticks == _body_phase_ticks_applied
-			and key == _anim_key):
-		return
-	if _skeletal == null or not _skeletal.has_clip(key):
-		return
-	var previous_key := _anim_key
-	var previous_time := _anim_time
-	var previous_external := _anim_external_phase
-	var fps: float = _skeletal.get_clip_fps(key)
-	var seconds := 0.0
-	if fps > 0.0:
-		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
-	var same_external := previous_external and key == previous_key and is_equal_approx(previous_time, seconds)
-	_anim_key = key
-	_anim_variant = 0  # stamp-driven body path: variant rings deferred to the 3P channel
-	_set_body_playhead(seconds)
-	_anim_playing = false
-	_anim_external_phase = true
-	_body_phase_stamp_valid = true
-	_body_phase_ticks_applied = phase_ticks
-	if same_external and not _body_pose_dirty:
-		return
-	_body_pose_dirty = true
-	advance_body_animation(0.0)
+	_body_anim.play_body_clip_at(key, phase_ticks)
 
 
-## Seed a main-body clip from retail half-frame ticks, pose it immediately, and
-## leave it free-running. Distinct from play_body_clip_at(), whose callers own
-## every later playhead sample and therefore intentionally pin external phase.
 func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
-	if _select_body_clip_seeded(key, phase_ticks):
-		advance_body_animation(0.0)
+	_body_anim.play_body_clip_seeded(key, phase_ticks)
 
 
 func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
-	if _skeletal == null or not _skeletal.has_clip(key):
-		return false
-	_anim_key = key
-	_anim_variant = 0
-	var fps: float = _skeletal.get_clip_fps(key)
-	var seconds := 0.0
-	if fps > 0.0:
-		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
-	_set_body_playhead(seconds)
-	_anim_playing = true
-	_anim_external_phase = false
-	_body_pose_dirty = true
-	return true
+	return _body_anim._select_body_clip_seeded(key, phase_ticks)
 
 
-## Apply one raw compact-organic body-state request with retail's remote
-## transition arbitration. A phase belongs only to an immediately accepted
-## player transition; queued states promote at tick zero when the current clip
-## reaches its completion boundary.
 func apply_remote_body_state(state_id: int, key: String, flags: int,
 		phase_ticks: int = -1) -> void:
-	if state_id < 0 or key.is_empty() or _skeletal == null or not _skeletal.has_clip(key):
-		return
-	if _remote_state < 0:
-		_accept_remote_body_state(state_id, key, flags, phase_ticks)
-		return
-	if state_id == _remote_state:
-		_clear_remote_body_pending()
-		return
-	if ((_remote_flags & 0x4) != 0
-			or ((_remote_flags & 0x20) != 0 and (flags & 0x1) == 0)):
-		_queue_remote_body_state(state_id, key, flags)
-		return
-	_accept_remote_body_state(state_id, key, flags, phase_ticks)
+	_body_anim.apply_remote_body_state(state_id, key, flags, phase_ticks)
 
 
 func reset_remote_body_state() -> void:
-	_remote_state = -1
-	_remote_flags = 0
-	_clear_remote_body_pending()
+	_body_anim.reset_remote_body_state()
 
 
 func _accept_remote_body_state(state_id: int, key: String, flags: int,
 		phase_ticks: int) -> void:
-	_clear_remote_body_pending()
-	_remote_state = state_id
-	_remote_flags = flags
-	if _select_body_clip_seeded(key, phase_ticks if phase_ticks >= 0 else 0):
-		advance_body_animation(0.0)
+	_body_anim._accept_remote_body_state(state_id, key, flags, phase_ticks)
 
 
 func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
-	_remote_pending_state = state_id
-	_remote_pending_key = key
-	_remote_pending_flags = flags
-	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
-	if length <= 0.0:
-		# A hold clip whose length cannot resolve completes IMMEDIATELY — an INF
-		# deadline here wedged the remote body-state machine forever (every later
-		# stance/anim request queued behind it), freezing the remote player's pose
-		# for the rest of the session. Retail's hold ends with the animation; a
-		# zero-length animation is already over.
-		_remote_pending_end_time = 0.0
-	elif _skeletal.is_clip_looping(_anim_key, _anim_variant):
-		_remote_pending_end_time = (floorf(_anim_time / length) + 1.0) * length
-	else:
-		_remote_pending_end_time = length
-	# A request arriving after a one-shot already ended promotes immediately.
-	if _promote_remote_body_pending_if_due():
-		advance_body_animation(0.0)
+	_body_anim._queue_remote_body_state(state_id, key, flags)
 
 
 func _clear_remote_body_pending() -> void:
-	_remote_pending_state = -1
-	_remote_pending_key = ""
-	_remote_pending_flags = 0
-	_remote_pending_end_time = INF
+	_body_anim._clear_remote_body_pending()
 
 
 func _promote_remote_body_pending_if_due() -> bool:
-	if _remote_pending_state < 0 or is_inf(_remote_pending_end_time):
-		return false
-	if _anim_time + 0.000001 < _remote_pending_end_time:
-		return false
-	var state_id := _remote_pending_state
-	var key := _remote_pending_key
-	var flags := _remote_pending_flags
-	_clear_remote_body_pending()
-	_remote_state = state_id
-	_remote_flags = flags
-	# The queued packet's phase described the old current channel. Retail starts
-	# the promoted request at the first frame and discards any overshoot.
-	return _select_body_clip_seeded(key, 0)
+	return _body_anim._promote_remote_body_pending_if_due()
 
 
 func stop_body_clip() -> void:
-	_anim_playing = false
-	_anim_external_phase = false
-	_body_phase_stamp_valid = false
-	reset_remote_body_state()
+	_body_anim.stop_body_clip()
 
 
 func get_active_body_clip() -> String:
-	return _anim_key
+	return _body_anim.get_active_body_clip()
 
 
-## Play a main-body animation by canonical AI slot (opennova::world::BodyAnim). Resolves the
-## slot to a clip key via the loaded NovaSkeletalAnim (with idle/reset fallback) and plays it.
-## Idempotent: a repeated same-slot call (every present tick) does not restart a playing loop.
-## No-op without a skeletal set or for slot < 0. This is the present pass's body-anim entry point.
 func play_body_anim(slot: int) -> void:
-	if _skeletal == null or slot < 0:
-		return
-	var key: String = _skeletal.slot_to_key(slot)
-	if key.is_empty():
-		return
-	if key == _anim_key and not _anim_external_phase:
-		return
-	play_body_clip(key)
+	_body_anim.play_body_anim(slot)
 
 
-## Pose a main-body animation slot at the authoritative infantry motor playhead.
 func play_body_anim_at(slot: int, phase_ticks: int) -> void:
-	if _skeletal == null or slot < 0:
-		return
-	if slot != _last_slot_resolved:
-		_last_slot_key = _skeletal.slot_to_key(slot)
-		_last_slot_resolved = slot
-	if _last_slot_key.is_empty():
-		return
-	play_body_clip_at(_last_slot_key, phase_ticks)
+	_body_anim.play_body_anim_at(slot, phase_ticks)
 
 
 func get_animation_time_ms() -> int:
 	return _anim_time_ms
 
 
-## Scrub the active body clip's playhead to `seconds` and pose IMMEDIATELY,
-## even while paused (paused scrubbing is the point; while playing the
-## zero-delta advance adds nothing). Mirrors eval_pose's own time handling so
-## the stored playhead and the rendered pose can never disagree: looping clips
-## wrap over the clip length, one-shots clamp to it. No-op without a skeletal
-## set / active clip. Distinct from the _anim_time_ms material/PANM clock.
 func set_animation_time(seconds: float) -> void:
-	if _skeletal == null or _anim_key.is_empty():
-		return
-	_anim_external_phase = false
-	_set_body_playhead(seconds)
-	_body_pose_dirty = true
-	advance_body_animation(0.0)
+	_body_anim.set_animation_time(seconds)
 
 
 func _set_body_playhead(seconds: float) -> void:
-	# Any playhead write outside play_body_clip_at's own apply (which re-stamps
-	# right after) invalidates the applied-phase stamp.
-	_body_phase_stamp_valid = false
-	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
-	if length <= 0.0:
-		_anim_time = 0.0
-	elif _skeletal.is_clip_looping(_anim_key, _anim_variant):
-		_anim_time = fposmod(seconds, length)
-	else:
-		_anim_time = clampf(seconds, 0.0, length)
+	_body_anim._set_body_playhead(seconds)
 
 
-## The active body clip's playhead in seconds, loop-wrapped (one-shots clamp),
-## so a scrub slider binds to it directly.
 func get_animation_time() -> float:
-	if _skeletal == null or _anim_key.is_empty():
-		return 0.0
-	var length: float = _skeletal.get_clip_length(_anim_key, _anim_variant)
-	if length <= 0.0:
-		return 0.0
-	if _skeletal.is_clip_looping(_anim_key, _anim_variant):
-		return fposmod(_anim_time, length)
-	return clampf(_anim_time, 0.0, length)
+	return _body_anim.get_animation_time()
 
 
 func set_active_lod(lod_index: int) -> void:
@@ -757,111 +546,32 @@ func get_ctrl_values() -> Dictionary:
 	return _ctrl_values.duplicate(true)
 
 
-# --- Part-animation channels (PLAYPARTANIM mission action) ---
-# [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22] PLAYPARTANIM(channel, play_type, time):
-# ANIMNUM (channel) in {1,2} selects one of two part-anim channels (slot = channel-1); ANIMPLAYTYPE
-# +1/0/-1 = forward/stop/reverse; ANIMTIME seconds = how long the part takes to cross its full range.
-# The original stores a per-channel direction + per-tick rate on the AI struct and a per-frame consumer
-# sweeps a 16.16 phase (0..65536, full range in ANIMTIME at 62.5Hz), clamping at the ends; it is
-# velocity-from-current (it does NOT reset the phase). We drive part channel `slot` through the model's
-# PANM control register at index `slot`, value 0..65535 == that phase, fed to evaluate_panm() each frame.
-# See notes/mission/anim-ai-grill-2026-06-07.md.
-
-## Play a model part animation, mirroring the runtime PLAYPARTANIM action so editor preview and host
-## playback share one path. channel: 1 or 2. play_type: 1 play / 0 stop / -1 reverse. time_s: seconds
-## for the part to traverse its full range (ANIMTIME).
 func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
-	var slot := channel - 1
-	if slot < 0 or slot > 1:
-		return  # the original validates channel in {1,2}; anything else is ignored
-	var register := _resolve_anim_channel_register(slot)
-	if register.is_empty():
-		return
-	if play_type == 0:
-		_part_anims.erase(register)  # Stop: freeze the part at its current value
-		return
-	var dir := 1 if play_type > 0 else -1
-	var speed := 65535.0 / time_s if time_s > 0.0 else 1.0e9  # full range crossed in time_s seconds
-	_part_anims[register] = {
-		"register": register,
-		"dir": dir,
-		"speed": speed,
-		"value": float(int(_ctrl_values.get(register, 0))),  # velocity from current (no reset)
-	}
+	_body_anim.play_part_anim(channel, play_type, time_s)
 
 
-## Editor-preview convenience: seed the channel at its rest start (0 forward / max reverse) then play,
-## so a preview always shows the full motion from rest. The runtime uses play_part_anim directly
-## (velocity-from-current, faithful to the action); only the editor preview restarts.
 func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
-	var slot := channel - 1
-	if slot < 0 or slot > 1:
-		return
-	var register := _resolve_anim_channel_register(slot)
-	# Stop (play_type == 0) must freeze the part where it is, so do NOT reseed the register: reseeding
-	# to 0 would jump the part to its 0 pose before play_part_anim's stop erases the channel. Only the
-	# forward/reverse previews seed a rest start (0 forward / max reverse).
-	if not register.is_empty() and play_type != 0:
-		_ctrl_values[register] = 0 if play_type >= 0 else 65535
-	play_part_anim(channel, play_type, time_s)
+	_body_anim.restart_part_anim(channel, play_type, time_s)
 
 
-## Pose a part channel directly to an engine-computed phase (0..65535 == 0..1 over the part's range).
-## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
-## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
-## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
 func set_part_phase(channel: int, phase: int) -> void:
-	var register := _resolve_anim_channel_register(channel - 1)
-	if register.is_empty():
-		return
-	var next_phase := clampi(phase, 0, 65535)
-	if int(_ctrl_values.get(register, -1)) == next_phase and not _part_anims.has(register):
-		return
-	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
-	_ctrl_values[register] = next_phase
-	_bounds_dirty = true
+	_body_anim.set_part_phase(channel, phase)
 
 
 func clear_part_anims() -> void:
-	_part_anims.clear()
+	_body_anim.clear_part_anims()
 
 
 func get_active_part_anims() -> Dictionary:
-	return _part_anims.duplicate(true)
+	return _body_anim.get_active_part_anims()
 
 
-# [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
 func _resolve_anim_channel_register(slot: int) -> String:
-	if object_data == null:
-		return ""
-	var regs: Array = object_data.get_control_registers()
-	if slot < 0 or slot >= regs.size():
-		return ""
-	return String((regs[slot] as Dictionary).get("name", ""))
+	return _body_anim._resolve_anim_channel_register(slot)
 
 
-# Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
-# Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
-# the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
 func _advance_part_anims(delta: float) -> bool:
-	if _part_anims.is_empty() or delta <= 0.0:
-		return false
-	var finished: Array = []
-	var changed := false
-	for register in _part_anims.keys():
-		var anim: Dictionary = _part_anims[register]
-		var old_value := int(_ctrl_values.get(register, 0))
-		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
-		anim["value"] = value
-		var next_value := int(round(value))
-		_ctrl_values[register] = next_value
-		changed = changed or old_value != next_value
-		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
-			finished.append(register)  # reached the clamp endpoint; the part holds there
-	for register in finished:
-		_part_anims.erase(register)
-	_bounds_dirty = _bounds_dirty or changed
-	return changed
+	return _body_anim._advance_part_anims(delta)
 
 
 # --- third-person aim overlay (the torso bend) ----------------------------------
@@ -891,109 +601,19 @@ var _wpn_phase_ticks := 0
 
 
 func set_weapon_channel(key: String, phase_ticks: int) -> void:
-	if key == _wpn_key and phase_ticks == _wpn_phase_ticks:
-		return
-	_wpn_key = key
-	_wpn_phase_ticks = phase_ticks
-	_body_pose_dirty = true
+	_body_anim.set_weapon_channel(key, phase_ticks)
 
 
 func set_aim_overlay(deltas: Array) -> void:
-	var overlay_changed := deltas != _aim_overlay_deltas
-	var classes_changed := false
-	if not deltas.is_empty() and _aim_overlay_classes.is_empty() and _skeletal != null \
-			and _skeletal.has_method("get_overlay_classes"):
-		var next_classes: PackedInt32Array = _skeletal.get_overlay_classes()
-		classes_changed = next_classes != _aim_overlay_classes
-		_aim_overlay_classes = next_classes
-	if not overlay_changed and not classes_changed:
-		return
-	_aim_overlay_deltas = deltas
-	_body_pose_dirty = true
+	_body_anim.set_aim_overlay(deltas)
 
 
 func set_right_hand_collapsed(collapsed: bool) -> void:
-	if collapsed == _collapse_right_hand:
-		return
-	_collapse_right_hand = collapsed
-	_body_pose_dirty = true
+	_body_anim.set_right_hand_collapsed(collapsed)
 
 
-## Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
-## evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
-## the bone pose. Public so deterministic hosts can advance the render-time channel without
-## reaching through Godot's private _process callback.
-## write_pose=false advances the clip clock and latches _body_pose_dirty
-## without writing bones — the hidden-model leg: the pose re-derives from
-## _anim_time on the next visible frame, so an unseen clip never freezes or
-## drifts.
 func advance_body_animation(delta: float, write_pose := true) -> void:
-	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
-		return
-	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
-		_anim_time += delta
-		_body_pose_dirty = true
-	if _promote_remote_body_pending_if_due():
-		_body_pose_dirty = true
-	if not write_pose:
-		return
-	if not _body_pose_dirty:
-		return
-	var use_overlay: bool = (not _aim_overlay_deltas.is_empty()
-			and not _aim_overlay_classes.is_empty())
-	if _skeletal.has_method("pose_skeleton"):
-		# The whole evaluate-and-write-bones loop in one native call: this runs per
-		# animated model per render frame, and the per-bone Variant boxing + three
-		# cross-boundary Skeleton3D calls from script dominated the present pass.
-		var wpn_time := 0.0
-		if use_overlay and not _wpn_key.is_empty():
-			# Weapon-channel playhead: half-frame ticks -> seconds, the
-			# play_body_clip_at convention (seconds = ticks / (2 * clip_fps)).
-			var wfps: float = _skeletal.get_clip_fps(_wpn_key)
-			if wfps > 0.0:
-				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
-		_skeletal.pose_skeleton(
-				_skeleton, _anim_key, _anim_time, _anim_variant,
-				_aim_overlay_classes if use_overlay else PackedInt32Array(),
-				_aim_overlay_deltas if use_overlay else [],
-				_wpn_key if use_overlay else "", wpn_time, _collapse_right_hand)
-		_body_pose_dirty = false
-		return
-	# Script fallback for duck-typed skeletal doubles (tests) without the native
-	# batch entry.
-	var pose: Array
-	if use_overlay and _skeletal.has_method("eval_pose_overlay"):
-		# Weapon-channel playhead: half-frame ticks -> seconds, the play_body_clip_at
-		# convention (seconds = ticks / (2 * clip_fps)).
-		var wpn_time := 0.0
-		if not _wpn_key.is_empty():
-			var wfps: float = _skeletal.get_clip_fps(_wpn_key)
-			if wfps > 0.0:
-				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
-		pose = _skeletal.eval_pose_overlay(
-			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas,
-			_wpn_key, wpn_time, _collapse_right_hand)
-	else:
-		# The weapon channel only renders through the overlay path — its export gate
-		# (primary-state flag 0x40) implies the aim overlay is active [orig: @0x4b14a7].
-		pose = _skeletal.eval_pose(_anim_key, _anim_time, _anim_variant)
-	var count: int = mini(pose.size(), _skeleton.get_bone_count())
-	for i in range(count):
-		var t: Transform3D = pose[i]
-		if _collapse_right_hand and i == 16:
-			# eval_pose_overlay preserves BN17's sampled parent-local joint origin
-			# while clearing its basis. Apply that origin directly and collapse scale
-			# there. Sending the joint to world zero makes mixed-weight triangles span
-			# from the actor to the origin instead of clipping the baked weapon.
-			# This branch also covers the no-overlay eval_pose fallback above.
-			_skeleton.set_bone_pose_position(i, t.origin)
-			_skeleton.set_bone_pose_rotation(i, Quaternion.IDENTITY)
-			_skeleton.set_bone_pose_scale(i, Vector3.ZERO)
-		else:
-			_skeleton.set_bone_pose_position(i, t.origin)
-			_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
-			_skeleton.set_bone_pose_scale(i, t.basis.get_scale())
-	_body_pose_dirty = false
+	_body_anim.advance_body_animation(delta, write_pose)
 
 
 func rebuild() -> void:
@@ -1239,15 +859,11 @@ func _clamp_lod_index(lod_index: int) -> int:
 	return clampi(lod_index, 0, maxi(lod_count - 1, 0))
 
 
+# --- W4-6c: the material factory/classification + environment-lighting
+# cluster moved verbatim to nova_object_materials.gd; delegates below.
+
 func _build_material_defs() -> Dictionary:
-	var result := {}
-	for material in object_data.get_materials():
-		var material_index := int(material.get("material_index", material.get("index", 0)))
-		result[material_index] = material
-		var array_index := int(material.get("index", material_index))
-		if not result.has(array_index):
-			result[array_index] = material
-	return result
+	return _materials._build_material_defs()
 
 
 func _legacy_submeshes_from_surfaces(lod_index: int) -> Array:
@@ -1480,390 +1096,68 @@ func _material_for_index(material_array_index: int,
 
 static func material_supports_projected_shadow_receiver(
 		blend_mode: int, material_flags: int) -> bool:
-	# The simple attenuation next-pass has no access to the source material's
-	# alpha coverage or two-sided raster state. Applying it to those surfaces
-	# would darken transparent cards/polygons or miss their back faces. Keep the
-	# approximation on coverage-complete one-sided opaque surfaces only; exact
-	# alpha-aware projection remains part of the retail tile-compositor work.
-	return blend_mode == NovaObjectShaderCache.BLEND_OPAQUE \
-			and (material_flags & (
-				NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST
-				| NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED)) == 0
+	return NovaObjectMaterials.material_supports_projected_shadow_receiver(blend_mode, material_flags)
 
 
 func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
-	var material := ShaderMaterial.new()
-	var material_index := int(material_def.get("index", index))
-	var info := object_data.get_material_info(material_index) if object_data != null and material_index >= 0 and material_index < object_data.get_material_count() else {}
-	var shader_tag := String(info.get("shader_tag", material_def.get("shader", "FF_ST_OP")))
-	if shader_tag.is_empty():
-		shader_tag = "FF_ST_OP"
-	var material_flags := 0
-	if bool(info.get("alpha_test_enabled", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0)):
-		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST
-	if bool(info.get("alpha_invert", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0)):
-		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT
-	if bool(info.get("two_sided", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED) != 0)):
-		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED
-	var emissive_type := 2 if bool(info.get("emissive", false)) else int(material_def.get("emissive_type", 0))
-	var is_glass_flag := 1 if bool(info.get("is_glass", material_def.get("is_glass", false))) else 0
-	var alpha_test_byte := int(info.get("alpha_test", roundi(float(material_def.get("alpha_threshold", 0.0)) * 255.0)))
-	var shader_cache := NovaObjectShaderCache.get_singleton()
-
-	# Textures resolve before the shader key: the detail stage only survives
-	# classification when the secondary texture actually resolved (below).
-	var diffuse := _load_texture_for_slot(material_def, 1)
-	var detail := _load_texture_for_slot(material_def, 2)
-	var normal := _load_texture_for_slot(material_def, 3)
-	if normal == null:
-		normal = _load_texture_for_slot(material_def, 4)
-	if diffuse == null and detail != null:
-		diffuse = detail
-		detail = null
-
-	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
-	if detail == null:
-		# Retail runs the _MT second stage only with its texture bound — a
-		# NULL-texture stage is dropped. An unresolved secondary therefore
-		# composes the no-detail shader: identical output to no stage at all,
-		# never the Modulate2x stage over a placeholder
-		# (render-material-re.md §FF technique tables).
-		key &= ~NovaObjectShaderCache.CAP_DETAIL
-	material.shader = shader_cache.get_shader_for_key(key)
-	var blend_mode := shader_cache.blend_for_key(key)
-	if blend_mode != NovaObjectShaderCache.BLEND_OPAQUE:
-		# Water-side rung applied by refresh_render_order() once placed.
-		_alpha_materials.append(material)
-
-	if diffuse != null:
-		material.set_shader_parameter("u_diffuse", diffuse)
-	else:
-		material.set_shader_parameter("u_diffuse", _solid_colour_texture(_hash_color_for_index(index)))
-	if detail != null:
-		# The _MT secondary map, same resolver path as the diffuse (slot 2 =
-		# the material record's second texture — OED's SECONDARY slot).
-		material.set_shader_parameter("u_detail", detail)
-	if normal != null:
-		material.set_shader_parameter("u_normal_map", normal)
-	else:
-		material.set_shader_parameter("u_normal_map", _solid_colour_texture(Color(0.5, 0.5, 1.0, 1.0)))
-	if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
-		## The ref byte feeds the compare exactly; the shader keeps a > ref
-		## (invert: a <= ref), so no epsilon fudge is needed for ref 0.
-		## [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0]
-		material.set_shader_parameter("u_alpha_test_threshold", float(alpha_test_byte) / 255.0)
-		material.set_shader_parameter("u_alpha_test_invert", 1.0 if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
-	else:
-		material.set_shader_parameter("u_alpha_test_threshold", 0.0)
-		material.set_shader_parameter("u_alpha_test_invert", 0.0)
-	var reflect: Color = info.get("reflect_color", Color(0.7, 0.8, 0.9, 0.35))
-	material.set_shader_parameter("u_reflect_color", reflect)
-	material.set_shader_parameter("u_uv_offset", Vector2.ZERO)
-	material.set_shader_parameter("u_uv_scale", Vector2.ONE)
-	material.set_shader_parameter("u_uv_rotation", 0.0)
-	material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
-	material.set_shader_parameter("u_alpha_mod", 1.0)
-	material.set_shader_parameter("u_emissive", 1.0 if bool(info.get("emissive", false)) else 0.0)
-	material.set_shader_parameter("u_local_light_count", 0)
-	material.set_shader_parameter("u_local_light_position", Vector3.ZERO)
-	material.set_shader_parameter("u_local_light_color", Vector3.ONE)
-	material.set_shader_parameter("u_local_light_intensity", 1.0)
-	material.set_shader_parameter("u_local_light_atten_start", 0.0)
-	material.set_shader_parameter("u_local_light_atten_end", 5.0)
-	if material_supports_projected_shadow_receiver(
-			blend_mode, material_flags):
-		material.next_pass = _get_shadow_receiver_material()
-	_apply_default_environment_to_material(material)
-	return material
+	return _materials._create_material(index, material_def)
 
 
 func _get_shadow_receiver_material() -> ShaderMaterial:
-	if _shadow_receiver_material == null:
-		_shadow_receiver_material = ShaderMaterial.new()
-		_shadow_receiver_material.shader = SUN_SHADOW_CATCHER_SHADER
-	return _shadow_receiver_material
+	return _materials._get_shadow_receiver_material()
 
 
 func _load_texture_for_slot(material_def: Dictionary, slot: int) -> Texture2D:
-	if object_data == null or material_def.is_empty():
-		return null
-	var textures: Array = material_def.get("textures", [])
-	if textures.is_empty():
-		return null
-
-	var material_index := int(material_def.get("index", -1))
-	if material_index < 0:
-		return null
-
-	for i in range(textures.size()):
-		var texture: Dictionary = textures[i]
-		if int(texture.get("slot", 0)) == slot:
-			var loaded: Texture2D = object_data.load_material_texture(material_index, i)
-			if loaded != null:
-				return loaded
-	return null
+	return _materials._load_texture_for_slot(material_def, slot)
 
 
 func _collect_anim_frames(material_index: int) -> void:
-	if _anim_frames_by_mat.has(material_index) or object_data == null:
-		return
-	var frame_names: PackedStringArray = object_data.get_material_anim_frames(material_index, 1)
-	if frame_names.size() <= 1:
-		return
-	var frames: Array = []
-	for frame_name in frame_names:
-		frames.append(_load_texture_name(frame_name))
-	_anim_frames_by_mat[material_index] = frames
+	_materials._collect_anim_frames(material_index)
 
 
 func _load_texture_name(texture_name: String) -> Texture2D:
-	if object_data == null or texture_name.is_empty():
-		return null
-	return object_data.load_texture_name(texture_name)
+	return _materials._load_texture_name(texture_name)
 
 
 func _hash_color_for_index(idx: int) -> Color:
-	var h := IndexHue.hue_for_index(idx)
-	return Color.from_hsv(h, 0.35, 0.85)
+	return _materials._hash_color_for_index(idx)
 
 
 func _solid_colour_texture(color: Color) -> ImageTexture:
-	var image := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-	image.set_pixel(0, 0, color)
-	return ImageTexture.create_from_image(image)
+	return _materials._solid_colour_texture(color)
 
 
 func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
-	apply_environment_values(material, environment_values_from(null))
+	_materials._apply_default_environment_to_material(material)
 
 
-# A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
-# animates. The classifier is conservative: any non-zero generator style counts as dynamic --
-# it can only over-evaluate, never freeze an animation (a fully-static material's eval is
-# the identity that _create_material already set).
 func _material_runtime_is_dynamic(material_index: int) -> bool:
-	if object_data == null:
-		return true
-	var info: Dictionary = object_data.get_material_info(material_index)
-	if info.is_empty():
-		return true
-	return int(info.get("uv_u_style", 0)) != 0 \
-		or int(info.get("uv_v_style", 0)) != 0 \
-		or int(info.get("rgb_gen_style", 0)) != 0 \
-		or int(info.get("alpha_gen_style", 0)) != 0
+	return _materials._material_runtime_is_dynamic(material_index)
 
 
-# Partition the surface materials into those that change at runtime (UV/RGB/alpha generators
-# or a multi-frame texture animation) and the static remainder. Only the dynamic slots are
-# visited per frame; static slots keep the identity values written at material creation.
 func _classify_materials() -> void:
-	_material_needs_eval.clear()
-	_dynamic_material_slots = PackedInt32Array()
-	var kind_cache: Dictionary = {}
-	for i in range(_surface_materials.size()):
-		var material_index := int(_surface_material_indices[i])
-		var needs_eval: bool
-		if kind_cache.has(material_index):
-			needs_eval = bool(kind_cache[material_index])
-		else:
-			needs_eval = _material_runtime_is_dynamic(material_index)
-			kind_cache[material_index] = needs_eval
-		_material_needs_eval.append(needs_eval)
-		var frames: Array = _anim_frames_by_mat.get(material_index, [])
-		if needs_eval or frames.size() > 1:
-			_dynamic_material_slots.append(i)
-
-
-# ADR 0017 typed record: the env-derived lighting/fog values the object
-# shaders consume — computed once per env change and stamped onto many
-# materials (live model surfaces AND the mission placer's static batches, so
-# batched world objects relight from the SAME values/skip logic as live
-# models; retail relights every entity from the current lighting block each
-# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
-# Fields are always assigned by environment_values_from().
-class EnvLightValues:
-	extends RefCounted
-	var hemi_sky: Vector3
-	var dir: Vector3
-	var dir_color: Vector3
-	var hemi_ground: Vector3
-	var ceiling: Vector3
-	var floor: Vector3
-	var gain: Vector3
-	var fog_enabled: bool
-	var fog_color: Vector3
-	var fog_start: float
-	var fog_end: float
-	var fog_type: int
-
-	# True when `other` carries the same lighting/fog the shaders consume.
-	# Colours compare with is_equal_approx (the weather smoother quantises to
-	# 8-bit, so real changes are >= 1/255, far above epsilon); a null other
-	# (first push after rebuild) is never equal, forcing the initial push.
-	func equals(other: EnvLightValues) -> bool:
-		if other == null:
-			return false
-		return hemi_sky.is_equal_approx(other.hemi_sky) \
-			and dir.is_equal_approx(other.dir) \
-			and dir_color.is_equal_approx(other.dir_color) \
-			and hemi_ground.is_equal_approx(other.hemi_ground) \
-			and ceiling.is_equal_approx(other.ceiling) \
-			and floor.is_equal_approx(other.floor) \
-			and gain.is_equal_approx(other.gain) \
-			and fog_enabled == other.fog_enabled \
-			and fog_color.is_equal_approx(other.fog_color) \
-			and is_equal_approx(fog_start, other.fog_start) \
-			and is_equal_approx(fog_end, other.fog_end) \
-			and fog_type == other.fog_type
+	_materials._classify_materials()
 
 
 static func environment_values_from(env_node: Node) -> EnvLightValues:
-	var v := EnvLightValues.new()
-	if env_node == null or not env_node.has_method("is_loaded") or not env_node.call("is_loaded"):
-		v.hemi_sky = DEFAULT_HEMI_SKY_COLOR
-		v.dir = DEFAULT_DIR_LIGHT_DIR
-		v.dir_color = DEFAULT_DIR_LIGHT_COLOR
-		v.hemi_ground = DEFAULT_HEMI_GROUND_COLOR
-		v.ceiling = DEFAULT_HEMI_SKY_COLOR
-		v.floor = DEFAULT_HEMI_GROUND_COLOR
-		v.gain = DEFAULT_COLOR_SRC_GAIN
-		v.fog_enabled = false
-		v.fog_color = DEFAULT_FOG_COLOR
-		v.fog_start = DEFAULT_FOG_START
-		v.fog_end = DEFAULT_FOG_END
-		v.fog_type = DEFAULT_FOG_TYPE
-		return v
-	# Select sun or moon before the object-material normalization seam
-	# [orig: Environment_GetLightDirectionFloat @ 0x57d870].
-	var light_dir: Vector3 = env_node.call("get_light_direction")
-	if light_dir.length() <= 0.001:
-		light_dir = -DEFAULT_DIR_LIGHT_DIR
-	var gain: Vector3 = DEFAULT_COLOR_SRC_GAIN
-	if env_node.has_method("get_color_src_gain"):
-		gain = env_node.call("get_color_src_gain")
-	v.hemi_sky = env_node.call("get_sky_ambient")
-	v.dir = -light_dir.normalized()
-	v.dir_color = env_node.call("get_sun_light")
-	v.hemi_ground = env_node.call("get_fill_light")
-	v.ceiling = env_node.call("get_ceiling_color")
-	v.floor = env_node.call("get_floor_color")
-	v.gain = gain
-	v.fog_enabled = true
-	v.fog_color = env_node.call("get_fog_color")
-	v.fog_start = env_node.call("get_fog_start")
-	v.fog_end = env_node.call("get_fog_level")
-	v.fog_type = env_node.call("get_fog_type")
-	return v
+	return NovaObjectMaterials.environment_values_from(env_node)
 
 
 static func entity_lighting_values(world_values: EnvLightValues, effect_scale: float,
 		interior_lerp: bool, interior_daylight: float) -> EnvLightValues:
-	if world_values == null:
-		return null
-	var v := EnvLightValues.new()
-	v.dir = world_values.dir
-	v.dir_color = world_values.dir_color * clampf(effect_scale, 0.0, 1.0)
-	v.hemi_sky = world_values.hemi_sky
-	v.hemi_ground = world_values.hemi_ground
-	v.ceiling = world_values.ceiling
-	v.floor = world_values.floor
-	v.gain = world_values.gain
-	v.fog_enabled = world_values.fog_enabled
-	v.fog_color = world_values.fog_color
-	v.fog_start = world_values.fog_start
-	v.fog_end = world_values.fog_end
-	v.fog_type = world_values.fog_type
-	if interior_lerp:
-		var transfer := clampf(interior_daylight, 0.0, 1.0)
-		v.dir_color *= transfer
-		v.hemi_ground = world_values.floor.lerp(world_values.hemi_ground, transfer)
-		v.hemi_sky = world_values.ceiling.lerp(world_values.hemi_sky, transfer)
-	return v
+	return NovaObjectMaterials.entity_lighting_values(world_values, effect_scale, interior_lerp, interior_daylight)
 
 
 static func apply_environment_values(material: ShaderMaterial, values: EnvLightValues) -> void:
-	if material == null or values == null:
-		return
-	material.set_shader_parameter("u_hemi_sky_color", values.hemi_sky)
-	material.set_shader_parameter("u_dir_light_dir", values.dir)
-	material.set_shader_parameter("u_dir_light_color", values.dir_color)
-	material.set_shader_parameter("u_hemi_ground_color", values.hemi_ground)
-	material.set_shader_parameter("u_color_src_global_gain", values.gain)
-	material.set_shader_parameter("u_fog_enabled", values.fog_enabled)
-	material.set_shader_parameter("u_fog_color", values.fog_color)
-	material.set_shader_parameter("u_fog_start", values.fog_start)
-	material.set_shader_parameter("u_fog_end", values.fog_end)
-	material.set_shader_parameter("u_fog_type", values.fog_type)
+	NovaObjectMaterials.apply_environment_values(material, values)
 
 
 func _apply_environment_to_materials() -> void:
-	# The environment is shared and changes slowly (time-of-day) or not at all. NovaWeather
-	# re-stamps it every frame, but the smoothed colours quantise to identical bytes once
-	# settled, so the 9 values these materials consume are byte-stable in steady state. Skip
-	# the 9 cross-language reads + 9-uniform-per-material push when nothing changed since the
-	# last push: a NovaEnvironment generation makes the steady-state check a single int
-	# compare; the value cache is the fallback for env nodes without one. Either way the skip
-	# only ever omits re-pushing identical uniforms (retained mode -> invisible), so the
-	# rendered lighting/fog is byte-identical to pushing every frame.
-	var gen := -1
-	if _env_has_generation:
-		gen = int(_environment_node.get_env_generation())
-		var have_all_cached := _last_env_values != null \
-				and (not _interior_section_lighting
-					or _last_section_env_values != null)
-		if gen == _last_env_gen and have_all_cached:
-			return
-	var world_values := environment_values_from(_environment_node)
-	# A portal building is not an ordinary entity submission: its exterior
-	# shell always keeps effectScale 1, and only ROBJ 1+ takes its own ItemDef
-	# transfer. Make that invariant authoritative here so a generic entity
-	# update cannot accidentally dim the shell.
-	var values := entity_lighting_values(
-			world_values,
-			1.0 if _interior_section_lighting else _lighting_effect_scale,
-			false if _interior_section_lighting else _interior_lerp,
-			0.0 if _interior_section_lighting else _interior_daylight)
-	var section_values: EnvLightValues = null
-	if _interior_section_lighting:
-		section_values = entity_lighting_values(
-				world_values,
-				1.0,
-				true,
-				_interior_section_daylight)
-	var entity_unchanged := values.equals(_last_env_values)
-	var section_unchanged := not _interior_section_lighting \
-			or section_values.equals(_last_section_env_values)
-	if entity_unchanged and section_unchanged:
-		_last_env_gen = gen
-		return
-	_last_env_values = values
-	_last_section_env_values = section_values
-	_last_env_gen = gen
-	for i in range(_surface_materials.size()):
-		var material := _surface_materials[i]
-		if material == null:
-			continue
-		var context := int(_surface_lighting_contexts[i]) \
-				if i < _surface_lighting_contexts.size() \
-				else LIGHTING_CONTEXT_ENTITY
-		apply_environment_values(
-				material,
-				section_values
-					if context == LIGHTING_CONTEXT_INTERIOR_SECTION
-					else values)
+	_materials._apply_environment_to_materials()
 
 
-# The witnessed block mapping: dir_color <- the light block (sun/moon),
-# hemi_sky <- the sky block, hemi_ground <- the ground block, gain <- the
-# modulator /64 (the iris exposure reaching self-lit surfaces)
-# [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
-#  ColorSrcGlobalGain bind @ 0x58e05d].
 func _environment_values() -> EnvLightValues:
-	return entity_lighting_values(
-			environment_values_from(_environment_node),
-			_lighting_effect_scale,
-			_interior_lerp,
-			_interior_daylight)
+	return _materials._environment_values()
 
 
 func _set_model_bounds(bounds: AABB) -> void:
