@@ -723,10 +723,6 @@ func set_selected_surface_index(value: int) -> void:
 	_mark_ui_state_changed()
 
 
-func get_surface_palette_bytes() -> PackedByteArray:
-	return _document.get_surface_palette_bytes()
-
-
 func get_selected_surface_label() -> String:
 	return TerrainEditorSurfacePaint.get_surface_label(selected_surface_index)
 
@@ -855,16 +851,8 @@ func get_sector_size() -> int:
 	return maxi(get_sector_count(), get_sector_rows())
 
 
-func set_sector_count(value: int) -> void:
-	set_sector_size(value)
-
-
 func get_sector_rows() -> int:
 	return _data.get_sector_rows() if _data else 0
-
-
-func set_sector_rows(value: int) -> void:
-	set_sector_size(value)
 
 
 func set_sector_size(value: int) -> void:
@@ -1083,20 +1071,12 @@ func has_tileinfo_resource() -> bool:
 	return _document.has_tileinfo_resource()
 
 
-func get_tileinfo_entries() -> Array:
-	return _document.get_tileinfo_entries()
-
-
 func get_tileinfo_entry(index: int) -> NovaTerrainTileEntry:
 	return _document.get_tileinfo_entry(index)
 
 
 func get_tileinfo_selected_index() -> int:
 	return _document.get_tileinfo_selected_index()
-
-
-func get_tileinfo_entry_indices_at_cell(cell_x: int, cell_z: int) -> PackedInt32Array:
-	return _document.get_tileinfo_entry_indices_at_cell(cell_x, cell_z)
 
 
 func has_selected_tileinfo_entry() -> bool:
@@ -2415,14 +2395,6 @@ func _set_heightmap_image(image: Image) -> void:
 	_mark_tile_overlay_dirty()
 
 
-func _set_colormap_image(image: Image, sync_data: bool = true) -> void:
-	_document.set_colormap_image(_get_material(), image, sync_data)
-
-
-func _set_blendmap_image(image: Image, sync_data: bool = true) -> void:
-	_document.set_blendmap_image(_get_material(), image, sync_data)
-
-
 func _sync_material_from_data() -> void:
 	_document.sync_material_from_data(_get_material())
 	_apply_environment_to_preview()
@@ -2521,12 +2493,6 @@ func _build_default_sector_grid() -> PackedInt32Array:
 func _create_heightmap_image(fill_height: float) -> Image:
 	var image := Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
 	image.fill(Color(fill_height, 0, 0, 1))
-	return image
-
-
-func _create_color_image(width: int, height: int, color: Color) -> Image:
-	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
-	image.fill(color)
 	return image
 
 
