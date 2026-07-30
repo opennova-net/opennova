@@ -345,6 +345,22 @@ func _build_panel() -> void:
 	_panel.offset_right = -PANEL_EDGE_MARGIN
 	_panel.offset_bottom = -PANEL_EDGE_MARGIN
 	_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	var panel_surface := StyleBoxFlat.new()
+	panel_surface.bg_color = Color(0.035, 0.04, 0.05, 0.94)
+	panel_surface.border_color = Color(0.42, 0.47, 0.54, 0.72)
+	panel_surface.border_width_left = 1
+	panel_surface.border_width_top = 1
+	panel_surface.border_width_right = 1
+	panel_surface.border_width_bottom = 1
+	panel_surface.corner_radius_top_left = 4
+	panel_surface.corner_radius_top_right = 4
+	panel_surface.corner_radius_bottom_left = 4
+	panel_surface.corner_radius_bottom_right = 4
+	panel_surface.content_margin_left = 4.0
+	panel_surface.content_margin_top = 4.0
+	panel_surface.content_margin_right = 4.0
+	panel_surface.content_margin_bottom = 4.0
+	_panel.add_theme_stylebox_override("panel", panel_surface)
 	add_child(_panel)
 
 	var frame := HBoxContainer.new()
@@ -385,6 +401,9 @@ func _build_panel() -> void:
 	_runtime_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_runtime_status_label.clip_text = true
 	_runtime_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_runtime_status_label.add_theme_font_size_override("font_size", 13)
+	_runtime_status_label.add_theme_color_override(
+			"font_color", Color(0.76, 0.8, 0.84))
 	header.add_child(_runtime_status_label)
 
 	_unlock_edits = CheckButton.new()
@@ -490,7 +509,9 @@ func _build_panel() -> void:
 	_page_host.name = "PageHost"
 	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_page_host.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# SHOW_NEVER is the width firewall: unlike DISABLED, it does not promote a
+	# wide page child's minimum width into the dock's own minimum size.
+	_page_host.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	_page_host.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_page_host.follow_focus = true
 	body.add_child(_page_host)
@@ -555,8 +576,8 @@ func _rebuild_page_list() -> void:
 			continue
 		var header := _page_list.add_item(String(category).to_upper(), null, false)
 		_page_list.set_item_selectable(header, false)
-		_page_list.set_item_disabled(header, true)
-		_page_list.set_item_custom_fg_color(header, Color(0.62, 0.62, 0.62))
+		_page_list.set_item_custom_fg_color(header, Color(0.7, 0.73, 0.77))
+		_page_list.set_item_custom_bg_color(header, Color(0.12, 0.13, 0.15, 0.86))
 		for page in members:
 			var row := _page_list.add_item(page.page_title())
 			_row_pages[row] = page
@@ -798,7 +819,7 @@ func _refresh() -> void:
 		_status_label.add_theme_color_override(
 				"font_color", Color(0.68, 0.72, 0.76))
 	_status_label.tooltip_text = _status_label.text
-	_runtime_status_label.text = String(status.get("label", "NO MISSION")).to_upper()
+	_runtime_status_label.text = String(status.get("label", "No mission"))
 	var runtime_detail := String(status.get("detail", ""))
 	_runtime_status_label.tooltip_text = "%s%s" % [
 		String(status.get("label", "No mission")),

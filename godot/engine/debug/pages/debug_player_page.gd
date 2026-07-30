@@ -13,6 +13,7 @@ var _player_position_label: Label
 var _player_orientation_label: Label
 var _player_combat_label: Label
 var _player_inventory_label: Label
+var _player_inventory_toggle: Button
 var _player_dump_button: Button
 var _player_dump_status: Label
 var _teleport_values: Array[SpinBox] = []
@@ -33,6 +34,7 @@ func page_category() -> StringName:
 func _build() -> void:
 	add_theme_constant_override("separation", 8)
 
+	add_child(_section_label("PlayerPoseHeading", "POSE"))
 	_player_mission_label = _info_label("PlayerMission")
 	_player_mission_label.text = "Mission: --"
 
@@ -42,11 +44,11 @@ func _build() -> void:
 	_player_orientation_label = _info_label("PlayerOrientation")
 	_set_optional_text(_player_orientation_label, "")
 
+	add_child(_section_label("PlayerCombatHeading", "COMBAT"))
 	_player_combat_label = _info_label("PlayerCombat")
-	_player_inventory_label = _info_label("PlayerInventory")
 	_set_optional_text(_player_combat_label, "")
-	_set_optional_text(_player_inventory_label, "")
 
+	add_child(_section_label("PlayerActionsHeading", "ACTIONS"))
 	_player_dump_button = Button.new()
 	_player_dump_button.name = "DumpSnapshot"
 	_player_dump_button.text = "Dump snapshot"
@@ -71,7 +73,7 @@ func _build() -> void:
 	add_child(edit_header)
 	var edit_grid := GridContainer.new()
 	edit_grid.name = "PlayerTeleportValues"
-	edit_grid.columns = 2
+	edit_grid.columns = 3
 	add_child(edit_grid)
 	for axis in ["X", "Y", "Z", "Yaw", "Pitch"]:
 		var field := VBoxContainer.new()
@@ -112,6 +114,20 @@ func _build() -> void:
 	_teleport_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_teleport_status)
 
+	_player_inventory_toggle = Button.new()
+	_player_inventory_toggle.name = "PlayerInventoryToggle"
+	_player_inventory_toggle.text = "Inventory"
+	_player_inventory_toggle.toggle_mode = true
+	_player_inventory_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_player_inventory_toggle.tooltip_text = \
+			"Show the local player's weapon slots and ammo pools."
+	_player_inventory_toggle.visible = false
+	_player_inventory_toggle.toggled.connect(_on_inventory_toggled)
+	add_child(_player_inventory_toggle)
+
+	_player_inventory_label = _info_label("PlayerInventory")
+	_player_inventory_label.visible = false
+
 
 func refresh() -> void:
 	var snapshot := DebugSnapshotWriter.capture(_ctx)
@@ -131,7 +147,7 @@ func _clear_live() -> void:
 	_player_position_label.text = "No local player."
 	_set_optional_text(_player_orientation_label, "")
 	_set_optional_text(_player_combat_label, "")
-	_set_optional_text(_player_inventory_label, "")
+	_set_inventory_text("", "Inventory", "")
 	_player_dump_button.disabled = true
 	if _teleport_button != null:
 		_teleport_button.disabled = true
@@ -144,13 +160,46 @@ func _clear_live() -> void:
 func _info_label(node_name: String) -> Label:
 	var label := Label.new()
 	label.name = node_name
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(label)
+	return label
+
+
+func _section_label(node_name: String, text: String) -> Label:
+	var label := Label.new()
+	label.name = node_name
+	label.text = text
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_color", Color(0.64, 0.68, 0.72))
 	return label
 
 
 func _set_optional_text(label: Label, text: String) -> void:
 	label.text = text
 	label.visible = not text.is_empty()
+
+
+func _set_inventory_text(text: String, summary: String, tooltip: String) -> void:
+	_player_inventory_label.text = text
+	_player_inventory_label.tooltip_text = tooltip
+	_player_inventory_toggle.text = summary
+	_player_inventory_toggle.tooltip_text = \
+			"Show or hide the local player's weapon slots and ammo pools." \
+			if not text.is_empty() \
+			else "Show the local player's weapon slots and ammo pools."
+	_player_inventory_toggle.visible = not text.is_empty()
+	_sync_inventory_visibility()
+
+
+func _sync_inventory_visibility() -> void:
+	_player_inventory_label.visible = _player_inventory_toggle.visible \
+			and _player_inventory_toggle.button_pressed \
+			and not _player_inventory_label.text.is_empty()
+
+
+func _on_inventory_toggled(_pressed: bool) -> void:
+	_sync_inventory_visibility()
 
 
 ## A mission swap clears the previous mission's "Saved:" path so the status
@@ -186,8 +235,9 @@ func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 	var player: Dictionary = snapshot.get("player", {})
 	var bms: Dictionary = player.get("position_bms", {})
 	var godot: Dictionary = player.get("position_godot", {})
-	_player_position_label.text = \
-			"Position (BMS)\n  x %.3f   y %.3f   z %.3f\nPosition (Godot world)\n  x %.3f   y %.3f   z %.3f" % [
+	var position_text := "BMS: x %.3f | y %.3f | z %.3f\n" + \
+			"World: x %.3f | y %.3f | z %.3f"
+	_player_position_label.text = position_text % [
 				float(bms.get("x", 0.0)), float(bms.get("y", 0.0)),
 				float(bms.get("z", 0.0)), float(godot.get("x", 0.0)),
 				float(godot.get("y", 0.0)), float(godot.get("z", 0.0)),
@@ -195,7 +245,7 @@ func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 
 	var orientation: Dictionary = player.get("orientation_mission_deg", {})
 	var orientation_text := \
-			"Orientation (mission degrees)\n  yaw %.3f   pitch %.3f\n  view roll %.3f" % [
+			"Aim: yaw %.3f | pitch %.3f | roll %.3f" % [
 				float(orientation.get("yaw", 0.0)),
 				float(orientation.get("pitch", 0.0)),
 				float(orientation.get("view_roll", 0.0)),
@@ -204,7 +254,7 @@ func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 	var camera: Dictionary = view.get("camera", {})
 	var camera_mode := String(camera.get("mode", ""))
 	if not camera_mode.is_empty() and camera_mode != "unknown":
-		orientation_text += "\nView camera: %s" % camera_mode.replace("_", " ")
+		orientation_text += "\nCamera: %s" % camera_mode.replace("_", " ")
 	_set_optional_text(_player_orientation_label, orientation_text)
 	if not _teleport_editor_has_focus():
 		_teleport_values[0].value = float(bms.get("x", 0.0))
@@ -218,45 +268,97 @@ func _refresh_player_details() -> void:
 	var sim := _ctx.nova_simulation()
 	if sim == null:
 		_set_optional_text(_player_combat_label, "")
-		_set_optional_text(_player_inventory_label, "")
+		_set_inventory_text("", "Inventory", "")
 		return
 	var combat := PackedStringArray()
-	combat.append("Health %d / %d" % [
+	combat.append("Health: %d / %d | Team: %d | Class: %d" % [
 		sim.get_local_player_health(),
-		sim.get_local_player_max_health()])
-	combat.append("Team %d | class %d" % [
+		sim.get_local_player_max_health(),
 		sim.get_local_player_team(),
 		sim.get_local_player_class()])
 	var weapon_name := sim.get_local_player_weapon_name()
-	if not weapon_name.is_empty():
-		combat.append("Weapon: %s" % weapon_name)
 	var weapon: Dictionary = sim.get_local_player_weapon_state()
+	if not weapon_name.is_empty():
+		combat.append("Weapon: %s | Clip: %d | Reserve: %d" % [
+			weapon_name,
+			int(weapon.get("clip", 0)),
+			int(weapon.get("reserve", 0)),
+		])
 	if bool(weapon.get("active", false)):
-		combat.append("Weapon phase %d | anim %s | shot %d | reload %d" % [
+		combat.append("State: phase %d | Animation: %s" % [
 			int(weapon.get("phase", 0)), String(weapon.get("anim_key", "")),
+		])
+		combat.append("Events: shot %d | reload %d" % [
 			int(weapon.get("fired_serial", 0)),
 			int(weapon.get("reload_serial", 0))])
 	_set_optional_text(_player_combat_label, "\n".join(combat))
 
 	var inventory_lines := PackedStringArray()
+	var tooltip_lines := PackedStringArray(["All loadout slots"])
 	var inventory: Dictionary = sim.get_local_player_inventory()
 	var slots: Array = inventory.get("slots", [])
+	var equipped_combo := int(inventory.get("equipped_combo", -2))
+	var hidden_slot_count := 0
 	for slot_value in slots:
 		var slot: Dictionary = slot_value
-		inventory_lines.append("%s: %d rounds%s" % [
-			String(slot.get("name", "unknown")), int(slot.get("clip", 0)),
-			"  [equipped]" if int(slot.get("combo", -1)) \
-					== int(inventory.get("equipped_combo", -2)) else ""])
+		var slot_name := String(slot.get("name", "unknown"))
+		var rounds := int(slot.get("clip", 0))
+		var equipped := int(slot.get("combo", -1)) == equipped_combo
+		var slot_line := "%s: %s%s" % [
+			slot_name,
+			_rounds_text(rounds),
+			"  [equipped]" if equipped else "",
+		]
+		tooltip_lines.append(slot_line)
+		if rounds > 0 or equipped:
+			inventory_lines.append(slot_line)
+		else:
+			hidden_slot_count += 1
+	if hidden_slot_count > 0:
+		inventory_lines.append("%d empty slot%s hidden." % [
+			hidden_slot_count, "" if hidden_slot_count == 1 else "s"])
 	var pools: Dictionary = inventory.get("pools", {})
+	var populated_pool_count := 0
 	if not pools.is_empty():
-		var ammo := PackedStringArray()
+		var pool_names := PackedStringArray()
 		for key in pools:
-			ammo.append("%s %s" % [key, pools[key]])
-		inventory_lines.append("Ammo: " + ", ".join(ammo))
+			pool_names.append(String(key))
+		pool_names.sort()
+		tooltip_lines.append("")
+		tooltip_lines.append("All ammo pools")
+		inventory_lines.append("")
+		inventory_lines.append("Ammo pools")
+		var all_pool_lines := PackedStringArray()
+		for pool_name in pool_names:
+			var count := int(pools[pool_name])
+			all_pool_lines.append("%s: %d" % [pool_name, count])
+			if count != 0:
+				populated_pool_count += 1
+				inventory_lines.append("  %s: %d" % [pool_name, count])
+		tooltip_lines.append_array(all_pool_lines)
+		var empty_pool_count := pool_names.size() - populated_pool_count
+		if populated_pool_count == 0:
+			inventory_lines.append("  All %d pools are empty." % empty_pool_count)
+		elif empty_pool_count > 0:
+			inventory_lines.append("  %d empty pool%s hidden." % [
+				empty_pool_count, "" if empty_pool_count == 1 else "s"])
 	if inventory_lines.is_empty():
 		inventory_lines.append("Loadout entries: %d" % \
 				sim.get_local_player_loadout().size())
-	_set_optional_text(_player_inventory_label, "\n".join(inventory_lines))
+	var summary := "Inventory (%d slot%s, %d active pool%s)" % [
+		slots.size(),
+		"" if slots.size() == 1 else "s",
+		populated_pool_count,
+		"" if populated_pool_count == 1 else "s",
+	]
+	_set_inventory_text(
+			"\n".join(inventory_lines),
+			summary,
+			"\n".join(tooltip_lines))
+
+
+static func _rounds_text(rounds: int) -> String:
+	return "%d %s" % [rounds, "round" if rounds == 1 else "rounds"]
 
 
 func _refresh_teleport_state() -> void:

@@ -66,6 +66,46 @@ func test_render_timeline_builds_the_span_tree_by_depth() -> void:
 	assert_string_contains(terrain.get_text(1), "ms", "stages show milliseconds")
 
 
+func test_span_tree_keeps_time_readable_in_a_narrow_perf_page() -> void:
+	var host := Control.new()
+	host.size = Vector2(388, 560)
+	add_child_autofree(host)
+	var pane: DebugPerfPage = PaneScript.new()
+	pane.setup(NovaDebugContext.new())
+	host.add_child(pane)
+	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var long_label := \
+			"Mission load with a deliberately long authored path and diagnostic context ".repeat(4)
+	pane.render_timeline(_fabricate(long_label))
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+			"live span text cannot widen the Perf page past its dock")
+	assert_lte(pane.span_tree.position.x + pane.span_tree.size.x, pane.size.x,
+			"the span tree remains inside the narrow content column")
+	var used_width := pane.span_tree.get_column_width(0) \
+			+ pane.span_tree.get_column_width(1)
+	assert_lte(used_width, int(pane.span_tree.size.x),
+			"Stage cannot push Time beyond the visible tree")
+	assert_false(pane.span_tree.scroll_horizontal_enabled,
+			"span diagnostics stay readable without sideways navigation")
+	for column in range(pane.span_tree.columns):
+		assert_true(pane.span_tree.is_column_clipping_content(column),
+				"column %d clips display text instead of growing the tree" % column)
+	assert_gte(pane.span_tree.get_column_width(1), 88,
+			"Time keeps enough visible width for formatted durations")
+	assert_eq(pane.span_tree.get_column_title_alignment(1),
+			HORIZONTAL_ALIGNMENT_RIGHT)
+
+	var total := pane.span_tree.get_root().get_first_child()
+	assert_eq(total.get_text_alignment(1), HORIZONTAL_ALIGNMENT_RIGHT)
+	assert_eq(total.get_tooltip_text(0), long_label,
+			"the complete clipped stage remains available on hover")
+	assert_eq(total.get_tooltip_text(1), total.get_text(1),
+			"the complete duration remains available on hover")
+
+
 func test_unbalanced_timeline_renders_cleanly() -> void:
 	# finish() auto-closes spans an early return left open; the tree must not
 	# choke on them.
@@ -87,6 +127,51 @@ func test_monitors_populate() -> void:
 		var label: Label = pane.monitor_labels[key]
 		assert_false(label.text.is_empty(), "monitor '%s' shows a value" % key)
 	assert_string_contains((pane.monitor_labels["frame_ms"] as Label).text, "ms")
+
+
+func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> void:
+	var host := Control.new()
+	host.size = Vector2(388, 900)
+	add_child_autofree(host)
+	var pane: DebugPerfPage = PaneScript.new()
+	pane.setup(NovaDebugContext.new())
+	host.add_child(pane)
+	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var long_label := \
+			"Mission load with objects effects terrain textures and a long authored path ".repeat(5)
+	pane.render_history([_fabricate(long_label)])
+	pane.refresh_monitors()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var host_rect := host.get_global_rect()
+	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+			"load summaries and monitor text cannot widen Perf past the dock")
+	assert_lte(pane.history_option.get_global_rect().end.x, host_rect.end.x,
+			"the retained-load selector clips instead of widening every row")
+	assert_string_contains(pane.history_option.tooltip_text, long_label,
+			"the complete clipped load summary remains available on hover")
+
+	for key in pane.monitor_labels:
+		var value := pane.monitor_labels[key] as Label
+		var row := value.get_parent() as HBoxContainer
+		var name_label := row.get_node_or_null("Name") as Label
+		assert_not_null(name_label, "%s has a stable readable name cell" % key)
+		if name_label == null:
+			continue
+		assert_lte(row.get_global_rect().end.x, host_rect.end.x,
+				"%s row remains inside the content column" % key)
+		assert_lte(value.get_global_rect().end.x, host_rect.end.x,
+				"%s value is not pushed beyond the dock" % key)
+		assert_gte(value.size.x, 88.0,
+				"%s reserves a readable value lane" % key)
+		assert_eq(value.horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT)
+		assert_eq(value.tooltip_text, value.text,
+				"%s retains the complete live value on hover" % key)
+		assert_true(name_label.clip_text,
+				"%s name clips before stealing value space" % key)
+		assert_eq(name_label.tooltip_text, name_label.text,
+				"%s retains the complete name on hover" % key)
 
 
 func test_history_selector_lists_entries_and_renders_selection() -> void:

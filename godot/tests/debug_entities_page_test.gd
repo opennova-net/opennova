@@ -158,9 +158,17 @@ func test_page_shows_non_ai_rows_but_only_edits_through_ai_index() -> void:
 
 	var health := page.find_child("SetEntityHealth", true, false) as Button
 	var value := page.find_child("EntityHealthValue", true, false) as SpinBox
+	var health_editor := page.find_child(
+			"EntityEditHealth", true, false) as Control
+	var position_editor := page.find_child(
+			"EntityEditPosition", true, false) as Control
+	var status := page.find_child("EntityEditStatus", true, false) as Label
 	list.item_selected.emit(1)
 	assert_true(health.disabled,
 			"the client-present vehicle is inspectable but has no AI edit target")
+	assert_false(health_editor.visible)
+	assert_false(position_editor.visible)
+	assert_eq(status.text, "Read only: no authoritative AI edit target.")
 
 	list.item_selected.emit(0)
 	value.value = 37
@@ -170,8 +178,30 @@ func test_page_shows_non_ai_rows_but_only_edits_through_ai_index() -> void:
 			"row zero edits its mapped AI pool entry, not row zero")
 
 
+func test_mutation_editors_appear_only_after_an_editable_selection() -> void:
+	var page := _make_page(StubRuntime.new())
+	var list := page.find_child("EntityList", true, false) as ItemList
+	var health_editor := page.find_child(
+			"EntityEditHealth", true, false) as Control
+	var position_editor := page.find_child(
+			"EntityEditPosition", true, false) as Control
+
+	assert_false(health_editor.visible,
+			"an empty selection does not present dead health inputs")
+	assert_false(position_editor.visible,
+			"an empty selection does not present dead position inputs")
+
+	list.item_selected.emit(0)
+	assert_true(health_editor.visible,
+			"an editable AI-backed selection exposes health editing")
+	assert_true(position_editor.visible,
+			"an editable AI-backed selection exposes position editing")
+
+
 func test_position_editor_labels_axes_and_stays_compact() -> void:
 	var page := _make_page(StubRuntime.new())
+	var list := page.find_child("EntityList", true, false) as ItemList
+	list.item_selected.emit(0)
 	var editor := page.find_child("EntityEditPosition", true, false) as Control
 	var move := page.find_child("SetEntityPosition", true, false) as Button
 	assert_not_null(editor)
@@ -229,10 +259,42 @@ func test_despawned_ai_pool_entries_are_explicit_and_not_editable() -> void:
 
 	var health := page.find_child("SetEntityHealth", true, false) as Button
 	var position := page.find_child("SetEntityPosition", true, false) as Button
+	var health_editor := page.find_child(
+			"EntityEditHealth", true, false) as Control
+	var position_editor := page.find_child(
+			"EntityEditPosition", true, false) as Control
 	var status := page.find_child("EntityEditStatus", true, false) as Label
 	assert_true(health.disabled)
 	assert_true(position.disabled)
-	assert_string_contains(status.text, "despawned")
+	assert_false(health_editor.visible)
+	assert_false(position_editor.visible)
+	assert_eq(status.text, "Read only: this AI entry has despawned from the world.")
+
+
+func test_retained_selection_recomputes_edit_policy_after_live_despawn() -> void:
+	var runtime := StubRuntime.new()
+	var page := _make_page(runtime)
+	var list := page.find_child("EntityList", true, false) as ItemList
+	var health := page.find_child("SetEntityHealth", true, false) as Button
+	var health_editor := page.find_child(
+			"EntityEditHealth", true, false) as Control
+	var status := page.find_child("EntityEditStatus", true, false) as Label
+	list.item_selected.emit(0)
+	health.pressed.emit()
+	assert_eq(status.text, "Health updated.")
+
+	runtime.sim.cards[1]["pool"] = -1
+	page.refresh()
+	assert_false(health_editor.visible)
+	assert_eq(status.text,
+			"Read only: this AI entry has despawned from the world.",
+			"a live policy change replaces stale mutation feedback")
+
+	runtime.sim.cards[1]["pool"] = 1
+	page.refresh()
+	assert_true(health_editor.visible)
+	assert_eq(status.text, "",
+			"restored editability clears the stale read-only policy")
 
 
 func test_runtime_action_failure_always_has_visible_feedback() -> void:

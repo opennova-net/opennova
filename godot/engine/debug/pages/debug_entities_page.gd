@@ -15,6 +15,9 @@ var _selected_entity := -1
 var _selected_identity := ""
 var _selected_ai_index := -1
 var _selected_registry_present := false
+var _edit_policy_reason := ""
+var _health_editor: HBoxContainer
+var _position_editor: VBoxContainer
 var _health_value: SpinBox
 var _position_values: Array[SpinBox] = []
 var _set_health_button: Button
@@ -50,37 +53,37 @@ func _build() -> void:
 	_entity_detail.text = "Select a unit to see its details."
 	add_child(_entity_detail)
 
-	var edit_row := HBoxContainer.new()
-	edit_row.name = "EntityEditHealth"
-	add_child(edit_row)
+	_health_editor = HBoxContainer.new()
+	_health_editor.name = "EntityEditHealth"
+	add_child(_health_editor)
 	var health_label := Label.new()
 	health_label.text = "Health"
-	edit_row.add_child(health_label)
+	_health_editor.add_child(health_label)
 	_health_value = SpinBox.new()
 	_health_value.name = "EntityHealthValue"
 	_health_value.min_value = NovaDebugCatalog.ENTITY_HEALTH_MIN
 	_health_value.max_value = NovaDebugCatalog.ENTITY_HEALTH_MAX
 	_health_value.step = 1.0
 	_health_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	edit_row.add_child(_health_value)
+	_health_editor.add_child(_health_value)
 	_set_health_button = Button.new()
 	_set_health_button.name = "SetEntityHealth"
 	_set_health_button.text = "Set"
 	_set_health_button.pressed.connect(_on_set_health_pressed)
-	edit_row.add_child(_set_health_button)
+	_health_editor.add_child(_set_health_button)
 
-	var position_editor := VBoxContainer.new()
-	position_editor.name = "EntityEditPosition"
-	position_editor.add_theme_constant_override("separation", 4)
-	add_child(position_editor)
+	_position_editor = VBoxContainer.new()
+	_position_editor.name = "EntityEditPosition"
+	_position_editor.add_theme_constant_override("separation", 4)
+	add_child(_position_editor)
 	var position_header := Label.new()
 	position_header.name = "EntityPositionHeader"
 	position_header.text = "Position (mission coordinates)"
-	position_editor.add_child(position_header)
+	_position_editor.add_child(position_header)
 	var position_grid := GridContainer.new()
 	position_grid.name = "EntityPositionValues"
 	position_grid.columns = 3
-	position_editor.add_child(position_grid)
+	_position_editor.add_child(position_grid)
 	for axis in ["X", "Y", "Z"]:
 		var field := VBoxContainer.new()
 		field.name = "EntityPosition%sField" % axis
@@ -104,8 +107,9 @@ func _build() -> void:
 	_set_position_button.name = "SetEntityPosition"
 	_set_position_button.text = "Move"
 	_set_position_button.pressed.connect(_on_set_position_pressed)
-	position_editor.add_child(_set_position_button)
+	_position_editor.add_child(_set_position_button)
 	_set_edit_enabled(false)
+	_set_editors_visible(false)
 	_edit_status = Label.new()
 	_edit_status.name = "EntityEditStatus"
 	_edit_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -213,6 +217,7 @@ func _clear_live() -> void:
 	_entity_detail.text = "Select a unit to see its details."
 	_edit_status.text = ""
 	_set_edit_enabled(false)
+	_set_editors_visible(false)
 
 
 func _refresh_entity_detail() -> void:
@@ -221,6 +226,7 @@ func _refresh_entity_detail() -> void:
 		_selected_registry_present = false
 		_entity_detail.text = "Select a unit to see its details."
 		_set_edit_enabled(false)
+		_set_editors_visible(false)
 		return
 	var row: Dictionary = _entity_rows[_selected_entity]
 	var card: Dictionary = row.get("detail", {})
@@ -229,6 +235,7 @@ func _refresh_entity_detail() -> void:
 		_selected_registry_present = false
 		_entity_detail.text = "Select a unit to see its details."
 		_set_edit_enabled(false)
+		_set_editors_visible(false)
 		return
 	_selected_ai_index = int(row.get("ai_index", -1))
 	_selected_registry_present = bool(row.get("registry_present", true))
@@ -303,6 +310,7 @@ func _refresh_entity_detail() -> void:
 		_position_values[0].value = pos.x
 		_position_values[1].value = -pos.z
 		_position_values[2].value = pos.y
+	_set_editors_visible(true)
 	_refresh_edit_state()
 
 
@@ -310,6 +318,7 @@ func _on_entity_selected(index: int) -> void:
 	_selected_entity = index
 	_selected_identity = _entity_identity(_entity_rows[index]) \
 			if index >= 0 and index < _entity_rows.size() else ""
+	_edit_policy_reason = ""
 	_edit_status.text = ""
 	_refresh_entity_detail()
 
@@ -364,23 +373,25 @@ func _resolve_selected_ai_index() -> int:
 func _refresh_edit_state() -> void:
 	if _ctx.session == null or _selected_entity < 0:
 		_set_edit_enabled(false)
+		_set_edit_policy("")
 		return
 	if _selected_ai_index < 0:
 		_set_edit_enabled(false)
-		var reason := "This client-view entity has no authoritative AI edit index."
+		_set_editors_visible(false)
+		var reason := "Read only: no authoritative AI edit target."
 		_set_health_button.tooltip_text = reason
 		_set_position_button.tooltip_text = reason
-		if _edit_status.text.is_empty():
-			_edit_status.text = reason
+		_set_edit_policy(reason)
 		return
 	if not _selected_registry_present:
 		_set_edit_enabled(false)
-		var reason := "This AI pool entry has been despawned from the world registry."
+		_set_editors_visible(false)
+		var reason := "Read only: this AI entry has despawned from the world."
 		_set_health_button.tooltip_text = reason
 		_set_position_button.tooltip_text = reason
-		if _edit_status.text.is_empty():
-			_edit_status.text = reason
+		_set_edit_policy(reason)
 		return
+	_set_edit_policy("")
 	var health := _ctx.session.get_control_state(&"set_entity_health")
 	var position := _ctx.session.get_control_state(&"set_entity_position")
 	_set_health_button.disabled = not health.available or not health.writable
@@ -398,6 +409,22 @@ func _set_edit_enabled(enabled: bool) -> void:
 	_health_value.editable = enabled
 	for value in _position_values:
 		value.editable = enabled
+
+
+func _set_editors_visible(visible: bool) -> void:
+	_health_editor.visible = visible
+	_position_editor.visible = visible
+
+
+func _set_edit_policy(reason: String) -> void:
+	if reason == _edit_policy_reason:
+		if not reason.is_empty():
+			_edit_status.text = reason
+		return
+	_edit_policy_reason = reason
+	# A policy transition invalidates prior mutation feedback. Read-only state
+	# takes precedence; becoming editable starts with a clean result line.
+	_edit_status.text = reason
 
 
 func _entity_editor_has_focus() -> bool:

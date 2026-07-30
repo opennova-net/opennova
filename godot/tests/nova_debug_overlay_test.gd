@@ -142,6 +142,43 @@ class FakePoseRuntime:
 		return _mission_name
 
 
+class RealPlayerRuntime:
+	extends Node
+
+	var sim := NovaSimulation.new()
+
+	func _init() -> void:
+		add_child(sim)
+
+	func prepare_populated_player() -> Error:
+		var mission := NovaMissionData.new()
+		var err := mission.create_default()
+		if err != OK:
+			return err
+		if not sim.load_from_mission_data(mission):
+			return ERR_CANT_CREATE
+		if not sim.spawn_local_player(Vector3.ZERO, 0.0, 2):
+			return ERR_CANT_CREATE
+		var root := NovaResourceRoot.new()
+		err = root.set_root_dir(ProjectSettings.globalize_path(
+				"res://../fixtures/def"))
+		if err != OK:
+			return err
+		return sim.load_weapon_table(root, "weapon.def")
+
+	func get_sim() -> NovaSimulation:
+		return sim
+
+	func is_playing() -> bool:
+		return true
+
+	func get_mission_file() -> String:
+		return "player_loadout.bms"
+
+	func get_mission_name() -> String:
+		return "Player loadout"
+
+
 class FakeEntitySim:
 	extends FakePoseSim
 
@@ -831,6 +868,90 @@ func test_player_tab_stays_docked_and_sidebar_remains_clickable() -> void:
 	assert_false(compact_picker.visible)
 
 
+func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
+	var runtime := RealPlayerRuntime.new()
+	add_child_autofree(runtime)
+	assert_eq(runtime.prepare_populated_player(), OK)
+	var inventory: Dictionary = runtime.sim.get_local_player_inventory()
+	assert_gt((inventory.get("pools", {}) as Dictionary).size(), 20,
+			"the regression uses the wide production ammo-pool inventory")
+
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(1600, 900)
+	add_child_autofree(viewport)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Player"))
+	await wait_process_frames(2)
+
+	var panel := overlay.find_child("DebugPanel", true, false) as Control
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var player_page := overlay.get_node(PAGES + "/Player") as Control
+	var inventory_label := overlay.get_node(
+			PAGES + "/Player/PlayerInventory") as Label
+	var inventory_toggle := overlay.get_node(
+			PAGES + "/Player/PlayerInventoryToggle") as Button
+	var dump := overlay.get_node(PAGES + "/Player/DumpSnapshot") as Button
+	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
+	var viewport_rect := viewport.get_visible_rect()
+	assert_true(inventory_toggle.visible,
+			"the typed simulation exposes a concise inventory disclosure")
+	assert_string_contains(inventory_toggle.text, "slot")
+	assert_string_contains(inventory_toggle.text, "active pool")
+	assert_false(inventory_toggle.button_pressed,
+			"verbose inventory starts collapsed so actions stay above the fold")
+	assert_false(inventory_label.visible)
+	assert_true(page_host.get_global_rect().encloses(dump.get_global_rect()),
+			"snapshot action is visible without scrolling past inventory")
+	assert_true(page_host.get_global_rect().encloses(teleport.get_global_rect()),
+			"teleport action is visible without scrolling past inventory")
+	assert_false(page_host.get_v_scroll_bar().visible,
+			"the default populated Player summary fits the live 1600x900 dock")
+
+	inventory_toggle.set_pressed_no_signal(true)
+	inventory_toggle.toggled.emit(true)
+	await wait_process_frames(2)
+	assert_true(inventory_label.visible)
+	assert_string_contains(inventory_label.text, "Ammo",
+			"expanding reaches the ammo-pool content that caused the runaway")
+	assert_false(inventory_label.text.contains("1 rounds"),
+			"single-round loadout entries use readable grammar")
+	assert_string_contains(inventory_label.tooltip_text, "All ammo pools",
+			"the compact inventory retains the complete raw pool list")
+	assert_gte(panel.get_global_rect().position.x,
+			viewport_rect.position.x + 7.0,
+			"live loadout content cannot expand the dock past the left inset")
+	assert_lte(panel.get_global_rect().end.x,
+			viewport_rect.end.x - 7.0,
+			"live loadout content cannot expand the dock past the right inset")
+	assert_gte(page_list.get_global_rect().position.x,
+			viewport_rect.position.x,
+			"the Player loadout cannot push the other page tabs off-screen")
+	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+			"the populated page itself fits rather than relying on hidden clipping")
+	assert_lte(player_page.get_global_rect().end.x,
+			page_host.get_global_rect().end.x + 1.0,
+			"expanded loadout controls remain inside the visible page column")
+
+	viewport.size = Vector2i(360, 900)
+	await wait_process_frames(2)
+	viewport_rect = viewport.get_visible_rect()
+	assert_gte(panel.get_global_rect().position.x,
+			viewport_rect.position.x + 7.0)
+	assert_lte(panel.get_global_rect().end.x,
+			viewport_rect.end.x - 7.0)
+	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+			"the real loadout also fits the compact single-column dock")
+	assert_lte(player_page.get_global_rect().end.x,
+			page_host.get_global_rect().end.x + 1.0,
+			"compact loadout content wraps instead of being silently clipped")
+
+
 func test_player_page_scrolls_without_moving_the_sidebar() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(520, 360)
@@ -847,7 +968,8 @@ func test_player_page_scrolls_without_moving_the_sidebar() -> void:
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
 	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
 	assert_not_null(page_host)
-	assert_eq(page_host.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED)
+	assert_eq(page_host.horizontal_scroll_mode,
+			ScrollContainer.SCROLL_MODE_SHOW_NEVER)
 	assert_false(page_host.get_h_scroll_bar().visible,
 			"page content never pushes the whole dock sideways")
 	var vertical_bar := page_host.get_v_scroll_bar()
@@ -922,7 +1044,14 @@ func test_shell_keeps_long_runtime_identity_and_actions_inside_the_dock() -> voi
 	var edit_status := overlay.find_child("DebugStatus", true, false) as Label
 	assert_eq(title.text, "F3")
 	assert_true(runtime_status.clip_text)
+	assert_eq(runtime_status.get_theme_font_size("font_size"), 13)
+	assert_eq(runtime_status.text, "%s | local" % long_name,
+			"runtime identity keeps natural case instead of shouting")
 	assert_string_contains(runtime_status.tooltip_text, long_name)
+	var panel_surface := panel.get_theme_stylebox("panel") as StyleBoxFlat
+	assert_not_null(panel_surface)
+	assert_gte(panel_surface.bg_color.a, 0.9,
+			"the dock stays readable over bright and busy game scenes")
 	assert_eq(live_edits.text, "Live edits")
 	assert_string_contains(live_edits.tooltip_text, "nothing by itself")
 	assert_string_contains(live_edits.tooltip_text, "not undoable")
@@ -1255,6 +1384,8 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	assert_false(texts.has("View"), "the dissolved View page is gone")
 	var header_row := texts.find("SIMULATION")
 	assert_false(list.is_item_selectable(header_row), "section headers are not rows")
+	assert_false(list.is_item_disabled(header_row),
+			"section headers keep readable contrast without becoming selectable")
 
 
 func test_empty_search_hides_the_active_page_and_restores_it_when_cleared() -> void:
