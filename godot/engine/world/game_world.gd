@@ -34,8 +34,6 @@ const NET_CONTAINER_NAME := "NetObjects"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
-# [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
-const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -121,31 +119,14 @@ var _local_player_weapon_tick_consumer := Callable()
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
-# The local player's applied blink letter gates (render-occlusion-re.md §4):
-# accum bit 0x2 hides the terrain render (near detail + far foliage ride the
-# terrain node) and the sky dome + celestials; bit 0x8 hides the water passes.
-var _blink_indoors := false
-var _blink_water_suppressed := false
-# --- Render-occlusion frame state (the section-mask/portal slice) ---
-# Diff-applied: the sim emits verdict CHANGES (get_building_visibility_changes /
-# get_render_culled_changes) and only transitions touch nodes, so a steady frame
-# does no per-node work. Two ownership bits decide final visibility:
-# the present pass owns the sim's intent (PF_HIDDEN), this system owns the
-# occlusion hide — the present pass consults _occlusion_hidden_ids (shared by
-# reference) so it never fights an occlusion hide, and an occlusion release
-# lands on sim.entity_present_visible() so a sim-hidden entity never flashes.
-# bms_id -> true for every node occlusion currently hides (buildings whose
-# batch verdict culled them, entities the render gates culled).
-var _occlusion_hidden_ids: Dictionary = {}
-# Exact MissionPresentPass bms_id -> visibility intent, shared by reference.
-# Occlusion only layers hides on top of this value and never reconstructs the
-# present predicate independently.
-var _present_visibility: Dictionary = {}
-# bms_id -> resolved node, so steady frames skip registry lookups. Entries
-# revalidate with is_instance_valid on use; reset on unload/A-B seams.
-var _occlusion_node_cache: Dictionary = {}
-# The mission attribute that forces the indoors accum bit every frame.
-# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
+# The render-occlusion frame pass (occlusion_frame_pass.gd): the blink letter
+# gates, the per-frame section-mask/portal apply, and the two visibility
+# dictionaries the mission present pass shares BY REFERENCE. Constructed once
+# in _init; tick() calls it directly (hot path — no Callables).
+var _occlusion: OcclusionFramePass
+# The mission attribute that forces the indoors accum bit every frame. Stays
+# on the world (mission state, test-pinned by name); handed to the pass's
+# entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
@@ -157,9 +138,6 @@ var _net_event_view # NetEventView: draws the decoded event stream over the worl
 var _injected_root: NovaResourceRoot = null
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
-# Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
-# master particle switch, mimicked). Off by default; survives mission reloads.
-var _particles_hidden := false
 var _playable := true
 # The net-session drive: typed request staging, the joiner preload/admission
 # coroutines, the ESC aborts, and NovaWorld gate registration (see
@@ -172,6 +150,13 @@ var _net_drive: NetSessionDrive
 # world-relative lookups — and the moved public toggles keep one-line
 # delegates below so the host-facing surface never moved.
 var _debug_views: DebugViewSet
+# The per-item ITEMS.DEF effect director (item_effect_director.gd): the
+# attached/static/controller item emitters, the effect-anchor resolvers, and
+# the retail master particle switch, on the same internal pattern (plain
+# RefCounted — it owns no Nodes). Public delegates below keep the host-facing
+# names on GameWorld. ALSO the sanctioned test-injection seam: like _runtime,
+# harnesses may swap in a director double (see game_world_test.gd).
+var _item_fx: ItemEffectDirector
 var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
@@ -246,6 +231,22 @@ func _init() -> void:
 		return world.get_effect_world() if world != null else null
 	_debug_views.setup(self, user_point_sources, effect_world_getter)
 	add_child(_debug_views)
+	# The render-occlusion frame pass: plain RefCounted (no tree presence),
+	# direct-called from tick() every frame. Constructed exactly once — its two
+	# shared dictionaries must keep their identity for the mission present pass.
+	_occlusion = OcclusionFramePass.new()
+	_occlusion.setup(self)
+	# The item-effect director, wired like the debug-view set: its two lent
+	# privates are the placer's static item-effect sources and its item
+	# database, null-guarded here. The db seam stays duck-typed on purpose —
+	# the public get_item_db() keeps its NovaItemDatabase contract while
+	# harness worlds serve value-only db doubles.
+	_item_fx = ItemEffectDirector.new()
+	_item_fx.setup(self,
+			func() -> Array:
+				return _placer.get_static_item_effect_sources() if _placer != null else [],
+			func() -> Variant:
+				return _placer.get_item_db() if _placer != null else null)
 
 
 func _ready() -> void:
@@ -730,16 +731,7 @@ func unload() -> void:
 		container.queue_free()
 	# Per-item attached-effect owner keys reference nodes in that container —
 	# never let a reload's provider resolve against freed instances.
-	_item_fx_nodes.clear()
-	_item_fx_owner_refs.clear()
-	_item_fx_registered_nodes.clear()
-	_item_fx_pending_nodes.clear()
-	_item_fx_registered_static.clear()
-	_item_fx_pending_static.clear()
-	_item_fx_control_active.clear()
-	_item_fx_control_nodes.clear()
-	_item_fx_control_instances.clear()
-	_present_visibility.clear()
+	_item_fx.reset()
 	# Debug-view teardown: the retain/free split (user-point re-arm vs freed
 	# overlays vs the deliberately surviving particle/pick stack) lives in the set.
 	_debug_views.on_unload()
@@ -762,11 +754,14 @@ func unload() -> void:
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	NovaMusicService.stop_context()
-	# Blink frame gates reset with the mission [orig: the letter-bit clear
-	# @ 0x525c45 at mission start] — an unload while indoors must not leave the
-	# next mission's terrain/sky/water hidden.
-	_reset_blink_frame_gates()
-	_reset_occlusion_frame()
+	# Blink frame gates and every occlusion override reset with the mission
+	# [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
+	# indoors must not leave the next mission's terrain/sky/water hidden. The
+	# pass clears the shared present-visibility intent FIRST (the pre-extraction
+	# unload cleared it up top), so its release walk falls back to
+	# sim.entity_present_visible — see OcclusionFramePass.reset.
+	_occlusion.reset()
+	_mission_forces_indoors = false
 	set_local_player_nvg_view(false, 0)
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
@@ -1040,12 +1035,8 @@ var _perf_probe_occlusion_skipped := false
 
 # The shared F3 frame-stats board (null outside the game shell). Feeds gate on
 # board capture so a closed Stats tab costs nothing; the occlusion split spans
-# land from _apply_occlusion_frame, the tick legs from tick() below.
+# land from OcclusionFramePass.apply_frame, the tick legs from tick() below.
 var _frame_stats: FrameStatsBoard = null
-# The two _apply_occlusion_frame halves, valid while probe/stats timing runs:
-# the native run_occlusion_frame call and the GDScript node application.
-var _perf_occl_native_us := 0
-var _perf_occl_apply_us := 0
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
 
@@ -1065,6 +1056,7 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
+	_occlusion.set_frame_stats_board(board)
 	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
 		_runtime.set_frame_stats_board(board)
 
@@ -1083,6 +1075,8 @@ func is_water_render_stats_measured() -> bool:
 ## request to its retail default and drops any sampled frame transport.
 func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_enabled = enabled
+	# The pass shares the probe's timing gate (see OcclusionFramePass.probe_timing).
+	_occlusion.probe_timing = enabled
 	_perf_probe_spans.clear()
 	if not enabled:
 		_perf_probe_skip_occl = false
@@ -1133,11 +1127,9 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	if probe_enabled and _loaded:
 		if skip_occlusion != _perf_probe_occlusion_skipped:
 			if skip_occlusion:
-				if _water != null:
-					_water.visible = not _blink_water_suppressed
-				_release_occlusion_overrides(false)
+				_occlusion.enter_probe_skip()
 			else:
-				_reset_occlusion_apply_baseline()
+				_occlusion.leave_probe_skip()
 		_perf_probe_occlusion_skipped = skip_occlusion
 	elif probe_enabled:
 		_perf_probe_occlusion_skipped = false
@@ -1173,7 +1165,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
 	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if _loaded and runtime_ticks > 0:
-		_apply_blink_frame_gates()
+		_occlusion.apply_blink_gates(_mission_forces_indoors)
 	if timing:
 		var blink_us := Time.get_ticks_usec() - probe_phase_start
 		if probe_enabled:
@@ -1187,7 +1179,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	if _loaded:
 		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		if not skip_occlusion:
-			_apply_occlusion_frame(camera_xform)
+			_occlusion.apply_frame(camera_xform, _mission_forces_indoors)
 		if probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
@@ -1717,13 +1709,10 @@ func is_occlusion_debug() -> bool:
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
+## Delegates to the item-effect director; the name stays on GameWorld for the
+## F3 option registry dispatch (nova_debug_options) + probe duck-calls.
 func set_particles_hidden(hidden: bool) -> void:
-	var was_hidden := _particles_hidden
-	_particles_hidden = hidden
-	if _effect_world != null:
-		_effect_world.set_particles_hidden(hidden)
-	if was_hidden and not hidden:
-		_retry_pending_item_effects()
+	_item_fx.set_particles_hidden(hidden)
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
@@ -1858,11 +1847,12 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	opts["placer"] = _placer
 	opts["env_node"] = _env
 	# The occlusion-claim set the present pass consults (two-bit visibility
-	# ownership; see _set_occlusion_hidden). Shared by reference: this world
-	# mutates it in place across the mission's occlusion frames.
+	# ownership; see OcclusionFramePass._set_occlusion_hidden). Shared by
+	# reference: the pass created these dictionaries once and mutates them in
+	# place across the mission's occlusion frames — hand the SAME instances.
 	opts["present_options"] = {
-		"occlusion_hidden_ids": _occlusion_hidden_ids,
-		"present_visibility": _present_visibility,
+		"occlusion_hidden_ids": _occlusion.occlusion_hidden_ids(),
+		"present_visibility": _occlusion.present_visibility(),
 	}
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
@@ -1969,7 +1959,7 @@ func _on_runtime_effects(effects: Array) -> void:
 	for effect_v in effects:
 		if effect_v is Dictionary:
 			var effect: Dictionary = effect_v
-			if _consume_item_fx_control_effect(effect):
+			if _item_fx.consume_control_effect(effect):
 				continue
 		routed.append(effect_v)
 	if routed.is_empty():
@@ -2014,7 +2004,7 @@ func _on_runtime_simulation_restarted() -> void:
 	# Persistent item effects belong to the restored entity set, not the scene
 	# that was just discarded. Re-register their admission and owner identities;
 	# restore emits fresh controller-start lifecycle events for occupied baselines.
-	_attach_item_effects()
+	_item_fx.reattach()
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
@@ -2067,8 +2057,8 @@ func _warm_effect_world_catalog() -> int:
 		warm_pos = cam.global_position - cam.global_transform.basis.z * 8.0
 	# The persistent master switch is a gameplay preference, not a reason to
 	# leave the catalog cold forever. Lift it only across the loading-screen
-	# draws; keep _particles_hidden unchanged and restore the EffectWorld before
-	# persistent item effects are reattached.
+	# draws; keep the director's persisted switch unchanged and restore the
+	# EffectWorld before persistent item effects are reattached.
 	var restore_particles_hidden := _effect_world.are_particles_hidden()
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(false)
@@ -2103,7 +2093,7 @@ func _warm_effect_world_catalog() -> int:
 	_effect_world.reset_runtime_state()
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(true)
-	_attach_item_effects()
+	_item_fx.reattach()
 	var unresolved := PackedStringArray(
 			_effect_world.get_unresolved_texture_names()).size()
 	print_verbose("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
@@ -2119,7 +2109,7 @@ func _start_effect_world() -> void:
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
 	_effect_world.set_environment_source(_env)
-	if _particles_hidden:
+	if _item_fx.particles_hidden():
 		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
@@ -2132,15 +2122,11 @@ func _start_effect_world() -> void:
 		var water_sim := get_sim()
 		if water_sim != null:
 			water_sim.set_water_z(float(_water.water_height))
-	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
-	# (resolved through the runtime), String keys are the per-item effect attaches
-	# (resolved to the placed node's live transform).
-	_effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
 	print_verbose("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
 		count, _effect_world.file_count()])
-	_attach_item_effects()
-	if _runtime != null and _runtime.has_method("set_wire_node_spawned_callback"):
-		_runtime.set_wire_node_spawned_callback(Callable(self, "_on_wire_node_spawned"))
+	# Item-effect wiring — the owner-pose provider, the persistent per-item
+	# attaches, and the wire-spawn callback — lives in the director.
+	_item_fx.on_effect_world_started()
 
 
 func get_effect_world() -> NovaEffectWorld:
@@ -2177,496 +2163,19 @@ func get_water_node() -> Node:
 	return _water
 
 
-# Owner-transform provider for the effect world's owned/attached groups. Int keys are
-# WAC fx2ssn SSNs (the runtime resolves the live entity transform; null = entity gone,
-# the group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]); String keys
-# are the per-item effect attaches registered by _attach_item_effects (the placed
-# entity's current value snapshot. The Node remains only as a pre-first-tick
-# seed and lifetime fallback for non-sim-owned callers.
-func _effect_owner_transform(owner_key: Variant) -> Variant:
-	# Host-owned live anchors first (the local weapon flash follows its viewmodel
-	# userpoint for the emitter group's whole life [orig: the actionEffectHandle
-	# per-tick tracker in WeaponAction_ProcessFrame @ 0x540edf]).
-	var anchor: Variant = _effect_anchor_resolvers.get(owner_key)
-	if anchor is Callable:
-		var resolver := anchor as Callable
-		if resolver.is_valid():
-			return resolver.call()
-		_effect_anchor_resolvers.erase(owner_key)
-		return null
-	if owner_key is String:
-		# Untyped on purpose: assigning a FREED instance to a typed Node3D var raises
-		# before any is_instance_valid guard could run.
-		var node: Variant = _item_fx_nodes.get(owner_key)
-		if node is Node3D and is_instance_valid(node) and node.is_inside_tree():
-			var entity_ref: Dictionary = _item_fx_owner_refs.get(owner_key, {})
-			if not entity_ref.is_empty() and _runtime != null \
-					and _runtime.has_method("has_current_present_effect_snapshot") \
-					and _runtime.has_current_present_effect_snapshot() \
-					and _runtime.has_method("presented_entity_effect_transform"):
-				# Null here means the identity left THIS tick's client view. Do
-				# not fall back to the one-frame-old Node or the group would emit
-				# once more from stale state before the batched present frees it.
-				return _runtime.presented_entity_effect_transform(entity_ref)
-			return (node as Node3D).global_transform
-		_item_fx_nodes.erase(owner_key)
-		_item_fx_owner_refs.erase(owner_key)
-		return null
-	if _runtime != null and _runtime.has_method("entity_effect_transform_for_ssn"):
-		return _runtime.entity_effect_transform_for_ssn(owner_key)
-	return null
-
-
-# owner key -> Callable returning the live anchor Transform3D (or null once
-# stale) for host-owned owner-bound effect groups; consulted before the
-# item-fx/SSN legs by _effect_owner_transform.
-var _effect_anchor_resolvers: Dictionary = {}
-
-
 ## A host registers a live pose resolver for an owner-bound effect group it
 ## spawned (e.g. the local muzzle flash riding the viewmodel userpoint). The
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
+## One-line delegates into the item-effect director (item_effect_director.gd):
+## the names stay on GameWorld — LocalPlayerHost and the present passes
+## register through the world, and harness worlds pin these methods.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
-	_effect_anchor_resolvers[owner_key] = resolver
+	_item_fx.register_effect_anchor(owner_key, resolver)
 
 
 func unregister_effect_anchor(owner_key: Variant) -> void:
-	_effect_anchor_resolvers.erase(owner_key)
-
-
-# owner key (String) -> presented Node3D, for the per-item attached effect groups.
-var _item_fx_nodes: Dictionary = {}
-# owner key -> copied entity_ref value identity (bms/origin or wire handle).
-var _item_fx_owner_refs: Dictionary = {}
-var _item_fx_registered_nodes: Dictionary = {}
-var _item_fx_pending_nodes: Dictionary = {}
-var _item_fx_registered_static: Dictionary = {}
-var _item_fx_pending_static: Dictionary = {}
-# Controller/Driver-only PlayerControl item effects are dormant at mission
-# startup. Portable lifecycle events activate them without polling.
-# identity alias -> true while the vehicle has any controlling occupant
-var _item_fx_control_active: Dictionary = {}
-# Node instance id -> {node, kind, item_id, aliases}
-var _item_fx_control_nodes: Dictionary = {}
-# Node instance id -> {group_ids, owner_keys}
-var _item_fx_control_instances: Dictionary = {}
-
-
-# Mission-start attach of the per-item ITEMS.DEF effects — slot A ('particlefx
-# <effect> <userpoint>') only: for every presented animated entity whose item def
-# authors it, spawn one entity-attached emitter at EVERY model userpoint matching
-# the authored name — exact case-insensitive match over the model's first 16
-# userpoints, duplicate names all match (a 16-bit mask in the original). Static
-# MultiMesh entities use the placer's value descriptors and spawn the same authored
-# effects world-bound at their final placement transform; no owner/render node is
-# synthesized for them.
-# Pool gates are kind-sensitive: pool 0 organics are excluded; pool 1 items skip
-# attrib 0x42; pools 2/3 skip attrib 0x2. The fxs/fxw1..4 wake tiers and the
-# death/fire/other family are movement/damage-state driven and stay unrouted
-# (ptl-format-re.md §8).
-# [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 (mission start,
-#  entity pools 1-3) -> ItemDef_GetBoneMaskByName @ 0x49ea40 (first 16, stricmp) ->
-#  Entity_SpawnBoneTrailEffect @ 0x43bef0 (one mode-2 attached emitter per masked
-#  userpoint: pos = the userpoint, forward = its direction)]
-func _attach_item_effects() -> void:
-	_item_fx_nodes.clear()
-	_item_fx_owner_refs.clear()
-	_item_fx_registered_nodes.clear()
-	_item_fx_pending_nodes.clear()
-	_item_fx_registered_static.clear()
-	_item_fx_pending_static.clear()
-	_item_fx_control_active.clear()
-	_item_fx_control_nodes.clear()
-	_item_fx_control_instances.clear()
-	if _effect_world == null or _placer == null:
-		return
-	var item_db = _placer.get_item_db()
-	if item_db == null:
-		return
-	var attached := 0
-	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
-	if container != null:
-		for child in container.get_children():
-			var node := child as Node3D
-			if node == null or not node.has_meta("entity_ref"):
-				continue
-			var ref: Dictionary = node.get_meta("entity_ref")
-			attached += _attach_item_effect_to_node(node, int(ref.get("kind", -1)),
-					int(ref.get("item_id", 0)), item_db)
-	var static_sources: Array = _placer.get_static_item_effect_sources()
-	for source_index in range(static_sources.size()):
-		attached += _attach_item_effect_to_static(
-				static_sources[source_index], source_index, item_db)
-	if attached > 0:
-		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
-
-
-func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
-	_attach_item_effect_to_node(node, kind, item_id)
-
-
-# The original walks entity pools 1-3 with distinct attrib masks. The imported
-# mission kind enum is Marker=0, Item=1, Building=2, Organic=3.
-func _item_effect_pool_allows(kind: int, attrib: int) -> bool:
-	if kind == NovaMissionData.KIND_ITEM:
-		return (attrib & 0x42) == 0
-	if kind == NovaMissionData.KIND_BUILDING or kind == NovaMissionData.KIND_MARKER:
-		return (attrib & 0x2) == 0
-	return false
-
-
-func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
-	# The occupied-controller pass bypasses only PlayerControl (0x40). The
-	# independent 0x2 exclusion remains intact.
-	return kind == NovaMissionData.KIND_ITEM and (attrib & 0x42) == 0x40
-
-
-func _item_fx_identity_aliases(net_id: int, bms_id: int,
-		spawn_origin: int, wire_handle: int = -1) -> Array[String]:
-	var aliases: Array[String] = []
-	var has_wire_identity := wire_handle >= 0 and wire_handle != 0xffff
-	if has_wire_identity:
-		aliases.append("wire:%d" % wire_handle)
-	# Synthetic items.def attachments all carry the same sentinel origin and no
-	# authored BMS/net identity. Their packed runtime handle is therefore the only
-	# alias that distinguishes siblings on the same carrier.
-	if has_wire_identity and bms_id == 0 and (
-			spawn_origin == -1 or spawn_origin == 0xffffffff):
-		return aliases
-	if net_id > 0:
-		aliases.append("net:%d" % net_id)
-	if bms_id > 0:
-		aliases.append("bms:%d" % bms_id)
-	if spawn_origin > 0:
-		aliases.append("origin:%d" % spawn_origin)
-	return aliases
-
-
-func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
-	return _item_fx_identity_aliases(
-			int(effect.get("a", 0)),
-			int(effect.get("b", 0)),
-			int(effect.get("c", 0)),
-			int(effect.get("wire_handle", -1)))
-
-
-func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
-	if node == null:
-		return []
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var net_id := int(ref.get("net_id", 0)) if ref.has("net_id") else 0
-	var bms_id := int(ref.get("bms_id", 0))
-	var origin_kind := int(ref.get("origin_kind", ref.get("kind", -1)))
-	var index := int(ref.get("index", -1))
-	var spawn_origin := 0
-	if origin_kind >= 0 and index >= 0:
-		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
-	return _item_fx_identity_aliases(
-			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
-
-
-func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:
-	for alias_v in left:
-		if right.has(alias_v):
-			return true
-	return false
-
-
-func _item_fx_control_node_is_active(entry: Dictionary) -> bool:
-	for alias_v in entry.get("aliases", []):
-		if _item_fx_control_active.has(String(alias_v)):
-			return true
-	return false
-
-
-func _register_item_fx_control_node(node: Node3D, kind: int,
-		item_id: int) -> Dictionary:
-	var aliases := _item_fx_control_node_aliases(node)
-	if aliases.is_empty():
-		return {}
-	var entry := {
-		"node": node,
-		"kind": kind,
-		"item_id": item_id,
-		"aliases": aliases,
-	}
-	_item_fx_control_nodes[node.get_instance_id()] = entry
-	return entry
-
-
-func _track_item_fx_control_spawn(node_id: int, owner_key: String,
-		receipt: Dictionary) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {
-		"group_ids": [],
-		"owner_keys": [],
-	})
-	var group_ids: Array = instance.get("group_ids", [])
-	var group_id := int(receipt.get("group_id", 0))
-	if group_id > 0 and not group_ids.has(group_id):
-		group_ids.append(group_id)
-	var owner_keys: Array = instance.get("owner_keys", [])
-	if not owner_keys.has(owner_key):
-		owner_keys.append(owner_key)
-	instance["group_ids"] = group_ids
-	instance["owner_keys"] = owner_keys
-	_item_fx_control_instances[node_id] = instance
-
-
-func _stop_item_fx_control_node(node_id: int) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {})
-	if _effect_world != null:
-		for group_id_v in instance.get("group_ids", []):
-			var group_id := int(group_id_v)
-			if group_id > 0:
-				_effect_world.stop_group(group_id)
-	for owner_key_v in instance.get("owner_keys", []):
-		var owner_key := String(owner_key_v)
-		_item_fx_nodes.erase(owner_key)
-		_item_fx_owner_refs.erase(owner_key)
-	_item_fx_control_instances.erase(node_id)
-	_item_fx_registered_nodes.erase(node_id)
-	_item_fx_pending_nodes.erase(node_id)
-
-
-func _activate_item_fx_control_nodes(event_aliases: Array) -> void:
-	for node_id_v in _item_fx_control_nodes.keys().duplicate():
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
-			continue
-		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
-			_stop_item_fx_control_node(node_id)
-			_item_fx_control_nodes.erase(node_id)
-			continue
-		if not _item_fx_control_node_is_active(entry):
-			continue
-		_attach_item_effect_to_node(
-				node_v as Node3D,
-				int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)),
-				null,
-				true)
-
-
-func _deactivate_item_fx_control_nodes(event_aliases: Array) -> void:
-	for node_id_v in _item_fx_control_nodes.keys().duplicate():
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
-			continue
-		if not _item_fx_control_node_is_active(entry):
-			_stop_item_fx_control_node(node_id)
-
-
-func _consume_item_fx_control_effect(effect: Dictionary) -> bool:
-	var kind := String(effect.get("kind", ""))
-	if kind != "vehicle_control_started" and kind != "vehicle_control_stopped":
-		return false
-	var aliases := _item_fx_control_event_aliases(effect)
-	if kind == "vehicle_control_started":
-		for alias in aliases:
-			_item_fx_control_active[alias] = true
-		_activate_item_fx_control_nodes(aliases)
-	else:
-		for alias in aliases:
-			_item_fx_control_active.erase(alias)
-		_deactivate_item_fx_control_nodes(aliases)
-	return true
-
-
-func _attach_item_effect_to_node(node: Node3D, kind: int, item_id: int,
-		item_db_override: Variant = null,
-		controller_active: bool = false) -> int:
-	if _effect_world == null or _placer == null or node == null or item_id <= 0:
-		return 0
-	if not node.has_method("get_object_data"):
-		return 0
-	var node_id := node.get_instance_id()
-	var registered: Variant = _item_fx_registered_nodes.get(node_id)
-	if registered is Node and is_instance_valid(registered):
-		return 0
-	var item_db: Variant = item_db_override
-	if item_db == null:
-		item_db = _placer.get_item_db()
-	if item_db == null:
-		return 0
-	var attrib := int(item_db.get_attrib(item_id))
-	if controller_active:
-		if not _item_effect_controller_allows(kind, attrib):
-			return 0
-	else:
-		if not _item_effect_pool_allows(kind, attrib):
-			if not _item_effect_controller_allows(kind, attrib):
-				return 0
-			var control_entry := _register_item_fx_control_node(node, kind, item_id)
-			if not control_entry.is_empty() and _item_fx_control_node_is_active(control_entry):
-				return _attach_item_effect_to_node(node, kind, item_id, item_db, true)
-			return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
-	if effect.is_empty():
-		return 0
-	var data = node.get_object_data()
-	if data == null:
-		return 0
-	if _effect_world.are_particles_hidden():
-		# The retail master switch makes every spawn facade a no-op. Remember
-		# persistent item attachments so re-enabling after a hidden mission load
-		# creates them exactly once instead of losing them for the mission.
-		_item_fx_pending_nodes[node_id] = {
-			"node": node,
-			"kind": kind,
-			"item_id": item_id,
-			"controller_active": controller_active,
-		}
-		return 0
-	var attached := 0
-	var matched := 0
-	var entity_ref: Dictionary = node.get_meta("entity_ref", {}).duplicate()
-	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
-				continue
-			var key := "itemfx:%d:%d" % [node_id, i]
-			var receipt: Dictionary = _effect_world.spawn_effect_attached_request(
-					key, effect, node.global_transform,
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
-			if bool(receipt.get("spawned", false)):
-				_item_fx_nodes[key] = node
-				_item_fx_owner_refs[key] = entity_ref
-				if controller_active:
-					_track_item_fx_control_spawn(node_id, key, receipt)
-				attached += 1
-			matched += 1
-	if matched == 0:
-		# No matched point (or no authored point name): the original still spawns
-		# ONE emitter at the entity origin — the spawn_count==0 leg
-		# [orig: Entity_SpawnBoneTrailEffect @ 0x43c097 -> submit_effect_descriptor
-		#  @ 0x43c0a4 at entity->Position].
-		var key := "itemfx:%d:origin" % node_id
-		var receipt: Dictionary = _effect_world.spawn_effect_attached_request(
-				key, effect, node.global_transform, Vector3.ZERO, Vector3.ZERO)
-		if bool(receipt.get("spawned", false)):
-			_item_fx_nodes[key] = node
-			_item_fx_owner_refs[key] = entity_ref
-			if controller_active:
-				_track_item_fx_control_spawn(node_id, key, receipt)
-			attached += 1
-	if attached > 0:
-		_item_fx_registered_nodes[node_id] = node
-		_item_fx_pending_nodes.erase(node_id)
-	return attached
-
-
-# Convert the authored userpoint forward vector into the same local pose used by
-# NovaEffectWorld.spawn_effect_attached. Static sources then compose this once
-# with their placement transform and submit it as a World-bound request.
-func _item_effect_local_pose(position: Vector3, forward_value: Vector3) -> Transform3D:
-	if forward_value.length_squared() <= 0.000001:
-		return Transform3D(Basis.IDENTITY, position)
-	var forward := forward_value.normalized()
-	var up_hint := Vector3.UP
-	if absf(forward.dot(up_hint)) > 0.999:
-		up_hint = Vector3.RIGHT
-	var right := up_hint.cross(forward).normalized()
-	var up := forward.cross(right).normalized()
-	return Transform3D(Basis(right, up, forward), position)
-
-
-func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
-	var receipt: Dictionary = _effect_world.spawn_effect_request(effect, transform, {
-		"admission": NovaEffectScene.ADMISSION_ALWAYS,
-		"binding": NovaEffectScene.BINDING_WORLD,
-		"render_domain": NovaEffectScene.RENDER_DOMAIN_WORLD,
-	})
-	return bool(receipt.get("spawned", false))
-
-
-func _attach_item_effect_to_static(source: Dictionary, source_index: int,
-		item_db_override: Variant = null) -> int:
-	if _effect_world == null or _placer == null or source_index < 0:
-		return 0
-	if _item_fx_registered_static.has(source_index):
-		return 0
-	var item_id := int(source.get("item_id", 0))
-	var kind := int(source.get("kind", -1))
-	if item_id <= 0:
-		return 0
-	var item_db: Variant = item_db_override
-	if item_db == null:
-		item_db = _placer.get_item_db()
-	if item_db == null or not _item_effect_pool_allows(kind, item_db.get_attrib(item_id)):
-		return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
-	var data: Variant = source.get("object_data")
-	if effect.is_empty() or data == null:
-		return 0
-	if _effect_world.are_particles_hidden():
-		_item_fx_pending_static[source_index] = source.duplicate()
-		return 0
-	var entity_transform: Transform3D = source.get(
-			"world_transform", Transform3D.IDENTITY)
-	var attached := 0
-	var matched := 0
-	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
-				continue
-			var local_pose := _item_effect_local_pose(
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
-			if _spawn_static_item_effect(effect, entity_transform * local_pose):
-				attached += 1
-			matched += 1
-	if matched == 0:
-		# The spawn_count==0 leg uses the entity origin. Preserve the entity basis,
-		# matching an attached origin pose at the moment it becomes world-bound.
-		if _spawn_static_item_effect(effect, entity_transform):
-			attached += 1
-	if attached > 0:
-		_item_fx_registered_static[source_index] = true
-		_item_fx_pending_static.erase(source_index)
-	return attached
-
-
-func _retry_pending_item_effects() -> void:
-	if _effect_world == null or _effect_world.are_particles_hidden():
-		return
-	var pending_ids := _item_fx_pending_nodes.keys().duplicate()
-	for node_id_v in pending_ids:
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_pending_nodes.get(node_id, {})
-		# A wire node may have despawned while particles were disabled. Keep the
-		# freed-object Variant untyped until after the validity guard; a typed cast
-		# can raise before is_instance_valid gets a chance to reject it.
-		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
-			_item_fx_pending_nodes.erase(node_id)
-			continue
-		var node := node_v as Node3D
-		var controller_active := bool(entry.get("controller_active", false))
-		if controller_active:
-			var control_entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-			if control_entry.is_empty() or not _item_fx_control_node_is_active(control_entry):
-				_item_fx_pending_nodes.erase(node_id)
-				continue
-		_attach_item_effect_to_node(node, int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)), null, controller_active)
-	var static_ids := _item_fx_pending_static.keys().duplicate()
-	for source_index_v in static_ids:
-		var source_index := int(source_index_v)
-		var source: Dictionary = _item_fx_pending_static.get(source_index, {})
-		_attach_item_effect_to_static(source, source_index)
+	_item_fx.unregister_effect_anchor(owner_key)
 
 
 func get_mission_audio() -> NovaMissionAudio:
@@ -2695,67 +2204,14 @@ func _music_var_pump() -> void:
 	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, _runtime.local_player_team())
 
 
-# --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------
-# The local player's accumulated blink letters gate whole render passes. The
-# letters are authored PER BOX (init 0x3E; letters clear bits), so windowed
-# buildings simply don't carry the indoors letter and keep the outside world
-# rendering — no portal special-casing at the gate level. The per-section
-# interior visibility masks (the portal traversal) are the next occlusion slice.
-
-func _apply_blink_frame_gates() -> void:
-	# Duck-typed like the silhouette-anchor pull above: harness runtimes supply
-	# value-only sims without weakening get_sim()'s NovaSimulation contract.
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("local_player_blink_flags"):
-		return
-	# The mission force-indoors attribute ORs the indoors letter into the frame
-	# view for BOTH consumers, matching run_occlusion_frame's camera input
-	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	var flags := int(sim.local_player_blink_flags()) | (0x2 if _mission_forces_indoors else 0)
-	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
-	# near-detail and far-foliage tiers are terrain children here, matching
-	# retail where the detail cells ride the skipped terrain traversal and the
-	# far patches carry their own bit-2 gate — and the skybox pass (dome +
-	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
-	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
-	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	var indoors := (flags & 0x2) != 0
-	if indoors != _blink_indoors:
-		_blink_indoors = indoors
-		if _terrain != null:
-			_terrain.visible = not indoors
-		var sky := get_node_or_null("NovaSky")
-		if sky != null:
-			sky.visible = not indoors
-		var celestial := get_node_or_null("NovaCelestial")
-		if celestial != null:
-			celestial.visible = not indoors
-	# Accum bit 0x8 (the authored water letter): both water passes skipped.
-	# Letter bits only accumulate while inside a box, so the outdoors leg of
-	# retail's override is implicit; the remaining g_BlinkWaterVisible legs
-	# (a camera building straddling the water plane, the window latch) ride
-	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
-	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
-	var water_off := (flags & 0x8) != 0
-	if water_off != _blink_water_suppressed:
-		_blink_water_suppressed = water_off
-		if _water != null:
-			_water.visible = not water_off
-
-
-# --- The render-occlusion frame (docs/render/render-occlusion-re.md §3/§5) -----
-# Per render frame: run the sim's occlusion pipeline (camera blink query ->
-# portal traversal -> section masks + TOC occluder culling + the entity render
-# gates), then drive the de-batched building nodes' per-section masks and the
-# gated entities' visibility. Runs after the present pass (inside tick_realtime)
-# so present's base visibility is re-asserted first each frame.
 # The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from the
 # sim each render frame, consumed by NovaWeather's exposure re-target on its
 # next tick [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
 # compute_ambient_light_along_direction @ 0x5c7a00 — retail re-targets from the
-# local player's view every render pass].
+# local player's view every render pass]. The render-occlusion frame it used
+# to share a section with (blink letter gates + the section-mask/portal apply)
+# lives in occlusion_frame_pass.gd; the iris march stays here as the weather
+# feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 	var weather := get_node_or_null("NovaWeather")
 	if weather == null or _runtime == null or not _runtime.has_method("get_sim"):
@@ -2768,203 +2224,6 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 		light_dir = _env.get_light_direction()
 	weather.iris_samples = sim.compute_iris_samples(
 			camera_xform.origin, -camera_xform.basis.z, light_dir)
-
-
-func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("run_occlusion_frame"):
-		return
-	var registry = _runtime.get_registry() if _runtime.has_method("get_registry") else null
-	if registry == null:
-		return
-	var fov_y := 70.0
-	var near := 0.05
-	var aspect := 16.0 / 9.0
-	if is_inside_tree():
-		var cam := get_viewport().get_camera_3d()
-		if cam != null:
-			fov_y = cam.fov
-			near = cam.near
-		var vs := get_viewport().get_visible_rect().size
-		if vs.y > 0.0:
-			aspect = vs.x / vs.y
-	var fog := 1000.0
-	if _env != null and _env.has_method("get_fog_distance"):
-		fog = float(_env.get_fog_distance())
-	var water_z := -100000.0
-	if is_water_render_active():
-		var wh = _water.get("water_height")
-		if wh != null:
-			water_z = float(wh)
-	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	var timing := _perf_probe_enabled or stats_on
-	var native_start := Time.get_ticks_usec() if timing else 0
-	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
-			_mission_forces_indoors)
-	var native_end := Time.get_ticks_usec() if timing else 0
-
-	# Building batch visibility + per-section masks (bit N = render part N,
-	# forced-visible def bits already merged by the sim), applied as CHANGES:
-	# the sim diffs against what this host last applied, so a steady frame
-	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
-	# verdicts as the full-walk form land on the nodes.
-	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
-	var changes: PackedInt64Array = sim.get_building_visibility_changes()
-	for i in range(0, changes.size(), 2):
-		var bms_id := int(changes[i])
-		var node := _occlusion_node(registry, bms_id)
-		if node == null:
-			continue
-		var packed := int(changes[i + 1])
-		if node.has_method("set_section_visibility_mask"):
-			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
-		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
-
-	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
-	# also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
-	var culled_changes: PackedInt32Array = sim.get_render_culled_changes()
-	if culled_changes.size() >= 2:
-		var added := int(culled_changes[0])
-		for i in range(1, 1 + added):
-			var node := _occlusion_node(registry, int(culled_changes[i]))
-			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), true)
-		for i in range(2 + added, culled_changes.size()):
-			var node := _occlusion_node(registry, int(culled_changes[i]))
-			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
-
-	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
-	# authored water letter suppressing (accum bit 0x8), the water still renders
-	# when the frame latched the exterior or a camera building straddles the
-	# water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
-	# @ 0x29ACE40]
-	if _water != null and sim.has_method("occlusion_water_visible"):
-		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
-
-	if timing:
-		_perf_occl_native_us = native_end - native_start
-		_perf_occl_apply_us = Time.get_ticks_usec() - native_end
-	if stats_on:
-		_frame_stats.add(FrameStatsBoard.OCCL_APPLY, _perf_occl_apply_us)
-		# The native call's internal split; the remainder of the bound call
-		# (marshalling + the handle collection) lands in the glue slot so the
-		# pane's Occlusion group still sums to the whole frame cost.
-		if sim.has_method("get_last_occlusion_build_us"):
-			var build_us := int(sim.get_last_occlusion_build_us())
-			var probe_us := int(sim.get_last_occlusion_probe_us())
-			_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
-					maxi(_perf_occl_native_us - build_us - probe_us, 0))
-		else:
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
-
-
-# Resolve (and cache) the node a bms_id drives. Cache entries revalidate with
-# is_instance_valid; a freed node re-resolves through the registry (reloads
-# recreate nodes under the same ids).
-func _occlusion_node(registry, bms_id: int) -> Node3D:
-	var cached: Variant = _occlusion_node_cache.get(bms_id)
-	if cached != null and is_instance_valid(cached):
-		return cached
-	var node: Node = registry.resolve_single(bms_id)
-	if node == null or not (node is Node3D):
-		_occlusion_node_cache.erase(bms_id)
-		return null
-	_occlusion_node_cache[bms_id] = node
-	return node
-
-
-# The occlusion-hidden ownership bit. A hide claims the id (the present pass
-# consults the shared set and never fights it); a release clears the claim and
-# lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
-# entity never flashes for a frame.
-func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void:
-	if hidden:
-		if not _occlusion_hidden_ids.has(bms_id):
-			_occlusion_hidden_ids[bms_id] = true
-			if node.visible:
-				node.visible = false
-	elif _occlusion_hidden_ids.erase(bms_id):
-		var present_visible := _entity_present_visible(sim, bms_id)
-		if present_visible and not node.visible:
-			node.visible = true
-
-
-# Duck-typed sim resolution for the occlusion apply paths: harness runtimes
-# serve stub sims that the typed get_sim() accessor cannot return.
-func _occlusion_sim() -> Object:
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return null
-	var sim: Variant = _runtime.get_sim()
-	return sim if sim is Object else null
-
-
-func _entity_present_visible(sim: Object, bms_id: int) -> bool:
-	if _present_visibility.has(bms_id):
-		return bool(_present_visibility[bms_id])
-	# Compatibility/test sources without MissionPresentPass retain the native
-	# base predicate. Production placed nodes always publish the exact combined
-	# hidden + local-view-suppressed intent above.
-	if sim != null and sim.has_method("entity_present_visible"):
-		return bool(sim.entity_present_visible(bms_id))
-	return true
-
-
-# Release every occlusion override: restore claimed nodes to the sim's present
-# intent, clear section masks to fully-visible, drop the caches, and forget the
-# sim's delta baseline so a later re-enable re-emits full state. The A/B seam
-# keeps mission blink/indoors semantics (reset_semantics=false); unload resets
-# them too.
-func _release_occlusion_overrides(reset_semantics: bool) -> void:
-	var sim := _occlusion_sim()
-	for bms_id in _occlusion_hidden_ids:
-		var node: Variant = _occlusion_node_cache.get(bms_id)
-		if node != null and is_instance_valid(node):
-			var present_visible := _entity_present_visible(sim, int(bms_id))
-			if present_visible:
-				(node as Node3D).visible = true
-	_occlusion_hidden_ids.clear()
-	for bms_id in _occlusion_node_cache:
-		var node: Variant = _occlusion_node_cache[bms_id]
-		if node != null and is_instance_valid(node) \
-				and (node as Node).has_method("set_section_visibility_mask"):
-			(node as Node).set_section_visibility_mask(-1)
-	_occlusion_node_cache.clear()
-	_reset_occlusion_apply_baseline()
-	if reset_semantics:
-		_mission_forces_indoors = false
-
-
-# Forget the sim's applied-state baseline so the next occlusion frame re-emits
-# everything (the host caches were dropped or the A/B skip ended).
-func _reset_occlusion_apply_baseline() -> void:
-	var sim := _occlusion_sim()
-	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):
-		sim.reset_occlusion_apply_baseline()
-
-
-func _reset_occlusion_frame() -> void:
-	_release_occlusion_overrides(true)
-
-
-func _reset_blink_frame_gates() -> void:
-	if _blink_indoors:
-		if _terrain != null:
-			_terrain.visible = true
-		var sky := get_node_or_null("NovaSky")
-		if sky != null:
-			sky.visible = true
-		var celestial := get_node_or_null("NovaCelestial")
-		if celestial != null:
-			celestial.visible = true
-	if _blink_water_suppressed and _water != null:
-		_water.visible = true
-	_blink_indoors = false
-	_blink_water_suppressed = false
 
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------
@@ -3003,7 +2262,7 @@ func _update_frame_clear_color() -> void:
 	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
 	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors
 	# bit is clear; the sentinel generation forces a recompute on exit].
-	if _blink_indoors:
+	if _occlusion.blink_indoors:
 		if _clear_env_generation != -2:
 			_clear_env_generation = -2
 			_clear_color.environment.background_color = Color.BLACK
