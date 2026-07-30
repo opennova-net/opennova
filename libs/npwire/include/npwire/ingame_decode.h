@@ -876,7 +876,7 @@ bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
 
 // S2C 0x4E — batch despawn/kill. `[u16 count][count × u16 slot]`; each slot is
 // killed via Entity_KillBySlotId(slot, 0, 1), then the handler replies C2S 0x28.
-// [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870 (misnamed — it kills)].
+// [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870 (Kong labeled this HandleBatchSpawn; it kills)].
 struct BatchKillBatch {
 	uint16_t count = 0;
 	std::vector<uint16_t> slots;    // (pool<<12)|slot of each despawned entity
