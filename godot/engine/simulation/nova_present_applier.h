@@ -123,6 +123,14 @@ private:
 	int64_t stat_posed_ = 0;
 	int64_t stat_hidden_ = 0;
 	int64_t stat_muzzles_ = 0;
+	int64_t stat_plan_rebuilds_ = 0;
+	int64_t stat_transform_builds_ = 0;
+	int64_t stat_aim_dispatches_ = 0;
+	int64_t stat_rhc_dispatches_ = 0;
+	int64_t stat_part_dispatches_ = 0;
+	int64_t stat_control_dispatches_ = 0;
+	int64_t stat_body_dispatches_ = 0;
+	int64_t stat_muzzle_queries_ = 0;
 
 	int64_t plan_revision_ = -1;
 	int plan_stride_ = 0;

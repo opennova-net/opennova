@@ -120,6 +120,14 @@ Dictionary NovaPresentApplier::get_stats() const {
 	d["posed"] = stat_posed_;
 	d["hidden"] = stat_hidden_;
 	d["muzzles"] = stat_muzzles_;
+	d["plan_rebuilds"] = stat_plan_rebuilds_;
+	d["transform_builds"] = stat_transform_builds_;
+	d["aim_dispatches"] = stat_aim_dispatches_;
+	d["rhc_dispatches"] = stat_rhc_dispatches_;
+	d["part_dispatches"] = stat_part_dispatches_;
+	d["control_dispatches"] = stat_control_dispatches_;
+	d["body_dispatches"] = stat_body_dispatches_;
+	d["muzzle_queries"] = stat_muzzle_queries_;
 	return d;
 }
 
@@ -269,6 +277,7 @@ bool NovaPresentApplier::row_plan_is_current(const float *p, int64_t size,
 
 void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		int64_t layout_revision) {
+	++stat_plan_rebuilds_;
 	rows_.clear();
 	present_visibility_.clear();
 	plan_revision_ = layout_revision;
@@ -377,6 +386,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					? aim_root_basis(snap, base, entity_basis)
 					: entity_basis;
 			const Transform3D next(root_basis, pos);
+			++stat_transform_builds_;
 			// The pass owns these transforms: compare against the last APPLIED
 			// value instead of reading the node property back per row (the aim
 			// leg below runs with drive_root_basis=false, so nothing else
@@ -402,6 +412,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED);
 			if (rhc != row.rhc) {
 				node->call(n.set_right_hand_collapsed, rhc != 0);
+				++stat_rhc_dispatches_;
 				row.rhc = rhc;
 			}
 		}
@@ -410,8 +421,10 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					field_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 			if (aim_valid != 0) {
 				aim_apply_valid(node, snap, base, false);
+				++stat_aim_dispatches_;
 			} else if (row.aim_valid != 0) {
 				node->call(n.set_aim_overlay, Array());
+				++stat_aim_dispatches_;
 			}
 			row.aim_valid = aim_valid;
 		}
@@ -422,6 +435,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				// address EWEAP_*; it must survive dismount, while live gunner
 				// aim still overlays it last.
 				emplaced_clear(node);
+				stat_control_dispatches_ += 2;
 			}
 			// PANM: the engine integrates each channel's phase
 			// [orig: Entity_ApplyCommand @ 0x43ab60 case 0x22]; the host only
@@ -431,15 +445,19 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					node->call(n.set_part_phase, 1,
 							field_i(p, base, NovaSimulation::PF_PHASE1));
 					++stat_posed_;
+					++stat_part_dispatches_;
 				}
 				if (field_i(p, base, NovaSimulation::PF_ACTIVE2) == 1) {
 					node->call(n.set_part_phase, 2,
 							field_i(p, base, NovaSimulation::PF_PHASE2));
 					++stat_posed_;
+					++stat_part_dispatches_;
 				}
 			}
 			if ((caps & CAP_CTRL) != 0) {
-				stat_posed_ += emplaced_apply(node, snap, base, false);
+				const int applied = emplaced_apply(node, snap, base, false);
+				stat_posed_ += applied;
+				stat_control_dispatches_ += applied;
 			}
 		}
 		const bool present_visible =
@@ -487,6 +505,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				if (!key.is_empty()) {
 					node->call(n.play_body_clip_at, key,
 							field_i(p, base, NovaSimulation::PF_ANIM_PHASE_TICKS));
+					++stat_body_dispatches_;
 					dispatched = true;
 				}
 			}
@@ -498,8 +517,10 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 						node->call(n.play_body_anim_at, body_anim_slot,
 								field_i(p, base,
 										NovaSimulation::PF_ANIM_PHASE_TICKS));
+						++stat_body_dispatches_;
 					} else if ((caps & CAP_BODY_PLAY) != 0) {
 						node->call(n.play_body_anim, body_anim_slot);
+						++stat_body_dispatches_;
 					}
 				}
 			}
@@ -509,6 +530,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// the sim so AI rounds leave the GUN (one-frame staleness, ledgered)
 			// [orig: Entity_GetAttachmentWorldPosition @ 0x4b2670 — our sim has
 			// no skeletal pose, so the present layer pushes it back].
+			++stat_muzzle_queries_;
 			if (static_cast<bool>(node->call(n.has_muzzle))) {
 				const Vector3 muzzle = node->call(n.get_muzzle_world_position);
 				if (native_sim != nullptr) {
