@@ -64,8 +64,8 @@ func _ready() -> void:
 	if OS.get_environment("NOVA_VM_SWEEP") == "1":
 		var sweep_host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 		if sweep_host != null:
-			var pvp: SubViewport = sweep_host.get("_vm_viewport")
-			var pcam: Camera3D = sweep_host.get("_vm_camera")
+			var pvp: SubViewport = sweep_host.viewmodel_rig().get("_vm_viewport")
+			var pcam: Camera3D = sweep_host.viewmodel_rig().get("_vm_camera")
 			print("[fp] pass: vp=%s size=%s cam=%s current=%s fov=%.1f cull=%d world_shared=%s" % [
 				str(pvp != null), str(pvp.size) if pvp != null else "-", str(pcam != null),
 				str(pcam.current) if pcam != null else "-", pcam.fov if pcam != null else -1.0,
@@ -80,12 +80,12 @@ func _ready() -> void:
 				if pimg != null:
 					pimg.save_png(_out_abs.path_join("pass_view.png"))
 					print("[fp] wrote pass_view.png")
-			var restore: Vector3 = sweep_host.PLAYER_VIEWMODEL_ROT
+			var restore: Vector3 = sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT
 			for y in [0, 90, 180, 270]:
-				sweep_host.PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)
+				sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)
 				await _settle(6)
 				await _capture("sweep_yaw_%03d.png" % y)
-			sweep_host.PLAYER_VIEWMODEL_ROT = restore
+			sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = restore
 			await _settle(6)
 	_look(Vector2(0, 260))   # ~30 deg down at 0.12 deg/px -- see the gun + hands
 	await _settle(24)

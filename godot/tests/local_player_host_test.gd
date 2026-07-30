@@ -584,7 +584,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster marker layers cannot make the reflection-only body visible to the player")
-	var pass_cam: Camera3D = host.get("_vm_camera")
+	var pass_cam: Camera3D = host.viewmodel_rig().get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
 		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
@@ -723,7 +723,7 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	add_child_autofree(vp)
 	await get_tree().process_frame
 
-	var pass_layer: CanvasLayer = trigger.host.get("_vm_pass_layer")
+	var pass_layer: CanvasLayer = trigger.host.viewmodel_rig().get("_vm_pass_layer")
 	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
 	if pass_layer != null:
 		assert_true(pass_layer.is_inside_tree(),

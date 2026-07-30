@@ -106,7 +106,7 @@ func _ready() -> void:
 				Vector3(-90, 180, 0), Vector3(90, 180, 0), Vector3(-90, 0, 0), Vector3(90, 0, 0),
 			]
 			for i in candidates.size():
-				host.PLAYER_VIEWMODEL_ROT = candidates[i]
+				host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = candidates[i]
 				await _settle(8)
 				await _capture("vm_rot_%d_%s.png" % [i, str(candidates[i]).replace(" ", "")])
 		ws.stop_play_mission()
