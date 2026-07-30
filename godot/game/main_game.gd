@@ -193,12 +193,9 @@ func _ready() -> void:
 		if _state == State.DEPLOY:
 			_state = State.WORLD
 	)
-	if _world.has_signal("join_deploy_pick_required"):
-		_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
-	if _world.has_signal("join_admission_ready"):
-		_world.join_admission_ready.connect(_on_join_admission_ready)
-	if _world.has_signal("session_lost"):
-		_world.session_lost.connect(_on_session_lost)
+	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
+	_world.join_admission_ready.connect(_on_join_admission_ready)
+	_world.session_lost.connect(_on_session_lost)
 	_hud_host = NovaGameHudHost.new()
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
@@ -217,8 +214,7 @@ func _ready() -> void:
 	_hud_host.set_frame_stats_board(_frame_stats)
 	# The shell's own round-outcome tap (the HUD host keeps its separate connection
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
-	if _world.has_signal("mission_effects") \
-			and not _world.mission_effects.is_connected(_on_shell_mission_effects):
+	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if _net.maybe_launch_replay_from_env():
 		return
@@ -368,8 +364,7 @@ func is_debug_overlay_open() -> bool:
 ## F6 (and the probe/test seam): pick whatever the crosshair is on into the
 ## debug pick list, with a brief on-screen confirmation.
 func pick_at_crosshair() -> void:
-	var sim = _world.get_sim() \
-			if _world != null and _world.has_method("get_sim") else null
+	var sim = _world.get_sim() if _world != null else null
 	var pick := DebugEntityPicker.pick_at_crosshair(sim, _camera)
 	if pick.is_empty():
 		return
@@ -445,7 +440,7 @@ func _begin_end_of_mission(winner: int) -> void:
 		return
 	# The end screen is the SP presentation; the MP post-round flow (scoreboard
 	# broadcast + the 2790-tick linger + round cycling) is the net track.
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	var sim = _world.get_sim() if _world != null else null
 	if sim != null and bool(sim.get_round_outcome_debug().get("mp_session", false)):
 		return
 	_round_ended = true
@@ -460,7 +455,7 @@ func _show_end_screen() -> void:
 	if _end_screen != null:
 		return
 	var outcome: Dictionary = {}
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	var sim = _world.get_sim() if _world != null else null
 	if sim != null:
 		outcome = sim.get_round_outcome_debug()
 	if outcome.is_empty():
@@ -491,8 +486,7 @@ func _current_player_view_context() -> DebugViewContext:
 	var context := DebugViewContext.new()
 	if _camera != null and is_instance_valid(_camera):
 		context.camera = _camera
-	if _player_host != null and is_instance_valid(_player_host) \
-			and _player_host.has_method("is_third_person"):
+	if _player_host != null and is_instance_valid(_player_host):
 		context.camera_mode_known = true
 		context.third_person = bool(_player_host.is_third_person())
 	return context
@@ -788,8 +782,7 @@ func _show_loading_screen(load_info: Dictionary) -> void:
 	_loading_screen.size = _loading_screen.get_viewport_rect().size
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
-	if _world.has_signal("join_session_identified") and \
-			not _world.join_session_identified.is_connected(_on_join_session_identified):
+	if not _world.join_session_identified.is_connected(_on_join_session_identified):
 		_world.join_session_identified.connect(_on_join_session_identified)
 
 
@@ -835,10 +828,9 @@ func _on_world_loaded() -> void:
 	# sessions); the world renders/curates the shell-owned list from here on.
 	_pick_list.clear()
 	_world.set_pick_debug(_pick_list)
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim != null and sim.has_method("is_joiner") and bool(sim.is_joiner()) \
-			and (not sim.has_method("is_joined_in_match")
-			or not bool(sim.is_joined_in_match())):
+	var sim := _world.get_sim()
+	if sim != null and bool(sim.is_joiner()) \
+			and not bool(sim.is_joined_in_match()):
 		return
 	_finish_world_load_presentation()
 
@@ -867,9 +859,8 @@ func _on_join_deploy_pick_required() -> void:
 	# waits at the DEATH screen), so a failed open with the pick still owed is a
 	# dead join, not a warning: abort to the menu with a reason instead of
 	# parking the player on the loading screen forever.
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim != null and sim.has_method("is_join_deploy_pick_pending") \
-			and bool(sim.is_join_deploy_pick_pending()):
+	var sim := _world.get_sim()
+	if sim != null and bool(sim.is_join_deploy_pick_pending()):
 		_on_world_load_failed("join: the deploy screen failed to open (death.mnu)")
 
 
@@ -922,10 +913,9 @@ func _on_camera_escape() -> void:
 	# SP/host map load remains a single synchronous call the SceneTree cannot
 	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	if _world_load_pending:
-		if _world != null and _world.has_method("cancel_join_preload") \
-				and _world.cancel_join_preload():
+		if _world != null and _world.cancel_join_preload():
 			return
-		if _world != null and _world.has_method("cancel_join_admission"):
+		if _world != null:
 			_world.cancel_join_admission()
 		return
 	# Round over: ESC leaves the mission instead of pausing [orig: ESC (0x1B) sets

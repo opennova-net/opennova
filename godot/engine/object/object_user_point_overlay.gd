@@ -57,7 +57,7 @@ func has_user_points() -> bool:
 
 
 func get_user_point_count() -> int:
-	if _object_data == null or not _object_data.has_method("get_user_point_count"):
+	if _object_data == null:
 		return 0
 	return _object_data.get_user_point_count()
 
@@ -152,7 +152,7 @@ func _sync_root_transform() -> void:
 
 
 func _part_local_position(model_position: Vector3, subobject: int) -> Vector3:
-	if _object_data == null or subobject < 0 or not _object_data.has_method("evaluate_panm"):
+	if _object_data == null or subobject < 0:
 		return model_position
 	var rest: Variant = _rest_part_transform(subobject)
 	if rest == null:

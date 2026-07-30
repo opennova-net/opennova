@@ -215,7 +215,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	if mission.is_empty():
 		# Report back so the panel leaves "Starting..." instead of hanging silently.
 		push_warning("NetSessionController: NovaWorld host requested but no mission is available")
-		if _novaworld_panel != null and _novaworld_panel.has_method("host_failed"):
+		if _novaworld_panel != null:
 			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
 		return
 	_dismiss_novaworld_panel()

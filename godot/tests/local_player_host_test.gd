@@ -293,6 +293,13 @@ class FakeWorld:
 	func set_local_player_nvg_view(active: bool, gain: int) -> void:
 		nvg_view_calls.append([active, gain])
 
+	# No weapon.def in the harness: no viewmodel def and no held-weapon model.
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return null
+
+	func build_local_player_held_weapon(_graphic: String) -> Node3D:
+		return null
+
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)

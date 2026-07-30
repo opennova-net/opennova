@@ -166,5 +166,5 @@ func build_inspector(host: Control) -> void:
 	var inspector := EnvironmentInspector.new()
 	host.add_child(inspector)
 	inspector.set_environment_editor(environment_editor)
-	if editor_shell != null and inspector.has_method("set_reference_services"):
+	if editor_shell != null:
 		inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
