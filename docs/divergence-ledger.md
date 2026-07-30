@@ -1,10 +1,11 @@
 # Divergence burn-down ledger
 
 Every tracked divergence between OpenNova and the original engine, in one place,
-under one vocabulary, with a target of **zero OPEN entries**. This is the dashboard
-for the maturity program's PAR (parity burn-down) track; the policy that ratifies it
-is [ADR 0022](adr/0022-divergence-burn-down.md), and the program that schedules the
-slices is [maturity-program.md](maturity-program.md).
+under one vocabulary, with a target of **zero OPEN entries**. The policy that
+ratifies it is [ADR 0022](adr/0022-divergence-burn-down.md); the maturity program
+that stood it up ([maturity-program.md](maturity-program.md)) CLOSED 2026-07-12,
+and since the close this ledger itself is the plan — work runs as retail-fidelity
+slices off these rows ([current-state.md](current-state.md) routes each domain).
 
 ## Purpose
 
@@ -387,11 +388,11 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column. **Scoping (2026-07-05):** NOT in `PlayerProfile_InitDefaults @ 0x54bb40` (that sets settings/macros/default weapon loadouts only) — the mouse/joystick default bindings are built by a separate input-binding init (an RE hunt), and the consumer is the Godot input-action layer (same gate as D-CTRL-3) | A | OPEN | PAR-UI |
 | D-CTRL-3 | Live double-click rebinding / DEFAULTS / CLEAR_KEY / profile persistence deferred — gated on a real input-action layer | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
-| D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-PLAYERINFO-9 | ACCEPT/commit + profile persistence host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
+| D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration host wiring: `PlayerInfoMenuHost` (godot/game/player_info_menu_host.gd) drives the live `player.mnu` screen — nat→div→combo cascade, SIDE_BLUE/SIDE_RED team filter, RTXT "Avatars" display resolve, 3D preview `[orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; PlayerInfo_HandleNationalitySelect @ 0x560600; PlayerInfo_HandleDivisionSelect @ 0x560690; populate_avatar_combo_list @ 0x560210]`; the witnessed 28-control registration maps onto wiring the .mnu's own control tree by name; GUT `player_info_menu_seam_test` pins the seams | A | FIXED (landed 2026-06-23, recorded 2026-07-30) | PAR-UI |
+| D-PLAYERINFO-9 | ACCEPT/commit + profile persistence: the ACCEPT seam is wired (`commit` → `avatar_chosen` → main_game `[orig: save_player_info_from_dialog @ 0x55ee10]`) and the NAME half persists (`NovaPlayerProfile.save_callsign` → `user://player_profile.cfg`); residual = persisting the avatar/class/loadout selection (in-memory `_chosen_avatar` only) + restoring it into the screen on entry | A | OPEN (partial; seam + callsign landed 2026-06-23) | PAR-UI |
 | D-PLAYERINFO-10 | Voice preview host wiring now binds `TESTPLAYERVOICE` and requests the selected avatar's `VOICE_%d` through `menu.lwf` `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]`; `test_voice_preview_requests_selected_avatar_voice` pins the public sound request (persisted profile override remains under D-PLAYERINFO-9) | A | FIXED 2026-07-22 | PAR-UI |
 | D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
-| D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
+| D-PLAYERINFO-12 | Per-(slot, team) selection-state globals not modeled: retail remembers the selection per profile slot and team; the shipped `PlayerInfoMenuHost` keeps a single current selection (`snapshot()`). Port = the per-slot/per-team memory + restore on screen entry (witness in avatars-re.md §Screen orchestration) | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-SND-16 | Ambient marker eval RAN per render frame in `NovaMissionAudio.tick`; retail registers each placed marker every 8th 62.5 Hz tick (pool-2 `tick&7` stagger in `Entity_UpdateAllEntities @ 0x4c2100`, keep-alive lifetimes in ticks) and only the live-slot Top8 mix runs per render frame (audio record §driver cadence) | A | FIXED 2026-07-28 (ported same day: `libs/audio` `AmbientMixer` staggered eval + 767-slot table + live-slot mix + the curve statics; `ambient_mixer` ctest + the GUT audio suites) | perf: F3 ranked slice 1 |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename to `HUD_DrawStanceIndicator` applied 2026-07-16 | A | FIXED (2026-07-09 port; IDB rename applied 2026-07-16) | PAR-UI |
 | D-HUD-2 | Stance widget = frame-swap + fade; do not port a rotating compass ring — 2026-07-18 resolution: JO:CA has NO in-HUD radar/compass at all (the old "radar `@ 0x599700`" pointer is the weapon HEAT BAR `HUD_DrawWeaponHeatBar`; the compass strip `@ 0x595470` and the in-world waypoint labels `@ 0x593820` are dead code); heading/map display lives only in the map overlay (`HUD_DrawMapOverlay @ 0x5a5f40`, its own follow-up) | A | FIXED (2026-07-18 witness: no radar element exists to port; the stance leg was fixed by the 2026-07-09 port) | PAR-UI |
@@ -443,7 +444,7 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-MIS-1 | All `begin item` records land in the generic pool; the pool-kind classifier needs original-editor confirmation | B | NEEDS-RE (narrowed 2026-07-07: the Nile importer classifies by the `items.def` TYPE STRING `[orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]`, matching the placer's empirically-verified kind mapping — porting it into the `.mis` reader closes this; `dfx2med.exe` confirmation rides D-MIS-3) | PAR-WORLD |
-| D-MIS-2 | `weapon_availability` emitted empty + skipped on read; loadout semantics deferred | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
+| D-MIS-2 | `weapon_availability` emitted empty + skipped on read; the semantics are now grilled (SEMANTICS CLOSED 2026-07-18 in mis-format-re.md — the per-map `{name, statusByte}` weapon-rules list, `[orig: build_item_restriction_table @ 0x54ddb0]`, net-re §5.63); the `.mis` text section stays empty-emitted pending the dfx2med grammar grill (D-MIS-3), and applying the tuple names to `bms.h` + the loadout panel is tracked in TODO.md | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-MIS-3 | Full `dfx2med.exe` `.mis` grammar unmapped (hand-authored / legacy variants beyond the writer subset) | B | NEEDS-RE | PAR-WORLD |
 | D-3DILW-1 | v8 branch deferred (v10-only parser; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files) | B | NEEDS-RE | rides an LW-import revival |
 | D-3DILW-2 | Textures deferred (geometry + one-weight skinning parsed; material textures not ported) | A | WITNESSED-READY-DEFERRED | rides an LW-import revival |
@@ -783,7 +784,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 22 | 1 | 11 | 34 | 19 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 56 | 4 | 6 | 66 | 27 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 6 | 21 | 9 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 15 | 1 | 4 | 20 | 10 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
@@ -798,7 +799,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 3 | 0 | 2 | 5 | 1 |
-| **Total** | **105** | **14** | **32** | **151** | 108 |
+| **Total** | **106** | **14** | **30** | **150** | 109 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 

@@ -82,10 +82,21 @@ hardening, and project health. Divergences from the original engine belong in
       (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: `wire_present_pass.gd` now carries
       7 `[orig]` anchors, and `mission_present_pass.gd`'s anchors moved to the native row
-      walk with #321 (`godot/engine/simulation/nova_present_applier.cpp`, 7 anchors) —
+      walk with #321 (`godot/engine/simulation/nova_present_applier.{h,cpp}`, 7 anchors —
+      6 in the .cpp + 1 in the header) —
       but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
+- [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
+      entity-render order from existing RE notes; a focused grill-ida pass to pin
+      `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
+      witness it directly
+- [ ] Incremental terrain-build tile load: `libs/terrain/src/build_quadtree.cpp` skips the
+      witnessed cached-tile load leg (`process_quadtree_leaf` / `sub_402730`) and always
+      regenerates from base meshes — correct on a clean build, but retail treats existing
+      tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
+      witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
+      divergence
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes
 - [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://engine/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in libs/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)

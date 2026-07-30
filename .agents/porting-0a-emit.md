@@ -28,6 +28,12 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 
 ## What is ported vs not (updated 2026-07-04, post round 14c / v33)
 
+> Historical snapshot: this table predates the #300-series work (deploy screen
+> D-NET-168, respawn D-NET-186/187, remote weapon channel D-NET-188, and later
+> rows through D-NET-195). The ledger's D-NET table and net-re §8 are
+> authoritative for current ported-vs-not state; read this table as the
+> emit-side witness map, not live status.
+
 | piece | status | where |
 |---|---|---|
 | phase counter (`playerSlot+100566`) | DONE | `netsim::Connection::s2c_phase`; advanced in `emit_connection_s2c` |

@@ -52,7 +52,7 @@ runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 | `advanced_clouds` | `NovaSky` mode switch | HONORED | [orig: render_skybox fixed-function pass @ 0x579b42] | 0 forces the dome to `cloud_tint`; ≠0 takes the keyframed-color path. |
 | `cloud_tint` (`cloud_rgb`) | `NovaSky` → `u_flat_color` (flat pass only) | HONORED | [orig: dome material AMBIENT vs D3DRS_AMBIENT=white @ 0x579b42..0x579bb6; xref sweep of Env_CloudBlock @ 0x26c64a4] | **Flipped by C7**: `cloud_rgb` now colors the dome *only* in the `advanced_clouds 0` flat pass (textureless, per the C7 pre-port read), exactly the witnessed scope. The fabricated keyframed-path `u_cloud_tint * 2.0` is deleted. |
 | `sun_3di` / `moon_3di` / `star_3di` | `NovaCelestial` model load + placement + keyframe tint | HONORED | [orig: EffectWorld_LoadCelestialModels @ 0x5adc50] | |
-| `glare_3di` | `NovaCelestial` additive overlay + `NovaGlareOcclusion` (env #14 closed 2026-07-06) | HONORED | [orig: render_skybox_sun_glow @ 0x5acd00 — window/hysteresis/dot⁴ glow chain; render_celestial_bodies @ 0x5acaa0] | Terrain ray march = the 32-unit bilinear stand-in for the lo-res DDA (@ 0x60cb80) until ENG-3. |
+| `glare_3di` | `NovaCelestial` additive overlay + `NovaGlareOcclusion` (env #14 closed 2026-07-06) | HONORED | [orig: render_skybox_sun_glow @ 0x5acd00 — window/hysteresis/dot⁴ glow chain; render_celestial_bodies @ 0x5acaa0] | Terrain ray march = the ENG-3 lo-res DDA port (`NovaTerrainData.raycast_terrain`, `libs/terrain_query` `[orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80]`); the 32-unit bilinear stand-in retired 2026-07-07. |
 
 ## Time-of-day keyframes (16 slots × 12 colors)
 

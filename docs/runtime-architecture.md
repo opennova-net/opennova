@@ -180,4 +180,5 @@ owner/exclusion setup are intentionally outside those native timing buckets.
   (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays host-side (it is bound
   to `NovaDbfData`).
 - The exact main-loop / entity-render order is cited from existing RE notes; a focused `grill-ida`
-  pass to pin `WacScript_AdvanceTick`'s surroundings + the entity-render function is a tracked follow-up.
+  pass to pin `WacScript_AdvanceTick`'s surroundings + the entity-render function is a tracked
+  follow-up (TODO.md § Cleanup & verification backlog).
