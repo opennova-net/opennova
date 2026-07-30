@@ -21,6 +21,7 @@
 #include "conn_fan_test_util.h"
 
 #include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
@@ -222,7 +223,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	ns::NetClientView view([](uint16_t type_id) {
 		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
 	});
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(mounted));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
 
 	const ns::ClientEntityState *p = view.state().find(0x0001);
 	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
@@ -238,7 +239,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	                    i->pitch_bam == static_cast<int32_t>(0xFE800000u),
 	            "infantry compact target advances live pitch by retail's one-eighth chase"))
 		return false;
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(mounted));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
 	i = view.state().find(0x0002);
 	if (!expect(i != nullptr &&
 	                    i->pitch_bam == static_cast<int32_t>(0xFD300000u),
@@ -256,7 +257,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 	infantry.infantry.seat_bone_idx = 0;
 	infantry.infantry.vehicle_slot_handle = 0xFFFF;
 	dismounted.records.push_back(infantry);
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(dismounted));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dismounted));
 	p = view.state().find(0x0001);
 	i = view.state().find(0x0002);
 	if (!expect(p != nullptr && p->carrier_handle == 0xFFFF && p->mount_bone == 0 &&
@@ -295,7 +296,7 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	frame.records.push_back(right);
 
 	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Player; });
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *l = view.state().find(0x0001);
 	const ns::ClientEntityState *r = view.state().find(0x0002);
 	if (!expect(l != nullptr && r != nullptr && l->move_input == 0x40 &&
@@ -320,7 +321,7 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	const int32_t held_left = l->lean_angle;
 	frame.records[0].player.move_input_byte = 0;
 	frame.records[1].player.move_input_byte = 0;
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	l = view.state().find(0x0001);
 	r = view.state().find(0x0002);
 	view.tick_lean();
@@ -373,7 +374,7 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 
 	// An initially witnessed dead record establishes the known state, but is not
 	// itself a respawn edge. Retain high/raw bits rather than normalizing the byte.
-	channel.host_send(ns::kTag0aFrameUpdate,
+	channel.host_send(nw::s2c::PER_FRAME_UPDATE,
 			nw::encode_frame_update(compact_lifecycle_frame(0x83, 0x42)));
 	view.pump(channel);
 	const ns::ClientEntityState *player = view.state().find(0x0001);
@@ -389,11 +390,11 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 
 	// alive, dead, alive: two dead->alive edges for each organic, all folded by
 	// one pump before presentation gets a chance to inspect final state.
-	channel.host_send(ns::kTag0aFrameUpdate,
+	channel.host_send(nw::s2c::PER_FRAME_UPDATE,
 			nw::encode_frame_update(compact_lifecycle_frame(0x80, 0x41)));
-	channel.host_send(ns::kTag0aFrameUpdate,
+	channel.host_send(nw::s2c::PER_FRAME_UPDATE,
 			nw::encode_frame_update(compact_lifecycle_frame(0x82, 0x43)));
-	channel.host_send(ns::kTag0aFrameUpdate,
+	channel.host_send(nw::s2c::PER_FRAME_UPDATE,
 			nw::encode_frame_update(compact_lifecycle_frame(0x81, 0x40)));
 	view.pump(channel);
 	player = view.state().find(0x0001);
@@ -455,7 +456,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
 	};
 	ns::NetClientView view(classify);
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(frame));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *decoded = view.state().find(0x0002);
 	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
 	                    decoded->y == (2 << 16) && decoded->z == (3 << 16) &&
@@ -474,7 +475,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	child.infantry.pos_z_compressed = nw::network_compress_fixedpoint(7 << 16);
 	child.infantry.yaw_byte = 0x44;
 	missing.records.push_back(child);
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(missing));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(missing));
 	decoded = view.state().find(0x0002);
 	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
 	                    decoded->y == (2 << 16) && decoded->z == (3 << 16) &&
@@ -517,7 +518,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	live_vehicle.vehicle.flags_byte = 0;
 	live_vehicle.vehicle.health_word = 3000;
 	live.records.push_back(live_vehicle);
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(live));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(live));
 	carrier = view.state().find(0x1007);
 	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x23456789 &&
 	                    carrier->roll_bam == static_cast<int32_t>(0xD1234567u),
@@ -529,7 +530,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	live_vehicle.vehicle.euler_x = 0x1234;
 	live_vehicle.vehicle.euler_y = static_cast<int16_t>(-0x2345);
 	dead.records.push_back(live_vehicle);
-	view.apply(ns::kTag0aFrameUpdate, nw::encode_frame_update(dead));
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
 	carrier = view.state().find(0x1007);
 	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x12340000 &&
 	                    carrier->roll_bam == static_cast<int32_t>(0xDCBB0000u),
@@ -717,7 +718,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178956960 &&
 	                    decoded_carrier->roll_bam == -119304640,
 	            "production carrier spawn retains authored pitch and roll")) return false;
-	view.apply(ns::kTag0aFrameUpdate, dg.body);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
 	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
 	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
@@ -734,7 +735,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	if (!expect(w::entity_detach_from_vehicle(world, ih), "infantry detaches")) return false;
 	ns::test::emit_all(world, conns, fallback);
 	if (!expect(channel.client_recv(dg), "dismounted infantry frame dequeued")) return false;
-	view.apply(ns::kTag0aFrameUpdate, dg.body);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
 	decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == 0xFFFF &&
 	                    decoded->mount_bone == 0,
@@ -758,7 +759,7 @@ bool run_header_only_records_are_ignored_by_client_view() {
 	fu.records.push_back(r);
 
 	ns::LoopbackChannel channel;
-	channel.host_send(ns::kTag0aFrameUpdate, nw::encode_frame_update(fu));
+	channel.host_send(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
 	ns::NetClientView view([](uint16_t t) {
 		return t == 0x0465 ? nw::class_from_tag("bldg") : nw::EntityClass::Unknown;
 	});

@@ -1,7 +1,7 @@
 #include "netsim/net_client_view.h"
 
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
-#include "netsim/connection_fan.h"     // kTag0aFrameUpdate
+#include <npwire/ingame_message_id.h>
 #include <io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
@@ -61,7 +61,7 @@ EntityClass NetClientView::classify(uint16_t type_id) const {
 
 void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 	switch (tag) {
-	case 0x08: { // fixed session config; field 3 = shared g_GameType
+	case s2c::SESSION_CONFIG: { // field 3 = shared g_GameType
 		SessionConfig config;
 		if (decode_session_config(body.data(), body.size(), config))
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
@@ -69,7 +69,7 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 			++unknown_tags_;
 		break;
 	}
-	case 0x7B: { // full player/session info; extra = shared g_GameType
+	case s2c::FULL_PLAYER_INFO: { // extra = shared g_GameType
 		FullPlayerInfo info;
 		if (decode_full_player_info(body.data(), body.size(), info))
 			game_type_ = info.extra;
@@ -77,10 +77,10 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 			++unknown_tags_;
 		break;
 	}
-	case kTag0aFrameUpdate:
+	case s2c::PER_FRAME_UPDATE:
 		apply_frame_update(body);
 		break;
-	case 0x49: { // weapon reload echo (same four-byte body as C2S 0x25)
+	case s2c::WEAPON_RELOAD: { // reload echo (same four-byte body as c2s::WEAPON_RELOAD_REQUEST)
 		WeaponReload reload;
 		size_t consumed = 0;
 		if (decode_weapon_reload(body.data(), body.size(), reload, consumed) &&
@@ -90,16 +90,16 @@ void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 			++unknown_tags_;
 		break;
 	}
-	case 0x0C: // pool-0 organic spawn batch (§5.23)
+	case s2c::ENTITY_SPAWN_BATCH: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
-	case 0x0D: // pool-1 entity spawn batch (§5.11)
+	case s2c::POOL_SPAWN: // pool-1 entity spawn batch (§5.11)
 		apply_pool_spawn(body);
 		break;
-	case 0x10: // pool-2 static entity batch (§5.9)
+	case s2c::STATIC_ENTITY_BATCH: // pool-2 (§5.9)
 		apply_static_batch(body);
 		break;
-	case 0x20: // pool-3 marker/waypoint sync batch (§5.12)
+	case s2c::POOL3_SYNC: // pool-3 marker/waypoint sync batch (§5.12)
 		apply_pool3_batch(body);
 		break;
 	default:
