@@ -157,9 +157,10 @@ func _run() -> void:
 	var aggregate_counter_delta := _empty_counter_delta()
 	var windows: Array = []
 	for i in range(window_count):
-		var counter_start: Dictionary = runtime.get_mission_present_stats()
+		var counter_start: MissionPresentStats = \
+				runtime.get_mission_present_stats()
 		var measured: Dictionary = await _measure_window(window_seconds)
-		var counter_end: Dictionary = runtime.get_mission_present_stats()
+		var counter_end: MissionPresentStats = runtime.get_mission_present_stats()
 		var counter_delta := _counter_delta(counter_start, counter_end)
 		var samples: Dictionary = measured["samples"]
 		_append_samples(aggregate_samples, samples)
@@ -394,11 +395,23 @@ func _sum_slots(sums: PackedInt64Array, slots: Array) -> int:
 	return total
 
 
-func _counter_delta(before: Dictionary, after: Dictionary) -> Dictionary:
-	var delta := {}
-	for key in COUNTER_KEYS:
-		delta[key] = int(after.get(key, 0)) - int(before.get(key, 0))
-	return delta
+func _counter_delta(before: MissionPresentStats,
+		after: MissionPresentStats) -> Dictionary:
+	return {
+		"plan_rebuilds": after.plan_rebuilds - before.plan_rebuilds,
+		"transform_builds": after.transform_builds - before.transform_builds,
+		"aim_dispatches": after.aim_dispatches - before.aim_dispatches,
+		"rhc_dispatches": after.rhc_dispatches - before.rhc_dispatches,
+		"part_dispatches": after.part_dispatches - before.part_dispatches,
+		"control_dispatches":
+				after.control_dispatches - before.control_dispatches,
+		"body_dispatches": after.body_dispatches - before.body_dispatches,
+		"muzzle_queries": after.muzzle_queries - before.muzzle_queries,
+		"moved": after.moved - before.moved,
+		"posed": after.posed - before.posed,
+		"hidden": after.hidden - before.hidden,
+		"muzzles": after.muzzles - before.muzzles,
+	}
 
 
 func _empty_counter_delta() -> Dictionary:

@@ -586,6 +586,11 @@ func test_stable_revisioned_snapshot_only_reconciles_live_outputs() -> void:
 	var presenter := _make_pass(index, sim)
 	presenter.present()
 	var presenter_stats: Dictionary = presenter.get_stats()
+	var stats_record: MissionPresentStats = presenter.get_stats_record()
+	assert_eq(stats_record.transform_builds,
+			int(presenter_stats["transform_builds"]))
+	assert_eq(stats_record.muzzle_queries,
+			int(presenter_stats["muzzle_queries"]))
 	var moved := int(presenter.get_stats()["moved"])
 	var phase_calls := model.phases.size()
 	var overlay_calls := model.overlay_calls.size()
