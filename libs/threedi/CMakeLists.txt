@@ -3,6 +3,7 @@ add_library(opennova_threedi STATIC
     src/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
     src/threedi_3di3_write.cpp  # Threedi3di3 -> 3DI3 (parity writer, ADR 0003)
     src/threedi_compare.cpp
+    src/threedi_ctrl_catalog.cpp
     src/threedi_panm.cpp
     src/threedi_panm_runtime.cpp
     src/threedi_panm_wave.cpp
@@ -24,9 +25,9 @@ if(NOT WIN32 OR MINGW)
     target_link_libraries(opennova_threedi PUBLIC m)
 endif()
 
-# C99 standard for the library
+# C++17 is required by the shared ASCII string helpers used by the CTRL catalog.
 set_target_properties(opennova_threedi PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
 )
 

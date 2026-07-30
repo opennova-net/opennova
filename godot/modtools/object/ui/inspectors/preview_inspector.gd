@@ -84,24 +84,40 @@ func build_main(host: Control) -> void:
 		ctrl_label.text = "Control registers"
 		box.add_child(ctrl_label)
 		for reg in ctrl_regs:
-			var reg_name := String((reg as Dictionary).get("name", ""))
-			if reg_name.is_empty():
+			var reg_info := reg as Dictionary
+			var local_index := int(reg_info.get("index", -1))
+			var authored_name := String(reg_info.get("name", ""))
+			var runtime_name := String(reg_info.get("runtime_name", ""))
+			var runtime_ordinal := int(reg_info.get("runtime_ordinal", -1))
+			if runtime_name.is_empty() or runtime_ordinal < 0:
 				continue
 			var row := HBoxContainer.new()
 			row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			box.add_child(row)
 			var label := Label.new()
-			label.text = reg_name
+			label.name = "ControlRegisterLabel_%d" % local_index
+			label.text = authored_name if not authored_name.is_empty() else "<empty>"
+			label.tooltip_text = "Runtime: %s (ordinal %d)" % [
+				runtime_name, runtime_ordinal]
 			label.custom_minimum_size = Vector2(90, 0)
 			row.add_child(label)
-			var slider := HSlider.new()
-			slider.name = "ControlRegisterSlider_%s" % reg_name.replace(" ", "_")
-			slider.min_value = 0
-			slider.max_value = ObjectEditorWorkspace.U16_VALUE_MAX
-			slider.step = 1
-			slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(slider)
-			slider.value_changed.connect(func(value: float, name: String = reg_name) -> void:
+			# A slider cannot practically address a signed-dword bus. SpinBox
+			# retains exact integer entry across the complete retail range.
+			var value_edit := SpinBox.new()
+			# The authored table can contain duplicate and empty names. Local
+			# indices are the stable identity of these editor widgets.
+			value_edit.name = "ControlRegisterValue_%d" % local_index
+			value_edit.min_value = ObjectEditorWorkspace.CTRL_VALUE_MIN
+			value_edit.max_value = ObjectEditorWorkspace.CTRL_VALUE_MAX
+			value_edit.step = 1
+			value_edit.update_on_text_changed = true
+			value_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(value_edit)
+			# Retail replaces the local CTRL reference with this global ordinal
+			# during load; unknown and empty authored names therefore drive
+			# LOD_FRAC rather than becoming inert editor-only controls.
+			# [orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6]
+			value_edit.value_changed.connect(func(value: float, name: String = runtime_name) -> void:
 				if _preview != null:
 					_preview.set_ctrl_value(name, int(value))
 			)

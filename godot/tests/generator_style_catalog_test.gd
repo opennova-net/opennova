@@ -15,6 +15,10 @@ func _catalog_ids() -> Array:
 	return ids
 
 
+func _label(consumer: String, id: int) -> String:
+	return String(GeneratorStyleCatalog.style_info(consumer, id).get("label", ""))
+
+
 func _canonical_codes_from_cpp() -> Array:
 	var path := ProjectSettings.globalize_path("res://").path_join("../libs/threedi/src/threedi_panm.cpp").simplify_path()
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -56,9 +60,72 @@ func test_catalog_labels_are_real_names() -> void:
 		assert_false(label.begins_with("Custom"), "Style %d label should be a real name, got '%s'." % [id, label])
 
 
+func test_control_value_read_dispatch_is_consumer_specific() -> void:
+	var expected := {
+		GeneratorStyleCatalog.CONSUMER_UV: [113, 114, 115, 116, 117],
+		GeneratorStyleCatalog.CONSUMER_RGB: [113, 114],
+		GeneratorStyleCatalog.CONSUMER_ALPHA: [113],
+		GeneratorStyleCatalog.CONSUMER_LIGHT: [113, 114],
+		GeneratorStyleCatalog.CONSUMER_PANM: [113],
+	}
+	for consumer in expected:
+		for id in range(113, 118):
+			assert_eq(
+					GeneratorStyleCatalog.reads_control_value(consumer, id),
+					(expected[consumer] as Array).has(id),
+					"%s style %d should match the witnessed retail dispatch." % [
+						consumer, id,
+					])
+
+
+func test_loader_parameter_remains_a_ctrl_reference_for_every_high_style() -> void:
+	for id in range(0, 256):
+		assert_eq(
+				GeneratorStyleCatalog.parameter_is_ctrl_reference(id),
+				id > 0x70,
+				"Style %d should follow the loader's >0x70 parameter fixup." % id)
+
+
+func test_control_style_labels_follow_each_consumer() -> void:
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_UV, 114),
+			"Add (control register)")
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_UV, 117),
+			"Rotate (control register)")
+
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_RGB, 114),
+			"Add (control register)")
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_RGB, 115),
+			"Wave: triangle")
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_LIGHT, 117),
+			"Wave: inverse saw")
+
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_ALPHA, 113),
+			"Set (control register)")
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_ALPHA, 114),
+			"Wave: sine")
+	assert_eq(_label(GeneratorStyleCatalog.CONSUMER_PANM, 116),
+			"Wave: saw")
+
+
+func test_consumer_options_carry_dispatch_metadata() -> void:
+	for consumer in GeneratorStyleCatalog.CONSUMERS:
+		var options := GeneratorStyleCatalog.options_for_consumer(consumer)
+		assert_eq(options.size(), GeneratorStyleCatalog.STYLES.size())
+		for option in options:
+			var id := int(option.get("id", -1))
+			assert_eq(
+					bool(option.get("reads_control_value", false)),
+					GeneratorStyleCatalog.reads_control_value(consumer, id))
+			assert_eq(
+					bool(option.get("parameter_is_ctrl_reference", false)),
+					GeneratorStyleCatalog.parameter_is_ctrl_reference(id))
+
+
 func test_part_anim_motion_modes_are_catalog_subset() -> void:
 	var catalog := _catalog_ids()
 	for id in PartAnimsInspectorScript.MOTION_MODE_IDS:
 		assert_true(catalog.has(int(id)), "Part-anim motion id %d should exist in the catalog." % int(id))
 		assert_true(PartAnimsInspectorScript.MOTION_MODE_KEYS.has(int(id)), "Part-anim motion id %d should map to a mode string." % int(id))
 	assert_eq(int(PartAnimsInspectorScript.MOTION_MODE_KEYS.size()), int(PartAnimsInspectorScript.MOTION_MODE_IDS.size()), "Motion id list and key map should be the same size.")
+	assert_false(PartAnimsInspectorScript.MOTION_MODE_IDS.has(114),
+			"Retail PANM treats code 114 as sine wave lookup, not an add-control-register authoring mode.")

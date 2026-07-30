@@ -647,7 +647,9 @@ ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name
   `comp+444+4·slot`; `comp` = the 812-byte AI struct at entity[25].
 - Rate derivation: `seconds = ANIMTIME / 65536` (confirms param4 raw = sec·65536);
   `rate = ftol((0.016 / seconds) · 65536)`, min 1 — i.e. **1048.576/seconds 16.16-phase units per
-  62.5 Hz tick**, so the phase crosses its full 0..1.0 range in exactly `seconds`. Constants verified
+  62.5 Hz tick** before truncation. Because the integer rate is truncated and the clamp is strict,
+  a nominal one-second sweep reaches `0x10000` on tick 63 and stops on the following overshoot.
+  Constants verified
   IEEE-754 LE: `flt_7C3310 = 1/65536`, `flt_7C3B40 = 0.016 (= 1/62.5)`, `flt_7C32BC = 65536`.
 - Writes ONLY direction + rate — it never resets the phase. PLAYPARTANIM is **velocity control from
   the current position** ("start moving part c at this speed/dir; play_type 0 = halt"), not
@@ -658,24 +660,28 @@ ONED therefore exposes ANIMNUM as a plain "Part #" raw int (the speculative name
   infantry full-body ADM/BAD system.
 - **The integrator, and the CTRL separation (witnessed 2026-07-22).** The per-tick integrator is
   `Entity_UpdateSuspensionBounce @ 0x456710` — an IDA misnomer for its first half. Per channel it reads
-  the direction `comp[109]/comp[110]` and the rate `comp[111]/comp[112]` and accumulates into
-  `comp[113]/comp[114]`, clamping to **[0, 0x10000]** and zeroing the direction on arrival (so a finished
-  sweep parks itself). That confirms the endpoint clamp and the velocity-from-current model above.
-  **The phases are their own pair, NOT the named CTRL registers**: the named registers live at
-  `comp+0x1D4 + 4*index` (their target bank at `comp+0x1EC + 4*index`) and are written by other systems
-  entirely — the emplaced turret writes the yaw/pitch pair straight in
-  `[orig: @0x441007/@0x44101a]`, and the ONLY generic CTRL animator is an ACTION row carrying a
-  `ctrlreg <NAME>` key `[orig: ActionSlot_ExecuteAction @0x4020cc -> CtrlRegAnimSlot_Allocate @0x401ca0
-  -> CtrlRegAnimSlot_UpdateAll @0x401bf0]`. So PLAYPARTANIM never touches a named CTRL register.
+  the direction `comp[109]/comp[110]` and the rate `comp[111]/comp[112]`. Direction `+1` performs a
+  wrapping 32-bit ADD into `comp[113]/comp[114]` and clamps/stops only when the signed result is
+  strictly greater than `0x10000`; every other nonzero direction performs wrapping SUB and
+  clamps/stops only when the signed result is negative. Landing exactly on either endpoint therefore
+  remains active until the next tick. `ANIMTIME=0` exposes the raw arithmetic: x87 conversion yields
+  `INT_MIN`, so forward from zero alternates `INT_MIN`/zero without stopping, while reverse from zero
+  clamps to zero and stops on its first tick `[orig: @0x456740..0x4567A9]`.
+  The phases are stored separately from the ordinary named-CTRL target/current banks, but they are
+  **published onto the global CTRL bus before presentation**. `[orig: HUD_CacheEntityDisplayInfo
+  @ 0x4A3E18..0x4A3E38]` maps `comp[113]` to `VEHICLE_SPECIAL1` (global ordinal 71) only when the
+  item's attribute bit `0x1000` is clear, and maps `comp[114]` to `VEHICLE_SPECIAL2` (ordinal 72)
+  unconditionally. This is the missing second stage behind the earlier, incorrect conclusion that
+  PLAYPARTANIM never reaches a named register.
 - Port contract (`NovaObjectModel.play_part_anim(channel, play_type, time_s)`): channel ∈ {1,2} → part
-  channel `slot` = channel − 1 `[orig: @0x43b198]`; value 0..65535 = the 16.16 phase; speed =
-  65535/time_s per second (delta-based); velocity from CURRENT value; **endpoint = clamp [0,65535]**
-  (one-shot; continuous-spin wrap is the def-default idle case, flagged as a possible per-part
-  refinement — the consumer's clamp-vs-wrap was not captured). **Correction 2026-07-22:** this line
-  previously read "→ PANM control register index `slot`". Our renderer binds parts by CTRL NAME, so the
-  sim used to place the two phases on the model's first two registers in model order — which on B50Cal
-  dropped a phase onto `HEAT_GLOW`. Retail has no such mapping (see the integrator note above); the
-  bridge now skips engine-owned register names (D-WPN-31).
+  channel `slot` = channel − 1 `[orig: Entity_ApplyCommand case 0x22 @ 0x43B192]`; the preview
+  integrator uses the same truncated rate, fixed 16 ms ticks, wrapping ADD/SUB, and strict
+  overshoot rules as the authority runtime. Ordinary values occupy `0..0x10000`, but wrapped signed
+  dwords are preserved rather than normalized. Velocity starts from the CURRENT value. Channel 1 targets
+  `VEHICLE_SPECIAL1` subject to the item-attribute `0x1000` gate, and channel 2 targets
+  `VEHICLE_SPECIAL2`. There is **no model-order selection and no engine-name blacklist**. The former
+  bridge walked the model's first two CTRL entries and then tried to blacklist collisions, which put
+  B50Cal's first phase on `HEAT_GLOW`; D-WPN-31 records that fixed divergence.
 
 ### 8.5 bmsi attribute flags (checkbox dialog)
 Flag label table @ 0x5b1c84 (dfx2med): REFLECTIVE, INDESTRUCTABLE, GUARDING, BLIND, **DEAF**,
@@ -3951,6 +3957,17 @@ RETIRES for motor vehicles (`physics != 0`) — the SM stays the decision layer
 the original split. Deferrals stay under D-NET-161 (updated in
 [novaworld-net-re.md](../net/novaworld-net-re.md)).
 
+The live motor now also supplies the two cveh control-register fields for
+which OpenNova owns exact sources. `VEHICLE_STEERING` zero-extends the high
+word of `steer_state`; `VEHICLE_SPEED` applies the original
+`CDQ`/`XOR`/`SUB` absolute value and unsigned `0x10000` cap, so `INT_MIN`
+publishes `0x10000` rather than entering signed-`abs` undefined behavior
+`[orig: Entity_CacheVehicleHUDStats @ 0x4929B0; stores
+@ 0x4929D7 / @ 0x4929F1]`. The projection is restricted to authoritative
+pool-1 rows with resolved vehicle traits. Compact rows contain neither source,
+so the joiner does not estimate them from position deltas. The other vehicle
+CTRL families remain in the complete producer gap recorded as D-3DI-2.
+
 Consequences pinned for the training missions: 00TRa's truck ride is
 **instructor-driven** (the command-mounted instructor holds ctrlx from spawn,
 so the ride runs leg 3 — the authored RedirectGroupTo + PatrolSpeed feed the
@@ -4795,16 +4812,30 @@ frame with retail's wrapped one-eighth chase before deriving the semantic phase.
 
 Those same EWEAP controls also pose the parent PANM consumed by the mounted carry.
 
-**HEAT_GLOW (witnessed 2026-07-22).** B50Cal's leading CTRL entry is not a loose end: `HEAT_GLOW` is
-ordinal **54** in the same global 32-byte name table (`aLodFrac @ 0x83dce8`, resolved by
-`CtrlName_ToOrdinal @ 0x57b290`, stored per model CtrlReg at `+24` by the loader `@ 0x5b4640`), directly
-ahead of `EWEAP_GUNYAW` (55) and `EWEAP_GUNPITCH` (56). The checked-in `B50Cal.3di` CTRL chunk carries
-exactly those three, in that order. **Nothing in retail writes it.** The engine's only path to a CTRL
-register is an ACTION row's `ctrlreg <NAME>` key, and **no shipped weapon.def authors `ctrlreg`** (0
-occurrences across the JOX corpus), so the weapon heat level never reaches a control register — the
-overheat visual is the particle emitter alone (§5.62 of the net record, D-WPN-28). Treat `HEAT_GLOW` as
-an authored-but-undriven register, in the same class as the dead compass strip and the unwritten
-`entity+0x37C` pitch tier: reproducing nothing is the faithful behavior.
+**HEAT_GLOW (writer audit corrected 2026-07-29).** B50Cal's leading CTRL entry is live:
+`HEAT_GLOW` is global ordinal **54** in the 96-entry table (`aLodFrac @ 0x83dce8`, resolved by
+`CtrlName_ToOrdinal @ 0x57b290`, stored per model CtrlReg by the loader
+`[orig: sub_5B4640 @ 0x5B4640; ordinal store @ 0x5B46E6]`), directly ahead of
+`EWEAP_GUNYAW` (55) and `EWEAP_GUNPITCH` (56). The checked-in `B50Cal.3di` CTRL chunk still carries
+exactly those three in local order, but the loader remaps them to global ordinals.
+
+Retail has dedicated heat writers outside the generic ACTION animator. The world writer is
+`HUD_CacheWeaponSlotInfo @0x440930`, whose sole caller is the valid-bone branch of
+`Entity_AttachToBoneAndUpdateTransform @0x546518`. It receives the parent carrier, validates the
+live UseGun/Gunner child relationship, and publishes that child's weapon heat to the carrier model's
+`HEAT_GLOW` slot at `0x440969` and `0x440991`; it is not a blanket world-render callback. The
+first-person viewmodel path writes the same register at `0x4DEEC2..0x4DEEF5`
+`[orig: Player_RenderFirstPersonViewModel @0x4DED60]`. It remains true that no shipped
+`weapon.def` row authors `ctrlreg`, but that corpus fact says nothing about these hard-coded writers.
+
+OpenNova's first-person writer exposes a separate `heat_glow` value clamped to `[0,0x10000]` and
+publishes the current `HEAT_GLOW` value with a writer identity used only to reject stale teardown;
+there is no value rollback stack. The
+authority/SP/listen world writer reconstructs the witnessed attachment predicate, publishes cold
+zero, and caps the hot leg at `0xFFFF`; presentation and collision consume the same scoped carrier
+value. Wire-direct snapshots carry that result too. Compact joiner rows do not contain enough
+attachment/heat state to reconstruct it, so remote joiner heat remains unavailable. The particle
+emitter and compact-joiner reconstruction are the two remaining D-WPN-28 residuals.
 After yaw/pitch update the port transforms the authored UseGun point through its owning
 live part and feeds that world position to the occupant root, matching
 `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` and its player/AI callers at

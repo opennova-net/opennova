@@ -2,6 +2,7 @@
 
 #include "oed/oed.h"
 #include "tdp/tdp.h"
+#include "threedi/threedi_3di3.h"
 #include "threedi/threedi_compare.h"
 
 #include <cctype>
@@ -20,6 +21,8 @@ struct Fixture {
 	const char *dir;
 	const char *stem;
 };
+
+using ProjectMutator = bool (*)(TdpProject *);
 
 const char *default_compare_chunks() {
 	return "INFO,GHDR,USRP,CTRL,MTRL,LGHT,MTRX,OVRT,OCCL,CMDL,BPLN,BVOL,CVRT,CNRM,CFAC,COBJ,CXLT,RDTA,RLOD,RMDL,VERT,INDX,STRP,ROBJ,PANM,CDTA";
@@ -59,7 +62,8 @@ fs::path resolve_ci(const fs::path &dir, const char *name) {
 	return exact;
 }
 
-bool export_fixture(const fs::path &fixture_dir, const char *stem, const fs::path &generated_path) {
+bool export_fixture(const fs::path &fixture_dir, const char *stem, const fs::path &generated_path,
+		ProjectMutator mutate_project = nullptr) {
 	const fs::path tdp_path = fixture_dir / (std::string(stem) + ".3dp");
 	TdpProject project = {};
 	tdp_init(&project);
@@ -87,6 +91,12 @@ bool export_fixture(const fs::path &fixture_dir, const char *stem, const fs::pat
 	const OedStatus create_rc = oed_session_create(ase_ptrs.data(), static_cast<int>(ase_ptrs.size()), &project, &session);
 	if (create_rc != OED_STATUS_OK) {
 		std::fprintf(stderr, "oed_session_create failed for %s (%d)\n", stem, static_cast<int>(create_rc));
+		tdp_free(&project);
+		return false;
+	}
+	if (mutate_project != nullptr && !mutate_project(&project)) {
+		std::fprintf(stderr, "failed to mutate parsed project %s\n", tdp_path.string().c_str());
+		oed_session_destroy(session);
 		tdp_free(&project);
 		return false;
 	}
@@ -171,6 +181,90 @@ bool run_fixture(const fs::path &root, const Fixture &fixture) {
 	return false;
 }
 
+constexpr char kRawStyle114Ctrl[] = "RAW_STYLE_114_CTRL";
+
+bool inject_raw_style_114_ctrl(TdpProject *project) {
+	if (project == nullptr || project->lods[0].part_anims == nullptr ||
+			project->lods[0].part_anim_count == 0) {
+		return false;
+	}
+
+	TdpLod &lod = project->lods[0];
+	lod.part_anim_enabled = 1;
+	TdpPartAnim &part_anim = lod.part_anims[0];
+	part_anim.trans_type = 1;
+	part_anim.trans_x.func_id = 114;
+	part_anim.trans_x.param0 = 1.0f;
+	part_anim.trans_x.param1 = 0.0f;
+	part_anim.trans_x.param2 = -2.0f;
+	part_anim.trans_x.param3 = 3.0f;
+	std::snprintf(part_anim.trans_x.ctrl_reg, sizeof(part_anim.trans_x.ctrl_reg), "%s", kRawStyle114Ctrl);
+	return true;
+}
+
+std::string fixed_string(const char *text, size_t capacity) {
+	size_t length = 0;
+	while (length < capacity && text[length] != '\0') {
+		++length;
+	}
+	return std::string(text, length);
+}
+
+bool run_raw_style_114_ctrl_regression(const fs::path &root) {
+	const fs::path fixture_dir = root / "fixtures" / "3dp" / "armry01";
+	const fs::path output_dir = fs::temp_directory_path() / "opennova_oed_export_3di_test";
+	fs::create_directories(output_dir);
+	const fs::path generated_path = output_dir / "Armry01_raw_style_114.3di";
+	fs::remove(generated_path);
+
+	if (!export_fixture(fixture_dir, "Armry01", generated_path, inject_raw_style_114_ctrl)) {
+		return false;
+	}
+
+	Threedi3di3 model = {};
+	if (threedi_3di3_read(generated_path.string().c_str(), &model) != 0) {
+		std::fprintf(stderr, "style 114 CTRL regression: failed to read %s\n",
+				generated_path.string().c_str());
+		return false;
+	}
+
+	size_t raw_ctrl_index = model.ctrl.count;
+	for (uint32_t i = 0; i < model.ctrl.count; ++i) {
+		if (fixed_string(model.ctrl.registers[i].name,
+					sizeof(model.ctrl.registers[i].name)) == kRawStyle114Ctrl) {
+			raw_ctrl_index = i;
+			break;
+		}
+	}
+
+	bool passed = true;
+	if (raw_ctrl_index >= model.ctrl.count || raw_ctrl_index > UINT8_MAX) {
+		std::fprintf(stderr,
+				"style 114 CTRL regression: %s missing from exported CTRL table (count=%u)\n",
+				kRawStyle114Ctrl, model.ctrl.count);
+		passed = false;
+	} else if (model.lod_count == 0 || model.lods[0].part_animation_count == 0) {
+		std::fprintf(stderr, "style 114 CTRL regression: exported LOD0 PANM is empty\n");
+		passed = false;
+	} else {
+		const ThreediTransform &translation = model.lods[0].part_animations[0].translation;
+		if (translation.control != 114 ||
+				translation.control_param != static_cast<uint8_t>(raw_ctrl_index)) {
+			std::fprintf(stderr,
+					"style 114 CTRL regression: PANM encoded control=%u param=%u; expected 114/%zu\n",
+					translation.control, translation.control_param, raw_ctrl_index);
+			passed = false;
+		}
+	}
+
+	threedi_3di3_free(&model);
+	if (passed) {
+		fs::remove(generated_path);
+		std::printf("PANM style 114 CTRL collection PASS (index=%zu)\n", raw_ctrl_index);
+	}
+	return passed;
+}
+
 } // namespace
 
 int main() {
@@ -194,6 +288,9 @@ int main() {
 		if (!run_fixture(root, fixture)) {
 			failed = true;
 		}
+	}
+	if (filter == nullptr && !run_raw_style_114_ctrl_regression(root)) {
+		failed = true;
 	}
 	return failed ? 1 : 0;
 }

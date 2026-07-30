@@ -81,9 +81,53 @@ static int test_decode_panm_wave_no_reg(void) {
         "  translation(Y): SET_WAVE_SINE phase=0.000 rate=0.500 start=1.000 end=-1.000");
 }
 
+static int test_raw_114_to_117_are_waves_with_ctrl_reference_params(void) {
+    static const char *expected[] = {
+        "WAVE_SINE_RAW_114",
+        "WAVE_TRIANGLE_RAW_115",
+        "WAVE_SAW_RAW_116",
+        "WAVE_INVERSE_SAW_RAW_117",
+    };
+    ThreediControlRegister reg;
+    ThreediCtrl ctrl;
+    memset(&reg, 0, sizeof(reg));
+    strncpy(reg.name, "STRUCTURAL_CTRL_REF", sizeof(reg.name) - 1);
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.count = 1;
+    ctrl.record_size = 24;
+    ctrl.registers = &reg;
+
+    for (uint8_t code = 114; code <= 117; ++code) {
+        ThreediTransform transform;
+        ThreediTransformDecoded decoded;
+        memset(&transform, 0, sizeof(transform));
+        memset(&decoded, 0, sizeof(decoded));
+        transform.control = code;
+        transform.control_param = 0;
+        if (threedi_decode_transform(
+                    &transform, 0, &ctrl, &decoded) != 0) {
+            fprintf(stderr, "decode_transform failed for raw code %u\n", code);
+            return 0;
+        }
+        if (decoded.ctrl_reg_name == NULL ||
+                strcmp(decoded.ctrl_reg_name, "STRUCTURAL_CTRL_REF") != 0 ||
+                decoded.control_name == NULL ||
+                strcmp(decoded.control_name, expected[code - 114]) != 0 ||
+                threedi_panm_control_uses_register(code) != 0 ||
+                threedi_panm_parameter_is_ctrl_reference(code) == 0) {
+            fprintf(stderr,
+                    "raw PANM code %u lost the structural/reference split\n",
+                    code);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int main(void) {
     int ok = 1;
     ok &= test_decode_transform_with_reg();
     ok &= test_decode_panm_wave_no_reg();
+    ok &= test_raw_114_to_117_are_waves_with_ctrl_reference_params();
     return ok ? 0 : 1;
 }

@@ -415,12 +415,20 @@ bool NovaSimulation::resolve_mounted_pose(
 	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
 		return false;
 	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
-	assign_part_anim_phases(ir, controls, [carrier_ai](int p_channel) {
+	assign_part_anim_phases(
+			controls, (p_carrier.item_attrib & 0x1000u) == 0,
+			[carrier_ai](int p_channel) {
 		return carrier_ai != nullptr
-				? std::clamp(carrier_ai->brain.f[
-						AiBrain::kPartAnimPhase0 + p_channel], 0, 65535)
+				? carrier_ai->brain.f[
+						AiBrain::kPartAnimPhase0 + p_channel]
 				: 0;
 	});
+	// This is the exact witnessed publisher scope: a live UseGun child is being
+	// posed from the parent carrier's PANM/bone transform, so cache the
+	// carrier's inline MountSlot before evaluating that parent model.
+	// [orig: Entity_AttachToBoneAndUpdateTransform @ 0x546518..0x54652B;
+	//  HUD_CacheWeaponSlotInfo @ 0x44095B..0x440991]
+	assign_world_model_heat_glow(controls, p_world, p_carrier);
 	EmplacedWeaponControls emplaced;
 	if (emplaced_weapon_controls_for(
 			p_world, ai_.get(), p_carrier, emplaced)) {
@@ -657,20 +665,28 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
 		return false;
 
-	// PLAYPARTANIM channel 1/2 drives control-register ordinal 0/1. A brainless
-	// static still evaluates free-running PANM with the zero control table.
+	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail
+	// VEHICLE_SPECIAL1/2 registers. A brainless static still evaluates
+	// free-running PANM with zero phase values.
 	Dictionary controls;
 	AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
-	assign_part_anim_phases(ir, controls, [ai_entity](int p_channel) {
+	assign_part_anim_phases(
+			controls, entity == nullptr || (entity->item_attrib & 0x1000u) == 0,
+			[ai_entity](int p_channel) {
 		return ai_entity != nullptr
-				? std::clamp(ai_entity->brain.f[
-						AiBrain::kPartAnimPhase0 + p_channel], 0, 65535)
+				? ai_entity->brain.f[
+						AiBrain::kPartAnimPhase0 + p_channel]
 				: 0;
 	});
-	// EWEAP yaw/pitch are semantic CTRL names, not PLAYPARTANIM ordinals — two
-	// separate arrays in retail, see ctrl_register_is_engine_owned. The generic
-	// walk above skips them (and HEAT_GLOW), so B50Cal takes no part phase and
-	// this pair is the only thing that drives it.
+	// The generic collision frame receives HEAT_GLOW only when this model is the
+	// carrier in that same live UseGun attachment relation. The helper omits it
+	// for every other entity; a scoped cold slot still writes literal zero.
+	// [orig: attachment caller @ 0x546518;
+	//  HUD_CacheWeaponSlotInfo cold/hot stores @ 0x440969/@0x440991]
+	if (entity != nullptr)
+		assign_world_model_heat_glow(controls, p_world, *entity);
+	// EWEAP yaw/pitch are independent semantic CTRL writers. B50Cal consumes
+	// this pair and is unaffected by the VEHICLE_SPECIAL publication above.
 	EmplacedWeaponControls emplaced;
 	if (entity != nullptr &&
 			emplaced_weapon_controls_for(p_world, ai_.get(), *entity, emplaced)) {

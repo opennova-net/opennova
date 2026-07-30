@@ -89,6 +89,97 @@ bool run_client_state_handle_lookup_contract() {
 	return true;
 }
 
+// The load-time world stream writes entity+354 for all four pools and the
+// pool-1 zone block writes entity+538/+350. These decoded values must survive
+// in the same ClientEntityState rows that later S2C 0x50 team assignments
+// mutate. Flag omission denotes zero in retail, so a later zero-valued record
+// must clear a previously witnessed non-zero value rather than preserve it.
+bool run_world_stream_team_and_zone_fields_survive_client_fold() {
+	ns::NetClientView view;
+
+	nw::PoolSpawnRecord pool1;
+	pool1.slot_id = 0x1007;
+	pool1.item_type_id = 0x054F;
+	pool1.team_byte = 2;
+	pool1.zone_number_rank = 0x22; // zone 2, chain rank 1
+	pool1.zone_radius = 70;
+	nw::PoolSpawnBatch pool1_batch;
+	pool1_batch.records.push_back(pool1);
+	view.apply(0x0D, nw::encode_pool_spawn_batch(pool1_batch));
+
+	const ns::ClientEntityState *decoded = view.state().find(0x1007);
+	if (!expect(decoded != nullptr && decoded->team == 2 &&
+	                    decoded->zone_number_rank == 0x22 &&
+	                    decoded->zone_radius == 70,
+	            "pool-1 retains team and packed zone block")) return false;
+
+	const std::size_t row_count = view.state().entities.size();
+	view.apply_team_assign(0x1007, 1);
+	decoded = view.state().find(0x1007);
+	if (!expect(view.state().entities.size() == row_count && decoded != nullptr &&
+	                    decoded->team == 1 &&
+	                    decoded->zone_number_rank == 0x22 &&
+	                    decoded->zone_radius == 70,
+	            "S2C 0x50 mutates the same pool-1 row without disturbing zone state"))
+		return false;
+
+	nw::StaticEntityRecord pool2;
+	pool2.item_type_id = 0x0600;
+	pool2.team_byte = 1;
+	nw::StaticEntityBatch pool2_batch;
+	pool2_batch.start_index = 4;
+	pool2_batch.records.push_back(pool2);
+	view.apply(0x10, nw::encode_static_entity_batch(pool2_batch));
+	decoded = view.state().find(0x2004);
+	if (!expect(decoded != nullptr && decoded->team == 1,
+	            "pool-2 retains team")) return false;
+
+	nw::Pool3SyncRecord pool3;
+	pool3.item_type_id = 0x0700;
+	pool3.net_handle = 0x3005;
+	pool3.team_byte = 2;
+	nw::Pool3SyncBatch pool3_batch;
+	pool3_batch.start_index = 5;
+	pool3_batch.records.push_back(pool3);
+	view.apply(0x20, nw::encode_pool3_sync_batch(pool3_batch));
+	decoded = view.state().find(0x3005);
+	if (!expect(decoded != nullptr && decoded->team == 2,
+	            "pool-3 retains team")) return false;
+
+	// Re-encode the same rows with all flag-gated values zero. The encoders omit
+	// those fields and the decoders surface zero, which the client fold must apply.
+	pool1.team_byte = 0;
+	pool1.zone_number_rank = 0;
+	pool1.zone_radius = 0;
+	pool1_batch.records[0] = pool1;
+	view.apply(0x0D, nw::encode_pool_spawn_batch(pool1_batch));
+	decoded = view.state().find(0x1007);
+	if (!expect(decoded != nullptr && decoded->team == 0 &&
+	                    decoded->zone_number_rank == 0 &&
+	                    decoded->zone_radius == 0,
+	            "pool-1 applies omitted team and zone fields as zero")) return false;
+
+	pool2.team_byte = 0;
+	pool2_batch.records[0] = pool2;
+	view.apply(0x10, nw::encode_static_entity_batch(pool2_batch));
+	decoded = view.state().find(0x2004);
+	if (!expect(decoded != nullptr && decoded->team == 0,
+	            "pool-2 applies omitted team as zero")) return false;
+
+	pool3.team_byte = 0;
+	pool3_batch.records[0] = pool3;
+	view.apply(0x20, nw::encode_pool3_sync_batch(pool3_batch));
+	decoded = view.state().find(0x3005);
+	if (!expect(decoded != nullptr && decoded->team == 0,
+	            "pool-3 applies omitted team as zero")) return false;
+
+	view.apply_team_assign(0x1007, 0);
+	decoded = view.state().find(0x1007);
+	if (!expect(decoded != nullptr && decoded->team == 0,
+	            "S2C 0x50 applies a zero team to the existing row")) return false;
+	return true;
+}
+
 // The exact value the host's encoder + codec produce for one axis: compress the
 // (wire - anchor) delta, decompress it, add the anchor back. The client must land
 // on precisely this.
@@ -932,6 +1023,7 @@ bool run_motor_skips_net_peer() {
 
 int main() {
 	const bool ok = run_client_state_handle_lookup_contract() &&
+	                run_world_stream_team_and_zone_fields_survive_client_fold() &&
 	                run() &&
 	                run_compact_pose_fields_survive_client_fold() &&
 	                run_compact_lifecycle_survives_multi_frame_pump() &&

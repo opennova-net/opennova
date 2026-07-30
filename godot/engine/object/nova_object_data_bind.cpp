@@ -47,7 +47,15 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_material_anim_frames", "index", "slot"), &NovaObjectData::get_material_anim_frames);
 	ClassDB::bind_method(D_METHOD("set_material_anim_frame", "index", "slot", "frame_idx", "path"), &NovaObjectData::set_material_anim_frame);
 	ClassDB::bind_method(D_METHOD("get_shader_catalog"), &NovaObjectData::get_shader_catalog);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("get_global_control_register_catalog"),
+			&NovaObjectData::get_global_control_register_catalog);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("canonical_control_register_name", "name"),
+			&NovaObjectData::canonical_control_register_name);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &NovaObjectData::get_control_registers);
+	ClassDB::bind_method(D_METHOD("set_control_register_name", "index", "name"),
+			&NovaObjectData::set_control_register_name);
 	ClassDB::bind_method(D_METHOD("resolve_material_texture_path", "material_index", "texture_index"), &NovaObjectData::resolve_material_texture_path);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "material_index", "texture_index"), &NovaObjectData::load_material_texture);
 	ClassDB::bind_method(D_METHOD("resolve_texture_name", "texture_name"), &NovaObjectData::resolve_texture_name);
@@ -91,6 +99,8 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("evaluate_panm", "lod_index", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_panm);
 	ClassDB::bind_method(D_METHOD("apply_panm_to_nodes", "lod_index", "time_ms",
 			"ctrl_values", "nodes", "applied_revision"), &NovaObjectData::apply_panm_to_nodes);
+	ClassDB::bind_method(D_METHOD("get_panm_evaluation_serial"),
+			&NovaObjectData::get_panm_evaluation_serial);
 	ClassDB::bind_method(D_METHOD("evaluate_lights", "time_ms", "ctrl_values"), &NovaObjectData::evaluate_lights);
 	ClassDB::bind_method(D_METHOD("set_material_shader", "material_index", "shader_name"), &NovaObjectData::set_material_shader);
 	ClassDB::bind_method(D_METHOD("set_material_texture", "material_index", "texture_index", "texture_name"), &NovaObjectData::set_material_texture);

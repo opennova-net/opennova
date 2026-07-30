@@ -4,7 +4,8 @@ The runtime path from a `.3di` material (shader tag string + per-material flag
 byte) to device render state, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `libs/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
-`libs/renderer` (`material_classify`, `object_shader_template`),
+`libs/renderer` (`material_classify`, `material_eval`, `uv_anim`,
+`object_shader_template`),
 `godot/engine/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
 `godot/engine/object/nova_object_model.gd`. Landed by maturity REN-2
 ([maturity-program.md](../maturity-program.md); standing rules
@@ -24,7 +25,9 @@ this record.
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
 | Composed lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | the composer emits the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` section 5 + the 630-hash cited re-dump pin it |
 | Technique-class pass system (6 classes) | witnessed / host-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the host bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
-| UV animation (MatTexCoord1) | MATCHING (math ported) | `renderer::uv_anim` is the structural port of `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]` over the shared PANM wave table; `renderer_state_vectors` section 4 pins it; the MTRL-field feed is the residual open question |
+| UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `NovaObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2 |
+| Controlled flipbook | MATCHING for the reachable retail branch | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16`; the static-zero adjacent state dword selects the fractional-frame interpretation; `renderer_material_eval` pins exact `0x10000`, negative, and wrap cases |
+| RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
 | Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-9 fixes; D-RMAT-8 blend-space residual permanent) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); host mapping = raw sampling + gamma math + exact-inverse encode, calibrate-mode byte-identity proof 256/256; the composer fog table re-witnessed `[orig: @ 0x58a950 → @ 0x677960]` |
 
@@ -106,12 +109,42 @@ pick the fog COLOR (scene / gray 0x7F7F7F7F / black / white — black fades
 additive surfaces out, white multiplicative, gray-0.5 mod2x), bits 2-3 pick
 primary/secondary/off fog parameter sets. `apply_shader_parameters @ 0x58db80`
 (sole caller: FlushBatches) binds constants: flipbook frame
-(`GetTickCount()/rate % count` or the controlled-anim table `@ 0x83fce8`),
-RgbGen/AlphaGen evaluated channels (`AlphaGenValue`), UV-scroll matrix
+(`GetTickCount()/rate % count` or the controlled-animation slot), evaluated
+RgbGen/AlphaGen channels (`AlphaGenValue`), the complete UV matrix
 (`compute_uv_transform_matrix @ 0x5b1990`, time-driven), world/view matrix
 family, `FogStart`/`FogRangeRecip`, `MatRotSpecular` from the live light
 direction, and `ColorSrcGlobalGain` ← `Render_LightScaleR @ 0x8409f4` (the
-env #17 modulator triple's shader-path consumer — REN-5).
+env #17 modulator triple's shader-path consumer — REN-5). A control slot is
+8 bytes: the even dword at `0x83FCE8 + 8·ordinal` is a **signed `int32`**
+value and the odd state dword at `0x83FCEC + 8·ordinal` selects
+fractional-frame versus modulo-frame interpretation. There is no blanket
+`uint16` clamp: `0x10000` is the exact 16.16 endpoint and negative values are
+preserved for extrapolation. The odd dword has no writer and is zero in the
+retail image, while `[orig: CtrlRegAnimSlot_UpdateAll @ 0x401bf0]` writes only
+the even value. Therefore the live controlled-flipbook behavior is the
+fractional branch; the modulo branch is present but unreachable in retail JO
+`[orig: apply_shader_parameters @ 0x58db80]`.
+
+The consumer fields do not index a private per-model value array. The on-disk
+CTRL list is model-local names; `[orig: sub_5B4640 @ 0x5B4640; ordinal store
+@ 0x5B46E6]` resolves those names against the 96-entry global catalog, and
+`ThreediGp_LoadFromFile` patches the material/texture-animation references to
+the resolved global ordinals at `0x5B5C80..0x5B5DA2`. The resolver is
+case-insensitive and returns zero for both `LOD_FRAC` and a miss
+`[orig: CtrlName_ToOrdinal @ 0x57B290]`; an unknown authored model name
+therefore aliases global ordinal 0. OpenNova keeps ordinary lookup
+unambiguous but reproduces this loader-only alias. The full catalog and the
+PANM/light remap sites are recorded in
+[3di-gp-format-re.md](../threedi/3di-gp-format-re.md).
+
+For the integer interpolation consumers, retail uses a two-operand 32-bit
+`IMUL`, discards the high product, then performs an arithmetic right shift.
+The port deliberately reproduces that wrapping low-product arithmetic rather
+than widening to 64 bits `[orig: AlphaGen_EvaluateValue @ 0x5B234C;
+RgbGen_EvaluateColor @ 0x5B24AC]`. Controlled flipbook uses the same
+low-dword/`SAR 16` rule. Controlled UV instead converts the signed CTRL dword
+to a floating fraction; its negative and `0x10000` inputs are likewise not
+clamped.
 
 **The GfxShader pass-flag word (anchored at the 2026-07-07 water fidelity
 grill).** The `GfxShader_Create*TexDesc` material family applies state
@@ -251,18 +284,48 @@ types 'q'..'u' (113..117) = CONTROLLED-ANIM set/scroll/shear/scale/rotation
 @ 0x5de6b0` indexes the SAME 2816-byte waveform table PANM uses
 (`WaveformTable @ 0x2bf8ed0` = libs/threedi `threedi_panm_wave_table()`);
 bands per type {1→0, 2→256, 3→768, 4→1024, 5→1280, 6→rand, 7→1536 lerped,
-8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as `renderer::uv_anim`
-(vectors section 4).
+8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as
+`renderer::uv_anim` (vectors section 4). The live bridge feeds the parsed U/V
+channel blocks into this port and carries its complete row-vector matrix
+through `NovaObjectData` and the object shader:
+`u' = u*m00 + v*m10 + m20`,
+`v' = u*m01 + v*m11 + m21`. Two shader `vec3` rows replace the former
+offset/scale/rotation decomposition, so controlled set (zero diagonal) and
+shear survive intact.
 
 **RgbGen / AlphaGen (REN-4 — closes the channel-remap question).** The
 `convert_material_definition` remaps (`src[16]`: file 3..7 → runtime 8..12,
 `src[17]` identity) are the RGBGEN/ALPHAGEN TYPE bytes — the file's wave-type
-ids shifted to the runtime `wave_lookup` band ids. `RgbGen_EvaluateColor
-@ 0x5b23d0` evaluates a 12-byte gen block per channel: type 24 = constant
-color; 113/114 = controlled-anim value; else `color = base + (delta x
-wave_lookup(type, phase16 + speed x (tick<<8)/1000)) >> 16` per RGB;
-`AlphaGen_EvaluateValue @ 0x5b2320` (matdef+564) feeds the AlphaGenValue
-param (slot 223) — the FF techniques consume it as MaterialDiffuse alpha.
+ids shifted to the runtime `wave_lookup` band ids.
+`[orig: RgbGen_EvaluateColor @ 0x5b23d0]` evaluates a 12-byte gen block per
+channel:
+type 24 = constant color; types 113 **and 114** interpolate from
+`dword_83FCE8[2*phase]`; every other type uses
+`base + (delta × wave_lookup(type, phase16 + speed × (tick<<8)/1000)) >> 16`.
+Thus RGB types 115–117 are waveform fallbacks, not controlled
+shear/scale/rotation operations. Both the controlled and waveform
+interpolations keep the low 32 bits of `delta × fraction` before arithmetic
+`SAR 16`; signed CTRL values can therefore extrapolate below the start and
+overflow wraps exactly as retail does `[orig: RgbGen_EvaluateColor
+@ 0x5B24AC]`.
+
+`[orig: AlphaGen_EvaluateValue @ 0x5b2320]` (matdef+564) feeds the
+AlphaGenValue parameter (slot 223), consumed by the FF techniques as
+MaterialDiffuse alpha. Type 24 is constant; type 113 interpolates the
+base/end window from `dword_83FCE8[2*phase]`; every other type uses the
+waveform path. This is a separate dispatch from RGB and UV, not one global
+meaning for the five control-style numbers. Alpha uses the same signed,
+low-product `IMUL`/`SAR 16` interpolation
+`[orig: AlphaGen_EvaluateValue @ 0x5B234C]`.
+
+Point-light color shares the RGB generator contract:
+`[orig: Light_TickGenBlock @ 0x5a8ae0]` advances the light generator block and
+`[orig: Light_GetPointLightParams @ 0x5a9180]` obtains its color through
+`RgbGen_EvaluateColor`. The runtime light bridge therefore resolves a control
+value only for RGB styles 113/114; styles 115–117 retain waveform behavior.
+`NovaObjectData::evaluate_lights` now supplies that signed register value, so
+point lights share the same endpoint, negative-extrapolation, and wrapping
+behavior as material RGB.
 
 **Fog parameter sets (REN-4 — closes the secondary-set question).**
 `CD3DDevice_SetFogParameters @ 0x677960` writes TWO blocks: the NORMAL set
@@ -386,10 +449,12 @@ REN-4 session (the shader/TSS grill):
   pushed in `setup_entity_lighting_and_shader_constants @ 0x5d98a0`); the
   secondary fog parameter set (= the dormant LITE 1/3-density block,
   §Fog parameter sets).
-- Which MTRL file fields feed the runtime UV-anim channel blocks
-  (matdef+524/+532, copied by `convert_material_definition @ 0x5b03c0`) — the
-  threedi-side mapping that would let the host drive `renderer::uv_anim`
-  from parsed materials.
+- **Closed 2026-07-29**: the parsed MTRL U/V blocks (matdef+524/+532 in
+  retail, copied by `[orig: convert_material_definition @ 0x5b03c0]`) now
+  feed the full live 2×3 object-shader transform; signed RGB/alpha/flipbook
+  consumers and the point-light register feed are also live. This closes the
+  consumer integration, not the still-partial set of gameplay CTRL producers
+  cataloged in [3di-gp-format-re.md](../threedi/3di-gp-format-re.md).
 - The sort word (entry+164) consumer — authored at load
   (`[orig: @ 0x5af14b..0x5af1a4]`) but no runtime reader was found; the batch
   sort uses the registry INDEX, not this word. Likely tooling/dev-sort

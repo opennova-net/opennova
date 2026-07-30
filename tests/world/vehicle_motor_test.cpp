@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 using namespace opennova::world;
 
@@ -163,6 +164,40 @@ void test_def_decel_default() {
         CHECK(file.entries[1].deceleration == 20); // authored value wins
     }
     def_free_items(&file);
+}
+
+// The cveh render callback publishes the high steer word and saturated wrapped
+// speed magnitude. Pin the word orientation and every signed boundary,
+// especially INT_MIN where std::abs(int32_t) would be undefined.
+// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+//  steering @0x4929C0..0x4929D7; speed @0x4929DC..0x4929F1]
+void test_ctrl_register_projection() {
+    Entity::VehicleMotorState state;
+
+    state.steer_state = static_cast<int32_t>(0x1234ABCDu);
+    state.speed = 0x1234;
+    VehicleCtrlRegisters ctrl = vehicle_ctrl_registers(state);
+    CHECK(ctrl.steering == 0x1234);
+    CHECK(ctrl.speed == 0x1234);
+
+    state.steer_state = static_cast<int32_t>(0xFEDC0001u);
+    state.speed = -0x1234;
+    ctrl = vehicle_ctrl_registers(state);
+    CHECK(ctrl.steering == 0xFEDC);
+    CHECK(ctrl.speed == 0x1234);
+
+    state.speed = 0x10000;
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
+    state.speed = -0x10000;
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
+    state.speed = 0x10001;
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
+    state.speed = -0x10001;
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
+    state.speed = std::numeric_limits<int32_t>::max();
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
+    state.speed = std::numeric_limits<int32_t>::min();
+    CHECK(vehicle_ctrl_registers(state).speed == 0x10000);
 }
 
 // Forward drive: moving bit + dir 0 ramps speed by the accel clamp toward
@@ -427,6 +462,7 @@ void test_physics_selector_gate() {
 int main() {
     test_def_physics_scaling();
     test_def_decel_default();
+    test_ctrl_register_projection();
     test_drive_forward();
     test_reverse();
     test_turn_in_place_holds();

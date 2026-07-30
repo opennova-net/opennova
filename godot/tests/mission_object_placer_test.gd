@@ -528,7 +528,7 @@ func test_inert_panm_model_applies_robj_base_once_not_every_frame() -> void:
 
 	assert_eq(model.robj_eval_count, build_evals,
 			"inert ROBJ transforms are retained instead of re-evaluated per frame")
-	model.set_ctrl_value("test_mutation", 123)
+	model.set_ctrl_value("VEHICLE_SPECIAL1", 123)
 	assert_eq(model.robj_eval_count, build_evals + 1,
 			"an exact runtime mutator still forces one defensive ROBJ refresh")
 	model.run_runtime_frame()

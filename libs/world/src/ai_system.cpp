@@ -13,6 +13,7 @@
 #include "world/vehicle_motor.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "ai_detail.h"
 
@@ -614,17 +615,48 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     return true;
 }
 
+static int32_t part_anim_wrapped_add(int32_t lhs, int32_t rhs) {
+    const uint32_t bits = static_cast<uint32_t>(lhs) +
+                          static_cast<uint32_t>(rhs);
+    int32_t result;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
+static int32_t part_anim_wrapped_sub(int32_t lhs, int32_t rhs) {
+    const uint32_t bits = static_cast<uint32_t>(lhs) -
+                          static_cast<uint32_t>(rhs);
+    int32_t result;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
 void AiSystem::advance_part_anim(AiEntity &e) {
     AiBrain &b = e.brain;
     for (int slot = 0; slot < 2; ++slot) {
-        int32_t dir = b.f[AiBrain::kPartAnimDir0 + slot];
-        int32_t rate = b.f[AiBrain::kPartAnimRate0 + slot];
-        if (dir == 0 || rate == 0) continue; // play_type 0 (stop) freezes the sweep
-        int64_t phase = static_cast<int64_t>(b.f[AiBrain::kPartAnimPhase0 + slot]) +
-                        static_cast<int64_t>(rate) * dir;
-        if (phase < 0) phase = 0;
-        if (phase > 65535) phase = 65535; // clamp endpoints (one-shot; wrap is a def-idle case)
-        b.f[AiBrain::kPartAnimPhase0 + slot] = static_cast<int32_t>(phase);
+        const int32_t dir = b.f[AiBrain::kPartAnimDir0 + slot];
+        const int32_t rate = b.f[AiBrain::kPartAnimRate0 + slot];
+        if (dir == 0) continue; // play_type 0 (stop) freezes the sweep
+        int32_t &phase = b.f[AiBrain::kPartAnimPhase0 + slot];
+        if (dir == 1) {
+            phase = part_anim_wrapped_add(phase, rate);
+            // The original clears direction only after a strict upper
+            // overshoot. Landing exactly on 0x10000 remains active.
+            // [orig: Entity_UpdateSuspensionBounce @0x456740..0x456764]
+            if (phase > 0x10000) {
+                phase = 0x10000;
+                b.f[AiBrain::kPartAnimDir0 + slot] = 0;
+            }
+        } else {
+            phase = part_anim_wrapped_sub(phase, rate);
+            // Every nonzero direction other than +1 takes the subtraction
+            // branch; only a negative result clamps and stops.
+            // [orig: Entity_UpdateSuspensionBounce @0x456756..0x456764]
+            if (phase < 0) {
+                phase = 0;
+                b.f[AiBrain::kPartAnimDir0 + slot] = 0;
+            }
+        }
     }
 }
 
@@ -641,8 +673,9 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
             // flt_7C3B40=0.016, flt_7C32BC=65536.] The original computes `base` unconditionally, so
             // ANIMTIME==0 -> base 0.0 -> 0.016/0.0 = +inf, and the x87 ftol of infinity is the
             // integer-indefinite 0x80000000 (INT_MIN) -- nonzero, so the min-1 guard does NOT fire.
-            // That makes ANIMTIME==0 saturate the part to a clamp endpoint on the first tick (matching
-            // the GDScript host's 1e9 instant-saturation). Replicated here rather than short-circuited.
+            // The updater then applies ordinary wrapping ADD/SUB. From phase
+            // zero, zero-time forward alternates INT_MIN/zero without stopping;
+            // zero-time reverse clamps back to zero and stops on its first tick.
             const double seconds = static_cast<double>(p4) / 65536.0; // base; p4==0 -> 0.0
             const double rate_f = (0.016 / seconds) * 65536.0;        // +inf when p4==0
             int32_t rate;

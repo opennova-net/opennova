@@ -2731,9 +2731,11 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = active_slot.clip;
 	out["reserve"] = active_slot.reserve;
 	out["kick"] = static_cast<int>(active_slot.kick);
-	// Weapon heat, clamped where the original's info builder clamps it — the drawer
-	// downstream reads a plain 0..0xFFFF level and self-hides at 0.
-	// [orig: HUD_BuildEntityInfo @ 0x4b852e -> hudInfo+60, the clamp @ 0x4b854d]
+	// Weapon heat has two retail consumers with different clamps: HUD info stops
+	// at 0xFFFF, while the first-person model publishes HEAT_GLOW on the signed
+	// CTRL bus through the exact 0x10000 endpoint.
+	// [orig: HUD_BuildEntityInfo @ 0x4B852E..0x4B854D;
+	//  Player_RenderFirstPersonViewModel @ 0x4DEEC2..0x4DEEF5]
 	{
 		const int32_t heat = world_ != nullptr
 				? opennova::world::weapon_slot_accumulated_heat(
@@ -2743,6 +2745,7 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 		out["heat"] = heat > opennova::world::weapon_heat::kFull
 				? opennova::world::weapon_heat::kFull
 				: heat;
+		out["heat_glow"] = std::clamp(heat, 0, 0x10000);
 	}
 	out["borrowed_usegun_slot"] = local_usegun_slot_active_;
 	out["emplaced_controls_valid"] = false;

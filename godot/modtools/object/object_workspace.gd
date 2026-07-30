@@ -23,8 +23,13 @@ const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL
 const OED_UPDATE_LGHT := NovaObjectData.UPDATE_LGHT
 const OED_UPDATE_PANM := NovaObjectData.UPDATE_PANM
 const OED_UPDATE_ALL := NovaObjectData.UPDATE_ALL
-# Maximum value of a 16-bit unsigned field (control registers, light rate).
+# Maximum value of an authored 16-bit unsigned field (for example, light rate).
 const U16_VALUE_MAX := 65535
+# The retail runtime CTRL bus stores signed dwords. Preview authoring must expose
+# the same complete range; several dedicated writers use values outside the
+# usual 0..0x10000 animation interval.
+const CTRL_VALUE_MIN := -2147483648
+const CTRL_VALUE_MAX := 2147483647
 
 var object_editor: ObjectEditor
 var environment_editor

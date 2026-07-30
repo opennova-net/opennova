@@ -882,6 +882,40 @@ void test_heat_is_derived_from_the_window_deadline() {
     // window left over [orig: the def+876 test @ 0x53f79b].
     WeaponFsmDef cold = make_ak_def();
     CHECK(weapon_slot_accumulated_heat(cold, s, 1000) == 0);
+
+    // The retail IMUL is low-32-bit, not widened arithmetic. INT32_MAX * 2
+    // becomes 0xFFFFFFFE (-2); the world publisher's signed cap leaves it
+    // alone and its final MOVZX AX exposes 65534.
+    def.heat_decay_per_tick = INT32_MAX;
+    s.heat_window_end_tick = 1002;
+    CHECK(weapon_slot_accumulated_heat(def, s, 1000) == -2);
+    CHECK(weapon_slot_world_heat_glow(def, s, 1000) == 65534);
+}
+
+void test_world_model_heat_glow_has_its_own_retail_clamp() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    WeaponSlotState s{};
+    const int32_t now = 1000;
+
+    // The world-model cache writes zero every time the inline slot is cold; it
+    // does not retain the prior entity's global CTRL value.
+    CHECK(weapon_slot_world_heat_glow(def, s, now) == 0);
+    s.heat_window_end_tick = now;
+    CHECK(weapon_slot_world_heat_glow(def, s, now) == 0);
+
+    // 42 * 1560 fits below the unsigned-word ceiling; one more tick of window
+    // crosses it and must publish 0xFFFF, never FP's 0x10000 endpoint.
+    s.heat_window_end_tick = now + 1560;
+    CHECK(weapon_slot_accumulated_heat(def, s, now) == 65520);
+    CHECK(weapon_slot_world_heat_glow(def, s, now) == 65520);
+    s.heat_window_end_tick = now + 1561;
+    CHECK(weapon_slot_accumulated_heat(def, s, now) == 65562);
+    CHECK(weapon_slot_world_heat_glow(def, s, now) == 0xFFFF);
+
+    // A stale active deadline on a definition with no heat model still
+    // publishes literal zero.
+    WeaponFsmDef cold = make_ak_def();
+    CHECK(weapon_slot_world_heat_glow(cold, s, now) == 0);
 }
 
 // Hold the trigger on an emplaced .50 and walk the whole heat arc. The shot numbers
@@ -1042,6 +1076,7 @@ int main() {
     test_switch_completion_signal();
     test_emplaced_switchfrom_and_try_switchto_contract();
     test_heat_is_derived_from_the_window_deadline();
+    test_world_model_heat_glow_has_its_own_retail_clamp();
     test_emplaced_gun_overheats_and_locks_out();
     test_heat_ceiling_clamps_the_window();
     test_no_heat_model_never_stamps_a_window();

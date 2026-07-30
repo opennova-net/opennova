@@ -65,8 +65,16 @@ var _section_visibility_mask: int = -1
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
 var _anim_frames_by_mat: Dictionary = {}
+# This retained model stores the latest CTRL snapshot applied to it.
 var _ctrl_values: Dictionary = {}
+# Presentation ownership is bookkeeping around retail's single current value,
+# not a stack of values. It prevents an older presenter's teardown from
+# clearing a later store, but never resurrects an overwritten value.
+var _ctrl_value_owners: Dictionary = {} # register -> current presentation owner
+var _ctrl_batch_depth := 0
+var _ctrl_batch_dirty := false
 var _part_anims: Dictionary = {}
+var _part_anim_tick_accum_s := 0.0
 var _anim_time_ms: int = 0
 var _panm_clock
 var _active_lod: int = 0
@@ -147,6 +155,7 @@ func set_object_data(value: NovaObjectData) -> void:
 	object_data = value
 	reset_remote_body_state()
 	_part_anims.clear()
+	_part_anim_tick_accum_s = 0.0
 	_active_lod = _clamp_lod_index(_active_lod)
 	if object_data != null and not object_data.object_changed.is_connected(_on_object_changed):
 		object_data.object_changed.connect(_on_object_changed, CONNECT_DEFERRED)
@@ -591,31 +600,98 @@ func get_active_lod() -> int:
 	return _active_lod
 
 
-func set_ctrl_value(name: String, value: int) -> void:
-	if name.is_empty():
-		return
-	var next_value := clampi(value, 0, 65535)
-	if int(_ctrl_values.get(name, -1)) == next_value:
-		return
-	_ctrl_values[name] = next_value
+func _ctrl_dword(value: int) -> int:
+	# Retail's global CTRL bus stores signed dwords. Keep exact 0x10000
+	# endpoints and negative angular controls instead of narrowing to uint16.
+	var next_value := value & 0xFFFFFFFF
+	if next_value >= 0x80000000:
+		next_value -= 0x100000000
+	return next_value
+
+
+func _finish_ctrl_change(_register: String, apply_now: bool) -> void:
 	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	if apply_now:
+		if _ctrl_batch_depth > 0:
+			_ctrl_batch_dirty = true
+		else:
+			_apply_runtime_state(0.0)
+
+
+## Batch the ordered register stores that precede one retained-model sample.
+## Retail writes every relevant global slot and then consumes the model once;
+## this avoids advancing shared waveform/random consumers once per individual
+## store. Nested callers are supported.
+func begin_ctrl_update() -> void:
+	_ctrl_batch_depth += 1
+
+
+func end_ctrl_update() -> void:
+	if _ctrl_batch_depth <= 0:
+		return
+	_ctrl_batch_depth -= 1
+	if _ctrl_batch_depth == 0 and _ctrl_batch_dirty:
+		_ctrl_batch_dirty = false
+		_apply_runtime_state(0.0)
+
+
+func set_ctrl_value(name: String, value: int) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if register.is_empty():
+		return
+	var next_value := _ctrl_dword(value)
+	if (_ctrl_values.has(register)
+			and int(_ctrl_values[register]) == next_value
+			and not _ctrl_value_owners.has(register)):
+		return
+	_ctrl_values[register] = next_value
+	_ctrl_value_owners.erase(register)
+	_finish_ctrl_change(register, true)
 
 
 func clear_ctrl_value(name: String) -> void:
-	if not _ctrl_values.has(name):
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if register.is_empty() or not _ctrl_values.has(register):
 		return
-	_ctrl_values.erase(name)
-	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	_ctrl_values.erase(register)
+	_ctrl_value_owners.erase(register)
+	_finish_ctrl_change(register, true)
+
+
+## Publish one dedicated retail writer into the register's single current
+## value. The owner tag is lifecycle bookkeeping only: a stale teardown cannot
+## clear a later writer's store, and overwritten values are never stacked or
+## restored. [orig: global CTRL value slots @0x83FCE8, stride 8]
+func set_ctrl_override(owner: String, name: String, value: int) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if owner.is_empty() or register.is_empty():
+		return
+	var next_value := _ctrl_dword(value)
+	if (_ctrl_values.has(register)
+			and int(_ctrl_values[register]) == next_value
+			and String(_ctrl_value_owners.get(register, "")) == owner):
+		return
+	_ctrl_values[register] = next_value
+	_ctrl_value_owners[register] = owner
+	_finish_ctrl_change(register, true)
+
+
+func clear_ctrl_override(owner: String, name: String) -> void:
+	var register := NovaObjectData.canonical_control_register_name(name)
+	if (owner.is_empty() or register.is_empty()
+			or String(_ctrl_value_owners.get(register, "")) != owner):
+		return
+	_ctrl_value_owners.erase(register)
+	_ctrl_values.erase(register)
+	_finish_ctrl_change(register, true)
 
 
 func clear_ctrl_values() -> void:
-	if _ctrl_values.is_empty():
+	if _ctrl_values.is_empty() and _ctrl_value_owners.is_empty():
 		return
 	_ctrl_values.clear()
-	_bounds_dirty = true
-	_apply_runtime_state(0.0)
+	_ctrl_value_owners.clear()
+	_finish_ctrl_change("", true)
 
 
 func get_ctrl_values() -> Dictionary:
@@ -626,105 +702,179 @@ func get_ctrl_values() -> Dictionary:
 # [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22] PLAYPARTANIM(channel, play_type, time):
 # ANIMNUM (channel) in {1,2} selects one of two part-anim channels (slot = channel-1); ANIMPLAYTYPE
 # +1/0/-1 = forward/stop/reverse; ANIMTIME seconds = how long the part takes to cross its full range.
-# The original stores a per-channel direction + per-tick rate on the AI struct and a per-frame consumer
-# sweeps a 16.16 phase (0..65536, full range in ANIMTIME at 62.5Hz), clamping at the ends; it is
-# velocity-from-current (it does NOT reset the phase). We drive part channel `slot` through the model's
-# PANM control register at index `slot`, value 0..65535 == that phase, fed to evaluate_panm() each frame.
-# See notes/mission/anim-ai-grill-2026-06-07.md.
+# The original stores a per-channel direction + truncated rate on the AI struct and a fixed-16-ms
+# consumer applies wrapping signed ADD/SUB. It clamps only after strict upper/negative overshoot
+# (so exact endpoints remain active for one more tick); it is velocity-from-current and does not
+# reset the phase. Before drawing, retail publishes channel 1/2
+# to the fixed global CTRL names VEHICLE_SPECIAL1/VEHICLE_SPECIAL2. It never selects a model-local
+# CTRL entry by ordinal.
+# [orig: Jointops HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38]
 
-## Play a model part animation, mirroring the runtime PLAYPARTANIM action so editor preview and host
-## playback share one path. channel: 1 or 2. play_type: 1 play / 0 stop / -1 reverse. time_s: seconds
-## for the part to traverse its full range (ANIMTIME).
+const _PART_ANIM_CTRL_NAMES: Array[String] = [
+	"VEHICLE_SPECIAL1",
+	"VEHICLE_SPECIAL2",
+]
+const _PART_ANIM_CTRL_OWNERS: Array[String] = [
+	"present:part_anim:1",
+	"present:part_anim:2",
+]
+const _PART_ANIM_TICK_S := 0.016
+
+
+func _part_anim_rate_for_seconds(time_s: float) -> int:
+	# x87 FISTP returns the integer-indefinite INT_MIN for infinity, NaN,
+	# or an out-of-range result. A zero finite result is then promoted to 1.
+	# [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]
+	if time_s == 0.0:
+		return -2147483648
+	var rate_f := (_PART_ANIM_TICK_S / time_s) * 65536.0
+	if is_nan(rate_f) or rate_f >= 2147483648.0 or rate_f < -2147483648.0:
+		return -2147483648
+	var rate := int(rate_f)
+	return 1 if rate == 0 else _ctrl_dword(rate)
+
+## Play a model part animation for the editor/legacy mission-controller path.
+## The authoritative runtime integrates the same fields in AiSystem and presents
+## them through set_part_phase(). channel: 1 or 2; play_type: -1, 0, or 1.
 func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	var slot := channel - 1
 	if slot < 0 or slot > 1:
 		return  # the original validates channel in {1,2}; anything else is ignored
+	if play_type < -1 or play_type > 1:
+		return
 	var register := _resolve_anim_channel_register(slot)
 	if register.is_empty():
 		return
 	if play_type == 0:
 		_part_anims.erase(register)  # Stop: freeze the part at its current value
 		return
-	var dir := 1 if play_type > 0 else -1
-	var speed := 65535.0 / time_s if time_s > 0.0 else 1.0e9  # full range crossed in time_s seconds
+	if _part_anims.is_empty():
+		_part_anim_tick_accum_s = 0.0
 	_part_anims[register] = {
 		"register": register,
-		"dir": dir,
-		"speed": speed,
-		"value": float(int(_ctrl_values.get(register, 0))),  # velocity from current (no reset)
+		"dir": play_type,
+		"rate": _part_anim_rate_for_seconds(time_s),
+		"value": int(_ctrl_values.get(register, 0)),  # velocity from current
 	}
 
 
 ## Editor-preview convenience: seed the channel at its rest start (0 forward / max reverse) then play,
-## so a preview always shows the full motion from rest. The runtime uses play_part_anim directly
-## (velocity-from-current, faithful to the action); only the editor preview restarts.
+## so a preview always shows the full motion from rest. Production presentation
+## receives the authoritative phase through set_part_phase().
 func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	var slot := channel - 1
-	if slot < 0 or slot > 1:
+	if slot < 0 or slot > 1 or play_type < -1 or play_type > 1:
 		return
 	var register := _resolve_anim_channel_register(slot)
 	# Stop (play_type == 0) must freeze the part where it is, so do NOT reseed the register: reseeding
 	# to 0 would jump the part to its 0 pose before play_part_anim's stop erases the channel. Only the
 	# forward/reverse previews seed a rest start (0 forward / max reverse).
 	if not register.is_empty() and play_type != 0:
-		_ctrl_values[register] = 0 if play_type >= 0 else 65535
+		_ctrl_values[register] = 0 if play_type >= 0 else 65536
+		_ctrl_value_owners.erase(register)
+		_finish_ctrl_change(register, false)
 	play_part_anim(channel, play_type, time_s)
 
 
-## Pose a part channel directly to an engine-computed phase (0..65535 == 0..1 over the part's range).
+## Pose a part channel directly to the engine-computed signed dword. Ordinary
+## sweeps live in 0..0x10000, but zero-time retail arithmetic can wrap outside
+## that range and the publisher copies it without another clamp.
 ## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
 ## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
 ## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
 func set_part_phase(channel: int, phase: int) -> void:
-	var register := _resolve_anim_channel_register(channel - 1)
-	if register.is_empty():
+	var slot := channel - 1
+	var register := _resolve_anim_channel_register(slot)
+	var owner := _resolve_anim_channel_owner(slot)
+	if register.is_empty() or owner.is_empty():
 		return
-	var next_phase := clampi(phase, 0, 65535)
-	if int(_ctrl_values.get(register, -1)) == next_phase and not _part_anims.has(register):
-		return
+	var next_phase := _ctrl_dword(phase)
 	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
-	_ctrl_values[register] = next_phase
-	_bounds_dirty = true
+	# Keep the source tag so stale teardown cannot clear a newer writer. Retail
+	# has one current slot value, not a rollback stack: clearing this current
+	# publication removes it instead of resurrecting an older authored value.
+	set_ctrl_override(owner, register, next_phase)
+
+
+## Release PLAYPARTANIM's ownership of one semantic register. This is distinct
+## from publishing zero: retail suppresses VEHICLE_SPECIAL1 altogether for
+## ItemDefAttrib FastRope (0x1000), while it still publishes SPECIAL2.
+func clear_part_phase(channel: int) -> void:
+	var slot := channel - 1
+	var register := _resolve_anim_channel_register(slot)
+	var owner := _resolve_anim_channel_owner(slot)
+	if register.is_empty() or owner.is_empty():
+		return
+	_part_anims.erase(register)
+	clear_ctrl_override(owner, register)
 
 
 func clear_part_anims() -> void:
 	_part_anims.clear()
+	_part_anim_tick_accum_s = 0.0
 
 
 func get_active_part_anims() -> Dictionary:
 	return _part_anims.duplicate(true)
 
 
-# [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
+# [orig: Jointops HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38:
+#  comp[113]/comp[114] -> global CTRL VEHICLE_SPECIAL1/VEHICLE_SPECIAL2.]
 func _resolve_anim_channel_register(slot: int) -> String:
-	if object_data == null or not object_data.has_method("get_control_registers"):
+	if slot < 0 or slot >= _PART_ANIM_CTRL_NAMES.size():
 		return ""
-	var regs: Array = object_data.get_control_registers()
-	if slot < 0 or slot >= regs.size():
-		return ""
-	return String((regs[slot] as Dictionary).get("name", ""))
+	return _PART_ANIM_CTRL_NAMES[slot]
 
 
-# Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
-# Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
-# the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
+func _resolve_anim_channel_owner(slot: int) -> String:
+	if slot < 0 or slot >= _PART_ANIM_CTRL_OWNERS.size():
+		return ""
+	return _PART_ANIM_CTRL_OWNERS[slot]
+
+
+# Advance at retail's fixed 16 ms cadence with wrapping signed-dword ADD/SUB.
+# Only strict overshoot clamps and stops; landing exactly on an endpoint keeps
+# the direction live for one more tick.
+# [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]
+# Writes the base/editor bus directly (NOT set_ctrl_value, which would eagerly
+# re-evaluate per channel); the enclosing _apply_runtime_state applies the
+# effective result once, in the same frame, to materials + PANM.
 func _advance_part_anims(delta: float) -> bool:
 	if _part_anims.is_empty() or delta <= 0.0:
 		return false
-	var finished: Array = []
+	_part_anim_tick_accum_s += delta
+	var tick_count := int(floor(
+			(_part_anim_tick_accum_s + 0.000000001) / _PART_ANIM_TICK_S))
+	if tick_count <= 0:
+		return false
+	_part_anim_tick_accum_s -= float(tick_count) * _PART_ANIM_TICK_S
 	var changed := false
-	for register in _part_anims.keys():
-		var anim: Dictionary = _part_anims[register]
-		var old_value := int(_ctrl_values.get(register, 0))
-		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
-		anim["value"] = value
-		var next_value := int(round(value))
-		_ctrl_values[register] = next_value
-		changed = changed or old_value != next_value
-		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
-			finished.append(register)  # reached the clamp endpoint; the part holds there
-	for register in finished:
-		_part_anims.erase(register)
+	for _tick in range(tick_count):
+		if _part_anims.is_empty():
+			break
+		for register in _part_anims.keys():
+			var anim: Dictionary = _part_anims[register]
+			var previous := int(anim["value"])
+			var direction := int(anim["dir"])
+			var rate := int(anim["rate"])
+			var next_value: int
+			var finished := false
+			if direction == 1:
+				next_value = _ctrl_dword(previous + rate)
+				if next_value > 65536:
+					next_value = 65536
+					finished = true
+			else:
+				next_value = _ctrl_dword(previous - rate)
+				if next_value < 0:
+					next_value = 0
+					finished = true
+			anim["value"] = next_value
+			_ctrl_values[register] = next_value
+			_ctrl_value_owners.erase(register)
+			changed = changed or next_value != previous
+			if finished:
+				_part_anims.erase(register)
 	_bounds_dirty = _bounds_dirty or changed
 	return changed
 
@@ -1035,14 +1185,15 @@ func advance_runtime_frame(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
 		return
 	# Retail evaluates material constants / PANM transforms / light state per
-	# SUBMITTED model only [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the
-	# batch computes constants for the models it draws]. A model that cannot
-	# render this frame (occlusion-hidden building, hidden prop) skips all
-	# clock-DERIVED work; every skipped value re-derives from the absolute
-	# clock on its next visible frame. Time-ACCUMULATING state (commanded part
-	# anims, an internally-timed skeletal clip, the private preview clock)
-	# still advances inside _apply_runtime_state — a door commanded open while
-	# culled is open when next seen.
+	# SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the batch
+	# computes constants for the models it draws]. is_visible_in_tree() is only
+	# the retained host's hierarchy-visibility gate: it skips explicitly hidden
+	# props/buildings, but it does not prove camera/frustum submission. Exact
+	# noise-call cadence therefore remains a renderer-scheduling gap (D-3DI-2),
+	# not something this SceneTree callback can reconstruct. Time-ACCUMULATING
+	# state (commanded part anims, an internally-timed skeletal clip, the private
+	# preview clock) still advances inside _apply_runtime_state — a door
+	# commanded open while hidden is open when next seen.
 	var renderable := is_visible_in_tree()
 	if not _needs_runtime_frame_work():
 		# Keep the private preview clock continuous even while the model has no
@@ -1192,6 +1343,15 @@ func _apply_runtime_state(delta: float, renderable := true) -> void:
 		# state advanced above; it re-derives on the next visible frame, with
 		# the pending dirt (_bounds_dirty, _body_pose_dirty) staying latched.
 		return
+	# Retail poses PANM during entity submission before the later render-batch
+	# flush evaluates material generators. Preserve that order because noise
+	# waveforms share one random stream.
+	# [orig: Render_SubmitEntity @0x5DAD80 -> Model_TransformBoneMatrices
+	#  @0x58E390; CRenderBatchQueue_SortAndFlush @0x5DAE40 ->
+	#  apply_shader_parameters @0x58DB80]
+	var robj_changed := false
+	if _has_live_panm or _bounds_dirty:
+		robj_changed = _apply_robj_transforms()
 	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
 	# advances) need a per-frame push; a fully-static material already carries its identity
 	# values from _create_material, so re-evaluating it each frame just re-writes identical
@@ -1204,26 +1364,22 @@ func _apply_runtime_state(delta: float, renderable := true) -> void:
 			continue
 		var material_index := int(_surface_material_indices[i])
 		if _material_needs_eval[i] and _od_has_eval:
-			var runtime: Dictionary = object_data.eval_material_runtime(material_index, _anim_time_ms, _ctrl_values)
+			var runtime: Dictionary = object_data.eval_material_runtime(
+					material_index, _anim_time_ms, _ctrl_values)
 			if not runtime.is_empty():
-				material.set_shader_parameter("u_uv_offset", runtime.get("uv_offset", Vector2.ZERO))
-				material.set_shader_parameter("u_uv_scale", runtime.get("uv_scale", Vector2.ONE))
-				material.set_shader_parameter("u_uv_rotation", runtime.get("uv_rotation", 0.0))
+				material.set_shader_parameter("u_uv_transform_u",
+						runtime.get("uv_transform_u", Vector3(1.0, 0.0, 0.0)))
+				material.set_shader_parameter("u_uv_transform_v",
+						runtime.get("uv_transform_v", Vector3(0.0, 1.0, 0.0)))
 				var rgb: Vector3 = runtime.get("rgb_mod", Vector3.ONE)
 				material.set_shader_parameter("u_rgb_mod", rgb)
 				material.set_shader_parameter("u_alpha_mod", runtime.get("alpha_mod", 1.0))
 		var frames: Array = _anim_frames_by_mat.get(material_index, [])
 		if frames.size() > 1 and _od_has_frame:
-			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
+			var frame_index := int(object_data.compute_anim_frame(
+					material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
-	# evaluate_panm builds native vectors plus a Dictionary of every ROBJ
-	# transform. For an inert PANM block those transforms are immutable: rebuild
-	# (or an exact mutator, via _bounds_dirty) applies the base pose once. Only a
-	# live time/register/view track needs this allocation-heavy call every frame.
-	var robj_changed := false
-	if _has_live_panm or _bounds_dirty:
-		robj_changed = _apply_robj_transforms()
 	_apply_lights()
 	_apply_environment_to_materials()
 	if _bounds_dirty or part_changed or robj_changed:
@@ -1250,7 +1406,8 @@ func _apply_robj_transforms() -> bool:
 	# Dictionary fallback for duck-typed data doubles (tests).
 	if not object_data.has_method("evaluate_panm"):
 		return false
-	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
+	var transforms: Dictionary = object_data.evaluate_panm(
+			_active_lod, _anim_time_ms, _ctrl_values)
 	var changed := false
 	for key in transforms.keys():
 		var robj_index := int(key)
@@ -1272,7 +1429,8 @@ func _apply_lights() -> void:
 		return
 	if object_data == null or not object_data.has_method("evaluate_lights"):
 		return
-	var lights: Array = object_data.evaluate_lights(_anim_time_ms, _ctrl_values)
+	var lights: Array = object_data.evaluate_lights(
+			_anim_time_ms, _ctrl_values)
 	var dominant := {}
 	var best_intensity := -1.0
 	for light in lights:
@@ -1396,9 +1554,8 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
 	var reflect: Color = info.get("reflect_color", Color(0.7, 0.8, 0.9, 0.35))
 	material.set_shader_parameter("u_reflect_color", reflect)
-	material.set_shader_parameter("u_uv_offset", Vector2.ZERO)
-	material.set_shader_parameter("u_uv_scale", Vector2.ONE)
-	material.set_shader_parameter("u_uv_rotation", 0.0)
+	material.set_shader_parameter("u_uv_transform_u", Vector3(1.0, 0.0, 0.0))
+	material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
 	material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 	material.set_shader_parameter("u_alpha_mod", 1.0)
 	material.set_shader_parameter("u_emissive", 1.0 if bool(info.get("emissive", false)) else 0.0)

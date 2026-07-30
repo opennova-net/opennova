@@ -1,5 +1,6 @@
 #include "world/vehicle_motor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
@@ -38,6 +39,31 @@ int32_t sin22_of_bam(int32_t bam) {
 }
 
 } // namespace
+
+VehicleCtrlRegisters vehicle_ctrl_registers(
+        const Entity::VehicleMotorState &state) {
+    VehicleCtrlRegisters out;
+
+    // entity+0x2B6 is the high word of the vehicle wheel/steer dword. MOVZX
+    // makes a negative wheel deflection a 0..0xFFFF cyclic phase; the following
+    // retail 0x10000 cap is unreachable for a zero-extended word.
+    // [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+    //  MOVZX/store @0x4929C0..0x4929D7]
+    out.steering = static_cast<int32_t>(
+            static_cast<uint32_t>(state.steer_state) >> 16);
+
+    // Reproduce CDQ/XOR/SUB as unsigned two's-complement arithmetic before the
+    // unsigned 0x10000 cap. In particular INT_MIN becomes 0x80000000 (it does
+    // not invoke C++ signed-abs UB) and therefore publishes 0x10000.
+    // [orig: Entity_CacheVehicleHUDStats @0x4929DC..0x4929F1]
+    const uint32_t speed_bits = static_cast<uint32_t>(state.speed);
+    const uint32_t sign_mask = 0u - (speed_bits >> 31);
+    const uint32_t magnitude =
+            (speed_bits ^ sign_mask) - sign_mask;
+    out.speed = static_cast<int32_t>(
+            std::min(magnitude, uint32_t{0x10000}));
+    return out;
+}
 
 // The controlling occupant: the Controller/Driver seat's occupant, stale-validated
 // against the occupant's own mount fields (the original walks its mountHandles and

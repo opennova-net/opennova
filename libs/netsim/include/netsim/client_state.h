@@ -70,10 +70,16 @@ struct ClientEntityState {
 	// pose — so this byte, not any replicated anim id, is how an observer knows what a
 	// remote player is holding. 0xFF = none. [orig: client store @0x4c11f2]
 	uint8_t equipped_adm_index = 0xFF;
-	// BMS team (1=Blue/2=Red) from the records that carry it (the organic spawn's
-	// entity+354). 0xFF until witnessed — feeds the remote round's friend/enemy
-	// item styling [orig: the resolved wire shooter's team copy @0x4ec705].
+	// BMS team (1=Blue/2=Red) from every world-stream record that carries
+	// entity+354 (pool-0 0x0C, pool-1 0x0D, pool-2 0x10, pool-3 0x20).
+	// A decoded flag-gated zero is assigned too; 0xFF means no team-bearing
+	// record has been witnessed yet.
 	uint8_t team = 0xFF;
+	// Pool-1 0x0D zone block, retained exactly as received. The packed byte is
+	// zoneNumber + 32*rank at entity+538; radius lands at entity+350. Both stay
+	// zero for non-zone pool-1 rows and for all other pools.
+	uint8_t zone_number_rank = 0;
+	uint16_t zone_radius = 0;
 	// The 0x0A off-12 movement-input byte; remote players are motor-driven from it,
 	// and bits 6/7 are lean L/R. [orig: pack @0x4df68f; write @0x4c0c9c]
 	uint8_t move_input = 0;

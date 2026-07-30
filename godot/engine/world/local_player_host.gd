@@ -113,6 +113,9 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
 const WEAPON_TICK_DT := MissionRuntime.TICK_DT  # the weapon FSM runs on the engine tick
+const CTRL_OWNER_FP_HEAT := "first_person:heat"
+const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
+const CTRL_OWNER_FP_TEAM := "first_person:team"
 
 var _world
 var _camera: Camera3D
@@ -1295,7 +1298,6 @@ func _update_viewmodel() -> void:
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
-	_apply_emplaced_viewmodel_controls()
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
@@ -1306,25 +1308,72 @@ func _update_viewmodel() -> void:
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := _view != null and _view.scope_card_active
 	var binoculars := _view != null and _view.binoculars_view_active
-	_viewmodel.visible = (
-			((not _third_person) and not carded and not binoculars)
-			or debug_force_viewmodel)
+	var retail_submit := not _third_person and not carded and not binoculars
+	# The debug override intentionally extends retail's submission scope, but a
+	# model made visible by that probe still needs a coherent CTRL snapshot.
+	var submit_viewmodel := retail_submit or debug_force_viewmodel
+	_viewmodel.visible = submit_viewmodel
+	_apply_viewmodel_control_registers(submit_viewmodel)
 	_update_viewmodel_pass()
 
 
-func _apply_emplaced_viewmodel_controls() -> void:
+func _apply_viewmodel_control_registers(submit_viewmodel: bool) -> void:
 	for part in _vm_parts:
 		if part == null or not is_instance_valid(part) or \
-				not part.has_method("set_ctrl_value"):
+				(not part.has_method("set_ctrl_override")
+				and not part.has_method("set_ctrl_value")):
 			continue
-		if _weapon_view != null and _weapon_view.emplaced_controls_valid:
-			part.set_ctrl_value(
+		var batch: bool = (part.has_method("begin_ctrl_update")
+				and part.has_method("end_ctrl_update"))
+		if batch:
+			part.begin_ctrl_update()
+		# TEX_TEAM is a signed-byte store immediately before the FP lighting,
+		# heat and model-submit path. Hidden/carded/binocular/third-person frames
+		# never execute that retail writer.
+		# [orig: Player_RenderFirstPersonViewModel @0x4DEE96..0x4DEE9F]
+		if submit_viewmodel and _world != null \
+				and _world.has_method("get_local_player_team"):
+			var team := int(_world.get_local_player_team()) & 0xFF
+			if team >= 0x80:
+				team -= 0x100
+			_set_viewmodel_ctrl(part, CTRL_OWNER_FP_TEAM, "TEX_TEAM", team)
+		else:
+			_clear_viewmodel_ctrl(part, CTRL_OWNER_FP_TEAM, "TEX_TEAM")
+		# Retail publishes accumulated heat independently for every FP model
+		# submit, clamped through the exact 0x10000 endpoint.
+		# [orig: Player_RenderFirstPersonViewModel @ 0x4DEEC2..0x4DEEF5]
+		if submit_viewmodel and _weapon_view != null:
+			_set_viewmodel_ctrl(part, CTRL_OWNER_FP_HEAT,
+					"HEAT_GLOW", _weapon_view.heat_glow)
+		else:
+			_clear_viewmodel_ctrl(part, CTRL_OWNER_FP_HEAT, "HEAT_GLOW")
+		if submit_viewmodel and _weapon_view != null \
+				and _weapon_view.emplaced_controls_valid:
+			_set_viewmodel_ctrl(part, CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNYAW", _weapon_view.emplaced_gun_yaw)
-			part.set_ctrl_value(
+			_set_viewmodel_ctrl(part, CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNPITCH", _weapon_view.emplaced_gun_pitch)
-		elif part.has_method("clear_ctrl_value"):
-			part.clear_ctrl_value("EWEAP_GUNYAW")
-			part.clear_ctrl_value("EWEAP_GUNPITCH")
+		else:
+			_clear_viewmodel_ctrl(part, CTRL_OWNER_FP_EMPLACED,
+					"EWEAP_GUNYAW")
+			_clear_viewmodel_ctrl(part, CTRL_OWNER_FP_EMPLACED,
+					"EWEAP_GUNPITCH")
+		if batch:
+			part.end_ctrl_update()
+
+
+func _set_viewmodel_ctrl(part, owner: String, register: String, value: int) -> void:
+	if part.has_method("set_ctrl_override"):
+		part.set_ctrl_override(owner, register, value)
+	elif part.has_method("set_ctrl_value"):
+		part.set_ctrl_value(register, value)
+
+
+func _clear_viewmodel_ctrl(part, owner: String, register: String) -> void:
+	if part.has_method("clear_ctrl_override"):
+		part.clear_ctrl_override(owner, register)
+	elif part.has_method("clear_ctrl_value"):
+		part.clear_ctrl_value(register)
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

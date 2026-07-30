@@ -5712,6 +5712,26 @@ death-screen overlays read the same list.
   `ZoneTimers_ResetState @ 0x4244A0` (ex-"CineEditor_ResetState") zeroes the list count + sync globals
   at mission start.
 
+**Runtime fold ported 2026-07-29.** `ClientRuntime` now retains the shared
+13-dword semantic entry rather than only the latest decoded packet. A new
+0x6F entry seeds value-current from wrapping `62 × value`; an existing entry
+keeps its current, while both forms replace value-target/limit/rate, activate
+the value channel, and disable the window channel. A new 0x53 entry seeds the
+window current; an existing entry resets it only when `modeB` changes. It
+activates the window channel, disables the value channel, and clears the value
+target/limit without clearing its current. Mixed 0x53/0x6F records stay in wire
+order for a joiner, the HostClient loopback uses the same semantic fold, and
+the list advances exactly once after the complete receive pump with wrapping
+ADD followed by signed high-then-low clamps
+`[orig: Client_ProcessNetworkFrame @ 0x42C2E1..0x42C2E6;
+ZoneTimerList_AdvancePerTick @ 0x537D60]`.
+
+The same entry now feeds the numbered-zone model callback's
+`LFP_CAMPPERCENT`: no entry means no register store; a zero limit writes
+`0x10000`; otherwise the callback truncates
+`signed current / signed limit × 65536`
+`[orig: BoneCallback_gnrc_World @ 0x4E2860; store @ 0x4E28C4]`.
+
 **§5.50 S2C 0x34 PLAY-SOUND** `[orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]` — the kong name
 "GotoTeleport" was a misnomer (renamed). Wire: `[u8 flag][cstr soundProfileName]` + (flag==1 only)
 `3×i16 pos`, each `<<16` into 16.16 world space. flag 0 → flat play; flag 1 → positioned 3D one-shot at
@@ -7597,25 +7617,48 @@ Ported as `DefWeaponDef::heat_*` + `WeaponFsmDef::heat_*`/`WeaponSlotState::
 heat_window_end_tick`/`weapon_slot_accumulated_heat` + the `NovaSimulation` weapon-view
 feed. The submerged term has no live source yet (D-WPN-29).
 
-**What the glow half still needs (D-WPN-28).** The level is ported. There are TWO candidate
-consumers, and only one of them is real:
+**What the glow half still needs (D-WPN-28; writer audit corrected 2026-07-29).**
+The level is ported. Retail has two dedicated model CTRL writers plus a separate
+particle effect. OpenNova hosts the first-person writer and the witnessed
+authority-side carrier-attachment writer. Two bounded seams remain:
 
 1. The **particle emitter** — the `@ 0x54109e..0x54122c` leg above. This is the actual
    overheat visual (shipped data authors `FX_OVERHEAT1` on the emplaced .50s, miniguns,
    DShK and turrets) and it is a host effect seam, still unported.
-2. The **`HEAT_GLOW` CTRL register** — **witnessed 2026-07-22 and dead in shipped JO.**
-   It is ordinal 54 in the global 32-byte CTRL name table (`aLodFrac @ 0x83dce8`;
-   resolver `CtrlName_ToOrdinal @ 0x57b290`; the per-model CtrlReg loader stores the
-   ordinal at `+24` `[orig: @ 0x5b4640]`), and `B50Cal.3di` carries exactly
-   `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]`. The engine has exactly ONE path that
-   drives a CTRL register: an ACTION row carrying a `ctrlreg <NAME>` key, parsed to
-   `ActionDef+28` `[orig: ActionDef_ParseScriptLine @ 0x4027fa]` and executed as a
-   ramping anim slot `[orig: ActionSlot_ExecuteAction @ 0x4020cc ->
-   CtrlRegAnimSlot_Allocate @ 0x401ca0 -> CtrlRegAnimSlot_UpdateAll @ 0x401bf0`, which
-   writes the global `dword_83FCE8[2*ordinal]` and bounces at 0/0xFFFF]`. **No shipped
-   weapon.def authors `ctrlreg` at all** — zero occurrences across the JOX corpus. So
-   retail never writes HEAT_GLOW, the heat level never reaches a control register, and
-   porting a HEAT_GLOW write would be inventing behavior, not restoring it.
+2. **Compact-joiner reconstruction.** The entity compact carries neither the
+   parent's heat window nor the full UseGun attachment ownership needed by the
+   retail writer. Joiner rows therefore leave the scoped value unavailable
+   instead of synthesizing a phase or stale cold zero (D-3DI-2).
+
+The implemented **world-model `HEAT_GLOW` CTRL register** is global ordinal 54 in the 96-entry,
+   32-byte descriptor table (`aLodFrac @ 0x83dce8`; resolver
+   `[orig: CtrlName_ToOrdinal @ 0x57b290]`; per-model ordinal store
+   `[orig: sub_5B4640 @ 0x5B4640; @ 0x5B46E6]`). `B50Cal.3di` carries
+   `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]` in local order, and the loader
+   remaps those references to global 54/55/56. The world writer is
+   `HUD_CacheWeaponSlotInfo @ 0x440930`; its only caller is the valid-bone branch
+   of `Entity_AttachToBoneAndUpdateTransform @ 0x546518`, which passes the
+   **parent carrier** while updating a UseGun child. It caps live heat at
+   `0xFFFF` and writes ordinal 54 at `0x440969`/`0x440991`. OpenNova validates
+   that same carrier/child/seat relation, publishes scoped cold zero, and feeds
+   the value to authority/SP/listen parent PANM, collision, and wire-direct
+   presentation. Writer-scoped composition releases only this source and
+   restores any underlying register value.
+   The first-person path writes at `0x4DEEC2..0x4DEEF5`
+   `[orig: Player_RenderFirstPersonViewModel @ 0x4DED60]` and is now hosted:
+   `NovaSimulation::get_local_player_weapon_state` emits `heat_glow` clamped to
+   `[0,0x10000]`, `PlayerWeaponView` carries it, and `LocalPlayerHost` writes it
+   on every owned viewmodel submit, including literal zero. The register is
+   cleared only when viewmodel ownership ends.
+
+The generic ACTION `ctrlreg <NAME>` ramp is an additional writer path
+`[orig: ActionDef_ParseScriptLine @ 0x4027FA; ActionSlot_ExecuteAction
+@ 0x4020CC; CtrlRegAnimSlot_Allocate @ 0x401CA0;
+CtrlRegAnimSlot_UpdateAll @ 0x401BF0]`. No shipped `weapon.def` authors that key,
+but that corpus fact does not disable the dedicated heat writers. OpenNova now
+has the signed CTRL catalog/consumer path and both dedicated model publishers;
+D-WPN-28 remains open for the particle emitter and compact-joiner
+reconstruction. The generic animator and remaining producer census are D-3DI-2.
 
 A related find while walking this: `ActionSlot_ExecuteAction @ 0x4020a0` (the DEFAULT
 action handler) carries its own copy of the heat-window stamp, gated on

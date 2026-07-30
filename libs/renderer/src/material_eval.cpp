@@ -1,173 +1,150 @@
-// [orig: EvaluateAnimParam @ 0x4769D0 (OED material anim-param eval)]
 #include "renderer/material_eval.h"
-#include "threedi/threedi_panm.h"
+
+#include "threedi/threedi_ctrl_catalog.h"
+#include "threedi/threedi_panm_runtime.h"
 
 #include <algorithm>
-#include <cmath>
+#include <array>
 #include <cstdint>
+#include <limits>
 
 namespace renderer {
 namespace {
 
-static uint32_t g_rand_state = 1;
-
-static float clamp01(float v) {
-    return std::max(0.0f, std::min(1.0f, v));
+static uint8_t localCtrlOrdinal(
+        int idx, const std::vector<std::string>& ctrl_names) {
+    if (idx < 0 || idx >= static_cast<int>(ctrl_names.size())) {
+        return THREEDI_CTRL_LOD_FRAC;
+    }
+    return threedi_ctrl_register_loader_ordinal(
+            ctrl_names[static_cast<size_t>(idx)].c_str());
 }
 
-static uint16_t msvcRand15() {
-    g_rand_state = g_rand_state * 214013u + 2531011u;
-    return static_cast<uint16_t>((g_rand_state >> 16) & 0x7FFFu);
+static int32_t regValue(int idx,
+                        const std::vector<std::string>& ctrl_names,
+                        const ControlRegisterValues& ctrl_bus) {
+    return ctrl_bus[localCtrlOrdinal(idx, ctrl_names)];
 }
 
-static int32_t waveLookup(uint8_t func, int16_t a3) {
-    const uint8_t* table = threedi_panm_wave_table();
-    const uint8_t idx = static_cast<uint8_t>(a3 >> 8);
-    const uint8_t frac = static_cast<uint8_t>(a3);
-    switch (func & 0x0F) {
-        case 1: return static_cast<int32_t>(table[idx]) << 8;
-        case 2: return static_cast<int32_t>(table[256 + idx]) << 8;
-        case 3: return static_cast<int32_t>(table[768 + idx]) << 8;
-        case 4: return static_cast<int32_t>(table[1024 + idx]) << 8;
-        case 5: return static_cast<int32_t>(table[1280 + idx]) << 8;
-        case 6: return 16 * static_cast<int32_t>(msvcRand15() & 0x0FFF);
-        case 7: {
-            const int32_t v0 = table[1536 + idx];
-            const int32_t v1 = table[1536 + static_cast<uint8_t>(idx + 1)];
-            return (v1 - v0) * frac + (v0 << 8);
-        }
-        case 8: return static_cast<int32_t>(table[1792 + idx]) << 8;
-        case 9: return static_cast<int32_t>(table[2048 + idx]) << 8;
-        case 0xA: {
-            const int32_t v0 = table[2304 + idx];
-            const int32_t v1 = table[2304 + static_cast<uint8_t>(idx + 1)];
-            return (v1 - v0) * frac + (v0 << 8);
-        }
-        case 0xF: return static_cast<int32_t>(table[2560 + idx]) << 8;
-        default: return 0;
-    }
+static int64_t roundNearest(double value) {
+    return value >= 0.0 ? static_cast<int64_t>(value + 0.5)
+                        : static_cast<int64_t>(value - 0.5);
 }
 
-static float styleSample01(int style, float phase, float rate, uint32_t time_ms) {
-    // Original OED stores phase as an 8-bit byte and passes phase_byte << 8
-    // into EvaluateWaveformLUT. ThreediMaterial keeps that byte normalized to
-    // [0, 1), so convert it back to the original fixed-point form here.
-    const int32_t phase_fp8 = static_cast<int32_t>(phase * 65536.0f);
-    const int32_t rate_fp8 = static_cast<int32_t>(rate * 256.0f);
-    // Original OED reference: EvaluateAnimParam @ 0x4769D0 passes
-    // (phase << 8) + ((ticks << 8) / 1000) * rate_word directly to
-    // EvaluateWaveformLUT without shifting the 8.8 rate product back down.
-    const int32_t a3 = phase_fp8 + static_cast<int32_t>(((time_ms << 8) / 1000u) * rate_fp8);
-    const int32_t wave_fp8 = waveLookup(static_cast<uint8_t>(style), static_cast<int16_t>(a3));
-    return clamp01(static_cast<float>(wave_fp8) / 65535.0f);
+static uint8_t quantizeByte(float value, float scale) {
+    const int64_t raw = roundNearest(static_cast<double>(value) * scale);
+    return static_cast<uint8_t>(std::clamp<int64_t>(raw, 0, 255));
 }
 
-static float ctrl01(uint16_t v) {
-    return static_cast<float>(v) * (1.0f / 65535.0f);
+static int16_t quantizeS16(float value, float scale) {
+    const int64_t raw = roundNearest(static_cast<double>(value) * scale);
+    // Preview the packed file value, including the writer's low-word wrap for
+    // out-of-range editor inputs. Clamping here made the live preview disagree
+    // with the exported .3di and with retail's signed-word consumer.
+    // [orig: packed s16 generator fields; OpenNova writer
+    //  buffer_append_scaled_s16 in threedi_3di3_write.cpp]
+    const uint16_t bits = static_cast<uint16_t>(raw);
+    return bits <= static_cast<uint16_t>(std::numeric_limits<int16_t>::max())
+            ? static_cast<int16_t>(bits)
+            : static_cast<int16_t>(static_cast<int32_t>(bits) - 0x10000);
 }
 
-static float ctrlSigned(uint16_t raw) {
-    const int16_t v = static_cast<int16_t>(raw);
-    if (v >= 0) return std::min(1.0f, static_cast<float>(v) / 32767.0f);
-    return std::max(-1.0f, static_cast<float>(v) / 32768.0f);
+// The loader rewrites the packed parameter byte for every style > 0x70,
+// even when a later consumer interprets that style as a waveform and uses
+// the byte as phase rather than reading the CTRL bus.
+// [orig: sub_5B4640 @ 0x5B4640]
+static uint8_t phaseOrRegisterByte(
+        uint8_t style,
+        float phase,
+        int32_t reg,
+        const std::vector<std::string>& ctrl_names) {
+    return style <= 112 ? quantizeByte(phase, 256.0f)
+                        : localCtrlOrdinal(reg, ctrl_names);
 }
 
-static float evalStyleScalar(int style,
-                             float rate,
-                             float phase,
-                             float start,
-                             float end,
-                             uint16_t ctrl,
-                             uint32_t time_ms) {
-    if (style == 0) return start;
-    if (style == 24) return start;
-
-    const float time_sec = static_cast<float>(time_ms) * 0.001f;
-    if (style == 16) return start + (phase + time_sec * rate);
-    if (style == 17) return start - (phase + time_sec * rate);
-
-    float w = 0.0f;
-    const bool ctrl_style = (style > 112);
-    int op = 0;
-
-    if (ctrl_style) {
-        const int ctrl_op = style - 112;
-        op = std::max(1, std::min(ctrl_op, 5));
-        w = (op == 3 || op == 5) ? ctrlSigned(ctrl) : ctrl01(ctrl);
-    } else {
-        const int major = (style >> 4) & 0xF;
-        if (major >= 3 && major <= 6) {
-            op = major - 2;
-            w = styleSample01(style, phase, rate, time_ms);
-        }
-    }
-
-    const float delta = end - start;
-    switch (op) {
-        case 1: return start + delta * w;
-        case 2: return start + delta * w;
-        case 3: return start + delta * w;
-        case 4: {
-            const float base = (std::fabs(start) > 0.00001f) ? start : 1.0f;
-            return base * (1.0f + delta * w);
-        }
-        case 5: return start + delta * w;
-        default: return start;
-    }
+static UvAnimChannel rawUvChannel(
+        const ThreediUvParams& params,
+        const std::vector<std::string>& ctrl_names) {
+    UvAnimChannel channel;
+    channel.type = params.style;
+    channel.phase = phaseOrRegisterByte(
+            params.style, params.phase, params.reg, ctrl_names);
+    channel.speed = quantizeS16(params.gen_rate, 256.0f);
+    channel.base = quantizeS16(params.start, 256.0f);
+    channel.range = quantizeS16(params.end, 256.0f);
+    return channel;
 }
 
-static void evalMapAxis(const ThreediUvParams& p,
-                        uint16_t ctrl,
-                        uint32_t time_ms,
-                        float* out_offset,
-                        float* out_scale,
-                        float* out_rotation) {
-    if (out_offset) *out_offset = 0.0f;
-    if (out_scale) *out_scale = 1.0f;
-    if (out_rotation) *out_rotation = 0.0f;
-
-    const int style = p.style;
-    if (style == 0) return;
-
-    if (style == 32 || style == 33) {
-        const float dir = (style == 32) ? -1.0f : 1.0f;
-        const float turns = p.phase + static_cast<float>(time_ms) * 0.001f * p.gen_rate;
-        if (out_rotation) *out_rotation = dir * turns * 6.28318530718f;
-        return;
-    }
-
-    if (style == 117) {
-        const float deg = evalStyleScalar(style, p.gen_rate, p.phase, p.start, p.end, ctrl, time_ms);
-        if (out_rotation) *out_rotation = deg * 0.01745329251994f;
-        return;
-    }
-
-    const float value = evalStyleScalar(style, p.gen_rate, p.phase, p.start, p.end, ctrl, time_ms);
-    if (style == 16 || style == 17 || ((style >> 4) == 3) || ((style >> 4) == 4) ||
-        ((style > 112) && style != 115 && style != 116 && style != 117)) {
-        if (out_offset) *out_offset = value;
-        return;
-    }
-
-    if (((style >> 4) == 5) || style == 115) {
-        if (out_offset) *out_offset = value * 0.5f;
-        return;
-    }
-
-    if (((style >> 4) == 6) || style == 116) {
-        if (out_scale) *out_scale = (std::fabs(value) > 0.0001f) ? value : 1.0f;
-        return;
-    }
-
-    if (out_offset) *out_offset = value;
+static bool uvChannelUsesNoise(const UvAnimChannel& channel) {
+    const uint8_t mode = channel.type & 0xF0;
+    return channel.type <= 0x70 && (channel.type & 0x0F) == 6 &&
+           mode != 0 && mode != 0x10 && mode != 0x20;
 }
 
-static uint16_t regValue(int idx,
-                         const std::vector<std::string>& ctrl_names,
-                         const std::unordered_map<std::string, uint16_t>& ctrl_values) {
-    if (idx < 0 || idx >= static_cast<int>(ctrl_names.size())) return 0;
-    auto it = ctrl_values.find(ctrl_names[static_cast<size_t>(idx)]);
-    return (it != ctrl_values.end()) ? it->second : 0;
+static uint16_t timeUnits16(uint32_t time_ms) {
+    return static_cast<uint16_t>((time_ms << 8) / 1000u);
+}
+
+static uint16_t phase16(uint8_t phase_byte, int16_t rate_word, uint32_t time_ms) {
+    const uint32_t sum =
+            (static_cast<uint32_t>(phase_byte) << 8) +
+            static_cast<uint32_t>(timeUnits16(time_ms)) *
+                    static_cast<uint32_t>(static_cast<uint16_t>(rate_word));
+    return static_cast<uint16_t>(sum);
+}
+
+// Retail keeps only IMUL's low 32 bits, then performs an arithmetic SAR 16.
+// Spell out both the wrap and signed shift so the result is portable.
+// [orig: AlphaGen_EvaluateValue @ 0x5B234C; RgbGen_EvaluateColor @ 0x5B24AC]
+static int32_t mulShift16(int32_t delta, int32_t fraction) {
+    const uint32_t low_product =
+            static_cast<uint32_t>(delta) * static_cast<uint32_t>(fraction);
+    const int64_t product =
+            low_product <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
+                    ? static_cast<int64_t>(low_product)
+                    : static_cast<int64_t>(low_product) - 0x100000000ll;
+    if (product >= 0) {
+        return static_cast<int32_t>(product / 65536);
+    }
+    return -static_cast<int32_t>((-product + 65535) / 65536);
+}
+
+static int32_t waveformFraction(uint8_t style,
+                                uint8_t phase_byte,
+                                int16_t rate_word,
+                                uint32_t time_ms) {
+    const uint16_t random =
+            (style & 0x0F) == 6 ? threedi_wave_rand15() : 0;
+    return uv_anim_wave_lookup(style, phase16(phase_byte, rate_word, time_ms), random);
+}
+
+static void evalRgbGen(uint8_t style,
+                       uint8_t phase_byte,
+                       int16_t rate_word,
+                       const std::array<uint8_t, 3>& start,
+                       const std::array<uint8_t, 3>& end,
+                       uint32_t time_ms,
+                       int32_t ctrl_value,
+                       float* out_r,
+                       float* out_g,
+                       float* out_b) {
+    // [orig: RgbGen_EvaluateColor @ 0x5B23D0]
+    constexpr float kByteToFloat = 1.0f / 255.0f;
+    const int32_t fraction =
+            style == 24
+                    ? 0
+                    : ((style == 113 || style == 114)
+                               ? ctrl_value
+                               : waveformFraction(style, phase_byte, rate_word, time_ms));
+    *out_r = static_cast<float>(
+                     start[0] + mulShift16(end[0] - start[0], fraction)) *
+             kByteToFloat;
+    *out_g = static_cast<float>(
+                     start[1] + mulShift16(end[1] - start[1], fraction)) *
+             kByteToFloat;
+    *out_b = static_cast<float>(
+                     start[2] + mulShift16(end[2] - start[2], fraction)) *
+             kByteToFloat;
 }
 
 } // namespace
@@ -175,47 +152,94 @@ static uint16_t regValue(int idx,
 MaterialRuntime eval_material_runtime(const ThreediMaterial& mat,
                                       uint32_t time_ms,
                                       const std::vector<std::string>& ctrl_names,
-                                      const std::unordered_map<std::string, uint16_t>& ctrl_values) {
+                                      const ControlRegisterValues& ctrl_values) {
     MaterialRuntime rt;
-
-    float u_off = 0.0f, u_scale = 1.0f, u_rot = 0.0f;
-    float v_off = 0.0f, v_scale = 1.0f, v_rot = 0.0f;
-    evalMapAxis(mat.u_params, regValue(mat.u_params.reg, ctrl_names, ctrl_values), time_ms, &u_off, &u_scale, &u_rot);
-    evalMapAxis(mat.v_params, regValue(mat.v_params.reg, ctrl_names, ctrl_values), time_ms, &v_off, &v_scale, &v_rot);
-    rt.uv.offset_u = u_off;
-    rt.uv.offset_v = v_off;
-    rt.uv.scale_u = u_scale;
-    rt.uv.scale_v = v_scale;
-    rt.uv.rotation = u_rot + v_rot;
-
-    if (mat.rgb_gen.style == 0) {
-        rt.rgb_r = rt.rgb_g = rt.rgb_b = 1.0f;
-    } else {
-        const uint16_t ctrl = regValue(mat.rgb_gen.reg, ctrl_names, ctrl_values);
-        rt.rgb_r = std::max(0.0f, evalStyleScalar(mat.rgb_gen.style, mat.rgb_gen.rate, mat.rgb_gen.phase,
-                                                  mat.rgb_gen.start_color[0], mat.rgb_gen.end_color[0],
-                                                  ctrl, time_ms));
-        rt.rgb_g = std::max(0.0f, evalStyleScalar(mat.rgb_gen.style, mat.rgb_gen.rate, mat.rgb_gen.phase,
-                                                  mat.rgb_gen.start_color[1], mat.rgb_gen.end_color[1],
-                                                  ctrl, time_ms));
-        rt.rgb_b = std::max(0.0f, evalStyleScalar(mat.rgb_gen.style, mat.rgb_gen.rate, mat.rgb_gen.phase,
-                                                  mat.rgb_gen.start_color[2], mat.rgb_gen.end_color[2],
-                                                  ctrl, time_ms));
-    }
+    // Retail patches every model-local material parameter to one of the 96
+    // global CTRL slots during load. Authored unknown/missing local references
+    // inherit the loader's ordinal-zero result.
+    // [orig: sub_5B4640 @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290]
+    const ControlRegisterValues& ctrl_bus = ctrl_values;
 
     if (mat.alpha_gen.style == 0) {
         rt.alpha = 1.0f;
     } else {
-        const uint16_t ctrl = regValue(mat.alpha_gen.reg, ctrl_names, ctrl_values);
-        float a = evalStyleScalar(mat.alpha_gen.style, mat.alpha_gen.rate, mat.alpha_gen.phase,
-                                  static_cast<float>(mat.alpha_gen.start),
-                                  static_cast<float>(mat.alpha_gen.end),
-                                  ctrl, time_ms);
-        if (std::fabs(mat.alpha_gen.start) > 1.5f || std::fabs(mat.alpha_gen.end) > 1.5f) {
-            a *= (1.0f / 255.0f);
-        }
-        rt.alpha = clamp01(a);
+        // [orig: AlphaGen_EvaluateValue @ 0x5B2320]
+        const int32_t ctrl = regValue(mat.alpha_gen.reg, ctrl_names, ctrl_bus);
+        const int32_t fraction =
+                mat.alpha_gen.style == 24
+                        ? 0
+                        : (mat.alpha_gen.style == 113
+                                   ? ctrl
+                                   : waveformFraction(
+                                             mat.alpha_gen.style,
+                                             phaseOrRegisterByte(
+                                                     mat.alpha_gen.style,
+                                                     mat.alpha_gen.phase,
+                                                     mat.alpha_gen.reg,
+                                                     ctrl_names),
+                                             quantizeS16(mat.alpha_gen.rate, 256.0f),
+                                             time_ms));
+        const int32_t value =
+                mat.alpha_gen.start +
+                mulShift16(mat.alpha_gen.end - mat.alpha_gen.start, fraction);
+        rt.alpha = static_cast<float>(value) * (1.0f / 255.0f);
     }
+
+    if (mat.rgb_gen.style == 0) {
+        rt.rgb_r = rt.rgb_g = rt.rgb_b = 1.0f;
+    } else {
+        const int32_t ctrl = regValue(mat.rgb_gen.reg, ctrl_names, ctrl_bus);
+        const std::array<uint8_t, 3> start = {
+            quantizeByte(mat.rgb_gen.start_color[0], 255.0f),
+            quantizeByte(mat.rgb_gen.start_color[1], 255.0f),
+            quantizeByte(mat.rgb_gen.start_color[2], 255.0f),
+        };
+        const std::array<uint8_t, 3> end = {
+            quantizeByte(mat.rgb_gen.end_color[0], 255.0f),
+            quantizeByte(mat.rgb_gen.end_color[1], 255.0f),
+            quantizeByte(mat.rgb_gen.end_color[2], 255.0f),
+        };
+        evalRgbGen(
+                mat.rgb_gen.style,
+                phaseOrRegisterByte(
+                        mat.rgb_gen.style,
+                        mat.rgb_gen.phase,
+                        mat.rgb_gen.reg,
+                        ctrl_names),
+                quantizeS16(mat.rgb_gen.rate, 256.0f),
+                start,
+                end,
+                time_ms,
+                ctrl,
+                &rt.rgb_r,
+                &rt.rgb_g,
+                &rt.rgb_b);
+    }
+
+    // Retail evaluates AlphaGen, RgbGen, then UV in this order. Preserve that
+    // ordering because noise waveforms share the CRT random stream.
+    // [orig: apply_shader_parameters @ 0x58DB80]
+    const UvAnimChannel u_channel = rawUvChannel(mat.u_params, ctrl_names);
+    const UvAnimChannel v_channel = rawUvChannel(mat.v_params, ctrl_names);
+    const bool u_uses_noise = uvChannelUsesNoise(u_channel);
+    const bool v_uses_noise = uvChannelUsesNoise(v_channel);
+    // Function-argument evaluation order is not portable. Consume the shared
+    // CRT stream explicitly in retail's U-then-V order before dispatch.
+    const uint16_t u_random =
+            u_uses_noise ? threedi_wave_rand15() : 0;
+    const uint16_t v_random =
+            v_uses_noise ? threedi_wave_rand15() : 0;
+    // The decoder exposes author-friendly floats; retail evaluates the packed
+    // 8-byte channel blocks. Reconstruct those raw fields before entering the
+    // exact transform port. [orig: compute_uv_transform_matrix @ 0x5B1990]
+    rt.uv = uv_anim_transform(
+            u_channel,
+            v_channel,
+            timeUnits16(time_ms),
+            regValue(mat.u_params.reg, ctrl_names, ctrl_bus),
+            regValue(mat.v_params.reg, ctrl_names, ctrl_bus),
+            u_random,
+            v_random);
 
     return rt;
 }
@@ -226,30 +250,37 @@ LightRuntime eval_light_runtime(uint8_t style,
                                 const std::array<uint8_t, 4>& color_start,
                                 const std::array<uint8_t, 4>& color_end,
                                 uint32_t time_ms,
-                                uint16_t ctrl_value) {
+                                int32_t ctrl_value) {
     LightRuntime rt;
     const float sb = static_cast<float>(color_start[0]);
     const float sg = static_cast<float>(color_start[1]);
     const float sr = static_cast<float>(color_start[2]);
-    const float eb = static_cast<float>(color_end[0]);
-    const float eg = static_cast<float>(color_end[1]);
-    const float er = static_cast<float>(color_end[2]);
 
     if (style == 0) {
+        // An absent Light RgbGen leaves the light's static packed color.
         rt.r = sr / 255.0f;
         rt.g = sg / 255.0f;
         rt.b = sb / 255.0f;
         return rt;
     }
 
-    float phase = static_cast<float>(phase_byte) * (1.0f / 256.0f);
-    float rate = static_cast<float>(rate_word) * (1.0f / 256.0f);
-    const float b = evalStyleScalar(style, rate, phase, sb, eb, ctrl_value, time_ms);
-    const float g = evalStyleScalar(style, rate, phase, sg, eg, ctrl_value, time_ms);
-    const float r = evalStyleScalar(style, rate, phase, sr, er, ctrl_value, time_ms);
-    rt.r = clamp01(r / 255.0f);
-    rt.g = clamp01(g / 255.0f);
-    rt.b = clamp01(b / 255.0f);
+    const std::array<uint8_t, 3> start = {
+        color_start[2], color_start[1], color_start[0],
+    };
+    const std::array<uint8_t, 3> end = {
+        color_end[2], color_end[1], color_end[0],
+    };
+    evalRgbGen(
+            style,
+            phase_byte,
+            static_cast<int16_t>(rate_word),
+            start,
+            end,
+            time_ms,
+            ctrl_value,
+            &rt.r,
+            &rt.g,
+            &rt.b);
     return rt;
 }
 
@@ -257,11 +288,15 @@ int compute_anim_frame(const ThreediMaterial& mat,
                        uint32_t max_anim_frames,
                        uint32_t time_ms,
                        const std::vector<std::string>& ctrl_names,
-                       const std::unordered_map<std::string, uint16_t>& ctrl_values) {
-    if (max_anim_frames > 0 && max_anim_frames <= 1) return 0;
+                       const ControlRegisterValues& ctrl_values) {
+    const ControlRegisterValues& ctrl_bus = ctrl_values;
     const uint8_t nframes = mat.animation.num_frames;
     if (nframes <= 1) return 0;
-    const int frame_count = std::max(1, static_cast<int>(nframes));
+    const uint32_t bounded_count = max_anim_frames == 0
+            ? static_cast<uint32_t>(nframes)
+            : std::min(static_cast<uint32_t>(nframes), max_anim_frames);
+    if (bounded_count <= 1) return 0;
+    const int frame_count = static_cast<int>(bounded_count);
 
     if (mat.animation.animation_type == 0) {
         int frame_ms = static_cast<int>(mat.animation.cycle_frame_time);
@@ -270,9 +305,12 @@ int compute_anim_frame(const ThreediMaterial& mat,
     }
 
     const int reg_index = static_cast<int>(mat.animation.cycle_frame_time);
-    const uint16_t ctrl = regValue(reg_index, ctrl_names, ctrl_values);
-    int frame = static_cast<int>((static_cast<uint32_t>(ctrl) * static_cast<uint32_t>(frame_count)) / 65536u);
-    if (frame < 0) frame = 0;
+    const int32_t ctrl = regValue(reg_index, ctrl_names, ctrl_bus);
+    // The odd dword in retail's 8-byte CTRL slot selects an alternate modulo
+    // mode, but has no writer in Joint Operations. The live path is therefore
+    // always the signed low-dword IMUL/SAR fractional-frame branch.
+    // [orig: apply_shader_parameters @ 0x58DB80]
+    int frame = mulShift16(frame_count, ctrl);
     if (frame >= frame_count) frame = frame_count - 1;
     return frame;
 }

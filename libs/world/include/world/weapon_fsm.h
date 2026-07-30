@@ -223,6 +223,15 @@ struct WeaponSlotState {
 int32_t weapon_slot_accumulated_heat(const WeaponFsmDef &def, const WeaponSlotState &slot,
                                      int32_t current_tick);
 
+// The value the third-person/world model publishes on HEAT_GLOW. This is
+// deliberately separate from the first-person consumer: world models zero the
+// register when the inline MountSlot's heat window is inactive and saturate a
+// live window at 0xFFFF (not the FP path's 0x10000).
+// [orig: HUD_CacheWeaponSlotInfo @ 0x44095B..0x440991]
+int32_t weapon_slot_world_heat_glow(const WeaponFsmDef &def,
+                                    const WeaponSlotState &slot,
+                                    int32_t current_tick);
+
 // Whether this definition/action pair selects the standard 2D SIGHTS card after
 // the frame's outer CanFire/view gates pass. Scoped and Sighted are asymmetric
 // selectors; NoCardSwitch clears both unless ForceScoped overrides it. Callers

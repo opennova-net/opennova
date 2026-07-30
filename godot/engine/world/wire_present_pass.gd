@@ -254,16 +254,24 @@ func _apply_body_anim_gated(
 		node.play_body_anim(body_anim_slot)
 
 
-# Keep dynamically materialized items on the same generic PANM path as placed
-# mission objects. Semantic EWEAP controls are overlaid after these model-order
-# channels, exactly as MissionPresentPass does.
+# Keep dynamically materialized items on the same PANM path as placed mission
+# objects. The ACTIVE fields are publication ownership, so an owned zero phase
+# must still be written and a suppressed channel must release its prior value.
+# set_part_phase publishes to retail's fixed VEHICLE_SPECIAL1/2 registers;
+# semantic EWEAP controls remain independent.
 func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
 	if not node.has_method("set_part_phase"):
 		return
-	if int(snap[base + NovaSimulation.PF_ACTIVE1]) == 1:
-		node.set_part_phase(1, int(snap[base + NovaSimulation.PF_PHASE1]))
-	if int(snap[base + NovaSimulation.PF_ACTIVE2]) == 1:
-		node.set_part_phase(2, int(snap[base + NovaSimulation.PF_PHASE2]))
+	if int(snap[base + NovaSimulation.PF_ACTIVE1]) > 0:
+		node.set_part_phase(1,
+				NovaSimulation.decode_present_part_anim_phase(snap, base, 1))
+	elif node.has_method("clear_part_phase"):
+		node.clear_part_phase(1)
+	if int(snap[base + NovaSimulation.PF_ACTIVE2]) > 0:
+		node.set_part_phase(2,
+				NovaSimulation.decode_present_part_anim_phase(snap, base, 2))
+	elif node.has_method("clear_part_phase"):
+		node.clear_part_phase(2)
 
 
 ## Register the render-host seam for runtime consumers that follow a dynamically
@@ -584,15 +592,33 @@ func _present_wire_row(
 			node.set_aim_overlay([])
 		if row >= 0:
 			_row_aim_valid[row] = aim_valid
+	var ctrl_batch: bool = ((caps & (CAP_CTRL | CAP_PART)) != 0
+			and node.has_method("begin_ctrl_update")
+			and node.has_method("end_ctrl_update"))
+	if ctrl_batch:
+		node.begin_ctrl_update()
 	if caps & CAP_CTRL:
-		# Semantic mount ownership must clear before generic model-order channels
-		# and re-apply after them — only meaningful on nodes with CTRL channels.
-		PresentEmplacedWeapon.clear(node)
 		if caps & CAP_PART:
 			_apply_procedural_part(node, snap, base)
-		PresentEmplacedWeapon.apply(node, snap, base, false)
+		PresentEmplacedWeapon.apply(node, snap, base, true)
+		# Only authoritative host rows can set VALID: compact joiner rows do not
+		# carry cveh steer/currentSpeed and release this owner instead.
+		# [orig: Entity_CacheVehicleHUDStats @0x4929B0]
+		NovaPresentApplier.vehicle_motion_apply(node, snap, base)
+		# A wire-direct numbered-zone model still runs the generic-world
+		# callback. Ordinary pool-0 wire organics leave every validity bit clear,
+		# so this releases rather than inventing sector/global-bus writes.
+		# [orig: BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
+		NovaPresentApplier.zone_team_apply(node, snap, base)
+		# Host wire-direct/synthetic carrier rows consume the same scoped
+		# parent-slot heat value as placed rows. Joiner compact rows leave VALID
+		# clear and therefore release this writer.
+		# [orig: parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
+		NovaPresentApplier.world_heat_apply(node, snap, base)
 	elif caps & CAP_PART:
 		_apply_procedural_part(node, snap, base)
+	if ctrl_batch:
+		node.end_ctrl_update()
 	if respawned_since_present and node.has_method("reset_remote_body_state"):
 		node.reset_remote_body_state()
 		if row >= 0:

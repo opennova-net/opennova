@@ -15,7 +15,33 @@ int32_t weapon_slot_accumulated_heat(const WeaponFsmDef &def, const WeaponSlotSt
                                      int32_t current_tick) {
     if (def.heat_per_shot == 0) return 0;
     if (slot.heat_window_end_tick <= current_tick) return 0;
-    return def.heat_decay_per_tick * (slot.heat_window_end_tick - current_tick);
+    // Retail's two-operand IMUL keeps only the low dword. Express the
+    // subtraction and multiplication in unsigned bits, then preserve those
+    // bits in the signed return value; signed C++ overflow would be undefined.
+    // [orig: WeaponSlot_CalcAccumulatedHeat @ 0x53F7A9..0x53F7B1]
+    const uint32_t ticks_remaining =
+            static_cast<uint32_t>(slot.heat_window_end_tick) -
+            static_cast<uint32_t>(current_tick);
+    const uint32_t product =
+            static_cast<uint32_t>(def.heat_decay_per_tick) * ticks_remaining;
+    int32_t result = 0;
+    std::memcpy(&result, &product, sizeof(result));
+    return result;
+}
+
+int32_t weapon_slot_world_heat_glow(const WeaponFsmDef &def,
+                                    const WeaponSlotState &slot,
+                                    int32_t current_tick) {
+    // Retail tests the inline slot's deadline before calling the accumulator,
+    // writes a literal zero on the cold leg, then caps the hot result at the
+    // largest unsigned word before storing it on the signed-dword CTRL bus.
+    // Preserve the final zero-extension as well as the 0xFFFF ceiling.
+    // [orig: HUD_CacheWeaponSlotInfo cold store @ 0x440969;
+    //  accumulator call/cap/store @ 0x440974..0x440991]
+    if (slot.heat_window_end_tick <= current_tick) return 0;
+    int32_t heat = weapon_slot_accumulated_heat(def, slot, current_tick);
+    if (heat > 0xFFFF) heat = 0xFFFF;
+    return static_cast<uint16_t>(heat);
 }
 
 namespace {

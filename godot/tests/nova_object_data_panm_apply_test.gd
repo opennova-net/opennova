@@ -51,6 +51,51 @@ func test_unchanged_evaluation_writes_nothing() -> void:
 			"an up-to-date caller gets no writes (the poison survives)")
 
 
+func test_same_time_noise_calls_sample_each_graphic_instance_independently() -> void:
+	var data := _data()
+	assert_gt(data.get_part_anim_count(0), 0,
+			"the fixture needs one PANM row to turn into a noise probe")
+	var anim := 0
+	var info: Dictionary = data.get_part_anim_info(0, anim)
+	var target_part := int(info.get("transform_as", -1))
+	var part_count := int(data.get_render_lod_info(0).get("part_count", 0))
+	assert_between(target_part, 0, part_count - 1)
+	if target_part < 0 or target_part >= part_count:
+		return
+
+	# Low nibble 6 is retail's rand()-backed wave lookup. Keep time, bus, and
+	# authored track identical across both calls so only the per-submission CRT
+	# sample can distinguish the two graphic instances.
+	# [orig: PANM_SampleTrack @ 0x5B2270; wave_lookup @ 0x5DE6B0]
+	assert_true(data.set_part_anim_channel_enabled(
+			0, anim, "translation", true))
+	assert_true(data.set_part_anim_track_field(
+			0, anim, "translation", "control", 0x36))
+	assert_true(data.set_part_anim_track_field(
+			0, anim, "translation", "control_param", 0))
+	assert_true(data.set_part_anim_track_field(
+			0, anim, "translation", "rate", 0))
+	assert_true(data.set_part_anim_track_field(
+			0, anim, "translation", "start", 0))
+	assert_true(data.set_part_anim_track_field(
+			0, anim, "translation", "end", 32767))
+
+	var first_nodes := _nodes(part_count)
+	var second_nodes := _nodes(part_count)
+	var serial_before := data.get_panm_evaluation_serial()
+	data.apply_panm_to_nodes(
+			0, 0, {}, first_nodes, 0)
+	var serial_after_first := data.get_panm_evaluation_serial()
+	data.apply_panm_to_nodes(
+			0, 0, {}, second_nodes, 0)
+	var serial_after_second := data.get_panm_evaluation_serial()
+
+	assert_eq(serial_after_first, serial_before + 1,
+			"the first graphic instance evaluates its noise track")
+	assert_eq(serial_after_second, serial_after_first + 1,
+			"same-time noise evaluates again for the second graphic instance")
+
+
 func test_time_advance_writes_only_moved_parts() -> void:
 	var data := _data()
 	var t0: Dictionary = data.evaluate_panm(0, 0, {})

@@ -18,12 +18,21 @@ class FakeModel:
 	var right_hand_collapse_calls: Array[bool] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
-	var part_control_names: Dictionary = {}
+	var cleared_part_channels: Array[int] = []
+	var part_control_names: Dictionary = {
+		1: "VEHICLE_SPECIAL1",
+		2: "VEHICLE_SPECIAL2",
+	}
 	func set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
 		var control_name := String(part_control_names.get(channel, ""))
 		if not control_name.is_empty():
 			ctrl_values[control_name] = phase
+	func clear_part_phase(channel: int) -> void:
+		cleared_part_channels.append(channel)
+		var control_name := String(part_control_names.get(channel, ""))
+		if not control_name.is_empty():
+			ctrl_values.erase(control_name)
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
 	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
@@ -39,6 +48,26 @@ class FakeModel:
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
+
+
+class OwnedBatchModel:
+	extends FakeModel
+	var ctrl_owners: Dictionary = {}
+	var begin_batch_calls := 0
+	var end_batch_calls := 0
+	func set_ctrl_override(owner: String, name: String, value: int) -> void:
+		ctrl_values[name] = value
+		ctrl_owners[name] = owner
+	func clear_ctrl_override(owner: String, name: String) -> void:
+		if String(ctrl_owners.get(name, "")) != owner:
+			return
+		ctrl_owners.erase(name)
+		ctrl_values.erase(name)
+		cleared_controls.append(name)
+	func begin_ctrl_update() -> void:
+		begin_batch_calls += 1
+	func end_ctrl_update() -> void:
+		end_batch_calls += 1
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -71,6 +100,14 @@ class CountingIndex:
 class FakeSim:
 	extends RefCounted
 	var entities: Array = []
+	func _write_phase(out: PackedFloat32Array, base: int,
+			channel: int, phase: int, active: bool) -> void:
+		var phase_field := NovaSimulation.PF_PHASE1 + (channel - 1) * 2
+		var active_field := NovaSimulation.PF_ACTIVE1 + (channel - 1) * 2
+		var bits := phase & 0xFFFFFFFF
+		out[base + phase_field] = float(bits & 0xFFFF)
+		out[base + active_field] = (
+				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
 	func get_present_stride() -> int:
 		return NovaSimulation.PF_STRIDE
 	func get_present_snapshot() -> PackedFloat32Array:
@@ -90,10 +127,10 @@ class FakeSim:
 			out[b + NovaSimulation.PF_POS_Y] = float(e.get("pos_y", 0.0))
 			out[b + NovaSimulation.PF_POS_Z] = float(e.get("pos_z", 0.0))
 			out[b + NovaSimulation.PF_YAW_DEG] = float(e.get("yaw_deg", 0.0))
-			out[b + NovaSimulation.PF_PHASE1] = float(e.get("phase1", 0))
-			out[b + NovaSimulation.PF_ACTIVE1] = float(e.get("active1", 0))
-			out[b + NovaSimulation.PF_PHASE2] = float(e.get("phase2", 0))
-			out[b + NovaSimulation.PF_ACTIVE2] = float(e.get("active2", 0))
+			_write_phase(out, b, 1, int(e.get("phase1", 0)),
+					int(e.get("active1", 0)) != 0)
+			_write_phase(out, b, 2, int(e.get("phase2", 0)),
+					int(e.get("active2", 0)) != 0)
 			out[b + NovaSimulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
@@ -113,6 +150,28 @@ class FakeSim:
 					e.get("emplaced_gun_yaw", 0))
 			out[b + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
 					e.get("emplaced_gun_pitch", 0))
+			out[b + NovaSimulation.PF_VEHICLE_MOTION_VALID] = float(
+					e.get("vehicle_motion_valid", 0))
+			out[b + NovaSimulation.PF_VEHICLE_STEERING] = float(
+					e.get("vehicle_steering", 0))
+			out[b + NovaSimulation.PF_VEHICLE_SPEED] = float(
+					e.get("vehicle_speed", 0))
+			out[b + NovaSimulation.PF_TEX_TEAM_VALID] = float(
+					e.get("tex_team_valid", 0))
+			out[b + NovaSimulation.PF_TEX_TEAM] = float(
+					e.get("tex_team", 0))
+			out[b + NovaSimulation.PF_ZONE_CTRL_VALID] = float(
+					e.get("zone_ctrl_valid", 0))
+			out[b + NovaSimulation.PF_TEAMSWING] = float(
+					e.get("team_swing", 0))
+			out[b + NovaSimulation.PF_LFP_CAMPPERCENT_VALID] = float(
+					e.get("lfp_camp_percent_valid", 0))
+			out[b + NovaSimulation.PF_LFP_CAMPPERCENT] = float(
+					e.get("lfp_camp_percent", 0))
+			out[b + NovaSimulation.PF_WORLD_HEAT_GLOW_VALID] = float(
+					e.get("world_heat_glow_valid", 0))
+			out[b + NovaSimulation.PF_WORLD_HEAT_GLOW] = float(
+					e.get("world_heat_glow", 0))
 			out[b + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					e.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = e.get(
@@ -153,15 +212,32 @@ func test_active_channel_poses_to_phase() -> void:
 	assert_eq(int((model.phases[0] as Array)[1]), 32768, "engine-computed phase passes through")
 
 
-func test_inactive_channel_not_posed() -> void:
+func test_publication_ownership_writes_zero_and_releases_suppressed_channel() -> void:
 	var model := FakeModel.new()
 	add_child_autofree(model)
 	var index := FakeIndex.new()
 	index.by_bms_id = { 1: model }
 	var sim := FakeSim.new()
-	sim.entities = [{ "bms_id": 1, "active1": 0, "phase1": 5 }]
-	_make_pass(index, sim).present()
-	assert_eq(model.phases.size(), 0, "an untouched channel is left at its default pose")
+	sim.entities = [{
+		"bms_id": 1,
+		"active1": 1,
+		"phase1": 1234,
+		"active2": 1,
+		"phase2": 5678,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values.get("VEHICLE_SPECIAL1"), 1234)
+	assert_eq(model.ctrl_values.get("VEHICLE_SPECIAL2"), 5678)
+
+	sim.entities[0]["phase2"] = 0
+	sim.entities[0]["active1"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("VEHICLE_SPECIAL1"),
+			"a suppressed SPECIAL1 releases its prior override")
+	assert_eq(model.ctrl_values.get("VEHICLE_SPECIAL2"), 0,
+			"an owned zero endpoint is still published")
+	assert_has(model.cleared_part_channels, 1)
 
 
 func test_both_channels_posed() -> void:
@@ -203,12 +279,122 @@ func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
 	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
 
 
-func test_dismount_restores_generic_part_values_for_the_same_registers() -> void:
+func test_world_heat_glow_owns_cold_zero_and_releases_unavailable_state() -> void:
 	var model := FakeModel.new()
-	model.part_control_names = {
-		1: "EWEAP_GUNYAW",
-		2: "EWEAP_GUNPITCH",
-	}
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = {10: model}
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 10,
+		"world_heat_glow_valid": 1,
+		"world_heat_glow": 0,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values.get("HEAT_GLOW", -1), 0,
+			"the authoritative cold branch publishes literal zero")
+
+	sim.entities[0]["world_heat_glow"] = 0xFFFF
+	presenter.present()
+	assert_eq(model.ctrl_values.get("HEAT_GLOW", -1), 0xFFFF,
+			"the world-model endpoint is the unsigned-word ceiling")
+
+	sim.entities[0]["world_heat_glow_valid"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("HEAT_GLOW"),
+			"a row without authoritative MountSlot heat releases this writer")
+	assert_has(model.cleared_controls, "HEAT_GLOW")
+
+
+func test_vehicle_motion_controls_share_one_owned_batch_and_release() -> void:
+	var model := OwnedBatchModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = {61: model}
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 61,
+		"vehicle_motion_valid": 1,
+		"vehicle_steering": 0xFEDC,
+		"vehicle_speed": 0x10000,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"VEHICLE_STEERING": 0xFEDC,
+		"VEHICLE_SPEED": 0x10000,
+	}, "the cveh pair publishes by semantic retail name")
+	assert_eq(model.ctrl_owners, {
+		"VEHICLE_STEERING": "present:vehicle_motion",
+		"VEHICLE_SPEED": "present:vehicle_motion",
+	}, "both stores carry one teardown owner")
+	assert_eq(model.begin_batch_calls, 1)
+	assert_eq(model.end_batch_calls, 1,
+			"both stores are consumed in one CTRL evaluation batch")
+
+	sim.entities[0]["vehicle_motion_valid"] = 0
+	presenter.present()
+	assert_true(model.ctrl_values.is_empty(),
+			"an unavailable/non-authoritative row releases the cveh writer")
+	assert_true(model.ctrl_owners.is_empty())
+	assert_has(model.cleared_controls, "VEHICLE_STEERING")
+	assert_has(model.cleared_controls, "VEHICLE_SPEED")
+	assert_eq(model.begin_batch_calls, 2)
+	assert_eq(model.end_batch_calls, 2)
+
+
+func test_sector_and_zone_controls_preserve_write_validity_and_owners() -> void:
+	var model := OwnedBatchModel.new()
+	add_child_autofree(model)
+	# This unrelated writer is the bounded-model stand-in for another semantic
+	# producer. Zone teardown must never use clear_ctrl_values().
+	model.set_ctrl_override("foreign", "FOREIGN_CTRL", 77)
+	var index := FakeIndex.new()
+	index.by_bms_id = {62: model}
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 62,
+		"tex_team_valid": 1,
+		"tex_team": -1,
+		"zone_ctrl_valid": 1,
+		"team_swing": 0,
+		"lfp_camp_percent_valid": 1,
+		"lfp_camp_percent": 0x8000,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"FOREIGN_CTRL": 77,
+		"TEX_TEAM": -1,
+		"TEAMSWING": 0,
+		"LFP_CAMPPERCENT": 0x8000,
+	}, "literal zero TEAMSWING remains an owned retail write")
+	assert_eq(model.ctrl_owners.get("TEX_TEAM"), "present:sector_team")
+	assert_eq(model.ctrl_owners.get("TEAMSWING"), "present:zone")
+	assert_eq(model.ctrl_owners.get("LFP_CAMPPERCENT"), "present:zone")
+
+	sim.entities[0]["lfp_camp_percent_valid"] = 0
+	presenter.present()
+	assert_false(model.ctrl_values.has("LFP_CAMPPERCENT"),
+			"a zone without a timer-list entry omits LFP instead of writing zero")
+	assert_eq(model.ctrl_values.get("TEAMSWING"), 0,
+			"the unconditional zone writer remains owned independently")
+	assert_eq(model.ctrl_values.get("TEX_TEAM"), -1)
+
+	sim.entities[0]["tex_team_valid"] = 0
+	sim.entities[0]["zone_ctrl_valid"] = 0
+	presenter.present()
+	assert_eq(model.ctrl_values, {"FOREIGN_CTRL": 77},
+			"leaving both callbacks releases only their scoped writers")
+	assert_eq(model.ctrl_owners, {"FOREIGN_CTRL": "foreign"})
+	assert_has(model.cleared_controls, "TEX_TEAM")
+	assert_has(model.cleared_controls, "TEAMSWING")
+	assert_has(model.cleared_controls, "LFP_CAMPPERCENT")
+
+
+func test_part_anim_and_emplaced_controls_remain_independent() -> void:
+	var model := FakeModel.new()
 	add_child_autofree(model)
 	var index := FakeIndex.new()
 	index.by_bms_id = { 9: model }
@@ -226,18 +412,20 @@ func test_dismount_restores_generic_part_values_for_the_same_registers() -> void
 	var presenter := _make_pass(index, sim)
 	presenter.present()
 	assert_eq(model.ctrl_values, {
+		"VEHICLE_SPECIAL1": 0x1111,
+		"VEHICLE_SPECIAL2": 0xEEEE,
 		"EWEAP_GUNYAW": 0x2222,
 		"EWEAP_GUNPITCH": 0xDDDD,
-	}, "live gunner controls outrank generic model-order values")
+	}, "retail publishes generic and emplaced systems on distinct semantic registers")
 
 	sim.entities[0]["emplaced_controls_valid"] = 0
 	sim.entities[0]["phase1"] = 0x3333
 	sim.entities[0]["phase2"] = 0xCCCC
 	presenter.present()
 	assert_eq(model.ctrl_values, {
-		"EWEAP_GUNYAW": 0x3333,
-		"EWEAP_GUNPITCH": 0xCCCC,
-	}, "dismount clears stale semantic ownership before generic PLAYPARTANIM")
+		"VEHICLE_SPECIAL1": 0x3333,
+		"VEHICLE_SPECIAL2": 0xCCCC,
+	}, "dismount clears only stale EWEAP ownership")
 
 
 func test_body_clip_poses_to_sim_anim_state_phase() -> void:
@@ -615,6 +803,44 @@ func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
 	present_pass.set_output_channels(channels)
 	present_pass.present()
 	assert_eq(model.body_calls.size(), 2, "restoring the seam resumes dispatch")
+
+
+func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = {12: model}
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 12,
+		"active1": 1,
+		"phase1": 0x1111,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2222,
+		"emplaced_gun_pitch": 0x3333,
+		"world_heat_glow_valid": 1,
+		"world_heat_glow": 0x4444,
+		"tex_team_valid": 1,
+		"tex_team": 2,
+		"zone_ctrl_valid": 1,
+		"team_swing": 0x10000,
+		"lfp_camp_percent_valid": 1,
+		"lfp_camp_percent": 0x8000,
+	}]
+	var present_pass := _make_pass(index, sim)
+	present_pass.present()
+	assert_false(model.ctrl_values.is_empty())
+	var channels := int(present_pass.get_output_channels())
+	present_pass.set_output_channels(channels & ~PresentPass.OUTPUT_PART_ANIM)
+	assert_true(model.ctrl_values.is_empty(),
+			"freezing the output seam cannot retain its last CTRL frame")
+	assert_has(model.cleared_part_channels, 1)
+	assert_has(model.cleared_controls, "EWEAP_GUNYAW")
+	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
+	assert_has(model.cleared_controls, "HEAT_GLOW")
+	assert_has(model.cleared_controls, "TEX_TEAM")
+	assert_has(model.cleared_controls, "TEAMSWING")
+	assert_has(model.cleared_controls, "LFP_CAMPPERCENT")
 
 
 func test_native_basis_matches_the_placement_convention() -> void:

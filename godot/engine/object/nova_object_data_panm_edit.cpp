@@ -39,9 +39,11 @@ String panm_mode_key_for_control(uint8_t control) {
 		case 52: return "saw_wave";
 		case 53: return "inverse_saw_wave";
 		case 113: return "control_register";
-		case 114: return "control_register_add";
 		default:
 			break;
+	}
+	if (control >= 114 && control <= 117) {
+		return "unsupported";
 	}
 	const ThreediControlFuncInfo *info = threedi_control_func_info(control);
 	if (info == nullptr || info->name == nullptr) {
@@ -63,20 +65,24 @@ String panm_mode_label_for_control(uint8_t control) {
 		case 52: return "Saw wave";
 		case 53: return "Inverse saw wave";
 		case 113: return "Control register";
-		case 114: return "Add control register";
 		default:
 			break;
+	}
+	if (control >= 114 && control <= 117) {
+		return vformat("Wave lookup (raw code %d; not authorable)", control);
 	}
 	const ThreediControlFuncInfo *info = threedi_control_func_info(control);
 	return (info != nullptr && info->name != nullptr) ? String(info->name).capitalize() : String("Unsupported");
 }
 
 bool panm_control_uses_register(uint8_t control) {
-	const ThreediControlFuncInfo *info = threedi_control_func_info(control);
-	return info != nullptr && info->is_register_func != 0;
+	return threedi_panm_control_uses_register(control) != 0;
 }
 
 bool panm_control_supported(uint8_t control) {
+	if (control >= 114 && control <= 117) {
+		return false;
+	}
 	return threedi_control_func_info(control) != nullptr;
 }
 
@@ -120,10 +126,6 @@ bool panm_control_for_mode(const String &p_mode, uint8_t &out_control) {
 	}
 	if (mode == "control_register") {
 		out_control = 113;
-		return true;
-	}
-	if (mode == "control_register_add") {
-		out_control = 114;
 		return true;
 	}
 	return false;

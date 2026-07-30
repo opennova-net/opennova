@@ -83,6 +83,22 @@ public:
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
 	static void emplaced_clear(Object *node);
+	// Authoritative ground-vehicle VEHICLE_STEERING/VEHICLE_SPEED pair.
+	// Invalid compact/non-vehicle rows release only this semantic writer.
+	static int vehicle_motion_apply(Object *node,
+			const PackedFloat32Array &snap, int base);
+	static void vehicle_motion_clear(Object *node);
+	// Bounded per-model projection of the retail sector/generic-zone CTRL
+	// writers. Validity bits distinguish an omitted global-bus write from a
+	// literal zero store; clears affect only these presentation owners.
+	static int zone_team_apply(Object *node,
+			const PackedFloat32Array &snap, int base);
+	static void zone_team_clear(Object *node);
+	// Attachment-scoped carrier HEAT_GLOW. A valid row includes cold zero;
+	// invalid/unavailable rows release only this dedicated writer.
+	static int world_heat_apply(Object *node, const PackedFloat32Array &snap,
+			int base);
+	static void world_heat_clear(Object *node);
 
 protected:
 	static void _bind_methods();
@@ -109,6 +125,7 @@ private:
 			int64_t layout_revision);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
+	void release_part_anim_outputs();
 	int64_t current_index_generation();
 	const String &infantry_key(int state);
 

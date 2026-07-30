@@ -48,12 +48,12 @@ static inline void apply_translation_track(ThreediMatrix4x4 *m,
                                            const ThreediTransform *track,
                                            const ThreediMatrix4x4 *basis_input,
                                            uint32_t time_ms,
-                                           const uint16_t *ctrl_table) {
+                                           const int32_t *ctrl_values) {
     if (trans_type == THREEDI_TRANS_NONE) return;
     if (!track || !track->control) return;
 
     const float kScaleUnit = 1.0f / 65536.0f;
-    float t = (float)threedi_panm_sample_track_raw(track, time_ms, ctrl_table) * kScaleUnit;
+    float t = (float)threedi_panm_sample_track_raw(track, time_ms, ctrl_values) * kScaleUnit;
 
     switch (trans_type) {
         case THREEDI_TRANS_X:
@@ -74,20 +74,20 @@ static inline void sample_scale(float *sx, float *sy, float *sz,
                                 const ThreediPartAnimation *n,
                                 uint8_t scale_type,
                                 uint32_t time_ms,
-                                const uint16_t *ctrl_table) {
+                                const int32_t *ctrl_values) {
     const float kScaleUnit = 1.0f / 65536.0f;
 
     float x = 1.0f, y = 1.0f, z = 1.0f;
 
     if (scale_type == 1) {
         if (n->scale_x.control) {
-            float s = (float)threedi_panm_sample_track_raw(&n->scale_x, time_ms, ctrl_table) * kScaleUnit;
+            float s = (float)threedi_panm_sample_track_raw(&n->scale_x, time_ms, ctrl_values) * kScaleUnit;
             x = y = z = s;
         }
     } else if (scale_type == 2) {
-        if (n->scale_x.control) x = (float)threedi_panm_sample_track_raw(&n->scale_x, time_ms, ctrl_table) * kScaleUnit;
-        if (n->scale_y.control) y = (float)threedi_panm_sample_track_raw(&n->scale_y, time_ms, ctrl_table) * kScaleUnit;
-        if (n->scale_z.control) z = (float)threedi_panm_sample_track_raw(&n->scale_z, time_ms, ctrl_table) * kScaleUnit;
+        if (n->scale_x.control) x = (float)threedi_panm_sample_track_raw(&n->scale_x, time_ms, ctrl_values) * kScaleUnit;
+        if (n->scale_y.control) y = (float)threedi_panm_sample_track_raw(&n->scale_y, time_ms, ctrl_values) * kScaleUnit;
+        if (n->scale_z.control) z = (float)threedi_panm_sample_track_raw(&n->scale_z, time_ms, ctrl_values) * kScaleUnit;
     }
 
     *sx = x; *sy = y; *sz = z;
@@ -122,7 +122,7 @@ static void build_euler(ThreediMatrix4x4 *out,
                         bool zyx_order,
                         const ThreediPartAnimation *n,
                         uint32_t time_ms,
-                        const uint16_t *ctrl_table) {
+                        const int32_t *ctrl_values) {
     const float kAngleScale = 0.0000014980282f;
 
     ThreediMatrix4x4 tmp, rot, bind_rot;
@@ -139,33 +139,33 @@ static void build_euler(ThreediMatrix4x4 *out,
     //   rotation_z track -> rotate around Z
     if (zyx_order) {
         if (n->rotation_z.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_z, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_z, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_z(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
         if (n->rotation_y.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_y, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_y, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_x(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
         if (n->rotation_x.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_x, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_x, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_y(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
     } else {
         if (n->rotation_x.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_x, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_x, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_y(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
         if (n->rotation_y.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_y, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_y, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_x(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
         if (n->rotation_z.control) {
-            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_z, time_ms, ctrl_table) * kAngleScale;
+            float ang = (float)threedi_panm_sample_track_raw(&n->rotation_z, time_ms, ctrl_values) * kAngleScale;
             threedi_mat4_make_rot_z(&rot, ang);
             threedi_mat4_mul_affine(&tmp, &tmp, &rot);
         }
@@ -313,7 +313,7 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
                                      const ThreediMatrix4x4 *in_matrices,
                                      const ThreediMatrix4x4 *mul_override,
                                      uint32_t time_ms,
-                                     const uint16_t *ctrl_table,
+                                     const int32_t *ctrl_values,
                                      ThreediMatrix4x4 *out_matrices) {
     if (!nodes || !pivots || !in_matrices || !out_matrices) {
         return -1;
@@ -365,7 +365,7 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         }
 
         float sx, sy, sz;
-        sample_scale(&sx, &sy, &sz, n, scale_type, time_ms, ctrl_table);
+        sample_scale(&sx, &sy, &sz, n, scale_type, time_ms, ctrl_values);
 
         ThreediMatrix4x4 built;
         bool spinner_break = false;
@@ -373,7 +373,7 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         if (rot_type == 1) {
             spinner_break = build_spinner(&built, in_sub, pivot_sub, parent, sx, sy, sz, n, time_radians);
         } else if (rot_type == 2) {
-            build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, rot_rev, n, time_ms, ctrl_table);
+            build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, rot_rev, n, time_ms, ctrl_values);
         } else if (rot_type == 3) {
             const ThreediVec3 *pivot_i = &pivots[i];
             build_viewaligned(&built, view_inv, basis_input, pivot_i, sx, sy, sz);
@@ -384,7 +384,7 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
             build_scaled_bind(&built, in_sub, pivot_sub, parent, sx, sy, sz);
         }
 
-        apply_translation_track(&built, trans_type, &n->translation, basis_input, time_ms, ctrl_table);
+        apply_translation_track(&built, trans_type, &n->translation, basis_input, time_ms, ctrl_values);
 
         built.m[15] = in_sub->m[15];
         *dst = built;

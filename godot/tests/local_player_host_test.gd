@@ -101,6 +101,7 @@ class FakeWorld:
 	var player_position := Vector3.ZERO
 	var player_yaw_deg := 0.0
 	var player_pitch_deg := 0.0
+	var player_team := 1
 
 	func is_loaded() -> bool:
 		return _loaded
@@ -162,6 +163,9 @@ class FakeWorld:
 
 	func local_player_pitch_deg() -> float:
 		return player_pitch_deg
+
+	func get_local_player_team() -> int:
+		return player_team
 
 	func local_player_anim_key() -> String:
 		return ""
@@ -673,15 +677,76 @@ func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 
 	assert_not_null(world.last_weapon_part)
 	assert_eq(world.last_weapon_part.ctrl_values, {
+		"TEX_TEAM": 1,
+		"HEAT_GLOW": 0,
 		"EWEAP_GUNYAW": 0x2345,
 		"EWEAP_GUNPITCH": 0xDCBA,
-	}, "the FP weapon receives the same semantic registers as the world model")
+	}, "the FP weapon receives cold heat plus the emplaced semantic pair")
 
 	world.weapon_view.emplaced_controls_valid = false
 	host.before_world_tick(0.016)
 	host.after_world_tick()
+	assert_eq(world.last_weapon_part.ctrl_values, {
+		"TEX_TEAM": 1,
+		"HEAT_GLOW": 0,
+	},
+			"leaving UseGun clears only the turret pair; FP heat still owns cold zero")
+
+
+func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.player_team = 0xFE
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_eq(world.last_weapon_part.ctrl_values.get("TEX_TEAM"), -2,
+			"the FP store sign-extends retail's entity team byte")
+	host.set_third_person(true)
+	host.after_world_tick()
 	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
-			"leaving UseGun cannot retain the previous turret pose")
+			"a third-person frame does not execute any FP CTRL writer")
+
+	host.set_third_person(false)
+	world.player_team = 2
+	host.after_world_tick()
+	assert_eq(world.last_weapon_part.ctrl_values.get("TEX_TEAM"), 2)
+	world.view.binoculars_view_active = true
+	host.after_world_tick()
+	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
+			"the binocular card path suppresses the FP model submit and TEX_TEAM")
+
+
+func test_viewmodel_publishes_full_range_heat_glow() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	world.view = PlayerLocalView.new()
+	world.weapon_view = _weapon_view()
+	world.weapon_view.heat_glow = 0x10000
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary: return {})
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(int(world.last_weapon_part.ctrl_values.get("HEAT_GLOW", -1)),
+			0x10000, "the FP writer keeps retail's exact 1.0 endpoint")
+
+	world.weapon_view.heat_glow = 0
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(int(world.last_weapon_part.ctrl_values.get("HEAT_GLOW", -1)), 0,
+			"the first-person writer stores literal zero on every cool submit")
 
 
 func _weapon_end_event(set_name: String) -> PlayerWeaponEvent:
