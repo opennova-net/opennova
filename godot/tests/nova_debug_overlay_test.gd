@@ -15,6 +15,7 @@ const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
 const PLAYER_DUMP_PATH := NodePath(PAGES + "/Player/DumpSnapshot")
 const PLAYER_DUMP_STATUS_PATH := NodePath(PAGES + "/Player/PlayerDumpStatus")
+const PLAYER_TELEPORT_STATUS_PATH := NodePath(PAGES + "/Player/PlayerTeleportStatus")
 const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_user_points")
 const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
 const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
@@ -36,6 +37,8 @@ class FakePoseSim:
 	var _yaw_deg := 0.0
 	var _pitch_deg := 0.0
 	var _view_roll_deg := 0.0
+	var joiner := false
+	var teleported_to := {}
 	var round_debug := { "events": [] }
 
 	func set_player_pose(
@@ -72,6 +75,9 @@ class FakePoseSim:
 	func get_logic_tick() -> int:
 		return 4242
 
+	func is_joiner() -> bool:
+		return joiner
+
 	func get_round_debug() -> Dictionary:
 		return round_debug
 
@@ -98,6 +104,15 @@ class FakePoseSim:
 
 	func get_music_variables_snapshot() -> PackedInt32Array:
 		return PackedInt32Array()
+
+	func debug_teleport_local_player(
+			position: Vector3, yaw_deg: float, pitch_deg: float) -> Error:
+		teleported_to = {
+			"position": position,
+			"yaw": yaw_deg,
+			"pitch": pitch_deg,
+		}
+		return OK
 
 
 class FakePoseRuntime:
@@ -389,7 +404,9 @@ func test_without_runtime_reports_no_mission() -> void:
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no source - the overlay says so")
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
-	assert_true(page_list.visible,
+	var compact_picker := overlay.find_child(
+			"CompactPagePicker", true, false) as OptionButton
+	assert_true(page_list.visible or compact_picker.visible,
 		"the page list stays usable (the perf page works from host-wide state, no sim needed)")
 	var entity_list := overlay.find_child("EntityList", true, false) as ItemList
 	assert_eq(entity_list.item_count, 0, "the sim-fed pages sit empty")
@@ -458,7 +475,7 @@ func test_shared_session_keeps_host_status_and_authority_sources() -> void:
 	add_child_autofree(overlay)
 	var unlock_edits := overlay.find_child("UnlockEdits", true, false) as CheckButton
 	assert_true(unlock_edits.button_pressed,
-			"the overlay initializes Edit from the already-unlocked shared session")
+			"the overlay initializes Live edits from the already-unlocked shared session")
 	session.set_edit_unlocked(false)
 	assert_false(unlock_edits.button_pressed,
 			"an external session lock immediately updates the overlay")
@@ -703,6 +720,10 @@ func test_player_tab_disables_dump_without_a_local_player() -> void:
 	assert_not_null(dump_button)
 	assert_string_contains(position_label.text, "No local player")
 	assert_eq(orientation_label.text, "")
+	assert_false(orientation_label.visible,
+			"empty optional player details do not leave blank rows behind")
+	assert_false((overlay.get_node(PAGES + "/Player/PlayerCombat") as Label).visible)
+	assert_false((overlay.get_node(PAGES + "/Player/PlayerInventory") as Label).visible)
 	assert_true(dump_button.disabled)
 	watch_signals(overlay)
 	assert_eq(overlay.dump_debug_snapshot(), "")
@@ -723,24 +744,30 @@ func test_player_tab_stays_docked_and_sidebar_remains_clickable() -> void:
 
 	var panel := overlay.find_child("DebugPanel", true, false) as Control
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	var compact_picker := overlay.find_child(
+			"CompactPagePicker", true, false) as OptionButton
+	var page_help := overlay.find_child("ActivePageHelp", true, false) as Label
 	var viewport_rect := viewport.get_visible_rect()
 	assert_eq(viewport_rect.size, Vector2(560, 900),
 			"the repro uses the minimum width that fits the configured dock")
 	var panel_rect := panel.get_global_rect()
-	assert_gte(panel_rect.position.x, viewport_rect.position.x,
+	assert_gte(panel_rect.position.x, viewport_rect.position.x + 7.0,
 			"opening Player must not push the dock past the viewport's left edge")
-	assert_almost_eq(panel_rect.size.x, 552.0, 1.0,
-			"opening Player must preserve the configured 560 px dock with 8 px edge inset")
+	assert_almost_eq(panel_rect.size.x, 544.0, 1.0,
+			"a constrained dock keeps an 8 px inset on both sides")
 	var page_list_rect := page_list.get_global_rect()
 	assert_gte(page_list_rect.position.x, viewport_rect.position.x,
 			"opening Player must not push the sidebar off the left edge")
 
-	# At 520 px the configured dock is wider than the window, but a conforming
-	# page still leaves the center of every sidebar row onscreen. The old
-	# five-SpinBox row pushed that center past the left edge and trapped Player.
+	# Shrinking the window applies a temporary fitted width without changing
+	# the user's preferred dock width.
 	viewport.size = Vector2i(520, 900)
 	await wait_process_frames(2)
 	viewport_rect = viewport.get_visible_rect()
+	panel_rect = panel.get_global_rect()
+	assert_gte(panel_rect.position.x, viewport_rect.position.x + 7.0)
+	assert_lte(panel_rect.end.x, viewport_rect.end.x - 7.0)
+	assert_almost_eq(panel_rect.size.x, 504.0, 1.0)
 	var stats_row := -1
 	for row in range(page_list.item_count):
 		if page_list.get_item_text(row).strip_edges() == "Stats":
@@ -775,6 +802,166 @@ func test_player_tab_stays_docked_and_sidebar_remains_clickable() -> void:
 
 	assert_eq(String(overlay.get_active_page_id()), "Stats",
 			"a real sidebar click must still leave the Player page")
+
+	viewport.size = Vector2i(360, 900)
+	await wait_process_frames(2)
+	viewport_rect = viewport.get_visible_rect()
+	panel_rect = panel.get_global_rect()
+	assert_gte(panel_rect.position.x, viewport_rect.position.x + 7.0,
+			"the dock remains fully on-screen below its preferred width floor")
+	assert_lte(panel_rect.end.x, viewport_rect.end.x - 7.0)
+	assert_false(page_list.visible)
+	assert_true(compact_picker.visible,
+			"narrow docks replace the fixed sidebar with a usable page picker")
+	assert_gte(page_help.size.x, 140.0,
+			"active-page metadata remains readable instead of collapsing to a sliver")
+	for index in range(compact_picker.item_count):
+		if compact_picker.get_item_text(index) == "Player":
+			compact_picker.item_selected.emit(index)
+			break
+	assert_eq(String(overlay.get_active_page_id()), "Player",
+			"the compact picker can leave Stats at the narrowest supported layout")
+
+	viewport.size = Vector2i(900, 900)
+	await wait_process_frames(2)
+	panel_rect = panel.get_global_rect()
+	assert_almost_eq(panel_rect.size.x, 552.0, 1.0,
+			"growing the viewport restores the preferred width")
+	assert_true(page_list.visible)
+	assert_false(compact_picker.visible)
+
+
+func test_player_page_scrolls_without_moving_the_sidebar() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(520, 360)
+	add_child_autofree(viewport)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Player"))
+	await wait_process_frames(2)
+
+	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
+	assert_not_null(page_host)
+	assert_eq(page_host.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED)
+	assert_false(page_host.get_h_scroll_bar().visible,
+			"page content never pushes the whole dock sideways")
+	var vertical_bar := page_host.get_v_scroll_bar()
+	assert_true(vertical_bar.visible)
+	assert_gt(vertical_bar.max_value, vertical_bar.page,
+			"the shared host makes the bottom of a tall page reachable")
+	var sidebar_before := page_list.get_global_rect()
+	vertical_bar.value = vertical_bar.max_value
+	await wait_process_frames(2)
+	assert_true(page_host.get_global_rect().intersects(teleport.get_global_rect()),
+			"scrolling reaches the Player page's final action")
+	assert_eq(page_list.get_global_rect(), sidebar_before,
+			"page scrolling leaves navigation fixed")
+	assert_true(overlay.select_page(&"Stats"))
+	await wait_process_frames(2)
+	assert_eq(page_host.scroll_vertical, 0,
+			"a newly selected page always opens at its top")
+
+
+func test_player_teleport_has_separate_policy_and_result_feedback() -> void:
+	var runtime := _make_pose_runtime()
+	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 15.0, -4.0, 0.0)
+	var overlay := _make_overlay()
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Player"))
+
+	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
+	var teleport_status := overlay.get_node(PLAYER_TELEPORT_STATUS_PATH) as Label
+	var dump_status := overlay.get_node(PLAYER_DUMP_STATUS_PATH) as Label
+	assert_true(teleport.disabled)
+	assert_string_contains(teleport_status.text, "Live edits")
+	assert_string_contains(dump_status.text, "No snapshot saved")
+
+	overlay.set_edit_unlocked(true)
+	assert_false(teleport.disabled)
+	(overlay.get_node(PAGES + "/Player/PlayerTeleportValues/TeleportXField/TeleportX")
+			as SpinBox).value = 40.0
+	(overlay.get_node(PAGES + "/Player/PlayerTeleportValues/TeleportYField/TeleportY")
+			as SpinBox).value = 50.0
+	(overlay.get_node(PAGES + "/Player/PlayerTeleportValues/TeleportZField/TeleportZ")
+			as SpinBox).value = 60.0
+	teleport.pressed.emit()
+
+	assert_eq(runtime.get_sim().teleported_to.get("position"), Vector3(40, 50, 60))
+	assert_eq(teleport_status.text, "Player moved.")
+	assert_string_contains(dump_status.text, "No snapshot saved",
+			"teleport feedback does not overwrite snapshot feedback")
+
+
+func test_shell_keeps_long_runtime_identity_and_actions_inside_the_dock() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(520, 900)
+	add_child_autofree(viewport)
+	var runtime := _make_pose_runtime()
+	var long_name := "Very Long Training Mission ".repeat(12)
+	runtime.set_mission_identity("00TRe.bms", long_name)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.set_runtime(runtime)
+	overlay.toggle()
+	await wait_process_frames(2)
+
+	var panel := overlay.find_child("DebugPanel", true, false) as Control
+	var title := overlay.find_child("DebugTitle", true, false) as Label
+	var runtime_status := overlay.find_child("RuntimeStatus", true, false) as Label
+	var live_edits := overlay.find_child("UnlockEdits", true, false) as CheckButton
+	var copy := overlay.find_child("CopyDebugSnapshot", true, false) as Button
+	var close_button := overlay.find_child("CloseDebug", true, false) as Button
+	var edit_status := overlay.find_child("DebugStatus", true, false) as Label
+	assert_eq(title.text, "F3")
+	assert_true(runtime_status.clip_text)
+	assert_string_contains(runtime_status.tooltip_text, long_name)
+	assert_eq(live_edits.text, "Live edits")
+	assert_string_contains(live_edits.tooltip_text, "nothing by itself")
+	assert_string_contains(live_edits.tooltip_text, "not undoable")
+	assert_string_contains(edit_status.text, "READ ONLY")
+	for action in [live_edits, copy, close_button]:
+		assert_true(panel.get_global_rect().encloses(action.get_global_rect()),
+				"header actions remain inside the dock with an unbounded mission name")
+
+	overlay.set_edit_unlocked(true)
+	assert_string_contains(edit_status.text, "LIVE EDITS")
+	assert_string_contains(edit_status.text, "immediately")
+
+	runtime.get_sim().joiner = true
+	overlay.refresh_now()
+	assert_true(live_edits.disabled)
+	assert_false(live_edits.button_pressed)
+	assert_false(overlay.get_debug_session().is_edit_unlocked(),
+			"losing host authority revokes the session unlock, not just its visual state")
+	assert_string_contains(edit_status.text, "host-only",
+			"joiners see why authoritative controls remain read-only")
+
+	runtime.get_sim().joiner = false
+	overlay.refresh_now()
+	assert_false(live_edits.disabled)
+	assert_false(live_edits.button_pressed,
+			"returning to host authority never silently restores live edits")
+	assert_string_contains(edit_status.text, "READ ONLY")
+
+	overlay.set_edit_unlocked(true)
+	var custom_authority := {"allowed": false}
+	overlay.set_authority_source(func(): return custom_authority["allowed"])
+	assert_true(live_edits.disabled)
+	assert_false(overlay.get_debug_session().is_edit_unlocked(),
+			"the UI and write path share a custom authority source")
+	custom_authority["allowed"] = true
+	overlay.refresh_now()
+	assert_false(live_edits.disabled)
+	assert_false(live_edits.button_pressed,
+			"restored custom authority still requires an explicit unlock")
 
 
 func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
@@ -1094,11 +1281,106 @@ func test_empty_search_hides_the_active_page_and_restores_it_when_cleared() -> v
 	assert_eq(title.text, "Rounds & collision")
 
 
+func test_search_reports_page_matches_and_copy_always_captures_every_control() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
+	var result_count := overlay.find_child(
+			"DebugSearchResults", true, false) as Label
+	var copy := overlay.find_child("CopyDebugSnapshot", true, false) as Button
+	var feedback_timer := overlay.find_child(
+			"CopyFeedbackTimer", true, false) as Timer
+	var full_control_count: int = overlay.list_controls().size()
+
+	search.text = "teleport_local_player"
+	search.text_changed.emit(search.text)
+	assert_eq(result_count.text, "1 match")
+	var filtered_control_count: int = overlay.list_controls(&"", search.text).size()
+	assert_lt(filtered_control_count, full_control_count)
+	var copied_payload: Dictionary = overlay._build_clipboard_snapshot()
+	assert_eq((copied_payload.get("controls", []) as Array).size(),
+			full_control_count,
+			"search navigates pages but never silently filters the copied snapshot")
+
+	copy.pressed.emit()
+	assert_eq(copy.text, "Copied")
+	assert_true(feedback_timer.time_left > 0.0)
+	feedback_timer.timeout.emit()
+	assert_eq(copy.text, "Copy", "copy confirmation resets instead of sticking forever")
+
+
+func test_search_and_page_navigation_have_a_keyboard_path() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Rounds"))
+	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
+	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	assert_eq(page_list.focus_mode, Control.FOCUS_ALL)
+
+	search.text = "terrain"
+	search.text_changed.emit(search.text)
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	assert_true(overlay.handle_key_input(escape))
+	assert_eq(search.text, "")
+	assert_true(overlay.visible,
+			"the first Escape clears an active search instead of closing the dock")
+
+	var active_before: StringName = overlay.get_active_page_id()
+	var next_page := InputEventKey.new()
+	next_page.keycode = KEY_PAGEDOWN
+	next_page.ctrl_pressed = true
+	next_page.pressed = true
+	assert_true(overlay.handle_key_input(next_page))
+	assert_ne(overlay.get_active_page_id(), active_before)
+
+	search.grab_focus()
+	var down := InputEventKey.new()
+	down.keycode = KEY_DOWN
+	down.pressed = true
+	search.gui_input.emit(down)
+	var compact_picker := overlay.find_child(
+			"CompactPagePicker", true, false) as OptionButton
+	assert_true(page_list.has_focus() or compact_picker.has_focus(),
+			"Down moves from page search into the matching navigation rows")
+
+	assert_true(overlay.handle_key_input(escape))
+	assert_false(overlay.visible, "Escape closes when there is no search to clear")
+
+
+func test_page_cycle_shortcut_precedes_focused_page_controls() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(900, 900)
+	add_child_autofree(viewport)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Stats"))
+	await wait_process_frames(2)
+
+	var stats_tree := overlay.get_node(PAGES + "/Stats/StatsRows") as Tree
+	stats_tree.grab_focus()
+	var next_page := InputEventKey.new()
+	next_page.keycode = KEY_PAGEDOWN
+	next_page.ctrl_pressed = true
+	next_page.pressed = true
+	viewport.push_input(next_page, true)
+	await wait_process_frames(2)
+	assert_eq(String(overlay.get_active_page_id()), "Perf",
+			"Ctrl+PageDown cycles pages before a focused Tree consumes PageDown")
+
+
 func test_selection_and_width_persist_across_instances() -> void:
 	var config_path := "user://test_debug_overlay_persist_%d.cfg" % Time.get_ticks_usec()
 	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(900, 900)
+	add_child_autofree(viewport)
 	var first: CanvasLayer = OverlayScript.new(config_path)
-	add_child(first)
+	viewport.add_child(first)
 	assert_eq(String(first.get_active_page_id()), "Entities",
 			"a fresh config lands on the first page")
 	assert_true(first.select_page(&"Rounds"))
@@ -1118,16 +1400,26 @@ func test_selection_and_width_persist_across_instances() -> void:
 	handle.gui_input.emit(release)
 	var widened := -panel.offset_left
 	assert_gt(widened, 560.0, "dragging the handle left widens the panel")
-	remove_child(first)
+	viewport.remove_child(first)
 	first.free()
 
 	var second: CanvasLayer = OverlayScript.new(config_path)
-	add_child_autofree(second)
+	viewport.add_child(second)
 	assert_eq(String(second.get_active_page_id()), "Rounds",
 			"the last-selected page survives a relaunch")
 	var second_panel := second.find_child("DebugPanel", true, false) as Control
 	assert_almost_eq(-second_panel.offset_left, widened, 0.01,
 			"the panel width survives a relaunch")
+	var second_handle := second.find_child("DebugResizeHandle", true, false) as Control
+	assert_gte(second_handle.custom_minimum_size.x, 10.0,
+			"the visible resize target is large enough to discover")
+	var reset := InputEventMouseButton.new()
+	reset.button_index = MOUSE_BUTTON_LEFT
+	reset.pressed = true
+	reset.double_click = true
+	second_handle.gui_input.emit(reset)
+	assert_almost_eq(-second_panel.offset_left, 560.0, 0.01,
+			"double-clicking the resize divider restores the default width")
 
 
 class TestHostPage:

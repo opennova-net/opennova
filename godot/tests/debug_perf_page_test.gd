@@ -137,7 +137,10 @@ func test_overlay_refreshes_perf_without_a_live_sim() -> void:
 	overlay.toggle()
 	assert_true(overlay._status_label.visible, "no sim - the overlay says so")
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
-	assert_true(page_list.visible, "...but the page list stays usable")
+	var compact_picker := overlay.find_child(
+			"CompactPagePicker", true, false) as OptionButton
+	assert_true(page_list.visible or compact_picker.visible,
+			"...but responsive page navigation stays usable")
 	assert_true(overlay.select_page(&"Perf"),
 		"the Perf page selects with no runtime at all")
 	assert_has(_tree_texts(overlay._perf_pane.span_tree), "perf pane menu state",

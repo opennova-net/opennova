@@ -15,8 +15,8 @@ extends VBoxContainer
 ## - set_capture_active(active) is the activity edge — true when the page is
 ##   active AND the overlay is visible — for pages owning an expensive
 ##   capture (Stats gates the FrameStatsBoard on it); the default ignores it.
-## - Keep the page's minimum content width <= 360 px: it must fit the panel
-##   width floor minus the sidebar.
+## - Keep the page's minimum content width <= 300 px: it must fit beside the
+##   regular sidebar at the responsive-navigation breakpoint.
 
 const CATEGORY_SIM := &"Simulation"
 const CATEGORY_WORLD := &"World"

@@ -170,6 +170,32 @@ func test_page_shows_non_ai_rows_but_only_edits_through_ai_index() -> void:
 			"row zero edits its mapped AI pool entry, not row zero")
 
 
+func test_position_editor_labels_axes_and_stays_compact() -> void:
+	var page := _make_page(StubRuntime.new())
+	var editor := page.find_child("EntityEditPosition", true, false) as Control
+	var move := page.find_child("SetEntityPosition", true, false) as Button
+	assert_not_null(editor)
+	assert_not_null(move)
+
+	for axis in ["X", "Y", "Z"]:
+		var label := page.find_child(
+				"EntityPosition%sLabel" % axis, true, false) as Label
+		var value := page.find_child(
+				"EntityPosition%s" % axis, true, false) as SpinBox
+		assert_not_null(label, "%s has a visible axis label" % axis)
+		assert_not_null(value, "%s keeps its stable editor control" % axis)
+		if label != null:
+			assert_eq(label.text, axis)
+
+	assert_lte(editor.get_combined_minimum_size().x, 280.0,
+			"the labeled position editor fits the narrow debug-page budget")
+	await wait_process_frames(2)
+	var z_value := page.find_child(
+			"EntityPositionZ", true, false) as SpinBox
+	assert_gt(move.get_global_rect().position.y, z_value.get_global_rect().end.y,
+			"Move sits below the coordinate fields instead of widening their row")
+
+
 func test_live_reorder_cannot_retarget_the_selected_entity_edit() -> void:
 	var runtime := StubRuntime.new()
 	var page := _make_page(runtime)

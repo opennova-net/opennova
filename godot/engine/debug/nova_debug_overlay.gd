@@ -29,8 +29,13 @@ signal debug_snapshot_dumped(path: String)
 const REFRESH_INTERVAL := 0.25
 const DEFAULT_PANEL_WIDTH := 560.0
 const MIN_PANEL_WIDTH := 420.0
+const PANEL_EDGE_MARGIN := 8.0
 const SIDEBAR_WIDTH := 148.0
-const RESIZE_HANDLE_WIDTH := 6.0
+const RESIZE_HANDLE_WIDTH := 10.0
+const COMPACT_NAV_PANEL_WIDTH := 480.0
+const COPY_FEEDBACK_SECONDS := 1.5
+const COPY_TOOLTIP := \
+		"Copy a complete structured snapshot of the runtime and every debug control."
 const DEFAULT_CONFIG_PATH := "user://debug_overlay.cfg"
 const CONFIG_SECTION := "overlay"
 const RenderingPageScript := preload(
@@ -55,15 +60,20 @@ var _runtime_status_label: Label
 var _page_title_label: Label
 var _page_help_label: Label
 var _search_edit: LineEdit
+var _search_result_label: Label
 var _unlock_edits: CheckButton
+var _copy_button: Button
+var _copy_feedback_timer: Timer
 var _page_list: ItemList
-var _page_host: MarginContainer
+var _compact_page_picker: OptionButton
+var _page_host: ScrollContainer
 
 var _pages: Array[NovaDebugPage] = []
 var _active_page: NovaDebugPage = null
 var _empty_search_restore_page: NovaDebugPage = null
 var _row_pages: Dictionary = {}  # sidebar row index -> NovaDebugPage
 var _panel_width := DEFAULT_PANEL_WIDTH
+var _applied_panel_width := DEFAULT_PANEL_WIDTH
 var _resizing := false
 
 # Direct pane handles for the public delegates (also poked by tests).
@@ -104,6 +114,14 @@ func _init(
 	visible = false
 	_sync_timer()
 	_restore_config()
+
+
+func _ready() -> void:
+	var viewport := get_viewport()
+	if viewport != null and not viewport.size_changed.is_connected(
+			_on_viewport_size_changed):
+		viewport.size_changed.connect(_on_viewport_size_changed)
+	_apply_panel_width()
 
 
 ## The runtime supplier: a Callable returning the current MissionRuntime (or
@@ -163,6 +181,8 @@ func set_player_source(source: Callable) -> void:
 ## override joiner authority.
 func set_authority_source(source: Callable) -> void:
 	_session.set_authority_source(source)
+	if visible:
+		_refresh()
 
 
 func get_debug_session() -> NovaDebugSession:
@@ -208,6 +228,8 @@ func set_frame_stats_board(board) -> void:
 func register_page(page: NovaDebugPage) -> void:
 	page.setup(_ctx)
 	page.visible = false
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_pages.append(page)
 	_page_host.add_child(page)
 	_rebuild_page_list()
@@ -308,9 +330,9 @@ func _build_panel() -> void:
 	_panel.anchor_right = 1.0
 	_panel.anchor_bottom = 1.0
 	_panel.offset_left = -_panel_width
-	_panel.offset_top = 8.0
-	_panel.offset_right = -8.0
-	_panel.offset_bottom = -8.0
+	_panel.offset_top = PANEL_EDGE_MARGIN
+	_panel.offset_right = -PANEL_EDGE_MARGIN
+	_panel.offset_bottom = -PANEL_EDGE_MARGIN
 	_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	add_child(_panel)
 
@@ -319,11 +341,11 @@ func _build_panel() -> void:
 	frame.add_theme_constant_override("separation", 0)
 	_panel.add_child(frame)
 
-	var handle := Control.new()
+	var handle := VSeparator.new()
 	handle.name = "DebugResizeHandle"
 	handle.custom_minimum_size = Vector2(RESIZE_HANDLE_WIDTH, 0)
 	handle.mouse_default_cursor_shape = Control.CURSOR_HSIZE
-	handle.tooltip_text = "Drag to resize"
+	handle.tooltip_text = "Drag to resize. Double-click to reset the dock width."
 	handle.gui_input.connect(_on_resize_handle_input)
 	frame.add_child(handle)
 
@@ -340,63 +362,104 @@ func _build_panel() -> void:
 
 	var title := Label.new()
 	title.name = "DebugTitle"
-	title.text = "Debug cockpit"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.text = "F3"
+	title.tooltip_text = "Runtime debug cockpit"
+	title.add_theme_font_size_override("font_size", 18)
 	header.add_child(title)
 
 	_runtime_status_label = Label.new()
 	_runtime_status_label.name = "RuntimeStatus"
 	_runtime_status_label.text = "NO MISSION"
 	_runtime_status_label.tooltip_text = "The runtime currently inspected by this cockpit."
+	_runtime_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_runtime_status_label.clip_text = true
+	_runtime_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	header.add_child(_runtime_status_label)
 
 	_unlock_edits = CheckButton.new()
 	_unlock_edits.name = "UnlockEdits"
-	_unlock_edits.text = "Edit"
+	_unlock_edits.text = "Live edits"
 	_unlock_edits.tooltip_text = \
-			"Unlock live mission edits. This never overrides multiplayer authority."
+			"Allow marked controls to change the running mission. The toggle changes " + \
+			"nothing by itself; edits apply immediately, are not undoable, and remain " + \
+			"host-only in multiplayer."
 	_unlock_edits.toggled.connect(_on_unlock_edits_toggled)
 	header.add_child(_unlock_edits)
 
-	var copy_button := Button.new()
-	copy_button.name = "CopyDebugSnapshot"
-	copy_button.text = "Copy"
-	copy_button.tooltip_text = \
-			"Copy a structured snapshot of the runtime and every debug control."
-	copy_button.focus_mode = Control.FOCUS_NONE
-	copy_button.pressed.connect(_on_copy_snapshot_pressed.bind(copy_button))
-	header.add_child(copy_button)
+	_copy_button = Button.new()
+	_copy_button.name = "CopyDebugSnapshot"
+	_copy_button.text = "Copy"
+	_copy_button.tooltip_text = COPY_TOOLTIP
+	_copy_button.pressed.connect(_on_copy_snapshot_pressed)
+	header.add_child(_copy_button)
 
 	var close_button := Button.new()
 	close_button.name = "CloseDebug"
-	close_button.text = "Close"
+	close_button.text = "×"
 	close_button.tooltip_text = "Close debug cockpit (Escape)"
-	close_button.focus_mode = Control.FOCUS_NONE
 	close_button.pressed.connect(close)
 	header.add_child(close_button)
 
+	var search_row := HBoxContainer.new()
+	search_row.name = "DebugSearchRow"
+	search_row.add_theme_constant_override("separation", 6)
+	box.add_child(search_row)
+
 	_search_edit = LineEdit.new()
 	_search_edit.name = "DebugSearch"
-	_search_edit.placeholder_text = "Filter pages and controls"
+	_search_edit.placeholder_text = "Find a page or control…"
 	_search_edit.clear_button_enabled = true
-	_search_edit.tooltip_text = "Search page names and public debug controls (Ctrl+F)."
+	_search_edit.tooltip_text = \
+			"Find the page that owns a matching public debug control (Ctrl+F)."
+	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search_edit.text_changed.connect(_on_search_changed)
-	box.add_child(_search_edit)
+	_search_edit.gui_input.connect(_on_search_input)
+	search_row.add_child(_search_edit)
+
+	_search_result_label = Label.new()
+	_search_result_label.name = "DebugSearchResults"
+	_search_result_label.text = "0 pages"
+	_search_result_label.tooltip_text = "Pages matching this search."
+	search_row.add_child(_search_result_label)
 
 	_status_label = Label.new()
 	_status_label.name = "DebugStatus"
-	_status_label.text = "No mission running."
-	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_label.text = "NO MISSION · Host-wide diagnostics remain available."
+	_status_label.clip_text = true
+	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status_label.add_theme_font_size_override("font_size", 12)
 	box.add_child(_status_label)
+
+	var page_heading := HBoxContainer.new()
+	page_heading.name = "ActivePageHeading"
+	page_heading.add_theme_constant_override("separation", 8)
+	box.add_child(page_heading)
 
 	_page_title_label = Label.new()
 	_page_title_label.name = "ActivePageTitle"
-	box.add_child(_page_title_label)
+	_page_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_page_title_label.clip_text = true
+	_page_title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_page_title_label.add_theme_font_size_override("font_size", 17)
+	page_heading.add_child(_page_title_label)
 
 	_page_help_label = Label.new()
 	_page_help_label.name = "ActivePageHelp"
-	_page_help_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_page_help_label)
+	_page_help_label.custom_minimum_size = Vector2(144, 0)
+	_page_help_label.clip_text = true
+	_page_help_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_page_help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_page_help_label.add_theme_font_size_override("font_size", 12)
+	page_heading.add_child(_page_help_label)
+
+	_compact_page_picker = OptionButton.new()
+	_compact_page_picker.name = "CompactPagePicker"
+	_compact_page_picker.fit_to_longest_item = false
+	_compact_page_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_compact_page_picker.tooltip_text = "Choose a debug page."
+	_compact_page_picker.visible = false
+	_compact_page_picker.item_selected.connect(_on_compact_page_selected)
+	box.add_child(_compact_page_picker)
 
 	var body := HBoxContainer.new()
 	body.name = "DebugBody"
@@ -408,15 +471,25 @@ func _build_panel() -> void:
 	_page_list.name = "PageList"
 	_page_list.custom_minimum_size = Vector2(SIDEBAR_WIDTH, 0)
 	_page_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_page_list.focus_mode = Control.FOCUS_NONE
+	_page_list.focus_mode = Control.FOCUS_ALL
 	_page_list.item_selected.connect(_on_page_row_selected)
 	body.add_child(_page_list)
 
-	_page_host = MarginContainer.new()
+	_page_host = ScrollContainer.new()
 	_page_host.name = "PageHost"
 	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_host.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_page_host.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_page_host.follow_focus = true
 	body.add_child(_page_host)
+
+	_copy_feedback_timer = Timer.new()
+	_copy_feedback_timer.name = "CopyFeedbackTimer"
+	_copy_feedback_timer.one_shot = true
+	_copy_feedback_timer.wait_time = COPY_FEEDBACK_SECONDS
+	_copy_feedback_timer.timeout.connect(_reset_copy_feedback)
+	add_child(_copy_feedback_timer)
 
 
 ## The built-in page set, in registration order. Registry toggles wire
@@ -455,6 +528,7 @@ func _build_default_pages() -> void:
 
 func _rebuild_page_list() -> void:
 	_page_list.clear()
+	_compact_page_picker.clear()
 	_row_pages.clear()
 	var filter_text := _search_edit.text.strip_edges() if _search_edit != null else ""
 	var categories: Array[StringName] = CATEGORY_ORDER.duplicate()
@@ -473,17 +547,51 @@ func _rebuild_page_list() -> void:
 		_page_list.set_item_disabled(header, true)
 		_page_list.set_item_custom_fg_color(header, Color(0.62, 0.62, 0.62))
 		for page in members:
-			var row := _page_list.add_item("  " + page.page_title())
+			var row := _page_list.add_item(page.page_title())
 			_row_pages[row] = page
+			_page_list.set_item_tooltip(row, "%s · %s" % [
+				page.page_title(), String(page.page_category())])
+			_compact_page_picker.add_item(page.page_title())
+			var picker_index := _compact_page_picker.item_count - 1
+			_compact_page_picker.set_item_metadata(picker_index, page)
+			_compact_page_picker.set_item_tooltip(picker_index, "%s · %s" % [
+				page.page_title(), String(page.page_category())])
+	_update_search_result_label(filter_text)
 	_sync_page_list_selection()
 
 
 func _sync_page_list_selection() -> void:
+	var selected_row := -1
 	for row in _row_pages:
 		if _row_pages[row] == _active_page:
-			_page_list.select(int(row))
+			selected_row = int(row)
+			break
+	if selected_row >= 0:
+		_page_list.select(selected_row)
+		_page_list.ensure_current_is_visible()
+	else:
+		_page_list.deselect_all()
+	for index in range(_compact_page_picker.item_count):
+		if _compact_page_picker.get_item_metadata(index) == _active_page:
+			_compact_page_picker.select(index)
+			_compact_page_picker.tooltip_text = \
+					_compact_page_picker.get_item_tooltip(index)
 			return
-	_page_list.deselect_all()
+	if _compact_page_picker.item_count == 0:
+		_compact_page_picker.tooltip_text = "No pages match the current search."
+
+
+func _update_search_result_label(filter_text: String) -> void:
+	if _search_result_label == null:
+		return
+	var page_count := _row_pages.size()
+	if page_count == 0:
+		_search_result_label.text = "No matches"
+	elif filter_text.is_empty():
+		_search_result_label.text = "%d pages" % page_count
+	else:
+		_search_result_label.text = "%d match%s" % [
+			page_count, "" if page_count == 1 else "es"]
 
 
 func _activate_page(page: NovaDebugPage, persist: bool) -> void:
@@ -494,6 +602,7 @@ func _activate_page(page: NovaDebugPage, persist: bool) -> void:
 	if _active_page != null:
 		_active_page.visible = false
 		_active_page.set_capture_active(false)
+	_page_host.scroll_vertical = 0
 	_active_page = page
 	if page == null:
 		_update_page_header()
@@ -513,6 +622,12 @@ func _activate_page(page: NovaDebugPage, persist: bool) -> void:
 
 func _on_page_row_selected(row: int) -> void:
 	var page: NovaDebugPage = _row_pages.get(row)
+	if page != null:
+		_activate_page(page, true)
+
+
+func _on_compact_page_selected(index: int) -> void:
+	var page := _compact_page_picker.get_item_metadata(index) as NovaDebugPage
 	if page != null:
 		_activate_page(page, true)
 
@@ -555,35 +670,64 @@ func _update_page_header() -> void:
 		return
 	if _active_page == null:
 		_page_title_label.text = "No matching page"
-		_page_help_label.text = "Clear the filter to show every debug page."
+		_page_help_label.text = "Clear search"
+		_page_help_label.tooltip_text = _page_help_label.text
 		return
 	_page_title_label.text = _active_page.page_title()
 	var control_count := _session.list_controls(_active_page.page_id()).size()
-	_page_help_label.text = "%s | %d public control%s" % [
-		String(_active_page.page_category()), control_count,
-		"" if control_count == 1 else "s"]
+	var count_text := "%d control%s" % [
+		control_count, "" if control_count == 1 else "s"]
+	if _active_page.page_title() == String(_active_page.page_category()):
+		_page_help_label.text = count_text
+	else:
+		_page_help_label.text = "%s · %s" % [
+			String(_active_page.page_category()), count_text]
+	_page_help_label.tooltip_text = _page_help_label.text
 
 
 # --- Panel width + persistence ------------------------------------------------
 
 func _set_panel_width(width: float) -> void:
-	# Floor only: a too-narrow panel is unusable, while an over-wide one is
-	# self-correcting (drag it back). No viewport-fraction cap — headless
-	# viewports report unreliable sizes.
-	var maximum := INF
+	# Preserve the user's preferred width independently from the temporary
+	# viewport fit. Growing the window restores the preference automatically.
+	_panel_width = maxf(width, MIN_PANEL_WIDTH)
+	_apply_panel_width()
+
+
+func _apply_panel_width() -> void:
+	var applied_width := _panel_width
 	var viewport := get_viewport() if is_inside_tree() else null
 	if viewport != null:
 		var viewport_width := viewport.get_visible_rect().size.x
-		if viewport_width > MIN_PANEL_WIDTH:
-			maximum = maxf(MIN_PANEL_WIDTH, viewport_width - 16.0)
-	_panel_width = clampf(width, MIN_PANEL_WIDTH, maximum)
+		applied_width = minf(applied_width,
+				maxf(PANEL_EDGE_MARGIN, viewport_width - PANEL_EDGE_MARGIN))
+	_applied_panel_width = applied_width
 	if _panel != null:
-		_panel.offset_left = -_panel_width
+		_panel.offset_left = -_applied_panel_width
+	_update_responsive_navigation()
+
+
+func _on_viewport_size_changed() -> void:
+	_apply_panel_width()
+
+
+func _update_responsive_navigation() -> void:
+	if _page_list == null or _compact_page_picker == null:
+		return
+	var compact := _applied_panel_width < COMPACT_NAV_PANEL_WIDTH
+	_page_list.visible = not compact
+	_compact_page_picker.visible = compact
 
 
 func _on_resize_handle_input(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
 	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed and button.double_click:
+			_resizing = false
+			_set_panel_width(DEFAULT_PANEL_WIDTH)
+			NovaConfigStore.write(_config_path, CONFIG_SECTION, "panel_width",
+					_panel_width)
+			return
 		_resizing = button.pressed
 		if not button.pressed:
 			NovaConfigStore.write(_config_path, CONFIG_SECTION, "panel_width",
@@ -592,7 +736,9 @@ func _on_resize_handle_input(event: InputEvent) -> void:
 	var motion := event as InputEventMouseMotion
 	if motion != null and _resizing:
 		# The panel is right-anchored: dragging the handle left widens it.
-		_set_panel_width(_panel_width - motion.relative.x)
+		var width_basis := _panel_width if motion.relative.x < 0.0 \
+				else minf(_panel_width, _applied_panel_width)
+		_set_panel_width(width_basis - motion.relative.x)
 
 
 func _restore_config() -> void:
@@ -614,12 +760,41 @@ func _refresh() -> void:
 	_session.sync()
 	var status := _runtime_status()
 	var has_sim := _ctx.sim() != null
-	_status_label.visible = not has_sim
-	_status_label.text = "No playable mission is running." if not has_sim else ""
+	var has_authority := _session.has_host_authority()
+	if has_sim and not has_authority and _session.is_edit_unlocked():
+		# Authority loss is a safety edge, not a visual mask. Relock so returning
+		# to a host/local role never silently restores mutation access.
+		_session.set_edit_unlocked(false)
+	var unlocked := _session.is_edit_unlocked()
+	if not has_sim:
+		_status_label.text = \
+				"NO MISSION · Host-wide diagnostics remain available."
+		_status_label.add_theme_color_override(
+				"font_color", Color(0.68, 0.72, 0.76))
+	elif not has_authority:
+		_status_label.text = \
+				"READ ONLY · Authoritative mission changes are host-only."
+		_status_label.add_theme_color_override(
+				"font_color", Color(0.68, 0.72, 0.76))
+	elif unlocked:
+		_status_label.text = \
+				"LIVE EDITS · Changes apply immediately and are not undoable."
+		_status_label.add_theme_color_override(
+				"font_color", Color(1.0, 0.72, 0.34))
+	else:
+		_status_label.text = \
+				"READ ONLY · Enable Live edits to change the running mission."
+		_status_label.add_theme_color_override(
+				"font_color", Color(0.68, 0.72, 0.76))
+	_status_label.tooltip_text = _status_label.text
 	_runtime_status_label.text = String(status.get("label", "NO MISSION")).to_upper()
-	_runtime_status_label.tooltip_text = String(status.get("detail", ""))
+	var runtime_detail := String(status.get("detail", ""))
+	_runtime_status_label.tooltip_text = "%s%s" % [
+		String(status.get("label", "No mission")),
+		"\n" + runtime_detail if not runtime_detail.is_empty() else ""]
 	if _unlock_edits != null:
-		_unlock_edits.disabled = not has_sim
+		_unlock_edits.disabled = not has_sim or not has_authority
+		_unlock_edits.set_pressed_no_signal(unlocked)
 	if _active_page != null:
 		_active_page.refresh()
 		_active_page.refresh_debug_controls()
@@ -707,16 +882,70 @@ func _on_edit_unlock_changed(unlocked: bool) -> void:
 		_refresh()
 
 
-func _on_copy_snapshot_pressed(button: Button) -> void:
-	var snapshot: Dictionary = _session.capture_snapshot(
-			_search_edit.text if _search_edit != null else "")
+func _build_clipboard_snapshot() -> Dictionary:
+	var snapshot: Dictionary = _session.capture_snapshot()
 	var picks: Array = _ctx.pick_list.get_picks() if _ctx.pick_list != null else []
 	var mission_snapshot := DebugSnapshotWriter.capture(_ctx, picks)
 	if not mission_snapshot.is_empty():
 		snapshot["mission"] = mission_snapshot
+	return snapshot
+
+
+func _on_copy_snapshot_pressed() -> void:
+	var snapshot := _build_clipboard_snapshot()
 	DisplayServer.clipboard_set(JSON.stringify(snapshot, "\t"))
-	button.text = "Copied"
-	button.tooltip_text = "Copied the structured debug snapshot to the clipboard."
+	_copy_button.text = "Copied"
+	_copy_button.tooltip_text = \
+			"Copied the complete structured debug snapshot to the clipboard."
+	_copy_feedback_timer.start()
+
+
+func _reset_copy_feedback() -> void:
+	if _copy_button == null:
+		return
+	_copy_button.text = "Copy"
+	_copy_button.tooltip_text = COPY_TOOLTIP
+
+
+func _on_search_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_DOWN or key.keycode == KEY_ENTER \
+			or key.keycode == KEY_KP_ENTER:
+		_focus_page_list()
+		_search_edit.accept_event()
+
+
+func _focus_page_list() -> void:
+	if _page_list == null or _row_pages.is_empty():
+		return
+	if _compact_page_picker.visible:
+		_compact_page_picker.grab_focus()
+		return
+	_sync_page_list_selection()
+	if _page_list.get_selected_items().is_empty():
+		for row in _row_pages:
+			_page_list.select(int(row))
+			break
+	_page_list.ensure_current_is_visible()
+	_page_list.grab_focus()
+
+
+func _cycle_page(direction: int) -> bool:
+	if _row_pages.is_empty():
+		return false
+	var rows: Array = _row_pages.keys()
+	rows.sort()
+	var active_index := -1
+	for index in range(rows.size()):
+		if _row_pages[rows[index]] == _active_page:
+			active_index = index
+			break
+	var next_index := 0 if active_index < 0 \
+			else posmod(active_index + direction, rows.size())
+	_activate_page(_row_pages[rows[next_index]], true)
+	return true
 
 
 ## Apply overlay-owned keyboard gestures. The engine callback delegates here;
@@ -727,15 +956,22 @@ func handle_key_input(event: InputEvent) -> bool:
 	if not visible or key == null or not key.pressed or key.echo:
 		return false
 	if key.keycode == KEY_ESCAPE:
+		if _search_edit != null and not _search_edit.text.is_empty():
+			_search_edit.clear()
+			return true
 		close()
 		return true
 	elif key.keycode == KEY_F and key.ctrl_pressed and _search_edit != null:
 		_search_edit.grab_focus()
 		_search_edit.select_all()
 		return true
+	elif key.ctrl_pressed and key.keycode == KEY_PAGEUP:
+		return _cycle_page(-1)
+	elif key.ctrl_pressed and key.keycode == KEY_PAGEDOWN:
+		return _cycle_page(1)
 	return false
 
 
-func _unhandled_key_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if handle_key_input(event):
 		get_viewport().set_input_as_handled()

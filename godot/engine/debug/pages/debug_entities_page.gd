@@ -69,10 +69,28 @@ func _build() -> void:
 	_set_health_button.pressed.connect(_on_set_health_pressed)
 	edit_row.add_child(_set_health_button)
 
-	var position_row := HBoxContainer.new()
-	position_row.name = "EntityEditPosition"
-	add_child(position_row)
+	var position_editor := VBoxContainer.new()
+	position_editor.name = "EntityEditPosition"
+	position_editor.add_theme_constant_override("separation", 4)
+	add_child(position_editor)
+	var position_header := Label.new()
+	position_header.name = "EntityPositionHeader"
+	position_header.text = "Position (mission coordinates)"
+	position_editor.add_child(position_header)
+	var position_grid := GridContainer.new()
+	position_grid.name = "EntityPositionValues"
+	position_grid.columns = 3
+	position_editor.add_child(position_grid)
 	for axis in ["X", "Y", "Z"]:
+		var field := VBoxContainer.new()
+		field.name = "EntityPosition%sField" % axis
+		field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		field.add_theme_constant_override("separation", 2)
+		position_grid.add_child(field)
+		var field_label := Label.new()
+		field_label.name = "EntityPosition%sLabel" % axis
+		field_label.text = axis
+		field.add_child(field_label)
 		var value := SpinBox.new()
 		value.name = "EntityPosition%s" % axis
 		value.min_value = NovaDebugCatalog.MISSION_COORD_MIN
@@ -80,13 +98,13 @@ func _build() -> void:
 		value.step = 0.1
 		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		value.tooltip_text = "%s mission coordinate" % axis
-		position_row.add_child(value)
+		field.add_child(value)
 		_position_values.append(value)
 	_set_position_button = Button.new()
 	_set_position_button.name = "SetEntityPosition"
 	_set_position_button.text = "Move"
 	_set_position_button.pressed.connect(_on_set_position_pressed)
-	position_row.add_child(_set_position_button)
+	position_editor.add_child(_set_position_button)
 	_set_edit_enabled(false)
 	_edit_status = Label.new()
 	_edit_status.name = "EntityEditStatus"
