@@ -170,7 +170,7 @@ func new_mission() -> Error:
 
 
 func clear() -> void:
-	_c._sim.sim_stop() # tear down a running simulation before the placed world it drives is cleared
+	_c._preview.stop_preview()
 	_c._viewport._reset_selection_state()
 	_c._pickable = []
 	_c._place_item_id = 0

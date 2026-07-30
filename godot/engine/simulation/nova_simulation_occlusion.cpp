@@ -365,8 +365,8 @@ Dictionary NovaSimulation::get_collision_debug() const {
 	if (!world_) return out;
 
 	// Anchor the sweep on the local player when one is spawned (150u box, the
-	// resolver's own neighborhood scale); an editor preview with no player sweeps
-	// the whole table up to the instance cap.
+	// resolver's own neighborhood scale); a direct test/tooling instance with
+	// no player sweeps the whole table up to the instance cap.
 	int32_t anchor[3] = {0, 0, 0};
 	int32_t range = -1;
 	const opennova::world::Entity *lp =

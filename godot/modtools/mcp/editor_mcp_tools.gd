@@ -12,19 +12,19 @@ extends RefCounted
 
 const INSTRUCTIONS := """ONED — the OpenNova editor (Godot-hosted). You are connected to a live editor a human may be watching.
 
-Start with get_editor_state: the mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, mission/sim status, and a log cursor.
+Start with get_editor_state: the mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, managed game-run status, and a log cursor.
 
 Conventions:
 - Paths: a bare resource name ("alpha.bms", resolved case-insensitively in the mounted resource root, including inside PFF archives) or an absolute path. Results carry the resolved path.
 - Coordinates: tools take WORLD-space x/z (y is up) and ground everything on the terrain for you — never guess or supply heights. Entity records read back are BMS mission-space (z up); describe_api(topic="coordinates") has the mapping.
 - Edits mark documents dirty and are undoable (undo/redo tools). NEVER save unless the user explicitly asked — saving is save_mission's job alone.
-- The running simulation locks every editing tool: sim_control(action="stop") first.
+- Running never writes editor state. F5/run_game mode="game" launches the saved loose assets; F6/mode="mission" launches the current saved top-level loose .bms. Unsaved edits are deliberately excluded.
 - After anything surprising, call get_logs — engine errors and editor status messages land there.
 
 Typical flows:
 - Study assets: list_assets(kind=...) -> describe_asset(path) / analyze_mission(path) / analyze_menu(path) -> read_file for raw bytes.
 - Author a mission: open_in_workspace(workspace="mission", path=...) -> list_items -> place_entities (grounded for you) -> edit_waypoint_path -> set_mission_header -> set_camera + screenshot to inspect. Repair floating/sunken layouts with reground_mission.
-- Watch it run: sim_control(action="play") -> get_sim_state / screenshot -> sim_control(action="stop") before editing again.
+- Test in the real game: run_game(op="start", mode="game"|"mission") -> game_state / game_debug / game_screenshot -> run_game(op="stop").
 - Author a menu: open_in_workspace(workspace="mnu", path=...) or menu_tabs(op="new") -> get_menu -> add_menu_widgets / edit_menu_widget / set_widget_actions -> menu_screenshot to look -> preview_menu to click through the navigation. describe_api(topic="menus") has the vocabulary.
 
 Be a good guest: narrate risky operations with show_status_message; the human's unsaved work matters."""
@@ -44,7 +44,7 @@ The terrain/mission views share an orbit camera (distance is about radius x 1.35
 
 Ids: terrain, object, mission, fonts, credits, strings, mnu, music, sound, environment (a popup over the active 3D view).
 
-open_in_workspace is the one open path; undo/redo route per-workspace; dirty state and capabilities are in get_editor_state. The mission workspace hosts the mission tools (list_items, place_entities, edit_mission_entity, edit_waypoint_path, set_mission_header, reground_mission, sim_control) — open a mission there first. The mnu workspace hosts the menu tools (get_menu, menu_tabs, add_menu_widgets, edit_menu_widget, set_widget_actions, edit_widget_items, preview_menu, menu_screenshot) and is MULTIDOC: tabs via menu_tabs, and undo/redo act on the ACTIVE tab (each tab keeps its own history). describe_api(name=...) reflects engine classes and live editor objects when you need a result shape explained.""",
+open_in_workspace is the one open path; undo/redo route per-workspace; dirty state and capabilities are in get_editor_state. The mission workspace hosts authored-data tools (list_items, place_entities, edit_mission_entity, edit_waypoint_path, set_mission_header, reground_mission) — open a mission there first. Real runtime inspection is exposed separately through run_game and the game_* tools. The mnu workspace hosts the menu tools (get_menu, menu_tabs, add_menu_widgets, edit_menu_widget, set_widget_actions, edit_widget_items, preview_menu, menu_screenshot) and is MULTIDOC: tabs via menu_tabs, and undo/redo act on the ACTIVE tab (each tab keeps its own history). describe_api(name=...) reflects engine classes and live editor objects when you need a result shape explained.""",
 	"menus": """# Menu authoring (the Menus workspace, .mnu)
 
 Vocabulary: a MENU is one .mnu document; a SCREEN is a full-canvas layout (one visible at a time; navigation moves between them); every tree node is a WINDOW; a WIDGET is a Window of a specific type (BUTTON, LIST, TABLE, ...). An ACTION is behavior the file itself expresses — navigate to a screen/menu, show/hide a window, pop, URL — wired with set_widget_actions. A COMMAND is game behavior the engine binds to a widget's NAME (start mission, apply settings): names are hooks, so reuse shipped names exactly and never rename shipped widgets casually.
@@ -85,7 +85,7 @@ func _init(mcp_service: Node) -> void:
 
 func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("get_editor_state",
-			"Deep snapshot of the ONED editor: version, mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, mission/sim status, camera pose, recent perf lines, and a log cursor. Call this first in a session and after any surprising result.",
+			"Deep snapshot of the ONED editor: version, mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, managed game-run status, camera pose, recent perf lines, and a log cursor. Call this first in a session and after any surprising result.",
 			{}), Callable(self, "_tool_editor_state"))
 	registry.register(McpToolDef.make("get_logs",
 			"Editor log since a cursor: server/status entries plus engine lines (print, push_warning, push_error) tailed from Godot's log file. Omit cursor to resume from this session's last read (first call: recent tail). Use after any failed or surprising operation.",
@@ -124,7 +124,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"call": { "type": "array", "items": { "type": "string" }, "description": "Zero-arg query methods to call — get_*/is_*/has_* names only." },
 			}, ["path"]), Callable(self, "_tool_get_node_state"))
 	registry.register(McpToolDef.make("describe_api",
-			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
+			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"game_session\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
@@ -169,7 +169,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"look_at": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
 			}), Callable(self, "_tool_set_camera"))
 	registry.register(McpToolDef.make("undo",
-			"Undo the last edit in a workspace (default: the active one) — mission edits, terrain strokes, whatever that workspace's history holds. steps repeats it. Mission undo is rejected while the simulation runs (sim_control stop first). Returns what remains undoable.",
+			"Undo the last edit in a workspace (default: the active one) — mission edits, terrain strokes, whatever that workspace's history holds. steps repeats it. Returns what remains undoable.",
 			{
 				"workspace": { "type": "string", "default": "" },
 				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 50 },
@@ -332,6 +332,7 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 		"active_workspace": String(active.get_workspace_id()) if active != null else "",
 		"workspaces": workspaces,
 		"mission": _mission_state(ctx),
+		"game_run": _game_run_state(shell),
 		"camera": _camera_state(ctx),
 		"perf_recent": _perf_lines(),
 		"log_cursor": service.log_hub.latest_cursor() if service != null and service.get("log_hub") != null else 0,
@@ -363,7 +364,6 @@ func _workspace_state(ws: Variant) -> Dictionary:
 
 
 func _mission_state(ctx: McpToolContext) -> Dictionary:
-	var ws: Variant = ctx.workspace("mission")
 	var controller: Variant = ctx.mission()
 	var out := { "loaded": false }
 	if controller != null and controller.has_method("is_loaded"):
@@ -372,16 +372,16 @@ func _mission_state(ctx: McpToolContext) -> Dictionary:
 		out["path"] = controller.get_current_path()
 	if controller != null and controller.has_method("get_stats"):
 		out["stats"] = controller.get_stats()
-	if controller != null and controller.has_method("is_simulating"):
-		out["simulating"] = bool(controller.is_simulating())
-		if controller.has_method("is_sim_playing"):
-			out["sim_playing"] = bool(controller.is_sim_playing())
-	if ws != null and ws.has_method("is_playing_mission"):
-		out["pie_active"] = bool(ws.is_playing_mission())
-	var sim: Variant = ctx.sim()
-	if sim != null and sim.has_method("get_logic_tick"):
-		out["tick"] = sim.get_logic_tick()
 	return out
+
+
+func _game_run_state(shell: Variant) -> Dictionary:
+	if shell == null or not shell.has_method("get_game_run_session"):
+		return {"state": "unavailable", "running": false}
+	var session: Variant = shell.get_game_run_session()
+	if session == null or not session.has_method("get_state"):
+		return {"state": "unavailable", "running": false}
+	return session.get_state()
 
 
 func _camera_state(ctx: McpToolContext) -> Dictionary:
@@ -452,7 +452,7 @@ func _tool_describe_api(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return {
 			"topics": TOPICS.keys(),
 			"classes": _api_classes(),
-			"objects": ["shell", "editor", "mission_controller", "runtime", "sim", "camera", "resource_root",
+			"objects": ["shell", "editor", "mission_controller", "game_session", "camera", "resource_root",
 					"workspace:terrain", "workspace:mission", "workspace:strings", "..."],
 			"hint": "describe_api(name=...) for a class or live object; describe_api(topic=...) for a guide.",
 		}
@@ -534,10 +534,9 @@ static func _live_object(ctx: McpToolContext, name: String) -> Variant:
 			return ctx.editor
 		"mission_controller":
 			return ctx.mission()
-		"runtime":
-			return ctx.runtime()
-		"sim":
-			return ctx.sim()
+		"game_session":
+			return ctx.shell.get_game_run_session() \
+					if ctx.shell != null and ctx.shell.has_method("get_game_run_session") else null
 		"camera":
 			return ctx.camera()
 		"resource_root":
@@ -669,7 +668,7 @@ func _tool_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"max_dim": int(args.get("max_dim", 1280)),
 		"format": String(args.get("format", "webp")),
 		"quality": float(args.get("quality", 0.8)),
-	})
+	}, func() -> bool: return ctx.cancelled)
 	if not outcome["ok"]:
 		return McpToolResult.error(String(outcome["error"]))
 	var caption := "%dx%d %s, %d KiB — %s" % [
@@ -787,5 +786,3 @@ func _undo_redo(args: Dictionary, ctx: McpToolContext, is_undo: bool) -> Variant
 		"can_redo": ws.can_redo(),
 		"workspace": String(ws.get_workspace_id()),
 	}
-
-

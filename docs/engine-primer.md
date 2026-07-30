@@ -212,9 +212,11 @@ Order of operations when you need an engine truth:
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
      `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see the root CLAUDE.md).
 5. **Runtime introspection:**
-   - The debug overlay (F3 in game; mountable over the editor's mission preview):
-     Entities/Sim/Vars/Perf tabs, sim transport (play/pause/step), mission-variable
-     writes — `godot/engine/debug/nova_debug_overlay.gd`.
+   - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
+     tabs, sim transport (play/pause/step), and mission-variable writes —
+     `godot/engine/debug/nova_debug_overlay.gd`. ONED launches that same game
+     with F5, or its current saved loose mission with F6; it has no embedded
+     mission preview or debug overlay.
    - `NovaSimulation` introspection: `get_present_snapshot()`,
      `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.

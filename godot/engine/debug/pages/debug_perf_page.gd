@@ -8,10 +8,25 @@ extends NovaDebugPage
 const _MONITORS := [
 	["fps", "FPS", Performance.TIME_FPS, false],
 	["frame_ms", "Frame time", Performance.TIME_PROCESS, true],
+	["physics_ms", "Physics time", Performance.TIME_PHYSICS_PROCESS, true],
+	["navigation_ms", "Navigation time", Performance.TIME_NAVIGATION_PROCESS, true],
+	["audio_latency", "Audio latency", Performance.AUDIO_OUTPUT_LATENCY, true],
 	["objects", "Objects", Performance.OBJECT_COUNT, false],
 	["nodes", "Nodes", Performance.OBJECT_NODE_COUNT, false],
+	["resources", "Resources", Performance.OBJECT_RESOURCE_COUNT, false],
+	["orphans", "Orphan nodes", Performance.OBJECT_ORPHAN_NODE_COUNT, false],
+	["render_objects", "Rendered objects", Performance.RENDER_TOTAL_OBJECTS_IN_FRAME, false],
+	["primitives", "Primitives", Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME, false],
 	["draw_calls", "Draw calls", Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME, false],
+	["physics_objects", "Physics 3D objects", Performance.PHYSICS_3D_ACTIVE_OBJECTS, false],
+	["physics_pairs", "Physics 3D pairs", Performance.PHYSICS_3D_COLLISION_PAIRS, false],
+	["nav_maps", "Navigation maps", Performance.NAVIGATION_ACTIVE_MAPS, false],
+	["nav_regions", "Navigation regions", Performance.NAVIGATION_REGION_COUNT, false],
+	["nav_agents", "Navigation agents", Performance.NAVIGATION_AGENT_COUNT, false],
+	["memory_static", "Static memory", Performance.MEMORY_STATIC, false],
 	["video_mem", "Video memory", Performance.RENDER_VIDEO_MEM_USED, false],
+	["texture_mem", "Texture memory", Performance.RENDER_TEXTURE_MEM_USED, false],
+	["buffer_mem", "Buffer memory", Performance.RENDER_BUFFER_MEM_USED, false],
 ]
 
 var history_option: OptionButton
@@ -90,7 +105,8 @@ func refresh_monitors() -> void:
 	for monitor in _MONITORS:
 		var value := Performance.get_monitor(int(monitor[2]))
 		var label: Label = monitor_labels[monitor[0]]
-		if String(monitor[0]) == "video_mem":
+		if String(monitor[0]).ends_with("_mem") \
+				or String(monitor[0]) == "memory_static":
 			label.text = "%.1f MB" % (value / (1024.0 * 1024.0))
 		elif bool(monitor[3]):
 			# The live gauge keeps a FIXED unit (a 1.4 s headless frame still

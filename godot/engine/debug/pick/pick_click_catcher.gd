@@ -2,11 +2,9 @@ class_name PickClickCatcher
 extends Node
 ## The overlay-open mouse picker: while the F3 overlay is up (mouse released),
 ## a left-click on the world ray-picks through the live camera and adds to
-## the injected pick list. Lives INSIDE the world subtree on purpose — the
-## root viewport routes clicks here in the game, and ONED play-in-editor's
-## SubViewportContainer forwards only play-view clicks into its SubViewport,
-## so the same node works in both hosts and overlay-panel clicks (consumed by
-## its Controls before the unhandled phase) never leak through.
+## the injected pick list. It lives inside the world subtree so the root
+## viewport routes game clicks here while overlay-panel clicks (consumed by
+## Controls before the unhandled phase) never leak through.
 
 var _world: Node = null  # duck-typed get_sim(); re-resolved every click
 var _pick_list: NovaDebugPickList = null

@@ -2,9 +2,9 @@ class_name SimDebugView
 extends Node3D
 
 # Shared scaffolding for the world-space debug views that read one
-# NovaSimulation debug accessor through a duck-typed host (GameWorld, or the
-# editor's mission preview): host/sim resolution, the per-frame refresh
-# template, and the common wireframe/label drawing recipes. Each view names
+# NovaSimulation debug accessor through GameWorld: host/sim resolution, the
+# per-frame refresh template, and the common wireframe/label drawing recipes.
+# Each view names
 # its accessor (_sim_debug_method), builds its meshes (_build_view), refreshes
 # from a live sim (_refresh_from_sim), and drops its artifacts (_clear_all).
 #

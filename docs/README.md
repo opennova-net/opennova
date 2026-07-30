@@ -23,7 +23,7 @@ behavior is summarized and cited.
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
 | [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
-| [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | How ONED and the game runtime share rendering and simulation (the `edit_mode` runtime-node pattern, sampler seams, the one mission runtime) |
+| [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | How ONED reuses runtime rendering/data seams for authoring previews while the standalone game remains the only live mission host |
 | [`oned/editor-layer-program.md`](oned/editor-layer-program.md) | The editor-layer refactor program (complete 2026-07-04): EditorApp root, shell decomposition, undo everywhere, global shortcuts, shared widgets/theme/vocabulary, with per-slice gates |
 | [`oned/workspace-maturity-program.md`](oned/workspace-maturity-program.md) | The maturity program's ONED track: the R/W/E/G capability bar, the twelve-workspace matrix (Avatars joined at AVA), foundation services, the music redesign, responsiveness, test-seam refits, per-workspace phases, and the RE ledger gating them |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
@@ -41,7 +41,7 @@ behavior is summarized and cited.
 | [0003](adr/0003-no-raw-passthrough-create-from-scratch.md) | MNU: no raw byte passthrough; documents are created from scratch |
 | [0004](adr/0004-audio-selection-pushdown.md) | Audio: member selection pushed down into portable `libs/audio` |
 | [0005](adr/0005-mnu-var-expansion-policy.md) | MNU: `%VAR%` expansion policy |
-| [0006](adr/0006-unified-mission-runtime-present-pass.md) | One mission runtime, one present pass, one entity index for game and editor |
+| [0006](adr/0006-unified-mission-runtime-present-pass.md) | Unified mission present pass and entity index; its former embedded editor host is superseded by ADR 0025 |
 | [0007](adr/0007-skeletal-runtime-and-entity-visual.md) | Skeletal `.bad`/`.adm` runtime and the `NovaEntityVisual` contract |
 | [0008](adr/0008-pff-writer-policy.md) | PFF writer: zero timestamp/checksum for new entries, verbatim for retained |
 | [0009](adr/0009-in-match-net-seam.md) | In-match networking enters the world tick through one seam (NetSystem + INetCommandSink) |
@@ -60,6 +60,7 @@ behavior is summarized and cited.
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
 | [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
 | [0024](adr/0024-lib-family-topology.md) | Lib family topology: one-lib-per-format affirmed; terrain/audio families are CMake INTERFACE link groups (never merges, never edge laundering); the renderer-fold reversal recorded; the two consumption models named (Model A flat C ABI / Model B C++ static link) |
+| [0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md) | ONED has no PIE or in-place mission simulation: F5/F6 run saved loose assets in one managed standalone game child; F8 stops it |
 
 ## RE records by domain
 

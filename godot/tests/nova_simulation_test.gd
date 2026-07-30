@@ -3067,6 +3067,53 @@ func test_entity_debug_card_carries_named_scalars() -> void:
 	sim.free()
 
 
+func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
+	var sim := NovaSimulation.new()
+	assert_eq(int(sim.debug_set_entity_health(0, 37)), ERR_INVALID_PARAMETER,
+			"health reports that entity zero is absent from the empty AI pool")
+	assert_eq(int(sim.debug_set_entity_position(0, Vector3.ONE)),
+			ERR_INVALID_PARAMETER,
+			"position reports that entity zero is absent from the empty AI pool")
+	assert_eq(int(sim.debug_teleport_local_player(Vector3.ONE, 15.0, -5.0)),
+			ERR_UNAVAILABLE, "teleport reports that the local player is absent")
+
+	sim.build_demo_mission()
+	var missing_index := sim.get_entity_count()
+	assert_eq(int(sim.debug_set_entity_health(-1, 37)), ERR_INVALID_PARAMETER)
+	assert_eq(int(sim.debug_set_entity_health(missing_index, 37)), ERR_INVALID_PARAMETER)
+	assert_eq(int(sim.debug_set_entity_position(-1, Vector3.ONE)),
+			ERR_INVALID_PARAMETER)
+	assert_eq(int(sim.debug_set_entity_position(missing_index, Vector3.ONE)),
+			ERR_INVALID_PARAMETER)
+	assert_eq(int(sim.debug_teleport_local_player(Vector3.ONE, 15.0, -5.0)),
+			ERR_UNAVAILABLE, "a live world without a local player is still unavailable")
+
+	assert_eq(int(sim.debug_set_entity_health(0, 37)), OK)
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_eq(int(card.get("health", -1)), 37)
+	assert_eq(int(card.get("ai_health", -1)), 37)
+
+	var entity_mission_position := Vector3(6.0, 5.0, 7.0)
+	assert_eq(int(sim.debug_set_entity_position(0, entity_mission_position)), OK)
+	assert_lt(sim.get_entity_position(0).distance_to(Vector3(6.0, 7.0, -5.0)),
+			0.001, "the successful move mutates the AI position mirror")
+	var world_card: Dictionary = sim.get_world_entity_debug(int(card.get("net_id", 0)))
+	var world_mission_position: Vector3 = world_card.get(
+			"mission_position", Vector3.ZERO)
+	assert_lt(world_mission_position.distance_to(entity_mission_position), 0.001,
+			"the successful move mutates the registry position mirror")
+
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var player_mission_position := Vector3(11.0, 3.0, -4.0)
+	assert_eq(int(sim.debug_teleport_local_player(
+			player_mission_position, 123.0, -17.0)), OK)
+	assert_lt(sim.get_local_player_position().distance_to(Vector3(11.0, -4.0, -3.0)),
+			0.001, "the successful teleport mutates the authoritative player position")
+	assert_almost_eq(sim.get_local_player_yaw_deg(), 123.0, 0.01)
+	assert_almost_eq(sim.get_local_player_pitch_deg(), -17.0, 0.01)
+	sim.free()
+
+
 func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)

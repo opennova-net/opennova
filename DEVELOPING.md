@@ -67,10 +67,11 @@ scripts/build_godot.sh DebugFull  # DebugFull -> the editor (/Od, for native deb
 scripts/build_godot.sh Release    # Release   -> exports
 ```
 
-`Dev` and `DebugFull` produce the same `template_debug`-named artifact — the one the
-editor and every play-in-editor session load — differing only in compiler flags. Build
-`DebugFull` when you need to step through native code; expect roughly 1.5x whole-frame
-cost in-game while it is installed, so never profile against it.
+`Dev` and `DebugFull` produce the same `template_debug`-named artifact — the one loaded
+by the Godot editor and by standalone game runs launched from ONED (F5/F6) — differing
+only in compiler flags. Build `DebugFull` when you need to step through native code;
+expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
+against it.
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not

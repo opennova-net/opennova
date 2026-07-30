@@ -18,6 +18,11 @@ var world_source := Callable()
 ## whose action changes what other rows show (sim transport, var edits).
 var request_refresh := Callable()
 
+## UI-free catalog/execution module shared by the overlay and runtime MCP.
+## Pages use it for generic controls; data-only pages may keep reading the
+## typed resolver helpers below.
+var session: NovaDebugSession = null
+
 ## The shared NovaDebugOptions value store. Pages build controls against it
 ## (NovaDebugPage.add_option_check); the overlay re-emits its `changed` as
 ## `debug_option_changed` for the hosts.
@@ -39,11 +44,12 @@ func runtime() -> Object:
 	if not runtime_source.is_valid():
 		return null
 	var value: Variant = runtime_source.call()
-	if value == null or not is_instance_valid(value):
+	if not (value is Object) or not is_instance_valid(value):
 		return null
-	if not (value as Object).has_method("get_sim"):
+	var live_runtime := value as Object
+	if not live_runtime.has_method("get_sim"):
 		return null
-	return value
+	return live_runtime
 
 
 ## The runtime's live NovaSimulation, or null.
@@ -55,6 +61,13 @@ func sim() -> Object:
 	if value == null or not is_instance_valid(value):
 		return null
 	return value
+
+
+## The concrete engine simulation, for pages that consume its mandatory
+## public API rather than the generic harness seam exposed by sim().
+func nova_simulation() -> NovaSimulation:
+	var value := sim()
+	return value as NovaSimulation if value is NovaSimulation else null
 
 
 ## The world host (GameWorld or a duck-typed stand-in), or null.

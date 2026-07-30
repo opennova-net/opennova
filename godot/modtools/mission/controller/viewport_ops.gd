@@ -9,20 +9,6 @@ extends "res://modtools/mission/controller/controller_section.gd"
 func handle_viewport_input(event: InputEvent) -> void:
 	if _c._mission == null or _c.terrain_editor == null:
 		return
-	# Live simulation: the present pass writes the placed nodes' transforms every tick, so no
-	# pick / drag / gizmo / place / hover gesture may start, and the keyboard mutators (undo /
-	# redo / delete) are locked out too. Report on a discrete attempt (a click or a mutating
-	# key), stay silent on hover/motion, and let everything else fall to the camera.
-	if _c._sim.is_simulating():
-		if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
-			_c._sim._reject_edit_while_simulating()
-		elif event is InputEventKey:
-			var sim_key := event as InputEventKey
-			var is_mutator := sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
-			if sim_key.pressed and not sim_key.echo and is_mutator and not _c._gui_focus_blocks_shortcut():
-				_c._sim._reject_edit_while_simulating()
-				_c._consume_viewport_key()
-		return
 	# Scripting mode is panel-driven and the viewport is inert in it (see Mode docs): swallow all
 	# pointer events so a stray click cannot select, drag, or hover-pick an object, while still
 	# letting the keyboard shortcuts (undo / redo / delete) below run.
@@ -331,7 +317,6 @@ func _refresh_gizmo() -> void:
 	if container == null:
 		return
 	var want = _c._gizmo_enabled and _c._mode == _c.Mode.OBJECTS and not _c._placement.is_placement_armed() \
-		and not _c._sim.is_simulating() \
 		and not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) != NovaMissionData.KIND_MARKER
 	if not want:
 		if _c._gizmo != null and is_instance_valid(_c._gizmo):
@@ -488,7 +473,7 @@ func _select(kind: int, index: int) -> void:
 	# so an inspector-driven re-select must flush it here too (the viewport's _on_left_press already
 	# does), otherwise SpinBox edits to two different objects fold into a single undo step.
 	_c._flush_edit()
-	_c._sim.stop_preview()
+	_c._preview.stop_preview()
 	_clear_selected_user_points()
 	_c._selected_ref = { "kind": kind, "index": index }
 	_c._selected_records = []
@@ -535,7 +520,7 @@ func _select(kind: int, index: int) -> void:
 
 
 func _deselect() -> void:
-	_c._sim.stop_preview()
+	_c._preview.stop_preview()
 	_clear_selected_user_points()
 	if _c._selected_ref.is_empty():
 		return
@@ -666,8 +651,6 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 func _commit_selected_transform() -> void:
 	if _c._selected_ref.is_empty() or _c._mission == null:
 		return
-	if _c._sim._reject_edit_while_simulating():
-		return
 	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
 	if _c._mission.set_entity_transform(int(_c._selected_ref["kind"]), int(_c._selected_ref["index"]), bms_pos, _c._selected_rotation_deg):
 		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
@@ -681,11 +664,9 @@ func _commit_selected_transform() -> void:
 ## its ground point sits at a world-space terrain hit — the viewport drag's
 ## anchor bake (origin = hit − rotated ground anchor; hit stored directly for
 ## markers) — as one closed undo step. Returns false with no selection, no
-## mission, or while simulating.
+## mission.
 func move_selected_to_world_grounded(global_hit: Vector3) -> bool:
 	if _c._selected_ref.is_empty() or _c._mission == null:
-		return false
-	if _c._sim._reject_edit_while_simulating():
 		return false
 	_c._flush_edit()
 	_c.begin_edit()
@@ -930,7 +911,7 @@ func _clear_hover() -> void:
 # objects container, so it is freed when the container is (re)built; here we only drop
 # the dangling ref.
 func _reset_selection_state() -> void:
-	_c._sim.stop_preview()
+	_c._preview.stop_preview()
 	_clear_selected_user_points()
 	_c._selected_ref = {}
 	_c._selected_records = []

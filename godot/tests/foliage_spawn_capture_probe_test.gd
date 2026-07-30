@@ -8,10 +8,10 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
 	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
 	assert_true(source.contains('const DEFAULT_MISSION := "00TRe.bms"'))
-	assert_true(source.contains("_mission_workspace.play_mission()"),
-		"Probe should boot the real play-in-editor GameWorld.")
-	assert_true(source.contains("_mission_workspace.play_controller()"),
-		"Probe should bind the workspace's public live-play seam.")
+	assert_true(source.contains("StandaloneProbe.boot("),
+		"Probe should boot the real standalone game shell.")
+	assert_true(source.contains("var world: GameWorld = _world"),
+		"Probe should bind the standalone shell's GameWorld.")
 	assert_true(source.contains("world.get_sim().has_local_player()"),
 		"Probe should fail unless the mission spawned a local player.")
 	assert_true(source.contains("world.get_sim().get_local_player_position()"),
@@ -22,11 +22,10 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 		"Capture filenames should identify the mission under comparison.")
 	assert_true(source.contains('_capture_stem + "_spawn_default.png"'),
 		"Each mission should keep its own exact-spawn capture.")
-	assert_true(source.contains(
-		"workstation.set_resource_root_dir(mission_resource_dir, false)"),
-		"The probe should mount its loose authoring root transiently.")
 	assert_false(source.contains("ResourceDirSettings.set_resource_dir("),
 		"The probe must not overwrite the user's persisted resource root.")
+	assert_false(source.contains("_mission_workspace"),
+		"The capture must not recreate the removed embedded PIE path.")
 	for forbidden in [
 		"_find_painted", "get_foliage_index_world", "camera.global_position =",
 		"camera.global_transform =", "camera.look_at(", "Input.parse_input_event",
@@ -73,6 +72,16 @@ func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners
 	assert_ne(ProbeScript.runtime_source_validation_error(
 		"revx02", "00TRa.bms", winning_entries), "",
 		"Every reported comparison input must name its packed winning source.")
+	winning_entries[2]["source_type"] = "pff"
+	winning_entries[0] = {
+		"logical_name": "00TRa.bms",
+		"source_type": "loose",
+		"source_path": "C:/Authoring/00TRa.bms",
+		"archive_path": "",
+	}
+	assert_eq(ProbeScript.runtime_source_validation_error(
+		"revx02", "00TRa.bms", winning_entries, true), "",
+		"A saved loose mission may drive a standalone packed-runtime capture.")
 
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
 	assert_true(source.contains('OS.get_environment("NOVA_MISSION_RESOURCE_DIR")'),
@@ -81,8 +90,9 @@ func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners
 		"The packed runtime root must be configured separately.")
 	assert_true(source.contains('OS.get_environment("NOVA_EXPANSION")'),
 		"The probe must receive an explicit expansion request.")
-	assert_true(source.contains("mount_runtime(runtime_resource_dir, requested_expansion"),
-		"The played world must use a packed mount with the requested expansion.")
+	assert_true(source.contains(
+		"self, runtime_resource_dir, mission_name, requested_expansion, mission_path"),
+		"The standalone shell must mount packed dependencies and parse the exact saved BMS.")
 	assert_true(source.contains("list_file_entries()"),
 		"The probe must report the VFS's winning source entries.")
 
@@ -125,7 +135,7 @@ func test_spawn_capture_uses_standalone_game_aspect_not_editor_dock_aspect() -> 
 	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
 	assert_true(source.contains("const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)"),
 		"Retail comparisons should use the standalone game's 16:9 viewport.")
-	assert_true(source.contains("play_container.stretch = false"),
-		"The editor dock must stop overriding the comparison viewport size.")
-	assert_true(source.contains("play_viewport.size = CAPTURE_VIEWPORT_SIZE"),
-		"The clean played world should render at the fixed comparison size.")
+	assert_true(source.contains("get_window().size = CAPTURE_VIEWPORT_SIZE"),
+		"The native game window should render at the fixed comparison size.")
+	assert_false(source.contains("PlayViewportContainer"),
+		"The capture must not depend on an editor dock viewport.")

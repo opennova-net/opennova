@@ -23,9 +23,16 @@ const MAX_DIM := 4096
 ## image pixels), region_control (Control — resolved to a region AFTER the
 ## drawn frame and against the real image size, so layout still settling when
 ## the capture starts cannot skew the crop), max_dim, format ("webp"|"png"),
-## quality. Returns { ok, bytes, mime, width, height, warning? } or
-## { ok: false, error }.
-static func capture(viewport: Viewport, opts := {}) -> Dictionary:
+## quality. The optional cancellation probe is sampled before capture and
+## after every awaited frame. Returns { ok, bytes, mime, width, height,
+## warning? } or { ok: false, error }.
+static func capture(
+	viewport: Viewport,
+	opts := {},
+	cancel_requested: Callable = Callable()
+) -> Dictionary:
+	if _cancel_requested(cancel_requested):
+		return { "ok": false, "error": "Screenshot capture was cancelled." }
 	if DisplayServer.get_name() == "headless":
 		return { "ok": false, "error": "No rendering in headless mode — screenshots need the windowed editor." }
 	if viewport == null:
@@ -37,9 +44,14 @@ static func capture(viewport: Viewport, opts := {}) -> Dictionary:
 	var on_draw := func() -> void: drawn["done"] = true
 	RenderingServer.frame_post_draw.connect(on_draw, Object.CONNECT_ONE_SHOT)
 	var frames := 0
-	while not drawn["done"] and frames < DRAW_TIMEOUT_FRAMES:
+	while not drawn["done"] and frames < DRAW_TIMEOUT_FRAMES \
+			and not _cancel_requested(cancel_requested):
 		await tree.process_frame
 		frames += 1
+	if _cancel_requested(cancel_requested):
+		if RenderingServer.frame_post_draw.is_connected(on_draw):
+			RenderingServer.frame_post_draw.disconnect(on_draw)
+		return { "ok": false, "error": "Screenshot capture was cancelled." }
 	if not drawn["done"]:
 		if RenderingServer.frame_post_draw.is_connected(on_draw):
 			RenderingServer.frame_post_draw.disconnect(on_draw)
@@ -53,6 +65,10 @@ static func capture(viewport: Viewport, opts := {}) -> Dictionary:
 		opts = opts.duplicate()
 		opts["region"] = region_for_control(region_control, image.get_size())
 	return encode(image, opts)
+
+
+static func _cancel_requested(source: Callable) -> bool:
+	return source.is_valid() and bool(source.call())
 
 
 ## Crop / downscale / compress an image into MCP-ready bytes. Same opts and

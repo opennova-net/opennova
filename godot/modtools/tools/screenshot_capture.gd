@@ -141,43 +141,9 @@ func _ready() -> void:
 	if not await _run_all():
 		get_tree().quit(1)
 		return
-	await _capture_mission_play()
 
 	print("[capture] done -> ", _out_abs)
 	get_tree().quit()
-
-
-# Optional play-in-editor capture: open $NOVA_MISSION_BMS (a .bms name in the
-# resource dir) in the Mission workspace, hit Play (the real game loop in the
-# play viewport), settle, and write mission_play.png. Skipped when the env var
-# is unset so asset-less runs are unaffected.
-func _capture_mission_play() -> void:
-	var bms_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
-	if bms_name.is_empty():
-		return
-	var ws: EditorWorkspace = _workstation.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	if ws == null or not ws.has_method("play_mission"):
-		push_error("[capture] mission workspace unavailable for mission_play.png")
-		return
-	var path := NovaPaths.resolve_file(_root, bms_name)
-	if path.is_empty():
-		push_error("[capture] %s not found in %s" % [bms_name, _root])
-		return
-	var err: int = ws.open_file(path)
-	if err != OK:
-		push_error("[capture] mission open failed (%d): %s" % [err, path])
-		return
-	_workstation.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await get_tree().process_frame
-	for _i in SETTLE_FRAMES_3D:
-		await get_tree().process_frame
-	if int(ws.play_mission()) != OK:
-		push_error("[capture] play_mission failed for %s" % bms_name)
-		return
-	for _i in SETTLE_FRAMES_3D:
-		await get_tree().process_frame
-	await _capture("mission_play.png")
-	ws.stop_play_mission()
 
 
 func _maximize_window() -> void:

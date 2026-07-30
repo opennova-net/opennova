@@ -18,7 +18,7 @@
     "libs_uncited_src_files": 57,
     "oversize_cpp_files": 2,
     "oversize_gd_files": 7,
-    "test_private_pokes": 1353
+    "test_private_pokes": 1313
   },
   "dict_contract_allowlist": [
     "to_drag_data",

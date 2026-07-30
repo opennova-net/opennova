@@ -65,8 +65,6 @@ func get_placement_item_id() -> int:
 func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	if _c._mission == null:
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	var container = _c._objects_container()
 	if container == null:
 		return false

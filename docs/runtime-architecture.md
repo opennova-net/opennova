@@ -30,8 +30,8 @@ AI/entity motor runs every tick — witnessed in
 ## How OpenNova maps onto it
 
 ```
-main_game.gd / editor _process(delta)
-  -> GameWorld.tick(camera, delta)                  host frame (game)
+main_game.gd
+  -> GameWorld.tick(camera, delta)                  sole live host frame
        foliage dispatch                             client render pass
        MissionRuntime.tick_realtime(delta)          == the fixed-timestep server tick + entity render:
          bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
@@ -48,22 +48,28 @@ main_game.gd / editor _process(delta)
        NovaMissionAudio.tick(camera)                 audio render pass
 ```
 
-The editor "Play the mission" goes through the **same** `MissionRuntime` and the same
-`tick_realtime` accumulator (the editor preview self-ticks via `_process`). There is one runtime,
-one entity index, and one present *step* — see
-[ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has grown into a fixed
-sequence of per-system passes, each owning one drain of the sim, and each installed only where its
-role applies: a host or single-player session runs the full ladder, and a joiner runs
+`GameWorld`, entered through `MainGame`, is the sole live host of
+`MissionRuntime`. ONED has no embedded mission simulation: F5 launches the
+normal standalone game, F6 launches the current saved top-level loose `.bms`,
+and F8 stops the one managed child. Launch reads saved loose assets from the
+mounted resource directory and never saves, exports, copies, or stages editor
+state. See [ADR 0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md).
+
+Inside that one live runtime there is one entity index and one present *step* —
+the surviving core of
+[ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has
+grown into a fixed sequence of per-system passes, each owning one drain of the
+sim, and each installed only where its role applies: a host or single-player
+session runs the full ladder, and a joiner runs
 `MissionPresentPass` over its locally placed mission (everything except organics — placed pools
 1-3 share the host's pool/slot handle space because promote order mirrors
 `Mission_LoadBMSFile @0x40f4e0` on both sides, so streamed rows carry the local defer identity
 and drive the placed nodes) plus the decode-driven passes (`WirePresentPass` for players,
 streamed AI, and anything without a placed node, and the fire/throwable presentation of decoded
 S2C events). Adding a system means adding a pass to that sequence, not a second present loop.
-The single-tick `MissionRuntime.tick()` survives as the deterministic primitive for editor Step,
-the MCP, and tests; it runs the identical pass sequence with `n = 1`.
-`GameWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
-`NovaSimulation` per host context is intentional, not duplication.
+The single-tick `MissionRuntime.tick()` survives as the deterministic primitive
+for runtime debug/MCP controls and tests; it runs the identical pass sequence
+with `n = 1`.
 
 ## Single-player is a listen server
 
@@ -97,8 +103,9 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
 - **Runtime driver (GDScript)** — `mission_runtime.gd` owns `{sim, present pass, index}` and
   single-sources the per-tick order (advance → drain → present). `tick_realtime(delta)` is the
   fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
-  the deterministic single-tick primitive (Step / MCP / tests). Both `game_world.gd` (game) and
-  `mission_controller.gd` (editor) drive it.
+  the deterministic single-tick primitive (runtime debug / MCP / tests).
+  `game_world.gd` is its only live host; ONED authoring previews do not drive a
+  mission runtime.
 - **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
   host writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)

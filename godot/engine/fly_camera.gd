@@ -4,9 +4,7 @@ extends Camera3D
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
 
-# Esc was pressed. Host-neutral: the game shell maps it to pause/resume, the
-# terrain editor to its own quit flow, play-in-editor to Stop. The camera only
-# reports the key; it never decides what Esc means.
+# Esc was pressed. Host-neutral: each shell decides what the key means.
 signal escape_pressed
 
 @export var mouse_sensitivity: float = 0.003

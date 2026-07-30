@@ -44,7 +44,7 @@ var _player_class := 0
 var _class_allow_mask := 0x3FF
 # Class selection is interactive only in an MP session — the original disables the
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
-# the WEAPON on-show handler @0x567370]. SP/PIE shells leave this false.
+# the WEAPON on-show handler @0x567370]. SP leaves this false.
 var _class_selection_enabled := false
 # The current kit's canonical parent weapon.def ids; each slot reselects its row
 # [orig: g_armoryLoadoutBufferByClass -> select-by-adm-index sub_645240 in
@@ -122,7 +122,7 @@ func set_availability_lookup(lookup: Callable) -> void:
 	_availability_lookup = lookup
 
 
-## MP hosts enable the class spin; SP/PIE leave it disabled like the original
+## MP hosts enable the class spin; SP leaves it disabled like the original
 ## [orig: @0x567370 enables PLAYER_CLASS + STATIC_PLAYER_CLASS only in-session].
 func set_class_selection_enabled(enabled: bool) -> void:
 	_class_selection_enabled = enabled

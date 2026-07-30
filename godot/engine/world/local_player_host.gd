@@ -111,8 +111,16 @@ func set_debug_force_viewmodel(enabled: bool) -> void:
 	debug_force_viewmodel = enabled
 
 
+func is_debug_force_viewmodel() -> bool:
+	return debug_force_viewmodel
+
+
 func set_debug_body_in_first_person(enabled: bool) -> void:
 	debug_body_in_first_person = enabled
+
+
+func is_debug_body_in_first_person() -> bool:
+	return debug_body_in_first_person
 
 
 func setup(world, camera: Camera3D) -> void:

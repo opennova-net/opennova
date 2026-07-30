@@ -659,10 +659,9 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 
 
 func test_packaged_scene_instantiates_with_intact_wiring() -> void:
-	# game_world.tscn is the embeddable world (the game instances it in
-	# main_game.tscn; play-in-editor instances it in a workspace viewport). Pin
-	# the extraction: every engine node is present and the intra-scene NodePaths
-	# survived the move out of main_game.tscn.
+	# game_world.tscn is the game shell's embeddable world. Pin the extraction:
+	# every engine node is present and the intra-scene NodePaths survived the
+	# move out of main_game.tscn.
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
@@ -1007,9 +1006,11 @@ func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> v
 func test_game_world_is_playable_by_default_without_env_flag() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
-	assert_true(world.is_playable(), "standalone and editor Play Mission should spawn a player by default")
+	assert_true(world.is_playable(),
+			"normal and F6 standalone launches spawn a player by default")
 	world.set_playable(false)
-	assert_false(world.is_playable(), "diagnostic previews can explicitly opt out of local-player setup")
+	assert_false(world.is_playable(),
+			"diagnostic fixtures can explicitly opt out of local-player setup")
 
 
 func test_load_mission_data_rejects_an_empty_document() -> void:
@@ -1061,6 +1062,22 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_eq(int(world.get_runtime().get_perf_counters().get("ticks", 0)), 8,
 			"mission simulation retains its 62.5 Hz cadence")
 	expected_clock.free()
+
+	# F3/MCP scrubs are a host-level operation: pause guarantees no later
+	# weather tick can hide a missing resync behind normal advancement.
+	world.get_runtime().pause()
+	assert_eq(world.debug_set_mission_minute_of_day(22.0 * 60.0 + 7.0), OK)
+	assert_almost_eq(env.time_of_day, 2207.0, 0.001)
+	var weather := world.get_weather_node() as NovaWeather
+	assert_true(weather.get_smooth_fill().is_equal_approx(
+			env.get_fill_light_target()))
+	assert_true(weather.get_smooth_sun().is_equal_approx(
+			env.get_sun_light_target()))
+	assert_true(weather.get_smooth_fog().is_equal_approx(
+			env.get_fog_color_target()))
+	world.tick(Vector3.ZERO, Transform3D(), 0.25)
+	assert_almost_eq(env.time_of_day, 2207.0, 0.001,
+			"a paused host keeps the scrubbed clock and rendered weather")
 	world.unload()
 
 
@@ -1489,6 +1506,36 @@ func test_runtime_dev_mount_still_loads_bms_from_archive() -> void:
 	world.unload()
 
 
+func test_editor_run_loads_the_exact_saved_loose_bms() -> void:
+	var root_dir := _stage_minimal_fixture("exact_loose_bms")
+	_write_pff(root_dir.path_join("resource.pff"), [{
+		"name": "mnml.bms",
+		"bytes": "not a mission".to_utf8_buffer(),
+	}])
+
+	var resource_root := NovaResourceRoot.new()
+	assert_eq(resource_root.mount_runtime(root_dir, "", true), OK)
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+
+	assert_eq(world.load_loose_mission("mnml.bms"), OK,
+		"F6 opens the valid disk BMS even when the archive row is corrupt")
+	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
+	world.unload()
+
+
+func test_editor_run_rejects_non_top_level_or_non_bms_paths() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	assert_eq(world.load_loose_mission("nested/mnml.bms"), ERR_INVALID_PARAMETER)
+	assert_eq(world.load_loose_mission("../mnml.bms"), ERR_INVALID_PARAMETER)
+	assert_eq(world.load_loose_mission("mnml.mis"), ERR_INVALID_PARAMETER)
+
+
 func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 	var root_dir := _make_fixture_root("loose_first_til")
 	var source_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
@@ -1702,6 +1749,82 @@ func test_user_point_debug_builds_frees_and_cleans_up_on_unload() -> void:
 
 	world.set_user_point_debug(false)
 	assert_false(world.is_user_point_debug())
+
+
+func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
+	var root_dir := _stage_minimal_fixture("debug_view_reload")
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	world.set_skeleton_debug(true)
+	world.set_user_point_debug(true)
+	world.set_collision_debug(true)
+	world.set_occlusion_debug(true)
+	world.set_round_debug(true)
+	world.set_hitbox_debug(true)
+	var debug_names := [
+		"SkeletonDebug",
+		"UserPointDebug",
+		"CollisionDebug",
+		"OcclusionDebug",
+		"RoundDebug",
+		"HitboxDebug",
+	]
+	for debug_name in debug_names:
+		assert_not_null(world.get_node_or_null(NodePath(debug_name)),
+				"%s exists before reload" % debug_name)
+
+	world.unload()
+	assert_true(world.is_skeleton_debug())
+	assert_true(world.is_user_point_debug())
+	assert_true(world.is_collision_debug())
+	assert_true(world.is_occlusion_debug())
+	assert_true(world.is_round_debug())
+	assert_true(world.is_hitbox_debug())
+	for debug_name in debug_names:
+		assert_null(world.get_node_or_null(NodePath(debug_name)),
+				"%s detaches immediately during unload" % debug_name)
+
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	for debug_name in debug_names:
+		assert_not_null(world.get_node_or_null(NodePath(debug_name)),
+				"%s is rebuilt for the replacement mission" % debug_name)
+	world.unload()
+
+
+func test_pick_helpers_keep_stable_names_on_same_frame_replacement() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	var first_picks := NovaDebugPickList.new()
+	var replacement_picks := NovaDebugPickList.new()
+
+	world.set_pick_debug(first_picks)
+	var first_view := world.get_node_or_null("PickDebug")
+	assert_not_null(first_view)
+	world.set_pick_debug(replacement_picks)
+	var replacement_view := world.get_node_or_null("PickDebug")
+	assert_not_null(replacement_view)
+	assert_ne(replacement_view, first_view)
+	assert_null(first_view.get_parent(),
+			"the old view detaches before its deferred destruction")
+	assert_eq(replacement_view.name, &"PickDebug")
+
+	world.set_pick_click_enabled(true)
+	var first_catcher := world.get_node_or_null("PickClickCatcher")
+	assert_not_null(first_catcher)
+	world.set_pick_click_enabled(true)
+	var replacement_catcher := world.get_node_or_null("PickClickCatcher")
+	assert_not_null(replacement_catcher)
+	assert_ne(replacement_catcher, first_catcher)
+	assert_null(first_catcher.get_parent(),
+			"the old click catcher also detaches before replacement")
+	assert_eq(replacement_catcher.name, &"PickClickCatcher")
 
 
 func test_hide_foliage_toggles_dispatcher_visibility() -> void:

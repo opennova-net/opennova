@@ -74,13 +74,15 @@ class NovaResourceRoot;
 // tick_realtime), faithful to Game_MainLoop @0x52b630. The per-system
 // cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
 // 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
-// (Server_TickUpdate @0x51d7e0). Both the editor "Play the mission" preview and the game
-// runtime go through this one path: promote a parsed BMS mission into the world
+// (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live host for
+// this path; focused tests and non-gameplay tools may instantiate it directly:
+// promote a parsed BMS mission into the world
 // (mission/promote.h), register the systems in the faithful order
 // (mission/mission_systems.h), run a pre-mission pass, then tick. Entity transforms
 // (mission space -> Godot space) and the part-anim phase are exposed for a scene/renderer
 // to draw; host-presentation side effects (text/dialog/win) drain out of the World
-// EffectLog each tick. Play/Pause/Step + Stop (snapshot/restore).
+// EffectLog each tick. Runtime transport and fixture teardown use the same
+// play/pause/step/restart surface.
 class NovaSimulation : public Node3D,
                        private opennova::world::ICollisionSectionMatrixProvider,
                        private opennova::world::IMountedPoseProvider {
@@ -351,14 +353,14 @@ private:
 	// The installed script program. Held as a Ref so it survives reset_world();
 	// finish_load() re-applies it onto the fresh WacSystem each (re)load.
 	Ref<NovaWacProgram> wac_program_;
-	opennova::world::World::Snapshot baseline_; // play-start state, for Stop -> restore
+	opennova::world::World::Snapshot baseline_; // runtime-start state, for restart/teardown
 	opennova::mission::PromoteResult promo_;
 	bool loaded_ = false;
 	bool playing_ = false;
 	bool have_baseline_ = false;
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
-	// by default, so the editor / non-net preview path is the direct AI-pool present, untouched. When
+	// by default, so an explicit non-network fixture uses the direct AI-pool present. When
 	// enabled (before load), bringup_host_runtime stands up the npruntime ctx_ + host_loop_ + runtime_
 	// (declared in the P7 block below) and the present pass reads the client-decoded ClientState
 	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
@@ -796,7 +798,7 @@ private:
 	bool local_eye_valid_ = false;
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
-	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
+	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
 	// listen server (NapiNPServerCtx ctx_ + its own loopback client over host_loop_, driven by
 	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
 	// the joiner is a non-authority np::ClientRuntime. The Godot net bindings stay PURE socket
@@ -949,8 +951,8 @@ public:
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0, called by Destroy]
 	~NovaSimulation() override;
 
-	// Load + promote the editor's live mission (the in-memory bms::File, including unsaved
-	// edits). This is the editor-integration entry: simulate exactly what is on screen.
+	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
+	// ONED gameplay launches only from a saved loose .bms through load_mission_file().
 	bool load_from_mission_data(const Ref<NovaMissionData> &p_mission);
 	// Load + promote a .bms mission from disk; false on parse failure.
 	bool load_mission_file(const String &path);
@@ -969,13 +971,13 @@ public:
 	// @0x52b630 accumulator) — a host frame is NOT one tick.
 	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
 	bool step();
-	void restart();        // Stop: restore the play-start baseline (rewinds world + AI)
+	void restart();        // Restore the runtime-start baseline (rewinds world + AI)
 
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
 	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
 	// fan), the local client decodes it, and the present pass reads that decoded state. Call
 	// BEFORE loading a mission — the next load stands up the npruntime host runtime. Disabling
-	// reverts to the direct AI-pool present (the editor default).
+	// reverts to the direct AI-pool present used by explicit non-network fixtures.
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
 
@@ -1459,17 +1461,21 @@ public:
 	// present loop has get_present_snapshot instead.
 	Dictionary get_entity_debug(int p_index) const;
 	// Probe seam: write an AI entity's health via the scripted-SETHP stores
-	// (registry + motor copy) so in-game probes can shorten a fight.
-	void debug_set_entity_health(int p_index, int p_hp);
+	// (registry + motor copy) so in-game probes can shorten a fight. Returns
+	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
+	// AI index, and OK only after both authoritative mirrors are mutated.
+	Error debug_set_entity_health(int p_index, int p_hp);
 	// Probe seam: teleport an AI entity (mission-space coords) through both
-	// position stores, for probes defeated by mission geography.
-	void debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
+	// position stores, for probes defeated by mission geography. Uses the same
+	// truthful Error contract as debug_set_entity_health.
+	Error debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
 	// World-registry probe seams by SSN (pool-1 vehicles carry no AI brain and are
 	// invisible to the AI-index seams): entity card + mission-space teleport.
 	Dictionary get_world_entity_debug(int p_net_id) const;
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
-	// Land the local player at an exact F3-dumped pose (probe seam).
-	void debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
+	// Land the local player at an exact F3-dumped pose (probe seam). Returns
+	// ERR_UNAVAILABLE until the complete local-player subject exists.
+	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
 	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
@@ -1490,14 +1496,14 @@ public:
 	// The adjacent retail transition-arbitration flags table (off_8139E8).
 	static int64_t infantry_anim_flags(int p_state);
 
-	// Entity query. The (kind, index) pair lets the editor map a sim entity back to its placed
-	// mission record + its already-rendered node (MissionController._pickable).
+	// Entity query. The (kind, index) pair lets a host map a sim entity back to
+	// its promoted mission record and already-rendered node.
 	int get_entity_count() const;
 	int get_entity_kind(int p_index) const;         // mission ItemType (3 = Organic), -1 if none
 	int get_entity_index(int p_index) const;        // index within its kind's list
 	Vector3 get_entity_position(int p_index) const; // mission (x,y,z) -> Godot (x, z, -y), units
 	float get_entity_yaw(int p_index) const;        // BAM heading -> radians
-	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for the editor remap)
+	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for host remap)
 	int get_entity_state(int p_index) const;        // AI state id (16 = GROUND_FOLLOWWP)
 	int get_entity_net_id(int p_index) const;       // runtime SSN (WAC/BMS addressing), 0 if none
 	// Empty when no LIVE registry entity owns p_ssn. Unlike the AI-indexed
@@ -1556,8 +1562,8 @@ public:
 
 	// Wire the terrain the AI grounds on (the host's loaded NovaTerrainData). Copies the depth
 	// buffer + sector layout so the portable height field outlives the source and survives reload.
-	// Null/unloaded clears grounding (entities keep their authored Z). The editor preview and the
-	// game runtime both call this once in MissionRuntime.setup() so they ground identically.
+	// Null/unloaded clears grounding (entities keep their authored Z). GameWorld
+	// and direct test/tooling fixtures call this through MissionRuntime.setup().
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
 	void set_item_seat_specs(const Array &p_specs);
 

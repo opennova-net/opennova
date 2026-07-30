@@ -173,11 +173,14 @@ at low FPS).
 runs `floor(accum / (1/62.5))` single ticks (clamped to `MAX_CATCHUP_TICKS = 31`, the 500 ms
 cap), and presents **once** after the batch — sim at a constant 62.5 Hz, render decoupled at the
 host frame rate, no inter-tick interpolation (faithful to §1.6). The single-tick
-`MissionRuntime.tick()` survives as the deterministic primitive for editor Step / the MCP /
-tests. The game host (`main_game._process` → `game_world.tick` → `tick_realtime`) and the editor
-mission preview (`mission_runtime._process` self-tick) both thread real `delta`. The portable
-`libs/world` per-tick motors are unchanged — they were already correct per tick; only the host
-tick **cadence** was wrong. Pinned by `mission_runtime_test.gd`
+`MissionRuntime.tick()` survives as the deterministic primitive for the standalone game's
+F3/MCP Step, tests, and isolated tooling previews. `MainGame` → `GameWorld` is now the sole
+live real-time host. When this accumulator landed, the old ONED mission preview also threaded
+real `delta` through `MissionRuntime._process` self-tick; [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md)
+later retired that host. F5/F6 now launch the standalone game from saved loose assets, where
+`game_world.tick` → `tick_realtime` drives the cadence. The portable `libs/world` per-tick
+motors are unchanged — they were already correct per tick; only the host tick **cadence** was
+wrong. Pinned by `mission_runtime_test.gd`
 (`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
 
 ## 2b. The tick-mode enum retired (2026-07-14)
@@ -195,9 +198,11 @@ Retired: one `bool step()` (false only when no mission is loaded), no enum, no
 `tick_mode` property. The one behavioral wrinkle removed with it: the `TICK_EVERY_PROCESS`
 branch of `MissionRuntime._advance_one_tick_no_present` hard-coded `did_tick = true`, so an
 unloaded sim reported a tick it never ran; the merged path returns the honest `step()`
-result. Editor-preview/game cadence parity is now structural (one path) rather than
-asserted, so `mission_controller_test.gd`'s tick-mode assert is gone and its `loco_scale`
-assert stands.
+result. Cadence parity among `MissionRuntime` consumers is now structural (one
+path) rather than asserted, so the standalone host and
+direct test/tooling fixtures cannot select divergent step implementations.
+`mission_controller_test.gd`'s obsolete tick-mode assert is gone and its
+`loco_scale` assert stands.
 
 Naming: `step()` survives over `advance_frame()` because a host frame runs 0..N ticks (§2a)
 — "frame" in our vocabulary is the render frame, not the engine tick. The

@@ -88,8 +88,6 @@ func _refresh_reground_button() -> void:
 		return
 	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	_reground_button.visible = mission != null and _inspector._controller.has_method("reground_drifted")
-	_reground_button.disabled = _inspector._controller != null and _inspector._controller.has_method("is_simulating") \
-		and _inspector._controller.is_simulating()
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:

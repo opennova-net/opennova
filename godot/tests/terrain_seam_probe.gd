@@ -1,6 +1,6 @@
 extends Node
 
-# Terrain sector-seam probe: boots ONED's Mission workspace on the mission a
+# Terrain sector-seam probe: boots the standalone game on the mission a
 # NOVA_POSE_JSON dump names, then reports what the terrain does at the sector
 # boundary nearest the dumped pose — a height profile straight across the seam
 # plus two screenshots (the dumped eye direction, and a side-on view along the
@@ -16,7 +16,7 @@ extends Node
 # Writes .scratch/terrain_seam/<tag>_{eye,side}.png (tag = NOVA_SEAM_TAG or "run").
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/terrain_seam"
 
 const SECTOR_SIZE := 512.0
@@ -56,34 +56,16 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_expansion(OS.get_environment("NOVA_WR_EXPANSION").strip_edges())
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	for _i in 9:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
 
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	if ws.open_file(NovaPaths.resolve_file(root, mission_file)) != OK:
-		push_error("[seam] open failed: " + mission_file)
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, mission_file,
+		OS.get_environment("NOVA_WR_EXPANSION").strip_edges())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[seam] " + String(session.error))
 		get_tree().quit(1)
 		return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-
-	# Play the mission: the seam belongs to the RUNTIME terrain (NovaTerrain over
-	# the CPT tiles), not the editor's own mesh, and the runtime is what the pose
-	# dump was taken from.
-	if int(ws.play_mission()) != OK:
-		push_error("[seam] play failed")
-		get_tree().quit(1)
-		return
-	await _settle(150)
 
 	var terrain_data: NovaTerrainData = _find_terrain_data()
 	if terrain_data == null:

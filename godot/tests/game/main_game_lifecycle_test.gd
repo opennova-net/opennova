@@ -67,11 +67,173 @@ const ISOLATED_ENV := [
 	"NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
 ]
 
+
+class EntitySimStub:
+	extends RefCounted
+
+	var present_snapshot_reads := 0
+	var cards := [
+		{
+			"name": "AI zero",
+			"net_id": 111,
+			"position": Vector3(10.0, 2.0, -30.0),
+			"pool": 0,
+			"wire_handle": 1001,
+			"alive": true,
+			"hidden": false,
+			"health": 80,
+			"team": 1,
+			"state_name": "guard",
+		},
+		{
+			"name": "AI one",
+			"net_id": 222,
+			"position": Vector3(20.0, 3.0, -40.0),
+			"pool": 1,
+			"wire_handle": 1002,
+			"alive": false,
+			"hidden": true,
+			"health": 0,
+			"team": 2,
+			"state_name": "dead",
+		},
+	]
+
+	func get_entity_count() -> int:
+		return cards.size()
+
+	func get_entity_debug(index: int) -> Dictionary:
+		return cards[index].duplicate(true) \
+				if index >= 0 and index < cards.size() else {}
+
+	func get_present_snapshot() -> PackedFloat32Array:
+		present_snapshot_reads += 1
+		var snapshot := PackedFloat32Array()
+		snapshot.append_array(_present_row(
+				222, 1002, 502, Vector3(22.0, 4.0, -44.0)))
+		snapshot.append_array(_present_row(
+				333, 2001, 703, Vector3(30.0, 5.0, -50.0)))
+		snapshot.append_array(_present_row(
+				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
+		return snapshot
+
+	func get_present_stride() -> int:
+		return NovaSimulation.PF_STRIDE
+
+	func get_world_entity_debug(net_id: int) -> Dictionary:
+		if net_id != 333:
+			return {}
+		return {
+			"name": "Client vehicle",
+			"state_name": "driving",
+			"health": 400,
+			"team": 3,
+			"alive": true,
+		}
+
+	func _present_row(
+			net_id: int,
+			wire_handle: int,
+			type_id: int,
+			position: Vector3) -> PackedFloat32Array:
+		var row := PackedFloat32Array()
+		row.resize(NovaSimulation.PF_STRIDE)
+		row[NovaSimulation.PF_TYPE_ID] = type_id
+		row[NovaSimulation.PF_NET_ID] = net_id
+		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
+		row[NovaSimulation.PF_KIND] = 1
+		row[NovaSimulation.PF_INDEX] = net_id
+		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
+		row[NovaSimulation.PF_POS_X] = position.x
+		row[NovaSimulation.PF_POS_Y] = position.y
+		row[NovaSimulation.PF_POS_Z] = position.z
+		row[NovaSimulation.PF_ALIVE] = 1.0
+		return row
+
+
+class EntityRuntimeStub:
+	extends RefCounted
+
+	var sim := EntitySimStub.new()
+
+	func get_sim() -> EntitySimStub:
+		return sim
+
+
+class EntityHostHarness:
+	extends "res://game/main_game.gd"
+
+	var runtime_stub := EntityRuntimeStub.new()
+
+	func _current_runtime():
+		return runtime_stub
+
+
 var _saved_config := PackedByteArray()
 var _had_config := false
 var _saved_env := {}
 var _temp_dir := ""
 var _shell: Node = null
+
+
+func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
+	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
+	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	assert_eq(debug_host.debug_set_audio_bus_mute("__missing_bus__", true),
+			ERR_INVALID_PARAMETER)
+	assert_eq(debug_host.debug_set_audio_bus_volume("Master", INF),
+			ERR_INVALID_PARAMETER)
+	assert_eq(debug_host.debug_set_audio_bus_volume(
+			"Master", NovaDebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+			ERR_INVALID_PARAMETER)
+	var bus := AudioServer.get_bus_index("SFX")
+	if bus < 0:
+		pass_test("no SFX bus in this layout")
+		return
+	var previous := {
+		"volume": AudioServer.get_bus_volume_db(bus),
+		"mute": AudioServer.is_bus_mute(bus),
+		"solo": AudioServer.is_bus_solo(bus),
+		"bypass": AudioServer.is_bus_bypassing_effects(bus),
+	}
+	assert_eq(debug_host.debug_set_audio_bus_volume("SFX", -14.5), OK)
+	assert_eq(debug_host.debug_set_audio_bus_mute("SFX", true), OK)
+	assert_eq(debug_host.debug_set_audio_bus_solo("SFX", true), OK)
+	assert_eq(debug_host.debug_set_audio_bus_bypass("SFX", true), OK)
+	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
+	assert_true(AudioServer.is_bus_mute(bus))
+	assert_true(AudioServer.is_bus_solo(bus))
+	assert_true(AudioServer.is_bus_bypassing_effects(bus))
+	AudioServer.set_bus_volume_db(bus, float(previous["volume"]))
+	AudioServer.set_bus_mute(bus, bool(previous["mute"]))
+	AudioServer.set_bus_solo(bus, bool(previous["solo"]))
+	AudioServer.set_bus_bypass_effects(bus, bool(previous["bypass"]))
+
+
+func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
+	var shell = autofree(EntityHostHarness.new())
+	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+
+	var page: Dictionary = debug_host.get_mcp_game_entities(0, 64)
+
+	assert_eq(page["total"], 3)
+	assert_eq(page["entities"][0]["index"], 0)
+	assert_eq(page["entities"][0]["net_id"], 222)
+	assert_eq(page["entities"][0]["ai_index"], 1)
+	assert_true(page["entities"][0]["editable"])
+	assert_eq(page["entities"][0]["mission_position"],
+			Vector3(22.0, 44.0, 4.0))
+	assert_eq(page["entities"][1]["index"], 1)
+	assert_eq(page["entities"][1]["net_id"], 333)
+	assert_eq(page["entities"][1]["name"], "Client vehicle")
+	assert_eq(page["entities"][1]["ai_index"], -1)
+	assert_false(page["entities"][1]["editable"],
+			"non-AI client entities remain discoverable without becoming editable")
+	assert_eq(page["entities"][2]["net_id"], 111)
+	assert_eq(page["entities"][2]["ai_index"], 0)
+	assert_gt(shell.runtime_stub.sim.present_snapshot_reads, 0)
+	assert_eq(debug_host.get_mcp_game_entity(0)["name"], "AI one")
+	assert_eq(debug_host.get_mcp_game_entity(0)["ai_index"], 1)
 
 
 func before_each() -> void:
@@ -358,13 +520,39 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_not_null(_shell.find_child("PickToast", true, false),
 			"the crosshair pick confirms every attempt with a toast")
 
-	_shell.toggle_debug_overlay()
+	(overlay.find_child("CloseDebug", true, false) as Button).pressed.emit()
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open())
 	assert_true(_shell.is_gameplay_input_active(),
-			"closing F3 restores the gameplay-input policy")
+			"the cockpit Close button restores the gameplay-input policy")
 	assert_null(world.get_node_or_null("PickClickCatcher"),
-			"overlay closed: clicks are gameplay again")
+			"Close removes the click picker")
+
+	_shell.toggle_debug_overlay()
+	await get_tree().process_frame
+	assert_not_null(world.get_node_or_null("PickClickCatcher"))
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
+	assert_true(overlay.handle_key_input(escape))
+	await get_tree().process_frame
+	assert_false(_shell.is_debug_overlay_open())
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"Escape removes the click picker through the same visibility edge")
+	assert_false(overlay.get_debug_session().is_presented())
+
+	menu_host.return_to_menu_requested.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(_shell.is_debug_overlay_open(),
+			"returning to the menu cannot blanket-show a closed F3 layer")
+	assert_false(overlay.get_debug_session().is_presented())
+	menu_host.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	assert_false(_shell.is_debug_overlay_open(),
+			"the next mission keeps the overlay's own closed lifecycle")
+	assert_false(overlay.get_debug_session().is_presented())
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

@@ -395,8 +395,6 @@ func move_selected_marker(delta: int) -> void:
 func delete_selected_marker() -> bool:
 	if _c._mission == null or _c._selected_marker.is_empty():
 		return false
-	if _c._sim._reject_edit_while_simulating():
-		return false
 	var marker_index := int(_c._selected_marker["marker_index"])
 	_c._flush_edit()
 	_c._mission.begin_edit()

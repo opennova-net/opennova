@@ -1,10 +1,8 @@
 class_name NovaArmoryHost
 extends Node
 
-## The in-world armory surface BOTH hosts mount — the game shell (main_game) and
-## ONED play-in-editor (mission_play_controller) — so the armory is literally one
-## code path (editor-runtime parity: instantiate the runtime node, never
-## reimplement the surface for the editor).
+## The in-world armory surface mounted by the game shell. Kept as a standalone
+## host so every runtime entry uses one implementation.
 ##
 ## Owns a live NovaMnuMenu over the gameplay view showing weapon.mnu's WEAPON
 ## screen, driven by the ArmoryMenuHost companion, zone-gated on the type-6
@@ -208,7 +206,8 @@ func teardown() -> void:
 # Build the runtime menu node over the gameplay view: the same NovaMnuMenu the
 # menu shell drives (edit_mode off), fed weapon.mnu from the WORLD's mounted
 # resource root, with the canonical stylesheet and the current root's
-# menutxt/gametext tables (ONED play has no front-end shell to load them).
+# menutxt/gametext tables. Direct/headless world hosts may not have run the
+# front-end text bootstrap.
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
 		return true
@@ -323,7 +322,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 
 # The armory's text lookups (WepDes weapon names, CHARCLASS_* rows, TOTAL_WEIGHT)
 # ride the shared NovaStrings registry; the game shell registers these at boot,
-# ONED play does not — fill only the missing tables.
+# while direct/headless world hosts may not — fill only the missing tables.
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: NovaResourceRoot) -> void:
 	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],

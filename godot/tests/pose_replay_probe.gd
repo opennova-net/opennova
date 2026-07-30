@@ -1,6 +1,6 @@
 extends Node
 
-# Pose-replay hit-detection probe: boots ONED play-in-editor on the mission a
+# Pose-replay hit-detection probe: boots the standalone game on the mission a
 # NOVA_POSE_JSON snapshot names, then re-fires the dumped camera ray through
 # the REAL RoundSim (NovaSimulation.debug_spawn_round) as a small fan around
 # the dumped forward, and reports every outcome the F3 Rounds debug ring
@@ -18,7 +18,7 @@ extends Node
 # what SHOULD be along the ray.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const OUT_DIR := "res://../.scratch/pose_replay"
 
@@ -92,60 +92,48 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_expansion(OS.get_environment("NOVA_WR_EXPANSION").strip_edges())
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	for _i in 9:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
 
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	if ws.open_file(NovaPaths.resolve_file(root, mission_file)) != OK:
+	var mission := NovaMissionData.new()
+	if mission.open_file(root.path_join(mission_file)) != OK:
 		push_error("[pr] open failed: " + mission_file)
 		get_tree().quit(1)
 		return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
 
 	# Context: what does the mission place within 80 u of the camera?
-	var controller = ws.get_editor_document()
-	var mission: NovaMissionData = controller.get_mission() if controller != null else null
 	var cam_bms := Vector3(from_g.x, -from_g.z, from_g.y)
-	if mission != null:
-		var near: Array = []
-		for e_v in mission.get_all_entities():
-			var e: Dictionary = e_v
-			var p: Vector3 = e.get("position", Vector3.ZERO)
-			var d := Vector2(p.x - cam_bms.x, p.y - cam_bms.y).length()
-			if d <= 80.0:
-				near.append([d, e])
-		near.sort_custom(func(a, b): return a[0] < b[0])
-		print("[pr] %d mission entities within 80 u (nearest 20):" % near.size())
-		for row in near.slice(0, 20):
-			var e2: Dictionary = row[1]
-			print("[pr]   %6.1fu  bms %s item %s kind %s at %s rot %s" % [
-					row[0], str(e2.get("bms_id", "?")), str(e2.get("item_id", "?")),
-					str(e2.get("kind", "?")), str(e2.get("position", Vector3.ZERO)),
-					str(e2.get("rotation_deg", Vector3.ZERO))])
-			if int(e2.get("bms_id", 0)) == int(OS.get_environment("NOVA_PR_BMS").to_int()):
-				var xf := MissionObjectPlacer.entity_transform(
-						e2.get("position", Vector3.ZERO),
-						e2.get("rotation_deg", Vector3.ZERO))
-				print("[pr]   VISUAL xform basis x=%s y=%s z=%s origin=%s" % [
-						str(xf.basis.x), str(xf.basis.y), str(xf.basis.z), str(xf.origin)])
+	var near: Array = []
+	for e_v in mission.get_all_entities():
+		var e: Dictionary = e_v
+		var p: Vector3 = e.get("position", Vector3.ZERO)
+		var d := Vector2(p.x - cam_bms.x, p.y - cam_bms.y).length()
+		if d <= 80.0:
+			near.append([d, e])
+	near.sort_custom(func(a, b): return a[0] < b[0])
+	print("[pr] %d mission entities within 80 u (nearest 20):" % near.size())
+	for row in near.slice(0, 20):
+		var e2: Dictionary = row[1]
+		print("[pr]   %6.1fu  bms %s item %s kind %s at %s rot %s" % [
+				row[0], str(e2.get("bms_id", "?")), str(e2.get("item_id", "?")),
+				str(e2.get("kind", "?")), str(e2.get("position", Vector3.ZERO)),
+				str(e2.get("rotation_deg", Vector3.ZERO))])
+		if int(e2.get("bms_id", 0)) == int(OS.get_environment("NOVA_PR_BMS").to_int()):
+			var xf := MissionObjectPlacer.entity_transform(
+					e2.get("position", Vector3.ZERO),
+					e2.get("rotation_deg", Vector3.ZERO))
+			print("[pr]   VISUAL xform basis x=%s y=%s z=%s origin=%s" % [
+					str(xf.basis.x), str(xf.basis.y), str(xf.basis.z), str(xf.origin)])
 
-	if int(ws.play_mission()) != OK:
-		push_error("[pr] play failed")
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, mission_file,
+		OS.get_environment("NOVA_WR_EXPANSION").strip_edges())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[pr] " + String(session.error))
 		get_tree().quit(1)
 		return
-	await _settle(120)
-	var runtime = _find_by_method(get_tree().root, "get_sim")
-	var sim = runtime.get_sim() if runtime != null else null
+	var world: GameWorld = session.world
+	var sim = world.get_sim()
 	if sim == null or not sim.has_method("debug_spawn_round"):
 		push_error("[pr] no sim / debug_spawn_round missing (stale DLL?)")
 		get_tree().quit(1)

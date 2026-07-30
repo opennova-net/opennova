@@ -1020,7 +1020,7 @@ func _tool_menu_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"max_dim": int(args.get("max_dim", 1280)),
 		"format": String(args.get("format", "webp")),
 		"quality": float(args.get("quality", 0.8)),
-	})
+	}, func() -> bool: return ctx.cancelled)
 	if not outcome["ok"]:
 		return McpToolResult.error(String(outcome["error"]))
 	var caption := "%dx%d %s, %d KiB — workspace=mnu doc=%s screen=%s interactive=%s" % [

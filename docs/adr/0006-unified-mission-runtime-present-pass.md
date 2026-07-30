@@ -1,10 +1,18 @@
 # ADR 0006 — Unified mission runtime present pass
 
-Status: accepted (branch `unified-edit-history`)
+Status: accepted for the game runtime; the embedded editor-host portion was
+superseded by [ADR 0025](0025-standalone-game-is-the-only-live-mission-runtime.md)
+on 2026-07-29.
 
 > The game-side host class `NovaWorld` discussed here was renamed `GameWorld`
 > in June 2026 (the `NovaWorld` name now belongs to the online service); this
 > record uses the new name.
+>
+> This ADR records the 2026-06 consolidation as it was made. Its one runtime
+> present pass and entity index remain current inside `GameWorld`. References
+> below to editor Play, self-ticking, rewind-on-Stop, and an editor-owned
+> `NovaSimulation` are historical: ADR 0025 later removed embedded mission
+> execution from ONED.
 
 ## Context
 
@@ -51,6 +59,15 @@ One runtime, one present pass, one present index — both hosts go through them.
   play; on play it `cancel_drag()` + `disarm_placement()`; on stop it restores authored transforms.
 - `MissionEntityRegistry` is kept (now also the present index) — the editor's single-action PLAYPARTANIM
   preview still uses its `resolve_single`/`resolve_group`/`resolve_zone`.
+
+### Amendment (2026-07-29)
+
+ADR 0025 supersedes the editor-host consequences above. ONED no longer creates
+or transports a live mission runtime, so editor Play/Stop transform ownership
+and rewind behavior no longer exist. The game-side result remains: `GameWorld`
+owns the consolidated runtime, present sequence, and entity index. Authoring
+previews may still reuse public render/data seams, but mission validation runs
+in the managed standalone game from saved loose assets.
 
 ## Deferred seams
 

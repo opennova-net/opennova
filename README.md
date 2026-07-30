@@ -80,7 +80,7 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 The authoring layer for JO assets, organized into workspaces grouped by purpose:
 
-- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime), and Avatars (`Avatars.def` player characters: head/body/arms parts and combos under the nationality/division tree, with a 3D preview).
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, saved as loose assets and tested in the standalone game with F5/F6), and Avatars (`Avatars.def` player characters: head/body/arms parts and combos under the nationality/division tree, with a 3D preview).
 - **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview), and HUD (a read-only preview of the in-game HUD layout).
 - **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
 - **Atmosphere**: Particles (`.ptl` effects: explosions, smoke, muzzle flashes, water spray), Sound (`.lwf` sound profiles), and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.

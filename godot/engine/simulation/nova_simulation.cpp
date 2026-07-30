@@ -711,15 +711,16 @@ void NovaSimulation::set_mission_variable(int index, int value) {
 // the same stores the scripted SETHP path touches (registry + the motor copy)
 // [orig: the WAC SETHP op writes entity+286]. Lets in-game probes shorten a fight
 // without bypassing the damage/death chain under test.
-void NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
-	if (!ai_ || !world_) return;
+Error NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
+	if (!ai_ || !world_) return ERR_UNAVAILABLE;
 	AiEntity *e = ai_->at(p_index);
-	if (!e) return;
+	if (!e) return ERR_INVALID_PARAMETER;
+	opennova::world::Entity *ent = world_->registry.get(e->handle);
+	if (ent == nullptr) return ERR_UNAVAILABLE;
 	e->health = static_cast<int16_t>(p_hp);
-	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
-		ent->health = p_hp;
-		ent->alive = p_hp > 0;
-	}
+	ent->health = p_hp;
+	ent->alive = p_hp > 0;
+	return OK;
 }
 
 // The D-AI-6 muzzle seam: the present layer pushes each posed model's gun-flash
@@ -756,18 +757,19 @@ void NovaSimulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_po
 // position stores (registry + motor copy) — mission-space coordinates. Lets
 // in-game probes bring a reachable victim to the player when the mission
 // geography (interiors, fences) defeats straight-line navigation.
-void NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
-	if (!ai_ || !world_) return;
+Error NovaSimulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
+	if (!ai_ || !world_) return ERR_UNAVAILABLE;
 	AiEntity *e = ai_->at(p_index);
-	if (!e) return;
+	if (!e) return ERR_INVALID_PARAMETER;
+	opennova::world::Entity *ent = world_->registry.get(e->handle);
+	if (ent == nullptr) return ERR_UNAVAILABLE;
 	e->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
 	e->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
 	e->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
-	if (opennova::world::Entity *ent = world_->registry.get(e->handle)) {
-		ent->position.x = p_mission_pos.x;
-		ent->position.y = p_mission_pos.y;
-		ent->position.z = p_mission_pos.z;
-	}
+	ent->position.x = p_mission_pos.x;
+	ent->position.y = p_mission_pos.y;
+	ent->position.z = p_mission_pos.z;
+	return OK;
 }
 
 // World-registry probe seams keyed by SSN — pool-1 vehicles (and anything else
@@ -784,7 +786,17 @@ Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
 	out["net_id"] = static_cast<int>(ent->net_id);
 	out["bms_id"] = ent->bms_id;
 	out["pool"] = h.pool();
+	out["kind"] = ent->spawn_origin == 0xFFFFFFFFu
+			? -1
+			: static_cast<int>(ent->spawn_origin >> 24);
+	out["index"] = ent->spawn_origin == 0xFFFFFFFFu
+			? -1
+			: static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+	out["item_id"] = ent->item_id;
+	out["name"] = String(ent->name.c_str());
+	out["team"] = static_cast<int>(ent->team);
 	out["alive"] = ent->alive;
+	out["hidden"] = ent->hidden;
 	out["health"] = ent->health;
 	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
 	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
@@ -808,13 +820,15 @@ Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
 // as the F3 Player-tab dump records them) — entity + AI-motor stores written
 // together so the next motor tick continues from the pose instead of
 // snapping back.
-void NovaSimulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
-                                                 float p_yaw_deg, float p_pitch_deg) {
-	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
+Error NovaSimulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
+                                                  float p_yaw_deg, float p_pitch_deg) {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) {
+		return ERR_UNAVAILABLE;
+	}
 	const opennova::world::EntityHandle h = world_->cached.local_player;
 	opennova::world::Entity *e = world_->registry.get(h);
 	AiEntity *p = world_->ai->for_handle(h);
-	if (e == nullptr || p == nullptr) return;
+	if (e == nullptr || p == nullptr) return ERR_UNAVAILABLE;
 	e->position.x = p_mission_pos.x;
 	e->position.y = p_mission_pos.y;
 	e->position.z = p_mission_pos.z;
@@ -824,6 +838,7 @@ void NovaSimulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	p->heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
 	p->pitch = static_cast<int32_t>(
 			static_cast<double>(p_pitch_deg) / opennova::world::kDegreesPerBam);
+	return OK;
 }
 
 void NovaSimulation::debug_set_world_entity_position(int p_net_id,

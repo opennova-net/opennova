@@ -1,8 +1,8 @@
 extends Node
 
 ## Deterministic retail-comparison capture at the real local-player spawn.
-## This uses ONED's real Play Mission path and never searches foliage-painted
-## cells, teleports the camera, or synthesizes input.
+## This uses the real standalone game shell and never searches
+## foliage-painted cells, teleports the camera, or synthesizes input.
 ##
 ## NOVA_MISSION_RESOURCE_DIR=<loose-authoring-dir> \
 ## NOVA_RUNTIME_RESOURCE_DIR=<packed-game-dir> NOVA_EXPANSION=revx02 \
@@ -11,13 +11,11 @@ extends Node
 ## Optional output override: NOVA_SPAWN_CAPTURE_DIR=<absolute-or-res://-path>
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const DEFAULT_MISSION := "00TRe.bms"
 const DEFAULT_EXPANSION := "revx02"
 const DEFAULT_OUT_DIR := "res://../.scratch/00tre-spawn"
-const EDITOR_BOOT_FRAMES := 9
-const MISSION_OPEN_FRAMES := 30
 const PLAY_SETTLE_FRAMES := 132
 const VISIBILITY_SETTLE_FRAMES := 3
 const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)
@@ -25,9 +23,8 @@ const FLICKER_CAPTURE_COUNT := 6
 const FLICKER_MASK_DELTA := 6
 const FLICKER_FADE_STEP := 0.25 / 22.0
 
-var _mission_workspace
-var _play_controller
-var _input_router: Node
+var _game: Node
+var _world: GameWorld
 var _out_abs := ""
 var _capture_stem := "00TRe"
 
@@ -66,36 +63,20 @@ func _ready() -> void:
 	print("[spawn-capture] mission authoring root: ", mission_resource_dir)
 	print("[spawn-capture] packed runtime root: ", runtime_resource_dir)
 	print("[spawn-capture] mission: ", mission_name, " -> ", mission_path)
-	print("[spawn-capture] input: disabled before first played frame; none synthesized")
+	print("[spawn-capture] input: disabled after shell load; none synthesized")
 
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await _settle(EDITOR_BOOT_FRAMES)
-	var workstation = app.workstation
-	if workstation == null:
-		_fail("ONED workstation unavailable")
+	get_window().mode = Window.MODE_WINDOWED
+	get_window().size = CAPTURE_VIEWPORT_SIZE
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, runtime_resource_dir, mission_name, requested_expansion, mission_path)
+	if not String(session.get("error", "")).is_empty():
+		_fail(String(session.error))
 		return
-	workstation.set_resource_root_dir(mission_resource_dir, false)
-	_mission_workspace = workstation.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	if _mission_workspace == null or not _mission_workspace.has_method("play_mission"):
-		_fail("mission workspace unavailable")
-		return
-	var open_err := int(_mission_workspace.open_file(mission_path))
-	if open_err != OK:
-		_fail("mission open failed (%d): %s" % [open_err, mission_path])
-		return
-	workstation.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(MISSION_OPEN_FRAMES)
-	# The editor first opens the loose mission into its in-memory authoring
-	# document. Replace that same injected root with the packed retail mount
-	# before Play so the live GameWorld resolves every dependency through the
-	# requested expansion, while preserving the exact loose mission document.
-	var runtime_root: NovaResourceRoot = workstation.get_resource_root()
-	var mount_err := int(runtime_root.mount_runtime(runtime_resource_dir, requested_expansion,
-		false, "jo"))
-	if mount_err != OK:
-		_fail("packed runtime mount failed (%d): %s" % [
-			mount_err, runtime_root.get_last_error()])
+	_game = session.game
+	_world = session.world
+	var runtime_root: NovaResourceRoot = _game.current_resource_root()
+	if runtime_root == null:
+		_fail("standalone game did not retain its packed runtime root")
 		return
 	var mount_validation_error := runtime_mount_validation_error(
 		requested_expansion, runtime_root.get_expansion(),
@@ -105,43 +86,16 @@ func _ready() -> void:
 		return
 	print("[spawn-capture] runtime expansion: requested=%s actual=%s mount=packed" % [
 		requested_expansion, runtime_root.get_expansion()])
-	var play_err := int(_mission_workspace.play_mission())
-	if play_err != OK:
-		_fail("play_mission failed (%d): %s" % [play_err, mission_name])
-		return
-
-	# Bind only through the workspace's public live-play seam. Input is disabled
-	# immediately, before the first played frame can move or rotate the player.
-	_play_controller = _mission_workspace.play_controller()
-	if _play_controller == null or not _play_controller.is_playing():
-		_fail("live play controller unavailable")
-		return
-	var world = _play_controller.get_world()
-	var camera: Camera3D = _play_controller.get_play_camera()
-	if world == null or not world.is_loaded() or not (world.get_sim() != null and world.get_sim().has_local_player()):
+	var world: GameWorld = _world
+	var camera: Camera3D = session.camera
+	if world == null or not world.is_loaded() \
+			or world.get_sim() == null or not world.get_sim().has_local_player():
 		_fail("GameWorld has no loaded local-player spawn anchor")
 		return
 	if camera == null or not camera.is_inside_tree():
-		_fail("play Camera3D unavailable")
+		_fail("game Camera3D unavailable")
 		return
-	var play_viewport := camera.get_viewport() as SubViewport
-	var play_container := _play_controller.get_node_or_null(
-		"PlayViewportContainer") as SubViewportContainer
-	if play_viewport == null or play_container == null:
-		_fail("clean play SubViewport host unavailable")
-		return
-	# The editor workspace is intentionally dock-shaped, but the retail oracle is
-	# a 16:9 game viewport. Detach the clean play target from the dock's stretch
-	# before settling so camera FOV, terrain coverage, and both A/B images use the
-	# same 1600x900 aspect as the standalone game.
-	play_container.stretch = false
-	play_viewport.size = CAPTURE_VIEWPORT_SIZE
-	_play_controller.set_capture_suspended(true)
-	_play_controller.set_process_input(false)
-	_play_controller.set_process_unhandled_input(false)
-	_input_router = _play_controller.find_child("PlayInputRouter", true, false)
-	if _input_router != null:
-		_input_router.set_process_unhandled_input(false)
+	var play_viewport: Viewport = camera.get_viewport()
 	world.get_sim().set_player_input(false, false, false, false, false, false, false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	await _settle(PLAY_SETTLE_FRAMES)
@@ -150,13 +104,13 @@ func _ready() -> void:
 	if environment == null or environment.get("time_of_day") == null:
 		_fail("played mission environment/TOD unavailable")
 		return
-	if play_viewport == null or play_viewport == get_viewport():
-		_fail("camera is not in the clean play SubViewport")
+	if play_viewport == null:
+		_fail("game viewport unavailable")
 		return
 
 	# Freeze the real game-loop host. Rendering stays live, while the player,
 	# camera, mission clock, and foliage dispatch stay bit-identical for the A/B.
-	_play_controller.set_process(false)
+	world.process_mode = Node.PROCESS_MODE_DISABLED
 	var dispatcher = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
 		mission_name,
@@ -170,21 +124,26 @@ func _ready() -> void:
 		_fail("spawn state failed validation")
 		return
 	var loaded_mission = world.get_loaded_mission()
-	var winning_entries := _winning_source_entries(runtime_root, PackedStringArray([
-		mission_name,
+	var winning_entries: Array = [{
+		"logical_name": mission_name,
+		"source_type": "loose",
+		"source_path": mission_path,
+		"archive_path": "",
+	}]
+	winning_entries.append_array(_winning_source_entries(runtime_root, PackedStringArray([
 		String(loaded_mission.get_terrain_ref()) + ".trn",
 		String(loaded_mission.get_environment_ref()) + ".env",
-	]))
+	])))
 	var source_validation_error := runtime_source_validation_error(
-		requested_expansion, mission_name, winning_entries)
+		requested_expansion, mission_name, winning_entries, true)
 	if not source_validation_error.is_empty():
 		_fail(source_validation_error)
 		return
 	for entry in winning_entries:
-		print("[spawn-capture] runtime source: logical_name=%s source_type=%s archive_path=%s" % [
+		print("[spawn-capture] runtime source: logical_name=%s source_type=%s source=%s" % [
 			entry.get("logical_name", ""),
 			entry.get("source_type", ""),
-			entry.get("archive_path", ""),
+			entry.get("source_path", entry.get("archive_path", "")),
 		])
 	_print_snapshot(spawn_state)
 	_print_runtime_metadata(world, environment)
@@ -260,7 +219,7 @@ static func runtime_mount_validation_error(
 
 static func runtime_source_validation_error(
 		requested_expansion: String, mission_name: String,
-		winning_entries: Array) -> String:
+		winning_entries: Array, mission_is_saved_loose: bool = false) -> String:
 	if winning_entries.is_empty():
 		return "runtime comparison reported no winning source entries"
 	var mission_key := mission_name.get_file().to_lower()
@@ -274,10 +233,15 @@ static func runtime_source_validation_error(
 		var archive_path := String(entry.get("archive_path", "")).replace("\\", "/")
 		if logical_name.is_empty():
 			return "runtime comparison has a missing winning source entry"
-		if source_type != "pff" or archive_path.is_empty():
-			return "%s did not resolve from a packed archive" % logical_name
 		if logical_name.to_lower() == mission_key:
 			mission_found = true
+			if mission_is_saved_loose:
+				var source_path := String(entry.get("source_path", "")).replace("\\", "/")
+				if source_type != "loose" or source_path.is_empty():
+					return "%s did not identify its saved loose source" % logical_name
+				continue
+		if source_type != "pff" or archive_path.is_empty():
+			return "%s did not resolve from a packed archive" % logical_name
 	if not mission_found:
 		return "runtime comparison did not report the %s mission winner" % mission_name
 	return ""
@@ -306,7 +270,8 @@ func _run_foliage_flicker_probe(
 	# Freeze every scene update and drive only the real foliage dispatcher. The
 	# renderer stays live, so any remaining pixel changes come from foliage draws.
 	world.process_mode = Node.PROCESS_MODE_DISABLED
-	var viewmodel_pass: Node = _play_controller.find_child("ViewmodelPass", true, false)
+	var viewmodel_pass: Node = _game.find_child("ViewmodelPass", true, false) \
+			if _game != null else null
 	if viewmodel_pass is CanvasItem:
 		viewmodel_pass.visible = false
 	var base_transform := camera.global_transform
@@ -602,14 +567,8 @@ func _fail(reason: String) -> void:
 
 
 func _shutdown(exit_code: int) -> void:
-	if _play_controller != null:
-		_play_controller.set_process(true)
-		_play_controller.set_process_input(true)
-		_play_controller.set_process_unhandled_input(true)
-	if _input_router != null:
-		_input_router.set_process_unhandled_input(true)
-	if _mission_workspace != null and _mission_workspace.has_method("stop_play_mission"):
-		_mission_workspace.stop_play_mission()
+	if _world != null and is_instance_valid(_world):
+		_world.process_mode = Node.PROCESS_MODE_INHERIT
 	get_tree().quit(exit_code)
 
 func _print_runtime_metadata(world, environment) -> void:

@@ -5,8 +5,9 @@ extends NovaDebugPage
 ## and the foliage dispatcher's frame stats, with the render knobs beside
 ## them. "Hide foliage" rides the NovaDebugOptions registry (the host owns the
 ## dispatcher node); the draw-mode and terrain-detail knobs poke the terrain
-## node directly through ctx.world(), the Sim/Vars precedent for page-local
-## controls.
+## node through the shared debug catalog. Their bespoke UI is registered with
+## the page's control-state bridge so target availability and write policy
+## stay identical to the generic controls.
 
 var _patches_label: Label
 var _traversal_label: Label
@@ -65,6 +66,7 @@ func _build() -> void:
 		_mode_option.add_item(mode_name)
 	_mode_option.item_selected.connect(_on_mode_selected)
 	mode_row.add_child(_mode_option)
+	_debug_controls[&"terrain_draw_mode"] = _mode_option
 
 	var detail_row := HBoxContainer.new()
 	detail_row.name = "TerrainDetailRow"
@@ -82,12 +84,26 @@ func _build() -> void:
 	_detail_slider.tooltip_text = "Scale how aggressively the terrain refines toward the camera (1.0 = normal)."
 	_detail_slider.value_changed.connect(_on_detail_changed)
 	detail_row.add_child(_detail_slider)
+	_debug_controls[&"terrain_lod_quality"] = _detail_slider
 	_detail_value = Label.new()
 	_detail_value.name = "TerrainDetailValue"
 	_detail_value.text = "1.0"
 	detail_row.add_child(_detail_value)
 
 	add_option_check(&"hide_foliage")
+
+	var culling_label := Label.new()
+	culling_label.text = "Traversal overrides"
+	add_child(culling_label)
+	for control_id in [
+			&"terrain_no_frustum",
+			&"terrain_no_nearfar",
+			&"terrain_no_sideplanes",
+			&"terrain_no_partial_subdiv",
+			&"terrain_force_leaves",
+			&"terrain_force_lod0",
+	]:
+		add_debug_control(control_id)
 
 
 func refresh() -> void:
@@ -156,6 +172,9 @@ func _dispatcher() -> Object:
 
 
 func _on_mode_selected(index: int) -> void:
+	if _ctx.session != null and _ctx.session.has_control(&"terrain_draw_mode"):
+		_ctx.session.set_control_value(&"terrain_draw_mode", index)
+		return
 	var terrain := _terrain()
 	if terrain != null:
 		terrain.set_debug_mode(index)
@@ -163,6 +182,9 @@ func _on_mode_selected(index: int) -> void:
 
 func _on_detail_changed(value: float) -> void:
 	_detail_value.text = "%.1f" % value
+	if _ctx.session != null and _ctx.session.has_control(&"terrain_lod_quality"):
+		_ctx.session.set_control_value(&"terrain_lod_quality", value)
+		return
 	var terrain := _terrain()
 	if terrain != null:
 		terrain.set_lod_quality(value)

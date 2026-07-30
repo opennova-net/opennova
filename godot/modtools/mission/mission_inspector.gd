@@ -106,23 +106,6 @@ var _delete_button: Button
 var _mode_tabs: TabBar
 var _mode_syncing: bool = false
 
-# Live-simulation transport (Play the mission): drives the controller's sim over the placed nodes.
-var _sim_bar: HBoxContainer
-var _sim_play_btn: Button
-# Play-in-editor hooks, injected by the workspace (the swap is a viewport concern
-# the inspector cannot own): play() -> Error, is_playing() -> bool, stop() -> void.
-var _play_mission_cb := Callable()
-var _is_playing_cb := Callable()
-var _stop_play_cb := Callable()
-# Debug-overlay hooks, same injection pattern: toggle() -> void, is_open() -> bool.
-var _debug_toggle_cb := Callable()
-var _debug_is_open_cb := Callable()
-var _play_mission_btn: Button
-var _debug_btn: Button
-var _sim_pause_btn: Button
-var _sim_step_btn: Button
-var _sim_stop_btn: Button
-
 # --- Cached option lists (group / waypoint-path / entity pickers) --------------
 # get_group_options / get_waypoint_path_options / get_all_entities each walk + marshal every entity
 # (~1600 Dictionaries across the C++ boundary). They feed the Faction Group + Behavior Waypoint-path
@@ -757,12 +740,10 @@ func _sync_user_points_check(has_selection: bool) -> void:
 		return
 	var has_points := false
 	var visible := false
-	var simulating := false
 	if has_selection and _controller != null:
 		has_points = _controller.selected_has_user_points() if _controller.has_method("selected_has_user_points") else false
 		visible = _controller.is_selected_user_points_visible() if _controller.has_method("is_selected_user_points_visible") else false
-		simulating = _controller.is_simulating() if _controller.has_method("is_simulating") else false
-	_user_points_check.disabled = not has_points or simulating
+	_user_points_check.disabled = not has_points
 	_user_points_check.button_pressed = has_points and visible
 
 
@@ -838,148 +819,6 @@ func _build_mode_tabs() -> void:
 	_mode_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root.add_child(_mode_tabs)
 	_mode_tabs.tab_changed.connect(_on_mode_tab_changed)
-	_build_sim_bar()
-
-
-# A Play / Pause / Step / Stop row that runs the live mission simulation over the placed entities
-# (the AI walks the NPCs along their authored routes). Read-only over the mission; Stop restores.
-func _build_sim_bar() -> void:
-	_sim_bar = HBoxContainer.new()
-	_sim_bar.name = "MissionSimBar"
-	_sim_bar.add_theme_constant_override("separation", 4)
-	_sim_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_sim_bar.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	_root.add_child(_sim_bar)
-
-	var label := InspectorForms.add_muted_label(_sim_bar, "Simulate:")
-	label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	label.clip_text = true
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-
-	_sim_play_btn = Button.new()
-	_sim_play_btn.text = "Play"
-	_sim_play_btn.tooltip_text = "Promote the loaded mission and walk its AI along their routes."
-	_prepare_sim_button(_sim_play_btn)
-	_sim_bar.add_child(_sim_play_btn)
-	_sim_play_btn.pressed.connect(func() -> void:
-		if _controller != null: _controller.sim_play())
-
-	_sim_pause_btn = Button.new()
-	_sim_pause_btn.text = "Pause"
-	_prepare_sim_button(_sim_pause_btn)
-	_sim_bar.add_child(_sim_pause_btn)
-	_sim_pause_btn.pressed.connect(func() -> void:
-		if _controller != null: _controller.sim_pause())
-
-	_sim_step_btn = Button.new()
-	_sim_step_btn.text = "Step"
-	_sim_step_btn.tooltip_text = "Advance the simulation one tick."
-	_prepare_sim_button(_sim_step_btn)
-	_sim_bar.add_child(_sim_step_btn)
-	_sim_step_btn.pressed.connect(func() -> void:
-		if _controller != null: _controller.sim_step())
-
-	_sim_stop_btn = Button.new()
-	_sim_stop_btn.text = "Stop"
-	_sim_stop_btn.tooltip_text = "Stop and restore the authored positions."
-	_prepare_sim_button(_sim_stop_btn)
-	_sim_bar.add_child(_sim_stop_btn)
-	_sim_stop_btn.pressed.connect(func() -> void:
-		if _controller != null: _controller.sim_stop())
-
-	_sim_bar.add_child(VSeparator.new())
-
-	# Play-in-editor: boots the REAL game loop over the open mission in a play
-	# viewport (the in-place Simulate above stays for quick in-context checks).
-	_play_mission_btn = Button.new()
-	_play_mission_btn.text = "Play Mission"
-	_play_mission_btn.tooltip_text = "Run the open mission with the real game loop in the viewport. Esc stops."
-	_prepare_sim_button(_play_mission_btn)
-	_sim_bar.add_child(_play_mission_btn)
-	_play_mission_btn.pressed.connect(_on_play_mission_pressed)
-
-	# Mission debug panel: summons the engine debug overlay over the editor
-	# (read-only there — the workspace locks variable edits before mounting).
-	_debug_btn = Button.new()
-	_debug_btn.name = "MissionDebugBtn"
-	_debug_btn.toggle_mode = true
-	_debug_btn.text = "Debug"
-	_debug_btn.tooltip_text = "Open the mission debug panel: live units, sim transport, and script variables."
-	_prepare_sim_button(_debug_btn)
-	_sim_bar.add_child(_debug_btn)
-	_debug_btn.toggled.connect(_on_debug_toggled)
-
-
-# The workspace injects these after building the inspector; without them (tests,
-# headless) the Play Mission button simply hides.
-func set_play_hooks(play: Callable, is_playing: Callable, stop: Callable) -> void:
-	_play_mission_cb = play
-	_is_playing_cb = is_playing
-	_stop_play_cb = stop
-	_refresh_sim_bar()
-
-
-# Same injection pattern as set_play_hooks: the Debug toggle hides until the
-# workspace hands over the overlay summon + open-state query.
-func set_debug_hooks(toggle: Callable, is_open: Callable) -> void:
-	_debug_toggle_cb = toggle
-	_debug_is_open_cb = is_open
-	_refresh_sim_bar()
-
-
-func _on_debug_toggled(_pressed: bool) -> void:
-	if _debug_toggle_cb.is_valid():
-		_debug_toggle_cb.call()
-	# Re-sync from the real open state: a summon that could not mount (no shell)
-	# must not leave the toggle latched on.
-	_refresh_sim_bar()
-
-
-func _on_play_mission_pressed() -> void:
-	if _is_playing_cb.is_valid() and bool(_is_playing_cb.call()):
-		if _stop_play_cb.is_valid():
-			_stop_play_cb.call()
-	elif _play_mission_cb.is_valid():
-		_play_mission_cb.call()
-	_refresh_sim_bar()
-
-
-func _prepare_sim_button(button: Button) -> void:
-	button.custom_minimum_size = Vector2(0, 30)
-	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-
-
-func _refresh_sim_bar() -> void:
-	if _sim_bar == null:
-		return
-	# Simulation is an optional controller capability; tolerate controllers (e.g. the test
-	# doubles) that don't implement it by hiding the bar instead of erroring.
-	var supported: bool = _controller != null and _controller.has_method("can_simulate")
-	var can: bool = supported and _controller.can_simulate()
-	var simming: bool = supported and _controller.is_simulating()
-	var playing: bool = supported and _controller.is_sim_playing()
-	# The bar also stays up whenever the Debug toggle is wired: it is the
-	# overlay's ONLY close affordance in the editor, so it must remain reachable
-	# with no mission open (the perf tab works without a sim) and while an
-	# overlay is still up after the mission underneath it cleared.
-	_sim_bar.visible = can or simming or _debug_toggle_cb.is_valid()
-	_sim_play_btn.disabled = not can or playing
-	_sim_pause_btn.disabled = not playing
-	_sim_step_btn.disabled = not can or playing
-	_sim_stop_btn.disabled = not simming
-	if _play_mission_btn != null:
-		var pie_playing := _is_playing_cb.is_valid() and bool(_is_playing_cb.call())
-		_play_mission_btn.visible = _play_mission_cb.is_valid()
-		_play_mission_btn.text = "Stop Playing" if pie_playing else "Play Mission"
-		_play_mission_btn.disabled = not pie_playing and not can
-	if _debug_btn != null:
-		# Stays enabled regardless of sim state: the overlay is useful without a
-		# live sim (perf tab, last mission's spans). Pressed state rides this
-		# refresh (controller.changed), so no polling.
-		_debug_btn.visible = _debug_toggle_cb.is_valid()
-		if _debug_is_open_cb.is_valid():
-			_debug_btn.set_pressed_no_signal(bool(_debug_is_open_cb.call()))
 
 
 func _on_mode_tab_changed(tab: int) -> void:
@@ -990,7 +829,6 @@ func _on_mode_tab_changed(tab: int) -> void:
 
 
 func _refresh_mode_tabs() -> void:
-	_refresh_sim_bar()
 	if _mode_tabs == null:
 		return
 	var has_mission := _controller != null and _controller.get_mission() != null

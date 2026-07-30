@@ -859,8 +859,8 @@ zero-only; canonical count preselect + ACCEPT serialization are live), the
 item_availability promote; values in net-re §5.63), the witnessed weight
 format, and the offline ACCEPT collect/apply seam — now the full multi-slot
 kit into the sim's slot pool with requested-ammo pool fills (net-re §5.63).
-The game/editor's shared `GameWorld` exposes its lazily loaded weapon catalog
-to the armory host, so this canonical reselect also runs on the first production
+The standalone game's `GameWorld` exposes its lazily loaded weapon catalog to
+the armory host, so this canonical reselect also runs on the first production
 visit (fixed 2026-07-21 after the unit proxy had masked the missing host seam).
 Kept divergence: **D-MNU-9**. Deferred (unported sub-elements, tracked here +
 in `ArmoryMenuHost`'s header): the per-class loadout buffer MEMORY

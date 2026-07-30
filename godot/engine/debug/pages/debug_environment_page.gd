@@ -2,9 +2,8 @@ class_name DebugEnvironmentPage
 extends NovaDebugPage
 ## Environment: the time-of-day / fog / sun state NovaEnvironment resolved,
 ## the weather core's wind, and the water surface — with the scrub knobs
-## beside them. Knobs poke the live nodes directly through ctx.world() (the
-## Sim/Vars precedent) and re-mirror them each refresh, so a WAC script or
-## editor poke never fights the UI.
+## beside them. Knobs use the shared session and re-mirror the public nodes
+## each refresh, so F3 and automation share one authority-checked path.
 
 var _env_label: Label
 var _water_label: Label
@@ -46,13 +45,15 @@ func _build() -> void:
 	_time_slider = HSlider.new()
 	_time_slider.name = "TimeOfDay"
 	_time_slider.min_value = 0
-	_time_slider.max_value = 2359
+	_time_slider.max_value = 1439
 	_time_slider.step = 1
-	_time_slider.value = 1200
+	_time_slider.value = 720
 	_time_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_time_slider.tooltip_text = "Scrub the mission clock (HHMM) — sun, sky and lighting follow."
+	_time_slider.tooltip_text = \
+			"Scrub the mission clock by minute — sun, sky and lighting follow."
 	_time_slider.value_changed.connect(_on_time_changed)
 	time_row.add_child(_time_slider)
+	_debug_controls[&"environment_time_of_day"] = _time_slider
 	_time_value = Label.new()
 	_time_value.name = "TimeOfDayValue"
 	_time_value.text = "1200"
@@ -74,6 +75,7 @@ func _build() -> void:
 	_wind_slider.tooltip_text = "Scale the wind driving foliage sway and weather gusts."
 	_wind_slider.value_changed.connect(_on_wind_changed)
 	wind_row.add_child(_wind_slider)
+	_debug_controls[&"environment_wind_strength"] = _wind_slider
 	_wind_value = Label.new()
 	_wind_value.name = "WindStrengthValue"
 	_wind_value.text = "100"
@@ -90,6 +92,7 @@ func _build() -> void:
 	short_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	short_button.pressed.connect(_on_lightning_short)
 	lightning_row.add_child(short_button)
+	_debug_controls[&"environment_lightning_short"] = short_button
 	var long_button := Button.new()
 	long_button.name = "LightningLong"
 	long_button.text = "Lightning (long)"
@@ -97,6 +100,7 @@ func _build() -> void:
 	long_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	long_button.pressed.connect(_on_lightning_long)
 	lightning_row.add_child(long_button)
+	_debug_controls[&"environment_lightning_long"] = long_button
 
 
 func refresh() -> void:
@@ -116,7 +120,8 @@ func refresh() -> void:
 			float(env.get_fog_start()), float(env.get_fog_distance()),
 			int(env.get_fog_type()), float(env.get_fog_level()),
 			sun.x, sun.y, sun.z]
-		_time_slider.set_value_no_signal(time_hhmm)
+		_time_slider.set_value_no_signal(
+				NovaEnvironment.hhmm_to_minute_of_day(time_hhmm))
 		_time_value.text = "%04d" % int(time_hhmm)
 
 	var weather := _weather()
@@ -158,26 +163,23 @@ func _water() -> Object:
 
 
 func _on_time_changed(value: float) -> void:
-	_time_value.text = "%04d" % int(value)
-	var env := _env()
-	if env != null:
-		env.set("time_of_day", value)
+	_time_value.text = "%04d" % int(
+			NovaEnvironment.minute_of_day_to_hhmm(value))
+	if _ctx.session != null:
+		_ctx.session.set_control_value(&"environment_time_of_day", value)
 
 
 func _on_wind_changed(value: float) -> void:
 	_wind_value.text = "%d" % int(value)
-	var weather := _weather()
-	if weather != null:
-		weather.set("wind_strength", value)
+	if _ctx.session != null:
+		_ctx.session.set_control_value(&"environment_wind_strength", value)
 
 
 func _on_lightning_short() -> void:
-	var weather := _weather()
-	if weather != null and weather.has_method("trigger_lightning_short"):
-		weather.trigger_lightning_short()
+	if _ctx.session != null:
+		_ctx.session.invoke_control(&"environment_lightning_short")
 
 
 func _on_lightning_long() -> void:
-	var weather := _weather()
-	if weather != null and weather.has_method("trigger_lightning_long"):
-		weather.trigger_lightning_long()
+	if _ctx.session != null:
+		_ctx.session.invoke_control(&"environment_lightning_long")

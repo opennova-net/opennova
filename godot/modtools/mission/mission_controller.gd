@@ -29,7 +29,6 @@ const MissionMarkerOverlay := preload("res://modtools/mission/mission_marker_ove
 const ObjectUserPointOverlayScript := preload("res://engine/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -106,13 +105,6 @@ var _placer  # MissionObjectPlacer (preloaded, no class_name)
 # Pickable index harvested from the placer (edit_mode): one record per (entity,
 # static batch) or per animated entity. See MissionObjectPlacer.pickable_records.
 var _pickable: Array = []
-
-# --- Live simulation ("Play the mission") -------------------------------------
-# The shared MissionRuntime node (parented under the objects container so it self-ticks via _process)
-# that promotes the loaded mission into a libs/world World + AI and presents entity state (transform +
-# part anims + visibility) onto the placed nodes -- the SAME runtime + present pass the game runs. Null
-# when not simulating. Mutually exclusive with editing: starting it disarms the active tool.
-var _sim_driver: Node = null
 
 # --- Exact picking via per-entity collision bodies ----------------------------
 # Object picking shoots the cursor ray through the viewport world's physics space and
@@ -292,7 +284,7 @@ const ControllerViewport := preload("res://modtools/mission/controller/viewport_
 const ControllerPlacement := preload("res://modtools/mission/controller/placement_ops.gd")
 const ControllerWaypoints := preload("res://modtools/mission/controller/waypoint_ops.gd")
 const ControllerZones := preload("res://modtools/mission/controller/zone_ops.gd")
-const ControllerSim := preload("res://modtools/mission/controller/sim_ops.gd")
+const ControllerPreview := preload("res://modtools/mission/controller/preview_ops.gd")
 const ControllerHistory := preload("res://modtools/mission/controller/history_ops.gd")
 const ControllerSelection := preload("res://modtools/mission/controller/selection_ops.gd")
 const ControllerScripting := preload("res://modtools/mission/controller/scripting_ops.gd")
@@ -303,7 +295,7 @@ var _viewport  # ControllerViewport (created in _init)
 var _placement  # ControllerPlacement (created in _init)
 var _waypoints  # ControllerWaypoints (created in _init)
 var _zones  # ControllerZones (created in _init)
-var _sim  # ControllerSim (created in _init)
+var _preview  # ControllerPreview (created in _init)
 var _history  # ControllerHistory (created in _init)
 var _selection  # ControllerSelection (created in _init)
 var _scripting  # ControllerScripting (created in _init)
@@ -318,7 +310,7 @@ func _init(p_terrain_editor: Node = null) -> void:
 	_placement = ControllerPlacement.new(self)
 	_waypoints = ControllerWaypoints.new(self)
 	_zones = ControllerZones.new(self)
-	_sim = ControllerSim.new(self)
+	_preview = ControllerPreview.new(self)
 	_history = ControllerHistory.new(self)
 	_selection = ControllerSelection.new(self)
 	_scripting = ControllerScripting.new(self)
@@ -606,15 +598,15 @@ func set_pick_debug(value: bool) -> void:
 
 
 func can_preview_part_anim(action: Dictionary) -> bool:
-	return _sim.can_preview_part_anim(action)
+	return _preview.can_preview_part_anim(action)
 
 
 func preview_part_anim(action: Dictionary) -> bool:
-	return _sim.preview_part_anim(action)
+	return _preview.preview_part_anim(action)
 
 
 func stop_preview() -> void:
-	_sim.stop_preview()
+	_preview.stop_preview()
 
 
 func move_selected_to_world_grounded(global_hit: Vector3) -> bool:
@@ -1047,47 +1039,3 @@ func _objects_container() -> Node3D:
 	if world_root == null:
 		return null
 	return world_root.get_node_or_null(NodePath(OBJECTS_CONTAINER)) as Node3D
-
-
-# --- Live simulation ("Play the mission") -------------------------------------
-# Promote the loaded mission into a libs/world World + AI through the shared MissionRuntime (the same
-# driver + present pass the game runs), at the same DIVIDED cadence the game runs, so the preview IS
-# the game's pacing. Read-only over the mission data: Stop rewinds the world and restores the
-# authored node transforms. While simulating, editing is locked out (see
-# _reject_edit_while_simulating): the present pass owns the placed nodes' transforms every tick, so
-# letting a gizmo drag or inspector write race it would leave two writers fighting over one node.
-
-func can_simulate() -> bool:
-	return _sim.can_simulate()
-
-
-func is_simulating() -> bool:
-	return _sim.is_simulating()
-
-
-func is_sim_playing() -> bool:
-	return _sim.is_sim_playing()
-
-
-func get_sim_runtime() -> Node:
-	return _sim.get_sim_runtime()
-
-
-func sim_play() -> void:
-	_sim.sim_play()
-
-
-func sim_pause() -> void:
-	_sim.sim_pause()
-
-
-func sim_step() -> void:
-	_sim.sim_step()
-
-
-func sim_stop() -> void:
-	_sim.sim_stop()
-
-
-func notify_sim_transport_changed() -> void:
-	_sim.notify_sim_transport_changed()

@@ -5,7 +5,7 @@ extends RefCounted
 ## MissionController seams the editor UI itself uses — placement and moves bake
 ## the model's ground anchor against terrain heights the TOOL samples (callers
 ## never supply heights), waypoint markers ground the same way, properties go
-## through the validated setters, and the sim transport mirrors the sim bar.
+## through the validated setters.
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
@@ -38,7 +38,7 @@ func _init(mcp_service: Node) -> void:
 
 func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("new_mission",
-			"Create a brand-new empty mission from scratch — no file until save_mission. A mission needs a terrain to place onto and reference: pass terrain (a .trn basename, e.g. \"Dvxi3\") to load it first, or omit to build on the already-loaded terrain. Replaces the open mission only when it has no unsaved changes (or discard=true). Switches focus to the Mission workspace. Rejected while simulating. This is the fresh-authoring entry point — call it before list_items / place_entities when starting a new mission.",
+			"Create a brand-new empty mission from scratch — no file until save_mission. A mission needs a terrain to place onto and reference: pass terrain (a .trn basename, e.g. \"Dvxi3\") to load it first, or omit to build on the already-loaded terrain. Replaces the open mission only when it has no unsaved changes (or discard=true). Switches focus to the Mission workspace. This is the fresh-authoring entry point — call it before list_items / place_entities when starting a new mission.",
 			{
 				"terrain": { "type": "string" },
 				"discard": { "type": "boolean", "default": false },
@@ -57,7 +57,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"points": { "type": "array", "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }, "minItems": 1, "maxItems": 1024 },
 			}, ["points"]), Callable(self, "_tool_sample_terrain"))
 	registry.register(McpToolDef.make("place_entities",
-			"Place new entities standing ON the terrain, exactly as the editor's click-placement grounds them: the tool samples the surface at each (x, z) and bakes the model's ground anchor — never supply or guess heights. rows: [{item_id (from list_items), x, z (world-space), yaw_deg?, name1? (AI class), name2? (AI script), team?, group?, waypoint_id? (path the unit follows), properties? (int field -> value)}]. Off-terrain rows fail individually without aborting the batch; each placement is its own undo step, like hand-placing. Max 100 rows per call. Rejected while the simulation runs — sim_control(action=\"stop\") first. Marks the mission dirty; never save unless asked.",
+			"Place new entities standing ON the terrain, exactly as the editor's click-placement grounds them: the tool samples the surface at each (x, z) and bakes the model's ground anchor — never supply or guess heights. rows: [{item_id (from list_items), x, z (world-space), yaw_deg?, name1? (AI class), name2? (AI script), team?, group?, waypoint_id? (path the unit follows), properties? (int field -> value)}]. Off-terrain rows fail individually without aborting the batch; each placement is its own undo step, like hand-placing. Max 100 rows per call. Marks the mission dirty; never save unless asked.",
 			{
 				"rows": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "type": "object",
 					"properties": {
@@ -68,7 +68,7 @@ func register_all(registry: McpToolRegistry) -> void:
 					}, "required": ["item_id", "x", "z"] } },
 			}, ["rows"], true, _MISSION_LOAD_TIMEOUT_MS), Callable(self, "_tool_place_entities"))
 	registry.register(McpToolDef.make("get_mission_entities",
-			"List or inspect the open mission's entities. Record positions are BMS mission-space ({x,y,z}, z up) plus a world [x,y,z] echo (y up). Filters: kind (0=marker 1=item 2=building 3=person), name (model-name substring), team, group, item_id. detail={kind,index} returns ONE entity's complete authored record instead. While simulating, person entities carry a live overlay (position, health, state).",
+			"List or inspect the open mission's authored entities. Record positions are BMS mission-space ({x,y,z}, z up) plus a world [x,y,z] echo (y up). Filters: kind (0=marker 1=item 2=building 3=person), name (model-name substring), team, group, item_id. detail={kind,index} returns ONE entity's complete authored record instead.",
 			{
 				"kind": { "type": "integer", "enum": [0, 1, 2, 3] },
 				"name": { "type": "string" },
@@ -80,7 +80,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"detail": { "type": "object", "properties": { "kind": { "type": "integer" }, "index": { "type": "integer" } } },
 			}), Callable(self, "_tool_get_entities"))
 	registry.register(McpToolDef.make("edit_mission_entity",
-			"Edit one existing entity by (kind, index) — exactly one op per call. move={x,z}: re-grounds it on the terrain at the new spot (the editor's drag bake; never pass y). rotate={yaw_deg?,pitch_deg?,roll_deg?}: omitted axes keep their value (stored as integer degrees). set={int property -> value} (group, waypoint_id, wp_number, team, ai_flags, perception, accuracy, alert_state, min/max_engagement_distance, max_attack_distance, spawn_count, max_simultaneous, no_less_than, map_symbol). set_strings={name1? (AI class), name2? (AI script)}. delete=true removes it (later indices of that kind shift — re-list before further edits). One undo step per call (set: one per field). Rejected while simulating.",
+			"Edit one existing entity by (kind, index) — exactly one op per call. move={x,z}: re-grounds it on the terrain at the new spot (the editor's drag bake; never pass y). rotate={yaw_deg?,pitch_deg?,roll_deg?}: omitted axes keep their value (stored as integer degrees). set={int property -> value} (group, waypoint_id, wp_number, team, ai_flags, perception, accuracy, alert_state, min/max_engagement_distance, max_attack_distance, spawn_count, max_simultaneous, no_less_than, map_symbol). set_strings={name1? (AI class), name2? (AI script)}. delete=true removes it (later indices of that kind shift — re-list before further edits). One undo step per call (set: one per field).",
 			{
 				"kind": { "type": "integer" }, "index": { "type": "integer" },
 				"move": { "type": "object", "properties": { "x": { "type": "number" }, "z": { "type": "number" } } },
@@ -90,7 +90,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"delete": { "type": "boolean" },
 			}, ["kind", "index"]), Callable(self, "_tool_edit_entity"))
 	registry.register(McpToolDef.make("edit_waypoint_path",
-			"Author waypoint paths — the routes AI units follow (a unit follows the path named by its waypoint_id property). One op per call: new_path (selects the first empty path, returns its index); select_path={path}; add_markers={points:[[x,z],...]} appends grounded markers to the ACTIVE path in order (world x/z, terrain-sampled, off-terrain points fail per-point); set_flags={loop?,blue?,red?} — paths loop by default (loop=true clears the on-disk DOES_NOT_LOOP bit; handled for you); assign_entity={kind,index,path}; delete_marker={marker_index}; list (all summaries + active detail). Marker ops switch the editor into Waypoints mode so the overlay is visible. Rejected while simulating.",
+			"Author waypoint paths — the routes AI units follow (a unit follows its waypoint_id path). One op per call: new_path, select_path, add_markers, set_flags, assign_entity, delete_marker, or list. Marker points are grounded from world x/z.",
 			{
 				"op": { "type": "string", "enum": ["new_path", "select_path", "add_markers", "set_flags", "assign_entity", "delete_marker", "list"] },
 				"path": { "type": "integer" },
@@ -105,7 +105,7 @@ func register_all(registry: McpToolRegistry) -> void:
 			"Set mission header fields; fields is a {name -> value} map, one undo step per field. Strings: mission_name, designer, briefing, environment (.env basename — the editor preview reloads to match the game, including the mission's fog/water overrides), terrain (terrain basename — does NOT reload the loaded terrain; avoid unless asked). Ints: climate, weather, mission_type, attrib_flags, start_time, minutes_per_day, player_health, max_saves, music, reverb, wind_speed, wind_direction, water_override (s16 half-units), fog_override (fog distance). The two *_override values only take effect when their attrib_flags bit is set (water 0x1, fog-distance 0x2) — set both, or the value is dormant (and an enabled bit with a 0 value fogs the map out). Unknown fields are rejected up front with this list.",
 			{ "fields": { "type": "object" } }, ["fields"]), Callable(self, "_tool_set_header"))
 	registry.register(McpToolDef.make("reground_mission",
-			"Repair: snap EVERY entity back onto the terrain surface in one undo step. Use when objects float or sink (placed at guessed heights, or terrain edits moved the ground). Unlike the editor's drift prompt this does not skip rows whose terrain never changed, so it fixes mis-grounded missions — but entities deliberately authored off the ground get planted too; warn the user if that may apply. Rejected while simulating.",
+			"Repair: snap EVERY entity back onto the terrain surface in one undo step. Use when objects float or sink (placed at guessed heights, or terrain edits moved the ground). Unlike the editor's drift prompt this does not skip rows whose terrain never changed, so it fixes mis-grounded missions — but entities deliberately authored off the ground get planted too; warn the user if that may apply.",
 			{}, [], true, _MISSION_LOAD_TIMEOUT_MS), Callable(self, "_tool_reground"))
 	registry.register(McpToolDef.make("analyze_mission",
 			"Composition report for a mission — the open one (no args) or ANY .bms by name/path (read-only; nothing opens in the editor). Header info, entity counts by kind, the most-used items with names, the densest 64m world-space cells (centers you can set_camera at), waypoint path summaries with loop bits, and team / AI-class (name1) / alert distributions for AI persons. Use it to study a stock mission's patterns before authoring in its style.",
@@ -114,10 +114,9 @@ func register_all(registry: McpToolRegistry) -> void:
 				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
 			}), Callable(self, "_tool_analyze"))
 	registry.register(McpToolDef.make("analyze_mounts",
-			"Read-only NPC mount/seat diagnostic for attach commands 123/124/125. Uses the same seat extraction rules as MissionRuntime: authored organic -> target SSN -> target model userpoints -> predicted seat, with optional live MissionRuntime/NovaSimulation comparison while editor Play/PIE is running. path can name any .bms through the mounted resource root; omit it for the open mission.",
+			"Read-only NPC mount/seat diagnostic for attach commands 123/124/125. Uses the same seat extraction rules as MissionRuntime: authored organic -> target SSN -> target model userpoints -> predicted seat. path can name any .bms through the mounted resource root; omit it for the open mission.",
 			{
 				"path": { "type": "string" },
-				"include_live": { "type": "boolean", "default": true },
 				"command_ids": { "type": "array", "items": { "type": "integer" } },
 				"ssn": { "type": "integer" },
 				"target_ssn": { "type": "integer" },
@@ -128,24 +127,6 @@ func register_all(registry: McpToolRegistry) -> void:
 	registry.register(McpToolDef.make("save_mission",
 			"Write the open mission to disk. ONLY call this when the user explicitly asked to save. No args: saves to its current path (errors if never saved — pass path). path: a filename (\"patrol.bms\", written into the mounted resource root) or an absolute path; must end in .bms and becomes the mission's current path. Clears the dirty flag; undo history survives.",
 			{ "path": { "type": "string" } }), Callable(self, "_tool_save"))
-	registry.register(McpToolDef.make("mission_play",
-			"Start or stop playing the open mission inside the editor (Play-in-Editor) — the toolbar Play button. Boots the real game runtime over the open mission: the local player spawns at a player start with the first-person camera, movement, and the weapon viewmodel. op=start|stop|state. While playing, editing tools are rejected (stop first); screenshot target=\"viewport\" captures the play view, and get_sim_state reads the live world. The play window takes keyboard/mouse focus in the editor — a human at the machine can walk around while the session runs.",
-			{
-				"op": { "type": "string", "enum": ["start", "stop", "state"] },
-			}, ["op"]), Callable(self, "_tool_mission_play"))
-	registry.register(McpToolDef.make("sim_control",
-			"Drive the in-editor mission simulation — the same AI and pacing the game runs, over the authored data. action=play|pause|step|stop; step advances `steps` ticks (max 600). While the sim runs ALL editing tools are rejected; stop also rewinds the world to the authored state. Unavailable while a human's Play-in-Editor session owns the runtime.",
-			{
-				"action": { "type": "string", "enum": ["play", "pause", "step", "stop"] },
-				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 600 },
-			}, ["action"]), Callable(self, "_tool_sim_control"))
-	registry.register(McpToolDef.make("get_sim_state",
-			"Live runtime state while simulating or playing-in-editor: logic tick, AI entity counts, WAC scripting state, non-zero mission/global variables, fired event flags — and entity=<index> returns one AI entity's full debug card (position, health, AI state, waypoint progress). Read-only and safe to poll; returns {active:false} with a hint when nothing runs.",
-			{
-				"entity": { "type": "integer" },
-				"include_variables": { "type": "boolean", "default": true },
-				"include_wac": { "type": "boolean", "default": true },
-			}, [], false), Callable(self, "_tool_sim_state"))
 
 
 # --- shared guards / helpers ---------------------------------------------------
@@ -159,19 +140,9 @@ func _require_mission(ctx: McpToolContext) -> Dictionary:
 	return { "controller": controller }
 
 
-# Mission present AND editable (the simulation locks every mutation, mirroring
-# the editor's own edit guard).
+# Mission present and editable.
 func _require_editable(ctx: McpToolContext) -> Dictionary:
-	var gate := _require_mission(ctx)
-	if gate.has("error"):
-		return gate
-	var controller: Variant = gate["controller"]
-	if controller.has_method("is_simulating") and controller.is_simulating():
-		return { "error": "The simulation owns the world — sim_control(action=\"stop\") first (stop rewinds to the authored state)." }
-	var ws: Variant = ctx.workspace("mission")
-	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
-		return { "error": "A Play-in-Editor session owns the world — stop it in the editor before editing." }
-	return gate
+	return _require_mission(ctx)
 
 
 # Batch-sample terrain heights at world (x, z) pairs; null per off-terrain point.
@@ -205,37 +176,6 @@ static func _world_echo(bms_pos: Vector3) -> Array:
 
 # --- discovery ------------------------------------------------------------------
 
-# Start/stop Play-in-Editor through the workspace's own seams (play_mission /
-# stop_play_mission) — the same path as the toolbar Play button, viewport swap
-# included. `state` is the poll form.
-func _tool_mission_play(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var ws: Variant = ctx.workspace("mission")
-	if ws == null or not ws.has_method("is_playing_mission"):
-		return McpToolResult.error("Mission workspace unavailable.")
-	var op := String(args.get("op", ""))
-	match op:
-		"state":
-			return { "playing": bool(ws.is_playing_mission()) }
-		"stop":
-			if ws.is_playing_mission():
-				ws.stop_play_mission()
-				await ctx.frames(1)
-			return { "playing": bool(ws.is_playing_mission()) }
-		"start":
-			if ws.is_playing_mission():
-				return { "playing": true }
-			var gate := _require_mission(ctx)
-			if gate.has("error"):
-				return McpToolResult.error(gate["error"])
-			var err: Error = ws.play_mission()
-			if err != OK:
-				return McpToolResult.error("Play failed (%s) — check get_logs; the mission needs a player start and the editor must be docked." % error_string(err))
-			# Let the runtime boot a couple of frames so the first screenshot has a world.
-			await ctx.frames(2)
-			return { "playing": bool(ws.is_playing_mission()) }
-	return McpToolResult.error("op must be start, stop, or state.")
-
-
 # Create a fresh empty mission, optionally loading a terrain first. Mirrors the
 # editor's New action (MissionController.new_mission) so authoring needs no manual
 # click — the gap that made the MCP server require human interaction.
@@ -243,11 +183,6 @@ func _tool_new_mission(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var controller: Variant = ctx.mission()
 	if controller == null or not controller.has_method("new_mission"):
 		return McpToolResult.error("Mission workspace unavailable.")
-	if controller.has_method("is_simulating") and controller.is_simulating():
-		return McpToolResult.error("The simulation owns the world — sim_control(action=\"stop\") first.")
-	var ws: Variant = ctx.workspace("mission")
-	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
-		return McpToolResult.error("A Play-in-Editor session owns the world — stop it in the editor first.")
 	if controller.has_method("is_loaded") and controller.is_loaded() \
 			and controller.has_method("is_dirty") and controller.is_dirty() \
 			and not bool(args.get("discard", false)):
@@ -407,10 +342,7 @@ func _tool_get_entities(args: Dictionary, ctx: McpToolContext) -> Variant:
 		record["kind_label"] = _kind_label(int(detail.get("kind", -1)))
 		if record.get("position") is Vector3:
 			record["world_position"] = _world_echo(record["position"])
-		record["live"] = _live_card(ctx, int(detail.get("kind", -1)), int(detail.get("index", -1)))
 		return record
-	var simulating: bool = controller.has_method("is_simulating") and controller.is_simulating()
-	var live := _live_cards_by_ref(ctx) if simulating else {}
 	var matched: Array = []
 	for row: Dictionary in controller.get_object_list():
 		if args.has("kind") and int(row.get("kind", -1)) != int(args["kind"]):
@@ -441,31 +373,9 @@ func _tool_get_entities(args: Dictionary, ctx: McpToolContext) -> Variant:
 		}
 		if record.get("position") is Vector3:
 			entry["world_position"] = _world_echo(record["position"])
-		var live_key := "%d:%d" % [int(row["kind"]), int(row["index"])]
-		if live.has(live_key):
-			entry["live"] = live[live_key]
 		out.append(entry)
 	var page := out.slice(offset, offset + limit)
-	return { "entities": page, "total": out.size(), "truncated": offset + page.size() < out.size(), "simulating": simulating }
-
-
-func _live_cards_by_ref(ctx: McpToolContext) -> Dictionary:
-	var sim: Variant = ctx.sim()
-	if sim == null:
-		return {}
-	var cards := {}
-	for i in range(int(sim.get_entity_count())):
-		var card: Dictionary = sim.get_entity_debug(i)
-		cards["%d:%d" % [int(card.get("kind", -1)), int(card.get("index", -1))]] = {
-			"position": card.get("position"), "health": card.get("health"),
-			"alive": card.get("alive"), "state": card.get("state_name", card.get("state")),
-		}
-	return cards
-
-
-func _live_card(ctx: McpToolContext, kind: int, index: int) -> Variant:
-	var cards := _live_cards_by_ref(ctx)
-	return cards.get("%d:%d" % [kind, index])
+	return { "entities": page, "total": out.size(), "truncated": offset + page.size() < out.size() }
 
 
 func _tool_edit_entity(args: Dictionary, ctx: McpToolContext) -> Variant:
@@ -736,7 +646,6 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var root: Variant = ctx.root()
 	var command_ids := _mount_command_filter(args.get("command_ids", []))
 	var target_by_ssn := _entities_by_bms_id(mission.get_all_entities())
-	var live_cards := _full_live_cards_by_ref(ctx) if bool(args.get("include_live", true)) and not args.has("path") else {}
 	var seat_cache := {}
 	var rows: Array = []
 	for raw in mission.get_all_entities():
@@ -753,7 +662,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 		if args.has("target_ssn") and target_ssn != int(args["target_ssn"]):
 			continue
 		var target: Dictionary = target_by_ssn.get(target_ssn, {})
-		var row := _mount_analysis_row(organic, target, command_id, root, item_db, seat_cache, live_cards)
+		var row := _mount_analysis_row(organic, target, command_id, root, item_db, seat_cache)
 		if bool(args.get("only_problems", false)) and not _mount_row_has_problem(row):
 			continue
 		rows.append(row)
@@ -763,10 +672,10 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 	return {
 		"source": source,
 		"runtime_parity": {
-			"shared_driver": "MissionRuntime",
-			"editor_host": "MissionController",
-			"game_host": "GameWorld",
-			"live_source": "MissionRuntime/NovaSimulation" if not live_cards.is_empty() else "static",
+			"shared_rules": "MissionRuntime",
+			"editor_mode": "static_analysis",
+			"live_host": "GameWorld",
+			"source": "static",
 		},
 		"mounts": page,
 		"total": rows.size(),
@@ -825,7 +734,7 @@ func _entities_by_bms_id(entities: Array) -> Dictionary:
 
 
 func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: int, root: Variant,
-		item_db: Variant, seat_cache: Dictionary, live_cards: Dictionary) -> Dictionary:
+		item_db: Variant, seat_cache: Dictionary) -> Dictionary:
 	var diagnostics: Array = []
 	var target_ssn := int(organic.get("wp_number", 0))
 	var seats: Array = []
@@ -864,15 +773,7 @@ func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: in
 		},
 		"diagnostics": diagnostics,
 	}
-	var live_key := "%d:%d" % [int(organic.get("kind", -1)), int(organic.get("index", -1))]
-	if live_cards.has(live_key):
-		var live: Dictionary = live_cards[live_key]
-		row["live"] = live
-		_append_live_mount_diagnostics(row, live, diagnostics)
-	elif live_cards.is_empty():
-		diagnostics.append("static_only")
-	else:
-		diagnostics.append("live_missing")
+	diagnostics.append("static_only")
 	return row
 
 
@@ -899,33 +800,6 @@ func _mount_entity_card(entity: Dictionary, item_db: Variant) -> Dictionary:
 	return out
 
 
-func _full_live_cards_by_ref(ctx: McpToolContext) -> Dictionary:
-	var sim: Variant = ctx.sim()
-	if sim == null:
-		return {}
-	var cards := {}
-	for i in range(int(sim.get_entity_count())):
-		var card: Dictionary = sim.get_entity_debug(i)
-		cards["%d:%d" % [int(card.get("kind", -1)), int(card.get("index", -1))]] = card
-	return cards
-
-
-func _append_live_mount_diagnostics(row: Dictionary, live: Dictionary, diagnostics: Array) -> void:
-	if not bool(live.get("mounted", false)):
-		diagnostics.append("live_not_mounted")
-		return
-	var expected := int((row.get("prediction", {}) as Dictionary).get("seat_index", -1))
-	var actual := int(live.get("mount_seat", -1))
-	if expected >= 0 and actual != expected:
-		diagnostics.append("predicted_live_mismatch")
-	var predicted_seat: Dictionary = (row.get("prediction", {}) as Dictionary).get("seat", {})
-	if not predicted_seat.is_empty():
-		var predicted_type := int(predicted_seat.get("type", 0))
-		var actual_type := int(live.get("mount_type", 0))
-		if predicted_type != actual_type:
-			diagnostics.append("predicted_live_type_mismatch")
-
-
 func _mount_row_has_problem(row: Dictionary) -> bool:
 	for item in row.get("diagnostics", []):
 		if String(item) != "static_only":
@@ -933,7 +807,7 @@ func _mount_row_has_problem(row: Dictionary) -> bool:
 	return false
 
 
-# --- save / sim -------------------------------------------------------------------
+# --- save -----------------------------------------------------------------------
 
 func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var gate := _require_mission(ctx)
@@ -958,95 +832,3 @@ func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if err != OK:
 		return McpToolResult.error("Save failed (%s): %s" % [error_string(err), controller.get_last_status()])
 	return { "ok": true, "path": controller.get_current_path(), "status": controller.get_last_status(), "dirty": controller.is_dirty() }
-
-
-func _tool_sim_control(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var gate := _require_mission(ctx)
-	if gate.has("error"):
-		return McpToolResult.error(gate["error"])
-	var controller: Variant = gate["controller"]
-	var ws: Variant = ctx.workspace("mission")
-	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
-		return McpToolResult.error("A Play-in-Editor session owns the runtime — stop it in the editor first.")
-	match String(args.get("action", "")):
-		"play":
-			controller.sim_play()
-			if not controller.is_simulating():
-				return McpToolResult.error("Simulation did not start: %s" % controller.get_last_status())
-		"pause":
-			controller.sim_pause()
-		"step":
-			var steps := clampi(int(args.get("steps", 1)), 1, 600)
-			if not controller.is_simulating():
-				controller.sim_step()
-				steps -= 1
-			var runtime: Variant = controller.get_sim_runtime()
-			for i in range(steps):
-				if runtime != null and runtime.has_method("tick"):
-					runtime.tick()
-				else:
-					controller.sim_step()
-				if (i + 1) % 30 == 0:
-					await ctx.frames(1)
-		"stop":
-			controller.sim_stop()
-		_:
-			return McpToolResult.error("action must be play | pause | step | stop.")
-	var sim: Variant = ctx.sim()
-	return {
-		"simulating": controller.is_simulating(),
-		"playing": controller.is_sim_playing() if controller.has_method("is_sim_playing") else false,
-		"tick": sim.get_logic_tick() if sim != null and sim.has_method("get_logic_tick") else null,
-	}
-
-
-func _tool_sim_state(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var runtime: Variant = ctx.runtime()
-	if runtime == null:
-		return { "active": false, "hint": "Nothing is running — sim_control(action=\"play\") starts the editor simulation." }
-	var sim: Variant = runtime.get_sim() if runtime.has_method("get_sim") else null
-	if sim == null:
-		return { "active": false, "hint": "Runtime present but no simulation attached." }
-	var ws: Variant = ctx.workspace("mission")
-	var out := {
-		"active": true,
-		"source": "pie" if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission() else "sim",
-		"playing": runtime.is_playing() if runtime.has_method("is_playing") else null,
-		"tick": sim.get_logic_tick(),
-		"entities": sim.get_entity_count(),
-	}
-	if sim.has_method("get_spawned_count"):
-		out["spawned"] = sim.get_spawned_count()
-	if sim.has_method("get_brain_count"):
-		out["brains"] = sim.get_brain_count()
-	if bool(args.get("include_wac", true)) and sim.has_method("get_wac_state"):
-		out["wac"] = sim.get_wac_state()
-	if bool(args.get("include_variables", true)):
-		out["variables"] = {
-			"mission": _nonzero(sim.get_mission_variables_snapshot() if sim.has_method("get_mission_variables_snapshot") else []),
-			"global": _nonzero(sim.get_global_variables_snapshot() if sim.has_method("get_global_variables_snapshot") else []),
-		}
-	if sim.has_method("get_fired_events_snapshot"):
-		var fired: Array = []
-		var flags: Variant = sim.get_fired_events_snapshot()
-		for i in range(flags.size()):
-			if int(flags[i]) != 0:
-				fired.append(i)
-				if fired.size() >= 50:
-					break
-		out["fired_events"] = fired
-	if args.has("entity"):
-		var index := int(args["entity"])
-		if index >= 0 and index < int(sim.get_entity_count()):
-			out["entity"] = sim.get_entity_debug(index)
-		else:
-			out["entity_error"] = "index out of range (0..%d)" % (int(sim.get_entity_count()) - 1)
-	return out
-
-
-static func _nonzero(values: Variant) -> Dictionary:
-	var out := {}
-	for i in range(values.size()):
-		if int(values[i]) != 0:
-			out[str(i)] = values[i]
-	return out

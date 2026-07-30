@@ -20,7 +20,7 @@ from `EditorWorkstation._workspace_defs()` in
 
 | Category | Workspace | Edits | Docs |
 |---|---|---|---|
-| World | Mission | missions: entities, waypoints, zones, BMS events, play in-editor (`.bms`) | [mission/](mission/README.md) |
+| World | Mission | missions: entities, waypoints, zones, BMS events (`.bms`) | [mission/](mission/README.md) |
 | World | Terrain | heightmaps, surface paint, foliage, tiles, layout (`.trn` / `.cpt` / `.til`) | [terrain/](terrain/README.md) |
 | World | Object | 3D object projects (`.3di` / `.3dp`) | [object/](object/README.md) |
 | World | Avatars | playable characters: head/body/arms combos by nationality and division, with a 3D preview (`Avatars.def`) | [avatar/](avatar/README.md) |
@@ -35,29 +35,29 @@ from `EditorWorkstation._workspace_defs()` in
 | Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [environment/](environment/README.md) |
 
 Mission edits `.bms` missions end to end: entities, waypoints, zones, and BMS
-event scripting, with play-in-editor through the same mission runtime and present
-pass the game host uses (one runtime; see
-[`docs/runtime-architecture.md`](../../docs/runtime-architecture.md)).
+event scripting. Testing always happens in the standalone game runtime.
 
 Environment is a *popup* workspace: instead of swapping the main viewport it
 overlays a panel on the active Terrain or Object view, so lighting changes are
 visible on the scene you are editing.
 
-## See it in game
+## Run the game
 
-The top bar's **See in game** button launches the game runtime over the same
-resource directory the editor has mounted, with the engine's own dev override:
-loose files next to the packed archives win (the retail `/d` flag). The gesture
-is always the same — **save, launch, see it**. The runtime still boots from the
-packed game data, so your resource directory needs to be a real game install
-(PFFs present); your saved files sit on top of it exactly as they did for the
-original tools.
+The top bar exposes **Run game** (F5), **Run current mission** (F6), and
+**Stop game** (F8) over one managed standalone process. The child mounts the
+resource directory the editor has selected; loose files next to packed
+archives win through the retail `/d` flag. F6 requires the Mission workspace's
+current saved, top-level loose `.bms`. Starting F5 or F6 again restarts the one
+managed process.
 
-Workspaces whose files reach the game through a specific step tell the button
-about it: the tooltip and the post-launch message carry the active workspace's
-pointer (Terrain: export into the game folder first, then load a mission on
-it; Environment: save the `.env` into the game folder — the game reads that
-same file), and warn when that step hasn't happened yet.
+Running never saves, exports, copies, or stages editor data. Unsaved changes are
+deliberately excluded, and F6 warns when it is launching an older saved version.
+The resource directory still needs to be a usable game install (PFFs present);
+saved loose files overlay it exactly as they did for the original tools.
+
+Run warnings name every workspace with unsaved changes. Save whichever loose
+asset you want the standalone process to consume, then relaunch; the editor
+never mutates the resource directory on your behalf.
 
 What to look at, per workspace:
 
@@ -137,8 +137,8 @@ mission's composition, grounded mission authoring (`place_entities`,
 bake ground anchors exactly like click-placement, so agents can never float or
 sink objects by guessing heights), `set_mission_header` (environment changes
 re-apply the preview, mission fog/water overrides included), `reground_mission`
-repair, the sim transport (`sim_control` / `get_sim_state`), camera +
-screenshot, undo/redo, and `save_mission` (only ever on explicit request).
+repair, camera + screenshot, undo/redo, and `save_mission` (only ever on
+explicit request).
 Menu authoring is first-class too: `get_menu` / `analyze_menu` to study,
 `add_menu_widgets` / `edit_menu_widget` / `set_widget_actions` /
 `edit_widget_items` to build (snapshot-undo batches, validated Action wiring),
@@ -151,6 +151,12 @@ engine demands on screen jumps, widgets carry their state appearance rows — an
 rules learned by debugging an authored menu against the real game), so a file
 that previews cleanly also runs in the shipped engine. There is **no script or
 code execution** on this surface.
+
+The stable ONED endpoint also owns the standalone run lifecycle:
+`run_game` mirrors F5/F6/F8, while `game_state`, `game_control`, `game_debug`,
+`game_screenshot`, and `game_logs` proxy into an ephemeral loopback MCP server
+inside that exact child process. F3 and `game_debug` consume the same UI-free
+debug-session catalog; there is no editor simulation.
 
 It speaks MCP Streamable HTTP on `http://127.0.0.1:8975/mcp` and starts with
 the editor by default (never in headless runs). The repo's `.mcp.json` points

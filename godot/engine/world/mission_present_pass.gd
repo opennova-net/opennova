@@ -1,10 +1,10 @@
 extends RefCounted
 
-# THE mission present pass: applies the live entity state the runtime computes onto the placed scene
-# nodes once per logic tick. Replaces the two divergent paths it consolidates -- the game's
-# MissionCommandHost (PANM part-anim only) and the editor's MissionSimDriver._apply (position + yaw
-# only) -- with ONE component both hosts go through, so the game gains movement and the editor gains
-# part-anims from the same code.
+# THE mission present pass: applies the client-view entity state onto placed scene nodes for
+# MissionRuntime. It consolidated the historical game's MissionCommandHost (PANM part-anim only) and
+# the editor's MissionSimDriver._apply (position + yaw only); those divergent paths remain retired.
+# `GameWorld`, under `MainGame`, is the sole live mission host and ONED has no PIE host. Tests and
+# non-gameplay tooling previews may still instantiate MissionRuntime and this RefCounted pass directly.
 #
 # Hybrid split (the engine decides, the host draws): it pulls ONE batched snapshot from the sim
 # (NovaSimulation.get_present_snapshot -- a flat PackedFloat32Array) and the NATIVE row walk

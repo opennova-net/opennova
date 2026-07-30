@@ -70,8 +70,12 @@ class StubWorld:
 func _make_page(world: Node = null) -> DebugTerrainPage:
 	var ctx := NovaDebugContext.new()
 	ctx.options = NovaDebugOptionState.new()
-	if world != null:
-		ctx.world_source = func(): return world
+	ctx.world_source = func(): return world
+	ctx.session = NovaDebugSession.new()
+	NovaDebugCatalog.install(ctx.session)
+	NovaDebugCatalog.bind_runtime_targets(
+			ctx.session, func(): return null, ctx.world_source)
+	ctx.session.set_presented(true)
 	var page: DebugTerrainPage = PageScript.new()
 	page.setup(ctx)
 	add_child_autofree(page)
@@ -95,6 +99,12 @@ func test_renders_empty_states_without_a_world() -> void:
 			"No terrain")
 	assert_string_contains((page.find_child("FoliageStats", true, false) as Label).text,
 			"No foliage")
+	assert_true((page.find_child(
+			"TerrainDrawMode", true, false) as OptionButton).disabled,
+			"draw mode is unavailable without a live terrain target")
+	assert_false((page.find_child(
+			"TerrainDetail", true, false) as HSlider).editable,
+			"terrain detail is unavailable without a live terrain target")
 
 
 func test_formats_the_canned_counters() -> void:
@@ -122,13 +132,15 @@ func test_knobs_poke_the_live_terrain_and_mirror_it_back() -> void:
 
 	var mode := page.find_child("TerrainDrawMode", true, false) as OptionButton
 	assert_eq(mode.item_count, 5, "all five terrain draw modes are offered")
+	assert_false(mode.disabled)
 	mode.item_selected.emit(1)
-	assert_eq(terrain.mode, 1, "picking a mode pokes the terrain node directly")
+	assert_eq(terrain.mode, 1, "picking a mode uses the shared public control")
 
 	var slider := page.find_child("TerrainDetail", true, false) as HSlider
+	assert_true(slider.editable)
 	slider.value = 2.0
 	assert_almost_eq(terrain.quality, 2.0, 0.001,
-			"the detail slider pokes lod_quality directly")
+			"the detail slider uses the shared public control")
 
 	terrain.mode = 3
 	terrain.quality = 0.5

@@ -242,9 +242,18 @@ func _write_weather_state(env: Node) -> void:
 
 
 ## Snap the smoothing state to the env's current colors on the next tick —
-## call after discrete TOD scrubs so the editor preview doesn't lag.
+## call after discrete TOD scrubs so the rendered runtime doesn't lag.
 func resync_colors() -> void:
 	_colors_synced = false
+
+
+## Discrete runtime scrubs must update the rendered currents even while the
+## mission transport is paused (and therefore no hosted weather tick runs).
+## A zero-tick refresh snaps the core to the new targets and writes them back
+## without advancing wind, lightning, rain, or the mission clock.
+func resync_colors_now() -> void:
+	resync_colors()
+	_tick_weather(0)
 
 
 static func _vec3_color(value: Vector3) -> Color:

@@ -1,8 +1,8 @@
 # Mission workspace
 
 Create or open `.bms` missions and author their world: place and edit objects,
-waypoints, zones, and BMS event scripting, then press Play to run the mission
-in-editor on the engine's own mission runtime. Part of the
+waypoints, zones, and BMS event scripting, then save and run the game from the
+editor's main toolbar to test the loose mission. Part of the
 [OpenNova Editor (ONED)](../README.md).
 
 ## What you do here
@@ -18,17 +18,9 @@ markers, and mission properties (briefing, music, win conditions) are editable i
 the same inspector, with undo/redo and Save / Save As.
 
 The Events panel edits BMS scripting: triggers and actions with typed parameter
-domains recovered from the original engine. Play runs the mission through the same
-runtime and present pass the game host uses, so WAC scripts, BMS events, and AI
-behave exactly as in the game runtime; Stop rewinds the world and restores the
-authored scene (one runtime, see
-[`docs/runtime-architecture.md`](../../../docs/runtime-architecture.md)).
-
-While playing, the game's own controls apply: WASD moves, the mouse looks,
-F4 switches first/third person, C and Z toggle crouch and prone, and F3 opens
-the same Mission debug panel the game runtime has (the mouse is freed while it
-is open so its controls are clickable; it is also available from the Simulate
-panel while editing). Esc stops and returns to editing.
+domains recovered from the original engine. ONED does not host a second mission
+runtime: testing always launches the real game over saved loose assets. F5 runs
+the game normally and F6 launches the current saved mission.
 
 ## Formats
 

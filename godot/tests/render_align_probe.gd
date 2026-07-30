@@ -1,7 +1,7 @@
 extends Node
 
-# Renderer-alignment capture probe: boots ONED play-in-editor on a retail
-# mission (the same GameWorld + shared HUD the runtime mounts), then captures a
+# Renderer-alignment capture probe: boots the standalone game on a retail
+# mission, then captures a
 # closed-loop yaw sweep of viewport PNGs at the player spawn, plus pitch
 # up/down shots, for side-by-side comparison against retail screenshots.
 # Prints player pos/yaw/pitch per shot so each PNG maps back to a viewpoint.
@@ -17,7 +17,7 @@ extends Node
 #      base name), NOVA_WALK_FRAMES (optional W-hold frames before the sweep).
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/rendercmp"
 
 var _out_abs := ""
@@ -40,37 +40,20 @@ func _ready() -> void:
 	var root_dir := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root_dir.is_empty():
 		root_dir = ResourceDirSettings.get_resource_dir()
-	ResourceDirSettings.set_resource_dir(root_dir)
-
 	get_window().mode = Window.MODE_WINDOWED
 	get_window().size = Vector2i(1920, 1080)
 
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root_dir)
-	await _settle(6)
-
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
 	var path := NovaPaths.resolve_file(root_dir, bms)
 	print("[rendercmp] mission=%s path=%s out=%s" % [bms, path, _out_abs])
-	if ws.open_file(path) != OK:
-		push_error("[rendercmp] open failed")
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root_dir, bms, ResourceDirSettings.get_expansion())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[rendercmp] " + String(session.error))
 		get_tree().quit(1)
 		return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(60)
-	if int(ws.play_mission()) != OK:
-		push_error("[rendercmp] play failed")
-		get_tree().quit(1)
-		return
-	await _settle(240)
 
-	_world = _find_by_method(get_tree().root, "local_player_view")
-	_cam = _find_play_camera(get_tree().root)
+	_world = session.world
+	_cam = session.camera
 	print("[rendercmp] world=%s cam=%s" % [str(_world != null), str(_cam != null)])
 	if _world == null or _cam == null:
 		get_tree().quit(1)
@@ -98,7 +81,6 @@ func _ready() -> void:
 	await _capture("%s_pitchB.png" % prefix)
 
 	print("[rendercmp] done -> ", _out_abs)
-	ws.stop_play_mission()
 	await _settle(10)
 	get_tree().quit(0)
 
@@ -187,18 +169,6 @@ func _find_by_method(node: Node, method: String) -> Node:
 		return node
 	for ch in node.get_children():
 		var f := _find_by_method(ch, method)
-		if f != null:
-			return f
-	return null
-
-
-func _find_play_camera(node: Node) -> Camera3D:
-	if node.has_method("get_play_camera"):
-		var c = node.call("get_play_camera")
-		if c is Camera3D:
-			return c
-	for ch in node.get_children():
-		var f := _find_play_camera(ch)
 		if f != null:
 			return f
 	return null

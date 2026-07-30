@@ -2,7 +2,7 @@ extends Node
 
 # Visual probe for the weapon-round slice (PR #226): captures the adjudicated
 # crosshair protocol (D-HUD-9/10), the M82/Barrett SIGHTS scope card, and
-# unscope-on-move, driven through the REAL input path in ONED play-in-editor
+# unscope-on-move, driven through the real standalone game's input path
 # (same boot shape as fp_clean_probe). Windowed run:
 #   NOVA_RESOURCE_DIR=<assets> "$GODOT_BIN" --path godot res://tests/weapon_round_probe.tscn
 # Captures land in .scratch/weapon_round/. Note the JOX id is WPN_Barret (one T);
@@ -10,9 +10,8 @@ extends Node
 # so the mid-ease captures sit a few FRAMES after the RMB edge.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/weapon_round"
-const ENV_NAME := "full_00.env"
 const RIG_WEAPON := "WPN_Barret"  # Scoped; M82_1st carries the empty/dup bone rows (rig-fix demo)
 const CARD_WEAPON := "WPN_RPG"    # Scoped (flags 1) + 2 sights rows in JOX -> the SIGHTS card
 
@@ -30,42 +29,22 @@ func _ready() -> void:
 	# NOVA_WR_EXPANSION: mount an expansion over the base game for this run (the
 	# persisted key is what GameWorld reads — mirror of the retail /exp flag).
 	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
-	ResourceDirSettings.set_expansion(expn)
-	ResourceDirSettings.set_resource_dir(root)
-
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
-	if app.environment_editor != null:
-		var env_path := NovaPaths.resolve_file(root, ENV_NAME)
-		if not env_path.is_empty():
-			app.environment_editor.open_env(env_path)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	var path := NovaPaths.resolve_file(root, bms)
-	if ws.open_file(path) != OK:
-		push_error("[wr] open failed"); get_tree().quit(1); return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-	if int(ws.play_mission()) != OK:
-		push_error("[wr] play failed"); get_tree().quit(1); return
-	await _settle(120)
-	_world = _find_by_method(get_tree().root, "local_player_weapon_view")
+	var session: Dictionary = await StandaloneProbe.boot(self, root, bms, expn)
+	if not String(session.get("error", "")).is_empty():
+		push_error("[wr] " + String(session.error)); get_tree().quit(1); return
+	_world = session.world
 	_host = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if _world == null:
 		push_error("[wr] no weapon world"); get_tree().quit(1); return
 
-	# Sanity: the GameplayOverlay must carry the play panel's rect (the PIE
-	# overlay-layer fix); a zero size here clips the HUD and armory to nothing.
+	# Sanity: the standalone GameplayOverlay must carry the root viewport rect;
+	# a zero size here clips the HUD and armory to nothing.
 	var hud_host := _find_by_method(get_tree().root, "hud_objective_line")
 	if hud_host != null:
 		hud_host.tick()  # force the lazy HUD build

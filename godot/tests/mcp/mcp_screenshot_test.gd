@@ -25,6 +25,13 @@ func test_capture_null_viewport_errors() -> void:
 	assert_false(outcome["ok"])
 
 
+func test_capture_honors_a_pre_cancelled_request() -> void:
+	var outcome: Dictionary = await McpScreenshot.capture(
+			get_tree().root, {}, func() -> bool: return true)
+	assert_false(outcome["ok"])
+	assert_true(String(outcome["error"]).contains("cancelled"))
+
+
 func test_encode_webp_with_dimensions() -> void:
 	var outcome := McpScreenshot.encode(_gradient(64, 32))
 	assert_true(outcome["ok"])

@@ -1,6 +1,6 @@
 extends Node
 
-# Impact-position probe: boots play-in-editor on the persisted mount, walks to open
+# Impact-position probe: boots the standalone game on the requested mount, walks to open
 # ground, aims down, fires a burst through the real input path, then dumps the
 # camera aim ray against every live effect-world group (name / sim position /
 # rendered bounds) to localize "impacts spawn in the wrong place" reports.
@@ -9,11 +9,10 @@ extends Node
 # Output: res://../.scratch/fp_impact/
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/fp_impact"
 
 var _out_abs := ""
-var _saved_resource_dir := ""
 
 
 func _ready() -> void:
@@ -21,37 +20,22 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	# The resource dir is persisted user:// state SHARED with the game runtime —
 	# restore it on every exit path so a probe run never repoints the user's mount.
-	_saved_resource_dir = ResourceDirSettings.get_resource_dir()
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
-		root = _saved_resource_dir
-	ResourceDirSettings.set_resource_dir(root)
+		root = ResourceDirSettings.get_resource_dir()
 
-	var app = EditorScene.instantiate()
-	add_child(app)
-	await get_tree().process_frame
-	for _i in 8:
-		await get_tree().process_frame
-	var ws_station = app.workstation
-	ws_station.set_resource_root_dir(root)
 	NovaWindow.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "00TRa.bms"
-	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
-	var path := NovaPaths.resolve_file(root, bms)
-	if path.is_empty() or ws.open_file(path) != OK:
-		push_error("[impact] open failed: " + bms)
-		_restore_resource_dir()
+	var session: Dictionary = await StandaloneProbe.boot(
+		self, root, bms, ResourceDirSettings.get_expansion())
+	if not String(session.get("error", "")).is_empty():
+		push_error("[impact] " + String(session.error))
 		get_tree().quit(1)
 		return
-	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
-	await _settle(30)
-	if int(ws.play_mission()) != OK:
-		push_error("[impact] play failed"); get_tree().quit(1); return
-	await _settle(120)
 
 	# Walk forward a little, then aim down ~35 deg so the burst hits near ground
 	# a few meters ahead.
@@ -62,8 +46,8 @@ func _ready() -> void:
 	_look(Vector2(0, 300))
 	await _settle(24)
 
-	var cam := _find_play_camera(get_tree().root)
-	var world := _find_by_method(get_tree().root, "get_effect_world")
+	var cam: Camera3D = session.camera
+	var world: GameWorld = session.world
 	if cam == null or world == null:
 		push_error("[impact] no camera/world"); get_tree().quit(1); return
 
@@ -96,16 +80,8 @@ func _ready() -> void:
 					int(em.get("alive", 0)), str(em.get("position", Vector3.ZERO)),
 					str(bounds.get_center()), str(em.get("bounds_valid", false))])
 	await _capture("impact_scene.png")
-	ws.stop_play_mission()
-	_restore_resource_dir()
 	print("[impact] done -> ", _out_abs)
 	get_tree().quit()
-
-
-func _restore_resource_dir() -> void:
-	if not _saved_resource_dir.is_empty() \
-			and _saved_resource_dir != ResourceDirSettings.get_resource_dir():
-		ResourceDirSettings.set_resource_dir(_saved_resource_dir)
 
 
 func _find_by_method(node: Node, method: String) -> Node:
@@ -145,15 +121,3 @@ func _capture(name: String) -> void:
 	if img != null:
 		img.save_png(_out_abs.path_join(name))
 		print("[impact] wrote ", name)
-
-
-func _find_play_camera(node: Node) -> Camera3D:
-	if node.has_method("get_play_camera"):
-		var c = node.call("get_play_camera")
-		if c is Camera3D:
-			return c
-	for ch in node.get_children():
-		var f := _find_play_camera(ch)
-		if f != null:
-			return f
-	return null

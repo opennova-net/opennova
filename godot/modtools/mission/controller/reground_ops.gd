@@ -131,8 +131,6 @@ func _count_terrain_drift(timeline: PerfTimeline = null) -> int:
 func reground_drifted() -> int:
 	if _c._mission == null:
 		return 0
-	if _c._sim._reject_edit_while_simulating():
-		return 0
 	var timeline := PerfTimeline.begin("Mission re-ground")
 	timeline.span("requests")
 	var requests := _drifted_requests()
@@ -175,7 +173,7 @@ func reground_drifted() -> int:
 ## filter protects deliberate off-surface authoring; this seam plants those
 ## too, so callers must warn). Returns { checked, moved }.
 func reground_all() -> Dictionary:
-	if _c._mission == null or _c._sim._reject_edit_while_simulating():
+	if _c._mission == null:
 		return { "checked": 0, "moved": 0 }
 	var requests := _reground_requests_cached()
 	_c._flush_edit()
