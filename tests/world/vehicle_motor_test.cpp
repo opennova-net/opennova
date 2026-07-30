@@ -4,9 +4,13 @@
 // player's replicated input moves the vehicle on the authority.
 // [orig: ItemDef_ParsePhysicsProperty @0x49d870; Entity_UpdateVehiclePhysics @0x48af00;
 //  drive gate @0x48b0ff; net-re §5.13 drive-authority witness 2026-07-04]
+#include "world/ai.h"
+#include "world/angle.h"
+#include "world/collision.h"
 #include "world/entity.h"
 #include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
+#include "world/vehicle_sound.h"
 #include "world/world.h"
 
 #include "def/def.h"
@@ -14,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 using namespace opennova::world;
 
@@ -36,6 +41,63 @@ VehicleTraits buggy_traits() {
     t.turn_rate2 = 41 * 192426;
     t.player_control = true;
     return t;
+}
+
+void load_transport_sound_profile(World &world) {
+    static constexpr char kTransportProfile[] =
+            "begin \"SP_Transport\"\n"
+            "  Soundloop_1 V_TRUCK_ILP .8 1.2\n"
+            "  Soundloop_2 V_TRUCK_DLP .7 1.1\n"
+            "  Soundloop_3 V_TRUCK_REVSE .8 1.2\n"
+            "  enginestop V_TRUCK_STOP\n"
+            "  enginereverse V_TRUCK_SHIFT\n"
+            "end\n";
+    CHECK(world.sound_profiles.parse(kTransportProfile,
+                                     sizeof(kTransportProfile) - 1) == 1);
+}
+
+CollisionModel vehicle_sound_test_wall() {
+    CollisionModel box;
+    auto plane = [&](int nx, int ny, int nz, double d) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = static_cast<int32_t>(d * 65536.0);
+        box.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -2.0);
+    plane(-16384, 0, 0, -2.0);
+    plane(0, 16384, 0, -25.0);
+    plane(0, -16384, 0, -25.0);
+    plane(0, 0, 16384, -5.0);
+    plane(0, 0, -16384, 0.0);
+
+    CollisionVolume volume;
+    volume.type = 1;
+    volume.min_x = -(2 << 16);
+    volume.max_x = 2 << 16;
+    volume.min_y = -(25 << 16);
+    volume.max_y = 25 << 16;
+    volume.min_z = 0;
+    volume.max_z = 5 << 16;
+    volume.plane_start = 0;
+    volume.plane_count = 6;
+    box.volumes.push_back(volume);
+
+    CollisionSection section;
+    section.volume_start = 0;
+    section.volume_count = 1;
+    section.min_x = volume.min_x;
+    section.max_x = volume.max_x;
+    section.min_y = volume.min_y;
+    section.max_y = volume.max_y;
+    section.min_z = volume.min_z;
+    section.max_z = volume.max_z;
+    section.center[2] = static_cast<int32_t>(2.5 * 65536.0);
+    section.radius = 26 << 16;
+    box.sections.push_back(section);
+    return box;
 }
 
 struct Rig {
@@ -422,6 +484,410 @@ void test_physics_selector_gate() {
     CHECK(p.x == 100.0f && p.y == 200.0f);
 }
 
+// An occupied PlayerControl vehicle continuously registers its stationary idle
+// emitter. Occupancy is claimant-based, not local-player-based: the controller here
+// is an NPC taking the AI command leg. The event is the portable sound-emitter seam
+// consumed by every host.
+// [orig: Entity_ProcessMovementSoundEffects @0x5294a0; emitter param block
+// @0x529270; SoundEmitter_RegisterSetLayers @0x528340]
+void test_npc_claimant_registers_stationary_idle_sound() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0; // an NPC, not the local/remote player body path
+    r.mount();
+    r.w.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
+
+    VehicleDriveCmd parked;
+    parked.ai_drive = true;
+    parked.steer_target_bam = 0;
+    parked.cmd_speed = 0;
+    tick_vehicle_motor(r.w, r.veh(), t, &parked);
+
+    CHECK(r.w.sound_emitters.size() == 1);
+    if (r.w.sound_emitters.size() == 1) {
+        const SoundEmitterEvent &idle = r.w.sound_emitters[0];
+        CHECK(idle.source_spawn_id == r.veh().registry_spawn_id);
+        CHECK(idle.source_handle == r.veh_h.packed);
+        CHECK(idle.pos.x == 100.0f);
+        CHECK(idle.pos.y == 200.0f);
+        CHECK(idle.pos.z == 10.0f);
+        CHECK(idle.source_bms_id == 77);
+        CHECK(idle.emitted_tick == 1);
+        CHECK(idle.lane == 0);
+        CHECK(idle.lifetime_ticks == 30);
+        CHECK(idle.pitch_q16 == 0x10000);
+        CHECK(idle.volume_q8_8 == 0xFFFF);
+        CHECK(idle.slot == 0); // Soundloop_1
+        CHECK(idle.set_name == "V_TRUCK_ILP");
+    }
+}
+
+// +368 is the engine-running claimant. A valid second Controller/Driver does not
+// inherit it when the claimant leaves, so the surviving seat occupant must not keep
+// a vehicle loop alive until a fresh attach claims the vehicle.
+// [orig: Entity_DetachFromVehicle @0x4356e9 claimant-only stop/clear leg]
+void test_controller_without_claimant_is_silent() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    const EntityHandle second = add_second_control_occupant(r);
+    r.mount();
+    CHECK(entity_process_vehicle_attach(r.w, second, r.veh_h, 2));
+    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
+    CHECK(!r.veh().primary_occupant.valid());
+    CHECK(r.veh().seats[1].occupant == second);
+
+    r.w.sound_emitters.clear();
+    tick_vehicle_motor(r.w, r.veh(), t);
+    CHECK(r.w.sound_emitters.empty());
+}
+
+// ItemDef_ResolveAllResources copies the profile slots, then a non-empty per-item
+// soundloop_N name re-resolves over the copied value. Keep that authoring precedence
+// at the portable vehicle-traits boundary.
+// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
+void test_item_soundloop_override_wins_over_profile() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Transport";
+    t.sound_loops[0] = "V_TRUCK_CUSTOM_IDLE";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+
+    VehicleDriveCmd parked;
+    parked.ai_drive = true;
+    tick_vehicle_motor(r.w, r.veh(), t, &parked);
+
+    CHECK(r.w.sound_emitters.size() == 1);
+    if (r.w.sound_emitters.size() == 1) {
+        CHECK(r.w.sound_emitters[0].slot == 0);
+        CHECK(r.w.sound_emitters[0].set_name == "V_TRUCK_CUSTOM_IDLE");
+    }
+}
+
+// Moving and idle remain independent lanes in the shared table. The forward
+// lane ramps across the first 1/16 of playerSpeed; pitch interpolates from the
+// authored p2/p3 pair, while idle fades over the full speed range.
+// [orig: @0x5295e6..0x529619, @0x52971a..0x529882]
+void test_forward_sound_gain_pitch_and_idle_crossfade() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+    r.veh().veh.speed = 1000; // playerSpeed / 32
+
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+    CHECK(r.w.sound_emitters.size() == 2);
+    if (r.w.sound_emitters.size() == 2) {
+        const SoundEmitterEvent &drive = r.w.sound_emitters[0];
+        const SoundEmitterEvent &idle = r.w.sound_emitters[1];
+        CHECK(drive.lane == 10);
+        CHECK(drive.slot == 1);
+        CHECK(drive.set_name == "V_TRUCK_DLP");
+        CHECK(drive.volume_q8_8 == 0x8000);
+        CHECK(drive.pitch_q16 == 46694); // .7 + 1/32 * (1.1 - .7), Q16 rounded
+        CHECK(idle.lane == 0);
+        CHECK(idle.volume_q8_8 == 0xF800);
+        CHECK(idle.pitch_q16 == 0x10000);
+    }
+}
+
+// The p4>1 forward profile subdivides the speed range into repeating gear
+// ramps. Keep the sequential low/high quarter-drop arithmetic byte-faithful.
+// [orig: @0x52968f..0x529765]
+void test_forward_sound_gear_pitch_sawtooth() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Geared";
+    static constexpr char kGearedProfile[] =
+            "begin \"SP_Geared\"\n"
+            "  Soundloop_1 V_IDLE 1 1\n"
+            "  Soundloop_2 V_DRIVE .8 1.2 4\n"
+            "end\n";
+    CHECK(r.w.sound_profiles.parse(kGearedProfile,
+                                   sizeof(kGearedProfile) - 1) == 1);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+    r.veh().veh.speed = 10000; // gear 1, one quarter through its 8000 band
+
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+    CHECK(!r.w.sound_emitters.empty());
+    if (!r.w.sound_emitters.empty()) {
+        CHECK(r.w.sound_emitters[0].lane == 10);
+        CHECK(r.w.sound_emitters[0].pitch_q16 == 55757);
+    }
+}
+
+// Reverse motion selects lane 20, and the caller-side direction latch plays
+// profile slot 32 exactly on each command-direction edge.
+// [orig: lane branch @0x529787; latch @0x48d1d1..0x48d222]
+void test_reverse_sound_and_direction_shift_edges() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+    r.w.slot_sounds.clear();
+    r.veh().veh.speed = -16000;
+    r.veh().veh.cmd_speed = -32000;
+
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+    CHECK(r.w.sound_emitters.size() == 2);
+    if (r.w.sound_emitters.size() == 2) {
+        CHECK(r.w.sound_emitters[0].lane == 20);
+        CHECK(r.w.sound_emitters[0].set_name == "V_TRUCK_REVSE");
+        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0xFFFF);
+        CHECK(r.w.sound_emitters[0].pitch_q16 == 0x10000);
+        CHECK(r.w.sound_emitters[1].lane == 0);
+        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0x8000);
+    }
+    CHECK(r.veh().veh.reverse_sound_latched);
+    CHECK(r.w.slot_sounds.size() == 1);
+    if (r.w.slot_sounds.size() == 1) {
+        CHECK(r.w.slot_sounds[0].slot == 32);
+        CHECK(std::strcmp(r.w.slot_sounds[0].set_name, "V_TRUCK_SHIFT") == 0);
+    }
+
+    r.w.slot_sounds.clear();
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    CHECK(r.w.slot_sounds.empty());
+    r.veh().veh.cmd_speed = 32000;
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    CHECK(!r.veh().veh.reverse_sound_latched);
+    CHECK(r.w.slot_sounds.size() == 1);
+}
+
+// The claimant detach edge immediately clears both moving lanes and plays the
+// profile's engine-stop one-shot. Idle receives no refresh and retires through
+// its existing 30-tick keep-alive.
+// [orig: Entity_DetachFromVehicle @0x4356e9..0x43577c]
+void test_claimant_detach_clears_motion_lanes_and_plays_stop() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.mount();
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    r.w.sound_emitters.clear();
+    r.w.slot_sounds.clear();
+
+    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
+
+    CHECK(r.w.sound_emitters.size() == 2);
+    if (r.w.sound_emitters.size() == 2) {
+        CHECK(r.w.sound_emitters[0].lane == 10);
+        CHECK(r.w.sound_emitters[0].pitch_q16 == 0);
+        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0);
+        CHECK(r.w.sound_emitters[1].lane == 20);
+        CHECK(r.w.sound_emitters[1].pitch_q16 == 0);
+        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0);
+    }
+    CHECK(r.w.slot_sounds.size() == 1);
+    if (r.w.slot_sounds.size() == 1) {
+        CHECK(r.w.slot_sounds[0].slot == 31);
+        CHECK(std::strcmp(r.w.slot_sounds[0].set_name, "V_TRUCK_STOP") == 0);
+    }
+
+    // The idle lane was already drained into the host before detach. While its
+    // keep-alive expires, later unoccupied motor ticks publish only the moved
+    // entity anchor and do not renew any lane controls.
+    r.w.sound_emitters.clear();
+    r.veh().position.x += 5.0f;
+    ++r.w.logic_tick;
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+    CHECK(r.w.sound_emitters.size() == 1);
+    if (r.w.sound_emitters.size() == 1) {
+        const SoundEmitterEvent &anchor = r.w.sound_emitters[0];
+        CHECK(anchor.source_only);
+        CHECK(anchor.source_spawn_id == r.veh().registry_spawn_id);
+        CHECK(anchor.pos.x == r.veh().position.x);
+        CHECK(anchor.emitted_tick == r.w.logic_tick + 1);
+        CHECK(anchor.pitch_q16 == 0);
+        CHECK(anchor.volume_q8_8 == 0);
+    }
+}
+
+// Hull collision is distinct from wreck/all-zero: it explicitly clears reverse
+// then forward, but still refreshes idle at full volume for this tick.
+// [orig: collision branch @0x5297db..0x529882]
+void test_hull_collision_clears_motion_lanes_and_forces_full_idle() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.drv().player_class = 0;
+    r.mount();
+
+    AiSystem ai;
+    CollisionWorld collision;
+    ai.collision = &collision;
+    r.w.ai = &ai;
+    r.w.registry.configure_pool(2, 4);
+
+    Entity wall;
+    wall.kind = EntityKind::Building;
+    wall.position = {150.0f, 200.0f, 10.0f};
+    wall.yaw = 90;
+    wall.alive = true;
+    wall.health = 30000;
+    const EntityHandle wall_h = r.w.registry.spawn(2, wall);
+    CHECK(wall_h.valid());
+    collision.assign_entity(wall_h, collision.add_model(vehicle_sound_test_wall()));
+
+    r.veh().position = {146.8f, 200.0f, 10.0f};
+    r.veh().yaw = 90;
+    r.veh().veh.yaw_seeded = false;
+    r.veh().veh.speed = 1000;
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(r.w);
+    CHECK(collision.candidate_count(r.veh_h) == 1);
+
+    VehicleDriveCmd drive;
+    drive.ai_drive = true;
+    drive.steer_target_bam = bam_heading_from_mission_yaw_deg(90.0);
+    drive.cmd_speed = 1000;
+    r.w.sound_emitters.clear();
+    tick_vehicle_motor(r.w, r.veh(), t, &drive);
+
+    CHECK(r.w.sound_emitters.size() == 3);
+    if (r.w.sound_emitters.size() == 3) {
+        const SoundEmitterEvent &reverse_clear = r.w.sound_emitters[0];
+        const SoundEmitterEvent &forward_clear = r.w.sound_emitters[1];
+        const SoundEmitterEvent &idle = r.w.sound_emitters[2];
+        CHECK(reverse_clear.lane == 20);
+        CHECK(reverse_clear.pitch_q16 == 0);
+        CHECK(reverse_clear.volume_q8_8 == 0);
+        CHECK(forward_clear.lane == 10);
+        CHECK(forward_clear.pitch_q16 == 0);
+        CHECK(forward_clear.volume_q8_8 == 0);
+        CHECK(idle.lane == 0);
+        CHECK(idle.slot == 0);
+        CHECK(idle.pitch_q16 == 0x10000);
+        CHECK(idle.volume_q8_8 == 0xFFFF);
+        CHECK(idle.set_name == "V_TRUCK_ILP");
+    }
+}
+
+// Claimant detach always clears keyed motion lanes, but slot 31 is strictly
+// above-water. At the plane itself retail suppresses the one-shot.
+// [orig: Entity_DetachFromVehicle @0x435716..0x43573e]
+void test_claimant_detach_at_water_plane_clears_without_stop_oneshot() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.w.vehicle_traits.set(r.veh().item_id, t);
+    r.w.env.water_z = 10 << 16;
+    r.mount();
+    r.w.sound_emitters.clear();
+    r.w.slot_sounds.clear();
+
+    CHECK(entity_detach_from_vehicle(r.w, r.drv_h));
+    CHECK(r.w.sound_emitters.size() == 2);
+    if (r.w.sound_emitters.size() == 2) {
+        CHECK(r.w.sound_emitters[0].pitch_q16 == 0);
+        CHECK(r.w.sound_emitters[0].volume_q8_8 == 0);
+        CHECK(r.w.sound_emitters[1].pitch_q16 == 0);
+        CHECK(r.w.sound_emitters[1].volume_q8_8 == 0);
+    }
+    CHECK(r.w.slot_sounds.empty());
+}
+
+// The portable producer accepts authored/modded int32 values. INT_MIN magnitudes,
+// a maximal gear count, and an extreme p2/p3 span must be deterministic rather
+// than invoking signed-overflow/abs(INT_MIN) undefined behavior.
+void test_vehicle_sound_extreme_ints_are_saturating() {
+    {
+        Rig r;
+        VehicleTraits t = buggy_traits();
+        t.player_speed = std::numeric_limits<int32_t>::min();
+        t.sound_profile = "SP_Transport";
+        load_transport_sound_profile(r.w);
+        r.mount();
+        r.w.sound_emitters.clear();
+        r.veh().veh.speed = std::numeric_limits<int32_t>::min();
+
+        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+        CHECK(r.w.sound_emitters.size() == 1);
+        if (r.w.sound_emitters.size() == 1) {
+            CHECK(r.w.sound_emitters[0].lane == 20);
+            CHECK(r.w.sound_emitters[0].pitch_q16 == 52428);
+            CHECK(r.w.sound_emitters[0].volume_q8_8 == 0xFFFF);
+        }
+    }
+
+    {
+        Rig r;
+        VehicleTraits t = buggy_traits();
+        t.player_speed = std::numeric_limits<int32_t>::min();
+        t.sound_profile = "SP_Extreme";
+        static constexpr char kExtremeProfile[] =
+                "begin \"SP_Extreme\"\n"
+                "  Soundloop_1 V_IDLE 1 1\n"
+                "  Soundloop_2 V_DRIVE .8 1.2 2147483647\n"
+                "end\n";
+        CHECK(r.w.sound_profiles.parse(kExtremeProfile,
+                                       sizeof(kExtremeProfile) - 1) == 1);
+        r.mount();
+        r.w.sound_emitters.clear();
+        r.veh().veh.speed = std::numeric_limits<int32_t>::max();
+
+        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+        CHECK(!r.w.sound_emitters.empty());
+        if (!r.w.sound_emitters.empty()) {
+            CHECK(r.w.sound_emitters[0].lane == 10);
+            CHECK(r.w.sound_emitters[0].pitch_q16 == 52428);
+        }
+    }
+
+    {
+        Rig r;
+        VehicleTraits t = buggy_traits();
+        t.player_speed = 1;
+        t.sound_profile = "SP_ExtremeSpan";
+        static constexpr char kExtremeSpanProfile[] =
+                "begin \"SP_ExtremeSpan\"\n"
+                "  Soundloop_1 V_IDLE 1 1\n"
+                "  Soundloop_2 V_DRIVE -32768 32767\n"
+                "end\n";
+        CHECK(r.w.sound_profiles.parse(kExtremeSpanProfile,
+                                       sizeof(kExtremeSpanProfile) - 1) == 1);
+        r.mount();
+        r.w.sound_emitters.clear();
+        r.veh().veh.speed = 0xFFFF;
+
+        update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+        CHECK(!r.w.sound_emitters.empty());
+        if (!r.w.sound_emitters.empty()) {
+            CHECK(r.w.sound_emitters[0].lane == 10);
+            CHECK(r.w.sound_emitters[0].pitch_q16 ==
+                  std::numeric_limits<int32_t>::max());
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -439,6 +905,16 @@ int main() {
     test_multiple_stale_controls_publish_one_stop();
     test_dead_vehicle_holds();
     test_physics_selector_gate();
+    test_npc_claimant_registers_stationary_idle_sound();
+    test_controller_without_claimant_is_silent();
+    test_item_soundloop_override_wins_over_profile();
+    test_forward_sound_gain_pitch_and_idle_crossfade();
+    test_forward_sound_gear_pitch_sawtooth();
+    test_reverse_sound_and_direction_shift_edges();
+    test_claimant_detach_clears_motion_lanes_and_plays_stop();
+    test_hull_collision_clears_motion_lanes_and_forces_full_idle();
+    test_claimant_detach_at_water_plane_clears_without_stop_oneshot();
+    test_vehicle_sound_extreme_ints_are_saturating();
     if (failures == 0) std::printf("vehicle_motor_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

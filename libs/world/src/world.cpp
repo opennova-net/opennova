@@ -8,6 +8,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/vehicle_attach.h"
+#include "world/vehicle_sound.h"
 
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
@@ -77,6 +78,7 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
     // occupant — leaves the latch untouched.
     if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
         return false;
+    stop_ground_vehicle_sound(world, vehicle);
     vehicle.primary_occupant = EntityHandle{};
     emit_vehicle_control_stopped(world, vehicle);
     return true;
@@ -926,6 +928,10 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
         }
     }
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
+    // Audio-less/headless hosts never drain presentation. Retire their bounded
+    // latest-intent rows on the same logic clock so old entity lifetimes cannot
+    // occupy mailbox admission indefinitely.
+    sound_emitters.prune(logic_tick);
 }
 
 // Structural translation of Server_ProcessRoundEnd @0x5164f0 at SP altitude.
@@ -1016,6 +1022,8 @@ void World::restore(const Snapshot &s) {
     cached = CachedFrameState{};
     cached.local_player = s.local_player;
     effects.clear();
+    slot_sounds.clear();
+    sound_emitters.clear();
     round_sim.reset();
     explosions.reset();
     throwables.reset();

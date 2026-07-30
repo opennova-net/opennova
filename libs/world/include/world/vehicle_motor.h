@@ -21,15 +21,18 @@
 // (`move_function chel` — Super Pumas stay parked), the skid/tire-slip model
 // (`tireSlip`/`slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
 // vehicle-vs-vehicle collision loop + collision-avoid damping, water
-// drag/drowning drain (no world water height), the husk/section damage model, the
-// AI autopilot/waypoint drive (states 16/18), the engine sound state machine, the
+// drag/drowning drain (the plane exists but motor physics does not consume it), the
+// AI autopilot/waypoint drive (states 16/18), specialized vehicle sound families
+// beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, the
 // wheel-contact pitch/roll solver (Entity_ProcessTrackedVehiclePhysics — substituted
 // by the bilinear terrain clamp), and the vehicle AI state machine's non-drive states
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
 #ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
 #define OPENNOVA_WORLD_VEHICLE_MOTOR_H
 
+#include <array>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 #include "world/entity.h"
@@ -55,6 +58,13 @@ struct VehicleTraits {
     int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
+    // The VEHICLE item's own authored sound binding. This deliberately does not
+    // borrow the mounted NPC's AiProfile: pool-1 vehicles need sound even when no
+    // AiEntity body exists for them. Profile slots seed soundloop_1..7, then a
+    // non-empty item-level soundloop_N overrides the corresponding set name.
+    // [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
+    std::string sound_profile;
+    std::array<std::string, 7> sound_loops{};
 };
 
 // items.def type-id -> traits. World-level like the weapon/ammo tables.

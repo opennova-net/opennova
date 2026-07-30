@@ -11,6 +11,7 @@
 #include "world/body_anim.h"
 #include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
+#include "world/vehicle_sound.h"
 #include <algorithm>
 #include <cmath>
 
@@ -395,6 +396,32 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                         ? veh->veh.yaw_bam
                         : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
             }
+        }
+    }
+    // A joiner does not integrate its replicated pool-1 vehicle copies here, but
+    // retail still executes the per-entity ground callback's presentation leg on
+    // clients. Evaluate sound from the current wire/local state after the authority
+    // motor pass, leaving position, heading, and motor accumulators untouched.
+    // Collision contact is authority-physics state and therefore unavailable on
+    // this path; an explicit replicated collision bit can replace `false` later.
+    // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
+    // @0x48d181..0x48d1c4]
+    if (!is_authority && !world.vehicle_traits.empty()) {
+        vehicle_pass_handles_.clear();
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() != 1) return;
+            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            if (traits == nullptr || traits->physics == 0) return;
+            vehicle_pass_handles_.push_back(e.handle);
+        });
+        for (const EntityHandle h : vehicle_pass_handles_) {
+            Entity *veh = world.registry.get(h);
+            if (veh == nullptr) continue;
+            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
+            if (traits == nullptr) continue;
+            update_ground_vehicle_sound(world, *veh, *traits,
+                                        /*wrecked=*/veh->health <= 0,
+                                        /*collided=*/false);
         }
     }
     events.process_timed(*this, world);

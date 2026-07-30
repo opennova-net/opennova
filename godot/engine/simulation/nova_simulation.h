@@ -1340,6 +1340,13 @@ public:
 	// slot} — played by the fire present pass at full volume
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
+	// Drain persistent entity-attached emitter registrations. Producers refresh
+	// a keyed (source_spawn_id, lane) intent; the audio host expands `set` into
+	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
+	// Rows are {source_spawn_id, handle, source_bms_id, pos, lane, slot,
+	// lifetime, emitted_tick, pitch_q16, volume_q8_8, source_only, set}.
+	// [orig: SoundEmitter_Register @0x529270]
+	Array drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
 	// framed per channel as [style_id, age, count, then count x (x, y, z, w)] in

@@ -22,11 +22,13 @@ add_library(opennova_world STATIC
     src/player_view.cpp
     src/destruction.cpp
     src/round_sim.cpp
+    src/sound_emitter_mailbox.cpp
     src/throwables.cpp
     src/spawn_select.cpp
     src/tracer_trails.cpp
     src/vehicle_attach.cpp
     src/vehicle_motor.cpp
+    src/vehicle_sound.cpp
     src/weapon_fsm.cpp
     src/weapon_inventory.cpp
     src/zone_capture.cpp
