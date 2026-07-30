@@ -1,6 +1,7 @@
 #include "netsim/net_client_view.h"
 
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
+#include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <npwire/ingame_message_id.h>
 #include <io/bam.h>                      // wrapped retail pitch chase
 
@@ -493,8 +494,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		}
 		if (has_state_flags) {
 			const bool was_known = es.state_flags_known;
-			const bool was_dead = (es.state_flags & 0x02u) != 0u;
-			const bool is_alive = (state_flags & 0x02u) == 0u;
+			const bool was_dead = (es.state_flags & world::kEntityFlagDead) != 0u;
+			const bool is_alive = (state_flags & world::kEntityFlagDead) == 0u;
 			es.state_flags = state_flags;
 			es.state_flags_known = true;
 			if (was_known && was_dead && is_alive) {

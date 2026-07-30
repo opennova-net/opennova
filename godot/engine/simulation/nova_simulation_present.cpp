@@ -3,6 +3,8 @@
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
 
+#include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+
 using namespace novasim;
 
 Array NovaSimulation::get_throwable_visuals() const {
@@ -1101,7 +1103,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		if (joiner_) {
 			if (es.state_flags_known) {
 				r[PF_HIDDEN] = (es.state_flags & 0x01u) != 0u ? 1.0f : 0.0f;
-				r[PF_ALIVE] = (es.state_flags & 0x02u) == 0u ? 1.0f : 0.0f;
+				r[PF_ALIVE] = (es.state_flags & opennova::world::kEntityFlagDead) == 0u ? 1.0f : 0.0f;
 			}
 		}
 		EmplacedWeaponControls emplaced;
@@ -1269,8 +1271,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 					}
 					wpn_hold_state = opennova::world::infantry_weapon_hold_state(
 							hold_kind, es.anim_state_id,
-							(es.state_flags & 0x10u) != 0,
-							(es.state_flags & 0x08u) != 0,
+							(es.state_flags & opennova::world::kEntityFlagScopeRaised) != 0,
+							(es.state_flags & opennova::world::kEntityFlagBinoculars) != 0,
 							/*reloading=*/false);
 				}
 				if (es.cls == opennova::EntityClass::Player && !collapse_right_hand &&
@@ -1294,7 +1296,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				if (es.cls == opennova::EntityClass::Player) {
 					write_present_held_weapon(
 							r, es.equipped_adm_index,
-							(es.state_flags & 0x02u) != 0, inputs,
+							(es.state_flags & opennova::world::kEntityFlagDead) != 0, inputs,
 							wpn_hold_state);
 				}
 			}
