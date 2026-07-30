@@ -60,6 +60,13 @@ needed, ask the user for the path; never guess or commit one.
   (optional `scene` for `res://game/main_game.tscn`), then poll
   `mcp__godot__get_debug_output`, and finish with `mcp__godot__stop_project`.
   Raw fallback (run in background): `"$GODOT_BIN" --path godot [scene]`.
+- Game-under-ONED (the managed F5/F6 child, ADR 0025): when ONED is running
+  with its MCP server, drive the game through the repo's own `oned` server
+  instead — `run_game(op="start", mode="game"|"mission")` mirrors F5/F6,
+  `game_state`/`game_debug`/`game_screenshot` observe and mutate the live
+  runtime, `run_game(op="stop")` mirrors F8. The child mounts the editor's
+  resource dir (`--resource-dir` + `--loose-root`: a loose authoring dir with
+  no PFFs plays as-is).
 - Headless scripted observation: the probe pattern — `SceneTree` scripts named
   `*_probe.gd` under `godot/tests/` (not collected by GUT), e.g.
   `"$GODOT_BIN" --headless --path godot -s res://tests/runtime_scene_probe.gd`.

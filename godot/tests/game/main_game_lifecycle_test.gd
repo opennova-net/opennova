@@ -618,7 +618,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 			actual_camera.global_position.z, 0.0001)
 
 	# The option registry drives the real world end to end: one programmatic
-	# flip rides debug_option_changed through the shell's generic handler and
+	# flip applies through the shared session's option target and
 	# builds the world's skeleton view; the counter-flip frees it.
 	overlay.set_option(&"show_skeletons", true)
 	assert_not_null(world.get_node_or_null("SkeletonDebug"),

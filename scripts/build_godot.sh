@@ -12,7 +12,8 @@
 # Usage: scripts/build_godot.sh [Dev|DebugFull|Release]   (default: Dev)
 #   Dev       -> libopennova.<platform>.template_debug.x86_64.<dll|so>  (editor)
 #                RelWithDebInfo: optimized native code (/O2 + symbols). This is
-#                the flavor every editor and play-in-editor session loads; an
+#                the flavor every editor session and every game runtime it
+#                launches (F5/F6) load; an
 #                unoptimized build here costs ~1.5x whole-frame time in-game
 #                (MSVC Debug is /Od /RTC1: ~5-10x on native sim work). The
 #                artifact NAME stays template_debug — godot-cpp derives it from

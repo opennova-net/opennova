@@ -169,9 +169,9 @@ func _build_viewmodel_pass() -> void:
 	_vm_viewport = SubViewport.new()
 	# Render the CAMERA's World3D: the pass re-renders the SAME scene, culled to the
 	# viewmodel layer [orig: one scene, second projection + depth window @0x4ded60].
-	# Assigned explicitly — this host node may live OUTSIDE the play viewport (ONED
-	# play-in-editor), so tree-inherited world/canvas targets would be the editor
-	# window's, not the game's.
+	# Assigned explicitly — this host node may live OUTSIDE the play viewport
+	# (tests host the rig off the game tree), so tree-inherited world/canvas
+	# targets would be the host window's, not the game's.
 	_vm_viewport.world_3d = _camera.get_world_3d()
 	_vm_viewport.transparent_bg = true
 	_vm_viewport.handle_input_locally = false

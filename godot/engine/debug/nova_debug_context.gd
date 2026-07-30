@@ -25,7 +25,7 @@ var session: NovaDebugSession = null
 
 ## The shared NovaDebugOptions value store. Pages build controls against it
 ## (NovaDebugPage.add_option_check); the overlay re-emits its `changed` as
-## `debug_option_changed` for the hosts.
+## `debug_option_changed` (observed by tests; hosts read the shared session).
 var options: NovaDebugOptionState = null
 
 ## The HOST-owned debug pick list (null until the host injects one). Pages

@@ -519,11 +519,11 @@ along seams that already exist as signal boundaries in the code.
   or stages terrain data. One correction to the phase's wording remains:
   terrain export bakes the terrain data set (`.trn`/`.cpt`/`.til`/maps), not a
   mission dir — there is no "exported terrain's mission" to boot directly.
-  The retired launcher introduced a per-workspace seam used by later
-  game-launch phases:
-  `EditorWorkspace.get_game_launch_note(launch_dir)` returning a typed
-  `GameLaunchNote` (staged + artist-facing detail), consumed by
-  `ShellGameLaunch` in the tooltip and post-launch status.
+  The retired launcher also introduced a per-workspace
+  `EditorWorkspace.get_game_launch_note(launch_dir)` -> `GameLaunchNote`
+  staging-note seam, consumed by the then-launcher's tooltip and post-launch
+  status; that seam was deleted with the launcher (ADR 0025 / PR #376) —
+  today's F5/F6 runs carry no per-workspace launch notes.
 
 ### Environment
 

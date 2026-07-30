@@ -52,7 +52,6 @@ var _fire_present                     # FirePresentPass: non-local fire sound + 
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
 var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
-var _self_tick := false              # tooling/tests only; live GameWorld calls tick_realtime()
 var _playing := false
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
@@ -87,7 +86,7 @@ var _effect_poses_by_ssn: Dictionary = {}
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
-## the present pass. options: { loco_scale, self_tick (tooling/tests only), present_options, and for a net
+## the present pass. options: { loco_scale, present_options, and for a net
 ## session the typed request under "host_session" (HostSessionConfig) or "join_target"
 ## (JoinTarget) }. Returns the AI entity count, or 0 on load failure (the orphan sim is
 ## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
@@ -227,10 +226,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 				options["wac_basename"], wac.get_error_count()])
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
-	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it. Live
-	# GameWorld leaves self_tick false and drives tick_realtime() explicitly; the option survives only
-	# for isolated tests/tooling previews, not an ONED gameplay host.
-	_self_tick = bool(options.get("self_tick", false))
+	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
+	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
 	# The registry present drives placed mission nodes on EVERY role. A joiner places the
@@ -936,11 +933,6 @@ func get_perf_counters() -> Dictionary:
 		"ticks": _ticks_last_frame,
 		"sim": _sim.get_runtime_perf_counters() if _sim != null else {},
 	}
-
-
-func _process(delta: float) -> void:
-	if _self_tick and _playing:
-		tick_realtime(delta)
 
 
 # --- Debug/tooling transport (Play / Step / Stop) -----------------------------

@@ -290,7 +290,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 
 
 # The gameplay keys (F4/B/N/NVG gain/stance) live in the input router; this
-# pinned host name delegates (main_game + the ONED play controller call it).
+# pinned host name delegates (main_game calls it).
 func handle_key_input(event: InputEvent, active: bool) -> bool:
 	return _input_router.handle_key_input(event, active)
 
