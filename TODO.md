@@ -87,6 +87,14 @@ hardening, and project health. Divergences from the original engine belong in
       but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
+- [ ] Wire present-pass native walk (the MP twin of #321): the SP mission present
+      row walk moved into `NovaPresentApplier` with #321, but
+      `godot/engine/world/wire_present_pass.gd` still builds and walks its own
+      GDScript row plan (`_begin_row_plan`/`_append_row_plan`) — only its
+      visual-control adapters delegate to the native statics. The July perf
+      program's F3 Stats reading put the MP walk at ~3.2 ms and ranked porting
+      it onto the native walk as the next present slice, ahead of the
+      env/water/sky/weather singleton `_process` set (~1 ms)
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
