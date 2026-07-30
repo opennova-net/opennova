@@ -58,7 +58,7 @@ func _combo(menu: Node, name: String) -> NovaMnuCombo:
 
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var db := _load_db()
-	var profile := GameWorld.character_join_profile_from_database(db)
+	var profile := NetSessionDrive.character_join_profile_from_database(db)
 	var ids: Array = profile.get("character_ids", [])
 	var classes: Array = profile.get("player_classes", [])
 	var avatars: Array = profile.get("avatars", [])
@@ -82,7 +82,7 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 		"combo": 1,
 		"player_class": 6,
 	}
-	var profile := GameWorld.character_join_profile_from_database(db, selected)
+	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
 	var ids: Array = profile.get("character_ids", [])
 	var avatars: Array = profile.get("avatars", [])
 	var combo: Dictionary = db.get_combo(0, 0, 1)

@@ -1263,6 +1263,43 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	blocker.close()
 
 
+func test_escape_aborts_the_joiner_admission_wait() -> void:
+	# ESC during the SECOND interruptible joiner wait: an explicit-mission joiner
+	# loads its map locally and then parks in the post-load admission watchdog
+	# until the (here: silent) host drives the join forward. cancel_join_admission
+	# tells that armed wait to abort; the watchdog reports through the ordinary
+	# load-failure leg exactly once, on its next process_frame resume.
+	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+	assert_eq(blocker.bind_listen(0), OK)
+	var silent_port := blocker.local_port()
+	assert_gt(silent_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	assert_false(world.cancel_join_admission(), "no armed admission wait is a no-op")
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", silent_port, "mnml")), OK)
+	assert_true(world.cancel_join_admission(), "an armed admission wait accepts the abort")
+	await get_tree().process_frame  # the watchdog resumes and observes the abort
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], "aborted")
+	await get_tree().process_frame
+	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
+	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
+	world.unload()
+	blocker.close()
+
+
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
