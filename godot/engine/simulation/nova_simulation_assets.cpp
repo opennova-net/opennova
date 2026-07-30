@@ -3,6 +3,8 @@
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/nova_simulation_internal.h"
 
+#include <def/def.h> // DEF_ITEM_ATTRIB_* / DEF_ITEM_ATTRIB2_*
+
 using namespace novasim;
 
 void NovaSimulation::reset_infantry_adm_ids() {
@@ -163,13 +165,13 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		// @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
 		const uint32_t attrib = p_item_db->get_attrib(def_id);
 		e->item_attrib = attrib;
-		e->is_capture_trigger = (attrib & 0x20000u) != 0;
-		e->is_spawn_point = (attrib & 0x40000u) != 0;
+		e->is_capture_trigger = (attrib & DEF_ITEM_ATTRIB_CHANGETEAM) != 0;
+		e->is_spawn_point = (attrib & DEF_ITEM_ATTRIB_SPAWNPOINT) != 0;
 		// Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
 		// forever; deathtime (def+0x890, parse-scaled ticks) seeds the corpse timer at
 		// the death edge. [orig: ItemDef_ParseProperty @0x4a09d3 / @0x49fa6c; consumers
 		// Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
-		e->leave_corpse = (attrib & 0x400000u) != 0;
+		e->leave_corpse = (attrib & DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
 		e->deathtime_ticks = p_item_db->get_deathtime_ticks(def_id);
 		// Destruction traits (world/destruction.h; world-wac-ai-re §24): the death
 		// chain's def fields, keyed by item id. Fills once per distinct id.
@@ -186,9 +188,9 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				t.kz = float(double(dt.get("kz", 0.0)));
 				t.armor_impact = int(dt.get("armor_impact", 0));
 				t.armor_blast = int(dt.get("armor_blast", 0));
-				t.team_protect = (attrib & 0x8000u) != 0;
-				t.no_die = (attrib & 0x40000000u) != 0;
-				t.static_death = (p_item_db->get_attrib2(def_id) & 0x100u) != 0;
+				t.team_protect = (attrib & 0x8000u) != 0; // 0x8000 is NOT in the witnessed attrib token table — stays raw
+				t.no_die = (attrib & DEF_ITEM_ATTRIB_NODIE) != 0;
+				t.static_death = (p_item_db->get_attrib2(def_id) & DEF_ITEM_ATTRIB2_STATICDEATH) != 0;
 				t.has_husk = bool(dt.get("has_husk", false));
 				t.is_decoration =
 						p_item_db->get_item_type(def_id) == NovaItemDatabase::TYPE_DECORATION;
@@ -228,7 +230,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.turn_rate2 = vp[5];
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
-				vt.player_control = (attrib & 0x40u) != 0;
+				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
 				// mounted NPC's AiProfile. Resolve the profile name and the
 				// item-level soundloop overrides once at this portable boundary.

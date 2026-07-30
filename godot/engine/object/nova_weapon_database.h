@@ -113,6 +113,12 @@ public:
 		SLOT_GRENADE = 3,
 	};
 
+	// weapon.def flags bits GDScript reads off get_* results — mirrors
+	// DEF_WEAPON_FLAG_* (static_assert in the .cpp pins it).
+	enum {
+		FLAG_EMPLACED = 0x80,
+	};
+
 	Error load(const String &path);
 	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
 	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);

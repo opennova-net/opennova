@@ -132,7 +132,7 @@ static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id :=
 	# "armory*" userpoints label/scan only on Armory-attrib items — the same attrib
 	# gate the original applies before its userpoint walk
 	# [orig: itemDef->attrib & 0x80000 @0x4361ee/@0x5a36f5; walk @0x436226/@0x5a372b].
-	if item_db.has_method("get_attrib") and (int(item_db.get_attrib(item_id)) & 0x80000) != 0:
+	if item_db.has_method("get_attrib") and (int(item_db.get_attrib(item_id)) & NovaItemDatabase.ATTRIB_ARMORY) != 0:
 		out["armory_points"] = armory_points_from_model(data)
 	return out
 

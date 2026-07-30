@@ -1356,7 +1356,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 	var arms_name := "armsG"
 	if def != null and not def.gfx1a.is_empty():
 		arms_name = def.gfx1a
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	if not gun_name.is_empty():
 		_placer.object_data_for(gun_name)
 	if show_arms and not arms_name.is_empty():
@@ -1513,7 +1513,7 @@ func build_local_player_viewmodel() -> Node3D:
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
 	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
 	# character-arms model. [orig: Player_RenderFirstPersonViewModel @0x4dedc7]
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
@@ -2310,16 +2310,18 @@ func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
 # mission kind enum is Marker=0, Item=1, Building=2, Organic=3.
 func _item_effect_pool_allows(kind: int, attrib: int) -> bool:
 	if kind == NovaMissionData.KIND_ITEM:
-		return (attrib & 0x42) == 0
+		return (attrib & (NovaItemDatabase.ATTRIB_POWERUP | NovaItemDatabase.ATTRIB_PLAYER_CONTROL)) == 0
 	if kind == NovaMissionData.KIND_BUILDING or kind == NovaMissionData.KIND_MARKER:
-		return (attrib & 0x2) == 0
+		return (attrib & NovaItemDatabase.ATTRIB_POWERUP) == 0
 	return false
 
 
 func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
-	# The occupied-controller pass bypasses only PlayerControl (0x40). The
-	# independent 0x2 exclusion remains intact.
-	return kind == NovaMissionData.KIND_ITEM and (attrib & 0x42) == 0x40
+	# The occupied-controller pass bypasses only PlayerControl. The
+	# independent powerup exclusion remains intact.
+	return kind == NovaMissionData.KIND_ITEM and \
+			(attrib & (NovaItemDatabase.ATTRIB_POWERUP | NovaItemDatabase.ATTRIB_PLAYER_CONTROL)) \
+			== NovaItemDatabase.ATTRIB_PLAYER_CONTROL
 
 
 func _item_fx_identity_aliases(net_id: int, bms_id: int,
