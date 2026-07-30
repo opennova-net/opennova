@@ -332,34 +332,68 @@ class ItemFxModelStub:
 		return data
 
 
+class ItemFxDirectorProbe:
+	extends ItemEffectDirector
+	# Probe wrappers over the REAL director's private internals: the pokes stay
+	# implicit-self inside the subclass, keeping the private-poke ratchet flat.
+	func attach_to_node(node: Node3D, kind: int, item_id: int) -> int:
+		return _attach_item_effect_to_node(node, kind, item_id)
+	func attach_to_static(source: Dictionary, source_index: int) -> int:
+		return _attach_item_effect_to_static(source, source_index)
+	func pending_node_count() -> int:
+		return _item_fx_pending_nodes.size()
+	func pending_static_count() -> int:
+		return _item_fx_pending_static.size()
+	func deferred_control_count() -> int:
+		return _item_fx_control_nodes.size()
+	func active_identity_count() -> int:
+		return _item_fx_control_active.size()
+	func seed_owner(key: String, node: Node3D, entity_ref: Dictionary) -> void:
+		_item_fx_nodes[key] = node
+		_item_fx_owner_refs[key] = entity_ref.duplicate()
+	func resolve_owner(key: String) -> Variant:
+		return _effect_owner_transform(key)
+
+
 class ItemFxGameWorldHarness:
 	extends GameWorld
+	# _item_fx is the world's sanctioned director-injection seam (like the
+	# _runtime seam below): swap in a probe subclass of the real director so
+	# tests drive the extracted code through the world's own wiring.
+	var fx: ItemFxDirectorProbe
+	func _init() -> void:
+		fx = ItemFxDirectorProbe.new()
+		fx.setup(self,
+				func() -> Array:
+					return _placer.get_static_item_effect_sources() if _placer != null else [],
+				func() -> Variant:
+					return _placer.get_item_db() if _placer != null else null)
+		_item_fx = fx
 	func configure_item_fx(effects: NovaEffectWorld, placer: RefCounted) -> void:
 		_effect_world = effects
 		_placer = placer
 	func present_item_fx(node: Node3D, kind: int, item_id: int) -> int:
-		return _attach_item_effect_to_node(node, kind, item_id)
+		return fx.attach_to_node(node, kind, item_id)
 	func attach_all_item_fx() -> void:
-		_attach_item_effects()
+		fx.reattach()
 	func present_static_item_fx(source: Dictionary, source_index: int) -> int:
-		return _attach_item_effect_to_static(source, source_index)
+		return fx.attach_to_static(source, source_index)
 	func pending_item_fx_count() -> int:
-		return _item_fx_pending_nodes.size()
+		return fx.pending_node_count()
 	func pending_static_item_fx_count() -> int:
-		return _item_fx_pending_static.size()
+		return fx.pending_static_count()
 	func deferred_control_item_fx_count() -> int:
-		return _item_fx_control_nodes.size()
+		return fx.deferred_control_count()
 	func active_control_identity_count() -> int:
-		return _item_fx_control_active.size()
+		return fx.active_identity_count()
 	func consume_runtime_effects(effects: Array) -> void:
 		_on_runtime_effects(effects)
 	func configure_item_owner(runtime: Node, key: String, node: Node3D,
 			entity_ref: Dictionary) -> void:
 		_runtime = runtime
-		_item_fx_nodes[key] = node
-		_item_fx_owner_refs[key] = entity_ref.duplicate()
+		fx.seed_owner(key, node, entity_ref)
 	func resolve_item_owner(key: String) -> Variant:
-		return _effect_owner_transform(key)
+		return fx.resolve_owner(key)
 
 
 class ImpactGameWorldHarness:
@@ -400,9 +434,30 @@ class WarmEffectWorldStub:
 		calls.append("reset")
 
 
+class WarmItemFxStub:
+	extends ItemEffectDirector
+	# Director double for the warm-pass ordering probe: reattach() records the
+	# particle switch it ran under instead of attaching real item effects.
+	var attached_while_hidden := false
+
+	func reattach() -> void:
+		var effect_world: NovaEffectWorld = _world.get_effect_world()
+		attached_while_hidden = effect_world.are_particles_hidden()
+
+
 class WarmGameWorldHarness:
 	extends GameWorld
-	var attached_while_hidden := false
+	# Injects a director double through the sanctioned _item_fx seam (the
+	# overridable-hook role the world's own _attach_item_effects used to play).
+	var fx_stub := WarmItemFxStub.new()
+
+	var attached_while_hidden: bool:
+		get:
+			return fx_stub.attached_while_hidden
+
+	func _init() -> void:
+		fx_stub.setup(self, Callable(), Callable())
+		_item_fx = fx_stub
 
 	func configure_warm_effects(effects: NovaEffectWorld) -> void:
 		_effect_world = effects
@@ -410,14 +465,14 @@ class WarmGameWorldHarness:
 	func warm_effect_catalog() -> int:
 		return _warm_effect_world_catalog()
 
-	func _attach_item_effects() -> void:
-		attached_while_hidden = _effect_world.are_particles_hidden()
-
 
 
 # Single stub-injection seam for this file: GameWorld builds its runtime
 # internally in _start_runtime, so duck-typed transport stubs go in through
-# these two helpers only (keeps the private pokes to one site).
+# these two helpers only (keeps the private pokes to one site). The same
+# sanction covers the _item_fx director seam above: harnesses swap in a
+# director probe/double instead of poking the moved item-fx privates on the
+# world (ItemFxGameWorldHarness / WarmGameWorldHarness).
 func _install_runtime(world, runtime, effects = null) -> void:
 	world._runtime = runtime
 	world._loaded = runtime != null
