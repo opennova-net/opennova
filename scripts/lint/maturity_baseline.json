@@ -30,6 +30,7 @@
     "host_session_config.gd|func to_session_options()",
     "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
     "occlusion_frame_pass.gd|func present_visibility()",
+    "nova_object_body_anim.gd|func get_active_part_anims()",
     "selection_ops.gd|func get_selection_summary()",
     "selection_ops.gd|func get_selected_entity()",
     "selection_ops.gd|func get_group(",
