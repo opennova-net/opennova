@@ -97,7 +97,7 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   7597        the NovaWorld gate UDP port    gate_probe.h / net_ports.h / HostSessionConfig
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
 #   0x30020     the retail Co-op g_GameType    HostSessionConfig.GAME_TYPE_COOP
-PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|3276[78]|0x30020)(?![\w.])", re.IGNORECASE)
+PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
 PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "libs/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
