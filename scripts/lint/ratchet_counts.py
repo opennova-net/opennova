@@ -179,6 +179,30 @@ def count_oversize_cpp_files() -> int:
     return count
 
 
+OVERSIZE_GD_LINE_LIMIT = 1200
+
+
+def count_oversize_gd_files() -> int:
+    """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
+    leave seven residual offenders; no .gd under godot/engine, godot/game, or
+    godot/modtools may grow past 1200 lines without splitting first.
+    godot/tests is deliberately out of scope: eleven test files already exceed
+    the limit and the test refit is ONED-TST's concern, not this ratchet's."""
+    count = 0
+    for root in ("godot/engine", "godot/game", "godot/modtools"):
+        for path in (REPO / root).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or "build" in parts:  # vendored addons / build output, not source
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if len(text.splitlines()) > OVERSIZE_GD_LINE_LIMIT:
+                count += 1
+    return count
+
+
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
@@ -221,6 +245,7 @@ def main() -> int:
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),
+        "oversize_gd_files": count_oversize_gd_files(),
         "has_method_guards": count_has_method_guards(),
     }
 

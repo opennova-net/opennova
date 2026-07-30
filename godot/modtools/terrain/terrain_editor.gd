@@ -22,6 +22,10 @@ const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
 const WorldContextPreview = preload("res://modtools/framework/world_context_preview.gd")
+const TerrainEditorTileinfoOps = preload("res://modtools/terrain/terrain_editor_tileinfo_ops.gd")
+const TerrainEditorFoliageOps = preload("res://modtools/terrain/terrain_editor_foliage_ops.gd")
+const TerrainEditorIoOps = preload("res://modtools/terrain/terrain_editor_io_ops.gd")
+const TerrainEditorBrushOps = preload("res://modtools/terrain/terrain_editor_brush_ops.gd")
 const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -52,6 +56,21 @@ var workstation: Node = null
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
+
+# Method-bundle sections (W4-6d): operation clusters extracted off the
+# facade. ALL state stays here on the host; sections reach back via `_te`.
+var _tileinfo_ops  # TerrainEditorTileinfoOps (created in _init)
+var _foliage_ops  # TerrainEditorFoliageOps (created in _init)
+var _io_ops  # TerrainEditorIoOps (created in _init)
+var _brush_ops  # TerrainEditorBrushOps (created in _init)
+
+
+func _init() -> void:
+	_tileinfo_ops = TerrainEditorTileinfoOps.new(self)
+	_foliage_ops = TerrainEditorFoliageOps.new(self)
+	_io_ops = TerrainEditorIoOps.new(self)
+	_brush_ops = TerrainEditorBrushOps.new(self)
+
 
 var _data: NovaTerrainData:
 	get:
@@ -403,18 +422,18 @@ func _handle_viewport_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton:
 			var locked_mouse := event as InputEventMouseButton
 			if locked_mouse.button_index == MOUSE_BUTTON_LEFT and not locked_mouse.pressed:
-				_on_primary_end()
+				_brush_ops._on_primary_end()
 		return
 
 	if event is InputEventMouseButton:
 		var mouse_button := event as InputEventMouseButton
 		if mouse_button.button_index == MOUSE_BUTTON_LEFT:
 			if mouse_button.pressed:
-				_on_primary_start()
+				_brush_ops._on_primary_start()
 			else:
-				_on_primary_end()
+				_brush_ops._on_primary_end()
 		elif mouse_button.button_index == MOUSE_BUTTON_RIGHT and mouse_button.pressed:
-			if current_tool == Tool.TILE_STAMP and is_tile_edit_mode():
+			if current_tool == Tool.TILE_STAMP and _tileinfo_ops.is_tile_edit_mode():
 				clear_tileinfo_selection()
 
 	if event is InputEventKey and event.is_pressed() and not event.is_echo():
@@ -470,7 +489,7 @@ func _handle_viewport_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	_poll_export_job()
+	_io_ops._poll_export_job()
 	if _uses_workspace_viewport and not _viewport_active:
 		return
 	if _world_preview != null:
@@ -483,12 +502,12 @@ func _process(delta: float) -> void:
 		if inactive_material:
 			inactive_material.set_shader_parameter("u_brush_pos", Vector2(-10000.0, -10000.0))
 			inactive_material.set_shader_parameter("u_show_surface_overlay", false)
-		_sync_foliage_preview()
-		_sync_tile_overlay_preview()
+		_foliage_ops._sync_foliage_preview()
+		_tileinfo_ops._sync_tile_overlay_preview()
 		return
 
-	_hover_hit = _raycast_terrain()
-	_hover_hit_valid = _is_valid_hit(_hover_hit)
+	_hover_hit = _brush_ops._raycast_terrain()
+	_hover_hit_valid = _brush_ops._is_valid_hit(_hover_hit)
 
 	var material := _get_material()
 	if _is_brush_preview_tool() and _hover_hit_valid:
@@ -500,10 +519,10 @@ func _process(delta: float) -> void:
 	_sync_surface_overlay_state(material)
 
 	if brush_active and _is_brush_preview_tool():
-		_apply_brush_stroke(delta)
+		_brush_ops._apply_brush_stroke(delta)
 
-	_sync_foliage_preview()
-	_sync_tile_overlay_preview()
+	_foliage_ops._sync_foliage_preview()
+	_tileinfo_ops._sync_tile_overlay_preview()
 
 
 func set_tool(tool: Tool) -> void:
@@ -517,7 +536,7 @@ func set_tool(tool: Tool) -> void:
 	if current_tool == tool:
 		return
 	if brush_active:
-		_on_primary_end()
+		_brush_ops._on_primary_end()
 	current_tool = tool
 	flatten_target_set = false
 	_sync_surface_overlay_state(_get_material())
@@ -684,7 +703,7 @@ func set_viewport_active(active: bool, edit_input_enabled: bool = true) -> void:
 		# Workspace switches/focus loss can interrupt a held stroke without a
 		# mouse-up event. Finalize through the normal path so history and the
 		# temporary live blend/normal bindings are restored atomically.
-		_on_primary_end()
+		_brush_ops._on_primary_end()
 	_viewport_active = active
 	_viewport_edit_input_active = next_edit_input
 	if camera != null:
@@ -723,10 +742,6 @@ func set_selected_surface_index(value: int) -> void:
 	_mark_ui_state_changed()
 
 
-func get_surface_palette_bytes() -> PackedByteArray:
-	return _document.get_surface_palette_bytes()
-
-
 func get_selected_surface_label() -> String:
 	return TerrainEditorSurfacePaint.get_surface_label(selected_surface_index)
 
@@ -735,76 +750,15 @@ const FOLIAGE_DEFS_LIMIT := 4
 
 
 func add_foliage_def() -> void:
-	if is_export_running():
-		return
-	if _document.foliage_defs.size() >= FOLIAGE_DEFS_LIMIT:
-		return
-	var before_state := _document.capture_foliage_editor_history_state()
-	if not _document.add_foliage_def():
-		return
-	var after_state := _document.capture_foliage_editor_history_state()
-	_push_foliage_defs_history(before_state, after_state)
-	is_dirty = true
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
+	_foliage_ops.add_foliage_def()
 
 
 func remove_foliage_def(index: int) -> void:
-	if is_export_running():
-		return
-	if index < 0 or index >= _document.foliage_defs.size():
-		return
-	var before_state := _document.capture_foliage_editor_history_state()
-	if not _document.remove_foliage_def(index):
-		return
-	var after_state := _document.capture_foliage_editor_history_state()
-	_push_foliage_defs_history(before_state, after_state)
-	is_dirty = true
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
+	_foliage_ops.remove_foliage_def(index)
 
 
 func set_foliage_def_field(index: int, field: String, value: Variant) -> void:
-	if is_export_running():
-		return
-	if index < 0 or index >= _document.foliage_defs.size():
-		return
-	var def := _document.foliage_defs[index]
-	if def == null:
-		return
-	var before_state := _document.capture_foliage_editor_history_state()
-	match field:
-		"graphic":
-			if def.graphic == String(value):
-				return
-			def.graphic = String(value)
-		"color_lower":
-			if def.color_lower == int(value):
-				return
-			def.color_lower = int(value)
-		"color_upper":
-			if def.color_upper == int(value):
-				return
-			def.color_upper = int(value)
-		"shadow":
-			if def.shadow == bool(value):
-				return
-			def.shadow = bool(value)
-		"force_on":
-			if def.force_on == bool(value):
-				return
-			def.force_on = bool(value)
-		"attrib_flags":
-			if def.attrib_flags == int(value):
-				return
-			def.attrib_flags = int(value)
-		_:
-			return
-	var after_state := _document.capture_foliage_editor_history_state()
-	_push_foliage_defs_history(before_state, after_state)
-	is_dirty = true
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
+	_foliage_ops.set_foliage_def_field(index, field, value)
 
 
 func save_project_to_current_dir() -> Error:
@@ -855,16 +809,8 @@ func get_sector_size() -> int:
 	return maxi(get_sector_count(), get_sector_rows())
 
 
-func set_sector_count(value: int) -> void:
-	set_sector_size(value)
-
-
 func get_sector_rows() -> int:
 	return _data.get_sector_rows() if _data else 0
-
-
-func set_sector_rows(value: int) -> void:
-	set_sector_size(value)
 
 
 func set_sector_size(value: int) -> void:
@@ -1083,20 +1029,12 @@ func has_tileinfo_resource() -> bool:
 	return _document.has_tileinfo_resource()
 
 
-func get_tileinfo_entries() -> Array:
-	return _document.get_tileinfo_entries()
-
-
 func get_tileinfo_entry(index: int) -> NovaTerrainTileEntry:
 	return _document.get_tileinfo_entry(index)
 
 
 func get_tileinfo_selected_index() -> int:
 	return _document.get_tileinfo_selected_index()
-
-
-func get_tileinfo_entry_indices_at_cell(cell_x: int, cell_z: int) -> PackedInt32Array:
-	return _document.get_tileinfo_entry_indices_at_cell(cell_x, cell_z)
 
 
 func has_selected_tileinfo_entry() -> bool:
@@ -1114,30 +1052,12 @@ func get_selected_tileinfo_world_center() -> Vector3:
 	return TerrainTileOverlayPreview.entry_center_world(entry, terrain_mesh)
 
 
-func is_tile_edit_mode() -> bool:
-	return current_tool == Tool.TILE_STAMP and _tile_interaction_mode == TileInteractionMode.EDIT_SELECTED and has_selected_tileinfo_entry()
-
-
 func clear_tileinfo_selection() -> void:
-	if _document.get_tileinfo_selected_index() < 0 and _tile_interaction_mode == TileInteractionMode.PLACE:
-		return
-	_document.clear_tileinfo_selection()
-	_tile_interaction_mode = TileInteractionMode.PLACE
-	_mark_tile_overlay_dirty()
-	_mark_ui_state_changed()
+	_tileinfo_ops.clear_tileinfo_selection()
 
 
 func select_tileinfo_entry(index: int, focus_camera: bool = false) -> void:
-	if _document.get_tileinfo_selected_index() == index and _tile_interaction_mode == TileInteractionMode.EDIT_SELECTED:
-		if focus_camera:
-			focus_selected_tileinfo_entry()
-		return
-	_document.set_tileinfo_selected_index(index, false)
-	_tile_interaction_mode = TileInteractionMode.EDIT_SELECTED
-	_mark_tile_overlay_dirty()
-	_mark_ui_state_changed()
-	if focus_camera:
-		focus_selected_tileinfo_entry()
+	_tileinfo_ops.select_tileinfo_entry(index, focus_camera)
 
 
 func get_tile_stamp_tile_index() -> int:
@@ -1145,12 +1065,7 @@ func get_tile_stamp_tile_index() -> int:
 
 
 func set_tile_stamp_tile_index(value: int) -> void:
-	if is_export_running():
-		return
-	if _document.get_tile_stamp_tile_index() == clampi(value, 0, 255):
-		return
-	_document.set_tile_stamp_tile_index(value)
-	_mark_ui_state_changed()
+	_tileinfo_ops.set_tile_stamp_tile_index(value)
 
 
 func get_tile_stamp_flags() -> int:
@@ -1158,257 +1073,55 @@ func get_tile_stamp_flags() -> int:
 
 
 func set_tile_stamp_flags(value: int) -> void:
-	if is_export_running():
-		return
-	var normalized := value & (
-		NovaTerrainTileInfo.FLAG_FLIP_X |
-		NovaTerrainTileInfo.FLAG_FLIP_Y |
-		NovaTerrainTileInfo.FLAG_ROTATE_90 |
-		NovaTerrainTileInfo.FLAG_OUTLINE
-	)
-	if _document.get_tile_stamp_flags() == normalized:
-		return
-	_document.set_tile_stamp_flags(value)
-	_mark_ui_state_changed()
+	_tileinfo_ops.set_tile_stamp_flags(value)
 
-## Place the current tile stamp at an explicit authored cell. This is the
-## programmatic counterpart to the viewport click path and retains the same
-## history, selection, surface-composite, foliage, and UI refresh semantics.
+
 func stamp_tileinfo_cell(cell_x: int, cell_z: int) -> bool:
-	if is_export_running() or not _document.has_tileinfo_resource():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	var result := _document.stamp_tileinfo_cell(cell_x, cell_z)
-	if int(result.get("index", -1)) >= 0:
-		_tile_interaction_mode = TileInteractionMode.EDIT_SELECTED
-	return _finalize_tileinfo_edit(before_state, bool(result.get("changed", false)))
+	return _tileinfo_ops.stamp_tileinfo_cell(cell_x, cell_z)
 
 
 func delete_selected_tileinfo_entry() -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	var changed := _finalize_tileinfo_edit(before_state, _document.delete_selected_tileinfo_entry())
-	if changed:
-		_tile_interaction_mode = TileInteractionMode.PLACE
-	return changed
+	return _tileinfo_ops.delete_selected_tileinfo_entry()
 
 
 func replace_selected_tileinfo_tile_index(value: int) -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.set_selected_tileinfo_tile_index(value))
+	return _tileinfo_ops.replace_selected_tileinfo_tile_index(value)
 
 
 func set_selected_tileinfo_flags(value: int) -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.set_selected_tileinfo_flags(value))
+	return _tileinfo_ops.set_selected_tileinfo_flags(value)
 
 
 func rotate_selected_tileinfo_clockwise() -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.rotate_selected_tileinfo_clockwise())
+	return _tileinfo_ops.rotate_selected_tileinfo_clockwise()
 
 
 func flip_selected_tileinfo_x() -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.flip_selected_tileinfo_x())
+	return _tileinfo_ops.flip_selected_tileinfo_x()
 
 
 func flip_selected_tileinfo_y() -> bool:
-	if is_export_running():
-		return false
-	var before_state := _document.capture_tileinfo_history_state()
-	return _finalize_tileinfo_edit(before_state, _document.flip_selected_tileinfo_y())
-
-
-func focus_selected_tileinfo_entry() -> bool:
-	var entry := _document.get_tileinfo_entry(_document.get_tileinfo_selected_index())
-	if entry == null:
-		return false
-	var center := TerrainTileOverlayPreview.entry_center_world(entry, terrain_mesh)
-	center.y += 4.0
-	if camera and camera.has_method("frame_bounds"):
-		camera.frame_bounds(center, maxf(float(NovaTerrainTileInfo.CELL_WORLD_SIZE) * 8.0, 96.0))
-		return true
-	return false
+	return _tileinfo_ops.flip_selected_tileinfo_y()
 
 
 func load_texture_slot(slot_id: String, path: String) -> void:
-	if is_export_running() or not _data:
-		return
-	if _document.load_texture_slot(_get_material(), slot_id, path):
-		is_dirty = true
-		_refresh_surface_inputs_for_texture_slot(slot_id)
-		if slot_id == "tilestrip":
-			_mark_tile_overlay_dirty()
-		elif slot_id == "foliagemap":
-			_mark_foliage_preview_dirty()
-		_mark_ui_state_changed()
+	_io_ops.load_texture_slot(slot_id, path)
 
 
 func reset_texture_slot(slot_id: String) -> void:
-	if is_export_running() or not _data:
-		return
-	_document.reset_texture_slot(_get_material(), slot_id)
-	is_dirty = true
-	_refresh_surface_inputs_for_texture_slot(slot_id)
-	if slot_id == "tilestrip":
-		_mark_tile_overlay_dirty()
-	elif slot_id == "foliagemap":
-		_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
+	_io_ops.reset_texture_slot(slot_id)
 
 
 func load_tileinfo(path: String) -> void:
-	if is_export_running():
-		return
-	if _document.load_tileinfo(path):
-		_normalize_loaded_tileinfo_if_needed()
-		is_dirty = true
-		_refresh_surface_input_tile_overlay()
-		_mark_foliage_preview_dirty()
-		_mark_tile_overlay_dirty()
-		_mark_ui_state_changed()
+	_tileinfo_ops.load_tileinfo(path)
 
 
 func new_tileinfo() -> void:
-	if is_export_running():
-		return
-	_document.new_tileinfo()
-	is_dirty = true
-	_refresh_surface_input_tile_overlay()
-	_mark_foliage_preview_dirty()
-	_mark_tile_overlay_dirty()
-	_mark_ui_state_changed()
+	_tileinfo_ops.new_tileinfo()
 
 
 func reset_tileinfo() -> void:
-	if is_export_running():
-		return
-	_document.reset_tileinfo()
-	is_dirty = _document.is_dirty
-	_refresh_surface_input_tile_overlay()
-	_mark_foliage_preview_dirty()
-	_mark_tile_overlay_dirty()
-	_mark_ui_state_changed()
-
-
-func _tile_cell_from_world(world_x: float, world_z: float) -> Vector2i:
-	return Vector2i(
-		int(floor(world_x / float(NovaTerrainTileInfo.CELL_WORLD_SIZE))),
-		int(floor(world_z / float(NovaTerrainTileInfo.CELL_WORLD_SIZE)))
-	)
-
-
-func _stamp_tileinfo_at_hover() -> bool:
-	if not _hover_hit_valid:
-		return false
-	if not _document.has_tileinfo_resource():
-		_notify_status("Load or create a tile layout before placing tiles.")
-		return false
-
-	var cell := _tile_cell_from_world(_hover_hit.x, _hover_hit.z)
-	return stamp_tileinfo_cell(cell.x, cell.y)
-
-
-func _select_tileinfo_entry_at_hover() -> bool:
-	if not _hover_hit_valid or not _document.has_tileinfo_resource():
-		return false
-
-	var cell := _tile_cell_from_world(_hover_hit.x, _hover_hit.z)
-	var index := _document.find_tileinfo_entry_index_at_cell(cell.x, cell.y)
-	if index < 0:
-		clear_tileinfo_selection()
-		return false
-
-	select_tileinfo_entry(index, false)
-	return true
-
-
-func _finalize_tileinfo_edit(before_state: Dictionary, changed: bool) -> bool:
-	if not changed:
-		return false
-	var after_state := _document.capture_tileinfo_history_state()
-	_push_tileinfo_history(before_state, after_state)
-	is_dirty = _document.is_dirty
-	_refresh_surface_input_tile_overlay()
-	_mark_foliage_preview_dirty()
-	_mark_tile_overlay_dirty()
-	_mark_ui_state_changed()
-	return true
-
-
-func _normalize_loaded_tileinfo_if_needed() -> bool:
-	var removed_count := _document.normalize_tileinfo_for_editor()
-	if removed_count <= 0:
-		return false
-	var plural := "y" if removed_count == 1 else "ies"
-	_notify_status("Flattened %d stacked tile entr%s. Tile mode now supports one tile per cell." % [removed_count, plural])
-	_mark_tile_overlay_dirty()
-	return true
-
-
-func _push_tileinfo_history(before_state: Dictionary, after_state: Dictionary) -> void:
-	_brush_session.push_custom_snapshot(TerrainEditHistory.Kind.TILEINFO, before_state, after_state)
-
-
-func _push_surface_map_history(before_state: Dictionary, after_state: Dictionary) -> void:
-	_brush_session.push_custom_snapshot(TerrainEditHistory.Kind.SURFACEMAP, before_state, after_state)
-
-
-func _push_foliage_map_history(before_state: Dictionary, after_state: Dictionary) -> void:
-	_brush_session.push_custom_snapshot(TerrainEditHistory.Kind.FOLIAGEMAP, before_state, after_state)
-
-
-func _push_foliage_defs_history(before_state: Variant, after_state: Variant) -> void:
-	_brush_session.push_custom_snapshot(TerrainEditHistory.Kind.FOLIAGE_DEFS, before_state, after_state)
-
-
-func _ensure_surface_inputs_rebuilt() -> void:
-	if terrain_mesh == null or _data == null or _surface_inputs_data == _data:
-		return
-	terrain_mesh.call("rebuild_surface_inputs", get_effective_tile_info(), true)
-	_surface_inputs_data = _data
-
-
-func _refresh_surface_input_heightfield() -> void:
-	if terrain_mesh != null:
-		terrain_mesh.call("refresh_surface_inputs_heightfield")
-
-
-func _refresh_surface_input_blend() -> void:
-	if terrain_mesh != null:
-		terrain_mesh.call("refresh_surface_inputs_blend")
-
-
-func _refresh_surface_input_details() -> void:
-	if terrain_mesh != null:
-		terrain_mesh.call("refresh_surface_inputs_details")
-
-
-func _refresh_surface_input_tile_overlay() -> void:
-	if terrain_mesh != null:
-		terrain_mesh.call(
-			"refresh_surface_inputs_tile_overlay",
-			get_effective_tile_info(),
-			true
-		)
-
-
-func _refresh_surface_inputs_for_texture_slot(slot_id: String) -> void:
-	if slot_id == "tilestrip":
-		_refresh_surface_input_tile_overlay()
-	elif slot_id in TerrainEditorSlots.get_detail_slot_ids() \
-			or slot_id in TerrainEditorSlots.get_aux_slot_ids():
-		_refresh_surface_input_details()
+	_tileinfo_ops.reset_tileinfo()
 
 
 ## Scope the Mission workspace's external tile blockers onto the shared editor
@@ -1437,7 +1150,7 @@ func set_mission_preview_context(
 			_world_preview.clear_time_of_day_override()
 		else:
 			_world_preview.set_time_of_day_override(_mission_preview_time_of_day)
-	_refresh_surface_input_tile_overlay()
+	_brush_ops._refresh_surface_input_tile_overlay()
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
 
@@ -1453,7 +1166,7 @@ func clear_mission_preview_context() -> void:
 	_sync_surface_overlay_state(_get_material())
 	if _world_preview != null:
 		_world_preview.clear_time_of_day_override()
-	_refresh_surface_input_tile_overlay()
+	_brush_ops._refresh_surface_input_tile_overlay()
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
 
@@ -1487,483 +1200,45 @@ func _mark_foliage_preview_dirty() -> void:
 		_foliage_preview.mark_dirty()
 
 
-func _sync_foliage_preview() -> void:
-	if _foliage_preview == null:
-		return
-	_foliage_preview.set_preview_state(
-		terrain_mesh,
-		camera,
-		_document.foliage_map,
-		_document.foliage_defs,
-		_data,
-		get_resource_root(),
-		get_effective_tile_info()
-	)
-	_foliage_preview.rebuild_if_needed()
-
-
-func _apply_foliage_paint_stroke(delta: float) -> bool:
-	if _document.foliage_map == null or not _hover_hit_valid:
-		_brush_session.reset_stroke_tracking()
-		return false
-
-	var target_index := 0
-	if not Input.is_key_pressed(KEY_CTRL):
-		target_index = _document.get_selected_foliage_paint_index()
-		if target_index < 0:
-			_brush_session.reset_stroke_tracking()
-			return false
-
-	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
-	var end_hit := _hover_hit
-	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
-	var map_width := maxi(_document.foliage_map.get_width(), 1)
-	var map_height := maxi(_document.foliage_map.get_height(), 1)
-	var detail_resolution := maxi(
-		_document.foliage_map.get_detail_sample_resolution(), 1)
-	var radius_pixels := maxi(1, int(round(
-		brush_radius * float(detail_resolution) / float(HM_SIZE))))
-	var changed := false
-
-	for dab_idx in range(dab_count):
-		var t: float = 1.0 if dab_count == 1 else float(dab_idx + 1) / float(dab_count)
-		var dab_hit := start_hit.lerp(end_hit, t)
-		var center := _document.foliage_map.get_detail_map_position_world(
-			dab_hit.x, dab_hit.z)
-		var center_x := center.x
-		var center_y := center.y
-		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
-			continue
-		changed = _document.foliage_map.paint_detail_circle_wrap(
-			center_x,
-			center_y,
-			radius_pixels,
-			brush_hardness,
-			brush_strength,
-			target_index
-		) or changed
-
-	_brush_session.commit_stroke_hit(end_hit)
-	if changed:
-		_foliage_map_stroke_changed = true
-	return changed
-
-
-func _eyedrop_foliage_at_hover() -> bool:
-	if _document.foliage_map == null or not _hover_hit_valid:
-		return false
-	var map_position := _document.foliage_map.get_detail_map_position_world(
-		_hover_hit.x, _hover_hit.z)
-	if map_position.x < 0 or map_position.y < 0:
-		return false
-	var match_index := int(_document.foliage_map.get_index(
-		map_position.x, map_position.y))
-	var def_index := _document.find_foliage_def_index_by_match(match_index)
-	if def_index < 0:
-		return false
-	_document.set_selected_foliage_def_index(def_index)
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
-	return true
-
-
 func _mark_tile_overlay_dirty() -> void:
 	if _tile_overlay_preview:
 		_tile_overlay_preview.mark_dirty()
 
 
-func _tileinfo_entry_index_at_hover() -> int:
-	if not _hover_hit_valid or not _document.has_tileinfo_resource():
-		return -1
-	var cell := _tile_cell_from_world(_hover_hit.x, _hover_hit.z)
-	return _document.find_tileinfo_entry_index_at_cell(cell.x, cell.y)
-
-
-func _tileinfo_ghost_state() -> Dictionary:
-	return {
-		"enabled": false,
-		"cell": Vector2i.ZERO,
-		"tile_index": _document.get_tile_stamp_tile_index(),
-		"flags": _document.get_tile_stamp_flags(),
-	}
-
-
-func _sync_tile_overlay_preview() -> void:
-	if _tile_overlay_preview == null:
-		return
-	var tilestrip: Texture2D = null
-	if _data:
-		tilestrip = TerrainEditorSlots.get_slot_texture(_data, "tilestrip")
-	var has_composited_base := terrain_mesh != null \
-		and terrain_mesh.has_tile_overlay_texture()
-	_tile_overlay_preview.set_base_overlay_visible(not has_composited_base)
-	_tile_overlay_preview.set_authoring_outlines_visible(not _mission_preview_context_active)
-	var preview_tile_info := get_effective_tile_info()
-	var ghost_state := {"enabled": false} if _mission_preview_context_active \
-		else _tileinfo_ghost_state()
-	var hover_index := -1
-	if not _mission_preview_context_active and current_tool == Tool.TILE_STAMP \
-			and _hover_hit_valid and _document.has_tileinfo_resource():
-		var ghost_cell := _tile_cell_from_world(_hover_hit.x, _hover_hit.z)
-		hover_index = _document.find_tileinfo_entry_index_at_cell(ghost_cell.x, ghost_cell.y)
-		if hover_index < 0:
-			ghost_state = {
-				"enabled": true,
-				"cell": ghost_cell,
-				"tile_index": _document.get_tile_stamp_tile_index(),
-				"flags": _document.get_tile_stamp_flags(),
-			}
-	_tile_overlay_preview.set_preview_state(
-		terrain_mesh,
-		preview_tile_info,
-		tilestrip,
-		-1 if _mission_preview_context_active else _document.get_tileinfo_selected_index(),
-		hover_index,
-		bool(ghost_state.get("enabled", false)),
-		ghost_state.get("cell", Vector2i.ZERO),
-		int(ghost_state.get("tile_index", 0)),
-		int(ghost_state.get("flags", 0))
-	)
-	_tile_overlay_preview.rebuild_if_needed()
-
-
-func _apply_surface_paint_stroke(_delta: float) -> bool:
-	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
-	if surface_map == null or not _hover_hit_valid:
-		_brush_session.reset_stroke_tracking()
-		return false
-
-	var map_width := surface_map.get_width()
-	var map_height := surface_map.get_height()
-	if map_width <= 0 or map_height <= 0:
-		_brush_session.reset_stroke_tracking()
-		return false
-
-	var start_hit := _brush_session.get_stroke_start_hit(_hover_hit)
-	var end_hit := _hover_hit
-	var dab_count := _brush_session.get_stroke_dab_count(start_hit, end_hit)
-	var radius_pixels := maxi(1, int(round(brush_radius * float(map_width) / float(HM_SIZE))))
-	var target_index := _get_surface_paint_index(Input.is_key_pressed(KEY_CTRL))
-	var changed := false
-
-	for dab_idx in range(dab_count):
-		var t: float = 1.0 if dab_count == 1 else float(dab_idx + 1) / float(dab_count)
-		var dab_hit := start_hit.lerp(end_hit, t)
-		var source := terrain_mesh.world_to_source_coords(dab_hit.x, dab_hit.z)
-		if source.x < 0.0 or source.y < 0.0:
-			continue
-		var center_x := surface_map.map_x_from_heightmap_x(source.x)
-		var center_y := surface_map.map_y_from_heightmap_y(source.y)
-		if center_x < 0 or center_y < 0 or center_x >= map_width or center_y >= map_height:
-			continue
-		changed = surface_map.paint_circle(
-			center_x,
-			center_y,
-			radius_pixels,
-			brush_hardness,
-			brush_strength,
-			target_index
-		) or changed
-
-	if changed:
-		_document.sync_surface_map_to_data(_get_material())
-		_surface_map_stroke_changed = true
-
-	_brush_session.commit_stroke_hit(end_hit)
-	return changed
-
-
-func _eyedrop_surface_at_hover() -> bool:
-	var surface_map: NovaTerrainSurfaceMap = _document.surface_map
-	if surface_map == null or not _hover_hit_valid:
-		return false
-	var map_width := surface_map.get_width()
-	var map_height := surface_map.get_height()
-	if map_width <= 0 or map_height <= 0:
-		return false
-	var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
-	if source.x < 0.0 or source.y < 0.0:
-		return false
-	var map_x := surface_map.map_x_from_heightmap_x(source.x)
-	var map_y := surface_map.map_y_from_heightmap_y(source.y)
-	selected_surface_index = surface_map.get_index(map_x, map_y)
-	_mark_ui_state_changed()
-	return true
-
-
-func _set_clone_source(world_pos: Vector3) -> void:
-	_brush_session.set_clone_source(world_pos, _colormap_image)
-	if _clone_source_marker:
-		_clone_source_marker.position = world_pos
-		_clone_source_marker.visible = true
-	_mark_ui_state_changed()
-
-
 func clear_clone_source() -> void:
-	_brush_session.clear_clone_source()
-	if _clone_source_marker:
-		_clone_source_marker.visible = false
-	_mark_ui_state_changed()
+	_brush_ops.clear_clone_source()
 
 
 func has_clone_source() -> bool:
-	return _brush_session.has_clone_source()
+	return _brush_ops.has_clone_source()
 
 
-func _on_primary_start() -> void:
-	if is_export_running():
-		return
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-		return
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
-		return
-	if current_tool == Tool.EDIT_SECTORS:
-		return
-	if current_tool == Tool.TILE_STAMP:
-		var hover_index := _tileinfo_entry_index_at_hover()
-		if is_tile_edit_mode():
-			if hover_index < 0:
-				clear_tileinfo_selection()
-				get_viewport().set_input_as_handled()
-			elif hover_index != _document.get_tileinfo_selected_index():
-				_select_tileinfo_entry_at_hover()
-				get_viewport().set_input_as_handled()
-			else:
-				get_viewport().set_input_as_handled()
-			return
-		if hover_index < 0:
-			_stamp_tileinfo_at_hover()
-		else:
-			_select_tileinfo_entry_at_hover()
-		return
-	if current_tool == Tool.SURFACE_PAINT:
-		if not _hover_hit_valid or _document.surface_map == null:
-			return
-		if Input.is_key_pressed(KEY_ALT):
-			_eyedrop_surface_at_hover()
-			return
-		_surface_map_stroke_before = _document.capture_surface_map_history_state()
-		_surface_map_stroke_changed = false
-		brush_active = true
-		_brush_session.reset_stroke_tracking()
-		_apply_surface_paint_stroke(1.0 / 60.0)
-		return
-	if current_tool == Tool.FOLIAGE_PAINT:
-		if not _hover_hit_valid or _document.foliage_map == null:
-			return
-		if Input.is_key_pressed(KEY_ALT):
-			_eyedrop_foliage_at_hover()
-			return
-		if not Input.is_key_pressed(KEY_CTRL):
-			var selected_def := _document.get_selected_foliage_def()
-			if selected_def == null or selected_def.get_match() < 0:
-				return
-		_foliage_map_stroke_before = _document.capture_foliage_map_history_state()
-		_foliage_map_stroke_changed = false
-		brush_active = true
-		_brush_session.reset_stroke_tracking()
-		_apply_foliage_paint_stroke(1.0 / 60.0)
-		return
-	if current_tool == Tool.CLONE_COLOR:
-		if Input.is_key_pressed(KEY_CTRL) and _hover_hit_valid:
-			_set_clone_source(_hover_hit)
-			_mark_ui_state_changed()
-			return
-		if not _brush_session.has_clone_source() or not _hover_hit_valid:
-			return
-		if not _brush_session.prepare_clone_drag(_hover_hit, terrain_mesh):
-			return
-	# fall through to normal brush-active path
-	if current_tool == Tool.PAINT_COLORMAP and Input.is_key_pressed(KEY_ALT) and _hover_hit_valid:
-		var source := terrain_mesh.world_to_source_coords(_hover_hit.x, _hover_hit.z)
-		if source.x >= 0.0:
-			paint_color = _data.brush_sample_colormap(source.x, source.y)
-			_mark_ui_state_changed()
-		return
-	var stroke_kind := _brush_session.history_kind_for_tool(current_tool)
-	var material := _get_material()
-	if material != null:
-		if stroke_kind == TerrainEditHistory.Kind.BLENDMAP and _blendmap_tex != null:
-			# Keep blend painting live; commit restores the normalized retail map.
-			material.set_shader_parameter("u_blendmap", _blendmap_tex)
-		elif stroke_kind == TerrainEditHistory.Kind.HEIGHTMAP:
-			# Let the shader derive normals from the live heightmap during sculpt.
-			material.set_shader_parameter("u_has_heightfield_normal", false)
-	_brush_session.begin_brush_drag(_source_image_for_kind(_brush_session.history_kind_for_tool(current_tool)), Input.is_key_pressed(KEY_CTRL))
-
-
-func _on_primary_end() -> void:
-	if current_tool == Tool.SURFACE_PAINT:
-		brush_active = false
-		_brush_session.reset_stroke_tracking()
-		if _surface_map_stroke_changed:
-			var after_state := _document.capture_surface_map_history_state()
-			_push_surface_map_history(_surface_map_stroke_before, after_state)
-			is_dirty = true
-			_mark_ui_state_changed()
-		_surface_map_stroke_before = {}
-		_surface_map_stroke_changed = false
-		return
-	if current_tool == Tool.FOLIAGE_PAINT:
-		brush_active = false
-		_brush_session.reset_stroke_tracking()
-		if _foliage_map_stroke_changed:
-			var after_state := _document.capture_foliage_map_history_state()
-			_push_foliage_map_history(_foliage_map_stroke_before, after_state)
-			is_dirty = true
-			_mark_foliage_preview_dirty()
-			_mark_ui_state_changed()
-		_foliage_map_stroke_before = {}
-		_foliage_map_stroke_changed = false
-		return
-	var result := _brush_session.end_brush_drag(
-		_source_image_for_kind(_brush_session.get_stroke_kind())
-	)
-	if not bool(result.get("history_committed", false)):
-		terrain_mesh.apply_surface_inputs()
-		return
-	match int(result.get("history_kind", -1)):
-		TerrainEditHistory.Kind.HEIGHTMAP:
-			_refresh_surface_input_heightfield()
-			_mark_foliage_preview_dirty()
-		TerrainEditHistory.Kind.BLENDMAP:
-			_refresh_surface_input_blend()
-
-
-# Public: intersect a viewport-space mouse position with the terrain surface. Returns
-# a world-space point, or INVALID_HIT on a miss; pair with is_valid_terrain_hit().
-# Used by the Mission workspace to drag/place entities onto the ground. Forwards to
-# the engine's witnessed segment raycast ([orig: Terrain_RaycastHeightmapLoRes
-# @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710], docs/terrain/terrain-re.md
-# §Runtime terrain queries) via EditorTerrainMesh.raycast_world; the engine side
-# slab-clips the long probe segment to the authored extent.
 func raycast_terrain_at(mouse_pos: Vector2) -> Vector3:
-	if camera == null or terrain_mesh == null:
-		return INVALID_HIT
-	var origin := camera.project_ray_origin(mouse_pos)
-	var direction := camera.project_ray_normal(mouse_pos)
-	var hit: Vector3 = terrain_mesh.raycast_world(origin, origin + direction * 100000.0)
-	if is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z):
-		return INVALID_HIT
-	return hit
+	return _brush_ops.raycast_terrain_at(mouse_pos)
 
 
 func is_valid_terrain_hit(hit: Vector3) -> bool:
-	return hit != INVALID_HIT
-
-
-func _raycast_terrain() -> Vector3:
-	var mouse_pos := _viewport_mouse_position if _uses_workspace_viewport else get_viewport().get_mouse_position()
-	return raycast_terrain_at(mouse_pos)
-
-
-func _is_valid_hit(hit: Vector3) -> bool:
-	return is_finite(hit.x) and is_finite(hit.y) and is_finite(hit.z)
-
-
-func _apply_brush_stroke(delta: float) -> void:
-	if current_tool == Tool.SURFACE_PAINT:
-		if _apply_surface_paint_stroke(delta):
-			is_dirty = true
-		return
-	if current_tool == Tool.FOLIAGE_PAINT:
-		if _apply_foliage_paint_stroke(delta):
-			is_dirty = true
-			_mark_foliage_preview_dirty()
-		return
-	var result := _brush_session.apply_brush_stroke(delta, _hover_hit, _hover_hit_valid, terrain_mesh, _data)
-	if result["changed_heightmap"]:
-		terrain_mesh.set_heightmap(_heightmap_image)
-		_height_revision += 1
-		_mark_tile_overlay_dirty()
-	if result["changed_blendmap"]:
-		_blendmap_tex.update(_blendmap_image)
-	if result["changed_colormap"]:
-		_colormap_tex.update(_colormap_image)
-	if result["changed_heightmap"] or result["changed_blendmap"] or result["changed_colormap"]:
-		is_dirty = true
+	return _brush_ops.is_valid_terrain_hit(hit)
 
 
 func undo() -> void:
-	if is_export_running() or not _brush_session.can_undo():
-		return
-	var snapshot := _brush_session.pop_undo()
-	_apply_history_snapshot(snapshot, true)
+	_brush_ops.undo()
 
 
 func redo() -> void:
-	if is_export_running() or not _brush_session.can_redo():
-		return
-	var snapshot := _brush_session.pop_redo()
-	_apply_history_snapshot(snapshot, false)
+	_brush_ops.redo()
 
 
 func can_undo() -> bool:
-	return _brush_session.can_undo()
+	return _brush_ops.can_undo()
 
 
 func can_redo() -> bool:
-	return _brush_session.can_redo()
+	return _brush_ops.can_redo()
 
 
 func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
-	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.SURFACEMAP:
-		var surface_state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
-		_document.restore_surface_map_history_state(_get_material(), surface_state)
-		is_dirty = true
-		_mark_ui_state_changed()
-		return
-	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.TILEINFO:
-		var state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
-		_document.restore_tileinfo_history_state(state)
-		is_dirty = true
-		_refresh_surface_input_tile_overlay()
-		_mark_foliage_preview_dirty()
-		_mark_tile_overlay_dirty()
-		_mark_ui_state_changed()
-		return
-	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.FOLIAGEMAP:
-		var state: Dictionary = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
-		_document.restore_foliage_map_history_state(state)
-		is_dirty = true
-		_mark_foliage_preview_dirty()
-		_mark_ui_state_changed()
-		return
-	if int(snapshot.get("kind", -1)) == TerrainEditHistory.Kind.FOLIAGE_DEFS:
-		var defs_state: Variant = snapshot.get("before_value", {}) if is_undo else snapshot.get("after_value", {})
-		if defs_state is Dictionary:
-			_document.restore_foliage_editor_history_state(defs_state)
-		else:
-			_document.restore_foliage_defs_history_state(defs_state)
-		is_dirty = true
-		_mark_foliage_preview_dirty()
-		_mark_ui_state_changed()
-		return
-	var result := _brush_session.apply_history_snapshot(snapshot, is_undo, _heightmap_image, _blendmap_image, _colormap_image)
-	if result["changed_heightmap"]:
-		terrain_mesh.set_heightmap(_heightmap_image)
-		_height_revision += 1
-		_refresh_surface_input_heightfield()
-		_mark_foliage_preview_dirty()
-		_mark_tile_overlay_dirty()
-	if result["changed_blendmap"]:
-		_blendmap_tex.update(_blendmap_image)
-		_refresh_surface_input_blend()
-	if result["changed_colormap"]:
-		_colormap_tex.update(_colormap_image)
-	if result["changed_heightmap"] or result["changed_blendmap"] or result["changed_colormap"]:
-		is_dirty = true
-
-
-func _source_image_for_kind(kind: int) -> Image:
-	match kind:
-		TerrainEditHistory.Kind.HEIGHTMAP:
-			return _heightmap_image
-		TerrainEditHistory.Kind.BLENDMAP:
-			return _blendmap_image
-		TerrainEditHistory.Kind.COLORMAP:
-			return _colormap_image
-	return null
+	_brush_ops._apply_history_snapshot(snapshot, is_undo)
 
 
 func _mark_ui_state_changed() -> void:
@@ -2039,372 +1314,23 @@ func _remember_export_dir(dir_path: String) -> void:
 
 
 func new_terrain() -> void:
-	if is_export_running():
-		return
-	_brush_session.clear_history()
-	clear_clone_source()
-	_create_default_document("untitled")
-	_set_heightmap_image(_create_heightmap_image(DEFAULT_HEIGHT))
-	_sync_sector_layout(true)
-	_ensure_surface_inputs_rebuilt()
-	_mark_foliage_preview_dirty()
-	is_dirty = false
-	_mark_ui_state_changed()
+	_io_ops.new_terrain()
 
 
 func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
-	if is_export_running():
-		return ERR_BUSY
-	var resources := get_resource_root()
-	if not FileAccess.file_exists(trn_path) and resources != null and resources.has_file(trn_path):
-		return _open_trn_from_resource_root(resources, trn_path, timeline)
-	_brush_session.clear_history()
-	clear_clone_source()
-	PerfTimeline.span_on(timeline, "trn_data")
-	_data = NovaTerrainData.new()
-	_data.set_trn_path(trn_path)
-	var err := _data.load()
-	if err != OK:
-		return err
-	PerfTimeline.end_on(timeline)
-
-	texture_files = {}
-	_apply_default_visual_state(false)
-
-	# Prefer a sibling <name>_depth.raw if present (project mode — depth.raw
-	# is the authoring source of truth). Fall back to building the heightmap
-	# from the CPT (import mode — original game assets have a CPT but no
-	# depth.raw). With CPT optional, a project .trn may have neither; in
-	# that case _build_heightmap_from_data returns a zero image.
-	var dir_path := trn_path.get_base_dir()
-	var depth_path := dir_path + "/" + _data.get_terrain_name() + "_depth.raw"
-	var depth_bytes: PackedByteArray
-	PerfTimeline.span_on(timeline, "heightmap")
-	if FileAccess.file_exists(depth_path):
-		var depth_file := FileAccess.open(depth_path, FileAccess.READ)
-		if depth_file:
-			depth_bytes = depth_file.get_buffer(HM_SIZE * HM_SIZE * 2)
-			depth_file.close()
-	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
-		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
-	else:
-		_set_heightmap_image(_build_heightmap_from_data())
-	PerfTimeline.end_on(timeline)
-
-	PerfTimeline.span_on(timeline, "textures")
-	_apply_loaded_textures_from_data()
-	PerfTimeline.end_on(timeline)
-	PerfTimeline.span_on(timeline, "sectors")
-	var normalized := _normalize_sector_layout_if_needed()
-	_sync_sector_layout(true)
-	PerfTimeline.end_on(timeline)
-	_document.capture_trn_resource(_data)
-	_document.load_tileinfo_from_dir(dir_path)
-	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
-	_ensure_surface_inputs_rebuilt()
-	_document.current_trn_path = trn_path
-	# When opening a .trn that sits next to its depth.raw + texture assets,
-	# treat the directory as the current project dir (Save uses it as the
-	# default target). If none of those sidecars exist this is an import of
-	# an external .trn; leave project_dir empty so the next Save prompts.
-	if depth_bytes.size() > 0:
-		_document.current_project_dir = dir_path
-	else:
-		_document.current_project_dir = ""
-	_remember_open_path(trn_path)
-
-	is_dirty = normalized or normalized_tileinfo
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
-	_mark_ui_state_changed()
-	_check_loaded_cdep_violations()
-	return OK
-
-
-func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String, timeline: PerfTimeline = null) -> Error:
-	if resources == null:
-		return ERR_INVALID_PARAMETER
-	_brush_session.clear_history()
-	clear_clone_source()
-	PerfTimeline.span_on(timeline, "trn_data")
-	_data = NovaTerrainData.new()
-	var err := _data.load_from_resource_root(resources, trn_name)
-	if err != OK:
-		return err
-	PerfTimeline.end_on(timeline)
-
-	texture_files = {}
-	_apply_default_visual_state(false)
-
-	PerfTimeline.span_on(timeline, "heightmap")
-	var depth_bytes := resources.read_file("%s_depth.raw" % _data.get_terrain_name())
-	if depth_bytes.size() == HM_SIZE * HM_SIZE * 2:
-		_set_heightmap_image(_build_heightmap_from_raw16(depth_bytes))
-	else:
-		_set_heightmap_image(_build_heightmap_from_data())
-	PerfTimeline.end_on(timeline)
-
-	PerfTimeline.span_on(timeline, "textures")
-	_apply_loaded_textures_from_data()
-	PerfTimeline.end_on(timeline)
-	PerfTimeline.span_on(timeline, "sectors")
-	var normalized := _normalize_sector_layout_if_needed()
-	_sync_sector_layout(true)
-	PerfTimeline.end_on(timeline)
-	_document.capture_trn_resource(_data)
-	var tileinfo := _data.get_tileinfo_resource()
-	if tileinfo != null:
-		_document.tileinfo_resource = tileinfo
-		_document.tileinfo_source_path = resources.get_root_dir().path_join(_data.get_tileinfo_filename())
-		_document.tileinfo_state = "explicit"
-		_document.tileinfo_selected_index = -1
-	var normalized_tileinfo := _normalize_loaded_tileinfo_if_needed()
-	_ensure_surface_inputs_rebuilt()
-	_document.current_trn_path = trn_name.get_file()
-	_document.current_project_dir = ""
-	_remember_open_path(resources.get_root_dir().path_join(trn_name.get_file()))
-
-	is_dirty = normalized or normalized_tileinfo
-	_mark_foliage_preview_dirty()
-	_mark_ui_state_changed()
-	_mark_ui_state_changed()
-	_check_loaded_cdep_violations()
-	return OK
+	return _io_ops.open_trn(trn_path, timeline)
 
 
 func save_project(dir_path: String) -> Error:
-	if is_export_running():
-		return ERR_BUSY
-	DirAccess.make_dir_recursive_absolute(dir_path)
-	_document.normalize_foliage_state_for_editor()
-	# The terrain name is the project directory's basename. Renaming the
-	# terrain is done by Save-As'ing into a differently-named directory —
-	# the name field in the properties panel is read-only on purpose, so
-	# there is no way for the terrain name and the dir name to drift apart.
-	var name := dir_path.get_file()
-	if name.is_empty():
-		name = "untitled"
-	if _data and String(_data.get_terrain_name()) != name:
-		_data.set_terrain_name(name)
-
-	var raw16 := _data.get_depth_raw16()
-	var depth_path := dir_path + "/" + name + "_depth.raw"
-	var depth_file: FileAccess = FileAccess.open(depth_path, FileAccess.WRITE)
-	if not depth_file:
-		return ERR_FILE_CANT_WRITE
-	depth_file.store_buffer(raw16)
-	depth_file.close()
-
-	var err := _save_texture_assets(dir_path, name)
-	if err != OK:
-		return err
-	err = _document.save_tileinfo(dir_path, name)
-	if err != OK:
-		return err
-
-	# Project save writes the .trn with no polydata — CPT is an export-time
-	# bake artifact, not an authoring one. NovaTerrainData::load() tolerates
-	# missing CPT since the "make CPT optional" change.
-	_document.prepare_data_for_trn_save(name, "")
-	err = ResourceSaver.save(_data, dir_path + "/" + name + ".trn")
-	if err != OK:
-		return err
-
-	_document.current_project_dir = dir_path
-	_document.current_trn_path = dir_path + "/" + name + ".trn"
-	_remember_save_dir(dir_path)
-	is_dirty = false
-	_mark_ui_state_changed()
-	_mark_ui_state_changed()
-	return OK
-
-
-# Heightmaps loaded from project .trn files can predate the editor's live
-# CDEP enforcement (or originate from external tools). If any 256-pixel
-# horizontal block exceeds the per-block range limit, prompt the user to
-# auto-clamp; otherwise the eventual DFX/JO export will fail at the bake
-# guard with a less actionable message.
-func _check_loaded_cdep_violations() -> void:
-	if _data == null or not _heightmap_image:
-		return
-	var count := _data.cdep_count_violations()
-	if count == 0:
-		return
-	if workstation and workstation.has_method("prompt_cdep_violations"):
-		workstation.prompt_cdep_violations(count, Callable(self, "_auto_fix_cdep_violations"))
-	else:
-		_notify_status("Heightmap has %d area%s too steep for Joint Operations / DFX export." % [count, "" if count == 1 else "s"])
-
-
-func _auto_fix_cdep_violations() -> void:
-	if _data == null or not _heightmap_image:
-		return
-	var clamped := _data.cdep_clamp_all_violations()
-	terrain_mesh.set_heightmap(_heightmap_image)
-	_height_revision += 1
-	_refresh_surface_input_heightfield()
-	_mark_foliage_preview_dirty()
-	_mark_tile_overlay_dirty()
-	is_dirty = true
-	_notify_status("Flattened %d area%s for Joint Operations / DFX export." % [clamped, "" if clamped == 1 else "s"])
-
-
-# Brush enforcement keeps newly-sculpted heightmaps inside the CDEP envelope,
-# but heightmaps loaded from disk (or imported from other tools) can still
-# contain blocks the user never touched. Run a global clamp on the export
-# path so a JO/DFX bake never fails on legacy data the user hasn't visited
-# with the brush yet. BHD/DPTH has no per-block range limit, so skip it.
-func _auto_clamp_for_export_if_needed(flavor: int) -> void:
-	if flavor != ExportFlavor.DFX_JO:
-		return
-	if _data == null or not _heightmap_image:
-		return
-	var clamped := _data.cdep_clamp_all_violations()
-	if clamped == 0:
-		return
-	terrain_mesh.set_heightmap(_heightmap_image)
-	_height_revision += 1
-	_refresh_surface_input_heightfield()
-	_mark_foliage_preview_dirty()
-	_mark_tile_overlay_dirty()
-	is_dirty = true
-	_notify_status("Flattened %d area%s before export." % [clamped, "" if clamped == 1 else "s"])
+	return _io_ops.save_project(dir_path)
 
 
 func begin_export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Error:
-	if is_export_running():
-		return ERR_BUSY
-
-	DirAccess.make_dir_recursive_absolute(output_dir)
-	var name := _get_terrain_name()
-	_auto_clamp_for_export_if_needed(flavor)
-	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
-		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
-		return ERR_INVALID_DATA
-	var raw16 := _data.get_depth_raw16()
-	if raw16.is_empty():
-		return ERR_INVALID_DATA
-	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
-	var job: NovaTerrainBuildJob = builder.begin_build_from_data(
-		raw16, output_dir, name, "", flavor, _data.get_quadrant_locks()
-	)
-	if job == null:
-		return ERR_CANT_CREATE
-
-	_export_job = job
-	_export_output_dir = output_dir
-	brush_active = false
-	_brush_session.reset_stroke_tracking()
-	_remember_export_dir(output_dir)
-
-	if workstation and workstation.has_method("on_export_started"):
-		workstation.on_export_started(output_dir)
-
-	return OK
+	return _io_ops.begin_export_terrain(output_dir, flavor)
 
 
 func export_terrain(output_dir: String, flavor: int = ExportFlavor.DFX_JO) -> Error:
-	if is_export_running():
-		return ERR_BUSY
-
-	DirAccess.make_dir_recursive_absolute(output_dir)
-	_auto_clamp_for_export_if_needed(flavor)
-	if flavor == ExportFlavor.DFX_JO and not _document.cdep_ranges_valid(_heightmap_image):
-		_notify_status("Export blocked: some areas are too steep for Joint Operations / DFX. Flatten them, or export for original Delta Force instead.")
-		return ERR_INVALID_DATA
-	var raw16 := _data.get_depth_raw16()
-	if raw16.is_empty():
-		return ERR_INVALID_DATA
-	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
-	var err := builder.build_from_data(
-		raw16, output_dir, _get_terrain_name(), "", flavor,
-		_data.get_quadrant_locks()
-	)
-	if err != OK:
-		return err
-
-	var name := _get_terrain_name()
-	err = _save_texture_assets(output_dir, name)
-	if err != OK:
-		return err
-	err = _document.save_tileinfo(output_dir, name)
-	if err != OK:
-		return err
-
-	_document.prepare_data_for_trn_save(name, name + ".cpt")
-	err = ResourceSaver.save(_data, output_dir + "/" + name + ".trn")
-	if err != OK:
-		return err
-
-	_remember_export_dir(output_dir)
-	_mark_ui_state_changed()
-	return OK
-
-
-func _poll_export_job() -> void:
-	if _export_job == null:
-		return
-	if not _export_job.is_finished():
-		return
-	_finish_export_job()
-
-
-func _finish_export_job() -> void:
-	var job: NovaTerrainBuildJob = _export_job
-	if job == null:
-		return
-
-	job.wait_for_completion()
-	var err: Error = job.get_result_error()
-	var message: String = job.get_result_message()
-	var output_dir: String = _export_output_dir
-	var name: String = _get_terrain_name()
-
-	if err == OK:
-		err = _save_texture_assets(output_dir, name)
-		if err == OK:
-			err = _document.save_tileinfo(output_dir, name)
-		if err == OK:
-			_document.prepare_data_for_trn_save(name, name + ".cpt")
-			err = ResourceSaver.save(_data, output_dir + "/" + name + ".trn")
-		if err == OK:
-			message = "Exported to: %s" % output_dir
-		elif message.is_empty():
-			message = "Export failed (error %d)" % err
-	elif message.is_empty():
-		message = "Export failed (error %d)" % err
-
-	_export_job = null
-	_export_output_dir = ""
-
-	if workstation and workstation.has_method("on_export_completed"):
-		workstation.on_export_completed(err, message)
-	_mark_ui_state_changed()
-
-
-func _create_default_document(terrain_name: String) -> void:
-	_document.create_default_document(terrain_name, _get_material(), _build_default_sector_grid())
-	_active_sector_cell = Vector2i(-1, -1)
-	selected_surface_index = TerrainEditorSurfacePaint.DEFAULT_SURFACE_INDEX
-	_mark_ui_state_changed()
-
-
-func _apply_default_visual_state(sync_data: bool = true) -> void:
-	_document.apply_default_visual_state(_get_material(), sync_data)
-
-
-func _apply_loaded_textures_from_data() -> void:
-	_document.apply_loaded_textures_from_data(_get_material())
-
-func _save_texture_assets(output_dir: String, terrain_name: String) -> Error:
-	return _document.save_texture_assets(_get_material(), output_dir, terrain_name)
-
-func _build_heightmap_from_data() -> Image:
-	return _document.build_heightmap_from_data()
-
-
-func _build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
-	return _document.build_heightmap_from_raw16(raw_bytes)
+	return _io_ops.export_terrain(output_dir, flavor)
 
 
 func _set_heightmap_image(image: Image) -> void:
@@ -2413,14 +1339,6 @@ func _set_heightmap_image(image: Image) -> void:
 	_height_revision += 1
 	_mark_foliage_preview_dirty()
 	_mark_tile_overlay_dirty()
-
-
-func _set_colormap_image(image: Image, sync_data: bool = true) -> void:
-	_document.set_colormap_image(_get_material(), image, sync_data)
-
-
-func _set_blendmap_image(image: Image, sync_data: bool = true) -> void:
-	_document.set_blendmap_image(_get_material(), image, sync_data)
 
 
 func _sync_material_from_data() -> void:
@@ -2516,18 +1434,6 @@ func _build_default_sector_grid() -> PackedInt32Array:
 		for col in 8:
 			grid[row * NovaTerrainData.SECTOR_GRID_DIM + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
 	return grid
-
-
-func _create_heightmap_image(fill_height: float) -> Image:
-	var image := Image.create(HM_SIZE, HM_SIZE, false, Image.FORMAT_RF)
-	image.fill(Color(fill_height, 0, 0, 1))
-	return image
-
-
-func _create_color_image(width: int, height: int, color: Color) -> Image:
-	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
-	image.fill(color)
-	return image
 
 
 func _get_terrain_name() -> String:
