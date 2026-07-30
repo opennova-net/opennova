@@ -28,6 +28,8 @@
     "mcp_tool_def.gd|func to_list_entry()",
     "waypoint_hud_entry.gd|func to_info_dict()",
     "host_session_config.gd|func to_session_options()",
+    "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
+    "occlusion_frame_pass.gd|func present_visibility()",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
