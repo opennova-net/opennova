@@ -612,6 +612,12 @@ func _sync_runtime_profiling() -> void:
 			_runtime_probe_enabled or stats_active)
 
 
+# Mission-presentation counters (probe/diagnostic seam).
+func get_mission_present_stats() -> MissionPresentStats:
+	return _present.get_stats_record() \
+			if _present != null else MissionPresentStats.new()
+
+
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
 func get_fire_present_stats() -> Dictionary:
 	return _fire_present.get_stats() if _fire_present != null else {}

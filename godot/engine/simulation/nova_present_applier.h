@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <array>
 #include <unordered_map>
 #include <vector>
 
@@ -15,12 +16,12 @@ class Node3D;
 
 // The native mission present-pass row walk. MissionPresentPass (GDScript,
 // godot/engine/world/mission_present_pass.gd) stays the host-facing component —
-// this class owns its hot loop: the row plan (identity validation, capability
-// bitmask, edge caches) and the per-frame walk over the sim's flat
-// PackedFloat32Array snapshot, dispatching to each resolved node's duck-typed
-// NovaEntityVisual surface (ADR 0007) only on change. Per-row work that was
-// ~10+ Variant-boxed reads plus a full plan revalidation in GDScript becomes
-// raw pointer arithmetic; the dispatched node calls (set_part_phase,
+// this class owns its hot loop: the revision-bound row plan (resolved node,
+// capability bitmask, applied-state caches) and the per-frame walk over the
+// sim's flat PackedFloat32Array snapshot, dispatching to each resolved node's
+// duck-typed NovaEntityVisual surface (ADR 0007) only on change. Per-row work
+// that was ~10+ Variant-boxed reads plus a full plan revalidation in GDScript
+// becomes raw pointer arithmetic; the dispatched node calls (set_part_phase,
 // play_body_clip_at, ...) keep their GDScript implementations.
 //
 // The walk itself is host presentation glue over the witnessed per-frame
@@ -88,24 +89,35 @@ protected:
 	static void _bind_methods();
 
 private:
+	enum BodyDispatchMode {
+		BODY_NONE = 0,
+		BODY_CLIP_AT,
+		BODY_SLOT_AT,
+		BODY_SLOT_PLAY,
+	};
+
 	struct Row {
 		int base = 0;
 		ObjectID node_id;
 		int caps = 0;
-		int32_t handle = 0;
-		int32_t type_id = 0;
 		int32_t bms_id = 0;
-		int32_t kind = 0;
-		int32_t index = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
 		int32_t present_visible = -1;
-		bool has_last_transform = false;
-		Transform3D last_transform;
+		bool transform_stamp_valid = false;
+		std::array<float, 6> transform_stamp = {};
+		bool aim_payload_valid = false;
+		std::array<float, 30> aim_payload = {};
+		bool part_stamp_valid = false;
+		std::array<int32_t, 7> part_stamp = {};
+		bool body_stamp_valid = false;
+		int32_t body_mode = BODY_NONE;
+		int32_t body_selector = -1;
+		int32_t body_phase = 0;
 	};
 
-	bool row_plan_is_current(const float *p, int64_t size, int stride,
+	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
@@ -123,11 +135,20 @@ private:
 	int64_t stat_posed_ = 0;
 	int64_t stat_hidden_ = 0;
 	int64_t stat_muzzles_ = 0;
+	int64_t stat_plan_rebuilds_ = 0;
+	int64_t stat_transform_builds_ = 0;
+	int64_t stat_aim_dispatches_ = 0;
+	int64_t stat_rhc_dispatches_ = 0;
+	int64_t stat_part_dispatches_ = 0;
+	int64_t stat_control_dispatches_ = 0;
+	int64_t stat_body_dispatches_ = 0;
+	int64_t stat_muzzle_queries_ = 0;
 
 	int64_t plan_revision_ = -1;
 	int plan_stride_ = 0;
 	int64_t plan_snapshot_size_ = -1;
 	int64_t plan_index_generation_ = -1;
+	bool plan_dirty_ = true;
 	std::vector<Row> rows_;
 
 	// infantry_anim_key(state) allocates its String per call natively; the
