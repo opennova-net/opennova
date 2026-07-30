@@ -115,6 +115,16 @@ enum class DeathMotionMode : uint8_t {
 // Minimal live-entity state the scripting evaluators read and mutate. This is a
 // clean model over the original 172-byte bms record + the pool record's net id;
 // the renderer/AI's full entity layout is a separate, deferred concern.
+// Named mirrors of the DEF_ITEM_ATTRIB_* bits world/netsim code reads off the
+// entity's ItemDefAttrib dword (Entity::item_attrib, and the same dword on
+// ai.h's def_attrib profile mirror). libs/world stays def-parser-free; parity
+// static_asserts against def.h live in npruntime/src/weapon_table_build.cpp.
+// [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
+inline constexpr uint32_t kItemAttribEweap = 0x20u;
+inline constexpr uint32_t kItemAttribLandable = 0x200u;
+inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — gates the 0x0D AI-trailer
+inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
+
 struct Entity {
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this
@@ -202,6 +212,8 @@ struct Entity {
     // sweep. Combat keeps this value on the entity because damage targets are
     // not necessarily AI entities. In particular bit 0x40000000 is NoDie:
     // weapon damage may reduce health only as far as 1.
+    // The kItemAttrib* constants below name the bits world/netsim code reads
+    // (same dword on ai.h's def_attrib profile mirror).
     uint32_t item_attrib = 0;
     // Signed impact/KZ armor classes and vehicle occupant-reduction factors
     // from ItemDef +0x190/+0x192 and +0x188/+0x18C.

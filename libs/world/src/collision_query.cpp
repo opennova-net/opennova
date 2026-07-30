@@ -7,6 +7,7 @@
 // projectile face and polygon raycasts, and the contact-force accumulation. Each
 // takes a CollisionTargetView and touches no world state.
 
+#include "world/ammo_table.h" // kAmmoFlagIgnorFoilage
 #include "world/angle.h"
 #include <algorithm>
 #include <cmath>
@@ -358,7 +359,7 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                 smax[1] < face.min[1] || smin[2] > face.max[2] || smax[2] < face.min[2])
                 continue;
             if ((face.flags & 0x100u) != 0) continue;
-            if (face.material == 17 && (ammo_flags & 0x4000000u) != 0) continue;
+            if (face.material == 17 && (ammo_flags & kAmmoFlagIgnorFoilage) != 0) continue;
             // Plane side at both endpoints (Q14 dot, signed >> 14). [orig: @ 0x4e50b6 shrd]
             const int32_t d0 =
                     static_cast<int32_t>((static_cast<int64_t>(ls[0]) * face.normal[0] +
@@ -616,7 +617,7 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 segment_min[2] > face.max[2] || segment_max[2] < face.min[2])
                 continue;
             if ((face.material_flags & 0x100u) != 0) continue;
-            if (face.poly_type == 17 && (ammo_flags & 0x04000000u) != 0) continue;
+            if (face.poly_type == 17 && (ammo_flags & kAmmoFlagIgnorFoilage) != 0) continue;
 
             const int32_t normal_index = sec.normal_start + face.normal_index;
             if (face.normal_index < 0 || normal_index < 0 ||

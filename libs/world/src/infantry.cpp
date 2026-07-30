@@ -732,7 +732,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
     // draggers 137-139), or a grounded corpse. The original's dead leg also requires
     // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
-    const bool conform = (e.def_attrib & 0x200u) != 0 ||
+    const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
                          (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
     if (!conform) {
         // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
@@ -1148,7 +1148,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // targets = target — the alternating shuffle while walking/turning.
         // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
         if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
-            (e.def_attrib & 0x200u) != 0) {
+            (e.def_attrib & kItemAttribLandable) != 0) {
             const int32_t tgt = inf.target_heading;
             inf.leg_yaw[0] = io::bam_add(
                 inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
@@ -1178,7 +1178,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
             // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
             const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-            int32_t lstep = (e.def_attrib & 0x200u) != 0
+            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
                                 ? io::bam_sar(io::bam_add(ldiff, 8), 4)
                                 : io::bam_sar(io::bam_add(ldiff, 2), 2);
             if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
