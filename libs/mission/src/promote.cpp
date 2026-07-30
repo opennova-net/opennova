@@ -511,6 +511,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             Seat anchor = attachment.anchor;
             anchor.type = SeatType::Gunner;
             anchor.bone_index = child->emplacement_bone;
+            anchor.attachment_frame = true;
             pose_mounted_occupant(world, *child, *carrier, anchor);
 
             std::vector<int32_t> lineage = work.lineage;

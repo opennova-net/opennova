@@ -152,11 +152,17 @@ bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
     }
 }
 
+static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
+    if (seat.attachment_frame)
+        return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    if (seat.type == SeatType::Gunner)
+        return static_cast<int16_t>(vehicle.yaw - seat.yaw_offset);
+    return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+}
+
 void presnap_vehicle_attach_heading(World &world, Entity &occupant,
                                     const Entity &vehicle, const Seat &seat) {
-    const int16_t seat_yaw = seat.type == SeatType::Gunner
-            ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
-            : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    const int16_t seat_yaw = mounted_pose_yaw(vehicle, seat);
     occupant.yaw = seat_yaw;
     if (world.ai == nullptr) return;
     AiEntity *body = world.ai->for_handle(occupant.handle);
@@ -192,9 +198,7 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
     occ.position.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
     occ.position.y = vehicle.position.y + static_cast<float>(L.x * sa + L.y * ca);
     occ.position.z = vehicle.position.z + L.z;
-    occ.yaw = (seat.type == SeatType::Gunner)
-                      ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
-                      : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    occ.yaw = mounted_pose_yaw(vehicle, seat);
     occ.pitch = vehicle.pitch;
     occ.roll = vehicle.roll;
 }
@@ -245,6 +249,7 @@ static void pose_emplacement_attachments(World &world) {
         anchor.bone_index = child->emplacement_bone;
         anchor.seat_local = child->emplacement_local;
         anchor.yaw_offset = child->emplacement_yaw_offset;
+        anchor.attachment_frame = true;
         pose_mounted_occupant(world, *child, *parent, anchor);
     });
 
