@@ -204,6 +204,14 @@ public:
 		SEAT_DRIVER = 5,
 	};
 
+	// local_player_blink_flags() letter bits GDScript gates the render passes
+	// on — mirrors world/collision.h kBlinkIndoorsBit/kBlinkWaterOffBit
+	// (static_asserts in nova_simulation_occlusion.cpp pin them).
+	enum BlinkFlag {
+		BLINK_INDOORS = 0x2,
+		BLINK_WATER_OFF = 0x8,
+	};
+
 	// The WAC/AI attach-to-seat command ids (world.h SeatSelectionMode maps
 	// them to seat filters). [orig: command 123 = sitex only, 124 = reject
 	// ctrlx, 125 = any seat — the Entity_RequestVehicleAttach command gates]

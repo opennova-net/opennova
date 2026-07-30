@@ -36,6 +36,9 @@ enum class EntityKind : uint8_t {
     Organic = 3,
 };
 
+// Live entity pools 0..4 [orig: the g_pool_list walk bound @0x431910].
+inline constexpr int kEntityPoolCount = 5;
+
 // Packed addressable handle: (pool_index << 12) | (slot_index & 0xFFF).
 // [orig: return value of EntityPool_FindByNetId @0x4f0a20; 0xFFFF == not found.]
 struct EntityHandle {
@@ -55,6 +58,17 @@ struct EntityHandle {
     bool operator==(const EntityHandle &o) const { return packed == o.packed; }
     bool operator!=(const EntityHandle &o) const { return packed != o.packed; }
 };
+
+// Spawn-origin provenance word: (kind << 24) | (record index & 0xFFFFFF);
+// kSpawnOriginNone = none. GDScript twin: godot/engine/world/spawn_origin.gd.
+inline constexpr uint32_t kSpawnOriginNone = 0xFFFFFFFFu;
+constexpr uint32_t spawn_origin_pack(uint32_t kind, uint32_t index) {
+    return (kind << 24) | (index & 0xFFFFFFu);
+}
+constexpr int spawn_origin_kind(uint32_t origin) { return static_cast<int>(origin >> 24); }
+constexpr int32_t spawn_origin_index(uint32_t origin) {
+    return static_cast<int32_t>(origin & 0xFFFFFFu);
+}
 
 // Seat class for vehicle/emplacement mounting. The enum values are the original
 // seatType codes. [orig: Entity_FindBestSeatSlot @0x4351f0 classifies the seat
@@ -303,6 +317,16 @@ struct Entity {
     // (the WAC SSN space) there instead. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
     // entity+0x15C; NapiNetConfig_LoadFromConnTags @0x4c7260 jsp[56]/jsp[58]]
     uint16_t minimap_net_id = 0;
+    // MoveOrder bit layout (the reconstructed word = net_move_input | net_stance_bits << 8;
+    // [orig: Player_PackInputStateToEntity @0x4df68f-0x4df741; stance reads
+    // Entity_UpdateInfantryPlayerBody @0x4b4165-0x4b4181]):
+    static constexpr uint32_t kMoveOrderDirMask = 0x7;    // 8-way dir F=0..FR=7 (§5.38)
+    static constexpr uint32_t kMoveOrderMoving = 0x8;
+    static constexpr uint32_t kMoveOrderFreeLook = 0x10;  // [orig: steer-source pick @0x48b4a8]
+    static constexpr uint32_t kMoveOrderLeanLeft = 0x40;  // [orig: lean ramp @0x4b7dbf]
+    static constexpr uint32_t kMoveOrderLeanRight = 0x80; // [orig: lean ramp @0x4b7dd6]
+    static constexpr uint32_t kMoveOrderProne = 0x100;    // stance bit 8 (see net_stance_bits below)
+    static constexpr uint32_t kMoveOrderCrouch = 0x200;   // stance bit 9
     // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2

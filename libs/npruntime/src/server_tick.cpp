@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <npwire/ingame_message_id.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/ai.h>                  // AiEntity / AiSystem::for_handle (the motor store)
@@ -24,9 +25,10 @@ namespace {
 // Pool-0 index byte for the S2C 0x1E kill-feed actor fields (§5.26: u8 pool-0 index,
 // 0xFF = none).
 uint8_t pool0_index_byte(uint16_t handle) {
-	if (handle == 0xFFFF || (handle & 0xF000u) != 0) return 0xFF;
-	const uint16_t slot = handle & 0xFFFu;
-	return slot <= 0xFEu ? static_cast<uint8_t>(slot) : 0xFF;
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() != 0) return 0xFF;
+	const int slot = h.slot();
+	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
 }
 
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
@@ -93,8 +95,8 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 				if (!is_in_match(c) || c.link.transport == nullptr) continue;
 				// mask 0x90 NOT_HOST: the host's in-process view skips the wire.
 				if (c.link.mode == netsim::TransportMode::Loopback) continue;
-				c.link.transport->host_send(0x13, body13);
-				if (!body1e.empty()) c.link.transport->host_send(0x1E, body1e);
+				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
+				if (!body1e.empty()) c.link.transport->host_send(s2c::GAME_EVENT, body1e);
 			}
 		}
 

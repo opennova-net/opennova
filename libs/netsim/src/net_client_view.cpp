@@ -177,8 +177,8 @@ void NetClientView::tick_lean() {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
 		es.lean_angle -= (es.lean_angle + 8) >> 4;
-		if ((es.move_input & 0x40u) != 0) es.lean_angle -= 0x3000000;
-		if ((es.move_input & 0x80u) != 0) es.lean_angle += 0x3000000;
+		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0) es.lean_angle -= 0x3000000;
+		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0) es.lean_angle += 0x3000000;
 	}
 }
 
@@ -266,7 +266,8 @@ void NetClientView::destroy_pool0_slot(uint16_t pool0_index) {
 void NetClientView::apply_team_assign(uint16_t handle, uint8_t team) {
 	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
 	// of the five entity pools (@0x431910 header checks).
-	if (handle == 0xFFFFu || ((handle >> 12) & 0xFu) >= 5u) return;
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	state_.upsert(handle).team = team;
 }
 

@@ -411,7 +411,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
-            uint32_t origin = (static_cast<uint32_t>(kind) << 24) | (idx & 0xFFFFFF);
+            uint32_t origin = spawn_origin_pack(static_cast<uint32_t>(kind), idx);
             ++idx;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);

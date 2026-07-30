@@ -849,8 +849,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t assign_consumed = 0;
 			if (decode_team_assign(m.payload.data(), m.payload.size(), assign,
 					assign_consumed) &&
-			    assign.entity_handle != 0xFFFFu &&
-			    ((assign.entity_handle >> 12) & 0xFu) < 5u) {
+			    world::EntityHandle{assign.entity_handle}.valid() &&
+			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
 				// Retail's header gates: not the 0xFFFF sentinel, and the pool
 				// nibble must address one of the five entity pools.
 				out.entity_team_assigns.emplace_back(

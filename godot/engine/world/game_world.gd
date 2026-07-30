@@ -2363,7 +2363,7 @@ func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
 	var index := int(ref.get("index", -1))
 	var spawn_origin := 0
 	if origin_kind >= 0 and index >= 0:
-		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
+		spawn_origin = SpawnOrigin.pack(origin_kind, index)
 	return _item_fx_identity_aliases(
 			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
 
@@ -2715,7 +2715,8 @@ func _apply_blink_frame_gates() -> void:
 	# The mission force-indoors attribute ORs the indoors letter into the frame
 	# view for BOTH consumers, matching run_occlusion_frame's camera input
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	var flags := int(sim.local_player_blink_flags()) | (0x2 if _mission_forces_indoors else 0)
+	var flags := int(sim.local_player_blink_flags()) | (
+			NovaSimulation.BLINK_INDOORS if _mission_forces_indoors else 0)
 	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
 	# near-detail and far-foliage tiers are terrain children here, matching
 	# retail where the detail cells ride the skipped terrain traversal and the
@@ -2723,7 +2724,7 @@ func _apply_blink_frame_gates() -> void:
 	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
 	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
 	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	var indoors := (flags & 0x2) != 0
+	var indoors := (flags & NovaSimulation.BLINK_INDOORS) != 0
 	if indoors != _blink_indoors:
 		_blink_indoors = indoors
 		if _terrain != null:
@@ -2740,7 +2741,7 @@ func _apply_blink_frame_gates() -> void:
 	# (a camera building straddling the water plane, the window latch) ride
 	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
 	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
-	var water_off := (flags & 0x8) != 0
+	var water_off := (flags & NovaSimulation.BLINK_WATER_OFF) != 0
 	if water_off != _blink_water_suppressed:
 		_blink_water_suppressed = water_off
 		if _water != null:

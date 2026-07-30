@@ -421,8 +421,8 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	// DEFAULTS rather than dropping keys - the card's shape is stable whether
 	// the entity is whole or registry-despawned.
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	out["kind"] = ent ? static_cast<int>(ent->spawn_origin >> 24) : -1;
-	out["index"] = ent ? static_cast<int>(ent->spawn_origin & 0xFFFFFF) : -1;
+	out["kind"] = ent ? opennova::world::spawn_origin_kind(ent->spawn_origin) : -1;
+	out["index"] = ent ? static_cast<int>(opennova::world::spawn_origin_index(ent->spawn_origin)) : -1;
 	out["bms_id"] = ent ? ent->bms_id : 0;
 	out["item_id"] = ent ? ent->item_id : 0;
 	// NOTE: retail BMS names are Windows-1252; non-ASCII bytes will read as
@@ -564,7 +564,7 @@ int NovaSimulation::get_entity_kind(int p_index) const {
 	if (!e) return -1;
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
 	if (!ent) return -1;
-	return static_cast<int>(ent->spawn_origin >> 24); // [orig promote: (kind<<24)|index]
+	return opennova::world::spawn_origin_kind(ent->spawn_origin); // [orig promote: (kind<<24)|index]
 }
 
 int NovaSimulation::get_entity_index(int p_index) const {
@@ -573,7 +573,7 @@ int NovaSimulation::get_entity_index(int p_index) const {
 	if (!e) return -1;
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
 	if (!ent) return -1;
-	return static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+	return static_cast<int>(opennova::world::spawn_origin_index(ent->spawn_origin));
 }
 
 Vector3 NovaSimulation::get_entity_position(int p_index) const {
@@ -757,8 +757,8 @@ bool NovaSimulation::cache_present_effect_pose(
 				p_entity_state.handle;
 		present_effect_missing_ssns_.erase(ssn);
 	}
-	const int kind = static_cast<int>(entity->spawn_origin >> 24);
-	const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
+	const int kind = opennova::world::spawn_origin_kind(entity->spawn_origin);
+	const int index = static_cast<int>(opennova::world::spawn_origin_index(entity->spawn_origin));
 	const uint64_t origin = present_effect_origin_key(kind, index);
 	present_effect_handles_by_origin_[origin] =
 			p_entity_state.handle;
@@ -877,8 +877,8 @@ PackedVector3Array NovaSimulation::get_present_effect_state_for_origin(
 		const opennova::world::Entity *entity = world_->registry.get(
 				opennova::world::EntityHandle{entity_state.handle});
 		if (!entity) continue;
-		const int kind = static_cast<int>(entity->spawn_origin >> 24);
-		const int index = static_cast<int>(entity->spawn_origin & 0xFFFFFFu);
+		const int kind = opennova::world::spawn_origin_kind(entity->spawn_origin);
+		const int index = static_cast<int>(opennova::world::spawn_origin_index(entity->spawn_origin));
 		if (present_effect_origin_key(kind, index) != requested_origin) continue;
 		if (cache_present_effect_pose(entity_state)) {
 			return cached_present_effect_state_for_handle(entity_state.handle);
@@ -1048,17 +1048,17 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		const opennova::world::Entity *ent = (!joiner_) ? world_->registry.get(h) : nullptr;
 		if (joiner_ && h.pool() >= 1 && h.pool() <= 3) {
 			const opennova::world::Entity *local = world_->registry.get(h);
-			if (local != nullptr && local->spawn_origin != 0xFFFFFFFFu &&
+			if (local != nullptr && local->spawn_origin != opennova::world::kSpawnOriginNone &&
 					static_cast<uint16_t>(local->item_id) == es.type_id) {
 				r[PF_KIND] = static_cast<float>(local->spawn_origin >> 24);
-				r[PF_INDEX] = static_cast<float>(local->spawn_origin & 0xFFFFFF);
+				r[PF_INDEX] = static_cast<float>(opennova::world::spawn_origin_index(local->spawn_origin));
 				r[PF_BMS_ID] = static_cast<float>(local->bms_id);
 				r[PF_NET_ID] = static_cast<float>(local->net_id);
 			}
 		}
 		if (ent) {
 			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);
-			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
+			r[PF_INDEX] = static_cast<float>(opennova::world::spawn_origin_index(ent->spawn_origin));
 			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
 			r[PF_NET_ID] = static_cast<float>(ent->net_id);
 			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
