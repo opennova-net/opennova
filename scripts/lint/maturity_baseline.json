@@ -17,7 +17,8 @@
     "libs_stdout_prints": 0,
     "libs_uncited_src_files": 61,
     "oversize_cpp_files": 2,
-    "test_private_pokes": 1366
+    "oversize_gd_files": 7,
+    "test_private_pokes": 1363
   },
   "dict_contract_allowlist": [
     "to_drag_data",
@@ -28,6 +29,14 @@
     "mcp_tool_def.gd|func to_list_entry()",
     "waypoint_hud_entry.gd|func to_info_dict()",
     "host_session_config.gd|func to_session_options()",
+    "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
+    "occlusion_frame_pass.gd|func present_visibility()",
+    "nova_object_body_anim.gd|func get_active_part_anims()",
+    "selection_ops.gd|func get_selection_summary()",
+    "selection_ops.gd|func get_selected_entity()",
+    "selection_ops.gd|func get_group(",
+    "scripting_ops.gd|func get_selected_event_chain()",
+    "scripting_ops.gd|func get_logic_summary()",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",

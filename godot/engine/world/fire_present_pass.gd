@@ -3,7 +3,7 @@ extends RefCounted
 # THE viewing-client fire-presentation pass: presents the sim's authoritative
 # host rounds or decoded visual-only joiner rounds — AI/remote-player fire sound,
 # muzzle effect, and in-flight tracers. The local player's own predicted fire keeps
-# its action-slot presentation (local_player_host._fire_action_effects) and is
+# its action-slot presentation (PlayerWeaponEffects._fire_action_effects) and is
 # self-filtered here, exactly like wire_present_pass filters the local avatar.
 #
 # [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 — on the firing host every AI

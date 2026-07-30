@@ -89,8 +89,15 @@ of job, not the TU-split recipe:
       `env.h`), trimmed the `world.h` umbrella by extracting `system.h`,
       `net_command_sink.h`, `vehicle_mount.h`, `entity_commands.h`, and landed the
       `oversize_cpp_files` ratchet at its residual floor of 2)
-- [ ] W4 GDScript: `game_world.gd` forwarder-delete + extractions, typed fields to
-      retire the ~90 `has_method` guards, F3 overlay per-tab, modtools splits
+- [x] W4 GDScript (DONE: W4-1 forwarder-delete; W4-2 guard floor — the
+      `has_method_guards` ratchet at 578; W4-3 `game_world.gd` extractions
+      3,876 → 2,295 (#362/#364/#366); W4-4 `local_player_host.gd` split
+      1,440 → 672 (#369/#370); W4-5 retired as already-done — #342's F3
+      rework shipped the per-tab overlay; W4-6 modtools splits — `live_mode`
+      1,951 → 779 (#372), `mission_controller` 1,695 → 1,093 (#373),
+      `nova_object_model` 1,877 → 1,171 (#374), `terrain_editor`
+      2,540 → 1,446 — and the `oversize_gd_files` ratchet landed at its
+      residual floor of 7)
 - [ ] W5 consolidations + push-downs: perf-span unify, sim debug-snapshot
       narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
       push-downs (ItemSeatSpecs, camera, armory/catalog) — opportunistic, under

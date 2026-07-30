@@ -76,11 +76,37 @@ class FakePosedWeaponPart:
 		return skeleton
 
 
-class ActionParticleHostHarness:
-	extends LocalPlayerHost
+# A minimal LocalPlayerHost stand-in serving only the public accessors
+# PlayerWeaponEffects resolves userpoints against.
+class FakeEffectsHost:
+	extends RefCounted
+	var parts: Array = []
+
+	func vm_parts() -> Array:
+		return parts
+
+	func viewmodel() -> Node3D:
+		return null
+
+	func held_weapon() -> Node3D:
+		return null
+
+	func camera() -> Camera3D:
+		return null
+
+	func is_third_person() -> bool:
+		return false
+
+
+class ActionParticleEffectsHarness:
+	extends PlayerWeaponEffects
+	var effects_host := FakeEffectsHost.new()
+
+	func _init() -> void:
+		setup(null, effects_host)
 
 	func configure_viewmodel_parts(parts: Array) -> void:
-		_vm_parts = parts
+		effects_host.parts = parts
 
 	func action_particle_world_position(userpoint: String) -> Vector3:
 		return _action_particle_world_position(userpoint)
@@ -558,7 +584,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster marker layers cannot make the reflection-only body visible to the player")
-	var pass_cam: Camera3D = host.get("_vm_camera")
+	var pass_cam: Camera3D = host.viewmodel_rig().get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
 		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
@@ -697,7 +723,7 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	add_child_autofree(vp)
 	await get_tree().process_frame
 
-	var pass_layer: CanvasLayer = trigger.host.get("_vm_pass_layer")
+	var pass_layer: CanvasLayer = trigger.host.viewmodel_rig().get("_vm_pass_layer")
 	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
 	if pass_layer != null:
 		assert_true(pass_layer.is_inside_tree(),
@@ -835,8 +861,7 @@ func _weapon_particle_event(kind: int, effect: String, scope_settled := false,
 
 
 func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
-	var host := ActionParticleHostHarness.new()
-	add_child_autofree(host)
+	var effects := ActionParticleEffectsHarness.new()
 	var part := FakePosedWeaponPart.new()
 	part.transform = Transform3D(Basis.from_euler(Vector3(0.0, 0.3, 0.0)), Vector3(4, 2, -3))
 	add_child_autofree(part)
@@ -851,7 +876,7 @@ func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
 	part.add_child(skeleton)
 	part.skeleton = skeleton
 	skeleton.force_update_all_bone_transforms()
-	host.configure_viewmodel_parts([part])
+	effects.configure_viewmodel_parts([part])
 
 	var raw_position: Vector3 = part.data.info["position"]
 	var global_rest := skeleton.get_bone_global_rest(0)
@@ -862,10 +887,10 @@ func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
 	var expected_forward := (skeleton.global_transform.basis * posed.basis
 			* rest_local_forward).normalized()
 
-	assert_almost_eq(host.action_particle_world_position("mflash01"),
+	assert_almost_eq(effects.action_particle_world_position("mflash01"),
 			expected_position, Vector3(0.0001, 0.0001, 0.0001),
 			"muzzle position follows the fake-skinned weapon bone")
-	assert_almost_eq(host.action_particle_world_forward("mflash01"),
+	assert_almost_eq(effects.action_particle_world_forward("mflash01"),
 			expected_forward, Vector3(0.0001, 0.0001, 0.0001),
 			"muzzle direction follows the same live weapon bone")
 
