@@ -231,6 +231,8 @@ class DefItemDef(ctypes.Structure):
         ("emplacement_attachments_count", ctypes.c_size_t),
         ("emplacement_g_slot", ctypes.c_int),
         ("emplacement_c_slot", ctypes.c_int),
+        # Building-interior daylight fraction (retail ItemDef+0x218).
+        ("light_transfer", ctypes.c_float),
     ]
 
 

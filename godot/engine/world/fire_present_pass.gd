@@ -3,7 +3,7 @@ extends RefCounted
 # THE viewing-client fire-presentation pass: presents the sim's authoritative
 # host rounds or decoded visual-only joiner rounds — AI/remote-player fire sound,
 # muzzle effect, and in-flight tracers. The local player's own predicted fire keeps
-# its action-slot presentation (local_player_host._fire_action_effects) and is
+# its action-slot presentation (PlayerWeaponEffects._fire_action_effects) and is
 # self-filtered here, exactly like wire_present_pass filters the local avatar.
 #
 # [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 — on the firing host every AI
@@ -264,6 +264,7 @@ func present(ticks: int = 1) -> void:
 		return
 	_drain_fires()
 	_drain_slot_sounds()
+	_drain_sound_emitters()
 	_tick_pending_sounds(ticks)
 	_draw_tracers()
 
@@ -297,6 +298,22 @@ func _drain_slot_sounds() -> void:
 			key = "%d:%d" % [int(ev.get("handle", 0)), slot]
 		if audio.slot_soundset(set_name, ev.get("pos", Vector3.ZERO), key):
 			_stats.sounds += 1
+
+
+# Entity-attached loop registrations (vehicle idle/drive/reverse today) share
+# the native ambient emitter table and its loudest-eight physical pool. The
+# audio host replays the bounded latest intents at their producer ticks before
+# advancing to the end of a catch-up frame, preserving the 30-tick keep-alive.
+# [orig: SoundEmitter_RegisterSetLayers @0x528340;
+# SoundEmitter_UpdateAndMixTop8 @0x5284a0]
+func _drain_sound_emitters() -> void:
+	var events: Array = _sim.drain_sound_emitters()
+	if events.is_empty():
+		return
+	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
+	if audio == null:
+		return
+	audio.apply_sound_emitters(events)
 
 
 func _drain_fires() -> void:

@@ -397,7 +397,8 @@ change; 223/223 ctest + GDExtension green):
   functions `drain_connection_c2s`/`emit_connection_s2c`/`build_0a_frame`; the class itself had no
   production consumer (only the 3 `netsim` tests). The file `net_system.{h,cpp}` was **renamed
   `connection_fan.{h,cpp}`** (no `NetSystem` left in it = the old name was a misnomer); it now holds
-  only the per-connection drain/fan primitives + `kTag0aFrameUpdate`. The 3 tests moved to a small
+  only the per-connection drain/fan primitives (message tags now come from
+  `npwire/ingame_message_id.h`). The 3 tests moved to a small
   explicit harness `tests/netsim/conn_fan_test_util.h` (a plain `std::vector<Connection>` + the free
   functions + `spawn_remote_player`), keeping every assertion.
 - **`NapiNPServerCtx.net` field removed** (always `nullptr`; the "removed at P7" promise honored here)

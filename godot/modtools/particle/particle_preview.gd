@@ -9,7 +9,7 @@ extends Control
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 
 const STEP_SECONDS := 1.0 / 62.5
-const PARTICLE_FLAG_FOREVER_EMIT := 1 << 18
+const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
 const PREVIEW_EFFECT_ID := "__oned_particle_preview__"
 
 var _viewport_container: SubViewportContainer

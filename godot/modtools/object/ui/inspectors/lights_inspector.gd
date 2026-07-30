@@ -116,18 +116,13 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 	var light_info := func(index: int) -> Dictionary:
 		if object_editor == null or object_editor.object_data == null:
 			return {}
-		if object_editor.object_data.has_method("get_light_info"):
-			return object_editor.object_data.get_light_info(index)
-		return lights[index] if index >= 0 and index < lights.size() else {}
+		return object_editor.object_data.get_light_info(index)
 
 	var set_field := func(key: String, value: Variant) -> void:
 		if int(selected["index"]) < 0:
 			return
 		_selected_index = int(selected["index"])
-		if object_editor.object_data.has_method("set_light_field"):
-			object_editor.object_data.set_light_field(int(selected["index"]), key, value)
-		elif key == "color_start" or key == "color_end":
-			object_editor.object_data.set_light_colors(int(selected["index"]), start_color.color, end_color.color)
+		object_editor.object_data.set_light_field(int(selected["index"]), key, value)
 		_refresh_list()
 
 	var corona_disabled := func(info: Dictionary) -> bool:

@@ -11,6 +11,7 @@
 #include "world/body_anim.h"
 #include "world/vehicle_attach.h"
 #include "world/vehicle_motor.h"
+#include "world/vehicle_sound.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -246,7 +247,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // [orig: Entity_HandleDamageTrigger @0x4073c8..0x4073ea]
             const Entity *victim_entity = world.registry.get(victim->handle);
             if (victim_entity != nullptr &&
-                (victim_entity->engine_flags & 0x100u) == 0) {
+                (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
                 victim->slot.bytes()[AiSlot::kMoveFlagByte] = 2;
                 world.relations.group(victim_entity->group_id).alert =
                         TriggerRelations::kAlertRed;
@@ -398,6 +399,32 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             }
         }
     }
+    // A joiner does not integrate its replicated pool-1 vehicle copies here, but
+    // retail still executes the per-entity ground callback's presentation leg on
+    // clients. Evaluate sound from the current wire/local state after the authority
+    // motor pass, leaving position, heading, and motor accumulators untouched.
+    // Collision contact is authority-physics state and therefore unavailable on
+    // this path; an explicit replicated collision bit can replace `false` later.
+    // [orig: Entity_UpdateVehiclePhysics @0x48af00; movement-sound call
+    // @0x48d181..0x48d1c4]
+    if (!is_authority && !world.vehicle_traits.empty()) {
+        vehicle_pass_handles_.clear();
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() != 1) return;
+            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            if (traits == nullptr || traits->physics == 0) return;
+            vehicle_pass_handles_.push_back(e.handle);
+        });
+        for (const EntityHandle h : vehicle_pass_handles_) {
+            Entity *veh = world.registry.get(h);
+            if (veh == nullptr) continue;
+            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
+            if (traits == nullptr) continue;
+            update_ground_vehicle_sound(world, *veh, *traits,
+                                        /*wrecked=*/veh->health <= 0,
+                                        /*collided=*/false);
+        }
+    }
     events.process_timed(*this, world);
 }
 
@@ -532,8 +559,10 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
         // split is ours) [orig: the MoveOrder packer @0x4df68f-0x4df741].
         occ->net_move_input = static_cast<uint8_t>(
-                (e.inf.player_move_dir_index & 7) | (e.inf.player_moving ? 8 : 0) |
-                (e.inf.lean_left ? 0x40 : 0) | (e.inf.lean_right ? 0x80 : 0));
+                (e.inf.player_move_dir_index & Entity::kMoveOrderDirMask) |
+                (e.inf.player_moving ? Entity::kMoveOrderMoving : 0) |
+                (e.inf.lean_left ? Entity::kMoveOrderLeanLeft : 0) |
+                (e.inf.lean_right ? Entity::kMoveOrderLeanRight : 0));
         occ->net_stance_bits = 0; // seated stance stays cleared [orig: @0x435c42]
         // Drop any pending jump: the input latch is set-only (its consumer is
         // tick_infantry's jump block, skipped for the whole ride) and the witnessed
@@ -602,9 +631,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
         if (e.inf.anim_state != mounted_state) {
-            e.inf.anim_prev = e.inf.anim_state;
-            e.inf.anim_state = mounted_state;
-            e.inf.clip_phase = 0;
+            e.inf.begin_body_transition(mounted_state);
         }
         e.inf.anim_pending = 0;
         e.inf.move_mode = 0;

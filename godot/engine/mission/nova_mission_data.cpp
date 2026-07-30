@@ -3,6 +3,7 @@
 #include "resource_index/nova_resource_root.h"
 
 #include <mission/authoring.h>
+#include <mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
 #include <mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -16,6 +17,10 @@
 using namespace godot;
 
 namespace {
+
+bool attrib_has(uint32_t attrib_flags, opennova::bms::AttribFlags bit) {
+	return (attrib_flags & static_cast<uint32_t>(bit)) != 0;
+}
 
 opennova::mission::EntityKind to_native_kind(int kind) {
 	switch (kind) {
@@ -172,6 +177,7 @@ void NovaMissionData::_bind_methods() {
 	BIND_CONSTANT(WP_FLAG_DOES_NOT_LOOP);
 	BIND_CONSTANT(WP_FLAG_BLUE_TEAM);
 	BIND_CONSTANT(WP_FLAG_RED_TEAM);
+	BIND_CONSTANT(ATTRIB_FORCE_INDOORS);
 	BIND_CONSTANT(ATTRIB_ROTATE_MAP_180);
 	BIND_CONSTANT(ATTRIB_ENABLE_NVG);
 	BIND_CONSTANT(ATTRIB_START_WITH_NVG_ON);
@@ -191,6 +197,8 @@ void NovaMissionData::_bind_methods() {
 }
 
 static_assert(NovaMissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
+static_assert(NovaMissionData::ATTRIB_FORCE_INDOORS ==
+              static_cast<int>(opennova::bms::AttribFlags::ForceIndoors));
 
 Error NovaMissionData::open_file(const String &path) {
 	source_path = path;
@@ -320,9 +328,9 @@ Dictionary NovaMissionData::get_info() const {
 	out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
 	out["water_color"] = Color(info.water_color[0] / 255.0f, info.water_color[1] / 255.0f, info.water_color[2] / 255.0f);
 	out["water_murk"] = info.water_murk;
-	out["has_water_override"] = (info.attrib_flags & 0x1) != 0;
-	out["has_fog_distance_override"] = (info.attrib_flags & 0x2) != 0;
-	out["has_fog_color_override"] = (info.attrib_flags & 0x4) != 0;
+	out["has_water_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::WaterOverrideEnable);
+	out["has_fog_distance_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogDistanceOverrideEnable);
+	out["has_fog_color_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogColorOverrideEnable);
 	return out;
 }
 
@@ -332,13 +340,13 @@ Dictionary NovaMissionData::get_environment_overrides() const {
 	// Game_StartMission @ 0x525371]. Keys present only when their gate is set.
 	const opennova::mission::MissionInfo info = document.info();
 	Dictionary out;
-	if ((info.attrib_flags & 0x1) != 0) {
+	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::WaterOverrideEnable)) {
 		out["water_height"] = static_cast<float>(info.water_override); // engine half-units
 	}
-	if ((info.attrib_flags & 0x2) != 0) {
+	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogDistanceOverrideEnable)) {
 		out["fog_level"] = static_cast<float>(info.fog_override);
 	}
-	if ((info.attrib_flags & 0x4) != 0) {
+	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogColorOverrideEnable)) {
 		out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
 	}
 	if (info.water_color[0] != 0 || info.water_color[1] != 0 || info.water_color[2] != 0) {
@@ -831,7 +839,11 @@ Dictionary NovaMissionData::set_area_trigger(int index, const Vector3 &min_bound
 	opennova::mission::AreaTriggerRecord record = make_area_record(min_bounds, max_bounds, active, constrain_z, zone_id);
 	opennova::mission::AreaTriggerRecord existing;
 	if (document.get_area_trigger(static_cast<size_t>(index), existing)) {
-		record.reserved = (existing.reserved & ~0x3) | (active ? 0x1 : 0) | (constrain_z ? 0x2 : 0);
+		constexpr int kKnownBits = static_cast<int>(opennova::bms::AreaTrigger::kFlagMissionArea |
+		                                            opennova::bms::AreaTrigger::kFlagConstrainZ);
+		record.reserved = (existing.reserved & ~kKnownBits) |
+		                  (active ? static_cast<int>(opennova::bms::AreaTrigger::kFlagMissionArea) : 0) |
+		                  (constrain_z ? static_cast<int>(opennova::bms::AreaTrigger::kFlagConstrainZ) : 0);
 	}
 	opennova::mission::AreaTriggerRecord out;
 	if (!document.set_area_trigger(static_cast<size_t>(index), record, &out)) {
@@ -1066,20 +1078,22 @@ opennova::mission::MissionTriggerRecord NovaMissionData::trigger_from_dictionary
 	// `record = seed` copy. Defaults for omitted keys come from the condition_flags bits (the canonical
 	// source: condition_flags is what trigger_from_record serializes), not the seed's mirror bool fields,
 	// so an out-of-sync seed can never propagate. The bool mirrors are then re-derived to stay consistent.
-	int condition = seed.condition_flags & ~0x7;
-	if (static_cast<bool>(dict.get("negated", (seed.condition_flags & 0x1) != 0))) {
-		condition |= 0x1;
+	using opennova::bms::Trigger;
+	constexpr int kConditionMask = Trigger::kConditionNegated | Trigger::kConditionOr | Trigger::kConditionXor;
+	int condition = seed.condition_flags & ~kConditionMask;
+	if (static_cast<bool>(dict.get("negated", (seed.condition_flags & Trigger::kConditionNegated) != 0))) {
+		condition |= Trigger::kConditionNegated;
 	}
-	if (static_cast<bool>(dict.get("logic_or", (seed.condition_flags & 0x2) != 0))) {
-		condition |= 0x2;
+	if (static_cast<bool>(dict.get("logic_or", (seed.condition_flags & Trigger::kConditionOr) != 0))) {
+		condition |= Trigger::kConditionOr;
 	}
-	if (static_cast<bool>(dict.get("logic_xor", (seed.condition_flags & 0x4) != 0))) {
-		condition |= 0x4;
+	if (static_cast<bool>(dict.get("logic_xor", (seed.condition_flags & Trigger::kConditionXor) != 0))) {
+		condition |= Trigger::kConditionXor;
 	}
 	record.condition_flags = condition;
-	record.negated = (condition & 0x1) != 0;
-	record.logic_or = (condition & 0x2) != 0;
-	record.logic_xor = (condition & 0x4) != 0;
+	record.negated = (condition & Trigger::kConditionNegated) != 0;
+	record.logic_or = (condition & Trigger::kConditionOr) != 0;
+	record.logic_xor = (condition & Trigger::kConditionXor) != 0;
 	return record;
 }
 

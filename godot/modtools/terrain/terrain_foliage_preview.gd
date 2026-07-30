@@ -120,12 +120,9 @@ func _editor_tile_overlay_tint() -> Vector3:
 func _sync_surface_input_overrides() -> void:
 	if _dispatcher == null:
 		return
-	var have_editor_inputs := _terrain_mesh != null \
-		and _terrain_mesh.has_method("get_heightfield_normal_texture") \
-		and _terrain_mesh.has_method("get_tile_overlay_texture") \
-		and _dispatcher.has_method("set_surface_input_overrides")
+	var have_editor_inputs := _terrain_mesh != null
 	if not have_editor_inputs:
-		if _surface_override_applied and _dispatcher.has_method("clear_surface_input_overrides"):
+		if _surface_override_applied:
 			_dispatcher.call("clear_surface_input_overrides")
 		_surface_override_applied = false
 		_last_heightfield_normal = null
@@ -215,7 +212,7 @@ func rebuild_if_needed() -> void:
 ## Public host diagnostic for ONED/runtime parity probes.
 func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
 	var diagnostics := SurfaceInputDiagnostics.new()
-	if _dispatcher == null or not _dispatcher.has_method("get_frame_stats"):
+	if _dispatcher == null:
 		return diagnostics
 	var telemetry: Variant = _dispatcher.call("get_frame_stats")
 	if telemetry is Dictionary:

@@ -217,7 +217,7 @@ XML-loaded layer whose category names include the unrelated `Soundloop_1..7` str
 @ 0x7d0788). Slot USE is per entity class: for `envsnd` markers slots 1..4 are the
 time-of-day variants (next section); vehicles read slots 1..3 as skid/spray/dust loop sets
 (`update_vehicle_effect_emissions @ 0x528f20` reads +0x82C/+0x830/+0x834), the movement
-driver reads 1..4 (`Entity_ProcessMovementSoundEffects @ 0x5294a0`). Entity-attached sounds
+driver reads 1..3 (`Entity_ProcessMovementSoundEffects @ 0x5294a0`). Entity-attached sounds
 use a separate composite-name path (`SoundProfile_FindByEntityAndType @ 0x528180`,
 `"<EntityDefName>_<SoundType>"`).
 
@@ -309,8 +309,84 @@ death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
 | D-SND-14 | the local player's death scream rides the NPC slot-7/8 leg | org2 plays the composite `SoundProfile_FindByEntityAndType(def, 5/0)` name `@ 0x4b4c61` | the composite-name chain is unported (P2b player-death presentation); the profile scream is the same authored voice family |
 | D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
 
-Follow-ups: the vehicle slot consumers (30-50; the direct def+0x864 readers)
-ride the vehicle-sound grill; remote-client footstep presentation rides the
+## Ground vehicle movement sounds (grilled 2026-07-29)
+
+Ground engines are not a one-shot fired merely because the local player entered a
+vehicle. They are three keyed sound-profile lanes whose eligible loops are
+re-registered from signed vehicle speed and admitted by the vehicle's
+primary-occupant latch.
+
+**Ground caller and occupancy gate.** The ground physics family calls
+`Entity_ProcessMovementSoundEffects @ 0x5294a0` once per vehicle tick from
+`Entity_UpdateVehiclePhysics @ 0x48d1b6`. The caller passes the entity's signed
+current speed (`entity+0x29C`) and the item-def `player_speed` (`def+0x8E8`) as both
+the speed denominator and maximum sound-speed input. Magnitudes below 256 in
+16.16 units are snapped to zero. A non-`PlayerControl` vehicle always reaches the
+sound pass; a `PlayerControl` vehicle reaches it only while its primary occupant
+(`entity+368`) is non-null (`@ 0x48d181..0x48d1c7`). That occupant may be an NPC:
+the sound gate tests the vehicle-side claim, not local-player identity.
+
+**The three shared-emitter lanes.** Active lanes register the authored
+`Soundloop_1..3` sets through
+`SoundEmitter_RegisterSetLayers @ 0x528340`, with a literal 30-tick lifetime
+(0.48 s at 62.5 Hz). The lane number is the emitter slot-type key:
+
+| Lane | Authored source | Direction / mix |
+|---|---|---|
+| 0 | `Soundloop_1` / sound-profile slot 0 | idle, pitch 1.0; while `abs(speed) < P`, volume is `clamp16(0x10000 - (abs(speed) << 16) / P)`, so the idle loop fades inversely to speed |
+| 10 | `Soundloop_2` / slot 1 | forward drive; volume rises linearly through the first `P/16` of speed as `(abs(speed) << 16) / (P/16)`, then stays at `0xFFFF` |
+| 20 | `Soundloop_3` / slot 2 | reverse drive; the same moving-volume ramp, registered only for reverse motion |
+
+Here `P` is the item-def `player_speed`. Moving pitch starts at the slot's authored
+`p2`, adds the rounded Q16 interpolation
+`(abs(speed) / P) * (p3 - p2)`, and treats a zero `p3` as 1.0. The forward lane's
+`p4 > 1` branch subdivides that interpolation into the witnessed gear sawtooth
+instead of one continuous sweep. The ordinary moving leg registers exactly one
+direction: `speed >= 0` selects lane 10 (`@ 0x529787` -> call `@ 0x5297c0`);
+negative speed selects lane 20 (call `@ 0x5297a3`). Stationary motion skips that
+leg under the normal non-collision/entity-def gate. The previously active
+opposite lane is therefore not zero-cleared on an ordinary direction or
+stationary change; it retires through the 30-tick lifetime. The idle registration
+is separate at `@ 0x529882`.
+
+These are not private vehicle channels. The registrations occupy the same
+767-entry `(entity, slot type, layer)` table as placed ambience and are ranked
+with it by `SoundEmitter_UpdateAndMixTop8 @ 0x5284a0`. Consequently vehicle and
+ambient layers share retail's eight real-channel budget. A registration whose
+pitch or volume is zero is the common clear operation. Both moving lanes receive
+explicit zero registrations only on the collision branch
+(`@ 0x5297db..0x52981a`) and the top all-zero/wreck branch
+(`@ 0x5298d4..0x52995e`); otherwise a refreshed lane gets another 30 ticks.
+
+**Direction shift and detach.** The ground caller keeps the reverse-direction
+latch in `moveData+0x318` bit 2. It enters reverse only after both commanded speed
+(`+0x220`) and actual speed (`+0x29C`) are negative, and leaves reverse when the
+command becomes positive; either edge plays sound-profile slot 32
+(`enginereverse`, used as the shift sound) once at `@ 0x48d21f`. Claimant detach
+zero-calls `Entity_ProcessMovementSoundEffects` at `@ 0x435716`, clearing the
+forward/reverse lanes through zero registrations, then plays slot 31
+(`enginestop`) only while the vehicle is strictly above
+`Env_WaterHeightFixed`, before clearing the primary occupant
+[orig: `Entity_DetachFromVehicle @ 0x4355f0`].
+
+Ground vehicles do **not** call the aircraft-only PlayerControl occupancy spawner
+`entity_update_damage_accumulator_and_shadow @ 0x48fa70`. That function's slot-30
+engine-start edge is reached only by the `CHel`/`cpln` updater. A parity port must
+therefore drive a ground vehicle's persistent loops from the per-tick movement
+pass and primary-occupant gate; synthesizing the aircraft engine-start one-shot
+for `cveh`/`ctank`/`cbike` would invent behavior.
+
+### Divergence
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-SND-17 | **PORTED 2026-07-29 (structural ground slice).** `world::update_ground_vehicle_sound` emits generic `SoundEmitterEvent` rows from the final ground-motor state: profile/item-override slots 0/1/2, lanes 0/10/20, the witnessed Q16 gain/pitch and p4 gear branches, 30-tick lifetime, validated primary-occupant gate, collision/wreck behavior, and slot-32 direction edges. `stop_ground_vehicle_sound` emits claimant-detach clears plus the above-water slot-31 stop. A bounded 767-key `SoundEmitterMailbox` retains only the newest source/lane intent and its producer tick; non-allocating clear/anchor controls displace allocation intents at saturation. `NovaSimulation::drain_sound_emitters` and `NovaMissionAudio.apply_sound_emitters` replay those ticks into the existing `AmbientMixer` and persistent eight-voice host. Source-only anchor rows preserve retail's entity-position-pointer behavior while an unrefreshed lane expires. | the occupied ground-physics path refreshes the eligible idle/direction lanes with speed-derived volume/pitch; an ordinary inactive moving lane expires after 30 ticks, while collision/wreck/detach explicitly clear both; collision forces a full idle refresh; direction edges play slot 32 and claimant detach plays slot 31 only above water | An NPC claimant now keeps the same engine loops alive as a player claimant, keyed by registry lifetime + lane and competing in the shared 767-slot/loudest-eight mix. Focused proof covers stationary NPC occupancy on authority and joiner paths, stale-claim expiry, no-claimant silence, item override, forward/reverse gain and pitch, the p4 gear branch, collision/wreck behavior, direction and water-gated detach one-shots, bounded/coalesced and saturation-safe control transport, 64-bit lifetime keys, moving residual anchors, catch-up chronology, simulation/presentation drain, ID recycling, and shared host ranking (`world`, `ai`, `vehicle_motor`, `ambient_mixer`, `nova_simulation_test.gd`, `nova_mission_audio_test.gd`, `fire_present_pass_test.gd`). Remote compact vehicle rows do not yet restore `veh.speed` or collision contact, so a joiner can reproduce the stationary NPC-truck idle case but moving remote gain/pitch and collision refresh remain open. Scope otherwise stays on the witnessed ground caller; the aircraft-only slot-30 start spawner and other vehicle families/slots remain unclaimed. |
+
+Follow-ups: the remaining vehicle slot consumers (30, 33-50; direct def+0x864
+readers outside the ground movement pass) ride their own vehicle-family grills.
+Moving remote-vehicle sound needs either speed in the compact vehicle row or a
+pose-derived signed-speed witness; remote collision sound behavior likewise
+needs a replicated contact edge. Remote-client footstep presentation rides the
 client anim path (net seam — the host never emits for net-snapped peers, same
 as retail's per-client body updaters); the chute family 41-43 + the chute
 brake physics ride the parachute slice (witness in world-wac-ai-re §17.4b).
@@ -600,14 +676,18 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
 - unknown: whether an ambient channel loops the wave natively (AUD1 flag) or restarts per
   registration — the DirectSound channel service layer (`sub_766AA0` queue consumers) is
   unwalked; folded into D-SND-6.
-- unknown: `Entity_ProcessMovementSoundEffects @ 0x5294a0` gear/pitch interpolation details
-  and the `Soundloop_5..7` consumers — vehicle-sound grill scope.
+- ground vehicle movement sounds (witnessed + ported 2026-07-29): the
+  `Entity_UpdateVehiclePhysics` occupant gate, `Entity_ProcessMovementSoundEffects
+  @ 0x5294a0` lanes 0/10/20, exact gain/pitch/gear math, direction latch, and
+  claimant detach clear/stop are D-SND-17. `Soundloop_5..7` consumers remain
+  unknown and are not claimed by the ground port.
 - the sound-profile system (witnessed + ported 2026-07-17): SndProf.def parse,
   the 51-slot table, item binding (incl. `sound_profileFemale`), the slot
   accessor, and the infantry consumers (footsteps by surface, SSAudio foley,
   landing pair, death scream night gate) are engine-witnessed and ported
-  (D-SND-10..15; ctests `sound_profile` + `slot_sound`); the vehicle slots
-  30-50 and the composite entity-type path remain vehicle/P2b scope.
+  (D-SND-10..15; ctests `sound_profile` + `slot_sound`); ground slots 31/32 are
+  now consumed by D-SND-17, while slots 30/33-50 and the composite entity-type
+  path remain vehicle/P2b scope.
 - follow-up: rename the `libs/lwf` `Multi.target_id` field (and its NovaLwfData/ONED
   exposures) to its witnessed one-shot-cull-range meaning; the ONED sound workspace shows
   it as "(id N)" today.

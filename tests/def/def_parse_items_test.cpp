@@ -15,6 +15,54 @@ static int expect_str(const char *what, const char *got, const char *want) {
     return 0;
 }
 
+/* Building interior daylight transfer: atoi, clamp 0..100, then x0.01 into
+   ItemDef+0x218. Ihq01 authors 20, so its interior lerp is exactly 0.2.
+   [orig: ItemDef_ParseProperty @0x4a19fd..0x4a1a50] */
+static int test_light_transfer(void) {
+    static const char snippet[] =
+        "begin \"Absent\"\n"
+        "  id 1\n"
+        "end\n"
+        "begin \"Ihq01\"\n"
+        "  id 101216\n"
+        "  light_transfer 20\n"
+        "end\n"
+        "begin \"Clamped Low\"\n"
+        "  id 3\n"
+        "  LIGHT_TRANSFER -7\n"
+        "end\n"
+        "begin \"Clamped High\"\n"
+        "  id 4\n"
+        "  light_transfer 107\n"
+        "end\n";
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items_memory((const unsigned char *)snippet, sizeof(snippet) - 1,
+                               &items) != 0 ||
+        items.count != 4) {
+        fprintf(stderr, "FAIL: light_transfer snippet did not parse\n");
+        def_free_items(&items);
+        return 1;
+    }
+    int fails = 0;
+    if (items.entries[0].light_transfer != 0.0f ||
+        items.entries[1].light_transfer < 0.1999f ||
+        items.entries[1].light_transfer > 0.2001f ||
+        items.entries[2].light_transfer != 0.0f ||
+        items.entries[3].light_transfer != 1.0f) {
+        fprintf(stderr, "FAIL: light_transfer clamp/scale semantics mismatch\n");
+        ++fails;
+    }
+    if (items.entries[1].raw_lines_count != 0 ||
+        items.entries[2].raw_lines_count != 0 ||
+        items.entries[3].raw_lines_count != 0) {
+        fprintf(stderr, "FAIL: light_transfer fell through to raw_lines\n");
+        ++fails;
+    }
+    def_free_items(&items);
+    return fails;
+}
+
 /* Per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00,
    particlefx chain @ 0x4a13ad..0x4a179d]: anchored slots take
    <effect> <userpoint> (particlefxs/particlefxw1/particlefxw2 read an optional
@@ -194,6 +242,9 @@ static int test_phrase_set_presence(void) {
 }
 
 int main(void) {
+    if (test_light_transfer() != 0) {
+        return 1;
+    }
     const char *repo_root = test_paths_repo_root(__FILE__);
     char path[4096];
     snprintf(path, sizeof(path), "%s/fixtures/def/items.def", repo_root);

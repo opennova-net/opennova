@@ -23,6 +23,7 @@
 #include "world/system.h"
 #include "world/trigger_relations.h"
 #include "world/round_ring.h"
+#include "world/sound_emitter_mailbox.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
@@ -276,6 +277,11 @@ public:
     // SP auto-lose win-condition leg and by the infantry death scream's night
     // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
     // [orig: Bms_AttribFlags @0xa76258]
+    // The named bits below mirror bms::AttribFlags (libs/world stays
+    // mission-parser-free; parity pinned by static_asserts in
+    // libs/mission/src/promote.cpp).
+    static constexpr uint32_t kMissionAttribSinglePlayerRespawn = 0x40u;
+    static constexpr uint32_t kMissionAttribEnableNVG = 0x100000u;
     uint32_t mission_attrib_flags = 0;
 
     // The Advance & Secure zone-slot chain (empty until the host builds it after the
@@ -335,6 +341,7 @@ public:
     // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
     audio::SoundProfileTable sound_profiles;
     std::vector<SoundSlotEvent> slot_sounds;
+    SoundEmitterMailbox sound_emitters;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

@@ -12,16 +12,19 @@ the runtime shading section landed 2026-07-06 (maturity REN-4); the runtime
 terrain-query section (height samplers + segment raycast) 2026-07-07
 (ENG-3 B0); a fresh retail runtime re-grill on 2026-07-13 closed the live
 LOD-family selector, texture preprocessing, top-tier bindings/math, tile-overlay
-ordering, and fog-distance semantics recorded below.
+ordering, and fog-distance semantics recorded below; the 2026-07-29 model-shadow
+audit pinned the static projected-silhouette tile producer and corrected the
+old `PSShadow*` interpretation.
 
 **Status: PARTIAL.** Terrain is the largest system and the last of the seven
 `UNAUDITED` systems; this record establishes the tracked surface — the module
 map and the mixed-binary witness basis. The data/build path is byte-identical,
 and the top-tier base-surface texture derivation and shader math are now closed.
 The bounded runtime gaps are the tile-composition render-target/update details
-and the separate local-light/shadow pass, plus CDEP/traversal documentation
-depth. Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains
-a partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
+(including the exact static projected-shadow cache mechanics) and the separate
+underwater water-noise modulation, plus CDEP/traversal documentation depth.
+Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains a
+partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 
 ## Module map (`libs/terrain`) and witness basis
 
@@ -237,7 +240,8 @@ dp3 bump terms ×2/×4), `PolyTrn_PS14Splat` (ps.1.4: three detail textures
 sampled at t1 by samplers 1/4/5, blended by the t2 blendmap's RGB — the
 3-way splat — then the colormap lighting chain ×4),
 `PolyTrn_PS14SplatNormalMap` (splat + dp3), `PolyTrn_PSShadowBasic` /
-`PolyTrn_PSShadowNormalMap` (t3 = shadow map: light scale `4·t3²·t0.a`),
+`PolyTrn_PSShadowNormalMap` (the legacy name is misleading: for an underwater
+camera, t3 = `Water_NoiseColorTexture`; light scale `4·t3²·t0.a`),
 `PolyTrn_PSDepthAlpha` (alpha = t0.b via `dp3 c5=(0,0,1)`, rgb = 0 — the
 depth/alpha extract pass). The c0/c1 lighting constants are CLOSED (REN-5):
 **c0 = the SKY block, c1 = the LIGHT block** (both `[0]` render colors ÷255)
@@ -331,6 +335,80 @@ sampler params, opaque + additive variants; the four texture slot ids 1-4
 @ 0x609de0` (REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
 `PolyTrn_RenderTile @ 0x60da70`.
 
+**Underwater selector correction (2026-07-29).** `dword_319FB3C` is not a
+scene-shadow enable or a loaded shadow-map handle. `terrain_setup_view_and_lighting
+@ 0x60FE40` writes view field `+0x74 = cameraY < Env_WaterHeightFixed`
+(`@ 0x60FEE0`); `terrain_render_visible_sectors @ 0x6090C0` copies that field
+to `dword_319FB3C` (`@ 0x60915F`; the alternate scene path does the same at
+`@ 0x60E8EE`). When set, `PolyTrn_BindStageTextures @ 0x604330` calls
+`sub_5C0190 @ 0x6043ED`, whose return is
+`Water_NoiseColorTexture @ 0x28EE8B8`, and binds it at stage 3. The same flag
+selects `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap`
+(`terrain_setup_lighting_and_shader @ 0x6044B1`) and changes stage-3 UV scale
+(`render_terrain_sector_batch @ 0x609786..0x6097D6`). These are therefore
+underwater animated water-noise/wave-shadow variants, not receivers for static
+or dynamic model shadows.
+
+`dword_319FB8C` is also not shadow state. Its complete writer set stores one:
+`sub_6040A0 @ 0x6040DD`, `terrain_render_visible_sectors @ 0x60910C`,
+`terrain_render_scene @ 0x60E89B`, and `PolyTrn_RenderFrame @ 0x60EB25`
+(EAX is seeded to one at `0x60EAC0`). `render_terrain_sector_batch` itself
+calls `sub_6040A0 @ 0x6092BE` before reading the value at `0x6095D7`, making
+its zero leg dead on the live path. The true leg admits terrain drawing and
+the nearby point/spot-light collection; the other observed consumer is the
+foliage/lightmap path at `0x60A3F8`. The most specific supported description
+is an always-on terrain-render/lighting latch, not a user shadow toggle.
+
+**Static sector/model sun shadows (witnessed 2026-07-29).** These live in the
+tile composer, completely separate from the underwater shaders above. With
+the model-shadow graphics gate `dword_8493DC` enabled,
+`PolyTrn_RenderTile @ 0x60DA70` calls
+`Terrain_CollectAndRenderTileModels @ 0x60D250` (`@ 0x60DC83..0x60DC96`).
+The collector:
+
+- gets the fixed and float sun directions from
+  `Environment_GetLightDirectionFixed @ 0x57D8E0` and
+  `Environment_GetLightDirectionFloat @ 0x57D870`
+  (`@ 0x60D2F5/0x60D2FF`), clamps the vertical fixed component to at least
+  `0x4000`, and derives the horizontal projection extent
+  (`@ 0x60D315..0x60D386`);
+- scans pool 2 and pool 1. Both reject BMS/runtime `NoShadow`
+  (`entity flags & 0x01000000 @ 0x60D42F`) and ItemDef `NoShadow`
+  (`ItemDef+0x54 & 0x04000000 @ 0x60D43E`). Pool-2 sector buildings otherwise
+  cast by default; only pool-1 candidates require ItemDef attrib2
+  `StaticShadow` (`ItemDef+0x58 & 0x20 @ 0x60D447..0x60D450`);
+- expands each model bound along the sun projection and intersects it with the
+  requested terrain-tile extent (`@ 0x60D465..0x60D54F`);
+- chooses the current model/husk render data, using its second render LOD for
+  coarse tile levels `<= 3` when available (`@ 0x60D881..0x60D894`), then
+  writes the same nonzero entity transform into every ROBJ matrix slot
+  (`renderObjectCount + 1` copies at `0x60D926..0x60D95E`) and submits
+  `Render_SubmitEntity @ 0x5DAD80` with flag `0x2`, the PROJSHAD technique
+  (`@ 0x60D960..0x60D971`).
+
+That direct render-data submission includes every opaque and alpha strip in
+every ROBJ of the selected LOD. It does not consume
+`g_BuildingSectionVisMask` or `g_HiddenSectionMask @ 0xB7965C`; those masks
+belong to the live portal-building draw in
+`Terrain_RenderSectorModels @ 0x5C5D30`. A loose-data audit of `IHQ01.3di`
+corroborates the call path: all five LODs contain three ROBJ; the two LODs used
+by this pass carry opaque strip counts 5/3/3 and 3/3/3, with no alpha strips.
+Ihq01 is pool-2 building index 40 and has neither BMS nor ItemDef `NoShadow`,
+so all three of its ROBJ enter the static caster pass even though its ItemDef
+does not author `StaticShadow`.
+
+The result is receiver-scoped rather than ordinary model self-shadowing.
+`Terrain_CollectAndRenderTileModels` selects the dedicated temporary render
+target `dword_319A2D8` at `0x60D5BE`, rasterizes black PROJSHAD silhouettes,
+and restores it at `0x60DA4F`. `PolyTrn_RenderTile` then selects the destination
+tile-cache RT at `0x60DCC5`, binds that temporary texture at
+`0x60E10A..0x60E112`, and composites it only when the collector returned a
+candidate (`0x60E0C6..0x60E19D`). The final cache is sampled as t0 by terrain
+and as t1 by `Foliage_LightmapBlendPS`; therefore terrain and foliage receive
+the projected/draped shadow, while an Ihq01 courtyard/interior floor mesh does
+not. Dynamic person/`DynamicShadow` render slots are a separate system
+(`Entity_InitFromModel @ 0x40E1BC..0x40E1F7`).
+
 **Bounded runtime gaps after the 2026-07-13 closure**:
 
 - **Tile-composition RT/update gap** — the host currently CPU-bakes one static
@@ -338,19 +416,25 @@ sampler params, opaque + additive variants; the four texture slot ids 1-4
   its RGB over the now-exact bare t0 reconstruction. It rebuilds on load,
   toggle/override, and terrain-change notifications. The base colormap draw,
   TrnNMap generation/split/addressing, coordinate-basis-correct light packing,
-  DOT3 alpha, and
-  supported overlay order are closed. Retail render-target allocation/format,
-  draw and dirty-update cadence, general patch/page c7/c8 projection, ordered
-  tile-model and depth-alpha contributions, and final RT mip generation/use
-  remain unwitnessed
+  DOT3 alpha, supported overlay order, and the static model-shadow
+  eligibility/ROBJ/receiver policy are closed. The host approximates the
+  latter with a directional-shadow adapter whose static receiver is terrain
+  only; admitted caster state follows individual/batched destruction-to-husk
+  swaps and editor transforms. Alpha-tested foliage deliberately has no generic
+  attenuation catcher because that would darken whole cards, so its retail
+  tile-cache projection remains open along with the exact temporary-shadow-RT
+  format/projection/composite strength, tile-cache
+  allocation and dirty cadence, general patch/page c7/c8 projection, remaining
+  ordered depth-alpha contributions, and final RT mip generation/use remain
+  open
   [`orig: Terrain_CollectAndRenderTileModels @ 0x60d250`;
   `PolyTrn_RenderTile @ 0x60da70`].
-- **Local-light/shadow gap (separate)** — the base terrain surface is closed,
-  but the host still lacks retail's per-local-light/shadow terrain pass. Retail
-  has `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap`, a t3 shadow
-  sample with light scale `4×t3²×t0.a`, and
-  `render_terrain_lightmaps @ 0x609de0`. This is not part of tile composition
-  and does not reopen top-tier base-pass parity; the wider record is
+- **Underwater water-noise modulation gap (separate)** — the host does not
+  feed `Water_NoiseColorTexture` into terrain when the camera is below water.
+  Retail's misleadingly named `PolyTrn_PSShadowBasic` /
+  `PolyTrn_PSShadowNormalMap` apply the t3 water-noise scale
+  `4×t3²×t0.a`. This is unrelated to the static tile shadow above and does not
+  reopen top-tier above-water base-pass parity; the wider record is
   [render/render-lighting-re.md](../render/render-lighting-re.md).
 
 **Foliage / sector models** (the four terrain-attached model slots):
@@ -507,9 +591,13 @@ runs opposite world y (samplers negate y internally).
   ([render-occlusion-re.md](../render/render-occlusion-re.md)). Callers:
   `Physics_RaycastTerrainAndSectors @ 0x539910` (`CollisionWorld::raycast_clear`,
   now on this port), `Physics_CheckTerrainLineOfSight @ 0x53b080` (the sound
-  occlusion LOS), `HUD_RenderAllOverlays`, `terrain_occlusion_check_three_rays
-  @ 0x610ed0` (the D-RLIT 3-ray sun-visibility source and the entity
-  visibility latch).
+  occlusion LOS), `HUD_RenderAllOverlays`, and
+  `terrain_occlusion_check_three_rays @ 0x610ed0` (the camera-to-entity
+  terrain visibility latch). This last caller is not D-RLIT's directional
+  lighting query: per-entity sun visibility instead uses collision-entity
+  candidate slices through `Entity_ComputeSunVisibility @ 0x5c6800` →
+  `raycast_find_collision_entity @ 0x539a70`; see
+  [render-lighting-re.md](../render/render-lighting-re.md#d-rlit-divergence-catalog).
 
 ### B1 port (landed 2026-07-07)
 
@@ -545,8 +633,8 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-4 | C | PERMANENT (candidate) | **Raycast editor-host guards** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Same class as the ratified `coords_editor_options` guards (ADR 0020); §Runtime terrain queries carries the retail forms for any future runtime-faithful host. |
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the host incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are hosted. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites now use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; tile-overlay RGB is composed before terrain lighting without replacing the cached heightfield/light DOT3 alpha [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
-| D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, and hosted static `.til` composition are closed. Retail allocation/format, draw and dirty-update cadence, general patch/page c7/c8 projection, ordered tile-model/depth-alpha contributions, and final RT mip behavior remain open. |
-| D-TERRAIN-8 | A | **OPEN (bounded)** | **Local-light/shadow terrain pass**: the host has no equivalent of the retail shadow PS variants and `render_terrain_lightmaps @ 0x609de0`. Kept separate from the closed base surface and from D-TERRAIN-7; see [render/render-lighting-re.md](../render/render-lighting-re.md). |
+| D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, static `.til` composition, and static model-shadow eligibility/ROBJ/receiver policy are closed. The host uses a terrain-receiver-only directional-shadow approximation and preserves caster eligibility through destruction-to-husk swaps and editor transforms. Retail's alpha-aware foliage projection, exact temporary-RT projection/composite, tile-cache allocation/dirty cadence, general patch/page c7/c8 projection, remaining ordered depth-alpha contributions, and final RT mip behavior remain open `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; PolyTrn_RenderTile @ 0x60DA70]`. |
+| D-TERRAIN-8 | A | **OPEN (bounded)** | **Underwater terrain water-noise modulation**: the host does not select the below-water `PolyTrn_PSShadowBasic/NormalMap` variants or sample `Water_NoiseColorTexture` as t3 (`4·t3²·t0.a`). This is unrelated to scene/model shadows `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; stage-3 bind @ 0x6043C2..0x6043F2; shader select @ 0x6044B1]`; see [render/render-lighting-re.md](../render/render-lighting-re.md). |
 | D-TERRAIN-9 | B | **OPEN (editor-preview-only)** | **Derived input preprocessing**: runtime binds integer-normalized DBlend and paired base/far C1/C2/C3 mip chains, including an explicit 4x4 terminal-LOD clamp. The live editor preview binds raw DBlend and raw detail textures; its authored-B coefficient fallback is exact, but minified detail/blend can differ from play. |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old host `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 
@@ -566,21 +654,24 @@ remains for a *full* (vs partial) R1 record:
   `lod_sub / 2` selector is closed; this item no longer includes shader
   binding or final mesh-family selection. `cdep_read` / `cdep_roundtrip`
   already pin the header and encode/decode round-trip against `Dvxi5.cpt`.
-- **Tile-composition mechanics** — close D-TERRAIN-7 by witnessing retail's
-  render-target lifecycle, update cadence, general patch/page c7/c8 projection,
-  ordered model/depth draws, and the final RT's sampling/edge/mip policy. The
-  bare producer's TrnNMap filter/address behavior, hosted static `.til`
-  composition, and shader binding are closed.
-- **Local-light/shadow terrain pass** — close D-TERRAIN-8 independently by
-  implementing and pinning the retail shadow/lightmap pass described in
+- **Tile-composition mechanics** — close D-TERRAIN-7 by matching retail's
+  temporary static-shadow RT projection/composite, render-target lifecycle and
+  update cadence, general patch/page c7/c8 projection, remaining ordered
+  depth-alpha draws, and the final RT's sampling/edge/mip policy. The bare
+  producer's TrnNMap filter/address behavior, hosted static `.til`
+  composition, and static-shadow admission/receiver policy are closed.
+- **Underwater water-noise modulation** — close D-TERRAIN-8 independently by
+  feeding the generated water-noise color texture through the below-water
+  terrain variants described in
   [render/render-lighting-re.md](../render/render-lighting-re.md).
 - **Editor derived-input parity** — close D-TERRAIN-9 by routing the live
   preview through the runtime integer DBlend normalization and paired custom
   mip-chain builder without replacing its live-sculpt geometry path.
 
-The CDEP/traversal item is documentation depth; D-TERRAIN-7 and D-TERRAIN-8
-are the two bounded open runtime parity surfaces, while D-TERRAIN-9 is limited
-to the editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
+The CDEP/traversal item is documentation depth; D-TERRAIN-7's exact
+tile-shadow/cache mechanics and D-TERRAIN-8's underwater modulation are the two
+bounded open runtime parity surfaces, while D-TERRAIN-9 is limited to the
+editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
 
 ## Cross-references
 

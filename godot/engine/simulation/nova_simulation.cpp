@@ -296,6 +296,32 @@ Array NovaSimulation::drain_slot_sounds() {
 	return out;
 }
 
+Array NovaSimulation::drain_sound_emitters() {
+	Array out;
+	if (!loaded_) return out;
+	const std::vector<opennova::world::SoundEmitterEvent> events =
+			world_->sound_emitters.drain();
+	for (const opennova::world::SoundEmitterEvent &ev : events) {
+		Dictionary d;
+		d["source_spawn_id"] = static_cast<int64_t>(ev.source_spawn_id);
+		d["handle"] = ev.source_handle;
+		d["source_bms_id"] = ev.source_bms_id;
+		// Mission coordinates -> Godot (x, z, -y), matching every other
+		// positional presentation drain.
+		d["pos"] = Vector3(ev.pos.x, ev.pos.z, -ev.pos.y);
+		d["lane"] = ev.lane;
+		d["slot"] = ev.slot;
+		d["lifetime"] = ev.lifetime_ticks;
+		d["emitted_tick"] = ev.emitted_tick;
+		d["pitch_q16"] = ev.pitch_q16;
+		d["volume_q8_8"] = ev.volume_q8_8;
+		d["source_only"] = ev.source_only;
+		d["set"] = String(ev.set_name.c_str());
+		out.push_back(d);
+	}
+	return out;
+}
+
 void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// One world, three systems, the faithful tick order. The AI-change action family reaches
 	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.

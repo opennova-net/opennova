@@ -1756,6 +1756,48 @@ func test_load_from_editor_mission_data() -> void:
 	sim.free()
 
 func test_item_seat_specs_mount_command_125_spawn() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+			"vehicle_idle_sim_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	var items_path := fixture_dir.path_join("items.def")
+	var items_file := FileAccess.open(items_path, FileAccess.WRITE)
+	assert_not_null(items_file)
+	if items_file == null:
+		return
+	items_file.store_string("""begin "Drivable Transport Truck"
+  id 101294
+  type vehicle
+  attrib: PlayerControl
+  physics 1
+  player_speed 60
+  acceleration 10
+  deceleration 20
+  turn_rate 45
+  turn_rate2 30
+  sound_profile SP_Transport
+end
+
+begin "Driver"
+  id 102072
+  type person
+end
+""")
+	items_file.close()
+	var sndprof_path := fixture_dir.path_join("SndProf.def")
+	var sndprof_file := FileAccess.open(sndprof_path, FileAccess.WRITE)
+	assert_not_null(sndprof_file)
+	if sndprof_file == null:
+		DirAccess.remove_absolute(items_path)
+		DirAccess.remove_absolute(fixture_dir)
+		return
+	sndprof_file.store_string("""begin "SP_Transport"
+  soundloop_1 V_TRUCK_ILP .8 1.2
+end
+""")
+	sndprof_file.close()
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(items_path), OK)
+
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
@@ -1776,7 +1818,9 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 			],
 		}
 	])
+	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
+	sim.resolve_item_traits(item_db)
 	var started: Dictionary = {}
 	for effect_v in sim.drain_effects():
 		var effect: Dictionary = effect_v
@@ -1795,6 +1839,29 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 					snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
 			break
 	assert_gte(expected_vehicle_handle, 0)
+	var idle: Dictionary = {}
+	for emitter_v in sim.drain_sound_emitters():
+		var emitter: Dictionary = emitter_v
+		if int(emitter.get("lane", -1)) == 0 \
+				and String(emitter.get("set", "")) == "V_TRUCK_ILP":
+			idle = emitter
+			break
+	assert_false(idle.is_empty(),
+			"an NPC control-seat occupant keeps the truck idle emitter alive without a local player")
+	assert_gt(int(idle.get("source_spawn_id", 0)), 0,
+			"the emitter key carries the registry-lifetime identity")
+	assert_eq(int(idle.get("handle", -1)), expected_vehicle_handle)
+	assert_eq(int(idle.get("source_bms_id", -1)), int(vehicle["bms_id"]))
+	assert_eq(int(idle.get("lane", -1)), 0)
+	assert_eq(int(idle.get("lifetime", -1)), 30)
+	assert_eq(int(idle.get("emitted_tick", -1)), int(sim.get_logic_tick()),
+			"catch-up transport retains the producing world tick")
+	assert_eq(int(idle.get("pitch_q16", -1)), 0x10000)
+	assert_eq(int(idle.get("volume_q8_8", -1)), 0xFFFF)
+	assert_false(bool(idle.get("source_only", true)))
+	assert_eq(int(idle.get("slot", -1)), 0)
+	assert_eq(String(idle.get("set", "")), "V_TRUCK_ILP")
+	assert_eq(Vector3(idle.get("pos", Vector3.INF)), Vector3(10, 0, 0))
 	assert_eq(int(started.get("wire_handle", -1)), expected_vehicle_handle,
 			"binding names the packed identity used by dynamic presentation")
 	assert_eq(int(started.get("d", -1)), expected_vehicle_handle,
@@ -1829,6 +1896,9 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_eq(int(card["anim_state"]), 100)
 	assert_eq(String(card["anim_key"]), "anim_sit_24")
 	sim.free()
+	DirAccess.remove_absolute(items_path)
+	DirAccess.remove_absolute(sndprof_path)
+	DirAccess.remove_absolute(fixture_dir)
 
 
 

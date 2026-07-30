@@ -7,8 +7,10 @@
 // the soldier stands — exactly the original's relationship between motion and clip data.
 //
 // Deviations (tracked):
-//   D-INF-1  blend windows: the original blends old/new clips for 10/15 ticks (root motion
-//            included); we switch clips immediately (phase reset).
+//   D-INF-1  primary-channel blend windows are ported: old/new clips keep independent
+//            playheads and their five numeric root lanes blend for 10 ticks (15 when
+//            the target state has flag 0x400). The secondary weapon channel still
+//            switches immediately.
 //   D-INF-2  commands 123/124/125 (move-to-entity orders: staged vehicle boarding via the
 //            E1..E8/S/G/H bones with per-soldier entry-slot claims at entity+866, UseGun
 //            emplacement manning, seat attach on arrival; dump 1545-2330) and 126
@@ -114,6 +116,69 @@ bool reset_capsule_bottom_state(int state) {
     return (state >= 32 && state <= 35) || (state >= 176 && state <= 179);
 }
 
+bool primary_blend_active(const InfantryState &inf) {
+    return inf.body_blend_active();
+}
+
+int32_t blend_root_lane(int32_t previous, int32_t current, float current_weight) {
+    // The provider has already quantized each channel to the integer RootMotionFrame
+    // seam. Retail mixes the underlying float tracks before that conversion, so this
+    // fallback can differ at the final integer by a bounded LSB. Keeping every
+    // operation float32 still preserves its accumulated-weight behavior and signed
+    // truncation rather than replacing it with a rational tick/tick count.
+    const float previous_weight = 1.0f - current_weight;
+    const float mixed = static_cast<float>(previous) * previous_weight +
+                        static_cast<float>(current) * current_weight;
+    return static_cast<int32_t>(mixed);
+}
+
+void blend_root_frame(const RootMotionFrame &previous, const RootMotionFrame &current,
+                      float current_weight, RootMotionFrame &out) {
+    out.dx = blend_root_lane(previous.dx, current.dx, current_weight);
+    out.dy = blend_root_lane(previous.dy, current.dy, current_weight);
+    out.dz = blend_root_lane(previous.dz, current.dz, current_weight);
+    out.capsule_bottom =
+            blend_root_lane(previous.capsule_bottom, current.capsule_bottom,
+                            current_weight);
+    out.capsule_top =
+            blend_root_lane(previous.capsule_top, current.capsule_top, current_weight);
+    // Event triggers are copied from the secondary/current channel, never blended
+    // with or ORed against primary. [orig: AnimMap_UpdateEntity @0x40b5f0]
+    out.events = current.events;
+}
+
+bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
+                             RootMotionFrame &out) {
+    out = RootMotionFrame{};
+
+    if (!primary_blend_active(inf))
+        return source.advance(inf.adm_id, inf.anim_state, inf.clip_phase, out);
+
+    inf.anim_blend_weight += inf.anim_blend_step;
+    if (inf.anim_blend_weight >= 1.0f) {
+        inf.anim_blend_weight = 1.0f;
+        inf.anim_blend_step = 0.0f;
+    }
+    return source.advance_blended(inf.adm_id,
+                                  inf.anim_prev, inf.anim_prev_clip_phase,
+                                  inf.anim_state, inf.clip_phase,
+                                  inf.anim_blend_weight, out);
+}
+
+void advance_primary_channel_fallback(InfantryState &inf) {
+    if (primary_blend_active(inf)) {
+        inf.anim_prev_clip_phase = (inf.anim_prev_clip_phase + 1) % 62;
+        inf.clip_phase = (inf.clip_phase + 1) % 62;
+        inf.anim_blend_weight += inf.anim_blend_step;
+        if (inf.anim_blend_weight >= 1.0f) {
+            inf.anim_blend_weight = 1.0f;
+            inf.anim_blend_step = 0.0f;
+        }
+        return;
+    }
+    inf.clip_phase = (inf.clip_phase + 1) % 62;
+}
+
 int32_t damp_npc_slide(int32_t v) {
     const int32_t out = opennova::io::bam_sar(7 * v + 4, 3); // [orig: 0x4b9910 entity[38/39] decay]
     return abs_bam(out) <= 8 ? 0 : out;
@@ -133,6 +198,35 @@ int32_t bearing_to(int32_t dx, int32_t dy) {
 }
 
 } // namespace
+
+bool IRootMotionSource::advance_blended(int adm_id,
+                                        int primary_state, int32_t &primary_phase_ticks,
+                                        int target_state, int32_t &target_phase_ticks,
+                                        float target_weight, RootMotionFrame &out) {
+    RootMotionFrame primary;
+    RootMotionFrame target;
+    const bool have_primary = advance(adm_id, primary_state, primary_phase_ticks, primary);
+    const bool have_target = advance(adm_id, target_state, target_phase_ticks, target);
+
+    if (have_primary && have_target) {
+        if (target_weight < 1.0f)
+            blend_root_frame(primary, target, target_weight, out);
+        else
+            out = target;
+        return true;
+    }
+    if (have_target) {
+        out = target;
+        return true;
+    }
+    if (have_primary) {
+        out = primary;
+        out.events = target.events;
+        return true;
+    }
+    out = RootMotionFrame{};
+    return false;
+}
 
 // ----------------------------------------------------------------------------
 // Navigation think (every 16 ticks, authority). [orig: 0x4b9910 dump 1293-1540]
@@ -297,11 +391,7 @@ static void commit_body_state(InfantryState &inf, int resolved) {
     if ((curf & 0x4u) != 0) {
         inf.anim_pending = resolved;
     } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-        inf.anim_prev = inf.anim_state;
-        inf.anim_state = resolved;
-        inf.anim_pending = 0;
-        inf.clip_phase = 0; // (D-INF-1: no blend window; clip restarts)
-        if (reset_capsule_bottom_state(resolved)) inf.prev_capsule_bottom = 0;
+        inf.begin_body_transition(resolved);
     } else {
         inf.anim_pending = resolved;
     }
@@ -674,10 +764,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     // The death clip is a LOCKED anim family (flags 0x82), so the selection commit would
     // defer every later change to clip end and keep the corpse posed. Reseed the spawn
     // idle the way the original's respawn does [orig: @0x4b9714 — spawn body state 44].
-    inf.anim_state = anim_state::kIdle;
-    inf.anim_pending = 0;
-    inf.anim_prev = anim_state::kIdle;
-    inf.clip_phase = 0;
+    inf.reset_body_animation(anim_state::kIdle);
     inf.reload_anim_ticks = 0;
     inf.arms_dip_ticks = 0;
     inf.pitch_kick_accum = 0;
@@ -732,7 +819,7 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
     // an anim state with flag bit 2 (prone crawls 19-26, rolls 41/42, prone idle 48,
     // draggers 137-139), or a grounded corpse. The original's dead leg also requires
     // !(Flags & 0x10A000) — the swim/parachute flag legs, unmodeled here.
-    const bool conform = (e.def_attrib & 0x200u) != 0 ||
+    const bool conform = (e.def_attrib & kItemAttribLandable) != 0 ||
                          (infantry_anim_flags(inf.anim_state) & 2u) != 0 || dead;
     if (!conform) {
         // Ease back to level, 1/16-step (org1: every 8th tick; org2: every tick).
@@ -868,6 +955,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     RootMotionFrame frame;
     bool have_clip = false;
+    int death_transition = -1;
 
     // 1. Death edge (once — the 0x82 death-family flag marks an already-posed corpse):
     // consume the damage-time anim selection, seed the corpse timer, drop any mount.
@@ -893,7 +981,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
             // Bms_AttribFlags & 0x100000 pick; play at &entity->pos]
             emit_slot_sound(world, e,
-                            (world.mission_attrib_flags & 0x100000u) != 0
+                            (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0
                                 ? audio::kSlotNightDeath
                                 : audio::kSlotDeath,
                             e.pos);
@@ -912,10 +1000,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 death = root_motion->has_clip(inf.adm_id, torso) ? torso
                                                                  : anim_state::kDeathFire;
             }
-            inf.anim_prev = inf.anim_state;
-            inf.anim_state = death;
-            inf.anim_pending = 0; // [orig: +0x2B8 = 0 @0x4b9d1e]
-            inf.clip_phase = 0;
+            // The state store is staged until after this tick's already-playing
+            // channel tuple advances. This matters when death interrupts A->B:
+            // retail outputs the next A/B blend, then replaces B with death C at w=0.
+            death_transition = death;
             inf.move_mode = 0;
             inf.target_dist = 0;
             inf.player_moving = false;
@@ -1012,7 +1100,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
     if (root_motion != nullptr)
-        have_clip = root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, frame);
+        have_clip = advance_primary_channel(inf, *root_motion, frame);
     if (have_clip) {
         if (inf.prev_capsule_bottom != 0)
             frame.dz = frame.capsule_bottom - inf.prev_capsule_bottom;
@@ -1034,6 +1122,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (!inf.is_local_player && is_authority && e.health > 0 && mounted_gunner)
         infantry_mounted_fire_pass(e, world, logic_tick, key);
 
+    // The death callback writes the replacement secondary only after the existing
+    // animation update/event consume. End-of-tick motor, collision, wire, and render
+    // state therefore see death at phase/weight zero, while this frame keeps the
+    // pre-death root/event sample. [orig: death caller tail @0x4b9d55]
+    if (death_transition >= 0)
+        inf.begin_body_transition(death_transition);
+
     // 3b. Deferred promotion when a LOCKED (flag 0x4) playing clip reaches its end —
     // the PRIMARY channel's end-flag path, the same machinery the weapon channel uses.
     // Before this, a pending target parked behind a locked state (the prone rolls
@@ -1042,11 +1137,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (inf.anim_pending != 0 && root_motion != nullptr) {
         const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
         if (len >= 0 && inf.clip_phase >= len) {
-            inf.anim_prev = inf.anim_state;
-            inf.anim_state = inf.anim_pending;
-            inf.anim_pending = 0;
-            inf.clip_phase = 0;
-            if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
+            const int next = inf.anim_pending;
+            inf.begin_body_transition(next);
         }
     }
 
@@ -1148,7 +1240,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // targets = target — the alternating shuffle while walking/turning.
         // [orig: selector @0x4be944-0x4be967; walk path @0x4be9d4-0x4bea0b]
         if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0 ||
-            (e.def_attrib & 0x200u) != 0) {
+            (e.def_attrib & kItemAttribLandable) != 0) {
             const int32_t tgt = inf.target_heading;
             inf.leg_yaw[0] = io::bam_add(
                 inf.leg_yaw[0], io::bam_sar(io::bam_sub(tgt, inf.leg_yaw[0]), 1));
@@ -1178,7 +1270,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // (~7 deg/tick), twist limit ±0x20000000 (45 deg) vs the BODY.
             // [orig: R @0x4bea11-0x4bea8d; L @0x4bea8d-0x4beb12; step pick @0x4bea1d]
             const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-            int32_t lstep = (e.def_attrib & 0x200u) != 0
+            int32_t lstep = (e.def_attrib & kItemAttribLandable) != 0
                                 ? io::bam_sar(io::bam_add(ldiff, 8), 4)
                                 : io::bam_sar(io::bam_add(ldiff, 2), 2);
             if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
@@ -1339,9 +1431,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     if (inf.anim_state != anim_state::kJumpLoop &&
                         root_motion != nullptr &&
                         root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                        inf.anim_prev = inf.anim_state;
-                        inf.anim_state = anim_state::kJumpLoop;
-                        inf.clip_phase = 0;
+                        inf.begin_body_transition(anim_state::kJumpLoop);
                     }
                 } else if (e.health > 0) {
                     inf.anim_pending = 0; // [orig: @0x4bf901]
@@ -1405,16 +1495,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 inf.jump_cooldown = 32;           // [orig: @0x4b7f06]
                 if (root_motion != nullptr &&
                     root_motion->has_clip(inf.adm_id, anim_state::kJumpStart)) {
-                    inf.anim_prev = inf.anim_state;
-                    inf.anim_state = anim_state::kJumpStart;   // [orig: @0x4b7ef2]
+                    inf.begin_body_transition(anim_state::kJumpStart); // [orig: @0x4b7ef2]
                     inf.anim_pending = anim_state::kJumpLoop;  // [orig: @0x4b7efc]
-                    inf.clip_phase = 0;
                 } else if (root_motion != nullptr &&
                            root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                    inf.anim_prev = inf.anim_state;
-                    inf.anim_state = anim_state::kJumpLoop;
-                    inf.anim_pending = 0;
-                    inf.clip_phase = 0;
+                    inf.begin_body_transition(anim_state::kJumpLoop);
                 }
             }
             inf.jump_requested = false;
@@ -1606,7 +1691,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         }
         // The own priority-target mark decays each scan; firing re-arms it.
         // [orig: Flags &= ~0x4000 @0x4bbfa4]
-        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~0x4000u;
+        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
     // --- Behavior + aim (per tick with a live target). [orig: §17.3/§17.5] ---
@@ -1983,6 +2068,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // The motor's registry hydration is skipped for wire-snapped peers (tick_infantry
     // returns before it); sync the health copy the selection/lean gates read.
     e.health = ent->health;
+    int death_transition = -1;
 
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, same policy as the motor's death edge
@@ -1991,13 +2077,11 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // [orig: the @0x4b40e0 death leg; digest: death 175 / deathAnim]
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
             const int death = anim_state::kDeathBulletBase + 4;
-            inf.anim_prev = inf.anim_state;
-            inf.anim_state =
+            const int target =
                 (root_motion != nullptr && root_motion->has_clip(inf.adm_id, death))
                     ? death
                     : anim_state::kDeathFire;
-            inf.anim_pending = 0;
-            inf.clip_phase = 0;
+            death_transition = target;
         }
     } else if ((logic_tick & 3u) == 0) {
         // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the REPLICATED
@@ -2034,8 +2118,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // and the equipped ADM index at +0x2B0 [orig: read @0x4b5dba]. Without this a
     // remote player holds a rifle pose whatever it carries, and never adopts the
     // scoped stance the wire is already reporting.
-    inf.scope_raised = (ent->flags & 0x10u) != 0;
-    inf.binoculars_raised = (ent->flags & 0x08u) != 0;
+    inf.scope_raised = (ent->flags & kEntityFlagScopeRaised) != 0;
+    inf.binoculars_raised = (ent->flags & kEntityFlagBinoculars) != 0;
     infantry_weapon_channel(e, world, logic_tick);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
@@ -2044,19 +2128,21 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // anim data rate). Root motion output is discarded: the pose is wire-owned.
     if (root_motion != nullptr) {
         RootMotionFrame discard;
-        root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, discard);
+        advance_primary_channel(inf, *root_motion, discard);
         // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
-        if (inf.anim_pending != 0) {
+        if (death_transition >= 0) {
+            inf.begin_body_transition(death_transition);
+        } else if (inf.anim_pending != 0) {
             const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
             if (len >= 0 && inf.clip_phase >= len) {
-                inf.anim_prev = inf.anim_state;
-                inf.anim_state = inf.anim_pending;
-                inf.anim_pending = 0;
-                inf.clip_phase = 0;
+                const int next = inf.anim_pending;
+                inf.begin_body_transition(next);
             }
         }
     } else {
-        inf.clip_phase = (inf.clip_phase + 1) % 62;
+        advance_primary_channel_fallback(inf);
+        if (death_transition >= 0)
+            inf.begin_body_transition(death_transition);
     }
 
     // Present-pass clip for the host's own third-person view of this peer.

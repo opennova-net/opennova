@@ -79,6 +79,15 @@ protected:
 	static void _bind_methods();
 
 public:
+	// particle_flag:: bits GDScript composes directly (the full name<->bit
+	// table stays introspectable via get_particle_flag_table()). Pinned to
+	// libs/particle by static_asserts in the .cpp.
+	enum {
+		FLAG_YAW_AND_PITCH = 0x100,
+		FLAG_FOREVER_EMIT = 0x40000,
+		FLAG_POSITION_RELATIVE = 0x80000,
+	};
+
 	NovaParticleDef();
 
 	// Trivial getter/setter pairs — full set is too large to inline declarations

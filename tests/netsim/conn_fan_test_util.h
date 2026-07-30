@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <netsim/connection.h>
-#include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c / kTag0aFrameUpdate
+#include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <netsim/entity_wire_bridge.h> // snapshot_world
 #include <world/player_spawn.h>        // spawn_remote_player
 #include <world/world.h>

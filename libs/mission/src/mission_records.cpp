@@ -48,7 +48,9 @@ bms::AreaTrigger from_area_trigger_record(const AreaTriggerRecord &rec) {
 	area.z_min = bms::to_fixed_16_16(rec.min_z);
 	area.z_max = bms::to_fixed_16_16(rec.max_z);
 	uint32_t flags = static_cast<uint32_t>(rec.reserved);
-	flags = (flags & ~0x3u) | (rec.active ? 0x1u : 0u) | (rec.constrain_z ? 0x2u : 0u);
+	flags = (flags & ~(bms::AreaTrigger::kFlagMissionArea | bms::AreaTrigger::kFlagConstrainZ)) |
+	        (rec.active ? bms::AreaTrigger::kFlagMissionArea : 0u) |
+	        (rec.constrain_z ? bms::AreaTrigger::kFlagConstrainZ : 0u);
 	area.flags = flags;
 	return area;
 }

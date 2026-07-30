@@ -230,7 +230,7 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
             velocity.z -= static_cast<int32_t>((static_cast<int64_t>(velocity.z) + 16) >> 5);
         // This apparently inverted gate is retail behavior: the ordinary gravity
         // pass skipped NoGravity, then the below-stable branch adds the same step.
-        if ((ammo.flags & 0x100u) != 0) velocity.z -= kProjectileGravityQ16;
+        if ((ammo.flags & kAmmoFlagNoGravity) != 0) velocity.z -= kProjectileGravityQ16;
 
         // A threshold crossing also applies tumble_error in a randomized local
         // frame. Its gate is characterized, but the PRNG/frame producer is not;
@@ -261,7 +261,7 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
     int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
     if (target.item_type == 3) {
         double zone_scale = 1.0;
-        if ((target.item_attrib & 0x200u) != 0) {
+        if ((target.item_attrib & kItemAttribLandable) != 0) {
             // The attrib-0x200 seat branch reads the primary/reaction section
             // ray[31] (hitZoneData+124 @0x4ec977), NOT the damage zone ray[32]
             // the normal-infantry table below reads (@0x4ec9bf). The two differ
@@ -369,7 +369,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // The retail spawn dispatch order [orig: RoundData_SpawnRound @ 0x4ec1f3..
     // 0x4ec2a5]: instantkillzone -> Detonatesatchels -> designator -> claymore
     // fan -> shotgun -> the ballistic default.
-    if ((ammo->flags & 0x400u) != 0) {
+    if ((ammo->flags & kAmmoFlagInstantKillZone) != 0) {
         // instantkillzone: the kill zone queues at the spawn point, no round
         // flies [orig: @ 0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry; the
         // kztype==1 knife raycast leaf stays with the FSM knife path].
@@ -395,13 +395,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         }
         return -1;
     }
-    if ((ammo->flags & 0x20u) != 0) {
+    if ((ammo->flags & kAmmoFlagDetonateSatchels) != 0) {
         // Detonatesatchels [orig: @ 0x4ec234 -> Entity_DetonateSatchelsByOwner]
         if (authoritative)
             world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
-    if ((ammo->flags & 0x20000u) != 0) {
+    if ((ammo->flags & kAmmoFlagClaymore) != 0) {
         // the claymore shrapnel fan [orig: @ 0x4ec288 -> Weapon_SpawnProjectileBurst]
         return spawn_burst(world, params, *ammo, mode);
     }
@@ -410,7 +410,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // `hasitem` ammo places an item entity instead of flying.
     if (ammo->velocity <= 0) return -1;
     if (ammo->kztype == 1 || ammo->kztype == 3) return -1;
-    if ((ammo->flags & 0x200u) != 0) return -1; // hasitem
+    if ((ammo->flags & kAmmoFlagHasItem) != 0) return -1;
 
     int slot = -1;
     for (int i = 0; i < kCapacity; ++i) {
@@ -456,7 +456,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
-    r.max_age_ticks = ((ammo->flags & 0x4000u) != 0) ? INT32_MAX : ammo->max_age_ticks;
+    r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
 
     // The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]: every
     // tracer_rate-th round per shooter is a tracer (the counter lives on the weapon
@@ -482,7 +482,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         if (++counter >= static_cast<uint32_t>(ammo->tracer_rate)) counter = 0;
         tracer = counter == 0;
     }                                      // [orig: @0x4ec1cf no slot + rate != 0 -> stays true]
-    if ((ammo->flags & 0x8000u) != 0) tracer = true; // [orig: forcetracer @0x4ec1db]
+    if ((ammo->flags & kAmmoFlagForceTracer) != 0) tracer = true; // [orig: forcetracer @0x4ec1db]
     r.tracer = tracer;
     // A local owner supplies the team; a decoded remote round carries the resolved
     // wire shooter's team in params (retail resolves the wire shooter entity and
@@ -498,7 +498,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // tracer_type friendly (+232) when round team == local team or shooter == local
     // player, else enemy (+236); id 0 = no channel; -> round+0x2B4].
     r.trail_slot = -1;
-    const bool forcetracer = (ammo->flags & 0x8000u) != 0;
+    const bool forcetracer = (ammo->flags & kAmmoFlagForceTracer) != 0;
     const bool same_team = r.team == local_team;
     const bool friendly_tracer =
             (local_player.valid() && params.owner.valid() &&
@@ -689,12 +689,12 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
         // `ignore` rounds only age.
-        if ((ammo_flags & 0x2u) != 0) continue;
+        if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
         // `useownmove` rounds run ONLY their class motor — no stock ray,
         // gravity, or drag [orig: the +452 motor leg of Projectile_UpdatePhysics
         // @ 0x4e9f06; the motor may convert the round into a placed device or
         // detonate it, releasing the slot].
-        if ((ammo_flags & 0x2000u) != 0) {
+        if ((ammo_flags & kAmmoFlagUseOwnMove) != 0) {
             bool alive = true;
             if (ammo != nullptr)
                 alive = throwable_motor_tick(
@@ -762,7 +762,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
             r.pos = vec_from_fixed(end_q16);
-            if ((ammo_flags & 0x100u) == 0) velocity_q16.z -= kProjectileGravityQ16;
+            if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr)
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z);
             r.vel = vec_from_fixed(velocity_q16);
@@ -818,7 +818,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 dud_replacement.ammo_index = dud;
                 dud_replacement.pos = impact_position;
                 dud_replacement.max_age_ticks =
-                    ((dud_ammo->flags & 0x4000u) != 0)
+                    ((dud_ammo->flags & kAmmoFlagNoAge) != 0)
                         ? INT32_MAX
                         : dud_ammo->max_age_ticks;
                 dud_replacement.trail_slot = -1;
@@ -831,7 +831,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         EntityHandle damage_entity = collision.geometry_entity;
         Entity *target = impact_target;
         if (target != nullptr && target->item_type != 1 &&
-            (target->item_attrib & 0x20u) != 0) {
+            (target->item_attrib & kItemAttribEweap) != 0) {
             Entity *parent = world.registry.get(target->ground_target);
             if (parent != nullptr && parent->item_type == 1) {
                 target = parent;
@@ -875,14 +875,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
-            if ((target->engine_flags & 0x4000000u) != 0 ||
+            if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
                 target->armor_impact == -1 ||
                 ammo->penetration_impact < target->armor_impact ||
                 target->damage_state != 0)
                 damage = 0;
             damage = apply_vehicle_occupant_scale(world, *target, damage);
             if (damage > target->health) damage = target->health;
-            if ((target->item_attrib & 0x40000000u) != 0 &&
+            if ((target->item_attrib & kItemAttribNoDie) != 0 &&
                 damage >= target->health)
                 damage = target->health - 1;
             if (damage != 0) {
@@ -997,7 +997,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         event.shooter = r.owner.packed;
         event.ammo_index = impact_ammo_index;
         event.husk = impact_target != nullptr &&
-                     (impact_target->engine_flags & 0x4u) != 0;
+                     (impact_target->engine_flags & kEntityFlagHusk) != 0;
         event.t = static_cast<float>(collision.t_q16) / 65536.0f;
         event.p0 = r.pos;
         event.p1 = vec_from_fixed(end_q16);

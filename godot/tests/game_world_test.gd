@@ -141,6 +141,9 @@ class FirstOpenArmorySimProxy:
 	func is_joiner() -> bool:
 		return false
 
+	func get_local_player_team() -> int:
+		return inner.get_local_player_team()
+
 	func get_local_player_class() -> int:
 		return inner.get_local_player_class()
 
@@ -177,9 +180,6 @@ class FirstOpenArmoryWorldProxy:
 
 	func get_weapon_database() -> NovaWeaponDatabase:
 		return inner.get_weapon_database()
-
-	func local_player_team() -> int:
-		return inner.local_player_team()
 
 	func local_player_viewmodel_def():
 		return inner.local_player_viewmodel_def()
@@ -332,34 +332,68 @@ class ItemFxModelStub:
 		return data
 
 
+class ItemFxDirectorProbe:
+	extends ItemEffectDirector
+	# Probe wrappers over the REAL director's private internals: the pokes stay
+	# implicit-self inside the subclass, keeping the private-poke ratchet flat.
+	func attach_to_node(node: Node3D, kind: int, item_id: int) -> int:
+		return _attach_item_effect_to_node(node, kind, item_id)
+	func attach_to_static(source: Dictionary, source_index: int) -> int:
+		return _attach_item_effect_to_static(source, source_index)
+	func pending_node_count() -> int:
+		return _item_fx_pending_nodes.size()
+	func pending_static_count() -> int:
+		return _item_fx_pending_static.size()
+	func deferred_control_count() -> int:
+		return _item_fx_control_nodes.size()
+	func active_identity_count() -> int:
+		return _item_fx_control_active.size()
+	func seed_owner(key: String, node: Node3D, entity_ref: Dictionary) -> void:
+		_item_fx_nodes[key] = node
+		_item_fx_owner_refs[key] = entity_ref.duplicate()
+	func resolve_owner(key: String) -> Variant:
+		return _effect_owner_transform(key)
+
+
 class ItemFxGameWorldHarness:
 	extends GameWorld
+	# _item_fx is the world's sanctioned director-injection seam (like the
+	# _runtime seam below): swap in a probe subclass of the real director so
+	# tests drive the extracted code through the world's own wiring.
+	var fx: ItemFxDirectorProbe
+	func _init() -> void:
+		fx = ItemFxDirectorProbe.new()
+		fx.setup(self,
+				func() -> Array:
+					return _placer.get_static_item_effect_sources() if _placer != null else [],
+				func() -> Variant:
+					return _placer.get_item_db() if _placer != null else null)
+		_item_fx = fx
 	func configure_item_fx(effects: NovaEffectWorld, placer: RefCounted) -> void:
 		_effect_world = effects
 		_placer = placer
 	func present_item_fx(node: Node3D, kind: int, item_id: int) -> int:
-		return _attach_item_effect_to_node(node, kind, item_id)
+		return fx.attach_to_node(node, kind, item_id)
 	func attach_all_item_fx() -> void:
-		_attach_item_effects()
+		fx.reattach()
 	func present_static_item_fx(source: Dictionary, source_index: int) -> int:
-		return _attach_item_effect_to_static(source, source_index)
+		return fx.attach_to_static(source, source_index)
 	func pending_item_fx_count() -> int:
-		return _item_fx_pending_nodes.size()
+		return fx.pending_node_count()
 	func pending_static_item_fx_count() -> int:
-		return _item_fx_pending_static.size()
+		return fx.pending_static_count()
 	func deferred_control_item_fx_count() -> int:
-		return _item_fx_control_nodes.size()
+		return fx.deferred_control_count()
 	func active_control_identity_count() -> int:
-		return _item_fx_control_active.size()
+		return fx.active_identity_count()
 	func consume_runtime_effects(effects: Array) -> void:
 		_on_runtime_effects(effects)
 	func configure_item_owner(runtime: Node, key: String, node: Node3D,
 			entity_ref: Dictionary) -> void:
 		_runtime = runtime
-		_item_fx_nodes[key] = node
-		_item_fx_owner_refs[key] = entity_ref.duplicate()
+		fx.seed_owner(key, node, entity_ref)
 	func resolve_item_owner(key: String) -> Variant:
-		return _effect_owner_transform(key)
+		return fx.resolve_owner(key)
 
 
 class ImpactGameWorldHarness:
@@ -400,9 +434,30 @@ class WarmEffectWorldStub:
 		calls.append("reset")
 
 
+class WarmItemFxStub:
+	extends ItemEffectDirector
+	# Director double for the warm-pass ordering probe: reattach() records the
+	# particle switch it ran under instead of attaching real item effects.
+	var attached_while_hidden := false
+
+	func reattach() -> void:
+		var effect_world: NovaEffectWorld = _world.get_effect_world()
+		attached_while_hidden = effect_world.are_particles_hidden()
+
+
 class WarmGameWorldHarness:
 	extends GameWorld
-	var attached_while_hidden := false
+	# Injects a director double through the sanctioned _item_fx seam (the
+	# overridable-hook role the world's own _attach_item_effects used to play).
+	var fx_stub := WarmItemFxStub.new()
+
+	var attached_while_hidden: bool:
+		get:
+			return fx_stub.attached_while_hidden
+
+	func _init() -> void:
+		fx_stub.setup(self, Callable(), Callable())
+		_item_fx = fx_stub
 
 	func configure_warm_effects(effects: NovaEffectWorld) -> void:
 		_effect_world = effects
@@ -410,14 +465,14 @@ class WarmGameWorldHarness:
 	func warm_effect_catalog() -> int:
 		return _warm_effect_world_catalog()
 
-	func _attach_item_effects() -> void:
-		attached_while_hidden = _effect_world.are_particles_hidden()
-
 
 
 # Single stub-injection seam for this file: GameWorld builds its runtime
 # internally in _start_runtime, so duck-typed transport stubs go in through
-# these two helpers only (keeps the private pokes to one site).
+# these two helpers only (keeps the private pokes to one site). The same
+# sanction covers the _item_fx director seam above: harnesses swap in a
+# director probe/double instead of poking the moved item-fx privates on the
+# world (ItemFxGameWorldHarness / WarmGameWorldHarness).
 func _install_runtime(world, runtime, effects = null) -> void:
 	world._runtime = runtime
 	world._loaded = runtime != null
@@ -939,6 +994,8 @@ func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> v
 		"the mirrored scene never draws the water surface itself")
 	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"the FP arms/weapon overlay never enters the mirrored scene")
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"caster-only helper instances never enter the color reflection")
 	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"the FP-mode local body DOES render in the mirror")
 	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD, 0,
@@ -1260,6 +1317,43 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	assert_false(world.is_loaded())
 	await get_tree().process_frame  # the canceled driver loop unwinds quietly
 	assert_eq(failures.size(), 1, "the canceled driver does not double-report")
+	blocker.close()
+
+
+func test_escape_aborts_the_joiner_admission_wait() -> void:
+	# ESC during the SECOND interruptible joiner wait: an explicit-mission joiner
+	# loads its map locally and then parks in the post-load admission watchdog
+	# until the (here: silent) host drives the join forward. cancel_join_admission
+	# tells that armed wait to abort; the watchdog reports through the ordinary
+	# load-failure leg exactly once, on its next process_frame resume.
+	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+	assert_eq(blocker.bind_listen(0), OK)
+	var silent_port := blocker.local_port()
+	assert_gt(silent_port, 0)
+
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+
+	assert_false(world.cancel_join_admission(), "no armed admission wait is a no-op")
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", silent_port, "mnml")), OK)
+	assert_true(world.cancel_join_admission(), "an armed admission wait accepts the abort")
+	await get_tree().process_frame  # the watchdog resumes and observes the abort
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], "aborted")
+	await get_tree().process_frame
+	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
+	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
+	world.unload()
 	blocker.close()
 
 

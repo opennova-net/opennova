@@ -1,7 +1,9 @@
 // libs/world substrate tests: addressable entities (faithful find_by_net_id),
 // shared var store, entity commands, tick cadence, snapshot/restore.
 #include <cstdio>
+#include <utility>
 
+#include "world/sound_emitter_mailbox.h"
 #include "world/world.h"
 
 using namespace opennova::world;
@@ -89,6 +91,104 @@ int main() {
     // wac_behavior_test.)
     w.run_logic_tick();
     CHECK(w.logic_tick == 1);
+
+    // Persistent sound intents use a bounded latest-value mailbox. A host with
+    // no audio presenter can run indefinitely without accumulating one string-
+    // owning row per vehicle per tick; a keyed refresh keeps its producer clock.
+    SoundEmitterMailbox emitter_mailbox;
+    for (uint32_t tick = 1; tick <= 10000; ++tick) {
+        SoundEmitterEvent event;
+        event.source_spawn_id = 55;
+        event.lane = 0;
+        event.emitted_tick = tick;
+        event.lifetime_ticks = 30;
+        event.pitch_q16 = 0x10000;
+        event.volume_q8_8 = 0xFFFF;
+        event.set_name = "V_TRUCK_ILP";
+        CHECK(emitter_mailbox.publish(std::move(event)));
+    }
+    CHECK(emitter_mailbox.size() == 1);
+    CHECK(emitter_mailbox.pending()[0].emitted_tick == 10000);
+
+    // Distinct live keys fill only the retail-sized admission table; keyed
+    // refresh remains accepted at capacity and expired rows make room again.
+    emitter_mailbox.clear();
+    for (size_t i = 0; i < SoundEmitterMailbox::kCapacity; ++i) {
+        SoundEmitterEvent event;
+        event.source_spawn_id = i + 1;
+        event.lane = 10;
+        event.emitted_tick = 100;
+        event.lifetime_ticks = 30;
+        event.pitch_q16 = 0x10000;
+        event.volume_q8_8 = 0xFFFF;
+        CHECK(emitter_mailbox.publish(std::move(event)));
+    }
+    SoundEmitterEvent overflow;
+    overflow.source_spawn_id = SoundEmitterMailbox::kCapacity + 1;
+    overflow.lane = 10;
+    overflow.emitted_tick = 100;
+    overflow.lifetime_ticks = 30;
+    overflow.pitch_q16 = 0x10000;
+    overflow.volume_q8_8 = 0xFFFF;
+    CHECK(!emitter_mailbox.publish(std::move(overflow)));
+    SoundEmitterEvent refresh;
+    refresh.source_spawn_id = 1;
+    refresh.lane = 10;
+    refresh.emitted_tick = 101;
+    refresh.lifetime_ticks = 30;
+    refresh.pitch_q16 = 0x10000;
+    refresh.volume_q8_8 = 0xFFFF;
+    CHECK(emitter_mailbox.publish(std::move(refresh)));
+    CHECK(emitter_mailbox.size() == SoundEmitterMailbox::kCapacity);
+
+    // Clears and source-position updates address already-live mixer state and
+    // therefore cannot fail merely because allocation intents filled the
+    // transport. They displace allocations while preserving the hard bound.
+    SoundEmitterEvent clear;
+    clear.source_spawn_id = 9001;
+    clear.lane = 20;
+    clear.emitted_tick = 101;
+    clear.lifetime_ticks = 30;
+    CHECK(emitter_mailbox.publish(std::move(clear)));
+    SoundEmitterEvent saturated_anchor;
+    saturated_anchor.source_spawn_id = 9002;
+    saturated_anchor.source_only = true;
+    saturated_anchor.emitted_tick = 101;
+    saturated_anchor.lifetime_ticks = 30;
+    CHECK(emitter_mailbox.publish(std::move(saturated_anchor)));
+    CHECK(emitter_mailbox.size() == SoundEmitterMailbox::kCapacity);
+    bool found_clear = false;
+    bool found_anchor = false;
+    for (const SoundEmitterEvent &event : emitter_mailbox.pending()) {
+        found_clear |= event.source_spawn_id == 9001 && !event.source_only &&
+                       event.lane == 20 && event.pitch_q16 == 0 &&
+                       event.volume_q8_8 == 0;
+        found_anchor |= event.source_spawn_id == 9002 && event.source_only;
+    }
+    CHECK(found_clear);
+    CHECK(found_anchor);
+    emitter_mailbox.prune(132);
+    CHECK(emitter_mailbox.empty());
+
+    // Source-anchor updates are independently coalesced from lane controls.
+    SoundEmitterEvent lane;
+    lane.source_spawn_id = 88;
+    lane.lane = 0;
+    lane.emitted_tick = 200;
+    lane.lifetime_ticks = 30;
+    lane.pitch_q16 = 0x10000;
+    lane.volume_q8_8 = 0xFFFF;
+    CHECK(emitter_mailbox.publish(std::move(lane)));
+    SoundEmitterEvent anchor;
+    anchor.source_spawn_id = 88;
+    anchor.source_only = true;
+    anchor.emitted_tick = 200;
+    anchor.lifetime_ticks = 30;
+    CHECK(emitter_mailbox.publish(std::move(anchor)));
+    CHECK(emitter_mailbox.size() == 2);
+    const std::vector<SoundEmitterEvent> drained = emitter_mailbox.drain();
+    CHECK(drained.size() == 2);
+    CHECK(emitter_mailbox.empty());
 
     // snapshot / restore (editor play).
     w.vars.set_mission(1, 7);

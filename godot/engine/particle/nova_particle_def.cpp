@@ -56,6 +56,10 @@ NovaParticleDef::NovaParticleDef() {
 	}
 }
 
+static_assert(NovaParticleDef::FLAG_YAW_AND_PITCH == opennova::particle::particle_flag::YawAndPitch);
+static_assert(NovaParticleDef::FLAG_FOREVER_EMIT == opennova::particle::particle_flag::ForeverEmit);
+static_assert(NovaParticleDef::FLAG_POSITION_RELATIVE == opennova::particle::particle_flag::PositionRelative);
+
 void NovaParticleDef::_bind_methods() {
 	#define BIND_GETSET(prop, setter, getter) \
 		ClassDB::bind_method(D_METHOD(setter, "v"), &NovaParticleDef::set_##prop); \
@@ -128,6 +132,9 @@ void NovaParticleDef::_bind_methods() {
 
 	// Canonical-table introspection + deep clone (editor helpers).
 	ClassDB::bind_static_method("NovaParticleDef", D_METHOD("get_particle_flag_table"), &NovaParticleDef::get_particle_flag_table);
+	BIND_CONSTANT(FLAG_YAW_AND_PITCH);
+	BIND_CONSTANT(FLAG_FOREVER_EMIT);
+	BIND_CONSTANT(FLAG_POSITION_RELATIVE);
 	ClassDB::bind_static_method("NovaParticleDef", D_METHOD("get_move_flag_table"), &NovaParticleDef::get_move_flag_table);
 	ClassDB::bind_static_method("NovaParticleDef", D_METHOD("get_blend_mode_names"), &NovaParticleDef::get_blend_mode_names);
 	ClassDB::bind_static_method("NovaParticleDef", D_METHOD("format_particle_flags", "bits"), &NovaParticleDef::format_particle_flags);

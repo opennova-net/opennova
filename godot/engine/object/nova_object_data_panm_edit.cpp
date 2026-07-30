@@ -2,6 +2,7 @@
 // per-channel/track editing over the IR part-animation blocks.
 #include "object/nova_object_data_internal.h"
 
+#include <threedi/threedi_panm.h> // the byte-lane flag helpers
 #include <threedi/threedi_panm_runtime.h>
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -643,10 +644,10 @@ Dictionary NovaObjectData::get_part_anim_info(int p_lod_index, int p_anim_index)
 	info["transform_as"] = static_cast<int>(anim.part_index);
 	info["parent_subobject"] = static_cast<int>(anim.parent_part);
 	info["flags"] = static_cast<int64_t>(anim.flags);
-	info["scale_type"] = static_cast<int>(anim.flags & 0xFFu);
-	info["rotation_type"] = static_cast<int>((anim.flags >> 8) & 0xFFu);
-	info["rotation_reversed"] = ((anim.flags >> 16) & 0xFFu) != 0;
-	info["translate_type"] = static_cast<int>((anim.flags >> 24) & 0xFFu);
+	info["scale_type"] = static_cast<int>(threedi_panm_scale_type(anim.flags));
+	info["rotation_type"] = static_cast<int>(threedi_panm_rotation_type(anim.flags));
+	info["rotation_reversed"] = threedi_panm_rotation_reversed(anim.flags) != 0;
+	info["translate_type"] = static_cast<int>(threedi_panm_translate_type(anim.flags));
 	info["rotation_x"] = transform_to_dict(anim.rotation_x, ir);
 	info["rotation_y"] = transform_to_dict(anim.rotation_y, ir);
 	info["rotation_z"] = transform_to_dict(anim.rotation_z, ir);
@@ -678,10 +679,10 @@ bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, cons
 		return true;
 	}
 	if (key == "scale_type" || key == "rotation_type" || key == "translate_type" || key == "rotation_reversed") {
-		uint8_t scale_type = static_cast<uint8_t>(anim.flags & 0xFFu);
-		uint8_t rotation_type = static_cast<uint8_t>((anim.flags >> 8) & 0xFFu);
-		uint8_t rotation_reversed = static_cast<uint8_t>((anim.flags >> 16) & 0xFFu);
-		uint8_t translate_type = static_cast<uint8_t>((anim.flags >> 24) & 0xFFu);
+		uint8_t scale_type = threedi_panm_scale_type(anim.flags);
+		uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
+		uint8_t rotation_reversed = static_cast<uint8_t>(threedi_panm_rotation_reversed(anim.flags) ? 1 : 0);
+		uint8_t translate_type = threedi_panm_translate_type(anim.flags);
 		if (key == "scale_type") {
 			scale_type = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
 		} else if (key == "rotation_type") {
@@ -691,10 +692,8 @@ bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, cons
 		} else if (key == "rotation_reversed") {
 			rotation_reversed = static_cast<bool>(p_value) ? 1 : 0;
 		}
-		anim.flags = static_cast<uint32_t>(scale_type) |
-				(static_cast<uint32_t>(rotation_type) << 8) |
-				(static_cast<uint32_t>(rotation_reversed) << 16) |
-				(static_cast<uint32_t>(translate_type) << 24);
+		anim.flags = threedi_panm_pack_flags(scale_type, rotation_type,
+				rotation_reversed, translate_type);
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}

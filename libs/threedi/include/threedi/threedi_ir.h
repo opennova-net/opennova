@@ -112,6 +112,13 @@ typedef enum ThreediIRBlendMode {
 #define THREEDI_IR_MATERIAL_FLAG_EMISSIVE      0x08u
 
 // Texture slot types
+/* Light flags byte (ThreediIRLight::flags): bits 0-2 disable legs, bit 3 the
+ * light type (0 = Omni, 1 = Target). */
+#define THREEDI_IR_LIGHT_FLAG_DISABLE_CORONA  0x01u
+#define THREEDI_IR_LIGHT_FLAG_DISABLE_TERRAIN 0x02u
+#define THREEDI_IR_LIGHT_FLAG_DISABLE_OBJECTS 0x04u
+#define THREEDI_IR_LIGHT_FLAG_TYPE_TARGET     0x08u
+
 #define THREEDI_IR_TEX_SLOT_DIFFUSE  1
 #define THREEDI_IR_TEX_SLOT_DETAIL   2
 #define THREEDI_IR_TEX_SLOT_NORMAL   3
@@ -205,7 +212,7 @@ typedef struct ThreediIRMaterial {
 // ============================================================================
 
 typedef struct ThreediIRLight {
-    float offset[3];            // Position offset from part
+    float offset[3];            // Authored model-space position
     float attenuation_start;    // Light falloff start distance
     float attenuation_end;      // Light falloff end distance
     float color_start[3];       // RGB color at start (0..1)
@@ -214,7 +221,7 @@ typedef struct ThreediIRLight {
     uint8_t phase;              // Animation phase
     uint16_t rate;              // Animation rate
     int32_t part_index;         // Attached part index
-    uint8_t flags;              // Light flags (bits 0-2: disable, bit 3: type)
+    uint8_t flags;              // Light flags — THREEDI_IR_LIGHT_FLAG_* below
     float falloff;              // Light falloff angle (degrees, from 3di byte)
     float rotation[3];          // Light direction (-rotY, rotZ, rotX from 3di)
     uint8_t light_type;         // 0=Omni, 1=Target (from flags bit 3)

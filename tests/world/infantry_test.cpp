@@ -140,6 +140,20 @@ struct TestSource : IRootMotionSource {
     }
 };
 
+struct BlendProbeSource : IRootMotionSource {
+    std::map<int, RootMotionFrame> frames;
+
+    bool has_clip(int, int id) const override { return frames.count(id) != 0; }
+    int32_t clip_length_ticks(int, int) const override { return -1; }
+    bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+        auto it = frames.find(id);
+        if (it == frames.end()) return false;
+        ++phase;
+        out = it->second;
+        return true;
+    }
+};
+
 AiEntity *soldier(AiSystem &ai) {
     int idx = ai.attach(EntityHandle::make(0, 0));
     AiEntity *e = ai.at(idx);
@@ -1155,6 +1169,176 @@ void test_death_presentation() {
     }
 }
 
+void test_primary_body_blend_windows_keep_independent_playheads() {
+    constexpr std::array<float, 10> kNormalWeights = {
+        0.10000000149011612f, 0.20000000298023224f, 0.30000001192092896f,
+        0.40000000596046448f, 0.5f, 0.60000002384185791f,
+        0.70000004768371582f, 0.80000007152557373f, 0.90000009536743164f,
+        1.0f,
+    };
+    constexpr std::array<float, 15> kLongWeights = {
+        0.06666667014360428f, 0.13333334028720856f, 0.20000001788139343f,
+        0.26666668057441711f, 0.33333334326744080f, 0.40000000596046448f,
+        0.46666666865348816f, 0.53333336114883423f, 0.60000002384185791f,
+        0.66666668653488159f, 0.73333334922790527f, 0.80000001192092896f,
+        0.86666667461395264f, 0.93333333730697632f, 1.0f,
+    };
+
+    auto exercise = [](int target_state, const auto &expected_weights) {
+        auto w = std::make_unique<World>();
+        auto ai = std::make_unique<AiSystem>();
+        TestSource src;
+        src.clips = {anim_state::kIdle, target_state};
+        ai->root_motion = &src;
+
+        AiEntity *e = soldier(*ai);
+        e->inf.clip_phase = 7;
+        e->inf.begin_body_transition(target_state);
+
+        CHECK(e->inf.anim_state == target_state);
+        CHECK(e->inf.anim_prev == anim_state::kIdle);
+        CHECK(e->inf.clip_phase == 0);
+        CHECK(e->inf.anim_prev_clip_phase == 7);
+        CHECK(e->inf.anim_blend_weight == 0.0f);
+
+        TickContext ctx{};
+        ctx.world = w.get();
+        ctx.is_authority = false; // advance the body without an NPC selection pass
+        for (int tick = 1; tick <= static_cast<int>(expected_weights.size()); ++tick) {
+            ctx.logic_tick = static_cast<uint32_t>(tick);
+            ai->tick(*w, ctx);
+            CHECK(e->inf.clip_phase == tick);
+            CHECK(e->inf.anim_prev_clip_phase == 7 + tick);
+            CHECK(e->inf.anim_blend_weight == expected_weights[static_cast<size_t>(tick - 1)]);
+        }
+
+        // Once weight reaches 1, only the target playhead continues.
+        const int blend_ticks = static_cast<int>(expected_weights.size());
+        ctx.logic_tick = static_cast<uint32_t>(blend_ticks + 1);
+        ai->tick(*w, ctx);
+        CHECK(e->inf.clip_phase == blend_ticks + 1);
+        CHECK(e->inf.anim_prev_clip_phase == 7 + blend_ticks);
+        CHECK(e->inf.anim_blend_weight == 1.0f);
+        CHECK(e->inf.anim_blend_step == 0.0f);
+    };
+
+    CHECK((infantry_anim_flags(anim_state::kIdle2) & 0x400u) == 0);
+    exercise(anim_state::kIdle2, kNormalWeights);
+
+    CHECK((infantry_anim_flags(anim_state::kWalkProneForward) & 0x400u) != 0);
+    exercise(anim_state::kWalkProneForward, kLongWeights);
+}
+
+void test_primary_body_mid_blend_retarget_keeps_original_primary() {
+    constexpr int kPrimary = anim_state::kIdle;
+    constexpr int kFirstTarget = anim_state::kIdle2;
+    constexpr int kReplacement = anim_state::kSit;
+
+    auto w = std::make_unique<World>();
+    auto ai = std::make_unique<AiSystem>();
+    BlendProbeSource src;
+    src.frames[kPrimary].dx = 100;
+    src.frames[kPrimary].events = 0x4u;
+    src.frames[kFirstTarget].dx = 200;
+    src.frames[kFirstTarget].events = 0u;
+    src.frames[kReplacement].dx = 300;
+    src.frames[kReplacement].events = 0x8u;
+    ai->root_motion = &src;
+
+    AiEntity *e = soldier(*ai);
+    e->inf.begin_body_transition(kFirstTarget);
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = false;
+    for (uint32_t tick = 1; tick <= 4; ++tick) {
+        ctx.logic_tick = tick;
+        ai->tick(*w, ctx);
+    }
+    CHECK(e->inf.anim_blend_weight == 0.40000000596046448f);
+    CHECK(e->inf.anim_prev == kPrimary);
+    CHECK(e->inf.anim_prev_clip_phase == 4);
+    CHECK(e->inf.clip_phase == 4);
+    CHECK(e->inf.last_events == 0u); // primary-only triggers are not inherited
+
+    e->inf.begin_body_transition(kReplacement);
+    CHECK(e->inf.anim_prev == kPrimary);
+    CHECK(e->inf.anim_prev_clip_phase == 4);
+    CHECK(e->inf.anim_state == kReplacement);
+    CHECK(e->inf.clip_phase == 0);
+    CHECK(e->inf.anim_blend_weight == 0.0f);
+
+    const int32_t x_before = e->pos[0];
+    ctx.logic_tick = 5;
+    ai->tick(*w, ctx);
+    CHECK(e->pos[0] - x_before == 120); // .9*A(100) + .1*C(300), not .9*B + .1*C
+    CHECK(e->inf.anim_prev_clip_phase == 5);
+    CHECK(e->inf.clip_phase == 1);
+    CHECK(e->inf.anim_blend_weight == 0.1f);
+    CHECK(e->inf.last_events == 0x8u); // target-only triggers survive unchanged
+}
+
+void test_death_during_blend_finishes_old_tuple_then_retargets() {
+    constexpr int kPrimary = anim_state::kIdle;
+    constexpr int kFirstTarget = anim_state::kIdle2;
+    constexpr int kDeath = anim_state::kDeathBulletBase + 4;
+
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 4);
+    Entity seed;
+    seed.health = 100;
+    seed.health_max = 100;
+    const EntityHandle handle = w->registry.spawn(0, seed);
+
+    auto ai = std::make_unique<AiSystem>();
+    BlendProbeSource src;
+    src.frames[kPrimary].dx = 100;
+    src.frames[kPrimary].events = 0x1u;
+    src.frames[kFirstTarget].dx = 200;
+    src.frames[kFirstTarget].events = 0x2u;
+    src.frames[kDeath].dx = 300;
+    src.frames[kDeath].events = 0x4u;
+    ai->root_motion = &src;
+
+    AiEntity *e = ai->at(ai->attach(handle));
+    e->inf.active = true;
+    e->health = 100;
+    e->inf.begin_body_transition(kFirstTarget);
+
+    TickContext ctx{};
+    ctx.world = w.get();
+    ctx.is_authority = false;
+    for (uint32_t tick = 1; tick <= 4; ++tick) {
+        ctx.logic_tick = tick;
+        ai->tick(*w, ctx);
+    }
+
+    Entity *ent = w->registry.get(handle);
+    ent->health = 0;
+    ent->death_anim_state = kDeath;
+    e->health = 0;
+    const int32_t kill_x = e->pos[0];
+    ctx.logic_tick = 5;
+    ai->tick(*w, ctx);
+
+    CHECK(e->pos[0] - kill_x == 150); // the existing A/B blend advances from .4 to .5
+    CHECK(e->inf.last_events == 0x2u);
+    CHECK(e->inf.anim_prev == kPrimary);
+    CHECK(e->inf.anim_prev_clip_phase == 5);
+    CHECK(e->inf.anim_state == kDeath);
+    CHECK(e->inf.clip_phase == 0);
+    CHECK(e->inf.anim_blend_weight == 0.0f);
+
+    const int32_t blend_x = e->pos[0];
+    ctx.logic_tick = 6;
+    ai->tick(*w, ctx);
+    CHECK(e->pos[0] - blend_x == 120); // the replacement starts as .9*A + .1*death
+    CHECK(e->inf.last_events == 0x4u);
+    CHECK(e->inf.anim_prev_clip_phase == 6);
+    CHECK(e->inf.clip_phase == 1);
+    CHECK(e->inf.anim_blend_weight == 0.1f);
+}
+
 int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
@@ -1334,11 +1518,12 @@ int main() {
         route(ai, e,
               {node(fx(3), 0, fx(1), /*facing=*/0, /*wait=*/248), node(fx(6), 0, fx(1))}, 1);
 
-        // Selection happens before root evaluation: walking covers t=0..15 -> 2u, and
-        // the t=16 think arrives because the authored radius is 1u around the 3u marker.
+        // The 15-tick idle->walk blend reaches the first marker on the t=32 think.
+        // That tick starts the 10-tick walk->idle blend, whose retained primary root
+        // carries the body a bounded distance beyond the radius edge.
         run_ticks(ai, w, 0, 33);
-        CHECK(e->pos[0] == fx(2));
-        CHECK(e->inf.wait_cooldown == 15);          // (248 + 8) >> 4, decremented at t=32
+        CHECK(e->pos[0] == 212165);                 // first idle-blend sample included
+        CHECK(e->inf.wait_cooldown == 16);          // (248 + 8) >> 4, stamped at t=32
         CHECK(e->slot.f[38] == 1);                  // advanced past node0
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
         if (!ai.relmat_calls.empty())
@@ -1347,12 +1532,12 @@ int main() {
         CHECK(w.relations.single_visited(8, 1, 0));
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
-        CHECK(e->pos[0] == fx(2));
+        CHECK(e->pos[0] == 241653);                 // walk->idle blend has settled
         CHECK(e->inf.anim_state == anim_state::kIdle);
-        CHECK(e->inf.wait_cooldown > 0);
+        CHECK(e->inf.wait_cooldown == 6);
 
-        run_ticks(ai, w, 200, 320); // hold expires at t=288; walks the remaining 2u by t=304
-        CHECK(e->pos[0] == fx(6));                  // resting exactly on node1
+        run_ticks(ai, w, 200, 320); // hold expires, then blended walk/idle reaches node1
+        CHECK(e->pos[0] == 372717);                 // bounded stop inside node1 radius
         CHECK(e->slot.f[38] == 1);                  // one-shot end pins the last node
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 20);          // end-of-path cooldown
@@ -1361,7 +1546,7 @@ int main() {
 
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 320, 1200); // parked: cooldown re-arms, never moves again
-        CHECK(e->pos[0] == fx(6));
+        CHECK(e->pos[0] == 372717);
         CHECK(e->pos[1] == 0);
         CHECK(ai.relmat_calls.size() > marks); // re-arrivals keep marking the matrix
     }
@@ -1980,7 +2165,9 @@ int main() {
         CHECK(e->inf.vel[2] == 0x1600);       // the raw impulse; gravity bites next tick
         CHECK(e->inf.jump_cooldown == 32);    // reloaded [orig: @0x4b7f06]
         CHECK(e->inf.anim_state == anim_state::kJumpLoop); // stamped at the jump (no 30 clip)
-        CHECK(e->inf.vel[0] == (3 * src.step) / 4); // rotated root-step momentum carry
+        // Third 15-tick blend sample: trunc(0x4000 * 0.2000000179f) = 3276;
+        // the jump carries three quarters of that current root step.
+        CHECK(e->inf.vel[0] == 2457);
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[2] == 0x1600 - 208); // org2 per-tick gravity
         CHECK(e->pos[2] > floor_z);           // rising
@@ -2164,6 +2351,9 @@ int main() {
     test_player_weapon_channel_ticks_while_dead();
     test_weapon_channel_consumer_gate_and_switch_identity();
     test_death_presentation();
+    test_primary_body_blend_windows_keep_independent_playheads();
+    test_primary_body_mid_blend_retarget_keeps_original_primary();
+    test_death_during_blend_finishes_old_tuple_then_retargets();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

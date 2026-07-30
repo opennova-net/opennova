@@ -14,7 +14,7 @@ const GameHudScript := preload("res://engine/world/game_hud.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-var _world = null           # GameWorld
+var _world: GameWorld = null
 var _player_host = null     # LocalPlayerHost (reserved for the weapon-round anchors)
 var _ui_parent: Node = null
 
@@ -47,7 +47,7 @@ func setup(world, player_host, ui_parent: Node) -> void:
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
 	# host's lifetime — teardown only resets per-mission state.
-	if _world != null and _world.has_signal("mission_effects") 			and not _world.mission_effects.is_connected(apply_mission_effects):
+	if _world != null and not _world.mission_effects.is_connected(apply_mission_effects):
 		_world.mission_effects.connect(apply_mission_effects)
 
 
@@ -94,7 +94,7 @@ func _ensure_game_hud() -> void:
 	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var hudpos := NovaHudPos.new()
 	var root: NovaResourceRoot = _world.get_resource_root() \
-			if _world != null and _world.has_method("get_resource_root") else null
+			if _world != null else null
 	if root == null:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
@@ -176,7 +176,8 @@ func tick() -> void:
 		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
 		return
-	if not _world.has_local_player():
+	var sim = _world.get_sim()
+	if sim == null or not sim.has_local_player():
 		if not _warned_no_player:
 			_warned_no_player = true
 			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
@@ -184,12 +185,12 @@ func tick() -> void:
 	_ensure_game_hud()
 	if _game_hud == null:
 		return
-	var max_h: int = _world.local_player_max_health()
-	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
+	var max_h: int = sim.get_local_player_max_health()
+	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
 	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip
 	# key). Icon indices: 0=stand, 1=crouch, 2=prone. [orig: HUD_BuildEntityInfo
 	# @0x4b860c — entity+300 flags 0x200=crouch->1, 0x100=prone->2]
-	var anim_key: String = _world.local_player_anim_key()
+	var anim_key: String = sim.get_local_player_anim_key()
 	var stance := 0
 	if "prone" in anim_key:
 		stance = 2
@@ -197,8 +198,7 @@ func tick() -> void:
 		stance = 1
 
 	# The equipped weapon's HUD slice: re-resolve on weapon change only.
-	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def() \
-			if _world.has_method("local_player_hud_weapon_def") else null
+	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def()
 	var weapon_name := weapon.weapon_name if weapon != null else ""
 	if weapon_name != _hud_weapon_name:
 		_hud_weapon_name = weapon_name
@@ -210,8 +210,7 @@ func tick() -> void:
 	var clip := -1
 	var reserve := -1
 	var weapon_active := false
-	var wv: PlayerWeaponView = _world.local_player_weapon_view() \
-			if _world.has_method("local_player_weapon_view") else null
+	var wv: PlayerWeaponView = _world.local_player_weapon_view()
 	if wv != null and wv.active:
 		weapon_active = true
 		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
@@ -230,8 +229,7 @@ func tick() -> void:
 	var binocular_range := 1
 	var nvg_visible := false
 	var nvg_gain := 0
-	var lv: PlayerLocalView = _world.local_player_view() \
-			if _world.has_method("local_player_view") else null
+	var lv: PlayerLocalView = _world.local_player_view()
 	if lv != null:
 		scope_engaged = lv.scope_engaged
 		scope_fraction = lv.scope_fraction
@@ -240,8 +238,7 @@ func tick() -> void:
 		binoculars_view_active = lv.binoculars_view_active
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
-	if binoculars_view_active and _player_host != null \
-			and _player_host.has_method("aim_range_units"):
+	if binoculars_view_active and _player_host != null:
 		binocular_range = clampi(int(_player_host.aim_range_units()), 1, 1000)
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
@@ -252,7 +249,7 @@ func tick() -> void:
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
 		"stance": stance,
-		"team": _world.local_player_team(),
+		"team": sim.get_local_player_team(),
 		"objective": "",
 		"weapon_active": weapon_active,
 		"clip": clip,
@@ -270,8 +267,7 @@ func tick() -> void:
 		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
 		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
 		"aim_screen": _player_host.aim_screen_point() \
-				if _player_host != null and _player_host.has_method("aim_screen_point") \
-				else Vector2.INF,
+				if _player_host != null else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 		"attach_labels": attach_labels,
@@ -329,15 +325,14 @@ func _waypoint_info_dict() -> Dictionary:
 func _build_waypoint_entry() -> WaypointHudEntry:
 	if _world == null:
 		return null
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("get_waypoint_hud_view"):
+	var sim := _world.get_sim()
+	if sim == null:
 		return null
 	var wp: Dictionary = sim.get_waypoint_hud_view()
 	if not bool(wp.get("show", false)) or int(wp.get("current", -1)) < 0:
 		return null
 	var pos: Vector3 = wp.get("position", Vector3.ZERO)
-	var player: Vector3 = sim.get_local_player_position() \
-			if sim.has_method("get_local_player_position") else Vector3.ZERO
+	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
 	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
 	# The original distance is horizontal-only (mission X/Y deltas = the Godot
@@ -376,8 +371,8 @@ func _build_attach_labels() -> Array:
 	var out: Array = []
 	if _game_hud == null or _world == null:
 		return out
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("get_attach_labels"):
+	var sim := _world.get_sim()
+	if sim == null:
 		return out
 	var labels: Array = sim.get_attach_labels()
 	if labels.is_empty():
@@ -527,8 +522,8 @@ func _build_objectives() -> Array:
 	var out: Array = []
 	if _world == null:
 		return out
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("get_objectives_view"):
+	var sim := _world.get_sim()
+	if sim == null:
 		return out
 	var table: RtxtStringFile = NovaStrings.get_table("mission")
 	for raw in sim.get_objectives_view():

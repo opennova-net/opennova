@@ -456,7 +456,7 @@ static int convert_materials(const ThreediGpFile *gp, ThreediModelIR *ir) {
         // GP tex_addressing_mode: bit 0 = U clamp, bit 8 = V clamp
         // If either axis is clamped, mark texture as clamped
         if (dm->texture_count > 0 && (sm->tex_addressing_mode & 0x0101u) != 0) {
-            dm->textures[0].flags |= 0x02;  // CLAMPED
+            dm->textures[0].flags |= THREEDI_TEX_FLAG_CLAMPED;
         }
 
         // Decode shader animation parameters
@@ -594,14 +594,14 @@ static int convert_lights(const ThreediGpFile *gp, ThreediModelIR *ir) {
         dl->attenuation_start = sl->attenuation_start;
         dl->attenuation_end = sl->attenuation_end;
 
-        /* Convert u8 RGB (0-255) to float (0-1) */
-        dl->color_start[0] = (float)sl->color_start[0] / 255.0f;
+        /* GP stores the authored RGB color as B,G,R, like 3DI3 LGHT. */
+        dl->color_start[0] = (float)sl->color_start[2] / 255.0f;
         dl->color_start[1] = (float)sl->color_start[1] / 255.0f;
-        dl->color_start[2] = (float)sl->color_start[2] / 255.0f;
+        dl->color_start[2] = (float)sl->color_start[0] / 255.0f;
 
-        dl->color_end[0] = (float)sl->color_end[0] / 255.0f;
+        dl->color_end[0] = (float)sl->color_end[2] / 255.0f;
         dl->color_end[1] = (float)sl->color_end[1] / 255.0f;
-        dl->color_end[2] = (float)sl->color_end[2] / 255.0f;
+        dl->color_end[2] = (float)sl->color_end[0] / 255.0f;
 
         dl->style = sl->style;
         dl->phase = sl->phase;

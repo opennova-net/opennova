@@ -80,7 +80,8 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 	// The mission-attribute force-indoors override ORs the indoors bit into the
 	// frame's accum view. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 	cam.local_blink_flags =
-			collision_world_.local_player_blink_flags | (p_force_indoors ? 0x2u : 0u);
+			collision_world_.local_player_blink_flags |
+			(p_force_indoors ? opennova::world::kBlinkIndoorsBit : 0u);
 
 	const uint64_t occl_build_start =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
@@ -223,8 +224,28 @@ bool NovaSimulation::local_player_indoors() const {
 	return e != nullptr && (e->flags & opennova::world::kEntityFlagIndoors) != 0;
 }
 
+static_assert(NovaSimulation::BLINK_INDOORS == opennova::world::kBlinkIndoorsBit,
+              "BLINK_INDOORS drifted from collision.h");
+static_assert(NovaSimulation::BLINK_WATER_OFF == opennova::world::kBlinkWaterOffBit,
+              "BLINK_WATER_OFF drifted from collision.h");
+
 int NovaSimulation::local_player_blink_flags() const {
 	return static_cast<int>(collision_world_.local_player_blink_flags);
+}
+
+int NovaSimulation::local_player_interior_item_id() const {
+	if (!world_) return 0;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player == nullptr || player->blink_hits[0] == 0) return 0;
+	const opennova::world::EntityHandle building =
+			opennova::world::EntityHandle::make(
+					2, static_cast<int32_t>(player->blink_hits[0] >> 20));
+	const opennova::world::Entity *parent = world_->registry.get(building);
+	return parent == nullptr
+			? 0
+			: static_cast<int>(parent->item_id)
+					+ opennova::mission::kItemIdOffset;
 }
 
 int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,

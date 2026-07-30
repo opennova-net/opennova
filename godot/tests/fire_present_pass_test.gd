@@ -7,6 +7,7 @@ class SimStub:
 	extends RefCounted
 	var events: Array = []
 	var slot_events: Array = []
+	var sound_emitter_events: Array = []
 
 	func drain_fire_presentation_events() -> Array:
 		var out := events
@@ -16,6 +17,11 @@ class SimStub:
 	func drain_slot_sounds() -> Array:
 		var out := slot_events
 		slot_events = []
+		return out
+
+	func drain_sound_emitters() -> Array:
+		var out := sound_emitter_events
+		sound_emitter_events = []
 		return out
 
 	# Trail channels framed [style_id, age, count, count x (x, y, z, w)] — the
@@ -30,6 +36,7 @@ class AudioStub:
 	extends RefCounted
 	var calls: Array = []
 	var slot_calls: Array = []
+	var sound_emitter_calls: Array = []
 
 	func fire_soundset(set_name: String, world_pos: Vector3,
 			source_bms_id: int = 0) -> bool:
@@ -48,6 +55,9 @@ class AudioStub:
 			"key": exclusive_key,
 		})
 		return true
+
+	func apply_sound_emitters(events: Array) -> void:
+		sound_emitter_calls.append(events.duplicate(true))
 
 
 func _event(pos: Vector3, source_bms_id: int) -> Dictionary:
@@ -214,4 +224,36 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 		assert_eq(String(audio.slot_calls[0]["key"]), "")
 		assert_eq(String(audio.slot_calls[1]["set"]), "FREEFALL")
 		assert_eq(String(audio.slot_calls[1]["key"]), "3:44")
+	presenter.teardown()
+
+
+func test_persistent_sound_emitters_drain_into_the_shared_audio_host() -> void:
+	var sim := SimStub.new()
+	var audio := AudioStub.new()
+	var presenter = _make_pass(sim, audio)
+	var idle := {
+		"source_spawn_id": 77,
+		"handle": 0x10001,
+		"source_bms_id": 42,
+		"emitted_tick": 12,
+		"lane": 0,
+		"lifetime": 30,
+		"pitch_q16": 0x10000,
+		"volume_q8_8": 0xFFFF,
+		"source_only": false,
+		"slot": 0,
+		"set": "V_TRUCK_ILP",
+		"pos": Vector3(10, 0, 0),
+	}
+	sim.sound_emitter_events = [idle]
+
+	presenter.present()
+
+	assert_true(sim.sound_emitter_events.is_empty(),
+			"the simulation queue is consumed once per present")
+	assert_eq(audio.sound_emitter_calls.size(), 1)
+	if audio.sound_emitter_calls.size() == 1:
+		var batch: Array = audio.sound_emitter_calls[0]
+		assert_eq(batch.size(), 1)
+		assert_eq(batch[0], idle)
 	presenter.teardown()

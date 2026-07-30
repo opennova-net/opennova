@@ -9,6 +9,7 @@ class FakeWeaponPart:
 	var plays: Array = []
 	var times: Array[float] = []
 	var ctrl_values: Dictionary = {}
+	var lighting_contexts: Array = []
 
 	func play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
@@ -32,6 +33,19 @@ class FakeWeaponPart:
 
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
+
+	func set_entity_lighting_context(effect_scale: float, interior_lerp: bool,
+			interior_daylight: float) -> void:
+		lighting_contexts.append([
+			effect_scale, interior_lerp, interior_daylight])
+
+
+class FakeInteriorItemDb:
+	extends RefCounted
+	var transfers := {}
+
+	func get_light_transfer(item_id: int) -> float:
+		return float(transfers.get(item_id, 0.0))
 
 
 class FakeUserPointData:
@@ -62,11 +76,37 @@ class FakePosedWeaponPart:
 		return skeleton
 
 
-class ActionParticleHostHarness:
-	extends LocalPlayerHost
+# A minimal LocalPlayerHost stand-in serving only the public accessors
+# PlayerWeaponEffects resolves userpoints against.
+class FakeEffectsHost:
+	extends RefCounted
+	var parts: Array = []
+
+	func vm_parts() -> Array:
+		return parts
+
+	func viewmodel() -> Node3D:
+		return null
+
+	func held_weapon() -> Node3D:
+		return null
+
+	func camera() -> Camera3D:
+		return null
+
+	func is_third_person() -> bool:
+		return false
+
+
+class ActionParticleEffectsHarness:
+	extends PlayerWeaponEffects
+	var effects_host := FakeEffectsHost.new()
+
+	func _init() -> void:
+		setup(null, effects_host)
 
 	func configure_viewmodel_parts(parts: Array) -> void:
-		_vm_parts = parts
+		effects_host.parts = parts
 
 	func action_particle_world_position(userpoint: String) -> Vector3:
 		return _action_particle_world_position(userpoint)
@@ -87,34 +127,164 @@ class FakeTerrainData:
 		return hit
 
 
+# The value-only sim double behind FakeWorld.get_sim(): records the same state
+# the old GameWorld-forwarder stubs recorded, under NovaSimulation's native names.
+class FakeSim:
+	extends RefCounted
+	var has_player := true
+	var player_position := Vector3.ZERO
+	var player_yaw_deg := 0.0
+	var player_pitch_deg := 0.0
+	var player_team := 1
+	var input_calls: Array = []
+	var look_calls: Array = []
+	var stance_requests: Array = []
+	var eye_calls: Array = []
+	var weapon_input_calls: Array = []
+	var weapon_category_requests: Array[int] = []
+	var weapon_cycle_requests: Array[int] = []
+	var scope_toggle_requests := 0
+	var binocular_toggle_requests := 0
+	var nvg_toggle_requests := 0
+	var nvg_gain_requests: Array[int] = []
+	var camera_mode_calls: Array = []
+	var interior_item_id := 0
+	var anim_key := ""
+	var anim_phase_ticks := 0
+	var anim_source_key := ""
+	var anim_source_phase_ticks := 0
+	var anim_blend_weight := 1.0
+
+	func has_local_player() -> bool:
+		return has_player
+
+	func get_local_player_position() -> Vector3:
+		return player_position
+
+	func get_local_player_yaw_deg() -> float:
+		return player_yaw_deg
+
+	func get_local_player_pitch_deg() -> float:
+		return player_pitch_deg
+
+	func get_local_player_team() -> int:
+		return player_team
+
+	func get_local_player_anim_key() -> String:
+		return anim_key
+
+	func get_local_player_anim_phase_ticks() -> int:
+		return anim_phase_ticks
+
+	func get_local_player_anim_source_key() -> String:
+		return anim_source_key
+
+	func get_local_player_anim_source_phase_ticks() -> int:
+		return anim_source_phase_ticks
+
+	func get_local_player_anim_blend_weight() -> float:
+		return anim_blend_weight
+
+	func get_local_player_body_anim_slot() -> int:
+		return -1
+
+	func set_player_input(forward: bool, back: bool, left: bool, right: bool,
+			lean_left: bool, lean_right: bool, jump: bool) -> void:
+		input_calls.append({
+			"forward": forward,
+			"back": back,
+			"left": left,
+			"right": right,
+			"lean_left": lean_left,
+			"lean_right": lean_right,
+			"jump": jump,
+		})
+
+	func add_local_player_look(dx_px: float, dy_px: float) -> void:
+		look_calls.append(Vector2(dx_px, dy_px))
+
+	func request_local_player_stance(stance: int) -> bool:
+		stance_requests.append(stance)
+		return true
+
+	func set_local_player_eye(eye: Vector3, valid: bool) -> void:
+		eye_calls.append([eye, valid])
+
+	func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool,
+			reload_pressed: bool) -> void:
+		weapon_input_calls.append([fire_held, fire_pressed, reload_pressed])
+
+	func request_local_player_weapon_category(category: int) -> void:
+		weapon_category_requests.append(category)
+
+	func request_local_player_weapon_cycle(direction: int) -> void:
+		weapon_cycle_requests.append(direction)
+
+	func request_local_player_scope_toggle() -> bool:
+		scope_toggle_requests += 1
+		return true
+
+	func request_local_player_binoculars_toggle() -> bool:
+		binocular_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_toggle() -> bool:
+		nvg_toggle_requests += 1
+		return true
+
+	func request_local_player_nvg_gain(delta: int) -> int:
+		nvg_gain_requests.append(delta)
+		return delta
+
+	func set_local_player_camera_third_person(third_person: bool) -> void:
+		camera_mode_calls.append(third_person)
+
+	func local_player_interior_item_id() -> int:
+		return interior_item_id
+
+
+class FakeAvatar:
+	extends FakeWeaponPart
+	var body_calls: Array = []
+
+	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+		body_calls.append(["at", key, phase_ticks])
+
+	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+			target_key: String, target_phase_ticks: int, weight: float) -> void:
+		body_calls.append([
+			"blend", source_key, source_phase_ticks,
+			target_key, target_phase_ticks, weight])
+
+
 class FakeWorld:
 	extends Node3D
 	var terrain_data: FakeTerrainData = null
-	var input_calls: Array = []
 	var avatar_count := 0
 	var viewmodel_count := 0
 	var last_avatar: Node3D = null
 	var last_viewmodel: Node3D = null
 	var last_weapon_part: FakeWeaponPart = null
-	var _has_player := true
 	var _loaded := true
-	var player_position := Vector3.ZERO
-	var player_yaw_deg := 0.0
-	var player_pitch_deg := 0.0
-	var player_team := 1
+	var sim := FakeSim.new()
+	var item_db: FakeInteriorItemDb = null
 
 	func is_loaded() -> bool:
 		return _loaded
 
-	func has_local_player() -> bool:
-		return _has_player
+	func get_sim() -> FakeSim:
+		return sim
+
+	# No MissionRuntime in the harness: the aim-overlay seam reads null (no overlay).
+	func get_runtime():
+		return null
 
 	# The real builders return NovaObjectModel subtrees whose MeshInstance3D
 	# children hang under container/Robj/Skeleton3D nodes; a plain child mesh
 	# models that shape (layers live on the VisualInstance3D, not the root).
 	func build_local_player_avatar() -> Node3D:
 		avatar_count += 1
-		var node := Node3D.new()
+		var node := FakeAvatar.new()
 		node.add_child(MeshInstance3D.new())
 		add_child(node)
 		last_avatar = node
@@ -131,50 +301,11 @@ class FakeWorld:
 		last_weapon_part = part
 		return node
 
-	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool,
-			lean_left: bool, lean_right: bool, jump: bool) -> void:
-		input_calls.append({
-			"forward": forward,
-			"back": back,
-			"left": left,
-			"right": right,
-			"lean_left": lean_left,
-			"lean_right": lean_right,
-			"jump": jump,
-		})
-
-	var look_calls: Array = []
-	func add_local_player_look(dx_px: float, dy_px: float) -> void:
-		look_calls.append(Vector2(dx_px, dy_px))
-
-	var stance_requests: Array = []
-	func request_local_player_stance(stance: int) -> bool:
-		stance_requests.append(stance)
-		return true
-
 	func get_terrain_data() -> FakeTerrainData:
 		return terrain_data
 
-	func local_player_position() -> Vector3:
-		return player_position
-
-	func local_player_yaw_deg() -> float:
-		return player_yaw_deg
-
-	func local_player_pitch_deg() -> float:
-		return player_pitch_deg
-
-	func get_local_player_team() -> int:
-		return player_team
-
-	func local_player_anim_key() -> String:
-		return ""
-
-	func local_player_anim_phase_ticks() -> int:
-		return 0
-
-	func local_player_body_anim_slot() -> int:
-		return -1
+	func get_item_db():
+		return item_db
 
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
@@ -184,12 +315,7 @@ class FakeWorld:
 	var weapon_clear_calls := 0
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
-	var scope_toggle_requests := 0
-	var binocular_toggle_requests := 0
-	var nvg_toggle_requests := 0
-	var nvg_gain_requests: Array[int] = []
 	var nvg_view_calls: Array = []
-	var camera_mode_calls: Array = []
 	# The ordered action-sound + effect-world seams the host drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
 	var effect_world = null   # FakeEffectWorld
@@ -244,27 +370,15 @@ class FakeWorld:
 	func local_player_view():
 		return view
 
-	func request_local_player_scope_toggle() -> bool:
-		scope_toggle_requests += 1
-		return true
-
-	func request_local_player_binoculars_toggle() -> bool:
-		binocular_toggle_requests += 1
-		return true
-
-	func request_local_player_nvg_toggle() -> bool:
-		nvg_toggle_requests += 1
-		return true
-
-	func request_local_player_nvg_gain(delta: int) -> int:
-		nvg_gain_requests.append(delta)
-		return delta
-
 	func set_local_player_nvg_view(active: bool, gain: int) -> void:
 		nvg_view_calls.append([active, gain])
 
-	func set_local_player_camera_third_person(third_person: bool) -> void:
-		camera_mode_calls.append(third_person)
+	# No weapon.def in the harness: no viewmodel def and no held-weapon model.
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return null
+
+	func build_local_player_held_weapon(_graphic: String) -> Node3D:
+		return null
 
 
 func after_each() -> void:
@@ -284,8 +398,8 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 
 	host.before_world_tick(0.016)
 
-	assert_eq(world.input_calls.size(), 1)
-	var call: Dictionary = world.input_calls[0]
+	assert_eq(world.sim.input_calls.size(), 1)
+	var call: Dictionary = world.sim.input_calls[0]
 	assert_true(call["forward"])
 	assert_true(call["left"])
 	assert_true(call["lean_left"])
@@ -295,6 +409,60 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+
+
+func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> void:
+	var world := FakeWorld.new()
+	world.sim.interior_item_id = 101216
+	world.item_db = FakeInteriorItemDb.new()
+	world.item_db.transfers[101216] = 0.2
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, true, 0.2],
+			"the FP submit keeps effectScale 1 and uses the blink parent's transfer")
+	world.sim.interior_item_id = 0
+	host.after_world_tick()
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, false, 0.0],
+			"walking out refreshes the model lighting on the live render frame")
+
+
+func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
+	var world := FakeWorld.new()
+	world.sim.anim_source_key = "anim_idle"
+	world.sim.anim_source_phase_ticks = 12
+	world.sim.anim_key = "anim_death_bullet_head_left"
+	world.sim.anim_phase_ticks = 0
+	world.sim.anim_blend_weight = 0.0
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	var avatar := world.last_avatar as FakeAvatar
+	assert_not_null(avatar)
+	assert_eq(avatar.body_calls[0].slice(0, 5), [
+		"blend", "anim_idle", 12, "anim_death_bullet_head_left", 0])
+	assert_almost_eq(float(avatar.body_calls[0][5]), 0.0, 0.000001,
+			"the local third-person avatar keeps the outgoing death-switch pose")
 
 
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
@@ -376,8 +544,8 @@ func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking()
 
 	host.before_world_tick(0.016, false, false)
 
-	assert_eq(world.input_calls.size(), 1, "the live overlay still submits one input frame")
-	var call: Dictionary = world.input_calls[0]
+	assert_eq(world.sim.input_calls.size(), 1, "the live overlay still submits one input frame")
+	var call: Dictionary = world.sim.input_calls[0]
 	for key in ["forward", "back", "left", "right", "lean_left", "lean_right", "jump"]:
 		assert_false(bool(call[key]), "%s is neutral while the armory owns input" % key)
 
@@ -398,10 +566,10 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 	var motion := InputEventMouseMotion.new()
 	motion.relative = Vector2(17.0, -6.0)
 	assert_true(host.handle_input(motion, true))
-	assert_eq(world.look_calls.size(), 1)
-	assert_eq(world.look_calls[0], Vector2(17.0, -6.0))
+	assert_eq(world.sim.look_calls.size(), 1)
+	assert_eq(world.sim.look_calls[0], Vector2(17.0, -6.0))
 	assert_false(host.handle_input(motion, false), "inactive input is not forwarded")
-	assert_eq(world.look_calls.size(), 1)
+	assert_eq(world.sim.look_calls.size(), 1)
 
 
 func test_stance_keys_are_three_key_select_requests() -> void:
@@ -421,7 +589,7 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 		key.keycode = keycode
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
-	assert_eq(world.stance_requests, [2, 1, 0])
+	assert_eq(world.sim.stance_requests, [2, 1, 0])
 
 
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
@@ -438,9 +606,9 @@ func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 		key.physical_keycode = keycode
 		key.pressed = true
 		assert_true(host.handle_key_input(key, true))
-	assert_eq(world.binocular_toggle_requests, 1)
-	assert_eq(world.nvg_toggle_requests, 1)
-	assert_eq(world.nvg_gain_requests, [1, -1])
+	assert_eq(world.sim.binocular_toggle_requests, 1)
+	assert_eq(world.sim.nvg_toggle_requests, 1)
+	assert_eq(world.sim.nvg_gain_requests, [1, -1])
 
 
 func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
@@ -472,7 +640,9 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
-	var pass_cam: Camera3D = host.get("_vm_camera")
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"caster marker layers cannot make the reflection-only body visible to the player")
+	var pass_cam: Camera3D = host.viewmodel_rig().get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
 		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
@@ -505,6 +675,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"teardown() restores the camera's original marker-layer bits exactly")
 
 
 func test_camera_state_rides_the_sim_view() -> void:
@@ -566,15 +738,15 @@ func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	host.setup(world, camera)  # _reset_state syncs the initial mode
-	world.camera_mode_calls.clear()
+	world.sim.camera_mode_calls.clear()
 
 	var f4 := InputEventKey.new()
 	f4.keycode = KEY_F4
 	f4.pressed = true
 	assert_true(host.handle_key_input(f4, true))
-	assert_eq(world.camera_mode_calls, [true], "F4 pushes third person into the sim")
+	assert_eq(world.sim.camera_mode_calls, [true], "F4 pushes third person into the sim")
 	assert_true(host.handle_key_input(f4, true))
-	assert_eq(world.camera_mode_calls, [true, false], "and back")
+	assert_eq(world.sim.camera_mode_calls, [true, false], "and back")
 
 
 # The game shell calls setup() from its own _ready — while the player camera's
@@ -609,7 +781,7 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	add_child_autofree(vp)
 	await get_tree().process_frame
 
-	var pass_layer: CanvasLayer = trigger.host.get("_vm_pass_layer")
+	var pass_layer: CanvasLayer = trigger.host.viewmodel_rig().get("_vm_pass_layer")
 	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
 	if pass_layer != null:
 		assert_true(pass_layer.is_inside_tree(),
@@ -700,7 +872,7 @@ func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> v
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_team = 0xFE
+	world.sim.player_team = 0xFE
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	host.setup(world, camera)
@@ -716,7 +888,7 @@ func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> v
 			"a third-person frame does not execute any FP CTRL writer")
 
 	host.set_third_person(false)
-	world.player_team = 2
+	world.sim.player_team = 2
 	host.after_world_tick()
 	assert_eq(world.last_weapon_part.ctrl_values.get("TEX_TEAM"), 2)
 	world.view.binoculars_view_active = true
@@ -808,8 +980,7 @@ func _weapon_particle_event(kind: int, effect: String, scope_settled := false,
 
 
 func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
-	var host := ActionParticleHostHarness.new()
-	add_child_autofree(host)
+	var effects := ActionParticleEffectsHarness.new()
 	var part := FakePosedWeaponPart.new()
 	part.transform = Transform3D(Basis.from_euler(Vector3(0.0, 0.3, 0.0)), Vector3(4, 2, -3))
 	add_child_autofree(part)
@@ -824,7 +995,7 @@ func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
 	part.add_child(skeleton)
 	part.skeleton = skeleton
 	skeleton.force_update_all_bone_transforms()
-	host.configure_viewmodel_parts([part])
+	effects.configure_viewmodel_parts([part])
 
 	var raw_position: Vector3 = part.data.info["position"]
 	var global_rest := skeleton.get_bone_global_rest(0)
@@ -835,10 +1006,10 @@ func test_action_particle_userpoint_follows_the_live_weapon_bone_pose() -> void:
 	var expected_forward := (skeleton.global_transform.basis * posed.basis
 			* rest_local_forward).normalized()
 
-	assert_almost_eq(host.action_particle_world_position("mflash01"),
+	assert_almost_eq(effects.action_particle_world_position("mflash01"),
 			expected_position, Vector3(0.0001, 0.0001, 0.0001),
 			"muzzle position follows the fake-skinned weapon bone")
-	assert_almost_eq(host.action_particle_world_forward("mflash01"),
+	assert_almost_eq(effects.action_particle_world_forward("mflash01"),
 			expected_forward, Vector3(0.0001, 0.0001, 0.0001),
 			"muzzle direction follows the same live weapon bone")
 
@@ -855,8 +1026,8 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	add_child_autofree(fx)
-	world.player_position = Vector3(17.0, 2.0, -9.0)
-	world.player_yaw_deg = 35.0
+	world.sim.player_position = Vector3(17.0, 2.0, -9.0)
+	world.sim.player_yaw_deg = 35.0
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
@@ -883,7 +1054,7 @@ func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> 
 	add_child_autofree(camera)
 	add_child_autofree(host)
 	add_child_autofree(fx)
-	world.player_position = Vector3(6.0, 1.0, -4.0)
+	world.sim.player_position = Vector3(6.0, 1.0, -4.0)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
@@ -1373,9 +1544,9 @@ func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
-	world.player_yaw_deg = 0.0
-	world.player_pitch_deg = 0.0
+	world.sim.player_position = Vector3.ZERO
+	world.sim.player_yaw_deg = 0.0
+	world.sim.player_pitch_deg = 0.0
 	world.terrain_data = FakeTerrainData.new()
 	# Yaw 0 / pitch 0 looks down -Z; the eye sits PLAYER_EYE_HEIGHT above the feet,
 	# so a hit 250 u ahead at eye height is 250 u from the player position too.
@@ -1398,7 +1569,7 @@ func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> 
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
+	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = FakeTerrainData.new()  # all-NAN = miss
 	host.setup(world, camera)
 
@@ -1413,7 +1584,7 @@ func test_aim_range_survives_a_world_with_no_terrain() -> void:
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
-	world.player_position = Vector3.ZERO
+	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = null
 	host.setup(world, camera)
 

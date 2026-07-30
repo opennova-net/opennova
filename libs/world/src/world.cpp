@@ -8,6 +8,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/vehicle_attach.h"
+#include "world/vehicle_sound.h"
 
 #include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
@@ -77,6 +78,7 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
     // occupant — leaves the latch untouched.
     if (!vehicle.primary_occupant.valid() || vehicle.primary_occupant != occupant)
         return false;
+    stop_ground_vehicle_sound(world, vehicle);
     vehicle.primary_occupant = EntityHandle{};
     emit_vehicle_control_stopped(world, vehicle);
     return true;
@@ -152,11 +154,17 @@ bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
     }
 }
 
+static int16_t mounted_pose_yaw(const Entity &vehicle, const Seat &seat) {
+    if (seat.attachment_frame)
+        return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    if (seat.type == SeatType::Gunner)
+        return static_cast<int16_t>(vehicle.yaw - seat.yaw_offset);
+    return static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+}
+
 void presnap_vehicle_attach_heading(World &world, Entity &occupant,
                                     const Entity &vehicle, const Seat &seat) {
-    const int16_t seat_yaw = seat.type == SeatType::Gunner
-            ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
-            : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    const int16_t seat_yaw = mounted_pose_yaw(vehicle, seat);
     occupant.yaw = seat_yaw;
     if (world.ai == nullptr) return;
     AiEntity *body = world.ai->for_handle(occupant.handle);
@@ -192,9 +200,7 @@ void pose_mounted_occupant(World &world, Entity &occ, const Entity &vehicle,
     occ.position.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
     occ.position.y = vehicle.position.y + static_cast<float>(L.x * sa + L.y * ca);
     occ.position.z = vehicle.position.z + L.z;
-    occ.yaw = (seat.type == SeatType::Gunner)
-                      ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
-                      : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
+    occ.yaw = mounted_pose_yaw(vehicle, seat);
     occ.pitch = vehicle.pitch;
     occ.roll = vehicle.roll;
 }
@@ -245,6 +251,7 @@ static void pose_emplacement_attachments(World &world) {
         anchor.bone_index = child->emplacement_bone;
         anchor.seat_local = child->emplacement_local;
         anchor.yaw_offset = child->emplacement_yaw_offset;
+        anchor.attachment_frame = true;
         pose_mounted_occupant(world, *child, *parent, anchor);
     });
 
@@ -599,15 +606,21 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
     occ->mounted = true;
     if (s.type == SeatType::Gunner) {
-        // UseGun clears the transient 0xA000 pair but does not set the generic
-        // carried/vehicle flag. [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
-        occ->flags &= ~0xA000u;
-        occ->engine_flags &= ~0xA000u;
+        // UseGun clears the transient drowning/in-air pair but does not set the
+        // generic carried/vehicle flag. [orig: Entity_AttachToUseGunSlot
+        // @0x546c56-0x546c7c clears 0xA000]
+        occ->flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
+        occ->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
     } else {
-        // Ordinary vehicle slots clear 0xA000 and mark the occupant carried.
-        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
-        occ->flags = (occ->flags & 0xFFFF5FBFu) | 0x40u;
-        occ->engine_flags = (occ->engine_flags & 0xFFFF5FBFu) | 0x40u;
+        // Ordinary vehicle slots clear the pair and mark the occupant carried.
+        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775, the
+        // `& 0xFFFF5FBF | 0x40` form — the masks are static_asserted at the
+        // vehicle_attach.cpp twin]
+        occ->flags = (occ->flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                     kEntityFlagMounted;
+        occ->engine_flags =
+                (occ->engine_flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                kEntityFlagMounted;
     }
     occ->mounted_config_valid = tgt->emplaced_config_valid;
     occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
@@ -673,8 +686,8 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
     vehicle_release_use_gun_slot(*occ, tgt);
     occ->mounted = false;
-    occ->flags &= ~0x40u;
-    occ->engine_flags &= ~0x40u;
+    occ->flags &= ~kEntityFlagMounted;
+    occ->engine_flags &= ~kEntityFlagMounted;
     occ->mount_target = EntityHandle{};
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;
@@ -921,6 +934,10 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
         }
     }
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
+    // Audio-less/headless hosts never drain presentation. Retire their bounded
+    // latest-intent rows on the same logic clock so old entity lifetimes cannot
+    // occupy mailbox admission indefinitely.
+    sound_emitters.prune(logic_tick);
 }
 
 // Structural translation of Server_ProcessRoundEnd @0x5164f0 at SP altitude.
@@ -1011,6 +1028,8 @@ void World::restore(const Snapshot &s) {
     cached = CachedFrameState{};
     cached.local_player = s.local_player;
     effects.clear();
+    slot_sounds.clear();
+    sound_emitters.clear();
     round_sim.reset();
     explosions.reset();
     throwables.reset();

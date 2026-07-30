@@ -617,7 +617,7 @@ func _describe_texture_status(material_index: int, texture_info: Dictionary, sup
 func _shader_catalog() -> Array:
 	if not _shader_catalog_cache.is_empty():
 		return _shader_catalog_cache
-	if object_editor != null and object_editor.object_data != null and object_editor.object_data.has_method("get_shader_catalog"):
+	if object_editor != null and object_editor.object_data != null:
 		var catalog: Array = object_editor.object_data.get_shader_catalog()
 		if not catalog.is_empty():
 			_shader_catalog_cache = catalog

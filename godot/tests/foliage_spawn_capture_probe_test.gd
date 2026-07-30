@@ -12,9 +12,9 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 		"Probe should boot the real play-in-editor GameWorld.")
 	assert_true(source.contains("_mission_workspace.play_controller()"),
 		"Probe should bind the workspace's public live-play seam.")
-	assert_true(source.contains("world.has_local_player()"),
+	assert_true(source.contains("world.get_sim().has_local_player()"),
 		"Probe should fail unless the mission spawned a local player.")
-	assert_true(source.contains("world.local_player_position()"),
+	assert_true(source.contains("world.get_sim().get_local_player_position()"),
 		"Probe should record the real local-player anchor.")
 	assert_true(source.contains("world.set_foliage_hidden(true)"),
 		"Foliage-hidden A/B should use GameWorld's public API.")
@@ -22,9 +22,10 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 		"Capture filenames should identify the mission under comparison.")
 	assert_true(source.contains('_capture_stem + "_spawn_default.png"'),
 		"Each mission should keep its own exact-spawn capture.")
-	assert_true(source.contains("workstation.set_resource_root_dir(resource_dir, false)"),
-		"The probe should mount its resource root transiently.")
-	assert_false(source.contains("ResourceDirSettings.set_resource_dir(resource_dir)"),
+	assert_true(source.contains(
+		"workstation.set_resource_root_dir(mission_resource_dir, false)"),
+		"The probe should mount its loose authoring root transiently.")
+	assert_false(source.contains("ResourceDirSettings.set_resource_dir("),
 		"The probe must not overwrite the user's persisted resource root.")
 	for forbidden in [
 		"_find_painted", "get_foliage_index_world", "camera.global_position =",
@@ -32,6 +33,58 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 	]:
 		assert_false(source.contains(forbidden),
 			"Probe must not search painted cells, teleport the camera, or synthesize input: %s" % forbidden)
+
+
+func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners() -> void:
+	assert_eq(ProbeScript.runtime_mount_validation_error(
+		"revx02", "revx02", true), "")
+	assert_ne(ProbeScript.runtime_mount_validation_error(
+		"revx02", "", true), "",
+		"A silent expansion-to-base fallback must make the capture fail.")
+	assert_ne(ProbeScript.runtime_mount_validation_error(
+		"revx02", "revx02", false), "",
+		"A loose/editor root must not masquerade as the packed comparison mount.")
+
+	var winning_entries := [
+		{
+			"logical_name": "00TRa.bms",
+			"source_type": "pff",
+			"archive_path": "C:/Game/JO/localres.pff",
+		},
+		{
+			"logical_name": "00TRa.trn",
+			"source_type": "pff",
+			"archive_path": "C:/Game/JO/expansion/revx02/RevX02.pff",
+		},
+		{
+			"logical_name": "00TRa.env",
+			"source_type": "pff",
+			"archive_path": "C:/Game/JO/expansion/revx02/RevX02.pff",
+		},
+	]
+	assert_eq(ProbeScript.runtime_source_validation_error(
+		"revx02", "00TRa.bms", winning_entries), "")
+	winning_entries[0]["archive_path"] = ""
+	assert_ne(ProbeScript.runtime_source_validation_error(
+		"revx02", "00TRa.bms", winning_entries), "",
+		"The compared mission itself must name its packed winning archive.")
+	winning_entries[0]["archive_path"] = "C:/Game/JO/localres.pff"
+	winning_entries[2]["source_type"] = "loose"
+	assert_ne(ProbeScript.runtime_source_validation_error(
+		"revx02", "00TRa.bms", winning_entries), "",
+		"Every reported comparison input must name its packed winning source.")
+
+	var source := FileAccess.get_file_as_string(PROBE_PATH)
+	assert_true(source.contains('OS.get_environment("NOVA_MISSION_RESOURCE_DIR")'),
+		"The loose authoring root must be configured separately.")
+	assert_true(source.contains('OS.get_environment("NOVA_RUNTIME_RESOURCE_DIR")'),
+		"The packed runtime root must be configured separately.")
+	assert_true(source.contains('OS.get_environment("NOVA_EXPANSION")'),
+		"The probe must receive an explicit expansion request.")
+	assert_true(source.contains("mount_runtime(runtime_resource_dir, requested_expansion"),
+		"The played world must use a packed mount with the requested expansion.")
+	assert_true(source.contains("list_file_entries()"),
+		"The probe must report the VFS's winning source entries.")
 
 
 func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:

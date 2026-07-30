@@ -78,9 +78,20 @@ enum : int32_t {
     kSlash = 7,
 };
 }
+inline constexpr uint32_t kAmmoFlagIgnore = 0x2u;
+inline constexpr uint32_t kAmmoFlagDetonateSatchels = 0x20u;
+inline constexpr uint32_t kAmmoFlagNoGravity = 0x100u;
+inline constexpr uint32_t kAmmoFlagHasItem = 0x200u;
+inline constexpr uint32_t kAmmoFlagInstantKillZone = 0x400u;
+inline constexpr uint32_t kAmmoFlagUseOwnMove = 0x2000u;
+inline constexpr uint32_t kAmmoFlagNoAge = 0x4000u;
+inline constexpr uint32_t kAmmoFlagForceTracer = 0x8000u;
+inline constexpr uint32_t kAmmoFlagClaymore = 0x20000u;
 inline constexpr uint32_t kAmmoFlagNoOItems = 0x80000u;
 inline constexpr uint32_t kAmmoFlagNoMItems = 0x100000u;
 inline constexpr uint32_t kAmmoFlagNoDItems = 0x200000u;
+inline constexpr uint32_t kAmmoFlagIgnorFoilage = 0x4000000u; // sic — the witnessed token spelling
+// (parity static_asserts against DEF_AMMO_FLAG_* live in npruntime/src/weapon_table_build.cpp)
 
 struct AmmoTableEntry {
     std::string name;               // record +144 [orig: AmmoDef_AllocateSlot copy]

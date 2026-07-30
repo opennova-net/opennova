@@ -23,7 +23,7 @@ signal closed()
 # (the SAME entry the LAN browser + NW_LAN_JOIN env use — one in-match joiner seam, ADR 0009).
 signal join_in_match_requested(target: JoinTarget)
 # Host a NovaWorld game. The panel supplies the gate (the server it's connected to); MainGame fills in
-# the mission + callsign and stands up a browsable listen host (game_world._maybe_start_nw_host).
+# the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host).
 signal host_requested(config: HostSessionConfig)
 
 var _client            # NovaWorldClient (created at runtime if the class exists)
@@ -385,7 +385,7 @@ func _on_joined_game(host: String, port: int) -> void:
 
 
 # Host a NovaWorld game: hand the gate (the server we're connected to) up to MainGame, which fills in
-# the mission + callsign and stands up a browsable listen host (game_world._maybe_start_nw_host). We
+# the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host). We
 # register on the OpenNova gate only — never advertise a host on NovaLogic's live service.
 func _on_host_pressed() -> void:
 	if _target == NovaWorldSettings.Target.REAL:

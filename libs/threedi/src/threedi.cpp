@@ -1,12 +1,12 @@
 #include "threedi/threedi.h"
 
+#include "threedi/threedi_3di3.h" // THREEDI_3DI3_PARENT_FLAG / _LENGTH_MASK
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define PARENT_FLAG 0x80000000u
-#define LENGTH_MASK 0x00FFFFFFu
 
 static int read_u32(FILE *f, uint32_t *out)
 {
@@ -46,8 +46,8 @@ static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, Threed
                        | ((uint32_t)buf[cursor + 6] << 16)
                        | ((uint32_t)buf[cursor + 7] << 24);
 
-    out_chunk->is_parent = (len_flags & PARENT_FLAG) != 0;
-    out_chunk->content_len = len_flags & LENGTH_MASK;
+    out_chunk->is_parent = (len_flags & THREEDI_3DI3_PARENT_FLAG) != 0;
+    out_chunk->content_len = len_flags & THREEDI_3DI3_LENGTH_MASK;
     out_chunk->offset = cursor;
 
     size_t content_start = cursor + 8;

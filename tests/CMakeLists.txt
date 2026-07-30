@@ -99,6 +99,10 @@ target_link_libraries(def_comment_strip_test PRIVATE opennova_def)
 target_include_directories(def_comment_strip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME def_comment_strip COMMAND def_comment_strip_test)
 
+add_executable(def_flag_parity_test def/def_flag_parity_test.cpp)
+target_link_libraries(def_flag_parity_test PRIVATE opennova_def)
+add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
+
 foreach(test items weapons ammo hudpos item_attrib item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_def)
@@ -987,6 +991,12 @@ add_executable(infantry_test world/infantry_test.cpp)
 target_link_libraries(infantry_test PRIVATE opennova_world)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
+# Like player_spawn_test below, MSVC coalesces this file's many scoped World
+# fixtures into one Release stack frame. The blend-transition grills add nested
+# motor calls on top of that frame, so leave the test runner deliberate headroom.
+if(MSVC)
+    target_link_options(infantry_test PRIVATE "/STACK:8388608")
+endif()
 add_test(NAME infantry COMMAND infantry_test)
 
 # The infantry slot-sound emissions (footsteps/foley/landing/screams).

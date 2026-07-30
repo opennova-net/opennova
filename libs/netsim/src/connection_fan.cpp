@@ -8,6 +8,7 @@
 
 #include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
+#include <npwire/ingame_message_id.h>
 #include <world/geom.h>              // to_fixed
 
 #include "netsim/entity_wire_bridge.h" // health_classification_byte (the field-17 pack)
@@ -607,14 +608,14 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 	Datagram dg;
 	while (conn.transport->host_recv(dg)) {
 		// §5.10 player-input uplink only this increment (other in-match C2S tags TBD).
-		if (dg.tag != 0x0C) continue;
+		if (dg.tag != c2s::ENTITY_UPLINK) continue;
 
 		// 5-byte sub-header [u16 handle][u16 itemTypeId][u8 sub_op], then the 43-B body.
 		std::size_t consumed = 0;
 		EntityPacketSubHeader hdr;
 		if (!decode_entity_packet_sub_header(dg.body.data(), dg.body.size(), hdr, consumed))
 			continue;
-		if (hdr.sub_op != 0x0A) continue; // 0x0A=extended (type 10); 0x0B compact = later
+		if (hdr.sub_op != ENTITY_SUB_OP_EXTENDED) continue; // compact (type 11) = later
 
 		// [D-NET-119] Owner gate: a connection may only SNAP its OWN entity. The original resolves
 		// the wire handle (pool<<12|slot) to an entity and verifies `entity == *owner_ctx` (the
@@ -720,7 +721,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
 		}
 	}
-	conn.transport->host_send(kTag0aFrameUpdate,
+	conn.transport->host_send(s2c::PER_FRAME_UPDATE,
 	                          build_0a_frame(anchor, selected, flags2, hs, game_type, w.subgoals,
 	                                         std::move(rounds)));
 }

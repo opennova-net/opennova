@@ -14,6 +14,7 @@
 #include <mission/bms.h>                  // bms::File, bms::encode_header_blob (0x0B body)
 #include <netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
+#include <npwire/ingame_message_id.h>
 #include <world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
@@ -73,7 +74,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // SP clears it
 	if (!gs.server_password.empty()) flags |= 0x8u;
 	if ((gs.game_type & 0x10000u) != 0) {     // team game
-		if ((gs.mp_attributes & 4u) != 0) flags |= 0x4u;
+		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= 0x4u;
 		if (!gs.side_a_password.empty()) flags |= 0x20u;
 		if (!gs.side_b_password.empty()) flags |= 0x10u;
 	}
@@ -276,15 +277,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	if (b.sync_state == 2) {
 		// Player-sync track: one tag per subphase (8..20), then -> world-stream.
 		switch (b.player_sync_subphase) {
-		case 8:  tag = 0x2C; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
-		case 9:  tag = 0x08; action = Action::EmitBody; break;  // ServerConfig_SerializeToPacket @0x505bd0
+		case 8:  tag = s2c::MISSION_MAP_NAMES; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
+		case 9:  tag = s2c::SESSION_CONFIG; action = Action::EmitBody; break;  // ServerConfig_SerializeToPacket @0x505bd0
 		case 10: case 11: case 12: case 13: case 14: case 15:
-		         tag = 0x2A; action = Action::EmitBody; break;  // NetPacket_CopyTenBytes @0x503900 (×6, table @0x82F1D8)
-		case 16: tag = 0x1C; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x1C empty payload]
-		case 17: tag = 0x0B; action = Action::EmitBody; break;  // bms::encode_header_blob (§5.4, 616 B)
-		case 18: tag = 0x66; action = Action::EmitBody; break;  // NetPacket_SerializeWeaponRestrictionTable @0x5102c0
-		case 19: tag = 0x76; action = Action::EmitBody; break;  // NetPacket_WriteServerTick16 @0x510350
-		case 20: tag = 0x11; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
+		         tag = s2c::CHAT_HISTORY; action = Action::EmitBody; break;  // NetPacket_CopyTenBytes @0x503900 (×6, table @0x82F1D8)
+		case 16: tag = s2c::NOOP; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x1C empty payload]
+		case 17: tag = s2c::BMS_HEADER; action = Action::EmitBody; break;  // bms::encode_header_blob (§5.4, 616 B)
+		case 18: tag = s2c::WEAPON_RESTRICTIONS; action = Action::EmitBody; break;  // NetPacket_SerializeWeaponRestrictionTable @0x5102c0
+		case 19: tag = s2c::SERVER_TICK16; action = Action::EmitBody; break;  // NetPacket_WriteServerTick16 @0x510350
+		case 20: tag = s2c::DISCONNECT_UNLOCK; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
 		default: break;
 		}
 	} else if (b.sync_state == 4) {
@@ -410,7 +411,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			break;
 		}
 		case 6: break; // 0x7E briefing text — deferred (no MissionText wired)
-		case 7: tag = 0x1A; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
+		case 7: tag = s2c::WAIT_FOR_GAME_START_ACK; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
 		case 8: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
 			// Without it a retail joiner world-loads but stays undeployed (floods C2S 0x0f, "stuck at 7%").
 			// 0x42 input-flags, 0x0F world-state-load (clears the client's dword_81474C load-gate + queues
@@ -450,7 +451,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		break;
 	case Action::EmitBody: {
 		std::vector<uint8_t> body;
-		if (tag == 0x0B) {
+		if (tag == s2c::BMS_HEADER) {
 			if (ctx.mission != nullptr) {
 				std::string err;
 				if (!bms::encode_header_blob(*ctx.mission, body, err)) {
@@ -462,17 +463,17 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				log_deferred_once(tag); // no mission wired -> skip 0x0B, never fabricate the header
 				action = Action::SkipSilent;
 			}
-		} else if (tag == 0x2C) {
+		} else if (tag == s2c::MISSION_MAP_NAMES) {
 			body = serialize_server_name_map(ctx.config);
-		} else if (tag == 0x08) {
+		} else if (tag == s2c::SESSION_CONFIG) {
 			body = serialize_server_config(ctx);
-		} else if (tag == 0x2A) {
+		} else if (tag == s2c::CHAT_HISTORY) {
 			body.assign(k0x2aRecord.begin(), k0x2aRecord.end());
-		} else if (tag == 0x66) {
+		} else if (tag == s2c::WEAPON_RESTRICTIONS) {
 			body = serialize_weapon_restrictions(ctx);
-		} else if (tag == 0x76) {
+		} else if (tag == s2c::SERVER_TICK16) {
 			body = serialize_server_tick16(now_tick);
-		} else if (tag == 0x1A) {
+		} else if (tag == s2c::WAIT_FOR_GAME_START_ACK) {
 			body = serialize_timestamp(now_tick);
 		}
 		if (action == Action::EmitBody) step.messages.push_back(InitialStateMessage{tag, std::move(body)});

@@ -458,7 +458,7 @@ Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctr
 			global_control_values_from_dict(p_ctrl_values);
 	for (size_t i = 0; i < ir.light_count; ++i) {
 		const ThreediIRLight &light = ir.lights[i];
-		if ((light.flags & 0x04) != 0) {
+		if ((light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_OBJECTS) != 0) {
 			continue;
 		}
 		ThreediLight runtime_light = {};
@@ -507,8 +507,8 @@ Array NovaObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctr
 		entry["atten_start"] = light.attenuation_start;
 		entry["atten_end"] = light.attenuation_end;
 		entry["subobject"] = light.part_index;
-		entry["disable_corona"] = (light.flags & 0x01) != 0;
-		entry["disable_lightterrain"] = (light.flags & 0x02) != 0;
+		entry["disable_corona"] = (light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_CORONA) != 0;
+		entry["disable_lightterrain"] = (light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_TERRAIN) != 0;
 		entry["disable_lightobjects"] = false;
 		out.push_back(entry);
 	}

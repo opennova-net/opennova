@@ -978,6 +978,8 @@ inline bool resolve_model_mounted_pose(
 	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
 	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
 	const Vector3 authored_model_position = userpoint.get("position", Vector3());
+	const Vector3 authored_model_direction =
+			userpoint.get("rotation", Vector3());
 	if (part_index < 0 || !finite_vector3(authored_model_position)) return false;
 
 	constexpr int lod_index = 0;
@@ -1014,15 +1016,55 @@ inline bool resolve_model_mounted_pose(
 			static_cast<float>(-live_world_position.z),
 			static_cast<float>(live_world_position.y)};
 
-	const double baseline_yaw =
-			seat.type == opennova::world::SeatType::Gunner
-			? static_cast<double>(carrier.yaw - seat.yaw_offset)
-			: static_cast<double>(carrier.yaw + seat.yaw_offset);
-	const Basis baseline_basis = godot_model_basis_from_mission_euler(
-			carrier.pitch, baseline_yaw, carrier.roll);
-	const Basis part_delta = live_part.basis * rest_part.basis.inverse();
-	Basis live_basis = carrier_basis * part_delta *
-			carrier_basis.inverse() * baseline_basis;
+	Basis live_basis;
+	if (seat.attachment_frame &&
+			finite_vector3(authored_model_direction) &&
+			authored_model_direction.length_squared() > 1.0e-8) {
+		// An addeweap child owns the complete EWeap userpoint frame. Build the
+		// same direction look-at frame retail multiplies through the live bone:
+		// forward = direction; right = (forward.z, 0, -forward.x);
+		// up = forward x right. Retail's result is a row-vector render matrix,
+		// so transpose and conjugate by the loader's X mirror exactly as
+		// panm_matrix_to_transform does before composing it in Godot. The
+		// rest-bone inverse then makes that authored model-space frame
+		// part-local; the live bone carries both position and orientation
+		// through PANM.
+		// [orig: build_bone_attachment_matrix @0x56C630;
+		// build_direction_look_at_matrix @0x612C90]
+		const Vector3 forward = authored_model_direction.normalized();
+		Vector3 right(forward.z, 0.0, -forward.x);
+		if (right.length_squared() <= 1.0e-8)
+			right = Vector3(1.0, 0.0, 0.0);
+		else
+			right.normalize();
+		Vector3 up = forward.cross(right);
+		if (up.length_squared() <= 1.0e-8) return false;
+		up.normalize();
+		const Basis retail_frame(right, up, forward);
+		const Basis render_x_flip(
+				Vector3(-1.0, 0.0, 0.0),
+				Vector3(0.0, 1.0, 0.0),
+				Vector3(0.0, 0.0, 1.0));
+		const Basis authored_basis =
+				render_x_flip * retail_frame.transposed() * render_x_flip;
+		const Basis attachment_in_part =
+				rest_part.basis.inverse() * authored_basis;
+		live_basis =
+				carrier_basis * live_part.basis * attachment_in_part;
+	} else {
+		const double baseline_yaw =
+				seat.attachment_frame
+				? static_cast<double>(carrier.yaw + seat.yaw_offset)
+				: seat.type == opennova::world::SeatType::Gunner
+				? static_cast<double>(carrier.yaw - seat.yaw_offset)
+				: static_cast<double>(carrier.yaw + seat.yaw_offset);
+		const Basis baseline_basis = godot_model_basis_from_mission_euler(
+				carrier.pitch, baseline_yaw, carrier.roll);
+		const Basis part_delta =
+				live_part.basis * rest_part.basis.inverse();
+		live_basis = carrier_basis * part_delta *
+				carrier_basis.inverse() * baseline_basis;
+	}
 	if (!finite_basis(live_basis) ||
 			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
 		return false;

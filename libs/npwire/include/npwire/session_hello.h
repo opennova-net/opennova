@@ -195,7 +195,9 @@ std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
 //  NapiNPMessage_Create(msg_id 3, msg_class 1) @0x627fc0; receiver
 //  CNapiNPConnection_HandleDescriptionPacket @0x621ae0 (g_np_msginfo_highbit @0x849e80 row 3),
 //  TLV walk @0x621b8c..0x621c7d, terminal state @0x621d53..0x621d6b]
-constexpr uint16_t PROTOCOL_TAG_CONNECTION_DESCRIPTION = 0x103;
+// The tag constant PROTOCOL_TAG_CONNECTION_DESCRIPTION lives in
+// npwire/protocol_message.h (the full_tag/high-bit home); only the TLV body
+// parser lives here, beside its ClientGoodBye TLV sibling.
 
 struct DisconnectEvent {
 	uint32_t ds = 0;    // sender role (1 server / 2 client) — the receiver DISCARDS it and

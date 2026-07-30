@@ -33,6 +33,9 @@ class StubSim:
 	func drain_tracer_trails() -> Array:
 		return []
 
+	func drain_sound_emitters() -> Array:
+		return []
+
 
 class StubFx:
 	extends RefCounted

@@ -113,6 +113,12 @@ public:
 		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // body-clip phase in IDA half-frame ticks; -1 when the compact omits it
+		// The authoritative outgoing PRIMARY channel and exact float32 target
+		// weight. Host/NPC rows carry the live AnimMap tuple; remote-request rows
+		// leave source=-1/weight=1 and reconstruct it at the receive-side FSM.
+		PF_ANIM_SOURCE_STATE,
+		PF_ANIM_SOURCE_PHASE_TICKS,
+		PF_ANIM_BLEND_WEIGHT,
 		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
 		// A transition state observed and then OVERWRITTEN within one decode fold
 		// (several 0x0A datagrams can apply between present drains). Retail applies
@@ -233,6 +239,14 @@ public:
 		SEAT_GUNNER = 3,
 		SEAT_ARMORY_POINT = 4,
 		SEAT_DRIVER = 5,
+	};
+
+	// local_player_blink_flags() letter bits GDScript gates the render passes
+	// on — mirrors world/collision.h kBlinkIndoorsBit/kBlinkWaterOffBit
+	// (static_asserts in nova_simulation_occlusion.cpp pin them).
+	enum BlinkFlag {
+		BLINK_INDOORS = 0x2,
+		BLINK_WATER_OFF = 0x8,
 	};
 
 	// The WAC/AI attach-to-seat command ids (world.h SeatSelectionMode maps
@@ -1143,6 +1157,9 @@ public:
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
 	int get_local_player_anim_phase_ticks() const;
+	String get_local_player_anim_source_key() const;
+	int get_local_player_anim_source_phase_ticks() const;
+	float get_local_player_anim_blend_weight() const;
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
@@ -1371,6 +1388,13 @@ public:
 	// slot} — played by the fire present pass at full volume
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
+	// Drain persistent entity-attached emitter registrations. Producers refresh
+	// a keyed (source_spawn_id, lane) intent; the audio host expands `set` into
+	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
+	// Rows are {source_spawn_id, handle, source_bms_id, pos, lane, slot,
+	// lifetime, emitted_tick, pitch_q16, volume_q8_8, source_only, set}.
+	// [orig: SoundEmitter_Register @0x529270]
+	Array drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
 	// framed per channel as [style_id, age, count, then count x (x, y, z, w)] in
@@ -1715,6 +1739,12 @@ public:
 	// 0x800000]. The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;
 	int local_player_blink_flags() const;
+	// items.def id of the pool-2 building encoded by blink_hits[0], or 0 when
+	// the player is not inside a blink volume. Entity::item_id is the raw BMS
+	// type, so this accessor applies mission::kItemIdOffset for database lookup.
+	// Lighting keys from hit PRESENCE, independently of the aggregate
+	// "indoors" flag bit.
+	int local_player_interior_item_id() const;
 
 	// Sound-occlusion distance inflation for the audio host [orig:
 	// Sound_ApplyOcclusionDistance @0x529970 — two LOS rays through terrain +

@@ -182,9 +182,9 @@ Dictionary NovaObjectData::get_light_info(int p_index) const {
 	info["color_end"] = Color(light.color_end[0], light.color_end[1], light.color_end[2], 1.0f);
 	info["falloff_deg"] = static_cast<int>(light.falloff);
 	info["subobject"] = light.part_index;
-	info["disable_corona"] = (light.flags & 0x01) != 0;
-	info["disable_lightterrain"] = (light.flags & 0x02) != 0;
-	info["disable_lightobjects"] = (light.flags & 0x04) != 0;
+	info["disable_corona"] = (light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_CORONA) != 0;
+	info["disable_lightterrain"] = (light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_TERRAIN) != 0;
+	info["disable_lightobjects"] = (light.flags & THREEDI_IR_LIGHT_FLAG_DISABLE_OBJECTS) != 0;
 	info["colorgen_style"] = static_cast<int>(light.style);
 	info["colorgen_phase"] = static_cast<int>(light.phase);
 	info["colorgen_rate"] = static_cast<int>(light.rate);

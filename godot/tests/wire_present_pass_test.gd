@@ -2,6 +2,7 @@ extends GutTest
 
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://engine/world/present_held_weapon.gd")
 
 
 class FakeModel:
@@ -10,26 +11,42 @@ class FakeModel:
 	var right_hand_collapse_calls: Array[bool] = []
 	var weapon_channel_calls: Array = []
 	var body_calls: Array = []
+	var remote_tick_calls: Array[int] = []
+	var remote_tick_results: Array[bool] = []
 	var remote_body_calls: Array = []
+	var remote_apply_results: Array[bool] = []
 	var reset_remote_body_calls := 0
 	var part_calls: Array = []
 	var cleared_part_channels: Array[int] = []
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
+	var shadow_caster_enabled := false
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append(["at", key, phase_ticks])
+		pose_call_order.append("body")
+	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+			target_key: String, target_phase_ticks: int, weight: float) -> void:
+		body_calls.append([
+			"blend", source_key, source_phase_ticks,
+			target_key, target_phase_ticks, weight])
 		pose_call_order.append("body")
 	func play_body_clip(key: String) -> void:
 		body_calls.append(["free", key])
 		pose_call_order.append("body")
 	func apply_remote_body_state(state_id: int, key: String, flags: int,
-			phase_ticks: int = -1) -> void:
+			phase_ticks: int = -1) -> bool:
 		remote_body_calls.append([state_id, key, flags, phase_ticks])
 		pose_call_order.append("body")
+		return remote_apply_results.pop_front() \
+				if not remote_apply_results.is_empty() else false
 	func reset_remote_body_state() -> void:
 		reset_remote_body_calls += 1
 		pose_call_order.append("reset")
+	func advance_remote_body_blend_tick(state_id: int) -> bool:
+		remote_tick_calls.append(state_id)
+		return remote_tick_results.pop_front() \
+				if not remote_tick_results.is_empty() else false
 	func set_part_phase(channel: int, phase: int) -> void:
 		part_calls.append([channel, phase])
 		ctrl_values["VEHICLE_SPECIAL%d" % channel] = phase
@@ -49,6 +66,8 @@ class FakeModel:
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
+	func set_shadow_caster_enabled(enabled: bool) -> void:
+		shadow_caster_enabled = enabled
 
 
 class FakeSim:
@@ -111,6 +130,12 @@ class FakeSim:
 			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
 			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
 					entity.get("anim_phase", -1))
+			out[base + NovaSimulation.PF_ANIM_SOURCE_STATE] = float(
+					entity.get("anim_source_state", -1))
+			out[base + NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
+					entity.get("anim_source_phase", -1))
+			out[base + NovaSimulation.PF_ANIM_BLEND_WEIGHT] = float(
+					entity.get("anim_blend_weight", 1.0))
 			out[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST] = float(
 					entity.get("anim_remote_request", 1))
 			out[base + NovaSimulation.PF_ANIM_STATE_PULSE] = float(
@@ -171,6 +196,13 @@ class RevisionFakeSim:
 		return layout_revision
 
 
+class ClockedRevisionFakeSim:
+	extends RevisionFakeSim
+	var logic_tick := 100
+	func get_logic_tick() -> int:
+		return logic_tick
+
+
 class FakePlacer:
 	extends RefCounted
 	var built: Array[Node3D] = []
@@ -187,7 +219,7 @@ class FakePlacer:
 	func build_model_from_graphic(graphic: String, _adm_name: String, parent: Node3D,
 			_clip_key: String = "", _env_node: Node = null,
 			_rig_graphic: String = "") -> Node3D:
-		var node := Node3D.new()
+		var node := FakeModel.new()
 		parent.add_child(node)
 		graphic_builds.append(graphic)
 		return node
@@ -240,6 +272,24 @@ class SpawnObserver:
 			"item_id": item_id,
 			"position": node.position,
 		})
+
+
+func test_present_snapshot_rejects_a_legacy_short_stride() -> void:
+	var sim := FakeSim.new()
+	sim.local_player_present = false
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, EmptyIndex.new())
+	var legacy_stride := NovaSimulation.PF_STRIDE - 1
+	var snapshot := PackedFloat32Array()
+	snapshot.resize(legacy_stride)
+
+	presenter.present_snapshot(snapshot, legacy_stride)
+
+	assert_true(placer.built.is_empty(),
+			"a row that predates the blend tuple cannot be cross-read")
 
 
 func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void:
@@ -660,8 +710,9 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	assert_true((deltas[8] as Basis).is_equal_approx(
 			body_basis.inverse() * MissionObjectPlacer.bms_to_godot_basis(angles[8])))
 
-	# The model owns transition acceptance and completion, so presentation keeps
-	# forwarding raw requests rather than filtering state changes itself.
+	# The model owns transition acceptance and completion. A repeated semantic
+	# state preserves its free-running playhead even for a revisionless source;
+	# only the next state edge is dispatched.
 	sim.entities[0]["anim_phase"] = 22
 	presenter.present()
 	sim.entities[0]["anim_state"] = 68
@@ -669,9 +720,8 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 	presenter.present()
 	assert_eq(model.remote_body_calls, [
 		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), 11],
-		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), 22],
 		[68, "anim_emplaced_2", NovaSimulation.infantry_anim_flags(68), 6],
-	], "raw compact requests reach the completion-aware remote animation channel")
+	], "state edges reach the completion-aware remote animation channel")
 
 
 func test_wire_model_receives_the_transition_pulse_before_the_current_state() -> void:
@@ -733,8 +783,7 @@ func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:
 	var model := placer.built[0] as FakeModel
 	assert_eq(model.remote_body_calls, [
 		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), -1],
-		[67, "anim_emplaced", NovaSimulation.infantry_anim_flags(67), -1],
-	], "phase-less compact infantry forwards an unavailable phase sentinel")
+	], "phase-less compact infantry is accepted once then free-runs locally")
 
 
 func test_host_current_body_state_is_posed_without_remote_rearbitration() -> void:
@@ -760,6 +809,131 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 			"host current state is not submitted to the receive-side request channel")
 	assert_eq(model.body_calls, [["at", "anim_emplaced", 11]],
 			"host current state keeps the authoritative direct-phase pose path")
+
+
+func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_source_state": 43,
+		"anim_source_phase": 18,
+		"anim_state": 1,
+		"anim_phase": 4,
+		"anim_blend_weight": 0.3,
+		"anim_remote_request": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+
+	var model := placer.built[0] as FakeModel
+	assert_eq(model.remote_body_calls, [])
+	assert_eq(model.body_calls[0].slice(0, 5), [
+		"blend", "anim_idle", 18, "anim_walk_forward", 4])
+	assert_almost_eq(float(model.body_calls[0][5]), 0.3, 0.000001,
+			"host-loopback consumes authority rather than reconstructing a blend")
+
+
+func test_remote_blend_advances_on_steady_fixed_tick_without_redispatch() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 1,
+		"anim_phase": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+	model.remote_apply_results = [true]
+	# Re-submit once to arm the transition latch, since the first spawn call
+	# above used the fake's default false result.
+	sim.entities[0]["anim_state"] = 2
+	presenter.present()
+	model.remote_tick_results = [false]
+	sim.entities[0]["anim_state"] = 2
+	presenter.present()
+	presenter.present()
+
+	assert_eq(model.remote_tick_calls, [2],
+			"the receive-side fixed-tick seam runs only while its row latch is live")
+	assert_eq(model.remote_body_calls.size(), 2,
+			"an active blend advances locally without re-submitting the same request")
+
+
+func test_revisionless_source_keeps_remote_blend_latch_across_cold_plans() -> void:
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 1,
+		"anim_phase": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+
+	model.remote_apply_results = [true, true]
+	sim.entities[0]["anim_state"] = 2
+	presenter.present()
+	model.remote_tick_results = [false]
+	presenter.present()
+
+	assert_eq(model.remote_tick_calls, [2],
+			"a revisionless cold row plan restores its live transition latch")
+	assert_eq(model.remote_body_calls.size(), 2,
+			"the retained latch advances instead of re-submitting the same state")
+
+
+func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
+	var sim := ClockedRevisionFakeSim.new()
+	sim.entities = [{
+		"type_id": 4567,
+		"handle": 0x0004,
+		"anim_state": 1,
+		"anim_phase": 0,
+	}]
+	var placer := FakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container)
+	presenter.present()
+	var model := placer.built[0] as FakeModel
+
+	# The state arrives after one logic tick and is staged at target weight zero.
+	model.remote_apply_results = [true]
+	sim.logic_tick = 101
+	sim.entities[0]["anim_state"] = 2
+	presenter.present()
+	model.remote_tick_results = [true, true, true, true, true]
+
+	# Render-only presents at the same fixed tick must not accelerate the blend.
+	presenter.present()
+	presenter.present()
+	assert_eq(model.remote_tick_calls, [],
+			"duplicate presents at one logic tick do not advance a fixed-tick blend")
+
+	# A catch-up frame advances every omitted fixed tick, not just one render call.
+	sim.logic_tick = 104
+	presenter.present()
+	assert_eq(model.remote_tick_calls, [2, 2, 2],
+			"a three-tick catch-up advances both channels and weight three times")
+	presenter.present()
+	assert_eq(model.remote_tick_calls, [2, 2, 2],
+			"a repeated presentation of the catch-up result is idempotent")
 
 
 func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> void:
@@ -798,7 +972,7 @@ func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> 
 	presenter.present()
 	assert_eq(model.reset_remote_body_calls, 1,
 			"a steady revision does not repeatedly reset local clip playback")
-	assert_eq(model.pose_call_order, ["right_hand", "overlay", "body"])
+	assert_eq(model.pose_call_order, ["right_hand", "overlay"])
 
 
 func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
@@ -1029,12 +1203,28 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	presenter.present()
 	assert_eq(placer.graphic_builds.size(), 0,
 			"an ADM of 0 draws nothing — no model is built at all")
+	var body := presenter.resolve_wire_handle(0x1004)
+	var skeleton := Skeleton3D.new()
+	for bone_index in range(PresentHeldWeapon.BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+	body.add_child(skeleton)
 
 	# Now the peer is holding something the table can resolve.
 	sim.entities[0]["held_weapon_adm"] = 16
 	presenter.present()
 	assert_eq(placer.graphic_builds, ["WPN16_3rd"],
 			"the model is resolved from the ADM index the wire carries")
+	var weapon := presenter.get("_weapon_nodes").get(0x1004) as Node3D
+	assert_not_null(weapon)
+	assert_true(weapon.visible)
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(weapon.visible,
+			"the weapon consumes this snapshot's body visibility without a one-tick lag")
+	sim.entities[0]["hidden"] = 0
+	presenter.present()
+	assert_true(weapon.visible,
+			"the caster and color model return on the same visible snapshot")
 
 	# Stowing it again retires the node rather than leaving a gun floating.
 	sim.entities[0]["held_weapon_adm"] = 0

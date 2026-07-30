@@ -62,6 +62,7 @@ private:
 	// Shader
 	Ref<Shader> terrain_shader;
 	Ref<ShaderMaterial> terrain_material;
+	Ref<ShaderMaterial> shadow_receiver_material;
 	Ref<NovaTerrainSurfaceInputs> surface_inputs;
 	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 

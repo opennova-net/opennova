@@ -81,6 +81,10 @@ func get_stats() -> Dictionary:
 	return _applier.get_stats() if _applier != null else {}
 
 
+func get_stats_record() -> MissionPresentStats:
+	return MissionPresentStats.new(get_stats())
+
+
 ## Apply the current sim state onto every resolved animated node. Called once per logic tick by the
 ## runtime driver (after the sim advances).
 func present() -> void:

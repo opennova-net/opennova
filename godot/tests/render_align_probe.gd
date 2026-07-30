@@ -140,15 +140,15 @@ func _dump_env_state() -> void:
 # Mouse-motion yaw/pitch response measured live: sign and scale both come from
 # the sim, so the aim loop needs no convention assumptions.
 func _measure_gains() -> void:
-	var y0: float = _world.local_player_yaw_deg()
+	var y0: float = _world.get_sim().get_local_player_yaw_deg()
 	_look(Vector2(200, 0))
 	await _settle(6)
-	var y1: float = _world.local_player_yaw_deg()
+	var y1: float = _world.get_sim().get_local_player_yaw_deg()
 	_yaw_gain = _wrap_deg(y1 - y0) / 200.0
-	var p0: float = _world.local_player_pitch_deg()
+	var p0: float = _world.get_sim().get_local_player_pitch_deg()
 	_look(Vector2(0, 200))
 	await _settle(6)
-	var p1: float = _world.local_player_pitch_deg()
+	var p1: float = _world.get_sim().get_local_player_pitch_deg()
 	_pitch_gain = (p1 - p0) / 200.0
 	print("[rendercmp] yaw_gain=%.5f pitch_gain=%.5f" % [_yaw_gain, _pitch_gain])
 	if absf(_yaw_gain) < 0.0001 or absf(_pitch_gain) < 0.0001:
@@ -157,8 +157,8 @@ func _measure_gains() -> void:
 
 func _aim(target_yaw: float, target_pitch: float) -> void:
 	for _i in 24:
-		var yaw_err := _wrap_deg(target_yaw - float(_world.local_player_yaw_deg()))
-		var pitch_err := target_pitch - float(_world.local_player_pitch_deg())
+		var yaw_err := _wrap_deg(target_yaw - float(_world.get_sim().get_local_player_yaw_deg()))
+		var pitch_err := target_pitch - float(_world.get_sim().get_local_player_pitch_deg())
 		if absf(yaw_err) < 0.5 and absf(pitch_err) < 0.5:
 			break
 		var dx := clampf(yaw_err / _yaw_gain, -400.0, 400.0) if absf(yaw_err) >= 0.5 else 0.0
@@ -178,8 +178,8 @@ func _capture(name: String) -> void:
 	if img != null:
 		img.save_png(_out_abs.path_join(name))
 	print("[rendercmp] wrote %s yaw=%.1f pitch=%.1f pos=%s" % [
-		name, _world.local_player_yaw_deg(), _world.local_player_pitch_deg(),
-		str(_world.local_player_position())])
+		name, _world.get_sim().get_local_player_yaw_deg(), _world.get_sim().get_local_player_pitch_deg(),
+		str(_world.get_sim().get_local_player_position())])
 
 
 func _find_by_method(node: Node, method: String) -> Node:

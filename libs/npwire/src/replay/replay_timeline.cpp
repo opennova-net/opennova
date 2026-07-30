@@ -1,6 +1,7 @@
 #include "npwire/replay_timeline.h"
 
 #include "npwire/ingame_decode.h"
+#include "npwire/ingame_message_id.h"
 
 #include <algorithm>
 #include <cmath>
@@ -284,7 +285,7 @@ ReplayTimeline build_replay_timeline(
 	for (const auto &m : messages) {
 		b.note_frame(m.frame_index);
 
-		if (m.dir == 'S' && m.tag == 0x0D) {
+		if (m.dir == 'S' && m.tag == s2c::POOL_SPAWN) {
 			// Pool-1/3 entity spawn (vehicles, items, objective markers). The
 			// 0x01-gated euler_z (entity+16) is the engine yaw heading (32-bit BAM),
 			// not velocity (D-NET-86); surface it as the spawn pose facing.
@@ -308,9 +309,9 @@ ReplayTimeline build_replay_timeline(
 					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
 					s.has_heading = true;
 				}
-				b.set_spawn(e, s, 0x0D);
+				b.set_spawn(e, s, s2c::POOL_SPAWN);
 			}
-		} else if (m.dir == 'S' && m.tag == 0x20) {
+		} else if (m.dir == 'S' && m.tag == s2c::POOL3_SYNC) {
 			// Pool-3 bulk sync (markers/waypoints). Positioned records: the
 			// handle is synthesized from the slot index; the marker's authored
 			// BMS id rides net_handle.
@@ -337,9 +338,9 @@ ReplayTimeline build_replay_timeline(
 					s.heading_deg = bam32_to_deg(r.movement_val);
 					s.has_heading = true;
 				}
-				b.set_spawn(e, s, 0x20);
+				b.set_spawn(e, s, s2c::POOL3_SYNC);
 			}
-		} else if (m.dir == 'S' && m.tag == 0x0C) {
+		} else if (m.dir == 'S' && m.tag == s2c::ENTITY_SPAWN_BATCH) {
 			// Pool-0 organic spawn (AI infantry + human players). Carries a
 			// 32-bit BAM orientation and an always-present team.
 			OrganicSpawnBatch batch;
@@ -359,9 +360,9 @@ ReplayTimeline build_replay_timeline(
 				s.z = r.pos_z;
 				s.heading_deg = bam32_to_deg(uint32_t(r.orientation));
 				s.has_heading = true;
-				b.set_spawn(e, s, 0x0C);
+				b.set_spawn(e, s, s2c::ENTITY_SPAWN_BATCH);
 			}
-		} else if (m.dir == 'S' && m.tag == 0x10) {
+		} else if (m.dir == 'S' && m.tag == s2c::STATIC_ENTITY_BATCH) {
 			// Pool-2 static-entity batch (armory, oil pump, static decorations).
 			// Like 0x20 the handle is synthesized from the slot index; pure
 			// statics carry no motion, only the spawn pose.
@@ -390,9 +391,9 @@ ReplayTimeline build_replay_timeline(
 					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
 					s.has_heading = true;
 				}
-				b.set_spawn(e, s, 0x10);
+				b.set_spawn(e, s, s2c::STATIC_ENTITY_BATCH);
 			}
-		} else if (m.dir == 'C' && m.tag == 0x0C) {
+		} else if (m.dir == 'C' && m.tag == c2s::ENTITY_UPLINK) {
 			// Joiner's own-player uplink — the clean per-frame motion source.
 			// Only the extended (type-10) sub_op carries world positions.
 			EntityPacketSubHeader hdr;
@@ -400,7 +401,7 @@ ReplayTimeline build_replay_timeline(
 			if (!decode_entity_packet_sub_header(m.payload.data(),
 			                                     m.payload.size(), hdr, consumed))
 				continue;
-			if (hdr.sub_op != 0x0A) continue;
+			if (hdr.sub_op != ENTITY_SUB_OP_EXTENDED) continue;
 			const uint8_t *rest = m.payload.data() + consumed;
 			const size_t rest_len = m.payload.size() - consumed;
 			PlayerExtendedUplink up;
@@ -434,7 +435,7 @@ ReplayTimeline build_replay_timeline(
 				s.source = ReplaySampleSource::ClientUplink;
 				e.track.push_back(s);
 			}
-		} else if (m.dir == 'S' && m.tag == 0x0A) {
+		} else if (m.dir == 'S' && m.tag == s2c::PER_FRAME_UPDATE) {
 			// Per-frame motion for every nearby entity (the host's view). Each
 			// compact record's position is compressed against the message's
 			// header anchor; unmounted records decode to world here, mounted
@@ -493,7 +494,7 @@ ReplayTimeline build_replay_timeline(
 				ev.sound = true;
 				b.tl.events.push_back(std::move(ev));
 			}
-		} else if (m.dir == 'C' && m.tag == 0x06) {
+		} else if (m.dir == 'C' && m.tag == c2s::FIRED_ROUND) {
 			// Weapon-fire uplink — world origin + direction + shooter (§5.16).
 			ClientFiredRound fr;
 			size_t consumed = 0;
@@ -510,7 +511,7 @@ ReplayTimeline build_replay_timeline(
 				ev.sound = true;
 				b.tl.events.push_back(std::move(ev));
 			}
-		} else if (m.dir == 'S' && m.tag == 0x1E) {
+		} else if (m.dir == 'S' && m.tag == s2c::GAME_EVENT) {
 			// Game event — kill feed + objectives. Pool-0 indices ARE pool-0
 			// handles ((0<<12)|slot), matching organic spawn slot_ids.
 			GameEventRecord ge;
@@ -534,7 +535,7 @@ ReplayTimeline build_replay_timeline(
 				ev.sound = true;
 				b.tl.events.push_back(std::move(ev));
 			}
-		} else if (m.dir == 'S' && m.tag == 0x26) {
+		} else if (m.dir == 'S' && m.tag == s2c::KILL_SYNC) {
 			// Direct entity-death replication.
 			KillRecord kr;
 			size_t consumed = 0;
@@ -546,7 +547,7 @@ ReplayTimeline build_replay_timeline(
 				ev.target = kr.victim_slot;
 				b.tl.events.push_back(std::move(ev));
 			}
-		} else if (m.dir == 'S' && m.tag == 0x4E) {
+		} else if (m.dir == 'S' && m.tag == s2c::KILL_BY_SLOT) {
 			// Batch despawn/kill — every listed slot is killed via Entity_KillBySlotId
 			// [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870]. Emit one Kill per
 			// slot so mark_lifecycle ends each victim's life segment.
@@ -561,7 +562,7 @@ ReplayTimeline build_replay_timeline(
 					b.tl.events.push_back(std::move(ev));
 				}
 			}
-		} else if (m.dir == 'S' && m.tag == 0x40) {
+		} else if (m.dir == 'S' && m.tag == s2c::CAPTURE_ZONE_STATE) {
 			// Capture-zone state — emit only on change (the 0x40 sync repeats).
 			CaptureZoneOverlayBatch cz;
 			if (decode_capture_zone_overlay(m.payload.data(), m.payload.size(), cz)) {

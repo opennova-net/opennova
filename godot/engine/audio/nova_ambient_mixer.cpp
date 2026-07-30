@@ -18,6 +18,15 @@ void NovaAmbientMixer::_bind_methods() {
 			D_METHOD("add_marker", "pos", "source_bms_id", "stagger_slot",
 					"lifetime_ticks", "slot_keys", "sets"),
 			&NovaAmbientMixer::add_marker);
+	ClassDB::bind_method(
+			D_METHOD("register_emitter", "source_spawn_id", "lane", "pos",
+					"source_bms_id", "lifetime_ticks", "pitch_q16",
+					"volume_q8_8", "layers"),
+			&NovaAmbientMixer::register_emitter);
+	ClassDB::bind_method(
+			D_METHOD("update_emitter_source", "source_spawn_id", "pos",
+					"source_bms_id"),
+			&NovaAmbientMixer::update_emitter_source);
 	ClassDB::bind_method(D_METHOD("set_time_of_day_hours", "hours"),
 			&NovaAmbientMixer::set_time_of_day_hours);
 	ClassDB::bind_method(D_METHOD("advance_to_tick", "tick"),
@@ -25,6 +34,7 @@ void NovaAmbientMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_seconds", "dt"),
 			&NovaAmbientMixer::advance_seconds);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &NovaAmbientMixer::mix);
+	ClassDB::bind_method(D_METHOD("mix_v2", "listener"), &NovaAmbientMixer::mix_v2);
 	ClassDB::bind_method(D_METHOD("live_slot_count"),
 			&NovaAmbientMixer::live_slot_count);
 	ClassDB::bind_method(D_METHOD("clock_tick"), &NovaAmbientMixer::clock_tick);
@@ -88,6 +98,35 @@ int NovaAmbientMixer::add_marker(const Vector3 &pos, int64_t source_bms_id,
 			std::move(native_sets));
 }
 
+void NovaAmbientMixer::register_emitter(int64_t source_spawn_id, int lane,
+		const Vector3 &pos, int64_t source_bms_id, int lifetime_ticks,
+		int pitch_q16, int volume_q8_8, const PackedInt32Array &layers) {
+	std::vector<opennova::audio::AmbientMixer::LayerDesc> native_layers;
+	native_layers.reserve(static_cast<size_t>(layers.size() / 5));
+	for (int base = 0; base + 5 <= layers.size(); base += 5) {
+		opennova::audio::AmbientMixer::LayerDesc ld;
+		ld.candidate_id = layers[base + 0];
+		ld.falloff_u = layers[base + 1];
+		ld.min_u = layers[base + 2];
+		ld.member_vol = layers[base + 3];
+		ld.clamp_vol = layers[base + 4];
+		native_layers.push_back(ld);
+	}
+	const float p[3] = { static_cast<float>(pos.x), static_cast<float>(pos.y),
+		static_cast<float>(pos.z) };
+	mixer_.register_emitter(static_cast<uint64_t>(source_spawn_id), lane, p,
+			source_bms_id, lifetime_ticks, pitch_q16, volume_q8_8,
+			std::move(native_layers));
+}
+
+void NovaAmbientMixer::update_emitter_source(int64_t source_spawn_id,
+		const Vector3 &pos, int64_t source_bms_id) {
+	const float p[3] = { static_cast<float>(pos.x), static_cast<float>(pos.y),
+		static_cast<float>(pos.z) };
+	mixer_.update_emitter_source(static_cast<uint64_t>(source_spawn_id), p,
+			source_bms_id);
+}
+
 void NovaAmbientMixer::set_time_of_day_hours(float hours) {
 	mixer_.set_time_of_day_hours(hours);
 }
@@ -117,6 +156,15 @@ int64_t NovaAmbientMixer::occlusion_trampoline(void *ctx, const float listener[3
 }
 
 PackedFloat32Array NovaAmbientMixer::mix(const Vector3 &listener) {
+	return mix_rows(listener, false);
+}
+
+PackedFloat32Array NovaAmbientMixer::mix_v2(const Vector3 &listener) {
+	return mix_rows(listener, true);
+}
+
+PackedFloat32Array NovaAmbientMixer::mix_rows(const Vector3 &listener,
+		bool include_pitch) {
 	const float l[3] = { static_cast<float>(listener.x),
 		static_cast<float>(listener.y), static_cast<float>(listener.z) };
 	// Resolve the provider fresh each mix: a freed provider silently degrades to
@@ -130,12 +178,16 @@ PackedFloat32Array NovaAmbientMixer::mix(const Vector3 &listener) {
 	const bool has_provider = sim_ != nullptr || duck_ != nullptr;
 	const std::vector<opennova::audio::AmbientCandidate> &out = mixer_.mix(
 			l, has_provider ? &NovaAmbientMixer::occlusion_trampoline : nullptr, this);
+	const int stride = include_pitch ? 6 : 5;
 	PackedFloat32Array rows;
-	rows.resize(static_cast<int64_t>(out.size()) * 5);
+	rows.resize(static_cast<int64_t>(out.size()) * stride);
 	float *w = rows.ptrw();
 	for (const opennova::audio::AmbientCandidate &c : out) {
 		*w++ = static_cast<float>(c.candidate_id);
 		*w++ = static_cast<float>(c.vol);
+		if (include_pitch) {
+			*w++ = static_cast<float>(c.pitch_q16);
+		}
 		*w++ = c.pos[0];
 		*w++ = c.pos[1];
 		*w++ = c.pos[2];

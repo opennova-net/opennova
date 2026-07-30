@@ -948,8 +948,14 @@ bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
 struct EntityPacketSubHeader {
 	uint16_t handle = 0;        // pool<<12|slot of the entity this packet describes
 	uint16_t item_type_id = 0;  // (items.def id − 100000); §5.10b dispatch key
-	uint8_t  sub_op = 0;        // 0x0A=extended (type 10), 0x0B=compact (type 11)
+	uint8_t  sub_op = 0;        // ENTITY_SUB_OP_EXTENDED or ENTITY_SUB_OP_COMPACT
 };
+
+// sub_op selector values (§5.10b). NOT message tags — sub_op 0x0A is unrelated
+// to tag 0x0A. [orig: Pool_SerializeEntityViaVTable @0x4D64E0 writes;
+// dispatch_entity_packet_callback @0x4D6A80 dispatches]
+inline constexpr uint8_t ENTITY_SUB_OP_EXTENDED = 0x0A; // type-10 extended (§5.10 joiner uplink)
+inline constexpr uint8_t ENTITY_SUB_OP_COMPACT = 0x0B;  // type-11 compact (S2C 0x0A trailing records)
 
 // Decode the 5-byte sub-header. Returns true iff the read fit; on success
 // `consumed` is 5.

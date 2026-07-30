@@ -24,36 +24,16 @@ extends Node3D
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const NovaSunShadowScript := preload("res://engine/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
-const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
-const UserPointDebugView := preload("res://engine/debug/user_point_debug_view.gd")
-const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
-const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd")
-const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
-const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
-const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
-# The retail ConnectOrHost wait window, shared by the joiner's pre-load admission
-# drive and the post-load deployment watchdog [orig: 0xEA60 = 60000 ms].
-const JOIN_CONNECT_TIMEOUT_MS := 60000
-const SKELETON_DEBUG_NAME := "SkeletonDebug"
-const USER_POINT_DEBUG_NAME := "UserPointDebug"
-const COLLISION_DEBUG_NAME := "CollisionDebug"
-const PARTICLE_DEBUG_NAME := "ParticleDebug"
-const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
-const ROUND_DEBUG_NAME := "RoundDebug"
-const HITBOX_DEBUG_NAME := "HitboxDebug"
-const PICK_DEBUG_NAME := "PickDebug"
-const PICK_CATCHER_NAME := "PickClickCatcher"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
-# [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
-const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -111,6 +91,8 @@ signal mission_effects(effects: Array)
 
 var _dispatcher: NovaFoliageDispatcher
 var _tile_overlay: NovaTerrainTileOverlay
+var _sun_shadow: NovaSunShadow
+var _static_sun_shadow: NovaSunShadow
 var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _mission_tile_info: NovaTerrainTileInfo
@@ -137,82 +119,44 @@ var _local_player_weapon_tick_consumer := Callable()
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
 var _clear_above_water := true
-# The local player's applied blink letter gates (render-occlusion-re.md §4):
-# accum bit 0x2 hides the terrain render (near detail + far foliage ride the
-# terrain node) and the sky dome + celestials; bit 0x8 hides the water passes.
-var _blink_indoors := false
-var _blink_water_suppressed := false
-# --- Render-occlusion frame state (the section-mask/portal slice) ---
-# Diff-applied: the sim emits verdict CHANGES (get_building_visibility_changes /
-# get_render_culled_changes) and only transitions touch nodes, so a steady frame
-# does no per-node work. Two ownership bits decide final visibility:
-# the present pass owns the sim's intent (PF_HIDDEN), this system owns the
-# occlusion hide — the present pass consults _occlusion_hidden_ids (shared by
-# reference) so it never fights an occlusion hide, and an occlusion release
-# lands on sim.entity_present_visible() so a sim-hidden entity never flashes.
-# bms_id -> true for every node occlusion currently hides (buildings whose
-# batch verdict culled them, entities the render gates culled).
-var _occlusion_hidden_ids: Dictionary = {}
-# Exact MissionPresentPass bms_id -> visibility intent, shared by reference.
-# Occlusion only layers hides on top of this value and never reconstructs the
-# present predicate independently.
-var _present_visibility: Dictionary = {}
-# bms_id -> resolved node, so steady frames skip registry lookups. Entries
-# revalidate with is_instance_valid on use; reset on unload/A-B seams.
-var _occlusion_node_cache: Dictionary = {}
-# The mission attribute that forces the indoors accum bit every frame.
-# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
+# The render-occlusion frame pass (occlusion_frame_pass.gd): the blink letter
+# gates, the per-frame section-mask/portal apply, and the two visibility
+# dictionaries the mission present pass shares BY REFERENCE. Constructed once
+# in _init; tick() calls it directly (hot path — no Callables).
+var _occlusion: OcclusionFramePass
+# The mission attribute that forces the indoors accum bit every frame. Stays
+# on the world (mission state, test-pinned by name); handed to the pass's
+# entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
 var _net_event_view # NetEventView: draws the decoded event stream over the world
-# NovaWorldHost: registers a LAN/co-op listen host with the NovaWorld gate so a
-# retail client can browse + join it (F1). Only created when a gate was supplied
-# (via _host_config["nw_gate_host"]); absent for pure-LAN play. Fed the live
-# player count from tick(), torn down in unload().
-var _nw_host
 # A host-injected resource root (the editor's mounted VFS). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
 var _injected_root: NovaResourceRoot = null
-# Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
-var _skeleton_debug := false
-# Debug: draw named model user points, including static-batched objects. Off by default.
-var _user_point_debug := false
-# Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
-var _collision_debug := false
-var _occlusion_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
-# Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
-# master particle switch, mimicked). Off by default; survives mission reloads.
-var _particles_hidden := false
-# Debug: draw live emitter bounds + effect names (F3 overlay's "Show effect boxes").
-var _particle_debug := false
 var _playable := true
-var _host_config: Dictionary = {}  # internal staging derived from the typed request; consumed once by _start_runtime
-# The typed session request at the shell seam (ADR 0017): exactly one is non-null
-# during a net load — the host screen's HostSessionConfig or the joiner's dial
-# JoinTarget — threaded to MissionRuntime as opts["host_session"]/opts["join_target"].
-var _pending_host: HostSessionConfig = null
-var _pending_join: JoinTarget = null
-# A retail LAN join authenticates before the local mission load. This off-tree
-# simulation owns that one live socket/session while S2C 0x7B supplies map_file;
-# _start_runtime consumes it so the connection is never restarted.
-var _join_preload_sim: NovaSimulation
-var _join_preload_root: NovaResourceRoot
-var _join_preload_request_id := 0
-# Admission and deploy notifications are edges, not per-frame state reports.
-# The deploy latch releases when pending clears so a later death can reopen DEATH.
-var _join_admission_ready_emitted := false
-var _join_deploy_signal_active := false
-# One session-loss notification per session (the reason stays true afterwards).
-var _session_lost_emitted := false
-# The post-load admission wait is an async coroutine that awaits process_frame
-# every iteration, so unlike the synchronous host load it IS interruptible.
-var _join_admission_watch_active := false
-var _join_admission_abort := false
+# The net-session drive: typed request staging, the joiner preload/admission
+# coroutines, the ESC aborts, and NovaWorld gate registration (see
+# net_session_drive.gd). The session signals live on THIS node — the shell
+# contract pins them here — and the drive emits them through its world reference.
+var _net_drive: NetSessionDrive
+# The F3 debug-view set: the world-space debug views + the pick stack, an
+# internal child node on the same pattern (see debug_view_set.gd). The views
+# it builds attach to THIS world node — hosts and tests pin them as
+# world-relative lookups — and the moved public toggles keep one-line
+# delegates below so the host-facing surface never moved.
+var _debug_views: DebugViewSet
+# The per-item ITEMS.DEF effect director (item_effect_director.gd): the
+# attached/static/controller item emitters, the effect-anchor resolvers, and
+# the retail master particle switch, on the same internal pattern (plain
+# RefCounted — it owns no Nodes). Public delegates below keep the host-facing
+# names on GameWorld. ALSO the sanctioned test-injection seam: like _runtime,
+# harnesses may swap in a director double (see game_world_test.gd).
+var _item_fx: ItemEffectDirector
 var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
@@ -258,12 +202,69 @@ func _resolve_root(dir: String) -> NovaResourceRoot:
 	return _mount_runtime_root(dir)
 
 
+func _init() -> void:
+	# The drive's preload/admission waits are coroutines that await process_frame,
+	# so it must be in the tree before load_mission_as_joiner runs: constructed
+	# here, it enters the tree with the world itself, and every load_* entry runs
+	# on an in-tree world. The drive holds this world for its public load surface
+	# + signal emission; the three Callables lend it the private internals the
+	# preload path needs without widening GameWorld's API.
+	_net_drive = NetSessionDrive.new()
+	_net_drive.name = "NetSessionDrive"
+	_net_drive.setup(self,
+			Callable(self, "_load_mission_internal"),
+			Callable(self, "_resolve_root"),
+			func() -> Dictionary: return _local_player_spawn_loadout)
+	add_child(_net_drive)
+	# The debug-view set follows the same internal-child pattern. Its two
+	# Callables lend the private internals the views need without widening
+	# GameWorld's API: the placer's grouped static user-point sources, and a
+	# weakref-guarded effect-world getter (the ParticleDebugView outlives
+	# mission reloads, so it must never hold this world strongly).
+	_debug_views = DebugViewSet.new()
+	_debug_views.name = "DebugViewSet"
+	var ref: WeakRef = weakref(self)
+	var user_point_sources := func() -> Array:
+		return _placer.get_static_user_point_sources() if _placer != null else []
+	var effect_world_getter := func():
+		var world = ref.get_ref()
+		return world.get_effect_world() if world != null else null
+	_debug_views.setup(self, user_point_sources, effect_world_getter)
+	add_child(_debug_views)
+	# The render-occlusion frame pass: plain RefCounted (no tree presence),
+	# direct-called from tick() every frame. Constructed exactly once — its two
+	# shared dictionaries must keep their identity for the mission present pass.
+	_occlusion = OcclusionFramePass.new()
+	_occlusion.setup(self)
+	# The item-effect director, wired like the debug-view set: its two lent
+	# privates are the placer's static item-effect sources and its item
+	# database, null-guarded here. The db seam stays duck-typed on purpose —
+	# the public get_item_db() keeps its NovaItemDatabase contract while
+	# harness worlds serve value-only db doubles.
+	_item_fx = ItemEffectDirector.new()
+	_item_fx.setup(self,
+			func() -> Array:
+				return _placer.get_static_item_effect_sources() if _placer != null else [],
+			func() -> Variant:
+				return _placer.get_item_db() if _placer != null else null)
+
+
 func _ready() -> void:
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher") as NovaFoliageDispatcher
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as NovaTerrainTileOverlay
+	_sun_shadow = NovaSunShadowScript.new()
+	_sun_shadow.name = "NovaSunShadow"
+	_sun_shadow.projection_mode = NovaSunShadow.PROJECTION_DYNAMIC
+	add_child(_sun_shadow)
+	_sun_shadow.set_environment_node(_env)
+	_static_sun_shadow = NovaSunShadowScript.new()
+	_static_sun_shadow.name = "NovaStaticSunShadow"
+	_static_sun_shadow.projection_mode = NovaSunShadow.PROJECTION_STATIC_TERRAIN
+	add_child(_static_sun_shadow)
+	_static_sun_shadow.set_environment_node(_env)
 	# Both retained render systems start dormant until a successful load chooses
 	# their host mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
@@ -317,8 +318,7 @@ func load_world(dir: String = "") -> int:
 	_loaded = true
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -345,505 +345,30 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
-## Load a mission as a LAN co-op HOST. Same load path as load_mission, but the runtime
-## starts the in-process listen server (ADR 0011) bound to a real socket transport and,
-## on the NovaWorld channel, registered with the gate. `config` is the typed session
-## request every host producer builds (ADR 0017): the mp.mnu host screen, the NovaWorld
-## panel, and the NW_LAN_HOST env hook. Returns the same codes as load_mission.
+## Load a mission as a LAN co-op HOST: the typed session request (ADR 0017) is
+## staged and driven by NetSessionDrive through the same load path as
+## load_mission. Returns the same codes as load_mission.
 func load_mission_as_host(config: HostSessionConfig) -> int:
-	if config == null:
-		load_failed.emit("host start: no host configuration")
-		return ERR_INVALID_PARAMETER
-	_pending_host = config
-	# Internal staging for the option spread + the NovaWorld gate registration;
-	# the runtime consumes the typed record itself via opts["host_session"].
-	_host_config = config.to_session_options()
-	_host_config["net_transport"] = "lan"
-	_host_config["dedicated"] = config.dedicated
-	_host_config["channel"] = config.channel
-	if config.channel == HostSessionConfig.CHANNEL_NOVAWORLD:
-		_host_config["nw_gate_host"] = config.nw_gate_host
-		_host_config["nw_gate_port"] = config.nw_gate_port
-		_host_config["region"] = config.region
-		if not config.advertise.is_empty():
-			_host_config["advertise"] = config.advertise
-	var bms := config.mission
-	if bms.is_empty() and config.missions.size() > 0:
-		bms = config.missions[0]
-	if bms.is_empty():
-		_clear_pending_session()
-		load_failed.emit("host start: no mission selected")
-		return ERR_INVALID_PARAMETER
-	var err := load_mission(bms, config.dir)
-	if err != OK:
-		_clear_pending_session()
-	return err
+	return _net_drive.load_as_host(config)
 
 
-# One reset for the typed request + its derived staging, used by every session
-# load-failure leg and unload.
-func _clear_pending_session() -> void:
-	_pending_host = null
-	_pending_join = null
-	_host_config = {}
-
-
-# Retail's ClientAuth does not invent a network-only player id: it uploads the
-# two profile character selections packed from Avatars.def. The packed value is
-# [nat:5 | division:4 | combo:6 | alignment:1], and the companion avatar byte is
-# the selected combo's head voice unless the profile has an explicit override.
-# [orig: PlayerProfile_InitDefaults @0x54BB40,
-#  lookup_entity_slot_and_pack_entry @0x57AD40,
-#  sub_57AE60 @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
-static func _join_character_selection(
-		db: NovaAvatarDatabase, nat_index: int, div_index: int,
-		combo_index: int, expected_alignment: int) -> Dictionary:
-	if db == null or nat_index < 0 or nat_index >= db.get_nationality_count():
-		return {}
-	var nat: Dictionary = db.get_nationality(nat_index)
-	if int(nat.get("alignment", -1)) != expected_alignment:
-		return {}
-	if div_index < 0 or div_index >= db.get_division_count(nat_index):
-		return {}
-	if combo_index < 0 or combo_index >= db.get_combo_count(nat_index, div_index):
-		return {}
-	var div: Dictionary = db.get_division(nat_index, div_index)
-	var combo: Dictionary = db.get_combo(nat_index, div_index, combo_index)
-	if nat.is_empty() or div.is_empty() or combo.is_empty():
-		return {}
-	var packed_id := (
-			(int(nat.get("id", 0)) & 0x1F)
-			| ((int(div.get("id", 0)) & 0x0F) << 5)
-			| ((int(combo.get("id", 0)) & 0x3F) << 9)
-			| ((1 if expected_alignment != 0 else 0) << 15))
-	var head: Dictionary = combo.get("head", {})
-	return {
-		"character_id": packed_id,
-		"avatar": int(head.get("voice", 1)),
-	}
-
-
-static func _first_join_character_selection(
-		db: NovaAvatarDatabase, alignment: int) -> Dictionary:
-	if db == null:
-		return {}
-	for nat_index in db.get_nationality_count():
-		var nat: Dictionary = db.get_nationality(nat_index)
-		if int(nat.get("alignment", -1)) != alignment:
-			continue
-		for div_index in db.get_division_count(nat_index):
-			if db.get_combo_count(nat_index, div_index) > 0:
-				return _join_character_selection(
-						db, nat_index, div_index, 0, alignment)
-	return {}
-
-
-# Public test seam over the exact profile-to-wire projection. `selection` is the
-# PLAYER_INFO snapshot; its chosen side replaces that side's retail default.
-static func character_join_profile_from_database(
-		db: NovaAvatarDatabase, selection: Dictionary = {}) -> Dictionary:
-	var side_selections: Array[Dictionary] = [
-		_first_join_character_selection(db, 0),
-		_first_join_character_selection(db, 1),
-	]
-	var selected_side := int(selection.get("team", -1))
-	if selected_side == 0 or selected_side == 1:
-		var chosen := _join_character_selection(
-				db,
-				int(selection.get("nationality", -1)),
-				int(selection.get("division", -1)),
-				int(selection.get("combo", -1)),
-				selected_side)
-		if not chosen.is_empty():
-			side_selections[selected_side] = chosen
-
-	var player_class := int(selection.get("player_class", 8))
-	if player_class < 5 or player_class > 9:
-		player_class = 8
-	return {
-		"character_ids": [
-			int(side_selections[0].get("character_id", 0)),
-			int(side_selections[1].get("character_id", 0)),
-		],
-		"player_classes": [player_class, player_class],
-		"avatars": [
-			int(side_selections[0].get("avatar", 1)),
-			int(side_selections[1].get("avatar", 1)),
-		],
-		"team_request": -1,
-	}
-
-
-func _build_join_character_profile(
-		resource_root: NovaResourceRoot, selection: Dictionary) -> Dictionary:
-	if resource_root == null:
-		return {}
-	var db := NovaAvatarDatabase.new()
-	if db.load_from_resource_root(resource_root, "Avatars.def") != OK \
-			or not db.is_loaded():
-		push_warning("GameWorld: Avatars.def not loaded for LAN join profile (%s)"
-				% db.get_last_error())
-		return {}
-	return character_join_profile_from_database(db, selection)
-
-
-## Load as a LAN co-op JOINER (a non-authority client). Retail LAN enumeration supplies an
-## endpoint, not a map name: authenticate first, learn map_file from the normal S2C 0x7B
-## post-handshake message, load that local .bms, then resume the SAME socket/session into the
-## spawn drive. `target.mission` remains an explicit debug/online-row override. Dynamic
-## entities render WIRE-DIRECT (no local .bms placement). `target.player_name` rides the game
-## ClientAuth and is echoed in our organic-spawn record for self-identification.
+## Load as a LAN co-op JOINER (a non-authority client): the typed dial target is
+## staged and driven by NetSessionDrive (authenticate before the local load; S2C
+## 0x7B supplies the mission). Returns the same codes as load_mission.
 func load_mission_as_joiner(target: JoinTarget) -> int:
-	if target == null:
-		load_failed.emit("join: no join target")
-		return ERR_INVALID_PARAMETER
-	_cancel_join_preload()
-	_join_admission_ready_emitted = false
-	_join_deploy_signal_active = false
-	_session_lost_emitted = false
-	_pending_join = target
-	# Internal staging for the option spread; the 0x7B promote below refreshes it
-	# with the authoritative session record before the runtime consumes it.
-	_host_config = {
-		"net_transport": "lan-join",
-		"host_ip": target.host_ip,
-		"port": target.port,
-		"player_name": target.player_name,
-	}
-	var bms := target.mission
-	if bms.is_empty():
-		bms = mission_file
-	if bms.is_empty():
-		var resource_root := _resolve_root(target.dir)
-		if resource_root == null:
-			_clear_pending_session()
-			return ERR_CANT_OPEN
-		_join_preload_sim = NovaSimulation.new()
-		# Retail builds g_CharAttr from the boot-soft charattr.def before any
-		# network receive can deliver the 0x41 property clears or 0x39 challenge.
-		# A missing file deliberately leaves the inactive all-zero table.
-		_join_preload_sim.load_charattr_challenge(resource_root)
-		_join_preload_sim.set_join_character_profile(
-				_build_join_character_profile(
-						resource_root, _local_player_spawn_loadout))
-		if not _join_preload_sim.enable_join(
-				target.host_ip, target.port, target.player_name):
-			_join_preload_sim.free()
-			_join_preload_sim = null
-			_clear_pending_session()
-			load_failed.emit("join: could not open the LAN session socket")
-			return ERR_CANT_CONNECT
-		_join_preload_sim.set_join_world_ready(false)
-		_join_preload_root = resource_root
-		_join_preload_request_id += 1
-		call_deferred("_drive_join_preload", _join_preload_request_id)
-		return OK
-	# NovaWorld's host row carries the retail basename (e.g. ASH_I5A), while the
-	# VFS load requires the resource filename. LAN callers that already supply the
-	# extension pass through unchanged.
-	if not bms.to_lower().ends_with(".bms"):
-		bms += ".bms"
-	var err := load_mission(bms, target.dir)
-	if err != OK:
-		_clear_pending_session()
-		return err
-	# An explicit-mission joiner (the NovaWorld panel row, NW_LAN_MISSION) skips the
-	# preload drive, but its post-load admission is identical to the preload path's:
-	# arm the same watchdog so the player-paced deployment pick emits
-	# join_deploy_pick_required (the sim parks at AwaitDeployPick for EVERY joiner)
-	# and a stalled host still aborts with the stage-named reason instead of
-	# holding the loading screen forever.
-	_watch_join_admission(_runtime)
-	return OK
+	return _net_drive.load_as_joiner(target)
 
 
-# Drive the witnessed pre-world connect/session exchange while the loading
-# screen is visible. The 60-second deadline is the retail ConnectOrHost timeout
-# (0xEA60).
-func _drive_join_preload(request_id: int) -> void:
-	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
-	while request_id == _join_preload_request_id and _join_preload_sim != null \
-			and not _join_preload_sim.is_join_preload_ready():
-		_join_preload_sim.poll_join_preload()
-		var join_error := String(_join_preload_sim.get_join_error())
-		if not join_error.is_empty():
-			_fail_join_preload("join failed: %s" % join_error)
-			return
-		if Time.get_ticks_msec() >= deadline_ms:
-			_fail_join_preload("join timed out before the host completed preload admission")
-			return
-		await get_tree().process_frame
-	if request_id != _join_preload_request_id or _join_preload_sim == null:
-		return
-	# Reconcile the mount with the host's data set BEFORE anything is resolved through it:
-	# the host's mission itself may exist only inside the expansion, so this precedes the
-	# .bms lookup as well as weapon.def/items.def (D-NET-178).
-	if not _reconcile_join_expansion():
-		return
-
-	var bms := String(_join_preload_sim.get_join_mission_file()).strip_edges()
-	if bms.is_empty():
-		_fail_join_preload("join: host sent an empty map_file in S2C 0x7B")
-		return
-	if not bms.to_lower().ends_with(".bms"):
-		bms += ".bms"
-	var resource_root := _join_preload_root
-	if resource_root == null or not resource_root.has_file(
-			bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
-		_fail_join_preload("join: host mission %s is not installed locally" % bms)
-		return
-	var mission := NovaMissionData.new()
-	if mission.open_from_resource_root(
-			resource_root, bms, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
-		_fail_join_preload("join: failed to parse host mission %s: %s" % [
-			bms, mission.get_last_error()])
-		return
-
-	# Promote the authoritative session variables before the runtime consumes
-	# _host_config. None came from discovery; every value here came from 0x7B.
-	_host_config["server_name"] = _join_preload_sim.get_join_server_name()
-	_host_config["mission_name"] = _join_preload_sim.get_join_mission_name()
-	_host_config["mission_file"] = bms
-	_host_config["gametype"] = _join_preload_sim.get_join_game_type()
-	# The MOUNTED expansion, which _reconcile_join_expansion has just proven equal to the
-	# host's (case aside) or aborted the join over. Reporting the mount rather than the wire
-	# claim keeps this value evidence of what our data set actually is.
-	_host_config["expansion"] = resource_root.get_expansion()
-	_join_preload_root = null
-	join_session_identified.emit({
-		"server_name": String(_host_config["server_name"]),
-		"mission_name": String(_host_config["mission_name"]),
-		"mission_file": bms,
-		"game_type": int(_host_config["gametype"]),
-	})
-	var err := _load_mission_internal(mission, bms, resource_root)
-	if err != OK:
-		# _load_mission_internal emitted the specific resource/load failure.
-		_cancel_join_preload()
-		_clear_pending_session()
-		return
-	_watch_join_admission(_runtime)
-
-
-# Point the joiner's resource root at the HOST's expansion (S2C 0x7B field 7, net-re
-# §5.32) before any of the host's data is resolved through it. The ADM weapon index space
-# is expansion-scoped, so a joiner mounted on a different expansion than the host misreads
-# every wire ADM index from the first diverging weapon.def row on — in BOTH directions, and
-# in both its own C2S 0x2F kit and the host's S2C 0x5A grant / round events (D-NET-178).
-# Retail switches THE ONE global mount in place on this same leg — it copies the session
-# record's expansion over the pending name, switches, and only then connects
-# [orig: UI_JoinSelectedSession @ 0x5699d0 (expansion copy @ 0x569afa, switch @ 0x569b02,
-# connect @ 0x569ded) -> Expansion_SwitchTo @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380
-# / PFF_OpenAllArchives @ 0x4a4310]. There is no second mount object, and the switch is
-# sticky: the shell keeps running on the host's expansion after the session.
-# Returns false when the join has been failed and the driver must stop.
-func _reconcile_join_expansion() -> bool:
-	var resource_root := _join_preload_root
-	if resource_root == null:
-		return true
-	var plan := JoinExpansionPlan.decide(
-		String(_join_preload_sim.get_join_expansion()),
-		String(resource_root.get_expansion()),
-		resource_root.list_expansions(resource_root.get_root_dir()))
-	if plan.action == JoinExpansionPlan.ACTION_KEEP:
-		return true
-	# Only a runtime mount layers expansion archives at all. A loose authoring root
-	# (play-in-editor hands the editor's VFS over, tests hand fixtures over) has no expansion
-	# to switch AND reports an empty installed set by construction, so it can neither honour
-	# the host's expansion nor prove it missing — every decision below is meaningless there.
-	# Report the mismatch and let the authored data stand. This precedes the abort: policing
-	# an install we do not own would fail every editor/fixture join against an expansion host.
-	# The shipping game always arrives here on a runtime mount (main_game hands GameWorld its
-	# live menu mount), so D-NET-178's protection is unaffected.
-	if not resource_root.is_runtime_mount():
-		push_warning("GameWorld: host expansion '%s' differs from the loose root's '%s'; the authoring mount stands"
-			% [String(_join_preload_sim.get_join_expansion()), String(resource_root.get_expansion())])
-		return true
-	# A runtime mount that cannot supply the host's expansion aborts the join. Retail's switch
-	# is a no-op when expansion\<name>\<name>.pff is missing and it connects on its own data set
-	# anyway [orig: Expansion_SwitchTo @ 0x5688c0, missing-.pff gate @ 0x568914] — that is
-	# precisely the ADM index-space corruption D-NET-178 records, so we refuse the join instead
-	# (tracked divergence).
-	if plan.action == JoinExpansionPlan.ACTION_FAIL:
-		_fail_join_preload(plan.error)
-		return false
-	var dir := resource_root.get_root_dir()
-	var previous := String(resource_root.get_expansion())
-	# Switch THIS root rather than swapping in a second one, the same in-place remount
-	# NovaMenuHost._apply_expansion does for the Mods screen: every holder (the menu shell, the
-	# loading screen) is meant to move with it, and mount_runtime rebuilds the index and bumps
-	# the cache epoch, so their caches self-clear. The persisted expansion setting is NOT
-	# written — the host owns this session's data set, not the local menu choice. Same layering
-	# as _mount_runtime_root (see it for the flag rules); only the expansion differs.
-	if resource_root.mount_runtime(dir, plan.expansion, NovaLaunchFlags.loose_override_enabled(),
-			NovaLaunchFlags.game(ResourceDirSettings.get_game())) != OK:
-		# A hard mount failure clears the root, and the shell shares this object, so put the
-		# previous expansion back before aborting to the menu (NovaMenuHost._apply_expansion rolls
-		# back the same way). The failure surfaces through the preload's abort leg rather than a
-		# bare load_failed, so the live session is torn down too.
-		var mount_error := String(resource_root.get_last_error())
-		resource_root.mount_runtime(dir, previous, NovaLaunchFlags.loose_override_enabled(),
-			NovaLaunchFlags.game(ResourceDirSettings.get_game()))
-		_fail_join_preload("join: could not mount host expansion '%s' from %s: %s" % [
-			plan.expansion, dir, mount_error])
-		return false
-	# mount_runtime succeeds even when the expansion never layered (opennova::Vfs::mount_game
-	# falls back to base game silently), so read back what ACTUALLY mounted. Without this the
-	# abort leg above would be bypassed by a root that is quietly base game again. No rollback
-	# here: unlike the hard failure above, the root holds a valid mount of whatever DID layer,
-	# so the shell survives the abort on it.
-	if String(resource_root.get_expansion()).to_lower() != plan.expansion.to_lower():
-		_fail_join_preload("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)" % [
-			plan.expansion, dir, String(resource_root.get_expansion()),
-			JoinExpansionPlan.describe_installed(resource_root.list_expansions(dir))])
-		return false
-	return true
-
-
-# Post-load joiner watchdog: the admission tail (C2S 0x0A -> world stream -> loadout
-# grants) is server-driven with no protocol-level timeout, so a stalled or incompatible
-# host would leave the player loaded but hidden forever with no feedback. Reuse the
-# retail ConnectOrHost window (0xEA60) from world-ready and surface a stage-named
-# failure through the shell's abort-to-menu leg — the reachable analog of retail's
-# post-load network-wait failure returns [orig: NapiClient_WaitForGameStart @ 0x42cc10
-# failure legs -> "Mission loading aborted"]. The deadline covers only SERVER-owed
-# transitions: once the join reaches the player-paced deployment pick (the DEATH deploy
-# screen), the watchdog ends — retail has no in-world join timeout there, the screen
-# simply waits (a rejected pick stays up for a re-pick; net-re 5.61).
-func _watch_join_admission(runtime) -> void:  # MissionRuntime, untyped like _runtime
-	var deadline_ms := Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
-	_join_admission_watch_active = true
-	_join_admission_abort = false
-	while is_instance_valid(runtime) and runtime == _runtime:
-		var sim: NovaSimulation = runtime.get_sim()
-		if sim == null or not sim.is_joiner():
-			_join_admission_watch_active = false
-			return
-		if _join_admission_abort:
-			_join_admission_watch_active = false
-			_join_admission_abort = false
-			load_failed.emit("Mission loading aborted")
-			return
-		if sim.has_method("is_join_deploy_pick_pending") \
-				and bool(sim.is_join_deploy_pick_pending()):
-			_join_admission_watch_active = false
-			_emit_join_deploy_pick_required()
-			return
-		if sim.is_joined_in_match():
-			_join_admission_watch_active = false
-			_emit_join_admission_ready()
-			return
-		var join_error := String(sim.get_join_error())
-		if not join_error.is_empty():
-			_join_admission_watch_active = false
-			load_failed.emit("join failed: %s" % join_error)
-			return
-		if Time.get_ticks_msec() >= deadline_ms:
-			_join_admission_watch_active = false
-			load_failed.emit("join stalled waiting for the host (%s)"
-					% String(sim.get_join_admission_stage()))
-			return
-		await get_tree().process_frame
-	_join_admission_watch_active = false
-
-
-func _emit_join_admission_ready() -> void:
-	if _join_admission_ready_emitted:
-		return
-	_join_admission_ready_emitted = true
-	join_admission_ready.emit()
-
-
-func _emit_join_deploy_pick_required() -> void:
-	if _join_deploy_signal_active:
-		return
-	_join_deploy_signal_active = true
-	join_deploy_pick_required.emit()
-
-
-# The initial watchdog stops at admission or the player-paced deployment screen.
-# Continue observing deploy state afterward: death can create another pending edge
-# in the same session.
-func _update_joiner_admission_signals() -> void:
-	# Render/occlusion tests install deliberately narrow runtime doubles. This
-	# observer is optional outside a real MissionRuntime, so keep the seam
-	# duck-typed instead of forcing every render-only double to model networking.
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim: Variant = _runtime.get_sim()
-	if sim == null or not sim.has_method("is_joiner") or not bool(sim.is_joiner()):
-		return
-	var deploy_pending: bool = sim.has_method("is_join_deploy_pick_pending") \
-			and bool(sim.is_join_deploy_pick_pending())
-	if deploy_pending:
-		_emit_join_deploy_pick_required()
-	else:
-		_join_deploy_signal_active = false
-	if sim.has_method("is_joined_in_match") and bool(sim.is_joined_in_match()):
-		_emit_join_admission_ready()
-	_update_session_loss_signal(sim)
-
-
-## Per-frame in-match session-loss observer, read once per frame off the same seam
-## as the admission signals. The reason latches true inside the runtime, so this
-## emits exactly once per session. [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]
-func _update_session_loss_signal(sim: Variant) -> void:
-	if _session_lost_emitted or not sim.has_method("get_session_loss_reason"):
-		return
-	var reason := String(sim.get_session_loss_reason())
-	if reason.is_empty():
-		return
-	_session_lost_emitted = true
-	session_lost.emit(reason)
-
-
-# ESC/abort for the only interruptible load leg: the joiner's pre-load
-# connect/session wait (the SP/host load remains one synchronous call the
-# SceneTree cannot interrupt). Returns true when an in-flight preload was
-# aborted; the ordinary load-failure leg reports it to the shell [orig: the
-# "Mission loading aborted" early return of Client_CheckDisconnectOrEscDuringLoad
-# @ 0x520270] (docs/interface/loading-screen-re.md D-LOADSCR-7).
+## ESC/abort for the joiner's pre-load connect/session wait. Returns true when an
+## in-flight preload was aborted (see NetSessionDrive.cancel_preload).
 func cancel_join_preload() -> bool:
-	if _join_preload_sim == null:
-		return false
-	_fail_join_preload("Mission loading aborted")
-	return true
+	return _net_drive.cancel_preload()
 
 
-## ESC/abort for the SECOND interruptible joiner wait: the post-load admission
-## tail, where the map is loaded but the world stays hidden until the host drives
-## the join to its deploy pick or in-match edge. D-LOADSCR-7's "single synchronous
-## operation.call()" reasoning covers the host/SP map load, NOT this one --
-## _watch_join_admission awaits process_frame every iteration, so the ESC window
-## is as reachable here as it is in the pre-load connect wait. Without this a
-## player who joins a host that stalls after the local load has no way out for the
-## full JOIN_CONNECT_TIMEOUT_MS. Returns true when a live admission wait was told
-## to abort; the watchdog reports it through the ordinary load-failure leg.
+## ESC/abort for the joiner's post-load admission wait. Returns true when a live
+## admission wait was told to abort (see NetSessionDrive.cancel_admission_wait).
 func cancel_join_admission() -> bool:
-	if not _join_admission_watch_active:
-		return false
-	_join_admission_abort = true
-	return true
-
-
-func _fail_join_preload(reason: String) -> void:
-	_cancel_join_preload()
-	_clear_pending_session()
-	load_failed.emit(reason)
-
-
-func _cancel_join_preload() -> void:
-	_join_preload_request_id += 1
-	if _join_preload_sim != null:
-		_join_preload_sim.free()
-	_join_preload_sim = null
-	_join_preload_root = null
-
-
-# True between load_mission_as_joiner and _start_runtime's config consume: this load is a
-# co-op joiner, so dynamic objects render from the wire rather than from local placement.
-func _is_joiner() -> bool:
-	return _pending_join != null
+	return _net_drive.cancel_admission_wait()
 
 
 ## True while this world is a live network session (a co-op JOINER or a LISTEN HOST).
@@ -939,8 +464,7 @@ func load_net_session(opts: Dictionary) -> int:
 
 	_net_client.connect_to_replay()
 	_loaded = true
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -980,7 +504,7 @@ func _on_net_mission(mission_name: String) -> void:
 	# only after the complete map is renderable. A partial load publishes neither.
 	_apply_mission_environment_overrides(mission)
 	_loaded_mission = mission
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	_prepare_autonomous_weather()
 	_set_water_host_rendering_enabled(true)
 	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
@@ -1039,7 +563,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_loaded_mission = mission
 	# The mission attribute that forces the indoors accum bit every frame.
 	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8]
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & 0x10) != 0
+	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	timeline.span("objects")
 	_place_mission_objects(mission, timeline)
 	timeline.end_span()
@@ -1059,8 +583,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	var challenge_sim: NovaSimulation = _runtime.get_sim()
 	if challenge_sim != null and challenge_sim.is_joiner():
 		_prewarm_loaded_model_challenge_definitions()
-	if challenge_sim != null and challenge_sim.has_method(
-			"finalize_loaded_model_challenge_snapshot"):
+	if challenge_sim != null:
 		challenge_sim.finalize_loaded_model_challenge_snapshot()
 	load_progress.emit(70)
 	timeline.span("audio")
@@ -1086,8 +609,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_loaded = true
 	_set_water_host_rendering_enabled(true)
 	load_progress.emit(100)
-	if _user_point_debug:
-		_refresh_user_point_debug()
+	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -1099,7 +621,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 # decodes correctly. Emits load_failed and returns null on a bad root.
 # The expansion here is the LOCAL choice, which is only authoritative for single-player and
 # for hosting. A joiner's is the HOST's, learned after this mount and reconciled by
-# _reconcile_join_expansion before any host data is read (D-NET-178).
+# NetSessionDrive._reconcile_join_expansion before any host data is read (D-NET-178).
 func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 	var resource_root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
@@ -1127,7 +649,7 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	# @0x40f4e0 on both sides), so the wire present pass defers their rows onto
 	# these placed nodes by identity, restoring MultiMesh batching, occlusion,
 	# and registry resolution to the joiner.
-	if _is_joiner():
+	if _net_drive.is_join_pending():
 		options["skip_kinds"] = [NovaMissionData.KIND_ORGANIC]
 	if timeline != null:
 		options["timeline"] = timeline
@@ -1196,13 +718,11 @@ func get_mission_stats() -> Dictionary:
 func unload() -> void:
 	_loaded = false
 	_stop_water_render_stats()
-	_cancel_join_preload()
-	_join_admission_ready_emitted = false
-	_join_deploy_signal_active = false
-	_session_lost_emitted = false
+	# Net-session teardown: the preload sim/root, the notification latches, the
+	# typed request staging, and the NovaWorld gate registration.
+	_net_drive.reset()
 	_set_weather_host_tick_driven(true)
 	_set_water_host_rendering_enabled(false)
-	_clear_pending_session()
 	_local_player_spawn_loadout = {}
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
@@ -1211,34 +731,10 @@ func unload() -> void:
 		container.queue_free()
 	# Per-item attached-effect owner keys reference nodes in that container —
 	# never let a reload's provider resolve against freed instances.
-	_item_fx_nodes.clear()
-	_item_fx_owner_refs.clear()
-	_item_fx_registered_nodes.clear()
-	_item_fx_pending_nodes.clear()
-	_item_fx_registered_static.clear()
-	_item_fx_pending_static.clear()
-	_item_fx_control_active.clear()
-	_item_fx_control_nodes.clear()
-	_item_fx_control_instances.clear()
-	_present_visibility.clear()
-	# The user-point view retains its toggle and re-arms on the next successful load.
-	_remove_user_point_debug_view()
-	# Skeleton/collision/occlusion overlays are also freed for a clean teardown.
-	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if skel_debug != null:
-		skel_debug.queue_free()
-	var col_debug := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if col_debug != null:
-		col_debug.queue_free()
-	var occ_debug := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if occ_debug != null:
-		occ_debug.queue_free()
-	var rnd_debug := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if rnd_debug != null:
-		rnd_debug.queue_free()
-	var hb_debug := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if hb_debug != null:
-		hb_debug.queue_free()
+	_item_fx.reset()
+	# Debug-view teardown: the retain/free split (user-point re-arm vs freed
+	# overlays vs the deliberately surviving particle/pick stack) lives in the set.
+	_debug_views.on_unload()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -1253,21 +749,19 @@ func unload() -> void:
 	_net_event_view = null
 	_net_view = null
 	_net_client = null
-	# Gate registration teardown: tells the gate to drop the host row (ClientStopHosting).
-	if _nw_host != null:
-		_nw_host.stop()
-		_nw_host.queue_free()
-		_nw_host = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	NovaMusicService.stop_context()
-	# Blink frame gates reset with the mission [orig: the letter-bit clear
-	# @ 0x525c45 at mission start] — an unload while indoors must not leave the
-	# next mission's terrain/sky/water hidden.
-	_reset_blink_frame_gates()
-	_reset_occlusion_frame()
+	# Blink frame gates and every occlusion override reset with the mission
+	# [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
+	# indoors must not leave the next mission's terrain/sky/water hidden. The
+	# pass clears the shared present-visibility intent FIRST (the pre-extraction
+	# unload cleared it up top), so its release walk falls back to
+	# sim.entity_present_visible — see OcclusionFramePass.reset.
+	_occlusion.reset()
+	_mission_forces_indoors = false
 	set_local_player_nvg_view(false, 0)
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
@@ -1541,12 +1035,8 @@ var _perf_probe_occlusion_skipped := false
 
 # The shared F3 frame-stats board (null outside the game shell). Feeds gate on
 # board capture so a closed Stats tab costs nothing; the occlusion split spans
-# land from _apply_occlusion_frame, the tick legs from tick() below.
+# land from OcclusionFramePass.apply_frame, the tick legs from tick() below.
 var _frame_stats: FrameStatsBoard = null
-# The two _apply_occlusion_frame halves, valid while probe/stats timing runs:
-# the native run_occlusion_frame call and the GDScript node application.
-var _perf_occl_native_us := 0
-var _perf_occl_apply_us := 0
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
 
@@ -1566,6 +1056,7 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
+	_occlusion.set_frame_stats_board(board)
 	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
 		_runtime.set_frame_stats_board(board)
 
@@ -1584,6 +1075,8 @@ func is_water_render_stats_measured() -> bool:
 ## request to its retail default and drops any sampled frame transport.
 func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_enabled = enabled
+	# The pass shares the probe's timing gate (see OcclusionFramePass.probe_timing).
+	_occlusion.probe_timing = enabled
 	_perf_probe_spans.clear()
 	if not enabled:
 		_perf_probe_skip_occl = false
@@ -1634,11 +1127,9 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	if probe_enabled and _loaded:
 		if skip_occlusion != _perf_probe_occlusion_skipped:
 			if skip_occlusion:
-				if _water != null:
-					_water.visible = not _blink_water_suppressed
-				_release_occlusion_overrides(false)
+				_occlusion.enter_probe_skip()
 			else:
-				_reset_occlusion_apply_baseline()
+				_occlusion.leave_probe_skip()
 		_perf_probe_occlusion_skipped = skip_occlusion
 	elif probe_enabled:
 		_perf_probe_occlusion_skipped = false
@@ -1655,13 +1146,8 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		else:
 			runtime_ticks = 1 if bool(_runtime.tick()) else 0
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
-		_update_joiner_admission_signals()
-		# Keep the gate's advertised occupancy current (host + admitted joiners).
-		# set_player_count self-dedupes, so this is a no-op until the count changes.
-		if _nw_host != null and _runtime.has_method("get_sim"):
-			var sim = _runtime.get_sim()
-			if sim != null and sim.has_method("get_host_peer_count"):
-				_nw_host.set_player_count(1 + sim.get_host_peer_count())
+		# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
+		_net_drive.observe_tick(_runtime)
 	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation above
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
@@ -1679,7 +1165,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# Blink flags only change on sim ticks; re-apply the frame gates then.
 	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if _loaded and runtime_ticks > 0:
-		_apply_blink_frame_gates()
+		_occlusion.apply_blink_gates(_mission_forces_indoors)
 	if timing:
 		var blink_us := Time.get_ticks_usec() - probe_phase_start
 		if probe_enabled:
@@ -1693,7 +1179,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	if _loaded:
 		probe_phase_start = Time.get_ticks_usec() if timing else 0
 		if not skip_occlusion:
-			_apply_occlusion_frame(camera_xform)
+			_occlusion.apply_frame(camera_xform, _mission_forces_indoors)
 		if probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
@@ -1784,8 +1270,8 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime_us": _perf_runtime_us,
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
-		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null and _dispatcher.has_method("get_frame_stats") else {},
-		"audio": _mission_audio.get_perf_counters() if _mission_audio != null and _mission_audio.has_method("get_perf_counters") else {},
+		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
+		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
 	}
 
 
@@ -1809,53 +1295,6 @@ func get_destruction_present_stats() -> RefCounted:
 	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else null
 
 
-# --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
-func has_local_player() -> bool:
-	return _runtime != null and _runtime.has_player()
-
-func local_player_position() -> Vector3:
-	return _runtime.local_player_position() if _runtime != null else Vector3.ZERO
-
-func local_player_yaw_deg() -> float:
-	return _runtime.local_player_yaw_deg() if _runtime != null else 0.0
-
-func local_player_pitch_deg() -> float:
-	return _runtime.local_player_pitch_deg() if _runtime != null else 0.0
-
-func local_player_body_anim_slot() -> int:
-	return _runtime.local_player_body_anim_slot() if _runtime != null else -1
-
-func local_player_anim_key() -> String:
-	return _runtime.local_player_anim_key() if _runtime != null else ""
-
-func local_player_anim_phase_ticks() -> int:
-	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
-
-func local_player_aim_overlay() -> PlayerAimOverlay:
-	return _runtime.local_player_aim_overlay() if _runtime != null else null
-
-func local_player_health() -> int:
-	return _runtime.local_player_health() if _runtime != null else 0
-
-func local_player_max_health() -> int:
-	return _runtime.local_player_max_health() if _runtime != null else 100
-
-func local_player_team() -> int:
-	return _runtime.local_player_team() if _runtime != null else 0
-
-func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
-	if _runtime != null:
-		_runtime.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
-
-## One frame of raw mouse pixels -> the sim-owned look (see mission_runtime).
-func add_local_player_look(dx_px: float, dy_px: float) -> void:
-	if _runtime != null:
-		_runtime.add_player_look(dx_px, dy_px)
-
-## Stance SELECT request: 0 stand / 1 crouch / 2 prone.
-func request_local_player_stance(stance: int) -> bool:
-	return _runtime.request_player_stance(stance) if _runtime != null else false
-
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third
 ## person: in first person the body stays renderable on the reflection-only layer, because the
@@ -1872,7 +1311,11 @@ func request_local_player_stance(stance: int) -> bool:
 func build_local_player_held_weapon(graphic: String) -> Node3D:
 	if _placer == null or graphic.is_empty():
 		return null
-	return _placer.build_model_from_graphic(graphic, "", self, "", _env)
+	var model: Node3D = _placer.build_model_from_graphic(
+			graphic, "", self, "", _env)
+	if model != null:
+		model.set_shadow_caster_enabled(true)
+	return model
 
 
 func build_local_player_avatar() -> Node3D:
@@ -1905,7 +1348,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 	var arms_name := "armsG"
 	if def != null and not def.gfx1a.is_empty():
 		arms_name = def.gfx1a
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	if not gun_name.is_empty():
 		_placer.object_data_for(gun_name)
 	if show_arms and not arms_name.is_empty():
@@ -2062,7 +1505,7 @@ func build_local_player_viewmodel() -> Node3D:
 	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
 	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
 	# character-arms model. [orig: Player_RenderFirstPersonViewModel @0x4dedc7]
-	var show_arms := def == null or (def.flags & 0x80) == 0
+	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
@@ -2118,62 +1561,10 @@ func _setup_local_player_weapon(model) -> void:
 			_local_weapon_dict, clip_seconds, _local_weapon_preserve_slot_state)
 
 
-## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload
-## edge — the dispatch gates (full-magazine/empty-reserve refusal) run in the sim
-## [orig: the binding-149/reload input dispatch, Input_HandleActionBinding_0 @0x4e0420].
-func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed)
-
-
-## The category keys 1..9 [orig: input actions 201-209 -> Player_SwitchToWeaponByHandle
-## ((action-200)*65) @ 0x4e1144]; the sim runs the witnessed walk and answers through
-## the event drain.
-func request_local_player_weapon_category(category: int) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.request_local_player_weapon_category(category)
-
-
-## Next/previous weapon [orig: input cases 212/214 -> Player_CycleWeaponSlot @ 0x4dfe70].
-func request_local_player_weapon_cycle(direction: int) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.request_local_player_weapon_cycle(direction)
-
-
 ## The installed FP weapon dict's name (empty when none) — the switch-event guard
 ## against redundant viewmodel reinstalls.
 func local_player_weapon_name() -> String:
 	return String(_local_weapon_dict.get("name", ""))
-
-
-## The ADS toggle request; the sim applies the dispatcher gates and owns the engaged
-## state [orig: input case 6 @0x4e0420; Player_ToggleWeaponScope @0x4df0c0].
-func request_local_player_scope_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_scope_toggle())
-
-
-## Retail Binoculars action 26 (default B). The sim owns the persistent request
-## and its movement/life/round/camera-derived effective states.
-func request_local_player_binoculars_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_binoculars_toggle())
-
-
-## Retail Night Vision action 41 (default N); mission EnableNVG is night
-## semantics, not an input permission gate.
-func request_local_player_nvg_toggle() -> bool:
-	var sim := get_sim()
-	return sim != null and bool(sim.request_local_player_nvg_toggle())
-
-
-## Retail NVG gain actions 56/57 (default +/-), clamped sim-side to 0..4.
-func request_local_player_nvg_gain(delta: int) -> int:
-	var sim := get_sim()
-	return int(sim.request_local_player_nvg_gain(delta)) if sim != null else 0
 
 
 ## Feed only the first-person-visible NVG state into world lighting. The raw
@@ -2181,22 +1572,6 @@ func request_local_player_nvg_gain(delta: int) -> int:
 func set_local_player_nvg_view(active: bool, gain: int) -> void:
 	if _env != null and _env.has_method("set_nvg_view"):
 		_env.set_nvg_view(active, gain)
-
-
-## The host camera mode, driving the sim-side fov suppression + anchor chase
-## [orig: g_camera_mode @0xA890C8].
-func set_local_player_camera_third_person(third_person: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_camera_third_person(third_person)
-
-
-## The host-sampled head-bone eye (Godot space) — the sim's 3P anchor-chase target
-## [orig: ThirdPersonCamera_Update @0x437b70 target = Position + CameraOffset].
-func set_local_player_eye(eye: Vector3, valid: bool) -> void:
-	var sim := get_sim()
-	if sim != null:
-		sim.set_local_player_eye(eye, valid)
 
 
 ## The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once at this
@@ -2276,212 +1651,68 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
-# --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------
-# Build / free a child SkeletonDebugView that draws every character's bones over the world.
-# Mirrors the editor's set_pick_debug -> _refresh_pick_debug build/free toggle flow.
+# --- F3 debug views (world-space overlays + the pick stack) ------------------
+# The build/teardown lifecycle lives in DebugViewSet (debug_view_set.gd), an
+# internal child constructed in _init; the views it builds still attach under
+# THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
+# unchanged. These one-line delegates keep the host-facing names on GameWorld:
+# the F3 option registry dispatches its setters against the world script
+# (nova_debug_options), and probes duck-find the world by these methods.
 
 func set_skeleton_debug(enabled: bool) -> void:
-	_skeleton_debug = enabled
-	_refresh_skeleton_debug()
+	_debug_views.set_skeleton_debug(enabled)
+
 
 func is_skeleton_debug() -> bool:
-	return _skeleton_debug
+	return _debug_views.is_skeleton_debug()
 
-func _refresh_skeleton_debug() -> void:
-	var existing := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not _skeleton_debug:
-		return
-	var view := SkeletonDebugView.new()
-	view.name = SKELETON_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # walks this GameWorld's subtree for Skeleton3D nodes each frame
-
-
-# --- User-point debug view (F3 overlay's "Show user points") ------------------
-# Live models are discovered under this world. Static mission objects have no
-# per-entity nodes after batching, so the placer supplies the exact grouped
-# placement-time sources that successfully rendered.
 
 func set_user_point_debug(enabled: bool) -> void:
-	_user_point_debug = enabled
-	_refresh_user_point_debug()
+	_debug_views.set_user_point_debug(enabled)
 
 
 func is_user_point_debug() -> bool:
-	return _user_point_debug
+	return _debug_views.is_user_point_debug()
 
-
-func _refresh_user_point_debug() -> void:
-	_remove_user_point_debug_view()
-	if not _user_point_debug:
-		return
-	var view := UserPointDebugView.new()
-	view.name = USER_POINT_DEBUG_NAME
-	add_child(view)
-	var static_sources: Array = []
-	if _placer != null:
-		static_sources = _placer.get_static_user_point_sources()
-	view.setup(self, static_sources)
-
-
-func _remove_user_point_debug_view() -> void:
-	var existing := get_node_or_null(NodePath(USER_POINT_DEBUG_NAME))
-	if existing == null:
-		return
-	# Detach before deferred destruction so an unload+reload in one frame can
-	# create the same stable child name without stale-source/name collisions.
-	remove_child(existing)
-	existing.queue_free()
-
-
-# --- Collision debug view (F3 overlay's "Show collision") --------------------
-# Build / free a child CollisionDebugView drawing the sim's collision volumes +
-# the local player's capsule test points over the world. Same build/free toggle
-# flow as the skeleton view; the view re-resolves the sim through this
-# GameWorld every frame, so mission reloads never leave it stale.
 
 func set_collision_debug(enabled: bool) -> void:
-	_collision_debug = enabled
-	_refresh_collision_debug()
+	_debug_views.set_collision_debug(enabled)
+
+
+func set_particle_debug(enabled: bool) -> void:
+	_debug_views.set_particle_debug(enabled)
+
+
+func set_round_debug(enabled: bool) -> void:
+	_debug_views.set_round_debug(enabled)
+
+
+func set_hitbox_debug(enabled: bool) -> void:
+	_debug_views.set_hitbox_debug(enabled)
+
+
+func set_pick_debug(pick_list: NovaDebugPickList) -> void:
+	_debug_views.set_pick_debug(pick_list)
+
+
+func set_pick_click_enabled(enabled: bool) -> void:
+	_debug_views.set_pick_click_enabled(enabled)
+
+
+func set_occlusion_debug(enabled: bool) -> void:
+	_debug_views.set_occlusion_debug(enabled)
+
+
+func is_occlusion_debug() -> bool:
+	return _debug_views.is_occlusion_debug()
 
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
+## Delegates to the item-effect director; the name stays on GameWorld for the
+## F3 option registry dispatch (nova_debug_options) + probe duck-calls.
 func set_particles_hidden(hidden: bool) -> void:
-	var was_hidden := _particles_hidden
-	_particles_hidden = hidden
-	if _effect_world != null:
-		_effect_world.set_particles_hidden(hidden)
-	if was_hidden and not hidden:
-		_retry_pending_item_effects()
-
-
-# Build / free a child ParticleDebugView drawing every live emitter's bounds +
-# effect name, on the overlay's "Show effect boxes" toggle (the collision-view
-# contract; survives mission reloads by re-resolving the effect world).
-func set_particle_debug(enabled: bool) -> void:
-	_particle_debug = enabled
-	var existing := get_node_or_null(NodePath(PARTICLE_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := ParticleDebugView.new()
-	view.name = PARTICLE_DEBUG_NAME
-	add_child(view)
-	var ref: WeakRef = weakref(self)
-	view.setup(func():
-		var world = ref.get_ref()
-		return world.get_effect_world() if world != null else null)
-
-func _refresh_collision_debug() -> void:
-	var existing := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not _collision_debug:
-		return
-	var view := CollisionDebugView.new()
-	view.name = COLLISION_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# --- Round debug view (F3 overlay's "Show round trails") ---------------------
-# Build / free a child RoundDebugView drawing the RoundSim debug ring (flight
-# segments + hit markers + labels) over the world — the collision-view
-# contract: the view re-resolves the sim through this GameWorld every frame,
-# so mission reloads never leave it stale.
-
-func set_round_debug(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(ROUND_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := RoundDebugView.new()
-	view.name = ROUND_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# Build / free a child HitboxDebugView drawing the round hit-detection reality
-# (bullet-mesh wireframes + bound spheres + posed organic bone spheres) — the
-# collision-view contract, on the overlay's "Show hit meshes" toggle.
-func set_hitbox_debug(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(HITBOX_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := HitboxDebugView.new()
-	view.name = HITBOX_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-# --- Pick debug (the F3 pick list: world highlight + overlay-open clicking) --
-# The pick list itself is HOST-owned (crosshair picks work before F3 ever
-# opens); this world only renders it and, while the overlay is up, feeds it
-# from clicks. Same build/free contract as every debug view.
-
-var _pick_list: NovaDebugPickList = null
-
-
-## Install (or clear, with null) the host's pick list: builds the world
-## highlight view that follows it. The click catcher (see below) picks into
-## the same list.
-func set_pick_debug(pick_list: NovaDebugPickList) -> void:
-	_pick_list = pick_list
-	var existing := get_node_or_null(NodePath(PICK_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if pick_list == null:
-		set_pick_click_enabled(false)
-		return
-	var view := PickDebugView.new()
-	view.name = PICK_DEBUG_NAME
-	view.set_pick_list(pick_list)
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-
-## While the F3 overlay is open (mouse released), a world click ray-picks the
-## entity under the cursor into the installed pick list. The catcher lives in
-## this subtree so ONED PIE's SubViewportContainer forwarding works unchanged.
-func set_pick_click_enabled(enabled: bool) -> void:
-	var existing := get_node_or_null(NodePath(PICK_CATCHER_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled or _pick_list == null:
-		return
-	var catcher := PickClickCatcher.new()
-	catcher.name = PICK_CATCHER_NAME
-	add_child(catcher)
-	catcher.setup(self, _pick_list)
-
-
-# --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
-# Build / free a child OcclusionDebugView drawing the render-occlusion portal
-# faces (type-colored outlines + section labels) over the world — the
-# collision-view contract: the view re-resolves the sim through this GameWorld
-# every frame, so mission reloads never leave it stale.
-
-func set_occlusion_debug(enabled: bool) -> void:
-	_occlusion_debug = enabled
-	var existing := get_node_or_null(NodePath(OCCLUSION_DEBUG_NAME))
-	if existing != null:
-		existing.queue_free()
-	if not enabled:
-		return
-	var view := OcclusionDebugView.new()
-	view.name = OCCLUSION_DEBUG_NAME
-	add_child(view)
-	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
-
-func is_occlusion_debug() -> bool:
-	return _occlusion_debug
+	_item_fx.set_particles_hidden(hidden)
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
@@ -2606,36 +1837,22 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# serialize_terrain_tiles @ 0x6080f0]. Reuse the payload parsed before terrain build.
 	if not _mission_til_bytes.is_empty():
 		opts["terrain_til"] = _mission_til_bytes
-	opts["playable"] = _playable and not (_pending_host != null and _pending_host.dedicated)
-	# A LAN host start threads its typed session request (HostSessionConfig) through to the
-	# listen server. A LAN JOINER threads its typed dial target (JoinTarget) and is NOT a
-	# listen server (ADR 0017). Both are consumed once per load; absent for a normal
-	# single-player start, which keeps the in-process (socketless) listen server.
-	if _pending_host != null:
-		opts["host_session"] = _pending_host
-	elif _pending_join != null:
-		opts["join_target"] = _pending_join
-		opts["join_character_profile"] = _build_join_character_profile(
-				_resource_root, _local_player_spawn_loadout)
-	_pending_host = null
-	_pending_join = null
-	if not _host_config.is_empty():
-		for k in ["server_name", "max_players", "game_type", "gametype", "net_transport", "bind_port",
-				"advertise", "host_ip", "port", "player_name", "expansion",
-				"nw_gate_host", "nw_gate_port", "region", "dedicated", "channel"]:
-			if _host_config.has(k):
-				opts[k] = _host_config[k]
-		_host_config = {}
+	opts["playable"] = _playable and not _net_drive.pending_dedicated()
+	# Spread the staged net-session request (typed record + derived staging +
+	# the surrendered preload sim, consumed once per load) into the runtime's
+	# options — MissionRuntime alone adopts opts["simulation"] (ADR 0011/0012).
+	_net_drive.stage_runtime_options(opts)
 	# The placer + environment node let the joiner's wire present pass resolve + light its
 	# remote-entity avatars (build_player_animated_model); unused by the host present path.
 	opts["placer"] = _placer
 	opts["env_node"] = _env
 	# The occlusion-claim set the present pass consults (two-bit visibility
-	# ownership; see _set_occlusion_hidden). Shared by reference: this world
-	# mutates it in place across the mission's occlusion frames.
+	# ownership; see OcclusionFramePass._set_occlusion_hidden). Shared by
+	# reference: the pass created these dictionaries once and mutates them in
+	# place across the mission's occlusion frames — hand the SAME instances.
 	opts["present_options"] = {
-		"occlusion_hidden_ids": _occlusion_hidden_ids,
-		"present_visibility": _present_visibility,
+		"occlusion_hidden_ids": _occlusion.occlusion_hidden_ids(),
+		"present_visibility": _occlusion.present_visibility(),
 	}
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
@@ -2646,16 +1863,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# The destruction present pass anchors its wreck/piece effect groups through
 	# register_effect_anchor and swaps husk models via the placer.
 	opts["game_world"] = self
-	# Consume the already-authenticated joiner. MissionRuntime adopts and frees
-	# this off-tree Node like its usual freshly-created simulation; clearing our
-	# reference before setup makes ownership singular even on a setup failure.
-	if _join_preload_sim != null:
-		opts["simulation"] = _join_preload_sim
-		_join_preload_sim = null
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
-		var setup_error := int(_runtime.get_setup_error()) \
-				if _runtime.has_method("get_setup_error") else ERR_CANT_CREATE
+		var setup_error := int(_runtime.get_setup_error())
 		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
 		var bind_port := int(opts.get("bind_port", 32768))
 		# Free before emitting: a load_failed handler may synchronously tear
@@ -2677,7 +1887,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	_load_player_weapon_profile()
 	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
-	if _water != null and _runtime.get_sim().has_method("set_water_z"):
+	if _water != null:
 		# Water may have been built before the runtime existed — re-push the
 		# sim-side plane the footstep/landing legs compare feet against.
 		_runtime.get_sim().set_water_z(float(_water.water_height))
@@ -2686,7 +1896,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	_runtime.simulation_restarted.connect(_on_runtime_simulation_restarted)
 	# A browsable listen host: register it with the NovaWorld gate (F1), if one was
 	# configured. No-op for single-player, joiners, and pure-LAN play.
-	_maybe_start_nw_host(opts, bms_name)
+	_net_drive.on_runtime_started(opts, bms_name)
 	# The game starts running (tick() gates on is_playing, so the overlay's
 	# transport can pause/step a live mission).
 	_runtime.play()
@@ -2741,59 +1951,6 @@ func _load_player_weapon_profile() -> void:
 				% [path, err])
 
 
-# Register a browsable listen host with the NovaWorld gate (F1, ADR 0010). The host-direction
-# sibling of the joiner's NovaWorldClient: it runs the NWU lobby handshake to the gate, then
-# ClientHostRequest + ClientHostUpdate heartbeats so the host shows in /api/hosts + the retail
-# server browser. Gated so it only fires for a real LAN listen server WITH a gate configured —
-# single-player, joiners, and pure-LAN play (no nw_gate_host) all skip it, unchanged.
-func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
-	if not bool(opts.get("listen_server", false)):
-		return
-	if String(opts.get("net_transport", "")) != "lan":
-		return
-	# Register only when the explicit NovaWorld host flow supplied a gate. The in-match wire is
-	# shared, but the LAN menu path never reads or manufactures service configuration.
-	var channel := String(opts.get("channel", "LAN"))
-	var gate_host := String(opts.get("nw_gate_host", ""))
-	if gate_host.is_empty():
-		if channel == "NovaWorld":
-			push_warning("GameWorld: NovaWorld host requested but no gate address (nw_gate_host) — gate registration skipped; host is LAN-reachable only")
-		return  # no gate configured -> pure LAN, nothing to register with
-	if not ClassDB.class_exists("NovaWorldHost"):
-		push_warning("GameWorld: NovaWorldHost unavailable; host is LAN-only (not browsable)")
-		return
-	var sim = _runtime.get_sim() if _runtime != null and _runtime.has_method("get_sim") else null
-	if sim == null or not sim.has_method("is_host_listening") or not sim.is_host_listening():
-		return  # the listen socket never came up; nothing reachable to advertise
-	_nw_host = ClassDB.instantiate("NovaWorldHost")
-	add_child(_nw_host)
-	_nw_host.host = gate_host
-	_nw_host.gate_port = int(opts.get("nw_gate_port", 7597))
-	_nw_host.server_name = String(opts.get("server_name", "OpenNova Host"))
-	_nw_host.mission_name = bms_name.get_basename()
-	_nw_host.max_players = int(opts.get("max_players", 32))
-	# The actually-bound game port the joiner will dial (not the requested bind_port).
-	_nw_host.game_port = sim.get_host_listen_port() if sim.has_method("get_host_listen_port") else int(opts.get("bind_port", 32768))
-	_nw_host.region = String(opts.get("region", "us"))
-	_nw_host.player_name = String(opts.get("player_name", "Host"))
-	var adv := String(opts.get("advertise", ""))
-	if not adv.is_empty():
-		_nw_host.advertise_ip = adv
-	if _nw_host.has_signal("registered"):
-		_nw_host.registered.connect(_on_nw_host_registered)
-	if _nw_host.has_signal("error_occurred"):
-		_nw_host.error_occurred.connect(_on_nw_host_error)
-	_nw_host.start()
-
-
-func _on_nw_host_registered() -> void:
-	print_verbose("GameWorld: listen host registered with the NovaWorld gate (browsable)")
-
-
-func _on_nw_host_error(message: String) -> void:
-	push_warning("GameWorld: NovaWorld host registration error: %s" % message)
-
-
 # Consume render-internal lifecycle effects first, route "dialog" actions to
 # mission audio (resolved through the co-named .DBF + LWF set), then expose only
 # the remaining host-facing effects to HUD consumers.
@@ -2802,7 +1959,7 @@ func _on_runtime_effects(effects: Array) -> void:
 	for effect_v in effects:
 		if effect_v is Dictionary:
 			var effect: Dictionary = effect_v
-			if _consume_item_fx_control_effect(effect):
+			if _item_fx.consume_control_effect(effect):
 				continue
 		routed.append(effect_v)
 	if routed.is_empty():
@@ -2824,8 +1981,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
-	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
-			and not skip_effect_tick:
+	if _effect_world != null and not skip_effect_tick:
 		if _frame_stats != null and _frame_stats.is_capture_active():
 			var fx_start := Time.get_ticks_usec()
 			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
@@ -2848,7 +2004,7 @@ func _on_runtime_simulation_restarted() -> void:
 	# Persistent item effects belong to the restored entity set, not the scene
 	# that was just discarded. Re-register their admission and owner identities;
 	# restore emits fresh controller-start lifecycle events for occupied baselines.
-	_attach_item_effects()
+	_item_fx.reattach()
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
@@ -2893,7 +2049,7 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 # without await), then clear the warm spawns exactly like the sim-restart
 # path (reset + re-register the persistent item effects). Returns the count.
 func _warm_effect_world_catalog() -> int:
-	if _effect_world == null or not _effect_world.has_method("warm_all_effects"):
+	if _effect_world == null:
 		return 0
 	var warm_pos := Vector3.ZERO
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
@@ -2901,8 +2057,8 @@ func _warm_effect_world_catalog() -> int:
 		warm_pos = cam.global_position - cam.global_transform.basis.z * 8.0
 	# The persistent master switch is a gameplay preference, not a reason to
 	# leave the catalog cold forever. Lift it only across the loading-screen
-	# draws; keep _particles_hidden unchanged and restore the EffectWorld before
-	# persistent item effects are reattached.
+	# draws; keep the director's persisted switch unchanged and restore the
+	# EffectWorld before persistent item effects are reattached.
 	var restore_particles_hidden := _effect_world.are_particles_hidden()
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(false)
@@ -2915,10 +2071,8 @@ func _warm_effect_world_catalog() -> int:
 	# The tracer ribbon pipelines compile in the same forced frames.
 	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
 		_runtime.warm_present_pipelines(warm_pos)
-	if _effect_world.has_method("advance_fixed_tick"):
-		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
-	if _effect_world.has_method("render_now"):
-		_effect_world.render_now()
+	_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	_effect_world.render_now()
 	# Pipeline compiles need real draws. Skip the forced frames inside the
 	# editor host (re-entrant editor drawing); the texture warm above still
 	# runs there, and the shipped game is what the full warm protects.
@@ -2929,10 +2083,8 @@ func _warm_effect_world_catalog() -> int:
 		var was_visible := visible
 		visible = true
 		RenderingServer.force_draw(true)
-		if _effect_world.has_method("advance_fixed_tick"):
-			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
-		if _effect_world.has_method("render_now"):
-			_effect_world.render_now()
+		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		_effect_world.render_now()
 		RenderingServer.force_draw(true)
 		# The reset below cancels any unserviced compositor warm request. Drain
 		# the forced draws first so threaded renderers cannot race that cancel.
@@ -2941,11 +2093,9 @@ func _warm_effect_world_catalog() -> int:
 	_effect_world.reset_runtime_state()
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(true)
-	_attach_item_effects()
-	var unresolved := 0
-	if _effect_world.has_method("get_unresolved_texture_names"):
-		unresolved = PackedStringArray(
-				_effect_world.get_unresolved_texture_names()).size()
+	_item_fx.reattach()
+	var unresolved := PackedStringArray(
+			_effect_world.get_unresolved_texture_names()).size()
 	print_verbose("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
 			spawned, unresolved])
 	return spawned
@@ -2959,7 +2109,7 @@ func _start_effect_world() -> void:
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
 	_effect_world.set_environment_source(_env)
-	if _particles_hidden:
+	if _item_fx.particles_hidden():
 		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
@@ -2970,17 +2120,13 @@ func _start_effect_world() -> void:
 		# @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
 		# start too (either side may come up first).
 		var water_sim := get_sim()
-		if water_sim != null and water_sim.has_method("set_water_z"):
+		if water_sim != null:
 			water_sim.set_water_z(float(_water.water_height))
-	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
-	# (resolved through the runtime), String keys are the per-item effect attaches
-	# (resolved to the placed node's live transform).
-	_effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
 	print_verbose("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
 		count, _effect_world.file_count()])
-	_attach_item_effects()
-	if _runtime != null and _runtime.has_method("set_wire_node_spawned_callback"):
-		_runtime.set_wire_node_spawned_callback(Callable(self, "_on_wire_node_spawned"))
+	# Item-effect wiring — the owner-pose provider, the persistent per-item
+	# attaches, and the wire-spawn callback — lives in the director.
+	_item_fx.on_effect_world_started()
 
 
 func get_effect_world() -> NovaEffectWorld:
@@ -3017,496 +2163,19 @@ func get_water_node() -> Node:
 	return _water
 
 
-# Owner-transform provider for the effect world's owned/attached groups. Int keys are
-# WAC fx2ssn SSNs (the runtime resolves the live entity transform; null = entity gone,
-# the group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]); String keys
-# are the per-item effect attaches registered by _attach_item_effects (the placed
-# entity's current value snapshot. The Node remains only as a pre-first-tick
-# seed and lifetime fallback for non-sim-owned callers.
-func _effect_owner_transform(owner_key: Variant) -> Variant:
-	# Host-owned live anchors first (the local weapon flash follows its viewmodel
-	# userpoint for the emitter group's whole life [orig: the actionEffectHandle
-	# per-tick tracker in WeaponAction_ProcessFrame @ 0x540edf]).
-	var anchor: Variant = _effect_anchor_resolvers.get(owner_key)
-	if anchor is Callable:
-		var resolver := anchor as Callable
-		if resolver.is_valid():
-			return resolver.call()
-		_effect_anchor_resolvers.erase(owner_key)
-		return null
-	if owner_key is String:
-		# Untyped on purpose: assigning a FREED instance to a typed Node3D var raises
-		# before any is_instance_valid guard could run.
-		var node: Variant = _item_fx_nodes.get(owner_key)
-		if node is Node3D and is_instance_valid(node) and node.is_inside_tree():
-			var entity_ref: Dictionary = _item_fx_owner_refs.get(owner_key, {})
-			if not entity_ref.is_empty() and _runtime != null \
-					and _runtime.has_method("has_current_present_effect_snapshot") \
-					and _runtime.has_current_present_effect_snapshot() \
-					and _runtime.has_method("presented_entity_effect_transform"):
-				# Null here means the identity left THIS tick's client view. Do
-				# not fall back to the one-frame-old Node or the group would emit
-				# once more from stale state before the batched present frees it.
-				return _runtime.presented_entity_effect_transform(entity_ref)
-			return (node as Node3D).global_transform
-		_item_fx_nodes.erase(owner_key)
-		_item_fx_owner_refs.erase(owner_key)
-		return null
-	if _runtime != null and _runtime.has_method("entity_effect_transform_for_ssn"):
-		return _runtime.entity_effect_transform_for_ssn(owner_key)
-	return null
-
-
-# owner key -> Callable returning the live anchor Transform3D (or null once
-# stale) for host-owned owner-bound effect groups; consulted before the
-# item-fx/SSN legs by _effect_owner_transform.
-var _effect_anchor_resolvers: Dictionary = {}
-
-
 ## A host registers a live pose resolver for an owner-bound effect group it
 ## spawned (e.g. the local muzzle flash riding the viewmodel userpoint). The
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
+## One-line delegates into the item-effect director (item_effect_director.gd):
+## the names stay on GameWorld — LocalPlayerHost and the present passes
+## register through the world, and harness worlds pin these methods.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
-	_effect_anchor_resolvers[owner_key] = resolver
+	_item_fx.register_effect_anchor(owner_key, resolver)
 
 
 func unregister_effect_anchor(owner_key: Variant) -> void:
-	_effect_anchor_resolvers.erase(owner_key)
-
-
-# owner key (String) -> presented Node3D, for the per-item attached effect groups.
-var _item_fx_nodes: Dictionary = {}
-# owner key -> copied entity_ref value identity (bms/origin or wire handle).
-var _item_fx_owner_refs: Dictionary = {}
-var _item_fx_registered_nodes: Dictionary = {}
-var _item_fx_pending_nodes: Dictionary = {}
-var _item_fx_registered_static: Dictionary = {}
-var _item_fx_pending_static: Dictionary = {}
-# Controller/Driver-only PlayerControl item effects are dormant at mission
-# startup. Portable lifecycle events activate them without polling.
-# identity alias -> true while the vehicle has any controlling occupant
-var _item_fx_control_active: Dictionary = {}
-# Node instance id -> {node, kind, item_id, aliases}
-var _item_fx_control_nodes: Dictionary = {}
-# Node instance id -> {group_ids, owner_keys}
-var _item_fx_control_instances: Dictionary = {}
-
-
-# Mission-start attach of the per-item ITEMS.DEF effects — slot A ('particlefx
-# <effect> <userpoint>') only: for every presented animated entity whose item def
-# authors it, spawn one entity-attached emitter at EVERY model userpoint matching
-# the authored name — exact case-insensitive match over the model's first 16
-# userpoints, duplicate names all match (a 16-bit mask in the original). Static
-# MultiMesh entities use the placer's value descriptors and spawn the same authored
-# effects world-bound at their final placement transform; no owner/render node is
-# synthesized for them.
-# Pool gates are kind-sensitive: pool 0 organics are excluded; pool 1 items skip
-# attrib 0x42; pools 2/3 skip attrib 0x2. The fxs/fxw1..4 wake tiers and the
-# death/fire/other family are movement/damage-state driven and stay unrouted
-# (ptl-format-re.md §8).
-# [orig: resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 (mission start,
-#  entity pools 1-3) -> ItemDef_GetBoneMaskByName @ 0x49ea40 (first 16, stricmp) ->
-#  Entity_SpawnBoneTrailEffect @ 0x43bef0 (one mode-2 attached emitter per masked
-#  userpoint: pos = the userpoint, forward = its direction)]
-func _attach_item_effects() -> void:
-	_item_fx_nodes.clear()
-	_item_fx_owner_refs.clear()
-	_item_fx_registered_nodes.clear()
-	_item_fx_pending_nodes.clear()
-	_item_fx_registered_static.clear()
-	_item_fx_pending_static.clear()
-	_item_fx_control_active.clear()
-	_item_fx_control_nodes.clear()
-	_item_fx_control_instances.clear()
-	if _effect_world == null or _placer == null:
-		return
-	var item_db = _placer.get_item_db()
-	if item_db == null:
-		return
-	var attached := 0
-	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
-	if container != null:
-		for child in container.get_children():
-			var node := child as Node3D
-			if node == null or not node.has_meta("entity_ref"):
-				continue
-			var ref: Dictionary = node.get_meta("entity_ref")
-			attached += _attach_item_effect_to_node(node, int(ref.get("kind", -1)),
-					int(ref.get("item_id", 0)), item_db)
-	var static_sources: Array = _placer.get_static_item_effect_sources()
-	for source_index in range(static_sources.size()):
-		attached += _attach_item_effect_to_static(
-				static_sources[source_index], source_index, item_db)
-	if attached > 0:
-		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
-
-
-func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
-	_attach_item_effect_to_node(node, kind, item_id)
-
-
-# The original walks entity pools 1-3 with distinct attrib masks. The imported
-# mission kind enum is Marker=0, Item=1, Building=2, Organic=3.
-func _item_effect_pool_allows(kind: int, attrib: int) -> bool:
-	if kind == NovaMissionData.KIND_ITEM:
-		return (attrib & 0x42) == 0
-	if kind == NovaMissionData.KIND_BUILDING or kind == NovaMissionData.KIND_MARKER:
-		return (attrib & 0x2) == 0
-	return false
-
-
-func _item_effect_controller_allows(kind: int, attrib: int) -> bool:
-	# The occupied-controller pass bypasses only PlayerControl (0x40). The
-	# independent 0x2 exclusion remains intact.
-	return kind == NovaMissionData.KIND_ITEM and (attrib & 0x42) == 0x40
-
-
-func _item_fx_identity_aliases(net_id: int, bms_id: int,
-		spawn_origin: int, wire_handle: int = -1) -> Array[String]:
-	var aliases: Array[String] = []
-	var has_wire_identity := wire_handle >= 0 and wire_handle != 0xffff
-	if has_wire_identity:
-		aliases.append("wire:%d" % wire_handle)
-	# Synthetic items.def attachments all carry the same sentinel origin and no
-	# authored BMS/net identity. Their packed runtime handle is therefore the only
-	# alias that distinguishes siblings on the same carrier.
-	if has_wire_identity and bms_id == 0 and (
-			spawn_origin == -1 or spawn_origin == 0xffffffff):
-		return aliases
-	if net_id > 0:
-		aliases.append("net:%d" % net_id)
-	if bms_id > 0:
-		aliases.append("bms:%d" % bms_id)
-	if spawn_origin > 0:
-		aliases.append("origin:%d" % spawn_origin)
-	return aliases
-
-
-func _item_fx_control_event_aliases(effect: Dictionary) -> Array[String]:
-	return _item_fx_identity_aliases(
-			int(effect.get("a", 0)),
-			int(effect.get("b", 0)),
-			int(effect.get("c", 0)),
-			int(effect.get("wire_handle", -1)))
-
-
-func _item_fx_control_node_aliases(node: Node3D) -> Array[String]:
-	if node == null:
-		return []
-	var ref: Dictionary = node.get_meta("entity_ref", {})
-	var net_id := int(ref.get("net_id", 0)) if ref.has("net_id") else 0
-	var bms_id := int(ref.get("bms_id", 0))
-	var origin_kind := int(ref.get("origin_kind", ref.get("kind", -1)))
-	var index := int(ref.get("index", -1))
-	var spawn_origin := 0
-	if origin_kind >= 0 and index >= 0:
-		spawn_origin = ((origin_kind & 0xff) << 24) | (index & 0xffffff)
-	return _item_fx_identity_aliases(
-			net_id, bms_id, spawn_origin, int(ref.get("wire_handle", -1)))
-
-
-func _item_fx_aliases_intersect(left: Array, right: Array) -> bool:
-	for alias_v in left:
-		if right.has(alias_v):
-			return true
-	return false
-
-
-func _item_fx_control_node_is_active(entry: Dictionary) -> bool:
-	for alias_v in entry.get("aliases", []):
-		if _item_fx_control_active.has(String(alias_v)):
-			return true
-	return false
-
-
-func _register_item_fx_control_node(node: Node3D, kind: int,
-		item_id: int) -> Dictionary:
-	var aliases := _item_fx_control_node_aliases(node)
-	if aliases.is_empty():
-		return {}
-	var entry := {
-		"node": node,
-		"kind": kind,
-		"item_id": item_id,
-		"aliases": aliases,
-	}
-	_item_fx_control_nodes[node.get_instance_id()] = entry
-	return entry
-
-
-func _track_item_fx_control_spawn(node_id: int, owner_key: String,
-		receipt: Dictionary) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {
-		"group_ids": [],
-		"owner_keys": [],
-	})
-	var group_ids: Array = instance.get("group_ids", [])
-	var group_id := int(receipt.get("group_id", 0))
-	if group_id > 0 and not group_ids.has(group_id):
-		group_ids.append(group_id)
-	var owner_keys: Array = instance.get("owner_keys", [])
-	if not owner_keys.has(owner_key):
-		owner_keys.append(owner_key)
-	instance["group_ids"] = group_ids
-	instance["owner_keys"] = owner_keys
-	_item_fx_control_instances[node_id] = instance
-
-
-func _stop_item_fx_control_node(node_id: int) -> void:
-	var instance: Dictionary = _item_fx_control_instances.get(node_id, {})
-	if _effect_world != null:
-		for group_id_v in instance.get("group_ids", []):
-			var group_id := int(group_id_v)
-			if group_id > 0:
-				_effect_world.stop_group(group_id)
-	for owner_key_v in instance.get("owner_keys", []):
-		var owner_key := String(owner_key_v)
-		_item_fx_nodes.erase(owner_key)
-		_item_fx_owner_refs.erase(owner_key)
-	_item_fx_control_instances.erase(node_id)
-	_item_fx_registered_nodes.erase(node_id)
-	_item_fx_pending_nodes.erase(node_id)
-
-
-func _activate_item_fx_control_nodes(event_aliases: Array) -> void:
-	for node_id_v in _item_fx_control_nodes.keys().duplicate():
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
-			continue
-		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
-			_stop_item_fx_control_node(node_id)
-			_item_fx_control_nodes.erase(node_id)
-			continue
-		if not _item_fx_control_node_is_active(entry):
-			continue
-		_attach_item_effect_to_node(
-				node_v as Node3D,
-				int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)),
-				null,
-				true)
-
-
-func _deactivate_item_fx_control_nodes(event_aliases: Array) -> void:
-	for node_id_v in _item_fx_control_nodes.keys().duplicate():
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
-			continue
-		if not _item_fx_control_node_is_active(entry):
-			_stop_item_fx_control_node(node_id)
-
-
-func _consume_item_fx_control_effect(effect: Dictionary) -> bool:
-	var kind := String(effect.get("kind", ""))
-	if kind != "vehicle_control_started" and kind != "vehicle_control_stopped":
-		return false
-	var aliases := _item_fx_control_event_aliases(effect)
-	if kind == "vehicle_control_started":
-		for alias in aliases:
-			_item_fx_control_active[alias] = true
-		_activate_item_fx_control_nodes(aliases)
-	else:
-		for alias in aliases:
-			_item_fx_control_active.erase(alias)
-		_deactivate_item_fx_control_nodes(aliases)
-	return true
-
-
-func _attach_item_effect_to_node(node: Node3D, kind: int, item_id: int,
-		item_db_override: Variant = null,
-		controller_active: bool = false) -> int:
-	if _effect_world == null or _placer == null or node == null or item_id <= 0:
-		return 0
-	if not node.has_method("get_object_data"):
-		return 0
-	var node_id := node.get_instance_id()
-	var registered: Variant = _item_fx_registered_nodes.get(node_id)
-	if registered is Node and is_instance_valid(registered):
-		return 0
-	var item_db: Variant = item_db_override
-	if item_db == null:
-		item_db = _placer.get_item_db()
-	if item_db == null:
-		return 0
-	var attrib := int(item_db.get_attrib(item_id))
-	if controller_active:
-		if not _item_effect_controller_allows(kind, attrib):
-			return 0
-	else:
-		if not _item_effect_pool_allows(kind, attrib):
-			if not _item_effect_controller_allows(kind, attrib):
-				return 0
-			var control_entry := _register_item_fx_control_node(node, kind, item_id)
-			if not control_entry.is_empty() and _item_fx_control_node_is_active(control_entry):
-				return _attach_item_effect_to_node(node, kind, item_id, item_db, true)
-			return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
-	if effect.is_empty():
-		return 0
-	var data = node.get_object_data()
-	if data == null:
-		return 0
-	if _effect_world.are_particles_hidden():
-		# The retail master switch makes every spawn facade a no-op. Remember
-		# persistent item attachments so re-enabling after a hidden mission load
-		# creates them exactly once instead of losing them for the mission.
-		_item_fx_pending_nodes[node_id] = {
-			"node": node,
-			"kind": kind,
-			"item_id": item_id,
-			"controller_active": controller_active,
-		}
-		return 0
-	var attached := 0
-	var matched := 0
-	var entity_ref: Dictionary = node.get_meta("entity_ref", {}).duplicate()
-	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
-				continue
-			var key := "itemfx:%d:%d" % [node_id, i]
-			var receipt: Dictionary = _effect_world.spawn_effect_attached_request(
-					key, effect, node.global_transform,
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
-			if bool(receipt.get("spawned", false)):
-				_item_fx_nodes[key] = node
-				_item_fx_owner_refs[key] = entity_ref
-				if controller_active:
-					_track_item_fx_control_spawn(node_id, key, receipt)
-				attached += 1
-			matched += 1
-	if matched == 0:
-		# No matched point (or no authored point name): the original still spawns
-		# ONE emitter at the entity origin — the spawn_count==0 leg
-		# [orig: Entity_SpawnBoneTrailEffect @ 0x43c097 -> submit_effect_descriptor
-		#  @ 0x43c0a4 at entity->Position].
-		var key := "itemfx:%d:origin" % node_id
-		var receipt: Dictionary = _effect_world.spawn_effect_attached_request(
-				key, effect, node.global_transform, Vector3.ZERO, Vector3.ZERO)
-		if bool(receipt.get("spawned", false)):
-			_item_fx_nodes[key] = node
-			_item_fx_owner_refs[key] = entity_ref
-			if controller_active:
-				_track_item_fx_control_spawn(node_id, key, receipt)
-			attached += 1
-	if attached > 0:
-		_item_fx_registered_nodes[node_id] = node
-		_item_fx_pending_nodes.erase(node_id)
-	return attached
-
-
-# Convert the authored userpoint forward vector into the same local pose used by
-# NovaEffectWorld.spawn_effect_attached. Static sources then compose this once
-# with their placement transform and submit it as a World-bound request.
-func _item_effect_local_pose(position: Vector3, forward_value: Vector3) -> Transform3D:
-	if forward_value.length_squared() <= 0.000001:
-		return Transform3D(Basis.IDENTITY, position)
-	var forward := forward_value.normalized()
-	var up_hint := Vector3.UP
-	if absf(forward.dot(up_hint)) > 0.999:
-		up_hint = Vector3.RIGHT
-	var right := up_hint.cross(forward).normalized()
-	var up := forward.cross(right).normalized()
-	return Transform3D(Basis(right, up, forward), position)
-
-
-func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
-	var receipt: Dictionary = _effect_world.spawn_effect_request(effect, transform, {
-		"admission": NovaEffectScene.ADMISSION_ALWAYS,
-		"binding": NovaEffectScene.BINDING_WORLD,
-		"render_domain": NovaEffectScene.RENDER_DOMAIN_WORLD,
-	})
-	return bool(receipt.get("spawned", false))
-
-
-func _attach_item_effect_to_static(source: Dictionary, source_index: int,
-		item_db_override: Variant = null) -> int:
-	if _effect_world == null or _placer == null or source_index < 0:
-		return 0
-	if _item_fx_registered_static.has(source_index):
-		return 0
-	var item_id := int(source.get("item_id", 0))
-	var kind := int(source.get("kind", -1))
-	if item_id <= 0:
-		return 0
-	var item_db: Variant = item_db_override
-	if item_db == null:
-		item_db = _placer.get_item_db()
-	if item_db == null or not _item_effect_pool_allows(kind, item_db.get_attrib(item_id)):
-		return 0
-	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
-	var effect := String(fx.get("effect", ""))
-	var userpoint := String(fx.get("userpoint", ""))
-	var data: Variant = source.get("object_data")
-	if effect.is_empty() or data == null:
-		return 0
-	if _effect_world.are_particles_hidden():
-		_item_fx_pending_static[source_index] = source.duplicate()
-		return 0
-	var entity_transform: Transform3D = source.get(
-			"world_transform", Transform3D.IDENTITY)
-	var attached := 0
-	var matched := 0
-	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
-				continue
-			var local_pose := _item_effect_local_pose(
-					Vector3(info.get("position", Vector3.ZERO)),
-					Vector3(info.get("rotation", Vector3.ZERO)))
-			if _spawn_static_item_effect(effect, entity_transform * local_pose):
-				attached += 1
-			matched += 1
-	if matched == 0:
-		# The spawn_count==0 leg uses the entity origin. Preserve the entity basis,
-		# matching an attached origin pose at the moment it becomes world-bound.
-		if _spawn_static_item_effect(effect, entity_transform):
-			attached += 1
-	if attached > 0:
-		_item_fx_registered_static[source_index] = true
-		_item_fx_pending_static.erase(source_index)
-	return attached
-
-
-func _retry_pending_item_effects() -> void:
-	if _effect_world == null or _effect_world.are_particles_hidden():
-		return
-	var pending_ids := _item_fx_pending_nodes.keys().duplicate()
-	for node_id_v in pending_ids:
-		var node_id := int(node_id_v)
-		var entry: Dictionary = _item_fx_pending_nodes.get(node_id, {})
-		# A wire node may have despawned while particles were disabled. Keep the
-		# freed-object Variant untyped until after the validity guard; a typed cast
-		# can raise before is_instance_valid gets a chance to reject it.
-		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
-			_item_fx_pending_nodes.erase(node_id)
-			continue
-		var node := node_v as Node3D
-		var controller_active := bool(entry.get("controller_active", false))
-		if controller_active:
-			var control_entry: Dictionary = _item_fx_control_nodes.get(node_id, {})
-			if control_entry.is_empty() or not _item_fx_control_node_is_active(control_entry):
-				_item_fx_pending_nodes.erase(node_id)
-				continue
-		_attach_item_effect_to_node(node, int(entry.get("kind", -1)),
-				int(entry.get("item_id", 0)), null, controller_active)
-	var static_ids := _item_fx_pending_static.keys().duplicate()
-	for source_index_v in static_ids:
-		var source_index := int(source_index_v)
-		var source: Dictionary = _item_fx_pending_static.get(source_index, {})
-		_attach_item_effect_to_static(source, source_index)
+	_item_fx.unregister_effect_anchor(owner_key)
 
 
 func get_mission_audio() -> NovaMissionAudio:
@@ -3526,76 +2195,23 @@ func get_mission_audio() -> NovaMissionAudio:
 # Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode ids not yet
 # mapped to our sessions).
 func _music_var_pump() -> void:
-	if not has_local_player():
+	if _runtime == null or not _runtime.has_player():
 		return
-	var max_h := local_player_max_health()
-	var cur_h := local_player_health()
+	var max_h: int = _runtime.local_player_max_health()
+	var cur_h: int = _runtime.local_player_health()
 	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
 		(cur_h * 100 / max_h) if max_h > cur_h else 100)
-	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
+	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, _runtime.local_player_team())
 
 
-# --- Blink frame gates (docs/render/render-occlusion-re.md §4) -----------------
-# The local player's accumulated blink letters gate whole render passes. The
-# letters are authored PER BOX (init 0x3E; letters clear bits), so windowed
-# buildings simply don't carry the indoors letter and keep the outside world
-# rendering — no portal special-casing at the gate level. The per-section
-# interior visibility masks (the portal traversal) are the next occlusion slice.
-
-func _apply_blink_frame_gates() -> void:
-	# Duck-typed like the silhouette-anchor pull above: harness runtimes supply
-	# value-only sims without weakening get_sim()'s NovaSimulation contract.
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("local_player_blink_flags"):
-		return
-	# The mission force-indoors attribute ORs the indoors letter into the frame
-	# view for BOTH consumers, matching run_occlusion_frame's camera input
-	# [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	var flags := int(sim.local_player_blink_flags()) | (0x2 if _mission_forces_indoors else 0)
-	# Accum bit 0x2 (indoors): the terrain render is skipped entirely — the
-	# near-detail and far-foliage tiers are terrain children here, matching
-	# retail where the detail cells ride the skipped terrain traversal and the
-	# far patches carry their own bit-2 gate — and the skybox pass (dome +
-	# celestials) is skipped [orig: render_main_scene @ 0x5c1353 (PolyTrn
-	# skip), terrain_scene_render @ 0x5d0570, Terrain_RenderSkyboxPass skip
-	# @ 0x5ca84f, Foliage_RenderFarPatchesPass skips @ 0x5c95bf/0x5c9665].
-	var indoors := (flags & 0x2) != 0
-	if indoors != _blink_indoors:
-		_blink_indoors = indoors
-		if _terrain != null:
-			_terrain.visible = not indoors
-		var sky := get_node_or_null("NovaSky")
-		if sky != null:
-			sky.visible = not indoors
-		var celestial := get_node_or_null("NovaCelestial")
-		if celestial != null:
-			celestial.visible = not indoors
-	# Accum bit 0x8 (the authored water letter): both water passes skipped.
-	# Letter bits only accumulate while inside a box, so the outdoors leg of
-	# retail's override is implicit; the remaining g_BlinkWaterVisible legs
-	# (a camera building straddling the water plane, the window latch) ride
-	# the section-mask slice [orig: Terrain_RenderSceneWithReflection
-	# @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
-	var water_off := (flags & 0x8) != 0
-	if water_off != _blink_water_suppressed:
-		_blink_water_suppressed = water_off
-		if _water != null:
-			_water.visible = not water_off
-
-
-# --- The render-occlusion frame (docs/render/render-occlusion-re.md §3/§5) -----
-# Per render frame: run the sim's occlusion pipeline (camera blink query ->
-# portal traversal -> section masks + TOC occluder culling + the entity render
-# gates), then drive the de-batched building nodes' per-section masks and the
-# gated entities' visibility. Runs after the present pass (inside tick_realtime)
-# so present's base visibility is re-asserted first each frame.
 # The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from the
 # sim each render frame, consumed by NovaWeather's exposure re-target on its
 # next tick [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
 # compute_ambient_light_along_direction @ 0x5c7a00 — retail re-targets from the
-# local player's view every render pass].
+# local player's view every render pass]. The render-occlusion frame it used
+# to share a section with (blink letter gates + the section-mask/portal apply)
+# lives in occlusion_frame_pass.gd; the iris march stays here as the weather
+# feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 	var weather := get_node_or_null("NovaWeather")
 	if weather == null or _runtime == null or not _runtime.has_method("get_sim"):
@@ -3608,203 +2224,6 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 		light_dir = _env.get_light_direction()
 	weather.iris_samples = sim.compute_iris_samples(
 			camera_xform.origin, -camera_xform.basis.z, light_dir)
-
-
-func _apply_occlusion_frame(camera_xform: Transform3D) -> void:
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("run_occlusion_frame"):
-		return
-	var registry = _runtime.get_registry() if _runtime.has_method("get_registry") else null
-	if registry == null:
-		return
-	var fov_y := 70.0
-	var near := 0.05
-	var aspect := 16.0 / 9.0
-	if is_inside_tree():
-		var cam := get_viewport().get_camera_3d()
-		if cam != null:
-			fov_y = cam.fov
-			near = cam.near
-		var vs := get_viewport().get_visible_rect().size
-		if vs.y > 0.0:
-			aspect = vs.x / vs.y
-	var fog := 1000.0
-	if _env != null and _env.has_method("get_fog_distance"):
-		fog = float(_env.get_fog_distance())
-	var water_z := -100000.0
-	if is_water_render_active():
-		var wh = _water.get("water_height")
-		if wh != null:
-			water_z = float(wh)
-	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	var timing := _perf_probe_enabled or stats_on
-	var native_start := Time.get_ticks_usec() if timing else 0
-	sim.run_occlusion_frame(camera_xform, fov_y, aspect, near, fog, water_z,
-			_mission_forces_indoors)
-	var native_end := Time.get_ticks_usec() if timing else 0
-
-	# Building batch visibility + per-section masks (bit N = render part N,
-	# forced-visible def bits already merged by the sim), applied as CHANGES:
-	# the sim diffs against what this host last applied, so a steady frame
-	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
-	# verdicts as the full-walk form land on the nodes.
-	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
-	var changes: PackedInt64Array = sim.get_building_visibility_changes()
-	for i in range(0, changes.size(), 2):
-		var bms_id := int(changes[i])
-		var node := _occlusion_node(registry, bms_id)
-		if node == null:
-			continue
-		var packed := int(changes[i + 1])
-		if node.has_method("set_section_visibility_mask"):
-			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
-		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
-
-	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
-	# also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
-	var culled_changes: PackedInt32Array = sim.get_render_culled_changes()
-	if culled_changes.size() >= 2:
-		var added := int(culled_changes[0])
-		for i in range(1, 1 + added):
-			var node := _occlusion_node(registry, int(culled_changes[i]))
-			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), true)
-		for i in range(2 + added, culled_changes.size()):
-			var node := _occlusion_node(registry, int(culled_changes[i]))
-			if node != null:
-				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
-
-	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
-	# authored water letter suppressing (accum bit 0x8), the water still renders
-	# when the frame latched the exterior or a camera building straddles the
-	# water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
-	# @ 0x29ACE40]
-	if _water != null and sim.has_method("occlusion_water_visible"):
-		_water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
-
-	if timing:
-		_perf_occl_native_us = native_end - native_start
-		_perf_occl_apply_us = Time.get_ticks_usec() - native_end
-	if stats_on:
-		_frame_stats.add(FrameStatsBoard.OCCL_APPLY, _perf_occl_apply_us)
-		# The native call's internal split; the remainder of the bound call
-		# (marshalling + the handle collection) lands in the glue slot so the
-		# pane's Occlusion group still sums to the whole frame cost.
-		if sim.has_method("get_last_occlusion_build_us"):
-			var build_us := int(sim.get_last_occlusion_build_us())
-			var probe_us := int(sim.get_last_occlusion_probe_us())
-			_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
-					maxi(_perf_occl_native_us - build_us - probe_us, 0))
-		else:
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
-
-
-# Resolve (and cache) the node a bms_id drives. Cache entries revalidate with
-# is_instance_valid; a freed node re-resolves through the registry (reloads
-# recreate nodes under the same ids).
-func _occlusion_node(registry, bms_id: int) -> Node3D:
-	var cached: Variant = _occlusion_node_cache.get(bms_id)
-	if cached != null and is_instance_valid(cached):
-		return cached
-	var node: Node = registry.resolve_single(bms_id)
-	if node == null or not (node is Node3D):
-		_occlusion_node_cache.erase(bms_id)
-		return null
-	_occlusion_node_cache[bms_id] = node
-	return node
-
-
-# The occlusion-hidden ownership bit. A hide claims the id (the present pass
-# consults the shared set and never fights it); a release clears the claim and
-# lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
-# entity never flashes for a frame.
-func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void:
-	if hidden:
-		if not _occlusion_hidden_ids.has(bms_id):
-			_occlusion_hidden_ids[bms_id] = true
-			if node.visible:
-				node.visible = false
-	elif _occlusion_hidden_ids.erase(bms_id):
-		var present_visible := _entity_present_visible(sim, bms_id)
-		if present_visible and not node.visible:
-			node.visible = true
-
-
-# Duck-typed sim resolution for the occlusion apply paths: harness runtimes
-# serve stub sims that the typed get_sim() accessor cannot return.
-func _occlusion_sim() -> Object:
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return null
-	var sim: Variant = _runtime.get_sim()
-	return sim if sim is Object else null
-
-
-func _entity_present_visible(sim: Object, bms_id: int) -> bool:
-	if _present_visibility.has(bms_id):
-		return bool(_present_visibility[bms_id])
-	# Compatibility/test sources without MissionPresentPass retain the native
-	# base predicate. Production placed nodes always publish the exact combined
-	# hidden + local-view-suppressed intent above.
-	if sim != null and sim.has_method("entity_present_visible"):
-		return bool(sim.entity_present_visible(bms_id))
-	return true
-
-
-# Release every occlusion override: restore claimed nodes to the sim's present
-# intent, clear section masks to fully-visible, drop the caches, and forget the
-# sim's delta baseline so a later re-enable re-emits full state. The A/B seam
-# keeps mission blink/indoors semantics (reset_semantics=false); unload resets
-# them too.
-func _release_occlusion_overrides(reset_semantics: bool) -> void:
-	var sim := _occlusion_sim()
-	for bms_id in _occlusion_hidden_ids:
-		var node: Variant = _occlusion_node_cache.get(bms_id)
-		if node != null and is_instance_valid(node):
-			var present_visible := _entity_present_visible(sim, int(bms_id))
-			if present_visible:
-				(node as Node3D).visible = true
-	_occlusion_hidden_ids.clear()
-	for bms_id in _occlusion_node_cache:
-		var node: Variant = _occlusion_node_cache[bms_id]
-		if node != null and is_instance_valid(node) \
-				and (node as Node).has_method("set_section_visibility_mask"):
-			(node as Node).set_section_visibility_mask(-1)
-	_occlusion_node_cache.clear()
-	_reset_occlusion_apply_baseline()
-	if reset_semantics:
-		_mission_forces_indoors = false
-
-
-# Forget the sim's applied-state baseline so the next occlusion frame re-emits
-# everything (the host caches were dropped or the A/B skip ended).
-func _reset_occlusion_apply_baseline() -> void:
-	var sim := _occlusion_sim()
-	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):
-		sim.reset_occlusion_apply_baseline()
-
-
-func _reset_occlusion_frame() -> void:
-	_release_occlusion_overrides(true)
-
-
-func _reset_blink_frame_gates() -> void:
-	if _blink_indoors:
-		if _terrain != null:
-			_terrain.visible = true
-		var sky := get_node_or_null("NovaSky")
-		if sky != null:
-			sky.visible = true
-		var celestial := get_node_or_null("NovaCelestial")
-		if celestial != null:
-			celestial.visible = true
-	if _blink_water_suppressed and _water != null:
-		_water.visible = true
-	_blink_indoors = false
-	_blink_water_suppressed = false
 
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------
@@ -3843,7 +2262,7 @@ func _update_frame_clear_color() -> void:
 	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
 	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors
 	# bit is clear; the sentinel generation forces a recompute on exit].
-	if _blink_indoors:
+	if _occlusion.blink_indoors:
 		if _clear_env_generation != -2:
 			_clear_env_generation = -2
 			_clear_color.environment.background_color = Color.BLACK

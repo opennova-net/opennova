@@ -101,6 +101,7 @@ func _build_viewport() -> void:
 
 	_model = NovaObjectModelScript.new()
 	_model.name = "NovaObjectModel"
+	_model.set_model_light_preview_enabled(true)
 	_root.add_child(_model)
 	_model.bounds_changed.connect(_on_model_bounds_changed)
 	_model.set_object_data(object_data)
@@ -277,6 +278,7 @@ func load_arms(arms_name: String, resource_root) -> bool:
 	if _arms_model == null:
 		_arms_model = NovaObjectModelScript.new()
 		_arms_model.name = "NovaArmsModel"
+		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
 		_arms_model.set_environment_node(_environment)
 	_arms_model.set_object_data(data)
@@ -363,7 +365,7 @@ func set_collision_visible(value: bool) -> void:
 
 
 func has_collision() -> bool:
-	return object_data != null and object_data.has_method("has_collision") and object_data.has_collision()
+	return object_data != null and object_data.has_collision()
 
 
 func is_user_points_visible() -> bool:
@@ -377,7 +379,6 @@ func set_user_points_visible(value: bool) -> void:
 
 func has_user_points() -> bool:
 	return object_data != null \
-		and object_data.has_method("get_user_point_count") \
 		and object_data.get_user_point_count() > 0
 
 
@@ -404,7 +405,7 @@ func _refresh_collision_overlay() -> void:
 		if child.name == "ObjectCollision":
 			_guide_root.remove_child(child)
 			child.free()
-	if not _collision_visible or object_data == null or not object_data.has_method("get_collision_volumes"):
+	if not _collision_visible or object_data == null:
 		return
 	var volumes: Array = object_data.get_collision_volumes()
 	if volumes.is_empty():

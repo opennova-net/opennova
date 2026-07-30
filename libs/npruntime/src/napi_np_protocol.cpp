@@ -5,6 +5,7 @@
 #include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
 #include <npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <npwire/session_hello.h>
@@ -648,7 +649,7 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// known by the time we stream the 0x0C.
 	for (const ProtocolMessage &m : messages) {
 		if (conn.admission_stage == GameAdmissionStage::Complete &&
-		    m.tag == 0x48 && m.payload.size() >= 4) {
+		    m.tag == c2s::CLIENT_ACK && m.payload.size() >= 4) {
 			conn.connection_id = static_cast<uint32_t>(m.payload[0]) |
 					(static_cast<uint32_t>(m.payload[1]) << 8) |
 					(static_cast<uint32_t>(m.payload[2]) << 16) |
@@ -708,7 +709,7 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (conn.spawned_announced) {
 		std::vector<ProtocolMessage> c2s;
 		for (const ProtocolMessage &m : messages) {
-			if (m.tag == 0x0C) c2s.push_back(m);
+			if (m.tag == c2s::ENTITY_UPLINK) c2s.push_back(m);
 		}
 		if (!c2s.empty()) {
 			HostAcceptEvent ev;

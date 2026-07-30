@@ -263,7 +263,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world != nullptr) {
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =
-				(owner.ctx.config.mp_attributes & 0x8000u) != 0;
+				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;
 	}
 	configure_session_runtime(owner.ctx);
 

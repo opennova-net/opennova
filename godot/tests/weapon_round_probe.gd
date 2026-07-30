@@ -218,14 +218,14 @@ func _anim_trace() -> void:
 	var tracef := FileAccess.open(_out_abs + "/animtrace.log", FileAccess.WRITE)
 	var part: Node = null
 	for _attempt in range(120):  # the equip rebuilds the viewmodel over several frames
-		if _host != null and "_vm_parts" in _host and _host._vm_parts.size() > 0:
-			part = _host._vm_parts[0]
+		if _host != null and _host.vm_parts().size() > 0:
+			part = _host.vm_parts()[0]
 			break
 		await get_tree().process_frame
 	if part == null:
 		var diag := "no viewmodel part: host=%s vm=%s def=%s" % [
 				str(_host != null),
-				str(_host._viewmodel) if _host != null else "-",
+				str(_host.viewmodel()) if _host != null else "-",
 				str(_world.local_player_viewmodel_def() != null)
 						if _world.has_method("local_player_viewmodel_def") else "?"]
 		print("[wr] ANIMTRACE: ", diag)
@@ -270,7 +270,7 @@ func _fire_diag() -> void:
 	if audio != null:
 		for set_name in ["GS_M4", "GF_RL_AR15_2", "SHELLDROP", "DRY_TRIGGER"]:
 			print("[wr] bank probe %-14s -> %s" % [set_name,
-					str(audio.fire_soundset(set_name, _world.local_player_position()))])
+					str(audio.fire_soundset(set_name, _world.get_sim().get_local_player_position()))])
 	var t0 = _world.local_player_weapon_view()
 	print("[wr] pre-fire: active=%s clip=%s reserve=%s act=%s" % [
 			str(t0.active), str(t0.clip), str(t0.reserve), str(t0.current_action)])

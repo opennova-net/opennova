@@ -42,7 +42,7 @@ func _mission_wait(seconds: float) -> void:
 
 
 func _find_local_player_index(sim, world) -> int:
-	var pp: Vector3 = world.local_player_position()
+	var pp: Vector3 = world.get_sim().get_local_player_position()
 	for i in AI_SCAN_CAP:
 		var d: Dictionary = sim.get_entity_debug(i)
 		if d.is_empty():
@@ -84,7 +84,7 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			_fail("player never spawned (mission load stalled?)")

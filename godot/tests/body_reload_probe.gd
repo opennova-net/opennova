@@ -75,7 +75,7 @@ func _ready() -> void:
 	var fore_idle := _mask_bone_rot(avatar)
 	print("[body] idle: ", _body_str(world.local_player_weapon_view()))
 	_check(String(world.local_player_weapon_view().body_anim_key) ==
-			String(world.local_player_anim_key()),
+			String(world.get_sim().get_local_player_anim_key()),
 			"idle: body channel mirrors the state with its own playhead")
 
 	# Short burst so the magazine is not full (the reload input gate), then reload.
@@ -114,7 +114,7 @@ func _ready() -> void:
 	var post = world.local_player_weapon_view()
 	print("[body] post-reload: ", _body_str(post))
 	_check(post.current_action == 0, "post-reload: FSM back to IDLE")
-	_check(String(post.body_anim_key) == String(world.local_player_anim_key()),
+	_check(String(post.body_anim_key) == String(world.get_sim().get_local_player_anim_key()),
 			"post-reload: body channel mirrors the primary state again")
 	await _capture("03_tp_post.png")
 

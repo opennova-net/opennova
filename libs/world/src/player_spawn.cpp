@@ -70,7 +70,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Both local and remote player bodies carry the retail player classifier. The
     // damage trigger uses this bit—not local ownership—to bypass NPC move/group alerts.
     // [orig: Entity_HandleDamageTrigger test victim Flags,100h @0x4073c8]
-    seed.engine_flags |= 0x100u;
+    seed.engine_flags |= kEntityFlagPlayer;
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
     // 0x0C organic-spawn carries it so the client self-matches its own player. [orig: Server_PlayerAdd
     // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2b]
@@ -104,7 +104,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.inf.leg_yaw[0] = ae.inf.leg_yaw[1] = ae.heading;
     ae.inf.leg_target[0] = ae.inf.leg_target[1] = ae.heading;
     ae.inf.max_health = static_cast<int16_t>(hp);
-    ae.inf.anim_state = anim_state::kIdle;
+    ae.inf.reset_body_animation(anim_state::kIdle);
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]

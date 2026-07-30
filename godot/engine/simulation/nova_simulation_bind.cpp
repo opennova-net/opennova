@@ -85,6 +85,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &NovaSimulation::get_local_player_anim_source_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &NovaSimulation::get_local_player_anim_source_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_blend_weight"), &NovaSimulation::get_local_player_anim_blend_weight);
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
 	ClassDB::bind_method(
 			D_METHOD("set_local_player_weapon", "def", "clip_seconds",
@@ -132,6 +135,7 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::set_sound_profiles);
 	ClassDB::bind_method(D_METHOD("set_water_z", "water_y"), &NovaSimulation::set_water_z);
 	ClassDB::bind_method(D_METHOD("drain_slot_sounds"), &NovaSimulation::drain_slot_sounds);
+	ClassDB::bind_method(D_METHOD("drain_sound_emitters"), &NovaSimulation::drain_sound_emitters);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
@@ -265,6 +269,10 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
+	ClassDB::bind_method(D_METHOD("local_player_interior_item_id"),
+	                     &NovaSimulation::local_player_interior_item_id);
+	BIND_CONSTANT(BLINK_INDOORS);
+	BIND_CONSTANT(BLINK_WATER_OFF);
 	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),
 	                     &NovaSimulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos",
@@ -328,6 +336,9 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_BODY_ANIM_SLOT);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_ANIM_SOURCE_STATE);
+	BIND_ENUM_CONSTANT(PF_ANIM_SOURCE_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_ANIM_BLEND_WEIGHT);
 	BIND_ENUM_CONSTANT(PF_ANIM_REMOTE_REQUEST);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE_PULSE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PULSE_TICKS);

@@ -48,7 +48,7 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("ai_muzzle_probe: mission load stalled")
@@ -61,7 +61,7 @@ func _run() -> void:
 	# range — the SP player spawns farthest-from-enemy, so no NPC is in view at
 	# spawn. Bring a few infantry NPCs to the player (the probe teleport seam) so
 	# their rows decode and the muzzle seam flows, exactly as in-range combat does.
-	var pp: Vector3 = world.local_player_position()
+	var pp: Vector3 = world.get_sim().get_local_player_position()
 	var moved := 0
 	for i in AI_SCAN_CAP:
 		var d: Dictionary = sim.get_entity_debug(i)

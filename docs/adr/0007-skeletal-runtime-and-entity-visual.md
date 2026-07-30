@@ -126,21 +126,25 @@ live projectile queries remain exact per-tick queries.
 
 ## Deferred seams (feature gaps, IDA-cited)
 
-- Two-channel **upper/lower-body blend** (`AnimChannel_BlendTwoChannels @0x410740`) — for aim/walk
-  separation; single clip is fine for AI walk cycles.
+- The **secondary weapon channel's own transition cross-fade** remains deferred under D-INF-1;
+  its mask composition is live, but target changes still switch immediately. The PRIMARY
+  locomotion/body cross-fade is **FIXED 2026-07-29**: source and target retain independent
+  fixed-tick playheads, use the exact float32 10/15-tick weight, and blend before the
+  weapon-mask/aim-overlay compose `[orig: AnimMap_UpdateEntity @ 0x40b5f0;
+  AnimChannel_BlendTwoChannels @ 0x410740]`. Simulation root/capsule output, rendered pose,
+  and authoritative organic collision consume that same transition state.
 - Body-segment **aim/lean overlays** (`Entity_BuildBoneTransformMatrices @0x4b1290` bone-index switch +
   `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08** and ported for
   local/placed/remote rendering plus the synchronous organic-collision pose
   (docs/world/world-wac-ai-re.md §14/§15.8b: the bone→overlay map, mounted config table, seven blend
   matrices, and pivot recomposition). Remaining D-INF-11 scope is NPC/remote secondary-weapon threading,
-  attachments, and blend windows; mounted selection now shares the landed seat-frame
+  attachments, and secondary-channel blend windows; mounted selection now shares the landed seat-frame
   body/leg/pitch/roll inputs without replacing that synchronization.
   Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
 - Full **anim-slot table** (`Entity_ComputeAnimSlotIndex @0x43a690`, base 180 + 4·variant) and the
   player-avatar `off_8135F0` table — current selector is walk/run/idle by speed+alert.
-- **Cross-fade** on slot change (currently a hard cut); needs the two-channel blend first.
-- Playhead advances on Godot wall-clock × clip `fps`, not the fixed sim tick (`flt_A78354`) — a timing-parity
-  follow-up; visually fine at `fps`.
+- Free-running editor preview still advances on Godot wall-clock × clip `fps`; simulation-owned
+  body playheads and their primary cross-fades are now driven by fixed half-frame ticks.
 - Turn-rate clamp (sim-side infantry heading update); pitch/roll present path is ported
   but unexercised (flag for a visual check when a non-zero source exists).
 
@@ -148,7 +152,10 @@ live projectile queries remain exact per-tick queries.
 
 `tests/anim/anim_sample_test` (native conventions, world↔local self-consistency, shared-rest regression,
 and a synthetic compressed-clip regression: a sparsely-keyed bone holds its keyframe, never identity),
-`tests/world/ai_test` (state → `anim_slot`), GUT `skeletal_anim_test`/`object_editor_test`/
+`tests/world/ai_test` (state → `anim_slot`, plus a real lethal RoundSim edge that retains
+the outgoing root sample and enters death at weight zero), `tests/world/infantry_test`
+(exact float32 10/15-tick weights, independent playheads, A→B→C retargeting, target-only
+events, and death during an active blend), GUT `skeletal_anim_test`/`object_editor_test`/
 `mission_present_pass_test`. Native `mount_test` pins the exact non-cardinal seat-heading conversion,
 remote seat-frame state, and the local look/body split. Focused GUT `nova_simulation_test` test
 `test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun` fires a local-owned round through a
