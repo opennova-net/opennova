@@ -430,6 +430,34 @@ func test_resource_root_loads_dds_from_pff() -> void:
 		assert_eq(tex.get_height(), 4)
 
 
+func test_packed_texture_collapses_compound_authored_extensions() -> void:
+	# Retail Wwall models author names such as Jbark_2.dds.tga while resource.pff
+	# stores Jbark_2.dds. The shared candidate generator must retain that inner
+	# recognized filename before probing alternate extensions.
+	var inner_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	inner_image.fill(Color.RED)
+	var fallback_image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	fallback_image.fill(Color.BLUE)
+	var root := _make_flat_root("compound_texture_extension")
+	_write_pff(root.path_join("resource.pff"), [
+		{"name": "swatch.dds", "bytes": inner_image.save_dds_to_buffer()},
+		{"name": "swatch.dds.dds", "bytes": fallback_image.save_dds_to_buffer()},
+	])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var tex: Texture2D = resources.load_texture("swatch.dds.tga")
+	assert_not_null(
+		tex,
+		"A compound authored .dds.tga reference should resolve the packaged .dds.",
+	)
+	if tex != null:
+		assert_true(
+			tex.get_image().get_pixel(0, 0).is_equal_approx(Color.RED),
+			"The exposed .dds filename must win before generic extension fallbacks.",
+		)
+
+
 func test_resolve_file_snapshots_per_cache_epoch() -> void:
 	# resolve_file reads a one-walk-per-epoch snapshot of the root directory, matching
 	# the index-backed listings: on-disk edits surface via scan/mount or an explicit
