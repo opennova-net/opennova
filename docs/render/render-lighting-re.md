@@ -27,11 +27,14 @@ scalar function in this record; the GUT env vectors
 | The modulator chain (modulator2 → modulator → every color block, same tick) | MATCHING (ported; env #17 CLOSED) | `env::ModulatorChain` + the witnessed block order `[orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..0x57f03c]`; 62-tick target chase `[orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas @ 0x57d940]`; env vectors re-dumped surgically (exactly the 8 weather checkpoint rows; hand-check wb/k064 `0x31·61/64 = 0x2E`) |
 | Iris auto-exposure sampling | MATCHING (marched port, bounded residuals) | the curve was already ported (env record §Iris); the 3-point camera-ray march is PORTED (2026-07-18): `NovaSimulation::compute_iris_samples` (terrain-clipped 8 u camera ray, thirds march, per-sample blink/indoor classification + 3 sun-occlusion rays) → `NovaWeatherCore::set_exposure_from_iris_samples` (per-sample curve vs ceiling/floor indoors, ×level/8 sun outdoors, INT /3 average) `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]`; the outdoor sample stays the no-world editor fallback; residuals on D-RLIT-2 |
 | World lighting block (per-pass build + ctx store) | MATCHING (math ported) | `renderer::build_world_lighting` `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]` incl. the NVG hemi rewrite, vehicle-scope grey, NVG world dim, and the two hemisphere averages; `renderer_state_vectors` section 5 |
-| Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade — the REN-4 erratum corrected in render-material-re.md |
+| Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported; host transfer wired) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade. The host now parses `items.def light_transfer` as a clamped percentage, carries it through `NovaItemDatabase`, and applies the normalized value to interior ROBJ sections and contained player/viewmodel lighting |
 | FF vertex lighting (ambient + dir + hemisphere delta lights, saturate, ×2) | MATCHING (composed) | `renderer::ff_vertex_light` + the composer rewrite `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TSSColor MODULATE2X]`; D-RMAT-5 FIXED; T2 swatch: 116/120 cells moved, the 4 VS_TRACER (unlit, MODULATE 1×) cells byte-identical |
-| Per-entity sun visibility (effectScale source) | MATCHING (math ported; host raycasts pending) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; the 3-ray host sampling rides the runtime slice (D-RLIT-3) |
-| Dynamic point lights (color × modulator, {1,0,15/r²,1}, ≤4 D3D lights, owner/interior groups) | MATCHING (math ported) / group culling witnessed | `renderer::point_light_color/point_light_attenuation` `[orig: Light_GetPointLightParams @ 0x5a9180; Light_FillD3DPointLight @ 0x5aa450]` — attenuation identical in shape to the OED preview (`build_oed_light_attenuation`, PrepareLightParams @ 0x46A500), range ×1.25; the group/visibility machinery witnessed (D-RLIT-4) |
+| Per-entity sun visibility (effectScale source) | MATCHING (math/API ported; ordinary world-entity feed pending) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; hosted models accept the factor, but the ordinary outdoor entity presenter does not yet drive it from the witnessed 3-ray query (D-RLIT-3) |
+| EffectWorld dynamic point lights (color × modulator, {1,0,15/r²,1}, ≤4 D3D lights, owner/interior groups) | MATCHING (math ported) / group culling witnessed | `renderer::point_light_color/point_light_attenuation` `[orig: Light_GetPointLightParams @ 0x5a9180; Light_FillD3DPointLight @ 0x5aa450]` — attenuation identical in shape to the OED preview (`build_oed_light_attenuation`, PrepareLightParams @ 0x46A500), range ×1.25; these runtime light instances are independent of model-authored `LGHT` chunks (D-RLIT-4) |
+| Model-authored `LGHT` chunks | MATCHING gameplay gate / editor-only approximation | Retail parses and stores the records, but the gameplay renderer has no post-load read of the model light field. Godot likewise keeps parsed `LGHT` inactive (`u_local_light_count = 0`) for runtime models and enables the dominant-light approximation only through the explicit object-editor preview opt-in `[orig: parse_lights_chunk @ 0x5B47B0; model field +0xCC post-load xref audit]` |
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
+| Dynamic projected entity shadows | WITNESSED / host-native approximation | Retail allocates the independent projected render-slot path for people (and the local player) or ItemDef `DynamicShadow`; attached third-person weapons join their entity, while the first-person viewmodel does not cast. ItemDef `NoShadow` does not gate this path `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7]` |
+| Static sector/model sun shadows onto terrain/foliage | WITNESSED / terrain-only host approximation | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into the terrain tile cache, not back onto sector models `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; Render_SubmitEntity @ 0x60D971; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]` — exact retail RT projection/cache mechanics, including alpha-aware foliage reception, remain D-TERRAIN-7 |
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: render_terrain_lightmaps @ 0x609de0]`; foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / host-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the host's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
@@ -158,7 +161,21 @@ combined FF vertex diffuse saturates and the output stage doubles it:
 `TSSColor(0, Modulate2x, Texture, Diffuse)` — **pixel = tex × min(lit,1) × 2**
 (VS_TRACER alone modulates 1×).
 
-**Dynamic point lights.** 176-byte records in `Light_InstanceTable
+**Hosted `light_transfer` wiring (2026-07-29).** The `items.def` parser now
+recognizes `light_transfer`, clamps the authored integer percentage to
+`0..100`, and stores its normalized `0.0..1.0` value through the def FFI and
+`NovaItemDatabase` (Ihq01 is the shipped witness: `20` → `0.2`). Mission
+placement supplies that value before building the model's section materials.
+The portal split leaves ROBJ 0 on outdoor lighting and interpolates ROBJ 1+
+toward the floor/ceiling blocks by the parent transfer. A player inside the
+building's blink volume, including first-person arms/weapon lighting, inherits
+the same parent value even when the coarse `local_player_indoors` state is
+false. This closes the interior half of D-RLIT-3. The remaining half is the
+ordinary outdoor world-entity feed: `NovaObjectModel` can consume an
+effect-scale factor, but the presenter still defaults it to 1.0 instead of
+running retail's three per-entity sun-visibility rays.
+
+**EffectWorld dynamic point lights.** 176-byte records in `Light_InstanceTable
 @ 0x2732e28`, handle-indexed; per-frame in-frustum handles in
 `Light_VisibleHandles @ 0x272eda0` (count @ 0x272ed98). Params
 (`Light_GetPointLightParams @ 0x5a9180`): position fixed→float Y-negated,
@@ -177,6 +194,16 @@ entity being rendered (`Lighting_SetOwnerLightGroup @ 0x5a9100`);
 (indices offset by `Light_D3DIndexBase @ 0x840b20`), maintaining the active
 list @ 0x2732dfc.
 
+These records are not model `LGHT`. Retail's 3DI loader parses and stores the
+model chunk (`parse_lights_chunk @ 0x5B47B0`, model field `+0xCC`), and its
+CTRL/load/destruction machinery preserves the authored records, but the
+gameplay renderer has no post-load read of that field. The host therefore
+keeps `LGHT` in the IR and object-editor round trip while forcing
+`u_local_light_count = 0` for normal runtime models. Only
+`ObjectPreview.set_model_light_preview_enabled(true)` opts into the existing
+single-dominant-light approximation for authoring inspection; it is not a
+claim that retail gameplay emits the model lights.
+
 **Terrain/foliage lighting constants.** `Render_TerrainScene @ 0x610c80`
 (per frame) calls `init_terrain_lighting_color_ramps @ 0x604ee0` with
 **(Env_LightBlock[0], Env_SkyBlock[0])** — NVG blends the sky arg toward the
@@ -188,8 +215,9 @@ modulator (`@ 0x610d28..0x610e36`), the vehicle scope forces
 and the packed sun/blend ratio `PolyTrn_SunToBlendRatioColor @ 0x849930`
 (consumed by the tile renderers). `terrain_setup_lighting_and_shader
 @ 0x604420` pushes c0/c1 as PS constants and picks the PS variant
-(shadow-map loaded → PSShadow*, tier ≥1 + normal map → NM variants, splat
-textures → PS14Splat*); all eight terrain PS share
+(camera below `Env_WaterHeightFixed` → the misleadingly named PSShadow*
+water-noise variants, tier ≥1 + normal map → NM variants, splat textures →
+PS14Splat*); all eight terrain PS share
 `r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = tileAlpha × light +
 sky** (the ÷2 and MODULATE2X cancel). `t0` is the cached tile render target,
 not raw colormap RGBA. `PolyTrn_RenderTile @ 0x60da70` clears authored
@@ -229,6 +257,54 @@ write: that sampled packed diffuse is overwritten by the source-height bend
 carrier before emission. It is therefore not a rendered instance-color
 source. See the corrected D-FOLIAGE-1 disposition and
 [foliage-re.md](../foliage/foliage-re.md).
+
+**Underwater `PSShadow*` and static model shadows are different systems
+(2026-07-29 correction).** `terrain_setup_view_and_lighting @ 0x60FE40`
+stores `cameraY < Env_WaterHeightFixed` in view field `+0x74`
+(`@ 0x60FEE0`), and `terrain_render_visible_sectors @ 0x6090C0` copies it to
+`dword_319FB3C @ 0x60915F`. Under that flag,
+`PolyTrn_BindStageTextures @ 0x604330` calls `sub_5C0190 @ 0x6043ED` and
+binds its result, `Water_NoiseColorTexture @ 0x28EE8B8`, at t3; shader
+selection occurs at `terrain_setup_lighting_and_shader @ 0x6044B1`.
+`PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap` then form the direct
+coefficient `4·t3²·t0.a`. They are underwater animated wave-shadow/noise
+variants, not geometry shadow-map receivers. `dword_319FB8C` is likewise not
+shadow state: all four writers store one (`@ 0x6040DD`, `0x60910C`,
+`0x60E89B`, `0x60EB25`), and `render_terrain_sector_batch` reasserts it at
+`0x6092BE` before the read at `0x6095D7`; its live leg admits the ordinary
+terrain/local-point-light and foliage work.
+
+Static directional sector shadows instead originate in
+`Terrain_CollectAndRenderTileModels @ 0x60D250`. With
+`dword_8493DC` enabled, `PolyTrn_RenderTile` invokes it at
+`0x60DC83..0x60DC96`. The collector derives a planar projection from
+`Environment_GetLightDirectionFixed/Float @ 0x57D8E0/0x57D870`, admits pool-2
+buildings unless either BMS/runtime or ItemDef `NoShadow` is set
+(`@ 0x60D42F/0x60D43E`), and admits pool-1 items only when they also carry
+ItemDef attrib2 `StaticShadow` (`@ 0x60D447..0x60D450`). It fills every ROBJ
+matrix slot for the selected LOD (`@ 0x60D926..0x60D95E`) and submits flag
+`0x2`/PROJSHAD at `0x60D971`; the live portal
+`g_HiddenSectionMask @ 0xB7965C` is not part of this direct render-data path.
+
+The silhouettes render into temporary RT `dword_319A2D8`
+(`@ 0x60D5BE..0x60DA4F`) and are sampled into the destination terrain tile
+cache at `0x60E10A..0x60E19D`. Terrain receives that cache as t0 and foliage
+as t1, so both inherit the projected shadow while sector-model floors and
+walls do not receive or self-shadow from it. Ihq01 is the concrete parity
+case: pool-2 index 40, no `NoShadow`, three ROBJ in every LOD; all three cast,
+despite ROBJ 1/2 being interior-lighting sections in the live model draw.
+Dynamic people/ItemDef `DynamicShadow` render slots remain independent
+(`Entity_InitFromModel @ 0x40E1BC..0x40E1F7`). Full tile-producer record:
+[terrain-re.md](../terrain/terrain-re.md).
+
+The Godot host is deliberately narrower than that retail receiver path. Its
+static directional adapter marks the admitted model/husk population as casters
+but exposes only terrain as a receiver; destruction swaps and editor moves keep
+the corresponding caster eligibility and transform in lockstep. The shared
+black attenuation catcher is attached to one-sided opaque model materials for
+the independent dynamic projection path, but not to alpha-tested/two-sided
+materials or foliage cards. Exact alpha-aware foliage projection therefore
+remains part of D-TERRAIN-7's tile-compositor residual.
 
 **Lighting textures + the DOT3 light shader.** `Lighting_InitTextures
 @ 0x5a94f0` builds the procedural set: `texlight2d`/`texlightspot2d` (64²
@@ -316,10 +392,10 @@ directional with 0.75 ambient material.
 |---|---|---|---|
 | D-RLIT-1 | Hosted weather runs the complete 16-block chain: modulator2/modulator plus all 14 color blocks | 16 blocks modulate in witnessed order (including skyfog and the static ceiling/cloud/floor trio) `[orig: @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-21)** — `SkyWeatherColorBlocks` preserves the witnessed order; skyfog gets its lightning additive, horizon blend, and tail double; and `NovaEnvironment` writes every color current back. `NovaSky` and the frame clear share the final doubled skyfog, the flat dome consumes smoothed `cloud_rgb`, and indoor iris samples consume the pre-modulated ceiling/floor currents. |
 | D-RLIT-2 | Iris exposure uses the marched 3-point camera-ray average with per-sample indoor/outdoor classification and sun occlusion | 3-point average marched back from the camera-ray hit, with per-sample interior detection + 3 sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]` | **PORTED (2026-07-18, the marched-iris slice)** — the march, per-sample indoor/no-data classification (ceiling/floor blocks, gain-255 no-data short-circuit), sun level 8−hits (radii −0x2000/−0x5000/−0x8000), and INT /3 average are live in-world (`compute_iris_samples` → `set_exposure_from_iris_samples`; the sniper/aircraft retail A/B was the trigger — the retail hangar frame runs the indoor-dilated gain ≈ 71/64 vs the old outdoor 59/64). Bounded residuals: the camera-ray ENTITY nearest-hit clip (terrain clip only), pool-1 dynamics in the sun rays (statics walk only), the caller-sector entity-count ray gate (rays always run; identical when no statics exist), and the per-sample interior LIGHT-GROUP side effect (`Lighting_SetInteriorLightGroup @ 0x5a90e0` — rides D-RLIT-4's group hosting) |
-| D-RLIT-3 | Object materials light at full sun visibility (effectScale = 1.0) | per-entity 3-ray sun occlusion dims DirLightColor to 0.75/0.5/0.25 under cover `[orig: Entity_ComputeSunVisibility @ 0x5c6800]`; interior-parented entities lerp to floor/ceiling ambience by the interior's daylight openness (model+536) `[orig: @ 0x5d98a0]` | WITNESSED-READY-DEFERRED — the math is ported and T1-pinned (`compute_entity_lighting`, `sun_visibility_factor`); the host wiring (raycasts + interior data) rides the runtime/interior slices |
-| D-RLIT-4 | Local lights: the host's single-light LGHT preview (editor) + Godot's own light path | ≤4 concurrent D3D point lights culled by owner/interior groups, colors × the modulator scale × optional RgbGen animation, atten {1,0,15/r²,1} `[orig: @ 0x5a9180; @ 0x5abc50; @ 0x5a9120]` | WITNESSED-READY-DEFERRED — color/attenuation math ported; the dynamic-light hosting (effect-spawned lights) rides the EffectWorld/particle track |
+| D-RLIT-3 | `items.def light_transfer` is parsed and applied to interior ROBJ sections plus the contained player/viewmodel; ordinary outdoor world entities still default to full sun visibility (effectScale = 1.0) | interior-parented entities lerp to floor/ceiling ambience by the parent daylight openness (model+536), while outdoor entities use 3-ray sun occlusion to dim DirLightColor to 0.75/0.5/0.25 `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0; Entity_ComputeSunVisibility @ 0x5c6800]` | WITNESSED-READY-DEFERRED — **interior transfer FIXED 2026-07-29** (def/FFI/database/runtime context, Ihq01 `20` → `0.2`); the remaining ordinary world-entity raycast feed is deferred, with the math and model API already pinned |
+| D-RLIT-4 | EffectWorld dynamic point lights remain unhosted; parsed model `LGHT` is deliberately inactive in gameplay and available only through the explicit single-light object-editor preview | retail enables ≤4 EffectWorld D3D point lights culled by owner/interior groups, colors × modulator × optional RgbGen, atten {1,0,15/r²,1}; its model `LGHT` field has no post-load gameplay-render read `[orig: @ 0x5a9180; @ 0x5abc50; @ 0x5a9120; parse_lights_chunk @ 0x5B47B0]` | WITNESSED-READY-DEFERRED — dynamic EffectWorld hosting remains; the runtime `LGHT` gate is matching, and the preview is explicitly editor-only |
 | D-RLIT-5 | Glass/env reflection = the hemisphere sampled along the reflected view; phong specular = a pow-16 lobe in the witnessed light color | glass GLOW samples CubeRotSpecular (the static sun-glint cube) via MatRotSpecular; NORMAL techniques sample the LIVE CubeEnvironment scene cube; VS_PHONG* samples the PhongMap texture `[orig: @ 0x58f290; @ 0x6106a0; Glass.fx]` | OPEN (approximation) — the cube CONTENTS are witnessed (this record); hosting a live scene cube / the glint cube is the D-RORD-5 bloom-wiring residual's substrate |
-| D-RLIT-6 | No terrain shadow-map PS variants; no baked lightmap TGA draped | shadow-map-loaded terrain uses PSShadowBasic/NM (light scale 4·t3²·t0.a); the mission lightmap TGA drapes tiles/billboards `[orig: @ 0x604420; @ 0x604a90]` | OPEN — rides the terrain lightmap hosting (terrain-record scope; the constants and shapes are pinned here) |
+| D-RLIT-6 | No below-water terrain water-noise modulation; no baked mission lightmap TGA draped | camera-below-water terrain binds `Water_NoiseColorTexture` as t3 and selects the misleadingly named PSShadowBasic/NM variants (light scale `4·t3²·t0.a`); the mission lightmap TGA separately drapes tiles/billboards `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; t3 bind @ 0x6043C2..0x6043F2; shader select @ 0x6044B1; lightmap load @ 0x604A90]` | OPEN — underwater modulation is D-TERRAIN-8 and mission-lightmap hosting remains terrain-record scope; static model sun shadows are the separate D-TERRAIN-7 tile-composition path |
 | D-RLIT-7 | Static mission objects (the placer's MultiMesh batches) froze the env lighting harvested at load — the throwaway template's materials had no live owner, so TOD/weather/iris advances relit animated models but not the static world (the load-time snapshot even carried the pre-first-iris-tick modulator: gain 1.0 vs the settled 60/64) | retail relights EVERY entity from the current lighting block each frame `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 ← CRenderBatchQueue_FlushBatches]` | **FIXED (2026-07-06, the model-parity slice)**: the placer registers every harvested batch ShaderMaterial and re-stamps them from the live env (`mission_object_placer.update_environment`, driven per frame by the container's `mission_batch_env_stamper`, generation-gated like the per-model stamp; values/push single-sourced as `NovaObjectModel.environment_values_from`/`apply_environment_values`); verified batch uniforms == live-model uniforms after settle (dir 159/255, gain 60/64) |
 | D-RLIT-8 | The object per-material hemisphere mixed color spaces: `hemi_sky` came from `NovaEnvironment.get_sky_ambient()` = the RAW TOD keyframe (never smoothed, never iris-modulated) while `dir_color`/`hemi_ground` came from the smoothed+modulated weather writeback — off-noon the modulator brightens every block toward the exposure target but the un-modulated sky half stays dark (the sky-facing half of every building too dark at night; the terrain/foliage GLOBALS path was already correct via `get_smooth_sky()`) | retail feeds ALL entity lighting from the post-modulator block render colors — the world-block writer fills [8..10] ← `Env_SkyBlock[0]` ÷255 exactly like light/ground `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; the blocks smooth + modulate in the weather tick @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-06, the REN-6 session)**: the sky block joins the per-tick env writeback seam — `NovaWeather` pushes `get_smooth_sky()` through the new `NovaEnvironment.set_sky_ambient_rt` (mirroring fill/sun/fog, generation-gated), `get_sky_ambient()` serves the smoothed current and re-seeds from the keyframe on discrete TOD recomputes (the `_fill_light` contract); GUT pins the seam (`env_parity_vectors_test.test_sky_ambient_serves_smoothed_writeback`); golden env grid/weather rows byte-identical (the grid collects bare env nodes; the weather checkpoints already read `get_smooth_sky`) |
 

@@ -227,6 +227,21 @@ int NovaSimulation::local_player_blink_flags() const {
 	return static_cast<int>(collision_world_.local_player_blink_flags);
 }
 
+int NovaSimulation::local_player_interior_item_id() const {
+	if (!world_) return 0;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player == nullptr || player->blink_hits[0] == 0) return 0;
+	const opennova::world::EntityHandle building =
+			opennova::world::EntityHandle::make(
+					2, static_cast<int32_t>(player->blink_hits[0] >> 20));
+	const opennova::world::Entity *parent = world_->registry.get(building);
+	return parent == nullptr
+			? 0
+			: static_cast<int>(parent->item_id)
+					+ opennova::mission::kItemIdOffset;
+}
+
 int64_t NovaSimulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
                                                      const Vector3 &source_pos,
                                                      int64_t distance_q16,

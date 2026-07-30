@@ -375,9 +375,9 @@ typedef struct ThreediGpLight {
     uint8_t style;              // Colorgen animation style
     uint8_t phase;              // Animation phase (or ctrl_reg index if style > 0x70)
     uint16_t rate;              // Animation rate
-    uint8_t color_start[3];     // RGB start color (0-255)
-    uint8_t color_end[3];       // RGB end color (0-255)
-    float position[3];          // Position (x, y, z)
+    uint8_t color_start[3];     // BGR start color on disk (0-255)
+    uint8_t color_end[3];       // BGR end color on disk (0-255)
+    float position[3];          // Authored model-space position (x, y, z)
     float attenuation_start;    // Falloff start distance
     float attenuation_end;      // Falloff end distance
     int32_t part_index;         // Attached part index

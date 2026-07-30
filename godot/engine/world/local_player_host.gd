@@ -164,6 +164,7 @@ var _camera_saved_fov := -1.0
 # section-hide like the original's bone zeroing @0x4b1f2a is ported).
 var debug_force_viewmodel := false
 var debug_body_in_first_person := false
+var _camera_saved_cull_mask := -1
 
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -185,13 +186,17 @@ func setup(world, camera: Camera3D) -> void:
 	_world = world
 	_camera = camera
 	_camera_saved_fov = camera.fov if camera != null else -1.0
+	_camera_saved_cull_mask = camera.cull_mask if camera != null else -1
 	# The player camera never draws the reflection-only body layer: in first
 	# person the body lives there for the water mirror alone (see
 	# _update_avatar); NovaWater's mirror camera is the one view that keeps it.
 	# It never draws the viewmodel layer either — the FP arms/weapon render
 	# through the dedicated renderfov pass built below.
 	if _camera != null:
-		_camera.cull_mask &= ~(NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL)
+		_camera.cull_mask &= ~(
+				NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
+				| NovaWater.VISUAL_LAYER_VIEWMODEL
+				| NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK)
 	# Deferred: the game shell calls setup() from its own _ready, while the root
 	# viewport is still mid-scene-setup — a direct add_child into it fails then
 	# ("parent busy"), which would leave the viewmodel layer masked off the player
@@ -216,11 +221,13 @@ func teardown() -> void:
 	_clear_models()
 	_free_viewmodel_pass()
 	if _camera != null:
-		_camera.cull_mask |= NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL
+		if _camera_saved_cull_mask >= 0:
+			_camera.cull_mask = _camera_saved_cull_mask
 		if _camera_saved_fov > 0.0:
 			_camera.fov = _camera_saved_fov
 	_world = null
 	_camera = null
+	_camera_saved_cull_mask = -1
 	_input_source = Callable()
 	_reset_state()
 
@@ -1182,7 +1189,35 @@ func _update_player_camera() -> void:
 		_camera.global_position += _camera.global_transform.basis.z * PLAYER_EYE_PULLBACK
 	_update_scope_camera()
 	_update_avatar(pos)
+	_update_model_lighting_context()
 	_update_viewmodel()
+
+
+func _update_model_lighting_context() -> void:
+	var sim = _sim()
+	var interior_item_id := \
+			int(sim.local_player_interior_item_id()) if sim != null else 0
+	var transfer := 0.0
+	var item_db = _world.get_item_db() if _world != null else null
+	if interior_item_id != 0 and item_db != null:
+		transfer = float(item_db.get_light_transfer(interior_item_id))
+	var interior := interior_item_id != 0
+
+	# Ordinary world models take the player's current entity context. The FP
+	# submit deliberately keeps effectScale=1 (retail computes then discards its
+	# outdoor sun sample) but still keys the interior group from blink_hits[0].
+	# Updating on every presentation frame makes portal crossings live.
+	# [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52]
+	_set_model_lighting_context(_avatar, interior, transfer)
+	_set_model_lighting_context(_held_weapon, interior, transfer)
+	for part in _vm_parts:
+		_set_model_lighting_context(part, interior, transfer)
+
+
+func _set_model_lighting_context(model: Node, interior: bool,
+		transfer: float) -> void:
+	if model != null and is_instance_valid(model):
+		model.set_entity_lighting_context(1.0, interior, transfer)
 
 
 # The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,
@@ -1348,7 +1383,9 @@ func _apply_emplaced_viewmodel_controls() -> void:
 # on the default layer, so the callers above re-stamp every frame.
 func _set_visual_layers(root: Node, layer_mask: int) -> void:
 	if root is VisualInstance3D:
-		(root as VisualInstance3D).layers = layer_mask
+		var visual := root as VisualInstance3D
+		visual.layers = layer_mask \
+				| (visual.layers & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK)
 	for child in root.get_children():
 		_set_visual_layers(child, layer_mask)
 

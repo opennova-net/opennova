@@ -609,12 +609,12 @@ func _present_wire_row(
 		node.set_weapon_channel(
 				_infantry_key(wpn_state) if wpn_state >= 0 else "",
 				int(snap[base + NovaSimulation.PF_WPN_PHASE_TICKS]))
-	_update_held_weapon(handle, node, snap, base)
-	_respawn_revisions[handle] = respawn_revision
 	var next_visible := (
 			int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
 			and int(snap[base +
 					NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
+	_update_held_weapon(handle, node, snap, base, next_visible)
+	_respawn_revisions[handle] = respawn_revision
 	if node.visible != next_visible:
 		node.visible = next_visible
 	if spawned_now and _node_spawned_callback.is_valid():
@@ -668,7 +668,9 @@ func entity_count() -> int:
 ## basis, which is neither bone 16's rotation nor any aim-overlay class.
 ## [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; matrix @0x4b2180..0x4b22f8;
 ##  gate Entity_CanFireWeapon @0x4dcb10]
-func _update_held_weapon(handle: int, node: Node3D, snap: PackedFloat32Array, base: int) -> void:
+func _update_held_weapon(
+		handle: int, node: Node3D, snap: PackedFloat32Array,
+		base: int, body_visible: bool) -> void:
 	var adm := int(snap[base + NovaSimulation.PF_HELD_WEAPON_ADM])
 	var graphic := ""
 	if adm > 0 and _sim != null and _sim.has_method("get_weapon_third_person_model"):
@@ -680,13 +682,14 @@ func _update_held_weapon(handle: int, node: Node3D, snap: PackedFloat32Array, ba
 					graphic, "", _container, "", _env_node)
 			if built != null:
 				built.name = "WireWeapon_%04x" % handle
+				built.set_shadow_caster_enabled(true)
 				_weapon_nodes[handle] = built
 		_weapon_graphics[handle] = graphic
 	var weapon_v: Variant = _weapon_nodes.get(handle)
 	if not is_instance_valid(weapon_v) or not (weapon_v is Node3D):
 		return
 	var weapon := weapon_v as Node3D
-	if adm <= 0 or not node.visible:
+	if adm <= 0 or not body_visible:
 		weapon.visible = false
 		return
 	var attach: Variant = PresentHeldWeapon.attach_transform(

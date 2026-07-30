@@ -543,7 +543,6 @@ void NovaFoliageDispatcher::_ensure_visuals() {
     silhouette_shader_ =
         loader->load("res://shaders/foliage_silhouette.gdshader", "Shader");
   }
-
   auto ensure_material = [](Ref<ShaderMaterial> &r_material,
                             const Ref<Shader> &p_shader) {
     if (r_material.is_null()) {
@@ -632,9 +631,16 @@ MeshInstance3D *NovaFoliageDispatcher::_ensure_draw_node(
     instance->set_as_top_level(true);
     instance->set_transform(Transform3D());
     // Fresh audit: attrib shadow (0x02) is parsed but never read, and both
-    // foliage tiers are excluded from retail shadow passes.
+    // foliage tiers are excluded from retail shadow-caster passes. They still
+    // receive static model projection through retail's composed tile cache.
     instance->set_cast_shadows_setting(
         GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+    // The generic attenuation catcher cannot reproduce foliage-card alpha,
+    // two-sided rasterization, and wind deformation without dark rectangles.
+    // Keep foliage on the ordinary world layer until the retail tile-cache
+    // compositor (which supplies the alpha-lighting term before this pass) is
+    // hosted.
+    instance->set_layer_mask(1u << 0);
     instance->set_extra_cull_margin(8.0f);
     instance->set_visible(false);
     r_pool.push_back(instance);

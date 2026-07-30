@@ -676,6 +676,9 @@ void NovaTerrain::build() {
 		RID inst = rs->instance_create();
 		rs->instance_set_scenario(inst, scenario);
 		rs->instance_geometry_set_material_override(inst, mat_rid);
+		// World-visible plus the terrain-only static-shadow receiver marker.
+		// Keep bit assignments mirrored in nova_water.gd.
+		rs->instance_set_layer_mask(inst, (1u << 0) | (1u << 15));
 		rs->instance_set_visible(inst, false);
 		patch_instances[i] = inst;
 		patch_visible[i] = false;
@@ -714,6 +717,13 @@ bool NovaTerrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
+	Ref<Shader> shadow_shader = ResourceLoader::get_singleton()->load(
+			"res://shaders/sun_shadow_catcher.gdshader", "Shader");
+	if (shadow_shader.is_valid()) {
+		shadow_receiver_material.instantiate();
+		shadow_receiver_material->set_shader(shadow_shader);
+		terrain_material->set_next_pass(shadow_receiver_material);
+	}
 
 	tile_infos.resize(cpt.tiles.size());
 	tile_mesh_meta.resize(cpt.tiles.size());

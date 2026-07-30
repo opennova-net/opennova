@@ -262,6 +262,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
+	ClassDB::bind_method(D_METHOD("local_player_interior_item_id"),
+	                     &NovaSimulation::local_player_interior_item_id);
 	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),
 	                     &NovaSimulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("sound_occlusion_distance_q16", "listener_pos", "source_pos",

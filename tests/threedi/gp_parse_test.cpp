@@ -10,6 +10,42 @@
 #include "threedi/threedi_ir.h"
 #include "common/test_paths.h"
 
+static int gp_lght_bgr_converts_to_rgb(void) {
+    ThreediGpFile gp;
+    threedi_gp_init(&gp);
+    gp.light_count = 1;
+    gp.lights = (ThreediGpLight *)calloc(1, sizeof(ThreediGpLight));
+    if (!gp.lights) return 0;
+
+    /* The GP payload stores both light colors as B,G,R, matching LGHT in
+       3DI3. Use distinct channels so an accidental byte-for-byte RGB copy
+       cannot pass. */
+    gp.lights[0].color_start[0] = 11;
+    gp.lights[0].color_start[1] = 22;
+    gp.lights[0].color_start[2] = 33;
+    gp.lights[0].color_end[0] = 44;
+    gp.lights[0].color_end[1] = 55;
+    gp.lights[0].color_end[2] = 66;
+
+    ThreediModelIR ir;
+    threedi_ir_init(&ir);
+    const int converted = threedi_ir_from_gp(&gp, &ir) == 0;
+    const int correct =
+        converted && ir.light_count == 1 &&
+        ir.lights[0].color_start[0] == 33.0f / 255.0f &&
+        ir.lights[0].color_start[1] == 22.0f / 255.0f &&
+        ir.lights[0].color_start[2] == 11.0f / 255.0f &&
+        ir.lights[0].color_end[0] == 66.0f / 255.0f &&
+        ir.lights[0].color_end[1] == 55.0f / 255.0f &&
+        ir.lights[0].color_end[2] == 44.0f / 255.0f;
+    if (!correct) {
+        fprintf(stderr, "GP LGHT BGR-to-RGB conversion mismatch\n");
+    }
+    threedi_ir_free(&ir);
+    threedi_gp_free(&gp);
+    return correct;
+}
+
 static int has_extension(const char *name, const char *ext) {
     size_t nlen = strlen(name);
     size_t elen = strlen(ext);
@@ -202,6 +238,10 @@ static int test_gp_parse(const char *path) {
 }
 
 int main(void) {
+    if (!gp_lght_bgr_converts_to_rgb()) {
+        return EXIT_FAILURE;
+    }
+
     const char *repo_root = test_paths_repo_root(__FILE__);
     char fixtures_dir[4096];
     char **files = NULL;

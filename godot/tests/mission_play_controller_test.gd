@@ -79,6 +79,18 @@ class FakeSim:
 	func get_local_player_body_anim_slot() -> int:
 		return -1
 
+	func local_player_interior_item_id() -> int:
+		return 0
+
+
+class FakePlayerModel:
+	extends Node3D
+
+	func set_entity_lighting_context(
+			_effect_scale: float, _interior_lerp: bool,
+			_interior_daylight: float) -> void:
+		pass
+
 
 class FakeWorld:
 	extends Node3D
@@ -95,7 +107,7 @@ class FakeWorld:
 		return null
 
 	func build_local_player_avatar() -> Node3D:
-		var node := Node3D.new()
+		var node := FakePlayerModel.new()
 		add_child(node)
 		return node
 
@@ -135,6 +147,9 @@ class FakeWorld:
 		pass
 
 	func get_terrain_data() -> NovaTerrainData:
+		return null
+
+	func get_item_db() -> NovaItemDatabase:
 		return null
 
 	func local_player_viewmodel_def() -> PlayerViewmodelDef:

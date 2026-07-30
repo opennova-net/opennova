@@ -939,6 +939,8 @@ func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> v
 		"the mirrored scene never draws the water surface itself")
 	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"the FP arms/weapon overlay never enters the mirrored scene")
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"caster-only helper instances never enter the color reflection")
 	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"the FP-mode local body DOES render in the mirror")
 	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD, 0,

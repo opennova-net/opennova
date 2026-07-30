@@ -9,6 +9,7 @@ class FakeWeaponPart:
 	var plays: Array = []
 	var times: Array[float] = []
 	var ctrl_values: Dictionary = {}
+	var lighting_contexts: Array = []
 
 	func play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
@@ -32,6 +33,19 @@ class FakeWeaponPart:
 
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
+
+	func set_entity_lighting_context(effect_scale: float, interior_lerp: bool,
+			interior_daylight: float) -> void:
+		lighting_contexts.append([
+			effect_scale, interior_lerp, interior_daylight])
+
+
+class FakeInteriorItemDb:
+	extends RefCounted
+	var transfers := {}
+
+	func get_light_transfer(item_id: int) -> float:
+		return float(transfers.get(item_id, 0.0))
 
 
 class FakeUserPointData:
@@ -107,6 +121,7 @@ class FakeSim:
 	var nvg_toggle_requests := 0
 	var nvg_gain_requests: Array[int] = []
 	var camera_mode_calls: Array = []
+	var interior_item_id := 0
 
 	func has_local_player() -> bool:
 		return has_player
@@ -180,6 +195,9 @@ class FakeSim:
 	func set_local_player_camera_third_person(third_person: bool) -> void:
 		camera_mode_calls.append(third_person)
 
+	func local_player_interior_item_id() -> int:
+		return interior_item_id
+
 
 class FakeWorld:
 	extends Node3D
@@ -191,6 +209,7 @@ class FakeWorld:
 	var last_weapon_part: FakeWeaponPart = null
 	var _loaded := true
 	var sim := FakeSim.new()
+	var item_db: FakeInteriorItemDb = null
 
 	func is_loaded() -> bool:
 		return _loaded
@@ -207,7 +226,7 @@ class FakeWorld:
 	# models that shape (layers live on the VisualInstance3D, not the root).
 	func build_local_player_avatar() -> Node3D:
 		avatar_count += 1
-		var node := Node3D.new()
+		var node := FakeWeaponPart.new()
 		node.add_child(MeshInstance3D.new())
 		add_child(node)
 		last_avatar = node
@@ -226,6 +245,9 @@ class FakeWorld:
 
 	func get_terrain_data() -> FakeTerrainData:
 		return terrain_data
+
+	func get_item_db():
+		return item_db
 
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
@@ -329,6 +351,34 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+
+
+func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> void:
+	var world := FakeWorld.new()
+	world.sim.interior_item_id = 101216
+	world.item_db = FakeInteriorItemDb.new()
+	world.item_db.transfers[101216] = 0.2
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, true, 0.2],
+			"the FP submit keeps effectScale 1 and uses the blink parent's transfer")
+	world.sim.interior_item_id = 0
+	host.after_world_tick()
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, false, 0.0],
+			"walking out refreshes the model lighting on the live render frame")
 
 
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
@@ -506,6 +556,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"caster marker layers cannot make the reflection-only body visible to the player")
 	var pass_cam: Camera3D = host.get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
@@ -539,6 +591,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"teardown() restores the camera's original marker-layer bits exactly")
 
 
 func test_camera_state_rides_the_sim_view() -> void:

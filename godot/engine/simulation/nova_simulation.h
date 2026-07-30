@@ -1683,6 +1683,12 @@ public:
 	// 0x800000]. The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;
 	int local_player_blink_flags() const;
+	// items.def id of the pool-2 building encoded by blink_hits[0], or 0 when
+	// the player is not inside a blink volume. Entity::item_id is the raw BMS
+	// type, so this accessor applies mission::kItemIdOffset for database lookup.
+	// Lighting keys from hit PRESENCE, independently of the aggregate
+	// "indoors" flag bit.
+	int local_player_interior_item_id() const;
 
 	// Sound-occlusion distance inflation for the audio host [orig:
 	// Sound_ApplyOcclusionDistance @0x529970 — two LOS rays through terrain +

@@ -36,6 +36,10 @@ extends RefCounted
 # editor re-import (same convention as veg_assets.gd).
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const ITEM_ATTRIB_NO_SHADOW := 0x04000000
+const ITEM_ATTRIB2_DYNAMIC_SHADOW := 0x10
+const ITEM_ATTRIB2_STATIC_SHADOW := 0x20
+const ENTITY_ATTRIB_NO_SHADOW := 0x01000000
 const EnvStamperScript := preload("res://engine/mission/mission_batch_env_stamper.gd")
 const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
@@ -249,6 +253,10 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# Bucket entities by graphic, split static vs animated.
 	PerfTimeline.span_on(timeline, "bucket_entities")
 	var static_by_graphic: Dictionary = {}  # graphic -> Array[Transform3D]
+	# Parallel eligibility flags. Retail composites pool-2 and StaticShadow
+	# silhouettes into terrain tiles; keeping one slot per visible transform
+	# lets destruction carve the matching shadow slot by the same BMS index.
+	var static_shadow_by_graphic: Dictionary = {}  # graphic -> Array[bool]
 	# Parallel value records retained only when that graphic resolves to a static
 	# batch. Unlike edit-only pick refs, runtime item-effect production needs these
 	# for every placed static entity.
@@ -288,15 +296,23 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				"bms_id": int(entity.get("bms_id", 0)),
 				"group": int(entity.get("group", -1)),
 				"team": int(entity.get("team", -1)),
+				"ai_flags": int(entity.get("ai_flags", 0)),
 				"position": entity.get("position", Vector3.ZERO),
 			})
 		else:
 			if not static_by_graphic.has(graphic):
 				static_by_graphic[graphic] = []
+				static_shadow_by_graphic[graphic] = []
 				static_refs_by_graphic[graphic] = []
 				static_effect_sources_by_graphic[graphic] = []
 				static_ids_by_graphic[graphic] = []
 			static_by_graphic[graphic].append(xform)
+			static_shadow_by_graphic[graphic].append(
+					item_casts_static_terrain_shadow(
+						int(entity.get("kind", -1)),
+						int(entity.get("ai_flags", 0)),
+						item_db.get_attrib(item_id),
+						item_db.get_attrib2(item_id)))
 			static_ids_by_graphic[graphic].append(int(entity.get("bms_id", 0)))
 			static_effect_sources_by_graphic[graphic].append({
 				"kind": int(entity.get("kind", -1)),
@@ -318,6 +334,9 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		if progress.is_valid():
 			progress.call()
 		var xforms: Array = static_by_graphic[graphic]
+		var shadow_slots: Array = static_shadow_by_graphic.get(graphic, [])
+		var has_static_shadow := true in shadow_slots
+		var all_static_shadow := has_static_shadow and not (false in shadow_slots)
 		var batches := _get_static_batches(graphic, env_node, container)
 		if batches.is_empty():
 			stats.unresolved += xforms.size()
@@ -328,6 +347,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				graphic, static_effect_sources_by_graphic.get(graphic, []))
 		stats.graphics += 1
 		for batch in batches:
+			var shadow_mm: MultiMesh = null
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
 			mm.mesh = batch["mesh"]
@@ -337,14 +357,53 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				mm.set_instance_transform(i, (xforms[i] as Transform3D) * offset)
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
+			if all_static_shadow:
+				# The host's static directional approximation reaches only the
+				# terrain receiver layer. An all-eligible visible batch can therefore
+				# carry the static-caster marker without self-shadowing, avoiding
+				# a full duplicate MultiMesh per submesh.
+				mmi.layers = NovaWater.VISUAL_LAYER_WORLD \
+						| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			else:
+				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			if batch["material"] != null:
 				mmi.material_override = batch["material"]
 			mmi.name = "Batch_%s_%d" % [graphic, int(batch.get("submesh", 0))]
 			container.add_child(mmi)
 			stats.batches += 1
 			_destruction_batches.get_or_add(graphic, []).append(mm)
+			if has_static_shadow and not all_static_shadow:
+				shadow_mm = MultiMesh.new()
+				shadow_mm.transform_format = MultiMesh.TRANSFORM_3D
+				shadow_mm.mesh = batch["mesh"]
+				shadow_mm.instance_count = xforms.size()
+				for i in range(xforms.size()):
+					var shadow_xform := (xforms[i] as Transform3D) * offset
+					if i >= shadow_slots.size() or not bool(shadow_slots[i]):
+						shadow_xform.basis = shadow_xform.basis.scaled(Vector3.ZERO)
+					shadow_mm.set_instance_transform(i, shadow_xform)
+				var shadow_mmi := MultiMeshInstance3D.new()
+				shadow_mmi.multimesh = shadow_mm
+				shadow_mmi.layers = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+				shadow_mmi.cast_shadow = \
+						GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+				if batch["material"] != null:
+					shadow_mmi.material_override = batch["material"]
+				shadow_mmi.name = "StaticShadow_%s_%d" % [
+						graphic, int(batch.get("submesh", 0))]
+				container.add_child(shadow_mmi)
+				_destruction_batches.get_or_add(graphic).append(shadow_mm)
 			if edit_mode:
-				_record_static_batch(graphic, static_refs_by_graphic.get(graphic, []), mm, mmi, offset, batch["mesh"])
+				_record_static_batch(
+						graphic,
+						static_refs_by_graphic.get(graphic, []),
+						mm,
+						mmi,
+						offset,
+						batch["mesh"],
+						shadow_mm,
+						shadow_slots)
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
 		var inst_ids: Array = static_ids_by_graphic.get(graphic, [])
@@ -354,6 +413,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				_destruction_instances[iid] = {
 					"graphic": graphic, "index": i,
 					"xform": xforms[i] as Transform3D,
+					"casts_static_shadow":
+						i < shadow_slots.size() and bool(shadow_slots[i]),
 				}
 	PerfTimeline.end_on(timeline)
 
@@ -398,6 +459,12 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
+		_configure_item_shadow(
+				model,
+				int(a.get("item_id", 0)),
+				int(a.get("kind", -1)),
+				int(a.get("ai_flags", 0)))
+		_configure_item_lighting(model, int(a.get("item_id", 0)))
 		# Load the entity's body-animation set (.adm) BEFORE the data: setting it
 		# first is a no-op rebuild (no data yet), so set_object_data below does
 		# the ONE skeletal-keyed mesh build - the old order built a static-keyed
@@ -408,6 +475,17 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
+		if item_casts_static_terrain_shadow(
+				int(a.get("kind", -1)),
+				int(a.get("ai_flags", 0)),
+				item_db.get_attrib(int(a.get("item_id", 0))),
+				item_db.get_attrib2(int(a.get("item_id", 0)))):
+			_add_individual_static_shadow_siblings(
+					model,
+					String(a.get("graphic", "")),
+					Transform3D.IDENTITY,
+					env_node,
+					"live%d" % stats.animated)
 		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
 		# SSN/group/zone host-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
 		# colliders stay editor-only.
@@ -458,6 +536,7 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
+	_configure_item_shadow(model, item_id)
 	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
 	model.set_object_data(data)
 	return model
@@ -575,11 +654,22 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
 			model.set_environment_node(env_node)
+		_configure_item_shadow(
+				model, item_id, kind, int(entity.get("ai_flags", 0)))
+		_configure_item_lighting(model, item_id)
 		# Skeletal set first = no-op rebuild; set_object_data does the one
 		# skeletal-keyed build (same ordering rationale as place()).
 		_apply_skeletal_anim(model, item_id,
 				data.get_bone_origins(), data.get_bone_parents())
 		model.set_object_data(data)
+		if item_casts_static_terrain_shadow(
+				kind,
+				int(entity.get("ai_flags", 0)),
+				item_db.get_attrib(item_id),
+				item_db.get_attrib2(item_id)):
+			_add_individual_static_shadow_siblings(
+					model, graphic, Transform3D.IDENTITY, env_node,
+					"k%d_i%d" % [kind, index])
 		var ref := {
 			"kind": kind,
 			"index": index,
@@ -616,6 +706,11 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 	update_environment(env_node)
 	_ensure_env_stamper(container, env_node)
 	var refs := [{ "kind": kind, "index": index }]
+	var casts_static_shadow := item_casts_static_terrain_shadow(
+			kind,
+			int(entity.get("ai_flags", 0)),
+			item_db.get_attrib(item_id),
+			item_db.get_attrib2(item_id))
 	for batch in batches:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -625,6 +720,15 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		mm.set_instance_transform(0, xform * offset)
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
+		if casts_static_shadow:
+			# As in an all-eligible pooled batch, the isolated static light can
+			# use this visible instance directly: its receiver mask cannot feed
+			# the silhouette back onto the model.
+			mmi.layers = NovaWater.VISUAL_LAYER_WORLD \
+					| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		else:
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if batch["material"] != null:
 			mmi.material_override = batch["material"]
 		mmi.name = "Place_%s_k%d_i%d_s%d" % [graphic, kind, index, int(batch.get("submesh", 0))]
@@ -640,6 +744,33 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 
 
 # --- Internals ----------------------------------------------------------------
+
+func _add_individual_static_shadow_siblings(
+		model: Node3D, graphic: String, local_xform: Transform3D,
+		env_node: Node, suffix: String) -> void:
+	# Visible portal/PANM models live below camera-masked ROBJ nodes. Retail's
+	# terrain-tile collector ignores those masks and submits every selected-LOD
+	# ROBJ, so harvest one independent all-section shadow-only sibling per
+	# submesh. The host's static light reaches only the terrain receiver.
+	var batches := _get_static_batches(graphic, env_node, model)
+	for batch in batches:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = batch["mesh"]
+		mm.instance_count = 1
+		var offset: Transform3D = batch["offset"]
+		mm.set_instance_transform(0, local_xform * offset)
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.layers = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+		mmi.cast_shadow = \
+				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		if batch["material"] != null:
+			mmi.material_override = batch["material"]
+		mmi.name = "StaticShadow_%s_%s_%d" % [
+				graphic, suffix, int(batch.get("submesh", 0))]
+		model.add_child(mmi)
+
 
 func _record_static_user_point_group(graphic: String, transforms: Array) -> void:
 	var data := _load_object_data(graphic)
@@ -705,7 +836,10 @@ func _append_static_item_effect_source(kind: int, item_id: int, graphic: String,
 # (instance_count == entity count), so moving entity i means rewriting instance i in
 # every batch that shares its graphic. mesh_aabb (under the instance transform) gives
 # the editor a tight pick volume without per-instance physics bodies.
-func _record_static_batch(graphic: String, refs: Array, mm: MultiMesh, mmi: MultiMeshInstance3D, offset: Transform3D, mesh: Mesh) -> void:
+func _record_static_batch(
+		graphic: String, refs: Array, mm: MultiMesh,
+		mmi: MultiMeshInstance3D, offset: Transform3D, mesh: Mesh,
+		shadow_mm: MultiMesh = null, shadow_slots: Array = []) -> void:
 	var mesh_aabb: AABB = mesh.get_aabb() if mesh != null else AABB()
 	for i in range(mm.instance_count):
 		var ref: Dictionary = refs[i] if i < refs.size() else {}
@@ -716,6 +850,9 @@ func _record_static_batch(graphic: String, refs: Array, mm: MultiMesh, mmi: Mult
 			"slot": i,
 			"mm": mm,
 			"mmi": mmi,
+			"shadow_mm": shadow_mm,
+			"casts_static_shadow":
+				i < shadow_slots.size() and bool(shadow_slots[i]),
 			"offset": offset,
 			"mesh_aabb": mesh_aabb,
 			"animated": false,
@@ -793,9 +930,60 @@ func _needs_individual_node(item_id: int) -> bool:
 	var item_type := item_db.get_item_type(item_id)
 	if item_type == NovaItemDatabase.TYPE_PERSON:
 		return true
+	if item_casts_dynamic_shadow(
+			item_type, item_db.get_attrib(item_id), item_db.get_attrib2(item_id)):
+		return true
 	if not item_db.get_anim_def(item_id).is_empty():
 		return true
 	return _has_occlusion_records(item_id)
+
+
+static func item_casts_dynamic_shadow(
+		item_type: int, _attrib: int, attrib2: int) -> bool:
+	return item_type == NovaItemDatabase.TYPE_PERSON \
+			or (attrib2 & ITEM_ATTRIB2_DYNAMIC_SHADOW) != 0
+
+
+static func item_casts_static_terrain_shadow(
+		kind: int, entity_attrib: int, item_attrib: int,
+		item_attrib2: int) -> bool:
+	if (entity_attrib & ENTITY_ATTRIB_NO_SHADOW) != 0 \
+			or (item_attrib & ITEM_ATTRIB_NO_SHADOW) != 0:
+		return false
+	return kind == NovaMissionData.KIND_BUILDING \
+			or (kind == NovaMissionData.KIND_ITEM \
+				and (item_attrib2 & ITEM_ATTRIB2_STATIC_SHADOW) != 0)
+
+
+func _configure_item_shadow(
+		model: Node, item_id: int, _kind: int = -1,
+		_entity_attrib: int = 0) -> void:
+	if model == null or item_db == null:
+		return
+	model.set_shadow_caster_enabled(item_casts_dynamic_shadow(
+			item_db.get_item_type(item_id),
+			item_db.get_attrib(item_id),
+			item_db.get_attrib2(item_id)))
+	# The static tile pass must ignore the visible model's portal/section
+	# mask. Eligible mission entities get independent all-section siblings
+	# after their visible model is built.
+	model.set_static_shadow_caster_enabled(false)
+
+
+func _configure_item_lighting(model: Node, item_id: int) -> void:
+	if model == null or item_db == null:
+		return
+	# Retail's building collector marks ROBJ 1+ as interior-lighting entries
+	# while ROBJ 0 remains the exterior shell. Only portal buildings take this
+	# model-section path; people and live-PANM decorations still use ordinary
+	# per-entity lighting.
+	# [orig: Terrain_RenderSectorModels @0x5C5D30;
+	#  collect_render_objects_for_batch @0x5D9156..0x5D9170]
+	if item_db.get_item_type(item_id) != NovaItemDatabase.TYPE_BUILDING \
+			or not _has_occlusion_records(item_id):
+		return
+	model.set_interior_section_light_transfer(
+			item_db.get_light_transfer(item_id))
 
 
 func _has_occlusion_records(item_id: int) -> bool:
@@ -956,6 +1144,12 @@ func get_static_instance_transform(bms_id: int) -> Variant:
 	if not (rec is Dictionary):
 		return null
 	return (rec as Dictionary).xform
+
+
+func static_instance_casts_terrain_shadow(bms_id: int) -> bool:
+	var rec: Variant = _destruction_instances.get(bms_id)
+	return rec is Dictionary \
+			and bool((rec as Dictionary).get("casts_static_shadow", false))
 
 
 ## Hide a destroyed batched static in every batch of its graphic. Returns the

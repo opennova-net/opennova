@@ -265,6 +265,15 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             current.phrase_set = parse_int_n(v, vl);
             current.phrase_set_valid = 1;
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "light_transfer", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            /* atoi, clamp 0..100, then percent -> float at ItemDef+0x218.
+               [orig: @0x4A1A12..0x4A1A50; scale 0.01f @0x7C56A8] */
+            int transfer = parse_int_n(v, vl);
+            if (transfer < 0) transfer = 0;
+            if (transfer > 100) transfer = 100;
+            current.light_transfer = static_cast<float>(transfer) * 0.01f;
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "clipsize", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
             /* plain atol -> def+0x894, the entity+0x35C magazine reseed source

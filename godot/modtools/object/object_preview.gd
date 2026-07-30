@@ -101,6 +101,7 @@ func _build_viewport() -> void:
 
 	_model = NovaObjectModelScript.new()
 	_model.name = "NovaObjectModel"
+	_model.set_model_light_preview_enabled(true)
 	_root.add_child(_model)
 	_model.bounds_changed.connect(_on_model_bounds_changed)
 	_model.set_object_data(object_data)
@@ -277,6 +278,7 @@ func load_arms(arms_name: String, resource_root) -> bool:
 	if _arms_model == null:
 		_arms_model = NovaObjectModelScript.new()
 		_arms_model.name = "NovaArmsModel"
+		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
 		_arms_model.set_environment_node(_environment)
 	_arms_model.set_object_data(data)

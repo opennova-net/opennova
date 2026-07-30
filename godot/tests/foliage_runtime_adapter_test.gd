@@ -137,6 +137,14 @@ func test_detail_preview_uses_foliage_map() -> void:
 		)
 		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
+		assert_eq(child.layers & NovaWater.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
+			"an alpha-blind catcher must not darken whole foliage cards")
+		var material := child.material_override as ShaderMaterial
+		assert_not_null(material)
+		if material != null:
+			var shadow_receiver := material.next_pass as ShaderMaterial
+			assert_null(shadow_receiver,
+				"foliage waits for the alpha-aware retail tile-cache compositor")
 	assert_true(found_draw)
 
 func test_editor_surface_input_overrides_reach_detail_materials() -> void:
