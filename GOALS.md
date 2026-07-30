@@ -35,8 +35,9 @@ powers the tools.
 
 The OpenNova Editor (ONED) is where you author the data the engine runs. Today it
 focuses on creating individual assets: terrain, 3D objects, missions, particle
-effects, playable characters, HUD layout, fonts, credits, strings, menus, music,
-sound profiles, and environment. The longer-term goal is depth:
+effects, playable characters, fonts, credits, strings, menus, music, sound
+profiles, and environment (plus a preview-only HUD layout workspace). The
+longer-term goal is depth:
 
 - **An asset dependency graph.** NovaLogic assets reference each other (a `.3di`
   points at its textures, a `.def` points at a `.3di` and its `.bad` animations, a

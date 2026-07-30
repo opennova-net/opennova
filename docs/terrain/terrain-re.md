@@ -38,7 +38,7 @@ partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified**: `dvd4_parity` (canonical `.cpt`) + `parametric_parity` (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
 | `packing` | word→byte packing | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) |
 | `depthmap` | depth/height map storage | in-code |
-| `terrain_query` raycast (B1 pending) | world-space height samplers + the segment raycast the editor/celestial hosts adopt | **retail** §Runtime terrain queries below (`Terrain_SampleHeightBilinear @ 0x6067b0`, `Terrain_RaycastHeightmapLoRes @ 0x60cb80`, `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) |
+| `terrain_query` raycast (ENG-3 B1, ported with #209) | world-space height samplers + the segment raycast the editor/celestial hosts adopt | **retail** §Runtime terrain queries below (`Terrain_SampleHeightBilinear @ 0x6067b0`, `Terrain_RaycastHeightmapLoRes @ 0x60cb80`, `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) |
 
 The tile overlay and foliage that render over the terrain surface have their own
 now-landed records: [tiles/til-re.md](../tiles/til-re.md) (PAR-R3),
