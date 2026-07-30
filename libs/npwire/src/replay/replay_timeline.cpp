@@ -549,7 +549,7 @@ ReplayTimeline build_replay_timeline(
 			}
 		} else if (m.dir == 'S' && m.tag == s2c::KILL_BY_SLOT) {
 			// Batch despawn/kill — every listed slot is killed via Entity_KillBySlotId
-			// [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870]. Emit one Kill per
+			// [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870]. Emit one Kill per
 			// slot so mark_lifecycle ends each victim's life segment.
 			BatchKillBatch bk;
 			if (decode_batch_kill(m.payload.data(), m.payload.size(), bk)) {

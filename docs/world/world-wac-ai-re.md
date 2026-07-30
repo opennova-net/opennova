@@ -5395,3 +5395,27 @@ raw per the partially-witnessed rule): dismount scrub `~0xA000`
 (`~(Drowning|InAir|Mounted) | Mounted`) `[orig: @ 0x546c56-0x546c7c;
 @ 0x494752-0x494775]`; repulsion exemption `0x43` and skip composites
 `0x2000001`/`0x8000001` stay raw (constituent bits unpinned).
+
+## IDB type-sync session (2026-07-30)
+
+A net/entity type-sync pass over `Jointops.exe.kong.i64` confirmed the curated
+IDB is already ~95% in sync with the reimpl (every witnessed `GamePlayerEntity`
+offset already named). The AI-component structs were the main gap and were
+declared + applied:
+
+- **`AiBrain`** (812 B, `unk_AED380` = `entity+0x64`) declared with the ~55
+  witnessed dwords from `world/ai.h` (waypoint sub-struct `+52..`,
+  `cooldown_pair +208`, `part_anim* +436..`, the state-17 working set). Applied
+  to `GamePlayerEntity+0x64` (member kept its existing name `renderInstance`,
+  now typed `AiBrain *`), so the ~40 AI functions that read
+  `entity->renderInstance` as the brain now decompile against named fields
+  (`aiState->cooldown_pair`, `->fire_timer`, `->burst_window` …) instead of
+  `aiState[52]`/`[9]`/`[181]`. Note: `docs/net/novaworld-net-re.md` labels
+  `+0x64` `renderInstance` and the world docs / `ai.h` / the live decomp treat
+  it as the 812-B brain — the member name was left as `renderInstance` so the
+  net-side label is not overwritten; only the type was set.
+- **`AiSlot`** (172 B, `unk_A34B90` = `entity+0x68`) declared (`ai_action +32`,
+  `move_flag +136`) and applied to `GamePlayerEntity.aiRuntime` (`AiSlot *`).
+- **`GamePlayerEntity+0x370`** `pad_370[4]` split into `prevHeldAdmIndex`
+  (`+0x370`) / `armsDipTicks` (`+0x371`) / `reloadAnimTicks` (`+0x372`) + one
+  pad byte, matching the reimpl `[orig]` names (`entity.h`). IDB saved.
