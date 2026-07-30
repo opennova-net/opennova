@@ -630,9 +630,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (e.inf.active) {
         const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
         if (e.inf.anim_state != mounted_state) {
-            e.inf.anim_prev = e.inf.anim_state;
-            e.inf.anim_state = mounted_state;
-            e.inf.clip_phase = 0;
+            e.inf.begin_body_transition(mounted_state);
         }
         e.inf.anim_pending = 0;
         e.inf.move_mode = 0;

@@ -649,6 +649,15 @@ func _update_avatar(pos: Vector3) -> void:
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""
 	var anim_phase := int(sim.get_local_player_anim_phase_ticks()) if sim != null else 0
+	var anim_source_key := (
+			String(sim.get_local_player_anim_source_key())
+			if sim != null else "")
+	var anim_source_phase := (
+			int(sim.get_local_player_anim_source_phase_ticks())
+			if sim != null else 0)
+	var anim_blend_weight := (
+			float(sim.get_local_player_anim_blend_weight())
+			if sim != null else 1.0)
 	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed
 	# at its own playhead onto the mask bones, composed under the aim overlay. Equal
 	# state ids still carry the secondary playhead; an empty key means the gate is off.
@@ -660,7 +669,13 @@ func _update_avatar(pos: Vector3) -> void:
 			_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase)
 		else:
 			_avatar.set_weapon_channel("", 0)
-	if not anim_key.is_empty() and _avatar.has_method("play_body_clip_at"):
+	if (not anim_source_key.is_empty() and not anim_key.is_empty()
+			and anim_blend_weight < 1.0
+			and _avatar.has_method("play_body_blend_at")):
+		_avatar.play_body_blend_at(
+				anim_source_key, anim_source_phase,
+				anim_key, anim_phase, anim_blend_weight)
+	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip_at"):
 		_avatar.play_body_clip_at(anim_key, anim_phase)
 	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):
 		_avatar.play_body_clip(anim_key)

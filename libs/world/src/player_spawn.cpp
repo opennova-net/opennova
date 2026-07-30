@@ -104,7 +104,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.inf.leg_yaw[0] = ae.inf.leg_yaw[1] = ae.heading;
     ae.inf.leg_target[0] = ae.inf.leg_target[1] = ae.heading;
     ae.inf.max_health = static_cast<int16_t>(hp);
-    ae.inf.anim_state = anim_state::kIdle;
+    ae.inf.reset_body_animation(anim_state::kIdle);
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]

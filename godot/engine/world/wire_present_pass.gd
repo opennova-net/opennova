@@ -69,6 +69,9 @@ const CAP_BODY_SLOT_AT := 64
 const CAP_BODY_SLOT := 128
 const CAP_RHC := 256
 const CAP_WPN := 512
+const CAP_BODY_BLEND_AT := 1024
+const CAP_REMOTE_BLEND_TICK := 2048
+const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # MissionRuntime.MAX_CATCHUP_TICKS
 var _row_caps := PackedInt32Array()
 var _row_aim_valid := PackedInt32Array()
 var _row_rhc := PackedInt32Array()
@@ -79,6 +82,17 @@ static var _infantry_key_cache := {}
 
 var _row_anim_state := PackedInt32Array()
 var _row_anim_request := PackedInt32Array()
+var _row_remote_body_tick := PackedInt32Array()
+# Revisionless sources rebuild the row plan every call. Preserve the three
+# transition-cache scalars by stable wire handle so a cold plan cannot strand
+# an already-active receive-side blend at weight zero.
+var _remote_body_cache := {} # wire_handle -> Vector3i(state, request, latch)
+# Remote primary-channel blends are fixed-tick state, while this pass also runs
+# on zero-tick render frames and once after a multi-tick catch-up batch. Consume
+# the sim clock once per presented snapshot so every row advances by the exact
+# logic-tick delta rather than by the number of render submissions.
+var _last_present_logic_tick := -1
+var _remote_body_tick_delta := 1
 # The third-person held weapon per wire handle: {handle: Node3D} and the gfx3 each live
 # node was built from, so a weapon switch rebuilds and an unarmed row frees. Kept beside
 # _nodes rather than parented under the body: NovaObjectModel.rebuild() frees all of its
@@ -118,6 +132,7 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 	_env_node = env_node
 	_defer_index = defer_index
 	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
+	_last_present_logic_tick = -1
 
 
 func get_stats() -> Dictionary:
@@ -148,6 +163,7 @@ func _free_wire_node(wire_handle: int) -> void:
 		(node_v as Node3D).queue_free()
 	_nodes.erase(wire_handle)
 	_respawn_revisions.erase(wire_handle)
+	_remote_body_cache.erase(wire_handle)
 	_free_held_weapon(wire_handle)
 
 
@@ -169,7 +185,9 @@ func reset_runtime_state() -> void:
 	_nodes.clear()
 	_unresolved.clear()
 	_respawn_revisions.clear()
+	_remote_body_cache.clear()
 	_clear_row_plan()
+	_last_present_logic_tick = -1
 	_stats.live = 0
 
 
@@ -199,6 +217,24 @@ func _apply_body_anim_gated(
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
 	var remote_request_i := int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST])
 	var anim_pulse := int(snap[base + NovaSimulation.PF_ANIM_STATE_PULSE])
+	# Accepted/queued remote transitions advance exactly once per simulation
+	# tick. The row latch is set only when the model reports live transition
+	# work, so steady-state rows never cross a GDScript call boundary.
+	if (row >= 0 and int(_row_remote_body_tick[row]) != 0
+			and remote_request_i != 0 and anim_pulse < 0
+			and anim_state == int(_row_anim_state[row])
+			and remote_request_i == int(_row_anim_request[row])
+			and (caps & CAP_REMOTE_BLEND_TICK) != 0):
+		var ticks_left := _remote_body_tick_delta
+		while ticks_left > 0 and int(_row_remote_body_tick[row]) != 0:
+			_row_remote_body_tick[row] = (
+					1 if node.advance_remote_body_blend_tick(anim_state) else 0)
+			ticks_left -= 1
+		if row >= 0:
+			_row_anim_state[row] = anim_state
+			_row_anim_request[row] = remote_request_i
+			_store_remote_body_cache(row)
+		return
 	if (row >= 0 and remote_request_i != 0 and anim_pulse < 0
 			and anim_state == int(_row_anim_state[row])
 			and remote_request_i == int(_row_anim_request[row])):
@@ -206,8 +242,10 @@ func _apply_body_anim_gated(
 	if row >= 0:
 		_row_anim_state[row] = anim_state
 		_row_anim_request[row] = remote_request_i
+		_store_remote_body_cache(row)
 	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	var remote_request := remote_request_i != 0
+	var remote_needs_tick := false
 	# A transition state that arrived and was overwritten within one decode fold
 	# (several 0x0A datagrams can apply per render frame — a tapped prone roll is
 	# on the wire for 1-2 ticks). Dispatch it FIRST so the model's arbitration
@@ -217,9 +255,10 @@ func _apply_body_anim_gated(
 	if remote_request and anim_pulse >= 0 and (caps & CAP_REMOTE_BODY) != 0:
 		var pulse_key := _infantry_key(anim_pulse)
 		if not pulse_key.is_empty():
-			node.apply_remote_body_state(anim_pulse, pulse_key,
+			remote_needs_tick = bool(node.apply_remote_body_state(
+					anim_pulse, pulse_key,
 					NovaSimulation.infantry_anim_flags(anim_pulse),
-					int(snap[base + NovaSimulation.PF_ANIM_PULSE_TICKS]))
+					int(snap[base + NovaSimulation.PF_ANIM_PULSE_TICKS])))
 	if anim_state >= 0:
 		var key := _infantry_key(anim_state)
 		if not key.is_empty():
@@ -228,8 +267,13 @@ func _apply_body_anim_gated(
 			# consumes player phase only on an accepted transition and starts a
 			# queued state at tick zero. [orig: @0x4c0859/@0x4c11a6]
 			if remote_request and (caps & CAP_REMOTE_BODY) != 0:
-				node.apply_remote_body_state(anim_state, key,
-						NovaSimulation.infantry_anim_flags(anim_state), anim_phase)
+				remote_needs_tick = bool(node.apply_remote_body_state(
+						anim_state, key,
+						NovaSimulation.infantry_anim_flags(anim_state),
+						anim_phase))
+				if row >= 0:
+					_row_remote_body_tick[row] = 1 if remote_needs_tick else 0
+					_store_remote_body_cache(row)
 				return
 			if remote_request and (caps & CAP_BODY_CLIP) != 0:
 				node.play_body_clip(key)
@@ -239,10 +283,36 @@ func _apply_body_anim_gated(
 			# extra loop, so pose it directly as before.
 			if (not remote_request and anim_phase >= 0
 					and (caps & CAP_BODY_CLIP_AT) != 0):
-				node.play_body_clip_at(key, anim_phase)
+				var source_state := int(
+						snap[base + NovaSimulation.PF_ANIM_SOURCE_STATE])
+				var source_key := (
+						_infantry_key(source_state)
+						if source_state >= 0 else "")
+				var blend_weight := float(
+						snap[base + NovaSimulation.PF_ANIM_BLEND_WEIGHT])
+				if (not source_key.is_empty() and blend_weight < 1.0
+						and (caps & CAP_BODY_BLEND_AT) != 0):
+					node.play_body_blend_at(
+							source_key,
+							int(snap[base
+									+ NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS]),
+							key, anim_phase, blend_weight)
+				else:
+					node.play_body_clip_at(key, anim_phase)
 				return
 			if not remote_request and (caps & CAP_BODY_CLIP) != 0:
 				node.play_body_clip(key)
+				return
+	if not remote_request and (caps & CAP_BODY_CLIP_AT) != 0:
+		var source_state := int(
+				snap[base + NovaSimulation.PF_ANIM_SOURCE_STATE])
+		if source_state >= 0:
+			var source_key := _infantry_key(source_state)
+			if not source_key.is_empty():
+				node.play_body_clip_at(
+						source_key,
+						int(snap[base
+								+ NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS]))
 				return
 	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
 	if body_anim_slot < 0:
@@ -289,7 +359,7 @@ func present() -> void:
 	if _sim == null or _placer == null or _container == null or not is_instance_valid(_container):
 		return
 	var stride: int = _sim.get_present_stride()
-	if stride <= 0:
+	if stride < NovaSimulation.PF_STRIDE:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
 	var layout_revision := -1
@@ -303,8 +373,10 @@ func present() -> void:
 func present_snapshot(
 		snap: PackedFloat32Array, stride: int, layout_revision: int = -1) -> void:
 	if (_sim == null or _placer == null or _container == null
-			or not is_instance_valid(_container) or stride <= 0):
+			or not is_instance_valid(_container)
+			or stride < NovaSimulation.PF_STRIDE):
 		return
+	_remote_body_tick_delta = _consume_present_logic_tick_delta()
 	# Packed handle zero is a valid pool-0 identity, so the numeric getter cannot
 	# also carry presence. Fold the sim's explicit validity seam into a -1
 	# sentinel: the row filter needs no separate flag, and the row-plan key then
@@ -398,6 +470,26 @@ func present_snapshot(
 			_unresolved.erase(handle_v)
 
 
+func _consume_present_logic_tick_delta() -> int:
+	# Lightweight test/compatibility sources predate the clock seam. They retain
+	# the historical one-fixed-tick-per-call contract; production NovaSimulation
+	# always exposes its monotonic logic tick.
+	if _sim == null or not _sim.has_method("get_logic_tick"):
+		return 1
+	var now := int(_sim.get_logic_tick())
+	if _last_present_logic_tick < 0:
+		_last_present_logic_tick = now
+		return 0
+	if now <= _last_present_logic_tick:
+		# Equal means a render-only re-present. A lower value means the world was
+		# restarted under the same presenter; rebase without fabricating ticks.
+		_last_present_logic_tick = now
+		return 0
+	var delta := now - _last_present_logic_tick
+	_last_present_logic_tick = now
+	return mini(delta, MAX_REMOTE_BODY_CATCHUP_TICKS)
+
+
 func _current_index_generation() -> int:
 	if _defer_index != null and _defer_index.has_method("get_generation"):
 		return int(_defer_index.get_generation())
@@ -423,6 +515,7 @@ func _clear_row_plan() -> void:
 	_row_rhc.clear()
 	_row_anim_state.clear()
 	_row_anim_request.clear()
+	_row_remote_body_tick.clear()
 
 
 func _begin_row_plan(
@@ -460,7 +553,20 @@ static func _node_caps(node: Variant) -> int:
 		caps |= CAP_RHC
 	if node.has_method("set_weapon_channel"):
 		caps |= CAP_WPN
+	if node.has_method("play_body_blend_at"):
+		caps |= CAP_BODY_BLEND_AT
+	if node.has_method("advance_remote_body_blend_tick"):
+		caps |= CAP_REMOTE_BLEND_TICK
 	return caps
+
+
+func _store_remote_body_cache(row: int) -> void:
+	if row < 0 or row >= _row_handles.size():
+		return
+	_remote_body_cache[int(_row_handles[row])] = Vector3i(
+			int(_row_anim_state[row]),
+			int(_row_anim_request[row]),
+			int(_row_remote_body_tick[row]))
 
 
 func _append_row_plan(
@@ -480,8 +586,11 @@ func _append_row_plan(
 	# Last-applied edge state (-1 = unknown, first hot frame always applies).
 	_row_aim_valid.append(-1)
 	_row_rhc.append(-1)
-	_row_anim_state.append(-2)
-	_row_anim_request.append(-1)
+	var body_cache: Vector3i = _remote_body_cache.get(
+			handle, Vector3i(-2, -1, 0))
+	_row_anim_state.append(body_cache.x)
+	_row_anim_request.append(body_cache.y)
+	_row_remote_body_tick.append(body_cache.z)
 
 
 func _row_plan_is_current(
@@ -597,6 +706,7 @@ func _present_wire_row(
 		node.reset_remote_body_state()
 		if row >= 0:
 			_row_anim_state[row] = -2 # force the next body-anim dispatch through
+			_row_remote_body_tick[row] = 0
 	_apply_body_anim_gated(node, snap, base, caps, row)
 	# The upper-body weapon channel: the hold pose this player's held weapon and
 	# scope state select. The sim derives the state (there is no anim id on the

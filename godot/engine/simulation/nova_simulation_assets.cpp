@@ -488,13 +488,32 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 				source.overlay_classes.size() < static_cast<int64_t>(section_count))
 			return false;
 
-		const String primary_key = infantry_anim_key(ai_entity->inf.anim_state);
+		const String reset_key("anim_reset");
+		auto resolve_primary_key = [&](const String &p_key) {
+			if (source.anim->has_clip(p_key)) return p_key;
+			return source.anim->has_clip(reset_key) ? reset_key : p_key;
+		};
+		const String primary_key =
+				resolve_primary_key(infantry_anim_key(ai_entity->inf.anim_state));
 		if (primary_key.is_empty()) return false;
 		const float primary_fps = source.anim->get_clip_fps(primary_key, 0);
 		const double primary_seconds = primary_fps > 0.0f
 				? static_cast<double>(std::max(ai_entity->inf.clip_phase, 0)) /
 						(2.0 * primary_fps)
 				: 0.0;
+		String source_key;
+		double source_seconds = 0.0;
+		const bool primary_blend = ai_entity->inf.body_blend_active();
+		if (primary_blend) {
+			source_key = resolve_primary_key(
+					infantry_anim_key(ai_entity->inf.anim_prev));
+			const float source_fps = source.anim->get_clip_fps(source_key, 0);
+			if (source_fps > 0.0f)
+				source_seconds =
+						static_cast<double>(
+								std::max(ai_entity->inf.anim_prev_clip_phase, 0)) /
+						(2.0 * source_fps);
+		}
 
 		const opennova::anim::AimOverlayInputs inputs =
 				aim_overlay_inputs_for(*ai_entity, *entity);
@@ -521,9 +540,17 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 						(2.0 * weapon_fps);
 		}
 
-		const Array pose = source.anim->eval_pose_overlay(
-				primary_key, primary_seconds, source.overlay_classes, deltas,
-				weapon_key, weapon_seconds, collapse_right_hand);
+		const Array pose = primary_blend
+				? source.anim->eval_pose_blended_overlay(
+						source_key, source_seconds,
+						primary_key, primary_seconds,
+						ai_entity->inf.anim_blend_weight,
+						source.overlay_classes, deltas,
+						weapon_key, weapon_seconds, collapse_right_hand)
+				: source.anim->eval_pose_overlay(
+						primary_key, primary_seconds,
+						source.overlay_classes, deltas,
+						weapon_key, weapon_seconds, collapse_right_hand);
 		if (pose.size() < static_cast<int64_t>(section_count)) return false;
 
 		// The callback result is FINAL world-space. Build the body placement from

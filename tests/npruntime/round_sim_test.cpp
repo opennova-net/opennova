@@ -24,6 +24,7 @@
 
 #include <netsim/connection.h>
 #include <netsim/loopback_channel.h>
+#include <netsim/net_client_view.h>
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
@@ -56,6 +57,22 @@ bool expect(bool cond, const char *msg) {
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
 }
+
+struct DeathAnimSource final : w::IRootMotionSource {
+	bool has_clip(int, int state_id) const override {
+		return state_id == w::anim_state::kIdle ||
+		       state_id == w::anim_state::kIdle2 ||
+		       (state_id >= w::anim_state::kDeathFire &&
+		        state_id <= w::anim_state::kDeathBulletBase + 59);
+	}
+	int32_t clip_length_ticks(int, int) const override { return -1; }
+	bool advance(int, int state_id, int32_t &phase, w::RootMotionFrame &out) override {
+		if (!has_clip(0, state_id)) return false;
+		++phase;
+		out = w::RootMotionFrame{};
+		return true;
+	}
+};
 
 w::PlayerSpawn player_spawn(uint16_t net_id, float x, float y, float z) {
 	w::PlayerSpawn s;
@@ -139,12 +156,19 @@ Drained drain_all(ns::UdpSessionTransport &t) {
 	return out;
 }
 
+void deliver_all(const Drained &drained, ns::UdpSessionTransport &client) {
+	for (const std::vector<uint8_t> &raw : drained.raw) client.push_inbound(raw);
+}
+
 } // namespace
 
 int main() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;
+	DeathAnimSource death_clips;
+	ai.is_authority = true;
+	ai.root_motion = &death_clips;
 	world.ai = &ai;
 	world.player_item_hp = 150; // items.def Player hp (D-NET-144)
 
@@ -157,6 +181,14 @@ int main() {
 	if (!expect(ha.valid() && hb.valid() && hc.valid(), "three players spawned")) return 1;
 	if (!expect(world.registry.get(hc)->health == 150, "victim spawns at template hp 150"))
 		return 1;
+	w::AiEntity *shooter_body = ai.for_handle(hb);
+	w::AiEntity *victim_body = ai.for_handle(hc);
+	if (!expect(shooter_body != nullptr && victim_body != nullptr,
+	            "remote player motor bodies spawned"))
+		return 1;
+	shooter_body->net_is_remote_peer = true;
+	victim_body->net_is_remote_peer = true;
+	world.add_system(&ai);
 
 	// Armory: adm 5 = a rifle firing TEST_556. Ammo table via the real builder — entry 0
 	// is the file-order null, entry 1 the live round (854 u/s, 62 grains, 3 s, C4 kz —
@@ -250,6 +282,8 @@ int main() {
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport client_b_in(ns::UdpSessionTransport::Role::Client);
+	ns::NetClientView client_b_view;
 
 	np::NapiNPServerCtx ctx;
 	ctx.world = &world;
@@ -363,7 +397,17 @@ int main() {
 
 	// --- 3. Two more hits kill: 90 -> 30 -> 0 (the last clamped to remaining health
 	// [orig: @0x4e8064]); the death routes 0x13 + 0x1E to both clients, not the host. ---
-	drain_all(udp_b); // clear the 0x0A noise so the death drain reads clean
+	const Drained before_kill_b = drain_all(udp_b);
+	deliver_all(before_kill_b, client_b_in);
+	client_b_view.pump(client_b_in);
+	const ns::ClientEntityState *remote_before = client_b_view.state().find(hc.packed);
+	if (!expect(remote_before != nullptr,
+	            "observer decoded the live remote victim before lethal damage"))
+		return 1;
+	const int32_t remote_before_x = remote_before->x;
+	const int32_t remote_before_y = remote_before->y;
+	const int32_t remote_before_z = remote_before->z;
+	const uint8_t remote_before_anim = remote_before->anim_state_id;
 	drain_all(udp_c);
 	for (int shot = 0; shot < 2; ++shot) {
 		dispatch_fire(roster[1], roster, world,
@@ -373,6 +417,26 @@ int main() {
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	const Drained after_kill_b = drain_all(udp_b);
 	const Drained after_kill_c = drain_all(udp_c);
+	deliver_all(after_kill_b, client_b_in);
+	client_b_view.pump(client_b_in);
+	const ns::ClientEntityState *remote_dead = client_b_view.state().find(hc.packed);
+	if (!expect(remote_dead != nullptr,
+	            "observer retained the remote victim through the death handoff"))
+		return 1;
+	if (!expect((remote_dead->state_flags & 0x02u) != 0u,
+	            "observer decoded the remote victim's lethal/dead sample"))
+		return 1;
+	if (!expect(remote_before_anim < w::anim_state::kDeathFire &&
+	                    remote_dead->anim_state_id >= w::anim_state::kDeathFire &&
+	                    remote_dead->anim_state_id <=
+	                            w::anim_state::kDeathBulletBase + 59,
+	            "observer decoded the first alive-to-death-family animation edge"))
+		return 1;
+	if (!expect(remote_dead->x == remote_before_x &&
+	                    remote_dead->y == remote_before_y &&
+	                    remote_dead->z == remote_before_z,
+	            "remote networked victim does not jump at lethal/death-animation handoff"))
+		return 1;
 	{
 		auto notif_b = after_kill_b.tag(0x13);
 		auto notif_c = after_kill_c.tag(0x13);

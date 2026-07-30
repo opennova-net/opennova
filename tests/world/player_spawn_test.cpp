@@ -343,7 +343,7 @@ int main() {
     }
 
     // --- player movement uses real 8-way clip states. Facing stays fixed; left input selects
-    //     walk_left (state 7) and consumes that clip's lateral root.
+    //     walk_left (state 7), then the retail body transition blends its lateral root in.
     {
         World w;
         AiSystem ai;
@@ -367,7 +367,15 @@ int main() {
 
         CHECK(ae.inf.anim_state == anim_state::kWalkForward + 6);
         CHECK(ae.pos[0] == 0);
-        CHECK(ae.pos[1] == 0x8000);
+        CHECK(ae.pos[1] == 2184); // trunc((1.0f / 15.0f) * 0x8000)
+        CHECK(ae.inf.anim_blend_weight == (1.0f / 15.0f));
+
+        ctx.logic_tick = 1;
+        submit_player_input(ae, in);
+        ai.tick(w, ctx);
+        CHECK(ae.pos[0] == 0);
+        CHECK(ae.pos[1] == 6553); // previous + trunc((2.0f / 15.0f) * 0x8000)
+        CHECK(ae.inf.anim_blend_weight == (2.0f / 15.0f));
     }
 
     // --- grounding mirror runs for NON-player motor entities too (the AI-in-the-ground fix):

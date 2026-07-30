@@ -985,6 +985,12 @@ add_executable(infantry_test world/infantry_test.cpp)
 target_link_libraries(infantry_test PRIVATE opennova_world)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
+# Like player_spawn_test below, MSVC coalesces this file's many scoped World
+# fixtures into one Release stack frame. The blend-transition grills add nested
+# motor calls on top of that frame, so leave the test runner deliberate headroom.
+if(MSVC)
+    target_link_options(infantry_test PRIVATE "/STACK:8388608")
+endif()
 add_test(NAME infantry COMMAND infantry_test)
 
 # The infantry slot-sound emissions (footsteps/foley/landing/screams).

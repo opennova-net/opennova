@@ -92,6 +92,7 @@ private:
 	enum BodyDispatchMode {
 		BODY_NONE = 0,
 		BODY_CLIP_AT,
+		BODY_BLEND_AT,
 		BODY_SLOT_AT,
 		BODY_SLOT_PLAY,
 	};
@@ -115,6 +116,9 @@ private:
 		int32_t body_mode = BODY_NONE;
 		int32_t body_selector = -1;
 		int32_t body_phase = 0;
+		int32_t body_source_selector = -1;
+		int32_t body_source_phase = 0;
+		float body_blend_weight = 1.0f;
 	};
 
 	bool row_plan_is_current(int64_t size, int stride,

@@ -584,6 +584,59 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 	return out;
 }
 
+Array NovaSkeletalAnim::eval_pose_blended(const String &p_source_key,
+		double p_source_playhead_seconds, const String &p_target_key,
+		double p_target_playhead_seconds, float p_weight) const {
+	String source_key = p_source_key;
+	String target_key = p_target_key;
+	const String reset_key("anim_reset");
+	const bool have_reset = find_clip(reset_key) != nullptr;
+	if (find_clip(source_key) == nullptr && have_reset) {
+		source_key = reset_key;
+	}
+	if (find_clip(target_key) == nullptr && have_reset) {
+		target_key = reset_key;
+	}
+	const bool source_valid = find_clip(source_key) != nullptr;
+	const bool target_valid = find_clip(target_key) != nullptr;
+	if (!source_valid) {
+		return eval_pose(target_key, p_target_playhead_seconds);
+	}
+	if (!target_valid) {
+		return eval_pose(source_key, p_source_playhead_seconds);
+	}
+	const float weight = CLAMP(p_weight, 0.0f, 1.0f);
+	if (weight <= 0.0f) {
+		return eval_pose(source_key, p_source_playhead_seconds);
+	}
+	if (weight >= 1.0f) {
+		return eval_pose(target_key, p_target_playhead_seconds);
+	}
+
+	// Semantic states can map to the same BAD (including missing states that both
+	// bind RESET) while retaining independent channel playheads. They must still
+	// blend; key equality alone is not a valid single-sample shortcut.
+	const Array source = eval_pose(source_key, p_source_playhead_seconds);
+	const Array target = eval_pose(target_key, p_target_playhead_seconds);
+	if (source.size() != target.size()) {
+		return target;
+	}
+	Array out;
+	out.resize(target.size());
+	for (int i = 0; i < target.size(); ++i) {
+		const Transform3D a = source[i];
+		const Transform3D b = target[i];
+		const Quaternion rotation =
+				a.basis.get_rotation_quaternion().slerp(
+						b.basis.get_rotation_quaternion(), weight);
+		const Vector3 scale =
+				a.basis.get_scale().lerp(b.basis.get_scale(), weight);
+		out[i] = Transform3D(Basis(rotation).scaled(scale),
+				a.origin.lerp(b.origin, weight));
+	}
+	return out;
+}
+
 PackedInt32Array NovaSkeletalAnim::get_overlay_classes() const {
 	PackedInt32Array out;
 	out.resize(static_cast<int64_t>(bones_.size()));
@@ -666,7 +719,28 @@ Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
 		bool p_collapse_right_hand) const {
-	Array pose = eval_pose(p_key, p_playhead_seconds);
+	return apply_pose_overlay(eval_pose(p_key, p_playhead_seconds),
+			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
+			p_collapse_right_hand);
+}
+
+Array NovaSkeletalAnim::eval_pose_blended_overlay(
+		const String &p_source_key, double p_source_playhead_seconds,
+		const String &p_target_key, double p_target_playhead_seconds,
+		float p_weight, const PackedInt32Array &p_classes,
+		const Array &p_deltas, const String &p_wpn_key,
+		double p_wpn_playhead_seconds, bool p_collapse_right_hand) const {
+	return apply_pose_overlay(eval_pose_blended(
+					p_source_key, p_source_playhead_seconds,
+					p_target_key, p_target_playhead_seconds, p_weight),
+			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
+			p_collapse_right_hand);
+}
+
+Array NovaSkeletalAnim::apply_pose_overlay(Array pose,
+		const PackedInt32Array &p_classes, const Array &p_deltas,
+		const String &p_wpn_key, double p_wpn_playhead_seconds,
+		bool p_collapse_right_hand) const {
 	// The witnessed order: primary sample -> weapon-channel mask override -> the aim
 	// overlay multiplies ON TOP of the composed pose [orig: @0x4b14a7..@0x4b16a7 run
 	// before the per-bone overlay loop; world-wac-ai-re.md §14.8.6].
@@ -720,9 +794,6 @@ void NovaSkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
 		bool p_collapse_right_hand) const {
-	if (p_skeleton == nullptr) {
-		return;
-	}
 	// Branch mirror of NovaObjectModel.advance_body_animation: overlay inputs
 	// present -> the composed overlay pose, else the plain clip pose.
 	Array pose;
@@ -732,10 +803,39 @@ void NovaSkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key
 	} else {
 		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
 	}
-	const int count = MIN(static_cast<int>(pose.size()),
+	write_pose_to_skeleton(p_skeleton, pose, p_collapse_right_hand);
+}
+
+void NovaSkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
+		const String &p_source_key, double p_source_playhead_seconds,
+		const String &p_target_key, double p_target_playhead_seconds,
+		float p_weight, const PackedInt32Array &p_classes,
+		const Array &p_deltas, const String &p_wpn_key,
+		double p_wpn_playhead_seconds, bool p_collapse_right_hand) const {
+	Array pose;
+	if (!p_deltas.is_empty() && !p_classes.is_empty()) {
+		pose = eval_pose_blended_overlay(
+				p_source_key, p_source_playhead_seconds,
+				p_target_key, p_target_playhead_seconds, p_weight,
+				p_classes, p_deltas, p_wpn_key,
+				p_wpn_playhead_seconds, p_collapse_right_hand);
+	} else {
+		pose = eval_pose_blended(
+				p_source_key, p_source_playhead_seconds,
+				p_target_key, p_target_playhead_seconds, p_weight);
+	}
+	write_pose_to_skeleton(p_skeleton, pose, p_collapse_right_hand);
+}
+
+void NovaSkeletalAnim::write_pose_to_skeleton(Skeleton3D *p_skeleton,
+		const Array &p_pose, bool p_collapse_right_hand) const {
+	if (p_skeleton == nullptr) {
+		return;
+	}
+	const int count = MIN(static_cast<int>(p_pose.size()),
 			static_cast<int>(p_skeleton->get_bone_count()));
 	for (int i = 0; i < count; ++i) {
-		const Transform3D t = pose[i];
+		const Transform3D t = p_pose[i];
 		if (p_collapse_right_hand && i == 16) {
 			// eval_pose_overlay preserves BN17's sampled parent-local joint origin
 			// while clearing its basis. Apply that origin directly and collapse
@@ -771,7 +871,10 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_length", "key", "variant"), &NovaSkeletalAnim::get_clip_length, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key", "variant"), &NovaSkeletalAnim::is_clip_looping, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &NovaSkeletalAnim::eval_pose, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("eval_pose_blended", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight"), &NovaSkeletalAnim::eval_pose_blended);
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
 	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("pose_skeleton_blended", "skeleton", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &NovaSkeletalAnim::pose_skeleton_blended, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
 }

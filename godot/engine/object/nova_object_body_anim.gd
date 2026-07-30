@@ -33,6 +33,7 @@ func set_skeletal_anim(skeletal) -> void:
 	_m._anim_playing = false
 	_m._anim_external_phase = false
 	_m._body_phase_stamp_valid = false
+	_clear_body_blend()
 	_m._last_slot_resolved = -1
 	_m._last_slot_key = ""
 	_m._body_pose_dirty = true
@@ -102,7 +103,8 @@ func _resolve_muzzle_userpoint() -> void:
 	_m._muzzle_model_pos = info2.get("position", Vector3.ZERO)
 
 
-## Play a main-body clip by ADM key (e.g. "anim_walk"). No-op if no skeletal set / unknown.
+## Play a main-body clip by ADM key (e.g. "anim_walk"). Missing semantic keys
+## use this ADM's RESET binding when present.
 func play_body_clip(key: String) -> void:
 	play_body_clip_variant(key, 0)
 
@@ -112,8 +114,11 @@ func play_body_clip(key: String) -> void:
 ## variant change re-poses even on the same key. [orig: AnimMap_PlayAnimBySlot
 ## @0x40bda0 latches the served ring entry at animState+68]
 func play_body_clip_variant(key: String, variant: int) -> void:
-	if _m._skeletal == null or not _m._skeletal.has_clip(key):
+	if variant == 0:
+		key = _resolve_body_clip_key(key)
+	if _m._skeletal == null or key.is_empty() or not _m._skeletal.has_clip(key):
 		return
+	_clear_body_blend()
 	if key == _m._anim_key and variant == _m._anim_variant:
 		_m._anim_external_phase = false
 		_m._body_phase_stamp_valid = false
@@ -134,6 +139,7 @@ func play_body_clip_variant(key: String, variant: int) -> void:
 func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
 	if _m._skeletal == null or not _m._skeletal.has_clip(key):
 		return
+	_clear_body_blend()
 	var same_external: bool = (_m._anim_external_phase and key == _m._anim_key
 			and variant == _m._anim_variant
 			and is_equal_approx(_m._anim_time, seconds))
@@ -152,6 +158,10 @@ func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -
 ## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
 ## The model does not free-run this clip between sim snapshots.
 func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	key = _resolve_body_clip_key(key)
+	if key.is_empty():
+		return
+	_clear_body_blend()
 	# Repeat-call fast path: the stamp proves this exact (key, tick) pair is what
 	# posed the skeleton last, nothing else touched the playhead since, and no
 	# other input dirtied the pose — the full body below would be a no-op.
@@ -159,8 +169,6 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 			and not _m._body_pose_dirty
 			and phase_ticks == _m._body_phase_ticks_applied
 			and key == _m._anim_key):
-		return
-	if _m._skeletal == null or not _m._skeletal.has_clip(key):
 		return
 	var previous_key: String = _m._anim_key
 	var previous_time: float = _m._anim_time
@@ -183,6 +191,58 @@ func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	advance_body_animation(0.0)
 
 
+## Pose the authoritative outgoing + incoming PRIMARY channels at one shared
+## blend weight. The two clips are sampled first; the weapon-mask channel and
+## aim overlay compose once on top in advance_body_animation(), matching
+## AnimChannel_BlendTwoChannels -> Entity_BuildBoneTransformMatrices.
+##
+## A missing semantic source or target uses this ADM's RESET binding. If RESET
+## itself is absent, a valid remaining channel is retained. Weight 1 uses
+## play_body_clip_at's stamped single-channel fast path, so steady-state
+## presentation pays no second pose evaluation.
+func play_body_blend_at(
+		source_key: String, source_phase_ticks: int,
+		target_key: String, target_phase_ticks: int,
+		weight: float) -> void:
+	if _m._skeletal == null:
+		return
+	source_key = _resolve_body_clip_key(source_key)
+	target_key = _resolve_body_clip_key(target_key)
+	var source_valid := not source_key.is_empty()
+	var target_valid := not target_key.is_empty()
+	if not target_valid:
+		if source_valid:
+			play_body_clip_at(source_key, source_phase_ticks)
+		else:
+			_reset_body_pose()
+		return
+	if not source_valid or weight >= 1.0:
+		play_body_clip_at(target_key, target_phase_ticks)
+		return
+
+	_pose_body_blend_at_times(
+			source_key, _clip_phase_seconds(source_key, source_phase_ticks),
+			target_key, _clip_phase_seconds(target_key, target_phase_ticks),
+			weight)
+
+
+func _pose_body_blend_at_times(
+		source_key: String, source_time: float,
+		target_key: String, target_time: float,
+		weight: float) -> void:
+	_m._anim_key = target_key
+	_m._anim_variant = 0
+	_set_body_playhead(target_time)
+	_m._anim_playing = false
+	_m._anim_external_phase = true
+	_m._body_phase_stamp_valid = false
+	_m._body_blend_source_key = source_key
+	_m._body_blend_source_time = source_time
+	_m._body_blend_weight = clampf(weight, 0.0, 1.0)
+	_m._body_pose_dirty = true
+	advance_body_animation(0.0)
+
+
 ## Seed a main-body clip from retail half-frame ticks, pose it immediately, and
 ## leave it free-running. Distinct from play_body_clip_at(), whose callers own
 ## every later playhead sample and therefore intentionally pin external phase.
@@ -192,15 +252,13 @@ func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
 
 
 func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
-	if _m._skeletal == null or not _m._skeletal.has_clip(key):
+	key = _resolve_body_clip_key(key)
+	if key.is_empty():
 		return false
+	_clear_body_blend()
 	_m._anim_key = key
 	_m._anim_variant = 0
-	var fps: float = _m._skeletal.get_clip_fps(key)
-	var seconds := 0.0
-	if fps > 0.0:
-		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
-	_set_body_playhead(seconds)
+	_set_body_playhead(_clip_phase_seconds(key, phase_ticks))
 	_m._anim_playing = true
 	_m._anim_external_phase = false
 	_m._body_pose_dirty = true
@@ -212,34 +270,41 @@ func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
 ## player transition; queued states promote at tick zero when the current clip
 ## reaches its completion boundary.
 func apply_remote_body_state(state_id: int, key: String, flags: int,
-		phase_ticks: int = -1) -> void:
-	if state_id < 0 or key.is_empty() or _m._skeletal == null or not _m._skeletal.has_clip(key):
-		return
+		phase_ticks: int = -1) -> bool:
+	if state_id < 0 or _resolve_body_clip_key(key).is_empty():
+		return remote_body_needs_fixed_tick()
 	if _m._remote_state < 0:
 		_accept_remote_body_state(state_id, key, flags, phase_ticks)
-		return
+		return remote_body_needs_fixed_tick()
 	if state_id == _m._remote_state:
 		_clear_remote_body_pending()
-		return
+		return remote_body_needs_fixed_tick()
 	if ((_m._remote_flags & 0x4) != 0
 			or ((_m._remote_flags & 0x20) != 0 and (flags & 0x1) == 0)):
 		_queue_remote_body_state(state_id, key, flags)
-		return
+		return remote_body_needs_fixed_tick()
 	_accept_remote_body_state(state_id, key, flags, phase_ticks)
+	return remote_body_needs_fixed_tick()
 
 
 func reset_remote_body_state() -> void:
 	_m._remote_state = -1
 	_m._remote_flags = 0
 	_clear_remote_body_pending()
+	_clear_remote_body_blend()
 
 
 func _accept_remote_body_state(state_id: int, key: String, flags: int,
 		phase_ticks: int) -> void:
 	_clear_remote_body_pending()
+	var had_current: bool = (
+			_m._remote_state >= 0 and not _m._anim_key.is_empty())
 	_m._remote_state = state_id
 	_m._remote_flags = flags
-	if _select_body_clip_seeded(key, phase_ticks if phase_ticks >= 0 else 0):
+	var target_phase := phase_ticks if phase_ticks >= 0 else 0
+	if had_current:
+		_start_remote_body_blend(key, flags, target_phase)
+	elif _select_body_clip_seeded(key, target_phase):
 		advance_body_animation(0.0)
 
 
@@ -271,6 +336,108 @@ func _clear_remote_body_pending() -> void:
 	_m._remote_pending_end_time = INF
 
 
+func _clear_remote_body_blend() -> void:
+	_m._remote_blend_active = false
+	_m._remote_blend_source_key = ""
+	_m._remote_blend_source_phase_ticks = 0
+	_m._remote_blend_source_time = 0.0
+	_m._remote_blend_target_phase_ticks = 0
+	_m._remote_blend_weight = 1.0
+	_m._remote_blend_step = 0.0
+	_clear_body_blend()
+
+
+func _body_phase_ticks(key: String, seconds: float) -> int:
+	if _m._skeletal == null or key.is_empty():
+		return 0
+	var fps: float = _m._skeletal.get_clip_fps(key)
+	return maxi(int(floor(seconds * 2.0 * fps + 0.000001)), 0) \
+			if fps > 0.0 else 0
+
+
+func _f32(value: float) -> float:
+	return PackedFloat32Array([value])[0]
+
+
+func _start_remote_body_blend(
+		target_key: String, target_flags: int, target_phase_ticks: int) -> void:
+	target_key = _resolve_body_clip_key(target_key)
+	if target_key.is_empty():
+		return
+	# A retarget during A->B retains A and replaces only B with C.
+	var source_key: String = (
+			_m._remote_blend_source_key
+			if _m._remote_blend_active else _m._anim_key)
+	var source_phase: int = (
+			_m._remote_blend_source_phase_ticks
+			if _m._remote_blend_active
+			else _body_phase_ticks(_m._anim_key, _m._anim_time))
+	var source_time: float = (
+			_m._remote_blend_source_time
+			if _m._remote_blend_active else _m._anim_time)
+	if (source_key.is_empty() or _m._skeletal == null
+			or not _m._skeletal.has_clip(source_key)):
+		_clear_remote_body_blend()
+		if _select_body_clip_seeded(target_key, target_phase_ticks):
+			advance_body_animation(0.0)
+		return
+	_m._remote_blend_active = true
+	_m._remote_blend_source_key = source_key
+	_m._remote_blend_source_phase_ticks = source_phase
+	_m._remote_blend_source_time = source_time
+	_m._remote_blend_target_phase_ticks = target_phase_ticks
+	_m._remote_blend_weight = 0.0
+	_m._remote_blend_step = _f32(
+			1.0 / 15.0 if (target_flags & 0x400) != 0 else 0.1)
+	_pose_body_blend_at_times(
+			_m._remote_blend_source_key, _m._remote_blend_source_time,
+			target_key,
+			_clip_phase_seconds(
+					target_key, _m._remote_blend_target_phase_ticks),
+			0.0)
+
+
+## Advance one receive-side simulation tick for an already accepted target.
+## Both channels advance before the float32 target weight increments. The state
+## guard lets an arriving retarget replace B with C at weight zero instead of
+## accidentally consuming a tick from the old transition first.
+func advance_remote_body_blend_tick(state_id: int) -> bool:
+	if not _m._remote_blend_active:
+		if _m._remote_pending_state >= 0:
+			_promote_remote_body_pending_if_due()
+			return remote_body_needs_fixed_tick()
+		return false
+	if state_id != _m._remote_state and state_id != _m._remote_pending_state:
+		return false
+	_m._remote_blend_source_phase_ticks += 1
+	_m._remote_blend_source_time += _clip_half_tick_seconds(
+			_m._remote_blend_source_key)
+	_m._remote_blend_target_phase_ticks += 1
+	# PackedFloat32Array performs the same IEEE-754 single-precision rounding as
+	# retail's accumulated channel weight. This allocation exists only for the
+	# ten/fifteen transition ticks; steady-state never enters this method.
+	_m._remote_blend_weight = minf(_f32(
+			_m._remote_blend_weight + _m._remote_blend_step), 1.0)
+	var target_key: String = _m._anim_key
+	if _m._remote_blend_weight >= 1.0:
+		var target_phase: int = _m._remote_blend_target_phase_ticks
+		_clear_remote_body_blend()
+		if _select_body_clip_seeded(target_key, target_phase):
+			advance_body_animation(0.0)
+		return remote_body_needs_fixed_tick()
+	_pose_body_blend_at_times(
+			_m._remote_blend_source_key, _m._remote_blend_source_time,
+			target_key,
+			_clip_phase_seconds(
+					target_key, _m._remote_blend_target_phase_ticks),
+			_m._remote_blend_weight)
+	return remote_body_needs_fixed_tick()
+
+
+func remote_body_needs_fixed_tick() -> bool:
+	return _m._remote_blend_active or _m._remote_pending_state >= 0
+
+
 func _promote_remote_body_pending_if_due() -> bool:
 	if _m._remote_pending_state < 0 or is_inf(_m._remote_pending_end_time):
 		return false
@@ -284,13 +451,15 @@ func _promote_remote_body_pending_if_due() -> bool:
 	_m._remote_flags = flags
 	# The queued packet's phase described the old current channel. Retail starts
 	# the promoted request at the first frame and discards any overshoot.
-	return _select_body_clip_seeded(key, 0)
+	_start_remote_body_blend(key, flags, 0)
+	return true
 
 
 func stop_body_clip() -> void:
 	_m._anim_playing = false
 	_m._anim_external_phase = false
 	_m._body_phase_stamp_valid = false
+	_clear_body_blend()
 	reset_remote_body_state()
 
 
@@ -334,6 +503,7 @@ func play_body_anim_at(slot: int, phase_ticks: int) -> void:
 func set_animation_time(seconds: float) -> void:
 	if _m._skeletal == null or _m._anim_key.is_empty():
 		return
+	_clear_body_blend()
 	_m._anim_external_phase = false
 	_set_body_playhead(seconds)
 	_m._body_pose_dirty = true
@@ -351,6 +521,50 @@ func _set_body_playhead(seconds: float) -> void:
 		_m._anim_time = fposmod(seconds, length)
 	else:
 		_m._anim_time = clampf(seconds, 0.0, length)
+
+
+func _resolve_body_clip_key(key: String) -> String:
+	if _m._skeletal == null:
+		return ""
+	if not key.is_empty() and _m._skeletal.has_clip(key):
+		return key
+	# AnimMap registration binds absent semantic state keys to state-0 RESET.
+	# Keep that same fallback for presentation; if this ADM has no RESET either,
+	# callers retain their valid outgoing channel or fail without inventing one.
+	return "anim_reset" if _m._skeletal.has_clip("anim_reset") else ""
+
+
+func _clip_phase_seconds(key: String, phase_ticks: int) -> float:
+	var fps: float = _m._skeletal.get_clip_fps(key)
+	return (float(maxi(phase_ticks, 0)) / (2.0 * fps)
+			if fps > 0.0 else 0.0)
+
+
+func _clip_half_tick_seconds(key: String) -> float:
+	var fps: float = _m._skeletal.get_clip_fps(key)
+	return 1.0 / (2.0 * fps) if fps > 0.0 else 0.0
+
+
+func _clear_body_blend() -> void:
+	if not _m._body_blend_source_key.is_empty() or _m._body_blend_weight < 1.0:
+		_m._body_pose_dirty = true
+	_m._body_blend_source_key = ""
+	_m._body_blend_source_time = 0.0
+	_m._body_blend_weight = 1.0
+
+
+func _reset_body_pose() -> void:
+	_m._anim_key = ""
+	_m._anim_variant = 0
+	_m._anim_time = 0.0
+	_m._anim_playing = false
+	_m._anim_external_phase = false
+	_m._body_phase_stamp_valid = false
+	_clear_body_blend()
+	if _m._skeleton != null:
+		for bone in range(_m._skeleton.get_bone_count()):
+			_m._skeleton.reset_bone_pose(bone)
+	_m._body_pose_dirty = false
 
 
 ## The active body clip's playhead in seconds, loop-wrapped (one-shots clamp),
@@ -525,6 +739,9 @@ func advance_body_animation(delta: float, write_pose := true) -> void:
 		return
 	var use_overlay: bool = (not _m._aim_overlay_deltas.is_empty()
 			and not _m._aim_overlay_classes.is_empty())
+	var use_primary_blend: bool = (
+			not _m._body_blend_source_key.is_empty()
+			and _m._body_blend_weight < 1.0)
 	if _m._skeletal.has_method("pose_skeleton"):
 		# The whole evaluate-and-write-bones loop in one native call: this runs per
 		# animated model per render frame, and the per-bone Variant boxing + three
@@ -536,17 +753,44 @@ func advance_body_animation(delta: float, write_pose := true) -> void:
 			var wfps: float = _m._skeletal.get_clip_fps(_m._wpn_key)
 			if wfps > 0.0:
 				wpn_time = float(maxi(_m._wpn_phase_ticks, 0)) / (2.0 * wfps)
-		_m._skeletal.pose_skeleton(
-				_m._skeleton, _m._anim_key, _m._anim_time, _m._anim_variant,
-				_m._aim_overlay_classes if use_overlay else PackedInt32Array(),
-				_m._aim_overlay_deltas if use_overlay else [],
-				_m._wpn_key if use_overlay else "", wpn_time, _m._collapse_right_hand)
+		if use_primary_blend and _m._skeletal.has_method("pose_skeleton_blended"):
+			_m._skeletal.pose_skeleton_blended(
+					_m._skeleton,
+					_m._body_blend_source_key, _m._body_blend_source_time,
+					_m._anim_key, _m._anim_time, _m._body_blend_weight,
+					_m._aim_overlay_classes if use_overlay else PackedInt32Array(),
+					_m._aim_overlay_deltas if use_overlay else [],
+					_m._wpn_key if use_overlay else "", wpn_time,
+					_m._collapse_right_hand)
+		else:
+			_m._skeletal.pose_skeleton(
+					_m._skeleton, _m._anim_key, _m._anim_time, _m._anim_variant,
+					_m._aim_overlay_classes if use_overlay else PackedInt32Array(),
+					_m._aim_overlay_deltas if use_overlay else [],
+					_m._wpn_key if use_overlay else "", wpn_time,
+					_m._collapse_right_hand)
 		_m._body_pose_dirty = false
 		return
 	# Script fallback for duck-typed skeletal doubles (tests) without the native
 	# batch entry.
 	var pose: Array
-	if use_overlay and _m._skeletal.has_method("eval_pose_overlay"):
+	if use_primary_blend and use_overlay \
+			and _m._skeletal.has_method("eval_pose_blended_overlay"):
+		var wpn_time := 0.0
+		if not _m._wpn_key.is_empty():
+			var wfps: float = _m._skeletal.get_clip_fps(_m._wpn_key)
+			if wfps > 0.0:
+				wpn_time = float(maxi(_m._wpn_phase_ticks, 0)) / (2.0 * wfps)
+		pose = _m._skeletal.eval_pose_blended_overlay(
+				_m._body_blend_source_key, _m._body_blend_source_time,
+				_m._anim_key, _m._anim_time, _m._body_blend_weight,
+				_m._aim_overlay_classes, _m._aim_overlay_deltas,
+				_m._wpn_key, wpn_time, _m._collapse_right_hand)
+	elif use_primary_blend and _m._skeletal.has_method("eval_pose_blended"):
+		pose = _m._skeletal.eval_pose_blended(
+				_m._body_blend_source_key, _m._body_blend_source_time,
+				_m._anim_key, _m._anim_time, _m._body_blend_weight)
+	elif use_overlay and _m._skeletal.has_method("eval_pose_overlay"):
 		# Weapon-channel playhead: half-frame ticks -> seconds, the play_body_clip_at
 		# convention (seconds = ticks / (2 * clip_fps)).
 		var wpn_time := 0.0

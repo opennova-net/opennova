@@ -225,6 +225,21 @@ func _loaded_skeletal() -> NovaSkeletalAnim:
 	return sk
 
 
+func _loaded_remote_transition_skeletal() -> NovaSkeletalAnim:
+	var sk := NovaSkeletalAnim.new()
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	assert_true(sk.load_from_bad_files(root, "idle.bad", {
+		"anim_idle": "idle.bad",
+		"anim_idle_prone": "idle.bad",
+		"anim_walk_forward": "walk.bad",
+		"anim_run_forward": "walk.bad",
+		"anim_roll_left": "walk.bad",
+		"anim_death_bullet_head_left": "walk.bad",
+	}), "remote transition fixture loads: %s" % sk.get_last_error())
+	return sk
+
+
 func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> void:
 	# Retail zeros model bone 16 (BN17 R Hand) while an organic occupies a
 	# controller/gunner/driver parent slot. The personal weapon is baked into the
@@ -432,6 +447,198 @@ func _bone_poses(skel: Skeleton3D) -> Array:
 	return out
 
 
+func _assert_skeleton_pose_matches(
+		skeleton: Skeleton3D, expected: Array, context: String) -> void:
+	assert_eq(skeleton.get_bone_count(), expected.size(), "%s bone count" % context)
+	for bone in range(mini(skeleton.get_bone_count(), expected.size())):
+		var want: Transform3D = expected[bone]
+		assert_lt(
+				skeleton.get_bone_pose_position(bone).distance_to(want.origin),
+				0.0001,
+				"%s bone %d position" % [context, bone])
+		assert_lt(
+				skeleton.get_bone_pose_rotation(bone).angle_to(
+						want.basis.get_rotation_quaternion()),
+				0.0001,
+				"%s bone %d rotation" % [context, bone])
+
+
+func _blend_primary_poses(old_pose: Array, new_pose: Array, weight: float) -> Array:
+	var out: Array = []
+	for bone in range(mini(old_pose.size(), new_pose.size())):
+		var old_transform: Transform3D = old_pose[bone]
+		var new_transform: Transform3D = new_pose[bone]
+		var rotation := old_transform.basis.get_rotation_quaternion().slerp(
+				new_transform.basis.get_rotation_quaternion(), weight)
+		out.append(Transform3D(
+				Basis(rotation),
+				old_transform.origin.lerp(new_transform.origin, weight)))
+	return out
+
+
+func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
+	# AnimChannel_InitFromParams retains the outgoing channel, and
+	# AnimChannel_BlendTwoChannels slerps/lerps it into the incoming channel over
+	# 10 ticks (15 when the TARGET state's flags carry 0x400). The blend happens
+	# below the existing weapon/aim overlays, so this public model seam pins the
+	# shared primary pose instead of any one presentation host's call bookkeeping.
+	var skeletal := _loaded_skeletal()
+	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
+	var walk_fps: float = skeletal.get_clip_fps("anim_walk_forward")
+	assert_gt(idle_fps, 0.0)
+	assert_gt(walk_fps, 0.0)
+
+	for case in [
+		{"flags": 0, "ticks": 10, "name": "normal"},
+		{"flags": 0x400, "ticks": 15, "name": "slow"},
+	]:
+		var model = NovaObjectModelScript.new()
+		add_child_autofree(model)
+		model.set_skeletal_anim(skeletal)
+		model.set_object_data(_open(SHED))
+		if not model.has_method("play_body_blend_at"):
+			fail_test("NovaObjectModel exposes the shared blend-aware body-clip seam")
+			return
+		var skeleton: Skeleton3D = model.get_skeleton()
+		var idle_phase := 4
+		model.play_body_clip_at("anim_idle", idle_phase)
+		var old_at_switch: Array = skeletal.eval_pose(
+				"anim_idle", float(idle_phase) / (2.0 * idle_fps))
+
+		model.call("play_body_blend_at",
+				"anim_idle", idle_phase,
+				"anim_walk_forward", 0, 0.0)
+		_assert_skeleton_pose_matches(
+				skeleton, old_at_switch,
+				"%s transition weight 0 retains the old pose" % case.name)
+
+		var total_ticks := int(case.ticks)
+		for tick in range(1, total_ticks + 1):
+			var weight := float(tick) / float(total_ticks)
+			model.call("play_body_blend_at",
+					"anim_idle", idle_phase + tick,
+					"anim_walk_forward", tick, weight)
+			var old_pose: Array = skeletal.eval_pose(
+					"anim_idle",
+					float(idle_phase + tick) / (2.0 * idle_fps))
+			var new_pose: Array = skeletal.eval_pose(
+					"anim_walk_forward",
+					float(tick) / (2.0 * walk_fps))
+			_assert_skeleton_pose_matches(
+					skeleton,
+					_blend_primary_poses(old_pose, new_pose, weight),
+					"%s transition tick %d weight %.6f" % [
+						case.name, tick, weight])
+
+
+func test_body_blend_missing_channels_fall_back_without_stale_pose() -> void:
+	var skeletal := _loaded_skeletal()
+	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
+	var walk_fps: float = skeletal.get_clip_fps("anim_walk_forward")
+	var reset_fps: float = skeletal.get_clip_fps("anim_reset")
+	var target_time := 3.0 / (2.0 * walk_fps)
+	var source_time := 5.0 / (2.0 * idle_fps)
+	var reset_source_time := 2.0 / (2.0 * reset_fps)
+	var reset_target_time := 7.0 / (2.0 * reset_fps)
+	assert_eq(
+			skeletal.eval_pose_blended(
+					"does_not_exist", reset_source_time,
+					"anim_walk_forward", target_time, 0.0),
+			skeletal.eval_pose("anim_reset", reset_source_time),
+			"a missing source resolves to RESET at its own playhead")
+	assert_eq(
+			skeletal.eval_pose_blended(
+					"anim_idle", source_time,
+					"does_not_exist", reset_target_time, 1.0),
+			skeletal.eval_pose("anim_reset", reset_target_time),
+			"a missing target resolves to RESET at its own playhead")
+
+	var same_key_weight := 0.35
+	var same_key_source: Array = skeletal.eval_pose(
+			"anim_walk_forward", source_time)
+	var same_key_target: Array = skeletal.eval_pose(
+			"anim_walk_forward", target_time)
+	assert_eq(
+			skeletal.eval_pose_blended(
+					"anim_walk_forward", source_time,
+					"anim_walk_forward", target_time, same_key_weight),
+			_blend_primary_poses(
+					same_key_source, same_key_target, same_key_weight),
+			"two channels sharing one BAD still blend independent playheads")
+
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(_open(SHED))
+	model.play_body_clip("does_not_exist")
+	assert_eq(model.get_active_body_clip(), "anim_reset",
+			"the direct semantic primary path also binds missing keys to RESET")
+	model.play_body_clip_at("anim_walk_forward", 3)
+	var skeleton: Skeleton3D = model.get_skeleton()
+	model.play_body_blend_at(
+			"anim_idle", 5, "does_not_exist", 7, 1.0)
+	assert_eq(model.get_active_body_clip(), "anim_reset",
+			"a missing target selects RESET rather than retaining the source")
+	skeleton.set_bone_pose_position(0, Vector3(99, 98, 97))
+	model.play_body_blend_at(
+			"does_not_exist", 2, "also_missing", 7, 0.5)
+	assert_eq(model.get_active_body_clip(), "anim_reset",
+			"two missing semantic channels keep RESET as the sampled clip")
+	_assert_skeleton_pose_matches(
+			skeleton,
+			skeletal.eval_pose_blended(
+					"anim_reset", reset_source_time,
+					"anim_reset", reset_target_time, 0.5),
+			"both missing semantic channels resolve to RESET, not a stale pose")
+
+
+func test_primary_blend_composes_weapon_channel_then_aim_overlay_once() -> void:
+	var data := _open(CHARMODEL)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var skeletal := NovaSkeletalAnim.new()
+	assert_true(skeletal.load_from_resource_root(
+			root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	assert_gt(skeletal.get_bone_count(), 16,
+			"the composition fixture exercises the upper-body weapon mask")
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(data)
+	var deltas: Array = []
+	for cls in range(9):
+		deltas.append(Basis(Quaternion(
+				Vector3.UP, deg_to_rad(float(cls + 1)))))
+	model.set_weapon_channel("anim_run_forward", 5)
+	model.set_aim_overlay(deltas)
+	model.play_body_blend_at(
+			"anim_idle", 4, "anim_walk_forward", 2, 0.35)
+
+	var idle_seconds := 4.0 / (2.0 * skeletal.get_clip_fps("anim_idle"))
+	var walk_seconds := 2.0 / (
+			2.0 * skeletal.get_clip_fps("anim_walk_forward"))
+	var weapon_seconds := 5.0 / (
+			2.0 * skeletal.get_clip_fps("anim_run_forward"))
+	var expected: Array = skeletal.eval_pose_blended_overlay(
+			"anim_idle", idle_seconds,
+			"anim_walk_forward", walk_seconds, 0.35,
+			skeletal.get_overlay_classes(), deltas,
+			"anim_run_forward", weapon_seconds, false)
+	_assert_skeleton_pose_matches(
+			model.get_skeleton(), expected,
+			"primary blend then weapon mask then aim overlay")
+
+	var primary_only: Array = skeletal.eval_pose_blended(
+			"anim_idle", idle_seconds,
+			"anim_walk_forward", walk_seconds, 0.35)
+	for bone in range(expected.size()):
+		assert_true(
+				(expected[bone] as Transform3D).origin.is_equal_approx(
+						(primary_only[bone] as Transform3D).origin),
+				"weapon/aim overlays preserve blended primary origin %d" % bone)
+
+
 func test_scrub_while_paused_moves_playhead_and_pose() -> void:
 	# The ANIMS workflow's scrub seam: set_animation_time poses the skeleton
 	# IMMEDIATELY even while paused. SHED is rigid, so it fake-skins into a real
@@ -591,6 +798,101 @@ func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
 	model.apply_remote_body_state(1, "anim_walk_forward", flags, 22)
 	assert_almost_eq(model.get_animation_time(), locally_advanced, 0.001,
 		"steady-state off15 samples do not hard-scrub a free-running channel")
+
+
+func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	var skeletal := _loaded_remote_transition_skeletal()
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(_open(SHED))
+	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
+	var death_fps: float = skeletal.get_clip_fps(
+			"anim_death_bullet_head_left")
+	assert_gt(idle_fps, 0.0)
+	assert_gt(death_fps, 0.0)
+
+	model.apply_remote_body_state(
+			43, "anim_idle", NovaSimulation.infantry_anim_flags(43), 8)
+	model.advance_body_animation(0.005)
+	var outgoing_time := 8.0 / (2.0 * idle_fps) + 0.005
+	model.apply_remote_body_state(
+			191, "anim_death_bullet_head_left",
+			NovaSimulation.infantry_anim_flags(191), 0)
+	assert_true(model.remote_body_needs_fixed_tick())
+	_assert_skeleton_pose_matches(
+			model.get_skeleton(),
+			skeletal.eval_pose("anim_idle", outgoing_time),
+			"remote death receipt weight zero")
+
+	assert_true(model.advance_remote_body_blend_tick(191))
+	var source: Array = skeletal.eval_pose(
+			"anim_idle", outgoing_time + 1.0 / (2.0 * idle_fps))
+	var target: Array = skeletal.eval_pose(
+			"anim_death_bullet_head_left", 1.0 / (2.0 * death_fps))
+	_assert_skeleton_pose_matches(
+			model.get_skeleton(), _blend_primary_poses(source, target, 0.1),
+			"remote death next fixed tick weight point one")
+
+
+func test_remote_mid_blend_retarget_keeps_original_source() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	var skeletal := _loaded_skeletal()
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(_open(SHED))
+	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
+
+	model.apply_remote_body_state(
+			43, "anim_idle", NovaSimulation.infantry_anim_flags(43), 4)
+	model.apply_remote_body_state(
+			1, "anim_walk_forward", NovaSimulation.infantry_anim_flags(1), 0)
+	model.advance_remote_body_blend_tick(1)
+	model.apply_remote_body_state(
+			2, "anim_run_forward", NovaSimulation.infantry_anim_flags(2), 0)
+
+	_assert_skeleton_pose_matches(
+			model.get_skeleton(),
+			skeletal.eval_pose("anim_idle", 5.0 / (2.0 * idle_fps)),
+			"A to B retargeted to C still starts from A")
+
+
+func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	model.apply_remote_body_state(43, "anim_idle", 0, 0)
+	model.apply_remote_body_state(2, "anim_walk_forward", 0x400, 0)
+	for _tick in range(14):
+		assert_true(model.advance_remote_body_blend_tick(2),
+				"slow transition remains live through tick fourteen")
+	assert_false(model.advance_remote_body_blend_tick(2),
+			"slow transition promotes the target on tick fifteen")
+
+
+func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_clears() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_remote_transition_skeletal())
+	model.set_object_data(_open(SHED))
+
+	model.apply_remote_body_state(
+			48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 10)
+	model.apply_remote_body_state(
+			41, "anim_roll_left", NovaSimulation.infantry_anim_flags(41), 0)
+	model.apply_remote_body_state(
+			48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 11)
+	assert_eq(model.get_active_body_clip(), "anim_roll_left",
+			"the pulse accepts before the folded final state queues")
+	assert_true(model.remote_body_needs_fixed_tick(),
+			"the locked pulse begins at blend weight zero")
+	assert_true(model.advance_remote_body_blend_tick(48),
+			"the folded final-state row still advances the queued pulse transition")
+
+	model.reset_remote_body_state()
+	assert_false(model.remote_body_needs_fixed_tick(),
+			"respawn/reset clears the receive-side blend epoch")
 
 
 func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:

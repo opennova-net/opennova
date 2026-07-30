@@ -27,6 +27,11 @@ class FakeModel:
 			ctrl_values[control_name] = phase
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
+	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+			target_key: String, target_phase_ticks: int, weight: float) -> void:
+		body_calls.append([
+			"blend", source_key, source_phase_ticks,
+			target_key, target_phase_ticks, weight])
 	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
 		body_calls.append([slot, phase_ticks])
 	func play_body_anim(slot: int) -> void:
@@ -113,6 +118,12 @@ class FakeSim:
 			out[b + NovaSimulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
+			out[b + NovaSimulation.PF_ANIM_SOURCE_STATE] = float(
+					e.get("anim_source_state", -1))
+			out[b + NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
+					e.get("anim_source_phase", -1))
+			out[b + NovaSimulation.PF_ANIM_BLEND_WEIGHT] = float(
+					e.get("anim_blend_weight", 1.0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
 			out[b + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					e.get("local_view_suppressed", 0))
@@ -415,6 +426,96 @@ func test_hidden_body_catches_up_when_it_becomes_presentable() -> void:
 	presenter.present()
 	assert_eq(model.body_calls, [["anim_idle", 9]],
 			"visibility eligibility catches the body up to its current authoritative pose")
+
+
+func test_body_clip_poses_authoritative_two_channel_blend() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = {11: model}
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 11,
+		"anim_source_state": 43,
+		"anim_source_phase": 17,
+		"anim_state": 1,
+		"anim_phase": 3,
+		"anim_blend_weight": 0.2,
+		"aim_overlay_valid": 1,
+		"aim_angles": PackedVector3Array([Vector3(1.0, 2.0, 3.0)]),
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.body_calls.size(), 1)
+	var call: Array = model.body_calls[0]
+	assert_eq(call.slice(0, 5), [
+		"blend", "anim_idle", 17, "anim_walk_forward", 3])
+	assert_almost_eq(float(call[5]), 0.2, 0.000001,
+			"placed NPCs consume the authority's exact primary blend tuple")
+
+	presenter.present()
+	assert_eq(model.body_calls.size(), 1,
+			"an unchanged retained blend does not redispatch")
+
+	sim.entities[0]["anim_source_phase"] = 18
+	presenter.present()
+	assert_eq(model.body_calls.size(), 2,
+			"the outgoing playhead participates in the retained pose stamp")
+
+	sim.entities[0]["anim_blend_weight"] = 0.3
+	presenter.present()
+	assert_eq(model.body_calls.size(), 3,
+			"the float32 blend weight participates in the retained pose stamp")
+
+	sim.entities[0]["anim_source_state"] = 0
+	presenter.present()
+	assert_eq(model.body_calls.size(), 4,
+			"the outgoing semantic state participates in the retained pose stamp")
+	assert_eq((model.body_calls.back() as Array).slice(0, 3),
+			["blend", "anim_reset", 18])
+
+	sim.entities[0]["aim_angles"] = PackedVector3Array(
+			[Vector3(4.0, 5.0, 6.0)])
+	presenter.present()
+	assert_eq(model.body_calls.size(), 5,
+			"an overlay change reposes the retained two-channel body")
+
+	sim.entities[0]["right_hand_collapsed"] = 1
+	presenter.present()
+	assert_eq(model.body_calls.size(), 6,
+			"a right-hand mask change reposes the retained two-channel body")
+
+	var channels := int(presenter.get_output_channels())
+	presenter.set_output_channels(channels & ~PresentPass.OUTPUT_BODY_ANIM)
+	sim.entities[0]["anim_source_phase"] = 19
+	sim.entities[0]["anim_blend_weight"] = 0.4
+	presenter.present()
+	assert_eq(model.body_calls.size(), 6,
+			"a disabled body channel performs no blend dispatch")
+	presenter.set_output_channels(channels)
+	presenter.present()
+	assert_eq(model.body_calls.size(), 7,
+			"reenabling the body channel cold-applies the full latest tuple")
+	assert_eq((model.body_calls.back() as Array).slice(0, 5),
+			["blend", "anim_reset", 19, "anim_walk_forward", 3])
+	assert_almost_eq(float((model.body_calls.back() as Array)[5]),
+			0.4, 0.000001)
+
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	sim.entities[0]["anim_source_phase"] = 20
+	sim.entities[0]["anim_blend_weight"] = 0.5
+	presenter.present()
+	assert_eq(model.body_calls.size(), 7,
+			"a hidden non-muzzle body does not write an updated blend")
+	sim.entities[0]["hidden"] = 0
+	presenter.present()
+	assert_eq(model.body_calls.size(), 8,
+			"becoming visible catches up with the full latest blend tuple")
+	assert_eq((model.body_calls.back() as Array).slice(0, 5),
+			["blend", "anim_reset", 20, "anim_walk_forward", 3])
+	assert_almost_eq(float((model.body_calls.back() as Array)[5]),
+			0.5, 0.000001)
 
 
 func test_placed_model_applies_snapshot_overlay_in_body_frame() -> void:

@@ -21,6 +21,7 @@ struct DispatchNames {
 	StringName get_generation = StringName("get_generation");
 	StringName set_part_phase = StringName("set_part_phase");
 	StringName play_body_clip_at = StringName("play_body_clip_at");
+	StringName play_body_blend_at = StringName("play_body_blend_at");
 	StringName play_body_anim_at = StringName("play_body_anim_at");
 	StringName play_body_anim = StringName("play_body_anim");
 	StringName set_aim_overlay = StringName("set_aim_overlay");
@@ -51,7 +52,10 @@ enum RowCaps {
 	CAP_CTRL = 32,
 	CAP_MUZZLE = 64,
 	CAP_PART = 128,
+	CAP_BODY_BLEND = 256,
 };
+static_assert((CAP_PART & CAP_BODY_BLEND) == 0,
+		"part animation and primary body blending need distinct capability bits");
 
 inline int32_t field_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
@@ -323,6 +327,9 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 		if (node->has_method(names().play_body_clip_at)) {
 			caps |= CAP_BODY_CLIP;
 		}
+		if (node->has_method(names().play_body_blend_at)) {
+			caps |= CAP_BODY_BLEND;
+		}
 		if (node->has_method(names().play_body_anim_at)) {
 			caps |= CAP_BODY_SLOT;
 		}
@@ -592,15 +599,45 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			int32_t body_mode = BODY_NONE;
 			int32_t body_selector = -1;
 			int32_t body_phase = 0;
+			int32_t body_source_selector = -1;
+			int32_t body_source_phase = 0;
+			float body_blend_weight = 1.0f;
 			String body_clip_key;
-			if (anim_state >= 0 && (caps & CAP_BODY_CLIP) != 0) {
-				const String &key = infantry_key(anim_state);
+			String body_source_clip_key;
+			if ((caps & CAP_BODY_CLIP) != 0) {
+				const String key =
+						anim_state >= 0 ? infantry_key(anim_state) : String();
+				const int32_t source_state = field_i(
+						p, base, NovaSimulation::PF_ANIM_SOURCE_STATE);
+				const String source_key =
+						source_state >= 0 ? infantry_key(source_state) : String();
 				if (!key.is_empty()) {
-					body_mode = BODY_CLIP_AT;
 					body_selector = anim_state;
 					body_phase = field_i(
 							p, base, NovaSimulation::PF_ANIM_PHASE_TICKS);
 					body_clip_key = key;
+					const float target_weight =
+							p[base + NovaSimulation::PF_ANIM_BLEND_WEIGHT];
+					if (source_state >= 0 && !source_key.is_empty() &&
+							target_weight < 1.0f &&
+							(caps & CAP_BODY_BLEND) != 0) {
+						body_mode = BODY_BLEND_AT;
+						body_source_selector = source_state;
+						body_source_phase = field_i(
+								p, base,
+								NovaSimulation::PF_ANIM_SOURCE_PHASE_TICKS);
+						body_source_clip_key = source_key;
+						body_blend_weight = target_weight;
+					} else {
+						body_mode = BODY_CLIP_AT;
+					}
+				} else if (source_state >= 0 && !source_key.is_empty()) {
+					body_mode = BODY_CLIP_AT;
+					body_selector = source_state;
+					body_phase = field_i(
+							p, base,
+							NovaSimulation::PF_ANIM_SOURCE_PHASE_TICKS);
+					body_clip_key = source_key;
 				}
 			}
 			if (body_mode == BODY_NONE) {
@@ -622,16 +659,27 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			const bool body_stamp_changed =
 					!row.body_stamp_valid || row.body_mode != body_mode ||
 					row.body_selector != body_selector ||
-					row.body_phase != body_phase;
+					row.body_phase != body_phase ||
+					row.body_source_selector != body_source_selector ||
+					row.body_source_phase != body_source_phase ||
+					row.body_blend_weight != body_blend_weight;
 			const bool force_external_pose =
 					body_dependency_changed &&
 					(body_mode == BODY_CLIP_AT ||
+							body_mode == BODY_BLEND_AT ||
 							body_mode == BODY_SLOT_AT);
 			if (body_stamp_changed || force_external_pose) {
 				switch (body_mode) {
 					case BODY_CLIP_AT:
 						node->call(n.play_body_clip_at, body_clip_key,
 								body_phase);
+						++stat_body_dispatches_;
+						break;
+					case BODY_BLEND_AT:
+						node->call(n.play_body_blend_at,
+								body_source_clip_key, body_source_phase,
+								body_clip_key, body_phase,
+								body_blend_weight);
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_AT:
@@ -649,6 +697,9 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				row.body_mode = body_mode;
 				row.body_selector = body_selector;
 				row.body_phase = body_phase;
+				row.body_source_selector = body_source_selector;
+				row.body_source_phase = body_source_phase;
+				row.body_blend_weight = body_blend_weight;
 				row.body_stamp_valid = true;
 			}
 		} else if ((output_channels_ & OUTPUT_BODY_ANIM) != 0) {

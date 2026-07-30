@@ -715,10 +715,7 @@ void NovaSimulation::joiner_apply_authoritative_health() {
 					inf.player_move_dir_index = 0;
 					inf.move_mode = 0;
 					inf.target_dist = 0;
-					inf.anim_state = opennova::world::anim_state::kIdle;
-					inf.anim_pending = 0;
-					inf.anim_prev = opennova::world::anim_state::kIdle;
-					inf.clip_phase = 0;
+					inf.reset_body_animation(opennova::world::anim_state::kIdle);
 					inf.reload_anim_ticks = 0;
 					inf.arms_dip_ticks = 0;
 					inf.pitch_kick_accum = 0;
