@@ -40,6 +40,11 @@
 #define THREEDI_TEX_FLAG_ANIMATED  0x01u  // Part of animation sequence
 #define THREEDI_TEX_FLAG_CLAMPED   0x02u  // Use clamp addressing (vs wrap)
 
+/* 3DI3 chunk-header dword: high bit = parent (has children), low 24 bits =
+ * payload length. One home; the reader and writer TUs both use these. */
+#define THREEDI_3DI3_PARENT_FLAG 0x80000000u
+#define THREEDI_3DI3_LENGTH_MASK 0x00FFFFFFu
+
 // Emissive type values (emissive_type field in ThreediMaterial)
 #define THREEDI_EMISSIVE_NONE      0  // Not emissive
 #define THREEDI_EMISSIVE_FULL      2  // Full emissive (LUM shader variants)
