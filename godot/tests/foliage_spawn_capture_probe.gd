@@ -87,7 +87,7 @@ func _ready() -> void:
 		return
 	var world = _play_controller.get_world()
 	var camera: Camera3D = _play_controller.get_play_camera()
-	if world == null or not world.is_loaded() or not world.has_local_player():
+	if world == null or not world.is_loaded() or not (world.get_sim() != null and world.get_sim().has_local_player()):
 		_fail("GameWorld has no loaded local-player spawn anchor")
 		return
 	if camera == null or not camera.is_inside_tree():
@@ -111,7 +111,7 @@ func _ready() -> void:
 	_input_router = _play_controller.find_child("PlayInputRouter", true, false)
 	if _input_router != null:
 		_input_router.set_process_unhandled_input(false)
-	world.set_local_player_input(false, false, false, false, false, false, false)
+	world.get_sim().set_player_input(false, false, false, false, false, false, false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	await _settle(PLAY_SETTLE_FRAMES)
 
@@ -428,9 +428,9 @@ func _masked_flicker_diff(hidden: Image, first: Image, current: Image) -> Dictio
 
 func _snapshot(world, camera: Camera3D, environment, viewport: Viewport) -> Dictionary:
 	return {
-		"position": world.local_player_position(),
-		"yaw": float(world.local_player_yaw_deg()),
-		"pitch": float(world.local_player_pitch_deg()),
+		"position": world.get_sim().get_local_player_position(),
+		"yaw": float(world.get_sim().get_local_player_yaw_deg()),
+		"pitch": float(world.get_sim().get_local_player_pitch_deg()),
 		"camera": camera.global_transform,
 		"fov": camera.fov,
 		"tod": float(environment.get("time_of_day")),
@@ -589,25 +589,19 @@ func _print_runtime_metadata(world, environment) -> void:
 func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
 	if OS.get_environment("NOVA_MODEL_LIGHTING_TRACE") != "1":
 		return
-	var sim = world.get_sim() if world.has_method("get_sim") else null
+	var sim = world.get_sim()
 	var light_dir: Vector3 = environment.get_light_direction()
 	var iris_samples := PackedInt32Array()
-	if sim != null and sim.has_method("compute_iris_samples"):
+	if sim != null:
 		iris_samples = sim.compute_iris_samples(
 			camera.global_position, -camera.global_basis.z, light_dir)
 	print("[spawn-capture] model lighting trace: ", {
 		"local_player_indoors":
-			sim.local_player_indoors()
-				if sim != null and sim.has_method("local_player_indoors")
-				else null,
+			sim.local_player_indoors() if sim != null else null,
 		"local_player_blink_flags":
-			sim.local_player_blink_flags()
-				if sim != null and sim.has_method("local_player_blink_flags")
-				else null,
+			sim.local_player_blink_flags() if sim != null else null,
 		"local_player_interior_item_id":
-			sim.local_player_interior_item_id()
-				if sim != null and sim.has_method("local_player_interior_item_id")
-				else null,
+			sim.local_player_interior_item_id() if sim != null else null,
 		"iris_samples": iris_samples,
 	})
 

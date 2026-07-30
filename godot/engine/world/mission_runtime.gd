@@ -101,10 +101,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = NovaSimulation.new()
-	_has_trace_stats_sampling = (
-			_sim.has_method("get_last_projectile_trace_times_us")
-			and _sim.has_method("get_last_projectile_trace_counts")
-			and _sim.has_method("get_last_projectile_trace_faces"))
+	_has_trace_stats_sampling = _sim != null
 	_sync_runtime_profiling()
 	var mission_path := String(options.get(
 			"debug_mission_file", options.get("mission_file", "")))
@@ -117,11 +114,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if _mission_name.is_empty() and not _mission_file.is_empty():
 		_mission_name = _mission_file.get_file().get_basename()
 
-	_has_native_present_effect_pose_lookup = (
-			_sim.has_method("get_present_effect_state_for_ssn")
-			and _sim.has_method("get_present_effect_state_for_wire_handle")
-			and _sim.has_method("get_present_effect_state_for_bms_id")
-			and _sim.has_method("get_present_effect_state_for_origin"))
+	_has_native_present_effect_pose_lookup = _sim != null
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7: EVERY play/preview path is the in-process listen server (ADR 0011) — stood up BEFORE load,
@@ -140,11 +133,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# screen was up; do not replace its connection, restart its handshake, or
 		# reload charattr after ordered S2C 0x41 mutations have already landed.
 		var needs_join_connection := not _sim.is_joiner()
-		if needs_join_connection and options.get("resource_root") != null \
-				and _sim.has_method("load_charattr_challenge"):
+		if needs_join_connection and options.get("resource_root") != null:
 			_sim.load_charattr_challenge(options["resource_root"])
-		if needs_join_connection and options.has("join_character_profile") \
-				and _sim.has_method("set_join_character_profile"):
+		if needs_join_connection and options.has("join_character_profile"):
 			_sim.set_join_character_profile(options["join_character_profile"])
 		if needs_join_connection and not _sim.enable_join(
 				join_target.host_ip, join_target.port, join_target.player_name):
@@ -179,6 +170,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			_setup_error = ERR_CANT_CREATE
 			_sim.free()
 			_sim = null
+			_has_trace_stats_sampling = false
 			_has_native_present_effect_pose_lookup = false
 			return 0
 	else:
@@ -194,6 +186,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
+		_has_trace_stats_sampling = false
 		_has_native_present_effect_pose_lookup = false
 		return 0
 	if _presentation_time_ms >= 0:
@@ -207,7 +200,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# resource root — same file either way). The night gate the death scream
 	# reads is the BMS attrib dword finish_load already stamps.
 	# [orig: SoundProfile_LoadAll @ 0x527490 from Game_InitSubsystems]
-	if _sim.has_method("set_sound_profiles") and options.get("resource_root") != null:
+	if options.get("resource_root") != null:
 		var sound_rr = options["resource_root"]
 		if sound_rr.has_file("SndProf.def"):
 			_sim.set_sound_profiles(sound_rr.read_file("SndProf.def"))
@@ -340,8 +333,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# adjacent buildings into cross-building links, stamp the per-building
 		# flag bytes. [orig: Terrain_InitBuildingPortals @ 0x5c7480 from
 		# Game_StartMission @ 0x525e11]
-		if _sim.has_method("occlusion_init_mission"):
-			_sim.occlusion_init_mission()
+		_sim.occlusion_init_mission()
 	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
 	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
 	# empty; the loadout reply then degrades to the tracked request-echo fallback.
@@ -562,27 +554,12 @@ func _ensure_present_effect_poses() -> void:
 			_effect_poses_by_ssn[ssn] = transform
 
 
-# --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---
+# --- the local player (Phase 2; ADR 0012). W4-1 removed the pass-through
+# delegates: consumers reach the sim natively via get_sim(). What remains here
+# either composes (has_player), decodes (aim overlay, ADR 0017), or feeds
+# GameWorld's own _music_var_pump. ---
 func has_player() -> bool:
 	return _sim != null and _sim.has_local_player()
-
-func local_player_position() -> Vector3:
-	return _sim.get_local_player_position() if _sim != null else Vector3.ZERO
-
-func local_player_yaw_deg() -> float:
-	return _sim.get_local_player_yaw_deg() if _sim != null else 0.0
-
-func local_player_pitch_deg() -> float:
-	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
-
-func local_player_body_anim_slot() -> int:
-	return _sim.get_local_player_body_anim_slot() if _sim != null else -1
-
-func local_player_anim_key() -> String:
-	return String(_sim.get_local_player_anim_key()) if _sim != null else ""
-
-func local_player_anim_phase_ticks() -> int:
-	return int(_sim.get_local_player_anim_phase_ticks()) if _sim != null else 0
 
 # Decoded at the NovaSimulation transport edge (ADR 0017); null when absent/invalid.
 func local_player_aim_overlay() -> PlayerAimOverlay:
@@ -627,13 +604,18 @@ func _on_frame_stats_capture_changed(_active: bool) -> void:
 
 
 func _sync_runtime_profiling() -> void:
-	if _sim == null or not _sim.has_method(
-			"set_runtime_profiling_enabled"):
+	if _sim == null:
 		return
 	var stats_active := _frame_stats != null \
 			and _frame_stats.is_capture_active()
 	_sim.set_runtime_profiling_enabled(
 			_runtime_probe_enabled or stats_active)
+
+
+# Mission-presentation counters (probe/diagnostic seam).
+func get_mission_present_stats() -> MissionPresentStats:
+	return _present.get_stats_record() \
+			if _present != null else MissionPresentStats.new()
 
 
 # Fire-presentation counters (probe/diagnostic seam; empty when the pass is absent).
@@ -664,26 +646,6 @@ func get_destruction_present_stats() -> RefCounted:
 	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
 	# host mission runs with the pass.
 	return _destruction_present.get_stats() if _destruction_present != null else null
-
-func set_player_input(forward: bool, back: bool, left: bool, right: bool, lean_left: bool, lean_right: bool, jump: bool) -> void:
-	if _sim != null:
-		_sim.set_player_input(forward, back, left, right, lean_left, lean_right, jump)
-
-
-## One frame of raw mouse pixels onto the sim-owned look angles (the witnessed
-## integer pipeline: sensitivity, scoped zoom reduction, prone pitch clamp).
-## [orig: Input_ProcessMouseAxisBindings @0x499680; cases 166/164]
-func add_player_look(dx_px: float, dy_px: float) -> void:
-	if _sim != null:
-		_sim.add_local_player_look(dx_px, dy_px)
-
-
-## Stance SELECT request: 0 stand / 1 crouch / 2 prone (the 3-key semantics,
-## refused while the equipped weapon has ForceCrouch). [orig: cases 169/170/172
-## -> C2S 0x1D -> NapiNPServerMsg_HandleStanceChange @0x501c60]
-func request_player_stance(stance: int) -> bool:
-	return _sim.request_local_player_stance(stance) if _sim != null else false
-
 
 func get_sim() -> NovaSimulation:
 	return _sim
@@ -763,9 +725,7 @@ func _present_entity_rows(stats_on := false) -> void:
 		# The native buffer build the fetch above just paid for.
 		_frame_stats.add(FrameStatsBoard.PRESENT_SNAPSHOT,
 				int(_sim.get_last_present_snapshot_us()))
-	var layout_revision := -1
-	if _sim.has_method("get_present_layout_revision"):
-		layout_revision = int(_sim.get_present_layout_revision())
+	var layout_revision := int(_sim.get_present_layout_revision())
 	if _present != null:
 		var mission_start := Time.get_ticks_usec() if stats_on else 0
 		if _present.has_method("present_snapshot"):
@@ -969,7 +929,7 @@ func get_perf_counters() -> Dictionary:
 		"effects_us": _perf_effects_us,
 		"did_tick": _perf_did_tick,
 		"ticks": _ticks_last_frame,
-		"sim": _sim.get_runtime_perf_counters() if _sim != null and _sim.has_method("get_runtime_perf_counters") else {},
+		"sim": _sim.get_runtime_perf_counters() if _sim != null else {},
 	}
 
 
@@ -1077,8 +1037,7 @@ func _exit_tree() -> void:
 			_frame_stats.capture_changed.disconnect(capture_changed)
 	_runtime_probe_enabled = false
 	_has_trace_stats_sampling = false
-	if _sim != null and _sim.has_method(
-			"set_runtime_profiling_enabled"):
+	if _sim != null:
 		_sim.set_runtime_profiling_enabled(false)
 	_clear_present_effect_poses()
 	_has_native_present_effect_pose_lookup = false

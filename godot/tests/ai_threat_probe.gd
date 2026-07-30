@@ -38,7 +38,7 @@ func _mission_wait(seconds: float) -> void:
 
 
 func _nearest_npc(sim, world) -> Dictionary:
-	var player_pos: Vector3 = world.local_player_position()
+	var player_pos: Vector3 = world.get_sim().get_local_player_position()
 	var best := {}
 	var best_dist := INF
 	for i in AI_SCAN_CAP:
@@ -93,7 +93,7 @@ func _run() -> void:
 
 	# Wait out the menu -> loading screen -> mission load -> player spawn chain.
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("ai_threat_probe: player never spawned (mission load stalled?)")
@@ -111,7 +111,7 @@ func _run() -> void:
 			[float(first.get("distance", INF)), String(first.get("name", "")),
 			int(first.get("item_id", 0))])
 	# Self + nearest diagnostic rows (team, perception ranges, the D-AI-5 seed).
-	var ppos: Vector3 = world.local_player_position()
+	var ppos: Vector3 = world.get_sim().get_local_player_position()
 	for i in AI_SCAN_CAP:
 		var d: Dictionary = sim.get_entity_debug(i)
 		if d.is_empty():
@@ -133,16 +133,16 @@ func _run() -> void:
 
 	# --- Approach: walk at the nearest NPC, correcting heading off the actual
 	# movement vector (convention-free); bang-bang gain sign self-calibrates.
-	var hp0: int = world.local_player_health()
+	var hp0: int = world.get_sim().get_local_player_health()
 	var seconds := 0
 	var px_per_deg := 8.0
 	var prev_err := 0.0
-	var prev_pos: Vector3 = world.local_player_position()
+	var prev_pos: Vector3 = world.get_sim().get_local_player_position()
 	_forward = true
 	while seconds < MAX_MISSION_SECONDS:
 		await _mission_wait(1.0)
 		seconds += 1
-		var hp: int = world.local_player_health()
+		var hp: int = world.get_sim().get_local_player_health()
 		if hp < hp0:
 			break # already under fire — skip to the watch phase
 		var npc := _nearest_npc(sim, world)
@@ -151,7 +151,7 @@ func _run() -> void:
 		var dist := float(npc.get("distance", INF))
 		if dist <= STOP_DISTANCE_U:
 			break
-		var pos: Vector3 = world.local_player_position()
+		var pos: Vector3 = world.get_sim().get_local_player_position()
 		var moved := Vector2(pos.x - prev_pos.x, pos.z - prev_pos.z)
 		var tgt: Vector3 = npc.get("position", pos)
 		var want := Vector2(tgt.x - pos.x, tgt.z - pos.z)
@@ -159,7 +159,7 @@ func _run() -> void:
 			var err := rad_to_deg(moved.angle_to(want))
 			if abs(err) > abs(prev_err) + 1.0 and abs(prev_err) > 0.5:
 				px_per_deg = -px_per_deg # gain sign was wrong; flip
-			world.add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
+			world.get_sim().add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
 			prev_err = err
 		prev_pos = pos
 		if seconds % 10 == 0:
@@ -173,7 +173,7 @@ func _run() -> void:
 	# --- Watch: stand still until NPC fire kills the player.
 	var damaged_at := -1
 	while seconds < MAX_MISSION_SECONDS:
-		var hp2: int = world.local_player_health()
+		var hp2: int = world.get_sim().get_local_player_health()
 		if hp2 < hp0 and damaged_at < 0:
 			damaged_at = seconds
 			print("PROBE DAMAGED t=%ds hp %d -> %d (hostile fire landed)" % [seconds, hp0, hp2])
@@ -205,5 +205,5 @@ func _run() -> void:
 					int(npc2.get("state", -1)), int(npc2.get("ai_health", 0)),
 					str(world.get_fire_present_stats())])
 	print("PROBE FAIL: player hp=%d after %ds (damaged_at=%d) — no kill observed" %
-			[world.local_player_health(), MAX_MISSION_SECONDS, damaged_at])
+			[world.get_sim().get_local_player_health(), MAX_MISSION_SECONDS, damaged_at])
 	quit(1)

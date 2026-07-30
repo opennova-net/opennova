@@ -331,8 +331,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		return
 	# Batched replacements inherit the carved instance's authored eligibility.
 	var batched_casts_static_shadow: bool = \
-			_placer.has_method("static_instance_casts_terrain_shadow") \
-			and bool(_placer.static_instance_casts_terrain_shadow(bms_id))
+			bool(_placer.static_instance_casts_terrain_shadow(bms_id))
 	var graft: Node3D = _placer.build_model_from_graphic(
 			husk_graphic, "", _container, "", _env_node)
 	if graft == null:
@@ -371,8 +370,7 @@ func _node_has_static_shadow_caster(root: Node) -> bool:
 
 
 func _set_husk_static_shadow(model: Node, enabled: bool) -> void:
-	if enabled and model != null \
-			and model.has_method("set_static_shadow_caster_enabled"):
+	if enabled and model != null:
 		model.set_static_shadow_caster_enabled(true)
 
 

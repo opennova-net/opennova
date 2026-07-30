@@ -60,12 +60,10 @@ func _process(_delta: float) -> void:
 
 func _update_direction() -> void:
 	if _environment_node == null \
-			or not _environment_node.has_method("is_loaded") \
-			or not bool(_environment_node.call("is_loaded")) \
-			or not _environment_node.has_method("get_light_direction"):
+			or not bool(_environment_node.is_loaded()):
 		visible = false
 		return
-	var light_direction: Vector3 = _environment_node.call("get_light_direction")
+	var light_direction: Vector3 = _environment_node.get_light_direction()
 	if light_direction.length_squared() <= 0.000001:
 		visible = false
 		return

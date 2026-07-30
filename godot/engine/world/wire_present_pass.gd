@@ -682,8 +682,7 @@ func _update_held_weapon(
 					graphic, "", _container, "", _env_node)
 			if built != null:
 				built.name = "WireWeapon_%04x" % handle
-				if built.has_method("set_shadow_caster_enabled"):
-					built.set_shadow_caster_enabled(true)
+				built.set_shadow_caster_enabled(true)
 				_weapon_nodes[handle] = built
 		_weapon_graphics[handle] = graphic
 	var weapon_v: Variant = _weapon_nodes.get(handle)

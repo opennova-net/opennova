@@ -182,13 +182,26 @@ defaults.
 Mission promotion recursively creates the child item entities and resolves
 their model userpoints case-insensitively (falling back to the parent root when
 the anchor is absent). On the authority, children follow the resolved live
-USRP/PANM pose. Their S2C `0x0D` records retain absolute spawn position and use
-the witnessed `0x0100` relation flag plus the entity+368 parent handle; after
-the complete batch, a remote client derives a rigid parent-local pose and
-follows the decoded parent. A replicated zero-health carrier compact retires
-the decoded attachment subtree. Direct scripted carrier removal remains open
-until its witnessed destroy-list message is mapped; S2C `0x4E` is a paged
-loadout transaction and is deliberately not repurposed for this lifecycle.
+USRP/PANM pose. The attachment owns the userpoint's complete authored direction
+frame, not a gunner-seat yaw offset: retail builds a direction look-at matrix,
+multiplies it through the live owning bone and carrier matrix, then writes the
+resulting child position plus yaw/pitch/roll every pool-1 update
+[`Entity_UpdateTransformAndTurret @ 0x440CA0`, attachment call `@ 0x44109D`,
+`build_bone_attachment_matrix @ 0x56C630`,
+`build_direction_look_at_matrix @ 0x612C90`]. Missing anchors copy the full
+parent pose. The retail helper emits a row-vector render matrix, so the Godot
+port applies the same transpose plus X-axis conjugation used for PANM matrices.
+`Entity_UpdateAllEntities @ 0x4C2100` walks attachment ancestors parent-first
+before `Entity_UpdatePool1Slot @ 0x4B8DD0` invokes the child's `ewep` update
+callback, so a driven carrier and its child are recomposed in the same tick.
+
+Their S2C `0x0D` records retain absolute spawn position and use the witnessed
+`0x0100` relation flag plus the entity+368 parent handle; after the complete
+batch, a remote client derives a rigid parent-local pose and follows the
+decoded parent. A replicated zero-health carrier compact retires the decoded
+attachment subtree. Direct scripted carrier removal remains open until its
+witnessed destroy-list message is mapped; S2C `0x4E` is a paged loadout
+transaction and is deliberately not repurposed for this lifecycle.
 
 The entity+290 bone-byte consumer remains unwitnessed, so remote generic
 PANM-bone articulation is still open rather than encoded into a guessed wire

@@ -1373,30 +1373,29 @@ func _push_foliage_defs_history(before_state: Variant, after_state: Variant) -> 
 
 
 func _ensure_surface_inputs_rebuilt() -> void:
-	if terrain_mesh == null or _data == null or _surface_inputs_data == _data \
-			or not terrain_mesh.has_method("rebuild_surface_inputs"):
+	if terrain_mesh == null or _data == null or _surface_inputs_data == _data:
 		return
 	terrain_mesh.call("rebuild_surface_inputs", get_effective_tile_info(), true)
 	_surface_inputs_data = _data
 
 
 func _refresh_surface_input_heightfield() -> void:
-	if terrain_mesh != null and terrain_mesh.has_method("refresh_surface_inputs_heightfield"):
+	if terrain_mesh != null:
 		terrain_mesh.call("refresh_surface_inputs_heightfield")
 
 
 func _refresh_surface_input_blend() -> void:
-	if terrain_mesh != null and terrain_mesh.has_method("refresh_surface_inputs_blend"):
+	if terrain_mesh != null:
 		terrain_mesh.call("refresh_surface_inputs_blend")
 
 
 func _refresh_surface_input_details() -> void:
-	if terrain_mesh != null and terrain_mesh.has_method("refresh_surface_inputs_details"):
+	if terrain_mesh != null:
 		terrain_mesh.call("refresh_surface_inputs_details")
 
 
 func _refresh_surface_input_tile_overlay() -> void:
-	if terrain_mesh != null and terrain_mesh.has_method("refresh_surface_inputs_tile_overlay"):
+	if terrain_mesh != null:
 		terrain_mesh.call(
 			"refresh_surface_inputs_tile_overlay",
 			get_effective_tile_info(),

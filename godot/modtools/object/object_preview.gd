@@ -365,7 +365,7 @@ func set_collision_visible(value: bool) -> void:
 
 
 func has_collision() -> bool:
-	return object_data != null and object_data.has_method("has_collision") and object_data.has_collision()
+	return object_data != null and object_data.has_collision()
 
 
 func is_user_points_visible() -> bool:
@@ -379,7 +379,6 @@ func set_user_points_visible(value: bool) -> void:
 
 func has_user_points() -> bool:
 	return object_data != null \
-		and object_data.has_method("get_user_point_count") \
 		and object_data.get_user_point_count() > 0
 
 
@@ -406,7 +405,7 @@ func _refresh_collision_overlay() -> void:
 		if child.name == "ObjectCollision":
 			_guide_root.remove_child(child)
 			child.free()
-	if not _collision_visible or object_data == null or not object_data.has_method("get_collision_volumes"):
+	if not _collision_visible or object_data == null:
 		return
 	var volumes: Array = object_data.get_collision_volumes()
 	if volumes.is_empty():

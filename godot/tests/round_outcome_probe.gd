@@ -59,7 +59,7 @@ var _blacklist: Array[int] = []
 # blue 1). The round sim's entity hits scan pool 0 only, so victims elsewhere can
 # never take player rounds — skip them (and anything blacklisted after a stall).
 func _pick_victim(sim, world) -> Dictionary:
-	var player_pos: Vector3 = world.local_player_position()
+	var player_pos: Vector3 = world.get_sim().get_local_player_position()
 	var best := {}
 	var best_key := [99, INF] # [team preference rank, distance]
 	for i in AI_SCAN_CAP:
@@ -126,7 +126,7 @@ func _run() -> void:
 	world.mission_effects.connect(_on_effects)
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("round_outcome_probe: player never spawned (mission load stalled?)")
@@ -153,11 +153,11 @@ func _run() -> void:
 		quit(1)
 		return
 	var yaw0 := cam.global_rotation.y
-	world.add_local_player_look(50.0, 0.0)
+	world.get_sim().add_local_player_look(50.0, 0.0)
 	await _mission_wait(0.2)
 	var yaw_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.y - yaw0, -PI, PI))
 	var pitch0 := cam.global_rotation.x
-	world.add_local_player_look(0.0, 50.0)
+	world.get_sim().add_local_player_look(0.0, 50.0)
 	await _mission_wait(0.2)
 	var pitch_gain := 50.0 / rad_to_deg(wrapf(cam.global_rotation.x - pitch0, -PI, PI))
 	print("PROBE aim gains: yaw %.1f pitch %.1f px/deg" % [yaw_gain, pitch_gain])
@@ -176,7 +176,7 @@ func _run() -> void:
 		# Approach the current best candidate.
 		var px_per_deg := 8.0
 		var prev_err := 0.0
-		var prev_pos: Vector3 = world.local_player_position()
+		var prev_pos: Vector3 = world.get_sim().get_local_player_position()
 		var target_index := -1
 		_forward = true
 		while seconds < MAX_MISSION_SECONDS:
@@ -196,7 +196,7 @@ func _run() -> void:
 			if seconds % 5 == 0:
 				# Out of reach (mission geography defeats straight-line walking):
 				# bring the victim to the probe. Outcome loop under test, not nav.
-				var pp: Vector3 = world.local_player_position()
+				var pp: Vector3 = world.get_sim().get_local_player_position()
 				var camf: Vector3 = -cam.global_transform.basis.z
 				var flat := Vector2(camf.x, camf.z)
 				if flat.length() < 0.1:
@@ -207,7 +207,7 @@ func _run() -> void:
 				sim.debug_set_entity_position(int(npc.get("ai_index", -1)), mission)
 				print("PROBE teleport: net=%d team=%d brought to %.1fu in front" %
 						[int(npc.get("net_id", -1)), int(npc.get("team", -1)), 5.0])
-			var pos: Vector3 = world.local_player_position()
+			var pos: Vector3 = world.get_sim().get_local_player_position()
 			var moved := Vector2(pos.x - prev_pos.x, pos.z - prev_pos.z)
 			var tgt: Vector3 = npc.get("position", pos)
 			var want := Vector2(tgt.x - pos.x, tgt.z - pos.z)
@@ -215,7 +215,7 @@ func _run() -> void:
 				var err := rad_to_deg(moved.angle_to(want))
 				if abs(err) > abs(prev_err) + 1.0 and abs(prev_err) > 0.5:
 					px_per_deg = -px_per_deg
-				world.add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
+				world.get_sim().add_local_player_look(clampf(err * px_per_deg, -400.0, 400.0), 0.0)
 				prev_err = err
 			prev_pos = pos
 			if seconds % 10 == 0:
@@ -229,14 +229,14 @@ func _run() -> void:
 		sim.debug_set_entity_health(target_index, 10)
 		var hp_prev := 10
 		var fire_ticks := 0
-		world.set_local_player_weapon_input(true, true, false)
+		world.get_sim().set_local_player_weapon_input(true, true, false)
 		while seconds < MAX_MISSION_SECONDS:
 			var t0 := Time.get_ticks_msec()
 			while float(Time.get_ticks_msec() - t0) * TIME_SCALE < 1000.0:
 				var row0: Dictionary = sim.get_entity_debug(target_index)
 				var tpos: Vector3 = row0.get("position", Vector3.INF)
 				if tpos != Vector3.INF:
-					var muzzle_y: float = world.local_player_position().y + 0.9
+					var muzzle_y: float = world.get_sim().get_local_player_position().y + 0.9
 					var aim_bias := cam.global_position.y - muzzle_y
 					var chest := tpos + Vector3(0.0, 0.9 + aim_bias, 0.0)
 					var to := chest - cam.global_position
@@ -244,11 +244,11 @@ func _run() -> void:
 					var err_yaw := rad_to_deg(wrapf(atan2(-to.x, -to.z) - atan2(-fwd.x, -fwd.z), -PI, PI))
 					var err_pitch := rad_to_deg(atan2(to.y, Vector2(to.x, to.z).length())
 							- atan2(fwd.y, Vector2(fwd.x, fwd.z).length()))
-					world.add_local_player_look(
+					world.get_sim().add_local_player_look(
 							clampf(err_yaw * yaw_gain, -400.0, 400.0),
 							clampf(err_pitch * pitch_gain, -400.0, 400.0))
 					_forward = Vector2(to.x, to.z).length() > 8.0
-				world.set_local_player_weapon_input(true, false, false)
+				world.get_sim().set_local_player_weapon_input(true, false, false)
 				await process_frame
 			seconds += 1
 			fire_ticks += 1
@@ -260,20 +260,20 @@ func _run() -> void:
 			if not bool(row.get("alive", true)) or hp <= 0:
 				killed = true
 				_forward = false
-				world.set_local_player_weapon_input(false, false, false)
+				world.get_sim().set_local_player_weapon_input(false, false, false)
 				print("PROBE KILLED t=%ds team-%d person down" % [seconds, target_team])
 				break
-			if world.local_player_health() <= 0:
+			if world.get_sim().get_local_player_health() <= 0:
 				print("PROBE FAIL: the player died first (t=%ds) — rerun" % seconds)
 				quit(1)
 				return
 			if fire_ticks >= 15:
 				var tp: Vector3 = row.get("position", Vector3.INF)
-				var pp: Vector3 = world.local_player_position()
+				var pp: Vector3 = world.get_sim().get_local_player_position()
 				print("PROBE stall: net=%d pool=%d hp=%d tgt=%s ply=%s — retargeting" %
 						[int(row.get("net_id", -1)), int(row.get("pool", -1)), hp, str(tp), str(pp)])
 				_blacklist.append(target_index)
-				world.set_local_player_weapon_input(false, false, false)
+				world.get_sim().set_local_player_weapon_input(false, false, false)
 				break
 	if not killed:
 		print("PROBE FAIL: no candidate victim could be killed before the mission timer")

@@ -167,6 +167,13 @@ var debug_body_in_first_person := false
 var _camera_saved_cull_mask := -1
 
 
+# The sim, re-resolved per use: mission reloads free the runtime and its sim,
+# so a cached reference would go stale (the debug views follow the same rule).
+# Untyped: GUT harness worlds serve value-only sim doubles.
+func _sim():
+	return _world.get_sim() if _world != null else null
+
+
 func set_debug_force_viewmodel(enabled: bool) -> void:
 	debug_force_viewmodel = enabled
 
@@ -200,15 +207,14 @@ func setup(world, camera: Camera3D) -> void:
 	# Attachment is the adoption boundary: discard presentation history produced
 	# before this host existed. Every event produced after setup is live, including
 	# a first-tick shot before the first active snapshot is presented.
-	if _world != null and _world.has_method("drain_local_player_weapon_events"):
+	if _world != null:
 		_world.drain_local_player_weapon_events()
-	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
 		_world.set_local_player_weapon_tick_consumer(
 				Callable(self, "_present_fixed_weapon_tick"))
 
 
 func teardown() -> void:
-	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
+	if _world != null:
 		_world.set_local_player_weapon_tick_consumer(Callable())
 	_set_fly_camera_locked(false)
 	_release_mouse_capture()
@@ -276,10 +282,9 @@ func _free_viewmodel_pass() -> void:
 ## exists) are skipped so the queued SWITCHTO draw-in survives.
 func _apply_weapon_switch(weapon_name: String,
 		preserve_slot_state: bool = false) -> void:
-	if _world == null or not _world.has_method("set_local_player_weapon_by_name"):
+	if _world == null:
 		return
-	if (_world.has_method("local_player_weapon_name")
-			and String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
+	if (String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
 			and _viewmodel != null and is_instance_valid(_viewmodel)):
 		return
 	var switched := bool(_world.set_local_player_weapon_by_name(
@@ -290,7 +295,7 @@ func _apply_weapon_switch(weapon_name: String,
 
 
 func _apply_weapon_clear() -> void:
-	if _world == null or not _world.has_method("clear_local_player_weapon"):
+	if _world == null:
 		return
 	_world.clear_local_player_weapon()
 	refresh_viewmodel()
@@ -308,7 +313,7 @@ func refresh_viewmodel() -> void:
 
 
 func _unregister_effect_anchors() -> void:
-	if _world != null and _world.has_method("unregister_effect_anchor"):
+	if _world != null:
 		for key in _registered_effect_anchor_keys:
 			_world.unregister_effect_anchor(key)
 	_registered_effect_anchor_keys.clear()
@@ -342,8 +347,9 @@ func set_third_person(enabled: bool) -> void:
 # The sim owns the camera-mode-dependent view state (fov suppression + the 3P
 # anchor chase) [orig: g_camera_mode @0xA890C8]; tell it whenever the mode flips.
 func _sync_camera_mode() -> void:
-	if _world != null and _world.has_method("set_local_player_camera_third_person"):
-		_world.set_local_player_camera_third_person(_third_person)
+	var sim = _sim()
+	if sim != null:
+		sim.set_local_player_camera_third_person(_third_person)
 
 
 func is_third_person() -> bool:
@@ -365,21 +371,22 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 	# movement frame. Skipping this call leaves the sim holding its previous input,
 	# so a player who opened the armory while running would keep running under it.
 	var state := _read_input_state() if gameplay_input_active else {}
-	_world.set_local_player_input(
-		_bool(state, "forward"),
-		_bool(state, "back"),
-		_bool(state, "left"),
-		_bool(state, "right"),
-		_bool(state, "lean_left"),
-		_bool(state, "lean_right"),
-		_bool(state, "jump"))
-	# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
-	# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
-	# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
-	# the sample source (D-INF-18)].
-	if _world.has_method("set_local_player_eye"):
+	var sim = _sim()
+	if sim != null:
+		sim.set_player_input(
+			_bool(state, "forward"),
+			_bool(state, "back"),
+			_bool(state, "left"),
+			_bool(state, "right"),
+			_bool(state, "lean_left"),
+			_bool(state, "lean_right"),
+			_bool(state, "jump"))
+		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
+		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
+		# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+		# the sample source (D-INF-18)].
 		var head := _avatar_head_world()
-		_world.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
+		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
 	_send_weapon_input()
 
@@ -391,8 +398,7 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 # 0x95 fire / 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420 —
 # ported in libs/world weapon_fsm + NovaSimulation]
 func _send_weapon_input() -> void:
-	if _world == null or not _world.has_method("set_local_player_weapon_input"):
-		return
+	var sim = _sim()
 	var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var fire_edge := fire_held and not _fire_was_held
@@ -401,10 +407,14 @@ func _send_weapon_input() -> void:
 	var reload_edge := reload_down and not _reload_was_down
 	_reload_was_down = reload_down
 	var scope_down := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	if scope_down and not _scope_was_down and _world.has_method("request_local_player_scope_toggle"):
-		_world.request_local_player_scope_toggle()
+	if scope_down and not _scope_was_down and sim != null:
+		sim.request_local_player_scope_toggle()
 	_scope_was_down = scope_down
-	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
+	# Latches update even with no sim (the deleted forwarders no-op'd downstream):
+	# a key held across a mission reload must not fire a spurious edge on the
+	# first frame the new sim appears.
+	if sim != null:
+		sim.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
 	_send_weapon_switch_input(captured)
 
 
@@ -412,22 +422,21 @@ func _send_weapon_input() -> void:
 # into the sim's switch walks; the sim applies the witnessed stance/FSM gates and
 # answers through the event drain (switch_to_weapon / switch_denied).
 func _send_weapon_switch_input(captured: bool) -> void:
-	if _world == null or not _world.has_method("request_local_player_weapon_category"):
-		return
+	var sim = _sim()
 	var down_mask := 0
 	for i in _WEAPON_CATEGORY_KEYS.size():
 		if captured and Input.is_physical_key_pressed(_WEAPON_CATEGORY_KEYS[i]):
 			down_mask |= 1 << i
-			if (_category_was_down & (1 << i)) == 0:
-				_world.request_local_player_weapon_category(i + 1)
+			if (_category_was_down & (1 << i)) == 0 and sim != null:
+				sim.request_local_player_weapon_category(i + 1)
 	_category_was_down = down_mask
 	var prev_down := captured and Input.is_physical_key_pressed(KEY_BRACKETLEFT)
-	if prev_down and not _cycle_prev_was_down:
-		_world.request_local_player_weapon_cycle(-1)
+	if prev_down and not _cycle_prev_was_down and sim != null:
+		sim.request_local_player_weapon_cycle(-1)
 	_cycle_prev_was_down = prev_down
 	var next_down := captured and Input.is_physical_key_pressed(KEY_BRACKETRIGHT)
-	if next_down and not _cycle_next_was_down:
-		_world.request_local_player_weapon_cycle(1)
+	if next_down and not _cycle_next_was_down and sim != null:
+		sim.request_local_player_weapon_cycle(1)
 	_cycle_next_was_down = next_down
 
 
@@ -437,13 +446,13 @@ func after_world_tick() -> void:
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
-		if _world != null and _world.has_method("drain_local_player_weapon_events"):
+		if _world != null:
 			_world.drain_local_player_weapon_events()
 		_weapon_play_serial = -1
 		_weapon_view = null
 		_view = null
 		return
-	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_view = _world.local_player_view()
 	_set_world_nvg_view(_view != null and _view.nvg_visible,
 			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
@@ -451,8 +460,7 @@ func after_world_tick() -> void:
 	# at its default transform; on later ticks it otherwise trails movement/look by
 	# one frame. Pre-adopt the weapon snapshot so the avatar's body channel remains
 	# current while _update_player_camera() stamps all visual roots.
-	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
-			if _world.has_method("local_player_weapon_view") else null)
+	var weapon_view: PlayerWeaponView = _world.local_player_weapon_view()
 	_weapon_view = weapon_view
 	_update_player_camera()
 	_consume_weapon_view(weapon_view)
@@ -465,14 +473,13 @@ func after_world_tick() -> void:
 func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 	if not _has_player():
 		return
-	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
-			if _world.has_method("local_player_weapon_view") else null)
+	var weapon_view: PlayerWeaponView = _world.local_player_weapon_view()
 	if events.is_empty():
 		# Keep the active clip at this tick's exact pose, but defer the expensive
 		# camera/avatar/viewmodel-root presentation to after the catch-up batch.
 		_consume_weapon_events(weapon_view, events, true)
 		return
-	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_view = _world.local_player_view()
 	_weapon_view = weapon_view
 	_update_player_camera()
 	_consume_weapon_events(weapon_view, events, true)
@@ -490,9 +497,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 func _consume_weapon_view(view: PlayerWeaponView) -> void:
 	if _world == null:
 		return
-	var events: Array[PlayerWeaponEvent] = []
-	if _world.has_method("drain_local_player_weapon_events"):
-		events = _world.drain_local_player_weapon_events()
+	var events: Array[PlayerWeaponEvent] = _world.drain_local_player_weapon_events()
 	_consume_weapon_events(view, events)
 
 
@@ -595,11 +600,11 @@ func _weapon_effect_transform(position: Vector3, forward: Vector3) -> Transform3
 func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if _world == null:
 		return
-	if not event.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
+	if not event.action_soundset.is_empty():
 		var audio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(event.action_soundset, event.world_position, -1)
-	if event.action_particle.is_empty() or not _world.has_method("get_effect_world"):
+	if event.action_particle.is_empty():
 		return
 	if event.action_started != WEAPON_ACTION_FIRE:
 		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
@@ -626,10 +631,9 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	# the +0x18 tracker leg in WeaponAction_ProcessFrame @ 0x540edf ->
 	# CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]. The host analog is an
 	# owner-bound group whose anchor resolver re-reads the live userpoint pose.
-	if _world.has_method("register_effect_anchor"):
-		_world.register_effect_anchor(slot_key,
-				_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
-		_registered_effect_anchor_keys[slot_key] = true
+	_world.register_effect_anchor(slot_key,
+			_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
+	_registered_effect_anchor_keys[slot_key] = true
 	fx.spawn_effect_request(event.action_particle, anchor_transform, {
 		"admission": NovaEffectScene.ADMISSION_SUPPRESS_WHILE_OWNED,
 		"binding": NovaEffectScene.BINDING_FOLLOW_OWNER,
@@ -649,8 +653,6 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 # [orig: WeaponAction_Recoil @ 0x542dd0, spawn @ 0x542f64 with param7=0]
 func _fire_direct_action_effect(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.effect_particle.is_empty():
-		return
-	if not _world.has_method("get_effect_world"):
 		return
 	var fx = _world.get_effect_world()
 	if fx == null:
@@ -755,7 +757,8 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 	# Retail's deepest fallback is the ENTITY ORIGIN [orig: loc_401867 @0x401867..0x401887
 	# copies entity+4/+8/+0xC]. The eye was our own invention and put the flash on the
 	# player's face whenever a userpoint failed to resolve.
-	return _world.local_player_position()
+	var sim = _sim()
+	return sim.get_local_player_position() if sim != null else Vector3.ZERO
 
 
 func _action_particle_world_forward(userpoint: String) -> Vector3:
@@ -789,8 +792,6 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 #  dupsound repeat loop (+44/+48) is data-dead in the JOX/REVX corpora]
 func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.action_end_soundset.is_empty():
-		return
-	if not _world.has_method("get_mission_audio"):
 		return
 	var audio = _world.get_mission_audio()
 	if audio != null:
@@ -840,21 +841,22 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		_sync_camera_mode()
 		return true
 	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
+	var sim = _sim()
 	if physical == KEY_B:
-		if _world.has_method("request_local_player_binoculars_toggle"):
-			_world.request_local_player_binoculars_toggle()
+		if sim != null:
+			sim.request_local_player_binoculars_toggle()
 		return true
 	if physical == KEY_N:
-		if _world.has_method("request_local_player_nvg_toggle"):
-			_world.request_local_player_nvg_toggle()
+		if sim != null:
+			sim.request_local_player_nvg_toggle()
 		return true
 	if physical == KEY_EQUAL or physical == KEY_PLUS or physical == KEY_KP_ADD:
-		if _world.has_method("request_local_player_nvg_gain"):
-			_world.request_local_player_nvg_gain(1)
+		if sim != null:
+			sim.request_local_player_nvg_gain(1)
 		return true
 	if physical == KEY_MINUS or physical == KEY_KP_SUBTRACT:
-		if _world.has_method("request_local_player_nvg_gain"):
-			_world.request_local_player_nvg_gain(-1)
+		if sim != null:
+			sim.request_local_player_nvg_gain(-1)
 		return true
 	if key.keycode == KEY_Z:
 		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
@@ -869,8 +871,9 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 
 
 func _request_stance(stance: int) -> void:
-	if _world != null and _world.has_method("request_local_player_stance"):
-		_world.request_local_player_stance(stance)
+	var sim = _sim()
+	if sim != null:
+		sim.request_local_player_stance(stance)
 
 
 # Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline (the sim
@@ -879,10 +882,11 @@ func _request_stance(stance: int) -> void:
 func handle_input(event: InputEvent, active: bool) -> bool:
 	if not active or not _has_player() or not (event is InputEventMouseMotion):
 		return false
-	if not _world.has_method("add_local_player_look"):
+	var sim = _sim()
+	if sim == null:
 		return false
 	var mm := event as InputEventMouseMotion
-	_world.add_local_player_look(mm.relative.x, mm.relative.y)
+	sim.add_local_player_look(mm.relative.x, mm.relative.y)
 	return true
 
 
@@ -899,16 +903,17 @@ func _reset_state() -> void:
 
 
 func _set_world_nvg_view(active: bool, gain: int) -> void:
-	if _world != null and _world.has_method("set_local_player_nvg_view"):
+	if _world != null:
 		_world.set_local_player_nvg_view(active, gain)
 
 
 func _has_player() -> bool:
 	if _world == null:
 		return false
-	if _world.has_method("is_loaded") and not _world.is_loaded():
+	if not _world.is_loaded():
 		return false
-	return _world.has_method("has_local_player") and _world.has_local_player()
+	var sim = _sim()
+	return sim != null and sim.has_local_player()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe);
@@ -939,9 +944,9 @@ func _bool(state: Dictionary, key: String) -> bool:
 func _ensure_models() -> void:
 	if _world == null:
 		return
-	if (_avatar == null or not is_instance_valid(_avatar)) and _world.has_method("build_local_player_avatar"):
+	if _avatar == null or not is_instance_valid(_avatar):
 		_avatar = _world.build_local_player_avatar()
-	if (_viewmodel == null or not is_instance_valid(_viewmodel)) and _world.has_method("build_local_player_viewmodel"):
+	if _viewmodel == null or not is_instance_valid(_viewmodel):
 		_viewmodel = _world.build_local_player_viewmodel()
 		if _viewmodel != null:
 			_apply_viewmodel_def()
@@ -997,7 +1002,8 @@ func aim_screen_point() -> Vector2:
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye := _eye_position(_world.local_player_position())
+	var sim = _sim()
+	var eye := _eye_position(sim.get_local_player_position() if sim != null else Vector3.ZERO)
 	var target := eye + forward * AIM_PROJECT_RANGE
 	if _camera.is_position_behind(target):
 		return Vector2.INF
@@ -1010,7 +1016,8 @@ func aim_screen_point() -> Vector2:
 func aim_range_units() -> int:
 	if _world == null or _camera == null or not _has_player():
 		return 1
-	var pos: Vector3 = _world.local_player_position()
+	var sim = _sim()
+	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var eye := _eye_position(pos)
 	var angles := _aim_angles_deg()
 	var yr := deg_to_rad(angles.x)
@@ -1024,7 +1031,7 @@ func aim_range_units() -> int:
 	# ever hit in the runtime -- object pick bodies are editor-only -- so this
 	# measures the same surface, and it is now the SAME sampler the round the
 	# player fires traces, so the readout and the bullet agree by construction.
-	var terrain = _world.get_terrain_data() if _world.has_method("get_terrain_data") else null
+	var terrain = _world.get_terrain_data()
 	if terrain != null and terrain.has_method("raycast_terrain"):
 		var hit: Vector3 = terrain.raycast_terrain(eye, endpoint)
 		# A miss reports all-NAN.
@@ -1034,8 +1041,9 @@ func aim_range_units() -> int:
 
 
 func _aim_angles_deg() -> Vector2:
-	var yaw := float(_world.local_player_yaw_deg())
-	var pitch := float(_world.local_player_pitch_deg())
+	var sim = _sim()
+	var yaw := float(sim.get_local_player_yaw_deg()) if sim != null else 0.0
+	var pitch := float(sim.get_local_player_pitch_deg()) if sim != null else 0.0
 	if _view != null and _view.binoculars_view_active:
 		yaw += _view.binocular_yaw_offset_deg
 		pitch += _view.binocular_pitch_offset_deg
@@ -1081,7 +1089,7 @@ func _avatar_head_world() -> Vector3:
 func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	if _world == null:
 		return
-	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def() 			if _world.has_method("local_player_viewmodel_def") else null
+	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def()
 	# 27 of the 94 shipped weapon rows author no gfx3 at all; drawing nothing is the
 	# correct, retail behaviour there, not a missing asset.
 	var graphic := def.gfx3 if def != null else ""
@@ -1090,7 +1098,7 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 			_held_weapon.queue_free()
 		_held_weapon = null
 		_held_weapon_graphic = graphic
-		if not graphic.is_empty() and _world.has_method("build_local_player_held_weapon"):
+		if not graphic.is_empty():
 			_held_weapon = _world.build_local_player_held_weapon(graphic)
 	if _held_weapon == null or not is_instance_valid(_held_weapon):
 		return
@@ -1138,7 +1146,8 @@ func _find_skeleton(root: Node) -> Skeleton3D:
 func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
-	var pos: Vector3 = _world.local_player_position()
+	var sim = _sim()
+	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var angles := _aim_angles_deg()
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
@@ -1185,16 +1194,13 @@ func _update_player_camera() -> void:
 
 
 func _update_model_lighting_context() -> void:
-	var interior_item_id := 0
-	if _world != null and _world.has_method("get_sim"):
-		var sim = _world.get_sim()
-		if sim != null and sim.has_method("local_player_interior_item_id"):
-			interior_item_id = int(sim.local_player_interior_item_id())
+	var sim = _sim()
+	var interior_item_id := \
+			int(sim.local_player_interior_item_id()) if sim != null else 0
 	var transfer := 0.0
-	if interior_item_id != 0 and _world.has_method("get_item_db"):
-		var item_db = _world.get_item_db()
-		if item_db != null and item_db.has_method("get_light_transfer"):
-			transfer = float(item_db.get_light_transfer(interior_item_id))
+	var item_db = _world.get_item_db() if _world != null else null
+	if interior_item_id != 0 and item_db != null:
+		transfer = float(item_db.get_light_transfer(interior_item_id))
 	var interior := interior_item_id != 0
 
 	# Ordinary world models take the player's current entity context. The FP
@@ -1210,8 +1216,7 @@ func _update_model_lighting_context() -> void:
 
 func _set_model_lighting_context(model: Node, interior: bool,
 		transfer: float) -> void:
-	if model != null and is_instance_valid(model) \
-			and model.has_method("set_entity_lighting_context"):
+	if model != null and is_instance_valid(model):
 		model.set_entity_lighting_context(1.0, interior, transfer)
 
 
@@ -1241,8 +1246,9 @@ func _update_avatar(pos: Vector3) -> void:
 	# the body-class delta is identity by construction so the hips stay glued to the node.
 	# [orig: Entity_BuildBoneTransformMatrices @0x4b1290 — every overlay blends toward
 	# bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14 (D-INF-11)]
-	var overlay: PlayerAimOverlay = _world.local_player_aim_overlay() \
-			if _world.has_method("local_player_aim_overlay") else null
+	var runtime = _world.get_runtime()
+	var overlay: PlayerAimOverlay = runtime.local_player_aim_overlay() \
+			if runtime != null else null
 	if overlay != null:
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
 		_avatar.global_basis = body_basis
@@ -1253,8 +1259,9 @@ func _update_avatar(pos: Vector3) -> void:
 				deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
 			_avatar.set_aim_overlay(deltas)
 	else:
+		var sim_yaw = _sim()
 		_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
 		if _avatar.has_method("set_aim_overlay"):
 			_avatar.set_aim_overlay([])
 	# The body renders in BOTH modes; first person hides it from the player
@@ -1272,8 +1279,9 @@ func _update_avatar(pos: Vector3) -> void:
 			if (_third_person or debug_body_in_first_person)
 			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 	_update_held_weapon(overlay)
-	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
-	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
+	var sim = _sim()
+	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""
+	var anim_phase := int(sim.get_local_player_anim_phase_ticks()) if sim != null else 0
 	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed
 	# at its own playhead onto the mask bones, composed under the aim overlay. Equal
 	# state ids still carry the secondary playhead; an empty key means the gate is off.
@@ -1288,9 +1296,11 @@ func _update_avatar(pos: Vector3) -> void:
 	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):
 		_avatar.play_body_clip(anim_key)
 	elif _avatar.has_method("play_body_anim_at"):
-		_avatar.play_body_anim_at(_world.local_player_body_anim_slot(), anim_phase)
+		_avatar.play_body_anim_at(
+				sim.get_local_player_body_anim_slot() if sim != null else -1, anim_phase)
 	elif _avatar.has_method("play_body_anim"):
-		_avatar.play_body_anim(_world.local_player_body_anim_slot())
+		_avatar.play_body_anim(
+				sim.get_local_player_body_anim_slot() if sim != null else -1)
 
 
 # First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1,
@@ -1385,7 +1395,7 @@ func _set_visual_layers(root: Node, layer_mask: int) -> void:
 # in force. The def rows carry xyz raw file units + yaw/pitch/roll degrees
 # [orig: weapon.def 'pos'/'tpos' handlers @0x54471f; 'renderfov' @0x54482a, default 80.0].
 func _apply_viewmodel_def() -> void:
-	if _world == null or not _world.has_method("local_player_viewmodel_def"):
+	if _world == null:
 		return
 	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def()
 	if def == null:

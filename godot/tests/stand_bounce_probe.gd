@@ -33,7 +33,7 @@ func _mission_wait(seconds: float) -> void:
 
 
 func _self_state(sim, world) -> int:
-	var ppos: Vector3 = world.local_player_position()
+	var ppos: Vector3 = world.get_sim().get_local_player_position()
 	for i in AI_SCAN_CAP:
 		var d: Dictionary = sim.get_entity_debug(i)
 		if d.is_empty():
@@ -70,7 +70,7 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("stand_bounce_probe: player never spawned (mission load stalled?)")
@@ -87,7 +87,7 @@ func _run() -> void:
 	host.set_input_source(func() -> Dictionary: return {})
 
 	await _mission_wait(SETTLE_MISSION_SECONDS)
-	var z0: float = world.local_player_position().y
+	var z0: float = world.get_sim().get_local_player_position().y
 	print("PROBE settled: z=%.4f state=%d — watching %.0f mission-s" %
 			[z0, _self_state(sim, world), WATCH_MISSION_SECONDS])
 
@@ -103,7 +103,7 @@ func _run() -> void:
 	var t0 := Time.get_ticks_msec()
 	while float(Time.get_ticks_msec() - t0) * TIME_SCALE < WATCH_MISSION_SECONDS * 1000.0:
 		await process_frame
-		var z: float = world.local_player_position().y
+		var z: float = world.get_sim().get_local_player_position().y
 		zs.append(z)
 		min_z = minf(min_z, z)
 		max_z = maxf(max_z, z)

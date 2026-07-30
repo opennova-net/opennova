@@ -78,7 +78,7 @@ func build_main(host: Control) -> void:
 	_build_collision_legend(box)
 	_build_export_mask_controls(box)
 
-	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data and object_editor.object_data.has_method("get_control_registers") else []
+	var ctrl_regs: Array = object_editor.object_data.get_control_registers() if object_editor and object_editor.object_data else []
 	if not ctrl_regs.is_empty() and _preview != null:
 		var ctrl_label := Label.new()
 		ctrl_label.text = "Control registers"
@@ -116,8 +116,6 @@ func build_main(host: Control) -> void:
 # artist read which colored hull is which type when validating.
 func _build_collision_legend(box: VBoxContainer) -> void:
 	if object_editor == null or object_editor.object_data == null:
-		return
-	if not object_editor.object_data.has_method("get_collision_volumes"):
 		return
 	var volumes: Array = object_editor.object_data.get_collision_volumes()
 	if volumes.is_empty():

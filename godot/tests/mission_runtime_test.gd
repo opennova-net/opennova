@@ -362,6 +362,21 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	assert_eq(int(rt.get_fire_present_stats()["fires"]), 64)
 
 
+func test_mission_present_stats_are_a_typed_record() -> void:
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	var stats: MissionPresentStats = rt.get_mission_present_stats()
+	assert_not_null(stats)
+	assert_eq(stats.plan_rebuilds, 0)
+	assert_eq(stats.transform_builds, 0)
+	assert_eq(stats.aim_dispatches, 0)
+	assert_eq(stats.rhc_dispatches, 0)
+	assert_eq(stats.part_dispatches, 0)
+	assert_eq(stats.control_dispatches, 0)
+	assert_eq(stats.body_dispatches, 0)
+	assert_eq(stats.muzzle_queries, 0)
+
+
 func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()

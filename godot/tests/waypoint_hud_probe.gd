@@ -52,7 +52,7 @@ func _run() -> void:
 		return
 
 	var wall_start := Time.get_ticks_msec()
-	while not world.has_local_player():
+	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		await process_frame
 		if float(Time.get_ticks_msec() - wall_start) / 1000.0 > LOAD_TIMEOUT_WALL_SECONDS:
 			push_error("waypoint_hud_probe: player never spawned (mission load stalled?)")
@@ -97,7 +97,7 @@ func _run() -> void:
 	var pos: Vector3 = wp.get("position", Vector3.ZERO)
 	var mission_pos := Vector3(pos.x, -pos.z, pos.y) # Godot -> mission
 	var player_idx := -1
-	var ppos: Vector3 = world.local_player_position()
+	var ppos: Vector3 = world.get_sim().get_local_player_position()
 	for i in 4096:
 		var d: Dictionary = sim.get_entity_debug(i)
 		if d.is_empty():

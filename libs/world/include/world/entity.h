@@ -89,6 +89,14 @@ struct Seat {
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
     int16_t yaw_offset = 0;     // gunner facing offset vs the vehicle yaw [orig: @0x43656c]
+    // An items.def addeweap* anchor is not a mount-facing convention. Retail
+    // builds the child entity's complete orientation from this userpoint's
+    // authored direction and live owning bone every update. The flag keeps
+    // that frame distinct while reusing the mounted-pose provider for its
+    // position/PANM walk.
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 -> attachment call
+    // @0x44109D; build_bone_attachment_matrix @0x56C630]
+    bool attachment_frame = false;
     EntityHandle occupant;      // [orig: vehicle[400+2*slot]] kInvalid = empty
 };
 
@@ -511,6 +519,9 @@ struct Entity {
         int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
         int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
         int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
+        bool reverse_sound_latched = false; // movement-sound direction bit
+                                            // [orig: vehicleData+0x318 bit 2]
+        uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
         bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick

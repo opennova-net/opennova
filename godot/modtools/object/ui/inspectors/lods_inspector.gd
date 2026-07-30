@@ -8,7 +8,7 @@ func build_main(host: Control) -> void:
 	var box := _make_inspector_box(host)
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}
-	var lods: Array = data.get_project_lods() if data != null and data.has_method("get_project_lods") else []
+	var lods: Array = data.get_project_lods() if data != null else []
 	var selected := {"index": 0 if not lods.is_empty() else -1}
 	var binder := FieldBinder.new()
 

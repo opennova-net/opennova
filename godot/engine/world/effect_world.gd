@@ -184,7 +184,7 @@ func reset_runtime_state() -> void:
 	_owner_keys_by_token.clear()
 	_owner_pose_cache.clear()
 	_next_token = 1
-	if is_instance_valid(_renderer) and _renderer.has_method("clear_warm_pipelines"):
+	if is_instance_valid(_renderer):
 		_renderer.clear_warm_pipelines()
 	_scene.reset_runtime_state()
 
@@ -318,8 +318,7 @@ func warm_all_effects(position: Vector3) -> int:
 	# compositor request for all eight World RD pipelines, independent of
 	# emitter timing (delayed emitters emit nothing during the warm frames).
 	_ensure_renderer()
-	if _renderer.has_method("warm_pipelines"):
-		_renderer.warm_pipelines(position)
+	_renderer.warm_pipelines(position)
 	var seen := {}
 	var spawned := 0
 	for file in _files:
@@ -338,7 +337,7 @@ func warm_all_effects(position: Vector3) -> int:
 				spawned += 1
 	# GameWorld skips its draw/reset leg when there was nothing to warm. Do not
 	# strand the deterministic shader helper quads in that empty-catalog path.
-	if spawned == 0 and _renderer.has_method("clear_warm_pipelines"):
+	if spawned == 0:
 		_renderer.clear_warm_pipelines()
 	return spawned
 

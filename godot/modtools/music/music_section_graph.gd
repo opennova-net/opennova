@@ -19,9 +19,9 @@ const KIND_BRANCH := 2       # goto/brfalse/brtrue whose target is a section ent
 # Returns the structural model: an Array of section dicts, each
 #   { name, index, is_entry, is_idle_loop,
 #     edges:[{to:int, to_name:String, kind:int}], plays:[{track:int, wait:bool}] }
-# Empty Array when the script can't be modelled (no script / old extension).
+# Empty Array when the script can't be modelled (no script).
 static func build(script_resource: NovaMusicScript, script_name: StringName) -> Array:
-	if script_resource == null or not script_resource.has_method("get_section_model"):
+	if script_resource == null:
 		return []
 	return script_resource.get_section_model(script_name)
 

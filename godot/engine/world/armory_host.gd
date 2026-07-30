@@ -97,12 +97,11 @@ func try_open() -> bool:
 	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0].
 	# Re-read the spawned entity on every show. Entity teams use 1/3=blue and
 	# 2/4=red; the menu filter uses the profile-side 0=blue, 1=red domain.
-	if _world.has_method("local_player_team"):
-		var entity_team := int(_world.local_player_team())
-		if entity_team == 1 or entity_team == 3:
-			_team = 0
-		elif entity_team == 2 or entity_team == 4:
-			_team = 1
+	var entity_team := int(sim.get_local_player_team())
+	if entity_team == 1 or entity_team == 3:
+		_team = 0
+	elif entity_team == 2 or entity_team == 4:
+		_team = 1
 	if sim.has_method("get_local_player_class"):
 		_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)

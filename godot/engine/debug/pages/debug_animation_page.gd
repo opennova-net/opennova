@@ -49,13 +49,13 @@ func _build() -> void:
 
 
 func refresh() -> void:
-	var world := _ctx.world()
-	if world != null and world.has_method("local_player_anim_key"):
-		var key := String(world.local_player_anim_key())
+	var sim := _ctx.sim()
+	if sim != null:
+		var key := String(sim.get_local_player_anim_key())
 		_player_label.text = "Local player:  %s   body slot %d   phase %d ticks" % [
 			key if not key.is_empty() else "-",
-			int(world.local_player_body_anim_slot()),
-			int(world.local_player_anim_phase_ticks())]
+			int(sim.get_local_player_body_anim_slot()),
+			int(sim.get_local_player_anim_phase_ticks())]
 	else:
 		_player_label.text = "No local player."
 

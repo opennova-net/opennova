@@ -79,7 +79,17 @@ var _markers: Array = []
 # (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). The host keeps the
 # per-candidate descriptors for stream resolution and the voice binding below.
 var _mixer: NovaAmbientMixer = null
-var _candidate_lookup: Dictionary = {}  # candidate_id -> {descriptor, pos}
+var _candidate_lookup: Dictionary = {}  # candidate_id -> {descriptor[, bus]}
+# Portable systems emit short-lived registrations before the GameWorld audio
+# pass advances the mixer clock. Queue them so catch-up ticks age the previous
+# registrations first, then the newest per-tick refresh lands at the current
+# clock [orig: SoundEmitter_Register @0x529270 before the render-frame
+# SoundEmitter_UpdateAndMixTop8 @0x5284a0].
+var _queued_sound_emitters: Array = []
+# (source registry lifetime, lane) -> {set_name, candidate_ids}. Candidate IDs
+# remain stable across per-tick refreshes so an incumbent physical channel does
+# not restart; a set change or explicit clear retires the old IDs.
+var _dynamic_emitter_states: Dictionary = {}
 # Latched once a hosted logic tick arrives (advance_ticks): the world tick owns
 # the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
 # (editor-idle hosts — the nova_weather host/autonomous split).
@@ -88,6 +98,8 @@ var _hosted_tick_offset := 0
 # At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].
 var _channels: Array = []
 var _next_candidate_id := 1
+var _free_candidate_ids: Array[int] = []
+var _retired_candidate_ids: Array[int] = []
 var _failed_candidate_ids: Dictionary = {}
 var _validated_candidate_ids: Dictionary = {}
 var _warned_ambient_decode_failure := false
@@ -147,6 +159,10 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	_validated_candidate_ids.clear()
 	_warned_ambient_decode_failure = false
 	_next_candidate_id = 1
+	_free_candidate_ids.clear()
+	_retired_candidate_ids.clear()
+	_queued_sound_emitters.clear()
+	_dynamic_emitter_states.clear()
 
 	_bank = NovaSoundBank.new(_resource_root)
 	_bank.occlusion_provider = _simulation
@@ -257,6 +273,10 @@ func set_markers(markers: Array, container: Node3D = null) -> void:
 	_validated_candidate_ids.clear()
 	_warned_ambient_decode_failure = false
 	_next_candidate_id = 1
+	_free_candidate_ids.clear()
+	_retired_candidate_ids.clear()
+	_queued_sound_emitters.clear()
+	_dynamic_emitter_states.clear()
 	if container != null and (_audio_root == null or not is_instance_valid(_audio_root)):
 		_audio_root = Node3D.new()
 		_audio_root.name = "MissionAudio"
@@ -301,6 +321,21 @@ func get_perf_counters() -> Dictionary:
 
 func get_bank() -> NovaSoundBank:
 	return _bank
+
+
+## Apply the portable entity-attached emitter drain. These are keep-alive
+## registrations, not one-shots: the same (source registry lifetime, lane,
+## layer) refreshes in place and competes with placed ambience in retail's one
+## loudest-eight table. Pitch/volume zero is the common keyed clear.
+## [orig: SoundEmitter_RegisterSetLayers @0x528340;
+## SoundEmitter_ClearByEntityAndSlot @0x527a50]
+func apply_sound_emitters(events: Array) -> void:
+	if _mixer == null or _bank == null:
+		return
+	for event_value in events:
+		if event_value is Dictionary:
+			_queued_sound_emitters.append(
+				(event_value as Dictionary).duplicate())
 
 
 ## PlayWavList / event-action seam: fire a one-shot sound set by name at a world
@@ -459,7 +494,12 @@ func advance_ticks(logic_tick: int) -> void:
 	if not _hosted_ticks:
 		_hosted_ticks = true
 		_hosted_tick_offset = maxi(0, int(_mixer.clock_tick()) - logic_tick)
-	_mixer.advance_to_tick(logic_tick + _hosted_tick_offset)
+	var target_tick := logic_tick + _hosted_tick_offset
+	# Apply each intent at its producer tick before advancing to the end of a
+	# catch-up batch. A lane last refreshed early in the batch therefore spends
+	# the elapsed ticks from its real 30-tick lifetime.
+	_flush_sound_emitters(target_tick)
+	_mixer.advance_to_tick(target_tick)
 
 
 ## Occlusion provider (the NovaSimulation) — emitter/one-shot distances inflate
@@ -493,23 +533,33 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		_perf_voice_writes = 0
 		_perf_tick_us = Time.get_ticks_usec() - start
 		return
+	# Autonomous hosts register at the current clock before consuming this
+	# render frame's elapsed time. Hosted callers normally flush chronologically
+	# from advance_ticks above; the fallback handles a late same-tick delivery.
+	_flush_sound_emitters(int(_mixer.clock_tick()))
 	if not _hosted_ticks and delta > 0.0:
 		_mixer.advance_seconds(delta)
-	var rows: PackedFloat32Array = _mixer.mix(camera_pos)
+	var rows: PackedFloat32Array = _mixer.mix_v2(camera_pos)
+	const row_stride := 6
 	# Ranked loudest-first (candidate-id tie-break) by the native mixer; a
 	# physical incumbent is never rebound merely because its rank within the
 	# selected eight changed.
-	var candidates: Array = []  # [{candidate_id, descriptor, pos, vol}]
-	for base in range(0, rows.size(), 5):
+	var candidates: Array = []  # [{candidate_id, descriptor, pos, vol, pitch_q16, bus}]
+	for base in range(0, rows.size(), row_stride):
 		var row_id := int(rows[base])
 		var entry: Dictionary = _candidate_lookup.get(row_id, {})
 		if entry.is_empty():
 			continue
+		var pitch_q16 := int(rows[base + 2])
+		var pos_base := base + 3
 		candidates.append({
 			"candidate_id": row_id,
 			"descriptor": entry.descriptor,
-			"pos": entry.pos,
+			"pos": Vector3(
+				rows[pos_base], rows[pos_base + 1], rows[pos_base + 2]),
 			"vol": int(rows[base + 1]),
+			"pitch_q16": pitch_q16,
+			"bus": entry.get("bus", AMBIENT_BUS),
 		})
 	var incumbent_by_id: Dictionary = {}
 	for state_value in _channels:
@@ -571,9 +621,11 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 			var player: AudioStreamPlayer3D = state.player
 			var stream: AudioStreamWAV = candidate.get("resolved_stream")
 			NovaSoundBank.configure_ambient_player(
-				player, stream, candidate.descriptor, AMBIENT_BUS)
+				player, stream, candidate.descriptor,
+				StringName(candidate.get("bus", AMBIENT_BUS)))
 			player.position = candidate.pos
 			player.volume_db = NovaSoundBank.volume_db_from_255(int(candidate.vol))
+			player.pitch_scale = _candidate_pitch_scale(candidate)
 			player.process_mode = Node.PROCESS_MODE_INHERIT
 			player.set_meta("ambient_candidate_id", candidate_id)
 			state["candidate_id"] = candidate_id
@@ -589,8 +641,14 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		if not is_equal_approx(incumbent.volume_db, db):
 			incumbent.volume_db = db
 			changed = true
+		var pitch_scale := _candidate_pitch_scale(candidate)
+		if not is_equal_approx(incumbent.pitch_scale, pitch_scale):
+			incumbent.pitch_scale = pitch_scale
+			changed = true
 		if changed:
 			writes += 1
+	_prune_dynamic_emitter_states()
+	_release_retired_candidate_ids()
 	_perf_markers = _markers.size()
 	_perf_voice_writes = writes
 	_perf_tick_us = Time.get_ticks_usec() - start
@@ -688,6 +746,10 @@ func teardown() -> void:
 	_warned_ambient_decode_failure = false
 	_mixer = null
 	_candidate_lookup.clear()
+	_free_candidate_ids.clear()
+	_retired_candidate_ids.clear()
+	_queued_sound_emitters.clear()
+	_dynamic_emitter_states.clear()
 	_hosted_ticks = false
 	_hosted_tick_offset = 0
 	_bank = null
@@ -703,6 +765,10 @@ func _feed_mixer() -> void:
 	_mixer.set_occlusion_provider(_simulation)
 	_mixer.set_time_of_day_hours(_hhmm_to_hours(_time_of_day_hhmm))
 	_candidate_lookup.clear()
+	_free_candidate_ids.clear()
+	_retired_candidate_ids.clear()
+	_queued_sound_emitters.clear()
+	_dynamic_emitter_states.clear()
 	_hosted_ticks = false
 	_hosted_tick_offset = 0
 	for mi in _markers.size():
@@ -739,6 +805,162 @@ func _feed_mixer() -> void:
 		var stagger_slot := int(roundf(float(marker.get("stagger_h", 0.0)) * 65536.0)) >> 11
 		_mixer.add_marker(pos, int(marker.get("source_bms_id", 0)), stagger_slot,
 				0, slot_keys, sets)
+
+
+# Resolve queued name-keyed registrations into LWF layer descriptors at their
+# producer ticks. Each layer keeps a stable candidate ID while its keyed lane is
+# alive; retired IDs are recycled only after no physical channel still carries
+# them, keeping the float-packed native row identity exact for long missions.
+func _flush_sound_emitters(final_tick: int) -> void:
+	if _mixer == null or _bank == null or _queued_sound_emitters.is_empty():
+		return
+	var pending := _queued_sound_emitters
+	_queued_sound_emitters = []
+	pending.sort_custom(_sound_emitter_event_before)
+	for event_value in pending:
+		var event: Dictionary = event_value
+		var event_tick := int(event.get(
+				"emitted_tick", int(_mixer.clock_tick())))
+		if _hosted_ticks:
+			event_tick += _hosted_tick_offset
+		event_tick = mini(event_tick, final_tick)
+		if event_tick > int(_mixer.clock_tick()):
+			_mixer.advance_to_tick(event_tick)
+		var source_spawn_id := int(event.get("source_spawn_id", 0))
+		var lane := int(event.get("lane", 0))
+		var key := "%d:%d" % [source_spawn_id, lane]
+		var pos: Vector3 = event.get("pos", Vector3.ZERO)
+		var source_bms_id := int(event.get("source_bms_id", 0))
+		var lifetime := maxi(1, int(event.get("lifetime", 30)))
+		var pitch_q16 := int(event.get("pitch_q16", 0))
+		var volume_q8_8 := int(event.get("volume_q8_8", 0))
+		if bool(event.get("source_only", false)):
+			_mixer.update_emitter_source(source_spawn_id, pos, source_bms_id)
+			continue
+		if pitch_q16 == 0 or volume_q8_8 == 0:
+			_mixer.register_emitter(source_spawn_id, lane, pos, source_bms_id,
+					lifetime, pitch_q16, volume_q8_8, PackedInt32Array())
+			_forget_dynamic_emitter(key)
+			continue
+
+		var set_name := String(event.get("set", ""))
+		if set_name.is_empty():
+			continue
+		var described: Array = _bank.describe_ambient(set_name)
+		if described.is_empty():
+			continue
+		var state: Dictionary = _dynamic_emitter_states.get(key, {})
+		var candidate_ids: PackedInt32Array = state.get(
+				"candidate_ids", PackedInt32Array())
+		if String(state.get("set_name", "")) != set_name \
+				or candidate_ids.size() != described.size():
+			if not state.is_empty():
+				_mixer.register_emitter(source_spawn_id, lane, pos,
+						source_bms_id, lifetime, 0, 0, PackedInt32Array())
+				_forget_dynamic_emitter(key)
+			candidate_ids = PackedInt32Array()
+			candidate_ids.resize(described.size())
+			for i in described.size():
+				candidate_ids[i] = _allocate_dynamic_candidate_id()
+			_dynamic_emitter_states[key] = {
+				"set_name": set_name,
+				"candidate_ids": candidate_ids,
+			}
+		var state_tick := int(_mixer.clock_tick())
+		var live_state: Dictionary = _dynamic_emitter_states[key]
+		live_state["expires_tick"] = state_tick + lifetime
+		_dynamic_emitter_states[key] = live_state
+
+		var layers := PackedInt32Array()
+		for i in described.size():
+			var descriptor: Dictionary = (
+					described[i] as Dictionary).duplicate()
+			var candidate_id := int(candidate_ids[i])
+			descriptor["candidate_id"] = candidate_id
+			_candidate_lookup[candidate_id] = {
+				"descriptor": descriptor,
+				"bus": SFX_BUS,
+			}
+			layers.append_array(PackedInt32Array([
+				candidate_id,
+				int(descriptor.get("falloff_radius", 0)),
+				int(descriptor.get("min_distance", 0)),
+				int(descriptor.get(
+					"volume", NovaSoundBank.VOLUME_BYTE_MAX)),
+				int(descriptor.get(
+					"clamp_volume", NovaSoundBank.VOLUME_BYTE_MAX)),
+			]))
+		_mixer.register_emitter(source_spawn_id, lane, pos, source_bms_id,
+				lifetime, pitch_q16, volume_q8_8, layers)
+
+
+func _forget_dynamic_emitter(key: String) -> void:
+	var state: Dictionary = _dynamic_emitter_states.get(key, {})
+	var ids: PackedInt32Array = state.get(
+			"candidate_ids", PackedInt32Array())
+	for candidate_id in ids:
+		var id := int(candidate_id)
+		_candidate_lookup.erase(id)
+		_failed_candidate_ids.erase(id)
+		_validated_candidate_ids.erase(id)
+		_retired_candidate_ids.append(id)
+	_dynamic_emitter_states.erase(key)
+
+
+func _allocate_dynamic_candidate_id() -> int:
+	if not _free_candidate_ids.is_empty():
+		return _free_candidate_ids.pop_back()
+	var candidate_id := _next_candidate_id
+	_next_candidate_id += 1
+	return candidate_id
+
+
+func _prune_dynamic_emitter_states() -> void:
+	if _mixer == null:
+		return
+	var now_tick := int(_mixer.clock_tick())
+	var expired_keys: Array[String] = []
+	for key_value in _dynamic_emitter_states:
+		var key := String(key_value)
+		var state: Dictionary = _dynamic_emitter_states[key]
+		if now_tick > int(state.get("expires_tick", now_tick)):
+			expired_keys.append(key)
+	for key in expired_keys:
+		_forget_dynamic_emitter(key)
+
+
+func _release_retired_candidate_ids() -> void:
+	if _retired_candidate_ids.is_empty():
+		return
+	var bound_ids: Dictionary = {}
+	for state_value in _channels:
+		var state: Dictionary = state_value
+		var candidate_id := int(state.get("candidate_id", -1))
+		if candidate_id >= 0:
+			bound_ids[candidate_id] = true
+	var still_retired: Array[int] = []
+	for candidate_id in _retired_candidate_ids:
+		if bound_ids.has(candidate_id):
+			still_retired.append(candidate_id)
+		else:
+			_free_candidate_ids.append(candidate_id)
+	_retired_candidate_ids = still_retired
+
+
+static func _sound_emitter_event_before(a: Variant, b: Variant) -> bool:
+	var event_a: Dictionary = a
+	var event_b: Dictionary = b
+	return int(event_a.get("emitted_tick", 0)) < int(
+			event_b.get("emitted_tick", 0))
+
+
+static func _candidate_pitch_scale(candidate: Dictionary) -> float:
+	var descriptor: Dictionary = candidate.get("descriptor", {})
+	var base_pitch := float(descriptor.get("base_pitch", 1.0))
+	if base_pitch <= 0.01:
+		base_pitch = 1.0
+	return base_pitch * maxf(
+			float(candidate.get("pitch_q16", 0x10000)) / 65536.0, 0.0001)
 
 
 static func _hhmm_to_hours(hhmm: float) -> float:

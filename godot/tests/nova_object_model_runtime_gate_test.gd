@@ -237,17 +237,17 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 
 
 func test_projected_shadow_receiver_rejects_incomplete_material_coverage() -> void:
-	assert_true(NovaObjectModel._material_supports_projected_shadow_receiver(
+	assert_true(NovaObjectModel.material_supports_projected_shadow_receiver(
 			NovaObjectShaderCache.BLEND_OPAQUE, 0),
 			"a one-sided opaque surface can use the simple attenuation catcher")
-	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
 			NovaObjectShaderCache.BLEND_ALPHA, 0),
 			"an alpha-blind next pass must not darken a transparent polygon")
-	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
 			NovaObjectShaderCache.BLEND_OPAQUE,
 			NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST),
 			"alpha-tested holes must not become a solid shadow card")
-	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
 			NovaObjectShaderCache.BLEND_OPAQUE,
 			NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED),
 			"the one-sided catcher cannot safely cover a two-sided base surface")

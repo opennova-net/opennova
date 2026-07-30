@@ -93,7 +93,7 @@ func _axis_id_for_name(axis_name: String) -> int:
 func _part_options_for_lod(lod_index: int) -> Array:
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	var options := []
-	var lod_info: Dictionary = data.get_render_lod_info(lod_index) if data != null and data.has_method("get_render_lod_info") else {}
+	var lod_info: Dictionary = data.get_render_lod_info(lod_index) if data != null else {}
 	var part_count := maxi(1, int(lod_info.get("part_count", lod_info.get("render_object_count", 1))))
 	for part_index in range(part_count):
 		options.append({"id": part_index, "label": "Part %02d" % part_index})
@@ -104,13 +104,7 @@ func _part_anim_entries() -> Array:
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	if data == null:
 		return []
-	if data.has_method("get_part_anim_editor_entries"):
-		return data.get_part_anim_editor_entries(_part_anim_lod_index)
-	var raw: Array = data.get_part_animations(_part_anim_lod_index)
-	for i in range(raw.size()):
-		var entry: Dictionary = raw[i]
-		entry["summary"] = "Part %02d" % int(entry.get("part_index", i))
-	return raw
+	return data.get_part_anim_editor_entries(_part_anim_lod_index)
 
 
 func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = true) -> void:
@@ -208,7 +202,7 @@ func _build_part_anims_inspector(host: Control) -> void:
 		_refresh_part_anim_list(index, selection_changed)
 	)
 	add_button.pressed.connect(func() -> void:
-		if data == null or not data.has_method("add_part_anim"):
+		if data == null:
 			return
 		var target_index := 0
 		var entries := _part_anim_entries()
@@ -219,14 +213,14 @@ func _build_part_anims_inspector(host: Control) -> void:
 			_refresh_part_anim_list(new_index, true)
 	)
 	_part_anim_duplicate_button.pressed.connect(func() -> void:
-		if data == null or _part_anim_selected_index < 0 or not data.has_method("duplicate_part_anim"):
+		if data == null or _part_anim_selected_index < 0:
 			return
 		var new_index := int(data.call("duplicate_part_anim", _part_anim_lod_index, _part_anim_selected_index))
 		if new_index >= 0:
 			_refresh_part_anim_list(new_index, true)
 	)
 	_part_anim_delete_button.pressed.connect(func() -> void:
-		if data == null or _part_anim_selected_index < 0 or not data.has_method("delete_part_anim"):
+		if data == null or _part_anim_selected_index < 0:
 			return
 		var removed_index := _part_anim_selected_index
 		if bool(data.call("delete_part_anim", _part_anim_lod_index, removed_index)):
@@ -441,17 +435,17 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	# (exercised by tests via item_selected.emit) and in case the controls are ever
 	# re-enabled.
 	target_part.item_selected.connect(func(_index: int) -> void:
-		if data != null and data.has_method("set_part_anim_target"):
+		if data != null:
 			data.set_part_anim_target(_part_anim_lod_index, _part_anim_selected_index, target_part.get_selected_id(), parent_part.get_selected_id())
 			refresh_after_edit.call()
 	)
 	parent_part.item_selected.connect(func(_index: int) -> void:
-		if data != null and data.has_method("set_part_anim_target"):
+		if data != null:
 			data.set_part_anim_target(_part_anim_lod_index, _part_anim_selected_index, target_part.get_selected_id(), parent_part.get_selected_id())
 			refresh_after_edit.call()
 	)
 	rotation_enabled.toggled.connect(func(value: bool) -> void:
-		if data != null and data.has_method("set_part_anim_channel_enabled"):
+		if data != null:
 			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "rotation", value)
 			refresh_after_edit.call()
 		update_visibility.call()
@@ -465,12 +459,12 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		rotation_enabled.toggled.emit(false)
 	)
 	rotation_mode.item_selected.connect(func(index: int) -> void:
-		if data != null and data.has_method("set_part_anim_channel_mode"):
+		if data != null:
 			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "rotation", "x", _mode_name_for_id(rotation_mode.get_item_id(index)), -1)
 			refresh_after_edit.call()
 	)
 	var set_rotation_values := func(axis: String, from_control: SpinBox, to_control: SpinBox) -> void:
-		if data != null and data.has_method("set_part_anim_channel_values"):
+		if data != null:
 			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "rotation", axis, float(from_control.value), float(to_control.value), float(rotation_speed.value))
 			refresh_after_edit.call()
 	rotation_x_from.value_changed.connect(func(_value: float) -> void: set_rotation_values.call("x", rotation_x_from, rotation_x_to))
@@ -485,12 +479,12 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		set_rotation_values.call("z", rotation_z_from, rotation_z_to)
 	)
 	reversed.toggled.connect(func(value: bool) -> void:
-		if data != null and data.has_method("set_part_anim_rotation_reversed"):
+		if data != null:
 			data.set_part_anim_rotation_reversed(_part_anim_lod_index, _part_anim_selected_index, value)
 			refresh_after_edit.call()
 	)
 	scale_enabled.toggled.connect(func(value: bool) -> void:
-		if data != null and data.has_method("set_part_anim_channel_enabled"):
+		if data != null:
 			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "scale", value)
 			refresh_after_edit.call()
 		update_visibility.call()
@@ -504,14 +498,14 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		scale_enabled.toggled.emit(false)
 	)
 	var set_scale_values := func(axis: String) -> void:
-		if data != null and data.has_method("set_part_anim_channel_values"):
+		if data != null:
 			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "scale", axis, float(scale_from.value), float(scale_to.value), float(scale_speed.value))
 			refresh_after_edit.call()
 	scale_mode.item_selected.connect(func(index: int) -> void:
 		set_scale_values.call("per_axis" if scale_mode.get_item_id(index) == 2 else "uniform")
 	)
 	scale_motion.item_selected.connect(func(index: int) -> void:
-		if data != null and data.has_method("set_part_anim_channel_mode"):
+		if data != null:
 			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "scale", "uniform", _mode_name_for_id(scale_motion.get_item_id(index)), -1)
 			refresh_after_edit.call()
 	)
@@ -519,7 +513,7 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 	scale_to.value_changed.connect(func(_value: float) -> void: set_scale_values.call("uniform"))
 	scale_speed.value_changed.connect(func(_value: float) -> void: set_scale_values.call("uniform"))
 	translation_enabled.toggled.connect(func(value: bool) -> void:
-		if data != null and data.has_method("set_part_anim_channel_enabled"):
+		if data != null:
 			data.set_part_anim_channel_enabled(_part_anim_lod_index, _part_anim_selected_index, "translation", value)
 			refresh_after_edit.call()
 		update_visibility.call()
@@ -533,19 +527,19 @@ func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
 		translation_enabled.toggled.emit(false)
 	)
 	var set_translation_values := func() -> void:
-		if data != null and data.has_method("set_part_anim_channel_values"):
+		if data != null:
 			data.set_part_anim_channel_values(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), float(translation_from.value), float(translation_to.value), float(translation_speed.value))
 			refresh_after_edit.call()
 	translation_axis.item_selected.connect(func(_index: int) -> void: set_translation_values.call())
 	translation_mode.item_selected.connect(func(index: int) -> void:
-		if data != null and data.has_method("set_part_anim_channel_mode"):
+		if data != null:
 			data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), _mode_name_for_id(translation_mode.get_item_id(index)), translation_register.selected if translation_register != null else -1)
 			refresh_after_edit.call()
 		update_visibility.call()
 	)
 	if translation_register != null:
 		translation_register.register_selected.connect(func(reg: int) -> void:
-			if data != null and data.has_method("set_part_anim_channel_mode"):
+			if data != null:
 				data.set_part_anim_channel_mode(_part_anim_lod_index, _part_anim_selected_index, "translation", _axis_name_for_id(translation_axis.get_selected_id()), _mode_name_for_id(translation_mode.get_selected_id()), reg)
 				refresh_after_edit.call()
 		)

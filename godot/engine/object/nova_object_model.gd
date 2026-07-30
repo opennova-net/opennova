@@ -44,11 +44,11 @@ var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
 var _robj_rest_transforms: Dictionary = {}
-# Per-frame hot-path caches: object_data capability lookups (has_method is a
-# string-keyed scan) refresh in rebuild(); the environment-node capability
-# refreshes on assignment. The typed light-push cache holds the last-applied
-# uniform set so identical values are never re-pushed without allocating a
-# comparison Array (retained mode — a skipped identical push is invisible).
+# Per-frame hot-path caches: the object_data document-loaded gates refresh in
+# rebuild(); the environment-node capability refreshes on assignment. The typed
+# light-push cache holds the last-applied uniform set so identical values are
+# never re-pushed without allocating a comparison Array (retained mode — a
+# skipped identical push is invisible).
 var _od_has_eval := false
 var _od_has_frame := false
 var _env_has_generation := false
@@ -421,8 +421,7 @@ func get_muzzle_world_position() -> Vector3:
 # rows exist in shipped models) disqualify the point.
 func _resolve_muzzle_userpoint() -> void:
 	_muzzle_bone = -1
-	if _skeleton == null or object_data == null \
-			or not object_data.has_method("get_user_point_info"):
+	if _skeleton == null or object_data == null:
 		return
 	var best := -1
 	var best_rank := 99
@@ -833,7 +832,7 @@ func get_active_part_anims() -> Dictionary:
 
 # [orig: ANIMNUM channel (1/2) -> part-anim slot 0/1 -> the model's PANM control register at index `slot`.]
 func _resolve_anim_channel_register(slot: int) -> String:
-	if object_data == null or not object_data.has_method("get_control_registers"):
+	if object_data == null:
 		return ""
 	var regs: Array = object_data.get_control_registers()
 	if slot < 0 or slot >= regs.size():
@@ -1030,8 +1029,8 @@ func rebuild() -> void:
 		_od_has_frame = false
 		_set_model_bounds(AABB())
 		return
-	_od_has_eval = object_data.has_method("eval_material_runtime")
-	_od_has_frame = object_data.has_method("compute_anim_frame")
+	_od_has_eval = true
+	_od_has_frame = true
 
 	_material_defs = _build_material_defs()
 	_active_lod = _clamp_lod_index(_active_lod)
@@ -1045,7 +1044,7 @@ func rebuild() -> void:
 		_build_skeleton()
 		_resolve_muzzle_userpoint()
 	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame) if object_data.has_method("build_lod_submeshes") else []
+	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame)
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
 	for entry in submeshes:
@@ -1085,7 +1084,7 @@ func rebuild() -> void:
 		_collect_anim_frames(material_index)
 
 	_classify_materials()
-	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
+	_has_lights = int(object_data.get_light_count()) > 0
 	_apply_runtime_state(0.0)
 	refresh_render_order()
 
@@ -1169,7 +1168,7 @@ func _on_object_changed() -> void:
 
 
 func _last_object_update_mask() -> int:
-	if object_data != null and object_data.has_method("get_last_oed_update_mask"):
+	if object_data != null:
 		return int(object_data.get_last_oed_update_mask()) & OED_UPDATE_ALL
 	return OED_UPDATE_ALL
 
@@ -1228,12 +1227,8 @@ func _needs_runtime_frame_work() -> bool:
 func _refresh_live_panm_classification() -> void:
 	if object_data == null:
 		_has_live_panm = false
-	elif object_data.has_method("has_live_panm_for_lod"):
-		_has_live_panm = bool(object_data.has_live_panm_for_lod(_active_lod))
 	else:
-		# Compatible/custom data without the exact classifier keeps the former
-		# conservative behavior: if it can evaluate PANM, assume it can change.
-		_has_live_panm = object_data.has_method("evaluate_panm")
+		_has_live_panm = bool(object_data.has_live_panm_for_lod(_active_lod))
 
 
 func _clamp_lod_index(lod_index: int) -> int:
@@ -1391,26 +1386,11 @@ func _apply_robj_transforms() -> bool:
 	# writes only the parts whose transforms changed since this model last
 	# applied. The common empty-control path allocates nothing and no output
 	# Dictionary is boxed.
-	if object_data.has_method("apply_panm_to_nodes"):
-		var revision := int(object_data.apply_panm_to_nodes(
-				_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
-				_panm_applied_revision))
-		var changed := revision != _panm_applied_revision
-		_panm_applied_revision = revision
-		return changed
-	# Dictionary fallback for duck-typed data doubles (tests).
-	if not object_data.has_method("evaluate_panm"):
-		return false
-	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
-	var changed := false
-	for key in transforms.keys():
-		var robj_index := int(key)
-		if _robj_nodes.has(robj_index):
-			var node := _robj_nodes[robj_index] as Node3D
-			var next_transform: Transform3D = transforms[key]
-			if node.transform != next_transform:
-				node.transform = next_transform
-				changed = true
+	var revision := int(object_data.apply_panm_to_nodes(
+			_active_lod, _anim_time_ms, _ctrl_values, _robj_dense,
+			_panm_applied_revision))
+	var changed := revision != _panm_applied_revision
+	_panm_applied_revision = revision
 	return changed
 
 
@@ -1420,7 +1400,7 @@ func _apply_lights() -> void:
 	# authoring/inspection without changing shipped rendering.
 	if not _model_light_preview_enabled or not _has_lights:
 		return
-	if object_data == null or not object_data.has_method("evaluate_lights"):
+	if object_data == null:
 		return
 	var lights: Array = object_data.evaluate_lights(_anim_time_ms, _ctrl_values)
 	var dominant := {}
@@ -1498,7 +1478,7 @@ func _material_for_index(material_array_index: int,
 	return material
 
 
-static func _material_supports_projected_shadow_receiver(
+static func material_supports_projected_shadow_receiver(
 		blend_mode: int, material_flags: int) -> bool:
 	# The simple attenuation next-pass has no access to the source material's
 	# alpha coverage or two-sided raster state. Applying it to those surfaces
@@ -1590,7 +1570,7 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	material.set_shader_parameter("u_local_light_intensity", 1.0)
 	material.set_shader_parameter("u_local_light_atten_start", 0.0)
 	material.set_shader_parameter("u_local_light_atten_end", 5.0)
-	if _material_supports_projected_shadow_receiver(
+	if material_supports_projected_shadow_receiver(
 			blend_mode, material_flags):
 		material.next_pass = _get_shadow_receiver_material()
 	_apply_default_environment_to_material(material)
@@ -1625,7 +1605,7 @@ func _load_texture_for_slot(material_def: Dictionary, slot: int) -> Texture2D:
 
 
 func _collect_anim_frames(material_index: int) -> void:
-	if _anim_frames_by_mat.has(material_index) or object_data == null or not object_data.has_method("get_material_anim_frames"):
+	if _anim_frames_by_mat.has(material_index) or object_data == null:
 		return
 	var frame_names: PackedStringArray = object_data.get_material_anim_frames(material_index, 1)
 	if frame_names.size() <= 1:
@@ -1658,16 +1638,11 @@ func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
 
 
 # A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
-# animates. The native get_material_runtime_kind (faithful style taxonomy, single-sourced in
-# libs/renderer) is preferred when present; until it is built, the conservative fallback
-# treats any non-zero generator style as dynamic -- it can only over-evaluate, never freeze
-# an animation (a fully-static material's eval is the identity that _create_material already set).
+# animates. The classifier is conservative: any non-zero generator style counts as dynamic --
+# it can only over-evaluate, never freeze an animation (a fully-static material's eval is
+# the identity that _create_material already set).
 func _material_runtime_is_dynamic(material_index: int) -> bool:
 	if object_data == null:
-		return true
-	if object_data.has_method("get_material_runtime_kind"):
-		return int(object_data.get_material_runtime_kind(material_index)) != 0  # 0 == STATIC
-	if not object_data.has_method("get_material_info"):
 		return true
 	var info: Dictionary = object_data.get_material_info(material_index)
 	if info.is_empty():

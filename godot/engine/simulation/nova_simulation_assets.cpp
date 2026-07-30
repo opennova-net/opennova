@@ -229,6 +229,17 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
 				vt.player_control = (attrib & 0x40u) != 0;
+				// Vehicle audio belongs to the vehicle ItemDef, not to the
+				// mounted NPC's AiProfile. Resolve the profile name and the
+				// item-level soundloop overrides once at this portable boundary.
+				// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
+				vt.sound_profile = p_item_db->get_sound_profile(def_id).utf8().get_data();
+				const PackedStringArray loops = p_item_db->get_sound_loops(def_id);
+				for (int i = 0; i < loops.size() &&
+						i < static_cast<int>(vt.sound_loops.size()); ++i) {
+					vt.sound_loops[static_cast<size_t>(i)] =
+							String(loops[i]).utf8().get_data();
+				}
 				world_->vehicle_traits.set(e->item_id, vt);
 			}
 		}
@@ -394,21 +405,6 @@ bool NovaSimulation::resolve_mounted_pose(
 			data_found->second.is_null())
 		return false;
 	const Ref<NovaObjectData> &data = data_found->second;
-	const int userpoint_index = static_cast<int>(p_seat.bone_index) - 1;
-	if (userpoint_index < 0 ||
-			userpoint_index >= data->get_user_point_count())
-		return false;
-	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
-	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
-	const Vector3 authored_model_position =
-			userpoint.get("position", Vector3());
-	if (part_index < 0 || !finite_vector3(authored_model_position))
-		return false;
-
-	constexpr int lod_index = 0;
-	const Dictionary rest_parts =
-			data->evaluate_panm(lod_index, 0, Dictionary());
-	if (!rest_parts.has(part_index)) return false;
 
 	Dictionary controls;
 	const ThreediModelIR &ir = data->native_ir();
@@ -432,79 +428,10 @@ bool NovaSimulation::resolve_mounted_pose(
 	const uint32_t time_ms = panm_time_override_ms_ >= 0
 			? static_cast<uint32_t>(panm_time_override_ms_)
 			: p_world.logic_tick * 16u;
-	const Dictionary live_parts =
-			data->evaluate_panm(lod_index, time_ms, controls);
-	if (!live_parts.has(part_index)) return false;
-	const Variant rest_value = rest_parts[part_index];
-	const Variant live_value = live_parts[part_index];
-	if (rest_value.get_type() != Variant::TRANSFORM3D ||
-			live_value.get_type() != Variant::TRANSFORM3D)
-		return false;
-	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
-	const Transform3D live_part = static_cast<Transform3D>(live_value);
-	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
-			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
-			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
-		return false;
-
-	const Vector3 point_in_part =
-			rest_part.affine_inverse().xform(authored_model_position);
-	const Vector3 live_model_position = live_part.xform(point_in_part);
-	const Basis carrier_basis = godot_model_basis_from_mission_euler(
-			p_carrier.pitch, p_carrier.yaw, p_carrier.roll);
-	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
-			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
-		return false;
-	const Vector3 carrier_origin(
-			p_carrier.position.x, p_carrier.position.z,
-			-p_carrier.position.y);
-	const Vector3 live_world_position =
-			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
-	if (!finite_vector3(live_world_position)) return false;
-	r_out.position = {
-			static_cast<float>(live_world_position.x),
-			static_cast<float>(-live_world_position.z),
-			static_cast<float>(live_world_position.y)};
-
-	// Apply the articulated part's rest-to-live delta around the carrier to the
-	// exact static seat orientation. This identity-round-trips the fallback and
-	// lets moving seat parts carry yaw/pitch/roll without coupling to LOOK.
-	const double baseline_yaw =
-			p_seat.type == opennova::world::SeatType::Gunner
-			? static_cast<double>(p_carrier.yaw - p_seat.yaw_offset)
-			: static_cast<double>(p_carrier.yaw + p_seat.yaw_offset);
-	const Basis baseline_basis = godot_model_basis_from_mission_euler(
-			p_carrier.pitch, baseline_yaw, p_carrier.roll);
-	const Basis part_delta =
-			live_part.basis * rest_part.basis.inverse();
-	Basis live_basis = carrier_basis * part_delta *
-			carrier_basis.inverse() * baseline_basis;
-	if (!finite_basis(live_basis) ||
-			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
-		return false;
-	live_basis = live_basis.orthonormalized();
-	const Basis euler_basis = live_basis *
-			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
-	const double pitch_rad = std::asin(std::clamp(
-			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
-	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
-	const double heading_rad = std::atan2(
-			-static_cast<double>(euler_basis[2].x),
-			static_cast<double>(euler_basis[0].x));
-	const double roll_rad = std::atan2(
-			-static_cast<double>(euler_basis[1].z),
-			static_cast<double>(euler_basis[1].y));
-	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
-			90.0 - heading_rad / kRadiansPerDegree);
-	const double pitch_deg = pitch_rad / kRadiansPerDegree;
-	const double roll_deg = roll_rad / kRadiansPerDegree;
-	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
-			!std::isfinite(roll_deg))
-		return false;
-	r_out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
-	r_out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
-	r_out.roll = static_cast<int16_t>(std::lround(roll_deg));
-	return true;
+	// Keep authority and joiner attachment reconstruction on one matrix path:
+	// both consume the same authored userpoint and rest/live bone transforms.
+	return resolve_model_mounted_pose(
+			data, p_carrier, p_seat, controls, time_ms, r_out);
 }
 
 bool NovaSimulation::ensure_collision_instance(
@@ -1126,6 +1053,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 						attachment_d.get("anchor_found", false));
 				attachment.anchor.type =
 						opennova::world::SeatType::Gunner;
+				attachment.anchor.attachment_frame = true;
 				attachment.anchor.bone_index = static_cast<uint8_t>(
 						std::clamp(static_cast<int>(
 								attachment_d.get("bone_index", 0)), 0, 255));

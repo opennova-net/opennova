@@ -206,7 +206,7 @@ func _dismiss_novaworld_panel() -> void:
 # The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
 # available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
 # the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + the NovaWorld channel,
-# so game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+# so net_session_drive._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
@@ -215,7 +215,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	if mission.is_empty():
 		# Report back so the panel leaves "Starting..." instead of hanging silently.
 		push_warning("NetSessionController: NovaWorld host requested but no mission is available")
-		if _novaworld_panel != null and _novaworld_panel.has_method("host_failed"):
+		if _novaworld_panel != null:
 			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
 		return
 	_dismiss_novaworld_panel()

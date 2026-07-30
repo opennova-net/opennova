@@ -100,14 +100,7 @@ func compile_script() -> Array:
 		return no_text
 	# NovaMusicScript.compile_text returns a Dictionary (see header). Output
 	# references aren't viable through GDExtension; the bridge packs everything
-	# into the dict instead. Older builds without the bridge return null when
-	# probed via has_method, so we treat that as a no-op success (matches the
-	# pre-F4 stub state).
-	if not mus_script.has_method("compile_text"):
-		_compiled_bytecode = PackedByteArray()
-		_compiled_file_bytes = PackedByteArray()
-		compile_finished.emit(true, [])
-		return []
+	# into the dict instead.
 	var d: Dictionary = mus_script.compile_text(_compiled_script_text)
 	var rc: int = int(d.get("rc", -1))
 	if rc != 0:
@@ -120,9 +113,9 @@ func compile_script() -> Array:
 		return errs
 	_compiled_bytecode = d.get("bytecode", PackedByteArray())
 	_compiled_file_bytes = d.get("file_bytes", PackedByteArray())
-	if _compiled_file_bytes.size() > 0 and mus_script.has_method("set_compiled_file_bytes"):
+	if _compiled_file_bytes.size() > 0:
 		mus_script.set_compiled_file_bytes(_compiled_file_bytes)
-	elif _compiled_bytecode.size() > 0 and mus_script.has_method("set_compiled_bytecode"):
+	elif _compiled_bytecode.size() > 0:
 		mus_script.set_compiled_bytecode(_compiled_bytecode)
 	compile_finished.emit(true, [])
 	return []
@@ -200,8 +193,6 @@ const _NEW_SCRIPT_TEMPLATE := "script %s\nsection Begin\n{\n}\n"
 
 func new_script(script_name: String = "gamescript") -> int:
 	var ms := NovaMusicScript.new()
-	if not ms.has_method("compile_text") or not ms.has_method("set_compiled_file_bytes"):
-		return ERR_UNAVAILABLE
 	var d: Dictionary = ms.compile_text(_NEW_SCRIPT_TEMPLATE % script_name)
 	if int(d.get("rc", -1)) != 0:
 		return ERR_CANT_CREATE
@@ -431,12 +422,12 @@ func delete_track(index: int) -> void:
 # loosen the gate without a passing parity test.
 
 func can_edit_plays() -> bool:
-	if not script_loaded() or not mus_script.has_method("compile_text"):
+	if not script_loaded():
 		return false
 	# Structured edits operate on a single chunk (the default script) and
 	# re-encode a one-chunk file; a multi-chunk .bin would lose its other chunks
 	# on the first edit, so keep those read-only.
-	if mus_script.has_method("get_script_count") and int(mus_script.get_script_count()) != 1:
+	if int(mus_script.get_script_count()) != 1:
 		return false
 	var text := _current_script_text()
 	if text == "":
@@ -777,9 +768,9 @@ func can_author() -> bool:
 # is intentionally read-only (a structured edit re-encodes a single chunk and would
 # drop the others), where a bare "must compile" message would just confuse.
 func authoring_blocked_reason() -> String:
-	if not script_loaded() or not mus_script.has_method("compile_text"):
+	if not script_loaded():
 		return "Open a project first"
-	if mus_script.has_method("get_script_count") and int(mus_script.get_script_count()) != 1:
+	if int(mus_script.get_script_count()) != 1:
 		return "Multi-chunk script is read-only (editing would drop the other chunks)"
 	var text := _current_script_text()
 	if text == "":
@@ -793,7 +784,7 @@ func authoring_blocked_reason() -> String:
 # {text, rows} for the committed names-less decompile, via the bridge. rows is an
 # Array of { section_index, ordinal, code_offset, kind, line_start, line_end }.
 func _annotated() -> Dictionary:
-	if not script_loaded() or not mus_script.has_method("get_annotated_decompile"):
+	if not script_loaded():
 		return {}
 	var script_name := StringName(mus_script.get_default_script_name())
 	return mus_script.get_annotated_decompile(script_name)
@@ -1252,7 +1243,7 @@ func _delete_section_text(text: String, name: String) -> String:
 
 # True when `name` is the script's entry/start section (is_entry on the AST dict).
 func _is_entry_section(name: String) -> bool:
-	if not script_loaded() or not mus_script.has_method("get_program_ast"):
+	if not script_loaded():
 		return false
 	var sn := StringName(mus_script.get_default_script_name())
 	for s in mus_script.get_program_ast(sn):

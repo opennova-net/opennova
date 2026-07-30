@@ -17,6 +17,7 @@ class FakeModel:
 	var pose_call_order: Array[String] = []
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
+	var shadow_caster_enabled := false
 	func play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append(["at", key, phase_ticks])
 		pose_call_order.append("body")
@@ -45,6 +46,8 @@ class FakeModel:
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
+	func set_shadow_caster_enabled(enabled: bool) -> void:
+		shadow_caster_enabled = enabled
 
 
 class FakeSim:
@@ -158,7 +161,7 @@ class FakePlacer:
 	func build_model_from_graphic(graphic: String, _adm_name: String, parent: Node3D,
 			_clip_key: String = "", _env_node: Node = null,
 			_rig_graphic: String = "") -> Node3D:
-		var node := Node3D.new()
+		var node := FakeModel.new()
 		parent.add_child(node)
 		graphic_builds.append(graphic)
 		return node

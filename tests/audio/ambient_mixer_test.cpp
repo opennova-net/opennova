@@ -277,6 +277,150 @@ int main() {
         TEST_EXPECT(mx.live_slot_count() == 0);
     }
 
+    // --- Entity-attached emitters share the retail slot table and loudest-first
+    //     ranking with placed markers; pitch survives into the host candidate ---
+    {
+        AmbientMixer mx;
+        const int32_t all_regions[4] = {0, 0, 0, 0};
+        add_simple_marker(mx, 100.0f, 1, 0, all_regions);
+        mx.set_time_of_day_hours(12.0f);
+        mx.advance_to_tick(8);
+
+        const float vehicle_pos[3] = {25.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc vehicle_idle;
+        vehicle_idle.candidate_id = 2;
+        vehicle_idle.falloff_u = 200;
+        mx.register_emitter(0x01000003u, 0, vehicle_pos, 77, 30,
+                            0x14000, 0xFFFF, {vehicle_idle});
+
+        const std::vector<AmbientCandidate> out = mx.mix(kOrigin);
+        TEST_EXPECT(out.size() == 2);
+        TEST_EXPECT(out[0].candidate_id == 2); // nearer dynamic emitter wins
+        TEST_EXPECT(out[1].candidate_id == 1);
+        TEST_EXPECT(out[0].vol > out[1].vol);
+        TEST_EXPECT(out[0].pitch_q16 == 0x14000);
+        TEST_EXPECT(out[1].pitch_q16 == 0x10000); // placed markers register at unity
+    }
+
+    // --- Dynamic registration is keyed by (source, lane, layer): a per-tick
+    //     refresh updates in place, lanes coexist, and pitch/volume zero clears
+    //     only the addressed source+lane.
+    //     [orig: SoundEmitter_RegisterSetLayers @ 0x528340;
+    //      SoundEmitter_ClearByEntityAndSlot @ 0x527a50] ---
+    {
+        AmbientMixer mx;
+        const float idle_pos[3] = {20.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc idle;
+        idle.candidate_id = 10;
+        idle.falloff_u = 200;
+        mx.register_emitter(501, 0, idle_pos, 77, 30,
+                            0x10000, 0xFFFF, {idle});
+        TEST_EXPECT(mx.live_slot_count() == 1);
+
+        const float moved_pos[3] = {40.0f, 3.0f, 1.0f};
+        mx.register_emitter(501, 0, moved_pos, 77, 30,
+                            0x12000, 0x8000, {idle});
+        TEST_EXPECT(mx.live_slot_count() == 1); // keyed update, not allocation
+        const std::vector<AmbientCandidate> updated = mx.mix(kOrigin);
+        TEST_EXPECT(updated.size() == 1);
+        TEST_EXPECT(updated[0].pos[0] == 40.0f);
+        TEST_EXPECT(updated[0].pos[1] == 3.0f);
+        TEST_EXPECT(updated[0].pos[2] == 1.0f);
+        TEST_EXPECT(updated[0].pitch_q16 == 0x12000);
+
+        AmbientMixer::LayerDesc forward;
+        forward.candidate_id = 11;
+        forward.falloff_u = 200;
+        mx.register_emitter(501, 10, moved_pos, 77, 30,
+                            0x10000, 0xFFFF, {forward});
+        TEST_EXPECT(mx.live_slot_count() == 2); // another retail lane coexists
+
+        mx.register_emitter(501, 0, moved_pos, 77, 30,
+                            0, 0xFFFF, {idle});
+        TEST_EXPECT(mx.live_slot_count() == 1);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        TEST_EXPECT(mx.mix(kOrigin)[0].candidate_id == 11);
+
+        mx.register_emitter(501, 10, moved_pos, 77, 30,
+                            0x10000, 0, {forward});
+        TEST_EXPECT(mx.live_slot_count() == 0);
+        TEST_EXPECT(mx.mix(kOrigin).empty());
+    }
+
+    // --- Pose is source-owned across lanes. Clearing one lane at a moved pose
+    //     carries an unrefreshed lane with the entity, but does not renew that
+    //     lane's original keep-alive.
+    {
+        AmbientMixer mx;
+        const float initial_pos[3] = {20.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc idle;
+        idle.candidate_id = 12;
+        idle.falloff_u = 200;
+        AmbientMixer::LayerDesc forward = idle;
+        forward.candidate_id = 13;
+        mx.register_emitter(502, 0, initial_pos, 77, 3,
+                            0x10000, 0xFFFF, {idle});
+        mx.register_emitter(502, 10, initial_pos, 77, 3,
+                            0x10000, 0xFFFF, {forward});
+        TEST_EXPECT(mx.mix(kOrigin).size() == 2);
+
+        mx.advance_to_tick(2);
+        const float moved_pos[3] = {40.0f, 3.0f, 1.0f};
+        mx.register_emitter(502, 10, moved_pos, 78, 3, 0, 0, {});
+        const std::vector<AmbientCandidate> moved = mx.mix(kOrigin);
+        TEST_EXPECT(moved.size() == 1);
+        TEST_EXPECT(moved[0].candidate_id == 12);
+        TEST_EXPECT(moved[0].pos[0] == 40.0f);
+        TEST_EXPECT(moved[0].pos[1] == 3.0f);
+        TEST_EXPECT(moved[0].pos[2] == 1.0f);
+
+        mx.advance_to_tick(3);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        TEST_EXPECT(mx.mix(kOrigin).empty());
+    }
+
+    // --- The source key retains the complete registry-lifetime serial. A
+    //     generation beyond 32 bits must not alias an older entity in the same
+    //     lane.
+    {
+        AmbientMixer mx;
+        const float pos[3] = {10.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc old_generation;
+        old_generation.candidate_id = 20;
+        old_generation.falloff_u = 200;
+        AmbientMixer::LayerDesc new_generation = old_generation;
+        new_generation.candidate_id = 21;
+        mx.register_emitter(1, 0, pos, 77, 30, 0x10000, 0xFFFF,
+                            {old_generation});
+        mx.register_emitter(0x100000001ULL, 0, pos, 77, 30, 0x10000,
+                            0xFFFF, {new_generation});
+        TEST_EXPECT(mx.live_slot_count() == 2);
+        const std::vector<AmbientCandidate> out = mx.mix(kOrigin);
+        TEST_EXPECT(out.size() == 2);
+    }
+
+    // --- Registration happens at the current logic tick. A catch-up interval
+    //     since the preceding render mix cannot retroactively consume a newly
+    //     refreshed source's keep-alive.
+    {
+        AmbientMixer mx;
+        mx.advance_to_tick(10);
+        TEST_EXPECT(mx.mix(kOrigin).empty());
+        mx.advance_to_tick(100);
+        const float pos[3] = {10.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc layer;
+        layer.candidate_id = 30;
+        layer.falloff_u = 200;
+        mx.register_emitter(99, 0, pos, 77, 30, 0x10000, 0xFFFF, {layer});
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        mx.advance_to_tick(129);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1);
+        mx.advance_to_tick(131);
+        TEST_EXPECT(mx.mix(kOrigin).size() == 1); // reaches zero after this service
+        TEST_EXPECT(mx.mix(kOrigin).empty());
+        TEST_EXPECT(mx.live_slot_count() == 0);
+    }
+
     // --- The autonomous clock derives 62.5 Hz ticks from wall seconds ---
     {
         AmbientMixer mx;
