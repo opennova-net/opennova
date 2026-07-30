@@ -83,6 +83,7 @@ using OcclusionFn = int64_t (*)(void *ctx, const float listener[3],
 struct AmbientCandidate {
     int32_t candidate_id;
     int32_t vol; // 0..255 through the witnessed curve (crossfade + member + clamp)
+    int32_t pitch_q16; // registration pitch; placed markers use unity (0x10000)
     float pos[3];
 };
 
@@ -122,6 +123,22 @@ public:
     int add_marker(const float pos[3], int64_t source_bms_id, int32_t stagger_slot,
                    int32_t lifetime_ticks, const int32_t slot_keys[4],
                    std::vector<std::vector<LayerDesc>> sets);
+
+    // Register one entity-attached emitter into the SAME transient slot table used
+    // by placed markers. Slots are keyed by (source_spawn_id, lane, layer), so a
+    // per-tick registration refreshes the existing lifetime and presentation values
+    // instead of allocating a second voice. Pitch or volume zero clears every layer
+    // for exactly that source+lane [orig: SoundEmitter_RegisterSetLayers @ 0x528340;
+    // SoundEmitter_ClearByEntityAndSlot @ 0x527a50]. `volume_q8_8` is the original
+    // registration word; its high byte feeds the member-volume curve.
+    // A source pose belongs to the entity rather than to one lane. Updating it
+    // moves every still-live lane without extending any lane's keep-alive.
+    void update_emitter_source(uint64_t source_spawn_id, const float pos[3],
+                               int64_t source_bms_id);
+    void register_emitter(uint64_t source_spawn_id, int32_t lane,
+                          const float pos[3], int64_t source_bms_id,
+                          int32_t lifetime_ticks, int32_t pitch_q16,
+                          int32_t volume_q8_8, std::vector<LayerDesc> layers);
 
     int marker_count() const { return static_cast<int>(markers_.size()); }
 
@@ -168,24 +185,46 @@ private:
         int64_t occl_dist_q16 = -1;
     };
 
+    // One live entity-attached registration, shared by all of its layer slots.
+    // Records remain index-stable while live because Slot stores this vector index;
+    // cleared records are reused only after all of their slots are released.
+    struct DynamicEmitter {
+        bool active = false;
+        uint64_t source_spawn_id = 0;
+        int32_t lane = 0;
+        float pos[3] = {0.0f, 0.0f, 0.0f};
+        int64_t source_bms_id = 0;
+        std::vector<LayerDesc> layers;
+        int64_t occl_stamp = -1;
+        int64_t occl_dist_q16 = -1;
+    };
+
     // One transient emitter slot [orig: 48-byte slot @ 0x24D66A8, keyed
-    // (entity, slot-type byte = region, layer index)].
+    // (entity, slot-type byte = region/lane, layer index)].
     struct Slot {
         bool used = false;
-        int32_t marker = 0;
-        int32_t region = 0;
+        bool dynamic = false;
+        int32_t owner = 0;  // marker index or DynamicEmitter index
+        int32_t lane = 0;   // marker region or entity-attached lane
         int32_t layer = 0;
         int32_t lifetime = 0; // remaining ticks; 0 at mix entry clears the slot
         int32_t vol_byte = 0; // emitter volume byte (the crossfade blend)
+        int32_t pitch_q16 = 0x10000;
         int64_t range_q16 = -1; // lazily cached falloff << 16 [orig: @ 0x52856a]
+        int64_t refreshed_tick = -1; // registrations at the current tick do not age retroactively
     };
 
     void eval_marker_tick(int32_t marker_index);
     void register_set(int32_t marker_index, int32_t region, int32_t vol_byte);
     void clear_marker_region(int32_t marker_index, int32_t region);
-    Slot *find_or_alloc_slot(int32_t marker_index, int32_t region, int32_t layer);
+    Slot *find_or_alloc_marker_slot(int32_t marker_index, int32_t region,
+                                    int32_t layer);
+    int32_t find_or_alloc_dynamic_emitter(uint64_t source_spawn_id, int32_t lane);
+    Slot *find_or_alloc_dynamic_slot(int32_t emitter_index, int32_t layer);
+    void clear_dynamic_emitter(uint64_t source_spawn_id, int32_t lane);
 
     std::vector<Marker> markers_;
+    std::vector<DynamicEmitter> dynamic_emitters_;
     Slot slots_[kSlotCapacity];
     std::vector<AmbientCandidate> mix_out_;
     float tod_hours_ = 12.0f;

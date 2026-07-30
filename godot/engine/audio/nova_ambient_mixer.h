@@ -51,14 +51,25 @@ public:
 	int add_marker(const Vector3 &pos, int64_t source_bms_id, int stagger_slot,
 			int lifetime_ticks, const PackedInt32Array &slot_keys, const Array &sets);
 
+	// One entity-attached registration. `layers` uses the same stride-5 rows as
+	// add_marker's set entries. The key is (source_spawn_id, lane, layer);
+	// pitch_q16 or volume_q8_8 zero clears that source+lane.
+	void register_emitter(int64_t source_spawn_id, int lane, const Vector3 &pos,
+			int64_t source_bms_id, int lifetime_ticks, int pitch_q16,
+			int volume_q8_8, const PackedInt32Array &layers);
+	void update_emitter_source(int64_t source_spawn_id, const Vector3 &pos,
+			int64_t source_bms_id);
+
 	void set_time_of_day_hours(float hours);
 	void advance_to_tick(int64_t tick);
 	void advance_seconds(float dt);
 
-	// Ranked audible candidates, loudest first, as [candidate_id, vol, x, y, z]
-	// rows (stride 5). The host cuts to its channel budget after filtering decode
-	// failures.
+	// Legacy ranked-candidate ABI: [candidate_id, vol, x, y, z], stride 5.
+	// Keep this stable for scripts paired with an older native extension.
 	PackedFloat32Array mix(const Vector3 &listener);
+	// Pitch-aware ranked candidates:
+	// [candidate_id, vol, pitch_q16, x, y, z], stride 6.
+	PackedFloat32Array mix_v2(const Vector3 &listener);
 
 	int live_slot_count() const;
 	int64_t clock_tick() const;
@@ -73,6 +84,9 @@ public:
 	static int crossfade_volume_byte(float blend);
 	// { "region": int, "adjacent": int, "blend": float }
 	static Dictionary time_of_day_region(float hours);
+
+private:
+	PackedFloat32Array mix_rows(const Vector3 &listener, bool include_pitch);
 };
 
 } // namespace godot

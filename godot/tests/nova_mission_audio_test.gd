@@ -75,6 +75,34 @@ func _active_player(container: Node, candidate_id: int) -> AudioStreamPlayer3D:
 	return null
 
 
+func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
+	for player in _players(container):
+		if player.position.is_equal_approx(pos):
+			return player
+	return null
+
+
+func test_native_mixer_keeps_legacy_rows_and_versions_pitch_rows() -> void:
+	var mixer := NovaAmbientMixer.new()
+	var layer := PackedInt32Array([7, 2000, 0, 255, 255])
+	mixer.add_marker(Vector3(10, 2, 3), 0, 0, 30,
+		PackedInt32Array([0, 0, 0, 0]), [layer])
+	mixer.advance_to_tick(0)
+	var legacy: PackedFloat32Array = mixer.mix(Vector3.ZERO)
+	var pitched: PackedFloat32Array = mixer.mix_v2(Vector3.ZERO)
+	assert_eq(legacy.size(), 5,
+		"mix() retains its public stride-5 ABI for older scripts")
+	assert_eq(pitched.size(), 6,
+		"mix_v2() carries pitch without silently reframing legacy rows")
+	if legacy.size() == 5 and pitched.size() == 6:
+		assert_eq(int(legacy[0]), 7)
+		assert_eq(int(pitched[0]), 7)
+		assert_eq(int(pitched[2]), 0x10000)
+		assert_eq(
+			Vector3(legacy[2], legacy[3], legacy[4]),
+			Vector3(pitched[3], pitched[4], pitched[5]))
+
+
 func test_only_the_loudest_eight_candidates_mix() -> void:
 	var audio = NovaMissionAudioScript.new(null, null)
 	var holder := Node3D.new()
@@ -274,6 +302,178 @@ func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
 	assert_ne(_active_player(holder, 1).stream, candidate_one_stream,
 		"a dropped candidate restarts when it becomes an entrant again")
 	assert_eq(_players(holder).size(), 8)
+
+
+func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_vehicle_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	_write_bytes(fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path(
+				"res://../fixtures/menu_sound/selecta1.wav")))
+	var lwf := NovaLwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, null)
+	audio.setup(mission, "vehicle_probe.bms", container)
+
+	# Dynamic engine voices share retail's loudest-eight emitter budget with
+	# placed ambience [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
+	# Eight quieter placed voices plus this source must still own only eight
+	# physical players, with the truck displacing the weakest marker.
+	var vehicle_pos := Vector3(900, 4, -300)
+	var markers: Array = []
+	for i in range(8):
+		var marker_offset := 1500.0 if i == 7 else float(20 + i * 20)
+		markers.append(_marker(
+			vehicle_pos + Vector3(marker_offset, 0, 0),
+			["amb", "amb", "amb", "amb"],
+			{"amb": [_layer(2000)]}))
+	audio.set_markers(markers)
+	var idle := {
+		"source_spawn_id": 77,
+		"handle": 0x10001,
+		"source_bms_id": 42,
+		"lane": 0,
+		"lifetime": 30,
+		"pitch_q16": 0x10000,
+		"volume_q8_8": 0xFFFF,
+		"slot": 0,
+		"set": "V_TRUCK_ILP",
+		"pos": vehicle_pos,
+	}
+	audio.apply_sound_emitters([idle])
+	audio.tick(vehicle_pos, 0.2)
+
+	assert_eq(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS,
+		"the vehicle voice competes inside the same bounded emitter pool")
+	var voice := _player_at_position(container, vehicle_pos)
+	assert_not_null(voice, "the full-gain idle voice displaces a quieter ambient marker")
+	if voice == null:
+		audio.teardown()
+		_remove_dir_recursive(fixture_dir)
+		return
+	var first_stream := voice.stream
+	assert_true(voice.playing)
+	assert_eq((voice.stream as AudioStreamWAV).loop_mode,
+		AudioStreamWAV.LOOP_FORWARD, "the engine emitter is a persistent loop")
+	assert_almost_eq(voice.pitch_scale, 1.0, 0.0001)
+	assert_almost_eq(voice.volume_db, linear_to_db(252.0 / 255.0), 0.001,
+		"Q8.8 full gain enters the witnessed emitter volume curve")
+
+	# A per-tick refresh of the same (source lifetime, lane) updates its live
+	# controls and pose without rebinding/restarting its stream.
+	var refreshed := idle.duplicate()
+	var refreshed_pos := vehicle_pos + Vector3(1, 0, 0)
+	refreshed["pos"] = refreshed_pos
+	refreshed["pitch_q16"] = 0xC000
+	refreshed["volume_q8_8"] = 0x8000
+	audio.apply_sound_emitters([refreshed])
+	audio.tick(refreshed_pos, 0.2)
+	assert_eq(_player_at_position(container, refreshed_pos), voice)
+	assert_eq(voice.stream, first_stream,
+		"a keyed refresh preserves the incumbent playback")
+	assert_almost_eq(voice.pitch_scale, 0.75, 0.0001)
+	assert_almost_eq(voice.volume_db, linear_to_db(125.0 / 255.0), 0.001)
+
+	var clear := refreshed.duplicate()
+	clear["pitch_q16"] = 0
+	clear["volume_q8_8"] = 0
+	audio.apply_sound_emitters([clear])
+	audio.tick(refreshed_pos, 0.2)
+	assert_null(_player_at_position(container, refreshed_pos),
+		"the zeroed source/lane update removes the vehicle emitter immediately")
+	assert_eq(_players(container).size(), NovaMissionAudioScript.MIX_CHANNELS,
+		"the released channel is reused by the displaced ambient marker")
+
+	audio.teardown()
+	_remove_dir_recursive(fixture_dir)
+
+
+func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_vehicle_catchup_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	_write_bytes(fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path(
+				"res://../fixtures/menu_sound/selecta1.wav")))
+	var lwf := NovaLwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, null)
+	audio.setup(mission, "vehicle_catchup.bms", container)
+
+	var idle := {
+		"source_spawn_id": 77,
+		"source_bms_id": 42,
+		"emitted_tick": 1,
+		"lane": 0,
+		"lifetime": 30,
+		"pitch_q16": 0x10000,
+		"volume_q8_8": 0xFFFF,
+		"set": "V_TRUCK_ILP",
+		"pos": Vector3(40, 0, 0),
+	}
+	audio.apply_sound_emitters([idle])
+	# One render frame catches up 32 world ticks. The registration must retain
+	# tick 1 as its refresh time rather than being reborn at the final tick.
+	audio.advance_ticks(32)
+	var live_state: Dictionary = audio._dynamic_emitter_states.get("77:0", {})
+	assert_false(live_state.is_empty())
+	var first_ids: PackedInt32Array = live_state.get(
+		"candidate_ids", PackedInt32Array())
+	assert_eq(first_ids.size(), 1)
+	var first_id := int(first_ids[0]) if first_ids.size() == 1 else -1
+	audio.tick(Vector3.ZERO)
+	assert_true(audio._dynamic_emitter_states.is_empty(),
+		"the early-batch intent expires against its producer tick")
+	assert_false(audio._candidate_lookup.has(first_id))
+	assert_false(audio._validated_candidate_ids.has(first_id),
+		"retired dynamic descriptors leave the validation cache")
+
+	# The native mixer services a slot that reaches zero once, then releases it
+	# on the next same-clock mix. The host can recycle its integer identity only
+	# after that physical incumbent has dropped out.
+	audio.tick(Vector3.ZERO)
+	assert_null(_active_player(container, first_id))
+	assert_true(audio._free_candidate_ids.has(first_id))
+
+	var replacement := idle.duplicate()
+	replacement["source_spawn_id"] = 88
+	replacement["emitted_tick"] = 33
+	replacement["pos"] = Vector3(80, 0, 0)
+	audio.apply_sound_emitters([replacement])
+	audio.advance_ticks(33)
+	var replacement_state: Dictionary = audio._dynamic_emitter_states.get(
+		"88:0", {})
+	var replacement_ids: PackedInt32Array = replacement_state.get(
+		"candidate_ids", PackedInt32Array())
+	assert_eq(replacement_ids.size(), 1)
+	if replacement_ids.size() == 1:
+		assert_eq(int(replacement_ids[0]), first_id,
+			"retired dynamic IDs stay float-exact by recycling after channel release")
+	audio.tick(Vector3.ZERO)
+
+	audio.teardown()
+	_remove_dir_recursive(fixture_dir)
 
 
 func test_setup_dispatches_envs_items_across_entity_kinds() -> void:

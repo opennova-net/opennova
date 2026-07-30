@@ -132,6 +132,7 @@ TimeOfDayRegion time_of_day_region(float hours) {
 
 void AmbientMixer::clear() {
     markers_.clear();
+    dynamic_emitters_.clear();
     for (Slot &s : slots_) {
         s = Slot{};
     }
@@ -183,6 +184,10 @@ void AmbientMixer::advance_to_tick(int64_t tick) {
         from = 0;
     }
     for (int64_t tk = from; tk <= tick; ++tk) {
+        // Registrations carry the tick at which they were refreshed. This also
+        // prevents a newly registered dynamic source from aging through the
+        // entire interval since the preceding render-frame mix.
+        clock_tick_ = tk;
         const int32_t cohort = static_cast<int32_t>(tk & (kStaggerPeriod - 1));
         for (int32_t i = 0; i < static_cast<int32_t>(markers_.size()); ++i) {
             if ((markers_[i].stagger_slot & (kStaggerPeriod - 1)) == cohort) {
@@ -241,29 +246,32 @@ void AmbientMixer::register_set(int32_t marker_index, int32_t region, int32_t vo
     const std::vector<LayerDesc> &layers =
             m.sets[static_cast<size_t>(m.slot_keys[region])];
     for (int32_t li = 0; li < static_cast<int32_t>(layers.size()); ++li) {
-        Slot *s = find_or_alloc_slot(marker_index, region, li);
+        Slot *s = find_or_alloc_marker_slot(marker_index, region, li);
         if (s == nullptr) {
             return; // table full: the registration drops, like the fixed table
         }
         s->lifetime = m.lifetime_ticks;
         s->vol_byte = vol_byte;
+        s->pitch_q16 = 0x10000;
+        s->refreshed_tick = clock_tick_;
     }
 }
 
 void AmbientMixer::clear_marker_region(int32_t marker_index, int32_t region) {
     for (Slot &s : slots_) {
-        if (s.used && s.marker == marker_index && s.region == region) {
+        if (s.used && !s.dynamic && s.owner == marker_index && s.lane == region) {
             s = Slot{};
         }
     }
 }
 
-AmbientMixer::Slot *AmbientMixer::find_or_alloc_slot(int32_t marker_index,
-                                                     int32_t region, int32_t layer) {
+AmbientMixer::Slot *AmbientMixer::find_or_alloc_marker_slot(
+        int32_t marker_index, int32_t region, int32_t layer) {
     Slot *free_slot = nullptr;
     for (Slot &s : slots_) {
         if (s.used) {
-            if (s.marker == marker_index && s.region == region && s.layer == layer) {
+            if (!s.dynamic && s.owner == marker_index && s.lane == region &&
+                s.layer == layer) {
                 return &s;
             }
         } else if (free_slot == nullptr) {
@@ -273,11 +281,145 @@ AmbientMixer::Slot *AmbientMixer::find_or_alloc_slot(int32_t marker_index,
     if (free_slot != nullptr) {
         *free_slot = Slot{};
         free_slot->used = true;
-        free_slot->marker = marker_index;
-        free_slot->region = region;
+        free_slot->owner = marker_index;
+        free_slot->lane = region;
         free_slot->layer = layer;
     }
     return free_slot;
+}
+
+int32_t AmbientMixer::find_or_alloc_dynamic_emitter(uint64_t source_spawn_id,
+                                                     int32_t lane) {
+    int32_t reusable = -1;
+    for (int32_t i = 0; i < static_cast<int32_t>(dynamic_emitters_.size()); ++i) {
+        DynamicEmitter &emitter = dynamic_emitters_[static_cast<size_t>(i)];
+        if (emitter.source_spawn_id == source_spawn_id && emitter.lane == lane) {
+            return i;
+        }
+        if (!emitter.active && reusable < 0) {
+            reusable = i;
+        }
+    }
+    if (reusable >= 0) {
+        dynamic_emitters_[static_cast<size_t>(reusable)] = DynamicEmitter{};
+        return reusable;
+    }
+    dynamic_emitters_.push_back(DynamicEmitter{});
+    return static_cast<int32_t>(dynamic_emitters_.size()) - 1;
+}
+
+AmbientMixer::Slot *AmbientMixer::find_or_alloc_dynamic_slot(
+        int32_t emitter_index, int32_t layer) {
+    Slot *free_slot = nullptr;
+    for (Slot &s : slots_) {
+        if (s.used) {
+            if (s.dynamic && s.owner == emitter_index && s.layer == layer) {
+                return &s;
+            }
+        } else if (free_slot == nullptr) {
+            free_slot = &s;
+        }
+    }
+    if (free_slot != nullptr) {
+        *free_slot = Slot{};
+        free_slot->used = true;
+        free_slot->dynamic = true;
+        free_slot->owner = emitter_index;
+        free_slot->lane =
+                dynamic_emitters_[static_cast<size_t>(emitter_index)].lane;
+        free_slot->layer = layer;
+    }
+    return free_slot;
+}
+
+void AmbientMixer::update_emitter_source(uint64_t source_spawn_id,
+                                         const float pos[3],
+                                         int64_t source_bms_id) {
+    for (DynamicEmitter &emitter : dynamic_emitters_) {
+        if (!emitter.active || emitter.source_spawn_id != source_spawn_id) {
+            continue;
+        }
+        emitter.pos[0] = pos[0];
+        emitter.pos[1] = pos[1];
+        emitter.pos[2] = pos[2];
+        emitter.source_bms_id = source_bms_id;
+        emitter.occl_stamp = -1;
+        emitter.occl_dist_q16 = -1;
+    }
+}
+
+void AmbientMixer::clear_dynamic_emitter(uint64_t source_spawn_id, int32_t lane) {
+    for (int32_t i = 0; i < static_cast<int32_t>(dynamic_emitters_.size()); ++i) {
+        DynamicEmitter &emitter = dynamic_emitters_[static_cast<size_t>(i)];
+        if (emitter.source_spawn_id != source_spawn_id || emitter.lane != lane) {
+            continue;
+        }
+        for (Slot &s : slots_) {
+            if (s.used && s.dynamic && s.owner == i) {
+                s = Slot{};
+            }
+        }
+        emitter.active = false;
+        emitter.layers.clear();
+        return;
+    }
+}
+
+void AmbientMixer::register_emitter(uint64_t source_spawn_id, int32_t lane,
+                                    const float pos[3], int64_t source_bms_id,
+                                    int32_t lifetime_ticks, int32_t pitch_q16,
+                                    int32_t volume_q8_8,
+                                    std::vector<LayerDesc> layers) {
+    // Position is entity-owned, not lane-owned. An unrefreshed lane remains
+    // spatially attached while its keep-alive naturally expires; this update
+    // deliberately leaves lifetime/refreshed_tick untouched.
+    update_emitter_source(source_spawn_id, pos, source_bms_id);
+
+    // [orig: SoundEmitter_RegisterSetLayers @ 0x528340] — either zero field
+    // routes to SoundEmitter_ClearByEntityAndSlot for this source/lane only.
+    if (pitch_q16 == 0 || volume_q8_8 == 0) {
+        clear_dynamic_emitter(source_spawn_id, lane);
+        return;
+    }
+
+    const int32_t emitter_index =
+            find_or_alloc_dynamic_emitter(source_spawn_id, lane);
+    DynamicEmitter &emitter =
+            dynamic_emitters_[static_cast<size_t>(emitter_index)];
+    emitter.active = true;
+    emitter.source_spawn_id = source_spawn_id;
+    emitter.lane = lane;
+    emitter.pos[0] = pos[0];
+    emitter.pos[1] = pos[1];
+    emitter.pos[2] = pos[2];
+    emitter.source_bms_id = source_bms_id;
+    emitter.layers = std::move(layers);
+    emitter.occl_stamp = -1;
+    emitter.occl_dist_q16 = -1;
+
+    // A keyed refresh may replace a set with fewer layers. The retail key includes
+    // layer ordinal, so release any old ordinal no longer present.
+    for (Slot &s : slots_) {
+        if (s.used && s.dynamic && s.owner == emitter_index &&
+            s.layer >= static_cast<int32_t>(emitter.layers.size())) {
+            s = Slot{};
+        }
+    }
+
+    const int32_t vol_byte =
+            static_cast<int32_t>((static_cast<uint32_t>(volume_q8_8) >> 8) & 0xFFu);
+    for (int32_t li = 0; li < static_cast<int32_t>(emitter.layers.size()); ++li) {
+        Slot *s = find_or_alloc_dynamic_slot(emitter_index, li);
+        if (s == nullptr) {
+            return; // fixed table full: later layers drop like retail
+        }
+        s->lane = lane;
+        s->lifetime = lifetime_ticks;
+        s->vol_byte = vol_byte;
+        s->pitch_q16 = pitch_q16;
+        s->range_q16 = -1;
+        s->refreshed_tick = clock_tick_;
+    }
 }
 
 const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
@@ -287,10 +429,7 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
     // The mix runs per render frame but its clock is the logic tick — lifetimes are
     // frame-rate independent [orig: the current_tick argument @ 0x52133a; delta
     // decrement @ 0x5284aa/0x528541].
-    int64_t delta = 0;
-    if (last_mix_tick_ >= 0 && clock_tick_ > last_mix_tick_) {
-        delta = clock_tick_ - last_mix_tick_;
-    }
+    const int64_t previous_mix_tick = last_mix_tick_;
     last_mix_tick_ = clock_tick_;
     ++mix_counter_;
     for (Slot &s : slots_) {
@@ -303,24 +442,74 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
             s = Slot{};
             continue;
         }
+        int64_t decay_from = previous_mix_tick;
+        if (s.refreshed_tick > decay_from) {
+            decay_from = s.refreshed_tick;
+        }
+        const int64_t delta =
+                decay_from >= 0 && clock_tick_ > decay_from
+                        ? clock_tick_ - decay_from
+                        : 0;
         s.lifetime = delta >= s.lifetime ? 0
                                          : s.lifetime - static_cast<int32_t>(delta);
-        Marker &m = markers_[static_cast<size_t>(s.marker)];
-        const LayerDesc &ld =
-                m.sets[static_cast<size_t>(m.slot_keys[s.region])][static_cast<size_t>(
-                        s.layer)];
+        const float *source_pos = nullptr;
+        int64_t source_bms_id = 0;
+        const LayerDesc *ld = nullptr;
+        int64_t *occl_stamp = nullptr;
+        int64_t *occl_dist_q16 = nullptr;
+        if (s.dynamic) {
+            if (s.owner < 0 ||
+                s.owner >= static_cast<int32_t>(dynamic_emitters_.size())) {
+                s = Slot{};
+                continue;
+            }
+            DynamicEmitter &emitter =
+                    dynamic_emitters_[static_cast<size_t>(s.owner)];
+            if (!emitter.active || s.layer < 0 ||
+                s.layer >= static_cast<int32_t>(emitter.layers.size())) {
+                s = Slot{};
+                continue;
+            }
+            source_pos = emitter.pos;
+            source_bms_id = emitter.source_bms_id;
+            ld = &emitter.layers[static_cast<size_t>(s.layer)];
+            occl_stamp = &emitter.occl_stamp;
+            occl_dist_q16 = &emitter.occl_dist_q16;
+        } else {
+            if (s.owner < 0 || s.owner >= static_cast<int32_t>(markers_.size()) ||
+                s.lane < 0 || s.lane >= 4) {
+                s = Slot{};
+                continue;
+            }
+            Marker &marker = markers_[static_cast<size_t>(s.owner)];
+            const int32_t set_key = marker.slot_keys[s.lane];
+            if (set_key < 0 ||
+                set_key >= static_cast<int32_t>(marker.sets.size()) ||
+                s.layer < 0 ||
+                s.layer >= static_cast<int32_t>(
+                                   marker.sets[static_cast<size_t>(set_key)].size())) {
+                s = Slot{};
+                continue;
+            }
+            source_pos = marker.pos;
+            source_bms_id = marker.source_bms_id;
+            ld = &marker.sets[static_cast<size_t>(set_key)]
+                             [static_cast<size_t>(s.layer)];
+            occl_stamp = &marker.occl_stamp;
+            occl_dist_q16 = &marker.occl_dist_q16;
+        }
         if (s.range_q16 < 0) {
             // Lazily cached falloff range [orig: @ 0x52856a falloff << 16].
-            s.range_q16 = static_cast<int64_t>(ld.falloff_u) << 16;
+            s.range_q16 = static_cast<int64_t>(ld->falloff_u) << 16;
         }
         // Axis cull then euclidean against the layer range [orig: @ 0x5285da axis
         // abs checks; fsqrt compare @ 0x5285e0..0x528633]. Host positions are
         // world floats; the Q16 boundary is the curve call, like the GDScript form
         // this replaces.
         const float range_f = static_cast<float>(s.range_q16) / 65536.0f;
-        const float dx = m.pos[0] - listener[0];
-        const float dy = m.pos[1] - listener[1];
-        const float dz = m.pos[2] - listener[2];
+        const float dx = source_pos[0] - listener[0];
+        const float dy = source_pos[1] - listener[1];
+        const float dz = source_pos[2] - listener[2];
         if (std::fabs(dx) > range_f || std::fabs(dy) > range_f ||
             std::fabs(dz) > range_f) {
             continue;
@@ -330,37 +519,56 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
             continue;
         }
         const int64_t dist_q16 = static_cast<int64_t>(dist * 65536.0f);
-        int32_t vol = emitter_layer_volume(dist_q16, ld.falloff_u, ld.min_u,
-                                           s.vol_byte, ld.member_vol, ld.clamp_vol);
+        int32_t vol =
+                emitter_layer_volume(dist_q16, ld->falloff_u, ld->min_u,
+                                     s.vol_byte, ld->member_vol, ld->clamp_vol);
         if (vol > 0 && occl != nullptr) {
             // One LOS per marker per mix, shared across its layers; rays run only
             // for raw-audible slots (the shipped D-SND-7 lazy form)
             // [orig: Sound_ApplyOcclusionDistance call @ 0x528659].
-            if (m.occl_stamp != mix_counter_) {
-                m.occl_stamp = mix_counter_;
-                m.occl_dist_q16 =
-                        occl(occl_ctx, listener, m.pos, dist_q16, m.source_bms_id);
+            if (*occl_stamp != mix_counter_) {
+                *occl_stamp = mix_counter_;
+                *occl_dist_q16 = occl(occl_ctx, listener, source_pos, dist_q16,
+                                      source_bms_id);
             }
-            if (m.occl_dist_q16 != dist_q16) {
-                vol = emitter_layer_volume(m.occl_dist_q16, ld.falloff_u, ld.min_u,
-                                           s.vol_byte, ld.member_vol, ld.clamp_vol);
+            if (*occl_dist_q16 != dist_q16) {
+                vol = emitter_layer_volume(*occl_dist_q16, ld->falloff_u,
+                                           ld->min_u, s.vol_byte, ld->member_vol,
+                                           ld->clamp_vol);
             }
         }
         if (vol <= 0) {
             continue; // [orig: volume_low == 0 skip @ 0x528706]
         }
         AmbientCandidate c;
-        c.candidate_id = ld.candidate_id;
+        c.candidate_id = ld->candidate_id;
         c.vol = vol;
-        c.pos[0] = m.pos[0];
-        c.pos[1] = m.pos[1];
-        c.pos[2] = m.pos[2];
+        c.pitch_q16 = s.pitch_q16;
+        c.pos[0] = source_pos[0];
+        c.pos[1] = source_pos[1];
+        c.pos[2] = source_pos[2];
         mix_out_.push_back(c);
         // The original's candidate collect buffer holds 64 entries and the slot
         // walk BREAKS when it fills — slots past the 64th audible candidate never
         // rank that frame [orig: the v77 >= &buffer_end break @ 0x528775].
         if (mix_out_.size() >= 64) {
             break;
+        }
+    }
+    // Natural expiry releases the reusable dynamic source record after its
+    // final layer slot has gone. Explicit clears already do this immediately.
+    std::vector<bool> dynamic_live(dynamic_emitters_.size(), false);
+    for (const Slot &s : slots_) {
+        if (s.used && s.dynamic && s.owner >= 0 &&
+            s.owner < static_cast<int32_t>(dynamic_live.size())) {
+            dynamic_live[static_cast<size_t>(s.owner)] = true;
+        }
+    }
+    for (size_t i = 0; i < dynamic_emitters_.size(); ++i) {
+        DynamicEmitter &emitter = dynamic_emitters_[i];
+        if (emitter.active && !dynamic_live[i]) {
+            emitter.active = false;
+            emitter.layers.clear();
         }
     }
     // Loudest first; equal volumes keep deterministic membership by candidate id —

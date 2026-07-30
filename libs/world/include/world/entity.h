@@ -519,6 +519,9 @@ struct Entity {
         int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
         int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
         int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
+        bool reverse_sound_latched = false; // movement-sound direction bit
+                                            // [orig: vehicleData+0x318 bit 2]
+        uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
         bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick

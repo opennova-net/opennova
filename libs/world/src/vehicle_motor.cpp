@@ -6,6 +6,7 @@
 #include "world/ai.h"
 #include "world/angle.h"
 #include "world/geom.h"
+#include "world/vehicle_sound.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -66,6 +67,7 @@ Entity *resolve_vehicle_controller(World &world, Entity &veh) {
     if (veh.primary_occupant.valid()) {
         Entity *po = world.registry.get(veh.primary_occupant);
         if (po == nullptr || !po->mounted || po->mount_target != veh.handle) {
+            stop_ground_vehicle_sound(world, veh);
             veh.primary_occupant = EntityHandle{};
             emit_vehicle_control_stopped(world, veh);
         }
@@ -293,6 +295,8 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
     }
 
+    bool collided = false;
+
     // ------------------------------------------- velocity, gravity, integration
     {
         // Direction from the live heading; velocity only re-derives while grounded —
@@ -308,8 +312,9 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                            // below (pitch/roll contact solve deferred, D-NET-161)
         }
         m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
-        // The in-water 25% drag + authority drown-drain block is unmodeled
-        // (no world water height; D-NET-161) [orig: @0x48d6a4-0x48d6f8].
+        // The in-water 25% drag + authority drown-drain block remains unmodeled
+        // (the water plane is available, but not yet consumed by motor physics;
+        // D-NET-161) [orig: @0x48d6a4-0x48d6f8].
 
         const int32_t prev[3] = {to_fixed(veh.position.x), to_fixed(veh.position.y),
                                  to_fixed(veh.position.z)};
@@ -329,6 +334,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             const int32_t sev =
                     world.ai->collision->resolve_vehicle_hull(world, veh.handle, moved,
                                                               prev, push);
+            collided = sev != 0;
             if (sev == 3) {
                 px += push[0];
                 py += push[1];
@@ -372,6 +378,12 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         veh.yaw = static_cast<int16_t>(std::lround(
                 normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
     }
+
+    // Publish the final motor state into the generic, host-owned persistent
+    // emitter seam. The claimant gate lives in the sound consumer because the
+    // motor still needs to settle an unoccupied PlayerControl vehicle.
+    // [orig: Entity_ProcessMovementSoundEffects call @0x48d181..0x48d25c]
+    update_ground_vehicle_sound(world, veh, traits, wrecked, collided);
 }
 
 } // namespace opennova::world

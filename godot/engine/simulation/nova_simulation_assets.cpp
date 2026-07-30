@@ -229,6 +229,17 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
 				vt.player_control = (attrib & 0x40u) != 0;
+				// Vehicle audio belongs to the vehicle ItemDef, not to the
+				// mounted NPC's AiProfile. Resolve the profile name and the
+				// item-level soundloop overrides once at this portable boundary.
+				// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
+				vt.sound_profile = p_item_db->get_sound_profile(def_id).utf8().get_data();
+				const PackedStringArray loops = p_item_db->get_sound_loops(def_id);
+				for (int i = 0; i < loops.size() &&
+						i < static_cast<int>(vt.sound_loops.size()); ++i) {
+					vt.sound_loops[static_cast<size_t>(i)] =
+							String(loops[i]).utf8().get_data();
+				}
 				world_->vehicle_traits.set(e->item_id, vt);
 			}
 		}

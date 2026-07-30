@@ -23,6 +23,7 @@
 #include "world/system.h"
 #include "world/trigger_relations.h"
 #include "world/round_ring.h"
+#include "world/sound_emitter_mailbox.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
 #include "world/ammo_table.h"
@@ -335,6 +336,7 @@ public:
     // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
     audio::SoundProfileTable sound_profiles;
     std::vector<SoundSlotEvent> slot_sounds;
+    SoundEmitterMailbox sound_emitters;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
