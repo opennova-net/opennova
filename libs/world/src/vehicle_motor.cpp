@@ -106,7 +106,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
 
     if (traits.player_control) {
-        if (occ == nullptr || wrecked || (veh.flags & 0x2u) != 0) {
+        if (occ == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
             // No controller (or dead/locked vehicle): steer holds the current heading,
             // commanded speed decays to zero through the decel clamps below.
             // [orig: @0x48c002-0x48c02d — `+528 = entity->Yaw; [136] = 0; [137] = 0;
@@ -247,7 +247,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // Airborne: the command opposes the current motion (a coast brake)
         // [orig: @0x48ba64-0x48ba8a, gated `BYTE2(aiRef0) == 0 && !(Flags & 0x2000)`].
         int32_t cmd = m.cmd_speed;
-        if (!m.grounded && (veh.flags & 0x2000u) == 0) {
+        if (!m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
                 if (cmd < 0) cmd = -cmd;
             } else if (cmd > 0) {

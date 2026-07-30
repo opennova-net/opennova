@@ -288,14 +288,10 @@ struct BlinkAccum {
     }
 };
 
-inline constexpr uint32_t kBlinkIndoorsBit = 0x2;        // accum bit -> Flags 0x800000
-inline constexpr uint32_t kEntityFlagIndoors = 0x800000; // entity+36 bit
-// Raw entity Flags bit written by a CL/type-4 touch. Retail also uses it to lock
-// the upper-body pose and skip gravity while aligned to a ladder. The reimpl
-// currently extracts the contact frame but does not implement climb locomotion.
-inline constexpr uint32_t kEntityFlagLadderContact = 0x100000;
-inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;  // type-6 volume touch
-inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800; // type-11 volume touch
+inline constexpr uint32_t kBlinkIndoorsBit = 0x2;        // accum bit -> kEntityFlagIndoors
+// The entity Flags bit constants the touch dispatch writes (kEntityFlagIndoors/
+// LadderContact/ArmoryZone/VehicleLoadoutZone) live in world/entity.h — the one
+// home beside the field they describe.
 
 // A test point (stride-4 record, xyz + spare — faithful to the caller layout).
 struct CollisionPoint {

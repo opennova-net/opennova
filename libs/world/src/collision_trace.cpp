@@ -33,7 +33,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
     // @ 0x538720; the contact pick @ 0x4ae233].
     const bool using_husk =
-            (e->engine_flags & 0x4u) != 0 && instance->husk_model_id >= 0;
+            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
     int32_t model_id =
             using_husk ? instance->husk_model_id : instance->model_id;
     const CollisionModel *m = model(model_id);
@@ -155,7 +155,7 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
     const Entity *e = world.registry.get(h);
     if (e == nullptr) return false;
     const bool using_husk =
-            (e->engine_flags & 0x4u) != 0 && instance->husk_model_id >= 0;
+            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
     const CollisionModel *m =
             model(using_husk ? instance->husk_model_id : instance->model_id);
     if (m == nullptr || !m->valid()) return false;
@@ -171,7 +171,7 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
 const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
                                                              EntityHandle h) const {
     const Entity *e = world.registry.get(h);
-    const bool husk_now = e != nullptr && (e->engine_flags & 0x4u) != 0;
+    const bool husk_now = e != nullptr && (e->engine_flags & kEntityFlagHusk) != 0;
     const uint32_t mask_now = e != nullptr ? e->spawned_piece_mask : 0;
     const uint64_t spawn_id_now =
             e != nullptr ? e->registry_spawn_id : uint64_t{0};
@@ -707,7 +707,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     int32_t effective_radius = std::max(trace.radius_q16, 0);
     const bool authority_fat_bullet =
         world.mp_session && world.projectile_authority && world.fat_bullets &&
-        owner != nullptr && (owner->flags & 0x100u) != 0 &&
+        owner != nullptr && (owner->flags & kEntityFlagPlayer) != 0 &&
         trace.owner != world.cached.local_player;
     if (authority_fat_bullet)
         effective_radius = std::max(effective_radius, kProjectileAuthorityMinRadiusQ16);

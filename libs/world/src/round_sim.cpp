@@ -875,7 +875,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             int32_t damage = calc_impact_damage(velocity_q16, *ammo, collision.hit_zone,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
-            if ((target->engine_flags & 0x4000000u) != 0 ||
+            if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
                 target->armor_impact == -1 ||
                 ammo->penetration_impact < target->armor_impact ||
                 target->damage_state != 0)
@@ -997,7 +997,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         event.shooter = r.owner.packed;
         event.ammo_index = impact_ammo_index;
         event.husk = impact_target != nullptr &&
-                     (impact_target->engine_flags & 0x4u) != 0;
+                     (impact_target->engine_flags & kEntityFlagHusk) != 0;
         event.t = static_cast<float>(collision.t_q16) / 65536.0f;
         event.p0 = r.pos;
         event.p1 = vec_from_fixed(end_q16);

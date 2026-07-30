@@ -377,10 +377,8 @@ void destruction_tick_dead_items(World &world,
 int32_t item_bullet_damage_gate(const World &world, const Entity &target,
                                 int32_t damage, int32_t penetration_impact);
 
-// The retail entity Flags bits this module owns.
-inline constexpr uint32_t kEntityFlagDead = 0x2;      // Flags bit 1
-inline constexpr uint32_t kEntityFlagHusk = 0x4;      // Flags bit 2 — husk swap
-inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000;
+// The entity Flags bit constants (kEntityFlagDead/Husk/Indestructible and the
+// rest) live in world/entity.h — the one home beside the field they describe.
 
 } // namespace opennova::world
 

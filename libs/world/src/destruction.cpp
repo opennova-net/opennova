@@ -117,7 +117,7 @@ EntityHandle resolve_attacker_chain(World &world, EntityHandle owner) {
     for (int hop = 0; hop < 2; ++hop) {
         const Entity *e = world.registry.get(resolved);
         if (e == nullptr) break;
-        if (e->health > 0 || (e->engine_flags & 0x100u) != 0) break;
+        if (e->health > 0 || (e->engine_flags & kEntityFlagPlayer) != 0) break;
         if (!e->last_attacker.valid()) break;
         resolved = e->last_attacker;
     }
@@ -695,7 +695,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         mask = spawn_death_pieces(world, target);
         break;
     }
-    if (!matched_row) target.engine_flags &= ~0x20000u;
+    if (!matched_row) target.engine_flags &= ~kEntityFlagBuilding;
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
@@ -763,7 +763,7 @@ void destruction_tick_dead_items(World &world,
             }
             const bool routed_falling = e->death_motion == DeathMotionMode::Falling;
             const bool static_motion = e->death_motion == DeathMotionMode::Static;
-            if (routed_falling) e->engine_flags &= ~0x20000u;
+            if (routed_falling) e->engine_flags &= ~kEntityFlagBuilding;
             const Vec3 old_position = e->position;
             if (static_motion) {
                 // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
@@ -772,7 +772,7 @@ void destruction_tick_dead_items(World &world,
                 if (terrain != nullptr && terrain->valid())
                     ground = terrain::height_field_height_world_bilinear(
                             *terrain, e->position.x, -e->position.y);
-                e->engine_flags &= ~0x20000u;
+                e->engine_flags &= ~kEntityFlagBuilding;
                 const float static_water =
                         water_height <= -1.0e8f ? 0.0f : water_height;
                 const float water_above_ground = static_water - ground;

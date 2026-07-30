@@ -116,7 +116,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (vel_z > 0 || vel_z < -420) full_update = true;
     if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
         full_update = true;
-    if (ent != nullptr && (ent->flags & 0x2000u) != 0) full_update = true; // [orig: @ 0x4b2ca6]
+    if (ent != nullptr && (ent->flags & kEntityFlagInAir) != 0) full_update = true; // [orig: @ 0x4b2ca6]
     if ((tick & 0x3Fu) == 0) full_update = true;
     if (!full_update) {
         if (state.skip_counter <= 10) {
@@ -345,7 +345,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const bool repulse_exempt_flags = ent != nullptr && (ent->flags & 0x43u) != 0;
     if (!had_model_contact && !repulse_exempt_state && !repulse_exempt_flags) {
         int32_t my_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
-        if (ent != nullptr && (ent->flags & 0x20u) != 0) my_radius += 0x20000;
+        if (ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) my_radius += 0x20000;
         for (const PersonSlot &p : persons_) {
             if (p.h == source) continue;
             const int32_t threshold = 30 * (my_radius + p.radius) / 100;
@@ -499,7 +499,7 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         ent.pos[2] = tv->pos[2];
         ent.bound_radius = tv->bound_radius;
         if (const Entity *e = world.registry.get(h)) {
-            ent.husk = (e->engine_flags & 0x4u) != 0 &&
+            ent.husk = (e->engine_flags & kEntityFlagHusk) != 0 &&
                        instances_.at(h.packed).husk_model_id >= 0;
             if (e->bound_radius > 0.0f) ent.bound_radius = to_fixed(e->bound_radius);
         }
@@ -595,7 +595,7 @@ void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &hea
     // DH/DM/DL contact damage is authority-only AND gated off for
     // EngineFlags 0x4000000 entities.
     // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
-    if (is_authority && (ent->engine_flags & 0x4000000u) == 0) {
+    if (is_authority && (ent->engine_flags & kEntityFlagIndestructible) == 0) {
         // Damage low/medium/high. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);

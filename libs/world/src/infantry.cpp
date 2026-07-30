@@ -1606,7 +1606,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         }
         // The own priority-target mark decays each scan; firing re-arms it.
         // [orig: Flags &= ~0x4000 @0x4bbfa4]
-        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~0x4000u;
+        if (Entity *se = world.registry.get(e.handle)) se->engine_flags &= ~kEntityFlagPriorityTarget;
     }
 
     // --- Behavior + aim (per tick with a live target). [orig: §17.3/§17.5] ---
@@ -2034,8 +2034,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // and the equipped ADM index at +0x2B0 [orig: read @0x4b5dba]. Without this a
     // remote player holds a rifle pose whatever it carries, and never adopts the
     // scoped stance the wire is already reporting.
-    inf.scope_raised = (ent->flags & 0x10u) != 0;
-    inf.binoculars_raised = (ent->flags & 0x08u) != 0;
+    inf.scope_raised = (ent->flags & kEntityFlagScopeRaised) != 0;
+    inf.binoculars_raised = (ent->flags & kEntityFlagBinoculars) != 0;
     infantry_weapon_channel(e, world, logic_tick);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real

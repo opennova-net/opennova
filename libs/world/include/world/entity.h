@@ -125,6 +125,39 @@ inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — gates the 0x0D AI-trailer
 inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
 
+// The retail entity Flags dword bits (Entity::engine_flags + the organic
+// low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
+// witnessed meaning; the consolidated per-bit table is
+// docs/world/world-wac-ai-re.md § "The entity Flags dword". Known-but-unnamed
+// bits stay raw at use sites — do not name: 0x1, 0x80, 0x10000, 0x2000000,
+// 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
+// meanings unwitnessed).
+inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
+inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
+inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG draw, same bit kind-dependent
+                                                              // [orig: draw @0x4e3b54; refresh of bits 2-4 §13.1]
+inline constexpr uint32_t kEntityFlagBinoculars = 0x8;        // [orig: draw @0x4e3c04; g_binocularsRaised refresh]
+inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_weaponScopeActive refresh; test @0x4b5deb]
+inline constexpr uint32_t kEntityFlagParachute = 0x20;        // deployed chute (D-INF-20) [orig: radius leg @0x4b3aac]
+inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
+                                                              // [orig: @0x494752; guard @0x4bf5a5-family]
+inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates held-weapon draws
+                                                              // [orig: §5.10b class; draw gate @0x4e5073-family]
+inline constexpr uint32_t kEntityFlagReflective = 0x400;      // BMS Reflective(1<<23) [orig: @0x40e9f0]
+inline constexpr uint32_t kEntityFlagVehicleLoadoutZone = 0x800;  // type-11 volume touch
+inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimming [orig: grounded selector @0x4b78ab]
+inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
+                                                              // [orig: @0x4bf370 set; @0x4bbfa4 clear; §16.2 x6 scoring]
+inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
+inline constexpr uint32_t kEntityFlagBuilding = 0x20000;      // [orig: Entity_InitFromModel @0x40e105]
+inline constexpr uint32_t kEntityFlagLadderContact = 0x100000; // CL/type-4 touch; locks upper-body pose + skips
+                                                               // gravity while aligned [orig: @0x4b3291]
+inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume touch [orig: @0x4aea45]
+inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
+inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
+inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+                                                                 // [orig: @0x40e9f0; @0x40dc8e]
+
 struct Entity {
     uint16_t net_id = 0;      // SSN; the field WAC/BMS address entities by
     int32_t bms_id = 0;       // file entity id (bms::Entity::id); the host keys placed nodes by this

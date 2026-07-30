@@ -606,15 +606,21 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelec
     occ->mount_bone = s.bone_index;                        // [orig: occupant+0x157]
     occ->mounted = true;
     if (s.type == SeatType::Gunner) {
-        // UseGun clears the transient 0xA000 pair but does not set the generic
-        // carried/vehicle flag. [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
-        occ->flags &= ~0xA000u;
-        occ->engine_flags &= ~0xA000u;
+        // UseGun clears the transient drowning/in-air pair but does not set the
+        // generic carried/vehicle flag. [orig: Entity_AttachToUseGunSlot
+        // @0x546c56-0x546c7c clears 0xA000]
+        occ->flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
+        occ->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagInAir);
     } else {
-        // Ordinary vehicle slots clear 0xA000 and mark the occupant carried.
-        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775]
-        occ->flags = (occ->flags & 0xFFFF5FBFu) | 0x40u;
-        occ->engine_flags = (occ->engine_flags & 0xFFFF5FBFu) | 0x40u;
+        // Ordinary vehicle slots clear the pair and mark the occupant carried.
+        // [orig: Entity_AttachToVehicleSlot @0x494752-0x494775, the
+        // `& 0xFFFF5FBF | 0x40` form — the masks are static_asserted at the
+        // vehicle_attach.cpp twin]
+        occ->flags = (occ->flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                     kEntityFlagMounted;
+        occ->engine_flags =
+                (occ->engine_flags & ~(kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted)) |
+                kEntityFlagMounted;
     }
     occ->mounted_config_valid = tgt->emplaced_config_valid;
     occ->mounted_config = tgt->emplaced_config_valid ? tgt->emplaced_config : 0;
@@ -680,8 +686,8 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
         tgt->seats[occ->mount_seat].occupant = EntityHandle{}; // [orig: vehicle[400+2*slot]=0xFFFF]
     vehicle_release_use_gun_slot(*occ, tgt);
     occ->mounted = false;
-    occ->flags &= ~0x40u;
-    occ->engine_flags &= ~0x40u;
+    occ->flags &= ~kEntityFlagMounted;
+    occ->engine_flags &= ~kEntityFlagMounted;
     occ->mount_target = EntityHandle{};
     occ->mount_target_net_id = 0;
     occ->mount_target_bms_id = 0;
