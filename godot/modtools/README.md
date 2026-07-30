@@ -52,8 +52,11 @@ managed process.
 
 Running never saves, exports, copies, or stages editor data. Unsaved changes are
 deliberately excluded, and F6 warns when it is launching an older saved version.
-The resource directory still needs to be a usable game install (PFFs present);
-saved loose files overlay it exactly as they did for the original tools.
+A resource directory that is a game install (PFFs present) plays with saved
+loose files overlaying it exactly as the original tools did; a loose authoring
+directory with no packed archives plays as the loose file set directly (the
+managed launch passes `--loose-root` — ADR 0025's tracked divergence from the
+game's packed-only boot).
 
 Run warnings name every workspace with unsaved changes. Save whichever loose
 asset you want the standalone process to consume, then relaunch; the editor

@@ -316,6 +316,56 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	_rm_runtime_dir(dir)
 
 
+# A loose authoring root (the ONED --loose-root play-test mount, ADR 0025) has no
+# packed archives to relayer: applying a discoverable expansion must refuse and
+# leave the live loose mount untouched, not remount it through mount_runtime into
+# a cleared root (the zero-archives fatal would kill the running play-test).
+func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
+	var saved := NovaResourceDirSettings.get_expansion()
+	NovaResourceDirSettings.set_expansion("")
+	var dir := OS.get_temp_dir().path_join("menu_shell_loose_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
+	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.close()
+	file = FileAccess.open(dir.path_join("menumus.bin"), FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(FileAccess.get_file_as_bytes(MUS_FIXTURE))
+	file.close()
+	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
+	# The expansion pair exists ON DISK (list_expansions scans the path), but the
+	# mounted root is the editor's loose mount, which cannot layer it.
+	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "expmodel.3di", "bytes": "exp model"},
+	])
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var host = MenuHostScript.new()
+	host.main_menu_file = "options.mnu"
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	assert_true(host.setup(root), "the loose root serves the menu fixture")
+	var menu = host.get_menu()
+	var avail = menu.find_child("AVAIL_LIST", true, false)
+	assert_not_null(avail)
+	assert_eq(avail.item_count, 1, "the packed expansion is still discoverable on disk")
+	avail.select(0)
+	var accept = menu.find_child("ACCEPT", true, false)
+	assert_not_null(accept)
+	(accept as BaseButton).pressed.emit()
+	assert_eq(host.get_selected_expansion(), "", "the loose mount refuses the switch")
+	assert_eq(NovaResourceDirSettings.get_expansion(), "", "nothing persisted")
+	assert_false(root.read_file("options.mnu").is_empty(),
+			"the live loose mount survives untouched (no clear())")
+	root.clear()
+	NovaResourceDirSettings.set_expansion(saved)
+	for sub in ["options.mnu", "menumus.bin", "menumus.sbf",
+			"expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
+		DirAccess.remove_absolute(dir.path_join(sub))
+	DirAccess.remove_absolute(dir)
+
+
 # The opposite scope: on a play screen (mission list IA_LIST present) the same ACCEPT
 # name still launches, so the screen-scoped wiring did not break the SP launch path.
 func test_play_screen_accept_still_launches() -> void:

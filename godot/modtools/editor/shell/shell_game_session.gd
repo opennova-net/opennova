@@ -282,12 +282,15 @@ func call_runtime_tool(tool: String, arguments: Dictionary = {}) -> Variant:
 		arguments.duplicate(true))
 
 
-## The game always mounts this exact directory with /d. An F6 request adds the
-## exact saved loose BMS; editor-managed identity is opaque to the game shell.
+## The game always mounts this exact directory with /d, and --loose-root lets a
+## directory holding no packed archives (a loose authoring root) play as the
+## loose file set ONED is editing (ADR 0025). An F6 request adds the exact saved
+## loose BMS; editor-managed identity is opaque to the game shell.
 static func runtime_flags(request: GameRunRequest) -> PackedStringArray:
 	var flags := PackedStringArray([
 		"/d",
 		"--resource-dir", request.resource_dir,
+		"--loose-root",
 	])
 	var exp_name := request.expansion.strip_edges()
 	if not exp_name.is_empty():

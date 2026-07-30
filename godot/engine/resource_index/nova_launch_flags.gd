@@ -14,6 +14,11 @@ extends RefCounted
 ##                 the persisted editor/game preference.
 ##   --loose-mission <name.bms>
 ##                 boot the exact top-level loose BMS from --resource-dir.
+##   --loose-root  editor-managed runs: when the directory holds none of the
+##                 packed game archives, mount it as loose files (the editor's
+##                 own mount) instead of failing the boot. Ordinary standalone
+##                 launches omit it, keeping retail's no-archives fatal error
+##                 (ADR 0025).
 ##   --oned-run-id / --oned-run-descriptor
 ##                 opaque editor-run identity consumed by the optional runtime
 ##                 control service. Ordinary standalone launches omit both.
@@ -81,6 +86,16 @@ static func resource_dir(fallback: String = "") -> String:
 ## A top-level loose BMS to boot directly, or "" for the normal menu flow.
 static func loose_mission() -> String:
 	return _value_after("--loose-mission")
+
+
+## True when `--loose-root` was passed: this editor-managed run may play a
+## directory with no packed archives (a loose authoring root) through the
+## editor's loose mount instead of retail's fatal no-archives error.
+static func loose_root_allowed() -> bool:
+	for arg in _all_args():
+		if arg.to_lower() == "--loose-root":
+			return true
+	return false
 
 
 ## Opaque editor-run identity and the absolute descriptor path the runtime

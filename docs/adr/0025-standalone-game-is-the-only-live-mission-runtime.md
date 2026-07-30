@@ -34,6 +34,15 @@ and state machinery that the engine itself does not need.
 3. **F5 runs the normal game.** ONED launches one managed standalone child
    over the resource directory it has mounted. Starting F5 again, or switching
    from F6 to F5, replaces that child rather than creating another runtime.
+   Because ONED mounts loose files while the game's runtime mount is
+   packed-archive-first, every managed launch also passes `--loose-root`: a
+   directory holding none of the packed archives then falls back to the
+   editor's loose mount instead of failing the boot, so play-testing works on
+   the exact loose file set being authored. This is a tracked divergence from
+   retail's fatal no-archives gate
+   [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44],
+   scoped to editor-managed runs only — a standalone launch without the flag
+   keeps the witnessed fatal error.
 4. **F6 runs the current mission.** The mission must already be saved as an
    existing top-level loose `.bms` in the mounted resource directory. The
    standalone game boots that exact saved mission through its normal

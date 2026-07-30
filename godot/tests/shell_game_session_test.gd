@@ -17,6 +17,7 @@ func test_runtime_flags_carry_exact_root_mission_and_editor_identity() -> void:
 	assert_eq(Session.runtime_flags(request), PackedStringArray([
 		"/d",
 		"--resource-dir", "C:/assets",
+		"--loose-root",
 		"/exp", "jox01",
 		"/game", "jodemo",
 		"--loose-mission", "alpha.bms",

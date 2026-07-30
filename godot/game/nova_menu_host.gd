@@ -419,6 +419,13 @@ func _on_apply_selected_mod() -> void:
 func _apply_expansion(name: String) -> void:
 	if _root == null or name.is_empty() or name == _current_expansion():
 		return
+	# Expansions layer packed archives, so only a runtime (PFF) mount can switch
+	# them. A loose-root play-test mount (ADR 0025) lists no expansions to begin
+	# with; this guard keeps a hand-driven selection from remounting the loose
+	# root through mount_runtime and clearing it on the inevitable failure.
+	if not _root.is_runtime_mount():
+		push_warning("NovaMenuHost: expansions need a packed game install; the loose mount stands")
+		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
 	# A full context reload clears the AudioVM globals. Preserve the active
