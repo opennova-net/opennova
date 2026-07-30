@@ -39,8 +39,14 @@ struct GameConfig {
 	// and Server_AssignPlayerTeam. Default 0 (a fresh/dev host); a real host seeds the mission gametype.
 	uint32_t game_type = 0;                     // [orig g_GameType @0x24D2128 == game_settings +0xCC]
 	// mpattrib bitmask — the BuildFlags team-branch input [orig game_settings +0xD0] AND the 0x64
-	// mission-metadata blob's attrib dword. Observed bits: 0x001 NoTracers, 0x004 TeamChoose,
-	// 0x008 FFWarning-suppress, 0x200 NoFriendlyFire, 0x400 NoFriendlyTag, 0x8000 ClaymorePref.
+	// mission-metadata blob's attrib dword. Observed bits (docs/net/novaworld-net-re.md §6.4;
+	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0]):
+	static constexpr uint32_t kMpAttribNoTracers = 0x001;
+	static constexpr uint32_t kMpAttribTeamChoose = 0x004;
+	static constexpr uint32_t kMpAttribFFWarningSuppress = 0x008;
+	static constexpr uint32_t kMpAttribNoFriendlyFire = 0x200;
+	static constexpr uint32_t kMpAttribNoFriendlyTag = 0x400;
+	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
 	uint32_t mp_attributes = 14854;             // [orig game_settings +0xD0]
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.

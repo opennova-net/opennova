@@ -74,7 +74,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // SP clears it
 	if (!gs.server_password.empty()) flags |= 0x8u;
 	if ((gs.game_type & 0x10000u) != 0) {     // team game
-		if ((gs.mp_attributes & 4u) != 0) flags |= 0x4u;
+		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= 0x4u;
 		if (!gs.side_a_password.empty()) flags |= 0x20u;
 		if (!gs.side_b_password.empty()) flags |= 0x10u;
 	}
