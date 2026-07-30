@@ -1,6 +1,7 @@
 #include "npruntime/joiner_connection.h"
 
 #include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
@@ -162,7 +163,8 @@ std::vector<uint8_t> build_retail_mission_status() {
 
 bool is_structural_cs_config_update(
 		const ProtocolMessage &message, uint8_t &direction_out) {
-	if (!message.flags.settings_update || message.full_tag != 0x100u ||
+	if (!message.flags.settings_update ||
+	    message.full_tag != (PROTOCOL_FULL_TAG_HIGH_BASE | hightag::CS_CONFIG_UPDATE) ||
 	    message.payload.size() < 5 || message.payload[0] > 1) {
 		return false;
 	}
@@ -438,7 +440,7 @@ ProtocolMessage JoinerConnection::make_loaded_model_page_reply(
 						static_cast<uint8_t>((index >> shift) & 0xFFu));
 		}
 	}
-	return make_protocol_message(0x3D, std::move(page));
+	return make_protocol_message(c2s::LOADED_MODEL_PAGE_REPLY, std::move(page));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence) {
@@ -581,15 +583,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			out.send_holdoff_set = true;
 			out.send_holdoff = holdoff;
 		}
-		if (!m.flags.settings_update && m.full_tag < 0x100u && m.tag == 0x5A) {
+		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE && m.tag == s2c::WEAPON_LOADOUT) {
 			WeaponLoadout loadout;
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
 				out.loadout_grants.push_back(std::move(loadout));
 			}
 		}
-		if (!m.flags.settings_update && m.full_tag < 0x100u &&
-		    m.tag == 0x0F && m.payload.size() > 22) {
+		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
+		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
 			deployment_policy_seen_ = true;
 			deployment_pick_required_ = (m.payload[22] & 0x01u) != 0;
 		}
@@ -647,11 +649,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		}
 		// The initial settings records use low tag 0x00 with the high/settings flag set. They are
 		// connection control, not the regular S2C 0x00 JOIN acknowledgement below.
-		if (m.flags.settings_update || m.full_tag >= 0x100u) continue;
+		if (m.flags.settings_update || m.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
 		// ensures a 0x39 before a same-packet 0x5A still sees the prior class.
-		if (m.tag == 0x5A) {
+		if (m.tag == s2c::WEAPON_LOADOUT) {
 			WeaponLoadout loadout;
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
@@ -659,13 +661,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		}
 
-		if (m.tag == 0x00 && post_auth_stage_ == PostAuthStage::AwaitJoinAck) {
+		if (m.tag == s2c::INIT && post_auth_stage_ == PostAuthStage::AwaitJoinAck) {
 			// Golden retail frames 9-11: acknowledge S2C 0x00 with a header-only sequence, then post
 			// the one-byte zero form body. An empty 0x01 is not accepted by the retail host FSM.
 			out.outbound.push_back(frame_session({}));
 			out.outbound.push_back(frame_inner(0x01, {0x00}));
 			post_auth_stage_ = PostAuthStage::AwaitPaddingProbe;
-		} else if (m.tag == 0x02 &&
+		} else if (m.tag == s2c::JOIN_PADDING_PROBE &&
 		           post_auth_stage_ == PostAuthStage::AwaitPaddingProbe) {
 			// Retail's response to the post-auth join probe. This sequenced reply is what causes the
 			// server to send the post-handshake burst containing authoritative S2C 0x7B metadata.
@@ -678,20 +680,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						0x02, build_join_padding_echo(probe, net_frame_counter_)));
 				post_auth_stage_ = PostAuthStage::AwaitGameStart;
 			}
-		} else if (m.tag == 0x05 &&
+		} else if (m.tag == s2c::GAME_START_SIGNAL &&
 		           post_auth_stage_ == PostAuthStage::AwaitGameStart &&
 		           !m.payload.empty() && m.payload[0] != 0) {
 			// Golden frame 17: the game-start flag completes verification with ONE grouped C2S
 			// packet. This exchange runs before local mission loading; 0x48 echoes ServerAuth.MI.
 			out.outbound.push_back(frame_session({
-					make_protocol_message(0x4E, std::vector<uint8_t>(4, 0)),
-					make_protocol_message(0x03, std::vector<uint8_t>(4, 0)),
-					make_protocol_message(0x48, le32_value(conn_.connection_id)),
-					make_protocol_message(0x47, {}),
-					make_protocol_message(0x33, std::vector<uint8_t>(8, 0)),
+					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
+					make_protocol_message(c2s::SET_PLAYER_VALUE, std::vector<uint8_t>(4, 0)),
+					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
+					make_protocol_message(c2s::PING, {}),
+					make_protocol_message(c2s::FILE_CHUNK_REQUEST, std::vector<uint8_t>(8, 0)),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitServerInfo;
-		} else if (m.tag == 0x60 &&
+		} else if (m.tag == s2c::FILE_TRANSFER_CHUNK &&
 		           post_auth_stage_ == PostAuthStage::AwaitServerInfo) {
 			FileTransferChunk chunk;
 			if (decode_file_transfer_chunk(
@@ -710,7 +712,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					post_auth_stage_ = PostAuthStage::AwaitMissionData;
 				}
 			}
-		} else if (m.tag == 0x64 &&
+		} else if (m.tag == s2c::MISSION_DATA_CHUNK &&
 		           post_auth_stage_ == PostAuthStage::AwaitMissionData) {
 			FileTransferChunk chunk;
 			if (decode_file_transfer_chunk(
@@ -724,7 +726,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
 					if (player_list_seen_) {
 						out.outbound.push_back(frame_session({
-								make_protocol_message(0x09, {}),
+								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
 								make_protocol_message(
 										0x22, {0x00, 0xF7, 0x1C}),
 						}));
@@ -732,7 +734,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					}
 				}
 			}
-		} else if (m.tag == 0x16) {
+		} else if (m.tag == s2c::PLAYER_LIST) {
 			PlayerList player_list;
 			if (decode_player_list(
 					m.payload.data(), m.payload.size(), player_list)) {
@@ -742,21 +744,21 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// one packet. OpenNova hosts may send 0x16 early, so the latch above lets
 					// the final 0x64 release the same wire packet without a compatibility fork.
 					out.outbound.push_back(frame_session({
-							make_protocol_message(0x09, {}),
+							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
 							make_protocol_message(
 									0x22, {0x00, 0xF7, 0x1C}),
 					}));
 					enter_initial_sync_tail();
 				}
 			}
-		} else if (m.tag == 0x08) {
+		} else if (m.tag == s2c::SESSION_CONFIG) {
 			// Our initial-state burst carries the same g_GameType in the fixed
 			// session-config block before any live frame. Retail keeps this equal
 			// to the later 0x7B `extra` value.
 			SessionConfig config;
 			if (decode_session_config(m.payload.data(), m.payload.size(), config))
 				game_type_ = static_cast<uint32_t>(config.fields[3]);
-		} else if (m.tag == 0x7B) {
+		} else if (m.tag == s2c::FULL_PLAYER_INFO) {
 			// The retail post-auth source of truth for the session the joiner is about to load.
 			FullPlayerInfo info;
 			if (decode_full_player_info(m.payload.data(), m.payload.size(), info)) {
@@ -767,7 +769,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				expansion_ = std::move(info.game_name);
 				mission_known_ = true;
 			}
-		} else if (m.tag == 0x0C) {
+		} else if (m.tag == s2c::ENTITY_SPAWN_BATCH) {
 			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
 			// batch to the NetClientView (below) so every other organic upserts too.
 			OrganicSpawnBatch batch;
@@ -810,11 +812,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 			}
 			out.inbound_world.emplace_back(m.tag, m.payload);
-		} else if (m.tag == 0x0D || m.tag == 0x10 || m.tag == 0x20) {
+		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
 			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
 			// pool-3 markers. Surface raw for the caller's NetClientView to upsert.
 			out.inbound_world.emplace_back(m.tag, m.payload);
-		} else if (m.tag == 0x04) {
+		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
 			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
 			// writes the full 24-byte body [orig: NetPacket_WriteSlotAssignment @0x502b30];
@@ -831,7 +833,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				local_player_slot_ = m.payload[17];
 				assigned_team_ = m.payload[23];
 			}
-		} else if (m.tag == 0x50) {
+		} else if (m.tag == s2c::TEAM_ASSIGN) {
 			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48
 			// team latch (the S2C 0x04 tail is the first). The host emits it for any
 			// entity retargeted by Server_ChangeEntityTeam @0x518D70, capture zones
@@ -883,7 +885,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					}
 				}
 			}
-		} else if (m.tag == 0x5D) {
+		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {
 			// S2C 0x5D EMPTY-SLOT SWEEP — the reply to our C2S 0x32. Every entry is a
 			// RAW pool-0 index the host considers empty; the client destroys whatever
 			// it still holds there and unlinks the matching player slot. This is the
@@ -898,7 +900,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				for (uint16_t index : destroy_list.pool0_indices)
 					out.destroyed_pool0_slots.push_back(index);
 			}
-		} else if (m.tag == 0x46) {
+		} else if (m.tag == s2c::PLAYER_SYNC) {
 			// S2C 0x46 PLAYER-SYNC. Bit 15 (0x8000) is the roster REMOVAL form: no
 			// entity byte follows, and PlayerSlot_ClearAndUnlink clears BOOKKEEPING
 			// ONLY (active flag, names, team, entity ref). The ENTITY IS NEVER
@@ -912,7 +914,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    sync.removal) {
 				out.cleared_player_slots.push_back(sync.slot_id);
 			}
-		} else if (m.tag == 0x0F && !empty_slot_sweep_requested_) {
+		} else if (m.tag == s2c::WORLD_STATE_LOAD && !empty_slot_sweep_requested_) {
 			// The world-state-load reply burst (§5.29). Retail queues C2S
 			// 0x28/0x29/0x2D/0x32 here; the 0x32 leg is what makes the host answer
 			// S2C 0x5D with its empty pool-0 slots, so a joiner that never asks can
@@ -920,8 +922,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// (D-NET-176 residual).
 			// [orig: NapiNPClientMsg_0x00F @0x42e647]
 			empty_slot_sweep_requested_ = true;
-			periodic_replies.push_back(make_protocol_message(0x32, {}));
-		} else if (m.tag == 0x1A &&
+			periodic_replies.push_back(make_protocol_message(c2s::EMPTY_SLOT_SWEEP_REQUEST, {}));
+		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
 			// The world-stream terminator releases retail's loadout/status submission: the SAME
 			// per-side profile kit twice — first with the fixed Primary-key slot 195, then with
@@ -937,13 +939,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			const LoadoutSubmit second =
 					build_profile_loadout_submit(assigned_team_, true);
 			out.outbound.push_back(frame_session({
-					make_protocol_message(0x2F, encode_loadout_submit(first)),
-					make_protocol_message(0x2F, encode_loadout_submit(second)),
+					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
+					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
 					make_protocol_message(
 							0x0B, build_retail_mission_status()),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitDeployment;
-		} else if (m.tag == 0x57) {
+		} else if (m.tag == s2c::RTT_ECHO) {
 			RttSample sample;
 			std::size_t consumed = 0;
 			if (decode_rtt_sample(
@@ -952,9 +954,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				std::vector<uint8_t> pong = le32_value(sample.timestamp);
 				pong.push_back(0);
 				periodic_replies.push_back(
-						make_protocol_message(0x2C, std::move(pong)));
+						make_protocol_message(c2s::RTT_CONSUMED, std::move(pong)));
 			}
-		} else if (m.tag == 0x41) {
+		} else if (m.tag == s2c::CHARATTR_PROPERTY_CLEAR) {
 			// Session-option mutation of the boot charattr table. A short body
 			// defaults to property 0; trailing bytes are ignored. Every row is
 			// touched before the next inner message dispatches.
@@ -964,7 +966,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.empty() ? uint8_t{0} : m.payload[0];
 			clear_charattr_challenge_property(
 					charattr_challenge_table_, property_id);
-		} else if (m.tag == 0x39) {
+		} else if (m.tag == s2c::CHARATTR_CRC_CHALLENGE) {
 			// Anti-cheat character-attribute CRC challenge. The reply is one
 			// 4-byte C2S 0x1C, and
 			// the host DISCARDS the value: its handler calls its own
@@ -994,8 +996,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						crc32_napi(row->data(), row->size());
 			}
 			periodic_replies.push_back(
-					make_protocol_message(0x1C, le32_value(checksum)));
-		} else if (m.tag == 0x30) {
+					make_protocol_message(c2s::CHARATTR_CRC_REPLY, le32_value(checksum)));
+		} else if (m.tag == s2c::ENTITY_CHECKSUM_REQ) {
 			// Anti-cheat ANIMATION-DEFINITION checksum challenge. The reply is one 5-byte
 			// C2S 0x20: [u8 echoed id][u32 challenge ^ source]. The source is selected by
 			// the id: 0xFF asks for the whole loaded weapon-slot table, any other value
@@ -1020,7 +1022,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// (DC=2, DPC=46, "PUNT ACRC") on a client that had been joining cleanly for
 			// weeks while silent. Silence is the SAFE divergence here (D-NET-181).
 			(void)m;
-		} else if (m.tag == 0x31) {
+		} else if (m.tag == s2c::LOADOUT_CRC_REQ) {
 			// Anti-cheat AMMO-DEFINITION CRC challenge. The reply is one 9-byte C2S 0x21:
 			// [u8 echoed index][u32 crc][u32 echoed key]. Retail CRCs the indexed 276-byte
 			// in-memory ammo record with six volatile dwords zeroed and ships key ^ crc —
@@ -1046,7 +1048,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// record image from our parsed ammo.def, which we do not model yet
 			// (D-NET-181) — until then silence, which the host does not punish.
 			(void)crc_request;
-		} else if (m.tag == 0x68) {
+		} else if (m.tag == s2c::LOADED_MODEL_PAGE_REQUEST) {
 			// Loaded-model index-page request. The reply is C2S 0x3D, whose body the host
 			// never parses (its handler ignores data/dataLen and only stores a global
 			// into the player record), so what matters is that the reply ARRIVES.
@@ -1067,7 +1069,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					index_consumed);
 			periodic_replies.push_back(
 					make_loaded_model_page_reply(start_index));
-		} else if (m.tag == 0x43) {
+		} else if (m.tag == s2c::TIME_SYNC_PING) {
 			// Time-sync / anti-speedhack ping. The client echoes the server's stamp
 			// back with its OWN clock appended, and the host validates that the
 			// client's reported time deltas track wall-clock within 3% — so a client
@@ -1091,8 +1093,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			for (int shift = 0; shift < 32; shift += 8)
 				reply.push_back(static_cast<uint8_t>((local_stamp >> shift) & 0xFFu));
 			periodic_replies.push_back(
-					make_protocol_message(0x08, std::move(reply)));
-		} else if (m.tag == 0x61) {
+					make_protocol_message(c2s::TIME_SYNC_REPLY, std::move(reply)));
+		} else if (m.tag == s2c::TICK_SEED) {
 			// The per-player TICK SEED. Every C2S fired-round descriptor stamps the
 			// client's network-role tick at off-0, and the host rejects a shot whose
 			// tick is zero or not past the seed it stamped into our slot — so an
@@ -1104,10 +1106,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  NapiNPServerMsg_0x006_ClientFiredRound @0x51358d]
 			decode_tick_seed(m.payload.data(), m.payload.size(), out.tick_seed);
 			out.tick_seed_set = true;
-		} else if (m.tag == 0x0A) {
+		} else if (m.tag == s2c::PER_FRAME_UPDATE) {
 			// Per-frame world snapshot — surface for the caller's NetClientView.
 			out.inbound_0a.push_back(m.payload);
-		} else if (m.tag == 0x5A &&
+		} else if (m.tag == s2c::WEAPON_LOADOUT &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 			// Retail grants both submitted profile-side loadouts before it can
 			// process the deployment pick. Persist the count across packet
@@ -1115,7 +1117,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// second grant from being mistaken for the post-pick release.
 			if (initial_loadout_grant_count_ < 2)
 				++initial_loadout_grant_count_;
-		} else if (m.tag == 0x5A &&
+		} else if (m.tag == s2c::WEAPON_LOADOUT &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployRelease) {
 			// A split second grant may arrive after we have queued the deploy
 			// pick. Only a packet that cumulatively ACKs the C2S 0x0E can be its
@@ -1124,25 +1126,25 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    packet_ack >= deployment_pick_sequence_) {
 				release_deployment();
 			}
-		} else if (m.tag == 0x49) {
+		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
 			out.inbound_gameplay.emplace_back(m.tag, m.payload);
-		} else if (m.tag == 0x6F) {
+		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
 			ZoneTimerValue value;
 			std::size_t consumed = 0;
 			if (decode_zone_timer_value(
 					m.payload.data(), m.payload.size(), value, consumed) &&
 			    consumed == m.payload.size())
 				out.zone_timer_values.push_back(value);
-		} else if (m.tag == 0x53) {
+		} else if (m.tag == s2c::ZONE_TIMER_WINDOW) {
 			ZoneTimerWindow window;
 			std::size_t consumed = 0;
 			if (decode_zone_timer_window(
 					m.payload.data(), m.payload.size(), window, consumed) &&
 			    consumed == m.payload.size())
 				out.zone_timer_windows.push_back(window);
-		} else if (m.tag == 0x11) {
+		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
 			// S2C 0x11 is the terminal pre-world admission marker. Its cumulative ACK is the safe
 			// point at which the binding may pause progress for synchronous mission loading. Hold
 			// retail's empty C2S 0x0A world-stream request until that local world is installed.
@@ -1425,11 +1427,11 @@ std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint1
 	EntityPacketSubHeader sub;
 	sub.handle = handle_H;
 	sub.item_type_id = type;
-	sub.sub_op = 0x0A; // extended (type-10) uplink
+	sub.sub_op = ENTITY_SUB_OP_EXTENDED; // extended (type-10) uplink
 	std::vector<uint8_t> payload = encode_entity_packet_sub_header(sub);
 	std::vector<uint8_t> ext = encode_player_extended_uplink(body);
 	payload.insert(payload.end(), ext.begin(), ext.end());
-	return frame_session({make_protocol_message(0x0C, std::move(payload))});
+	return frame_session({make_protocol_message(c2s::ENTITY_UPLINK, std::move(payload))});
 }
 
 void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,

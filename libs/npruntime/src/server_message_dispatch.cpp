@@ -9,6 +9,7 @@
 
 #include <npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
+#include <npwire/ingame_message_id.h>
 #include <npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
@@ -558,14 +559,16 @@ bool emit_post_handshake_burst(const GameConfig &cfg, NapiNPConnection &conn,
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return false;
 
-	out.push_back(make_protocol_message(0x00, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
-	out.push_back(make_protocol_message(0x00, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
-	out.push_back(make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(0x7A, build_tag7a_pcid(cfg)));
-	out.push_back(make_protocol_message(0x7B, build_tag7b_session_summary(cfg)));
+	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0},
+	                                    PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
+	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0},
+	                                    PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
+	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
+	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(cfg)));
+	out.push_back(make_protocol_message(s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
-	out.push_back(make_protocol_message(0x03, {0x01, 0x01, 0x00, 0x01, 0x00}));
-	out.push_back(make_protocol_message(0x05, {0x01}));
+	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
+	out.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
 	uint8_t team = 2; // world-less golden responder default; a live World reserves below
 	if (world != nullptr) {
 		const world::Entity *entity = conn.link.owned_entity.valid()
@@ -606,7 +609,7 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 	EntityPacketSubHeader hdr;
 	size_t header_consumed = 0;
 	if (decode_entity_packet_sub_header(payload.data(), payload.size(), hdr, header_consumed) &&
-	    hdr.sub_op == 0x0A) {
+	    hdr.sub_op == ENTITY_SUB_OP_EXTENDED) {
 		PlayerExtendedUplink uplink;
 		size_t body_consumed = 0;
 		if (decode_player_extended_uplink(payload.data() + header_consumed,
@@ -646,7 +649,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	if (conn.admission_stage != GameAdmissionStage::Complete) {
 		const ProtocolMessage *admission_message = nullptr;
 		for (const ProtocolMessage &message : messages) {
-			if (message.flags.settings_update || message.full_tag >= 0x100u) continue;
+			if (message.flags.settings_update || message.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 			// Each leg is a distinct sequenced request/reply turn. Two gameplay records in one
 			// datagram cannot be a valid 0x00 -> 0x01 or 0x01 -> 0x02 exchange because the client
 			// has not received the intervening acknowledgement/challenge.
@@ -666,7 +669,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.admission_stage = GameAdmissionStage::Rejected;
 					return {};
 				}
-				replies.push_back(make_protocol_message(0x00, {}));
+				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				conn.admission_stage = GameAdmissionStage::AwaitFormPost;
 				return replies;
 
@@ -680,7 +683,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.admission_padding_x = read_u32_le(challenge.data());
 				conn.admission_padding_y = read_u32_le(challenge.data() + 4);
 				replies.push_back(
-						make_protocol_message(0x02, std::move(challenge)));
+						make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge)));
 				conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
 				return replies;
 			}
@@ -716,19 +719,19 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	for (const ProtocolMessage &msg : messages) {
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
 		// these before the gameplay dispatch). [orig: dispatch_in_match_session_messages gate]
-		if (msg.flags.settings_update || msg.full_tag >= 0x100u) continue;
+		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
 
 		switch (msg.tag) {
-			case 0x00: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
-				replies.push_back(make_protocol_message(0x00, {}));
+			case c2s::JOIN: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
+				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				break;
-			case 0x01: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_0x001 @0x512ED0]
+			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_0x001 @0x512ED0]
 				// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
 				// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
 				// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
-				replies.push_back(make_protocol_message(0x02, build_tag02_push(now_tick)));
+				replies.push_back(make_protocol_message(s2c::JOIN_PADDING_PROBE, build_tag02_push(now_tick)));
 				break;
-			case 0x02: // GLB_JOIN reply -> the post-handshake burst + 0x16 [orig: NapiNPServerMsg_0x002 @0x512FD0]
+			case c2s::JOIN_PADDING_ECHO: // GLB_JOIN reply -> the post-handshake burst + 0x16 [orig: NapiNPServerMsg_0x002 @0x512FD0]
 				// Reactive to the client's C2S 0x02 (the golden's f133->f134 leg). Sets roster_pushed,
 				// which unblocks the §5.2a world-stream burst in tick_connections — so the post-handshake
 				// (0x01/0x7a/0x7b/0x03/0x16) reliably PRECEDES the world-stream (golden f134-142 vs f144).
@@ -738,11 +741,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						conn.admission_stage = GameAdmissionStage::Rejected;
 						return {};
 					}
-					replies.push_back(make_protocol_message(0x16, build_reply_tag_16(roster, rep, world)));
+					replies.push_back(make_protocol_message(s2c::PLAYER_LIST, build_reply_tag_16(roster, rep, world)));
 					st.roster_pushed = true;
 				}
 				break;
-			case 0x22: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
+			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
 				// (body byte 0) + a fieldFlags word (bytes 1-2); reply 0x46 for THAT slot so the joiner
 				// binds it. The ACK-WALK is CLIENT-driven: the server ECHOES bit 0x4000 from the request
@@ -779,26 +782,26 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
 					replies.push_back(
-							make_protocol_message(0x46, encode_player_sync(prs, reply_flags)));
+							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync(prs, reply_flags)));
 				} else {
 					// Empty/disconnected slot: the 0x8000 removal record (|0x4000 when the
 					// request asked for the ack) — the walk terminator [orig: @0x505ecb..ee0].
 					replies.push_back(
-							make_protocol_message(0x46, encode_player_sync_removal(req_slot, echo_ack)));
+							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync_removal(req_slot, echo_ack)));
 				}
 				break;
 			}
-			case 0x47: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
-				replies.push_back(make_protocol_message(0x75, {0x00, 0x02}));
+			case c2s::PING: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
+				replies.push_back(make_protocol_message(s2c::SPECTATOR_FLAGS, {0x00, 0x02}));
 				break;
-			case 0x33: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_0x033 @0x515230]
-				replies.push_back(make_protocol_message(0x60, build_tag60_server_info(config)));
+			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_0x033 @0x515230]
+				replies.push_back(make_protocol_message(s2c::FILE_TRANSFER_CHUNK, build_tag60_server_info(config)));
 				break;
-			case 0x37: // mission-file request -> 0x75 + 0x64 chunk [orig: NapiNPServerMsg_0x037 @0x5152E0]
-				replies.push_back(make_protocol_message(0x75, {0x00, 0x02}));
-				replies.push_back(make_protocol_message(0x64, build_tag64_mission_metadata(config)));
+			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x75 + 0x64 chunk [orig: NapiNPServerMsg_0x037 @0x5152E0]
+				replies.push_back(make_protocol_message(s2c::SPECTATOR_FLAGS, {0x00, 0x02}));
+				replies.push_back(make_protocol_message(s2c::MISSION_DATA_CHUNK, build_tag64_mission_metadata(config)));
 				break;
-			case 0x2F: { // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
+			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
 				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
 				// the joiner's weapon slots BEFORE the first 0x0A; without it every 0x0A triggers
 				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8
@@ -831,7 +834,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
 				st.last_loadout_reply = encode_weapon_loadout(grant.reply);
-				replies.push_back(make_protocol_message(0x5A, st.last_loadout_reply));
+				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (world != nullptr && conn.link.owned_entity.valid()) {
@@ -854,7 +857,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.burst.loadout_received = true;
 				break;
 			}
-			case 0x0A: // spawn-menu request [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]
+			case c2s::SPAWN_MENU_REQUEST: // spawn-menu request [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]
 				// THE world-stream unlock (D-NET-150): the handler sets game state 9, advances
 				// the session's sync state to 4 and RESTARTS the world-stream phase machine —
 				// the §5.2a world stream never starts until the client asks for the spawn menu.
@@ -877,9 +880,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
 				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
-				replies.push_back(make_protocol_message(0x19, build_tag1a_tick(now_tick)));
+				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP, build_tag1a_tick(now_tick)));
 				break;
-			case 0x29: // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
+			case c2s::TEAM_SPAWN_ACK: // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
 				// resolves to a pending entity in g_team_change_entity_list @0xC947C8 (gated
 				// !g_net_spawn_suspended && !g_spawn_success_gate), and that reply is a REAL
@@ -892,7 +895,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// change is unmodeled; when it lands, port the @0x514F10 list lookup +
 				// write_entity_packet — never an echo.
 				break;
-			case 0x0E: { // RESPAWN/DEPLOY request [i16 spawnHandle] — the deploy-map pick.
+			case c2s::RESPAWN_REQUEST: { // RESPAWN/DEPLOY request [i16 spawnHandle] — the deploy-map pick.
 				// [orig: Server_ProcessClientRequestRespawn @0x519AF0; net-re §5.61]. 0xFFFE = the
 				// auto frontier pick; a real handle resolves through the SpawnPoint/team gates and a
 				// NUMBERED zone additionally requires team match + control >= 1.0 (a contested zone
@@ -910,7 +913,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr || !conn.link.owned_entity.valid()) {
 					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
 					replies.push_back(
-							make_protocol_message(0x1E, build_tag_1e_game_event_post_spawn()));
+							make_protocol_message(s2c::GAME_EVENT, build_tag_1e_game_event_post_spawn()));
 					break;
 				}
 				world::Entity *player = world->registry.get(conn.link.owned_entity);
@@ -1004,13 +1007,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				                                                  player->team);
 				if (frontier != 0)
 					replies.push_back(
-							make_protocol_message(0x1E, build_tag_1e_frontier_hint(frontier)));
+							make_protocol_message(s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
 				break;
 			}
-			case 0x0C: // C2S player-input uplink — cache the pre-spawn pose
+			case c2s::ENTITY_UPLINK: // C2S player-input uplink — cache the pre-spawn pose
 				cache_client_pose(msg.payload, st);
 				break;
-			case 0x1D: { // STANCE CHANGE [i16 stanceCode] — the crouch/prone replication leg.
+			case c2s::STANCE_CHANGE: { // STANCE CHANGE [i16 stanceCode] — the crouch/prone replication leg.
 				// [orig: NapiNPServerMsg_HandleStanceChange @0x501C60 — authority-gated; the
 				// SENDER connection's player entity (conn+352 -> +192 -> entity, the same
 				// chain as the vehicle attach); code 169 -> MoveOrder = (MoveOrder & ~0x300)
@@ -1029,7 +1032,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				else if (code == 172) pe->net_stance_bits = 0; // stand          [orig: @0x501cc9]
 				break;
 			}
-			case 0x26: { // VEHICLE ATTACH [u16 senderHandle][u16 vehicleHandle][u8 bone][u8 pad]
+			case c2s::VEHICLE_ATTACH_REQUEST: { // VEHICLE ATTACH [u16 senderHandle][u16 vehicleHandle][u8 bone][u8 pad]
 				// [orig: NapiNPServerMsg_HandleVehicleAttach @0x502390 — authority-gated;
 				// word0 is OVERWRITTEN with the sender's authoritative handle (@0x502415,
 				// anti-spoof — the client value is never read); then Entity_ProcessVehicleAttach
@@ -1046,7 +1049,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				                                     world::EntityHandle{veh}, bone);
 				break;
 			}
-			case 0x27: { // VEHICLE DETACH [u16 selfHandle][u16 vehicleHandle][u16 junk]
+			case c2s::VEHICLE_DETACH_REQUEST: { // VEHICLE DETACH [u16 selfHandle][u16 vehicleHandle][u16 junk]
 				// [orig: NapiNPServerMsg_HandleVehicleDetach @0x4FC980 -> the @0x435D00 tail:
 				// sender conn must have a player block+cell; the wire word0 is TRUSTED in
 				// retail (no anti-spoof, no range guard) — we clamp the detach subject to the
@@ -1058,7 +1061,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				world::entity_detach_from_vehicle(*world, conn.link.owned_entity);
 				break;
 			}
-			case 0x2C: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
+			case c2s::RTT_CONSUMED: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
 				// [u32 timestamp][u8 echo_flag]. echo_flag != 0 -> bounce S2C 0x57 [u32 ts][u8 0]; the
 				// echo_flag == 0 return leg is server-internal RTT stat + min/max-ping kick (no reply).
 				if (msg.payload.size() >= 5 && msg.payload[4] != 0) {
@@ -1066,14 +1069,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					                    (static_cast<uint32_t>(msg.payload[1]) << 8) |
 					                    (static_cast<uint32_t>(msg.payload[2]) << 16) |
 					                    (static_cast<uint32_t>(msg.payload[3]) << 24);
-					replies.push_back(make_protocol_message(0x57, build_tag57_pong(ts)));
+					replies.push_back(make_protocol_message(s2c::RTT_ECHO, build_tag57_pong(ts)));
 				}
 				break;
 			}
-			case 0x0B: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
+			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
 				st.mission_status_received = true;
 				break;
-			case 0x06: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
+			case c2s::FIRED_ROUND: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
 				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 ->
 				// Server_ClientFiredRound @0x50baa0]. An accepted PRIMARY fire re-enters the
 				// validator locally through the adm 'fire' action (WeaponAction_Fire @0x542b10
@@ -1189,7 +1192,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// select_round_events), reaching every OTHER in-match recipient.
 				break;
 			}
-			case 0x25: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
+			case c2s::WEAPON_RELOAD_REQUEST: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
 				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
 				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
 				// reach ALL in-match connections INCLUDING the requester. The client's 0x49 apply is the
@@ -1266,7 +1269,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				break;
 			}
-			case 0x0F: { // entity-info query [u16 handle] -> S2C 0x18 FULL-ENTITY-SPAWN (the self-heal).
+			case c2s::ENTITY_INFO_QUERY: { // entity-info query [u16 handle] -> S2C 0x18 FULL-ENTITY-SPAWN (the self-heal).
 				// [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 — validates pool <= 1 &&
 				// slot < capacity, serializes the REQUESTED entity via serialize_object_to_buffer
 				// @0x504d10, replies msg 0x18 to the requester only (send_mask 0x20).] The client sends
@@ -1293,12 +1296,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						} else {
 							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
 						}
-						replies.push_back(make_protocol_message(0x18, encode_full_entity_spawn(frec)));
+						replies.push_back(make_protocol_message(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(frec)));
 					}
 				}
 				break;
 			}
-			case 0x32: { // EMPTY-SLOT SWEEP REQUEST -> S2C 0x5D to the REQUESTER ONLY.
+			case c2s::EMPTY_SLOT_SWEEP_REQUEST: { // EMPTY-SLOT SWEEP REQUEST -> S2C 0x5D to the REQUESTER ONLY.
 				// The client queues this inside its S2C 0x0F world-state-load reply burst
 				// (@0x42e647). The host walks pool 0 and answers with the index of every
 				// EMPTY entry (`entry_dword[7] == 0`); the client destroys whatever it
@@ -1362,7 +1365,7 @@ ProtocolMessage build_player_list_message(const GameConfig &config,
 	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
 	PlayerReplicationState fallback;
 	fallback.player_name = config.player_name;
-	return make_protocol_message(0x16, build_reply_tag_16(roster, fallback, world));
+	return make_protocol_message(s2c::PLAYER_LIST, build_reply_tag_16(roster, fallback, world));
 }
 
 void broadcast_player_sync_on_join(const GameConfig &config,
