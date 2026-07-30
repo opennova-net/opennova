@@ -266,7 +266,7 @@ func _item_fx_identity_aliases(net_id: int, bms_id: int,
 	# authored BMS/net identity. Their packed runtime handle is therefore the only
 	# alias that distinguishes siblings on the same carrier.
 	if has_wire_identity and bms_id == 0 and (
-			spawn_origin == -1 or spawn_origin == 0xffffffff):
+			spawn_origin == -1 or spawn_origin == SpawnOrigin.NONE):
 		return aliases
 	if net_id > 0:
 		aliases.append("net:%d" % net_id)
