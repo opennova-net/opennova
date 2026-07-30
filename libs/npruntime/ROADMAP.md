@@ -459,7 +459,8 @@ Goldens (local, gitignored, captured 2026-06-26): `.scratch/golden/retail-lan-ho
   `.agents/debug.md`. (`.agents/network.md` is a redirect that points back here — this file
   is the architecture-guardrails / module-ownership / frame-order owner; do not chase the
   redirect in a circle.)
-- Promote-from: `libs/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
+- Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
+  deleted at P8.1, recorded above): `libs/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
 - Seam: `libs/netsim/include/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
   `tests/novaworld/nw_pcap_stream_test.cpp`.

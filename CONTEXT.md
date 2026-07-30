@@ -176,8 +176,8 @@ _Avoid_: game (when you mean the identity, not the running program)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
-banks, HUD layout, defs, default world files...). The witnessed enumeration will land as
-`docs/required-resources.md` (planned, ENG-6); the engine manifest derived from it is what
+banks, HUD layout, defs, default world files...). The witnessed enumeration is
+`docs/required-resources.md` (landed at ENG-6); the engine manifest derived from it is what
 boot validation and ONED diagnostics consume, and it defines what a person starts with to
 make a new game.
 _Avoid_: core assets, base game files

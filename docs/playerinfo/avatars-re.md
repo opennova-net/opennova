@@ -9,12 +9,17 @@ binary's.
 
 **Status: implemented and IDA-grilled for the parser/data model/editor bridge
 (2026-06-16); the full `PLAYER_INFO` screen runtime orchestration was grilled
-(read-only) on 2026-06-23** ahead of the runtime `player.mnu` host wiring.
-`libs/avatars`, `NovaAvatarDatabase`, and the ONED Avatars workspace implement
-the witnessed loader semantics below; the in-game menu population (a
-`PlayerInfoMenuHost` host) is the next phase and is now fully witnessed
-(D-PLAYERINFO-7..12). The runtime combo -> spawned-player 3D model binding
-remains unwitnessed/open as **D-PLAYERINFO-1**.
+(read-only) on 2026-06-23 and the runtime `player.mnu` host landed the same
+day.** `libs/avatars`, `NovaAvatarDatabase`, and the ONED Avatars workspace
+implement the witnessed loader semantics below; the in-game menu population is
+live as `PlayerInfoMenuHost` (godot/game/player_info_menu_host.gd) — the
+nat→div→combo cascade, team filter, RTXT display resolve, and 3D preview
+(D-PLAYERINFO-7 FIXED), the voice preview (D-PLAYERINFO-10 FIXED 2026-07-22),
+and the loadout weapon lists. Open residuals: profile persistence beyond the
+callsign (D-PLAYERINFO-9), the ammo combos + weight readout (D-PLAYERINFO-11),
+and the per-(slot, team) selection globals (D-PLAYERINFO-12). The runtime
+combo -> spawned-player 3D model binding remains unwitnessed/open as
+**D-PLAYERINFO-1**.
 
 ## Verdict table
 
@@ -25,9 +30,9 @@ remains unwitnessed/open as **D-PLAYERINFO-1**.
 | `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; ONED editor exposes the same tree, alignment, and resolved-combo data but does not implement the in-game menu UI |
 | combo → spawned-player 3D model binding | **unwitnessed (time-boxed)** | consumer set identified but not traced — see **D-PLAYERINFO-1** follow-up |
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |
-| `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (read-only grill, 2026-06-23)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; no reimpl yet — the `player.mnu` host wiring is the next phase (D-PLAYERINFO-7/8/12) |
+| `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (ported 2026-06-23)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; ported as `PlayerInfoMenuHost` — cascade + team filter + RTXT resolve wired by control name onto the `.mnu`'s own control tree, pinned by `player_info_menu_seam_test` (D-PLAYERINFO-7 FIXED; the per-(slot, team) selection globals remain D-PLAYERINFO-12) |
 | Voice preview + PLAYERVOICE list | **matching (ported 2026-07-22)** | `PlayerInfoMenuHost` binds the real `TESTPLAYERVOICE` control and requests the selected avatar's `VOICE_%d` trigger through `menu.lwf`; `player_info_menu_seam_test` pins the public sound request. Persisted profile overrides remain part of D-PLAYERINFO-9. `[orig: PlayerInfo_PreviewVoice @ 0x55ff70; PlayerInfo_HandleVoiceSelect @ 0x55fe00]` |
-| ACCEPT commit + profile persistence | **matching (read-only grill, 2026-06-23)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; profile field offsets + selection-state globals pinned (D-PLAYERINFO-9/12) |
+| ACCEPT commit + profile persistence | **partial (seam + callsign ported)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; the host wires ACCEPT → `commit`/`avatar_chosen` and main_game persists the callsign (`NovaPlayerProfile.save_callsign` → `user://player_profile.cfg`); persisting + restoring the avatar/class/loadout selection remains D-PLAYERINFO-9 (selection-state globals D-PLAYERINFO-12) |
 | Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `populate_weapon_slot_lists @ 0x560430`; ported in `libs/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `NovaWeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
 | Loadout ammo combos + weight readout | **matching (read-only grill)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0` (ammo combos) and the weight budget `update_player_info_weight_and_weapon_icons @ 0x55f480` (encumbrance ≥66.6 HEAVY / ≥33.3 NORMAL / else LIGHT; `calculate_loadout_weight @ 0x55f1f0`; icons from weapon `+144`) anchored; host implementation is the next slice (D-PLAYERINFO-11) |
 

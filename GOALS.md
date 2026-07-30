@@ -34,8 +34,10 @@ powers the tools.
 ## A deep editor
 
 The OpenNova Editor (ONED) is where you author the data the engine runs. Today it
-focuses on creating individual assets: terrain, 3D objects, missions, fonts, credits,
-strings, menus, music, sound profiles, and environment. The longer-term goal is depth:
+focuses on creating individual assets: terrain, 3D objects, missions, particle
+effects, playable characters, fonts, credits, strings, menus, music, sound
+profiles, and environment (plus a preview-only HUD layout workspace). The
+longer-term goal is depth:
 
 - **An asset dependency graph.** NovaLogic assets reference each other (a `.3di`
   points at its textures, a `.def` points at a `.3di` and its `.bad` animations, a
@@ -65,8 +67,10 @@ original (retail) servers, our servers can serve original clients, and opennovaâ
 works the same way â€” so the original games keep working as their official services age
 out, and our runtime and theirs are interchangeable on the same protocol. The
 matchmaking and server backend (NovaWorld) is reimplemented and maturing
-(`apps/novaworld_server`, `libs/novaworld`); in-match replication is decode-complete
-against real captures, with the encode side in progress. The protocol reverse
+(`apps/novaworld_server`, `libs/novaworld`); in-match replication is exercised in
+both directions against real captures and live retail sessions (retail clients join
+and play on our hosts), with the remaining gaps tracked in
+[the divergence ledger](docs/divergence-ledger.md). The protocol reverse
 engineering is recorded in
 [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md). Single-player already runs
 as an in-process listen server, so co-op and multiplayer share one replication path
