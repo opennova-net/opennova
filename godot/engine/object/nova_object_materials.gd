@@ -360,7 +360,7 @@ func _apply_environment_to_materials() -> void:
 	var gen := -1
 	if _m._env_has_generation:
 		gen = int(_m._environment_node.get_env_generation())
-		var have_all_cached := _m._last_env_values != null \
+		var have_all_cached: bool = _m._last_env_values != null \
 				and (not _m._interior_section_lighting
 					or _m._last_section_env_values != null)
 		if gen == _m._last_env_gen and have_all_cached:
@@ -383,7 +383,7 @@ func _apply_environment_to_materials() -> void:
 				true,
 				_m._interior_section_daylight)
 	var entity_unchanged := values.equals(_m._last_env_values)
-	var section_unchanged := not _m._interior_section_lighting \
+	var section_unchanged: bool = not _m._interior_section_lighting \
 			or section_values.equals(_m._last_section_env_values)
 	if entity_unchanged and section_unchanged:
 		_m._last_env_gen = gen

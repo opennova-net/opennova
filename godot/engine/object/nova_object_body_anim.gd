@@ -134,7 +134,7 @@ func play_body_clip_variant(key: String, variant: int) -> void:
 func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
 	if _m._skeletal == null or not _m._skeletal.has_clip(key):
 		return
-	var same_external := (_m._anim_external_phase and key == _m._anim_key
+	var same_external: bool = (_m._anim_external_phase and key == _m._anim_key
 			and variant == _m._anim_variant
 			and is_equal_approx(_m._anim_time, seconds))
 	_m._anim_key = key
@@ -483,7 +483,7 @@ func set_weapon_channel(key: String, phase_ticks: int) -> void:
 
 
 func set_aim_overlay(deltas: Array) -> void:
-	var overlay_changed := deltas != _m._aim_overlay_deltas
+	var overlay_changed: bool = deltas != _m._aim_overlay_deltas
 	var classes_changed := false
 	if not deltas.is_empty() and _m._aim_overlay_classes.is_empty() and _m._skeletal != null \
 			and _m._skeletal.has_method("get_overlay_classes"):
