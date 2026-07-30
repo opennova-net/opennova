@@ -805,7 +805,7 @@ func _has_occlusion_records(item_id: int) -> bool:
 	var graphic := _graphic_for(item_id)
 	if not graphic.is_empty():
 		var data := _load_object_data(graphic)
-		if data != null and data.has_method("has_occlusion"):
+		if data != null:
 			has_occ = data.has_occlusion()
 	_occlusion_cache[item_id] = has_occ
 	return has_occ
@@ -826,7 +826,7 @@ func _graphic_needs_live_panm(graphic: String) -> bool:
 		return bool(_graphic_panm_cache[graphic])
 	var result := false
 	var data := _load_object_data(graphic)
-	if data != null and data.has_method("has_live_panm"):
+	if data != null:
 		result = bool(data.has_live_panm())
 	_graphic_panm_cache[graphic] = result
 	return result
@@ -903,7 +903,7 @@ func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 	if _anchor_cache.has(graphic):
 		return _anchor_cache[graphic]
 	var anchor := Vector3.ZERO
-	if data != null and data.has_method("get_ground_anchor"):
+	if data != null:
 		anchor = data.get_ground_anchor(RENDER_LOD)
 	_anchor_cache[graphic] = anchor
 	return anchor
@@ -1054,7 +1054,7 @@ func collision_shapes_for(graphic: String) -> Array:
 		return _collision_shapes_cache[graphic]
 	var shapes: Array = []
 	var data := _load_object_data(graphic)
-	if data != null and data.has_method("get_collision_volumes"):
+	if data != null:
 		shapes = CollisionHull.shapes_for(data.get_collision_volumes())
 	if shapes.is_empty():
 		var aabb := _visual_model_aabb(data)
@@ -1095,7 +1095,7 @@ func add_pick_collider(container: Node3D, kind: int, index: int, graphic: String
 # Merged AABB of the render submeshes (model-local), used only as the collision
 # fallback for models that carry no collision volumes.
 func _visual_model_aabb(data: NovaObjectData) -> AABB:
-	if data == null or not data.has_method("build_lod_submeshes"):
+	if data == null:
 		return AABB()
 	var aabb := AABB()
 	var first := true

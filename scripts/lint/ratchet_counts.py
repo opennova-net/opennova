@@ -138,6 +138,25 @@ def count_gd_prints_outside_debug() -> int:
     return count
 
 
+HAS_METHOD_GUARD = re.compile(r"(?<!\w)has_method\s*\(")
+
+
+def count_has_method_guards() -> int:
+    """Duck-type guards in the shipping godot layer (W4-2): the floor is the
+    documented kept set (harness seams, workspace capability hooks, dynamic
+    dispatch) - not zero. class_has_method is excluded by the word boundary."""
+    count = 0
+    for sub in ("engine", "game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                count += len(HAS_METHOD_GUARD.findall(line.split("#", 1)[0]))
+    return count
+
+
 OVERSIZE_CPP_LINE_LIMIT = 2500
 
 
@@ -202,6 +221,7 @@ def main() -> int:
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),
+        "has_method_guards": count_has_method_guards(),
     }
 
     if args.write_baseline:

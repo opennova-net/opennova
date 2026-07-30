@@ -104,6 +104,56 @@ class FakeWorld:
 		add_child(node)
 		return node
 
+	# Value-only stubs for the GameWorld seam methods the host calls
+	# unconditionally (W4-2 deleted the has_method guards).
+	func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
+		var events: Array[PlayerWeaponEvent] = []
+		return events
+
+	func set_local_player_weapon_tick_consumer(_consumer: Callable) -> void:
+		pass
+
+	func local_player_view():
+		return null
+
+	func local_player_weapon_view():
+		return null
+
+	func get_mission_audio():
+		return null
+
+	func get_effect_world():
+		return null
+
+	func register_effect_anchor(_owner_key: Variant, _resolver: Callable) -> void:
+		pass
+
+	func unregister_effect_anchor(_owner_key: Variant) -> void:
+		pass
+
+	func set_local_player_nvg_view(_active: bool, _gain: int) -> void:
+		pass
+
+	func get_terrain_data() -> NovaTerrainData:
+		return null
+
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
+		return null
+
+	func build_local_player_held_weapon(_graphic: String) -> Node3D:
+		return null
+
+	# Weapon-event consumers (unreached while the drain above returns empty;
+	# present so a future test feeding events fails on assertions, not arity).
+	func local_player_weapon_name() -> String:
+		return ""
+
+	func set_local_player_weapon_by_name(_weapon: String, _preserve := false) -> bool:
+		return false
+
+	func clear_local_player_weapon() -> void:
+		pass
+
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)

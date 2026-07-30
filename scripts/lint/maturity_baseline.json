@@ -13,6 +13,7 @@
   "counters": {
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
+    "has_method_guards": 578,
     "libs_stdout_prints": 0,
     "libs_uncited_src_files": 61,
     "oversize_cpp_files": 2,

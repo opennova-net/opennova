@@ -157,7 +157,7 @@ func release_viewport() -> void:
 
 
 func get_viewport_camera() -> Camera3D:
-	if _preview != null and _preview.has_method("get_editor_camera"):
+	if _preview != null:
 		return _preview.get_editor_camera()
 	return null
 
@@ -489,8 +489,6 @@ func _selected_export_update_mask() -> int:
 
 func _get_oed_dirty_mask() -> int:
 	if object_editor == null or object_editor.object_data == null:
-		return OED_UPDATE_NONE
-	if not object_editor.object_data.has_method("get_oed_dirty_mask"):
 		return OED_UPDATE_NONE
 	return int(object_editor.object_data.get_oed_dirty_mask()) & OED_UPDATE_ALL
 

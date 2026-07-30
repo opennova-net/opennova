@@ -202,15 +202,14 @@ func setup(world, camera: Camera3D) -> void:
 	# Attachment is the adoption boundary: discard presentation history produced
 	# before this host existed. Every event produced after setup is live, including
 	# a first-tick shot before the first active snapshot is presented.
-	if _world != null and _world.has_method("drain_local_player_weapon_events"):
+	if _world != null:
 		_world.drain_local_player_weapon_events()
-	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
 		_world.set_local_player_weapon_tick_consumer(
 				Callable(self, "_present_fixed_weapon_tick"))
 
 
 func teardown() -> void:
-	if _world != null and _world.has_method("set_local_player_weapon_tick_consumer"):
+	if _world != null:
 		_world.set_local_player_weapon_tick_consumer(Callable())
 	_set_fly_camera_locked(false)
 	_release_mouse_capture()
@@ -276,10 +275,9 @@ func _free_viewmodel_pass() -> void:
 ## exists) are skipped so the queued SWITCHTO draw-in survives.
 func _apply_weapon_switch(weapon_name: String,
 		preserve_slot_state: bool = false) -> void:
-	if _world == null or not _world.has_method("set_local_player_weapon_by_name"):
+	if _world == null:
 		return
-	if (_world.has_method("local_player_weapon_name")
-			and String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
+	if (String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
 			and _viewmodel != null and is_instance_valid(_viewmodel)):
 		return
 	var switched := bool(_world.set_local_player_weapon_by_name(
@@ -290,7 +288,7 @@ func _apply_weapon_switch(weapon_name: String,
 
 
 func _apply_weapon_clear() -> void:
-	if _world == null or not _world.has_method("clear_local_player_weapon"):
+	if _world == null:
 		return
 	_world.clear_local_player_weapon()
 	refresh_viewmodel()
@@ -308,7 +306,7 @@ func refresh_viewmodel() -> void:
 
 
 func _unregister_effect_anchors() -> void:
-	if _world != null and _world.has_method("unregister_effect_anchor"):
+	if _world != null:
 		for key in _registered_effect_anchor_keys:
 			_world.unregister_effect_anchor(key)
 	_registered_effect_anchor_keys.clear()
@@ -441,13 +439,13 @@ func after_world_tick() -> void:
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
-		if _world != null and _world.has_method("drain_local_player_weapon_events"):
+		if _world != null:
 			_world.drain_local_player_weapon_events()
 		_weapon_play_serial = -1
 		_weapon_view = null
 		_view = null
 		return
-	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_view = _world.local_player_view()
 	_set_world_nvg_view(_view != null and _view.nvg_visible,
 			_view.nvg_gain if _view != null else 0)
 	# Place the camera/viewmodel root for THIS tick before consuming one-shot
@@ -455,8 +453,7 @@ func after_world_tick() -> void:
 	# at its default transform; on later ticks it otherwise trails movement/look by
 	# one frame. Pre-adopt the weapon snapshot so the avatar's body channel remains
 	# current while _update_player_camera() stamps all visual roots.
-	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
-			if _world.has_method("local_player_weapon_view") else null)
+	var weapon_view: PlayerWeaponView = _world.local_player_weapon_view()
 	_weapon_view = weapon_view
 	_update_player_camera()
 	_consume_weapon_view(weapon_view)
@@ -469,14 +466,13 @@ func after_world_tick() -> void:
 func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 	if not _has_player():
 		return
-	var weapon_view: PlayerWeaponView = (_world.local_player_weapon_view()
-			if _world.has_method("local_player_weapon_view") else null)
+	var weapon_view: PlayerWeaponView = _world.local_player_weapon_view()
 	if events.is_empty():
 		# Keep the active clip at this tick's exact pose, but defer the expensive
 		# camera/avatar/viewmodel-root presentation to after the catch-up batch.
 		_consume_weapon_events(weapon_view, events, true)
 		return
-	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
+	_view = _world.local_player_view()
 	_weapon_view = weapon_view
 	_update_player_camera()
 	_consume_weapon_events(weapon_view, events, true)
@@ -494,9 +490,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 func _consume_weapon_view(view: PlayerWeaponView) -> void:
 	if _world == null:
 		return
-	var events: Array[PlayerWeaponEvent] = []
-	if _world.has_method("drain_local_player_weapon_events"):
-		events = _world.drain_local_player_weapon_events()
+	var events: Array[PlayerWeaponEvent] = _world.drain_local_player_weapon_events()
 	_consume_weapon_events(view, events)
 
 
@@ -599,11 +593,11 @@ func _weapon_effect_transform(position: Vector3, forward: Vector3) -> Transform3
 func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if _world == null:
 		return
-	if not event.action_soundset.is_empty() and _world.has_method("get_mission_audio"):
+	if not event.action_soundset.is_empty():
 		var audio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(event.action_soundset, event.world_position, -1)
-	if event.action_particle.is_empty() or not _world.has_method("get_effect_world"):
+	if event.action_particle.is_empty():
 		return
 	if event.action_started != WEAPON_ACTION_FIRE:
 		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
@@ -630,10 +624,9 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	# the +0x18 tracker leg in WeaponAction_ProcessFrame @ 0x540edf ->
 	# CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]. The host analog is an
 	# owner-bound group whose anchor resolver re-reads the live userpoint pose.
-	if _world.has_method("register_effect_anchor"):
-		_world.register_effect_anchor(slot_key,
-				_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
-		_registered_effect_anchor_keys[slot_key] = true
+	_world.register_effect_anchor(slot_key,
+			_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
+	_registered_effect_anchor_keys[slot_key] = true
 	fx.spawn_effect_request(event.action_particle, anchor_transform, {
 		"admission": NovaEffectScene.ADMISSION_SUPPRESS_WHILE_OWNED,
 		"binding": NovaEffectScene.BINDING_FOLLOW_OWNER,
@@ -653,8 +646,6 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 # [orig: WeaponAction_Recoil @ 0x542dd0, spawn @ 0x542f64 with param7=0]
 func _fire_direct_action_effect(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.effect_particle.is_empty():
-		return
-	if not _world.has_method("get_effect_world"):
 		return
 	var fx = _world.get_effect_world()
 	if fx == null:
@@ -795,8 +786,6 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 	if _world == null or event.action_end_soundset.is_empty():
 		return
-	if not _world.has_method("get_mission_audio"):
-		return
 	var audio = _world.get_mission_audio()
 	if audio != null:
 		audio.fire_soundset(event.action_end_soundset, event.world_position, -1)
@@ -907,14 +896,14 @@ func _reset_state() -> void:
 
 
 func _set_world_nvg_view(active: bool, gain: int) -> void:
-	if _world != null and _world.has_method("set_local_player_nvg_view"):
+	if _world != null:
 		_world.set_local_player_nvg_view(active, gain)
 
 
 func _has_player() -> bool:
 	if _world == null:
 		return false
-	if _world.has_method("is_loaded") and not _world.is_loaded():
+	if not _world.is_loaded():
 		return false
 	var sim = _sim()
 	return sim != null and sim.has_local_player()
@@ -948,9 +937,9 @@ func _bool(state: Dictionary, key: String) -> bool:
 func _ensure_models() -> void:
 	if _world == null:
 		return
-	if (_avatar == null or not is_instance_valid(_avatar)) and _world.has_method("build_local_player_avatar"):
+	if _avatar == null or not is_instance_valid(_avatar):
 		_avatar = _world.build_local_player_avatar()
-	if (_viewmodel == null or not is_instance_valid(_viewmodel)) and _world.has_method("build_local_player_viewmodel"):
+	if _viewmodel == null or not is_instance_valid(_viewmodel):
 		_viewmodel = _world.build_local_player_viewmodel()
 		if _viewmodel != null:
 			_apply_viewmodel_def()
@@ -1035,7 +1024,7 @@ func aim_range_units() -> int:
 	# ever hit in the runtime -- object pick bodies are editor-only -- so this
 	# measures the same surface, and it is now the SAME sampler the round the
 	# player fires traces, so the readout and the bullet agree by construction.
-	var terrain = _world.get_terrain_data() if _world.has_method("get_terrain_data") else null
+	var terrain = _world.get_terrain_data()
 	if terrain != null and terrain.has_method("raycast_terrain"):
 		var hit: Vector3 = terrain.raycast_terrain(eye, endpoint)
 		# A miss reports all-NAN.
@@ -1093,7 +1082,7 @@ func _avatar_head_world() -> Vector3:
 func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	if _world == null:
 		return
-	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def() 			if _world.has_method("local_player_viewmodel_def") else null
+	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def()
 	# 27 of the 94 shipped weapon rows author no gfx3 at all; drawing nothing is the
 	# correct, retail behaviour there, not a missing asset.
 	var graphic := def.gfx3 if def != null else ""
@@ -1102,7 +1091,7 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 			_held_weapon.queue_free()
 		_held_weapon = null
 		_held_weapon_graphic = graphic
-		if not graphic.is_empty() and _world.has_method("build_local_player_held_weapon"):
+		if not graphic.is_empty():
 			_held_weapon = _world.build_local_player_held_weapon(graphic)
 	if _held_weapon == null or not is_instance_valid(_held_weapon):
 		return
@@ -1369,7 +1358,7 @@ func _set_visual_layers(root: Node, layer_mask: int) -> void:
 # in force. The def rows carry xyz raw file units + yaw/pitch/roll degrees
 # [orig: weapon.def 'pos'/'tpos' handlers @0x54471f; 'renderfov' @0x54482a, default 80.0].
 func _apply_viewmodel_def() -> void:
-	if _world == null or not _world.has_method("local_player_viewmodel_def"):
+	if _world == null:
 		return
 	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def()
 	if def == null:

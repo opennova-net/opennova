@@ -159,10 +159,8 @@ static func _describe_mission(ctx: McpToolContext, out: Dictionary, resolved: Di
 		"entity_counts": counts,
 		"entity_total": entities.size(),
 	}
-	if mission.has_method("get_waypoint_summaries"):
-		data["waypoints"] = mission.get_waypoint_summaries()
-	if mission.has_method("get_logic_summary"):
-		data["logic"] = mission.get_logic_summary()
+	data["waypoints"] = mission.get_waypoint_summaries()
+	data["logic"] = mission.get_logic_summary()
 	if full:
 		data["entities"] = entities.slice(0, limit)
 		out["truncated"] = entities.size() > limit
@@ -302,7 +300,7 @@ static func _describe_lwf(ctx: McpToolContext, out: Dictionary, resolved: Dictio
 		out["error"] = "LWF sound profile failed to parse."
 		return
 	var data := { "set_count": lwf.get_set_count() }
-	if full and lwf.has_method("get_sets"):
+	if full:
 		var sets: Array = lwf.get_sets()
 		data["sets"] = sets.slice(0, limit)
 		out["truncated"] = sets.size() > limit

@@ -282,8 +282,6 @@ func _ensure_preview_skeletal():
 	if not _resource_root.has_file(PREVIEW_SKELETON_BAD) or not _resource_root.has_file(PREVIEW_IDLE_BAD):
 		return null
 	var sk := NovaSkeletalAnim.new()
-	if not sk.has_method("load_from_bad_files"):
-		return null  # native extension predates the raw-.bad path; render static
 	if not sk.load_from_bad_files(_resource_root, PREVIEW_SKELETON_BAD, {PREVIEW_IDLE_KEY: PREVIEW_IDLE_BAD}):
 		return null
 	_skeletal = sk

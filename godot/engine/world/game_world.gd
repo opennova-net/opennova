@@ -1059,8 +1059,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	var challenge_sim: NovaSimulation = _runtime.get_sim()
 	if challenge_sim != null and challenge_sim.is_joiner():
 		_prewarm_loaded_model_challenge_definitions()
-	if challenge_sim != null and challenge_sim.has_method(
-			"finalize_loaded_model_challenge_snapshot"):
+	if challenge_sim != null:
 		challenge_sim.finalize_loaded_model_challenge_snapshot()
 	load_progress.emit(70)
 	timeline.span("audio")
@@ -1784,8 +1783,8 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime_us": _perf_runtime_us,
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
-		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null and _dispatcher.has_method("get_frame_stats") else {},
-		"audio": _mission_audio.get_perf_counters() if _mission_audio != null and _mission_audio.has_method("get_perf_counters") else {},
+		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
+		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
 	}
 
 
@@ -2539,8 +2538,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		_join_preload_sim = null
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
-		var setup_error := int(_runtime.get_setup_error()) \
-				if _runtime.has_method("get_setup_error") else ERR_CANT_CREATE
+		var setup_error := int(_runtime.get_setup_error())
 		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
 		var bind_port := int(opts.get("bind_port", 32768))
 		# Free before emitting: a load_failed handler may synchronously tear
@@ -2562,7 +2560,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	_load_player_weapon_profile()
 	_apply_local_player_spawn_loadout()
 	_runtime.set_presentation_time_ms(_panm_clock.time_ms)
-	if _water != null and _runtime.get_sim().has_method("set_water_z"):
+	if _water != null:
 		# Water may have been built before the runtime existed — re-push the
 		# sim-side plane the footstep/landing legs compare feet against.
 		_runtime.get_sim().set_water_z(float(_water.water_height))
@@ -2709,8 +2707,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
-	if _effect_world != null and _effect_world.has_method("advance_fixed_tick") \
-			and not skip_effect_tick:
+	if _effect_world != null and not skip_effect_tick:
 		if _frame_stats != null and _frame_stats.is_capture_active():
 			var fx_start := Time.get_ticks_usec()
 			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
@@ -2778,7 +2775,7 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 # without await), then clear the warm spawns exactly like the sim-restart
 # path (reset + re-register the persistent item effects). Returns the count.
 func _warm_effect_world_catalog() -> int:
-	if _effect_world == null or not _effect_world.has_method("warm_all_effects"):
+	if _effect_world == null:
 		return 0
 	var warm_pos := Vector3.ZERO
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
@@ -2800,10 +2797,8 @@ func _warm_effect_world_catalog() -> int:
 	# The tracer ribbon pipelines compile in the same forced frames.
 	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
 		_runtime.warm_present_pipelines(warm_pos)
-	if _effect_world.has_method("advance_fixed_tick"):
-		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
-	if _effect_world.has_method("render_now"):
-		_effect_world.render_now()
+	_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	_effect_world.render_now()
 	# Pipeline compiles need real draws. Skip the forced frames inside the
 	# editor host (re-entrant editor drawing); the texture warm above still
 	# runs there, and the shipped game is what the full warm protects.
@@ -2814,10 +2809,8 @@ func _warm_effect_world_catalog() -> int:
 		var was_visible := visible
 		visible = true
 		RenderingServer.force_draw(true)
-		if _effect_world.has_method("advance_fixed_tick"):
-			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
-		if _effect_world.has_method("render_now"):
-			_effect_world.render_now()
+		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		_effect_world.render_now()
 		RenderingServer.force_draw(true)
 		# The reset below cancels any unserviced compositor warm request. Drain
 		# the forced draws first so threaded renderers cannot race that cancel.
@@ -2827,10 +2820,8 @@ func _warm_effect_world_catalog() -> int:
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(true)
 	_attach_item_effects()
-	var unresolved := 0
-	if _effect_world.has_method("get_unresolved_texture_names"):
-		unresolved = PackedStringArray(
-				_effect_world.get_unresolved_texture_names()).size()
+	var unresolved := PackedStringArray(
+			_effect_world.get_unresolved_texture_names()).size()
 	print_verbose("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
 			spawned, unresolved])
 	return spawned
@@ -2855,7 +2846,7 @@ func _start_effect_world() -> void:
 		# @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
 		# start too (either side may come up first).
 		var water_sim := get_sim()
-		if water_sim != null and water_sim.has_method("set_water_z"):
+		if water_sim != null:
 			water_sim.set_water_z(float(_water.water_height))
 	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
 	# (resolved through the runtime), String keys are the per-item effect attaches
