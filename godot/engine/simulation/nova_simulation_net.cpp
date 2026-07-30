@@ -3,6 +3,7 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/nova_simulation_internal.h"
 
+#include <npwire/ingame_message_id.h>
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -192,7 +193,7 @@ void NovaSimulation::drain_host_client_gameplay_requests() {
 		// This seam owns only the witnessed local reload producer. Preserve
 		// every other C2S datagram, in FIFO order, for Server_TickUpdate's
 		// authoritative transport drain (notably a future/local 0x0C).
-		if (dg.tag != 0x25) {
+		if (dg.tag != opennova::c2s::WEAPON_RELOAD_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
