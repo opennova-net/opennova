@@ -117,7 +117,7 @@ func _unregister_effect_anchors() -> void:
 
 
 # Drain any ordered presentation events left for hosts that do not install the
-# fixed-tick callback. In the game and ONED, _present_fixed_weapon_tick consumes
+# fixed-tick callback. In the game, _present_fixed_weapon_tick consumes
 # each 62.5 Hz batch before that tick's particle update. Every clip/begin/end
 # payload survives either route; pre-aged fallback clips resume at their source age.
 # Clip starts land on BOTH viewmodel parts. Scope side effects

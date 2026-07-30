@@ -6,19 +6,24 @@ shell (`godot/game/`) and ONED's authoring/preview surfaces (`godot/modtools/`):
 - **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `libs/` to
   Godot. Thin wrappers only — format/runtime logic belongs in `libs/`. Register new
   classes in `register_types.cpp`.
-- **The shared GDScript engine layer** (~30k LOC across 124 scripts) both hosts run on:
+- **The shared GDScript engine layer** (~36k LOC across ~150 scripts) both hosts run on:
   - `world/` — THE runtime, and by far the largest slice (~15k LOC): `game_world.gd` (the
     GameWorld host scene), `mission_runtime.gd`, `mission_present_pass.gd`,
     `local_player_host.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
     ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.
-  - `debug/` (the F3 overlay: a NovaDebugPage-per-system framework — sidebar shell,
+  - `debug/` (the F3 overlay — a NovaDebugPage-per-system framework: sidebar shell,
     NovaDebugOptions registry, the pick/snapshot stack; add pages per
-    `debug/pages/README.md`), `environment/` (time-of-day / water / sky / weather —
-    heavily `[orig]`-cited, shared by the game and the Terrain/Object editors),
+    `debug/pages/README.md` — plus the UI-free session layer under it:
+    `NovaDebugSession` + `NovaDebugCatalog`, the one control catalog both F3 and
+    the runtime `game_debug` MCP tool consume), `environment/` (time-of-day /
+    water / sky / weather — heavily `[orig]`-cited, shared by the game and the
+    Terrain/Object editors),
     `mission/` (object placer + model resolver; the editor-only authoring overlays
     live in `modtools/mission/`), `object/` (`nova_object_model.gd`, collision
-    hulls), `mcp/` (host-agnostic MCP server core, booted by `modtools/mcp/`),
+    hulls), `mcp/` (host-agnostic MCP server core: booted by ONED's
+    `modtools/mcp/` on the stable editor port, and by the game's
+    `game/game_mcp_service.gd` as the arg-gated ephemeral runtime endpoint),
     `ui/` (HUD view helpers), `avatar/` (avatar composition), `terrain/`,
     `resource_index/`, `util/`, `strings/` (the `NovaStrings` autoload, wired in
     `project.godot`), `fly_camera.gd`.

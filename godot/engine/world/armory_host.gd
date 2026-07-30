@@ -52,7 +52,7 @@ func _init() -> void:
 
 
 ## Wire the host to a world + player host and the control the menu overlays
-## (the HUD layer in the game shell; the play viewport container in ONED).
+## (the HUD layer in the game shell; tests pass their own parent).
 func setup(world, player_host, ui_parent: Node) -> void:
 	_world = world
 	_player_host = player_host

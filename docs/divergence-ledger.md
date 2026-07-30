@@ -479,8 +479,9 @@ the container-detection seam.
 | D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
 | D-VFS-7 | Archive lookup now mirrors the 31-byte query cap + both-sides ASCII uppercase and exact trailing-space significance; the apparent retail trim starts on the terminating NUL and is dead, pinned by `test_archive_names_keep_trailing_spaces` | A | FIXED (2026-07-17) | fidelity 2026-07-17 |
 | D-VFS-10 | Host rejects rooted/drive-qualified/ADS/`..` queries and symlink escapes from a mounted loose root, where retail constructs an unchecked path; pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | C | PERMANENT (2026-07-17) | mounted-root safety |
+| D-VFS-11 | Editor-managed runs (`--loose-root`, passed by every ONED F5/F6 launch) fall back to the editor's loose mount when the fixed boot table opens zero archives, where retail aborts subsystem init; unflagged launches keep the witnessed fatal; pinned by `test_mount_boot_root_falls_back_to_the_loose_authoring_mount` [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44] | C | PERMANENT (2026-07-30) | ADR 0025 play-testing |
 
-D-VFS-4/6/8/9/10 are ratified permanent decisions (register below). Closed 2026-07-05:
+D-VFS-4/6/8/9/10/11 are ratified permanent decisions (register below). Closed 2026-07-05:
 **D-VFS-2** -> `FIXED` — `Vfs::mount_game` defaults to the witnessed fixed boot
 table (`VfsArchiveDiscovery::RetailTable`: language/localres/resource.pff in
 slot order, extra archives never mount, pinned by
@@ -491,7 +492,9 @@ modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 Closed 2026-07-17: **D-VFS-1**, **D-VFS-3**, and **D-VFS-7** — per-call source
 policy, verbatim relative runtime queries, and exact archive-name comparison are
 live and pinned at the VFS/Godot seams; **D-VFS-10** records the ratified safety
-boundary around those newly live loose probes.
+boundary around those newly live loose probes. Added 2026-07-30: **D-VFS-11** —
+the editor-managed `--loose-root` boot fallback, ratified by
+[ADR 0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md).
 
 ### Credits (CBIN) — [credits/cbin-re.md](credits/cbin-re.md) (D-CBIN catalog; PAR-R5, PARTIAL)
 
@@ -785,7 +788,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
 | 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
-| VFS / PFF mount stack | 0 | 1 | 0 | 1 | 4 |
+| VFS / PFF mount stack | 0 | 1 | 0 | 1 | 5 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 3 | 0 | 0 | 3 | 7 |
 | Tiles | 0 | 0 | 0 | 0 | 2 |
@@ -795,7 +798,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 3 | 0 | 2 | 5 | 1 |
-| **Total** | **105** | **14** | **32** | **151** | 107 |
+| **Total** | **105** | **14** | **32** | **151** | 108 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 
@@ -839,6 +842,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
 | D-VFS-10 | Mounted loose lookups reject rooted/drive-qualified/ADS/`..` queries and symlink escapes, unlike retail's unchecked path construction [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | A resource name must stay inside the explicitly mounted root. Preserving legitimate relative, case-insensitive lookup while refusing arbitrary host-file access is a host safety boundary, not a gameplay fidelity loss. |
+| D-VFS-11 | Under `--loose-root` (editor-managed F5/F6 runs) the game shell falls back to the editor's loose mount when the fixed boot table opens zero archives, where retail aborts subsystem initialization [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44] | Play-testing the exact loose file set ONED authors is the managed launch's purpose ([ADR 0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md)); every unflagged standalone run keeps the retail fatal, so shipped-game behavior is unchanged. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
 | D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the host renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the host pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future host that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 

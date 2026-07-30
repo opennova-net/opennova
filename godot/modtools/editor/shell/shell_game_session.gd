@@ -282,7 +282,8 @@ func call_runtime_tool(tool: String, arguments: Dictionary = {}) -> Variant:
 		arguments.duplicate(true))
 
 
-## The game always mounts this exact directory with /d, and --loose-root lets a
+## The game always mounts this exact directory with /d ([orig: `/d`
+## loose-override, Game_ParseCommandLineAndInit @ 0x4a7310]), and --loose-root lets a
 ## directory holding no packed archives (a loose authoring root) play as the
 ## loose file set ONED is editing (ADR 0025). An F6 request adds the exact saved
 ## loose BMS; editor-managed identity is opaque to the game shell.

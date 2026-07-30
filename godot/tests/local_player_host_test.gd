@@ -753,9 +753,8 @@ func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 # viewport is still making its children ready, so it rejects add_child ("parent
 # busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
 # mount fails then, leaving the viewmodel layer masked off the player camera with
-# nothing drawing it: an invisible FP viewmodel in the runtime (but not in ONED,
-# whose play controller enters an already-running tree). The pass mount is
-# deferred for exactly this boot shape; this pins it.
+# nothing drawing it: an invisible FP viewmodel in the runtime. The pass mount
+# is deferred for exactly this boot shape; this pins it.
 class BootTrigger:
 	extends Node
 	var host

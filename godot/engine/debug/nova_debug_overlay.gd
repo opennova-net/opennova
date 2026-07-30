@@ -16,8 +16,9 @@ extends CanvasLayer
 ## stale. Panel width and the last-selected page persist per user via
 ## NovaConfigStore; live toggles deliberately do not.
 
-## Compatibility notification after a NovaDebugOptions control has already
-## been applied through the shared session's public target.
+## Post-apply notification after a NovaDebugOptions control has gone through
+## the shared session's public target. No production host consumes it —
+## tests observe option flips here.
 signal debug_option_changed(id: StringName, value: Variant)
 
 ## Fired after a fresh debug snapshot lands on disk — the local-player pose

@@ -124,7 +124,7 @@ func _settle(frames: int) -> void:
 		await get_tree().process_frame
 
 
-# The play controller owns a LocalPlayerHost child; find it by capability.
+# The game host owns a LocalPlayerHost; find it by capability.
 func _find_player_host(node: Node) -> Node:
 	if node.has_method("set_debug_body_in_first_person"):
 		return node

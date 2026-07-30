@@ -129,7 +129,8 @@ var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
 var _net_event_view # NetEventView: draws the decoded event stream over the world
-# A host-injected resource root (the editor's mounted VFS). When set, the load_*
+# A host-injected resource root (main_game hands its boot mount over; tests
+# hand fixture roots). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
 var _injected_root: NovaResourceRoot = null
@@ -1633,8 +1634,8 @@ func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 	return out
 
 
-## Register the host-side presenter for fixed-tick weapon events. The game and
-## ONED both install LocalPlayerHost here; headless/runtime-only hosts leave it
+## Register the host-side presenter for fixed-tick weapon events. The game
+## installs LocalPlayerHost here; headless/runtime-only hosts leave it
 ## invalid and may drain the typed event queue explicitly.
 func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 	_local_player_weapon_tick_consumer = consumer
@@ -1834,7 +1835,7 @@ func _route_round_impacts() -> void:
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
 # placed MissionObjects, and each tick applies every entity's transform + part animations (PLAYPARTANIM,
 # applied in-engine) + visibility onto its model. The game runs it at the faithful 62-frame cadence and
-# drives it explicitly from tick() (self_tick off); its drained side effects route through
+# drives it explicitly from tick(); its drained side effects route through
 # _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))

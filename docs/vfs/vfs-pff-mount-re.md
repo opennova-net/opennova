@@ -26,7 +26,7 @@ stands confirmed.
 | The by-name front door (6 functions, ~190 callsites) | **witnessed** | FileSystem_FileExists @ 0x75aa50 / OpenFile @ 0x75b1c0 / GetFileSize @ 0x75b390 / File_LoadResource @ 0x75b540 / ReadFileWithSearchPaths @ 0x75b700 / ReadFileEx @ 0x75b870 — one shared skeleton |
 | PFF container open + entry lookup | **witnessed** | PFF_Open @ 0x7682e0; PFF_SortEntries @ 0x768280 (in-place `strupr` + qsort); PFF_FindEntry @ 0x7685d0 (bsearch); no header validation at all |
 | Read disciplines (streaming vs whole-file; XOR entries) | **witnessed** | FileSystem_Read @ 0x75abe0 (raw, no decrypt); PFF_ReadFile @ 0x768a30 / PFF_LoadFileToMemory @ 0x768920 (XOR-decrypt on entry flags bit0 via Buffer_XorDecrypt @ 0x768760, seed 0x0312A4CE, ROL 7/byte) |
-| Ours vs retail | **1 research-gated row + 5 permanent decisions** | the D-VFS catalog below |
+| Ours vs retail | **1 research-gated row + 6 permanent decisions** | the D-VFS catalog below |
 
 ## The witnessed pipeline
 
@@ -136,6 +136,7 @@ paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 | D-VFS-5 | B | NEEDS-RE | Encrypted-entry (bit0) streaming: retail decrypts ONLY whole-file reads; streaming + partial reads return ciphertext; ours always decrypts — needs the corpus check (does any retail JO pff carry bit0, ever streamed?) |
 | D-VFS-7 | A | FIXED (2026-07-17) | Retail archive lookup now has a dedicated query key: at most 31 bytes, ASCII-uppercase, compared exactly against the entry name uppercased at mount. No trimming occurs—the apparent trim starts on the NUL and is dead—so stored/query trailing spaces remain significant; overlength queries cannot match the format's ≤16-byte entry names. `test_archive_names_keep_trailing_spaces` pins the distinction [orig: `PFF_FindEntry @ 0x7685d0`; `PFF_CompareSearchNameToEntry @ 0x768240`] |
 | D-VFS-10 | C | PERMANENT (2026-07-17) | The retail loose path is built from an unchecked query; the host rejects rooted/drive-qualified/ADS/`..` queries and canonicalizes every component so symlinks cannot escape a mounted search root. This is a ratified mount-sandbox boundary: legitimate relative, case-insensitive in-root queries retain retail behavior, while exposing arbitrary host files through an asset name would be wrong. Pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] |
+| D-VFS-11 | C | PERMANENT (2026-07-30) | Editor-managed play-testing boots a loose-only directory past retail's zero-archives fatal: under `--loose-root` (every ONED F5/F6 launch passes it) `MainGame.mount_boot_root` falls back to the editor's loose mount when no boot-table archive opens; unflagged standalone launches keep the witnessed fatal ("No game data archives could be opened"). Ratified by ADR 0025; pinned by `test_mount_boot_root_falls_back_to_the_loose_authoring_mount` [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44 in Game_InitSubsystems @ 0x4a6cd0] |
 
 **Ratified permanent decisions** (in the ledger's register):
 D-VFS-4 (raw runtime reads now probe live while editor listings and decoded
@@ -144,8 +145,9 @@ D-VFS-6 (retail's zero container validation + two write-after-free bugs —
 reproducing manufactures garbage, ADR 0003 class), D-VFS-8 (retail's
 16-path/16-byte/16-slot caps incl. the >5-char expansion-name overflow —
 capacity supersets), D-VFS-9 (`<exp>L.pff` as our persistent primary vs
-retail's secondary slot 0 — identical effective precedence, model note), and
-D-VFS-10 (mounted-root containment — host safety boundary).
+retail's secondary slot 0 — identical effective precedence, model note),
+D-VFS-10 (mounted-root containment — host safety boundary), and D-VFS-11
+(the editor-managed `--loose-root` boot fallback — ADR 0025 tooling boundary).
 
 ## Not witnessed
 
