@@ -6,6 +6,8 @@
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
+#include <algorithm>
+
 #include "simulation/nova_simulation.h"
 
 using namespace godot;
@@ -48,11 +50,18 @@ enum RowCaps {
 	CAP_RHC = 16,
 	CAP_CTRL = 32,
 	CAP_MUZZLE = 64,
+	CAP_PART = 128,
 };
 
 inline int32_t field_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
 }
+
+constexpr int AIM_PAYLOAD_FLOATS =
+		NovaSimulation::PF_EMPLACED_CONTROLS_VALID -
+		NovaSimulation::PF_AIM_BODY_PITCH_DEG;
+static_assert(AIM_PAYLOAD_FLOATS == 30,
+		"aim cache must cover body Euler plus all nine overlay triples");
 
 } // namespace
 
@@ -101,11 +110,28 @@ void NovaPresentApplier::setup(Object *sim, Object *index) {
 	index_has_generation_ =
 			index != nullptr && index->has_method(names().get_generation);
 	plan_revision_ = -1; // force a rebuild against the new wiring
+	plan_dirty_ = true;
 	rows_.clear();
 }
 
 void NovaPresentApplier::set_output_channels(int channels) {
-	output_channels_ = channels & OUTPUT_ALL;
+	const int next = channels & OUTPUT_ALL;
+	const int rising = next & ~output_channels_;
+	output_channels_ = next;
+	if (rising == 0) {
+		return;
+	}
+	for (Row &row : rows_) {
+		if ((rising & OUTPUT_TRANSFORM) != 0) {
+			row.transform_stamp_valid = false;
+		}
+		if ((rising & OUTPUT_PART_ANIM) != 0) {
+			row.part_stamp_valid = false;
+		}
+		if ((rising & OUTPUT_BODY_ANIM) != 0) {
+			row.body_stamp_valid = false;
+		}
+	}
 }
 
 void NovaPresentApplier::set_shared_visibility_maps(
@@ -248,29 +274,15 @@ int64_t NovaPresentApplier::current_index_generation() {
 	return static_cast<int64_t>(index->call(names().get_generation));
 }
 
-bool NovaPresentApplier::row_plan_is_current(const float *p, int64_t size,
-		int stride, int64_t layout_revision) {
+bool NovaPresentApplier::row_plan_is_current(int64_t size, int stride,
+		int64_t layout_revision) {
 	// No revision means a compatible fake/custom source: preserve the original
 	// full-resolution behavior rather than trusting an unverifiable row order.
-	if (layout_revision < 0 || plan_revision_ != layout_revision ||
+	if (plan_dirty_ || layout_revision < 0 ||
+			plan_revision_ != layout_revision ||
 			plan_stride_ != stride || plan_snapshot_size_ != size ||
 			plan_index_generation_ != current_index_generation()) {
 		return false;
-	}
-	for (const Row &row : rows_) {
-		if (row.base < 0 || row.base + stride > size) {
-			return false;
-		}
-		if (ObjectDB::get_instance(row.node_id) == nullptr) {
-			return false;
-		}
-		if (field_i(p, row.base, NovaSimulation::PF_WIRE_HANDLE) != row.handle ||
-				field_i(p, row.base, NovaSimulation::PF_TYPE_ID) != row.type_id ||
-				field_i(p, row.base, NovaSimulation::PF_BMS_ID) != row.bms_id ||
-				field_i(p, row.base, NovaSimulation::PF_KIND) != row.kind ||
-				field_i(p, row.base, NovaSimulation::PF_INDEX) != row.index) {
-			return false;
-		}
 	}
 	return true;
 }
@@ -284,8 +296,10 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 	plan_stride_ = stride;
 	plan_snapshot_size_ = size;
 	plan_index_generation_ = current_index_generation();
+	plan_dirty_ = false;
 	Object *index = ObjectDB::get_instance(index_id_);
 	if (index == nullptr) {
+		plan_dirty_ = true;
 		return;
 	}
 	const int64_t count = size / stride;
@@ -302,11 +316,7 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 		Row row;
 		row.base = base;
 		row.node_id = node->get_instance_id();
-		row.handle = field_i(p, base, NovaSimulation::PF_WIRE_HANDLE);
-		row.type_id = field_i(p, base, NovaSimulation::PF_TYPE_ID);
 		row.bms_id = bms_id;
-		row.kind = kind;
-		row.index = idx;
 		// Capability lookups are stable per node script: resolve them once per
 		// topology change so the per-frame loop never pays has_method() again.
 		int caps = 0;
@@ -334,6 +344,9 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 				static_cast<bool>(node->call(names().has_muzzle))) {
 			caps |= CAP_MUZZLE;
 		}
+		if (node->has_method(names().set_part_phase)) {
+			caps |= CAP_PART;
+		}
 		row.caps = caps;
 		rows_.push_back(row);
 	}
@@ -350,12 +363,12 @@ const String &NovaPresentApplier::infantry_key(int state) {
 
 void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision) {
-	if (stride <= 0 || index_id_ == ObjectID()) {
+	if (stride < NovaSimulation::PF_STRIDE || index_id_ == ObjectID()) {
 		return;
 	}
 	const float *p = snap.ptr();
 	const int64_t size = snap.size();
-	if (!row_plan_is_current(p, size, stride, layout_revision)) {
+	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
 	Object *sim = ObjectDB::get_instance(sim_id_);
@@ -364,29 +377,37 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 	for (Row &row : rows_) {
 		Object *node = ObjectDB::get_instance(row.node_id);
 		if (node == nullptr) {
-			// A freed cached node cannot be written through; the next call's
-			// validation rejects the plan and rebuilds.
+			// Revisioned snapshots trust their topology stamp instead of
+			// pre-scanning every ObjectID. Rebind on the next frame and release
+			// this row's visibility intent immediately.
+			present_visibility_.erase(row.bms_id);
+			row.present_visible = -1;
+			plan_dirty_ = true;
 			continue;
 		}
 		Node3D *n3 = Object::cast_to<Node3D>(node);
 		const int base = row.base;
 		const int caps = row.caps;
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0 && n3 != nullptr) {
+			// Compare the six packed source floats before constructing either
+			// the placement Basis or Transform3D.
 			// Position is already Godot-space (x, z, -y); rotation is
 			// mission-space degrees, built through the ONE placement convention
 			// so a sim-driven entity sits exactly where placement would put it.
-			const Vector3 pos(p[base + NovaSimulation::PF_POS_X],
-					p[base + NovaSimulation::PF_POS_Y],
-					p[base + NovaSimulation::PF_POS_Z]);
-			const Basis entity_basis = bms_to_godot_basis(
-					Vector3(p[base + NovaSimulation::PF_PITCH_DEG],
-							p[base + NovaSimulation::PF_YAW_DEG],
-							p[base + NovaSimulation::PF_ROLL_DEG]));
-			const Basis root_basis = (caps & CAP_AIM) != 0
-					? aim_root_basis(snap, base, entity_basis)
-					: entity_basis;
-			const Transform3D next(root_basis, pos);
-			++stat_transform_builds_;
+			const bool aim_owns_root = (caps & CAP_AIM) != 0 &&
+					field_i(p, base,
+							NovaSimulation::PF_AIM_OVERLAY_VALID) != 0;
+			const int rotation_field = aim_owns_root
+					? NovaSimulation::PF_AIM_BODY_PITCH_DEG
+					: NovaSimulation::PF_PITCH_DEG;
+			const std::array<float, 6> next_stamp = {
+				p[base + NovaSimulation::PF_POS_X],
+				p[base + NovaSimulation::PF_POS_Y],
+				p[base + NovaSimulation::PF_POS_Z],
+				p[base + rotation_field],
+				p[base + rotation_field + 1],
+				p[base + rotation_field + 2],
+			};
 			// The pass owns these transforms: compare against the last APPLIED
 			// value instead of reading the node property back per row (the aim
 			// leg below runs with drive_root_basis=false, so nothing else
@@ -394,19 +415,27 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// including the every-call rebuild of revisionless fake sources)
 			// fall back to one live read so an unchanged row never re-dirties
 			// the node's tree, exactly like the GDScript live compare did.
-			if (!row.has_last_transform && n3->get_transform() == next) {
-				row.has_last_transform = true;
-				row.last_transform = next;
-			} else if (!row.has_last_transform || row.last_transform != next) {
-				n3->set_transform(next);
-				row.has_last_transform = true;
-				row.last_transform = next;
-				++stat_moved_;
+			if (!row.transform_stamp_valid ||
+					row.transform_stamp != next_stamp) {
+				const Transform3D next(
+						bms_to_godot_basis(
+								Vector3(next_stamp[3], next_stamp[4],
+										next_stamp[5])),
+						Vector3(next_stamp[0], next_stamp[1], next_stamp[2]));
+				++stat_transform_builds_;
+				if (row.transform_stamp_valid ||
+						n3->get_transform() != next) {
+					n3->set_transform(next);
+					++stat_moved_;
+				}
+				row.transform_stamp = next_stamp;
+				row.transform_stamp_valid = true;
 			}
 		}
 		// Aim overlay with the capability lookups hoisted into the row plan and
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).
+		bool body_dependency_changed = false;
 		if ((caps & CAP_RHC) != 0) {
 			const int32_t rhc =
 					field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED);
@@ -414,50 +443,109 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				node->call(n.set_right_hand_collapsed, rhc != 0);
 				++stat_rhc_dispatches_;
 				row.rhc = rhc;
+				body_dependency_changed = true;
 			}
 		}
 		if ((caps & CAP_AIM) != 0) {
 			const int32_t aim_valid =
 					field_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 			if (aim_valid != 0) {
-				aim_apply_valid(node, snap, base, false);
-				++stat_aim_dispatches_;
+				bool payload_changed =
+						row.aim_valid != 1 || !row.aim_payload_valid;
+				if (!payload_changed) {
+					for (int i = 0; i < AIM_PAYLOAD_FLOATS; ++i) {
+						if (row.aim_payload[static_cast<size_t>(i)] !=
+								p[base +
+										NovaSimulation::PF_AIM_BODY_PITCH_DEG +
+										i]) {
+							payload_changed = true;
+							break;
+						}
+					}
+				}
+				if (payload_changed) {
+					aim_apply_valid(node, snap, base, false);
+					++stat_aim_dispatches_;
+					std::copy_n(
+							p + base +
+									NovaSimulation::PF_AIM_BODY_PITCH_DEG,
+							AIM_PAYLOAD_FLOATS, row.aim_payload.begin());
+					row.aim_payload_valid = true;
+					body_dependency_changed = true;
+				}
+				row.aim_valid = 1;
 			} else if (row.aim_valid != 0) {
 				node->call(n.set_aim_overlay, Array());
 				++stat_aim_dispatches_;
+				row.aim_valid = 0;
+				row.aim_payload_valid = false;
+				body_dependency_changed = true;
+			} else {
+				row.aim_valid = 0;
 			}
-			row.aim_valid = aim_valid;
 		}
-		if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
-			if ((caps & CAP_CTRL) != 0) {
-				// Remove last tick's semantic mount ownership before generic
-				// model-order channels run: a generic PLAYPARTANIM can itself
-				// address EWEAP_*; it must survive dismount, while live gunner
-				// aim still overlays it last.
-				emplaced_clear(node);
-				stat_control_dispatches_ += 2;
-			}
-			// PANM: the engine integrates each channel's phase
-			// [orig: Entity_ApplyCommand @ 0x43ab60 case 0x22]; the host only
-			// poses commanded channels.
-			if (node->has_method(n.set_part_phase)) {
-				if (field_i(p, base, NovaSimulation::PF_ACTIVE1) == 1) {
-					node->call(n.set_part_phase, 1,
-							field_i(p, base, NovaSimulation::PF_PHASE1));
-					++stat_posed_;
-					++stat_part_dispatches_;
+		if ((output_channels_ & OUTPUT_PART_ANIM) != 0 &&
+				(caps & (CAP_PART | CAP_CTRL)) != 0) {
+			const int32_t active1 =
+					field_i(p, base, NovaSimulation::PF_ACTIVE1) == 1 ? 1 : 0;
+			const int32_t active2 =
+					field_i(p, base, NovaSimulation::PF_ACTIVE2) == 1 ? 1 : 0;
+			const int32_t controls_valid =
+					field_i(p, base,
+							NovaSimulation::PF_EMPLACED_CONTROLS_VALID) == 1
+					? 1
+					: 0;
+			const std::array<int32_t, 7> next_part_stamp = {
+				active1,
+				active1 != 0
+						? field_i(p, base, NovaSimulation::PF_PHASE1)
+						: 0,
+				active2,
+				active2 != 0
+						? field_i(p, base, NovaSimulation::PF_PHASE2)
+						: 0,
+				controls_valid,
+				controls_valid != 0
+						? field_i(p, base, NovaSimulation::PF_EWEAP_GUNYAW)
+						: 0,
+				controls_valid != 0
+						? field_i(p, base, NovaSimulation::PF_EWEAP_GUNPITCH)
+						: 0,
+			};
+			if (!row.part_stamp_valid ||
+					row.part_stamp != next_part_stamp) {
+				// PANM and EWEAP controls alias model registers on some assets,
+				// so update them as one transaction: release semantic ownership,
+				// replay every active generic phase, then overlay semantics last.
+				if ((caps & CAP_CTRL) != 0) {
+					emplaced_clear(node);
+					stat_control_dispatches_ += 2;
 				}
-				if (field_i(p, base, NovaSimulation::PF_ACTIVE2) == 1) {
-					node->call(n.set_part_phase, 2,
-							field_i(p, base, NovaSimulation::PF_PHASE2));
-					++stat_posed_;
-					++stat_part_dispatches_;
+				// PANM phases are integrated by the engine [orig:
+				// Entity_ApplyCommand @ 0x43ab60 case 0x22]; the host poses
+				// currently active channels.
+				if ((caps & CAP_PART) != 0) {
+					if (active1 != 0) {
+						node->call(n.set_part_phase, 1,
+								next_part_stamp[1]);
+						++stat_posed_;
+						++stat_part_dispatches_;
+					}
+					if (active2 != 0) {
+						node->call(n.set_part_phase, 2,
+								next_part_stamp[3]);
+						++stat_posed_;
+						++stat_part_dispatches_;
+					}
 				}
-			}
-			if ((caps & CAP_CTRL) != 0) {
-				const int applied = emplaced_apply(node, snap, base, false);
-				stat_posed_ += applied;
-				stat_control_dispatches_ += applied;
+				if ((caps & CAP_CTRL) != 0) {
+					const int applied =
+							emplaced_apply(node, snap, base, false);
+					stat_posed_ += applied;
+					stat_control_dispatches_ += applied;
+				}
+				row.part_stamp = next_part_stamp;
+				row.part_stamp_valid = true;
 			}
 		}
 		const bool present_visible =
@@ -492,38 +580,81 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		// Hidden models skip skeletal writes unless they own the authoritative
 		// posed-muzzle feedback seam (AI fire origins survive; hidden non-weapon
 		// actors take the cheap path).
-		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 &&
-				(present_visible || (net_id > 0 && (caps & CAP_MUZZLE) != 0))) {
+		const bool body_eligible =
+				present_visible ||
+				(net_id > 0 && (caps & CAP_MUZZLE) != 0);
+		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && body_eligible) {
 			// Main-body skeletal clip: infantry poses to the exact anim-state
 			// phase that produced root motion; PF_BODY_ANIM_SLOT is the coarse
 			// fallback for compatible non-infantry nodes.
 			const int32_t anim_state =
 					field_i(p, base, NovaSimulation::PF_ANIM_STATE);
-			bool dispatched = false;
+			int32_t body_mode = BODY_NONE;
+			int32_t body_selector = -1;
+			int32_t body_phase = 0;
+			String body_clip_key;
 			if (anim_state >= 0 && (caps & CAP_BODY_CLIP) != 0) {
 				const String &key = infantry_key(anim_state);
 				if (!key.is_empty()) {
-					node->call(n.play_body_clip_at, key,
-							field_i(p, base, NovaSimulation::PF_ANIM_PHASE_TICKS));
-					++stat_body_dispatches_;
-					dispatched = true;
+					body_mode = BODY_CLIP_AT;
+					body_selector = anim_state;
+					body_phase = field_i(
+							p, base, NovaSimulation::PF_ANIM_PHASE_TICKS);
+					body_clip_key = key;
 				}
 			}
-			if (!dispatched) {
+			if (body_mode == BODY_NONE) {
 				const int32_t body_anim_slot =
 						field_i(p, base, NovaSimulation::PF_BODY_ANIM_SLOT);
 				if (body_anim_slot >= 0) {
 					if ((caps & CAP_BODY_SLOT) != 0) {
-						node->call(n.play_body_anim_at, body_anim_slot,
-								field_i(p, base,
-										NovaSimulation::PF_ANIM_PHASE_TICKS));
-						++stat_body_dispatches_;
+						body_mode = BODY_SLOT_AT;
+						body_selector = body_anim_slot;
+						body_phase = field_i(
+								p, base,
+								NovaSimulation::PF_ANIM_PHASE_TICKS);
 					} else if ((caps & CAP_BODY_PLAY) != 0) {
-						node->call(n.play_body_anim, body_anim_slot);
-						++stat_body_dispatches_;
+						body_mode = BODY_SLOT_PLAY;
+						body_selector = body_anim_slot;
 					}
 				}
 			}
+			const bool body_stamp_changed =
+					!row.body_stamp_valid || row.body_mode != body_mode ||
+					row.body_selector != body_selector ||
+					row.body_phase != body_phase;
+			const bool force_external_pose =
+					body_dependency_changed &&
+					(body_mode == BODY_CLIP_AT ||
+							body_mode == BODY_SLOT_AT);
+			if (body_stamp_changed || force_external_pose) {
+				switch (body_mode) {
+					case BODY_CLIP_AT:
+						node->call(n.play_body_clip_at, body_clip_key,
+								body_phase);
+						++stat_body_dispatches_;
+						break;
+					case BODY_SLOT_AT:
+						node->call(n.play_body_anim_at, body_selector,
+								body_phase);
+						++stat_body_dispatches_;
+						break;
+					case BODY_SLOT_PLAY:
+						node->call(n.play_body_anim, body_selector);
+						++stat_body_dispatches_;
+						break;
+					case BODY_NONE:
+						break;
+				}
+				row.body_mode = body_mode;
+				row.body_selector = body_selector;
+				row.body_phase = body_phase;
+				row.body_stamp_valid = true;
+			}
+		} else if ((output_channels_ & OUTPUT_BODY_ANIM) != 0) {
+			// Desired state can keep changing while a hidden, non-muzzle row is
+			// ineligible. Keep the applied stamp dirty so visibility catches up.
+			row.body_stamp_valid = false;
 		}
 		if (net_id > 0 && (caps & CAP_MUZZLE) != 0) {
 			// The D-AI-6 muzzle seam: feed the posed gun-flash userpoint back to

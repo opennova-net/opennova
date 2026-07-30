@@ -17,6 +17,7 @@ class FakeModel:
 	var overlay_calls: Array = []
 	var right_hand_collapse_calls: Array[bool] = []
 	var ctrl_values: Dictionary = {}
+	var set_controls: Array = []
 	var cleared_controls: Array[String] = []
 	var part_control_names: Dictionary = {}
 	func set_part_phase(channel: int, phase: int) -> void:
@@ -36,9 +37,21 @@ class FakeModel:
 		right_hand_collapse_calls.append(collapsed)
 	func set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
+		set_controls.append([name, value])
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
+
+
+class MuzzleFakeModel:
+	extends FakeModel
+	var muzzle_queries := 0
+	var muzzle_position := Vector3(4.0, 5.0, 6.0)
+	func has_muzzle() -> bool:
+		return true
+	func get_muzzle_world_position() -> Vector3:
+		muzzle_queries += 1
+		return muzzle_position
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -71,6 +84,9 @@ class CountingIndex:
 class FakeSim:
 	extends RefCounted
 	var entities: Array = []
+	var muzzle_pushes: Array = []
+	func set_ai_muzzle_world(net_id: int, position: Vector3) -> void:
+		muzzle_pushes.append([net_id, position])
 	func get_present_stride() -> int:
 		return NovaSimulation.PF_STRIDE
 	func get_present_snapshot() -> PackedFloat32Array:
@@ -164,6 +180,33 @@ func test_inactive_channel_not_posed() -> void:
 	assert_eq(model.phases.size(), 0, "an untouched channel is left at its default pose")
 
 
+func test_part_channel_holds_while_inactive_and_catches_up_when_reactivated() -> void:
+	var model := FakeModel.new()
+	model.part_control_names = { 1: "HOLD_PHASE" }
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 1: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{ "bms_id": 1, "active1": 1, "phase1": 100 }]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.phases, [[1, 100]])
+
+	sim.entities[0]["active1"] = 0
+	sim.entities[0]["phase1"] = 200
+	presenter.present()
+	presenter.present()
+	assert_eq(model.phases, [[1, 100]],
+			"an inactive channel holds its last applied phase without dispatch")
+	assert_eq(model.ctrl_values.get("HOLD_PHASE"), 100,
+			"the model register keeps the last phase while its channel is inactive")
+
+	sim.entities[0]["active1"] = 1
+	presenter.present()
+	assert_eq(model.phases, [[1, 100], [1, 200]],
+			"reactivation catches the model up to the current phase exactly once")
+
+
 func test_both_channels_posed() -> void:
 	var model := FakeModel.new()
 	add_child_autofree(model)
@@ -203,6 +246,29 @@ func test_emplaced_weapon_uses_named_controls_and_clears_them() -> void:
 	assert_has(model.cleared_controls, "EWEAP_GUNPITCH")
 
 
+func test_first_invalid_emplaced_state_clears_stale_node_controls() -> void:
+	var model := FakeModel.new()
+	model.ctrl_values = {
+		"EWEAP_GUNYAW": 0x1234,
+		"EWEAP_GUNPITCH": 0xFEDC,
+	}
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 8: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 8,
+		"emplaced_controls_valid": 0,
+	}]
+	_make_pass(index, sim).present()
+	assert_true(model.ctrl_values.is_empty(),
+			"the cold applied-state cache cannot retain controls from an earlier owner")
+	assert_eq(model.cleared_controls, [
+		"EWEAP_GUNYAW",
+		"EWEAP_GUNPITCH",
+	])
+
+
 func test_dismount_restores_generic_part_values_for_the_same_registers() -> void:
 	var model := FakeModel.new()
 	model.part_control_names = {
@@ -240,6 +306,43 @@ func test_dismount_restores_generic_part_values_for_the_same_registers() -> void
 	}, "dismount clears stale semantic ownership before generic PLAYPARTANIM")
 
 
+func test_dismount_restores_unchanged_generic_values_for_aliased_registers() -> void:
+	var model := FakeModel.new()
+	model.part_control_names = {
+		1: "EWEAP_GUNYAW",
+		2: "EWEAP_GUNPITCH",
+	}
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 9: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 9,
+		"active1": 1,
+		"phase1": 0x1111,
+		"active2": 1,
+		"phase2": 0xEEEE,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2222,
+		"emplaced_gun_pitch": 0xDDDD,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x2222,
+		"EWEAP_GUNPITCH": 0xDDDD,
+	})
+
+	# The generic phase did not change, but clearing semantic mount ownership
+	# erased the aliased register. It therefore has to be replayed on dismount.
+	sim.entities[0]["emplaced_controls_valid"] = 0
+	presenter.present()
+	assert_eq(model.ctrl_values, {
+		"EWEAP_GUNYAW": 0x1111,
+		"EWEAP_GUNPITCH": 0xEEEE,
+	}, "dismount restores retained generic values even when their phases are unchanged")
+
+
 func test_body_clip_poses_to_sim_anim_state_phase() -> void:
 	var model := FakeModel.new()
 	add_child_autofree(model)
@@ -251,6 +354,67 @@ func test_body_clip_poses_to_sim_anim_state_phase() -> void:
 	assert_eq(model.body_calls.size(), 1, "one body clip posed")
 	assert_eq(String((model.body_calls[0] as Array)[0]), "anim_idle", "infantry anim state resolves to .adm key")
 	assert_eq(int((model.body_calls[0] as Array)[1]), 9, "sim clip phase passes through")
+
+
+func test_aim_and_right_hand_changes_repose_stable_body_state() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 11: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 11,
+		"anim_state": 43,
+		"anim_phase": 9,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(3.0, 27.0, -2.0),
+		"aim_angles": PackedVector3Array([Vector3(5.0, 6.0, 7.0)]),
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_eq(model.body_calls.size(), 1)
+
+	sim.entities[0]["aim_angles"] = PackedVector3Array([Vector3(8.0, 9.0, 10.0)])
+	presenter.present()
+	assert_eq(model.overlay_calls.size(), 2, "changed aim reaches the model")
+	assert_eq(model.body_calls.size(), 2,
+			"changed aim reposes an otherwise-stable externally-phased body")
+
+	sim.entities[0]["right_hand_collapsed"] = 1
+	presenter.present()
+	assert_eq(model.right_hand_collapse_calls, [false, true])
+	assert_eq(model.body_calls.size(), 3,
+			"changed collapse state also reposes the stable body")
+
+
+func test_hidden_body_catches_up_when_it_becomes_presentable() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 11: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 11,
+		"hidden": 1,
+		"anim_state": 43,
+		"anim_phase": 9,
+		"aim_overlay_valid": 1,
+		"aim_angles": PackedVector3Array([Vector3(5.0, 6.0, 7.0)]),
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_true(model.body_calls.is_empty(), "hidden non-muzzle bodies skip skeletal dispatch")
+
+	sim.entities[0]["aim_angles"] = PackedVector3Array([Vector3(8.0, 9.0, 10.0)])
+	sim.entities[0]["right_hand_collapsed"] = 1
+	presenter.present()
+	assert_true(model.body_calls.is_empty(),
+			"pose dependencies may update while hidden without writing the body")
+
+	sim.entities[0]["hidden"] = 0
+	presenter.present()
+	assert_eq(model.body_calls, [["anim_idle", 9]],
+			"visibility eligibility catches the body up to its current authoritative pose")
 
 
 func test_placed_model_applies_snapshot_overlay_in_body_frame() -> void:
@@ -366,6 +530,112 @@ func test_stable_snapshot_does_not_redirty_the_transform_tree() -> void:
 			"aim body rotation is composed into the one root transform write")
 
 
+func test_changed_aim_body_updates_root_with_stable_entity_transform() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 21: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 21,
+		"handle": 2,
+		"type_id": 101,
+		"pos_x": 12.0,
+		"yaw_deg": 15.0,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(3.0, 27.0, -2.0),
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	var moved := int(presenter.get_stats()["moved"])
+
+	sim.entities[0]["aim_body"] = Vector3(-5.0, 61.0, 4.0)
+	presenter.present()
+	assert_eq(int(presenter.get_stats()["moved"]), moved + 1,
+			"aim-owned root rotation participates in the transform change stamp")
+	assert_true(model.basis.is_equal_approx(MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(-5.0, 61.0, 4.0))),
+			"the changed aim body, not the stable entity Euler, owns the root")
+
+
+func test_stable_revisioned_snapshot_only_reconciles_live_outputs() -> void:
+	var model := MuzzleFakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 21: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 21,
+		"handle": 2,
+		"type_id": 101,
+		"net_id": 77,
+		"pos_x": 12.0,
+		"yaw_deg": 15.0,
+		"active1": 1,
+		"phase1": 0x1111,
+		"emplaced_controls_valid": 1,
+		"emplaced_gun_yaw": 0x2222,
+		"emplaced_gun_pitch": 0xDDDD,
+		"anim_state": 43,
+		"anim_phase": 9,
+		"aim_overlay_valid": 1,
+		"aim_body": Vector3(3.0, 27.0, -2.0),
+		"aim_angles": PackedVector3Array([Vector3(5.0, 6.0, 7.0)]),
+		"right_hand_collapsed": 1,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	var presenter_stats: Dictionary = presenter.get_stats()
+	var moved := int(presenter.get_stats()["moved"])
+	var phase_calls := model.phases.size()
+	var overlay_calls := model.overlay_calls.size()
+	var rhc_calls := model.right_hand_collapse_calls.size()
+	var set_ctrl_calls := model.set_controls.size()
+	var clear_ctrl_calls := model.cleared_controls.size()
+	var body_calls := model.body_calls.size()
+	var muzzle_queries := model.muzzle_queries
+	var muzzle_pushes := sim.muzzle_pushes.size()
+
+	# Visibility and the AI muzzle seam are live outputs, so a stable snapshot
+	# must not short-circuit the entire row.
+	model.visible = false
+	presenter.present()
+	var next_presenter_stats: Dictionary = presenter.get_stats()
+	assert_true(model.visible, "live visibility ownership is reconciled every frame")
+	assert_eq(model.muzzle_queries, muzzle_queries + 1,
+			"the four-tick muzzle-freshness seam still samples every frame")
+	assert_eq(sim.muzzle_pushes.size(), muzzle_pushes + 1,
+			"the fresh muzzle sample still reaches the simulation")
+
+	assert_eq(int(presenter.get_stats()["moved"]), moved,
+			"stable transform inputs do not rebuild or write the root transform")
+	assert_eq(model.phases.size(), phase_calls,
+			"stable PANM inputs do not redispatch their phase")
+	assert_eq(model.overlay_calls.size(), overlay_calls,
+			"stable aim inputs do not rebuild or redispatch the overlay")
+	assert_eq(model.right_hand_collapse_calls.size(), rhc_calls,
+			"stable right-hand collapse does not redispatch")
+	assert_eq(model.set_controls.size(), set_ctrl_calls,
+			"stable semantic controls do not redispatch")
+	assert_eq(model.cleared_controls.size(), clear_ctrl_calls,
+			"stable semantic ownership is not cleared and rebuilt")
+	assert_eq(model.body_calls.size(), body_calls,
+			"stable externally-phased body state does not redispatch")
+	for key in [
+		"transform_builds",
+		"aim_dispatches",
+		"rhc_dispatches",
+		"part_dispatches",
+		"control_dispatches",
+		"body_dispatches",
+	]:
+		assert_eq(int(next_presenter_stats[key]), int(presenter_stats[key]),
+				"stable rows add no %s work" % key)
+	assert_eq(int(next_presenter_stats["muzzle_queries"]),
+			int(presenter_stats["muzzle_queries"]) + 1,
+			"the presenter counter also records the mandatory live muzzle query")
+
+
 func test_stable_layout_reuses_resolution_but_reads_fresh_pose() -> void:
 	var model := FakeModel.new()
 	add_child_autofree(model)
@@ -434,6 +704,43 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 			"same-size identity replacement is resolved against the new row")
 	assert_almost_eq(a.position.x, 12.0, 0.001)
 	assert_almost_eq(c.position.x, 30.0, 0.001)
+
+
+func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
+	var old_model := FakeModel.new()
+	var index := CountingIndex.new()
+	index.by_bms_id = { 21: old_model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 21,
+		"handle": 2,
+		"type_id": 101,
+		"pos_x": 12.0,
+	}]
+	var visibility_intent := {}
+	var presenter := _make_pass(index, sim, {
+		"present_visibility": visibility_intent,
+	})
+	presenter.present()
+	assert_almost_eq(old_model.position.x, 12.0, 0.001)
+	assert_true(bool(visibility_intent.get(21, false)))
+
+	old_model.free()
+	var replacement := FakeModel.new()
+	add_child_autofree(replacement)
+	index.by_bms_id[21] = replacement
+	sim.entities[0]["pos_x"] = 30.0
+
+	# A trusted layout revision no longer scans every ObjectID before the walk.
+	# The first null encounter may defer the rebind, but it must dirty the plan
+	# so the replacement is resolved on the following public presentation call.
+	presenter.present()
+	assert_false(visibility_intent.has(21),
+			"a freed cached node releases its visibility intent immediately")
+	presenter.present()
+	assert_eq(index.resolve_calls, 2, "the freed cached node triggers one plan rebind")
+	assert_almost_eq(replacement.position.x, 30.0, 0.001,
+			"the replacement receives the current row after the rebind")
 
 
 func test_transform_ignores_body_clip_visual_offsets() -> void:
@@ -544,6 +851,50 @@ func test_options_gate_each_channel() -> void:
 	_make_pass(index, sim, { "drive_part_anim": false }).present()
 	assert_eq(model.phases.size(), 0, "part-anim channel disabled -> nothing posed")
 	assert_almost_eq(model.position.x, 3.0, 0.001, "transform still applied")
+
+
+func test_reenabled_output_channels_catch_up_to_current_state() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 9: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{
+		"bms_id": 9,
+		"pos_x": 1.0,
+		"active1": 1,
+		"phase1": 100,
+		"anim_state": 43,
+		"anim_phase": 9,
+	}]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_almost_eq(model.position.x, 1.0, 0.001)
+	assert_eq(model.phases, [[1, 100]])
+	assert_eq(model.body_calls, [["anim_idle", 9]])
+
+	var channels := int(presenter.get_output_channels())
+	var frozen := (
+			PresentPass.OUTPUT_TRANSFORM
+			| PresentPass.OUTPUT_PART_ANIM
+			| PresentPass.OUTPUT_BODY_ANIM)
+	presenter.set_output_channels(channels & ~frozen)
+	sim.entities[0]["pos_x"] = 8.0
+	sim.entities[0]["phase1"] = 200
+	sim.entities[0]["anim_phase"] = 12
+	presenter.present()
+	assert_almost_eq(model.position.x, 1.0, 0.001)
+	assert_eq(model.phases, [[1, 100]])
+	assert_eq(model.body_calls, [["anim_idle", 9]])
+
+	presenter.set_output_channels(channels)
+	presenter.present()
+	assert_almost_eq(model.position.x, 8.0, 0.001,
+			"transform ownership catches up on its rising edge")
+	assert_eq(model.phases, [[1, 100], [1, 200]],
+			"part ownership catches up on its rising edge")
+	assert_eq(model.body_calls, [["anim_idle", 9], ["anim_idle", 12]],
+			"body ownership catches up on its rising edge")
 
 
 func test_unresolved_target_does_not_crash() -> void:
