@@ -196,6 +196,8 @@ unaffected; full ctest 223/223.
 > `0x10` records, whereas our host follows D-NET-97/98 (empty `0x10`, pool-1 `0x0D` omitted) to avoid
 > the joiner's C2S-`0x0F` flood — reconcile whether the joiner suppresses its local `.bms` pool-1/2
 > spawn when *joining* (vs hosting), which would let the host stream them without conflict.
+> *(Since answered by D-NET-194: the retail joiner never opens the `.bms` at all — its world is
+> built entirely from the wire `0x0B` header + spawn stream, so the host can stream freely.)*
 
 ### ✅ P4 — Per-frame host loop (SP) (DONE)
 `Server_TickUpdate` (`server_tick.{h,cpp}`): **(1)** drain C2S (`NapiNPProtocol_Pump` →
