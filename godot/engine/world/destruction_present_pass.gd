@@ -288,6 +288,9 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		return
 	var node := _resolve_entity_node(bms_id, spawn_origin_v, wire_handle)
 	if node != null and is_instance_valid(node):
+		# A qualifying intact model transfers its static-caster role to the husk.
+		var individual_casts_static_shadow := \
+				_node_has_static_shadow_caster(node)
 		var model: Node3D = _placer.build_model_from_graphic(
 				husk_graphic, "", node, "", _env_node)
 		if model == null:
@@ -295,6 +298,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			_stats.no_husk += 1
 			return
 		model.name = "HuskModel"
+		_set_husk_static_shadow(model, individual_casts_static_shadow)
 		var child_visibility: Array = []
 		for child in node.get_children():
 			if child is Node3D and child != model:
@@ -325,6 +329,10 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			or not _placer.has_method("hide_static_instance"):
 		_husked[husk_key] = null
 		return
+	# Batched replacements inherit the carved instance's authored eligibility.
+	var batched_casts_static_shadow: bool = \
+			_placer.has_method("static_instance_casts_terrain_shadow") \
+			and bool(_placer.static_instance_casts_terrain_shadow(bms_id))
 	var graft: Node3D = _placer.build_model_from_graphic(
 			husk_graphic, "", _container, "", _env_node)
 	if graft == null:
@@ -347,7 +355,25 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	}
 	graft.name = "HuskModel_%d" % bms_id
 	graft.transform = xform_v as Transform3D
+	_set_husk_static_shadow(graft, batched_casts_static_shadow)
 	_husked[husk_key] = graft
+
+
+func _node_has_static_shadow_caster(root: Node) -> bool:
+	if root is VisualInstance3D \
+			and (((root as VisualInstance3D).layers \
+				& NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER) != 0):
+		return true
+	for child in root.get_children():
+		if _node_has_static_shadow_caster(child):
+			return true
+	return false
+
+
+func _set_husk_static_shadow(model: Node, enabled: bool) -> void:
+	if enabled and model != null \
+			and model.has_method("set_static_shadow_caster_enabled"):
+		model.set_static_shadow_caster_enabled(true)
 
 
 # Node-less wrecks still move while death physics settles them. Resolve the

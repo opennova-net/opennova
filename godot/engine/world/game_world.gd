@@ -24,6 +24,7 @@ extends Node3D
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const NovaSunShadowScript := preload("res://engine/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
@@ -111,6 +112,8 @@ signal mission_effects(effects: Array)
 
 var _dispatcher: NovaFoliageDispatcher
 var _tile_overlay: NovaTerrainTileOverlay
+var _sun_shadow: NovaSunShadow
+var _static_sun_shadow: NovaSunShadow
 var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _mission_tile_info: NovaTerrainTileInfo
@@ -264,6 +267,16 @@ func _ready() -> void:
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher") as NovaFoliageDispatcher
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as NovaTerrainTileOverlay
+	_sun_shadow = NovaSunShadowScript.new()
+	_sun_shadow.name = "NovaSunShadow"
+	_sun_shadow.projection_mode = NovaSunShadow.PROJECTION_DYNAMIC
+	add_child(_sun_shadow)
+	_sun_shadow.set_environment_node(_env)
+	_static_sun_shadow = NovaSunShadowScript.new()
+	_static_sun_shadow.name = "NovaStaticSunShadow"
+	_static_sun_shadow.projection_mode = NovaSunShadow.PROJECTION_STATIC_TERRAIN
+	add_child(_static_sun_shadow)
+	_static_sun_shadow.set_environment_node(_env)
 	# Both retained render systems start dormant until a successful load chooses
 	# their host mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
@@ -1872,7 +1885,11 @@ func request_local_player_stance(stance: int) -> bool:
 func build_local_player_held_weapon(graphic: String) -> Node3D:
 	if _placer == null or graphic.is_empty():
 		return null
-	return _placer.build_model_from_graphic(graphic, "", self, "", _env)
+	var model: Node3D = _placer.build_model_from_graphic(
+			graphic, "", self, "", _env)
+	if model != null and model.has_method("set_shadow_caster_enabled"):
+		model.set_shadow_caster_enabled(true)
+	return model
 
 
 func build_local_player_avatar() -> Node3D:

@@ -98,6 +98,30 @@ func test_item_database_loads_and_handles_missing() -> void:
 	assert_eq(db.get_item(-99999), {}, "unknown id has empty record")
 
 
+func test_item_database_exposes_retail_interior_light_transfer() -> void:
+	var tmp := ProjectSettings.globalize_path(
+			"user://light_transfer_items_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(
+			"begin \"Absent\"\n"
+			+ "  id 710010\n"
+			+ "end\n"
+			+ "begin \"Ihq01\"\n"
+			+ "  id 101216\n"
+			+ "  light_transfer 20\n"
+			+ "end\n")
+	file.close()
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(tmp), OK)
+	assert_eq(db.get_light_transfer(710010), 0.0,
+			"an unauthored building keeps the zero-initialized retail value")
+	assert_almost_eq(db.get_light_transfer(101216), 0.2, 0.0001,
+			"items.def percent is the interior daylight lerp at ItemDef+0x218")
+	assert_almost_eq(float(db.get_item(101216)["light_transfer"]), 0.2, 0.0001)
+	DirAccess.remove_absolute(tmp)
+
+
 func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> void:
 	# The retail target definition source is phrase_set at itemDef+0x86c. Exercise
 	# the production database wrapper, including the state that the old

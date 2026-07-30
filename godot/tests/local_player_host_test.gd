@@ -9,6 +9,7 @@ class FakeWeaponPart:
 	var plays: Array = []
 	var times: Array[float] = []
 	var ctrl_values: Dictionary = {}
+	var lighting_contexts: Array = []
 
 	func play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
@@ -32,6 +33,27 @@ class FakeWeaponPart:
 
 	func clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
+
+	func set_entity_lighting_context(effect_scale: float, interior_lerp: bool,
+			interior_daylight: float) -> void:
+		lighting_contexts.append([
+			effect_scale, interior_lerp, interior_daylight])
+
+
+class FakeInteriorSim:
+	extends RefCounted
+	var interior_item_id := 0
+
+	func local_player_interior_item_id() -> int:
+		return interior_item_id
+
+
+class FakeInteriorItemDb:
+	extends RefCounted
+	var transfers := {}
+
+	func get_light_transfer(item_id: int) -> float:
+		return float(transfers.get(item_id, 0.0))
 
 
 class FakeUserPointData:
@@ -101,6 +123,8 @@ class FakeWorld:
 	var player_position := Vector3.ZERO
 	var player_yaw_deg := 0.0
 	var player_pitch_deg := 0.0
+	var sim: FakeInteriorSim = null
+	var item_db: FakeInteriorItemDb = null
 
 	func is_loaded() -> bool:
 		return _loaded
@@ -162,6 +186,12 @@ class FakeWorld:
 
 	func local_player_pitch_deg() -> float:
 		return player_pitch_deg
+
+	func get_sim():
+		return sim
+
+	func get_item_db():
+		return item_db
 
 	func local_player_anim_key() -> String:
 		return ""
@@ -291,6 +321,35 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["lean_right"])
 	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+
+
+func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> void:
+	var world := FakeWorld.new()
+	world.sim = FakeInteriorSim.new()
+	world.sim.interior_item_id = 101216
+	world.item_db = FakeInteriorItemDb.new()
+	world.item_db.transfers[101216] = 0.2
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	assert_not_null(world.last_weapon_part)
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, true, 0.2],
+			"the FP submit keeps effectScale 1 and uses the blink parent's transfer")
+	world.sim.interior_item_id = 0
+	host.after_world_tick()
+	assert_eq(world.last_weapon_part.lighting_contexts.back(),
+			[1.0, false, 0.0],
+			"walking out refreshes the model lighting on the live render frame")
 
 
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
@@ -468,6 +527,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"caster marker layers cannot make the reflection-only body visible to the player")
 	var pass_cam: Camera3D = host.get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
@@ -501,6 +562,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+		"teardown() restores the camera's original marker-layer bits exactly")
 
 
 func test_camera_state_rides_the_sim_view() -> void:

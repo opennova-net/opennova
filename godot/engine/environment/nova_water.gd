@@ -20,6 +20,16 @@ const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world 
 const VISUAL_LAYER_WATER := 1 << 10  # the water surface itself; mirror-excluded
 const VISUAL_LAYER_VIEWMODEL := 1 << 11  # the FP arms/weapon overlay; mirror-excluded, main-visible
 const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mirror-visible, main-excluded
+# Shadow participation is orthogonal to camera visibility. Retail renders live
+# entity silhouettes and static terrain-tile silhouettes through separate
+# projection lists, so the host lights select these marker layers with
+# shadow_caster_mask without re-lighting the hand-lit base materials.
+const VISUAL_LAYER_STATIC_SHADOW_CASTER := 1 << 13
+const VISUAL_LAYER_DYNAMIC_SHADOW_CASTER := 1 << 14
+const VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER := 1 << 15
+const VISUAL_LAYER_SHADOW_CASTER_MASK := \
+		VISUAL_LAYER_STATIC_SHADOW_CASTER \
+		| VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
 # Retail allocates a square 256 RTT at water detail 2; only detail >= 3 or the
 # capture override selects 512 [orig: sub_5C08B0 @ 0x5c08d1..0x5c0937].
 # The host has no higher-detail/capture selector, so its witnessed mapping is 256.
@@ -274,7 +284,10 @@ func build() -> void:
 		# witnessed mirrored scene is a re-render of the world, local player's
 		# body and all [orig: Water_ReflectionPrerender @ 0x5c2780 ->
 		# render_main_scene @ 0x5c1240].
-		reflection_camera.cull_mask = 0xFFFFF & ~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL)
+		reflection_camera.cull_mask = 0xFFFFF & ~(
+				VISUAL_LAYER_WATER
+				| VISUAL_LAYER_VIEWMODEL
+				| VISUAL_LAYER_SHADOW_CASTER_MASK)
 		reflection_viewport.add_child(reflection_camera)
 		reflection_camera.current = true
 	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -598,5 +611,3 @@ func _apply_environment_water_height() -> void:
 			env != null and env.has_method("is_loaded") and env.is_loaded())
 	if has_loaded_terrain or has_loaded_env:
 		water_height = 0.0
-
-

@@ -40,6 +40,7 @@ private:
 		String ai_function;
 		String move_function;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
+		float light_transfer = 0.0f; // ItemDef+0x218 interior daylight fraction
 		float damage_reduc_pp = 0.0f;
 		float damage_reduc_max = 0.0f;
 		// Vehicle physics-property block, PRE-SCALED by the libs/def parser exactly like
@@ -180,6 +181,9 @@ public:
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
 	int get_hp(int id) const;
 	int get_item_type(int id) const;
+	// Building-interior daylight fraction from items.def light_transfer
+	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
+	float get_light_transfer(int id) const;
 	float get_damage_reduc_pp(int id) const;
 	float get_damage_reduc_max(int id) const;
 	int get_armor_impact(int id) const;

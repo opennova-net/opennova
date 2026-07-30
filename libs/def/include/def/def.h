@@ -540,6 +540,11 @@ typedef struct DefItemDef {
        zero means that variant was not stored. */
     int emplacement_g_slot;
     int emplacement_c_slot;
+    /* Building-interior daylight transfer, appended for normalized-struct/FFI
+       stability. `light_transfer` is parsed as atoi clamped 0..100, then x0.01
+       into retail ItemDef+0x218. Ihq01 authors 20 -> 0.2.
+       [orig: ItemDef_ParseProperty @0x4A19FD..0x4A1A50] */
+    float light_transfer;
 } DefItemDef;
 
 typedef struct DefItemsFile {

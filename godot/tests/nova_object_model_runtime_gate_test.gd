@@ -111,9 +111,10 @@ func test_live_panm_transforms_rederive_on_the_visible_frame() -> void:
 			"the visible frame re-derives transforms from the absolute clock")
 
 
-func test_light_push_skips_identical_values() -> void:
-	# Real rebuild -> real ShaderMaterials and the fixture's real light block.
-	# Re-evaluating at the same clock must not touch the materials again.
+func test_retail_runtime_does_not_submit_model_authored_lght() -> void:
+	# Jointops loads LGHT into the model resource but has no gameplay read of
+	# that field after load. Runtime models therefore keep the shader's
+	# count-zero defaults even when the source file carries authored lights.
 	var model := NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
@@ -125,12 +126,131 @@ func test_light_push_skips_identical_values() -> void:
 		pass_test("fixture built no surface materials under this renderer")
 		return
 	var material := materials[0] as ShaderMaterial
+	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
+			"gameplay parity leaves parsed LGHT disabled")
+	model.advance_runtime_frame(0.0)
+	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
+			"runtime frames do not inject parsed LGHT")
+
+
+func test_explicit_editor_preview_can_show_model_authored_lght() -> void:
+	var model := NovaObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.position = Vector3(11.0, 13.0, 17.0)
+	model.set_model_light_preview_enabled(true)
+	var data := _object_data(ARMRY_3DI)
+	for light_index in range(data.get_light_count()):
+		assert_true(data.set_light_field(light_index, "subobject", -1))
+		assert_true(data.set_light_field(light_index, "position", Vector3(4.0, 5.0, 6.0)))
+	model.set_object_data(data)
+	var materials: Array = model.get_surface_materials()
+	if materials.is_empty():
+		pass_test("fixture built no surface materials under this renderer")
+		return
+	var material := materials[0] as ShaderMaterial
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 1,
-			"rebuild pushes the fixture's dominant light")
+			"the opt-in object-editor preview can inspect authored LGHT")
+	var lights: Array = data.evaluate_lights(0, {})
+	var dominant: Dictionary = {}
+	var best_intensity := -1.0
+	for raw_light in lights:
+		var light: Dictionary = raw_light
+		var intensity := float(light.get("intensity", 1.0))
+		if intensity > best_intensity:
+			best_intensity = intensity
+			dominant = light
+	var model_position: Vector3 = dominant.get("position", Vector3.ZERO)
+	var subobject := int(dominant.get("subobject", -1))
+	var expected_world := model.global_transform * model_position
+	var part_nodes: Dictionary = model.get_render_part_nodes()
+	if subobject >= 0 and part_nodes.has(subobject):
+		var rest := Transform3D.IDENTITY
+		for raw_submesh in data.build_lod_submeshes(model.get_active_lod()):
+			var submesh: Dictionary = raw_submesh
+			if int(submesh.get("robj_index", -1)) == subobject:
+				rest.origin = submesh.get("abs", Vector3.ZERO)
+				break
+		var part := part_nodes[subobject] as Node3D
+		expected_world = part.global_transform * (rest.affine_inverse() * model_position)
+	assert_eq(material.get_shader_parameter("u_local_light_position"), expected_world,
+			"preview maps model-space LGHT through its attached part's live transform once")
 	material.set_shader_parameter("u_local_light_count", 99)
 	model.advance_runtime_frame(0.0)
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 99,
-			"an identical evaluation pushes nothing (the poison survives)")
+			"an identical preview evaluation pushes nothing")
+
+
+func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for child in root.get_children():
+		if child is MeshInstance3D:
+			out.append(child as MeshInstance3D)
+		out.append_array(_mesh_instances_below(child))
+	return out
+
+
+func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -> void:
+	# Retail's offscreen silhouette pass admits people and DynamicShadow items,
+	# never every loaded model. A NovaObjectModel therefore starts receiver-only;
+	# the item-aware placer explicitly opts eligible entities into casting.
+	# [orig: Entity_InitFromModel @0x40E1BC..0x40E1F7]
+	var model := NovaObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(_object_data(HOUSE_3DI))
+	var meshes := _mesh_instances_below(model)
+	assert_gt(meshes.size(), 0, "the fixture builds renderable mesh instances")
+	for mesh in meshes:
+		assert_eq(mesh.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+				"ordinary/static models cannot enter the retail dynamic-shadow pass")
+
+	var materials: Array = model.get_surface_materials()
+	assert_gt(materials.size(), 0, "the fixture builds object materials")
+	for material in materials:
+		var receiver := (material as ShaderMaterial).next_pass as ShaderMaterial
+		assert_not_null(receiver,
+				"world models receive eligible entity silhouettes in a separate pass")
+		if receiver != null:
+			assert_true(receiver.shader.code.contains("1.0 - ATTENUATION"),
+					"the next pass consumes shadow attenuation only")
+
+	model.set_shadow_caster_enabled(true)
+	for mesh in meshes:
+		assert_eq(mesh.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+				"an eligible entity explicitly enters the silhouette pass")
+		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+				"the dynamic light can select the caster independently of receivers")
+		assert_eq(mesh.layers & NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0)
+	model.set_static_shadow_caster_enabled(true)
+	for mesh in meshes:
+		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+				"an item can participate in both witnessed projection systems")
+		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0,
+				"static terrain projection uses its own caster layer")
+	model.set_static_shadow_caster_enabled(false)
+	model.set_shadow_caster_enabled(false)
+	for mesh in meshes:
+		assert_eq(mesh.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+				"the policy remains live across an item/presentation change")
+		assert_eq(mesh.layers & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0)
+
+
+func test_projected_shadow_receiver_rejects_incomplete_material_coverage() -> void:
+	assert_true(NovaObjectModel._material_supports_projected_shadow_receiver(
+			NovaObjectShaderCache.BLEND_OPAQUE, 0),
+			"a one-sided opaque surface can use the simple attenuation catcher")
+	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+			NovaObjectShaderCache.BLEND_ALPHA, 0),
+			"an alpha-blind next pass must not darken a transparent polygon")
+	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+			NovaObjectShaderCache.BLEND_OPAQUE,
+			NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST),
+			"alpha-tested holes must not become a solid shadow card")
+	assert_false(NovaObjectModel._material_supports_projected_shadow_receiver(
+			NovaObjectShaderCache.BLEND_OPAQUE,
+			NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED),
+			"the one-sided catcher cannot safely cover a two-sided base surface")
 
 
 func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:

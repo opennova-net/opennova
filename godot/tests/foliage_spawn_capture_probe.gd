@@ -140,6 +140,7 @@ func _ready() -> void:
 		return
 	_print_snapshot(spawn_state)
 	_print_runtime_metadata(world, environment)
+	_print_model_lighting_trace(world, camera, environment)
 	_print_foliage_material_state(world)
 	if OS.get_environment("NOVA_FOLIAGE_FLICKER_PROBE") == "1":
 		await _run_foliage_flicker_probe(world, dispatcher, camera, play_viewport, spawn_state)
@@ -521,6 +522,8 @@ func _print_runtime_metadata(world, environment) -> void:
 		"sun_keyframe": environment.get_sun_color(),
 		"sun_light_runtime": environment.get_sun_light(),
 		"sky_ambient_runtime": environment.get_sky_ambient(),
+		"ceiling_ambient_runtime": environment.get_ceiling_color(),
+		"floor_ambient_runtime": environment.get_floor_color(),
 		"fog_color_runtime": environment.get_fog_color(),
 		"fog_color_target": environment.get_fog_color_target(),
 		"sky_base": environment.get_sky_base(),
@@ -580,6 +583,32 @@ func _print_runtime_metadata(world, environment) -> void:
 		"assigned_tile_info_source": tile_info_source,
 		"assigned_tile_info_entries": assigned_tile_info.get_entry_count() if assigned_tile_info != null else -1,
 		"terrain_tiles": data.get_tile_count() if data != null else -1,
+	})
+
+
+func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
+	if OS.get_environment("NOVA_MODEL_LIGHTING_TRACE") != "1":
+		return
+	var sim = world.get_sim() if world.has_method("get_sim") else null
+	var light_dir: Vector3 = environment.get_light_direction()
+	var iris_samples := PackedInt32Array()
+	if sim != null and sim.has_method("compute_iris_samples"):
+		iris_samples = sim.compute_iris_samples(
+			camera.global_position, -camera.global_basis.z, light_dir)
+	print("[spawn-capture] model lighting trace: ", {
+		"local_player_indoors":
+			sim.local_player_indoors()
+				if sim != null and sim.has_method("local_player_indoors")
+				else null,
+		"local_player_blink_flags":
+			sim.local_player_blink_flags()
+				if sim != null and sim.has_method("local_player_blink_flags")
+				else null,
+		"local_player_interior_item_id":
+			sim.local_player_interior_item_id()
+				if sim != null and sim.has_method("local_player_interior_item_id")
+				else null,
+		"iris_samples": iris_samples,
 	})
 
 

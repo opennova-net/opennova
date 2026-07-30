@@ -47,6 +47,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_hp", "id"), &NovaItemDatabase::get_hp);
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &NovaItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
+	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &NovaItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &NovaItemDatabase::is_ai_capable);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &NovaItemDatabase::get_ammo_closeattack);
@@ -118,6 +119,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.ai_function = String(entry.ai_function);
 	item.move_function = String(entry.move_function);
 	item.hp = entry.hp;
+	item.light_transfer = entry.light_transfer;
 	item.damage_reduc_pp = entry.damage_reduc_pp;
 	item.damage_reduc_max = entry.damage_reduc_max;
 	item.physics = entry.physics;
@@ -269,6 +271,11 @@ int NovaItemDatabase::get_hp(int id) const {
 int NovaItemDatabase::get_item_type(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+}
+
+float NovaItemDatabase::get_light_transfer(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0.0f : it->second.light_transfer;
 }
 
 float NovaItemDatabase::get_damage_reduc_pp(int id) const {
@@ -522,6 +529,7 @@ Dictionary NovaItemDatabase::get_item(int id) const {
 	out["display_name"] = it->second.display_name;
 	out["graphic"] = it->second.graphic;
 	out["anim_def"] = it->second.anim_def;
+	out["light_transfer"] = it->second.light_transfer;
 	out["sound_profile"] = it->second.sound_profile;
 	out["soundloops"] = get_sound_loops(id);
 	out["mount_config_valid"] = it->second.mount_config_valid;
@@ -570,6 +578,7 @@ Array NovaItemDatabase::get_items() const {
 		entry["display_name"] = item->display_name;
 		entry["graphic"] = item->graphic;
 		entry["anim_def"] = item->anim_def;
+		entry["light_transfer"] = item->light_transfer;
 		entry["sound_profile"] = item->sound_profile;
 		entry["soundloops"] = get_sound_loops(item->id);
 		entry["mount_config_valid"] = item->mount_config_valid;

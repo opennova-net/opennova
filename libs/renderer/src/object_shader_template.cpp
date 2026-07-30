@@ -90,11 +90,11 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "uniform float u_wind_amount = 0.5;\n";
 	u += "uniform float u_wind_phase = 0.0;\n";
 
-	// LGHT (per-model local lights).  Single-light prototype: the editor
-	// picks the most-intense LGHT entry and pushes its world-space position
-	// + colour + attenuation range every frame.  N4.1 will widen this to
-	// uniform vec3 arrays for multi-light support.  Set u_local_light_count=0
-	// to disable (default).
+	// LGHT (per-model authored lights), retained for the explicit object-editor
+	// preview only. Retail parses/stores this chunk but its gameplay renderer
+	// has no post-load read of the model light field; runtime models therefore
+	// keep u_local_light_count=0. The opt-in preview picks one dominant entry
+	// and supplies its world-space position, colour and approximate attenuation.
 	u += "uniform int u_local_light_count = 0;\n";
 	u += "uniform vec3 u_local_light_position = vec3(0.0);\n";
 	u += "uniform vec3 u_local_light_color = vec3(1.0);\n";
@@ -143,10 +143,11 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn base_rgb * min(obj_hemi(N) + u_dir_light_color * ndotl, vec3(1.0)) * 2.0;\n";
 	u += "}\n\n";
 
-	// Local-light contribution: returns the additive RGB from u_local_light_*.
+	// Editor-preview LGHT contribution: returns additive RGB from
+	// u_local_light_*.
 	// Returns zero when no local light is bound (count==0) or the surface is
-	// outside the attenuation range.  Linear falloff between atten_start and
-	// atten_end mirrors the original tool's NEAR/FAR attenuation pair.
+	// outside the attenuation range. Linear falloff between atten_start and
+	// atten_end is an authoring-preview approximation, not a gameplay path.
 	u += "vec3 obj_local_light_contrib(vec3 base_rgb, vec3 normal_ws, vec3 world_pos) {\n";
 	u += "\tif (u_local_light_count <= 0) return vec3(0.0);\n";
 	u += "\tvec3 to_light = u_local_light_position - world_pos;\n";
@@ -362,9 +363,9 @@ std::string compose_fragment(ObjectShaderKey key) {
 		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
 	}
 
-	// Layer in any LGHT contribution before the emissive override (LUM /
-	// emissive variants intentionally bypass lighting and shouldn't be
-	// brightened by local point lights).
+	// Layer in the opt-in editor LGHT preview before the emissive override
+	// (LUM / emissive variants intentionally bypass lighting). Gameplay leaves
+	// u_local_light_count at zero.
 	f += "\tif (u_emissive < 0.5) lit += obj_local_light_contrib(base.rgb, surface_normal, v_world_pos);\n";
 	f += "\tif (u_emissive > 0.5) lit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	f += "\tif (u_fog_enabled) {\n";

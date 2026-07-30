@@ -630,9 +630,22 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 		# under the cursor, matching how it was first placed.
 		_c._selected_node.transform = _c._selected_xform * _c._selected_node_offset
 	else:
-		for rec in _c._selected_records:
-			var mm: MultiMesh = rec["mm"]
-			mm.set_instance_transform(int(rec["slot"]), _c._selected_xform * (rec["offset"] as Transform3D))
+		for rec_v in _c._selected_records:
+			var rec: Dictionary = rec_v
+			var mm: MultiMesh = rec["mm"] as MultiMesh
+			var slot: int = int(rec["slot"])
+			var moved: Transform3D = \
+					_c._selected_xform * (rec["offset"] as Transform3D)
+			mm.set_instance_transform(slot, moved)
+			# Keep the parallel static-caster batch aligned during editor drags.
+			var shadow_mm: MultiMesh = rec.get("shadow_mm") as MultiMesh
+			if shadow_mm != null and slot >= 0 \
+					and slot < shadow_mm.instance_count:
+				var shadow_moved: Transform3D = moved
+				if not bool(rec.get("casts_static_shadow", false)):
+					shadow_moved.basis = \
+							shadow_moved.basis.scaled(Vector3.ZERO)
+				shadow_mm.set_instance_transform(slot, shadow_moved)
 	# Move the pick body node in lockstep so a re-pick mid/after-drag stays exact. The body sits at
 	# the entity transform directly (render is direct; the ground anchor is baked into the stored
 	# position, not applied here). No-op for a marker (no body).

@@ -205,7 +205,7 @@ typedef struct ThreediIRMaterial {
 // ============================================================================
 
 typedef struct ThreediIRLight {
-    float offset[3];            // Position offset from part
+    float offset[3];            // Authored model-space position
     float attenuation_start;    // Light falloff start distance
     float attenuation_end;      // Light falloff end distance
     float color_start[3];       // RGB color at start (0..1)

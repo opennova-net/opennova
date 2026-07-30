@@ -105,6 +105,14 @@ class ItemDbStub:
 		return ''
 
 
+class ShadowModelStub:
+	extends Node3D
+	var static_shadow_enabled := false
+
+	func set_static_shadow_caster_enabled(enabled: bool) -> void:
+		static_shadow_enabled = enabled
+
+
 class PlacerStub:
 	extends RefCounted
 	var built: Array = []
@@ -112,6 +120,7 @@ class PlacerStub:
 	var hidden: Array = []
 	var shown: Array = []
 	var batched_transforms: Dictionary = {}
+	var static_shadow_ids := {}
 	var build_success := true
 
 	func build_model_from_graphic(_graphic: String, _anim: String,
@@ -120,7 +129,7 @@ class PlacerStub:
 		built_env_nodes.append(env_node)
 		if not build_success:
 			return null
-		var model := Node3D.new()
+		var model := ShadowModelStub.new()
 		parent.add_child(model)
 		built.append(model)
 		return model
@@ -132,6 +141,9 @@ class PlacerStub:
 	func show_static_instance(bms_id: int) -> bool:
 		shown.append(bms_id)
 		return batched_transforms.has(bms_id)
+
+	func static_instance_casts_terrain_shadow(bms_id: int) -> bool:
+		return bool(static_shadow_ids.get(bms_id, false))
 
 
 func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
@@ -232,8 +244,11 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	var originally_visible := Node3D.new()
 	var originally_hidden := Node3D.new()
 	originally_hidden.visible = false
+	var static_caster := MeshInstance3D.new()
+	static_caster.layers = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	intact.add_child(originally_visible)
 	intact.add_child(originally_hidden)
+	intact.add_child(static_caster)
 	index.nodes[41] = intact
 	sim.events = {
 		'husk_swaps': [{
@@ -257,12 +272,16 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 
 	assert_false(originally_visible.visible)
 	assert_false(originally_hidden.visible)
+	assert_false(static_caster.visible,
+			"the intact individual caster follows the visible model into the husk swap")
 	assert_eq(placer.built.size(), 1)
 	assert_eq(placer.built_env_nodes, [env_node],
 			'husk materials receive the live mission environment')
 	assert_true(world.anchors.has('wreck:91:2'))
 	assert_true(world.anchors.has('piece:5'))
 	var graft: Node3D = placer.built[0]
+	assert_true((graft as ShadowModelStub).static_shadow_enabled,
+			"the individual husk replaces the intact static silhouette")
 
 	presenter.reset_runtime_state()
 
@@ -270,6 +289,8 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 			'the intact child returns to its authored visibility')
 	assert_false(originally_hidden.visible,
 			'an authored hidden child is not forced visible')
+	assert_true(static_caster.visible,
+			"reset restores the intact caster with its visible model")
 	assert_true(graft.is_queued_for_deletion())
 	assert_eq(world.anchors.size(), 0)
 	assert_true(world.unregistrations.has('wreck:91:2'))
@@ -290,6 +311,7 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	var container := Node3D.new()
 	add_child_autofree(container)
 	placer.batched_transforms[77] = Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
+	placer.static_shadow_ids[77] = true
 	sim.events = {
 		'husk_swaps': [{
 			'bms_id': 77,
@@ -306,6 +328,8 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	assert_eq(placer.built.size(), 1)
 	var graft: Node3D = placer.built[0]
 	assert_eq(graft.transform, placer.batched_transforms[77])
+	assert_true((graft as ShadowModelStub).static_shadow_enabled,
+			"the batched husk inherits the carved slot's static-caster admission")
 
 	presenter.reset_runtime_state()
 

@@ -31,6 +31,10 @@ const DEFAULT_FOG_COLOR := Vector3(0.5, 0.6, 0.8)
 const DEFAULT_FOG_START := 0.0
 const DEFAULT_FOG_END := 1024.0
 const DEFAULT_FOG_TYPE := 0
+const LIGHTING_CONTEXT_ENTITY := 0
+const LIGHTING_CONTEXT_INTERIOR_SECTION := 1
+const SUN_SHADOW_CATCHER_SHADER := preload(
+		"res://shaders/sun_shadow_catcher.gdshader")
 
 var object_data: NovaObjectData
 
@@ -39,6 +43,7 @@ var _material_cache: Dictionary = {}
 var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
+var _robj_rest_transforms: Dictionary = {}
 # Per-frame hot-path caches: object_data capability lookups (has_method is a
 # string-keyed scan) refresh in rebuild(); the environment-node capability
 # refreshes on assignment. The typed light-push cache holds the last-applied
@@ -64,6 +69,7 @@ var _panm_applied_revision := 0
 var _section_visibility_mask: int = -1
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array[ShaderMaterial] = []
+var _surface_lighting_contexts: PackedByteArray = PackedByteArray()
 var _anim_frames_by_mat: Dictionary = {}
 var _ctrl_values: Dictionary = {}
 var _part_anims: Dictionary = {}
@@ -73,6 +79,29 @@ var _active_lod: int = 0
 var _is_playing := true
 var _model_bounds := AABB()
 var _environment_node: Node
+# Per-entity lighting state. Retail applies these after it has selected the
+# current ENV block and before submitting each model:
+#   - outdoors: directional colour * (4 - blocked across three radius casts) / 4
+#   - inside a blink volume: the containing building's light_transfer lerp
+# [orig: Entity_ComputeSunVisibility @0x5C6800;
+#  setup_entity_lighting_and_shader_constants @0x5D98A0]
+var _lighting_effect_scale := 1.0
+var _interior_lerp := false
+var _interior_daylight := 0.0
+# Portal-building ROBJ 0 is the exterior shell. Every non-zero ROBJ is submitted
+# with the interior-lighting batch bit and therefore needs a separately cached
+# material even when it reuses the exterior's material index.
+# [orig: object collector @0x5D9156..0x5D9170]
+var _interior_section_lighting := false
+var _interior_section_daylight := 0.0
+# Retail keeps two explicit caster populations: people/DynamicShadow items feed
+# pose-derived live projection slots, while pool-2/StaticShadow models feed the
+# terrain tile cache. Marker layers let the two shadow-only Godot lights select
+# those populations independently without re-lighting the fixed-function base.
+# [orig: Entity_InitFromModel @0x40E1BC..0x40E1F7;
+#  Terrain_CollectAndRenderTileModels @0x60D250]
+var _shadow_caster_layers := 0
+var _shadow_receiver_material: ShaderMaterial
 
 # NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
 # for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
@@ -133,6 +162,13 @@ var _material_needs_eval: Array[bool] = []          # parallel to _surface_mater
 var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
 var _last_env_gen := -1
 var _last_env_values: EnvLightValues = null
+var _last_section_env_values: EnvLightValues = null
+# Retail loads LGHT records with the model resource but never reads that field
+# on the gameplay render path. Keep them available only to the explicit object
+# editor preview; ordinary runtime models retain u_local_light_count = 0.
+# [orig: parse_lights_chunk @0x5B47B0; model field +0xCC has no post-load
+#  renderer read in Jointops.exe]
+var _model_light_preview_enabled := false
 
 
 func _ready() -> void:
@@ -157,12 +193,112 @@ func get_object_data() -> NovaObjectData:
 	return object_data
 
 
+func set_model_light_preview_enabled(enabled: bool) -> void:
+	if _model_light_preview_enabled == enabled:
+		return
+	_model_light_preview_enabled = enabled
+	_last_light_push_valid = false
+	if enabled:
+		_apply_lights()
+		return
+	for material in _surface_materials:
+		if material != null:
+			material.set_shader_parameter("u_local_light_count", 0)
+
+
+func set_shadow_caster_enabled(enabled: bool) -> void:
+	_set_shadow_caster_layer_enabled(
+			NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, enabled)
+
+
+func is_shadow_caster_enabled() -> bool:
+	return (_shadow_caster_layers \
+			& NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER) != 0
+
+
+func set_static_shadow_caster_enabled(enabled: bool) -> void:
+	_set_shadow_caster_layer_enabled(
+			NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER, enabled)
+
+
+func is_static_shadow_caster_enabled() -> bool:
+	return (_shadow_caster_layers \
+			& NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER) != 0
+
+
+func _set_shadow_caster_layer_enabled(layer: int, enabled: bool) -> void:
+	var next_layers := _shadow_caster_layers | layer \
+			if enabled else _shadow_caster_layers & ~layer
+	if next_layers == _shadow_caster_layers:
+		return
+	_shadow_caster_layers = next_layers
+	_apply_shadow_casting_below(self)
+
+
+func _apply_shadow_casting_below(root: Node) -> void:
+	var setting := GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
+			if _shadow_caster_layers != 0 \
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for child in root.get_children():
+		if child is GeometryInstance3D:
+			var geometry := child as GeometryInstance3D
+			geometry.cast_shadow = setting
+			geometry.layers = (
+					geometry.layers
+					& ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK
+					) | _shadow_caster_layers
+		_apply_shadow_casting_below(child)
+
+
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
 	_env_has_generation = value != null and value.has_method("get_env_generation")
 	_last_env_gen = -1
 	_last_env_values = null
+	_last_section_env_values = null
 	_apply_environment_to_materials()
+
+
+func set_entity_lighting_context(effect_scale: float, interior_lerp: bool,
+		interior_daylight: float) -> void:
+	var next_effect := clampf(effect_scale, 0.0, 1.0)
+	var next_daylight := clampf(interior_daylight, 0.0, 1.0)
+	if is_equal_approx(_lighting_effect_scale, next_effect) \
+			and _interior_lerp == interior_lerp \
+			and is_equal_approx(_interior_daylight, next_daylight):
+		return
+	_lighting_effect_scale = next_effect
+	_interior_lerp = interior_lerp
+	_interior_daylight = next_daylight
+	_last_env_gen = -1
+	_last_env_values = null
+	_last_section_env_values = null
+	_apply_environment_to_materials()
+
+
+func set_interior_section_light_transfer(daylight: float) -> void:
+	var next_daylight := clampf(daylight, 0.0, 1.0)
+	if _interior_section_lighting \
+			and is_equal_approx(_interior_section_daylight, next_daylight):
+		return
+	_interior_section_lighting = true
+	_interior_section_daylight = next_daylight
+	_last_env_gen = -1
+	_last_env_values = null
+	_last_section_env_values = null
+	# The exterior/interior split is part of the material-cache key. Hosts
+	# normally configure it before set_object_data(), but preserve correctness
+	# for a live reconfiguration too.
+	if object_data != null and object_data.has_document():
+		rebuild()
+	else:
+		_apply_environment_to_materials()
+
+
+func _lighting_context_for_robj(robj_index: int) -> int:
+	if _interior_section_lighting and robj_index != 0:
+		return LIGHTING_CONTEXT_INTERIOR_SECTION
+	return LIGHTING_CONTEXT_ENTITY
 
 
 func get_model_bounds() -> AABB:
@@ -866,11 +1002,13 @@ func rebuild() -> void:
 		remove_child(child)
 		child.queue_free()
 	_robj_nodes.clear()
+	_robj_rest_transforms.clear()
 	_skeleton = null
 	_skeleton_skin = null
 	_muzzle_bone = -1
 	_surface_material_indices.clear()
 	_surface_materials.clear()
+	_surface_lighting_contexts.clear()
 	_alpha_materials.clear()
 	_anim_frames_by_mat.clear()
 	_material_cache.clear()
@@ -883,6 +1021,7 @@ func rebuild() -> void:
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
 	_last_env_values = null
+	_last_section_env_values = null
 	_last_light_push_valid = false
 	_robj_dense = []
 	_panm_applied_revision = 0
@@ -916,9 +1055,20 @@ func rebuild() -> void:
 			continue
 		var robj_index := int(submesh.get("robj_index", submesh.get("part_index", 0)))
 		var material_index := int(submesh.get("material_index", 0))
+		if not _robj_rest_transforms.has(robj_index):
+			_robj_rest_transforms[robj_index] = Transform3D(
+					Basis.IDENTITY, submesh.get("abs", Vector3.ZERO))
+		var lighting_context := _lighting_context_for_robj(robj_index)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
-		var material := _material_for_index(material_index)
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON \
+				if _shadow_caster_layers != 0 \
+				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.layers = (
+				instance.layers
+				& ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK
+				) | _shadow_caster_layers
+		var material := _material_for_index(material_index, lighting_context)
 		instance.material_override = material
 		# Skinned + rigid-fake-skinned submeshes bind to the shared Skeleton3D; everything else
 		# stays under its render-object (Robj) part node so PANM part transforms keep working.
@@ -931,6 +1081,7 @@ func rebuild() -> void:
 			node.add_child(instance)
 		_surface_material_indices.append(material_index)
 		_surface_materials.append(material)
+		_surface_lighting_contexts.append(lighting_context)
 		_collect_anim_frames(material_index)
 
 	_classify_materials()
@@ -1064,7 +1215,7 @@ func _needs_runtime_frame_work() -> bool:
 	if (_bounds_dirty
 			or _has_live_panm
 			or not _dynamic_material_slots.is_empty()
-			or _has_lights
+			or (_model_light_preview_enabled and _has_lights)
 			or not _part_anims.is_empty()):
 		return true
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
@@ -1264,11 +1415,10 @@ func _apply_robj_transforms() -> bool:
 
 
 func _apply_lights() -> void:
-	# A model with no .3di lights keeps the count-0 light defaults written at material
-	# creation (_create_material); evaluate_lights would return empty and this loop would
-	# only re-write those same defaults every frame. _has_lights is recomputed in rebuild(),
-	# the only path that can change the (immutable, IR-backed) light count.
-	if not _has_lights:
+	# Gameplay deliberately leaves these parsed records inactive: retail never
+	# submits model-authored LGHT. The opt-in editor preview is useful for
+	# authoring/inspection without changing shipped rendering.
+	if not _model_light_preview_enabled or not _has_lights:
 		return
 	if object_data == null or not object_data.has_method("evaluate_lights"):
 		return
@@ -1282,14 +1432,25 @@ func _apply_lights() -> void:
 			best_intensity = intensity
 			dominant = info
 	var count := 0 if dominant.is_empty() else 1
-	var position: Vector3 = dominant.get("position", Vector3.ZERO)
+	var model_position: Vector3 = dominant.get("position", Vector3.ZERO)
+	var position := global_transform * model_position
 	var color: Color = dominant.get("color", Color.WHITE)
 	var atten_start := float(dominant.get("atten_start", 0.0))
 	var atten_end := float(dominant.get("atten_end", 5.0))
 	var subobject := int(dominant.get("subobject", -1))
-	if subobject >= 0 and _robj_nodes.has(subobject):
+	if _skeleton != null and subobject >= 0 \
+			and subobject < _skeleton.get_bone_count():
+		# LGHT positions are authored in model space. Move through the same
+		# rest-to-live bone transform as user points and muzzle attachments.
+		position = (_skeleton.global_transform
+				* _skeleton.get_bone_global_pose(subobject)
+				* _skeleton.get_bone_global_rest(subobject).affine_inverse()) \
+				* model_position
+	elif subobject >= 0 and _robj_nodes.has(subobject) \
+			and _robj_rest_transforms.has(subobject):
 		var node := _robj_nodes[subobject] as Node3D
-		position = node.global_transform * position
+		var rest: Transform3D = _robj_rest_transforms[subobject]
+		position = node.global_transform * (rest.affine_inverse() * model_position)
 	# A static light evaluates to the same values every frame; re-pushing them
 	# re-writes identical uniforms across every material. Push only on change
 	# (retained mode — the skip is invisible); an animated/PANM-carried light
@@ -1321,13 +1482,33 @@ func _apply_lights() -> void:
 		material.set_shader_parameter("u_local_light_atten_end", atten_end)
 
 
-func _material_for_index(material_array_index: int) -> ShaderMaterial:
-	if _material_cache.has(material_array_index):
-		return _material_cache[material_array_index]
+func _material_for_index(material_array_index: int,
+		lighting_context: int = LIGHTING_CONTEXT_ENTITY) -> ShaderMaterial:
+	var cache_key := Vector2i(material_array_index, lighting_context)
+	if _material_cache.has(cache_key):
+		return _material_cache[cache_key]
 	var material_def: Dictionary = _material_defs.get(material_array_index, {})
 	var material := _create_material(material_array_index, material_def)
-	_material_cache[material_array_index] = material
+	_material_cache[cache_key] = material
+	# A newly created context-specific material still carries only the defaults
+	# from _create_material; force the next environment push to stamp it.
+	_last_env_gen = -1
+	_last_env_values = null
+	_last_section_env_values = null
 	return material
+
+
+static func _material_supports_projected_shadow_receiver(
+		blend_mode: int, material_flags: int) -> bool:
+	# The simple attenuation next-pass has no access to the source material's
+	# alpha coverage or two-sided raster state. Applying it to those surfaces
+	# would darken transparent cards/polygons or miss their back faces. Keep the
+	# approximation on coverage-complete one-sided opaque surfaces only; exact
+	# alpha-aware projection remains part of the retail tile-compositor work.
+	return blend_mode == NovaObjectShaderCache.BLEND_OPAQUE \
+			and (material_flags & (
+				NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST
+				| NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED)) == 0
 
 
 func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
@@ -1369,7 +1550,8 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 		# (render-material-re.md §FF technique tables).
 		key &= ~NovaObjectShaderCache.CAP_DETAIL
 	material.shader = shader_cache.get_shader_for_key(key)
-	if shader_cache.blend_for_key(key) != NovaObjectShaderCache.BLEND_OPAQUE:
+	var blend_mode := shader_cache.blend_for_key(key)
+	if blend_mode != NovaObjectShaderCache.BLEND_OPAQUE:
 		# Water-side rung applied by refresh_render_order() once placed.
 		_alpha_materials.append(material)
 
@@ -1408,8 +1590,18 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	material.set_shader_parameter("u_local_light_intensity", 1.0)
 	material.set_shader_parameter("u_local_light_atten_start", 0.0)
 	material.set_shader_parameter("u_local_light_atten_end", 5.0)
+	if _material_supports_projected_shadow_receiver(
+			blend_mode, material_flags):
+		material.next_pass = _get_shadow_receiver_material()
 	_apply_default_environment_to_material(material)
 	return material
+
+
+func _get_shadow_receiver_material() -> ShaderMaterial:
+	if _shadow_receiver_material == null:
+		_shadow_receiver_material = ShaderMaterial.new()
+		_shadow_receiver_material.shader = SUN_SHADOW_CATCHER_SHADER
+	return _shadow_receiver_material
 
 
 func _load_texture_for_slot(material_def: Dictionary, slot: int) -> Texture2D:
@@ -1520,6 +1712,8 @@ class EnvLightValues:
 	var dir: Vector3
 	var dir_color: Vector3
 	var hemi_ground: Vector3
+	var ceiling: Vector3
+	var floor: Vector3
 	var gain: Vector3
 	var fog_enabled: bool
 	var fog_color: Vector3
@@ -1538,6 +1732,8 @@ class EnvLightValues:
 			and dir.is_equal_approx(other.dir) \
 			and dir_color.is_equal_approx(other.dir_color) \
 			and hemi_ground.is_equal_approx(other.hemi_ground) \
+			and ceiling.is_equal_approx(other.ceiling) \
+			and floor.is_equal_approx(other.floor) \
 			and gain.is_equal_approx(other.gain) \
 			and fog_enabled == other.fog_enabled \
 			and fog_color.is_equal_approx(other.fog_color) \
@@ -1553,6 +1749,8 @@ static func environment_values_from(env_node: Node) -> EnvLightValues:
 		v.dir = DEFAULT_DIR_LIGHT_DIR
 		v.dir_color = DEFAULT_DIR_LIGHT_COLOR
 		v.hemi_ground = DEFAULT_HEMI_GROUND_COLOR
+		v.ceiling = DEFAULT_HEMI_SKY_COLOR
+		v.floor = DEFAULT_HEMI_GROUND_COLOR
 		v.gain = DEFAULT_COLOR_SRC_GAIN
 		v.fog_enabled = false
 		v.fog_color = DEFAULT_FOG_COLOR
@@ -1572,12 +1770,39 @@ static func environment_values_from(env_node: Node) -> EnvLightValues:
 	v.dir = -light_dir.normalized()
 	v.dir_color = env_node.call("get_sun_light")
 	v.hemi_ground = env_node.call("get_fill_light")
+	v.ceiling = env_node.call("get_ceiling_color")
+	v.floor = env_node.call("get_floor_color")
 	v.gain = gain
 	v.fog_enabled = true
 	v.fog_color = env_node.call("get_fog_color")
 	v.fog_start = env_node.call("get_fog_start")
 	v.fog_end = env_node.call("get_fog_level")
 	v.fog_type = env_node.call("get_fog_type")
+	return v
+
+
+static func entity_lighting_values(world_values: EnvLightValues, effect_scale: float,
+		interior_lerp: bool, interior_daylight: float) -> EnvLightValues:
+	if world_values == null:
+		return null
+	var v := EnvLightValues.new()
+	v.dir = world_values.dir
+	v.dir_color = world_values.dir_color * clampf(effect_scale, 0.0, 1.0)
+	v.hemi_sky = world_values.hemi_sky
+	v.hemi_ground = world_values.hemi_ground
+	v.ceiling = world_values.ceiling
+	v.floor = world_values.floor
+	v.gain = world_values.gain
+	v.fog_enabled = world_values.fog_enabled
+	v.fog_color = world_values.fog_color
+	v.fog_start = world_values.fog_start
+	v.fog_end = world_values.fog_end
+	v.fog_type = world_values.fog_type
+	if interior_lerp:
+		var transfer := clampf(interior_daylight, 0.0, 1.0)
+		v.dir_color *= transfer
+		v.hemi_ground = world_values.floor.lerp(world_values.hemi_ground, transfer)
+		v.hemi_sky = world_values.ceiling.lerp(world_values.hemi_sky, transfer)
 	return v
 
 
@@ -1608,18 +1833,49 @@ func _apply_environment_to_materials() -> void:
 	var gen := -1
 	if _env_has_generation:
 		gen = int(_environment_node.get_env_generation())
-		if gen == _last_env_gen and _last_env_values != null:
+		var have_all_cached := _last_env_values != null \
+				and (not _interior_section_lighting
+					or _last_section_env_values != null)
+		if gen == _last_env_gen and have_all_cached:
 			return
-	var values := _environment_values()
-	if values.equals(_last_env_values):
+	var world_values := environment_values_from(_environment_node)
+	# A portal building is not an ordinary entity submission: its exterior
+	# shell always keeps effectScale 1, and only ROBJ 1+ takes its own ItemDef
+	# transfer. Make that invariant authoritative here so a generic entity
+	# update cannot accidentally dim the shell.
+	var values := entity_lighting_values(
+			world_values,
+			1.0 if _interior_section_lighting else _lighting_effect_scale,
+			false if _interior_section_lighting else _interior_lerp,
+			0.0 if _interior_section_lighting else _interior_daylight)
+	var section_values: EnvLightValues = null
+	if _interior_section_lighting:
+		section_values = entity_lighting_values(
+				world_values,
+				1.0,
+				true,
+				_interior_section_daylight)
+	var entity_unchanged := values.equals(_last_env_values)
+	var section_unchanged := not _interior_section_lighting \
+			or section_values.equals(_last_section_env_values)
+	if entity_unchanged and section_unchanged:
 		_last_env_gen = gen
 		return
 	_last_env_values = values
+	_last_section_env_values = section_values
 	_last_env_gen = gen
-	for material in _surface_materials:
+	for i in range(_surface_materials.size()):
+		var material := _surface_materials[i]
 		if material == null:
 			continue
-		apply_environment_values(material, values)
+		var context := int(_surface_lighting_contexts[i]) \
+				if i < _surface_lighting_contexts.size() \
+				else LIGHTING_CONTEXT_ENTITY
+		apply_environment_values(
+				material,
+				section_values
+					if context == LIGHTING_CONTEXT_INTERIOR_SECTION
+					else values)
 
 
 # The witnessed block mapping: dir_color <- the light block (sun/moon),
@@ -1628,7 +1884,11 @@ func _apply_environment_to_materials() -> void:
 # [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
 #  ColorSrcGlobalGain bind @ 0x58e05d].
 func _environment_values() -> EnvLightValues:
-	return environment_values_from(_environment_node)
+	return entity_lighting_values(
+			environment_values_from(_environment_node),
+			_lighting_effect_scale,
+			_interior_lerp,
+			_interior_daylight)
 
 
 func _set_model_bounds(bounds: AABB) -> void:

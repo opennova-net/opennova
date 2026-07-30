@@ -2,6 +2,7 @@ extends GutTest
 
 const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://engine/world/present_held_weapon.gd")
 
 
 class FakeModel:
@@ -923,12 +924,28 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	presenter.present()
 	assert_eq(placer.graphic_builds.size(), 0,
 			"an ADM of 0 draws nothing — no model is built at all")
+	var body := presenter.resolve_wire_handle(0x1004)
+	var skeleton := Skeleton3D.new()
+	for bone_index in range(PresentHeldWeapon.BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+	body.add_child(skeleton)
 
 	# Now the peer is holding something the table can resolve.
 	sim.entities[0]["held_weapon_adm"] = 16
 	presenter.present()
 	assert_eq(placer.graphic_builds, ["WPN16_3rd"],
 			"the model is resolved from the ADM index the wire carries")
+	var weapon := presenter.get("_weapon_nodes").get(0x1004) as Node3D
+	assert_not_null(weapon)
+	assert_true(weapon.visible)
+	sim.entities[0]["hidden"] = 1
+	presenter.present()
+	assert_false(weapon.visible,
+			"the weapon consumes this snapshot's body visibility without a one-tick lag")
+	sim.entities[0]["hidden"] = 0
+	presenter.present()
+	assert_true(weapon.visible,
+			"the caster and color model return on the same visible snapshot")
 
 	# Stowing it again retires the node rather than leaving a gun floating.
 	sim.entities[0]["held_weapon_adm"] = 0

@@ -222,6 +222,9 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(int(rec["index"]), index, "the record points back at the placed entity")
 	assert_eq(int(rec["slot"]), 0, "a single-instance batch uses slot 0")
 	assert_false(bool(rec["animated"]))
+	var mmi := rec["mmi"] as MultiMeshInstance3D
+	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+			"retail static batches receive dynamic silhouettes but never cast them")
 	var mm: MultiMesh = rec["mm"]
 	assert_eq(mm.instance_count, 1, "the new static gets its own single-instance MultiMesh")
 	assert_true((rec["mmi"] as MultiMeshInstance3D).is_inside_tree(), "the batch instance is in the container")
@@ -251,6 +254,242 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
 	source["item_id"] = 0
 	assert_eq(int(placer.get_static_item_effect_sources()[0].get("item_id", 0)), 105004)
+
+
+func test_place_single_static_caster_reuses_its_visible_instance() -> void:
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	placer.edit_mode = true
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", NovaObjectData.new(), [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	placer.place(mission, parent)
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	var record := mission.add_entity(
+			NovaMissionData.KIND_BUILDING, 105004,
+			Vector3(3, 4, 5), Vector3.ZERO)
+
+	var delta: Dictionary = placer.place_single(
+			mission, container, NovaMissionData.KIND_BUILDING,
+			int(record["index"]))
+
+	assert_eq(int(delta.get("batched", -1)), 1)
+	var visible_batch := placer.pickable_records.back()["mmi"] \
+			as MultiMeshInstance3D
+	assert_eq(visible_batch.layers,
+			NovaWater.VISUAL_LAYER_WORLD \
+			| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+			"the one visible draw also enters the isolated static-caster pass")
+	assert_eq(visible_batch.cast_shadow,
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
+	assert_null(container.get_node_or_null(
+			"StaticShadow_StaticCrate1_k%d_i%d_s0" % [
+				NovaMissionData.KIND_BUILDING, int(record["index"])]),
+			"place_single avoids a second node referencing the same MultiMesh")
+
+
+func test_dynamic_shadow_caster_policy_matches_retail_entity_slot_admission() -> void:
+	assert_true(Placer.item_casts_dynamic_shadow(
+			NovaItemDatabase.TYPE_PERSON, 0, 0),
+			"people always receive a retail shadow render slot")
+	assert_true(Placer.item_casts_dynamic_shadow(
+			NovaItemDatabase.TYPE_VEHICLE, 0, 0x10),
+			"DynamicShadow admits a non-person model")
+	assert_false(Placer.item_casts_dynamic_shadow(
+			NovaItemDatabase.TYPE_BUILDING, 0, 0),
+			"portal/static buildings never become silhouette casters")
+	assert_true(Placer.item_casts_dynamic_shadow(
+			NovaItemDatabase.TYPE_PERSON, 0x04000000, 0x10),
+			"the witnessed dynamic-slot allocator does not consult ItemDef NoShadow")
+
+
+func test_static_shadow_caster_policy_matches_retail_terrain_tile_admission() -> void:
+	assert_true(Placer.item_casts_static_terrain_shadow(
+			NovaMissionData.KIND_BUILDING, 0, 0, 0),
+			"pool-2 buildings enter the terrain-tile caster pass by default")
+	assert_true(Placer.item_casts_static_terrain_shadow(
+			NovaMissionData.KIND_ITEM, 0, 0, 0x20),
+			"pool-1 items require StaticShadow")
+	assert_false(Placer.item_casts_static_terrain_shadow(
+			NovaMissionData.KIND_ITEM, 0, 0, 0),
+			"an ordinary pool-1 item is absent from the static pass")
+	assert_false(Placer.item_casts_static_terrain_shadow(
+			NovaMissionData.KIND_BUILDING, 0x01000000, 0, 0),
+			"BMS NoShadow suppresses a pool-2 caster")
+	assert_false(Placer.item_casts_static_terrain_shadow(
+			NovaMissionData.KIND_BUILDING, 0, 0x04000000, 0),
+			"ItemDef NoShadow suppresses a pool-2 caster")
+
+
+func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> void:
+	# The host's static light reaches only the terrain receiver layer, so an
+	# all-eligible batch can carry both the ordinary world and static-caster
+	# marker without self-shadowing. This avoids one duplicate MultiMesh per
+	# submesh while preserving the visible draw.
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_BUILDING, 105004,
+			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_BUILDING, 105004,
+			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", NovaObjectData.new(), [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("batched", -1)), 2)
+	var container := parent.get_node_or_null("MissionObjects")
+	var visible_batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+			as MultiMeshInstance3D
+	assert_not_null(visible_batch)
+	if visible_batch != null:
+		assert_eq(visible_batch.layers,
+				NovaWater.VISUAL_LAYER_WORLD \
+				| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+				"the visible batch joins the isolated static-caster layer")
+		assert_eq(visible_batch.cast_shadow,
+				GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+				"the visible batch supplies the static silhouette")
+	assert_null(container.get_node_or_null("StaticShadow_StaticCrate1_0"),
+			"an all-eligible batch needs no shadow-only duplicate")
+
+
+func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
+	# The two mission pools share one graphic here, but only the building is
+	# admitted to retail's terrain-tile shadow pass. A visible batch cannot
+	# express that per-instance difference, so this case still needs a parallel
+	# MultiMesh with the ineligible slot zero-scaled.
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_BUILDING, 105004,
+			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_ITEM, 105004,
+			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	placer.edit_mode = true
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", NovaObjectData.new(), [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	placer.place(mission, parent)
+
+	var container := parent.get_node_or_null("MissionObjects")
+	var visible_batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+			as MultiMeshInstance3D
+	var shadow_batch := container.get_node_or_null(
+			"StaticShadow_StaticCrate1_0") as MultiMeshInstance3D
+	assert_not_null(visible_batch)
+	assert_not_null(shadow_batch,
+			"mixed admission retains a filtered shadow-only batch")
+	if visible_batch != null:
+		assert_eq(visible_batch.layers, NovaWater.VISUAL_LAYER_WORLD)
+		assert_eq(visible_batch.cast_shadow,
+				GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+	if shadow_batch != null:
+		assert_eq(shadow_batch.layers,
+				NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+		assert_eq(shadow_batch.cast_shadow,
+				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+		if visible_batch != null:
+			assert_ne(shadow_batch.multimesh, visible_batch.multimesh,
+					"the filtered caster owns transforms independent of the visible batch")
+		assert_eq(shadow_batch.multimesh.instance_count, 2,
+				"slot identity stays parallel for destruction updates")
+	var building_record: Dictionary = {}
+	var item_record: Dictionary = {}
+	for record_v in placer.pickable_records:
+		var record: Dictionary = record_v
+		if int(record.get("kind", -1)) == NovaMissionData.KIND_BUILDING:
+			building_record = record
+		elif int(record.get("kind", -1)) == NovaMissionData.KIND_ITEM:
+			item_record = record
+	var expected_shadow_mm := shadow_batch.multimesh \
+			if shadow_batch != null else null
+	assert_same(building_record.get("shadow_mm"), expected_shadow_mm,
+			"editor records move the eligible parallel caster with its visible slot")
+	assert_true(bool(building_record.get("casts_static_shadow", false)))
+	assert_same(item_record.get("shadow_mm"), expected_shadow_mm)
+	assert_false(bool(item_record.get("casts_static_shadow", true)),
+			"moving an ineligible peer keeps its parallel slot zero-scaled")
+
+
+func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
+	# Portal buildings must keep their camera-driven ROBJ visibility on the
+	# visible NovaObjectModel, while retail's tile pass independently submits
+	# every ROBJ. Seed one harvested batch so the shadow-only sibling can be
+	# asserted without shipping the retail GuardTwr asset.
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+			NovaMissionData.KIND_BUILDING, 102001,
+			Vector3(3, 4, 5), Vector3.ZERO).is_empty())
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	var object_data := NovaObjectData.new()
+	assert_true(placer.register_resolved_static_graphic(
+			"GuardTwr1", object_data, [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("animated", -1)), 1,
+			"the anim_def building remains an individual visible model")
+	var container := parent.get_node_or_null("MissionObjects")
+	var visible_model := container.get_node_or_null("Anim_GuardTwr1_0")
+	assert_not_null(visible_model)
+	var static_shadow := visible_model.get_node_or_null(
+			"StaticShadow_GuardTwr1_live0_0") as MultiMeshInstance3D
+	assert_not_null(static_shadow,
+			"an independent all-section caster survives portal-mask changes")
+	if static_shadow != null:
+		assert_eq(static_shadow.cast_shadow,
+				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
+		assert_eq(static_shadow.layers,
+				NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+		assert_same(static_shadow.get_parent(), visible_model,
+				"the unmasked caster follows editor moves and husk visibility lifecycle")
+		var before := static_shadow.global_position
+		visible_model.position += Vector3(7, 0, 0)
+		assert_eq(static_shadow.global_position, before + Vector3(7, 0, 0),
+				"moving the individual entity cannot strand its caster")
 
 
 func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
