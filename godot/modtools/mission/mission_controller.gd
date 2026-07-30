@@ -293,6 +293,10 @@ const ControllerPlacement := preload("res://modtools/mission/controller/placemen
 const ControllerWaypoints := preload("res://modtools/mission/controller/waypoint_ops.gd")
 const ControllerZones := preload("res://modtools/mission/controller/zone_ops.gd")
 const ControllerSim := preload("res://modtools/mission/controller/sim_ops.gd")
+const ControllerHistory := preload("res://modtools/mission/controller/history_ops.gd")
+const ControllerSelection := preload("res://modtools/mission/controller/selection_ops.gd")
+const ControllerScripting := preload("res://modtools/mission/controller/scripting_ops.gd")
+const ControllerEdit := preload("res://modtools/mission/controller/edit_ops.gd")
 var _io  # ControllerIo (created in _init)
 var _reground  # ControllerReground (created in _init)
 var _viewport  # ControllerViewport (created in _init)
@@ -300,6 +304,10 @@ var _placement  # ControllerPlacement (created in _init)
 var _waypoints  # ControllerWaypoints (created in _init)
 var _zones  # ControllerZones (created in _init)
 var _sim  # ControllerSim (created in _init)
+var _history  # ControllerHistory (created in _init)
+var _selection  # ControllerSelection (created in _init)
+var _scripting  # ControllerScripting (created in _init)
+var _edit  # ControllerEdit (created in _init)
 
 
 func _init(p_terrain_editor: Node = null) -> void:
@@ -311,6 +319,10 @@ func _init(p_terrain_editor: Node = null) -> void:
 	_waypoints = ControllerWaypoints.new(self)
 	_zones = ControllerZones.new(self)
 	_sim = ControllerSim.new(self)
+	_history = ControllerHistory.new(self)
+	_selection = ControllerSelection.new(self)
+	_scripting = ControllerScripting.new(self)
+	_edit = ControllerEdit.new(self)
 
 
 func set_terrain_editor(value: Node) -> void:
@@ -380,169 +392,60 @@ func _report(message: String, is_error: bool = false) -> void:
 	status_reported.emit(message, is_error)
 
 
-# The items.def display name for an entity, or "" when it can't be resolved (no item
-# database, unknown id, or blank name). Drives the inspector identity line and the
-# delete / place status messages so the user reads a model name, not just an index.
 func entity_display_name(kind: int, index: int) -> String:
-	var entity = _viewport._find_entity(kind, index)
-	if entity.is_empty():
-		return ""
-	var db = _placement._item_db()
-	if db == null:
-		return ""
-	var item_id := int(entity.get("item_id", 0))
-	if not db.has_item(item_id):
-		return ""
-	return db.get_display_name(item_id).strip_edges()
+	return _selection.entity_display_name(kind, index)
 
 
-# The resolved model name of the current selection, or "" when nothing is selected /
-# unresolvable. The inspector pairs this with the kind + index for the identity line.
 func get_selected_display_name() -> String:
-	if _selected_ref.is_empty():
-		return ""
-	return entity_display_name(int(_selected_ref["kind"]), int(_selected_ref["index"]))
+	return _selection.get_selected_display_name()
 
 
-# The items.def graphic basename for the current selection, or "" when nothing is
-# selected / no item database is loaded / the item has no declared graphic.
 func get_selected_graphic_name() -> String:
-	if _selected_ref.is_empty():
-		return ""
-	var entity = _viewport._find_entity(int(_selected_ref["kind"]), int(_selected_ref["index"]))
-	if entity.is_empty():
-		return ""
-	var db = _placement._item_db()
-	if db == null:
-		return ""
-	var item_id := int(entity.get("item_id", 0))
-	if not db.has_item(item_id):
-		return ""
-	return db.get_graphic(item_id).strip_edges()
+	return _selection.get_selected_graphic_name()
 
 
-# { kind, index, position (mission-space Vector3), animated } for the selected
-# entity, or empty when nothing is selected. Drives the inspector's selection line.
 func get_selection_summary() -> Dictionary:
-	if _selected_ref.is_empty():
-		return {}
-	return {
-		"kind": int(_selected_ref["kind"]),
-		"index": int(_selected_ref["index"]),
-		"position": MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin),
-		"animated": _selected_node != null,
-	}
+	return _selection.get_selection_summary()
 
 
 func selected_has_user_points() -> bool:
-	var data := _selected_object_data()
-	return data != null \
-		and data.has_method("get_user_point_count") \
-		and data.get_user_point_count() > 0
+	return _selection.selected_has_user_points()
 
 
 func is_selected_user_points_visible() -> bool:
-	return _selected_user_points_visible and selected_has_user_points()
+	return _selection.is_selected_user_points_visible()
 
 
 func set_selected_user_points_visible(value: bool) -> void:
-	_selected_user_points_visible = value and selected_has_user_points() and not _sim.is_simulating()
-	_viewport._refresh_selected_user_points_overlay()
-	_notify_changed()
+	_selection.set_selected_user_points_visible(value)
 
 
 func _selected_object_data() -> NovaObjectData:
-	if _selected_ref.is_empty() or _selected_graphic.is_empty() or _placer == null:
-		return null
-	if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
-		return null
-	if not _placer.has_method("object_data_for"):
-		return null
-	return _placer.object_data_for(_selected_graphic)
+	return _selection._selected_object_data()
 
 
-# Select an object from the inspector's "Placed objects" browser by kind + array index,
-# then frame the editor camera on it so it is found in the viewport. This is the whole
-# point of the list: on a large map a named unit can be located without hunting the world.
-# Public (the viewport pick path uses the private _select); a missing entity is a no-op.
 func select_object(kind: int, index: int) -> void:
-	if _mission == null or _viewport._find_entity(kind, index).is_empty():
-		return
-	_viewport._select(kind, index)
-	focus_selection_in_view()
+	_selection.select_object(kind, index)
 
 
-# Orbit the editor camera onto the current selection's world AABB (falling back to its
-# authored origin when the selection has no baked mesh). Keeps the current heading so the
-# view does not spin. Returns false with no camera / nothing selected (e.g. headless tests).
 func focus_selection_in_view() -> bool:
-	if _selected_ref.is_empty() or terrain_editor == null or not terrain_editor.has_method("get_editor_camera"):
-		return false
-	var camera: Camera3D = terrain_editor.get_editor_camera()
-	if camera == null or not camera.has_method("frame_bounds_custom"):
-		return false
-	var aabb = _viewport._selected_world_aabb()
-	var center: Vector3
-	var radius: float
-	if aabb.size != Vector3.ZERO:
-		center = aabb.position + aabb.size * 0.5
-		radius = maxf(aabb.size.length() * 0.5, 8.0)
-	else:
-		# Mesh-less / not-yet-baked: frame the authored origin, converted to world space.
-		var container := _objects_container()
-		center = (container.global_transform * _selected_xform.origin) if container != null else _selected_xform.origin
-		radius = 16.0
-	camera.frame_bounds_custom(center, radius, 2.5, 1200.0, camera.rotation.y, -0.55)
-	return true
+	return _selection.focus_selection_in_view()
 
 
 func get_mission_title() -> String:
-	if _mission == null:
-		return "Mission"
-	var mission_name := _mission.get_mission_name().strip_edges()
-	if mission_name.is_empty():
-		mission_name = _current_path.get_file().get_basename()
-	if mission_name.is_empty():
-		mission_name = "untitled"
-	return "%s%s" % [mission_name, "*" if is_dirty() else ""]
+	return _selection.get_mission_title()
 
 
-## The mounted resource root, via the bound terrain editor — the controller's one
-## VFS seam. The controller runs headless in tests (no shell), so this reads the
-## editor, not the workspace; the duck-type guard for bare doubles lives here.
 func _resource_root() -> NovaResourceRoot:
-	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
-		return terrain_editor.get_resource_root()
-	return null
+	return _selection._resource_root()
 
 
-# Retail loads <mission>.til into one shared terrain tile array used by both
-# terrain composition and foliage's radius-2 blocker. Keep the basename and
-# VFS lookup identical to GameWorld._load_mission_tile_info.
-# [orig: Terrain_LoadFoliageFile @ 0x60a740;
-# Foliage_PathBlockedByPlacedTile @ 0x606490]
 func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
-	_clear_mission_tile_info()
-	if resource_root == null:
-		return
-	var mission_name := bms_name.get_file()
-	if mission_name.is_empty():
-		mission_name = bms_name
-	var til_name := mission_name.get_basename() + ".til"
-	if not resource_root.has_file(til_name):
-		return
-	var til_bytes := resource_root.read_file(til_name)
-	if til_bytes.is_empty():
-		return
-	var tile_info := NovaTerrainTileInfo.new()
-	if tile_info.load_from_bytes(til_bytes) != OK:
-		push_warning("MissionController: failed to parse mission tile file '%s'." % til_name)
-		return
-	_mission_tile_info = tile_info
+	_selection._load_mission_tile_info(bms_name, resource_root)
 
 
 func _clear_mission_tile_info() -> void:
-	_mission_tile_info = null
+	_selection._clear_mission_tile_info()
 
 
 func open_mission(bms_path: String) -> Error:
@@ -629,155 +532,47 @@ func save_as_path(path: String) -> Error:
 
 
 func can_undo() -> bool:
-	return _mission != null and _mission.can_undo()
+	return _history.can_undo()
 
 
 func can_redo() -> bool:
-	return _mission != null and _mission.can_redo()
+	return _history.can_redo()
 
 
-# The number of undo steps on the stack (for tests / a future history readout).
 func undo_depth() -> int:
-	return _mission.undo_depth() if _mission != null else 0
+	return _history.undo_depth()
 
 
-# Open an edit session, capturing the pre-edit document once. Inert if a session is already open
-# (so a run of axis edits coalesces) or no mission is loaded. Delegates to the document.
 func begin_edit() -> void:
-	if _mission != null:
-		_mission.begin_edit()
+	_history.begin_edit()
 
 
-# Close an edit session, pushing one undo step only if the document actually changed (a plain
-# click, a same-value edit, or a programmatic refresh push nothing). Delegates to the document.
 func commit_edit() -> void:
-	if _mission != null:
-		_mission.commit_edit()
+	_history.commit_edit()
 
 
 func _flush_edit() -> void:
-	commit_edit()
+	_history._flush_edit()
 
 
-# One-shot mutation recipe shared by the simple setters. Flush any open edit session as its own step,
-# open a fresh edit, run `do` (which performs exactly one NovaMissionData mutation and returns its
-# result), and on success commit a single undo step, run `on_success` (e.g. an overlay refresh), and
-# mark the document dirty. A bool result commits when true; a Dictionary / Array result (the chain
-# mutators return the edited record / chain) commits when non-empty. On a rejected edit, surface
-# `err` when it is non-empty. Returns whether the edit applied. Callers keep their own pre-guards (a
-# valid selection, a fetched record) before calling -- this owns only the begin/commit/dirty bracket.
 func _edit_step(do: Callable, err := "", on_success := Callable()) -> bool:
-	if _mission == null:
-		return false
-	if _sim._reject_edit_while_simulating():
-		return false
-	_flush_edit()
-	_mission.begin_edit()
-	var result: Variant = do.call()
-	var ok := false
-	if result is Dictionary:
-		ok = not (result as Dictionary).is_empty()
-	elif result is Array:
-		ok = not (result as Array).is_empty()
-	else:
-		ok = bool(result)
-	if ok:
-		_mission.commit_edit()
-		if on_success.is_valid():
-			on_success.call()
-		mark_dirty()
-	elif not err.is_empty():
-		_report(err, true)
-	return ok
+	return _history._edit_step(do, err, on_success)
 
 
 func _clear_history() -> void:
-	if _mission != null:
-		_mission.clear_history()
+	_history._clear_history()
 
 
 func undo() -> void:
-	_restore_step(true)
+	_history.undo()
 
 
 func redo() -> void:
-	_restore_step(false)
+	_history.redo()
 
 
-# Shared undo/redo spine (the two differ only in direction + the status line). A keyboard undo/redo
-# can arrive mid-drag; cancel_drag abandons the visual gesture (so the re-bake does not free nodes a
-# continuing drag still references) and commits any open edit session as its step before we rewind.
-# _restoring guards re-entrancy: a restore -> rebake -> `changed` -> inspector roundtrip must not recurse.
-func _restore_step(is_undo: bool) -> void:
-	if _restoring:
-		return
-	if _sim._reject_edit_while_simulating():
-		return
-	_viewport.cancel_drag()
-	if _mission == null:
-		return
-	if is_undo and not _mission.can_undo():
-		_report("Nothing to undo.")
-		return
-	if not is_undo and not _mission.can_redo():
-		_report("Nothing to redo.")
-		return
-	_restoring = true
-	var before := _mission.structure_fingerprint()
-	if is_undo:
-		_mission.undo()
-	else:
-		_mission.redo()
-	_after_restore(before)
-	_restoring = false
-	_report("Undid the last change." if is_undo else "Redid the last change.")
-
-
-# Sync the world + selection to the document after an in-memory undo/redo swap, then re-bake and
-# notify once so the inspector refreshes against the restored world in a single pass. `before` is the
-# pre-restore NovaMissionData.structure_fingerprint() -- { events, zones, object_rev }.
-#
-# Adding / deleting an event shifts later event indices, so a kept _selected_event_index could bind to
-# a DIFFERENT event (the in-range clamp can't see a shift); drop the selection only when the event set
-# actually changed (event add/delete are the only ops that change the count -- there is no event-reorder
-# op -- so a count change is exactly the structural case). An attribute / trigger / action undo leaves
-# the list intact and keeps the user on their event.
-func _after_restore(before: Dictionary) -> void:
-	var after := _mission.structure_fingerprint()
-	if int(after["events"]) != int(before["events"]):
-		_selected_event_index = -1
-	# Same reasoning for the zone selection: area triggers are NOT part of object_rev (it covers only
-	# placed objects), so an undo/redo of a zone add/delete takes the lightweight overlay-only path
-	# below and would otherwise rebuild the overlay against a stale _selected_zone_index that now points
-	# at a different (reindexed) zone. Add/delete are the only ops that change the zone count (no
-	# reorder), so a count change is exactly the structural case; drop the selection then.
-	if int(after["zones"]) != int(before["zones"]):
-		_selected_zone_index = -1
-	# Defensive clamp: never leave the index past the end of the restored zone list.
-	if _selected_zone_index >= _mission.get_area_trigger_count():
-		_selected_zone_index = -1
-	# Skip the full object re-place when the undo/redo changed only non-object data (events / triggers /
-	# actions / zones / header / loadout / groups): every placed object is byte-identical, so re-baking
-	# ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats + object selection
-	# all stay valid; only the active mode's overlay (which reads events / zones / paths from the document)
-	# needs a refresh. Any object change moves object_rev -> full re-bake. object_rev is computed in C++
-	# (NovaMissionData.object_records_revision) over the raw record bytes, so this no longer marshals the
-	# placed-object set into ~1600 entity dictionaries twice per undo.
-	if int(after["object_rev"]) == int(before["object_rev"]):
-		_refresh_active_overlay()
-	else:
-		_rebake_objects()
-	mark_dirty()
-
-
-# Mark the current input event handled so a consumed Ctrl+Z / Ctrl+Y does not propagate
-# further (mirrors terrain_editor). No-op without a live viewport (headless tests).
 func _consume_viewport_key() -> void:
-	if terrain_editor == null or not terrain_editor.is_inside_tree():
-		return
-	var vp := terrain_editor.get_viewport()
-	if vp != null:
-		vp.set_input_as_handled()
+	_history._consume_viewport_key()
 
 
 # --- Viewport authoring: select + terrain-plane drag --------------------------
@@ -826,176 +621,84 @@ func move_selected_to_world_grounded(global_hit: Vector3) -> bool:
 	return _viewport.move_selected_to_world_grounded(global_hit)
 
 
-# The full editable dictionary for the selected entity (see NovaMissionData entity
-# fields: position is mission-space, rotation_deg is authored degrees, plus team /
-# group), or {} when nothing is selected.
 func get_selected_entity() -> Dictionary:
-	if _selected_ref.is_empty():
-		return {}
-	return _viewport._find_entity(int(_selected_ref["kind"]), int(_selected_ref["index"]))
+	return _selection.get_selected_entity()
 
 
-# The live selected position in mission (BMS) space, tracking any uncommitted drag.
 func get_selected_position() -> Vector3:
-	if _selected_ref.is_empty():
-		return Vector3.ZERO
-	return MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin)
+	return _selection.get_selected_position()
 
 
-# The live selected rotation as authored (pitch, yaw, roll) degrees.
 func get_selected_rotation() -> Vector3:
-	if _selected_ref.is_empty():
-		return Vector3.ZERO
-	return _selected_rotation_deg
+	return _selection.get_selected_rotation()
 
 
 func set_selected_position(bms_pos: Vector3) -> void:
-	if _selected_ref.is_empty() or _mission == null:
-		return
-	# Open (or continue) one edit session so a run of axis edits on this entity coalesces
-	# into a single undo step; it is pushed by the next action's flush. begin_edit is inert
-	# if a session is already open, so X / Y / Z / pitch / yaw / roll share one step.
-	begin_edit()
-	# entity_transform places objects at bms_to_godot_position(pos) in container-local
-	# space (the drag path and get_selected_position both invert exactly that), so set
-	# the local origin directly. Routing through the container's world transform would
-	# double-apply it and shift the object whenever the container is not at the origin.
-	_viewport._apply_selected_xform(Transform3D(_selected_xform.basis, MissionObjectPlacer.bms_to_godot_position(bms_pos)))
-	_viewport._commit_selected_transform()
+	_selection.set_selected_position(bms_pos)
 
 
 func set_selected_rotation(rot_deg: Vector3) -> void:
-	if _selected_ref.is_empty() or _mission == null:
-		return
-	begin_edit()
-	# Unlike a drag (position only), this rebuilds the basis from the authored degrees
-	# and re-applies the full transform so the in-world object actually rotates. Round
-	# to whole degrees first: the format (and set_entity_transform) stores integer
-	# degrees, so keeping a fractional value would leave get_selected_rotation out of
-	# step with the persisted record on the next axis edit.
-	_selected_rotation_deg = rot_deg.round()
-	var basis := MissionObjectPlacer.bms_to_godot_basis(_selected_rotation_deg)
-	_viewport._apply_selected_xform(Transform3D(basis, _selected_xform.origin))
-	_viewport._commit_selected_transform()
+	_selection.set_selected_rotation(rot_deg)
 
 
 func set_selected_team(value: int) -> void:
-	# team / group are stored as uint8 by the format; clamp at this API boundary so an
-	# out-of-range value cannot silently wrap (the SpinBoxes already cap 0..255, but
-	# these methods are public). Surface the clamp so a corrected value is not a surprise.
-	var clamped := clampi(value, 0, 255)
-	if clamped != value:
-		_report("Team clamped to the 0 to 255 range.")
-	set_selected_property("team", clamped)
+	_selection.set_selected_team(value)
 
 
 func set_selected_group(value: int) -> void:
-	var clamped := clampi(value, 0, 255)
-	if clamped != value:
-		_report("Group clamped to the 0 to 255 range.")
-	set_selected_property("group", clamped)
+	_selection.set_selected_group(value)
 
 
-# Generic per-entity scalar property edit from the inspector: team / group plus the
-# AI + waypoint fields the format carries (waypoint_id, wp_number, perception, accuracy,
-# alert_state, the engagement / attack distances, spawn_count, max_simultaneous,
-# ai_flags). `property` is the entity-dictionary key it edits. A property change is its
-# own undo step: close any open transform session first, then bracket the write with
-# begin_edit/commit_edit so it records one step only if the write actually changed the document
-# (a same-value write is a no-op). The value range is governed by the inspector's SpinBoxes and the format's field
-# widths, so this does not clamp; team / group clamp through their wrappers above.
 func set_selected_property(property: String, value: int) -> void:
-	if _selected_ref.is_empty():
-		return
-	# set_entity_property_int returns false only on rejection (bad index, unknown property, failed
-	# write) -- never on a benign same-value write -- so a false return is a real error worth surfacing.
-	_edit_step(func(): return _mission.set_entity_property_int(
-			int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value),
-		"Could not set %s on the selected object." % property)
-	# A group change moves which groups are "in use" (and which "New group N" the picker offers), so the
-	# cached group dropdown must rebuild. Entity-set changes are covered by _rebake_objects; other
-	# per-entity fields (waypoint_id, team, AI) don't affect any cached option list, so don't bump here.
-	if property == "group":
-		_membership_rev += 1
+	_selection.set_selected_property(property, value)
 
 
-# Revision of the entity set + group membership; see _membership_rev. The inspector gates its
-# (otherwise per-`changed`, ~1600-entity) rebuild of the group / waypoint-path / entity pickers on this.
 func get_membership_revision() -> int:
-	return _membership_rev
+	return _selection.get_membership_revision()
 
 
-# String counterpart of set_selected_property, for the fixed-string entity fields
-# "name1" (AI class) and "name2" (AI script). Same snapshot / one-undo-step model.
 func set_selected_string_property(property: String, value: String) -> void:
-	if _selected_ref.is_empty():
-		return
-	_edit_step(func(): return _mission.set_entity_property_string(
-			int(_selected_ref["kind"]), int(_selected_ref["index"]), property, value),
-		"Could not set %s on the selected object." % property)
+	_selection.set_selected_string_property(property, value)
 
 
-# --- Authoring: mission-header editing ----------------------------------------
-# Each setter snapshots, writes one header field through NovaMissionData, then pushes a
-# single undo step. Field names match NovaMissionData::set_header_* and the inspector form.
 func set_header_string(field: String, value: String) -> void:
-	_edit_step(func(): return _mission.set_header_string(field, value),
-		"Could not set mission %s." % field)
+	_selection.set_header_string(field, value)
 
 
 func set_header_int(field: String, value: int) -> void:
-	_edit_step(func(): return _mission.set_header_int(field, value),
-		"Could not set mission %s." % field)
+	_selection.set_header_int(field, value)
 
 
 func set_header_flag(bit: int, on: bool) -> void:
-	_edit_step(func(): return _mission.set_header_flag(bit, on),
-		"Could not set mission flag.")
+	_selection.set_header_flag(bit, on)
 
 
-# Single-select game mode (one attrib_flags mode bit, or 0 = Single Player). Mirrors set_header_*:
-# one undo step + dirty. NovaMissionData.set_game_mode clears the other mode bits.
 func set_game_mode(bit: int) -> void:
-	_edit_step(func(): return _mission.set_game_mode(bit),
-		"Could not set the game mode.")
+	_selection.set_game_mode(bit)
 
-
-# --- Weapon loadout + groups (mission-global) ---------------------------------
-# Loadout entries are dictionaries { index, name, value1, value2 }; groups are
-# { index, field0(flags), field8(value), field12(constant 10) }. Edits use the one-step snapshot/undo recipe.
 
 func get_weapon_loadout() -> Array:
-	if _mission == null:
-		return []
-	return _mission.get_weapon_loadout()
+	return _selection.get_weapon_loadout()
 
 
 func set_weapon_loadout(entries: Array) -> void:
-	_edit_step(func(): return _mission.set_weapon_loadout(entries),
-		"Could not update the weapon loadout.")
+	_selection.set_weapon_loadout(entries)
 
 
 func get_group_count() -> int:
-	if _mission == null:
-		return 0
-	return _mission.get_group_count()
+	return _selection.get_group_count()
 
 
 func get_groups() -> Array:
-	if _mission == null:
-		return []
-	return _mission.get_groups()
+	return _selection.get_groups()
 
 
 func get_group(index: int) -> Dictionary:
-	if _mission == null:
-		return {}
-	return _mission.get_group(index)
+	return _selection.get_group(index)
 
 
 func set_group(index: int, field0: int, field8: int, field12: int) -> void:
-	_edit_step(func(): return _mission.set_group(index, field0, field8, field12),
-		"Could not update group %d." % index)
+	_selection.set_group(index, field0, field8, field12)
 
 
 # --- Authoring (Phase 3): place new objects -----------------------------------
@@ -1031,92 +734,16 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	return _placement.place_entity_at_world(item_id, global_hit)
 
 
-# Remove the currently-selected entity, then re-bake the world so it matches the new
-# record. A selected marker (mesh-less) skips the object re-bake (its delete shifts no object
-# MultiMesh indices) and just rebuilds the marker overlay. Returns false (a no-op) when nothing is
-# selected or the lib rejects the removal; clears the selection on success. Public so the
-# inspector's Delete button and the viewport Delete key share one path.
 func delete_selected() -> bool:
-	if _selected_ref.is_empty() or _mission == null:
-		return false
-	if _sim._reject_edit_while_simulating():
-		return false
-	var kind := int(_selected_ref["kind"])
-	var index := int(_selected_ref["index"])
-	# Capture a readable label before the removal: after the re-bake the selection (and its
-	# resolvable name) is gone.
-	var label := get_selected_display_name()
-	# Deleting is its own undo step: close any open session, then bracket the removal with
-	# begin_edit/commit_edit (a successful removal always changes the document, so this is never a
-	# no-op step).
-	_flush_edit()
-	_mission.begin_edit()
-	if not _mission.remove_entity(kind, index):
-		# Balance the begin_edit() bracket on the reject path (no-op step, the failed remove changed
-		# nothing) so the open session does not leak into the next gesture.
-		_mission.commit_edit()
-		_report("Could not delete the selected object.", true)
-		return false
-	_mission.commit_edit()
-	if kind == NovaMissionData.KIND_MARKER:
-		# Objects are untouched by a marker delete; drop the selection and rebuild only the marker
-		# overlay against the post-delete list (cheaper than re-placing every object). The marker is
-		# still part of the entity set the inspector's cached pickers marshal, so bump the membership
-		# revision (the non-marker branch gets this from _rebake_objects).
-		_membership_rev += 1
-		_viewport._deselect()
-		_waypoints._refresh_marker_overlay()
-	else:
-		# Re-bake first (it resets the selection state and rebuilds stats), then dirty +
-		# emit once so the inspector refreshes against the post-delete world in a single pass.
-		_rebake_objects()
-	mark_dirty()
-	_report("Deleted %s. Ctrl+Z to undo." % (label if not label.is_empty() else "object"))
-	return true
+	return _edit.delete_selected()
 
 
-# Rebuild the entire MissionObjects container from the current mission state, reusing
-# the retained placer so its (expensive) model + batch caches survive the rebuild. The
-# container node identity is kept (place() clears and refills it), so _objects_container
-# still resolves. Drops the selection: its box and pickable records are freed with the
-# old container contents and the indices they carried may no longer be valid.
 func _rebake_objects() -> void:
-	if _placer == null or _mission == null:
-		return
-	if terrain_editor == null or not terrain_editor.has_method("get_terrain_world_root"):
-		return
-	var world_root: Node3D = terrain_editor.get_terrain_world_root()
-	if world_root == null:
-		return
-	_viewport._reset_selection_state()
-	# A re-bake is the universal choke point for entity-set changes (add / remove / place / delete /
-	# marker edits, and undo/redo whose object signature differs), so bump the membership revision here
-	# to invalidate the inspector's cached group / waypoint-path / entity pickers. (A bulk re-ground is
-	# NOT a membership change — it moves existing entities in place and skips both the re-bake and this
-	# bump; see _apply_reground_world_update.)
-	_membership_rev += 1
-	var options: Dictionary = {}
-	var env_node := _environment_node()
-	if env_node != null:
-		options["environment_node"] = env_node
-	_stats = _placer.place(_mission, world_root, options)
-	_pickable = _placer.pickable_records
-	# The placer (re)created the pick colliders with the world; just refresh the debug overlay.
-	_viewport._refresh_pick_debug()
-	# The re-bake replaced the container (and the old overlay with it); rebuild the active
-	# mode's overlay against the new world.
-	_refresh_active_overlay()
+	_edit._rebake_objects()
 
 
-# Rebuild only the overlay for the current mode (each mode owns exactly one). Shared by the
-# re-bake and the lightweight undo path so the mode -> overlay dispatch lives in one place.
 func _refresh_active_overlay() -> void:
-	if _mode == Mode.WAYPOINTS:
-		_waypoints._refresh_waypoint_overlay()
-	elif _mode == Mode.AREA_TRIGGERS:
-		_zones._refresh_area_trigger_overlay()
-	elif _mode == Mode.OBJECTS:
-		_waypoints._refresh_marker_overlay()
+	_edit._refresh_active_overlay()
 
 
 # --- Authoring (P7): waypoint mode + marker selection -------------------------
@@ -1126,61 +753,8 @@ func _refresh_active_overlay() -> void:
 # across re-bakes; the marker selection (like the object selection) does not. Marker
 # picking reuses the same analytic ray-vs-AABB as objects, over the overlay's gizmo AABBs.
 
-# Switch the active editing mode (Mode.*). A mode switch is a fresh context: it closes any
-# open edit session, then drops EVERY mode's selection + armed tool so only the new mode's
-# clicks are live. Each mode focuses a sensible default on entry (a populated waypoint path /
-# the first zone) and toggles its overlay's visibility. Inert if already in `mode`.
 func set_mode(mode: int) -> void:
-	if _mode == mode:
-		return
-	_flush_edit()
-	_mode = mode
-	# A mode switch is a fresh context: stop any running part-animation preview.
-	_sim.stop_preview()
-	_viewport._clear_selected_user_points()
-	# Exclusive selection: clear the object selection refs + its box, the marker selection,
-	# the zone selection, and any armed placement tool.
-	_selected_ref = {}
-	_selected_records = []
-	_selected_node = null
-	_selected_graphic = ""
-	_selected_node_offset = Transform3D.IDENTITY
-	_selected_collider = null
-	_selected_ground_offset = Vector3.ZERO
-	_viewport._hide_selection_box()
-	# Hover only lives in objects mode; drop it on any mode switch.
-	_viewport._clear_hover()
-	_selected_marker = {}
-	_selected_zone_index = -1
-	_place_item_id = 0
-	_marker_place_armed = false
-	if mode == Mode.WAYPOINTS and _selected_path_index < 0:
-		# Focus a populated path on entry so the panel is not empty.
-		_selected_path_index = _waypoints._first_nonempty_path()
-	if mode == Mode.AREA_TRIGGERS and _mission != null and _mission.get_area_trigger_count() > 0:
-		# Focus the first zone on entry so the panel is not empty.
-		_selected_zone_index = 0
-	if mode == Mode.SCRIPTING and _mission != null and get_selected_event_index() < 0 and _mission.get_event_count() > 0:
-		# Focus the first event on entry so the scripting panel is not empty (get_selected_event_index
-		# reads a stale-but-out-of-range selection as -1, so a shrunken list re-focuses event 0).
-		_selected_event_index = 0
-	_waypoints._refresh_waypoint_overlay()
-	_zones._refresh_area_trigger_overlay()
-	_waypoints._refresh_marker_overlay()
-	# Each overlay is visible only in its own mode (markers are placed/edited in Objects mode; the
-	# waypoint overlay shows path markers in Waypoints mode), so the two marker-gizmo overlays never
-	# double-draw.
-	if _waypoint_overlay != null and is_instance_valid(_waypoint_overlay):
-		_waypoint_overlay.visible = mode == Mode.WAYPOINTS
-	if _area_overlay != null and is_instance_valid(_area_overlay):
-		_area_overlay.visible = mode == Mode.AREA_TRIGGERS
-	if _marker_overlay != null and is_instance_valid(_marker_overlay):
-		_marker_overlay.visible = mode == Mode.OBJECTS
-	# The transform gizmo lives only in Objects mode and only with a selection; a mode switch
-	# clears the selection above, so just hide it here (rebuilt on the next object select).
-	if _gizmo != null and is_instance_valid(_gizmo):
-		_gizmo.visible = false
-	_notify_changed()
+	_edit.set_mode(mode)
 
 
 func get_mode() -> int:
@@ -1244,7 +818,6 @@ func select_waypoint_marker(marker_index: int) -> void:
 
 # Arm the "add marker" tool: a terrain click then adds a marker to the active path. Needs
 # an active path; drops any marker selection so the inspector shows the placement state.
-# --- Add marker (placement tool) ---------------------------------------------
 
 func arm_marker_placement() -> void:
 	_waypoints.arm_marker_placement()
@@ -1267,7 +840,6 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 # Move the selected marker one step earlier (-1) or later (+1) along the active path. This
 # rewrites only the path's reference order (no marker entity changes), so it rebuilds just
 # the overlay. One undo step. Inert at the ends or without a marker selection.
-# --- Reorder / delete / clear -------------------------------------------------
 
 func move_selected_marker(delta: int) -> void:
 	_waypoints.move_selected_marker(delta)
@@ -1285,136 +857,28 @@ func get_area_triggers() -> Array:
 	return _mission.get_area_triggers() if _mission != null else []
 
 
-# Flat list of every entity (all kinds), shaped for a scripting param picker: { value: bms_id, label }.
-# Single/Player triggers and Single actions reference a unit by its BMS/net id, not an array index
-# ([orig: EntityPool_FindByNetId @0x4f0a20]); an unmatched value still round-trips as a raw row.
 func get_all_entities() -> Array:
-	if _mission == null:
-		return []
-	var out: Array = []
-	var id_counts: Dictionary = {}
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
-		for e in _mission.get_entities(kind):
-			var ed := e as Dictionary
-			var bms_id := int(ed.get("bms_id", 0))
-			var display := entity_display_name(kind, int(ed.get("index", 0)))
-			var label := ("%s #%d" % [display, bms_id]) if display != "" else ("Unit #%d" % bms_id)
-			out.append({ "value": bms_id, "label": label })
-			id_counts[bms_id] = int(id_counts.get(bms_id, 0)) + 1
-	# bms_id is not guaranteed unique on disk (many records default to 0), and the picker keys its
-	# OptionButton items by value, so rows that share an id would be visually indistinguishable. Append a
-	# 1-based ordinal to each member of a colliding id so the user can tell them apart. The committed
-	# value stays the bms_id -- the engine resolves units by that id (FindByNetId), so same-id rows are
-	# genuinely equivalent on disk; this only disambiguates the display.
-	var seen: Dictionary = {}
-	for row in out:
-		var v := int(row["value"])
-		if int(id_counts.get(v, 0)) > 1:
-			var n := int(seen.get(v, 0)) + 1
-			seen[v] = n
-			row["label"] = "%s  (%d)" % [String(row["label"]), n]
-	return out
+	return _selection.get_all_entities()
 
 
-# Human kind label for a "Placed objects" browser row. The list covers every entity kind the
-# Objects mode renders + picks, markers included (they are placed / edited as general entities
-# there, gizmo-picked via the always-on marker overlay; Waypoints mode is just a second view of them).
-func _object_kind_label(kind: int) -> String:
-	match kind:
-		NovaMissionData.KIND_BUILDING:
-			return "Building"
-		NovaMissionData.KIND_ORGANIC:
-			return "Person"
-		NovaMissionData.KIND_MARKER:
-			return "Marker"
-		_:
-			return "Item"
-
-
-# Flat, ordered list of every placed object (items / buildings / people / markers) for the
-# inspector's left-pane browser. One row per entity: { kind, index, item_id, name, category }.
-# `name` is the resolved model name (or "" -> the inspector falls back to the item id); the row
-# order is the on-disk array order, stable across edits, so duplicate-name ordinals stay put.
 func get_object_list() -> Array:
-	var out: Array = []
-	if _mission == null:
-		return out
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC, NovaMissionData.KIND_MARKER]:
-		var category := _object_kind_label(kind)
-		for e in _mission.get_entities(kind):
-			var ed := e as Dictionary
-			var index := int(ed.get("index", 0))
-			out.append({
-				"kind": kind,
-				"index": index,
-				"item_id": int(ed.get("item_id", 0)),
-				"name": entity_display_name(kind, index),
-				"category": category,
-			})
-	return out
+	return _selection.get_object_list()
 
 
-# Number of placed objects across every Objects-mode kind (markers included). Cheap (count fields,
-# no record walk); the inspector gates its (potentially 1000+ row) list rebuild on this changing.
 func get_object_count() -> int:
-	if _mission == null:
-		return 0
-	return _mission.get_entity_count(NovaMissionData.KIND_ITEM) \
-		+ _mission.get_entity_count(NovaMissionData.KIND_BUILDING) \
-		+ _mission.get_entity_count(NovaMissionData.KIND_ORGANIC) \
-		+ _mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	return _selection.get_object_count()
 
 
-# Whether item names are resolvable yet. A mission can open before its items.def is reachable
-# (the resource directory is repointed afterwards); the inspector rebuilds its row labels once
-# this flips true so the browser does not stay stuck on "Item <id>" placeholders.
 func has_item_database() -> bool:
-	return _placement._item_db() != null
+	return _selection.has_item_database()
 
 
-# Options for the inspector's "Waypoint path" picker -- which path a unit follows (the waypoint_id /
-# byte-79 field, [orig: Entity_SpawnFromBMSRecord @0x40f02f `if (record[79]) follow path record[79]`]).
-# Shaped { id, label } for InspectorForms.populate_id_option. id 0 = "None": byte 79 == 0 means the
-# unit follows no path, so path index 0 is unreachable as a follow target and is not offered. The
-# inspector adds the unit's current value if it is not in this set, so an odd value still round-trips.
 func get_waypoint_path_options() -> Array:
-	var out: Array = [{ "id": 0, "label": "None" }]
-	if _mission == null:
-		return out
-	for s in _mission.get_waypoint_summaries():
-		var d := s as Dictionary
-		var idx := int(d.get("index", 0))
-		var count := int(d.get("marker_count", 0))
-		if idx <= 0 or count <= 0:
-			continue
-		out.append({ "id": idx, "label": "Path %d  -  %d markers" % [idx, count] })
-	return out
+	return _selection.get_waypoint_path_options()
 
 
-# Options for the inspector's "Group" picker -- which squad a unit belongs to (the group_id / byte-78
-# field, [orig: Entity_SpawnFromBMSRecord @0x40ebb7]; the format carries 64 groups, 0..63). Shaped
-# { id, label }: "Ungrouped" (0), every group already in use (annotated with its unit count so the
-# user joins an existing squad), and a "New group N" entry for the first free group so a fresh squad
-# can be started. The inspector adds the unit's current group if it is not already listed.
 func get_group_options() -> Array:
-	var out: Array = [{ "id": 0, "label": "Ungrouped" }]
-	if _mission == null:
-		return out
-	var counts: Dictionary = {}
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
-		for e in _mission.get_entities(kind):
-			var g := int((e as Dictionary).get("group", 0))
-			if g > 0:
-				counts[g] = int(counts.get(g, 0)) + 1
-	var used: Array = counts.keys()
-	used.sort()
-	for g in used:
-		out.append({ "id": int(g), "label": "Group %d  (%d units)" % [int(g), int(counts[g])] })
-	for candidate in range(1, 64):
-		if not counts.has(candidate):
-			out.append({ "id": candidate, "label": "New group %d" % candidate })
-			break
-	return out
+	return _selection.get_group_options()
 
 
 func get_selected_zone_index() -> int:
@@ -1446,161 +910,95 @@ func delete_selected_area_trigger() -> bool:
 
 
 func get_event_count() -> int:
-	return _mission.get_event_count() if _mission != null else 0
+	return _scripting.get_event_count()
 
 
 func get_events() -> Array:
-	return _mission.get_events() if _mission != null else []
+	return _scripting.get_events()
 
 
-# The selected event index, or -1 when nothing valid is selected. Pure read (no side effects): a
-# selection that fell out of range (the event list shrank under it via a delete or an undo) reads as
-# "nothing selected" rather than a stale index, and the caller re-selects from the list. The stored
-# field is left alone; every read re-validates it against the current event count.
 func get_selected_event_index() -> int:
-	if _mission == null or _selected_event_index < 0 or _selected_event_index >= _mission.get_event_count():
-		return -1
-	return _selected_event_index
+	return _scripting.get_selected_event_index()
 
 
-# The selected event's full chain { event, triggers, actions, references, diagnostics }, or {}.
 func get_selected_event_chain() -> Dictionary:
-	var index := get_selected_event_index()
-	if _mission == null or index < 0:
-		return {}
-	return _mission.get_event_chain(index)
+	return _scripting.get_selected_event_chain()
 
 
 func get_logic_summary() -> Dictionary:
-	return _mission.get_logic_summary() if _mission != null else {}
+	return _scripting.get_logic_summary()
 
 
 func get_trigger_main_types() -> Array:
-	return _mission.get_trigger_main_types() if _mission != null else []
+	return _scripting.get_trigger_main_types()
 
 
 func get_trigger_sub_types(main_type: int) -> Array:
-	return _mission.get_trigger_sub_types(main_type) if _mission != null else []
+	return _scripting.get_trigger_sub_types(main_type)
 
 
 func get_action_types() -> Array:
-	return _mission.get_action_types() if _mission != null else []
+	return _scripting.get_action_types()
 
 
 func get_action_sub_types(action_type: int) -> Array:
-	return _mission.get_action_sub_types(action_type) if _mission != null else []
+	return _scripting.get_action_sub_types(action_type)
 
 
 func get_event_flag_bits() -> Array:
-	return _mission.get_event_flag_bits() if _mission != null else []
+	return _scripting.get_event_flag_bits()
 
 
 func get_ai_flag_bits() -> Array:
-	return _mission.get_ai_flag_bits() if _mission != null else []
+	return _scripting.get_ai_flag_bits()
 
 
-# Focus an event by index (the inspector list drives this). Inert if unchanged.
 func select_event(index: int) -> void:
-	if index == _selected_event_index:
-		return
-	_selected_event_index = index
-	_notify_changed()
+	_scripting.select_event(index)
 
 
-# Append a new empty event, select it, and dirty. One undo step. Returns the new index, or -1.
 func add_event_default() -> int:
-	if _mission == null:
-		return -1
-	_flush_edit()
-	_mission.begin_edit()
-	var event := _mission.add_event(0, 0, 0)
-	if event.is_empty():
-		_report("Could not add an event.", true)
-		return -1
-	_mission.commit_edit()
-	_selected_event_index = int(event.get("index", -1))
-	mark_dirty()
-	return _selected_event_index
+	return _scripting.add_event_default()
 
 
-# Delete the selected event (drops its triggers + actions; ResetEvent references are repaired in the
-# lib). Structural, so the selection clamps to the shrunken list. One undo step. False if none selected.
 func delete_selected_event() -> bool:
-	if _mission == null or get_selected_event_index() < 0:
-		return false
-	if _sim._reject_edit_while_simulating():
-		return false
-	_flush_edit()
-	_mission.begin_edit()
-	if not _mission.remove_event(_selected_event_index):
-		return false
-	_mission.commit_edit()
-	# Drop the selection after a delete (like the zone panel): the row the user was on is gone, and the
-	# index would otherwise point at the event that shifted into its slot.
-	_selected_event_index = -1
-	_report("Event deleted. A ResetEvent action that pointed past it was repaired; a direct hit was unset.")
-	mark_dirty()
-	return true
+	return _scripting.delete_selected_event()
 
 
-# Overwrite the selected event's own attributes (the EventFlags bitfield + reset_after / delay). One step.
 func set_selected_event(flags: int, reset_after: int, delay: int) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.set_event(_selected_event_index, flags, reset_after, delay))
+	_scripting.set_selected_event(flags, reset_after, delay)
 
 
-# Append a trigger to the selected event (defaults to a Group / Null condition). One undo step.
 func add_selected_event_trigger() -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.add_event_trigger(_selected_event_index, {}),
-		"Could not add a trigger (an event chains at most 20).")
+	_scripting.add_selected_event_trigger()
 
 
-# Overwrite the trigger at `local_index` (its position in the event's chain) from an editor dict. One step.
 func set_selected_event_trigger(local_index: int, trigger: Dictionary) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.set_event_trigger(_selected_event_index, local_index, trigger))
+	_scripting.set_selected_event_trigger(local_index, trigger)
 
 
 func remove_selected_event_trigger(local_index: int) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.remove_event_trigger(_selected_event_index, local_index))
+	_scripting.remove_selected_event_trigger(local_index)
 
 
 func move_selected_event_trigger(local_index: int, delta: int) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.move_event_trigger(_selected_event_index, local_index, delta))
+	_scripting.move_selected_event_trigger(local_index, delta)
 
 
-# Append an action to the selected event (defaults to a Null action). One undo step.
 func add_selected_event_action() -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.add_event_action(_selected_event_index, {}),
-		"Could not add an action (an event chains at most 20).")
+	_scripting.add_selected_event_action()
 
 
 func set_selected_event_action(local_index: int, action: Dictionary) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.set_event_action(_selected_event_index, local_index, action))
+	_scripting.set_selected_event_action(local_index, action)
 
 
 func remove_selected_event_action(local_index: int) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.remove_event_action(_selected_event_index, local_index))
+	_scripting.remove_selected_event_action(local_index)
 
 
 func move_selected_event_action(local_index: int, delta: int) -> void:
-	if _mission == null or get_selected_event_index() < 0:
-		return
-	_edit_step(func(): return _mission.move_event_action(_selected_event_index, local_index, delta))
+	_scripting.move_selected_event_action(local_index, delta)
 
 
 # Mission-space centre of the placed world: the average of item positions, else origin. Used
