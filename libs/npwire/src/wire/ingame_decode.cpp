@@ -1000,7 +1000,7 @@ bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
 	return true;
 }
 
-// S2C 0x4E batch despawn/kill. [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870]
+// S2C 0x4E batch despawn/kill. [orig: NapiNPClientMsg_HandleBatchKill @ 0x431870]
 // The handler kills every u16 slot after the count word up to the buffer end
 // (the leading `count` is echoed in the C2S 0x28 reply, not a read limit).
 bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out) {

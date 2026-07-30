@@ -510,7 +510,7 @@ Kill feed + replay event/environment streams (§5.26/§5.27; one-host/one-client
 |---|---|---|---|---|
 | `NetPacket_HandleGameEvent` | `0x426270` | S2C 0x1E game event / kill feed — 8-B body (type/attacker/victim/aux/pos); `event_type`→`STRCNDnn` switch ported (`game_event_kind`/`_strcnd_key`); byte-witnessed `04 05 04 ff`=type-4 kill | — | matching |
 | `NapiNPClientMsg_0x026` | `0x42EC30` | S2C 0x26 entity kill — `[u16 victim_slot][u16 attacker]` → `Entity_KillBySlotId` | — | matching |
-| `NapiNPClientMsg_HandleBatchSpawn` | `0x431870` | S2C 0x4E batch despawn — count + per-slot kill (Kong-misnamed "spawn") | — | matching |
+| `NapiNPClientMsg_HandleBatchKill` | `0x431870` | S2C 0x4E batch despawn — count + per-slot kill (renamed from Kong's misleading "HandleBatchSpawn") | — | matching |
 | `Entity_KillBySlotId` | `0x42BCE0` | arg0 = dying entity, arg1 = attacker — disambiguates the 0x26 field order | — | host code / read-only grill |
 | `HUD_FormatKillEventMessage` | `0x422DA0` | kill-feed name/clan formatting (`$A`/`$B` tokens) — confirms 0x1E actor roles (killer/victim/aux) | — | host code / read-only grill |
 
