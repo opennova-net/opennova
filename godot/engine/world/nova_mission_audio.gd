@@ -539,11 +539,8 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	_flush_sound_emitters(int(_mixer.clock_tick()))
 	if not _hosted_ticks and delta > 0.0:
 		_mixer.advance_seconds(delta)
-	var has_pitch_rows := _mixer.has_method("mix_v2")
-	var rows: PackedFloat32Array = (
-			_mixer.mix_v2(camera_pos) if has_pitch_rows
-			else _mixer.mix(camera_pos))
-	var row_stride := 6 if has_pitch_rows else 5
+	var rows: PackedFloat32Array = _mixer.mix_v2(camera_pos)
+	const row_stride := 6
 	# Ranked loudest-first (candidate-id tie-break) by the native mixer; a
 	# physical incumbent is never rebound merely because its rank within the
 	# selected eight changed.
@@ -553,8 +550,8 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		var entry: Dictionary = _candidate_lookup.get(row_id, {})
 		if entry.is_empty():
 			continue
-		var pitch_q16 := int(rows[base + 2]) if has_pitch_rows else 0x10000
-		var pos_base := base + 3 if has_pitch_rows else base + 2
+		var pitch_q16 := int(rows[base + 2])
+		var pos_base := base + 3
 		candidates.append({
 			"candidate_id": row_id,
 			"descriptor": entry.descriptor,
@@ -838,9 +835,7 @@ func _flush_sound_emitters(final_tick: int) -> void:
 		var pitch_q16 := int(event.get("pitch_q16", 0))
 		var volume_q8_8 := int(event.get("volume_q8_8", 0))
 		if bool(event.get("source_only", false)):
-			if _mixer.has_method("update_emitter_source"):
-				_mixer.update_emitter_source(
-					source_spawn_id, pos, source_bms_id)
+			_mixer.update_emitter_source(source_spawn_id, pos, source_bms_id)
 			continue
 		if pitch_q16 == 0 or volume_q8_8 == 0:
 			_mixer.register_emitter(source_spawn_id, lane, pos, source_bms_id,

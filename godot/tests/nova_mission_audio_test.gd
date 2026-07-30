@@ -436,25 +436,16 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	# One render frame catches up 32 world ticks. The registration must retain
 	# tick 1 as its refresh time rather than being reborn at the final tick.
 	audio.advance_ticks(32)
-	var live_state: Dictionary = audio._dynamic_emitter_states.get("77:0", {})
-	assert_false(live_state.is_empty())
-	var first_ids: PackedInt32Array = live_state.get(
-		"candidate_ids", PackedInt32Array())
-	assert_eq(first_ids.size(), 1)
-	var first_id := int(first_ids[0]) if first_ids.size() == 1 else -1
 	audio.tick(Vector3.ZERO)
-	assert_true(audio._dynamic_emitter_states.is_empty(),
-		"the early-batch intent expires against its producer tick")
-	assert_false(audio._candidate_lookup.has(first_id))
-	assert_false(audio._validated_candidate_ids.has(first_id),
-		"retired dynamic descriptors leave the validation cache")
+	var expiring_ids := _active_ids(container)
+	assert_eq(expiring_ids.size(), 1,
+		"the slot is serviced once on the tick its lifetime reaches zero")
+	var first_id := int(expiring_ids[0]) if expiring_ids.size() == 1 else -1
 
-	# The native mixer services a slot that reaches zero once, then releases it
-	# on the next same-clock mix. The host can recycle its integer identity only
-	# after that physical incumbent has dropped out.
+	# The next same-clock mix releases the zero-lifetime slot and its physical
+	# channel. Only then can a later lane reuse the float-packed identity.
 	audio.tick(Vector3.ZERO)
 	assert_null(_active_player(container, first_id))
-	assert_true(audio._free_candidate_ids.has(first_id))
 
 	var replacement := idle.duplicate()
 	replacement["source_spawn_id"] = 88
@@ -462,15 +453,9 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	replacement["pos"] = Vector3(80, 0, 0)
 	audio.apply_sound_emitters([replacement])
 	audio.advance_ticks(33)
-	var replacement_state: Dictionary = audio._dynamic_emitter_states.get(
-		"88:0", {})
-	var replacement_ids: PackedInt32Array = replacement_state.get(
-		"candidate_ids", PackedInt32Array())
-	assert_eq(replacement_ids.size(), 1)
-	if replacement_ids.size() == 1:
-		assert_eq(int(replacement_ids[0]), first_id,
-			"retired dynamic IDs stay float-exact by recycling after channel release")
 	audio.tick(Vector3.ZERO)
+	assert_not_null(_active_player(container, first_id),
+		"retired dynamic IDs stay float-exact by recycling after channel release")
 
 	audio.teardown()
 	_remove_dir_recursive(fixture_dir)

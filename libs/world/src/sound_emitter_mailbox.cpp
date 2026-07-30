@@ -18,6 +18,8 @@ int admission_priority(const SoundEmitterEvent &event) {
     // they operate on an already-live source. Preserve them at saturation by
     // displacing an allocating registration. A clear also outranks an anchor
     // because losing it can leave a stale voice alive for another lifetime.
+    // [orig: SoundEmitter_ClearByEntityAndSlot @0x527a50; fixed emitter table
+    // g_SoundEmitterSlots @0x24D66A8]
     if (event.source_only) return 1;
     if (event.pitch_q16 == 0 || event.volume_q8_8 == 0) return 2;
     return 0;

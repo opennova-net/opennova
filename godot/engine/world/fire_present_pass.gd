@@ -307,14 +307,12 @@ func _drain_slot_sounds() -> void:
 # [orig: SoundEmitter_RegisterSetLayers @0x528340;
 # SoundEmitter_UpdateAndMixTop8 @0x5284a0]
 func _drain_sound_emitters() -> void:
-	if not _sim.has_method("drain_sound_emitters"):
-		return  # stale native DLL: presentation degrades silently
 	var events: Array = _sim.drain_sound_emitters()
 	if events.is_empty():
 		return
 	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
-	if audio == null or not audio.has_method("apply_sound_emitters"):
-		return  # stale script/native pairing: the short-lived intents expire
+	if audio == null:
+		return
 	audio.apply_sound_emitters(events)
 
 
