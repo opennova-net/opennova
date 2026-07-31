@@ -7,7 +7,7 @@
 using namespace godot;
 
 void NovaMnuSpinList::_ready() {
-	value_host_ = Object::cast_to<Control>(get_node_or_null(NodePath("Value")));
+	value_mount_ = Object::cast_to<Control>(get_node_or_null(NodePath("Value")));
 	update_value_cell();
 	if (behavior_.edit_mode) {
 		// Inert while authoring: the value shows but the buttons are not wired.
@@ -41,13 +41,13 @@ void NovaMnuSpinList::on_spin_down() {
 }
 
 void NovaMnuSpinList::update_value_cell() {
-	if (value_host_ == nullptr) {
+	if (value_mount_ == nullptr) {
 		return;
 	}
 	if (index_ >= 0 && index_ < static_cast<int>(visuals_.size())) {
-		mnu_show_item_cell(value_host_, visuals_[index_]);
+		mnu_show_item_cell(value_mount_, visuals_[index_]);
 	} else {
-		mnu_show_item_cell(value_host_, MnuItemVisual());
+		mnu_show_item_cell(value_mount_, MnuItemVisual());
 	}
 }
 
@@ -60,7 +60,7 @@ void NovaMnuSpinList::set_item_visuals(const std::vector<MnuItemVisual> &p_visua
 }
 
 void NovaMnuSpinList::set_values(const PackedStringArray &p_values) {
-	// Host-supplied text values: build text-kind visuals so the cell shows them.
+	// Shell-supplied text values: build text-kind visuals so the cell shows them.
 	visuals_.clear();
 	for (int i = 0; i < p_values.size(); ++i) {
 		MnuItemVisual v;

@@ -32,7 +32,7 @@ class InputEventKey;
 // navigation controller (M5): widgets dispatch their actions here (screen nav +
 // stack, window show/hide, pop, quit) and ask it to play sounds. Menu music is
 // driven through an optional NovaMusicDirector and sounds through an optional
-// NovaSbfBank (PR #29); both are also surfaced as signals so a host can react
+// NovaSbfBank (PR #29); both are also surfaced as signals so a shell can react
 // without the menu owning audio policy.
 //
 // edit_mode makes the tree inert + click-through and suppresses navigation,
@@ -54,7 +54,7 @@ private:
 	// UI manager @ 0x64af10/0x64afe0]. A failed load caches a null bank so each
 	// bad name is tried once (the original leaves the element's bank id 0).
 	//
-	// sound_profile_ is a host-set authoring fallback for <SOUND> nodes that
+	// sound_profile_ is a shell-set authoring fallback for <SOUND> nodes that
 	// carry no file (the original fails the element parse in that case);
 	// sound_bank_ is the legacy pre-LWF SBF path, kept only as a last fallback.
 	struct LwfBankEntry {
@@ -79,18 +79,18 @@ private:
 	// Layered on top of edit_mode_ for the ONED "play" preview: keeps the authoring
 	// suppressions (music/cursor/all-screens) but re-wires navigators so clicking a
 	// tab runs its window show/hide actions. External side effects (quit/url/cross-
-	// .mnu jump) are clamped to no-ops so the sandbox cannot reach the editor host.
+	// .mnu jump) are clamped to no-ops so the sandbox cannot reach the editor shell.
 	bool interactive_ = false;
 	bool build_on_ready_ = true;
 	int unresolved_asset_count_ = 0;
 
-	// This menu's own .mnu basename (e.g. "main.mnu"), set by the host that
+	// This menu's own .mnu basename (e.g. "main.mnu"), set by the shell that
 	// built it. Shipped screen actions spell same-file jumps with their own
 	// filename, so dispatch compares against this (case-insensitive).
 	String menu_file_;
 
 	// Within-menu back navigation stack of screen names (cross-.mnu jumps are
-	// host policy, emitted as menu_requested rather than pushed here).
+	// shell policy, emitted as menu_requested rather than pushed here).
 	Vector<String> nav_stack_;
 
 	// Lazily created pooled players for one-shot widget sounds. Round-robin so a
@@ -130,7 +130,7 @@ private:
 	bool play_member_sound(const Dictionary &p_member, int p_vol255, double p_pitch_scale);
 	// Legacy SBF-keyed playback (pre-LWF). Returns true if it played.
 	bool play_sbf_sound(const String &p_trigger, const String &p_file);
-	// Nulls music_director_ if the host frees it out from under us (the menu does
+	// Nulls music_director_ if the shell frees it out from under us (the menu does
 	// not own the director, so its pointer can otherwise dangle).
 	void on_director_exiting();
 
@@ -199,7 +199,7 @@ public:
 
 	// --- Build ---
 	// build() emits screen_changed / music_changed for the initial screen, so a
-	// host that wants those cues should connect before assigning `menu` (or set
+	// shell that wants those cues should connect before assigning `menu` (or set
 	// the exported `menu` property in a scene and connect before the node's
 	// _ready runs build()).
 	void build();
@@ -215,7 +215,7 @@ public:
 	// Pop back to the previous screen; with an empty stack this emits
 	// quit_requested and returns false.
 	bool pop_screen();
-	// Cross-.mnu jump: emits menu_requested for the host to service.
+	// Cross-.mnu jump: emits menu_requested for the shell to service.
 	void navigate_to_menu(const String &p_file, const String &p_target_screen);
 	void quit_game();
 	// Show/hide/enable/disable a named descendant window inside the current
@@ -234,7 +234,7 @@ public:
 	bool dispatch_action(const String &p_type, const String &p_target,
 			const String &p_file, const String &p_window_state);
 	// Complete native action path used by built widgets. Unlike the script
-	// compatibility wrapper above, this retains TOGGLE and host-owned fields.
+	// compatibility wrapper above, this retains TOGGLE and shell-owned fields.
 	bool dispatch_widget_action(const MnuActionData &p_action);
 	void clear_navigation_stack();
 
@@ -258,7 +258,7 @@ public:
 
 	// --- Aggregate widget value/selection relay (M9) ---
 	// Interactive data widgets (list/combo/spinlist/table/edit/...) call this from
-	// their own change handlers so a host that holds only the menu can react to any
+	// their own change handlers so a shell that holds only the menu can react to any
 	// widget without connecting each one. Mirrors how actions/sounds funnel here.
 	// `kind` is the widget family ("list", "combo", "spinlist", "edit", ...), `index`
 	// the selected/changed row (-1 when not row-based), `value` the chosen value/text.

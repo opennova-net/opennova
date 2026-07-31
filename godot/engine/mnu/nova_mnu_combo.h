@@ -33,7 +33,7 @@ class NovaMnuScroll;
 // widget outside the popup subtree [orig: CWnd_IsVisibleInHierarchy @ 0x646290].
 // Only one dropdown can be open per scene [orig: g_ui_active_combo_wnd @
 // 0x31C16D0], and a press outside both the closed cell and the list closes it,
-// consumed [orig: combobox_handle_event @ 0x65c190]. The reimpl hosts those
+// consumed [orig: combobox_handle_event @ 0x65c190]. The reimpl shells those
 // semantics as a full-menu modal overlay added as the owning NovaMnuMenu's last
 // child (top of tree = wins Godot picking and draw): the transparent catcher makes
 // every other widget mouse-dead and implements the outside-press close, the menu
@@ -59,7 +59,7 @@ private:
 
 	Label *selected_label_ = nullptr;
 	// The spawned popup root: the full-menu overlay (menu-built combos) or the
-	// popup box itself (bare/host combos with no owning menu). Tracked by id so
+	// popup box itself (bare/shell combos with no owning menu). Tracked by id so
 	// close stays safe across menu teardown ordering; popup_ is the styled box
 	// with the rows, valid only while popup_root() resolves.
 	ObjectID popup_root_id_;
@@ -167,7 +167,7 @@ public:
 	void close_popup();
 	bool is_popup_open() const;
 	// The styled popup box holding the rows (null while closed). Script-visible so
-	// hosts/tests can reach the rows wherever the box is parented.
+	// shells/tests can reach the rows wherever the box is parented.
 	Control *get_popup() const;
 };
 

@@ -84,7 +84,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"show": { "type": ["string", "integer"] },
 			}), Callable(self, "_tool_edit_screen"))
 	registry.register(McpToolDef.make("add_menu_widgets",
-			"BATCH-create Windows in ONE undo step. Widget types: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND, GLB_TABLE, RADIOEDIT, LAN_LIST, GOPHER. rows carry parent, type, rect [x,y,w,h] (null/-1 extent = auto), and optional common properties/appearances. GLB_TABLE/LAN_LIST/GOPHER are host-owned: the generic preview preserves them but does not invent network/news data. Names are Command hooks. Max 50 rows.",
+			"BATCH-create Windows in ONE undo step. Widget types: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND, GLB_TABLE, RADIOEDIT, LAN_LIST, GOPHER. rows carry parent, type, rect [x,y,w,h] (null/-1 extent = auto), and optional common properties/appearances. GLB_TABLE/LAN_LIST/GOPHER are game-supplied: the generic preview preserves them but does not invent network/news data. Names are Command hooks. Max 50 rows.",
 			{
 				"rows": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object", "properties": {
 					"parent": { "type": ["integer", "string"] },
@@ -130,7 +130,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"count": { "type": "integer" }, "spacing": { "type": "integer" },
 			}, ["id", "op"]), Callable(self, "_tool_edit_items"))
 	registry.register(McpToolDef.make("preview_menu",
-			"Drive the sandboxed Interactive preview. Screen/Window/URL/pop Actions and widget activation use the real Menu path; host-owned external effects are swallowed. Editing locks while previewing. Ops: on | off | show={screen} | press={widget id or name} | back | status.",
+			"Drive the sandboxed Interactive preview. Screen/Window/URL/pop Actions and widget activation use the real Menu path; game-supplied external effects are swallowed. Editing locks while previewing. Ops: on | off | show={screen} | press={widget id or name} | back | status.",
 			{
 				"op": { "type": "string", "enum": ["on", "off", "show", "press", "back", "status"] },
 				"screen": { "type": "string" },

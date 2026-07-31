@@ -24,7 +24,7 @@ class NovaMnuMenu;
 class NovaMnuScroll;
 
 // A table view (type="table"). Custom composition (a header row + a clipped
-// viewport over a host-populated rows container + an embedded NovaMnuScroll) rather
+// viewport over a shell-populated rows container + an embedded NovaMnuScroll) rather
 // than Godot's Tree, because the MNU TableScrollbar art, per-column BODY bitmap
 // columns, and value->image SUBST cells don't map onto Tree's fixed theming.
 //
