@@ -126,7 +126,7 @@ var status_label: Label
 var stats_tree: Tree
 
 var _board: FrameStatsBoard = null
-var _host_visible := false
+var _overlay_visible := false
 var _capture_active := false
 var _refresh_count := 0
 var _items: Dictionary = {}  # row id -> TreeItem
@@ -200,14 +200,14 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 
 ## The overlay's explicit visibility edge: Controls under a hidden CanvasLayer
 ## don't all observe the layer hide, so the overlay tells us on toggle.
-func set_capture_active(host_visible: bool) -> void:
-	_host_visible = host_visible
+func set_capture_active(overlay_visible: bool) -> void:
+	_overlay_visible = overlay_visible
 	_sync_capture()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_EXIT_TREE:
-		_host_visible = false
+		_overlay_visible = false
 		if _board != null:
 			_board.set_capture_active(false)
 		_capture_active = false
@@ -222,7 +222,7 @@ func is_capturing() -> bool:
 
 
 func _sync_capture() -> void:
-	var want := _board != null and _host_visible and visible and is_inside_tree()
+	var want := _board != null and _overlay_visible and visible and is_inside_tree()
 	if want == _capture_active \
 			and (_board == null or _board.is_capture_active() == want):
 		return

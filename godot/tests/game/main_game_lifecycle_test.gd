@@ -179,7 +179,7 @@ var _shell: Node = null
 
 func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
 	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
-	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 	assert_eq(debug_host.debug_set_audio_bus_mute("__missing_bus__", true),
 			ERR_INVALID_PARAMETER)
 	assert_eq(debug_host.debug_set_audio_bus_volume("Master", INF),
@@ -213,7 +213,7 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
 	var shell = autofree(EntityHostHarness.new())
-	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 
 	var page: Dictionary = debug_host.get_mcp_game_entities(0, 64)
 
@@ -311,7 +311,7 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	assert_null(_shell.current_resource_root(),
 			"the failed mount leaves the shell without a resource session")
 	assert_false(_shell.get_node("World").is_loaded())
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"the shell stays on the front-end state the picker contract needs")
 
@@ -330,11 +330,11 @@ func test_session_loss_with_no_mounted_root_returns_shell_to_menu_state() -> voi
 	add_child(_shell)
 	await get_tree().process_frame
 	_shell.enter_net_world()
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world",
 			"the spectate entry is in-world with no mounted root")
 	_shell.get_node("World").session_lost.emit("test: replay stream ended")
-	state = _shell.get_game_debug_host().get_mcp_game_state()
+	state = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"a rootless teardown lands on the front-end state, not WORLD")
 	assert_false(_shell.is_world_loading())
@@ -351,7 +351,7 @@ func test_rejected_replay_boot_falls_through_to_the_menu_front_end() -> void:
 	_shell = await _make_shell()  # asserts the boot lands on main.mnu
 	if _shell == null:
 		return
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"the rejected replay session leaves the shell on the front-end state")
 	assert_false(_shell.is_world_loading())

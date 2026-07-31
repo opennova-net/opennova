@@ -18,11 +18,11 @@ signal status_changed
 
 var server: McpServer
 var log_hub: McpLogHub
-var tool_host: EditorMcpTools
-var mission_tool_host: EditorMcpMissionTools
-var menu_tool_host: EditorMcpMenuTools
-var object_tool_host: EditorMcpObjectTools
-var game_tool_host: EditorMcpGameTools
+var tools: EditorMcpTools
+var mission_tools: EditorMcpMissionTools
+var menu_tools: EditorMcpMenuTools
+var object_tools: EditorMcpObjectTools
+var game_tools: EditorMcpGameTools
 var editor: Node = null
 var shell: Node = null
 var game_run_bridge: EditorGameRunBridge = null
@@ -53,16 +53,16 @@ func setup(
 	server.context_factory = Callable(self, "_make_context")
 	server.log_sink = Callable(self, "_on_server_log")
 	add_child(server)
-	tool_host = EditorMcpTools.new(self)
-	tool_host.register_all(server.registry)
-	mission_tool_host = EditorMcpMissionTools.new(self)
-	mission_tool_host.register_all(server.registry)
-	menu_tool_host = EditorMcpMenuTools.new(self)
-	menu_tool_host.register_all(server.registry)
-	object_tool_host = EditorMcpObjectTools.new(self)
-	object_tool_host.register_all(server.registry)
-	game_tool_host = EditorMcpGameTools.new(self, game_run_bridge)
-	game_tool_host.register_all(server.registry)
+	tools = EditorMcpTools.new(self)
+	tools.register_all(server.registry)
+	mission_tools = EditorMcpMissionTools.new(self)
+	mission_tools.register_all(server.registry)
+	menu_tools = EditorMcpMenuTools.new(self)
+	menu_tools.register_all(server.registry)
+	object_tools = EditorMcpObjectTools.new(self)
+	object_tools.register_all(server.registry)
+	game_tools = EditorMcpGameTools.new(self, game_run_bridge)
+	game_tools.register_all(server.registry)
 	_bind_game_session_status()
 	if McpSettings.resolve_enabled():
 		start(McpSettings.resolve_port())
@@ -98,8 +98,8 @@ func _authorize_runtime_debug() -> void:
 	_runtime_transition_generation += 1
 	_runtime_disable_pending = false
 	_runtime_disable_status = ""
-	if game_tool_host != null:
-		game_tool_host.enable_runtime_debug()
+	if game_tools != null:
+		game_tools.enable_runtime_debug()
 	status_changed.emit()
 
 
@@ -107,7 +107,7 @@ func _begin_runtime_debug_disable() -> void:
 	_runtime_transition_generation += 1
 	var generation := _runtime_transition_generation
 	_runtime_disable_status = ""
-	if game_tool_host == null:
+	if game_tools == null:
 		_runtime_disable_pending = false
 		status_changed.emit()
 		return
@@ -117,7 +117,7 @@ func _begin_runtime_debug_disable() -> void:
 
 
 func _finish_runtime_debug_disable(generation: int) -> void:
-	var outcome: Variant = await game_tool_host.disable_runtime_debug()
+	var outcome: Variant = await game_tools.disable_runtime_debug()
 	if generation != _runtime_transition_generation:
 		return
 	_runtime_disable_pending = false
@@ -152,8 +152,8 @@ func is_running() -> bool:
 ## Status line for the Settings popup.
 func get_status_text() -> String:
 	if is_running():
-		if game_tool_host != null \
-				and bool(game_tool_host.current_runtime_needs_relaunch()):
+		if game_tools != null \
+				and bool(game_tools.current_runtime_needs_relaunch()):
 			return "Running at %s; relaunch the current game to enable runtime debug." \
 					% server.get_url()
 		return "Running at %s" % server.get_url()

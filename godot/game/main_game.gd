@@ -10,7 +10,7 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-const GameDebugHostScript := preload("res://game/game_debug_host.gd")
+const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://engine/world/local_player_presenter.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
@@ -60,7 +60,7 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _shell_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
-var _debug_host: GameDebugHost
+var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives overlay toggles; cleared on every world load.
 var _pick_list := NovaDebugPickList.new()
@@ -166,7 +166,7 @@ func abort_net_session(reason: String) -> void:
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_shell == null:
 		return
-	var debug_host := get_game_debug_host()
+	var debug_host := get_game_debug_adapter()
 	add_child(debug_host)
 	debug_host.start_runtime_endpoint()
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
@@ -177,7 +177,7 @@ func _ready() -> void:
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
 	_player_presenter.setup(_world, _camera)
-	# The in-world armory + HUD ride their shared engine hosts. Created here,
+	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so the NW_REPLAY
 	# spectator path (which never enters the menu) still gets them; the HUD presenter's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
@@ -431,11 +431,11 @@ func get_debug_overlay() -> NovaDebugOverlay:
 	return _debug_overlay if _debug_overlay != null \
 			and is_instance_valid(_debug_overlay) else null
 func get_debug_session() -> NovaDebugSession:
-	return get_game_debug_host().get_debug_session()
-func get_game_debug_host() -> GameDebugHost:
-	if _debug_host == null:
-		_debug_host = GameDebugHostScript.new()
-		_debug_host.configure(
+	return get_game_debug_adapter().get_debug_session()
+func get_game_debug_adapter() -> GameDebugAdapter:
+	if _debug_adapter == null:
+		_debug_adapter = GameDebugAdapterScript.new()
+		_debug_adapter.configure(
 			_current_runtime,
 			func(): return _world,
 			func(): return _player_presenter,
@@ -445,7 +445,7 @@ func get_game_debug_host() -> GameDebugHost:
 			_on_resume,
 			_on_return_to_menu,
 			request_quit)
-	return _debug_host
+	return _debug_adapter
 func get_frame_stats_board() -> FrameStatsBoard:
 	return _frame_stats
 
@@ -1054,7 +1054,7 @@ func _on_return_to_menu() -> void:
 
 
 # One idempotent rollback for a normal return and every load failure. Runtime
-# hosts keep references to the old world/root, so their teardown order is part
+# presenters keep references to the old world/root, so their teardown order is part
 # of the shell boundary rather than a menu-specific detail.
 func _teardown_world_to_menu() -> void:
 	_dismiss_loading_screen()
@@ -1104,7 +1104,7 @@ func _set_hud_visible(v: bool) -> void:
 # Drive the loaded world's per-frame foliage coverage. Tick whenever a world is
 # loaded and not paused (the pause menu freezes it); tick() itself no-ops until the
 # world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
-# also lets a host that drives load_world() directly (the headless runtime probe,
+# also lets a caller that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
 var _perf_probe_enabled := false
 var _perf_probe_spans: Dictionary = {}

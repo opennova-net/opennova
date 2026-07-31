@@ -71,7 +71,7 @@ class DebugSessionStub:
 
 
 class HostStub:
-	extends GameMcpHost
+	extends GameMcpAdapter
 
 	var debug := DebugSessionStub.new()
 	var last_action := ""

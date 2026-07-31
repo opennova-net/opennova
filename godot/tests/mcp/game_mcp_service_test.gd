@@ -21,10 +21,10 @@ func test_runtime_descriptor_rejects_path_like_run_ids() -> void:
 
 func test_endpoint_shutdown_removes_handshake_without_stopping_game_host() -> void:
 	var service: GameMcpService = add_child_autofree(GameMcpService.new())
-	var game_host: GameMcpHost = add_child_autofree(GameMcpHost.new())
+	var game_adapter: GameMcpAdapter = add_child_autofree(GameMcpAdapter.new())
 	var descriptor_path := ProjectSettings.globalize_path(
 			"user://oned-run-shutdown-test.json")
-	assert_eq(service.setup_from_metadata(game_host, {
+	assert_eq(service.setup_from_metadata(game_adapter, {
 		"run_id": "shutdown-test",
 		"descriptor_path": descriptor_path,
 		"log_path": "",
@@ -36,6 +36,6 @@ func test_endpoint_shutdown_removes_handshake_without_stopping_game_host() -> vo
 
 	assert_false(service.server.is_running())
 	assert_false(FileAccess.file_exists(descriptor_path))
-	assert_true(is_instance_valid(game_host),
+	assert_true(is_instance_valid(game_adapter),
 			"retiring runtime MCP does not stop or free MainGame")
 	assert_null(McpLogHub.instance)
