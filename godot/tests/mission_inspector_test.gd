@@ -1718,13 +1718,17 @@ func test_loadout_edit_commits_on_submit() -> void:
 func test_loadout_ammo_and_damage_class_edits_commit() -> void:
 	# One submit commits ALL four editors in a single set_weapon_loadout call, and each value
 	# lands under its kit-tuple key — the write half of the stringly-typed panel seam (the read
-	# half is pinned by the no-op guard + blank-name revert tests).
+	# half is pinned by the no-op guard + blank-name revert tests). Editors are addressed by
+	# node name — the public seam — so this adds no private pokes (ADR 0018).
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
-	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
-	ctx.inspector._loadout_groups._loadout_ammo_pri.text = "5"
-	ctx.inspector._loadout_groups._loadout_ammo_sec.text = "2"
-	ctx.inspector._loadout_groups._loadout_damage.text = "1"
-	ctx.inspector._loadout_groups._loadout_damage.text_submitted.emit("1")
+	(ctx.inspector.find_child("MissionLoadoutList", true, false) as ItemList).item_selected.emit(0)
+	var ammo_pri := ctx.inspector.find_child("MissionLoadoutAmmoPrimary", true, false) as LineEdit
+	var ammo_sec := ctx.inspector.find_child("MissionLoadoutAmmoSecondary", true, false) as LineEdit
+	var damage := ctx.inspector.find_child("MissionLoadoutDamageClass", true, false) as LineEdit
+	ammo_pri.text = "5"
+	ammo_sec.text = "2"
+	damage.text = "1"
+	damage.text_submitted.emit("1")
 	var committed := ctx.fake.set_loadout_calls.back() as Array
 	assert_eq(String((committed[0] as Dictionary)["ammo_primary"]), "5", "the edited primary-ammo request is committed")
 	assert_eq(String((committed[0] as Dictionary)["ammo_secondary"]), "2", "the edited secondary-ammo request is committed")
@@ -1754,7 +1758,8 @@ func test_loadout_blank_name_is_rejected_and_reverts_all_fields() -> void:
 	assert_eq(ctx.inspector._loadout_groups._loadout_name.text, "WPN_KNIFE", "name field reverts to the stored value")
 	assert_eq(ctx.inspector._loadout_groups._loadout_ammo_pri.text, "-1", "primary-ammo field reverts too (no half-applied edit)")
 	assert_eq(ctx.inspector._loadout_groups._loadout_ammo_sec.text, "-1", "secondary-ammo field stays consistent with the model")
-	assert_eq(ctx.inspector._loadout_groups._loadout_damage.text, "-1", "damage-class field stays consistent with the model")
+	assert_eq((ctx.inspector.find_child("MissionLoadoutDamageClass", true, false) as LineEdit).text, "-1",
+		"damage-class field stays consistent with the model")
 
 
 func test_loadout_delete_calls_controller() -> void:
