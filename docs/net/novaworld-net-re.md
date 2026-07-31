@@ -7697,7 +7697,7 @@ Reimpl: `libs/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, c
 `weapon_inventory`), `NovaSimulation` (`rebuild_local_player_loadout` + the switch/commit
 seams), `local_player_presenter.gd` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
 (availability filter + multi-slot ACCEPT), `mission_runtime.gd` (the .bms promote), GUT
-`nova_simulation_test.gd` / `armory_host_test.gd`.
+`nova_simulation_test.gd` / `armory_presenter_test.gd`.
 
 **The spawn-kit buffer.** `restrictionData @ 0x24D4E00` (IDB comment proposes
 `g_spawnLoadoutBuffer` — the name is a misnomer; the availability table is separate) is a
@@ -7856,7 +7856,7 @@ fills the new `WeaponTableEntry` fields + the ammo-class registry/caps;
 `request_local_player_weapon_category/cycle` the input dispatch, the commit rides the
 FSM `action_finished` seam. Evidence: ctest `weapon_inventory`; GUT
 `nova_simulation_test.gd` (`test_armory_reads_and_clears_authoritative_local_loadout`,
-`test_local_fire_spawns_the_authoritative_round_and_impact`), `armory_host_test.gd`.
+`test_local_fire_spawns_the_authoritative_round_and_impact`), `armory_presenter_test.gd`.
 
 **IDB changes (2026-07-18):** renamed `NetPacket_WriteServerTick16 →
 NetPacket_WriteClassAllowMask`, `NapiNPClientMsg_0x076 →
@@ -10221,7 +10221,7 @@ retail client every frame — the long-standing crouch/prone bug, §5.9 tail row
 stand-ins (this entry): run/jog promotion deferred (the ADM gait class
 `dword_24E808C[adm*0x460]` is not in our weapon table), prone lean 41/42 deferred (lean
 bits uplink fine but the selection leg is unported), the no-anim-data channel phase
-self-advances on a 62-tick loop (faithful source = the .adm loop rate; the Godot host
+self-advances on a 62-tick loop (faithful source = the .adm loop rate; the Godot shell
 feeds real data via IRootMotionSource), and the death leg reuses the motor's generic
 torso-forward pick (deathAnim +0x2C0 variants unmodeled). Tests:
 `infantry_test` (remote selection walk/crouch/prone/idle-promote),

@@ -1,7 +1,7 @@
 # Editor–runtime parity: the shared-node patterns
 
 How the OpenNova Editor (ONED) reuses game rendering and data systems for
-authoring previews without becoming a second gameplay host. These patterns were
+authoring previews without becoming a second gameplay runtime. These patterns were
 confirmed by an architecture survey of the editor/engine split (2026-06-10) and
 updated when embedded mission play was removed (2026-07-29). The template for
 new authoring surfaces is: **reuse the runtime node, public engine function, or
@@ -47,9 +47,9 @@ system shared and abstract only the data source behind a sampler seam.
 
 ### Mission execution — one standalone runtime
 
-`godot/engine/world/mission_runtime.gd` has one live host: `GameWorld`, entered
+`godot/engine/world/mission_runtime.gd` has one live owner: `GameWorld`, entered
 through `MainGame`. ONED does not self-tick a mission, create a local-player
-host, or embed the F3 debug overlay. This removes the editor-specific transport
+presenter, or embed the F3 debug overlay. This removes the editor-specific transport
 and lifecycle state that could make an apparently shared simulation behave
 differently from the shipped game.
 

@@ -201,7 +201,7 @@ what confuses.
   ci.yml rewrites, zero behavior edits, one revertable train, ADR accepted
   in the same PR.
 - **NET-3** (S) reclassifications: `apps/nw_server` README (dev/golden-
-  harness host; optional rename is the maintainer's pick);
+  harness owner; optional rename is the maintainer's pick);
   `.agents/network.md` rewritten as a redirect to `libs/npruntime/ROADMAP.md`
   + ADR 0013; the promote disambiguation lands (renaming
   `mission::promote_mission` is optional — if picked, full propagation per
@@ -266,7 +266,7 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   transforms exposed once and consumed everywhere.
 - **ENG-4** (S/M) — **DONE (Wave-2 trunk 2)** — FNT packing port (shelf
   packer + format facts into `libs/fnt`; the Godot TextServer rasterization
-  stays host-side) and object-flag single-sourcing — the `MATERIAL_FLAG_*`
+  stays shell-side) and object-flag single-sourcing — the `MATERIAL_FLAG_*`
   leg was **subsumed by REN-2**; `OED_UPDATE_*` closed here (GDScript
   aliases over the bound `NovaObjectData.UPDATE_*` + test contract pins).
   The DCC-side `THREEDI_IR_MATERIAL_FLAG_*` ctypes mirror is FFI-inherent
@@ -301,7 +301,7 @@ Sweep #2 ran 2026-07-12 over the post-#210..#230 fidelity-train GDScript
 (HUD/weapon, collision/armory, sound, particles) plus regression checks on the
 closed domains. Verdict: the boundary holds at the sim/FSM/def-parse level
 (weapon FSM, view state, collision, def tables, particle sim are libs-side
-with typed-record decodes at the edges); three new host-side math clusters
+with typed-record decodes at the edges); three new shell-side math clusters
 landed with those trains (HUD helpers, sound curves, the mission TOD clock)
 and are tracked below with their recommended slicing.
 
@@ -387,7 +387,7 @@ phases F1–F5, per-workspace phases, and RE ledger stand; this program adds:
 ### PROD — products and serve mode
 
 - **PROD-1** (M) serve mode per ADR 0015: `opennova.exe --server`
-  (+ `--headless`): windowed serve jumps the menu host to the
+  (+ `--headless`): windowed serve jumps the menu shell to the
   server-options `.mnu`; headless serve drives the existing host-session
   bring-up (ADR 0013 helper, 62 Hz pump). No new seam, no new protocol.
   The packaging boot smoke gains a `--headless --server` leg.
@@ -567,7 +567,7 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   through the env seam to every consumer; SunDim live end-to-end) and
   **#33 FIXED** (`env::generate_star_instances` + `NovaStarField` — the
   256-star camera-anchored twinkling billboard field). The tail: **#29** (the
-  strip tessellation port over the pinned constants) and **#30** (the host
+  strip tessellation port over the pinned constants) and **#30** (the reimpl
   planar-reflection port over the witnessed RTT pipeline; the strip
   mirroring rides #29's builder). Sequenced after REN-3/REN-4.
 - **REN-7** (S/M) close-out: T3 attested scene-by-scene; T1/T2 full re-run;
@@ -692,9 +692,9 @@ Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 8. **Program sprawl vs review bandwidth** → hard wave boundaries; WIP cap
    of two concurrent PR trains; this doc is the only dashboard; ONED is
    the only track with a detail doc.
-9. **Render host expressibility** (TSS combiner corner cases, fog
+9. **Renderer expressibility** (TSS combiner corner cases, fog
    interactions, reverse-Z — env #20 is the precedent) → the T1 vector
-   layer separates semantic parity from host mapping; inexpressible states
+   layer separates semantic parity from reimpl mapping; inexpressible states
    become tracked class-C rows via ADR 0022's register, never silent
    tolerance bumps; CI hard-gates on T1 only (visual tiers are local
    attestations, immune to GPU nondeterminism).

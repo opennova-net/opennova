@@ -99,6 +99,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   separate matter, done sparingly with no load/abuse — that caution is not a license to
   write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
   and ADRs 0009–0012.
+- "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
+  attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
+  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`.
 - Editor UI copy is artist-facing: "draw distance", "blend layer" — not "CDEP",
   "LOD bitstream", "mip slot".
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
