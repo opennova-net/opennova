@@ -1078,8 +1078,34 @@ void apply_input_font(MnuBuildContext &ctx, Control *node, const mnu::Font &font
 		}
 	}
 	const std::string fg = resolve_color(ctx, font.default_fg);
+	const std::string disabled_fg = resolve_color(ctx, font.disabled_fg);
 	if (!fg.empty()) {
-		node->add_theme_color_override("font_color", parse_color(to_gd(fg)));
+		const Color normal = parse_color(to_gd(fg));
+		node->add_theme_color_override("font_color", normal);
+		node->add_theme_color_override("font_placeholder_color", normal);
+		node->add_theme_color_override("font_selected_color", normal);
+	}
+	const std::string selected_fg = resolve_color(ctx, font.selected_fg);
+	if (!selected_fg.empty()) {
+		node->add_theme_color_override(
+				"font_selected_color", parse_color(to_gd(selected_fg)));
+	}
+	if (!fg.empty() || !disabled_fg.empty()) {
+		const Color normal = !fg.empty()
+				? parse_color(to_gd(fg))
+				: node->get_theme_color("font_color");
+		if (NovaMnuEdit *edit = Object::cast_to<NovaMnuEdit>(node)) {
+			const Color disabled = !disabled_fg.empty()
+					? parse_color(to_gd(disabled_fg))
+					: edit->get_theme_color("font_uneditable_color");
+			edit->set_text_state_colors(normal, disabled);
+		} else if (NovaMnuMultilineEdit *edit =
+						   Object::cast_to<NovaMnuMultilineEdit>(node)) {
+			const Color disabled = !disabled_fg.empty()
+					? parse_color(to_gd(disabled_fg))
+					: edit->get_theme_color("font_readonly_color");
+			edit->set_text_state_colors(normal, disabled);
+		}
 	}
 }
 
@@ -1120,11 +1146,9 @@ Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 		edit->set_hotkey(to_gd(w.hotkeys.front().value), w.hotkeys.front().virtual_key);
 	}
 
-	if (ctx.edit_mode || w.disabled) {
-		edit->set_editable(false);
-		if (text.is_empty()) {
-			edit->set_placeholder("Edit");
-		}
+	edit->set_runtime_enabled(!w.disabled);
+	if ((ctx.edit_mode || w.disabled) && text.is_empty()) {
+		edit->set_placeholder("Edit");
 	}
 	return edit;
 }
@@ -1201,7 +1225,6 @@ Control *build_radio_edit(MnuBuildContext &ctx, const mnu::Window &w,
 	radio->add_child(label);
 	edit->add_child(radio);
 	edit->set_radio_parts(radio, label);
-	edit->set_runtime_enabled(!w.disabled && !ctx.inert());
 	return edit;
 }
 
@@ -1221,9 +1244,7 @@ Control *build_multiline_edit(MnuBuildContext &ctx, const mnu::Window &w, const 
 	}
 
 	edit->set_readonly(w.readonly); // host can flip at runtime
-	if (ctx.edit_mode || w.disabled) {
-		edit->set_editable(false);
-	}
+	edit->set_runtime_enabled(!w.disabled);
 	const MnuScrollbarStyle scrollbar_style =
 			make_scrollbar_style(ctx, w.table_data.scrollbar);
 	if (NovaMnuScroll *scrollbar = make_authored_scroll(ctx, scrollbar_style)) {
@@ -1293,8 +1314,45 @@ void apply_list_theme(MnuBuildContext &ctx, ItemList *list, const mnu::Window &w
 		}
 	}
 	const std::string fg = resolve_color(ctx, font.default_fg);
+	MnuItemListTextPalette palette;
+	palette.normal = list->get_theme_color("font_color");
+	palette.hovered = list->get_theme_color("font_hovered_color");
+	palette.hovered_selected =
+			list->get_theme_color("font_hovered_selected_color");
+	palette.selected = list->get_theme_color("font_selected_color");
 	if (!fg.empty()) {
-		list->add_theme_color_override("font_color", parse_color(to_gd(fg)));
+		palette.normal = parse_color(to_gd(fg));
+		list->add_theme_color_override("font_color", palette.normal);
+	}
+	palette.disabled = palette.normal;
+	palette.disabled.a *= 0.5f;
+
+	const std::string hovered_fg = resolve_color(ctx, font.mouseover_fg);
+	if (!hovered_fg.empty()) {
+		palette.hovered = parse_color(to_gd(hovered_fg));
+		list->add_theme_color_override("font_hovered_color", palette.hovered);
+	}
+	const std::string selected_fg = resolve_color(ctx, font.selected_fg);
+	if (!selected_fg.empty()) {
+		palette.selected = parse_color(to_gd(selected_fg));
+		list->add_theme_color_override("font_selected_color", palette.selected);
+		// MNU has no distinct hovered+selected slot. Keep the selected
+		// foreground while the selected row is hovered.
+		palette.hovered_selected = palette.selected;
+		list->add_theme_color_override(
+				"font_hovered_selected_color", palette.hovered_selected);
+	}
+	const std::string disabled_fg = resolve_color(ctx, font.disabled_fg);
+	if (!disabled_fg.empty()) {
+		palette.disabled = parse_color(to_gd(disabled_fg));
+		palette.has_disabled = true;
+	}
+	if (NovaMnuList *mnu_list = Object::cast_to<NovaMnuList>(list)) {
+		mnu_list->set_item_text_palette(palette);
+		mnu_list->set_runtime_enabled(!w.disabled);
+	} else if (NovaMnuMulti *mnu_multi = Object::cast_to<NovaMnuMulti>(list)) {
+		mnu_multi->set_item_text_palette(palette);
+		mnu_multi->set_runtime_enabled(!w.disabled);
 	}
 	const std::string sel = w.items.present
 			? resolve_color(ctx, w.items.selection_color)

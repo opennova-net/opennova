@@ -46,6 +46,11 @@ void NovaMnuList::set_item_alignment(int p_horizontal, int p_vertical) {
 	item_text_layout_.configure(this, p_horizontal, p_vertical);
 }
 
+Color NovaMnuList::get_item_text_color(int p_index, bool p_hovered) const {
+	return item_text_layout_.color_for(
+			const_cast<NovaMnuList *>(this), p_index, p_hovered);
+}
+
 void NovaMnuList::on_sound_mouse_entered() {
 	behavior_.play_hover();
 }
@@ -74,6 +79,8 @@ int NovaMnuList::get_selected_index() const {
 void NovaMnuList::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_items", "items"), &NovaMnuList::set_items);
 	ClassDB::bind_method(D_METHOD("get_selected_index"), &NovaMnuList::get_selected_index);
+	ClassDB::bind_method(D_METHOD("get_item_text_color", "index", "hovered"),
+			&NovaMnuList::get_item_text_color, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("set_item_alignment", "horizontal", "vertical"),
 			&NovaMnuList::set_item_alignment);
 	ClassDB::bind_method(D_METHOD("get_item_horizontal_alignment"),

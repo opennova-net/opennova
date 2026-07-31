@@ -84,6 +84,22 @@ void NovaMnuEdit::set_radio_parts(BaseButton *p_button, Label *p_label) {
 	}
 }
 
+void NovaMnuEdit::set_text_state_colors(
+		const Color &p_normal, const Color &p_disabled) {
+	normal_text_color_ = p_normal;
+	disabled_text_color_ = p_disabled;
+	has_text_state_colors_ = true;
+	update_text_state_color();
+}
+
+void NovaMnuEdit::update_text_state_color() {
+	if (!has_text_state_colors_) {
+		return;
+	}
+	add_theme_color_override("font_uneditable_color",
+			runtime_enabled_ ? normal_text_color_ : disabled_text_color_);
+}
+
 void NovaMnuEdit::set_runtime_enabled(bool p_enabled) {
 	runtime_enabled_ = p_enabled;
 	if (!runtime_enabled_ && radio_editing_) {
@@ -95,6 +111,7 @@ void NovaMnuEdit::set_runtime_enabled(bool p_enabled) {
 	} else {
 		set_editable(runtime_enabled_ && !behavior_.edit_mode);
 	}
+	update_text_state_color();
 }
 
 bool NovaMnuEdit::trigger_hotkey() {

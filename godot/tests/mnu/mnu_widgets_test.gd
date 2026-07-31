@@ -7,6 +7,7 @@ extends GutTest
 # Combo/Scroll/Table and the special views are covered in their own files.
 
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
+const STYLE_FIXTURE := "res://../fixtures/mns/menu_style.mns"
 
 
 func _load_doc() -> NovaMnuDocument:
@@ -208,6 +209,101 @@ func test_multi_honors_authored_items_alignment() -> void:
 		"ITEMS justify controls all multi-select row text")
 	assert_eq(multi.get_item_vertical_alignment(), VERTICAL_ALIGNMENT_BOTTOM,
 		"ITEMS vjustify controls all multi-select row text")
+
+
+func test_edit_mode_text_families_render_authored_foreground() -> void:
+	# Exact ONED regression: authoring makes Edit and MultilineEdit read-only,
+	# while List/Multi redraw their own aligned glyphs. Inspect the effective
+	# colors those four render paths consume; this remains deterministic under
+	# CI's dummy headless renderer (which has no readable framebuffer).
+	var stylesheet := MnsStyleSheet.new()
+	assert_eq(stylesheet.load_from_bytes(
+			FileAccess.get_file_as_bytes(STYLE_FIXTURE)), OK)
+	stylesheet.set_variable("DEF_TEXT_FG", "FFFF00FF") # opaque magenta, AARRGGBB
+
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_edit_mode(true)
+	menu.stylesheet = stylesheet
+	menu.menu = _load_doc()
+	var expected := Color(1, 0, 1, 1)
+	var edit := menu.find_child("NameEdit", true, false) as LineEdit
+	var notes := menu.find_child("Notes", true, false) as TextEdit
+	var list := menu.find_child("MissionList", true, false) as NovaMnuList
+	var multi := menu.find_child("MapPicker", true, false) as NovaMnuMulti
+	assert_eq(edit.get_theme_color("font_uneditable_color"), expected,
+			"Edit keeps DEFAULT_FG when authoring makes it uneditable")
+	assert_eq(notes.get_theme_color("font_readonly_color"), expected,
+			"MultilineEdit keeps DEFAULT_FG when authoring makes it read-only")
+	assert_eq(list.get_item_text_color(0), expected,
+			"List ignores the opaque-black unset custom-foreground sentinel")
+	assert_eq(multi.get_item_text_color(0), expected,
+			"Multi ignores the opaque-black unset custom-foreground sentinel")
+
+
+func test_list_text_colors_honor_authored_font_states() -> void:
+	var source := """<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
+<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>640</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+<FONT><DEFAULT_FG>FF00FF00</DEFAULT_FG><MOUSEOVER_FG>FFFF0000</MOUSEOVER_FG>
+<SELECTED_FG>FF0000FF</SELECTED_FG><DISABLED_FG>FFFFFF00</DISABLED_FG></FONT>
+<WINDOW type="list" name="COLORS"><POSITION><LEFT>0</LEFT><TOP>0</TOP>
+<RIGHT>200</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+<ITEMS justify="LEFT"><ITEM>Row</ITEM></ITEMS></WINDOW>
+<WINDOW type="edit" name="FIELD"><POSITION><LEFT>0</LEFT><TOP>110</TOP>
+<RIGHT>200</RIGHT><BOTTOM>134</BOTTOM></POSITION></WINDOW>
+<WINDOW type="multiline_edit" name="NOTES"><POSITION><LEFT>0</LEFT><TOP>140</TOP>
+<RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION></WINDOW>
+</WINDOW></SCREEN>"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(source.to_utf8_buffer()), OK)
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var list := menu.find_child("COLORS", true, false) as NovaMnuList
+	assert_eq(list.get_item_text_color(0), Color8(0, 255, 0),
+			"default row text uses DEFAULT_FG")
+	assert_eq(list.get_item_text_color(0, true), Color8(255, 0, 0),
+			"hovered row text uses MOUSEOVER_FG")
+	var custom := Color8(12, 34, 56)
+	list.set_item_custom_fg_color(0, custom)
+	assert_eq(list.get_item_text_color(0), custom,
+			"ordinary rows honor a non-sentinel per-item foreground")
+	assert_eq(list.get_item_text_color(0, true), Color8(255, 0, 0),
+			"hover state takes precedence over a per-item foreground")
+	list.select(0)
+	assert_eq(list.get_item_text_color(0), Color8(0, 0, 255),
+			"selected row text uses SELECTED_FG")
+	assert_eq(list.get_item_text_color(0, true), Color8(0, 0, 255),
+			"selected rows keep SELECTED_FG while hovered")
+	list.set_item_disabled(0, true)
+	assert_eq(list.get_item_text_color(0), Color8(255, 255, 0),
+			"disabled row text uses DISABLED_FG")
+	list.set_item_disabled(0, false)
+	list.deselect_all()
+	list.set_item_custom_fg_color(0, Color())
+	assert_true(menu.handle_window_action("COLORS", "DISABLE"))
+	assert_eq(list.get_item_text_color(0), Color8(255, 255, 0),
+			"runtime WINDOW DISABLE switches the whole list to DISABLED_FG")
+	assert_true(menu.handle_window_action("COLORS", "ENABLE"))
+	assert_eq(list.get_item_text_color(0), Color8(0, 255, 0),
+			"runtime WINDOW ENABLE restores the list's normal foreground")
+
+	var field := menu.find_child("FIELD", true, false) as NovaMnuEdit
+	var notes := menu.find_child("NOTES", true, false) as NovaMnuMultilineEdit
+	assert_true(menu.handle_window_action("FIELD", "DISABLE"))
+	assert_true(menu.handle_window_action("NOTES", "DISABLE"))
+	assert_eq(field.get_theme_color("font_uneditable_color"), Color8(255, 255, 0),
+			"runtime-disabled Edit uses DISABLED_FG")
+	assert_eq(notes.get_theme_color("font_readonly_color"), Color8(255, 255, 0),
+			"runtime-disabled MultilineEdit uses DISABLED_FG")
+	assert_true(menu.handle_window_action("FIELD", "ENABLE"))
+	assert_true(menu.handle_window_action("NOTES", "ENABLE"))
+	assert_eq(field.get_theme_color("font_uneditable_color"), Color8(0, 255, 0),
+			"re-enabled Edit restores DEFAULT_FG")
+	assert_eq(notes.get_theme_color("font_readonly_color"), Color8(0, 255, 0),
+			"re-enabled MultilineEdit restores DEFAULT_FG")
 
 
 # --- SpinList ---------------------------------------------------------------

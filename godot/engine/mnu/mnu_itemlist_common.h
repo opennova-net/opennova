@@ -32,16 +32,33 @@ inline int mnu_itemlist_first_selected(ItemList *list) {
 // Because the overlay reads ItemList on every draw, rows added later by a Menu
 // Host through inherited add_item()/set_item_text() receive the authored layout
 // without a second data model.
+struct MnuItemListTextPalette {
+	Color normal = Color(1, 1, 1, 1);
+	Color hovered = Color(1, 1, 1, 1);
+	Color hovered_selected = Color(1, 1, 1, 1);
+	Color selected = Color(1, 1, 1, 1);
+	Color disabled = Color(1, 1, 1, 0.5f);
+	bool has_disabled = false;
+};
+
 struct MnuItemListTextLayout {
 	HorizontalAlignment horizontal = HORIZONTAL_ALIGNMENT_LEFT;
 	VerticalAlignment vertical = VERTICAL_ALIGNMENT_CENTER;
 	bool enabled = false;
+	bool widget_disabled = false;
+	bool palette_configured = false;
 
-	Color font_color;
-	Color font_hovered_color;
-	Color font_hovered_selected_color;
-	Color font_selected_color;
-	Color font_outline_color;
+	MnuItemListTextPalette palette;
+	Color font_outline_color = Color(0, 0, 0, 1);
+
+	void set_palette(const MnuItemListTextPalette &p_palette) {
+		palette = p_palette;
+		palette_configured = true;
+	}
+
+	void set_widget_disabled(bool p_disabled) {
+		widget_disabled = p_disabled;
+	}
 
 	void configure(ItemList *p_list, int p_horizontal, int p_vertical) {
 		switch (p_horizontal) {
@@ -68,11 +85,15 @@ struct MnuItemListTextLayout {
 		}
 
 		if (!enabled) {
-			font_color = p_list->get_theme_color("font_color");
-			font_hovered_color = p_list->get_theme_color("font_hovered_color");
-			font_hovered_selected_color =
-					p_list->get_theme_color("font_hovered_selected_color");
-			font_selected_color = p_list->get_theme_color("font_selected_color");
+			if (!palette_configured) {
+				palette.normal = p_list->get_theme_color("font_color");
+				palette.hovered = p_list->get_theme_color("font_hovered_color");
+				palette.hovered_selected =
+						p_list->get_theme_color("font_hovered_selected_color");
+				palette.selected = p_list->get_theme_color("font_selected_color");
+				palette.disabled = palette.normal;
+				palette.disabled.a *= 0.5f;
+			}
 			font_outline_color = p_list->get_theme_color("font_outline_color");
 
 			const Color transparent(1, 1, 1, 0);
@@ -84,6 +105,36 @@ struct MnuItemListTextLayout {
 			enabled = true;
 		}
 		p_list->queue_redraw();
+	}
+
+	Color color_for(ItemList *p_list, int p_index, bool p_hovered) const {
+		if (p_index < 0 || p_index >= p_list->get_item_count()) {
+			return palette.normal;
+		}
+
+		const bool selected = p_list->is_selected(p_index);
+		Color color;
+		if (selected && p_hovered) {
+			color = palette.hovered_selected;
+		} else if (selected) {
+			color = palette.selected;
+		} else if (p_hovered) {
+			color = palette.hovered;
+		} else {
+			// ItemList uses Color() (opaque black) as its "no custom
+			// foreground" sentinel. Alpha-testing that value paints every
+			// ordinary row black; match ItemList's own exact sentinel check.
+			const Color custom_color = p_list->get_item_custom_fg_color(p_index);
+			color = custom_color != Color() ? custom_color : palette.normal;
+		}
+		if (widget_disabled || p_list->is_item_disabled(p_index)) {
+			if (palette.has_disabled) {
+				color = palette.disabled;
+			} else {
+				color.a *= 0.5f;
+			}
+		}
+		return color;
 	}
 
 	void draw(ItemList *p_list) const {
@@ -120,18 +171,7 @@ struct MnuItemListTextLayout {
 				baseline = rect.position.y + rect.size.y - descent;
 			}
 
-			const bool selected = p_list->is_selected(i);
-			Color color = selected ? font_selected_color : font_color;
-			if (hovered == i) {
-				color = selected ? font_hovered_selected_color : font_hovered_color;
-			}
-			const Color custom_color = p_list->get_item_custom_fg_color(i);
-			if (custom_color.a > 0.0f) {
-				color = custom_color;
-			}
-			if (p_list->is_item_disabled(i)) {
-				color.a *= 0.5f;
-			}
+			const Color color = color_for(p_list, i, hovered == i);
 
 			const Vector2 origin(rect.position.x, baseline);
 			if (outline_size > 0 && font_outline_color.a > 0.0f) {

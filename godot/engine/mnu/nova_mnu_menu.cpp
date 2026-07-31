@@ -5,7 +5,9 @@
 #include "nova_mnu_combo.h"
 #include "nova_mnu_edit.h"
 #include "nova_mnu_goto.h"
+#include "nova_mnu_list.h"
 #include "nova_mnu_multiline_edit.h"
+#include "nova_mnu_multi.h"
 #include "nova_mnu_screen.h"
 #include "resource_index/nova_resource_root.h"
 
@@ -380,6 +382,12 @@ static void apply_window_enabled_state(Node *p_node, bool p_parent_enabled) {
 					   Object::cast_to<NovaMnuMultilineEdit>(p_node)) {
 		edit->set_runtime_enabled(effective_enabled);
 	} else if (ItemList *list = Object::cast_to<ItemList>(p_node)) {
+		if (NovaMnuList *mnu_list = Object::cast_to<NovaMnuList>(list)) {
+			mnu_list->set_runtime_enabled(effective_enabled);
+		} else if (NovaMnuMulti *mnu_multi =
+						   Object::cast_to<NovaMnuMulti>(list)) {
+			mnu_multi->set_runtime_enabled(effective_enabled);
+		}
 		list->set_mouse_filter(effective_enabled
 						? Control::MOUSE_FILTER_STOP
 						: Control::MOUSE_FILTER_IGNORE);

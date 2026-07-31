@@ -27,6 +27,28 @@ void NovaMnuMultilineEdit::on_text_changed() {
 	behavior_.notify_value(String(get_name()), "multiline", -1, get_text());
 }
 
+void NovaMnuMultilineEdit::set_text_state_colors(
+		const Color &p_normal, const Color &p_disabled) {
+	normal_text_color_ = p_normal;
+	disabled_text_color_ = p_disabled;
+	has_text_state_colors_ = true;
+	update_text_state_color();
+}
+
+void NovaMnuMultilineEdit::set_runtime_enabled(bool p_enabled) {
+	runtime_enabled_ = p_enabled;
+	set_editable(runtime_enabled_ && !readonly_ && !behavior_.edit_mode);
+	update_text_state_color();
+}
+
+void NovaMnuMultilineEdit::update_text_state_color() {
+	if (!has_text_state_colors_) {
+		return;
+	}
+	add_theme_color_override("font_readonly_color",
+			runtime_enabled_ ? normal_text_color_ : disabled_text_color_);
+}
+
 void NovaMnuMultilineEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_readonly", "readonly"), &NovaMnuMultilineEdit::set_readonly);
 	ClassDB::bind_method(D_METHOD("get_readonly"), &NovaMnuMultilineEdit::get_readonly);

@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include "nova_mnu_widget_behavior.h"
@@ -39,6 +40,9 @@ private:
 	bool radio_was_selected_on_press_ = false;
 	bool radio_editing_ = false;
 	bool runtime_enabled_ = true;
+	bool has_text_state_colors_ = false;
+	Color normal_text_color_;
+	Color disabled_text_color_;
 
 	void on_text_changed(const String &p_text);
 	void on_sound_mouse_entered();
@@ -52,6 +56,7 @@ private:
 	void leave_radio_edit();
 	String filter_numeric(const String &p_text) const;
 	bool commit_numeric();
+	void update_text_state_color();
 
 protected:
 	static void _bind_methods();
@@ -77,6 +82,7 @@ public:
 		max_ = p_max;
 	}
 	bool is_numeric_only() const { return number_; }
+	void set_text_state_colors(const Color &p_normal, const Color &p_disabled);
 	void set_radio_parts(BaseButton *p_button, Label *p_label);
 	bool is_radio_editing() const { return radio_editing_; }
 	void set_runtime_enabled(bool p_enabled);

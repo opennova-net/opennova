@@ -44,6 +44,14 @@ public:
 	}
 	void set_min_item_height(int p_height);
 	void set_item_alignment(int p_horizontal, int p_vertical);
+	void set_item_text_palette(const MnuItemListTextPalette &p_palette) {
+		item_text_layout_.set_palette(p_palette);
+	}
+	void set_runtime_enabled(bool p_enabled) {
+		item_text_layout_.set_widget_disabled(!p_enabled);
+		queue_redraw();
+	}
+	Color get_item_text_color(int p_index, bool p_hovered = false) const;
 	int get_item_horizontal_alignment() const {
 		return static_cast<int>(item_text_layout_.horizontal);
 	}
