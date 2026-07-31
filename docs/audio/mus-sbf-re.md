@@ -15,7 +15,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | SBF bank codec (`libs/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`libs/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `libs/pff` |
-| `godot/engine/audio` glue | host code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
+| `godot/engine/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 
@@ -46,10 +46,10 @@ changes per second measured) and `_on_play_sound` re-`play()`'d the `NovaSbfAudi
 every frame — a constant low buzz. The director now gates VM advance on the active track
 still playing (`_active_play->is_playing()`), reproducing the
 `remaining_bytes <= 0 -> step` rule. We pace on the Godot `AudioStreamPlayer` finishing
-rather than a byte counter (host-idiomatic), and stream one music context at a time as the
+rather than a byte counter (reimpl-idiomatic), and stream one music context at a time as the
 original does.
 
-Related host note (2026-07-09; rate witness corrected 2026-07-11): `NovaSbfAudioStreamPlayback`
+Related reimpl note (2026-07-09; rate witness corrected 2026-07-11): `NovaSbfAudioStreamPlayback`
 extends Godot's `AudioStreamPlaybackResampled` and reports the SBF content rate (22050 Hz), so
 the mixer resamples to the device rate. The original's audio service runs at a **44100 Hz
 device rate** — one-shot wavs carry a device-relative pitch ratio
@@ -59,10 +59,10 @@ and the music stream pump submits split L/R buffers at queue pitch 0x10000 throu
 ADPCM-decode/interpolate stage (`play_stereo_sample @ 0x7bcf95`, stepper
 `Audio_AdpcmDecodeNibbleStep @ 0x7bf250`, ex kong "noop_stub"), netting the same 22050 Hz
 content rate in real time. The decoded PCM itself is pinned byte-exact by the `sbf_roundtrip`
-golden tests; the prior host 1:1 frame mapping played SBF content at half speed on the 44100 Hz
+golden tests; the prior reimpl 1:1 frame mapping played SBF content at half speed on the 44100 Hz
 mix rate.
 
-## Music state variable selection — the host sets the section discriminator (grilled 2026-06-15; re-verified 2026-07-11)
+## Music state variable selection — the shell sets the section discriminator (grilled 2026-06-15; re-verified 2026-07-11)
 
 The MUS scripts are var-driven state machines: a "discriminator" global selects which
 section/track loop plays, and its var **index is per-script** (golden test
@@ -75,7 +75,7 @@ section/track loop plays, and its var **index is per-script** (golden test
 The original starts each context with the var at 0: `AudioVM_InitMenuMusicStreaming @0x56aa60`
 opens the menumus context (`g_path_menu_sbf` + `g_path_menu_bin` via
 `AudioVM_OpenMusicContext @0x6722a0`) and sets volume only — **no initial var**. The selecting
-var is set later by the host when a `.mnu` screen is shown (its `MUSICVAR` → the discriminator
+var is set later by the shell when a `.mnu` screen is shown (its `MUSICVAR` → the discriminator
 var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus `var2=1` theme.
 
 ### Divergence D-MUS-VAR / fix
@@ -84,9 +84,9 @@ var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus 
 | --- | --- | --- | --- |
 | D-MUS-VAR | the runtime pushed the screen `MUSICVAR` to var **index 0** (`menu_shell.gd MUSIC_VAR_INDEX` / `nova_mnu_menu.cpp music_var_index_`), so menumus' `var2` stayed 0 | the host sets the discriminator var the script actually reads (menumus `var2`, gamemus `var1`) | at index 0 the screen `MUSICVAR` was inert; the menu always ran the `var2=0` path (`P1,P2` then a `P0` loop) instead of the screen's `MUSICVAR=1` theme (`P2..P8`). Fixed: `MUSIC_VAR_INDEX = 2`; the shell pushes it synchronously in `setup()` (before the director's first `_process` tick) so the VM starts in the selected section. gamemus `var1` is never driven in retail — see "Game music driving" below. |
 
-## Game music driving — the full host writer map (witnessed 2026-07-09; re-verified 2026-07-11)
+## Game music driving — the full retail writer map (witnessed 2026-07-09; re-verified 2026-07-11)
 
-How the original drives the gamemus context in-mission. Every host write of the
+How the original drives the gamemus context in-mission. Every retail write of the
 music VM globals goes through `AudioVM_SetVariable @ 0x671fa0`
 (`g_audiovm_globals[idx] = val`); the COMPLETE caller set is the five functions
 below (exhaustive xref sweep of 0x671fa0).
