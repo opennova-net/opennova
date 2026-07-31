@@ -30,6 +30,9 @@ class DebugSessionStub:
 		var state := NovaDebugControlState.new()
 		state.id = id
 		state.available = true
+		# Writable like a session whose F3 Live-edits latch is open, so the
+		# adapter's per-caller gating is observable.
+		state.writable = true
 		return state
 
 	func definition(id: StringName) -> NovaDebugControlDef:
@@ -242,6 +245,31 @@ func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
 	await _call("game_debug", {"op": "get", "id": "terrain_lod_quality"})
 	assert_false(host.debug.read_authority,
 			"an unconfirmed caller still sees the locked F3 policy view")
+
+
+func test_unconfirmed_rows_for_gated_controls_mirror_the_write_precheck() -> void:
+	# The session can report writable while F3's Live-edits latch is open, but
+	# an unconfirmed automation caller's set/invoke is refused by the
+	# confirm_authority precheck — its rows must tell the same story.
+	var result := await _call("game_debug", {
+		"op": "get",
+		"id": "teleport_local_player",
+	})
+	assert_false(bool(result.structured["writable"]),
+			"an unconfirmed caller cannot be shown a write it will be refused")
+	assert_true(String(result.structured["reason"]).contains("confirm_authority"))
+
+	result = await _call("game_debug", {
+		"op": "get",
+		"id": "teleport_local_player",
+		"confirm_authority": true,
+	})
+	assert_true(bool(result.structured["writable"]),
+			"a confirmed caller keeps the session's writable view")
+
+	result = await _call("game_debug", {"op": "get", "id": "plain_control"})
+	assert_true(bool(result.structured["writable"]),
+			"ungated controls stay writable for unconfirmed callers")
 
 
 func test_authority_confirmation_requires_a_json_boolean() -> void:

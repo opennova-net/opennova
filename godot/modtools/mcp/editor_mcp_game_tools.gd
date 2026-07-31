@@ -161,7 +161,14 @@ func disable_runtime_debug() -> Variant:
 			"stale": true,
 		}
 	if shutdown_error != OK:
-		if session.shutdown():
+		session.poll()
+		if not bool(session.get_state().get("running", false)):
+			# Nothing was stopped and there is no endpoint left to retire:
+			# claiming a safety stop here would tell the user the editor
+			# stopped a game that in fact exited on its own.
+			message = "Agent server stopped; the managed game had already exited before its runtime debug endpoint could be retired."
+			shutdown_error = OK
+		elif session.shutdown():
 			fallback_stopped = true
 			message = "Agent server stopped; the managed game was also stopped because its runtime debug endpoint could not be retired cleanly."
 			shutdown_error = OK
@@ -227,7 +234,7 @@ func _connect_shutdown_peer(
 				descriptor_path, run_id, expected_pid)
 		if not descriptor.is_empty():
 			break
-		if _child_exited(session):
+		if _awaited_run_gone(session, run_id):
 			return ERR_UNAVAILABLE
 		if tree == null:
 			break
@@ -423,7 +430,7 @@ func _ensure_peer(
 		descriptor = _read_descriptor(descriptor_path, run_id, expected_pid)
 		if not descriptor.is_empty():
 			break
-		if _child_exited(session):
+		if _awaited_run_gone(session, run_id):
 			return ERR_UNAVAILABLE
 		if tree == null:
 			break
@@ -442,17 +449,22 @@ func _ensure_peer(
 	return OK
 
 
-## Both descriptor waits poll this between frames: a child that dies before
-## publishing its descriptor must fail the call now, not pin the caller for
-## the remainder of the DESCRIPTOR_WAIT_MS window.
-func _child_exited(session: ShellGameSession) -> bool:
+## Both descriptor waits poll this between frames: a wait bound to a run whose
+## child died — or was killed and replaced by an F5 relaunch, which leaves the
+## session running under a NEW run id while the awaited descriptor can never
+## appear — must fail the call now, not pin the caller for the remainder of
+## the DESCRIPTOR_WAIT_MS window.
+func _awaited_run_gone(session: ShellGameSession, run_id: String) -> bool:
 	if session == null:
 		return false
 	session.poll()
-	if bool(session.get_state().get("running", false)):
-		return false
-	_last_error = "The game process exited before its runtime debug endpoint became ready."
-	return true
+	if not bool(session.get_state().get("running", false)):
+		_last_error = "The game process exited before its runtime debug endpoint became ready."
+		return true
+	if session.get_current_run_id() != run_id:
+		_last_error = "The game was relaunched before its previous runtime debug endpoint became ready."
+		return true
+	return false
 
 
 func _await_restart(
