@@ -8,7 +8,7 @@ const PageScript := preload("res://engine/debug/pages/debug_animation_page.gd")
 
 
 class StubModel:
-	extends Node
+	extends NovaObjectModel
 	var clip := ""
 	var lod := 0
 	var skinned := false

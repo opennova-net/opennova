@@ -2,6 +2,8 @@ extends GutTest
 
 const PageScript := preload(
 		"res://engine/debug/pages/debug_rendering_page.gd")
+const NovaDebugViewStatus := preload(
+		"res://engine/debug/nova_debug_view_status.gd")
 
 
 class StubViewport:
@@ -65,19 +67,19 @@ class StubWorld:
 	func is_hitbox_debug() -> bool:
 		return enabled[&"show_hit_meshes"]
 
-	func get_debug_view_status() -> Dictionary:
-		var result := {}
+	func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
+		var result: Array[NovaDebugViewStatus] = []
 		for id in enabled:
 			var count := int(drawable.get(id, 0))
-			result[id] = {
-				"enabled": bool(enabled[id]),
-				"installed": bool(enabled[id]),
-				"drawable_count": count,
-				"reason": (
+			result.append(NovaDebugViewStatus.new(
+				id,
+				bool(enabled[id]),
+				bool(enabled[id]),
+				count,
+				(
 						"%d drawable items" % count
 						if count > 0
-						else "No matching data is currently drawable."),
-			}
+						else "No matching data is currently drawable.")))
 		return result
 
 

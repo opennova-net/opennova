@@ -5,6 +5,8 @@ extends NovaDebugPage
 ## gameplay uses the portable simulation's collision and routing systems, so
 ## those hints had no runtime geometry to show.
 
+const NovaDebugViewStatus := preload(
+		"res://engine/debug/nova_debug_view_status.gd")
 const WORLD_OVERLAYS: Array[StringName] = [
 	&"show_collision",
 	&"show_hit_meshes",
@@ -14,16 +16,6 @@ const WORLD_OVERLAYS: Array[StringName] = [
 	&"show_effect_boxes",
 	&"show_portal_faces",
 ]
-const WORLD_OVERLAY_LABELS := {
-	&"show_collision": "Collision",
-	&"show_hit_meshes": "Hit meshes",
-	&"show_round_trails": "Round trails",
-	&"show_skeletons": "Skeletons",
-	&"show_user_points": "User points",
-	&"show_effect_boxes": "Effect bounds",
-	&"show_portal_faces": "Portal faces",
-}
-
 var _renderer_label: Label
 var _viewport_label: Label
 var _viewport_debug_state: Label
@@ -140,22 +132,27 @@ func _refresh_diagnostic_state() -> void:
 
 	var world := _ctx.world() if _ctx != null else null
 	var report := {}
-	if world != null and world.has_method("get_debug_view_status"):
-		var value: Variant = world.get_debug_view_status()
-		if value is Dictionary:
-			report = value
+	if world != null and world.has_method("get_debug_view_statuses"):
+		var value: Variant = world.get_debug_view_statuses()
+		if value is Array:
+			for entry_v in value:
+				if entry_v is NovaDebugViewStatus:
+					var entry := entry_v as NovaDebugViewStatus
+					report[entry.id] = entry
 	var active_lines := PackedStringArray()
 	for id in WORLD_OVERLAYS:
 		var state := _ctx.session.get_control_state(id) \
 				if _ctx != null and _ctx.session != null else null
-		var entry: Dictionary = report.get(id, report.get(String(id), {}))
-		var enabled := bool(entry.get(
-				"enabled", state != null and bool(state.value)))
+		var entry := report.get(id) as NovaDebugViewStatus
+		var enabled := (
+				entry.enabled
+				if entry != null
+				else state != null and bool(state.value))
 		if not enabled:
 			continue
-		var installed := bool(entry.get("installed", false))
-		var count := int(entry.get("drawable_count", -1))
-		var detail := String(entry.get("reason", ""))
+		var installed := entry != null and entry.installed
+		var count := entry.drawable_count if entry != null else -1
+		var detail := entry.reason if entry != null else ""
 		if detail.is_empty():
 			if not installed:
 				detail = "waiting for a loaded view"
@@ -166,13 +163,32 @@ func _refresh_diagnostic_state() -> void:
 			else:
 				detail = "view installed"
 		active_lines.append("%s — ACTIVE · %s" % [
-			String(WORLD_OVERLAY_LABELS.get(id, String(id))),
+			_world_overlay_label(id),
 			detail,
 		])
 	_world_overlay_state.text = (
 			"No world overlays active."
 			if active_lines.is_empty()
 			else "\n".join(active_lines))
+
+
+func _world_overlay_label(id: StringName) -> String:
+	match id:
+		&"show_collision":
+			return "Collision"
+		&"show_hit_meshes":
+			return "Hit meshes"
+		&"show_round_trails":
+			return "Round trails"
+		&"show_skeletons":
+			return "Skeletons"
+		&"show_user_points":
+			return "User points"
+		&"show_effect_boxes":
+			return "Effect bounds"
+		&"show_portal_faces":
+			return "Portal faces"
+	return String(id)
 
 
 func _viewport_debug_help(draw_index: int) -> String:

@@ -15,7 +15,7 @@ var _player_label: Label
 var _models_header: Label
 var _model_list: ItemList
 var _model_detail: Label
-var _display_models: Array = []
+var _display_models: Array[NovaObjectModel] = []
 var _selected_model_identity := ""
 
 
@@ -72,18 +72,12 @@ func _refresh_player() -> void:
 	if sim == null:
 		_player_label.text = "No local player."
 		return
-	var key := String(sim.get_local_player_anim_key()) \
-			if sim.has_method("get_local_player_anim_key") else ""
-	var slot := int(sim.get_local_player_body_anim_slot()) \
-			if sim.has_method("get_local_player_body_anim_slot") else -1
-	var phase := int(sim.get_local_player_anim_phase_ticks()) \
-			if sim.has_method("get_local_player_anim_phase_ticks") else 0
-	var source_key := String(sim.get_local_player_anim_source_key()) \
-			if sim.has_method("get_local_player_anim_source_key") else ""
-	var source_phase := int(sim.get_local_player_anim_source_phase_ticks()) \
-			if sim.has_method("get_local_player_anim_source_phase_ticks") else 0
-	var blend := clampf(float(sim.get_local_player_anim_blend_weight()), 0.0, 1.0) \
-			if sim.has_method("get_local_player_anim_blend_weight") else 1.0
+	var key := String(sim.get_local_player_anim_key())
+	var slot := int(sim.get_local_player_body_anim_slot())
+	var phase := int(sim.get_local_player_anim_phase_ticks())
+	var source_key := String(sim.get_local_player_anim_source_key())
+	var source_phase := int(sim.get_local_player_anim_source_phase_ticks())
+	var blend := clampf(float(sim.get_local_player_anim_blend_weight()), 0.0, 1.0)
 	if not source_key.is_empty() and source_key != key and blend < 0.999:
 		_player_label.text = (
 				"Player transition\n"
@@ -112,7 +106,7 @@ func _refresh_models() -> void:
 	var playing := 0
 	var picked := 0
 	for row in rows:
-		var model: Node = row["model"]
+		var model: NovaObjectModel = row["model"]
 		var clip := _model_clip(model)
 		var has_bones := _model_has_skeleton(model)
 		if has_bones:
@@ -128,7 +122,7 @@ func _refresh_models() -> void:
 	var selected_index := -1
 	for i in range(shown):
 		var row: Dictionary = rows[i]
-		var model: Node = row["model"]
+		var model: NovaObjectModel = row["model"]
 		_display_models.append(model)
 		_model_list.add_item(_model_row_text(model, bool(row["picked"])), null, true)
 		_model_list.set_item_tooltip(i, "Select to inspect this model's live animation state.")
@@ -151,9 +145,9 @@ func _refresh_models() -> void:
 func _model_rows() -> Array:
 	var rows: Array = []
 	for candidate in _animatable_nodes():
-		if not (candidate is Node) or not is_instance_valid(candidate):
+		if not (candidate is NovaObjectModel) or not is_instance_valid(candidate):
 			continue
-		var model := candidate as Node
+		var model := candidate as NovaObjectModel
 		rows.append({
 			"model": model,
 			"identity": _model_identity(model),
@@ -177,7 +171,7 @@ func _model_row_less(a: Dictionary, b: Dictionary) -> bool:
 	return String(a["identity"]) < String(b["identity"])
 
 
-func _model_row_text(model: Node, picked: bool) -> String:
+func _model_row_text(model: NovaObjectModel, picked: bool) -> String:
 	var text := "PICKED   " if picked else ""
 	text += String(model.name)
 	var clip := _model_clip(model)
@@ -196,12 +190,12 @@ func _on_model_selected(index: int) -> void:
 	var candidate: Variant = _display_models[index]
 	if not (candidate is Node) or not is_instance_valid(candidate):
 		return
-	var model := candidate as Node
+	var model := candidate as NovaObjectModel
 	_selected_model_identity = _model_identity(model)
 	_render_model_detail(model)
 
 
-func _render_model_detail(model: Node) -> void:
+func _render_model_detail(model: NovaObjectModel) -> void:
 	if model == null or not is_instance_valid(model):
 		_model_detail.text = "The selected model is no longer live."
 		return
@@ -222,30 +216,23 @@ func _render_model_detail(model: Node) -> void:
 	_model_detail.text = "\n".join(lines)
 
 
-func _model_clip(model: Node) -> String:
-	return String(model.get_active_body_clip()) \
-			if model.has_method("get_active_body_clip") else ""
+func _model_clip(model: NovaObjectModel) -> String:
+	return String(model.get_active_body_clip())
 
 
-func _model_lod(model: Node) -> int:
-	return int(model.get_active_lod()) if model.has_method("get_active_lod") else -1
+func _model_lod(model: NovaObjectModel) -> int:
+	return int(model.get_active_lod())
 
 
-func _model_has_skeleton(model: Node) -> bool:
-	return bool(model.has_skeleton()) if model.has_method("has_skeleton") else false
+func _model_has_skeleton(model: NovaObjectModel) -> bool:
+	return bool(model.has_skeleton())
 
 
-func _model_playhead(model: Node) -> float:
-	if model.has_method("get_animation_time"):
-		return float(model.get_animation_time())
-	if model.has_method("get_animation_time_ms"):
-		return float(model.get_animation_time_ms()) / 1000.0
-	return 0.0
+func _model_playhead(model: NovaObjectModel) -> float:
+	return float(model.get_animation_time())
 
 
-func _part_state_text(model: Node) -> String:
-	if not model.has_method("get_active_part_anims"):
-		return "not exposed"
+func _part_state_text(model: NovaObjectModel) -> String:
 	var value: Variant = model.get_active_part_anims()
 	if not (value is Dictionary) or (value as Dictionary).is_empty():
 		return "no active sweep"
@@ -271,9 +258,7 @@ func _part_state_text(model: Node) -> String:
 	return "; ".join(pieces)
 
 
-func _ctrl_state_text(model: Node) -> String:
-	if not model.has_method("get_ctrl_values"):
-		return "not exposed"
+func _ctrl_state_text(model: NovaObjectModel) -> String:
 	var value: Variant = model.get_ctrl_values()
 	if not (value is Dictionary) or (value as Dictionary).is_empty():
 		return "no live values"
@@ -295,7 +280,7 @@ func _phase_text(value: int) -> String:
 	return str(value)
 
 
-func _model_identity(model: Node) -> String:
+func _model_identity(model: NovaObjectModel) -> String:
 	var ref := _model_ref(model)
 	var bms_id := int(ref.get("bms_id", 0))
 	if bms_id != 0:
@@ -310,7 +295,7 @@ func _model_identity(model: Node) -> String:
 	return "instance:%d" % model.get_instance_id()
 
 
-func _model_identity_label(model: Node) -> String:
+func _model_identity_label(model: NovaObjectModel) -> String:
 	var ref := _model_ref(model)
 	var bits := PackedStringArray()
 	var bms_id := int(ref.get("bms_id", 0))
@@ -331,12 +316,12 @@ func _model_identity_label(model: Node) -> String:
 	return "   ·   ".join(bits)
 
 
-func _model_ref(model: Node) -> Dictionary:
+func _model_ref(model: NovaObjectModel) -> Dictionary:
 	var value: Variant = model.get_meta("entity_ref", {})
 	return value if value is Dictionary else {}
 
 
-func _model_is_picked(model: Node) -> bool:
+func _model_is_picked(model: NovaObjectModel) -> bool:
 	if _ctx.pick_list == null:
 		return false
 	var ref := _model_ref(model)
@@ -393,8 +378,8 @@ func _append_animatable(
 		seen: Dictionary) -> void:
 	if not (candidate is Node) or not is_instance_valid(candidate):
 		return
-	var node := candidate as Node
-	if not node.has_method("get_active_body_clip"):
+	var node := candidate as NovaObjectModel
+	if node == null:
 		return
 	var instance_id := node.get_instance_id()
 	if seen.has(instance_id):
