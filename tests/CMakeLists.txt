@@ -1755,6 +1755,12 @@ add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
 target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_netsim)
 add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 
+# Diagnosis loop for the live-join remote-motion choppiness — EXPECTED RED until
+# the client-side smoothing port ([orig: @0x4b9a8c], §5.38a) lands. Registered
+# but not added to ctest so the suite stays green; run the exe directly.
+add_executable(netsim_remote_motion_smoothness_test netsim/remote_motion_smoothness_test.cpp)
+target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_netsim)
+
 # The co-op-LAN fan-out guard: one World snapshot fanned to a connection table (loopback
 # self + a socket-free UdpSessionTransport joiner), per-connection anchoring, and the
 # host-side C2S 0x0C drain/SNAP — no Godot, no OS sockets (Increment A).
