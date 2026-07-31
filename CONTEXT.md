@@ -23,11 +23,18 @@ A Window of a specific interactive/visual type (button, combobox, table, spinlis
 _Avoid_: control, element
 
 **Action**:
-A behavior the `.mnu` file itself can express, via an `<ACTION>` element: navigate to a screen or menu, show/hide a named window, pop, or open a URL. This is the *entire* behavior vocabulary the format carries.
+A behavior explicitly authored in a `.mnu` file via an `<ACTION>` element. The
+retail vocabulary includes screen/menu navigation; showing, hiding, enabling, or
+disabling a named Window; pop; URL and form submission; focus/tab operations; and
+legacy browser/LAN/application-message operations. Some Actions are completed by
+the Menu Host, but they remain Actions because the Menu authored them.
 _Avoid_: command, event, handler
 
 **Command**:
-Game-semantic behavior a button performs that the format *cannot* express (start a mission, apply video settings, connect to a server). The host/engine supplies a Command by matching a widget's **name**; it is never written in the `.mnu`.
+Behavior supplied by the Menu Host by matching a widget's **name**, rather than
+written as an `<ACTION>` (start a mission, apply video settings, quit, commit a
+loadout). An Action may also delegate work to the host; the distinction is whether
+the behavior is authored in the Menu or bound externally by name.
 _Avoid_: action (reserve that strictly for the `<ACTION>` element)
 
 **Menu Host**:
@@ -43,7 +50,10 @@ The flag that makes a live menu inert and click-through so the editor can reuse 
 _Avoid_: preview mode, design mode
 
 **Interactive preview**:
-An Edit-mode menu the Menus workspace can put into a "play" state: navigators wire up so clicking a Tab runs its window show/hide and screen Actions, while external Commands (launch/quit/URL/cross-menu) are sandboxed to no-ops. Lets an author preview tab/screen flow without leaving the editor.
+An Edit-mode menu the Menus workspace can put into a "play" state: navigators
+wire up so clicking a Tab runs its Window and Screen Actions, while external
+effects (Commands plus URL, cross-menu, and hosted Actions) are sandboxed to
+no-ops. Lets an author preview tab/screen flow without leaving the editor.
 _Avoid_: play mode, runtime (it is still a preview)
 
 **Tab**:

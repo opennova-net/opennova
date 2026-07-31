@@ -9,7 +9,7 @@ void NovaMnuGoto::trigger() {
 		return;
 	}
 	for (const MnuActionData &action : actions_) {
-		menu_->dispatch_action(action.type, action.target, action.file, action.window_state);
+		menu_->dispatch_widget_action(action);
 	}
 }
 

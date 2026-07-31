@@ -52,6 +52,10 @@ public:
 		TYPE_LABEL,
 		TYPE_GOTO,
 		TYPE_MARQUEE,
+		TYPE_GLB_TABLE,
+		TYPE_RADIOEDIT,
+		TYPE_LAN_LIST,
+		TYPE_GOPHER,
 		TYPE_UNKNOWN,
 	};
 
@@ -171,9 +175,11 @@ public:
 
 	// --- Screen properties ---
 	String get_screen_name(int p_screen_id) const;
+	bool get_screen_has_music_var(int p_screen_id) const;
 	int get_screen_music_var(int p_screen_id) const;
 	String get_screen_text_rsrc(int p_screen_id) const;
 	String get_screen_cursor_file(int p_screen_id) const;
+	String get_screen_cursor_flags(int p_screen_id) const;
 	void set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value);
 
 	// Which POSITION extents are explicitly authored (get_window_rect_flags
@@ -208,6 +214,14 @@ public:
 	String get_widget_orientation(int p_id) const;
 	void set_widget_orientation(int p_id, const String &p_value);
 
+	// Complete, presence-aware authoring state for one widget. apply_widget_patch
+	// accepts any subset of the same grouped keys and applies it atomically,
+	// preserving every field the caller did not mention. This is the deep seam
+	// shared by the inspector and MCP; the scalar methods remain convenient
+	// adapters for common edits.
+	Dictionary get_widget_authoring_state(int p_id) const;
+	bool apply_widget_patch(int p_id, const Dictionary &p_patch);
+
 	// Per-widget interaction sounds (hover/click etc.). Each row is
 	// {state, trigger, file}: file is the .lwf profile and trigger names a set in
 	// it (MOUSE_OVER/CLICK_SELECT/...). set replaces the whole list (the editor's
@@ -217,8 +231,9 @@ public:
 	void set_widget_sounds(int p_id, const TypedArray<Dictionary> &p_sounds);
 
 	// Per-widget navigation/window actions. Each row is
-	// {type, target, state, file, external_browser}: the structured editor view of
-	// <ACTION>, used by buttons/gotos to drive in-menu visual scripting.
+	// {type,target,state,file,source,field,test,has_target_form,target_form,
+	// toggle,external_browser}: the lossless structured editor view of <ACTION>,
+	// including retail host-owned GLB/LAN/form/app-message verbs.
 	TypedArray<Dictionary> get_widget_actions(int p_id) const;
 	void set_widget_actions(int p_id, const TypedArray<Dictionary> &p_actions);
 
@@ -239,10 +254,12 @@ public:
 	void move_item(int p_id, int p_from, int p_to); // p_to is the destination index
 
 	// Table column template (header/body/subst definitions) for a Table widget.
-	// Headers are {column, width, justify, vjustify, sort, text}; bodies are
-	// {column, bitmap_draw, scale_bitmap, bitmap_flags, justify, vjustify};
-	// value->image SUBST rows are {column, value, is_file, file}. Getters return
-	// empty / no-op for a non-table id.
+	// Headers are {has_column,column,has_width,width,justify,vjustify,sort,type,
+	// text}; bodies are {has_column,column,bitmap_draw,scale_bitmap,custom_draw,
+	// bitmap_flags,justify,vjustify}; value->image SUBST rows are
+	// {has_column,column,value,is_file,file}. Presence flags distinguish an
+	// omitted attribute from an explicitly-authored zero. Getters return empty /
+	// no-op for a non-table id.
 	int get_table_column_count(int p_id) const;
 	void set_table_column_count(int p_id, int p_count);
 	int get_table_column_spacing(int p_id) const;
@@ -295,6 +312,15 @@ public:
 	void delete_widget(int p_id);
 	int add_screen(const String &p_name);
 	void delete_screen(int p_screen_id);
+	// Lossless subtree clipboard. The payload is a self-contained MNU document,
+	// so editor copy/cut/paste preserves every nested authored field while pasted
+	// nodes receive fresh stable ids.
+	PackedByteArray capture_widget_subtree(int p_id) const;
+	int insert_widget_subtree(int p_parent_id, const PackedByteArray &p_payload,
+			int p_index = -1, const Vector2i &p_offset = Vector2i());
+	bool move_widget_to_index(int p_id, int p_index);
+	int duplicate_screen(int p_screen_id, const String &p_name);
+	bool move_screen_to_index(int p_screen_id, int p_index);
 
 	// --- Snapshot + reparent (M8: structural undo) ---
 	// capture_state returns an opaque state {mnu, ids, next_id, menu_size};

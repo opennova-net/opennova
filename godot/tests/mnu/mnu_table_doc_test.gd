@@ -40,7 +40,11 @@ func test_table_columns_parsed() -> void:
 
 	var headers := doc.get_table_headers(table)
 	assert_eq(headers.size(), 3, "3 header definitions")
-	assert_eq(headers[0], {"column": 0, "width": 120, "justify": "LEFT", "vjustify": "", "sort": "A", "text": "Name"},
+	assert_eq(headers[0], {
+		"column": 0, "has_column": true,
+		"width": 120, "has_width": true,
+		"justify": "LEFT", "vjustify": "", "sort": "A", "type": "", "text": "Name",
+	},
 		"Name header")
 	assert_eq(int(headers[2]["width"]), 60, "Ping header width")
 	assert_eq(String(headers[2]["justify"]), "RIGHT", "Ping header justify")
@@ -50,6 +54,7 @@ func test_table_columns_parsed() -> void:
 	assert_eq(int(bodies[0]["column"]), 2, "body targets column 2")
 	assert_true(bool(bodies[0]["bitmap_draw"]), "body draws a bitmap")
 	assert_eq(String(bodies[0]["bitmap_flags"]), "STANDARD_TRANSPARENT", "body bitmap flags")
+	assert_false(bool(bodies[0]["custom_draw"]), "body exposes the preserved custom-draw flag")
 
 
 func test_table_accessors_non_table_widget() -> void:
@@ -96,3 +101,40 @@ func test_table_body_add_remove() -> void:
 	assert_eq(bodies.size(), 1, "body removed")
 	assert_eq(int(bodies[0]["column"]), 1, "remaining body reindexed")
 	assert_true(bool(bodies[0]["scale_bitmap"]), "remaining body keeps its flag")
+
+
+func test_table_compound_edit_preserves_header_type_and_body_custom_draw() -> void:
+	var src := """
+<SCREEN><NAME>MAIN</NAME><WINDOW type="window" name="MAIN">
+  <WINDOW type="table" name="TypedTable">
+    <COLUMN count="1">
+      <HEADER column="0" width="100" type="id">MM_NAME</HEADER>
+      <BODY column="0" CUSTOM_DRAW justify="LEFT"/>
+    </COLUMN>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK, "typed table parses")
+	var table := _find_widget(doc, "TypedTable")
+	var headers := doc.get_table_headers(table)
+	var bodies := doc.get_table_bodies(table)
+	assert_eq(String(headers[0]["type"]), "id", "header type crosses the document seam")
+	assert_true(bool(bodies[0]["custom_draw"]), "body custom_draw crosses the document seam")
+
+	# This is exactly how the GUI and MCP edit one cell: read the complete row,
+	# replace an unrelated key, then write the row back.
+	var header: Dictionary = headers[0]
+	header["width"] = 140
+	doc.set_table_header(table, 0, header)
+	var body: Dictionary = bodies[0]
+	body["justify"] = "RIGHT"
+	doc.set_table_body(table, 0, body)
+
+	var doc2 := NovaMnuDocument.new()
+	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited typed table re-parses")
+	var table2 := _find_widget(doc2, "TypedTable")
+	assert_eq(String(doc2.get_table_headers(table2)[0]["type"]), "id",
+		"unrelated header edit does not clear type")
+	assert_true(bool(doc2.get_table_bodies(table2)[0]["custom_draw"]),
+		"unrelated body edit does not clear custom_draw")

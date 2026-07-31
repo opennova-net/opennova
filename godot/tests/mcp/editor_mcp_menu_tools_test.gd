@@ -10,6 +10,7 @@ const MnuWorkspaceScript := preload("res://modtools/mnu/mnu_workspace.gd")
 
 const ALL_WIDGETS := "res://../fixtures/mnu/all_widgets.mnu"
 const JO_OPTIONS := "res://../fixtures/mnu/jo_options.mnu"
+const MENU_STYLE := "res://../fixtures/mns/menu_style.mns"
 const SAVE_DIR := "user://mcp_menu_tools_test"
 
 var ws: RefCounted
@@ -77,7 +78,7 @@ func _call(name: String, args := {}) -> McpToolResult:
 
 
 func _resource() -> NovaMnuDocument:
-	return ws.get("_document").get("resource")
+	return ws.get_menu_resource()
 
 
 func test_headline_authoring_and_preview_loop() -> void:
@@ -109,6 +110,10 @@ func test_headline_authoring_and_preview_loop() -> void:
 	# Play: press the button, land on SECOND, pop back.
 	var on: McpToolResult = await _call("preview_menu", { "op": "on" })
 	assert_false(on.is_error, str(on.content))
+	var live_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(button_id)
+	assert_true(live_state.visible,
+		"new button is live on the starting Screen")
 	var pressed: McpToolResult = await _call("preview_menu", { "op": "press", "widget": "GotoSecond" })
 	assert_false(pressed.is_error, str(pressed.content))
 	assert_eq(String(pressed.structured["visible_screen"]), "SECOND", "Pressing the button navigates.")
@@ -217,6 +222,48 @@ func test_action_validation_and_sounds() -> void:
 	assert_eq(String(sounds.structured["sounds"][0]["trigger"]), "MOUSE_OVER")
 
 
+func test_all_action_types_and_fields_cross_the_mcp_seam() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
+		{"parent": first, "type": "BUTTON", "rect": [0, 0, 80, 24], "name": "Actions"},
+	]})
+	var id := int(added.structured["ids"][0])
+	var types := [
+		"screen", "window", "url", "form_post",
+		"glb_load", "glb_loadandping", "glb_filter", "glb_filter_num",
+		"glb_ping", "glb_join", "tab", "pop_screen", "appmsg",
+		"lan_search", "lan_join", "mnx",
+	]
+	var actions: Array = []
+	for type in types:
+		var row := {
+			"type": type, "state": "", "file": "", "source": "profile",
+			"field": "callsign", "test": "EQ", "target": "payload",
+			"has_target_form": true, "target_form": 0,
+			"external_browser": type == "url", "toggle": true,
+		}
+		if type == "screen":
+			row["target"] = first
+		elif type == "window":
+			row["target"] = "Actions"
+			row["state"] = "SHOW"
+		actions.append(row)
+	var wired: McpToolResult = await _call("set_widget_actions",
+		{"id": id, "actions": actions})
+	assert_false(wired.is_error, str(wired.content))
+	var saved: Array = wired.structured["actions"]
+	assert_eq(saved.size(), 16)
+	for i in range(types.size()):
+		assert_eq(String(saved[i]["type"]), types[i])
+	assert_eq(String(saved[-1]["source"]), "profile")
+	assert_eq(String(saved[-1]["field"]), "callsign")
+	assert_eq(String(saved[-1]["test"]), "EQ")
+	assert_true(bool(saved[-1]["has_target_form"]))
+	assert_eq(int(saved[-1]["target_form"]), 0)
+	assert_true(bool(saved[-1]["toggle"]))
+	assert_true(bool(saved[2]["external_browser"]))
+
+
 func test_items_and_table_ops() -> void:
 	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
 	var added: McpToolResult = await _call("add_menu_widgets", { "rows": [
@@ -246,6 +293,122 @@ func test_items_and_table_ops() -> void:
 	assert_eq((header.structured["headers"] as Array).size(), 1)
 
 
+func test_deep_authoring_supports_glb_table_lan_list_and_both_combo_items() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
+		{"parent": first, "type": "GLB_TABLE", "rect": [10, 10, 300, 100], "name": "GlobalGrid"},
+		{"parent": first, "type": "LAN_LIST", "rect": [10, 120, 300, 100], "name": "LanRows"},
+		{"parent": first, "type": "COMBOBOX", "rect": [10, 230, 200, 30], "name": "Mode"},
+	]})
+	assert_false(added.is_error, str(added.content))
+	var grid := int(added.structured["ids"][0])
+	var lan := int(added.structured["ids"][1])
+	var combo := int(added.structured["ids"][2])
+	var grid_edit: McpToolResult = await _call("edit_menu_widget", {"set": {
+		"id": grid, "props": {"authoring": {
+			"items": {"present": true, "appearances": [
+				{"state": "default", "type": "outline", "value": "112233"},
+				{"state": "selected", "type": "color", "value": "445566"},
+			]},
+			"table": {
+				"has_count": true, "count": 2, "has_spacing": true, "spacing": 3,
+				"headers": [{"has_column": true, "column": 0,
+					"has_width": true, "width": 120, "text": "Server"}],
+			},
+		}},
+	}})
+	assert_false(grid_edit.is_error, str(grid_edit.content))
+	var lan_edit: McpToolResult = await _call("edit_menu_widget", {"set": {
+		"id": lan, "props": {"authoring": {"items": {
+			"present": true, "rows": [{"type": "", "value": "1", "text": "LAN"}],
+		}}},
+	}})
+	assert_false(lan_edit.is_error, str(lan_edit.content))
+	var combo_edit: McpToolResult = await _call("edit_menu_widget", {"set": {
+		"id": combo, "props": {"authoring": {
+			"items": {"present": true,
+				"rows": [{"type": "", "value": "closed", "text": "Closed"}]},
+			"list_box": {"present": true, "items": {"present": true,
+				"rows": [{"type": "", "value": "popup", "text": "Popup"}]}},
+		}},
+	}})
+	assert_false(combo_edit.is_error, str(combo_edit.content))
+
+	var grid_card: McpToolResult = await _call("get_menu", {"widget": grid})
+	assert_eq(int(grid_card.structured["authoring"]["table"]["count"]), 2)
+	assert_eq(String(grid_card.structured["authoring"]["table"]["headers"][0]["text"]),
+		"Server")
+	var lan_card: McpToolResult = await _call("get_menu", {"widget": lan})
+	assert_eq(String(lan_card.structured["authoring"]["items"]["rows"][0]["text"]), "LAN")
+	var combo_card: McpToolResult = await _call("get_menu", {"widget": combo})
+	assert_eq(String(combo_card.structured["authoring"]["items"]["rows"][0]["text"]),
+		"Closed")
+	assert_eq(String(combo_card.structured["authoring"]["list_box"]["items"]["rows"][0]["text"]),
+		"Popup")
+	var glb_item: McpToolResult = await _call("edit_widget_items",
+		{"id": grid, "op": "item_add", "row": {"text": "Row"}})
+	assert_false(glb_item.is_error, "GLB_TABLE supports item rows")
+	var lan_item: McpToolResult = await _call("edit_widget_items",
+		{"id": lan, "op": "item_add", "row": {"text": "LAN two"}})
+	assert_false(lan_item.is_error, "LAN_LIST supports item rows")
+
+
+func test_authoring_validation_rejects_unknown_nested_keys_without_partial_edit() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
+		{"parent": first, "type": "BUTTON", "rect": [0, 0, 80, 24], "name": "Atomic"},
+	]})
+	var id := int(added.structured["ids"][0])
+	var editor: Object = ws.get_editor_document()
+	editor.restore_history({})
+	for malformed in [
+		{"name": "PartiallyMutated", "authoring": {"items": {"rowz": []}}},
+		{"authoring": {"table": {"spcaing": 4}}},
+		{"authoring": {"list_box": {"items": {"rows": ["not an object"]}}}},
+		{"authoring": {"hotkeys": "not an array"}},
+	]:
+		var refused: McpToolResult = await _call("edit_menu_widget",
+			{"set": {"id": id, "props": malformed}})
+		assert_true(refused.is_error, "malformed deep patches fail")
+		assert_eq(String(_resource().get_widget_name(id)), "Atomic",
+			"validation happens before the first scalar mutation")
+		assert_false(editor.can_undo(),
+			"rejected patches create no undo entry")
+	var noop: McpToolResult = await _call("edit_menu_widget", {"set": {
+		"id": id, "props": {"authoring": {"name": "Atomic"}},
+	}})
+	assert_false(noop.is_error)
+	assert_false(editor.can_undo(),
+		"idempotent authoring patches are strict no-ops")
+
+
+func test_unsupported_item_ops_and_atomic_table_sizing() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
+		{"parent": first, "type": "BUTTON", "rect": [0, 0, 80, 24], "name": "Plain"},
+		{"parent": first, "type": "TABLE", "rect": [0, 40, 200, 100], "name": "Grid"},
+	]})
+	var button := int(added.structured["ids"][0])
+	var table := int(added.structured["ids"][1])
+	var refused: McpToolResult = await _call("edit_widget_items",
+		{"id": button, "op": "item_add", "row": {"text": "Nope"}})
+	assert_true(refused.is_error, "BUTTON does not silently accept ITEMS")
+	var editor: Object = ws.get_editor_document()
+	editor.restore_history({})
+	var sized: McpToolResult = await _call("edit_widget_items",
+		{"id": table, "op": "set_table", "count": 4, "spacing": 7})
+	assert_false(sized.is_error, str(sized.content))
+	assert_true(editor.can_undo(),
+		"count plus spacing share one snapshot undo")
+	editor.undo()
+	assert_false(editor.can_undo(), "the table edit contributed exactly one undo entry")
+	var table_state: Dictionary = _resource().get_widget_authoring_state(table)["table"]
+	assert_false(bool(table_state["has_count"]))
+	assert_false(bool(table_state["has_spacing"]))
+	assert_eq(int(table_state["count"]), 0)
+	assert_eq(int(table_state["spacing"]), 0)
+
+
 func test_screen_ops_and_rules() -> void:
 	var last_delete: McpToolResult = await _call("edit_menu_screen", { "delete": String(_resource().get_screen_name(_resource().get_screen_ids()[0])) })
 	assert_true(last_delete.is_error, "The last Screen is protected.")
@@ -254,6 +417,9 @@ func test_screen_ops_and_rules() -> void:
 	assert_true(dup.is_error, "Duplicate Screen names are refused.")
 	var shown: McpToolResult = await _call("edit_menu_screen", { "show": "OPTIONS" })
 	assert_eq(String(shown.structured["visible_screen"]), "OPTIONS")
+	var filtered: McpToolResult = await _call("get_menu", {"screen": "options"})
+	assert_false(filtered.is_error, "Screen lookup is case-insensitive")
+	assert_eq(String(filtered.structured["screens"][0]["name"]), "OPTIONS")
 	var renamed: McpToolResult = await _call("edit_menu_screen", { "set": { "screen": "OPTIONS", "props": { "name": "SETTINGS", "music_var": 3 } } })
 	assert_false(renamed.is_error, str(renamed.content))
 	var sid := _resource().get_screen_ids()[1]
@@ -265,7 +431,10 @@ func test_screen_ops_and_rules() -> void:
 
 
 func test_interactive_preview_locks_editing() -> void:
-	await _call("preview_menu", { "op": "on" })
+	var on: McpToolResult = await _call("preview_menu", { "op": "on" })
+	assert_true(ws.get_editor_document().is_interactive(),
+		"preview_menu uses the editor-level interaction lock")
+	assert_true(bool(on.structured["interactive"]))
 	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
 	for spec in [
 		["add_menu_widgets", { "rows": [{ "parent": first, "type": "BUTTON", "rect": [0, 0, 10, 10] }] }],
@@ -278,9 +447,59 @@ func test_interactive_preview_locks_editing() -> void:
 		var result: McpToolResult = await _call(spec[0], spec[1])
 		assert_true(result.is_error, "%s is locked while the preview plays" % spec[0])
 		assert_true(String(result.content[0]["text"]).contains("preview_menu"), "%s names the fixing tool" % spec[0])
-	await _call("preview_menu", { "op": "off" })
+	var off: McpToolResult = await _call("preview_menu", { "op": "off" })
+	assert_false(ws.get_editor_document().is_interactive())
+	assert_false(bool(off.structured["interactive"]))
 	var unlocked: McpToolResult = await _call("edit_menu_screen", { "add": { "name": "X" } })
 	assert_false(unlocked.is_error, "off unlocks editing")
+
+
+func test_preview_radio_dispatches_actions_and_disabled_consumes_without_activation() -> void:
+	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
+	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
+		{"parent": first, "type": "WINDOW", "rect": [200, 40, 120, 80],
+			"name": "Panel", "flags": NovaMnuDocument.FLAG_HIDDEN},
+		{"parent": first, "type": "RADIO", "rect": [20, 40, 24, 24],
+			"name": "RadioShow", "group": 1, "appearances": [
+				{"state": "default"}, {"state": "selected"},
+			]},
+	]})
+	assert_false(added.is_error, str(added.content))
+	var panel := int(added.structured["ids"][0])
+	var radio := int(added.structured["ids"][1])
+	var wired: McpToolResult = await _call("set_widget_actions", {"id": radio,
+		"actions": [{"type": "window", "state": "SHOW", "target": "Panel"}]})
+	assert_false(wired.is_error, str(wired.content))
+	await _call("preview_menu", {"op": "on"})
+	var pressed: McpToolResult = await _call("preview_menu",
+		{"op": "press", "widget": "RadioShow"})
+	assert_false(pressed.is_error, str(pressed.content))
+	assert_eq(String(pressed.structured["actions"][0]["type"]), "window",
+		"RADIO activation reports and dispatches its authored action")
+	var radio_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(radio)
+	var panel_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(panel)
+	assert_true(radio_state.pressed,
+		"radio toggles before pressed is dispatched")
+	assert_true(panel_state.visible,
+		"the Window SHOW action reached the live menu")
+	await _call("preview_menu", {"op": "off"})
+
+	await _call("edit_menu_widget", {"set": {"id": panel,
+		"props": {"flags": NovaMnuDocument.FLAG_HIDDEN}}})
+	await _call("edit_menu_widget", {"set": {"id": radio,
+		"props": {"flags": NovaMnuDocument.FLAG_DISABLED}}})
+	await _call("preview_menu", {"op": "on"})
+	var disabled: McpToolResult = await _call("preview_menu",
+		{"op": "press", "widget": radio})
+	assert_false(disabled.is_error, "a disabled visible target consumes the press")
+	assert_true(bool(disabled.structured["disabled"]))
+	assert_false(bool(disabled.structured["activated"]))
+	panel_state = ws.get_editor_document().get_preview_widget_state(panel)
+	assert_false(panel_state.visible,
+		"disabled radio dispatches no SHOW action")
+	await _call("preview_menu", {"op": "off"})
 
 
 func test_menu_tabs_and_per_tab_undo_isolation() -> void:
@@ -363,6 +582,22 @@ func test_get_menu_on_all_widgets_fixture() -> void:
 	assert_gt((menu.structured["screens"] as Array).size(), 0)
 	var first_tree: Dictionary = menu.structured["screens"][0]["tree"]
 	assert_true(first_tree.has("children"), "The fixture tree is populated.")
+
+
+func test_menu_tools_stay_on_the_menu_editor_after_opening_styles() -> void:
+	assert_eq(int(ws.open_file(_abs(ALL_WIDGETS))), OK)
+	assert_eq(int(ws.open_file(_abs(MENU_STYLE))), OK)
+	await get_tree().process_frame
+	var menu: McpToolResult = await _call("get_menu")
+	assert_false(menu.is_error, str(menu.content))
+	assert_eq(String(menu.structured["path"]), _abs(ALL_WIDGETS))
+	assert_gt((menu.structured["screens"] as Array).size(), 0)
+	assert_ne(ws.get_editor_document(), ws.get_menu_editor(),
+		"the successful MCP query really ran while the Styles editor was active")
+
+	assert_eq(int(ws.open_file(_abs(ALL_WIDGETS))), OK)
+	assert_eq(ws.get_editor_document(), ws.get_menu_editor(),
+		"opening an existing MNU tab returns shell undo and commands to the menu editor")
 
 
 func test_table_ops_refuse_non_table_widgets() -> void:

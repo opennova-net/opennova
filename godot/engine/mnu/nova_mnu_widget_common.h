@@ -1,5 +1,7 @@
 #pragma once
 
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 namespace godot {
@@ -10,13 +12,20 @@ namespace godot {
 // (rather than bound Resources) matches this repo's "behavior in C++ subclasses"
 // decision and avoids per-widget Resource churn.
 struct MnuActionData {
-	// Lowercased action verb as it appears in the MNU markup:
-	// "screen" (navigate, optionally cross-file), "window" (show/hide/toggle a
-	// named window), "pop_screen"/"pop" (back), "quit"/"quit_game".
+	// Lowercased retail ACTION verb as it appears in the MNU markup. The generic
+	// menu owns SCREEN/WINDOW/URL/TAB/POP_SCREEN; form, GLB, LAN, APPMSG, and MNX
+	// payloads cross the explicit host_action_requested boundary.
 	String type;
 	String target; // screen or window name
 	String file; // external .mnu file (type=="screen" cross-menu jump)
-	String window_state; // "show", "hide", "toggle" (type=="window")
+	String window_state; // "show", "hide", "enable", "disable" (type=="window")
+	String source; // Host-owned GLB/LAN/form source name
+	String field; // Host-owned form/filter field name
+	bool has_target_form = false;
+	int target_form = 0;
+	bool external_browser = false; // URL EXTERNAL_BROWSER flag
+	bool toggle = false; // Retail TOGGLE flag: invert the state-selected property
+	String test; // Host-owned comparison token (LT/LE/EQ/GE/GT)
 };
 
 // Per-state widget sound slots.
@@ -59,6 +68,29 @@ struct MnuWidgetSounds {
 	bool has(int p_state) const {
 		return p_state >= 1 && p_state <= 3 && (mask & (1 << p_state)) != 0;
 	}
+};
+
+// Resolved authored scrollbar presentation shared by list, combo, multiline,
+// and table hosts. Geometry is parent-relative in MNU design space.
+struct MnuScrollbarStyle {
+	bool present = false;
+	bool has_rect = false;
+	Rect2 rect;
+	int edge_pad = 0;
+	Ref<Texture2D> track;
+	Ref<Texture2D> shuttle;
+	Ref<Texture2D> shuttle_hover;
+	Ref<Texture2D> shuttle_pressed;
+	Ref<Texture2D> shuttle_disabled;
+	Ref<Texture2D> up;
+	Ref<Texture2D> up_hover;
+	Ref<Texture2D> up_pressed;
+	Ref<Texture2D> up_disabled;
+	Ref<Texture2D> down;
+	Ref<Texture2D> down_hover;
+	Ref<Texture2D> down_pressed;
+	Ref<Texture2D> down_disabled;
+	MnuWidgetSounds sounds;
 };
 
 } // namespace godot

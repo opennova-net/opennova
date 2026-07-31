@@ -40,6 +40,7 @@ var _suppress_refresh := false
 # Cached for the shell's per-frame status poll.
 var _variable_count := 0
 var _diagnostic_count := 0
+var _authoring_enabled := true
 
 
 func _ready() -> void:
@@ -123,6 +124,24 @@ func _build_toolbar(parent: Control) -> void:
 	bar.add_child(_btn_source)
 
 
+func set_authoring_enabled(enabled: bool) -> void:
+	_authoring_enabled = enabled
+	if _btn_add != null:
+		_btn_add.disabled = not enabled
+	if _btn_remove != null:
+		_btn_remove.disabled = not enabled
+	for root in [_table, _source_view]:
+		if root == null:
+			continue
+		for node in root.find_children("*", "Control", true, false):
+			if node is BaseButton:
+				(node as BaseButton).disabled = not enabled
+			elif node is LineEdit:
+				(node as LineEdit).editable = enabled
+			elif node is TextEdit:
+				(node as TextEdit).editable = enabled
+
+
 func _show_source_view(on: bool) -> void:
 	if _source_view == null or _table_scroll == null:
 		return
@@ -189,6 +208,8 @@ func _refresh_all() -> void:
 		select_variable(String((entries[0] as Dictionary).get("name", "")))
 	else:
 		variable_selected.emit("")
+	if not _authoring_enabled:
+		set_authoring_enabled.call_deferred(false)
 
 
 func _refresh_views(keep_selection: String) -> void:
@@ -200,6 +221,8 @@ func _refresh_views(keep_selection: String) -> void:
 	if _source_view != null:
 		_source_view.refresh_from_resource(false)
 	_recount(sheet)
+	if not _authoring_enabled:
+		set_authoring_enabled.call_deferred(false)
 
 
 func _recount(sheet: MnsStyleSheet) -> void:
@@ -248,8 +271,11 @@ func select_variable(name: String) -> bool:
 # The single mutation point. Ops:
 #   {op:"set_value", name, value}        {op:"rename", name, new_name}
 #   {op:"set_comment", name, comment}    {op:"add", name, value, after_name?}
-#   {op:"remove", name}                  {op:"source", text}
+#   {op:"remove", name}                  {op:"move", name, to_entry_index}
+#   {op:"source", text}
 func apply_edit(edit: Dictionary) -> void:
+	if not _authoring_enabled:
+		return
 	var sheet := _sheet()
 	if sheet == null:
 		return
@@ -272,8 +298,11 @@ func apply_edit(edit: Dictionary) -> void:
 			if sheet.add_variable(name, String(edit.get("value", "")), String(edit.get("after_name", ""))):
 				sel_after = name
 		"remove":
-			sheet.remove_variable(name)
-			sel_after = ""
+			if sheet.remove_variable(name):
+				sel_after = ""
+		"move":
+			if sheet.move_variable(name, int(edit.get("to_entry_index", -1))):
+				sel_after = name
 		"source":
 			sheet.set_source_text(String(edit.get("text", "")))
 			if not sel_before.is_empty() and not sheet.has_variable(sel_before):
@@ -308,14 +337,16 @@ func apply_edit(edit: Dictionary) -> void:
 
 
 func can_undo() -> bool:
-	return not _undo_stack.is_empty()
+	return _authoring_enabled and not _undo_stack.is_empty()
 
 
 func can_redo() -> bool:
-	return not _redo_stack.is_empty()
+	return _authoring_enabled and not _redo_stack.is_empty()
 
 
 func undo() -> void:
+	if not _authoring_enabled:
+		return
 	if _undo_stack.is_empty():
 		return
 	var op: Dictionary = _undo_stack.pop_back()
@@ -324,6 +355,8 @@ func undo() -> void:
 
 
 func redo() -> void:
+	if not _authoring_enabled:
+		return
 	if _redo_stack.is_empty():
 		return
 	var op: Dictionary = _redo_stack.pop_back()

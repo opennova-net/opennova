@@ -130,6 +130,76 @@ MnuWidgetSounds make_widget_sounds(const std::vector<mnu::Sound> &sounds) {
 	return out;
 }
 
+Ref<Texture2D> get_texture(MnuBuildContext &ctx,
+		const std::vector<mnu::Appearance> &apps, const std::string &state);
+
+template <typename Scrollbar>
+MnuScrollbarStyle make_scrollbar_style(MnuBuildContext &ctx, const Scrollbar &scrollbar,
+		int p_edge_pad = 0) {
+	MnuScrollbarStyle style;
+	style.present = scrollbar.present;
+	style.edge_pad = MAX(p_edge_pad, 0);
+	if (!scrollbar.present) {
+		return style;
+	}
+	const mnu::Position &position = scrollbar.position;
+	if (position.has_left && position.has_top) {
+		float width = position.has_right ? (float)(position.right - position.left) : 0.0f;
+		float height = position.has_bottom ? (float)(position.bottom - position.top) : 0.0f;
+		style.rect = Rect2((float)position.left, (float)position.top, width, height);
+		style.has_rect = true;
+	}
+	style.track = get_texture(ctx, scrollbar.track, "default");
+	style.shuttle = get_texture(ctx, scrollbar.shuttle, "default");
+	style.shuttle_hover = get_texture(ctx, scrollbar.shuttle, "mouseover");
+	style.shuttle_pressed = get_texture(ctx, scrollbar.shuttle, "selected");
+	style.shuttle_disabled = get_texture(ctx, scrollbar.shuttle, "disabled");
+	style.up = get_texture(ctx, scrollbar.scrollup, "default");
+	style.up_hover = get_texture(ctx, scrollbar.scrollup, "mouseover");
+	style.up_pressed = get_texture(ctx, scrollbar.scrollup, "selected");
+	style.up_disabled = get_texture(ctx, scrollbar.scrollup, "disabled");
+	style.down = get_texture(ctx, scrollbar.scrolldown, "default");
+	style.down_hover = get_texture(ctx, scrollbar.scrolldown, "mouseover");
+	style.down_pressed = get_texture(ctx, scrollbar.scrolldown, "selected");
+	style.down_disabled = get_texture(ctx, scrollbar.scrolldown, "disabled");
+	style.sounds = make_widget_sounds(scrollbar.sounds);
+	return style;
+}
+
+NovaMnuScroll *make_authored_scroll(MnuBuildContext &ctx,
+		const MnuScrollbarStyle &style, bool p_vertical = true) {
+	if (!style.present) {
+		return nullptr;
+	}
+	NovaMnuScroll *scroll = memnew(NovaMnuScroll);
+	scroll->set_name("Scrollbar");
+	scroll->set_menu(ctx.owner);
+	scroll->set_edit_mode(ctx.inert());
+	scroll->set_orientation_vertical(p_vertical);
+	scroll->set_track_texture(style.track);
+	scroll->set_shuttle_state_textures(style.shuttle, style.shuttle_hover,
+			style.shuttle_pressed, style.shuttle_disabled);
+	scroll->set_arrow_state_textures(style.up, style.up_hover, style.up_pressed,
+			style.up_disabled, style.down, style.down_hover, style.down_pressed,
+			style.down_disabled);
+	scroll->set_sounds(style.sounds);
+	if (style.up.is_valid()) {
+		scroll->set_arrow_extent(p_vertical ? style.up->get_height() : style.up->get_width());
+	}
+	if (style.has_rect) {
+		Rect2 rect = style.rect;
+		if (rect.size.x <= 0.0f && style.up.is_valid()) {
+			rect.size.x = style.up->get_width();
+		}
+		if (rect.size.y <= 0.0f && style.up.is_valid() && !p_vertical) {
+			rect.size.y = style.up->get_height();
+		}
+		scroll->set_position(rect.position);
+		scroll->set_size(rect.size);
+	}
+	return scroll;
+}
+
 // Collapse an MNU <ACTION> into the widget's plain-data action list (verb +
 // window_state lowercased to match dispatch_action's comparisons).
 MnuActionData make_action(const mnu::Action &act) {
@@ -138,6 +208,13 @@ MnuActionData make_action(const mnu::Action &act) {
 	data.target = to_gd(act.target);
 	data.file = to_gd(act.file);
 	data.window_state = to_gd(act.state).to_lower();
+	data.source = to_gd(act.source);
+	data.field = to_gd(act.field);
+	data.has_target_form = act.has_target_form;
+	data.target_form = act.target_form;
+	data.external_browser = act.external_browser;
+	data.toggle = act.toggle;
+	data.test = to_gd(act.test);
 	return data;
 }
 
@@ -204,7 +281,8 @@ Ref<Texture2D> get_texture(MnuBuildContext &ctx, const std::vector<mnu::Appearan
 	for (const auto &app : apps) {
 		if (app.state == state && app.type == "image" && !app.value.empty()) {
 			Ref<Texture2D> tex = resolve_texture(ctx, app.value);
-			if (tex.is_valid() && app.map_state >= 0 && app.height > 0) {
+			if (tex.is_valid() && app.has_map_state && app.map_state >= 0 &&
+					app.has_height && app.height > 0) {
 				Ref<AtlasTexture> atlas;
 				atlas.instantiate();
 				atlas->set_atlas(tex);
@@ -400,7 +478,7 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 	if (stencil.is_valid()) {
 		// SIZE is the authored STENCIL attr; a canonical stencil is a 4x4 tile
 		// grid, so width/4 recovers the tile size when it is not authored.
-		int size = frame.stencil_size;
+		int size = frame.has_stencil_size ? frame.stencil_size : 0;
 		if (size <= 0) {
 			size = (int)stencil->get_width() / 4;
 		}
@@ -446,7 +524,7 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 // (falling back to the raw id when unavailable), then the {hot} marker is
 // stripped. Literal strings are returned as-is (minus any marker).
 String resolve_text(MnuBuildContext &ctx, const mnu::String &sd) {
-	if (sd.value.empty()) {
+	if (!sd.present || sd.value.empty()) {
 		return String();
 	}
 	if (iequals(sd.type, "id") && ctx.text != nullptr) {
@@ -519,7 +597,9 @@ void measure_appearance_extents(MnuBuildContext &ctx, const std::vector<mnu::App
 			continue;
 		}
 		r_max_w = MAX(r_max_w, (int)tex->get_width());
-		const int h = app.height > 0 ? app.height : (int)tex->get_height();
+		const int h = app.has_height && app.height > 0
+				? app.height
+				: (int)tex->get_height();
 		r_max_h = MAX(r_max_h, h);
 	}
 }
@@ -574,7 +654,7 @@ void apply_position(MnuBuildContext &ctx, Control *node, const mnu::Window &w,
 	// align to (left edge / centre / right edge; top / centre / bottom)
 	// [orig: adjust_rect_to_text_size @ 0x6575f0].
 	if ((right <= left || bottom <= top) && is_text_sized(w.type) &&
-			!w.string_data.value.empty()) {
+			w.string_data.present && !w.string_data.value.empty()) {
 		const String text = resolve_text(ctx, w.string_data);
 		if (!text.is_empty()) {
 			int fixed = 0;
@@ -662,7 +742,7 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 		if (w.checked) {
 			btn->set_pressed(true);
 		}
-		if (w.group > 0) {
+		if (w.has_group && w.group > 0) {
 			auto it = groups.find(w.group);
 			if (it == groups.end()) {
 				Ref<ButtonGroup> bg;
@@ -693,11 +773,11 @@ Control *build_button(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fon
 		btn->set_font_colors(normal_c, hover_c);
 	}
 
-	if (ctx.inert()) {
+	if (ctx.inert() || w.disabled) {
 		btn->set_disabled(true); // inert while authoring
 	}
 
-	if (!w.string_data.value.empty()) {
+	if (w.string_data.present && !w.string_data.value.empty()) {
 		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
 		if (iequals(w.string_data.type, "id")) {
@@ -775,11 +855,11 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 		check->set_underline_color(underline_c);
 	}
 
-	if (ctx.inert()) {
+	if (ctx.inert() || w.disabled) {
 		check->set_disabled(true);
 	}
 
-	if (!w.string_data.value.empty()) {
+	if (w.string_data.present && !w.string_data.value.empty()) {
 		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
 		if (iequals(w.string_data.type, "id")) {
@@ -788,6 +868,7 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 		lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		apply_label_font(ctx, lbl, font);
 
+		const String justify = to_gd(w.string_data.justify).to_upper();
 		const String vjustify = to_gd(w.string_data.vjustify).to_upper();
 		if (vjustify == "TOP") {
 			lbl->set_vertical_alignment(VERTICAL_ALIGNMENT_TOP);
@@ -796,17 +877,31 @@ Control *build_checkbox(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 		} else {
 			lbl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
 		}
-		lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+		if (justify == "RIGHT") {
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
+		} else if (justify == "CENTER") {
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+		} else {
+			lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+		}
 		lbl->set_text(resolve_text(ctx, w.string_data));
 
-		int checkbox_width = 24;
-		int checkbox_height = 24;
-		if (tex_normal.is_valid()) {
-			checkbox_width = tex_normal->get_width();
-			checkbox_height = tex_normal->get_height();
+		if (w.as_button) {
+			// AS_BUTTON changes checkbox label layout only: retail leaves the
+			// label inside the full widget rect and honors its authored justify.
+			// Toggle/event behavior and selected appearance remain checkbox-like.
+			// [orig: CCheckWnd_DrawLabel @ 0x64aa20; flag parsed @ 0x64ad90]
+			lbl->set_anchors_preset(Control::PRESET_FULL_RECT);
+		} else {
+			int checkbox_width = 24;
+			int checkbox_height = 24;
+			if (tex_normal.is_valid()) {
+				checkbox_width = tex_normal->get_width();
+				checkbox_height = tex_normal->get_height();
+			}
+			lbl->set_position(Vector2(checkbox_width + 2, 0));
+			lbl->set_size(Vector2(300, checkbox_height));
 		}
-		lbl->set_position(Vector2(checkbox_width + 4, 0));
-		lbl->set_size(Vector2(300, checkbox_height));
 		check->add_child(lbl);
 	}
 	return check;
@@ -861,7 +956,7 @@ Control *build_container(MnuBuildContext &ctx, const mnu::Window &w, const mnu::
 		}
 	}
 
-	if (!w.string_data.value.empty()) {
+	if (w.string_data.present && !w.string_data.value.empty()) {
 		NovaMnuLabel *lbl = memnew(NovaMnuLabel);
 		lbl->set_name("Label");
 		if (iequals(w.string_data.type, "id")) {
@@ -942,6 +1037,30 @@ Control *build_placeholder(MnuBuildContext &ctx, const mnu::Window &w, const mnu
 	return panel;
 }
 
+Control *build_host_owned_placeholder(MnuBuildContext &ctx, const mnu::Window &w,
+		const mnu::Font &font) {
+	Control *panel = build_placeholder(ctx, w, font);
+	panel->set_meta("mnu_host_owned", true);
+	panel->set_meta("mnu_host_widget_type",
+			to_gd(mnu::window_type_name(w.type)).to_upper());
+	if (ctx.edit_mode) {
+		// These retail factories exist, but their rows/content are populated by
+		// multiplayer or news hosts. The authoring canvas labels that boundary
+		// explicitly instead of fabricating representative server data.
+		Label *notice = memnew(Label);
+		notice->set_name("HostOwnedPreview");
+		notice->set_anchors_preset(Control::PRESET_FULL_RECT);
+		notice->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+		notice->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
+		notice->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		notice->set_text(to_gd(mnu::window_type_name(w.type)).to_upper() +
+				"\nHost-owned runtime data");
+		notice->add_theme_color_override("font_color", Color(0.72, 0.78, 0.86, 0.9));
+		panel->add_child(notice);
+	}
+	return panel;
+}
+
 // --- M9 interactive widgets -------------------------------------------------
 
 // Apply a widget's MNU font + default foreground colour to a themed input Control
@@ -959,8 +1078,34 @@ void apply_input_font(MnuBuildContext &ctx, Control *node, const mnu::Font &font
 		}
 	}
 	const std::string fg = resolve_color(ctx, font.default_fg);
+	const std::string disabled_fg = resolve_color(ctx, font.disabled_fg);
 	if (!fg.empty()) {
-		node->add_theme_color_override("font_color", parse_color(to_gd(fg)));
+		const Color normal = parse_color(to_gd(fg));
+		node->add_theme_color_override("font_color", normal);
+		node->add_theme_color_override("font_placeholder_color", normal);
+		node->add_theme_color_override("font_selected_color", normal);
+	}
+	const std::string selected_fg = resolve_color(ctx, font.selected_fg);
+	if (!selected_fg.empty()) {
+		node->add_theme_color_override(
+				"font_selected_color", parse_color(to_gd(selected_fg)));
+	}
+	if (!fg.empty() || !disabled_fg.empty()) {
+		const Color normal = !fg.empty()
+				? parse_color(to_gd(fg))
+				: node->get_theme_color("font_color");
+		if (NovaMnuEdit *edit = Object::cast_to<NovaMnuEdit>(node)) {
+			const Color disabled = !disabled_fg.empty()
+					? parse_color(to_gd(disabled_fg))
+					: edit->get_theme_color("font_uneditable_color");
+			edit->set_text_state_colors(normal, disabled);
+		} else if (NovaMnuMultilineEdit *edit =
+						   Object::cast_to<NovaMnuMultilineEdit>(node)) {
+			const Color disabled = !disabled_fg.empty()
+					? parse_color(to_gd(disabled_fg))
+					: edit->get_theme_color("font_readonly_color");
+			edit->set_text_state_colors(normal, disabled);
+		}
 	}
 }
 
@@ -972,6 +1117,12 @@ Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 	edit->set_edit_mode(ctx.edit_mode);
 
 	edit->set_sounds(make_widget_sounds(w.sounds));
+	edit->set_numeric_constraints(w.number, w.has_minval, w.minval,
+			w.has_maxval, w.maxval);
+	if (w.has_maxchar) {
+		edit->set_max_length(MAX(w.maxchar, 0));
+	}
+	edit->set_secret(w.password);
 
 	apply_input_font(ctx, edit, font);
 
@@ -991,16 +1142,89 @@ Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 	if (!text.is_empty()) {
 		edit->set_text(text);
 	}
-	if (!w.hotkey.empty()) {
-		edit->set_hotkey(to_gd(w.hotkey), w.hotkey_virtual);
+	if (!w.hotkeys.empty()) {
+		edit->set_hotkey(to_gd(w.hotkeys.front().value), w.hotkeys.front().virtual_key);
 	}
 
-	if (ctx.edit_mode) {
-		edit->set_editable(false);
-		if (text.is_empty()) {
-			edit->set_placeholder("Edit");
-		}
+	edit->set_runtime_enabled(!w.disabled);
+	if ((ctx.edit_mode || w.disabled) && text.is_empty()) {
+		edit->set_placeholder("Edit");
 	}
+	return edit;
+}
+
+// RADIOEDIT is a composite in the retail client: it owns a radio child and an
+// edit child, initially presenting the radio. Selecting an already-selected
+// radio swaps to the focused editor; focus loss copies the edited text back.
+// [orig: sub_65D210 @ 0x65d210; RadioEditWnd_handle_event @ 0x65d540]
+Control *build_radio_edit(MnuBuildContext &ctx, const mnu::Window &w,
+		const mnu::Font &font, ButtonGroupMap &groups) {
+	NovaMnuEdit *edit = Object::cast_to<NovaMnuEdit>(build_edit(ctx, w, font));
+	ERR_FAIL_NULL_V(edit, nullptr);
+
+	TextureButton *radio = memnew(TextureButton);
+	radio->set_name("Radio");
+	radio->set_anchors_preset(Control::PRESET_FULL_RECT);
+	radio->set_ignore_texture_size(true);
+	radio->set_stretch_mode(TextureButton::STRETCH_SCALE);
+	radio->set_focus_mode(Control::FOCUS_ALL);
+	radio->set_toggle_mode(true);
+	radio->set_pressed(w.checked);
+
+	const Ref<Texture2D> tex_normal = get_texture(ctx, w.appearances, "default");
+	const Ref<Texture2D> tex_hover = get_texture(ctx, w.appearances, "mouseover");
+	const Ref<Texture2D> tex_pressed = get_texture(ctx, w.appearances, "selected");
+	const Ref<Texture2D> tex_disabled = get_texture(ctx, w.appearances, "disabled");
+	if (tex_normal.is_valid()) {
+		radio->set_texture_normal(tex_normal);
+	}
+	if (tex_hover.is_valid()) {
+		radio->set_texture_hover(tex_hover);
+	}
+	if (tex_pressed.is_valid()) {
+		radio->set_texture_pressed(tex_pressed);
+	}
+	if (tex_disabled.is_valid()) {
+		radio->set_texture_disabled(tex_disabled);
+	}
+	if (w.has_group && w.group > 0) {
+		auto it = groups.find(w.group);
+		if (it == groups.end()) {
+			Ref<ButtonGroup> bg;
+			bg.instantiate();
+			groups[w.group] = bg;
+			it = groups.find(w.group);
+		}
+		radio->set_button_group(it->second);
+	}
+	if (ctx.inert() || w.disabled) {
+		radio->set_disabled(true);
+	}
+
+	NovaMnuLabel *label = memnew(NovaMnuLabel);
+	label->set_name("Label");
+	label->set_anchors_preset(Control::PRESET_FULL_RECT);
+	label->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	apply_label_font(ctx, label, font);
+	if (w.string_data.present && iequals(w.string_data.type, "id")) {
+		label->set_string_id(to_gd(w.string_data.value));
+	}
+	const String justify = w.string_data.present
+			? to_gd(w.string_data.justify).to_upper()
+			: String();
+	label->set_horizontal_alignment(justify == "LEFT" ? HORIZONTAL_ALIGNMENT_LEFT :
+			justify == "RIGHT" ? HORIZONTAL_ALIGNMENT_RIGHT :
+									 HORIZONTAL_ALIGNMENT_CENTER);
+	const String vjustify = w.string_data.present
+			? to_gd(w.string_data.vjustify).to_upper()
+			: String();
+	label->set_vertical_alignment(vjustify == "TOP" ? VERTICAL_ALIGNMENT_TOP :
+			vjustify == "BOTTOM" ? VERTICAL_ALIGNMENT_BOTTOM :
+								   VERTICAL_ALIGNMENT_CENTER);
+	label->set_text(resolve_text(ctx, w.string_data));
+	radio->add_child(label);
+	edit->add_child(radio);
+	edit->set_radio_parts(radio, label);
 	return edit;
 }
 
@@ -1020,8 +1244,12 @@ Control *build_multiline_edit(MnuBuildContext &ctx, const mnu::Window &w, const 
 	}
 
 	edit->set_readonly(w.readonly); // host can flip at runtime
-	if (ctx.edit_mode) {
-		edit->set_editable(false);
+	edit->set_runtime_enabled(!w.disabled);
+	const MnuScrollbarStyle scrollbar_style =
+			make_scrollbar_style(ctx, w.table_data.scrollbar);
+	if (NovaMnuScroll *scrollbar = make_authored_scroll(ctx, scrollbar_style)) {
+		edit->add_child(scrollbar);
+		edit->set_authored_scrollbar(scrollbar);
 	}
 	return edit;
 }
@@ -1086,10 +1314,49 @@ void apply_list_theme(MnuBuildContext &ctx, ItemList *list, const mnu::Window &w
 		}
 	}
 	const std::string fg = resolve_color(ctx, font.default_fg);
+	MnuItemListTextPalette palette;
+	palette.normal = list->get_theme_color("font_color");
+	palette.hovered = list->get_theme_color("font_hovered_color");
+	palette.hovered_selected =
+			list->get_theme_color("font_hovered_selected_color");
+	palette.selected = list->get_theme_color("font_selected_color");
 	if (!fg.empty()) {
-		list->add_theme_color_override("font_color", parse_color(to_gd(fg)));
+		palette.normal = parse_color(to_gd(fg));
+		list->add_theme_color_override("font_color", palette.normal);
 	}
-	const std::string sel = resolve_color(ctx, w.items.selection_color);
+	palette.disabled = palette.normal;
+	palette.disabled.a *= 0.5f;
+
+	const std::string hovered_fg = resolve_color(ctx, font.mouseover_fg);
+	if (!hovered_fg.empty()) {
+		palette.hovered = parse_color(to_gd(hovered_fg));
+		list->add_theme_color_override("font_hovered_color", palette.hovered);
+	}
+	const std::string selected_fg = resolve_color(ctx, font.selected_fg);
+	if (!selected_fg.empty()) {
+		palette.selected = parse_color(to_gd(selected_fg));
+		list->add_theme_color_override("font_selected_color", palette.selected);
+		// MNU has no distinct hovered+selected slot. Keep the selected
+		// foreground while the selected row is hovered.
+		palette.hovered_selected = palette.selected;
+		list->add_theme_color_override(
+				"font_hovered_selected_color", palette.hovered_selected);
+	}
+	const std::string disabled_fg = resolve_color(ctx, font.disabled_fg);
+	if (!disabled_fg.empty()) {
+		palette.disabled = parse_color(to_gd(disabled_fg));
+		palette.has_disabled = true;
+	}
+	if (NovaMnuList *mnu_list = Object::cast_to<NovaMnuList>(list)) {
+		mnu_list->set_item_text_palette(palette);
+		mnu_list->set_runtime_enabled(!w.disabled);
+	} else if (NovaMnuMulti *mnu_multi = Object::cast_to<NovaMnuMulti>(list)) {
+		mnu_multi->set_item_text_palette(palette);
+		mnu_multi->set_runtime_enabled(!w.disabled);
+	}
+	const std::string sel = w.items.present
+			? resolve_color(ctx, w.items.selection_color)
+			: std::string();
 	if (!sel.empty()) {
 		Ref<StyleBoxFlat> sb;
 		sb.instantiate();
@@ -1102,10 +1369,12 @@ void apply_list_theme(MnuBuildContext &ctx, ItemList *list, const mnu::Window &w
 // Seed the .mnu's own ITEM rows; in edit_mode inject a few synthetic rows when
 // the list is empty so the WYSIWYG canvas still reads.
 void seed_list_items(MnuBuildContext &ctx, ItemList *list, const mnu::Window &w) {
-	for (const auto &it : w.items.items) {
-		list->add_item(resolve_item_text(ctx, it));
+	if (w.items.present) {
+		for (const auto &it : w.items.items) {
+			list->add_item(resolve_item_text(ctx, it));
+		}
 	}
-	if (ctx.edit_mode && w.items.items.empty()) {
+	if (ctx.edit_mode && (!w.items.present || w.items.items.empty())) {
 		list->add_item("Sample 1");
 		list->add_item("Sample 2");
 		list->add_item("Sample 3");
@@ -1120,7 +1389,27 @@ Control *build_list(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 	list->set_edit_mode(ctx.edit_mode);
 	list->set_sounds(make_widget_sounds(w.sounds));
 	apply_list_theme(ctx, list, w, font);
+	if (w.items.present) {
+		const String justify = to_gd(w.items.justify).to_upper();
+		const String vjustify = to_gd(w.items.vjustify).to_upper();
+		list->set_item_alignment(
+				justify == "CENTER" ? HORIZONTAL_ALIGNMENT_CENTER :
+				justify == "RIGHT" ? HORIZONTAL_ALIGNMENT_RIGHT :
+										 HORIZONTAL_ALIGNMENT_LEFT,
+				vjustify == "TOP" ? VERTICAL_ALIGNMENT_TOP :
+				vjustify == "BOTTOM" ? VERTICAL_ALIGNMENT_BOTTOM :
+									   VERTICAL_ALIGNMENT_CENTER);
+	}
 	seed_list_items(ctx, list, w);
+	if (w.table_data.has_min_item_height) {
+		list->set_min_item_height(w.table_data.min_item_height);
+	}
+	const MnuScrollbarStyle scrollbar_style =
+			make_scrollbar_style(ctx, w.table_data.scrollbar);
+	if (NovaMnuScroll *scrollbar = make_authored_scroll(ctx, scrollbar_style)) {
+		list->add_child(scrollbar);
+		list->set_authored_scrollbar(scrollbar);
+	}
 	if (ctx.edit_mode) {
 		list->set_focus_mode(Control::FOCUS_NONE);
 	}
@@ -1135,7 +1424,27 @@ Control *build_multi(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	list->set_edit_mode(ctx.edit_mode);
 	list->set_sounds(make_widget_sounds(w.sounds));
 	apply_list_theme(ctx, list, w, font);
+	if (w.items.present) {
+		const String justify = to_gd(w.items.justify).to_upper();
+		const String vjustify = to_gd(w.items.vjustify).to_upper();
+		list->set_item_alignment(
+				justify == "CENTER" ? HORIZONTAL_ALIGNMENT_CENTER :
+				justify == "RIGHT" ? HORIZONTAL_ALIGNMENT_RIGHT :
+										 HORIZONTAL_ALIGNMENT_LEFT,
+				vjustify == "TOP" ? VERTICAL_ALIGNMENT_TOP :
+				vjustify == "BOTTOM" ? VERTICAL_ALIGNMENT_BOTTOM :
+									   VERTICAL_ALIGNMENT_CENTER);
+	}
 	seed_list_items(ctx, list, w);
+	if (w.table_data.has_min_item_height) {
+		list->set_min_item_height(w.table_data.min_item_height);
+	}
+	const MnuScrollbarStyle scrollbar_style =
+			make_scrollbar_style(ctx, w.table_data.scrollbar);
+	if (NovaMnuScroll *scrollbar = make_authored_scroll(ctx, scrollbar_style)) {
+		list->add_child(scrollbar);
+		list->set_authored_scrollbar(scrollbar);
+	}
 	if (ctx.edit_mode) {
 		list->set_focus_mode(Control::FOCUS_NONE);
 	}
@@ -1174,7 +1483,7 @@ void add_spin_button(MnuBuildContext &ctx, Control *spin, const mnu::Window &w,
 	}
 	btn->set_menu(ctx.owner);
 	btn->set_edit_mode(ctx.edit_mode);
-	if (ctx.edit_mode) {
+	if (ctx.inert() || w.disabled) {
 		btn->set_disabled(true);
 	}
 	if (sb.position.has_left || sb.position.has_top) {
@@ -1207,7 +1516,9 @@ Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	value_host->set_name("Value");
 	value_host->set_anchors_preset(Control::PRESET_FULL_RECT);
 	value_host->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	const String justify = to_gd(w.items.justify).to_upper();
+	const String justify = w.items.present
+			? to_gd(w.items.justify).to_upper()
+			: String();
 	HorizontalAlignment halign = HORIZONTAL_ALIGNMENT_CENTER; // spinlist default is centered
 	if (justify == "LEFT") {
 		halign = HORIZONTAL_ALIGNMENT_LEFT;
@@ -1218,8 +1529,10 @@ Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	spin->add_child(value_host);
 
 	std::vector<MnuItemVisual> visuals;
-	for (const auto &it : w.items.items) {
-		visuals.push_back(resolve_item(ctx, it));
+	if (w.items.present) {
+		for (const auto &it : w.items.items) {
+			visuals.push_back(resolve_item(ctx, it));
+		}
 	}
 	if (ctx.edit_mode && visuals.empty()) {
 		MnuItemVisual placeholder;
@@ -1268,58 +1581,106 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	lbl->set_anchors_preset(Control::PRESET_FULL_RECT);
 	lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	apply_label_font(ctx, lbl, font);
-	lbl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
-	const String j = to_gd(w.list_box.items.justify).to_upper();
-	HorizontalAlignment halign = HORIZONTAL_ALIGNMENT_LEFT;
-	if (j == "CENTER") {
-		halign = HORIZONTAL_ALIGNMENT_CENTER;
-	} else if (j == "RIGHT") {
-		halign = HORIZONTAL_ALIGNMENT_RIGHT;
+	const String closed_j = w.string_data.present
+			? to_gd(w.string_data.justify).to_upper()
+			: String();
+	HorizontalAlignment closed_halign = HORIZONTAL_ALIGNMENT_CENTER;
+	if (closed_j == "LEFT") {
+		closed_halign = HORIZONTAL_ALIGNMENT_LEFT;
+	} else if (closed_j == "RIGHT") {
+		closed_halign = HORIZONTAL_ALIGNMENT_RIGHT;
 	}
-	lbl->set_horizontal_alignment(halign);
+	lbl->set_horizontal_alignment(closed_halign);
+	const String closed_vj = w.string_data.present
+			? to_gd(w.string_data.vjustify).to_upper()
+			: String();
+	lbl->set_vertical_alignment(closed_vj == "TOP" ? VERTICAL_ALIGNMENT_TOP :
+			closed_vj == "BOTTOM" ? VERTICAL_ALIGNMENT_BOTTOM :
+									VERTICAL_ALIGNMENT_CENTER);
 	combo->add_child(lbl);
-	combo->set_item_alignment((int)halign);
 
-	// Items (the parser mirrors LIST_BOX items into w.items; prefer list_box).
-	const std::vector<mnu::Item> &src = !w.list_box.items.items.empty()
-			? w.list_box.items.items
-			: w.items.items;
-	for (const auto &it : src) {
-		combo->add_item(resolve_item_text(ctx, it), to_gd(it.value));
+	// Top-level ITEMS and LIST_BOX/ITEMS are independent authored containers.
+	// An authored nested container wins even when it is intentionally empty;
+	// otherwise fall back to an authored top-level container.
+	const mnu::Items *active_items = nullptr;
+	if (w.list_box.present && w.list_box.items.present) {
+		active_items = &w.list_box.items;
+	} else if (w.items.present) {
+		active_items = &w.items;
+	}
+	const std::string row_justify = active_items && !active_items->justify.empty()
+			? active_items->justify
+			: (w.list_box.present && w.list_box.string_data.present
+							? w.list_box.string_data.justify
+							: std::string());
+	const String row_j = to_gd(row_justify).to_upper();
+	HorizontalAlignment row_halign = HORIZONTAL_ALIGNMENT_LEFT;
+	if (row_j == "CENTER") {
+		row_halign = HORIZONTAL_ALIGNMENT_CENTER;
+	} else if (row_j == "RIGHT") {
+		row_halign = HORIZONTAL_ALIGNMENT_RIGHT;
+	}
+	combo->set_item_alignment((int)row_halign);
+	const std::string row_vjustify = active_items && !active_items->vjustify.empty()
+			? active_items->vjustify
+			: (w.list_box.present && w.list_box.string_data.present
+							? w.list_box.string_data.vjustify
+							: std::string());
+	const String row_vj = to_gd(row_vjustify).to_upper();
+	combo->set_item_vertical_alignment(row_vj == "TOP" ? VERTICAL_ALIGNMENT_TOP :
+			row_vj == "BOTTOM" ? VERTICAL_ALIGNMENT_BOTTOM :
+								 VERTICAL_ALIGNMENT_CENTER);
+	if (w.list_box.present && w.list_box.string_data.present &&
+			w.list_box.string_data.has_edge) {
+		combo->set_item_edge(w.list_box.string_data.edge);
+	}
+
+	if (active_items != nullptr) {
+		for (const auto &it : active_items->items) {
+			combo->add_item(resolve_item_text(ctx, it), to_gd(it.value));
+		}
 	}
 
 	// Popup styling from the LIST_BOX.
-	bool found = false;
-	const Color bgc = get_appearance_color(ctx, w.list_box.appearances, "color", "default", found);
-	if (found) {
-		combo->set_popup_bg_color(bgc);
+	if (w.list_box.present) {
+		bool found = false;
+		const Color bgc =
+				get_appearance_color(ctx, w.list_box.appearances, "color", "default", found);
+		if (found) {
+			combo->set_popup_bg_color(bgc);
+		}
+		Ref<Texture2D> bgt = get_texture(ctx, w.list_box.appearances, "default");
+		if (bgt.is_valid()) {
+			combo->set_popup_bg_texture(bgt);
+		}
+		bool ofound = false;
+		const Color oc =
+				get_appearance_color(ctx, w.list_box.appearances, "outline", "default", ofound);
+		if (ofound) {
+			combo->set_popup_outline_color(oc);
+		}
 	}
-	Ref<Texture2D> bgt = get_texture(ctx, w.list_box.appearances, "default");
-	if (bgt.is_valid()) {
-		combo->set_popup_bg_texture(bgt);
-	}
-	bool ofound = false;
-	const Color oc = get_appearance_color(ctx, w.list_box.appearances, "outline", "default", ofound);
-	if (ofound) {
-		combo->set_popup_outline_color(oc);
-	}
-	const std::string sel_src = w.list_box.items.selection_color.empty()
-			? w.items.selection_color
-			: w.list_box.items.selection_color;
+	const std::string sel_src =
+			active_items != nullptr ? active_items->selection_color : std::string();
 	const std::string sel = resolve_color(ctx, sel_src);
 	if (!sel.empty()) {
 		combo->set_selection_color(parse_color(to_gd(sel)));
 	}
-	if (w.list_box.min_item_height > 0) {
+	if (w.list_box.present && w.list_box.has_min_item_height &&
+			w.list_box.min_item_height > 0) {
 		combo->set_min_item_height(w.list_box.min_item_height);
 	}
+	combo->set_scrollbar_style(w.list_box.present
+					? make_scrollbar_style(ctx, w.list_box.scrollbar,
+							  w.list_box.has_sb_edge_pad ? w.list_box.sb_edge_pad : 0)
+					: MnuScrollbarStyle());
 	// The authored <LIST_BOX> POSITION is the dropdown's combo-relative rect (design
 	// space). The original opens the embedded CListWnd at exactly this rect; passing
 	// it through lets below/beside/upward dropdowns land where authored instead of a
 	// recomputed below-combo box. [orig: CComboWnd @ 0x65be40; CListWnd rect this+13
 	// from LIST_BOX POSITION] (docs/mnu/menu-re.md D-MNU-7).
 	const mnu::Position &lbp = w.list_box.position;
-	if (lbp.width() > 0 && lbp.height() > 0) {
+	if (w.list_box.present && lbp.width() > 0 && lbp.height() > 0) {
 		combo->set_popup_rect(Rect2(lbp.left, lbp.top, lbp.width(), lbp.height()));
 	}
 
@@ -1336,7 +1697,7 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 		combo->set_item_font_color(parse_color(to_gd(fg)));
 	}
 
-	if (ctx.edit_mode) {
+	if (ctx.inert() || w.disabled) {
 		combo->set_disabled(true);
 	}
 	if (combo->get_item_count() > 0) {
@@ -1376,20 +1737,16 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	table->set_edit_mode(ctx.edit_mode);
 	const mnu::TableData &td = w.table_data;
 
-	const int ncols = td.column.count > 0 ? td.column.count
-										  : static_cast<int>(td.column.headers.size());
-	const int rowh = td.min_item_height > 0 ? td.min_item_height : 16;
+	const int ncols = td.column.has_count
+			? MAX(td.column.count, 0)
+			: static_cast<int>(td.column.headers.size());
+	const int rowh = td.has_min_item_height && td.min_item_height > 0
+			? td.min_item_height
+			: 16;
 	table->set_row_height(rowh);
-	table->set_column_spacing(td.column.spacing);
-	table->set_multiselect(td.multiselect);
-
-	// Which columns render bitmaps (from BODY bitmap_draw).
-	std::map<int, bool> bitmap_cols;
-	for (const auto &b : td.column.bodies) {
-		if (b.bitmap_draw) {
-			bitmap_cols[b.column] = true;
-		}
-	}
+	const int column_spacing = td.column.has_spacing ? td.column.spacing : 0;
+	table->set_column_spacing(column_spacing);
+	table->set_multiselect(w.items.present && td.multiselect);
 
 	// Resolve the cell font once for header + body cells.
 	Ref<Font> cell_font;
@@ -1413,7 +1770,7 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 
 	auto find_header = [&](int col) -> const mnu::TableHeader * {
 		for (const auto &h : td.column.headers) {
-			if (h.column == col) {
+			if ((h.has_column ? h.column : 0) == col) {
 				return &h;
 			}
 		}
@@ -1421,7 +1778,7 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	};
 	auto find_body = [&](int col) -> const mnu::TableBody * {
 		for (const auto &b : td.column.bodies) {
-			if (b.column == col) {
+			if ((b.has_column ? b.column : 0) == col) {
 				return &b;
 			}
 		}
@@ -1440,25 +1797,45 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 		}
 		return fallback;
 	};
+	auto to_valign = [](const std::string &j, VerticalAlignment fallback) -> VerticalAlignment {
+		const String u = to_gd(j).to_upper();
+		if (u == "TOP") {
+			return VERTICAL_ALIGNMENT_TOP;
+		}
+		if (u == "BOTTOM") {
+			return VERTICAL_ALIGNMENT_BOTTOM;
+		}
+		if (u == "CENTER") {
+			return VERTICAL_ALIGNMENT_CENTER;
+		}
+		return fallback;
+	};
 
-	// Column defs (width + justify + bitmap) for the body cell layout. Body cells take
-	// the BODY justify; the HEADER justify aligns the header cell only (the old code
-	// reused the header justify for body cells, so a LEFT-authored body rendered CENTER).
+	// Column defs drive body alignment and rendering policy. BITMAP_FLAGS remains a
+	// preservation-only field: NovaResourceRoot imports decoded textures, so applying
+	// legacy DirectDraw flags here without a proven mapping would invent semantics
+	// (ADR 0002). BITMAP_DRAW/SCALE_BITMAP/CUSTOM_DRAW have direct runtime equivalents.
 	for (int c = 0; c < ncols; ++c) {
 		const mnu::TableHeader *h = find_header(c);
 		const mnu::TableBody *b = find_body(c);
-		const int width = h && h->width > 0 ? h->width : 80;
+		const int width = h && h->has_width && h->width > 0 ? h->width : 80;
 		const HorizontalAlignment header_align =
 				h ? to_halign(h->justify, HORIZONTAL_ALIGNMENT_LEFT) : HORIZONTAL_ALIGNMENT_LEFT;
 		const HorizontalAlignment body_align = b ? to_halign(b->justify, header_align) : header_align;
-		table->add_column(width, (int)body_align, bitmap_cols.count(c) > 0);
+		const VerticalAlignment header_valign =
+				h ? to_valign(h->vjustify, VERTICAL_ALIGNMENT_CENTER) : VERTICAL_ALIGNMENT_CENTER;
+		const VerticalAlignment body_valign =
+				b ? to_valign(b->vjustify, header_valign) : header_valign;
+		table->add_column(width, (int)body_align, b && b->bitmap_draw, (int)body_valign,
+				b && b->scale_bitmap, b && b->custom_draw);
 	}
 
 	// Colours from the ITEMS outline / selection.
 	bool has_outline = false;
 	Color outline(0.2f, 0.25f, 0.35f, 1.0f);
 	{
-		const std::string oc = resolve_color(ctx, td.outline_color);
+		const std::string oc =
+				w.items.present ? resolve_color(ctx, td.outline_color) : std::string();
 		if (!oc.empty()) {
 			has_outline = true;
 			outline = parse_color(to_gd(oc));
@@ -1466,7 +1843,8 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	}
 	Color selection(0.2f, 0.4f, 0.8f, 1.0f);
 	{
-		const std::string sc = resolve_color(ctx, td.selection_color);
+		const std::string sc =
+				w.items.present ? resolve_color(ctx, td.selection_color) : std::string();
 		if (!sc.empty()) {
 			selection = parse_color(to_gd(sc));
 		}
@@ -1476,7 +1854,8 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	// Value->image substitutions.
 	for (const auto &s : td.column.substitutions) {
 		if (s.is_file && !s.file.empty()) {
-			table->add_substitution(s.column, to_gd(s.value), resolve_texture(ctx, s.file));
+			table->add_substitution(s.has_column ? s.column : 0, to_gd(s.value),
+					resolve_texture(ctx, s.file));
 		}
 	}
 
@@ -1486,15 +1865,24 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	int hx = 0;
 	for (int c = 0; c < ncols; ++c) {
 		const mnu::TableHeader *h = find_header(c);
-		const int width = h && h->width > 0 ? h->width : 80;
+		const int width = h && h->has_width && h->width > 0 ? h->width : 80;
 		// Header text resolves type="id" through the RTXT table (the old code drew the
 		// raw id) [orig: type="id" branch @ 0x64344a -> CUIStringTable_LookupString
 		// @ 0x6434df]. ctx.text is already in scope.
-		const String text = h ? resolve_text(ctx, mnu::String{ h->type, h->justify, h->vjustify,
-												  0, h->text })
-							   : String();
+		String text;
+		if (h != nullptr) {
+			mnu::String header_string;
+			header_string.present = true;
+			header_string.type = h->type;
+			header_string.justify = h->justify;
+			header_string.vjustify = h->vjustify;
+			header_string.value = h->text;
+			text = resolve_text(ctx, header_string);
+		}
 		const HorizontalAlignment header_align =
 				h ? to_halign(h->justify, HORIZONTAL_ALIGNMENT_CENTER) : HORIZONTAL_ALIGNMENT_CENTER;
+		const VerticalAlignment header_valign =
+				h ? to_valign(h->vjustify, VERTICAL_ALIGNMENT_CENTER) : VERTICAL_ALIGNMENT_CENTER;
 		const bool sortable = h && !h->sort.empty();
 		if (sortable) {
 			Button *hb = memnew(Button);
@@ -1504,16 +1892,34 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 			hb->set_flat(true);
 			hb->set_position(Vector2(hx, 0));
 			hb->set_size(Vector2(width, rowh));
+			// Button supplies sort input while a child Label supplies the HEADER's
+			// vertical alignment, which BaseButton itself does not expose.
+			const Color transparent(1, 1, 1, 0);
+			hb->add_theme_color_override("font_color", transparent);
+			hb->add_theme_color_override("font_hover_color", transparent);
+			hb->add_theme_color_override("font_pressed_color", transparent);
+			hb->add_theme_color_override("font_hover_pressed_color", transparent);
+			hb->add_theme_color_override("font_focus_color", transparent);
+			hb->add_theme_color_override("font_disabled_color", transparent);
+			hb->add_theme_color_override("font_outline_color", transparent);
+			NovaMnuLabel *header_text = memnew(NovaMnuLabel);
+			header_text->set_name("HeaderText");
+			header_text->set_text(text);
+			header_text->set_anchors_preset(Control::PRESET_FULL_RECT);
+			header_text->set_horizontal_alignment(header_align);
+			header_text->set_vertical_alignment(header_valign);
+			header_text->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 			if (cell_font.is_valid()) {
-				hb->add_theme_font_override("font", cell_font);
+				header_text->add_theme_font_override("font", cell_font);
 			}
 			if (cell_font_size > 0) {
-				hb->add_theme_font_size_override("font_size", cell_font_size);
+				header_text->add_theme_font_size_override("font_size", cell_font_size);
 			}
 			if (has_cell_color) {
-				hb->add_theme_color_override("font_color", cell_color);
+				header_text->add_theme_color_override("font_color", cell_color);
 			}
-			hb->set_disabled(ctx.edit_mode);
+			hb->add_child(header_text);
+			hb->set_disabled(ctx.inert() || w.disabled);
 			hb->connect("pressed", callable_mp(table, &NovaMnuTable::header_clicked).bind(c));
 			header->add_child(hb);
 		} else {
@@ -1523,14 +1929,20 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 			hl->set_position(Vector2(hx, 0));
 			hl->set_size(Vector2(width, rowh));
 			hl->set_horizontal_alignment(header_align);
-			hl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
+			hl->set_vertical_alignment(header_valign);
 			hl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 			if (cell_font.is_valid()) {
 				hl->add_theme_font_override("font", cell_font);
 			}
+			if (cell_font_size > 0) {
+				hl->add_theme_font_size_override("font_size", cell_font_size);
+			}
+			if (has_cell_color) {
+				hl->add_theme_color_override("font_color", cell_color);
+			}
 			header->add_child(hl);
 		}
-		hx += width + td.column.spacing;
+		hx += width + column_spacing;
 	}
 	// Header underline (the ITEMS %TRIM_COLOR% outline read as a header rule).
 	if (has_outline) {
@@ -1556,35 +1968,15 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	table->add_child(viewport);
 
 	// Embedded vertical scrollbar from the TableScrollbar art.
-	NovaMnuScroll *sb = nullptr;
-	if (td.scrollbar.present) {
-		sb = memnew(NovaMnuScroll);
-		sb->set_name("Scrollbar");
-		sb->set_menu(ctx.owner);
-		sb->set_edit_mode(ctx.edit_mode);
-		sb->set_orientation_vertical(true);
-		sb->set_track_texture(get_texture(ctx, td.scrollbar.track, "default"));
-		sb->set_shuttle_textures(get_texture(ctx, td.scrollbar.shuttle, "default"),
-				get_texture(ctx, td.scrollbar.shuttle, "mouseover"));
-		sb->set_arrow_textures(get_texture(ctx, td.scrollbar.scrollup, "default"),
-				get_texture(ctx, td.scrollbar.scrollup, "mouseover"),
-				get_texture(ctx, td.scrollbar.scrolldown, "default"),
-				get_texture(ctx, td.scrollbar.scrolldown, "mouseover"));
-		Ref<Texture2D> sb_up = get_texture(ctx, td.scrollbar.scrollup, "default");
-		if (sb_up.is_valid()) {
-			sb->set_arrow_extent(sb_up->get_height());
-		}
+	const MnuScrollbarStyle table_scrollbar_style =
+			make_scrollbar_style(ctx, td.scrollbar);
+	NovaMnuScroll *sb = make_authored_scroll(ctx, table_scrollbar_style);
+	if (sb != nullptr) {
 		// Honor the authored <SCROLLBAR><POSITION> (parent-relative to the table)
 		// instead of a hardcoded 16px right strip [orig: table SCROLLBAR delegate
 		// @ 0x643b22]. Width from the art when the rect is degenerate.
-		const mnu::Position &sp = td.scrollbar.position;
-		if (sp.has_left && sp.has_top) {
-			float w_px = sp.has_right ? (float)(sp.right - sp.left) : 0.0f;
-			if (w_px <= 0.0f && sb_up.is_valid()) {
-				w_px = (float)sb_up->get_width();
-			}
-			float h_px = sp.has_bottom ? (float)(sp.bottom - sp.top) : 0.0f;
-			table->set_scrollbar_rect(Rect2((float)sp.left, (float)sp.top, w_px, h_px));
+		if (table_scrollbar_style.has_rect) {
+			table->set_scrollbar_rect(table_scrollbar_style.rect);
 		}
 		table->add_child(sb);
 	}
@@ -1729,7 +2121,9 @@ Control *build_marquee(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Fo
 	if (!fg.empty()) {
 		m->set_label_font_color(parse_color(to_gd(fg)));
 	}
-	const String j = to_gd(w.string_data.justify).to_upper();
+	const String j = w.string_data.present
+			? to_gd(w.string_data.justify).to_upper()
+			: String();
 	if (j == "LEFT") {
 		m->set_justify((int)HORIZONTAL_ALIGNMENT_LEFT);
 	} else if (j == "RIGHT") {
@@ -1758,8 +2152,8 @@ Control *build_goto(MnuBuildContext &ctx, const mnu::Window &w) {
 	for (const auto &act : w.actions) {
 		go->add_action(make_action(act));
 	}
-	if (!w.hotkey.empty()) {
-		go->set_hotkey(to_gd(w.hotkey), w.hotkey_virtual);
+	if (!w.hotkeys.empty()) {
+		go->set_hotkey(to_gd(w.hotkeys.front().value), w.hotkeys.front().virtual_key);
 	} else if (!w.actions.empty()) {
 		go->set_fire_on_show(true);
 	}
@@ -1827,6 +2221,9 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 		case mnu::WindowType::Edit:
 			node = build_edit(ctx, w, font);
 			break;
+		case mnu::WindowType::RadioEdit:
+			node = build_radio_edit(ctx, w, font, groups);
+			break;
 		case mnu::WindowType::MultilineEdit:
 			node = build_multiline_edit(ctx, w, font);
 			break;
@@ -1860,6 +2257,11 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 		case mnu::WindowType::Goto:
 			node = build_goto(ctx, w);
 			break;
+		case mnu::WindowType::GlbTable:
+		case mnu::WindowType::LanList:
+		case mnu::WindowType::Gopher:
+			node = build_host_owned_placeholder(ctx, w, font);
+			break;
 		default:
 			node = build_placeholder(ctx, w, font);
 			break;
@@ -1870,21 +2272,40 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 	}
 
 	node->set_name(names.get_unique(to_gd(w.name)));
+	// WINDOW ENABLE/DISABLE mutates this node's local state. Descendants retain
+	// their own authored state, so re-enabling a parent cannot accidentally wake
+	// a child authored with DISABLE.
+	node->set_meta("mnu_local_enabled", !w.disabled);
 	// Tag with the stable document id so the editor can map this Control back to its
 	// widget (and read its rendered size for widgets whose document rect is sizeless).
 	if (widget_id >= 0) {
 		node->set_meta("mnu_widget_id", widget_id);
 	}
-	// Tag the hotkey (e.g. "VK_ESCAPE") so the menu's keyboard router can find this
-	// widget by its accelerator without per-type accessors. Buttons carry the bulk
-	// of shipped hotkeys (Esc=back / Enter=accept) yet had no hotkey path before.
-	if (!w.hotkey.empty()) {
-		node->set_meta("mnu_hotkey", to_gd(w.hotkey).to_upper());
+	// Keep every authored accelerator and its VIRTUAL distinction. The menu walks
+	// Controls in document order, then each row in authored order; this covers
+	// shipped dual bindings such as jo_cmap's VK_ESCAPE + literal "V".
+	PackedStringArray virtual_hotkeys;
+	PackedStringArray character_hotkeys;
+	for (const mnu::Hotkey &hotkey : w.hotkeys) {
+		if (hotkey.virtual_key) {
+			virtual_hotkeys.push_back(to_gd(hotkey.value).to_upper());
+		} else {
+			character_hotkeys.push_back(to_gd(hotkey.value));
+		}
+	}
+	if (!virtual_hotkeys.is_empty()) {
+		node->set_meta("mnu_virtual_hotkeys", virtual_hotkeys);
+	}
+	if (!character_hotkeys.is_empty()) {
+		node->set_meta("mnu_character_hotkeys", character_hotkeys);
 	}
 	apply_position(ctx, node, w, font);
 
 	if (w.hidden) {
 		node->set_visible(false);
+	}
+	if (w.disabled) {
+		node->set_process_mode(Node::PROCESS_MODE_DISABLED);
 	}
 	// Author mode makes the whole tree click-through so the canvas owns gestures; the
 	// interactive preview leaves buttons clickable (they keep their default STOP).
@@ -1914,7 +2335,7 @@ Control *mnu_build_screen(const mnu::Screen &screen, MnuBuildContext &ctx, int r
 	NovaMnuScreen *screen_node = memnew(NovaMnuScreen);
 	screen_node->set_name(to_gd(screen.name).is_empty() ? String("Screen") : to_gd(screen.name));
 	screen_node->set_screen_name(to_gd(screen.name));
-	screen_node->set_music_var(screen.music_var);
+	screen_node->set_music_var(screen.has_music_var ? screen.music_var : 0);
 	screen_node->set_cursor_file(to_gd(screen.cursor_file));
 	screen_node->set_edit_mode(ctx.edit_mode);
 	screen_node->set_anchors_preset(Control::PRESET_FULL_RECT);

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/range.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
@@ -41,6 +42,12 @@ void NovaMnuScroll::build_parts() {
 	if (up_hover_tex_.is_valid()) {
 		arrow_up_->set_texture_hover(up_hover_tex_);
 	}
+	if (up_pressed_tex_.is_valid()) {
+		arrow_up_->set_texture_pressed(up_pressed_tex_);
+	}
+	if (up_disabled_tex_.is_valid()) {
+		arrow_up_->set_texture_disabled(up_disabled_tex_);
+	}
 	add_child(arrow_up_);
 
 	arrow_down_ = memnew(TextureButton);
@@ -52,6 +59,12 @@ void NovaMnuScroll::build_parts() {
 	}
 	if (down_hover_tex_.is_valid()) {
 		arrow_down_->set_texture_hover(down_hover_tex_);
+	}
+	if (down_pressed_tex_.is_valid()) {
+		arrow_down_->set_texture_pressed(down_pressed_tex_);
+	}
+	if (down_disabled_tex_.is_valid()) {
+		arrow_down_->set_texture_disabled(down_disabled_tex_);
 	}
 	add_child(arrow_down_);
 
@@ -70,6 +83,9 @@ void NovaMnuScroll::build_parts() {
 	if (behavior_.edit_mode) {
 		arrow_up_->set_disabled(true);
 		arrow_down_->set_disabled(true);
+		if (shuttle_disabled_tex_.is_valid()) {
+			shuttle_->set_texture(shuttle_disabled_tex_);
+		}
 	}
 }
 
@@ -123,6 +139,9 @@ void NovaMnuScroll::_ready() {
 	build_parts();
 	layout();
 	connect("resized", callable_mp(this, &NovaMnuScroll::layout));
+	if (!range_target_path_.is_empty()) {
+		sync_range_target();
+	}
 	if (behavior_.edit_mode) {
 		// Inert while authoring.
 		return;
@@ -138,6 +157,9 @@ void NovaMnuScroll::on_sound_mouse_entered() {
 
 void NovaMnuScroll::on_sound_mouse_exited() {
 	behavior_.play_mouseout();
+	if (!dragging_) {
+		update_shuttle_texture(false, false);
+	}
 }
 
 void NovaMnuScroll::on_arrow_up() {
@@ -162,21 +184,30 @@ void NovaMnuScroll::_gui_input(const Ref<InputEvent> &p_event) {
 			const Rect2 sr(shuttle_->get_position(), shuttle_->get_size());
 			if (sr.has_point(mb->get_position())) {
 				dragging_ = true;
+				update_shuttle_texture(true, true);
+				behavior_.play_click();
 			} else {
 				// Page toward the click (above/left of the shuttle pages up).
 				const float click = vertical_ ? mb->get_position().y : mb->get_position().x;
 				const float sh = vertical_ ? shuttle_->get_position().y : shuttle_->get_position().x;
 				const double delta = page_ > 0.0 ? page_ : step_;
 				set_value(click < sh ? value_ - delta : value_ + delta);
+				behavior_.play_click();
 				behavior_.notify_value(String(get_name()), "scroll", -1, String::num(value_));
 			}
 		} else {
 			dragging_ = false;
+			const Rect2 sr(shuttle_->get_position(), shuttle_->get_size());
+			update_shuttle_texture(sr.has_point(mb->get_position()), false);
 		}
 		accept_event();
 		return;
 	}
 	const Ref<InputEventMouseMotion> mm = p_event;
+	if (mm.is_valid() && !dragging_) {
+		const Rect2 sr(shuttle_->get_position(), shuttle_->get_size());
+		update_shuttle_texture(sr.has_point(mm->get_position()), false);
+	}
 	if (mm.is_valid() && dragging_ && travel_ > 0.0) {
 		const double rng = usable_max() - min_;
 		if (rng > 0.0) {
@@ -188,7 +219,69 @@ void NovaMnuScroll::_gui_input(const Ref<InputEvent> &p_event) {
 	}
 }
 
+void NovaMnuScroll::update_shuttle_texture(bool p_hovered, bool p_pressed) {
+	if (shuttle_ == nullptr) {
+		return;
+	}
+	if (p_pressed && shuttle_pressed_tex_.is_valid()) {
+		shuttle_->set_texture(shuttle_pressed_tex_);
+	} else if (p_hovered && shuttle_hover_tex_.is_valid()) {
+		shuttle_->set_texture(shuttle_hover_tex_);
+	} else if (shuttle_tex_.is_valid()) {
+		shuttle_->set_texture(shuttle_tex_);
+	}
+}
+
+Range *NovaMnuScroll::range_target() const {
+	if (range_target_path_.is_empty()) {
+		return nullptr;
+	}
+	return Object::cast_to<Range>(get_node_or_null(range_target_path_));
+}
+
+void NovaMnuScroll::sync_range_target() {
+	Range *range = range_target();
+	if (range == nullptr) {
+		return;
+	}
+	const Callable value_cb = callable_mp(this, &NovaMnuScroll::on_range_value_changed);
+	const Callable changed_cb = callable_mp(this, &NovaMnuScroll::sync_range_target);
+	if (!range->is_connected("value_changed", value_cb)) {
+		range->connect("value_changed", value_cb);
+	}
+	if (!range->is_connected("changed", changed_cb)) {
+		range->connect("changed", changed_cb);
+	}
+	syncing_range_ = true;
+	min_ = range->get_min();
+	max_ = range->get_max();
+	page_ = range->get_page();
+	step_ = range->get_step();
+	value_ = range->get_value();
+	syncing_range_ = false;
+	layout();
+}
+
+void NovaMnuScroll::on_range_value_changed(double p_value) {
+	if (syncing_range_) {
+		return;
+	}
+	syncing_range_ = true;
+	value_ = clampd(p_value, min_, usable_max());
+	syncing_range_ = false;
+	layout();
+}
+
 void NovaMnuScroll::apply_scroll_target() {
+	if (!range_target_path_.is_empty()) {
+		Range *range = range_target();
+		if (range != nullptr && !syncing_range_) {
+			syncing_range_ = true;
+			range->set_value(value_);
+			syncing_range_ = false;
+		}
+		return;
+	}
 	if (scroll_target_path_.is_empty()) {
 		return;
 	}
@@ -239,8 +332,17 @@ void NovaMnuScroll::set_range(double p_min, double p_max, double p_page) {
 }
 
 void NovaMnuScroll::link_scroll_target(const NodePath &p_path) {
+	range_target_path_ = NodePath();
 	scroll_target_path_ = p_path;
 	apply_scroll_target();
+}
+
+void NovaMnuScroll::link_range_target(const NodePath &p_path) {
+	scroll_target_path_ = NodePath();
+	range_target_path_ = p_path;
+	if (is_inside_tree()) {
+		sync_range_target();
+	}
 }
 
 double NovaMnuScroll::get_ratio() const {
@@ -267,6 +369,7 @@ void NovaMnuScroll::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_value"), &NovaMnuScroll::get_value);
 	ClassDB::bind_method(D_METHOD("set_range", "min", "max", "page"), &NovaMnuScroll::set_range);
 	ClassDB::bind_method(D_METHOD("link_scroll_target", "path"), &NovaMnuScroll::link_scroll_target);
+	ClassDB::bind_method(D_METHOD("link_range_target", "path"), &NovaMnuScroll::link_range_target);
 	ClassDB::bind_method(D_METHOD("get_ratio"), &NovaMnuScroll::get_ratio);
 	ClassDB::bind_method(D_METHOD("set_ratio", "ratio"), &NovaMnuScroll::set_ratio);
 

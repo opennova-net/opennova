@@ -153,6 +153,12 @@ func test_create_empty() -> void:
 	assert_eq(doc.get_screen_count(), 1, "empty doc has one screen")
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	assert_eq(doc.get_widget_type(root), NovaMnuDocument.TYPE_WINDOW, "empty root is a window")
+	assert_eq(doc.get_widget_name(root), "MAIN", "empty root uses the retail-safe MAIN name")
+	assert_eq(doc.get_window_rect(root), Rect2(0, 0, 800, 600), "empty root has all four bounds")
+	assert_eq(doc.get_menu_size(), Vector2i(800, 600), "new menus open on the retail canvas")
+	var appearances := doc.get_widget_appearances(root)
+	assert_eq(appearances.size(), 1, "empty root carries the required appearance")
+	assert_eq(String(appearances[0].get("type", "")), "custom", "empty root appearance is custom")
 
 
 # --- M8b: snapshot (capture/apply) + reparent ----------------------------------
@@ -345,8 +351,25 @@ func test_mns_diagnostics_report_line_and_severity() -> void:
 		assert_gt(int(diag.get("line", 0)), 0, "diagnostics carry 1-based lines")
 		assert_true(String(diag.get("severity", "")) in ["error", "warning"], "severity is error|warning")
 	assert_has(codes, "duplicate-name", "duplicate names are diagnosed")
-	assert_has(codes, "bad-if-arg", "a non-0/1 #if argument is diagnosed")
+	assert_has(codes, "noncanonical-if-arg",
+		"a retail-truthy non-0/1 #if argument is diagnosed without rejection")
 	assert_eq(sheet.get_variable("FOO"), "b", "the parse stays lenient: last duplicate wins")
+
+
+func test_mns_runtime_evaluation_validity_is_distinct_from_repairable_load() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes("#else\nOK value\n".to_utf8_buffer()), OK,
+		"lossless editor load remains permissive")
+	assert_false(sheet.is_runtime_valid(), "retail evaluator failure is runtime-visible")
+	assert_eq(sheet.get_variable("OK"), "value", "partial evaluated view remains inspectable")
+	var diagnostics := sheet.get_evaluation_diagnostics()
+	assert_gt(diagnostics.size(), 0, "evaluation diagnostics are exposed")
+	var codes := PackedStringArray()
+	for value in diagnostics:
+		codes.append(String((value as Dictionary).get("code", "")))
+	assert_has(codes, "unbalanced-else", "runtime failure reports the evaluator code")
+	sheet.set_source_text("OK value\n")
+	assert_true(sheet.is_runtime_valid(), "repairing source refreshes runtime validity")
 
 
 func test_mns_source_text_round_trip_byte_faithful() -> void:
@@ -389,11 +412,23 @@ func test_mns_entry_add_rename_remove_move() -> void:
 	assert_string_contains(String(sheet.get_source_text()), "// the middle one", "comment rendered")
 	assert_true(sheet.move_variable("C", 0), "move to the front")
 	assert_eq(String((sheet.get_entries()[0] as Dictionary).get("name", "")), "C", "C now first")
-	sheet.remove_variable("MIDDLE")
+	assert_true(sheet.remove_variable("MIDDLE"), "safe standalone define removes")
 	assert_false(sheet.has_variable("MIDDLE"), "removed")
 	assert_true(sheet.is_valid_variable_name("DEF_TEXT_FG"), "name validation binds")
 	assert_false(sheet.is_valid_variable_name("BAD NAME"), "whitespace rejects")
 	assert_false(sheet.is_valid_variable_value("a//b"), "values cannot carry comment starts")
+
+
+func test_mns_remove_rejects_control_flow_owning_entry_without_dirtying() -> void:
+	var sheet := MnsStyleSheet.new()
+	sheet.set_source_text("#if 1\nFOO bar \\\n#endif\nbaz\nQUX 7\n")
+	var before := sheet.get_source_text()
+	watch_signals(sheet)
+	assert_false(sheet.remove_variable("FOO"),
+		"a continuation crossing a directive cannot be structurally removed")
+	assert_eq(sheet.get_source_text(), before, "rejected remove leaves source byte-stable")
+	assert_true(sheet.has_variable("FOO"), "rejected entry remains in evaluated view")
+	assert_signal_not_emitted(sheet, "changed", "rejected mutation does not dirty the editor")
 
 
 # --- M10.1: item-row authoring (list / multi / spinlist / combo) ----------------
@@ -556,3 +591,420 @@ func test_widget_actions_read_edit_roundtrip() -> void:
 	assert_eq(String(actions2[1]["type"]), "window", "added window action type persisted")
 	assert_eq(String(actions2[1]["target"]), "SoundChk", "added window action target persisted")
 	assert_eq(String(actions2[1]["state"]), "HIDE", "added window action state persisted")
+
+
+func test_authoring_state_apply_preserves_presence_and_nested_data() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><MUSICVAR>0</MUSICVAR>
+<WINDOW type="window" name="ROOT">
+  <WINDOW type="vendor_widget" name="Opaque">
+    <GROUP>0</GROUP><TEXT_RSRC>widget.bin</TEXT_RSRC>
+    <FRAME><STENCIL size="0" insetx="0" insety="0">border.tga</STENCIL></FRAME>
+    <APPEARANCE type="image" state="default" map_state="0" height="0">art.tga</APPEARANCE>
+    <STRING edge="0"></STRING>
+    <ITEMS MULTISELECT justify="LEFT" vjustify="TOP">
+      <APPEARANCE type="color" state="selected" map_state="0" height="0">102030</APPEARANCE>
+      <ITEM type="id" value="0">ROW_ZERO</ITEM>
+    </ITEMS>
+    <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+    <ACTION type="form_post" source="profile" field="callsign" target_form="0" TOGGLE test="EQ">Submit</ACTION>
+  </WINDOW>
+  <WINDOW type="combo" name="Combo">
+    <ITEMS><ITEM value="legacy">Top</ITEM></ITEMS>
+    <LIST_BOX>
+      <STRING type="id" justify="CENTER" vjustify="BOTTOM" edge="0"></STRING>
+      <ITEMS MULTISELECT justify="RIGHT" vjustify="CENTER">
+        <APPEARANCE type="outline" state="default">ABCDEF</APPEARANCE>
+        <ITEM value="popup">Popup</ITEM>
+      </ITEMS>
+      <SCROLLBAR><SOUND state="mouseout" trigger="CLICK_VALUE">menu.lwf</SOUND></SCROLLBAR>
+    </LIST_BOX>
+  </WINDOW>
+  <WINDOW type="table" name="Grid">
+    <COLUMN count="0" spacing="0">
+      <HEADER column="0" width="0" type="id">HEAD</HEADER>
+      <BODY column="0" CUSTOM_DRAW></BODY>
+      <SUBST column="0" value="x" FILE>cell.tga</SUBST>
+    </COLUMN>
+    <ITEMS MULTISELECT justify="CENTER">
+      <APPEARANCE type="outline" state="default">010203</APPEARANCE>
+      <APPEARANCE type="color" state="selected">040506</APPEARANCE>
+    </ITEMS>
+    <SCROLLBAR><SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND></SCROLLBAR>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var screen := int(doc.get_screen_ids()[0])
+	assert_true(doc.get_screen_has_music_var(screen), "explicit MUSICVAR=0 presence is exposed")
+	assert_eq(doc.get_screen_music_var(screen), 0)
+
+	var opaque := _find_widget(doc, "Opaque")
+	var opaque_state: Dictionary = doc.get_widget_authoring_state(opaque)
+	assert_eq(String(opaque_state["type_token"]), "vendor_widget")
+	assert_eq(String(opaque_state["text_rsrc"]), "widget.bin")
+	assert_true(bool(opaque_state["string"]["present"]))
+	assert_true(bool(opaque_state["string"]["has_edge"]))
+	assert_true(bool(opaque_state["behavior"]["has_group"]))
+	assert_true(bool(opaque_state["frame"]["has_stencil_size"]))
+	assert_true(bool(opaque_state["appearances"][0]["has_map_state"]))
+	assert_true(bool(opaque_state["appearances"][0]["has_height"]))
+	assert_true(bool(opaque_state["items"]["multiselect"]))
+
+	var combo := _find_widget(doc, "Combo")
+	var combo_state: Dictionary = doc.get_widget_authoring_state(combo)
+	assert_eq(String(combo_state["items"]["rows"][0]["text"]), "Top",
+		"top-level combo ITEMS remains independently exposed")
+	assert_eq(String(combo_state["list_box"]["items"]["rows"][0]["text"]), "Popup",
+		"LIST_BOX owns the active popup rows")
+	assert_true(bool(combo_state["list_box"]["string"]["present"]))
+	assert_true(bool(combo_state["list_box"]["items"]["multiselect"]))
+
+	var table := _find_widget(doc, "Grid")
+	var table_state: Dictionary = doc.get_widget_authoring_state(table)
+	assert_true(bool(table_state["table"]["has_count"]))
+	assert_true(bool(table_state["table"]["has_spacing"]))
+	assert_true(bool(table_state["table"]["headers"][0]["has_column"]))
+	assert_true(bool(table_state["table"]["headers"][0]["has_width"]))
+	assert_true(bool(table_state["table"]["bodies"][0]["has_column"]))
+	assert_true(bool(table_state["table"]["bodies"][0]["custom_draw"]))
+	assert_true(bool(table_state["table"]["substitutions"][0]["has_column"]))
+	assert_eq(String(table_state["scrollbar"]["sounds"][0]["state"]), "selected")
+
+	var canonical_before := doc.to_byte_array()
+	for id in [opaque, combo, table]:
+		assert_false(doc.apply_widget_patch(id, doc.get_widget_authoring_state(id)),
+			"applying the complete current state is a strict no-op")
+	assert_eq(doc.to_byte_array(), canonical_before,
+		"get-state -> apply-state preserves every serialized presence bit and nested row")
+
+
+func test_scalar_explicit_zero_presence_and_type_token_are_immediate() -> void:
+	var doc := NovaMnuDocument.new()
+	doc.create_empty()
+	var screen := int(doc.get_screen_ids()[0])
+	var root := int(doc.get_screen_root_id(screen))
+	var radio := int(doc.add_widget(root, NovaMnuDocument.TYPE_RADIO, Rect2(0, 0, 20, 20)))
+	doc.set_widget_group(radio, 0)
+	assert_true(bool(doc.get_widget_authoring_state(radio)["behavior"]["has_group"]))
+
+	var table := int(doc.add_widget(root, NovaMnuDocument.TYPE_GLB_TABLE, Rect2(0, 30, 100, 80)))
+	doc.set_table_column_count(table, 0)
+	doc.set_table_column_spacing(table, 0)
+	var table_state: Dictionary = doc.get_widget_authoring_state(table)["table"]
+	assert_true(bool(table_state["has_count"]))
+	assert_true(bool(table_state["has_spacing"]))
+
+	var button := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 120, 40, 20)))
+	assert_true(doc.apply_widget_patch(button, {"type_token": "RADIO"}))
+	assert_eq(doc.get_widget_type(button), NovaMnuDocument.TYPE_RADIO,
+		"raw authored type updates the live enum without save/reload")
+	var reloaded := NovaMnuDocument.new()
+	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
+	assert_true(String(reloaded.to_byte_array().get_string_from_utf8()).contains('type="RADIO"'))
+
+
+func _ascii_utf16(text: String, big_endian: bool) -> PackedByteArray:
+	var out := PackedByteArray([0xFE, 0xFF] if big_endian else [0xFF, 0xFE])
+	for byte in text.to_ascii_buffer():
+		if big_endian:
+			out.append(0)
+			out.append(byte)
+		else:
+			out.append(byte)
+			out.append(0)
+	return out
+
+
+func test_document_bridge_preserves_bom_and_utf16_source_encoding() -> void:
+	var src := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT"/></SCREEN>'
+	var utf8_bom := PackedByteArray([0xEF, 0xBB, 0xBF])
+	utf8_bom.append_array(src.to_utf8_buffer())
+	for encoded in [utf8_bom, _ascii_utf16(src, false), _ascii_utf16(src, true)]:
+		var doc := NovaMnuDocument.new()
+		assert_eq(doc.load_from_bytes(encoded), OK)
+		var saved := doc.to_byte_array()
+		assert_gt(saved.size(), 3)
+		assert_eq(saved[0], encoded[0], "first encoding marker byte survives")
+		assert_eq(saved[1], encoded[1], "second encoding marker byte survives")
+		var reparsed := NovaMnuDocument.new()
+		assert_eq(reparsed.load_from_bytes(saved), OK, "preserved encoding remains parseable")
+
+
+func test_combo_closed_and_dropdown_items_edit_independently() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="combo" name="Mode">
+    <ITEMS justify="LEFT"><ITEM value="closed">Closed</ITEM></ITEMS>
+    <LIST_BOX>
+      <ITEMS justify="RIGHT"><ITEM value="popup">Popup</ITEM></ITEMS>
+    </LIST_BOX>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var combo := _find_widget(doc, "Mode")
+	assert_true(doc.apply_widget_patch(combo, {
+		"items": {
+			"justify": "CENTER",
+			"rows": [{"type": "", "value": "closed2", "text": "Closed two"}],
+		},
+		"list_box": {"items": {
+			"justify": "LEFT",
+			"rows": [{"type": "", "value": "popup2", "text": "Popup two"}],
+		}},
+	}))
+	var state: Dictionary = doc.get_widget_authoring_state(combo)
+	assert_eq(String(state["items"]["rows"][0]["text"]), "Closed two")
+	assert_eq(String(state["items"]["justify"]), "CENTER")
+	assert_eq(String(state["list_box"]["items"]["rows"][0]["text"]), "Popup two")
+	assert_eq(String(state["list_box"]["items"]["justify"]), "LEFT")
+	assert_eq(String(doc.get_item(combo, 0)["text"]), "Popup two",
+		"generic item convenience targets the authored dropdown collection")
+
+	var reloaded := NovaMnuDocument.new()
+	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
+	var state2: Dictionary = reloaded.get_widget_authoring_state(
+		_find_widget(reloaded, "Mode"))
+	assert_eq(String(state2["items"]["rows"][0]["text"]), "Closed two",
+		"closed/fallback rows survive independently")
+	assert_eq(String(state2["list_box"]["items"]["rows"][0]["text"]), "Popup two",
+		"dropdown rows survive independently")
+
+
+func test_presence_false_retains_latent_values_but_omits_authored_fields() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><MUSICVAR>9</MUSICVAR><WINDOW type="window" name="ROOT">
+  <WINDOW type="combo" name="Deep">
+    <GROUP>7</GROUP>
+    <STRING edge="5">latent</STRING>
+    <FRAME><STENCIL size="9" insetx="4" insety="3">edge.tga</STENCIL></FRAME>
+    <APPEARANCE state="default" type="image" map_state="2" height="8">art.tga</APPEARANCE>
+    <ITEMS><ITEM value="1">closed</ITEM></ITEMS>
+    <LIST_BOX><STRING edge="6">popup</STRING><ITEMS><ITEM>drop</ITEM></ITEMS>
+      <SCROLLBAR><APPEARANCE state="default" type="color">112233</APPEARANCE></SCROLLBAR>
+    </LIST_BOX>
+  </WINDOW>
+  <WINDOW type="table" name="Grid">
+    <COLUMN count="3" spacing="5">
+      <HEADER column="2" width="70">Head</HEADER>
+      <BODY column="1"></BODY><SUBST column="1" value="x"/>
+    </COLUMN>
+    <MIN_ITEM_HEIGHT>11</MIN_ITEM_HEIGHT>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var screen := int(doc.get_screen_ids()[0])
+	var deep := _find_widget(doc, "Deep")
+	var deep_state: Dictionary = doc.get_widget_authoring_state(deep)
+	var appearances: Array = deep_state["appearances"]
+	appearances[0]["has_map_state"] = false
+	appearances[0]["has_height"] = false
+	assert_true(doc.apply_widget_patch(deep, {
+		"behavior": {"has_group": false},
+		"string": {"present": false},
+		"frame": {
+			"has_stencil_size": false, "has_insetx": false, "has_insety": false,
+		},
+		"appearances": appearances,
+		"items": {"present": false},
+		"list_box": {"present": false},
+	}))
+	doc.set_screen_property(screen, "has_music_var", false)
+
+	var grid := _find_widget(doc, "Grid")
+	var table: Dictionary = doc.get_widget_authoring_state(grid)["table"]
+	table["has_count"] = false
+	table["has_spacing"] = false
+	table["has_min_item_height"] = false
+	table["headers"][0]["has_column"] = false
+	table["headers"][0]["has_width"] = false
+	table["bodies"][0]["has_column"] = false
+	table["substitutions"][0]["has_column"] = false
+	assert_true(doc.apply_widget_patch(grid, {"table": table}))
+
+	var retained: Dictionary = doc.get_widget_authoring_state(deep)
+	assert_eq(int(retained["behavior"]["group"]), 7, "GROUP value remains latent")
+	assert_eq(String(retained["string"]["value"]), "latent", "STRING value remains latent")
+	assert_eq(int(retained["frame"]["stencil_size"]), 9, "frame size remains latent")
+	assert_eq(int(retained["appearances"][0]["map_state"]), 2,
+		"appearance map state remains latent")
+	assert_eq(int(retained["appearances"][0]["height"]), 8,
+		"appearance height remains latent")
+	assert_eq(String(retained["items"]["rows"][0]["text"]), "closed",
+		"ITEMS content remains latent")
+	assert_eq(String(retained["list_box"]["string"]["value"]), "popup",
+		"LIST_BOX content remains latent")
+
+	var text := doc.to_byte_array().get_string_from_utf8()
+	assert_false(text.contains("<MUSICVAR>"), "unchecked nonzero MUSICVAR is omitted")
+	assert_false(text.contains("<GROUP>"), "unchecked nonzero GROUP is omitted")
+	assert_false(text.contains("<STRING"), "absent STRING/LIST_BOX containers are omitted")
+	assert_false(text.contains("<ITEMS"), "absent ITEMS containers are omitted")
+	assert_false(text.contains("<LIST_BOX"), "absent LIST_BOX is omitted")
+	assert_false(text.contains("map_state="), "unchecked nonzero map_state is omitted")
+	assert_false(text.contains("height="), "unchecked nonzero appearance height is omitted")
+	assert_false(text.contains("size="), "unchecked nonzero stencil size is omitted")
+	assert_false(text.contains("insetx="), "unchecked nonzero frame inset is omitted")
+	assert_false(text.contains("count="), "unchecked nonzero column count is omitted")
+	assert_false(text.contains("spacing="), "unchecked nonzero column spacing is omitted")
+	assert_false(text.contains("column="), "unchecked nonzero table row columns are omitted")
+	assert_false(text.contains("width="), "unchecked nonzero header width is omitted")
+	assert_false(text.contains("<MIN_ITEM_HEIGHT>"),
+		"unchecked nonzero table minimum height is omitted")
+
+
+func test_table_color_aliases_update_only_last_matching_ordered_row() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="table" name="Grid"><ITEMS>
+    <APPEARANCE state="default" type="outline">111111</APPEARANCE>
+    <APPEARANCE state="default" type="outline">222222</APPEARANCE>
+    <APPEARANCE state="selected" type="color">333333</APPEARANCE>
+    <APPEARANCE state="selected" type="color">444444</APPEARANCE>
+  </ITEMS></WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var grid := _find_widget(doc, "Grid")
+	assert_true(doc.apply_widget_patch(grid, {"table": {
+		"outline_color": "AAAAAA", "selection_color": "BBBBBB",
+	}}))
+	var state: Dictionary = doc.get_widget_authoring_state(grid)
+	var rows: Array = state["items"]["appearances"]
+	assert_eq(String(rows[0]["value"]), "111111", "earlier outline row is preserved")
+	assert_eq(String(rows[1]["value"]), "AAAAAA", "last outline row is authoritative")
+	assert_eq(String(rows[2]["value"]), "333333", "earlier selected row is preserved")
+	assert_eq(String(rows[3]["value"]), "BBBBBB", "last selected row is authoritative")
+	assert_true(bool(state["items"]["present"]), "scalar aliases author ITEMS")
+
+	var reloaded := NovaMnuDocument.new()
+	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
+	var grid2 := _find_widget(reloaded, "Grid")
+	var state2: Dictionary = reloaded.get_widget_authoring_state(grid2)
+	assert_eq(String(state2["table"]["outline_color"]), "AAAAAA")
+	assert_eq(String(state2["table"]["selection_color"]), "BBBBBB")
+	var edited_rows: Array = state2["items"]["appearances"]
+	edited_rows[1]["value"] = "CCCCCC"
+	edited_rows[3]["value"] = "DDDDDD"
+	assert_true(reloaded.apply_widget_patch(grid2,
+		{"items": {"appearances": edited_rows}}))
+	var state3: Dictionary = reloaded.get_widget_authoring_state(grid2)
+	assert_eq(String(state3["table"]["outline_color"]), "CCCCCC",
+		"ordered appearance edits synchronize the outline alias")
+	assert_eq(String(state3["table"]["selection_color"]), "DDDDDD",
+		"ordered appearance edits synchronize the selection alias")
+
+
+func test_apply_widget_patch_noop_and_unknown_only_do_not_touch() -> void:
+	var doc := NovaMnuDocument.new()
+	doc.create_empty()
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var button := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON,
+		Rect2(0, 0, 40, 20)))
+	var state: Dictionary = doc.get_widget_authoring_state(button)
+	assert_false(doc.apply_widget_patch(button, {"name": state["name"]}),
+		"identical values are not edits")
+	assert_false(doc.apply_widget_patch(button, {"spcaing": 4}),
+		"unknown-only patches are not edits")
+
+
+func test_items_selection_alias_reconciles_duplicates_deletion_and_clear() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="list" name="Rows"><ITEMS>
+    <APPEARANCE state="selected" type="color">111111</APPEARANCE>
+    <APPEARANCE state="selected" type="color">222222</APPEARANCE>
+  </ITEMS></WINDOW>
+  <WINDOW type="combo" name="Mode"><LIST_BOX><ITEMS>
+    <APPEARANCE state="selected" type="color">AAAAAA</APPEARANCE>
+    <APPEARANCE state="selected" type="color">BBBBBB</APPEARANCE>
+  </ITEMS></LIST_BOX></WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var list := _find_widget(doc, "Rows")
+	var list_items: Dictionary = doc.get_widget_authoring_state(list)["items"]
+	assert_eq(String(list_items["selection_color"]), "222222")
+	var rows: Array = list_items["appearances"]
+	rows.remove_at(1)
+	assert_true(doc.apply_widget_patch(list, {"items": {"appearances": rows}}))
+	list_items = doc.get_widget_authoring_state(list)["items"]
+	assert_eq(String(list_items["selection_color"]), "111111",
+		"deleting the winning duplicate reveals the prior row")
+	assert_true(doc.apply_widget_patch(list, {"items": {"selection_color": ""}}))
+	list_items = doc.get_widget_authoring_state(list)["items"]
+	assert_eq(list_items["appearances"].size(), 1,
+		"clearing a scalar edits the existing row without synthesizing")
+	assert_eq(String(list_items["appearances"][0]["value"]), "")
+	assert_true(doc.apply_widget_patch(list, {"items": {"appearances": []}}))
+	assert_false(doc.apply_widget_patch(list, {"items": {"selection_color": ""}}),
+		"clearing with no row is a no-op and does not synthesize an empty row")
+	assert_eq(doc.get_widget_authoring_state(list)["items"]["appearances"].size(), 0)
+
+	var combo := _find_widget(doc, "Mode")
+	var nested: Dictionary = doc.get_widget_authoring_state(combo)["list_box"]["items"]
+	assert_eq(String(nested["selection_color"]), "BBBBBB")
+	var nested_rows: Array = nested["appearances"]
+	nested_rows[1]["value"] = "CCCCCC"
+	assert_true(doc.apply_widget_patch(combo,
+		{"list_box": {"items": {"appearances": nested_rows}}}))
+	nested = doc.get_widget_authoring_state(combo)["list_box"]["items"]
+	assert_eq(String(nested["selection_color"]), "CCCCCC",
+		"Combo LIST_BOX Items shares the same ordered alias policy")
+	assert_true(doc.apply_widget_patch(combo,
+		{"list_box": {"items": {"selection_color": ""}}}))
+	nested = doc.get_widget_authoring_state(combo)["list_box"]["items"]
+	assert_eq(nested["appearances"].size(), 2)
+	assert_eq(String(nested["appearances"][1]["value"]), "")
+
+
+func test_combo_generic_items_ignore_latent_list_box_parent() -> void:
+	var src := """
+<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="combo" name="Mode">
+    <ITEMS><ITEM value="top">Top</ITEM></ITEMS>
+    <LIST_BOX><ITEMS><ITEM value="nested">Nested</ITEM></ITEMS></LIST_BOX>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var combo := _find_widget(doc, "Mode")
+	assert_true(doc.apply_widget_patch(combo, {"list_box": {"present": false}}))
+	assert_eq(String(doc.get_item(combo, 0)["text"]), "Top",
+		"a latent nested ITEMS is inactive when its LIST_BOX parent is absent")
+	doc.add_item(combo, {"type": "", "value": "top2", "text": "Top two"})
+	var state: Dictionary = doc.get_widget_authoring_state(combo)
+	assert_eq(state["items"]["rows"].size(), 2)
+	assert_eq(state["list_box"]["items"]["rows"].size(), 1,
+		"generic edits never overwrite the latent dropdown collection")
+
+
+func test_direct_authoring_patch_rejects_malformed_shapes_atomically() -> void:
+	var doc := NovaMnuDocument.new()
+	doc.create_empty()
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var combo := int(doc.add_widget(root, NovaMnuDocument.TYPE_COMBO,
+		Rect2(0, 0, 100, 24)))
+	var before := doc.to_byte_array()
+	watch_signals(doc)
+	for malformed in [
+		{"items": "not an object"},
+		{"items": {"rows": ["not an object"]}},
+		{"list_box": {"items": {"rows": [{"text": []}]}}},
+		{"table": {"count": []}},
+		{"string": {"present": "false"}},
+	]:
+		assert_false(doc.apply_widget_patch(combo, malformed),
+			"malformed direct patch is rejected")
+		assert_eq(doc.to_byte_array(), before,
+			"malformed direct patch leaves bytes identical")
+	assert_signal_not_emitted(doc, "changed",
+		"malformed direct patches never emit changed")

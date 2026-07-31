@@ -15,6 +15,7 @@ signal reparent_requested(id: int, new_parent: int, index: int)
 var _document: NovaMnuDocument
 var _item_by_id: Dictionary = {}
 var _suppress_selection := false
+var _authoring_enabled := true
 
 
 func _ready() -> void:
@@ -34,6 +35,12 @@ func set_document(doc: NovaMnuDocument) -> void:
 	_document = doc
 	if is_node_ready():
 		rebuild()
+
+
+func set_authoring_enabled(enabled: bool) -> void:
+	_authoring_enabled = enabled
+	drop_mode_flags = (Tree.DROP_MODE_INBETWEEN | Tree.DROP_MODE_ON_ITEM) \
+		if enabled else Tree.DROP_MODE_DISABLED
 
 
 func rebuild() -> void:
@@ -109,6 +116,8 @@ func _on_item_selected() -> void:
 
 # A non-screen, non-root widget can be dragged. The drag payload carries its id.
 func _get_drag_data(at_position: Vector2) -> Variant:
+	if not _authoring_enabled:
+		return null
 	var item := get_item_at_position(at_position)
 	if item == null or _document == null:
 		return null
@@ -122,6 +131,8 @@ func _get_drag_data(at_position: Vector2) -> Variant:
 
 
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
+	if not _authoring_enabled:
+		return false
 	if typeof(data) != TYPE_DICTIONARY or not data.has("mnu_widget_id") or _document == null:
 		return false
 	var src := int(data["mnu_widget_id"])
@@ -144,6 +155,8 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 
 
 func _drop_data(at_position: Vector2, data: Variant) -> void:
+	if not _authoring_enabled:
+		return
 	if typeof(data) != TYPE_DICTIONARY or not data.has("mnu_widget_id"):
 		return
 	var target := _drop_target(at_position)

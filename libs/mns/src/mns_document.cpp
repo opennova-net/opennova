@@ -68,7 +68,22 @@ void append_unescaped(std::string &out, const std::string &chunk) {
 std::string logical_value(const Node &node) {
 	std::string joined;
 	for (const DefineLine &dl : node.define_lines) {
+		if (!dl.contributes_value) continue;
 		append_unescaped(joined, dl.chunk);
+	}
+	rtrim_hws(joined);
+	return joined;
+}
+
+// Retail runtime value. parse_key_value_buffer scans over a doubled
+// backslash so it cannot be mistaken for a continuation, but later copies the
+// original contiguous source range; it does not collapse the pair.
+// [orig: parse_key_value_buffer @ 0x639bba, scan @ 0x639c0e]
+std::string retail_value(const Node &node) {
+	std::string joined;
+	for (const DefineLine &dl : node.define_lines) {
+		if (!dl.contributes_value) continue;
+		joined += dl.chunk;
 	}
 	rtrim_hws(joined);
 	return joined;
@@ -77,6 +92,7 @@ std::string logical_value(const Node &node) {
 std::string raw_value(const Node &node) {
 	std::string joined;
 	for (const DefineLine &dl : node.define_lines) {
+		if (!dl.contributes_value) continue;
 		joined += dl.chunk;
 	}
 	return joined;
@@ -128,12 +144,17 @@ Document Document::parse(const char *data, size_t size) {
 		p += 3;
 	}
 
-	// Conditional state replicates the legacy parser exactly (its #else
-	// handling is the pinned flatten behavior); if_lines is bookkeeping for
-	// the unbalanced/unterminated diagnostics only.
-	int skip_depth = 0;
-	bool in_else = false;
-	std::vector<int> if_lines;
+	// The retail loader uses the first argument character as its condition:
+	// leading '0' is false, every other spelling is true. A stack keeps nested
+	// inactive regions and #else branches independent.
+	struct ConditionalFrame {
+		int line = 0;
+		bool parent_active = true;
+		bool condition = true;
+		bool in_else = false;
+	};
+	std::vector<ConditionalFrame> conditionals;
+	bool active = true;
 
 	int line_no = 1;
 	std::unordered_map<std::string, int> seen; // uppercase active name -> first line
@@ -166,6 +187,75 @@ Document Document::parse(const char *data, size_t size) {
 		const char *start = p;
 		while (p < end && *p != '\n' && *p != '\r') ++p;
 		return std::string(start, p);
+	};
+
+	auto line_end_from = [&](const char *start) {
+		const char *line_end = start;
+		while (line_end < end && *line_end != '\n' && *line_end != '\r') ++line_end;
+		return line_end;
+	};
+
+	auto find_hash = [&](const char *start, const char *line_end) {
+		const char *hash = start;
+		while (hash < line_end && *hash != '#') ++hash;
+		return hash < line_end ? hash : nullptr;
+	};
+
+	// Apply one directive whose '#' may be embedded in otherwise inactive source.
+	// Retail's false-branch scanner seeks the next '#' byte rather than requiring
+	// a line start [orig: parse_key_value_buffer @ 0x639870].
+	auto apply_directive = [&](const char *hash, int directive_line,
+			DirectiveKind &kind, std::string &arg) {
+		const char *line_end = line_end_from(hash);
+		const char *tok_start = hash + 1;
+		const char *t = tok_start;
+		while (t < line_end && !is_hws(*t)) ++t;
+		const std::string tok(tok_start, t);
+
+		if (tok == "if") {
+			kind = DirectiveKind::If;
+			const char *a = t;
+			while (a < line_end && is_hws(*a)) ++a;
+			const char *arg_start = a;
+			while (a < line_end && !is_hws(*a)) ++a;
+			arg.assign(arg_start, a);
+			if (arg != "0" && arg != "1") {
+				diag(directive_line, Severity::Warning, "noncanonical-if-arg",
+						"'#if' uses its first character; canonical arguments are 0 or 1");
+			}
+			const bool condition = arg.empty() || arg.front() != '0';
+			conditionals.push_back(
+					ConditionalFrame{directive_line, active, condition, false});
+			active = active && condition;
+		} else if (tok == "else") {
+			kind = DirectiveKind::Else;
+			if (conditionals.empty()) {
+				diag(directive_line, Severity::Error, "unbalanced-else",
+						"'#else' without a matching '#if'");
+			} else {
+				ConditionalFrame &frame = conditionals.back();
+				if (frame.in_else) {
+					diag(directive_line, Severity::Error, "duplicate-else",
+							"'#if' block has more than one '#else'");
+				} else {
+					frame.in_else = true;
+					active = frame.parent_active && !frame.condition;
+				}
+			}
+		} else if (tok == "endif") {
+			kind = DirectiveKind::Endif;
+			if (conditionals.empty()) {
+				diag(directive_line, Severity::Error, "unbalanced-endif",
+						"'#endif' without a matching '#if'");
+			} else {
+				active = conditionals.back().parent_active;
+				conditionals.pop_back();
+			}
+		} else {
+			kind = DirectiveKind::Unknown;
+			diag(directive_line, Severity::Error, "unknown-directive",
+					"unknown stylesheet directive '#" + tok + "'");
+		}
 	};
 
 	// Scan one value segment from p to its EOL. Fills chunk/comment/whitespace
@@ -246,7 +336,7 @@ Document Document::parse(const char *data, size_t size) {
 
 		// Full-line comment (active regions only; inactive ones are plain
 		// skipped text to the runtime and stay InactiveText here).
-		if (skip_depth == 0 && p + 1 < end && p[0] == '/' && p[1] == '/') {
+		if (active && p + 1 < end && p[0] == '/' && p[1] == '/') {
 			node.kind = NodeKind::Comment;
 			node.leading_ws = leading_ws;
 			node.text = body_to_eol();
@@ -256,63 +346,18 @@ Document Document::parse(const char *data, size_t size) {
 			continue;
 		}
 
-		// Directives are recognized in both active and inactive regions
-		// (the legacy parser drives its skip state the same way).
-		if (*p == '#') {
+		// In active source a directive starts at the first non-whitespace byte.
+		// In inactive source retail scans forward to the next '#' even when it is
+		// not line-leading.
+		const char *directive_hash = *p == '#'
+				? p
+				: (!active ? find_hash(p, line_end_from(p)) : nullptr);
+		if (directive_hash != nullptr) {
 			node.kind = NodeKind::Directive;
 			node.leading_ws = leading_ws;
-			const char *tok_start = p + 1;
-			const char *t = tok_start;
-			while (t < end && !is_hws(*t) && *t != '\n' && *t != '\r') ++t;
-			const std::string tok(tok_start, t);
-			node.text = body_to_eol(); // from '#' through any trailing text/comment
-
-			if (tok == "if") {
-				node.directive = DirectiveKind::If;
-				const char *a = t;
-				while (a < end && is_hws(*a)) ++a;
-				const char *arg_start = a;
-				while (a < end && !is_hws(*a) && *a != '\n' && *a != '\r') ++a;
-				node.directive_arg.assign(arg_start, a);
-				if_lines.push_back(node.line);
-				if (node.directive_arg != "0" && node.directive_arg != "1") {
-					diag(node.line, Severity::Error, "bad-if-arg",
-							"'#if' argument must be 0 or 1");
-				}
-				if (skip_depth > 0) {
-					++skip_depth;
-				} else if (node.directive_arg == "0") {
-					skip_depth = 1;
-					in_else = false;
-				}
-			} else if (tok == "else") {
-				node.directive = DirectiveKind::Else;
-				if (if_lines.empty()) {
-					diag(node.line, Severity::Error, "unbalanced-else",
-							"'#else' without a matching '#if'");
-				}
-				if (skip_depth == 1 && !in_else) {
-					skip_depth = 0;
-					in_else = true;
-				} else if (skip_depth == 0 && in_else) {
-					skip_depth = 1;
-				} else if (skip_depth == 0) {
-					skip_depth = 1;
-					in_else = true;
-				}
-			} else if (tok == "endif") {
-				node.directive = DirectiveKind::Endif;
-				if (if_lines.empty()) {
-					diag(node.line, Severity::Error, "unbalanced-endif",
-							"'#endif' without a matching '#if'");
-				} else {
-					if_lines.pop_back();
-				}
-				if (skip_depth > 0) --skip_depth;
-				in_else = false;
-			} else {
-				node.directive = DirectiveKind::Unknown;
-			}
+			node.text = body_to_eol(); // whole body; inactive scans may have a prefix before '#'
+			apply_directive(directive_hash, node.line, node.directive,
+					node.directive_arg);
 			read_eol(node.eol);
 			doc.nodes_.push_back(std::move(node));
 			++line_no;
@@ -322,7 +367,7 @@ Document Document::parse(const char *data, size_t size) {
 		// Inside an evaluated-false region: preserve the line verbatim. The
 		// runtime skips these line-by-line, so no define structure is imposed
 		// (see ADR 0014 on why this is not "raw passthrough").
-		if (skip_depth > 0) {
+		if (!active) {
 			node.kind = NodeKind::InactiveText;
 			node.leading_ws = leading_ws;
 			node.text = body_to_eol();
@@ -350,21 +395,46 @@ Document Document::parse(const char *data, size_t size) {
 		const char *sep_start = p;
 		while (p < end && is_hws(*p)) ++p;
 		first.sep_ws.assign(sep_start, p);
+		if (first.sep_ws.empty()) {
+			diag(node.line, Severity::Error, "missing-value-delimiter",
+					"macro '" + first.name +
+							"' has no whitespace delimiter before its value");
+		}
 
 		bool continued = scan_segment(first);
 		read_eol(first.eol);
 		node.define_lines.push_back(std::move(first));
 		++line_no;
 
-		// An active define's continuation consumes the next physical line
-		// unconditionally -- even one that looks like a directive (legacy
-		// read_value behavior; D-MNS-4 in docs/mnu/menu-re.md).
+		// A pending continuation skips directive and inactive physical lines,
+		// then resumes with the next ordinary active line. Those crossed lines
+		// remain byte-owned by this Define node so serialization is still in
+		// physical order, but they do not contribute to the evaluated value.
 		while (continued && p < end) {
 			DefineLine cont;
 			const char *cont_ws = p;
 			while (p < end && is_hws(*p)) ++p;
 			cont.leading_ws.assign(cont_ws, p);
-			continued = scan_segment(cont);
+			const char *physical_end = line_end_from(p);
+			const char *hash = active
+					? (*p == '#' ? p : nullptr)
+					: find_hash(p, physical_end);
+			if (!active || hash != nullptr) {
+				cont.contributes_value = false;
+				const char *body_start = p;
+				cont.chunk.assign(body_start, physical_end);
+				p = physical_end;
+				if (hash != nullptr) {
+					DirectiveKind crossed_kind = DirectiveKind::Unknown;
+					std::string crossed_arg;
+					apply_directive(hash, line_no, crossed_kind, crossed_arg);
+				}
+				// A directive/inactive line does not terminate the pending
+				// continuation, regardless of whether its own source ends in '\'.
+				continued = true;
+			} else {
+				continued = scan_segment(cont);
+			}
 			read_eol(cont.eol);
 			node.define_lines.push_back(std::move(cont));
 			++line_no;
@@ -382,7 +452,7 @@ Document Document::parse(const char *data, size_t size) {
 		}
 		auto it = seen.find(upper);
 		if (it != seen.end()) {
-			diag(node.line, Severity::Error, "duplicate-name",
+			diag(node.line, Severity::Warning, "duplicate-name",
 					"duplicate macro name '" + name + "' (first defined at line " +
 							std::to_string(it->second) + ")");
 		} else {
@@ -391,8 +461,8 @@ Document Document::parse(const char *data, size_t size) {
 		doc.nodes_.push_back(std::move(node));
 	}
 
-	for (int open_line : if_lines) {
-		diag(open_line, Severity::Error, "unterminated-if",
+	for (const ConditionalFrame &frame : conditionals) {
+		diag(frame.line, Severity::Error, "unterminated-if",
 				"'#if' block not closed before end of file");
 	}
 
@@ -454,13 +524,25 @@ void Document::set_source_text(const std::string &text) {
 	has_bom_ = has_bom_ || had_bom;
 }
 
-StyleSheet Document::flatten() const {
-	StyleSheet sheet;
+EvaluationResult Document::evaluate() const {
+	EvaluationResult result;
+	result.diagnostics = diagnostics_;
 	for (const Node &node : nodes_) {
 		if (node.kind != NodeKind::Define) continue;
-		sheet.variables[to_upper(node.define_lines.front().name)] = logical_value(node);
+		result.sheet.variables[to_upper(node.define_lines.front().name)] =
+				retail_value(node);
 	}
-	return sheet;
+	for (const Diagnostic &diagnostic : result.diagnostics) {
+		if (diagnostic.severity == Severity::Error) {
+			result.success = false;
+			break;
+		}
+	}
+	return result;
+}
+
+StyleSheet Document::flatten() const {
+	return evaluate().sheet;
 }
 
 std::vector<Document::Entry> Document::entries() const {
@@ -545,6 +627,19 @@ bool Document::set_value(const std::string &name, const std::string &value, std:
 	Node &node = nodes_[ni];
 	if (node.define_lines.size() == 1) {
 		node.define_lines[0].chunk = escape_value(v);
+	} else if (std::any_of(node.define_lines.begin(), node.define_lines.end(),
+					   [](const DefineLine &line) {
+						   return !line.contributes_value;
+					   })) {
+		// Preserve crossed directives/inactive source in place. Put the edited
+		// logical value on the first real value line and empty the remaining real
+		// segments; their continuation structure/comments/EOLs remain intact.
+		bool wrote = false;
+		for (DefineLine &line : node.define_lines) {
+			if (!line.contributes_value) continue;
+			line.chunk = wrote ? std::string() : escape_value(v);
+			wrote = true;
+		}
 	} else {
 		// Collapse to one line. Layout comes from the first line; the EOL from
 		// the last (preserves a document-final missing newline). Inline
@@ -657,6 +752,20 @@ bool Document::add_define(const std::string &name, const std::string &value,
 
 bool Document::remove_define(const std::string &name, std::string *error) {
 	const std::string upper = to_upper(name);
+	for (const Node &node : nodes_) {
+		if (node.kind != NodeKind::Define ||
+				to_upper(node.define_lines.front().name) != upper) {
+			continue;
+		}
+		if (std::any_of(node.define_lines.begin(), node.define_lines.end(),
+					[](const DefineLine &line) {
+						return !line.contributes_value;
+					})) {
+			set_error(error, "cannot remove macro '" + name +
+					"': its continuation crosses conditional or inactive source");
+			return false;
+		}
+	}
 	bool removed = false;
 	for (size_t i = nodes_.size(); i > 0; --i) {
 		const Node &node = nodes_[i - 1];
@@ -686,6 +795,14 @@ bool Document::move_define(const std::string &name, int before_node_index, std::
 	}
 	if (before_node_index == ni || before_node_index == ni + 1) {
 		return true; // already there
+	}
+	if (std::any_of(nodes_[ni].define_lines.begin(),
+				nodes_[ni].define_lines.end(), [](const DefineLine &line) {
+					return !line.contributes_value;
+				})) {
+		set_error(error, "cannot move macro '" + name +
+				"': its continuation crosses conditional or inactive source");
+		return false;
 	}
 	Node node = std::move(nodes_[ni]);
 	nodes_.erase(nodes_.begin() + ni);

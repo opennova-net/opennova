@@ -20,6 +20,7 @@ var _sheet: MnsStyleSheet
 var _name := ""
 var _shell: Object
 var _font_names := PackedStringArray()
+var _authoring_enabled := true
 
 
 func _init() -> void:
@@ -40,6 +41,20 @@ func set_shell(shell: Object) -> void:
 # Font names from the resource folder (basenames incl. .fnt) for the pick menu.
 func set_font_names(names: PackedStringArray) -> void:
 	_font_names = names
+
+
+func set_authoring_enabled(enabled: bool) -> void:
+	_authoring_enabled = enabled
+	if enabled:
+		_rebuild()
+		return
+	for node in find_children("*", "Control", true, false):
+		if node is BaseButton:
+			(node as BaseButton).disabled = true
+		elif node is LineEdit:
+			(node as LineEdit).editable = false
+		elif node is TextEdit:
+			(node as TextEdit).editable = false
 
 
 func show_variable(sheet: MnsStyleSheet, name: String) -> void:
@@ -69,6 +84,8 @@ func _entry() -> Dictionary:
 
 func _rebuild() -> void:
 	_clear()
+	if not _authoring_enabled:
+		set_authoring_enabled.call_deferred(false)
 	if _sheet == null:
 		MnuUiHelpersScript.add_muted(_box, "No stylesheet open.")
 		return
@@ -94,7 +111,7 @@ func _rebuild() -> void:
 		"font":
 			_build_font_value(value)
 		"image":
-			_build_text_value(value)
+			_build_image_value(value)
 			MnuUiHelpersScript.add_muted(_box, "A picture file (like a .tga) next to the menus.")
 		_:
 			_build_text_value(value)
@@ -146,7 +163,17 @@ func _build_color_value(value: String) -> void:
 	var parsed = MnuUiHelpersScript.color_from_mnu(value)
 	picker.color = parsed if parsed != null else Color.WHITE
 	var had_alpha := value.strip_edges().length() == 8
+	var changed := {"value": false}
+	picker.color_changed.connect(func(color: Color) -> void:
+		changed["value"] = true
+		var hex: String = MnuUiHelpersScript.color_to_mnu(color, had_alpha)
+		edit.text = hex
+		if is_instance_valid(swatch):
+			MnuUiHelpersScript.refresh_swatch(swatch, hex))
 	picker.popup_closed.connect(func() -> void:
+		if not _authoring_enabled or not bool(changed["value"]):
+			return
+		changed["value"] = false
 		var hex: String = MnuUiHelpersScript.color_to_mnu(picker.color, had_alpha)
 		if hex != value:
 			edit_requested.emit({"op": "set_value", "name": _name, "value": hex}))
@@ -175,6 +202,24 @@ func _build_font_value(value: String) -> void:
 	jump.pressed.connect(func() -> void:
 		font_jump_requested.emit(value.get_basename()))
 	_box.add_child(jump)
+
+
+func _build_image_value(value: String) -> void:
+	var row := MnuUiHelpersScript._row(_box)
+	row.add_child(MnuUiHelpersScript._key_label("Value"))
+	var ref := ResourceRefWidget.new()
+	ref.name = "MnsImageRef"
+	ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ref.set_value_from_path(func(path: String) -> String:
+		return path.get_file())
+	ref.configure("texture", "Picture",
+		ResourceRefWidget.services_from_shell(_shell) if _shell != null else {})
+	ref.set_value(value)
+	ref.value_changed.connect(func(next: String) -> void:
+		if _authoring_enabled and next != value:
+			edit_requested.emit(
+				{"op": "set_value", "name": _name, "value": next}))
+	row.add_child(ref)
 
 
 func _build_text_value(value: String) -> void:
@@ -230,8 +275,8 @@ func _build_overview() -> void:
 # firing while the inspector is being torn down (the mnu inspector idiom).
 func _wire(edit: LineEdit, commit: Callable) -> void:
 	edit.text_submitted.connect(func(_text: String) -> void:
-		if is_instance_valid(edit) and edit.is_inside_tree():
+		if _authoring_enabled and is_instance_valid(edit) and edit.is_inside_tree():
 			commit.call(edit.text))
 	edit.focus_exited.connect(func() -> void:
-		if is_instance_valid(edit) and edit.is_inside_tree():
+		if _authoring_enabled and is_instance_valid(edit) and edit.is_inside_tree():
 			commit.call(edit.text))

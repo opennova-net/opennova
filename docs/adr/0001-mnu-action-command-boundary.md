@@ -1,11 +1,27 @@
-# MNU expresses only navigation; game behavior is wired by control name
+# MNU Actions stay authored; Commands stay host-bound by control name
 
-The MNU `<ACTION>` vocabulary covers navigation and visibility only: go to a screen or another `.mnu`, show/hide a named window, pop the screen, open a URL. It has no verb for game-semantic behavior — start a mission, apply video settings, connect to a server — and neither do the shipped JO menus.
+The MNU `<ACTION>` vocabulary is the behavior explicitly authored in a Menu.
+Retail parses sixteen types: `SCREEN`, `WINDOW`, `URL`, `FORM_POST`, the
+`GLB_*` browser family, `TAB`, `POP_SCREEN`, `APPMSG`, `LAN_SEARCH`,
+`LAN_JOIN`, and `MNX`
+`[orig: CUIElement_ParseXMLDefinition @ 0x648ee2..0x6490e9]`. The common JO
+menus use the navigation/visibility/URL subset; the remaining types belong to
+form, focus, browser, LAN, or application hosts.
 
-We deliberately keep `libs/mnu` free of any such command verb, staying faithful to the real format, and instead wire game behavior in the runtime host (`NovaMenuHost` / `menu_shell.gd`) by matching a widget's control **name** (`START_GAME`, `ACCEPT`, `EXIT`, ...). This is the Action vs Command distinction recorded in CONTEXT.md.
+Behavior not authored as an `<ACTION>` is a Command. The runtime host supplies
+Commands by matching a widget's control **name** (`START_GAME`, `ACCEPT`,
+`EXIT`, ...). This is the Action versus Command distinction recorded in
+`CONTEXT.md`; it is an authored-versus-host-bound seam, not a
+navigation-versus-gameplay taxonomy.
 
 ## Consequences
 
-- A functional button is inert until the host recognizes its name; behavior is never data-driven from the `.mnu`.
-- A future reader who finds the host scanning for magic control-name strings should read this: it is the intended boundary, not a shortcut.
-- Supporting a different game's menu set means supplying that game's control-name sets, not extending `libs/mnu`.
+- Actions remain typed, ordered data in `libs/mnu`; host-owned Action types are
+  preserved and dispatched through a host seam rather than reclassified as
+  Commands.
+- A Window with neither an Action nor a recognized control name is inert.
+- A future reader who finds the host scanning for control-name strings should
+  read this as the intended Command seam, not a shortcut.
+- Supporting another title can require both its control-name Command bindings
+  and host adapters for authored browser/form Actions. Neither justifies
+  inventing new MNU verbs.

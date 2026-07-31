@@ -69,6 +69,16 @@ func _collect_text(node: Node) -> String:
 	return out
 
 
+func _find_color_picker(node: Node) -> ColorPickerButton:
+	if node is ColorPickerButton:
+		return node
+	for child in node.get_children():
+		var found := _find_color_picker(child)
+		if found != null:
+			return found
+	return null
+
+
 func test_workspace_id_and_label() -> void:
 	var ws = MnuEditorWorkspaceScript.new()
 	assert_eq(ws.get_workspace_id(), "mnu", "workspace id")
@@ -270,6 +280,49 @@ func test_inspector_populates_for_selection() -> void:
 	assert_string_contains(text, "DEF_FONTNAME", "inspector shows the selected variable")
 	assert_string_contains(text, "Delete variable", "inspector offers delete")
 	ws.release_viewport()
+
+
+func test_inspector_color_picker_preserves_raw_value_until_changed() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes("LOWER aabbcc\n".to_utf8_buffer()), OK)
+	var inspector = MnsInspectorScript.new()
+	add_child_autofree(inspector)
+	inspector.show_variable(sheet, "LOWER")
+	var edits: Array = []
+	inspector.edit_requested.connect(func(edit: Dictionary) -> void:
+		edits.append(edit))
+	var picker := _find_color_picker(inspector)
+	assert_not_null(picker, "color variables have a real picker")
+	if picker == null:
+		return
+	picker.popup_closed.emit()
+	assert_eq(edits.size(), 0,
+		"opening and closing leaves lowercase/raw authoring untouched")
+	picker.color = Color(1.0, 0.0, 0.0)
+	picker.color_changed.emit(picker.color)
+	picker.popup_closed.emit()
+	assert_eq(edits.size(), 1, "an actual pick commits exactly once")
+	if edits.size() == 1:
+		assert_eq(String(edits[0].get("value", "")), "FF0000",
+			"the chosen literal retains the source's six-digit shape")
+
+
+func test_inspector_image_uses_resource_picker_and_commits_once() -> void:
+	var sheet := MnsStyleSheet.new()
+	assert_eq(sheet.load_from_bytes("PICTURE art.tga\n".to_utf8_buffer()), OK)
+	var inspector = MnsInspectorScript.new()
+	add_child_autofree(inspector)
+	inspector.show_variable(sheet, "PICTURE")
+	var edits: Array = []
+	inspector.edit_requested.connect(func(edit: Dictionary) -> void:
+		edits.append(edit))
+	var ref = inspector.find_child("MnsImageRef", true, false)
+	assert_not_null(ref, "image variables use the shared texture resource picker")
+	if ref == null:
+		return
+	ref.value_changed.emit("replacement.tga")
+	assert_eq(edits.size(), 1, "one resource pick emits one edit")
+	assert_eq(String(edits[0].get("value", "")), "replacement.tga")
 
 
 func test_variable_table_groups_and_header() -> void:

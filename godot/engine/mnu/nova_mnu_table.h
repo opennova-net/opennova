@@ -40,7 +40,10 @@ private:
 	struct ColumnDef {
 		int width = 80;
 		int h_align = 0; // HORIZONTAL_ALIGNMENT_LEFT
+		int v_align = 1; // VERTICAL_ALIGNMENT_CENTER
 		bool bitmap_draw = false;
+		bool scale_bitmap = false;
+		bool custom_draw = false;
 	};
 	struct Cell {
 		String text;
@@ -91,7 +94,8 @@ public:
 	// --- Build-time configuration ---
 	void set_menu(NovaMnuMenu *p_menu) { behavior_.set_menu(p_menu); }
 	void set_edit_mode(bool p_edit) { behavior_.set_edit_mode(p_edit); }
-	void add_column(int p_width, int p_h_align, bool p_bitmap_draw);
+	void add_column(int p_width, int p_h_align, bool p_bitmap_draw,
+			int p_v_align = 1, bool p_scale_bitmap = false, bool p_custom_draw = false);
 	void set_column_spacing(int p_s) { column_spacing_ = p_s; }
 	void set_row_height(int p_h) {
 		if (p_h > 0) {

@@ -32,7 +32,9 @@ enum class NodeKind : uint8_t {
 
 enum class DirectiveKind : uint8_t { If, Else, Endif, Unknown };
 
-// One physical line of a Define node. Render is the exact byte partition:
+// One physical line owned by a Define node. A pending retail continuation can
+// cross directive/inactive source; those lines stay physically ordered here
+// with contributes_value=false. Render is the exact byte partition:
 //   leading_ws [name sep_ws] chunk
 //     non-continued: + pre_comment_ws + comment + eol
 //     continued:     + '\' + post_backslash_ws + comment + eol
@@ -40,6 +42,8 @@ struct DefineLine {
 	std::string leading_ws;
 	std::string name;              // authored case; first line only
 	std::string sep_ws;            // name->value gap (alignment tabs); first line only
+	bool contributes_value = true; // false for directives/inactive source crossed
+	                               // while a retail continuation is pending
 	std::string chunk;             // authored value text, escapes intact, comment excluded;
 	                               // continued lines keep their trailing ws (spec: "all
 	                               // characters leading up to the backslash")
@@ -71,6 +75,12 @@ struct Diagnostic {
 	std::string message; // human-readable, cites names/lines
 };
 
+struct EvaluationResult {
+	StyleSheet sheet;
+	std::vector<Diagnostic> diagnostics;
+	bool success = true;
+};
+
 class Document {
 public:
 	// Permissive: never fails; problems land in diagnostics(). Lenient flatten
@@ -94,8 +104,12 @@ public:
 	const std::string &default_eol() const { return default_eol_; }
 
 	// Runtime view: evaluate conditionals, join continuations, strip inline
-	// comments, unescape "\\", uppercase keys, last duplicate wins.
+	// comments, preserve authored backslashes, uppercase keys, last duplicate
+	// wins. Diagnostics and success are returned together so callers cannot
+	// accidentally discard a retail syntax failure.
 	// [orig: consumed by NapiXML_ExpandVariablesInText @ 0x63a000]
+	EvaluationResult evaluate() const;
+	// Convenience for callers that deliberately accept diagnostics.
 	StyleSheet flatten() const;
 
 	const std::vector<Node> &nodes() const { return nodes_; }
@@ -130,7 +144,9 @@ public:
 			const std::string &inline_comment = std::string(),
 			std::string *error = nullptr);
 	// Removes EVERY active define with the name (whole nodes, continuation
-	// lines included; preceding comments stay).
+	// lines included; preceding comments stay). Remove/move reject a define
+	// whose continuation crosses directive or inactive source, because those
+	// structural bytes must remain in place.
 	bool remove_define(const std::string &name, std::string *error = nullptr);
 	bool move_define(const std::string &name, int before_node_index, std::string *error = nullptr);
 	// Plain comment text or a "//"-prefixed comment; empty clears.

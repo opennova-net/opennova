@@ -7,26 +7,33 @@ host. Terms (Menu, Screen, Window, Action, Command, Menu Host, Tab) are defined 
 ## Buttons and navigation: the `<ACTION>` element
 
 A button is a `<WINDOW type="button">` (or `type="radio"`) carrying one or more
-`<ACTION>` children. An Action expresses **only** navigation and visibility, never
-game logic:
+`<ACTION>` children. An Action is authored behavior. Retail parses this complete
+type vocabulary `[orig: CUIElement_ParseXMLDefinition @
+0x648ee2..0x6490e9]`:
 
 | Action | Effect |
 | --- | --- |
 | `<ACTION type="screen">NAME</ACTION>` | Show screen `NAME` in this menu (pushes the back stack). |
 | `<ACTION type="screen" file="sp.mnu">NAME</ACTION>` | Cross-menu jump: the host opens `sp.mnu` at screen `NAME`. |
-| `<ACTION type="window" state="SHOW\|HIDE\|TOGGLE">NAME</ACTION>` | Flip the visibility of the named Window in the current screen. |
+| `<ACTION type="window" state="SHOW\|HIDE\|ENABLE\|DISABLE">NAME</ACTION>` | Change the named Window's shown or enabled state. The separate `TOGGLE` flag inverts that property. |
+| `<ACTION type="url" EXTERNAL_BROWSER>www…</ACTION>` | Ask the host to open a URL; Interactive preview consumes it without side effects. |
+| `<ACTION type="form_post" source="…" field="…" target_form="…">…</ACTION>` | Submit authored form data. `TEST="LT\|LE\|EQ\|GE\|GT"` carries its comparison mode. |
+| `<ACTION type="tab">NAME</ACTION>` | Select a named focus target on the retail form/tab event. This is not the visibility-based Tab convention below. |
 | `<ACTION type="pop_screen">` | Back (pop the screen stack; at the root the host decides). |
-| `<ACTION type="quit">` / `<ACTION type="url">www…</ACTION>` | Host policy: quit / open a link. |
+| `GLB_LOAD`, `GLB_LOADANDPING`, `GLB_FILTER`, `GLB_FILTER_NUM`, `GLB_PING`, `GLB_JOIN` | Drive the hosted NovaWorld browser workflow. |
+| `APPMSG`, `LAN_SEARCH`, `LAN_JOIN`, `MNX` | Dispatch the corresponding application, LAN, or hosted compiler operation. |
 
-The target is read from the `target`/`screen`/`window` attribute, else the element
-text. A button may carry several Actions; pressing it runs them in order.
+Retail reads the target from the element text; the permissive authoring parser
+also accepts the existing `target`/`screen`/`window` aliases. A button may carry
+several Actions; pressing it runs them in order.
 
 **Tabs** are the `window` Action in practice: one button per panel, each one hiding
 its sibling panels and showing its own. There is no "tab" widget type.
 
 Runtime path: `NovaMnuButton::on_pressed` → `NovaMnuMenu::dispatch_action` routes
-`screen`/`window`/`pop`/`quit`/`url`. Same-file `screen` navigates in place;
-`file` jumps emit `menu_requested` for the Menu Host to open. (`godot/engine/mnu/`.)
+menu-owned Actions directly and hands browser/form/application Actions to their
+host. Same-file `screen` navigates in place; `file` jumps emit `menu_requested`
+for the Menu Host to open. Interactive preview consumes host-side effects.
 
 **Authoring:** add a widget, then add an Action in the inspector (type + target). It
 serializes straight back to `<ACTION>`. Use the Menus workspace **Interactive**

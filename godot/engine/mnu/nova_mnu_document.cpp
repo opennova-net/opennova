@@ -18,23 +18,28 @@ using opennova::to_std;
 
 // --- M10 helpers: active item container + dict <-> struct converters ---
 
-// The canonical item-row container for a list-like widget: win.items. The parser
-// mirrors a combo's LIST_BOX rows into win.items on load (mnu.cpp), and the
-// runtime builder reads list_box.items only when it is non-empty (otherwise
-// win.items) -- so win.items is always the correct view to read and edit. A
-// combo that stores its rows in a top-level <ITEMS> with a present-but-empty
-// LIST_BOX (styling only) is therefore handled correctly too. Non-list widgets
-// have no item list.
+// The canonical item-row container mirrors the authored format. Combo rows live
+// inside LIST_BOX; treating win.items as a mirror is destructive because it can
+// overwrite independently-authored popup alignment, appearances, and rows.
+// List/Table and the other list-like controls use the window-level ITEMS block.
 mnu::Items *items_container(mnu::Window *w) {
 	if (w == nullptr) {
 		return nullptr;
 	}
 	switch (w->type) {
 		case mnu::WindowType::List:
+		case mnu::WindowType::Table:
+		case mnu::WindowType::GlbTable:
 		case mnu::WindowType::Multi:
+		case mnu::WindowType::LanList:
 		case mnu::WindowType::SpinList:
-		case mnu::WindowType::Combo:
 			return &w->items;
+		case mnu::WindowType::Combo:
+			// LIST_BOX owns combo items when it actually authors an ITEMS
+			// block under an authored LIST_BOX. A latent/disabled LIST_BOX or a
+			// styling-only one falls back to top-level ITEMS, matching runtime.
+			return w->list_box.present && w->list_box.items.present ?
+					&w->list_box.items : &w->items;
 		default:
 			return nullptr;
 	}
@@ -42,17 +47,6 @@ mnu::Items *items_container(mnu::Window *w) {
 
 const mnu::Items *items_container(const mnu::Window *w) {
 	return items_container(const_cast<mnu::Window *>(w));
-}
-
-// After editing a combo's items, push win.items (the canonical container) into
-// its LIST_BOX so the two stay equal: the serializer writes both win.items (as a
-// top-level <ITEMS>) and list_box.items (inside <LIST_BOX>), and on re-parse a
-// non-empty LIST_BOX wins (win.items = list_box.items). Keeping them equal makes
-// that round-trip a no-op instead of letting a stale copy win.
-void sync_item_mirror(mnu::Window *w) {
-	if (w != nullptr && w->type == mnu::WindowType::Combo && w->list_box.present) {
-		w->list_box.items = w->items;
-	}
 }
 
 Dictionary item_to_dict(const mnu::Item &it) {
@@ -72,59 +66,126 @@ mnu::Item item_from_dict(const Dictionary &d) {
 }
 
 mnu::TableData *table_of(mnu::Window *w) {
-	return (w != nullptr && w->type == mnu::WindowType::Table) ? &w->table_data : nullptr;
+	return (w != nullptr && (w->type == mnu::WindowType::Table ||
+			w->type == mnu::WindowType::GlbTable)) ? &w->table_data : nullptr;
 }
 
 const mnu::TableData *table_of(const mnu::Window *w) {
 	return table_of(const_cast<mnu::Window *>(w));
 }
 
+bool is_table_window(const mnu::Window &w) {
+	return w.type == mnu::WindowType::Table ||
+			w.type == mnu::WindowType::GlbTable;
+}
+
+void sync_items_selection_alias(mnu::Items &items) {
+	items.selection_color.clear();
+	for (const mnu::Appearance &appearance : items.appearances) {
+		if (to_gd(appearance.state).nocasecmp_to("selected") == 0 &&
+				to_gd(appearance.type).nocasecmp_to("color") == 0) {
+			items.selection_color = appearance.value;
+		}
+	}
+}
+
+void set_items_selection_alias(mnu::Items &items, const std::string &value) {
+	items.selection_color = value;
+	// Clearing updates an existing winning row but never invents an empty row.
+	if (!value.empty() ||
+			items.find_appearance("selected", "color") != nullptr) {
+		items.set_appearance_value("selected", "color", value);
+	}
+}
+
+void sync_table_aliases_from_items(mnu::Window &w) {
+	if (!is_table_window(w)) {
+		return;
+	}
+	w.table_data.outline_color.clear();
+	sync_items_selection_alias(w.items);
+	for (const mnu::Appearance &appearance : w.items.appearances) {
+		String state = to_gd(appearance.state).to_lower();
+		String type = to_gd(appearance.type).to_lower();
+		if (state == "default" && type == "outline") {
+			w.table_data.outline_color = appearance.value;
+		}
+	}
+	w.table_data.selection_color = w.items.selection_color;
+}
+
+void set_table_item_alias(mnu::Window &w, const char *state,
+		const char *type, const std::string &value) {
+	if (!is_table_window(w)) {
+		return;
+	}
+	// Empty aliases should update an existing authored row but must not create
+	// a new empty row solely because a scalar was cleared.
+	if (!value.empty() || w.items.find_appearance(state, type) != nullptr) {
+		w.items.set_appearance_value(state, type, value);
+		// Table colors are serialized through the ordered ITEMS appearances.
+		// Editing either scalar alias therefore authors that container too.
+		w.items.present = true;
+	}
+}
+
 Dictionary header_to_dict(const mnu::TableHeader &h) {
 	Dictionary d;
+	d["has_column"] = h.has_column;
 	d["column"] = h.column;
+	d["has_width"] = h.has_width;
 	d["width"] = h.width;
 	d["justify"] = to_gd(h.justify);
 	d["vjustify"] = to_gd(h.vjustify);
 	d["sort"] = to_gd(h.sort);
+	d["type"] = to_gd(h.type);
 	d["text"] = to_gd(h.text);
 	return d;
 }
 
 mnu::TableHeader header_from_dict(const Dictionary &d) {
 	mnu::TableHeader h;
+	h.has_column = bool(d.get("has_column", d.has("column")));
 	h.column = static_cast<int>(d.get("column", 0));
+	h.has_width = bool(d.get("has_width", d.has("width")));
 	h.width = static_cast<int>(d.get("width", 0));
 	h.justify = to_std(String(d.get("justify", "")));
 	h.vjustify = to_std(String(d.get("vjustify", "")));
 	h.sort = to_std(String(d.get("sort", "")));
+	h.type = to_std(String(d.get("type", "")));
 	h.text = to_std(String(d.get("text", "")));
 	return h;
 }
 
 Dictionary body_to_dict(const mnu::TableBody &b) {
 	Dictionary d;
+	d["has_column"] = b.has_column;
 	d["column"] = b.column;
 	d["justify"] = to_gd(b.justify);
 	d["vjustify"] = to_gd(b.vjustify);
 	d["bitmap_draw"] = b.bitmap_draw;
 	d["scale_bitmap"] = b.scale_bitmap;
 	d["bitmap_flags"] = to_gd(b.bitmap_flags);
+	d["custom_draw"] = b.custom_draw;
 	return d;
 }
 
 mnu::TableBody body_from_dict(const Dictionary &d) {
 	mnu::TableBody b;
+	b.has_column = bool(d.get("has_column", d.has("column")));
 	b.column = static_cast<int>(d.get("column", 0));
 	b.justify = to_std(String(d.get("justify", "")));
 	b.vjustify = to_std(String(d.get("vjustify", "")));
 	b.bitmap_draw = static_cast<bool>(d.get("bitmap_draw", false));
 	b.scale_bitmap = static_cast<bool>(d.get("scale_bitmap", false));
 	b.bitmap_flags = to_std(String(d.get("bitmap_flags", "")));
+	b.custom_draw = static_cast<bool>(d.get("custom_draw", false));
 	return b;
 }
 
 Dictionary subst_to_dict(const mnu::TableSubst &s) {
 	Dictionary d;
+	d["has_column"] = s.has_column;
 	d["column"] = s.column;
 	d["value"] = to_gd(s.value);
 	d["is_file"] = s.is_file;
@@ -134,11 +195,304 @@ Dictionary subst_to_dict(const mnu::TableSubst &s) {
 
 mnu::TableSubst subst_from_dict(const Dictionary &d) {
 	mnu::TableSubst s;
+	s.has_column = bool(d.get("has_column", d.has("column")));
 	s.column = static_cast<int>(d.get("column", 0));
 	s.value = to_std(String(d.get("value", "")));
 	s.is_file = static_cast<bool>(d.get("is_file", false));
 	s.file = to_std(String(d.get("file", "")));
 	return s;
+}
+
+mnu::Screen make_default_screen(const std::string &name) {
+	mnu::Screen screen;
+	screen.name = name;
+	// New documents and added screens must share the retail-safe root shape.
+	// The original layout/render paths assume all four bounds and an appearance.
+	screen.root_window.name = "MAIN";
+	screen.root_window.type = mnu::WindowType::Window;
+	mnu::Position &root_pos = screen.root_window.position;
+	root_pos.left = 0;
+	root_pos.top = 0;
+	root_pos.right = 800;
+	root_pos.bottom = 600;
+	root_pos.has_left = root_pos.has_top = root_pos.has_right = root_pos.has_bottom = true;
+	mnu::Appearance root_app;
+	root_app.type = "custom";
+	root_app.state = "default";
+	screen.root_window.appearances.push_back(std::move(root_app));
+	return screen;
+}
+
+Dictionary position_to_dict(const mnu::Position &p) {
+	Dictionary d;
+	d["left"] = p.left;
+	d["top"] = p.top;
+	d["right"] = p.right;
+	d["bottom"] = p.bottom;
+	d["has_left"] = p.has_left;
+	d["has_top"] = p.has_top;
+	d["has_right"] = p.has_right;
+	d["has_bottom"] = p.has_bottom;
+	return d;
+}
+
+void apply_position_patch(mnu::Position &p, const Dictionary &d) {
+	if (d.has("left")) p.left = int(d["left"]);
+	if (d.has("top")) p.top = int(d["top"]);
+	if (d.has("right")) p.right = int(d["right"]);
+	if (d.has("bottom")) p.bottom = int(d["bottom"]);
+	if (d.has("has_left")) p.has_left = bool(d["has_left"]);
+	if (d.has("has_top")) p.has_top = bool(d["has_top"]);
+	if (d.has("has_right")) p.has_right = bool(d["has_right"]);
+	if (d.has("has_bottom")) p.has_bottom = bool(d["has_bottom"]);
+}
+
+Dictionary appearance_to_dict(const mnu::Appearance &a) {
+	Dictionary d;
+	d["state"] = to_gd(a.state);
+	d["type"] = to_gd(a.type);
+	d["value"] = to_gd(a.value);
+	d["has_map_state"] = a.has_map_state;
+	d["map_state"] = a.map_state;
+	d["has_height"] = a.has_height;
+	d["height"] = a.height;
+	return d;
+}
+
+TypedArray<Dictionary> appearances_to_array(const std::vector<mnu::Appearance> &appearances) {
+	TypedArray<Dictionary> out;
+	for (const mnu::Appearance &a : appearances) {
+		out.push_back(appearance_to_dict(a));
+	}
+	return out;
+}
+
+std::vector<mnu::Appearance> appearances_from_array(const TypedArray<Dictionary> &rows) {
+	std::vector<mnu::Appearance> out;
+	out.reserve(static_cast<size_t>(rows.size()));
+	for (int i = 0; i < rows.size(); ++i) {
+		const Dictionary d = rows[i];
+		mnu::Appearance a;
+		a.state = to_std(String(d.get("state", "")));
+		a.type = to_std(String(d.get("type", "")));
+		a.value = to_std(String(d.get("value", "")));
+		a.has_map_state = bool(d.get("has_map_state",
+				d.has("map_state") && int(d.get("map_state", -1)) >= 0));
+		a.map_state = int(d.get("map_state", -1));
+		a.has_height = bool(d.get("has_height",
+				d.has("height") && int(d.get("height", 0)) != 0));
+		a.height = int(d.get("height", 0));
+		out.push_back(std::move(a));
+	}
+	return out;
+}
+
+Dictionary sound_to_dict(const mnu::Sound &s) {
+	Dictionary d;
+	d["state"] = to_gd(s.state);
+	d["trigger"] = to_gd(s.trigger);
+	d["file"] = to_gd(s.file);
+	return d;
+}
+
+TypedArray<Dictionary> sounds_to_array(const std::vector<mnu::Sound> &sounds) {
+	TypedArray<Dictionary> out;
+	for (const mnu::Sound &s : sounds) {
+		out.push_back(sound_to_dict(s));
+	}
+	return out;
+}
+
+template <typename T>
+Dictionary scrollbar_to_dict(const T &s) {
+	Dictionary d;
+	d["present"] = s.present;
+	d["position"] = position_to_dict(s.position);
+	d["track"] = appearances_to_array(s.track);
+	d["shuttle"] = appearances_to_array(s.shuttle);
+	d["scrollup"] = appearances_to_array(s.scrollup);
+	d["scrolldown"] = appearances_to_array(s.scrolldown);
+	d["sounds"] = sounds_to_array(s.sounds);
+	return d;
+}
+
+template <typename T>
+void apply_scrollbar_patch(T &s, const Dictionary &d) {
+	// Child edits author the container unless this same atomic patch explicitly
+	// chooses its presence. Explicit false retains the latent child values.
+	if (!d.has("present") && !d.is_empty()) s.present = true;
+	if (d.has("present")) s.present = bool(d["present"]);
+	if (d.has("position")) apply_position_patch(s.position, Dictionary(d["position"]));
+	if (d.has("track")) s.track = appearances_from_array(TypedArray<Dictionary>(d["track"]));
+	if (d.has("shuttle")) s.shuttle = appearances_from_array(TypedArray<Dictionary>(d["shuttle"]));
+	if (d.has("scrollup")) s.scrollup = appearances_from_array(TypedArray<Dictionary>(d["scrollup"]));
+	if (d.has("scrolldown")) s.scrolldown = appearances_from_array(TypedArray<Dictionary>(d["scrolldown"]));
+	if (d.has("sounds")) {
+		const TypedArray<Dictionary> rows = d["sounds"];
+		std::vector<mnu::Sound> next;
+		next.reserve(static_cast<size_t>(rows.size()));
+		for (int i = 0; i < rows.size(); ++i) {
+			const Dictionary row = rows[i];
+			mnu::Sound sound;
+			sound.state = to_std(String(row.get("state", "")));
+			sound.trigger = to_std(String(row.get("trigger", "")));
+			sound.file = to_std(String(row.get("file", "")));
+			next.push_back(std::move(sound));
+		}
+		s.sounds = std::move(next);
+	}
+}
+
+Dictionary spin_button_to_dict(const mnu::SpinButton &button) {
+	Dictionary d;
+	d["present"] = button.present;
+	d["position"] = position_to_dict(button.position);
+	d["appearances"] = appearances_to_array(button.appearances);
+	return d;
+}
+
+void apply_spin_button_patch(mnu::SpinButton &button, const Dictionary &d) {
+	if (!d.has("present") && !d.is_empty()) button.present = true;
+	if (d.has("present")) button.present = bool(d["present"]);
+	if (d.has("position")) apply_position_patch(button.position, Dictionary(d["position"]));
+	if (d.has("appearances")) {
+		button.appearances = appearances_from_array(TypedArray<Dictionary>(d["appearances"]));
+	}
+}
+
+Dictionary authoring_row_schema(const String &path) {
+	Dictionary d;
+	if (path.ends_with("appearances") || path.ends_with(".track") ||
+			path.ends_with(".shuttle") || path.ends_with(".scrollup") ||
+			path.ends_with(".scrolldown")) {
+		d["state"] = String();
+		d["type"] = String();
+		d["value"] = String();
+		d["has_map_state"] = false;
+		d["map_state"] = 0;
+		d["has_height"] = false;
+		d["height"] = 0;
+	} else if (path.ends_with("hotkeys")) {
+		d["value"] = String();
+		d["virtual"] = false;
+	} else if (path.ends_with("sounds")) {
+		d["state"] = String();
+		d["trigger"] = String();
+		d["file"] = String();
+	} else if (path.ends_with("actions")) {
+		for (const char *key : { "type", "state", "file", "source", "field",
+					"test", "target" }) {
+			d[key] = String();
+		}
+		d["has_target_form"] = false;
+		d["target_form"] = 0;
+		d["external_browser"] = false;
+		d["toggle"] = false;
+	} else if (path.ends_with(".rows")) {
+		d["type"] = String();
+		d["value"] = String();
+		d["text"] = String();
+	} else if (path.ends_with("headers")) {
+		d["has_column"] = false;
+		d["column"] = 0;
+		d["has_width"] = false;
+		d["width"] = 0;
+		for (const char *key : { "justify", "vjustify", "sort", "type", "text" }) {
+			d[key] = String();
+		}
+	} else if (path.ends_with("bodies")) {
+		d["has_column"] = false;
+		d["column"] = 0;
+		d["justify"] = String();
+		d["vjustify"] = String();
+		d["bitmap_draw"] = false;
+		d["scale_bitmap"] = false;
+		d["bitmap_flags"] = String();
+		d["custom_draw"] = false;
+	} else if (path.ends_with("substitutions")) {
+		d["has_column"] = false;
+		d["column"] = 0;
+		d["value"] = String();
+		d["is_file"] = false;
+		d["file"] = String();
+	}
+	return d;
+}
+
+bool authoring_type_matches(const Variant &actual, const Variant &expected) {
+	const Variant::Type want = expected.get_type();
+	const Variant::Type got = actual.get_type();
+	if (want == Variant::INT) {
+		return got == Variant::INT || got == Variant::FLOAT;
+	}
+	if (want == Variant::STRING) {
+		return got == Variant::STRING || got == Variant::STRING_NAME;
+	}
+	return got == want;
+}
+
+bool validate_authoring_dictionary(const Dictionary &actual,
+		const Dictionary &schema, const String &path);
+
+bool validate_authoring_array(const Variant &value, const Variant &schema_value,
+		const String &path) {
+	if (value.get_type() != Variant::ARRAY) {
+		return false;
+	}
+	const Array rows = value;
+	const Array schema_rows = schema_value;
+	Dictionary row_schema;
+	if (!schema_rows.is_empty() &&
+			Variant(schema_rows[0]).get_type() == Variant::DICTIONARY) {
+		row_schema = schema_rows[0];
+	} else {
+		row_schema = authoring_row_schema(path);
+	}
+	if (row_schema.is_empty() && !rows.is_empty()) {
+		return false;
+	}
+	for (int i = 0; i < rows.size(); ++i) {
+		const Variant row_value = rows[i];
+			if (row_value.get_type() != Variant::DICTIONARY ||
+					!validate_authoring_dictionary(Dictionary(row_value), row_schema,
+							path + String("[") + String::num_int64(i) +
+									String("]"))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool validate_authoring_dictionary(const Dictionary &actual,
+		const Dictionary &schema, const String &path) {
+	const Array keys = actual.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const Variant key = keys[i];
+		if (key.get_type() != Variant::STRING &&
+				key.get_type() != Variant::STRING_NAME) {
+			return false;
+		}
+		if (!schema.has(key)) {
+			return false;
+		}
+		const Variant value = actual[key];
+		const Variant expected = schema[key];
+		const String child_path = path + String(".") + String(key);
+		if (expected.get_type() == Variant::DICTIONARY) {
+			if (value.get_type() != Variant::DICTIONARY ||
+					!validate_authoring_dictionary(Dictionary(value),
+							Dictionary(expected), child_path)) {
+				return false;
+			}
+		} else if (expected.get_type() == Variant::ARRAY) {
+			if (!validate_authoring_array(value, expected, child_path)) {
+				return false;
+			}
+		} else if (!authoring_type_matches(value, expected)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace
@@ -331,11 +685,16 @@ Error NovaMnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 }
 
 PackedByteArray NovaMnuDocument::to_byte_array() const {
-	const std::string text = mnu::serialize(doc_, true, 2);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!mnu::serialize_bytes(doc_, bytes, error, true, 2)) {
+		UtilityFunctions::push_warning(String("NovaMnuDocument::to_byte_array: ") + to_gd(error));
+		return PackedByteArray();
+	}
 	PackedByteArray out;
-	out.resize(static_cast<int64_t>(text.size()));
-	if (!text.empty()) {
-		std::memcpy(out.ptrw(), text.data(), text.size());
+	out.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) {
+		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
 	}
 	return out;
 }
@@ -363,11 +722,8 @@ Error NovaMnuDocument::save_to_path(const String &p_path) const {
 
 void NovaMnuDocument::create_empty() {
 	doc_ = mnu::Document{};
-	mnu::Screen screen;
-	screen.name = "SCREEN";
-	screen.root_window.name = "ROOT";
-	screen.root_window.type = mnu::WindowType::Window;
-	doc_.screens.push_back(std::move(screen));
+	doc_.screens.push_back(make_default_screen("SCREEN"));
+	menu_size_ = Vector2i(800, 600);
 	rebuild_ids();
 	touch();
 }
@@ -490,6 +846,12 @@ String NovaMnuDocument::get_screen_name(int p_screen_id) const {
 	return to_gd(doc_.screens[loc.screen_index].name);
 }
 
+bool NovaMnuDocument::get_screen_has_music_var(int p_screen_id) const {
+	const Locator loc = locate(p_screen_id);
+	return loc.valid() && loc.is_screen &&
+			doc_.screens[loc.screen_index].has_music_var;
+}
+
 int NovaMnuDocument::get_screen_music_var(int p_screen_id) const {
 	const Locator loc = locate(p_screen_id);
 	if (!loc.valid() || !loc.is_screen) {
@@ -514,6 +876,14 @@ String NovaMnuDocument::get_screen_cursor_file(int p_screen_id) const {
 	return to_gd(doc_.screens[loc.screen_index].cursor_file);
 }
 
+String NovaMnuDocument::get_screen_cursor_flags(int p_screen_id) const {
+	const Locator loc = locate(p_screen_id);
+	if (!loc.valid() || !loc.is_screen) {
+		return String();
+	}
+	return to_gd(doc_.screens[loc.screen_index].cursor_flags);
+}
+
 void NovaMnuDocument::set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value) {
 	const Locator loc = locate(p_screen_id);
 	if (!loc.valid() || !loc.is_screen) {
@@ -525,6 +895,9 @@ void NovaMnuDocument::set_screen_property(int p_screen_id, const String &p_key, 
 		s.name = to_std(p_value);
 	} else if (key == "music_var") {
 		s.music_var = static_cast<int>(p_value);
+		s.has_music_var = true;
+	} else if (key == "has_music_var") {
+		s.has_music_var = static_cast<bool>(p_value);
 	} else if (key == "text_rsrc") {
 		s.text_rsrc = to_std(p_value);
 	} else if (key == "cursor_file") {
@@ -595,6 +968,7 @@ void NovaMnuDocument::set_widget_text(int p_id, const String &p_text) {
 	if (!w) {
 		return;
 	}
+	w->string_data.present = true;
 	w->string_data.value = to_std(p_text);
 	touch();
 }
@@ -609,6 +983,7 @@ void NovaMnuDocument::set_widget_string_type(int p_id, const String &p_type) {
 	if (!w) {
 		return;
 	}
+	w->string_data.present = true;
 	w->string_data.type = to_std(p_type);
 	touch();
 }
@@ -655,6 +1030,459 @@ void NovaMnuDocument::set_widget_orientation(int p_id, const String &p_value) {
 	touch();
 }
 
+Dictionary NovaMnuDocument::get_widget_authoring_state(int p_id) const {
+	Dictionary out;
+	const mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return out;
+	}
+	out["id"] = p_id;
+	out["type"] = static_cast<int>(w->type);
+	out["type_token"] = to_gd(w->type_token);
+	out["name"] = to_gd(w->name);
+	out["text_rsrc"] = to_gd(w->text_rsrc);
+	out["position"] = position_to_dict(w->position);
+	out["flags"] = get_widget_flags(p_id);
+
+	Dictionary string_data;
+	string_data["present"] = w->string_data.present;
+	string_data["type"] = to_gd(w->string_data.type);
+	string_data["justify"] = to_gd(w->string_data.justify);
+	string_data["vjustify"] = to_gd(w->string_data.vjustify);
+	string_data["has_edge"] = w->string_data.has_edge;
+	string_data["edge"] = w->string_data.edge;
+	string_data["value"] = to_gd(w->string_data.value);
+	out["string"] = string_data;
+
+	Dictionary font;
+	font["name"] = to_gd(w->font.name);
+	font["default_fg"] = to_gd(w->font.default_fg);
+	font["default_bg"] = to_gd(w->font.default_bg);
+	font["mouseover_fg"] = to_gd(w->font.mouseover_fg);
+	font["mouseover_bg"] = to_gd(w->font.mouseover_bg);
+	font["selected_fg"] = to_gd(w->font.selected_fg);
+	font["selected_bg"] = to_gd(w->font.selected_bg);
+	font["disabled_fg"] = to_gd(w->font.disabled_fg);
+	font["disabled_bg"] = to_gd(w->font.disabled_bg);
+	out["font"] = font;
+
+	Dictionary constraints;
+	constraints["number"] = w->number;
+	constraints["has_minval"] = w->has_minval;
+	constraints["minval"] = w->minval;
+	constraints["has_maxval"] = w->has_maxval;
+	constraints["maxval"] = w->maxval;
+	constraints["has_maxchar"] = w->has_maxchar;
+	constraints["maxchar"] = w->maxchar;
+	out["constraints"] = constraints;
+
+	Dictionary behavior;
+	behavior["as_button"] = w->as_button;
+	behavior["has_group"] = w->has_group;
+	behavior["group"] = w->group;
+	behavior["has_form"] = w->has_form;
+	behavior["form"] = w->form;
+	behavior["global_var"] = w->global_var;
+	behavior["password"] = w->password;
+	behavior["datasource"] = to_gd(w->datasource);
+	behavior["orientation"] = to_gd(w->orientation);
+	out["behavior"] = behavior;
+
+	Dictionary scroll_size;
+	scroll_size["has_height"] = w->has_scroll_height;
+	scroll_size["height"] = w->scroll_height;
+	scroll_size["has_width"] = w->has_scroll_width;
+	scroll_size["width"] = w->scroll_width;
+	out["scroll_size"] = scroll_size;
+
+	Dictionary cursor;
+	cursor["file"] = to_gd(w->cursor.file);
+	cursor["flags"] = to_gd(w->cursor.flags);
+	out["cursor"] = cursor;
+
+	TypedArray<Dictionary> hotkeys;
+	for (const mnu::Hotkey &hotkey : w->hotkeys) {
+		Dictionary row;
+		row["value"] = to_gd(hotkey.value);
+		row["virtual"] = hotkey.virtual_key;
+		hotkeys.push_back(row);
+	}
+	out["hotkeys"] = hotkeys;
+
+	Dictionary items;
+	items["present"] = w->items.present;
+	items["multiselect"] = w->items.multiselect;
+	items["justify"] = to_gd(w->items.justify);
+	items["vjustify"] = to_gd(w->items.vjustify);
+	items["appearances"] = appearances_to_array(w->items.appearances);
+	items["selection_color"] = to_gd(w->items.selection_color);
+	TypedArray<Dictionary> item_rows;
+	for (const mnu::Item &item : w->items.items) {
+		item_rows.push_back(item_to_dict(item));
+	}
+	items["rows"] = item_rows;
+	out["items"] = items;
+
+	Dictionary list_box;
+	list_box["present"] = w->list_box.present;
+	list_box["position"] = position_to_dict(w->list_box.position);
+	list_box["appearances"] = appearances_to_array(w->list_box.appearances);
+	Dictionary list_string;
+	list_string["present"] = w->list_box.string_data.present;
+	list_string["type"] = to_gd(w->list_box.string_data.type);
+	list_string["justify"] = to_gd(w->list_box.string_data.justify);
+	list_string["vjustify"] = to_gd(w->list_box.string_data.vjustify);
+	list_string["has_edge"] = w->list_box.string_data.has_edge;
+	list_string["edge"] = w->list_box.string_data.edge;
+	list_string["value"] = to_gd(w->list_box.string_data.value);
+	list_box["string"] = list_string;
+	Dictionary list_items;
+	list_items["present"] = w->list_box.items.present;
+	list_items["multiselect"] = w->list_box.items.multiselect;
+	list_items["justify"] = to_gd(w->list_box.items.justify);
+	list_items["vjustify"] = to_gd(w->list_box.items.vjustify);
+	list_items["appearances"] = appearances_to_array(w->list_box.items.appearances);
+	list_items["selection_color"] = to_gd(w->list_box.items.selection_color);
+	TypedArray<Dictionary> list_item_rows;
+	for (const mnu::Item &item : w->list_box.items.items) {
+		list_item_rows.push_back(item_to_dict(item));
+	}
+	list_items["rows"] = list_item_rows;
+	list_box["items"] = list_items;
+	list_box["has_min_item_height"] = w->list_box.has_min_item_height;
+	list_box["min_item_height"] = w->list_box.min_item_height;
+	list_box["has_sb_edge_pad"] = w->list_box.has_sb_edge_pad;
+	list_box["sb_edge_pad"] = w->list_box.sb_edge_pad;
+	list_box["scrollbar"] = scrollbar_to_dict(w->list_box.scrollbar);
+	out["list_box"] = list_box;
+
+	out["spinup"] = spin_button_to_dict(w->spinup);
+	out["spindown"] = spin_button_to_dict(w->spindown);
+	Dictionary scroll_parts;
+	scroll_parts["shuttle"] = appearances_to_array(w->shuttle);
+	scroll_parts["scrollup"] = appearances_to_array(w->scrollup);
+	scroll_parts["scrolldown"] = appearances_to_array(w->scrolldown);
+	out["scroll_parts"] = scroll_parts;
+
+	Dictionary table;
+	table["has_count"] = w->table_data.column.has_count;
+	table["count"] = w->table_data.column.count;
+	table["has_spacing"] = w->table_data.column.has_spacing;
+	table["spacing"] = w->table_data.column.spacing;
+	table["headers"] = get_table_headers(p_id);
+	table["bodies"] = get_table_bodies(p_id);
+	table["substitutions"] = get_table_substs(p_id);
+	table["has_min_item_height"] = w->table_data.has_min_item_height;
+	table["min_item_height"] = w->table_data.min_item_height;
+	table["outline_color"] = to_gd(w->table_data.outline_color);
+	table["selection_color"] = to_gd(w->table_data.selection_color);
+	table["multiselect"] = w->table_data.multiselect;
+	table["scrollbar"] = scrollbar_to_dict(w->table_data.scrollbar);
+	out["table"] = table;
+	// Direct SCROLLBAR state is shared by LIST, MULTI, MULTILINE_EDIT, and
+	// other scrollable widget classes. Table keeps the historical grouped view
+	// above as well; both dictionaries describe the same native structure.
+	out["scrollbar"] = scrollbar_to_dict(w->table_data.scrollbar);
+
+	out["appearances"] = appearances_to_array(w->appearances);
+	out["sounds"] = get_widget_sounds(p_id);
+	out["actions"] = get_widget_actions(p_id);
+	out["frame"] = get_window_frame(p_id);
+	return out;
+}
+
+bool NovaMnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
+	mnu::Window *w = window_at(locate(p_id));
+	if (!w || p_patch.is_empty()) {
+		return false;
+	}
+	// Keep the bridge honest for direct callers as well as the editor/MCP:
+	// ignored keys and idempotent assignments are not edits and must not dirty
+	// the document or create an undo snapshot.
+	const Dictionary before_state =
+			get_widget_authoring_state(p_id).duplicate(true);
+	if (!validate_authoring_dictionary(p_patch, before_state, "authoring")) {
+		return false;
+	}
+	if (p_patch.has("type_token")) {
+		w->type_token = to_std(String(p_patch["type_token"]));
+		// A non-empty raw token is also the authoritative runtime type. Keep
+		// document structure, inspector sections, and serialization consistent
+		// immediately instead of waiting for a save/reload to reparse it.
+		if (!w->type_token.empty()) {
+			w->type = mnu::parse_window_type(w->type_token);
+		}
+	}
+	if (p_patch.has("name")) w->name = to_std(String(p_patch["name"]));
+	if (p_patch.has("text_rsrc")) w->text_rsrc = to_std(String(p_patch["text_rsrc"]));
+	if (p_patch.has("position")) apply_position_patch(w->position, Dictionary(p_patch["position"]));
+	if (p_patch.has("flags")) {
+		const int flags = int(p_patch["flags"]);
+		w->hidden = (flags & FLAG_HIDDEN) != 0;
+		w->disabled = (flags & FLAG_DISABLED) != 0;
+		w->checked = (flags & FLAG_CHECKED) != 0;
+		w->draw_frame = (flags & FLAG_DRAW_FRAME) != 0;
+		w->modal = (flags & FLAG_MODAL) != 0;
+		w->readonly = (flags & FLAG_READONLY) != 0;
+	}
+	if (p_patch.has("string")) {
+		const Dictionary d = p_patch["string"];
+		if (!d.has("present") && !d.is_empty()) w->string_data.present = true;
+		if (d.has("present")) w->string_data.present = bool(d["present"]);
+		if (d.has("type")) w->string_data.type = to_std(String(d["type"]));
+		if (d.has("justify")) w->string_data.justify = to_std(String(d["justify"]));
+		if (d.has("vjustify")) w->string_data.vjustify = to_std(String(d["vjustify"]));
+		if (d.has("has_edge")) w->string_data.has_edge = bool(d["has_edge"]);
+		if (d.has("edge")) w->string_data.edge = int(d["edge"]);
+		if (d.has("value")) w->string_data.value = to_std(String(d["value"]));
+	}
+	if (p_patch.has("font")) {
+		const Dictionary d = p_patch["font"];
+		if (d.has("name")) w->font.name = to_std(String(d["name"]));
+		if (d.has("default_fg")) w->font.default_fg = to_std(String(d["default_fg"]));
+		if (d.has("default_bg")) w->font.default_bg = to_std(String(d["default_bg"]));
+		if (d.has("mouseover_fg")) w->font.mouseover_fg = to_std(String(d["mouseover_fg"]));
+		if (d.has("mouseover_bg")) w->font.mouseover_bg = to_std(String(d["mouseover_bg"]));
+		if (d.has("selected_fg")) w->font.selected_fg = to_std(String(d["selected_fg"]));
+		if (d.has("selected_bg")) w->font.selected_bg = to_std(String(d["selected_bg"]));
+		if (d.has("disabled_fg")) w->font.disabled_fg = to_std(String(d["disabled_fg"]));
+		if (d.has("disabled_bg")) w->font.disabled_bg = to_std(String(d["disabled_bg"]));
+	}
+	if (p_patch.has("constraints")) {
+		const Dictionary d = p_patch["constraints"];
+		if (d.has("number")) w->number = bool(d["number"]);
+		if (d.has("has_minval")) w->has_minval = bool(d["has_minval"]);
+		if (d.has("minval")) w->minval = int(d["minval"]);
+		if (d.has("has_maxval")) w->has_maxval = bool(d["has_maxval"]);
+		if (d.has("maxval")) w->maxval = int(d["maxval"]);
+		if (d.has("has_maxchar")) w->has_maxchar = bool(d["has_maxchar"]);
+		if (d.has("maxchar")) w->maxchar = int(d["maxchar"]);
+	}
+	if (p_patch.has("behavior")) {
+		const Dictionary d = p_patch["behavior"];
+		if (d.has("as_button")) w->as_button = bool(d["as_button"]);
+		if (d.has("has_group")) w->has_group = bool(d["has_group"]);
+		if (d.has("group")) w->group = int(d["group"]);
+		if (d.has("has_form")) w->has_form = bool(d["has_form"]);
+		if (d.has("form")) w->form = int(d["form"]);
+		if (d.has("global_var")) w->global_var = bool(d["global_var"]);
+		if (d.has("password")) w->password = bool(d["password"]);
+		if (d.has("datasource")) w->datasource = to_std(String(d["datasource"]));
+		if (d.has("orientation")) w->orientation = to_std(String(d["orientation"]));
+	}
+	if (p_patch.has("scroll_size")) {
+		const Dictionary d = p_patch["scroll_size"];
+		if (d.has("has_height")) w->has_scroll_height = bool(d["has_height"]);
+		if (d.has("height")) w->scroll_height = int(d["height"]);
+		if (d.has("has_width")) w->has_scroll_width = bool(d["has_width"]);
+		if (d.has("width")) w->scroll_width = int(d["width"]);
+	}
+	if (p_patch.has("cursor")) {
+		const Dictionary d = p_patch["cursor"];
+		if (d.has("file")) w->cursor.file = to_std(String(d["file"]));
+		if (d.has("flags")) w->cursor.flags = to_std(String(d["flags"]));
+	}
+	if (p_patch.has("hotkeys")) {
+		const TypedArray<Dictionary> rows = p_patch["hotkeys"];
+		std::vector<mnu::Hotkey> hotkeys;
+		hotkeys.reserve(static_cast<size_t>(rows.size()));
+		for (int i = 0; i < rows.size(); ++i) {
+			const Dictionary d = rows[i];
+			mnu::Hotkey hotkey;
+			hotkey.value = to_std(String(d.get("value", "")));
+			hotkey.virtual_key = bool(d.get("virtual", false));
+			hotkeys.push_back(std::move(hotkey));
+		}
+		w->hotkeys = std::move(hotkeys);
+	}
+	if (p_patch.has("items")) {
+		const Dictionary d = p_patch["items"];
+		if (!d.has("present") && !d.is_empty()) w->items.present = true;
+		if (d.has("present")) w->items.present = bool(d["present"]);
+		if (d.has("multiselect")) w->items.multiselect = bool(d["multiselect"]);
+		if (d.has("justify")) w->items.justify = to_std(String(d["justify"]));
+		if (d.has("vjustify")) w->items.vjustify = to_std(String(d["vjustify"]));
+		const bool appearances_changed = d.has("appearances");
+		const bool selection_changed = d.has("selection_color");
+		if (appearances_changed) {
+			w->items.appearances = appearances_from_array(TypedArray<Dictionary>(d["appearances"]));
+			sync_items_selection_alias(w->items);
+		}
+		if (selection_changed) {
+			set_items_selection_alias(w->items,
+					to_std(String(d["selection_color"])));
+		}
+		if (d.has("rows")) {
+			const TypedArray<Dictionary> rows = d["rows"];
+			std::vector<mnu::Item> items;
+			items.reserve(static_cast<size_t>(rows.size()));
+			for (int i = 0; i < rows.size(); ++i) items.push_back(item_from_dict(rows[i]));
+			w->items.items = std::move(items);
+		}
+		if (is_table_window(*w)) {
+			if (appearances_changed) {
+				sync_table_aliases_from_items(*w);
+			}
+			if (selection_changed) {
+				w->table_data.selection_color = w->items.selection_color;
+			}
+		}
+	}
+	if (p_patch.has("list_box")) {
+		const Dictionary d = p_patch["list_box"];
+		if (!d.has("present") && !d.is_empty()) w->list_box.present = true;
+		if (d.has("present")) w->list_box.present = bool(d["present"]);
+		if (d.has("position")) apply_position_patch(w->list_box.position, Dictionary(d["position"]));
+		if (d.has("appearances")) w->list_box.appearances = appearances_from_array(TypedArray<Dictionary>(d["appearances"]));
+		if (d.has("string")) {
+			const Dictionary sd = d["string"];
+			if (!sd.has("present") && !sd.is_empty()) w->list_box.string_data.present = true;
+			if (sd.has("present")) w->list_box.string_data.present = bool(sd["present"]);
+			if (sd.has("type")) w->list_box.string_data.type = to_std(String(sd["type"]));
+			if (sd.has("justify")) w->list_box.string_data.justify = to_std(String(sd["justify"]));
+			if (sd.has("vjustify")) w->list_box.string_data.vjustify = to_std(String(sd["vjustify"]));
+			if (sd.has("has_edge")) w->list_box.string_data.has_edge = bool(sd["has_edge"]);
+			if (sd.has("edge")) w->list_box.string_data.edge = int(sd["edge"]);
+			if (sd.has("value")) w->list_box.string_data.value = to_std(String(sd["value"]));
+		}
+		if (d.has("items")) {
+			const Dictionary items = d["items"];
+			if (!items.has("present") && !items.is_empty()) w->list_box.items.present = true;
+			if (items.has("present")) w->list_box.items.present = bool(items["present"]);
+			if (items.has("multiselect")) w->list_box.items.multiselect = bool(items["multiselect"]);
+			if (items.has("justify")) w->list_box.items.justify = to_std(String(items["justify"]));
+			if (items.has("vjustify")) w->list_box.items.vjustify = to_std(String(items["vjustify"]));
+			if (items.has("appearances")) {
+				w->list_box.items.appearances =
+						appearances_from_array(TypedArray<Dictionary>(items["appearances"]));
+				sync_items_selection_alias(w->list_box.items);
+			}
+			if (items.has("selection_color")) {
+				set_items_selection_alias(w->list_box.items,
+						to_std(String(items["selection_color"])));
+			}
+			if (items.has("rows")) {
+				const TypedArray<Dictionary> rows = items["rows"];
+				std::vector<mnu::Item> next;
+				next.reserve(static_cast<size_t>(rows.size()));
+				for (int i = 0; i < rows.size(); ++i) next.push_back(item_from_dict(rows[i]));
+				w->list_box.items.items = std::move(next);
+			}
+		}
+		if (d.has("has_min_item_height")) w->list_box.has_min_item_height = bool(d["has_min_item_height"]);
+		if (d.has("min_item_height")) w->list_box.min_item_height = int(d["min_item_height"]);
+		if (d.has("has_sb_edge_pad")) w->list_box.has_sb_edge_pad = bool(d["has_sb_edge_pad"]);
+		if (d.has("sb_edge_pad")) w->list_box.sb_edge_pad = int(d["sb_edge_pad"]);
+		if (d.has("scrollbar")) apply_scrollbar_patch(w->list_box.scrollbar, Dictionary(d["scrollbar"]));
+	}
+	if (p_patch.has("spinup")) apply_spin_button_patch(w->spinup, Dictionary(p_patch["spinup"]));
+	if (p_patch.has("spindown")) apply_spin_button_patch(w->spindown, Dictionary(p_patch["spindown"]));
+	if (p_patch.has("scroll_parts")) {
+		const Dictionary d = p_patch["scroll_parts"];
+		if (d.has("shuttle")) w->shuttle = appearances_from_array(TypedArray<Dictionary>(d["shuttle"]));
+		if (d.has("scrollup")) w->scrollup = appearances_from_array(TypedArray<Dictionary>(d["scrollup"]));
+		if (d.has("scrolldown")) w->scrolldown = appearances_from_array(TypedArray<Dictionary>(d["scrolldown"]));
+	}
+	if (p_patch.has("table")) {
+		const Dictionary d = p_patch["table"];
+		if (d.has("has_count")) w->table_data.column.has_count = bool(d["has_count"]);
+		if (d.has("count")) w->table_data.column.count = int(d["count"]);
+		if (d.has("has_spacing")) w->table_data.column.has_spacing = bool(d["has_spacing"]);
+		if (d.has("spacing")) w->table_data.column.spacing = int(d["spacing"]);
+		if (d.has("headers")) {
+			const TypedArray<Dictionary> rows = d["headers"];
+			w->table_data.column.headers.clear();
+			for (int i = 0; i < rows.size(); ++i) w->table_data.column.headers.push_back(header_from_dict(rows[i]));
+		}
+		if (d.has("bodies")) {
+			const TypedArray<Dictionary> rows = d["bodies"];
+			w->table_data.column.bodies.clear();
+			for (int i = 0; i < rows.size(); ++i) w->table_data.column.bodies.push_back(body_from_dict(rows[i]));
+		}
+		if (d.has("substitutions")) {
+			const TypedArray<Dictionary> rows = d["substitutions"];
+			w->table_data.column.substitutions.clear();
+			for (int i = 0; i < rows.size(); ++i) w->table_data.column.substitutions.push_back(subst_from_dict(rows[i]));
+		}
+		if (d.has("has_min_item_height")) w->table_data.has_min_item_height = bool(d["has_min_item_height"]);
+		if (d.has("min_item_height")) w->table_data.min_item_height = int(d["min_item_height"]);
+		if (d.has("outline_color")) {
+			w->table_data.outline_color = to_std(String(d["outline_color"]));
+			set_table_item_alias(*w, "default", "outline",
+					w->table_data.outline_color);
+		}
+		if (d.has("selection_color")) {
+			w->table_data.selection_color = to_std(String(d["selection_color"]));
+			set_table_item_alias(*w, "selected", "color",
+					w->table_data.selection_color);
+		}
+		if (d.has("multiselect")) w->table_data.multiselect = bool(d["multiselect"]);
+		if (d.has("scrollbar")) apply_scrollbar_patch(w->table_data.scrollbar, Dictionary(d["scrollbar"]));
+	}
+	// Table alias edits above may have authored ITEMS. An explicit presence
+	// choice in the same patch is authoritative and wins last.
+	if (p_patch.has("items")) {
+		const Dictionary d = p_patch["items"];
+		if (d.has("present")) w->items.present = bool(d["present"]);
+	}
+	if (p_patch.has("scrollbar")) {
+		apply_scrollbar_patch(w->table_data.scrollbar, Dictionary(p_patch["scrollbar"]));
+	}
+	if (p_patch.has("appearances")) w->appearances = appearances_from_array(TypedArray<Dictionary>(p_patch["appearances"]));
+	if (p_patch.has("frame")) {
+		const Dictionary d = p_patch["frame"];
+		if (d.has("stencil")) w->frame.stencil = to_std(String(d["stencil"]));
+		if (d.has("has_stencil_size")) w->frame.has_stencil_size = bool(d["has_stencil_size"]);
+		if (d.has("stencil_size")) w->frame.stencil_size = int(d["stencil_size"]);
+		if (d.has("brush")) w->frame.brush = to_std(String(d["brush"]));
+		if (d.has("monogram")) w->frame.monogram = to_std(String(d["monogram"]));
+		if (d.has("has_insetx")) w->frame.has_insetx = bool(d["has_insetx"]);
+		if (d.has("insetx")) w->frame.insetx = int(d["insetx"]);
+		if (d.has("has_insety")) w->frame.has_insety = bool(d["has_insety"]);
+		if (d.has("insety")) w->frame.insety = int(d["insety"]);
+	}
+	if (p_patch.has("sounds")) {
+		const TypedArray<Dictionary> rows = p_patch["sounds"];
+		std::vector<mnu::Sound> next;
+		for (int i = 0; i < rows.size(); ++i) {
+			const Dictionary d = rows[i];
+			mnu::Sound sound;
+			sound.state = to_std(String(d.get("state", "")));
+			sound.trigger = to_std(String(d.get("trigger", "")));
+			sound.file = to_std(String(d.get("file", "")));
+			next.push_back(std::move(sound));
+		}
+		w->sounds = std::move(next);
+	}
+	if (p_patch.has("actions")) {
+		const TypedArray<Dictionary> rows = p_patch["actions"];
+		std::vector<mnu::Action> next;
+		for (int i = 0; i < rows.size(); ++i) {
+			const Dictionary d = rows[i];
+			mnu::Action action;
+			action.type = to_std(String(d.get("type", "")));
+			action.state = to_std(String(d.get("state", "")));
+			action.file = to_std(String(d.get("file", "")));
+			action.source = to_std(String(d.get("source", "")));
+			action.field = to_std(String(d.get("field", "")));
+			action.test = to_std(String(d.get("test", "")));
+			action.target = to_std(String(d.get("target", "")));
+			action.has_target_form = bool(d.get("has_target_form", false));
+			action.target_form = int(d.get("target_form", 0));
+			action.external_browser = bool(d.get("external_browser", false));
+			action.toggle = bool(d.get("toggle", false));
+			next.push_back(std::move(action));
+		}
+		w->actions = std::move(next);
+	}
+	const Dictionary after_state = get_widget_authoring_state(p_id);
+	if (before_state.recursive_equal(after_state, 0)) {
+		return false;
+	}
+	touch();
+	return true;
+}
+
 TypedArray<Dictionary> NovaMnuDocument::get_widget_sounds(int p_id) const {
 	TypedArray<Dictionary> out;
 	const mnu::Window *w = window_at(locate(p_id));
@@ -697,13 +1525,7 @@ TypedArray<Dictionary> NovaMnuDocument::get_widget_appearances(int p_id) const {
 		return out;
 	}
 	for (const mnu::Appearance &a : w->appearances) {
-		Dictionary d;
-		d["state"] = to_gd(a.state);
-		d["type"] = to_gd(a.type);
-		d["value"] = to_gd(a.value);
-		d["map_state"] = a.map_state;
-		d["height"] = a.height;
-		out.push_back(d);
+		out.push_back(appearance_to_dict(a));
 	}
 	return out;
 }
@@ -721,7 +1543,11 @@ void NovaMnuDocument::set_widget_appearances(int p_id, const TypedArray<Dictiona
 		a.state = to_std(String(d.get("state", "")));
 		a.type = to_std(String(d.get("type", "")));
 		a.value = to_std(String(d.get("value", "")));
+		a.has_map_state = static_cast<bool>(d.get("has_map_state",
+				d.has("map_state") && int(d.get("map_state", -1)) >= 0));
 		a.map_state = int(d.get("map_state", -1));
+		a.has_height = static_cast<bool>(d.get("has_height",
+				d.has("height") && int(d.get("height", 0)) != 0));
 		a.height = int(d.get("height", 0));
 		next.push_back(a);
 	}
@@ -736,9 +1562,14 @@ Dictionary NovaMnuDocument::get_window_frame(int p_id) const {
 		return out;
 	}
 	out["stencil"] = to_gd(w->frame.stencil);
+	out["has_stencil_size"] = w->frame.has_stencil_size;
 	out["stencil_size"] = w->frame.stencil_size;
 	out["brush"] = to_gd(w->frame.brush);
 	out["monogram"] = to_gd(w->frame.monogram);
+	out["has_insetx"] = w->frame.has_insetx;
+	out["insetx"] = w->frame.insetx;
+	out["has_insety"] = w->frame.has_insety;
+	out["insety"] = w->frame.insety;
 	return out;
 }
 
@@ -747,11 +1578,16 @@ void NovaMnuDocument::set_window_frame(int p_id, const Dictionary &p_frame) {
 	if (!w) {
 		return;
 	}
-	// insetx/insety stay untouched: they are round-trip data the bake ignores.
 	w->frame.stencil = to_std(String(p_frame.get("stencil", "")));
+	w->frame.has_stencil_size = bool(p_frame.get("has_stencil_size",
+			p_frame.has("stencil_size") ? true : w->frame.has_stencil_size));
 	w->frame.stencil_size = int(p_frame.get("stencil_size", 0));
 	w->frame.brush = to_std(String(p_frame.get("brush", "")));
 	w->frame.monogram = to_std(String(p_frame.get("monogram", "")));
+	w->frame.has_insetx = bool(p_frame.get("has_insetx", w->frame.has_insetx));
+	w->frame.insetx = int(p_frame.get("insetx", w->frame.insetx));
+	w->frame.has_insety = bool(p_frame.get("has_insety", w->frame.has_insety));
+	w->frame.insety = int(p_frame.get("insety", w->frame.insety));
 	touch();
 }
 
@@ -777,6 +1613,12 @@ TypedArray<Dictionary> NovaMnuDocument::get_widget_actions(int p_id) const {
 		d["target"] = to_gd(a.target);
 		d["state"] = to_gd(a.state);
 		d["file"] = to_gd(a.file);
+		d["source"] = to_gd(a.source);
+		d["field"] = to_gd(a.field);
+		d["test"] = to_gd(a.test);
+		d["has_target_form"] = a.has_target_form;
+		d["target_form"] = a.target_form;
+		d["toggle"] = a.toggle;
 		d["external_browser"] = a.external_browser;
 		out.push_back(d);
 	}
@@ -797,6 +1639,12 @@ void NovaMnuDocument::set_widget_actions(int p_id, const TypedArray<Dictionary> 
 		a.target = to_std(String(d.get("target", "")));
 		a.state = to_std(String(d.get("state", "")));
 		a.file = to_std(String(d.get("file", "")));
+		a.source = to_std(String(d.get("source", "")));
+		a.field = to_std(String(d.get("field", "")));
+		a.test = to_std(String(d.get("test", "")));
+		a.has_target_form = static_cast<bool>(d.get("has_target_form", false));
+		a.target_form = static_cast<int>(d.get("target_form", 0));
+		a.toggle = static_cast<bool>(d.get("toggle", false));
 		a.external_browser = static_cast<bool>(d.get("external_browser", false));
 		next.push_back(a);
 	}
@@ -837,8 +1685,8 @@ void NovaMnuDocument::set_item(int p_id, int p_index, const Dictionary &p_row) {
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return;
 	}
+	items->present = true;
 	items->items[p_index] = item_from_dict(p_row);
-	sync_item_mirror(w);
 	touch();
 }
 
@@ -848,9 +1696,9 @@ int NovaMnuDocument::add_item(int p_id, const Dictionary &p_row) {
 	if (items == nullptr) {
 		return -1;
 	}
+	items->present = true;
 	items->items.push_back(item_from_dict(p_row));
 	const int index = static_cast<int>(items->items.size()) - 1;
-	sync_item_mirror(w);
 	touch();
 	return index;
 }
@@ -861,8 +1709,8 @@ void NovaMnuDocument::remove_item(int p_id, int p_index) {
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return;
 	}
+	items->present = true;
 	items->items.erase(items->items.begin() + p_index);
-	sync_item_mirror(w);
 	touch();
 }
 
@@ -876,6 +1724,7 @@ void NovaMnuDocument::move_item(int p_id, int p_from, int p_to) {
 	if (p_from < 0 || p_from >= count || p_to < 0 || p_to >= count || p_from == p_to) {
 		return;
 	}
+	items->present = true;
 	// Remove then re-insert so p_to names the destination slot in final indexing
 	// (erase shifts the tail down by one when p_to > p_from). Clamp defensively.
 	mnu::Item moved = items->items[p_from];
@@ -885,7 +1734,6 @@ void NovaMnuDocument::move_item(int p_id, int p_from, int p_to) {
 		dest = static_cast<int>(items->items.size());
 	}
 	items->items.insert(items->items.begin() + dest, std::move(moved));
-	sync_item_mirror(w);
 	touch();
 }
 
@@ -901,6 +1749,7 @@ void NovaMnuDocument::set_table_column_count(int p_id, int p_count) {
 	if (td == nullptr || p_count < 0) {
 		return;
 	}
+	td->column.has_count = true;
 	td->column.count = p_count;
 	touch();
 }
@@ -915,6 +1764,7 @@ void NovaMnuDocument::set_table_column_spacing(int p_id, int p_spacing) {
 	if (td == nullptr || p_spacing < 0) {
 		return;
 	}
+	td->column.has_spacing = true;
 	td->column.spacing = p_spacing;
 	touch();
 }
@@ -1180,6 +2030,7 @@ void NovaMnuDocument::set_widget_group(int p_id, int p_group) {
 	if (!w) {
 		return;
 	}
+	w->has_group = true;
 	w->group = p_group;
 	touch();
 }
@@ -1261,23 +2112,10 @@ void NovaMnuDocument::delete_widget(int p_id) {
 }
 
 int NovaMnuDocument::add_screen(const String &p_name) {
-	mnu::Screen screen;
-	screen.name = to_std(p_name);
+	mnu::Screen screen = make_default_screen(to_std(p_name));
 	// Stock-shaped root: every shipped screen root is a MAIN window with a full
 	// 4-corner POSITION and at least one APPEARANCE row — the original engine's
 	// layout/render paths assume them (a bare root crashed it).
-	screen.root_window.name = "MAIN";
-	screen.root_window.type = mnu::WindowType::Window;
-	mnu::Position &root_pos = screen.root_window.position;
-	root_pos.left = 0;
-	root_pos.top = 0;
-	root_pos.right = 800;
-	root_pos.bottom = 600;
-	root_pos.has_left = root_pos.has_top = root_pos.has_right = root_pos.has_bottom = true;
-	mnu::Appearance root_app;
-	root_app.type = "custom";
-	root_app.state = "default";
-	screen.root_window.appearances.push_back(root_app);
 	doc_.screens.push_back(std::move(screen));
 
 	IdScreen s;
@@ -1299,198 +2137,130 @@ void NovaMnuDocument::delete_screen(int p_screen_id) {
 	touch();
 }
 
-// --- Snapshot + reparent (M8) ---
-
-void NovaMnuDocument::collect_id_window(const IdWindow &node, PackedInt32Array &out) const {
-	out.push_back(node.id);
-	for (const auto &child : node.children) {
-		collect_id_window(child, out);
+PackedByteArray NovaMnuDocument::capture_widget_subtree(int p_id) const {
+	PackedByteArray out;
+	const mnu::Window *w = window_at(locate(p_id));
+	if (w == nullptr) {
+		return out;
 	}
-}
-
-PackedInt32Array NovaMnuDocument::collect_ids() const {
-	PackedInt32Array out;
-	for (const auto &s : ids_) {
-		out.push_back(s.id);
-		collect_id_window(s.root, out);
+	mnu::Document clipboard;
+	mnu::Screen screen;
+	screen.name = "CLIPBOARD";
+	screen.root_window = *w;
+	clipboard.screens.push_back(std::move(screen));
+	const std::string bytes = mnu::serialize(clipboard, true, 2);
+	out.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) {
+		std::memcpy(out.ptrw(), bytes.data(), bytes.size());
 	}
 	return out;
 }
 
-bool NovaMnuDocument::build_id_window_from_list(const mnu::Window &w, const PackedInt32Array &ids, int &k, IdWindow &out) const {
-	if (k >= ids.size()) {
+int NovaMnuDocument::insert_widget_subtree(int p_parent_id, const PackedByteArray &p_payload,
+		int p_index, const Vector2i &p_offset) {
+	if (p_payload.is_empty()) {
+		return -1;
+	}
+	mnu::Document clipboard;
+	std::string error;
+	if (!mnu::parse(p_payload.ptr(), static_cast<size_t>(p_payload.size()), clipboard, error)
+			|| clipboard.screens.empty()) {
+		return -1;
+	}
+	const Locator parent_loc = locate(p_parent_id);
+	if (!parent_loc.valid()) {
+		return -1;
+	}
+	mnu::Window *parent = nullptr;
+	IdWindow *id_parent = nullptr;
+	if (parent_loc.is_screen) {
+		parent = &doc_.screens[parent_loc.screen_index].root_window;
+		id_parent = &ids_[parent_loc.screen_index].root;
+	} else {
+		parent = window_at(parent_loc);
+		id_parent = id_window_at(parent_loc);
+	}
+	if (parent == nullptr || id_parent == nullptr) {
+		return -1;
+	}
+
+	mnu::Window pasted = clipboard.screens.front().root_window;
+	if (pasted.position.has_left) pasted.position.left += p_offset.x;
+	if (pasted.position.has_right) pasted.position.right += p_offset.x;
+	if (pasted.position.has_top) pasted.position.top += p_offset.y;
+	if (pasted.position.has_bottom) pasted.position.bottom += p_offset.y;
+	IdWindow pasted_ids = make_id_window(pasted);
+	const int new_id = pasted_ids.id;
+	const int index = p_index < 0
+			? static_cast<int>(parent->children.size())
+			: CLAMP(p_index, 0, static_cast<int>(parent->children.size()));
+	parent->children.insert(parent->children.begin() + index, std::move(pasted));
+	id_parent->children.insert(id_parent->children.begin() + index, std::move(pasted_ids));
+	touch();
+	return new_id;
+}
+
+bool NovaMnuDocument::move_widget_to_index(int p_id, int p_index) {
+	const Locator loc = locate(p_id);
+	if (!loc.valid() || loc.is_screen || loc.path.empty()) {
 		return false;
 	}
-	out.id = ids[k++];
-	out.children.clear();
-	out.children.reserve(w.children.size());
-	for (const auto &child : w.children) {
-		IdWindow child_node;
-		if (!build_id_window_from_list(child, ids, k, child_node)) {
-			return false;
-		}
-		out.children.push_back(std::move(child_node));
+	mnu::Window *parent = &doc_.screens[loc.screen_index].root_window;
+	IdWindow *id_parent = &ids_[loc.screen_index].root;
+	for (size_t i = 0; i + 1 < loc.path.size(); ++i) {
+		parent = &parent->children[loc.path[i]];
+		id_parent = &id_parent->children[loc.path[i]];
 	}
+	const int from = loc.path.back();
+	const int to = CLAMP(p_index, 0, static_cast<int>(parent->children.size()) - 1);
+	if (from == to) {
+		return false;
+	}
+	mnu::Window moved = std::move(parent->children[from]);
+	IdWindow moved_ids = std::move(id_parent->children[from]);
+	parent->children.erase(parent->children.begin() + from);
+	id_parent->children.erase(id_parent->children.begin() + from);
+	const int insert_at = CLAMP(to, 0, static_cast<int>(parent->children.size()));
+	parent->children.insert(parent->children.begin() + insert_at, std::move(moved));
+	id_parent->children.insert(id_parent->children.begin() + insert_at, std::move(moved_ids));
+	touch();
 	return true;
 }
 
-Dictionary NovaMnuDocument::capture_state() const {
-	Dictionary state;
-	state["mnu"] = to_byte_array();
-	state["ids"] = collect_ids();
-	state["next_id"] = next_id_;
-	state["menu_size"] = menu_size_;
-	return state;
-}
-
-void NovaMnuDocument::apply_state(const Dictionary &p_state) {
-	if (!p_state.has("mnu")) {
-		return;
+int NovaMnuDocument::duplicate_screen(int p_screen_id, const String &p_name) {
+	const Locator loc = locate(p_screen_id);
+	if (!loc.valid() || !loc.is_screen) {
+		return -1;
 	}
-	const PackedByteArray packed = p_state.get("mnu", PackedByteArray());
-	std::vector<uint8_t> bytes(static_cast<size_t>(packed.size()));
-	if (!bytes.empty()) {
-		std::memcpy(bytes.data(), packed.ptr(), bytes.size());
-	}
-	mnu::Document parsed;
-	std::string error;
-	if (!mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
-		UtilityFunctions::push_warning("NovaMnuDocument::apply_state: parse failed: ", error.c_str());
-		return;
-	}
-	doc_ = std::move(parsed);
-
-	// Rebuild the id tree from the stored pre-order list (byte-identical restore),
-	// walking doc_ in the same order rebuild_ids would. On any under-/over-run the
-	// list is out of step with the parsed tree, so fall back to positional ids.
-	const PackedInt32Array ids = p_state.get("ids", PackedInt32Array());
-	bool ok = ids.size() > 0;
-	std::vector<IdScreen> rebuilt;
-	int k = 0;
-	if (ok) {
-		rebuilt.reserve(doc_.screens.size());
-		for (const auto &screen : doc_.screens) {
-			if (k >= ids.size()) {
-				ok = false;
-				break;
-			}
-			IdScreen s;
-			s.id = ids[k++];
-			if (!build_id_window_from_list(screen.root_window, ids, k, s.root)) {
-				ok = false;
-				break;
-			}
-			rebuilt.push_back(std::move(s));
-		}
-		if (ok && k != ids.size()) {
-			ok = false; // extra ids: tree had fewer nodes than the list
-		}
-	}
-
-	if (ok) {
-		ids_ = std::move(rebuilt);
-		int max_id = 0;
-		for (int64_t i = 0; i < ids.size(); ++i) {
-			if (ids[i] > max_id) {
-				max_id = ids[i];
-			}
-		}
-		const int stored_next = static_cast<int>(p_state.get("next_id", max_id + 1));
-		next_id_ = stored_next > max_id + 1 ? stored_next : max_id + 1;
-	} else {
-		UtilityFunctions::push_warning("NovaMnuDocument::apply_state: id list desync, falling back to positional ids");
-		rebuild_ids();
-	}
-
-	const Vector2i restored_size = p_state.get("menu_size", menu_size_);
-	menu_size_ = restored_size;
+	mnu::Screen screen = doc_.screens[loc.screen_index];
+	screen.name = to_std(p_name);
+	IdScreen ids;
+	ids.id = next_id_++;
+	ids.root = make_id_window(screen.root_window);
+	const int insert_at = loc.screen_index + 1;
+	doc_.screens.insert(doc_.screens.begin() + insert_at, std::move(screen));
+	ids_.insert(ids_.begin() + insert_at, std::move(ids));
 	touch();
+	return ids_[insert_at].id;
 }
 
-bool NovaMnuDocument::reparent_widget(int p_id, int p_new_parent_id, int p_index) {
-	const Locator src = locate(p_id);
-	// Refuse an unknown id, a screen, or a screen's root window (path empty).
-	if (!src.valid() || src.is_screen || src.path.empty()) {
+bool NovaMnuDocument::move_screen_to_index(int p_screen_id, int p_index) {
+	const Locator loc = locate(p_screen_id);
+	if (!loc.valid() || !loc.is_screen || doc_.screens.size() < 2) {
 		return false;
 	}
-	if (p_new_parent_id == p_id) {
+	const int from = loc.screen_index;
+	const int to = CLAMP(p_index, 0, static_cast<int>(doc_.screens.size()) - 1);
+	if (from == to) {
 		return false;
 	}
-	if (!locate(p_new_parent_id).valid()) {
-		return false;
-	}
-	// Cycle check: the new parent must not be p_id or one of its descendants.
-	for (int cur = p_new_parent_id; cur > 0 && widget_exists(cur);) {
-		if (cur == p_id) {
-			return false;
-		}
-		if (is_screen(cur)) {
-			break;
-		}
-		cur = get_parent_id(cur);
-	}
-
-	// Resolve the source parent vectors + the child's index within them.
-	const int src_index = src.path.back();
-	mnu::Window *src_parent = &doc_.screens[src.screen_index].root_window;
-	IdWindow *src_id_parent = &ids_[src.screen_index].root;
-	for (size_t i = 0; i + 1 < src.path.size(); ++i) {
-		src_parent = &src_parent->children[src.path[i]];
-		src_id_parent = &src_id_parent->children[src.path[i]];
-	}
-
-	// Move the subtree (and its mirrored id subtree) out, then erase the slot.
-	mnu::Window moved = std::move(src_parent->children[src_index]);
-	IdWindow moved_id = std::move(src_id_parent->children[src_index]);
-	src_parent->children.erase(src_parent->children.begin() + src_index);
-	src_id_parent->children.erase(src_id_parent->children.begin() + src_index);
-
-	// Re-locate the destination AFTER the erase (its path may have shifted when it
-	// was a later sibling in the same parent). It cannot have vanished: it is not
-	// inside the moved subtree (cycle check) and still exists in the tree.
-	const Locator dst = locate(p_new_parent_id);
-	mnu::Window *dst_parent = nullptr;
-	IdWindow *dst_id_parent = nullptr;
-	if (dst.valid()) {
-		if (dst.is_screen) {
-			dst_parent = &doc_.screens[dst.screen_index].root_window;
-			dst_id_parent = &ids_[dst.screen_index].root;
-		} else {
-			dst_parent = window_at(dst);
-			dst_id_parent = id_window_at(dst);
-		}
-	}
-	if (dst_parent == nullptr || dst_id_parent == nullptr) {
-		// Unreachable given the upfront guards; restore the node to keep the tree
-		// consistent rather than dropping it.
-		src_parent->children.insert(src_parent->children.begin() + src_index, std::move(moved));
-		src_id_parent->children.insert(src_id_parent->children.begin() + src_index, std::move(moved_id));
-		return false;
-	}
-
-	// When src and dst share the same parent vector and the node sat before the
-	// requested slot, the erase shifted everything down by one (the requested
-	// index was computed against the pre-erase tree).
-	const bool same_parent = (dst_parent == src_parent);
-	int insert_index = p_index;
-	if (same_parent && src_index < insert_index) {
-		insert_index -= 1;
-	}
-	if (insert_index < 0) {
-		insert_index = 0;
-	}
-	if (insert_index > static_cast<int>(dst_parent->children.size())) {
-		insert_index = static_cast<int>(dst_parent->children.size());
-	}
-	dst_parent->children.insert(dst_parent->children.begin() + insert_index, std::move(moved));
-	dst_id_parent->children.insert(dst_id_parent->children.begin() + insert_index, std::move(moved_id));
-	// A drop that lands the node back in its original slot is a no-op: the insert
-	// above already restored the tree byte-for-byte, so report "not moved" without
-	// a change event, so the caller records no undo entry and does not dirty the
-	// document.
-	if (same_parent && insert_index == src_index) {
-		return false;
-	}
+	mnu::Screen moved = std::move(doc_.screens[from]);
+	IdScreen moved_ids = std::move(ids_[from]);
+	doc_.screens.erase(doc_.screens.begin() + from);
+	ids_.erase(ids_.begin() + from);
+	const int insert_at = CLAMP(to, 0, static_cast<int>(doc_.screens.size()));
+	doc_.screens.insert(doc_.screens.begin() + insert_at, std::move(moved));
+	ids_.insert(ids_.begin() + insert_at, std::move(moved_ids));
 	touch();
 	return true;
 }
@@ -1525,9 +2295,11 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_window_rect", "id"), &NovaMnuDocument::get_window_rect);
 
 	ClassDB::bind_method(D_METHOD("get_screen_name", "screen_id"), &NovaMnuDocument::get_screen_name);
+	ClassDB::bind_method(D_METHOD("get_screen_has_music_var", "screen_id"), &NovaMnuDocument::get_screen_has_music_var);
 	ClassDB::bind_method(D_METHOD("get_screen_music_var", "screen_id"), &NovaMnuDocument::get_screen_music_var);
 	ClassDB::bind_method(D_METHOD("get_screen_text_rsrc", "screen_id"), &NovaMnuDocument::get_screen_text_rsrc);
 	ClassDB::bind_method(D_METHOD("get_screen_cursor_file", "screen_id"), &NovaMnuDocument::get_screen_cursor_file);
+	ClassDB::bind_method(D_METHOD("get_screen_cursor_flags", "screen_id"), &NovaMnuDocument::get_screen_cursor_flags);
 	ClassDB::bind_method(D_METHOD("set_screen_property", "screen_id", "key", "value"), &NovaMnuDocument::set_screen_property);
 
 	ClassDB::bind_method(D_METHOD("set_widget_name", "id", "name"), &NovaMnuDocument::set_widget_name);
@@ -1542,6 +2314,8 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_datasource", "id", "value"), &NovaMnuDocument::set_widget_datasource);
 	ClassDB::bind_method(D_METHOD("get_widget_orientation", "id"), &NovaMnuDocument::get_widget_orientation);
 	ClassDB::bind_method(D_METHOD("set_widget_orientation", "id", "value"), &NovaMnuDocument::set_widget_orientation);
+	ClassDB::bind_method(D_METHOD("get_widget_authoring_state", "id"), &NovaMnuDocument::get_widget_authoring_state);
+	ClassDB::bind_method(D_METHOD("apply_widget_patch", "id", "patch"), &NovaMnuDocument::apply_widget_patch);
 
 	ClassDB::bind_method(D_METHOD("get_item_count", "id"), &NovaMnuDocument::get_item_count);
 	ClassDB::bind_method(D_METHOD("get_widget_sounds", "id"), &NovaMnuDocument::get_widget_sounds);
@@ -1597,6 +2371,12 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("delete_widget", "id"), &NovaMnuDocument::delete_widget);
 	ClassDB::bind_method(D_METHOD("add_screen", "name"), &NovaMnuDocument::add_screen);
 	ClassDB::bind_method(D_METHOD("delete_screen", "screen_id"), &NovaMnuDocument::delete_screen);
+	ClassDB::bind_method(D_METHOD("capture_widget_subtree", "id"), &NovaMnuDocument::capture_widget_subtree);
+	ClassDB::bind_method(D_METHOD("insert_widget_subtree", "parent_id", "payload", "index", "offset"),
+			&NovaMnuDocument::insert_widget_subtree, DEFVAL(-1), DEFVAL(Vector2i()));
+	ClassDB::bind_method(D_METHOD("move_widget_to_index", "id", "index"), &NovaMnuDocument::move_widget_to_index);
+	ClassDB::bind_method(D_METHOD("duplicate_screen", "screen_id", "name"), &NovaMnuDocument::duplicate_screen);
+	ClassDB::bind_method(D_METHOD("move_screen_to_index", "screen_id", "index"), &NovaMnuDocument::move_screen_to_index);
 
 	ClassDB::bind_method(D_METHOD("capture_state"), &NovaMnuDocument::capture_state);
 	ClassDB::bind_method(D_METHOD("apply_state", "state"), &NovaMnuDocument::apply_state);
@@ -1620,6 +2400,10 @@ void NovaMnuDocument::_bind_methods() {
 	BIND_ENUM_CONSTANT(TYPE_LABEL);
 	BIND_ENUM_CONSTANT(TYPE_GOTO);
 	BIND_ENUM_CONSTANT(TYPE_MARQUEE);
+	BIND_ENUM_CONSTANT(TYPE_GLB_TABLE);
+	BIND_ENUM_CONSTANT(TYPE_RADIOEDIT);
+	BIND_ENUM_CONSTANT(TYPE_LAN_LIST);
+	BIND_ENUM_CONSTANT(TYPE_GOPHER);
 	BIND_ENUM_CONSTANT(TYPE_UNKNOWN);
 
 	BIND_ENUM_CONSTANT(COLOR_DEFAULT_FG);

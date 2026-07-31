@@ -39,6 +39,27 @@ GOPHER`; an unknown token builds a generic `CWnd` (children + attrs still parsed
 `mnu::WindowType` now models all 16 tokens; an unmodelled token is preserved verbatim
 on `Window::type_token` so it round-trips instead of degrading to `"unknown"`.
 
+### Authored Actions `[orig: CUIElement_ParseXMLDefinition @ 0x648ee2; CUIWidget_HandleScriptedAction @ 0x6497f0]`
+
+The parser assigns sixteen authored type codes in this order: `SCREEN`, `WINDOW`,
+`URL`, `FORM_POST`, `GLB_LOAD`, `GLB_LOADANDPING`, `GLB_FILTER`,
+`GLB_FILTER_NUM`, `GLB_PING`, `GLB_JOIN`, `TAB`, `POP_SCREEN`, `APPMSG`,
+`LAN_SEARCH`, `LAN_JOIN`, and `MNX` (`@ 0x648f4a..0x6490e9`). The Action also
+preserves `FILE`, `FIELD`, `SOURCE`, `TARGET_FORM`, `EXTERNAL_BROWSER`,
+`TOGGLE`, and `TEST=LT|LE|EQ|GE|GT`. `WINDOW` states are `HIDE`, `SHOW`,
+`ENABLE`, and `DISABLE`; `TOGGLE` inverts the chosen shown/enabled property
+(`[orig: state switch @ 0x6498f7..0x6499c9]`).
+
+The dispatcher handles screen selection, Window state, URL, form submission,
+the GLB/LAN/application host operations, and pop. Type `TAB` is a special
+focus-target action on the form event subtype (`@ 0x649c17..0x649c55`), not
+the common menu convention called a Tab; shipped Tabs are sibling panels
+shown/hidden by ordinary `WINDOW` Actions. The committed JO fixtures use only
+`SCREEN`, `WINDOW`, `URL`, and `POP_SCREEN`, but the remaining authored types
+are still format data and must round-trip and remain available to their hosts.
+`QUIT` is not a parsed Action type; exit buttons are host Commands bound by
+Window name (ADR 0001).
+
 ## Layout `[orig: @ 0x648120 parse tail; adjust_rect_to_text_size @ 0x6575f0]`
 
 POSITION is absolute parent-relative edges (`LEFT/TOP/RIGHT/BOTTOM`, with
@@ -155,6 +176,16 @@ combo/list items (a host can populate text-only at runtime). `D-MNU-5`: shipped 
 image/color items only in spinlists; the combo closed cell still renders text-only (its
 LIST_BOX items are all `type="id"`).
 
+### Checkbox button presentation `[orig: sub_64AD90 @ 0x64ad90; CCheckWnd_DrawLabel @ 0x64aa20]`
+
+`AS_BUTTON` changes checkbox presentation, not its event contract. A normal
+checkbox moves its label to the right of the checkbox-art rect; `AS_BUTTON`
+keeps the label inside the full Window rect and honors its horizontal
+justification. Clicks still toggle the checked value, and checked rendering
+forces the selected appearance (`CCheckWnd_Render @ 0x64ae20`, state index 3).
+The runtime therefore presents it as a full-rect toggle button rather than a
+checkbox with a detached indicator.
+
 ### `%VAR%` colors in APPEARANCE
 
 A `<APPEARANCE type="color">` value is frequently a stylesheet variable (e.g.
@@ -164,6 +195,19 @@ resolves the var through the stylesheet before parsing the hex
 @ 0x63a000]`). Previously every `%VAR%` color appearance silently failed, leaving combo
 dropdown popups, container backgrounds, and outlines transparent (the "stacked-inline /
 overlapping" video-options dropdowns).
+
+### FONT background colors are preservation-only
+
+The FONT parser stores four foreground/background pairs (default, mouseover,
+selected, and disabled) at element offsets `+0x7c..+0x98`
+`[orig: CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64]`, and inherited
+fonts copy all eight values `[orig: sub_646A70 @ 0x646a70]`.
+`draw_text_with_cursor @ 0x6533b0` selects the pair for the active state, but
+the common `font_cache_draw_text_scaled @ 0x653170` path consumes only the
+foreground member and never reads the paired background. Shipped JO menus
+normally author black BG values. The reimplementation therefore preserves and
+editor-exposes every BG field (including a color picker) but intentionally does
+not paint a text background.
 
 ## Spinlist arrows `[orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0]`
 
@@ -198,7 +242,11 @@ Reimpl `NovaMnuCombo`: a TextureButton + an in-tree layered popup. `build_combo`
 passes the authored `list_box.position` via `set_popup_rect`, and `open_popup` opens at
 that rect (falling back to a below-combo clamped/scrollable box only for host-built combos
 with no authored LIST_BOX, e.g. server browsers); `effective_item_height` uses the
-authored `MIN_ITEM_HEIGHT`, else the item font line height, else 16. Two earlier bugs are
+authored `MIN_ITEM_HEIGHT`, else the item font line height, else 16. Top-level `ITEMS`
+and `LIST_BOX/ITEMS` remain independent: an authored nested collection wins even when
+empty, otherwise the popup uses authored top-level fallback rows. Popup text honors
+the active ITEMS horizontal/vertical justification and the LIST_BOX STRING edge
+inset; the closed cell independently honors its outer STRING layout. Two earlier bugs are
 fixed: the popup background (`%COLOR_BLACK%`/`%SEMIOPAQUE_BLACK%` color appearance) not
 resolving (the `%VAR%` color change above), and the popup geometry being recomputed below
 the combo instead of using the authored rect — see **D-MNU-7** and **D-MNU-8**.
@@ -350,14 +398,25 @@ and profile persistence are deferred (D-CTRL-3), gated on a real game input-acti
 
 ### Table render `[orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]`
 
-Three reimpl table-render fixes landed with the controls work (`build_table` in
-`nova_mnu_builder.cpp`, `NovaMnuTable`):
+The reimplementation's table template is carried by `build_table` and
+`NovaMnuTable`:
 
 - **Header `type="id"` is resolved** through the RTXT table (`resolve_text`), closing the open
   inner divergence — the header branch `@ 0x64344a` looks the text up via
   `CUIStringTable_LookupString @ 0x6434df`; the old reimpl drew the raw id.
 - **Body cells align per the `<BODY>` justify**, not the `<HEADER>` justify (the old code reused
   the header justify, so a LEFT-authored body rendered centred).
+- **HEADER and BODY `vjustify` are independent.** Sortable headers keep their
+  Button input surface but use a child text layer so TOP/BOTTOM alignment is not
+  lost. Text and bitmap body cells use the BODY vertical alignment.
+- **`SCALE_BITMAP` is live.** An unscaled bitmap keeps its native size and authored
+  alignment; a scaled bitmap fills its cell. `BITMAP_FLAGS` remains
+  preservation-only because decoded Godot textures have no proven one-to-one
+  mapping for the legacy DirectDraw flag vocabulary.
+- **`CUSTOM_DRAW` has an explicit host seam.** At runtime a connected
+  `custom_cell_requested(row, column, value, slot)` handler synchronously fills a
+  table-owned cell slot. With no host—or in Edit mode—the normal cell fallback
+  remains visible; slots are recreated on every rebuild and must not be cached.
 - **The scrollbar honors the authored `<SCROLLBAR><POSITION>`** (table-relative) and art width
   instead of a hardcoded 16px right strip; the track texture is applied like `build_scroll`. The
   ITEMS `%TRIM_COLOR%` outline now draws as a header rule + per-row grid line.
@@ -413,47 +472,41 @@ literal). OpenNova keeps raw tokens in the document and expands per consumed fie
 build time (colors/fonts/textures/text) - see ADR 0005. Documented gap: host variables
 in non-themed fields need a host var map plumbed into the builder.
 
-## MNS stylesheet format `[orig: sub_552500, ref'd from UIScene_LoadAndParseContent @ 0x63c830]`
+## MNS stylesheet format `[orig: Menu_InitShellResources @ 0x552500; parse_key_value_buffer @ 0x639870]`
 
-The substitution table lives in `menu_style.mns` ("named menu_style.mns for the game
-to find it"), loaded by canonical name when menus initialize. The format's
-authoritative specification is NovaLogic's own 38-line comment header in the shipped
-file (vendored byte-exact at `fixtures/mns/menu_style.mns`); the loader itself is
-unwitnessed in IDA so far - the reimplementation (`mns::Document::parse`,
-`libs/mns/src/mns_document.cpp`) is built from that in-file spec plus
-current-behavior compatibility, with a grill session as the open follow-up.
+The substitution table lives in `menu_style.mns` ("named menu_style.mns for the
+game to find it"). Menu initialization calls
+`NapiConfigMap_LoadIncludeFile @ 0x63b970`, which reads the file and passes its
+buffer to `parse_key_value_buffer @ 0x639870`; menu XML expansion later uses
+`NapiXML_ExpandVariablesInText @ 0x63a000`. This resolves the previously
+unwitnessed loader chain.
 
-Spec rules implemented (2026-06-12 pass; the old parser violated the first two):
-`NAME value` pairs, value from the first non-whitespace after the name to the last
-non-whitespace on the line; `//` comments anywhere, including after a value;
-`\` continuations (whitespace before the backslash is part of the value; a comment
-may follow the backslash; a name alone followed by `\` starts its value on the next
-line); `\\` escapes a literal backslash in values; names exclude whitespace and the
-six `% < > # \ /`; nestable `#if 0|1` / `#else` / `#endif`.
+The editor model remains lossless (ADR 0014): typed node fields exactly
+partition the file bytes, so an untouched parse -> serialize is byte-identical
+and an edited value changes only its own line. Runtime flattening is a separate
+retail evaluator because the original can reject syntax that the editor must
+still open for repair.
 
-The model is lossless (ADR 0014): typed node fields exactly partition the file's
-bytes, so an untouched parse -> serialize is byte-identical and an edited value
-changes only its own line. `Document::flatten()` is the runtime view the existing
-`mns::StyleSheet` API serves (last duplicate wins, evaluated conditionals).
+Observed runtime rules:
 
-Divergences (each lenient-with-diagnostic where the spec says "error"; the parse
-never fails on shipped data):
+- names are case-insensitive and a duplicate silently replaces the earlier
+  value; duplicate diagnostics are an editor enhancement;
+- an unknown `%VAR%` remains literal;
+- `#if` tests only the first non-whitespace value character: `0` is false and
+  every other character is true, so `0foo` is false while `1foo` and `2` are
+  true;
+- directives encountered during a continuation remain directives; a
+  continuation can resume into the next ordinary line;
+- inactive scanning searches for the next `#` directive marker rather than
+  requiring a line start;
+- invalid names or a missing value delimiter fail evaluation;
+- doubled backslashes stay doubled: the scan advances across both bytes at
+  `0x639c0e..0x639c17`, then copies the original source span.
 
-- **D-MNS-1 (duplicate names):** the spec calls duplicates an error (debug-build
-  reporting only); the reimpl keeps last-wins flatten behavior and emits a
-  `duplicate-name` error diagnostic the editor surfaces.
-- **D-MNS-2 (unknown `%VAR%`):** the spec calls an unmatched tagged macro a failure;
-  the substitution layer keeps it literal (cross-ref D-MNU-1 / ADR 0005 - the host
-  var list means stylesheet-side strictness would misfire), and the Menus workspace
-  counts unresolved tokens in its status bar instead.
-- **D-MNS-3 (`#if` argument):** only `0`/`1` are valid per spec; any other token is
-  truthy in the reimpl (legacy-parser behavior, pinned) plus a `bad-if-arg`
-  diagnostic.
-- **D-MNS-4 (inactive-region scanning):** inside an evaluated-false region the
-  scanner is line-based and continuations are not honored, while an ACTIVE define's
-  continuation consumes even a `#endif`-looking next line (legacy `read_value`
-  precedence, pinned by `tests/mns/mns_document_test.cpp`). Unwitnessed in the
-  binary; flagged for the grill.
+Disposition: **D-MNS-1** and **D-MNS-2** match retail (the editor keeps their
+useful diagnostics); **D-MNS-3** and **D-MNS-4** are fixed by routing runtime
+consumers through the retail evaluator. The lossless document intentionally
+stays permissive so malformed files remain repairable.
 
 ## Verdict
 
@@ -498,6 +551,19 @@ Class-id->name table + per-device row build), the byte-exact default keyboard bi
 column format (key-name decode + `Ctrl-`/`Shift-`/`OR`), and the three table-render fixes (header
 `type="id"` lookup, body justify, authored scrollbar position) — the table now renders a populated,
 scrollable, correctly-aligned grid instead of floating headers over a blank body.
+
+**matching** (2026-07-30 menu parity pass): the typed format retains source
+encoding/BOM, optional-field presence, ordered HOTKEY/APPEARANCE/ITEM data, the
+complete sixteen-type Action payload, and nested list/table/scroll structures
+without raw-source replay. Runtime keyboard dispatch follows the witnessed
+virtual-key versus character paths and activates the first visible document-order
+match. WINDOW enable/disable/toggle, initial disabled state, AS_BUTTON layout,
+edit constraints, per-screen RTXT, and the shared authored scrollbar range/art/
+sound seam are live. Optional `has_*` and container `present` state is
+authoritative at save and build time, so retained latent values never
+re-materialize until presence is explicitly re-enabled. Browser, LAN, form,
+application, and MNX Actions remain
+authored Actions and cross the explicit host boundary with their full payload.
 
 Accepted/divergent (each a documented decision, not a defect):
 
@@ -586,15 +652,11 @@ Accepted/divergent (each a documented decision, not a defect):
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
-- The hotkey consume-on-effect vtable path (`CUIWidget_HandleScriptedAction @ 0x649790`,
-  no direct xrefs).
-- `GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER` runtime behavior (multiplayer-browser widgets;
-  build as containers, behavior rides with the net workspace).
-- Real 3D globe; the table SCROLLBAR delegate `(*(tableWnd[244]+60)) @ 0x643b22`.
-- Combo dropdown scrollbar art: the original draws the authored `<SCROLLBAR>` sprites
-  (`m_scrolV.tga` / `shuttlev.tga` / arrows) inside the listbox; the reimpl wraps the rows
-  in a Godot `ScrollContainer` (default scrollbar). Geometry/rows now match (D-MNU-7/8);
-  skinning the scrollbar to the authored art is the remaining fidelity gap.
+- Live data/behavior for `GLB_TABLE`, `LAN_LIST`, and `GOPHER` remains owned by
+  the multiplayer/news hosts. Their authored menu structure and Action payloads
+  are preserved; this menu-contained pass does not invent offline services.
+- Real 3D globe and CBIN credits custom-resource font/image resolution remain
+  separate render/data-host work (D-MNU-6 covers the latter).
 
 ---
 
@@ -614,7 +676,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | Original | OpenNova |
 |---|---|
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/menu_shell.gd` |
-| `sub_552500` (.mns stylesheet load, ref'd from `0x63c830`) | `mns::Document::parse` — `libs/mns/src/mns_document.cpp` (lossless model, ADR 0014; loader unwitnessed, built from the in-file spec — D-MNS-1..4) |
+| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `libs/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless editor model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/engine/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |

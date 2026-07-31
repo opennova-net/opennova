@@ -342,7 +342,7 @@ func _load_style(root: NovaResourceRoot) -> MnsStyleSheet:
 	if bytes.is_empty():
 		return null
 	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK else null
+	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null
 
 
 func _connect_layout_source() -> void:

@@ -82,13 +82,13 @@ func refresh() -> void:
 		return
 
 	var current_group := -1
-	for entry_value in entries:
-		var entry := entry_value as Dictionary
+	for entry_index in range(entries.size()):
+		var entry := entries[entry_index] as Dictionary
 		var group := int(entry.get("group", 0))
 		if group != current_group:
 			current_group = group
 			_add_group_heading(entry)
-		_add_row(entry)
+		_add_row(entry, entry_index, entries.size())
 
 	_selected_name = ""
 	if not keep.is_empty():
@@ -145,7 +145,7 @@ func _add_group_heading(first_entry: Dictionary) -> void:
 	add_child(heading)
 
 
-func _add_row(entry: Dictionary) -> void:
+func _add_row(entry: Dictionary, entry_index: int, entry_count: int) -> void:
 	var name := String(entry.get("name", ""))
 	var value := String(entry.get("value", ""))
 	var comment := String(entry.get("inline_comment", ""))
@@ -191,6 +191,22 @@ func _add_row(entry: Dictionary) -> void:
 		comment_label.text = comment.trim_prefix("//").strip_edges()
 		comment_label.tooltip_text = comment
 		row.add_child(comment_label)
+
+	var up := Button.new()
+	up.text = "â–²"
+	up.tooltip_text = "Move variable earlier"
+	up.disabled = entry_index == 0
+	up.pressed.connect(func() -> void:
+		edit_requested.emit({"op": "move", "name": name, "to_entry_index": entry_index - 1}))
+	row.add_child(up)
+	var down := Button.new()
+	down.text = "â–¼"
+	down.tooltip_text = "Move variable later"
+	down.disabled = entry_index >= entry_count - 1
+	down.pressed.connect(func() -> void:
+		edit_requested.emit({"op": "move", "name": name,
+			"to_entry_index": entry_index + 2 if entry_index + 2 < entry_count else -1}))
+	row.add_child(down)
 
 	_rows[name] = {"panel": panel, "edit": edit, "swatch": swatch, "comment": comment_label}
 
