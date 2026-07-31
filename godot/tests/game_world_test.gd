@@ -686,9 +686,9 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 		"the packaged host keeps retained water out of rendering before a load")
 	assert_false(world.is_water_render_active(),
 		"frame clear and occlusion use the lifecycle-aware water predicate")
-	water.set_host_rendering_enabled(true)
+	water.set_world_rendering_enabled(true)
 	assert_true(world.is_water_render_active())
-	water.set_host_rendering_enabled(false)
+	water.set_world_rendering_enabled(false)
 
 
 func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
@@ -1081,7 +1081,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.unload()
 
 
-func _hosted_weather_state_after(deltas: Array) -> Array:
+func _world_driven_weather_state_after(deltas: Array) -> Array:
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
@@ -1125,9 +1125,9 @@ func _hosted_weather_state_after(deltas: Array) -> Array:
 	return state
 
 
-func test_hosted_weather_is_invariant_to_render_batching() -> void:
-	var slow: Array = await _hosted_weather_state_after([0.128])
-	var split: Array = await _hosted_weather_state_after([
+func test_world_driven_weather_is_invariant_to_render_batching() -> void:
+	var slow: Array = await _world_driven_weather_state_after([0.128])
+	var split: Array = await _world_driven_weather_state_after([
 		0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016,
 	])
 	assert_eq(slow, split,
@@ -1142,7 +1142,7 @@ func test_hosted_weather_is_invariant_to_render_batching() -> void:
 	expected_seven.free()
 
 	var eighth_delta := 8.0 / GameWorld.WEATHER_TICK_HZ - 0.128 + 0.000001
-	var boundary: Array = await _hosted_weather_state_after([0.128, eighth_delta])
+	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
 	var expected_eight := NovaEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)
 	expected_eight.advance_mission_clock(8)

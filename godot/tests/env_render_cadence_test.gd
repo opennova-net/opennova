@@ -46,7 +46,7 @@ func test_weather_state_is_invariant_across_render_refresh_rates() -> void:
 	assert_eq(_weather_state_after_one_second(144), expected)
 
 
-func _hosted_weather_fixture() -> Array:
+func _world_driven_weather_fixture() -> Array:
 	var host := Node3D.new()
 	add_child_autofree(host)
 	var env := NovaEnvironment.new()
@@ -56,11 +56,11 @@ func _hosted_weather_fixture() -> Array:
 	var weather := NovaWeather.new()
 	weather.environment_path = NodePath('../Env')
 	host.add_child(weather)
-	weather.prepare_hosted()
+	weather.prepare_world_driven()
 	return [env, weather]
 
 
-func _hosted_weather_state(weather: NovaWeather, env: NovaEnvironment) -> Array:
+func _world_driven_weather_state(weather: NovaWeather, env: NovaEnvironment) -> Array:
 	return [
 		weather.get_cloud_uv_offset1(0.0, 0.0),
 		weather.get_cloud_uv_offset2(0.0, 0.0),
@@ -86,7 +86,7 @@ func _hosted_weather_state(weather: NovaWeather, env: NovaEnvironment) -> Array:
 
 
 func test_hosted_mission_restart_reseeds_complete_weather_state() -> void:
-	var reused_fixture := _hosted_weather_fixture()
+	var reused_fixture := _world_driven_weather_fixture()
 	var reused_env := reused_fixture[0] as NovaEnvironment
 	var reused := reused_fixture[1] as NovaWeather
 	reused.trigger_lightning_long()
@@ -94,18 +94,18 @@ func test_hosted_mission_restart_reseeds_complete_weather_state() -> void:
 		reused.tick_fixed()
 	assert_ne(reused.get_cloud_uv_offset1(0.0, 0.0), Vector2.ZERO)
 
-	reused.prepare_hosted()
-	var fresh_fixture := _hosted_weather_fixture()
+	reused.prepare_world_driven()
+	var fresh_fixture := _world_driven_weather_fixture()
 	var fresh_env := fresh_fixture[0] as NovaEnvironment
 	var fresh := fresh_fixture[1] as NovaWeather
-	assert_eq(_hosted_weather_state(reused, reused_env),
-			_hosted_weather_state(fresh, fresh_env))
+	assert_eq(_world_driven_weather_state(reused, reused_env),
+			_world_driven_weather_state(fresh, fresh_env))
 
 	for _tick in range(64):
 		reused.tick_fixed()
 		fresh.tick_fixed()
-	assert_eq(_hosted_weather_state(reused, reused_env),
-			_hosted_weather_state(fresh, fresh_env))
+	assert_eq(_world_driven_weather_state(reused, reused_env),
+			_world_driven_weather_state(fresh, fresh_env))
 
 
 func _sky_fallback_state_after_one_second(hz: int) -> Array:

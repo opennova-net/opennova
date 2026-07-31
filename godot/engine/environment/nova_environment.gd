@@ -69,7 +69,7 @@ var _cloud_highlight_rt := Vector3(0.5, 0.5, 0.5)
 var _cloud_edge_rt := Vector3(0.3, 0.4, 0.6)
 # ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
 var _color_src_gain := Vector3.ONE
-# The NVG world-lighting rewrite is a view concern, so the host supplies the
+# The NVG world-lighting rewrite is a view concern, so the shell supplies the
 # already camera-gated (first-person-visible) state here. Gain remains in the
 # retail 0..4 range even while the effect is inactive.
 var _nvg_view_active := false
@@ -108,7 +108,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	# day_speed is an OpenNova AUTHORING knob (HHMM units/second, default off)
-	# for scrubbing previews — host plumbing, not the witnessed day advance.
+	# for scrubbing previews — shell plumbing, not the witnessed day advance.
 	# Retail advances Env_CurTimeFixed24 by 0x18000000/(3720 x minutes) per
 	# 62 Hz tick [orig: Environment_SetTodAdvanceRate @ 0x57d170 (BMS day
 	# length) / Environment_SetTodRate @ 0x57c4f0 (options)]; GameWorld drives
@@ -160,7 +160,7 @@ func advance_mission_clock(ticks: int) -> void:
 ## Public debug clock seam. The catalog exposes minute-of-day rather than raw
 ## HHMM so its linear slider/JSON range contains no impossible values such as
 ## 12:79. Updating the fixed-point accumulator is essential: merely assigning
-## time_of_day would be overwritten by the next hosted weather tick.
+## time_of_day would be overwritten by the next world-driven weather tick.
 func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 	if not is_finite(minute_of_day) \
 			or minute_of_day < 0.0 \
@@ -602,15 +602,15 @@ func get_frame_clear_color() -> Vector3:
 	# @ 0x26c681c]. The blend runs on the UNDOUBLED keyframe colors, THEN the
 	# result doubles with saturation (the witnessed order) - this is the
 	# POST-BLEND DOUBLED skyfog render color, and the modulate2x-path device
-	# Clear consumes it VERBATIM. That is the path this host reproduces
+	# Clear consumes it VERBATIM. That is the path this reimpl reproduces
 	# everywhere (D-RMAT-7 calibrate proof: the x2 fixed-function combine and
 	# the doubled fog/skyfog render colors are in our shaders), and the dome
 	# pass fogs toward the SAME doubled skyfog - the dome-rim/clear seam is
 	# invisible because both sides converge on this one value. The halving
 	# branch in the device Clear is the non-modulate2x compat fallback, with
-	# NO host analog. Reference distance: the retail default 1024 (the
+	# NO reimpl analog. Reference distance: the retail default 1024 (the
 	# session authority forces it; 768 is an adapter-caps fallback with no
-	# host analog).
+	# reimpl analog).
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1,
 	#  doubling @ 0x57f1b1; consumer Render_ProcessMainSceneFrame
 	#  @ 0x5ca776..0x5ca7bf; dome fog toward the same value sub_579CB0; device
