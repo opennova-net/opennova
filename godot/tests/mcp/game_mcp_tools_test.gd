@@ -10,18 +10,29 @@ class DebugSessionStub:
 	var set_id: StringName
 	var set_value: Variant
 	var set_authority := false
+	var list_authority := false
+	var read_authority := false
+	var snapshot_authority := false
 	var presentation_acquires := 0
 	var presentation_releases := 0
 
 	func list_controls(
 			_page: StringName = &"",
-			_filter: String = "") -> Array[Dictionary]:
+			_filter: String = "",
+			allow_authority: bool = false) -> Array[Dictionary]:
+		list_authority = allow_authority
 		return [{"id": "probe"}]
 
-	func get_control_state(id: StringName) -> NovaDebugControlState:
+	func get_control_state(
+			id: StringName,
+			allow_authority: bool = false) -> NovaDebugControlState:
+		read_authority = allow_authority
 		var state := NovaDebugControlState.new()
 		state.id = id
 		state.available = true
+		# Writable like a session whose F3 Live-edits latch is open, so the
+		# adapter's per-caller gating is observable.
+		state.writable = true
 		return state
 
 	func definition(id: StringName) -> NovaDebugControlDef:
@@ -60,7 +71,10 @@ class DebugSessionStub:
 			"state": get_control_state(id).to_json_value(),
 		}
 
-	func capture_snapshot(filter: String = "") -> Dictionary:
+	func capture_snapshot(
+			filter: String = "",
+			allow_authority: bool = false) -> Dictionary:
+		snapshot_authority = allow_authority
 		return {"filter": filter, "controls": []}
 
 	func acquire_presentation_source(_source: StringName) -> void:
@@ -198,6 +212,64 @@ func test_debug_set_forwards_per_call_authority_confirmation() -> void:
 	assert_eq(host.debug.set_value, 2.0)
 	assert_true(host.debug.set_authority)
 	assert_eq(result.structured["id"], "terrain_lod_quality")
+
+
+func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
+	# A confirm_authority caller's rows must answer for THAT caller: reporting
+	# writable=false / "Unlock edits" after its own write succeeded misleads
+	# MCP consumers into thinking the mutation was rejected.
+	await _call("game_debug", {
+		"op": "get",
+		"id": "terrain_lod_quality",
+		"confirm_authority": true,
+	})
+	assert_true(host.debug.read_authority,
+			"op=get threads the caller's confirmed authority into the row")
+
+	host.debug.read_authority = false
+	await _call("game_debug", {
+		"op": "set",
+		"id": "terrain_lod_quality",
+		"value": 2.0,
+		"confirm_authority": true,
+	})
+	assert_true(host.debug.read_authority,
+			"the row returned after a confirmed set reflects that authority")
+
+	await _call("game_debug", {"op": "list", "confirm_authority": true})
+	assert_true(host.debug.list_authority)
+	await _call("game_debug", {"op": "snapshot", "confirm_authority": true})
+	assert_true(host.debug.snapshot_authority)
+
+	host.debug.read_authority = true
+	await _call("game_debug", {"op": "get", "id": "terrain_lod_quality"})
+	assert_false(host.debug.read_authority,
+			"an unconfirmed caller still sees the locked F3 policy view")
+
+
+func test_unconfirmed_rows_for_gated_controls_mirror_the_write_precheck() -> void:
+	# The session can report writable while F3's Live-edits latch is open, but
+	# an unconfirmed automation caller's set/invoke is refused by the
+	# confirm_authority precheck — its rows must tell the same story.
+	var result := await _call("game_debug", {
+		"op": "get",
+		"id": "teleport_local_player",
+	})
+	assert_false(bool(result.structured["writable"]),
+			"an unconfirmed caller cannot be shown a write it will be refused")
+	assert_true(String(result.structured["reason"]).contains("confirm_authority"))
+
+	result = await _call("game_debug", {
+		"op": "get",
+		"id": "teleport_local_player",
+		"confirm_authority": true,
+	})
+	assert_true(bool(result.structured["writable"]),
+			"a confirmed caller keeps the session's writable view")
+
+	result = await _call("game_debug", {"op": "get", "id": "plain_control"})
+	assert_true(bool(result.structured["writable"]),
+			"ungated controls stay writable for unconfirmed callers")
 
 
 func test_authority_confirmation_requires_a_json_boolean() -> void:
@@ -352,3 +424,19 @@ func test_cancelled_screenshot_releases_its_presentation_lease() -> void:
 	assert_eq(host.debug.presentation_acquires, 1)
 	assert_eq(host.debug.presentation_releases, 1,
 			"cooperative cancellation drops expensive debug views immediately")
+
+
+func test_wrong_typed_screenshot_args_error_before_the_lease_is_acquired() -> void:
+	# int()/float() on a non-numeric Variant is a script error; raised after
+	# acquire it would abort the handler and leak the presentation lease.
+	for args in [
+		{"max_dim": [1280]},
+		{"max_dim": "wide"},
+		{"quality": {"value": 0.8}},
+		{"format": 3},
+	]:
+		var result := await _call("game_screenshot", args)
+		assert_true(result.is_error, "wrong-typed %s errors" % [args])
+	assert_eq(host.debug.presentation_acquires, 0,
+			"invalid args never touch the presentation lease")
+	assert_eq(host.debug.presentation_releases, 0)

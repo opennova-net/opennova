@@ -222,6 +222,45 @@ class FailingShutdownPeer:
 		return McpToolResult.error("expected endpoint failure")
 
 
+class DyingChildSession:
+	extends RuntimeGateSession
+
+	var polls := 0
+
+	func _init(shared_events: Array) -> void:
+		super(shared_events)
+
+	func poll() -> void:
+		polls += 1
+		running = false
+
+
+class RelaunchedChildSession:
+	extends RuntimeGateSession
+
+	func _init(shared_events: Array) -> void:
+		super(shared_events)
+		run_id = "run-18"
+
+	func poll() -> void:
+		pass
+
+	func get_current_run_id() -> String:
+		return run_id
+
+
+class ExitedChildDisableProxy:
+	extends ConnectOnDisableProxy
+
+	func _connect_shutdown_peer(
+			_peer: McpPeerClient,
+			_run_id: String,
+			_descriptor_path: String,
+			_tree: SceneTree,
+			_generation: int) -> Error:
+		return ERR_UNAVAILABLE
+
+
 func _context(session_id: String) -> McpToolContext:
 	var ctx := McpToolContext.new()
 	ctx.args = {"_session_id": session_id}
@@ -274,6 +313,71 @@ func test_graceful_quit_retires_the_no_wait_peer() -> void:
 	assert_true(peer.closed)
 	assert_false(proxy.request_runtime_quit("run-17", "ignored"),
 			"the no-wait response cannot leak into a later request")
+
+
+func test_descriptor_wait_fails_fast_when_the_child_process_dies() -> void:
+	var events: Array = []
+	var session := DyingChildSession.new(events)
+	var service: Node = add_child_autofree(Node.new())
+	var bridge := EditorGameRunBridge.new(session)
+	var proxy := EditorMcpGameTools.new(service, bridge)
+
+	var started_ms := Time.get_ticks_msec()
+	var result: McpToolResult = await proxy.forward_runtime_tool(
+			"run-17", "user://missing-runtime-gate-descriptor.json",
+			"game_state", {})
+
+	assert_true(result.is_error)
+	assert_string_contains(String(result.content[0]["text"]), "exited")
+	assert_gt(session.polls, 0, "the wait loop re-polls child liveness")
+	assert_lt(int(Time.get_ticks_msec() - started_ms), 5_000,
+			"a dead child cannot pin the caller for the full descriptor window")
+
+
+func test_descriptor_wait_fails_fast_when_the_awaited_run_is_replaced() -> void:
+	# An F5 relaunch mid-wait leaves the session running under a NEW run id;
+	# the awaited descriptor can never appear, so waiting out the window would
+	# stall and then blame the healthy replacement run.
+	var events: Array = []
+	var session := RelaunchedChildSession.new(events)
+	var service: Node = add_child_autofree(Node.new())
+	var bridge := EditorGameRunBridge.new(session)
+	var proxy := EditorMcpGameTools.new(service, bridge)
+
+	var started_ms := Time.get_ticks_msec()
+	var result: McpToolResult = await proxy.forward_runtime_tool(
+			"run-17", "user://missing-runtime-gate-descriptor.json",
+			"game_state", {})
+
+	assert_true(result.is_error)
+	assert_string_contains(String(result.content[0]["text"]), "relaunched")
+	assert_lt(int(Time.get_ticks_msec() - started_ms), 5_000,
+			"a replaced run cannot pin the caller for the full descriptor window")
+
+
+func test_disable_reports_an_already_exited_child_truthfully() -> void:
+	# When the child died before publishing its descriptor, nothing is stopped
+	# in the fallback — the result must not claim a safety stop the editor
+	# never performed.
+	var events: Array = []
+	var session := DyingChildSession.new(events)
+	var shell: RuntimeGateShell = add_child_autofree(
+			RuntimeGateShell.new(session))
+	var service: RuntimeGateService = add_child_autofree(
+			RuntimeGateService.new(shell))
+	var proxy_peer := ShutdownPeer.new(events, "proxy_peer_retired")
+	var bridge := EditorGameRunBridge.new(session)
+	var proxy := ExitedChildDisableProxy.new(service, bridge, proxy_peer)
+	proxy.shutdown_peer = ShutdownPeer.new(events, "shutdown_peer_closed")
+
+	var outcome: Dictionary = await proxy.disable_runtime_debug()
+
+	assert_eq(outcome["error"], OK)
+	assert_false(outcome["fallback_stopped"],
+			"a crash is not reported as an editor-initiated stop")
+	assert_string_contains(String(outcome["message"]), "already exited")
+	assert_false(events.has("game_stopped_for_safety"),
+			"no shutdown is issued against an already-stopped session")
 
 
 func test_mcp_stop_reports_managed_process_failure() -> void:

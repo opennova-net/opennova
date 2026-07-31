@@ -600,12 +600,13 @@ func test_skeleton_toggle_lives_on_the_animation_page() -> void:
 	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
 	assert_false(skeleton_check.button_pressed, "it defaults off")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	skeleton_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_skeletons", true])
 	skeleton_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_skeletons", false])
 
 
@@ -616,9 +617,10 @@ func test_user_points_toggle_lives_on_the_animation_page() -> void:
 	assert_not_null(user_points_check, "the user-point checkbox has a stable public node path")
 	assert_false(user_points_check.button_pressed, "it defaults off")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	user_points_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_user_points", true])
 
 
@@ -631,9 +633,10 @@ func test_collision_toggle_lives_on_the_rounds_page() -> void:
 	assert_not_null(collision_check, "the collision checkbox has a stable public node path")
 	assert_false(collision_check.button_pressed, "it defaults off")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	collision_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_collision", true])
 
 
@@ -644,9 +647,10 @@ func test_occlusion_page_portal_toggle_rides_the_option_registry() -> void:
 	assert_not_null(portals_check, "the portal checkbox has a stable public node path")
 	assert_false(portals_check.button_pressed, "it defaults off")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	portals_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_portal_faces", true])
 
 
@@ -654,16 +658,17 @@ func test_set_option_syncs_the_owning_control_and_emits() -> void:
 	# The programmatic write path is the SAME path a click takes: one emission,
 	# and the page's control re-syncs without re-firing.
 	var overlay := _make_overlay()
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	overlay.set_option(&"hide_foliage", true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"hide_foliage", true])
-	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1)
+	assert_eq(get_signal_emit_count(session, "control_invoked"), 1)
 	var foliage_check := overlay.get_node_or_null(FOLIAGE_TOGGLE_PATH) as CheckBox
 	assert_true(foliage_check.button_pressed, "the page control re-synced")
 	assert_eq(overlay.get_option_value(&"hide_foliage"), true)
 	overlay.set_option(&"hide_foliage", true)
-	assert_eq(get_signal_emit_count(overlay, "debug_option_changed"), 1,
+	assert_eq(get_signal_emit_count(session, "control_invoked"), 1,
 			"a repeated value never re-fires")
 
 
@@ -739,12 +744,13 @@ func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 	assert_not_null(foliage_check, "the foliage checkbox has a stable public node path")
 	assert_false(foliage_check.button_pressed, "it defaults off (foliage shown)")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	foliage_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"hide_foliage", true])
 	foliage_check.toggled.emit(false)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"hide_foliage", false])
 
 
@@ -1332,12 +1338,13 @@ func test_particles_page_toggles_ride_the_option_registry() -> void:
 	assert_false(hide_check.button_pressed, "hide defaults off")
 	assert_false(boxes_check.button_pressed, "boxes default off")
 
-	watch_signals(overlay)
+	var session: NovaDebugSession = overlay.get_debug_session()
+	watch_signals(session)
 	hide_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"hide_particles", true])
 	boxes_check.toggled.emit(true)
-	assert_signal_emitted_with_parameters(overlay, "debug_option_changed",
+	assert_signal_emitted_with_parameters(session, "control_invoked",
 			[&"show_effect_boxes", true])
 
 

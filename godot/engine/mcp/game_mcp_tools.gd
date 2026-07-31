@@ -105,36 +105,44 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	if session == null:
 		return McpToolResult.error("The game's debug session is unavailable.")
 	var op := String(args.get("op", ""))
+	# State rows answer "can THIS caller write?" in both directions: a
+	# confirm_authority caller is not told its permitted writes are locked
+	# behind F3's latch, and an unconfirmed caller is not shown writable rows
+	# whose set/invoke the confirm_authority precheck will refuse.
+	var confirmed := _authority_confirmed(args)
 	match op:
 		"list":
-			return {
-				"controls": session.list_controls(
-						StringName(String(args.get("page", ""))),
-						String(args.get("filter", ""))),
-			}
+			var rows: Array[Dictionary] = session.list_controls(
+					StringName(String(args.get("page", ""))),
+					String(args.get("filter", "")),
+					confirmed)
+			for row in rows:
+				_apply_confirmation_gate(session,
+						StringName(String(row.get("id", ""))),
+						confirmed, row.get("state"))
+			return {"controls": rows}
 		"get":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
 				return McpToolResult.error("game_debug op=get requires id.")
-			return session.get_control_state(id).to_json_value()
+			return _apply_confirmation_gate(session, id, confirmed,
+					session.get_control_state(id, confirmed).to_json_value())
 		"set":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty() or not args.has("value"):
 				return McpToolResult.error(
 						"game_debug op=set requires id and value.")
-			var confirmed := _authority_confirmed(args)
 			if _automation_confirmation_required(session, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
 			var err: Error = session.set_control_value(
 					id, args["value"], confirmed)
 			if err != OK:
 				return McpToolResult.error(_debug_error(id, err))
-			return session.get_control_state(id).to_json_value()
+			return session.get_control_state(id, confirmed).to_json_value()
 		"invoke":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
 				return McpToolResult.error("game_debug op=invoke requires id.")
-			var confirmed := _authority_confirmed(args)
 			if _automation_confirmation_required(session, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
 			var call_args: Variant = _debug_action_args(id, args.get("args"))
@@ -153,10 +161,15 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 			return outcome
 		"snapshot":
 			var snapshot: Dictionary = session.capture_snapshot(
-					String(args.get("filter", "")))
+					String(args.get("filter", "")), confirmed)
 			if snapshot.is_empty():
 				return McpToolResult.error(
 						"Start a playable mission before capturing a debug snapshot.")
+			for row in snapshot.get("controls", []):
+				if row is Dictionary:
+					_apply_confirmation_gate(session,
+							StringName(String(row.get("id", ""))),
+							confirmed, row.get("state"))
 			return snapshot
 		_:
 			return McpToolResult.error(
@@ -166,14 +179,26 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if host == null:
 		return McpToolResult.error("The game shell is not ready.")
+	# Validate argument types before acquiring the presentation lease: a script
+	# error between acquire and release would leak the lease and pin expensive
+	# debug views on for the rest of the run.
+	var max_dim: Variant = _integer_number(
+			args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM))
+	var format: Variant = args.get("format", "webp")
+	var quality: Variant = _finite_number(
+			args.get("quality", McpScreenshot.DEFAULT_QUALITY))
+	if max_dim == null or typeof(format) != TYPE_STRING or quality == null:
+		return McpToolResult.error(
+				"game_screenshot requires an integer max_dim, a string format, "
+				+ "and a numeric quality.")
 	var debug_session := host.get_debug_session()
 	if debug_session != null:
 		debug_session.acquire_presentation_source(&"mcp_screenshot")
 	var viewport := host.get_viewport()
 	var outcome: Dictionary = await McpScreenshot.capture(viewport, {
-		"max_dim": int(args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM)),
-		"format": String(args.get("format", "webp")),
-		"quality": float(args.get("quality", McpScreenshot.DEFAULT_QUALITY)),
+		"max_dim": int(max_dim),
+		"format": String(format),
+		"quality": float(quality),
 	}, func() -> bool: return ctx.cancelled)
 	if debug_session != null:
 		debug_session.release_presentation_source(&"mcp_screenshot")
@@ -341,6 +366,24 @@ static func _automation_confirmation_required(
 	return definition != null and (
 			definition.requires_unlock
 			or definition.authority == NovaDebugControlDef.Authority.HOST_ONLY)
+
+
+## Mirror the op=set/invoke confirm_authority precheck in reported rows: for
+## an unconfirmed caller a confirmation-gated control is not writable no
+## matter what F3's Live-edits latch says, because that caller's write would
+## be refused before reaching the session.
+static func _apply_confirmation_gate(
+		session: NovaDebugSession,
+		id: StringName,
+		confirmed: bool,
+		state: Variant) -> Variant:
+	if confirmed or not (state is Dictionary) \
+			or not _automation_confirmation_required(session, id):
+		return state
+	if bool(state.get("writable", false)):
+		state["writable"] = false
+		state["reason"] = "This control changes authoritative state; pass confirm_authority=true on an authority-owning session."
+	return state
 
 
 static func _finite_number(value: Variant) -> Variant:

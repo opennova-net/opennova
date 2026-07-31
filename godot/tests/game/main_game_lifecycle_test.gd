@@ -211,6 +211,29 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 	AudioServer.set_bus_bypass_effects(bus, bool(previous["bypass"]))
 
 
+func test_game_debug_host_handles_every_cataloged_public_control_action() -> void:
+	# GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS is the one action list; the
+	# host's match arms are its implementation. An action added to the catalog
+	# without a host arm would fall through to ERR_INVALID_PARAMETER here.
+	var host: GameDebugHost = add_child_autofree(GameDebugHost.new())
+	host.configure(
+			func(): return null,
+			func(): return null,
+			func(): return null,
+			func(): return "menu",
+			func(): return false,
+			func(): return false,
+			func(): pass,
+			func(): pass,
+			func(): pass)
+	for action in GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS:
+		assert_ne(host.mcp_game_control(action), ERR_INVALID_PARAMETER,
+				"the host recognizes cataloged action '%s'" % action)
+	assert_eq(host.mcp_game_control("warp"), ERR_INVALID_PARAMETER,
+			"an uncataloged action is rejected")
+	await get_tree().process_frame
+
+
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
 	var shell = autofree(EntityHostHarness.new())
 	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
