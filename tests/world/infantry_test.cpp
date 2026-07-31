@@ -224,6 +224,57 @@ void give_held_weapon(World &w, AiEntity *e, uint8_t adm, int special_hold) {
     w.weapons.entries[adm].special_hold = special_hold;
 }
 
+void test_recoil_and_weapon_weight_kernels() {
+    // Ammo recoil=1 in the standing slot produces 1<<18 before this body tick.
+    // Pin the exact split, decay, pitch drift, and PRNG-selected yaw sign.
+    // [orig: entity+0x380 body-update block]
+    InfantryState recoil;
+    recoil.recoil_pitch = 1 << 18;
+    int32_t heading = 100;
+    int32_t pitch = -50;
+    infantry_recoil_tick(recoil, heading, pitch, 2); // even -> +half
+    CHECK(recoil.recoil_pitch == 245760);
+    CHECK(heading == 16484);
+    CHECK(pitch == 4046);
+    infantry_recoil_tick(recoil, heading, pitch, 3); // odd -> -half
+    CHECK(recoil.recoil_pitch == 230400);
+    CHECK(heading == 1124);
+    CHECK(pitch == 7886);
+    recoil.recoil_pitch = 0x301;
+    infantry_recoil_tick(recoil, heading, pitch, 0);
+    CHECK(recoil.recoil_pitch == 0); // signed <=0x300 snap after decay
+
+    InfantryWeightSpreadInputs in;
+    in.produce = true;
+    in.weaponweight_fp16 = 98304; // 1.5
+    in.clipweight_fp16 = 65536;   // 1.0; W=2.5
+
+    InfantryState weight;
+    infantry_weapon_weight_spread_tick(weight, in);
+    CHECK(weight.weapon_weight_spread == 230400); // trunc(W*1.5), then 1/16 decay
+    in.produce = false;
+    infantry_weapon_weight_spread_tick(weight, in);
+    CHECK(weight.weapon_weight_spread == 216000); // every body shares the decay
+
+    weight.weapon_weight_spread = 0;
+    in.produce = true;
+    in.aimed_shot_available = true;
+    infantry_weapon_weight_spread_tick(weight, in);
+    CHECK(weight.weapon_weight_spread == 51200); // W/3, then decay
+
+    weight.weapon_weight_spread = 0;
+    in.aimed_shot_available = false;
+    in.crouched = true;
+    infantry_weapon_weight_spread_tick(weight, in);
+    CHECK(weight.weapon_weight_spread == 102400); // trunc(double(W)*2/3), then decay
+
+    weight.weapon_weight_spread = 0;
+    in.crouched = false;
+    in.airborne_rising = true;
+    infantry_weapon_weight_spread_tick(weight, in);
+    CHECK(weight.weapon_weight_spread == 15959040); // +0x01000000 precedes decay
+}
+
 void test_hurt_volume_updates_registry_health() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     World world;
@@ -2337,6 +2388,7 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();

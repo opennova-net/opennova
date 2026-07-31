@@ -19,6 +19,7 @@ static_assert(static_cast<uint32_t>(world::weapon_flag::kUnderwater) == DEF_WEAP
 static_assert(static_cast<uint32_t>(world::weapon_flag::kEmplaced) == DEF_WEAPON_FLAG_EMPLACED);
 static_assert(static_cast<uint32_t>(world::weapon_flag::kArmor) == DEF_WEAPON_FLAG_ARMOR);
 static_assert(static_cast<uint32_t>(world::weapon_flag::kForceCrouch) == DEF_WEAPON_FLAG_FORCECROUCH);
+static_assert(static_cast<uint32_t>(world::weapon_flag::kUseSpreadTwo) == DEF_WEAPON_FLAG_USESPREADTWO);
 static_assert(static_cast<uint32_t>(world::weapon_flag::kNoCardSwitch) == DEF_WEAPON_FLAG_NOCARDSWITCH);
 static_assert(static_cast<uint32_t>(world::weapon_flag::kForceScoped) == DEF_WEAPON_FLAG_FORCESCOPED);
 static_assert(static_cast<uint32_t>(world::weapon_flag2::kInset) == DEF_WEAPON_FLAG2_INSET);
@@ -31,10 +32,12 @@ static_assert(world::kAmmoFlagInstantKillZone == DEF_AMMO_FLAG_INSTANTKILLZONE);
 static_assert(world::kAmmoFlagUseOwnMove == DEF_AMMO_FLAG_USEOWNMOVE);
 static_assert(world::kAmmoFlagNoAge == DEF_AMMO_FLAG_NOAGE);
 static_assert(world::kAmmoFlagForceTracer == DEF_AMMO_FLAG_FORCETRACER);
+static_assert(world::kAmmoFlagShotgun == DEF_AMMO_FLAG_SHOTGUN);
 static_assert(world::kAmmoFlagClaymore == DEF_AMMO_FLAG_CLAYMORE);
 static_assert(world::kAmmoFlagNoOItems == DEF_AMMO_FLAG_NOOITEMS);
 static_assert(world::kAmmoFlagNoMItems == DEF_AMMO_FLAG_NOMITEMS);
 static_assert(world::kAmmoFlagNoDItems == DEF_AMMO_FLAG_NODITEMS);
+static_assert(world::kAmmoFlagDesignateTarget == DEF_AMMO_FLAG_DESIGNATETARGET);
 static_assert(world::kAmmoFlagIgnorFoilage == DEF_AMMO_FLAG_IGNORFOILAGE);
 static_assert(world::kItemAttribEweap == DEF_ITEM_ATTRIB_EWEAP);
 static_assert(world::kItemAttribLandable == DEF_ITEM_ATTRIB_LANDABLE);
@@ -205,6 +208,11 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
 		e.flags = d.flags;
 		e.flags2 = d.flags2;
+		for (int row = 0; row < 6; ++row) e.error_fp16[row] = d.error_fp16[row];
+		e.error_hip_theta_fp16 = d.error_hip_theta_fp16;
+		e.error_up_theta_fp16 = d.error_up_theta_fp16;
+		e.weaponweight_fp16 = d.weaponweight_fp16;
+		e.clipweight_fp16 = d.clipweight_fp16;
 		// The 3P body-channel triple — see the WeaponTableEntry contract. The motor
 		// resolves these per ENTITY from its own equipped index, so they must live on
 		// the table rather than on a local-player scalar.

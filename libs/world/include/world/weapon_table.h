@@ -51,6 +51,18 @@ struct WeaponTableEntry {
     // @0x4e02c3; Player_SelectWeaponSlot @0x4dd6d8].
     int32_t flags = 0;
     int32_t flags2 = 0;
+    // Two generic stance triplets from ERROR, retained in the original 16.16
+    // representation. The projectile selector is `verticalSpread ? 3 : stance`,
+    // while the HUD selector is `stance + 3 * aimed_shot_available`; the triplets
+    // are therefore context-dependent, not horizontal/vertical labels. [orig:
+    // WeaponDefs_ParseLineCallback @0x543B21-0x543C19]
+    int32_t error_fp16[6] = {0, 0, 0, 0, 0, 0};
+    int32_t error_hip_theta_fp16 = 0; // AdmDef+0xCC
+    int32_t error_up_theta_fp16 = 0;  // AdmDef+0xD0
+    // The body updater sums these exact weights to build aim instability.
+    // [orig: clipweight store @0x5440DB; weaponweight store @0x54410D]
+    int32_t weaponweight_fp16 = 0;
+    int32_t clipweight_fp16 = 0;
     // Whether the definition authors a nonempty first-person-model reference.
     // Resource resolution is host-side; the renderer requires both this
     // candidate and the current host resolution result before suppressing the

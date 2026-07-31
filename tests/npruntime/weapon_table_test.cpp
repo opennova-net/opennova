@@ -13,6 +13,7 @@
 //              [orig: @0x502666/@0x502693/@0x502716].
 
 #include <npruntime/weapon_table_build.h>
+#include <npruntime/ammo_table_build.h>
 
 #include <def/def.h>
 
@@ -73,6 +74,18 @@ int main(void) {
 	CHECK(m4->loadout_subclasses == 1 && m4->loadout_selectable == 1);
 	CHECK(m4->ammo_class == "CLASS_556MM");
 	CHECK(m4->has_first_person_model_reference);
+	const int32_t expected_m4_error[6] = {1081, 13107, 16384, 1081, 2097, 3080};
+	for (int row = 0; row < 6; ++row) CHECK(m4->error_fp16[row] == expected_m4_error[row]);
+	CHECK(m4->weaponweight_fp16 == 360448 && m4->clipweight_fp16 == 98304);
+	const int mortar_index = table.index_of("WPN_MORTAR");
+	CHECK(mortar_index > 0);
+	const world::WeaponTableEntry *mortar =
+			table.by_index(static_cast<uint8_t>(mortar_index));
+	CHECK(mortar != nullptr && mortar->error_fp16[0] == 262144 &&
+	      mortar->error_hip_theta_fp16 == 262144 && mortar->error_up_theta_fp16 == 262144);
+	const int magnum_index = table.index_of("WPN_357");
+	CHECK(magnum_index > 0 &&
+	      table.by_index(static_cast<uint8_t>(magnum_index))->clipweight_fp16 == 22938);
 	const int empl50_index = table.index_of("WPN_EMPLCD50");
 	const int avenger_index = table.index_of("WPN_AVENGER");
 	CHECK(empl50_index > 0 && avenger_index > 0);
@@ -134,6 +147,24 @@ int main(void) {
 	      np::charfilter_bit("engineer") == 0x10 && np::charfilter_bit("bogus") == 0);
 	CHECK(np::teamfilter_bit("red") == 0x01 && np::teamfilter_bit("BLUE") == 0x02 &&
 	      np::teamfilter_bit("green") == 0);
+
+	// --- ammo spread/recoil bake: exact fixed carrier plus the original byte stores.
+	// Values outside byte range wrap exactly as the parser's atol-to-byte assignment
+	// does. [orig: AmmoDef_ParseProperty @0x40A2D0]
+	{
+		DefAmmoDef source{};
+		std::strcpy(source.name, "AMMO_BYTE_NARROW");
+		source.error_fp16 = 12345;
+		source.recoil[0] = -1;
+		source.recoil[1] = 256;
+		source.recoil[2] = 511;
+		DefAmmoFile af{&source, 1};
+		const world::AmmoTable ammo_table = np::build_ammo_table(af);
+		const world::AmmoTableEntry *baked = ammo_table.by_index(0);
+		CHECK(baked != nullptr && baked->spread_error_fp16 == 12345);
+		CHECK(baked != nullptr && baked->recoil[0] == 255 && baked->recoil[1] == 0 &&
+		      baked->recoil[2] == 255);
+	}
 
 	def_free_weapons(&wf);
 

@@ -507,6 +507,55 @@ void AiSystem::player_body_select(AiEntity &e) {
     commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
 }
 
+// The physical recoil accumulator's per-body decay and orientation drift.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]
+void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
+                          int32_t &pitch, int32_t random16) {
+    // The accumulator yields an eighth-step, then loses half of that step.
+    // Pitch receives one eighth of the pre-halved step and yaw receives the
+    // half-step with PRNG-selected sign. The caller draws PRNG_Next16 even when
+    // recoil is zero. [orig: the entity+0x380 body-update block]
+    const int32_t step = io::bam_sar(io::bam_add(inf.recoil_pitch, 4), 3);
+    const int32_t half = io::bam_sar(step, 1);
+    inf.recoil_pitch = io::bam_sub(inf.recoil_pitch, half);
+    if (inf.recoil_pitch <= 0x300) inf.recoil_pitch = 0;
+    pitch = io::bam_add(pitch, io::bam_sar(step, 3));
+    heading = (random16 & 1) == 0 ? io::bam_add(heading, half)
+                                  : io::bam_sub(heading, half);
+}
+
+void infantry_weapon_weight_spread_tick(
+        InfantryState &inf, const InfantryWeightSpreadInputs &inputs) {
+    if (inputs.produce) {
+        const int32_t weight = io::bam_add(inputs.weaponweight_fp16,
+                                           inputs.clipweight_fp16);
+        int32_t increment = 0;
+        if (inputs.aimed_shot_available ||
+            (inputs.prone && !inputs.drowning)) {
+            increment = weight / 3;
+        } else if (inputs.crouched && !inputs.drowning) {
+            increment = static_cast<int32_t>(
+                    static_cast<double>(weight) * 2.0 / 3.0);
+        } else {
+            increment = static_cast<int32_t>(static_cast<double>(weight) * 1.5);
+        }
+        inf.weapon_weight_spread =
+                io::bam_add(inf.weapon_weight_spread, increment);
+        if (inputs.airborne_rising) {
+            inf.weapon_weight_spread =
+                    io::bam_add(inf.weapon_weight_spread, 0x01000000);
+        }
+    }
+
+    // Shared decay is after the local producer; remote players and AI jump
+    // directly here. There is no upper clamp.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B5945]
+    inf.weapon_weight_spread = io::bam_sub(
+            inf.weapon_weight_spread,
+            io::bam_sar(io::bam_add(inf.weapon_weight_spread, 4), 4));
+    if (inf.weapon_weight_spread <= 0x300) inf.weapon_weight_spread = 0;
+}
+
 // The lean-angle producer — see the ai.h declaration. Decay runs every body tick for
 // every infantry body (the corpse keeps decaying, matching the original's placement
 // before the weapon-channel block); the ramp needs a live, non-prone body.
@@ -768,6 +817,9 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.reload_anim_ticks = 0;
     inf.arms_dip_ticks = 0;
     inf.pitch_kick_accum = 0;
+    inf.recoil_pitch = 0;
+    inf.weapon_weight_spread = 0;
+    inf.aimed_shot_available = false;
     inf.idle_counter = 0;
     inf.lean_left = false;
     inf.lean_right = false;
@@ -923,6 +975,36 @@ void AiSystem::infantry_slope_pass(AiEntity &e, uint32_t logic_tick, uint32_t ke
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
+    // Recoil/dispersion live ahead of the network-snap motor exit. Received
+    // shots are applied during the network pump, then decay in this frame's
+    // body pass; locally generated shots happen later and first decay on the
+    // following frame. The recoil PRNG draw is unconditional, including R=0.
+    // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
+    Entity *tick_entity = world.registry.get(e.handle);
+    infantry_recoil_tick(e.inf, e.heading, e.pitch, prng_step16());
+    InfantryWeightSpreadInputs weight_inputs;
+    const uint32_t tick_flags = tick_entity != nullptr
+            ? (tick_entity->flags | tick_entity->engine_flags)
+            : 0u;
+    const bool mounted_for_spread = tick_entity != nullptr && tick_entity->mounted;
+    const WeaponTableEntry *held = tick_entity != nullptr
+            ? world.weapons.by_index(tick_entity->equipped_adm_index)
+            : nullptr;
+    weight_inputs.produce = e.inf.is_local_player && e.inf.player_moving &&
+                            !mounted_for_spread && held != nullptr;
+    weight_inputs.aimed_shot_available = e.inf.aimed_shot_available;
+    weight_inputs.prone = e.inf.stance == InfantryState::Stance::kProne;
+    weight_inputs.crouched = e.inf.stance == InfantryState::Stance::kCrouch;
+    weight_inputs.drowning = (tick_flags & kEntityFlagDrowning) != 0;
+    weight_inputs.airborne_rising =
+            (e.inf.airborne || (tick_flags & kEntityFlagInAir) != 0) &&
+            e.inf.vel[2] > 0;
+    if (held != nullptr) {
+        weight_inputs.weaponweight_fp16 = held->weaponweight_fp16;
+        weight_inputs.clipweight_fp16 = held->clipweight_fp16;
+    }
+    infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
+
     // Network-snapped remote peer: its pose is SNAPPED each frame by the host read-apply
     // (netsim EntityWireBridge::apply_player_intent), so the movement motor must NOT
     // re-simulate it — it skips, exactly as the original exits before any motor work when
@@ -1938,7 +2020,8 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
         origin[2] = e.muzzle_world[2];
     }
     const int32_t yaw = inf.aim_valid ? inf.aim_heading : e.heading;
-    const int32_t pitch = inf.aim_valid ? inf.aim_pitch : 0;
+    const int32_t pitch = io::bam_add(
+            inf.aim_valid ? inf.aim_pitch : 0, inf.recoil_pitch);
 
     if (fire_primary)
         fire_ai_round(world, e, origin, yaw, pitch, e.profile.ammo_primary);

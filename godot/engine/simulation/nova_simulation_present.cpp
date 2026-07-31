@@ -723,8 +723,7 @@ bool NovaSimulation::cache_present_effect_pose(
 		return true;
 	}
 
-	const int32_t heading_bam = static_cast<int32_t>(
-			static_cast<uint32_t>(p_entity_state.yaw_byte) << 24);
+	const int32_t heading_bam = p_entity_state.heading_bam;
 	// Host/listen presentation can recover the authored pitch and roll from the
 	// authoritative registry. The compact peer row only carries yaw; joiners
 	// therefore retain the wire-only zeroes here.
@@ -1233,10 +1232,9 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
 			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
 			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
-			// Rebuild the 32-bit engine BAM from the compact high byte, then convert
-			// engine -> mission yaw (90 - heading), matching the AI-pool present.
-			const int32_t heading_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(es.yaw_byte) << 24);
+			// The decoded body keeps a full client-side heading: each wire sample
+			// re-seeds its high byte, then sub-byte body effects such as recoil apply.
+			const int32_t heading_bam = es.heading_bam;
 			r[PF_YAW_DEG] = static_cast<float>(
 					opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
 		}

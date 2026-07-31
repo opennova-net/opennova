@@ -7,11 +7,15 @@
 #include <cmath>
 #include <limits>
 
+#include <io/bam.h>
+
+#include "world/ai.h"
 #include "world/ammo_table.h"
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/infantry.h"
 #include "world/throwables.h"
+#include "world/weapon_table.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -24,7 +28,105 @@ constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
 
+constexpr uint32_t rotl32(uint32_t value, unsigned count) {
+    return (value << count) | (value >> (32u - count));
+}
+
+constexpr uint32_t rotr32(uint32_t value, unsigned count) {
+    return (value >> count) | (value << (32u - count));
+}
+
+uint32_t spread_hash(uint32_t seed) {
+    const uint64_t square = static_cast<uint64_t>(seed) * seed;
+    const uint32_t low = static_cast<uint32_t>(square) - seed;
+    uint32_t high = static_cast<uint32_t>(square >> 32);
+    high = rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
+    uint32_t hash = rotl32(low + high, 18);
+    if ((hash & 0x80000000u) != 0) hash += 0x001ABB09u;
+    return hash;
+}
+
 } // namespace
+
+RandomSpreadOffset weapon_calc_random_spread_offset(
+        int32_t spread_fp16, uint32_t seed, int32_t vertical_fp16,
+        bool use_spread_two) {
+    if (spread_fp16 == 0) return {};
+
+    const uint32_t hash = spread_hash(seed);
+    uint32_t mixed = rotl32(hash, 12);
+    if ((mixed & 0x80000000u) != 0) mixed += 0x001ABB09u;
+    const uint32_t a = mixed & 0xFFFFu;
+    const uint32_t b = (hash >> 8) & 0xFFFFu;
+
+    // These are the exact binary32 constants loaded by retail. Converting the
+    // float values to double before the arithmetic mirrors the x87 PC53 path;
+    // rounding every intermediate to float differs by several BAM units.
+    // [orig: Weapon_CalcRandomSpreadOffset @0x4E4120]
+    constexpr float kDegreeToBam16 = 182.04443359375f; // bits 0x43360B60
+    constexpr float kQuarterTurnPhase = 2.3968430468812585e-05f; // 0x37C90FD0
+    constexpr float kFullTurnPhase = 9.587372187525034e-05f; // 0x38C90FD0
+    constexpr float kUnit16 = 1.0f / 65536.0f; // 0x37800000
+    const double scale = static_cast<double>(kDegreeToBam16);
+    const double quarter_phase = static_cast<double>(kQuarterTurnPhase);
+    const double full_phase = static_cast<double>(kFullTurnPhase);
+    const double unit16 = static_cast<double>(kUnit16);
+
+    RandomSpreadOffset out;
+    if (!use_spread_two) {
+        const double radius = std::cos(static_cast<double>(a) * quarter_phase);
+        out.yaw_bam = static_cast<int32_t>(
+                static_cast<double>(spread_fp16) * scale * radius *
+                std::sin(static_cast<double>(b) * full_phase));
+        const int32_t pitch_spread =
+                vertical_fp16 != 0 ? vertical_fp16 : spread_fp16;
+        out.pitch_bam = static_cast<int32_t>(
+                static_cast<double>(pitch_spread) * scale * radius *
+                std::cos(static_cast<double>(b) * full_phase));
+        return out;
+    }
+
+    if (vertical_fp16 == 0) {
+        const double radius = static_cast<double>(spread_fp16) * scale *
+                              static_cast<double>(b) * unit16;
+        out.yaw_bam = static_cast<int32_t>(
+                radius * std::cos(static_cast<double>(b) * full_phase));
+        out.pitch_bam = static_cast<int32_t>(
+                radius * std::sin(static_cast<double>(b) * full_phase));
+        return out;
+    }
+
+    out.yaw_bam = static_cast<int32_t>(
+            static_cast<double>(spread_fp16) * scale *
+            static_cast<double>(b) * unit16 *
+            std::cos(static_cast<double>(b) * full_phase));
+    out.pitch_bam = static_cast<int32_t>(
+            static_cast<double>(vertical_fp16) * scale *
+            static_cast<double>(a) * unit16 *
+            std::sin(static_cast<double>(a) * full_phase));
+    return out;
+}
+
+RandomSpreadOffset weapon_calc_shotgun_spread_offset(
+        int32_t pie_slice_bam, uint16_t radial_draw, uint16_t phase_draw) {
+    // Retail loads these as binary32 and keeps the products/trig results in
+    // x87 PC53 until each fistp truncation. [orig:
+    // Weapon_SpawnProjectileBurstWithSpread @0x4EBC4B..0x4EBD21]
+    constexpr float kQuarterTurnPhase = 2.3968430468812585e-05f; // 0x37C90FD0
+    constexpr float kFullTurnPhase = 9.587372187525034e-05f; // 0x38C90FD0
+    const double radius =
+            static_cast<double>(pie_slice_bam) *
+            std::cos(static_cast<double>(radial_draw) *
+                     static_cast<double>(kQuarterTurnPhase));
+    const int32_t radial_bam = static_cast<int32_t>(radius);
+    const double phase = static_cast<double>(phase_draw) *
+                         static_cast<double>(kFullTurnPhase);
+    return RandomSpreadOffset{
+            static_cast<int32_t>(static_cast<double>(radial_bam) *
+                                 std::cos(phase)),
+            static_cast<int32_t>(static_cast<double>(radial_bam) *
+                                 std::sin(phase))};
+}
 
 // Queue an explosive round's kill zone at its stop. Knife/medic/bullet classes
 // never take this projectile detonation path. Shared with the throwable
@@ -340,6 +442,74 @@ Vec3 flight_direction(const Vec3 &vel) {
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
 }
 
+RoundSourceState resolve_round_source(World &world,
+                                      const RoundSpawnParams &params) {
+    if (params.source_state != nullptr) return *params.source_state;
+
+    RoundSourceState source;
+    Entity *entity = world.registry.get(params.owner);
+    if (entity == nullptr) return source;
+    const uint32_t flags = entity->flags | entity->engine_flags;
+    source.person_with_item_def = entity->has_item_def && entity->item_type == 3;
+    source.player = (flags & kEntityFlagPlayer) != 0;
+    source.scope_raised = (flags & kEntityFlagScopeRaised) != 0;
+    source.underwater = (flags & kEntityFlagDrowning) != 0;
+
+    AiEntity *body = world.ai != nullptr ? world.ai->for_handle(params.owner) : nullptr;
+    const int32_t source_z =
+            body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
+    source.underwater = source.underwater ||
+                        (world.env.water_z != 0 && source_z < world.env.water_z);
+    if (body == nullptr) {
+        source.stance_category = entity->mounted ? 1 : 2;
+        return source;
+    }
+
+    source.recoil_pitch = &body->inf.recoil_pitch;
+    source.weapon_weight_spread = &body->inf.weapon_weight_spread;
+    source.scope_raised = source.scope_raised || body->inf.scope_raised;
+    const bool forced_standing = body->inf.airborne || source.underwater ||
+                                 (flags & kEntityFlagInAir) != 0;
+    if (entity->mounted) {
+        source.stance_category = 1;
+    } else if (forced_standing) {
+        source.stance_category = 2;
+    } else if (body->inf.stance == InfantryState::Stance::kProne) {
+        source.stance_category = 0;
+    } else if (body->inf.stance == InfantryState::Stance::kCrouch) {
+        source.stance_category = 1;
+    } else {
+        source.stance_category = 2;
+    }
+    return source;
+}
+
+void apply_round_recoil(const AmmoTableEntry &ammo,
+                        const RoundSourceState &source) {
+    if (!source.person_with_item_def || source.recoil_pitch == nullptr) return;
+    const int category = std::min<int>(source.stance_category, 2);
+    const int shift = source.underwater ? 20 : 18;
+    int32_t impulse = static_cast<int32_t>(ammo.recoil[category]) << shift;
+    if (source.scope_raised) impulse = impulse * 3 / 4;
+    *source.recoil_pitch = io::bam_add(*source.recoil_pitch, impulse);
+}
+
+void record_round_fire(RoundSim &sim, const RoundSpawnParams &params) {
+    FireEvent event;
+    event.shooter = params.owner;
+    event.shooter_handle = params.shooter_handle;
+    event.ammo_index = params.ammo_index;
+    event.origin = params.origin;
+    // The ring/presentation descriptor is deliberately pre-spread. The final
+    // randomized angles live only on the spawned round.
+    // [orig: RoundData_AddRound @0x4FDB40 -> RoundData_SpawnRound @0x4EC0D0]
+    event.yaw_bam = params.dir_yaw_bam;
+    event.pitch_bam = params.dir_pitch_bam;
+    event.wire_round_flags = params.wire_round_flags;
+    event.adm_index = params.adm_index;
+    sim.fired.push_back(event);
+}
+
 } // namespace
 
 void RoundSim::reset() noexcept {
@@ -401,9 +571,28 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
             world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
+    if ((ammo->flags & kAmmoFlagDesignateTarget) != 0) {
+        // The designator dispatches to its tracker instead of allocating a
+        // projectile. That tracker is outside RoundSim; critically, this return
+        // precedes both shotgun/ordinary spawn and recoil.
+        // [orig: RoundData_SpawnRound @0x4EC249]
+        return -1;
+    }
     if ((ammo->flags & kAmmoFlagClaymore) != 0) {
         // the claymore shrapnel fan [orig: @ 0x4ec288 -> Weapon_SpawnProjectileBurst]
         return spawn_burst(world, params, *ammo, mode);
+    }
+    const RoundSourceState source = resolve_round_source(world, params);
+    const WeaponTableEntry *weapon = world.weapons.by_index(params.adm_index);
+    if ((ammo->flags & kAmmoFlagShotgun) != 0) {
+        // Shotgun is a separate pellet-fan leaf: it never reads weapon ERROR or
+        // the rules gate, but the ordinary ammo recoil is applied after the fan.
+        // [orig: RoundData_SpawnRound @0x4EC378]
+        const int first = spawn_burst(
+                world, params, *ammo, mode, /*shotgun_spread=*/true);
+        record_round_fire(*this, params);
+        apply_round_recoil(*ammo, source);
+        return first;
     }
     // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
     // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
@@ -421,6 +610,47 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     }
     if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
 
+    int32_t final_yaw = params.dir_yaw_bam;
+    int32_t final_pitch = params.dir_pitch_bam;
+    if (weapon != nullptr) {
+        // Weapon ERROR is player-only and rule-gated. The current shot consumes
+        // the PREVIOUS recoil accumulator; its own recoil is added after spawn.
+        // Projectile row = verticalSpread ? 3 : stance category.
+        // [orig: RoundData_SpawnRound @0x4EC0D0]
+        if (source.player && weapon_spread_enabled) {
+            const bool vertical_spread = (params.subtype & 0x80u) != 0;
+            const int category = std::min<int>(source.stance_category, 2);
+            const int row = vertical_spread ? 3 : category;
+            int32_t spread = weapon->error_fp16[row];
+            if (source.recoil_pitch != nullptr) {
+                spread = io::bam_add(
+                        spread, io::bam_sar(*source.recoil_pitch, 8));
+            }
+            if (source.weapon_weight_spread != nullptr) {
+                spread = io::bam_add(
+                        spread, io::bam_sar(*source.weapon_weight_spread, 7));
+            }
+            const int32_t vertical =
+                    (vertical_spread || category == 0)
+                            ? weapon->error_up_theta_fp16
+                            : weapon->error_hip_theta_fp16;
+            const RandomSpreadOffset offset =
+                    weapon_calc_random_spread_offset(
+                            spread, params.shot_seq, vertical,
+                            (weapon->flags & weapon_flag::kUseSpreadTwo) != 0);
+            final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
+            final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
+        }
+    } else if (ammo->spread_error_fp16 != 0) {
+        // A missing AdmDef falls back to ammo.def ERROR. This leaf is not a
+        // weapon-rule check and always uses the ordinary helper.
+        // [orig: RoundData_SpawnRound @0x4EC0D0]
+        const RandomSpreadOffset offset = weapon_calc_random_spread_offset(
+                ammo->spread_error_fp16, params.shot_seq, 0, false);
+        final_yaw = io::bam_add(final_yaw, offset.yaw_bam);
+        final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
+    }
+
     // Wire fire direction -> mission-frame unit vector. The 0x06 yaw BAM IS the mission
     // bearing directly — NOT the 0x0A euler_z heading frame (which is 90deg - mission
     // yaw): wire-validated on the v29 duel baselines (wire yaw -122.0/45.6 deg vs true
@@ -429,8 +659,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // The original spawner builds X=sinYaw*cosPitch, Y=cosYaw*cosPitch, Z=sinPitch in
     // engine axes [orig: RoundData_SpawnRound @0x4ec5e9 / Weapon_SpawnSingleProjectile
     // @0x4ebf51]; in this mission frame that lands as (cos yaw, sin yaw, sin pitch).
-    const double bearing = double(params.dir_yaw_bam) * kRadPerBam;
-    const double pitch = double(params.dir_pitch_bam) * kRadPerBam;
+    const double bearing = double(final_yaw) * kRadPerBam;
+    const double pitch = double(final_pitch) * kRadPerBam;
     const double cp = std::cos(pitch);
     double speed_per_tick = double(ammo->velocity) / 62.0; // [orig: speed/62 @0x4ec508]
     // The PowerThrow charge byte scales the launch speed for 1..254; 0 and 255
@@ -517,8 +747,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // the class motor
     // (+452) / think (+456) from the items.def ai_function/move_function tags,
     // and the init callback seeds 1 deg/tick spin @ 0x4435A0].
-    r.yaw_bam = params.dir_yaw_bam;
-    r.pitch_bam = params.dir_pitch_bam;
+    r.yaw_bam = final_yaw;
+    r.pitch_bam = final_pitch;
     const int32_t item_id = throwable_item_for_viewer(
             ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
     if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
@@ -535,27 +765,23 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // Record the fire for the host present layer (sound + muzzle effect) — the
     // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
-    FireEvent fe;
-    fe.shooter = params.owner;
-    fe.shooter_handle = params.shooter_handle;
-    fe.ammo_index = params.ammo_index;
-    fe.origin = params.origin;
-    fe.yaw_bam = params.dir_yaw_bam;
-    fe.pitch_bam = params.dir_pitch_bam;
-    fe.wire_round_flags = params.wire_round_flags;
-    fe.adm_index = params.adm_index;
-    fired.push_back(fe);
-
+    record_round_fire(*this, params);
     ++active_count;
+    // Same-shot ERROR used the old accumulator above. Recoil becomes visible
+    // immediately but affects only later shots.
+    // [orig: RoundData_SpawnRound @0x4EC8A3]
+    apply_round_recoil(*ammo, source);
     return slot;
 }
 
-// The pellet fan [orig: Weapon_SpawnProjectileBurst @ 0x4eb900]: spread_count
-// (clamped 1..32) plain ballistic rounds; per pellet the fan PRNG draws yaw in
-// [base - pieslice, base + pieslice) and pitch in [base, base + pieslice);
-// pellets carry no tracer, no model, no fire event.
+// The two pellet fans: claymore uses Weapon_SpawnProjectileBurst @0x4EB900
+// (rectangular yaw/pitch draws), while shotgun uses the radial
+// Weapon_SpawnProjectileBurstWithSpread @0x4EBBB0 distribution. Both clamp
+// spread_count to 1..32 and emit plain ballistic pellets; individual pellets
+// carry no tracer, model, or fire event.
 int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
-                          const AmmoTableEntry &ammo, RoundConsequenceMode mode) {
+                          const AmmoTableEntry &ammo, RoundConsequenceMode mode,
+                          bool shotgun_spread) {
     int count = ammo.spread_count;
     if (count > 32) count = 32;
     if (count <= 0) count = 1;
@@ -575,11 +801,23 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         const int64_t pieslice = ammo.kz_pieslice_bam;
         const uint16_t r1 = world.throwables.fan_prng();
         const uint16_t r2 = world.throwables.fan_prng();
-        const int32_t yaw = static_cast<int32_t>(
-                base_yaw +
-                static_cast<uint32_t>(((2 * pieslice * r1 + 0x8000) >> 16) - pieslice));
-        const int32_t pitch = static_cast<int32_t>(
-                base_pitch + static_cast<uint32_t>((pieslice * r2 + 0x8000) >> 16));
+        int32_t yaw;
+        int32_t pitch;
+        if (shotgun_spread) {
+            const RandomSpreadOffset offset =
+                    weapon_calc_shotgun_spread_offset(
+                            ammo.kz_pieslice_bam, r1, r2);
+            yaw = io::bam_add(static_cast<int32_t>(base_yaw), offset.yaw_bam);
+            pitch = io::bam_add(
+                    static_cast<int32_t>(base_pitch), offset.pitch_bam);
+        } else {
+            yaw = static_cast<int32_t>(
+                    base_yaw + static_cast<uint32_t>(
+                            ((2 * pieslice * r1 + 0x8000) >> 16) - pieslice));
+            pitch = static_cast<int32_t>(
+                    base_pitch + static_cast<uint32_t>(
+                            (pieslice * r2 + 0x8000) >> 16));
+        }
         const double bearing = double(yaw) * kRadPerBam;
         const double pitch_rad = double(pitch) * kRadPerBam;
         const double cp = std::cos(pitch_rad);

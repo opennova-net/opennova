@@ -95,6 +95,25 @@ func test_crosshair_spread_px() -> void:
 	assert_eq(HudCrosshair.spread_px(0.0, 80.0, 1024.0), 0.0)
 	# The fov register's integer part gates: fov <= 0 is a safe no-spread.
 	assert_eq(HudCrosshair.spread_px(1.0, 0.0, 1024.0), 0.0)
+	assert_eq(HudCrosshair.spread_px_fp16(0x4000, 80.0, 1024.0), 3.0,
+			"the exact 16.16 entry preserves the retail projection")
+
+
+func test_crosshair_live_spread_sum_uses_signed_shifts() -> void:
+	# ERROR + (entity+0x380 >> 7) + (entity+0x384 >> 7), with arithmetic
+	# shifts before any screen conversion. [orig: HUD_DrawCrosshair
+	# @0x592b07..0x592b28]
+	assert_eq(HudCrosshair.total_spread_fp16(
+			0x4000, 0x80000, 0x40000), 0x5800)
+	assert_eq(HudCrosshair.total_spread_fp16(0, -1, -129), -3,
+			"negative carriers use x86-style SAR, not truncating division")
+	assert_eq(HudCrosshair.total_spread_fp16(0x7FFFFFFF, 128, 0), -2147483648,
+			"spread addition retains retail signed-32 wrap")
+	assert_true(HudCrosshair.should_draw(false))
+	assert_false(HudCrosshair.should_draw(true),
+			"an ordinary settled aimed shot hides the reticle")
+	assert_true(HudCrosshair.should_draw(true, true),
+			"the vehicle/gunner keep-up leg can use ERROR's second triplet")
 
 
 func test_crosshair_error_row() -> void:

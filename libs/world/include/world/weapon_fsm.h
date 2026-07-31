@@ -51,6 +51,7 @@ enum : int32_t {
     kEmplaced = 0x00000080,
     kArmor = 0x00001000,      // carry-weight class [orig: @0x5415aa]
     kForceCrouch = 0x00040000,
+    kUseSpreadTwo = 0x00400000,
     kNoCardSwitch = 0x02000000,
     kForceScoped = 0x20000000,
 };

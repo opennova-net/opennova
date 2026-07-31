@@ -196,11 +196,54 @@ int main(void) {
         fprintf(stderr, "FAIL: M4AUTO weight mismatch: %.3f / %.3f\n", m4->weaponweight, m4->clipweight);
         def_free_weapons(&wf); return 1;
     }
+    if (m4->weaponweight_fp16 != 360448 || m4->clipweight_fp16 != 98304) {
+        fprintf(stderr, "FAIL: M4AUTO exact weight mismatch: %d / %d\n",
+                m4->weaponweight_fp16, m4->clipweight_fp16);
+        def_free_weapons(&wf); return 1;
+    }
+    {
+        static const int expected_error[6] = {1081, 13107, 16384, 1081, 2097, 3080};
+        for (int i = 0; i < 6; ++i) {
+            if (m4->error_fp16[i] != expected_error[i]) {
+                fprintf(stderr, "FAIL: M4AUTO exact ERROR[%d]: got %d want %d\n",
+                        i, m4->error_fp16[i], expected_error[i]);
+                def_free_weapons(&wf); return 1;
+            }
+        }
+        if (fabsf(m4->error[0] - 0.0165f) > FEPS ||
+            fabsf(m4->error[5] - 0.047f) > FEPS) {
+            fprintf(stderr, "FAIL: M4AUTO float ERROR view changed: %.4f / %.4f\n",
+                    m4->error[0], m4->error[5]);
+            def_free_weapons(&wf); return 1;
+        }
+    }
+    /* The retail digit walker is observably different from float requantization
+       for .35: 22938, not trunc(.35f * 65536) == 22937. */
+    {
+        const DefWeaponDef *magnum = NULL;
+        const DefWeaponDef *mortar = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_357") == 0) magnum = &wf.entries[i];
+            if (strcmp(wf.entries[i].weapon_name, "WPN_MORTAR") == 0) mortar = &wf.entries[i];
+        }
+        if (!magnum || magnum->clipweight_fp16 != 22938) {
+            fprintf(stderr, "FAIL: WPN_357 exact clipweight: found=%d value=%d\n",
+                    magnum != NULL, magnum ? magnum->clipweight_fp16 : -1);
+            def_free_weapons(&wf); return 1;
+        }
+        if (!mortar || mortar->error_hip_theta_fp16 != 262144 ||
+            mortar->error_up_theta_fp16 != 262144) {
+            fprintf(stderr, "FAIL: WPN_MORTAR exact theta: found=%d values=%d/%d\n",
+                    mortar != NULL, mortar ? mortar->error_hip_theta_fp16 : -1,
+                    mortar ? mortar->error_up_theta_fp16 : -1);
+            def_free_weapons(&wf); return 1;
+        }
+    }
     if (strcmp(m4->loadout_menu_textid, "WEAP_SHORT_M4") != 0) {
         fprintf(stderr, "FAIL: M4AUTO loadout_menu_textid mismatch: '%s'\n", m4->loadout_menu_textid);
         def_free_weapons(&wf); return 1;
     }
-    printf("Loadout fields OK\n");
+    printf("Loadout + exact spread/weight fields OK\n");
 
     /* Also find WPN_KNIFE to verify first entry */
     const DefWeaponDef *knife = NULL;

@@ -594,26 +594,31 @@ func _draw_attach_labels() -> void:
 
 
 # The spreading crosshair. Witnessed visibility: it draws when an aimed shot is NOT
-# available [orig: the gate @0x592afa — !Player_CanFireWeapon() (plus vehicle
-# autoaim/scoped-gunner keep-up legs, unported); Player_CanFireWeapon @0x5cf780
+# available [orig: the gate @0x592afa — !Player_CanFireWeapon() (plus the
+# vehicle/scoped-gunner keep-up leg); Player_CanFireWeapon @0x5cf780
 # returns the SETTLED sight view: g_weaponScopeActive is promoted only when the
 # scope ease completes (@0x4de4f7)] — so it stays up from the hip and through the
 # whole ADS ease, and yields once fully sighted (D-HUD-9 CLOSED; the magnified scope
 # overlay itself is still the recorded hud-re deferral). Spread = ERROR[stance row]
-# over the live fov. The +3 sighted rows key on the SAME CanFire predicate
+# + (recoil >> 7) + (weapon weight >> 7), over the live fov. The +3 sighted rows
+# key on the SAME CanFire predicate
 # [orig: row += 3·CanFire @0x592b87 — NOT "scoped"], so on foot they are unreachable
-# (the crosshair only draws while !CanFire); the reachable-at-CanFire cases are
-# vehicle autoaim / scoped gunner — unported with vehicles. Stance-row overrides
-# still deferred: airborne/swimming → standing (@0x592b65), mounted → crouch
-# (@0x592b6c). The recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
+# (the crosshair only draws while !CanFire); the reachable-at-CanFire cases use
+# the modeled vehicle/gunner keep-up proxy. Stance-row overrides
+# are applied sim-side: airborne/swimming → standing (@0x592b65), mounted → crouch
+# (@0x592b6c).
 # [orig: HUD_DrawCrosshair @0x592640]
 func _draw_crosshair(surface: Vector2) -> void:
 	if bool(_info.get("binoculars_view_active", false)):
 		return
 	var scoped := bool(_info.get("scope_engaged", false))
-	# The settled-sights hide [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa;
-	# scope_fraction < 1 = the ease still interpolating = scopeActive still 0].
-	if scoped and float(_info.get("scope_fraction", 1.0)) >= 1.0:
+	# The sim supplies Player_CanFireWeapon's settled/mode/mount verdict. Retain
+	# the old scope-derived fallback for test producers that predate the field.
+	# [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa]
+	var aimed := bool(_info.get("aimed_shot_available",
+			scoped and float(_info.get("scope_fraction", 1.0)) >= 1.0))
+	if not HudCrosshair.should_draw(aimed,
+			bool(_info.get("keep_crosshair_while_aimed", false))):
 		return
 	if _crosshair_tex == null:
 		return
@@ -625,10 +630,21 @@ func _draw_crosshair(surface: Vector2) -> void:
 		err_stance = 0
 	elif stance_icon == 1:
 		err_stance = 1
-	# Hip rows only: the crosshair draws only while !CanFire, and the +3 select keys
-	# on CanFire itself [orig: @0x592b87] — never reachable here on foot.
-	var err_deg := _weapon.error_row_deg(HudCrosshair.error_row(err_stance, false))
-	var spread := HudCrosshair.spread_px(err_deg, float(_info.get("fov_deg", 80.0)), surface.x)
+	# Hip rows are the ordinary on-foot visible case; vehicle/gunner override paths
+	# can keep the crosshair visible with the +3 aimed-shot triplet selected.
+	# [orig: @0x592b87]
+	# The bridge keeps the authored ERROR row and both signed SAR terms in exact
+	# fixed point. The static-row fallback supports old/test producers only.
+	# [orig: HUD_DrawCrosshair @0x592b07..0x592bf5]
+	var spread_fp16: int
+	if _info.has("hud_spread_fp16"):
+		spread_fp16 = int(_info["hud_spread_fp16"])
+	else:
+		var err_deg := _weapon.error_row_deg(
+				HudCrosshair.error_row(err_stance, false))
+		spread_fp16 = int(err_deg * 65536.0)
+	var spread := HudCrosshair.spread_px_fp16(
+			spread_fp16, float(_info.get("fov_deg", 80.0)), surface.x)
 	HudCrosshair.draw(self, _crosshair_tex, _crosshair_center(surface), surface, spread)
 
 

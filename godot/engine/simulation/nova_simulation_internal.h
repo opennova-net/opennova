@@ -157,6 +157,10 @@ inline opennova::anim::AimOverlayInputs aim_overlay_inputs_for(
 	in.leg_yaw_r = entity.inf.leg_yaw[0];
 	in.leg_yaw_l = entity.inf.leg_yaw[1];
 	in.pitch_kick_accum = entity.inf.pitch_kick_accum;
+	// The body overlay consumes the undoubled recoil accumulator. The camera is
+	// the separate consumer that adds 2*R. [orig: entity+0x380 read
+	// @0x4b1bce; Player_UpdateFirstPersonCamera @0x437fdb]
+	in.pitch_blend = entity.inf.recoil_pitch;
 	in.lean = entity.inf.lean_angle;
 	in.roll = entity.roll;
 	in.body_pitch = entity.body_pitch;
@@ -409,10 +413,8 @@ inline bool emplaced_weapon_controls_for_client(
 		// NetClientView has already composed mounted yaw into world heading and
 		// reconstructed an infantry gunner's live entity pitch from the compact
 		// aim target using retail's one-eighth chase.
-		const int32_t parent_heading = static_cast<int32_t>(
-				static_cast<uint32_t>(mount.yaw_byte) << 24);
-		const int32_t occupant_heading = static_cast<int32_t>(
-				static_cast<uint32_t>(occupant.yaw_byte) << 24);
+		const int32_t parent_heading = mount.heading_bam;
+		const int32_t occupant_heading = occupant.heading_bam;
 		const int32_t occupant_pitch =
 				occupant.cls == opennova::EntityClass::Player
 				? static_cast<int32_t>(
@@ -450,8 +452,7 @@ inline bool aim_overlay_inputs_for_client(
 		return false;
 
 	out = opennova::anim::AimOverlayInputs{};
-	out.aim_yaw = static_cast<int32_t>(
-			static_cast<uint32_t>(entity.yaw_byte) << 24);
+	out.aim_yaw = entity.heading_bam;
 	out.aim_pitch = static_cast<int32_t>(
 			static_cast<uint32_t>(
 					entity.cls == opennova::EntityClass::Player
@@ -477,6 +478,11 @@ inline bool aim_overlay_inputs_for_client(
 	// which is the ONLY feedback a pure client gets [orig: consumer @0x4b1bd4/@0x4b1c1b,
 	//  producer @0x4b5cab..0x4b5ce7].
 	out.pitch_kick_accum = entity.pitch_kick_accum;
+	// Recoil is not a wire field: the decoded client stamps it from the same
+	// received round event and decays it in its local body pass. Presentation
+	// consumes that reconstructed entity+0x380 exactly like an authority body.
+	// [orig: overlay consumer @0x4b1bce; round impulse @0x4ec378/@0x4ec8a3]
+	out.pitch_blend = entity.recoil_pitch;
 
 	// Both witnessed compact organic records already carry the carrier and raw
 	// seat bone. Bone zero is the standing-on/deck form, not a mount. Resolve
@@ -515,8 +521,7 @@ inline bool aim_overlay_inputs_for_client(
 	// pose_mounted_occupant faces seated slots at carrier+yaw_offset and a
 	// Gunner at carrier-yaw_offset in mission yaw. Engine heading is
 	// (90-mission yaw), so those signs invert here.
-	const int32_t carrier_heading = static_cast<int32_t>(
-			static_cast<uint32_t>(carrier->yaw_byte) << 24);
+	const int32_t carrier_heading = carrier->heading_bam;
 	const int32_t offset = opennova::world::bam_from_degrees_wrapped(
 			static_cast<double>(seat->yaw_offset));
 	out.body_yaw = out.mount_mode == opennova::anim::MountMode::Gunner
@@ -1162,8 +1167,7 @@ inline bool resolve_client_eweap_attachment_pose(
 			static_cast<float>(parent->z / kFixed16)};
 	carrier.yaw = static_cast<int16_t>(std::lround(
 			opennova::world::mission_yaw_deg_from_bam_heading(
-					static_cast<int32_t>(
-							static_cast<uint32_t>(parent->yaw_byte) << 24))));
+					parent->heading_bam)));
 	carrier.pitch = static_cast<int16_t>(std::lround(
 			static_cast<double>(parent->pitch_bam) *
 				opennova::world::kDegreesPerBam));

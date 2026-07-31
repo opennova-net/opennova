@@ -213,6 +213,9 @@ int main(void) {
         {"mf_light_value", car15->mf_light_value, 100},
         {"tracer_type_friendly", car15->tracer_type_friendly, 1},
         {"tracer_type_enemy", car15->tracer_type_enemy, 2},
+        {"recoil_prone", car15->recoil[0], 8},
+        {"recoil_crouch", car15->recoil[1], 9},
+        {"recoil_standing", car15->recoil[2], 11},
     };
     for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); ++i) {
         if (checks[i].got != checks[i].want) {

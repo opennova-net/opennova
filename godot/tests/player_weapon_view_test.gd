@@ -21,6 +21,11 @@ func test_weapon_view_decodes_state_dict() -> void:
 		"clip": 24,
 		"reserve": 270,
 		"kick": 12,
+		"recoil_pitch_bam": 0x1234567,
+		"weapon_weight_spread_bam": 0x7654321,
+		"aimed_shot_available": true,
+		"hud_spread_fp16": 0x23456,
+		"hud_spread_row": 5,
 		"windup_active": true,
 		"windup_held_ticks": 31,
 		"emplaced_controls_valid": true,
@@ -41,6 +46,11 @@ func test_weapon_view_decodes_state_dict() -> void:
 	assert_eq(view.clip, 24)
 	assert_eq(view.reserve, 270)
 	assert_eq(view.kick, 12)
+	assert_eq(view.recoil_pitch_bam, 0x1234567)
+	assert_eq(view.weapon_weight_spread_bam, 0x7654321)
+	assert_true(view.aimed_shot_available)
+	assert_eq(view.hud_spread_fp16, 0x23456)
+	assert_eq(view.hud_spread_row, 5)
 	assert_true(view.windup_active)
 	assert_eq(view.windup_held_ticks, 31)
 	assert_true(view.emplaced_controls_valid)

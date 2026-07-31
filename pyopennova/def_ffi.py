@@ -110,6 +110,12 @@ class DefWeaponDef(ctypes.Structure):
         ("heat_decay_per_tick", ctypes.c_int),
         ("heat_glow_threshold", ctypes.c_int),
         ("heat_effect", ctypes.c_char * 64),
+        # Exact 16.16 spread/theta/weight carriers (append-only; mirror def.h).
+        ("error_fp16", ctypes.c_int * 6),
+        ("error_hip_theta_fp16", ctypes.c_int),
+        ("error_up_theta_fp16", ctypes.c_int),
+        ("weaponweight_fp16", ctypes.c_int),
+        ("clipweight_fp16", ctypes.c_int),
     ]
 
 
