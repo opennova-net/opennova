@@ -42,9 +42,6 @@ struct WireDispatchNames {
 	StringName play_body_anim = StringName("play_body_anim");
 	StringName play_body_anim_at = StringName("play_body_anim_at");
 	StringName set_weapon_channel = StringName("set_weapon_channel");
-	StringName get_weapon_third_person_model =
-			StringName("get_weapon_third_person_model");
-	StringName find_skeleton_target = StringName("find_skeleton_target");
 };
 
 const WireDispatchNames &wnames() {
@@ -76,7 +73,7 @@ int NovaPresentApplier::wire_node_caps(Object *node, int visual_ctrl_caps) {
 	// the per-frame has_method probes this replaces were a measured hot cost.
 	const WireDispatchNames &n = wnames();
 	int caps = 0;
-	if (node->has_method(wnames().set_aim_overlay)) {
+	if (node->has_method(n.set_aim_overlay)) {
 		caps |= WIRE_CAP_AIM;
 	}
 	if ((visual_ctrl_caps & (VISUAL_CTRL_OWNED | VISUAL_CTRL_LEGACY)) != 0) {
