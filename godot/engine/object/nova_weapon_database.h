@@ -29,6 +29,7 @@ private:
 		String round_type;     // ammo key (GameText "WepDes")
 		String icon;           // loadout_menu_icon
 		int selectable = 0;    // loadout_selectable (gate)
+		int loadout_subclasses = 0; // sub-entry expansion count (+36) — the *_AMMO2 walk bound
 		int slot = 0;          // weapon_class: 0=accessory 1=primary 2=secondary 3=grenade
 		int team_mask = 0;     // teamfilter: blue/yellow=2, red/violet=1
 		int class_mask = 0;    // charfilter: medic1 sniper2 gunner4 rifleman8 engineer16
@@ -119,6 +120,22 @@ public:
 		FLAG_EMPLACED = 0x80,
 	};
 
+	// flags2 bit: the weapon authors no ammo-type choice — the PLAYER_INFO
+	// *_AMMO1_TYPE combo is locked non-interactive and the saved type resets to 0
+	// [orig: populate_ammo_combo_boxes @ 0x55def0 gates on +188 & 0x40].
+	enum {
+		FLAG2_NOAMMOTYPES = 0x40,
+	};
+
+	// Encumbrance bands for loadout weight — mirrors DefEncumbrance
+	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480:
+	//  >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT].
+	enum {
+		ENCUMBRANCE_LIGHT = 0,
+		ENCUMBRANCE_NORMAL = 1,
+		ENCUMBRANCE_HEAVY = 2,
+	};
+
 	Error load(const String &path);
 	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
 	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
@@ -138,6 +155,16 @@ public:
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
 	// case-insensitive like every def lookup), or -1 when absent.
 	int find_weapon(const String &name) const;
+
+	// Total loadout weight over the indexed weapons: per entry weaponweight +
+	// (count <= 0 ? maxclips : count) * clipweight — the libs/def port of the
+	// parent-slot terms [orig: calculate_loadout_weight @ 0x55f1f0]. Invalid
+	// indices contribute nothing; a short counts array reads as -1 (default).
+	double loadout_weight(const PackedInt32Array &weapon_indices,
+			const PackedInt32Array &ammo_counts) const;
+	// The encumbrance band for a weight (ENCUMBRANCE_*)
+	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480].
+	int encumbrance_class(double weight) const;
 };
 
 } // namespace godot

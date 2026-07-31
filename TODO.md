@@ -157,17 +157,12 @@ loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) are wired
 (godot/game/player_info_menu_host.gd; grilled in docs/playerinfo/avatars-re.md
 D-PLAYERINFO-7..12). Remaining:
 
-- [ ] Loadout ammo combos + weight readout (the D-PLAYERINFO-11 residual). The weapon
-      side is DONE: `libs/def` parses the loadout fields (slot/class/team-mask/weight,
-      `def.h` `[orig: WeaponDef_ParseProperty @ 0x54d730]`), the weight math is ported
-      and unit-tested (`def_loadout_weight`/`def_encumbrance_class`),
-      `NovaWeaponDatabase` exists, and the host populates the three weapon combos with
-      the class + team masks. Remaining: the `*_AMMO*` combos
-      (`populate_weapon_accessory_ammo_ui @ 0x55e8b0`) need an ammo-side binding
-      (a `NovaAmmoDatabase`, or extend `NovaWeaponDatabase`), and the
-      STATIC_TOTAL_WEIGHT budget label + weapon icons
-      (`update_player_info_weight_and_weapon_icons @ 0x55f480`) need host wiring.
+- [ ] Converge `armory_menu_host.gd`'s GDScript weight sum onto the
+      `NovaWeaponDatabase.loadout_weight`/`encumbrance_class` bindings the player-info
+      host consumes (its strings are pinned by `armory_menu_seam_test`; the
+      maturity-program armory-derivation row names this residual).
 - [ ] Persist the avatar/class/loadout selections to the on-disk profile
       (D-PLAYERINFO-9 — the NAME half is done: `NovaPlayerProfile.save_callsign` writes
-      `user://player_profile.cfg`) + render the chosen combo on the spawned soldier
+      `user://player_profile.cfg`; the ammo/type picks now ride `snapshot()` as
+      `*_clips`/`*_ammo_type`) + render the chosen combo on the spawned soldier
       (D-PLAYERINFO-1, still NEEDS-RE).
