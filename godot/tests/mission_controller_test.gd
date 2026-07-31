@@ -2450,7 +2450,7 @@ func test_set_weapon_loadout_edits_and_is_undoable() -> void:
 	var entries := controller.get_weapon_loadout()
 	var base := entries.size()
 	assert_gt(base, 0, "the fixture ships a non-empty loadout")
-	entries.append({ "name": "WPN_TEST", "value1": "1", "value2": "2" })
+	entries.append({ "name": "WPN_TEST", "ammo_primary": "1", "ammo_secondary": "2" })
 	controller.set_weapon_loadout(entries)
 	assert_eq(controller.get_weapon_loadout().size(), base + 1, "the weapon was appended")
 	assert_true(controller.is_dirty(), "editing the loadout dirties the mission")
@@ -2458,6 +2458,8 @@ func test_set_weapon_loadout_edits_and_is_undoable() -> void:
 	assert_eq(controller.get_weapon_loadout().size(), base, "undo restores the loadout")
 	controller.redo()
 	assert_eq(controller.get_weapon_loadout().size(), base + 1, "redo replays the loadout edit")
+	var redone := controller.get_weapon_loadout().back() as Dictionary
+	assert_eq(String(redone["ammo_primary"]), "1", "redo restores the appended row's ammo fields, not just the count")
 
 
 func test_set_group_writes_flags_value_and_is_undoable() -> void:

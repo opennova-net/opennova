@@ -708,7 +708,7 @@ std::vector<WeaponLoadoutEntry> MissionDocument::weapon_loadout() const {
 	}
 	out.reserve(impl_->file.loadout.entries.size());
 	for (const bms::WeaponLoadoutRecord &entry : impl_->file.loadout.entries) {
-		out.push_back({entry.name, entry.value1, entry.value2, entry.value3});
+		out.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary, entry.flags});
 	}
 	return out;
 }
@@ -747,8 +747,8 @@ bool MissionDocument::set_weapon_loadout(const std::vector<WeaponLoadoutEntry> &
 	records.reserve(entries.size());
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// Names are guaranteed non-empty by the validation above.
-		records.push_back({entry.name, entry.value1, entry.value2,
-		                   entry.value3.empty() ? "-1" : entry.value3});
+		records.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary,
+		                   entry.flags.empty() ? "-1" : entry.flags});
 	}
 	impl_->file.loadout.entries = std::move(records);
 	sync_counts();
@@ -1407,12 +1407,12 @@ void MissionDocument::sync_counts() {
 	for (const bms::WeaponLoadoutRecord &entry : impl_->file.loadout.entries) {
 		loadout_chunk.insert(loadout_chunk.end(), entry.name.begin(), entry.name.end());
 		loadout_chunk.push_back(0);
-		loadout_chunk.insert(loadout_chunk.end(), entry.value1.begin(), entry.value1.end());
+		loadout_chunk.insert(loadout_chunk.end(), entry.ammo_primary.begin(), entry.ammo_primary.end());
 		loadout_chunk.push_back(0);
-		loadout_chunk.insert(loadout_chunk.end(), entry.value2.begin(), entry.value2.end());
+		loadout_chunk.insert(loadout_chunk.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
 		loadout_chunk.push_back(0);
-		const std::string value3 = entry.value3.empty() ? "-1" : entry.value3;
-		loadout_chunk.insert(loadout_chunk.end(), value3.begin(), value3.end());
+		const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
+		loadout_chunk.insert(loadout_chunk.end(), flags.begin(), flags.end());
 		loadout_chunk.push_back(0);
 	}
 	if (!loadout_chunk.empty()) {

@@ -868,9 +868,9 @@ Dictionary NovaMissionData::weapon_loadout_to_dictionary(const opennova::mission
 	Dictionary out;
 	out["index"] = index;
 	out["name"] = String::utf8(entry.name.c_str());
-	out["value1"] = String::utf8(entry.value1.c_str());
-	out["value2"] = String::utf8(entry.value2.c_str());
-	out["value3"] = String::utf8(entry.value3.c_str());
+	out["ammo_primary"] = String::utf8(entry.ammo_primary.c_str());
+	out["ammo_secondary"] = String::utf8(entry.ammo_secondary.c_str());
+	out["flags"] = String::utf8(entry.flags.c_str());
 	return out;
 }
 
@@ -905,11 +905,11 @@ bool NovaMissionData::set_weapon_loadout(const Array &entries) {
 		const Dictionary dict = entries[i];
 		opennova::mission::WeaponLoadoutEntry record;
 		record.name = String(dict.get("name", "")).utf8().get_data();
-		// All three numeric strings default to "-1" when a caller omits them. value3 is the
+		// All three numeric strings default to "-1" when a caller omits them. flags is the
 		// load-bearing per-ammo damage class used by the runtime loadout builder.
-		record.value1 = String(dict.get("value1", "-1")).utf8().get_data();
-		record.value2 = String(dict.get("value2", "-1")).utf8().get_data();
-		record.value3 = String(dict.get("value3", "-1")).utf8().get_data();
+		record.ammo_primary = String(dict.get("ammo_primary", "-1")).utf8().get_data();
+		record.ammo_secondary = String(dict.get("ammo_secondary", "-1")).utf8().get_data();
+		record.flags = String(dict.get("flags", "-1")).utf8().get_data();
 		records.push_back(std::move(record));
 	}
 	if (!document.set_weapon_loadout(records)) {

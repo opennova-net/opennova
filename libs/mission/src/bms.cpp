@@ -826,9 +826,9 @@ bool parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& 
         WeaponLoadoutRecord entry;
         entry.name = loadout_string_at(raw, pos, limit);
         size_t value_pos = name_end + 1;
-        entry.value1 = loadout_value_after(raw, value_pos, limit);
-        entry.value2 = loadout_value_after(raw, value_pos, limit);
-        entry.value3 = loadout_value_after(raw, value_pos, limit);
+        entry.ammo_primary = loadout_value_after(raw, value_pos, limit);
+        entry.ammo_secondary = loadout_value_after(raw, value_pos, limit);
+        entry.flags = loadout_value_after(raw, value_pos, limit);
         out.entries.push_back(std::move(entry));
         pos = name_end;
     }
@@ -846,19 +846,19 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
             error = "BMS weapon loadout entries require a name";
             return false;
         }
-        const std::string value3 = entry.value3.empty() ? "-1" : entry.value3;
-        if (contains_nul(entry.name) || contains_nul(entry.value1) || contains_nul(entry.value2) ||
-            contains_nul(value3)) {
+        const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
+        if (contains_nul(entry.name) || contains_nul(entry.ammo_primary) ||
+            contains_nul(entry.ammo_secondary) || contains_nul(flags)) {
             error = "BMS weapon loadout entries cannot contain embedded NUL bytes";
             return false;
         }
         out.insert(out.end(), entry.name.begin(), entry.name.end());
         out.push_back(0);
-        out.insert(out.end(), entry.value1.begin(), entry.value1.end());
+        out.insert(out.end(), entry.ammo_primary.begin(), entry.ammo_primary.end());
         out.push_back(0);
-        out.insert(out.end(), entry.value2.begin(), entry.value2.end());
+        out.insert(out.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
         out.push_back(0);
-        out.insert(out.end(), value3.begin(), value3.end());
+        out.insert(out.end(), flags.begin(), flags.end());
         out.push_back(0);
     }
     if (!out.empty()) {
@@ -1316,9 +1316,9 @@ bool weapon_loadout_equal(const WeaponLoadout& a, const WeaponLoadout& b) {
     }
     for (size_t i = 0; i < a.entries.size(); ++i) {
         if (a.entries[i].name != b.entries[i].name ||
-            a.entries[i].value1 != b.entries[i].value1 ||
-            a.entries[i].value2 != b.entries[i].value2 ||
-            a.entries[i].value3 != b.entries[i].value3) {
+            a.entries[i].ammo_primary != b.entries[i].ammo_primary ||
+            a.entries[i].ammo_secondary != b.entries[i].ammo_secondary ||
+            a.entries[i].flags != b.entries[i].flags) {
             return false;
         }
     }

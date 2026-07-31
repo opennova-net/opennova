@@ -370,16 +370,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			if mission.has_method("get_item_availability"):
 				_sim.set_weapon_availability(mission.get_item_availability())
 			if mission.has_method("get_weapon_loadout"):
-				var kit: Array[Dictionary] = []
-				for row in mission.get_weapon_loadout():
-					kit.append({
-						"name": String(row.get("name", "")),
-						"ammo_primary": int(String(row.get("value1", "-1")).to_int()),
-						"ammo_secondary": int(String(row.get("value2", "-1")).to_int()),
-						# The BMS row's fourth string becomes the per-ammo damage-class
-						# byte: 1 = x0.9, 2 = x1.1, every other value is neutral.
-						"flags": int(String(row.get("value3", "-1")).to_int()),
-					})
+				var kit := kit_from_loadout_rows(mission.get_weapon_loadout())
 				if not kit.is_empty():
 					_sim.set_spawn_loadout(kit, true)
 					_sim.respawn_local_player_loadout()
@@ -401,6 +392,23 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 
 func get_setup_error() -> int:
 	return _setup_error
+
+
+# The mission loadout rows -> the sim spawn kit. The rows carry the .bms kit tuple
+# {name, ammo_primary, ammo_secondary, flags} as raw chunk strings; the sim kit wants
+# ints. flags becomes the per-ammo damage-class byte: 1 = x0.9, 2 = x1.1, every other
+# value is neutral (net-re §5.63). Static so the stringly-typed seam between
+# NovaMissionData's dictionaries and the kit keys is testable on its own.
+static func kit_from_loadout_rows(rows: Array) -> Array[Dictionary]:
+	var kit: Array[Dictionary] = []
+	for row in rows:
+		kit.append({
+			"name": String(row.get("name", "")),
+			"ammo_primary": int(String(row.get("ammo_primary", "-1")).to_int()),
+			"ammo_secondary": int(String(row.get("ammo_secondary", "-1")).to_int()),
+			"flags": int(String(row.get("flags", "-1")).to_int()),
+		})
+	return kit
 
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),

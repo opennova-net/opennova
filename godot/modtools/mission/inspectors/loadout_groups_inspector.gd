@@ -3,18 +3,22 @@ extends "res://modtools/mission/inspectors/inspector_section.gd"
 
 # --- Weapon loadout + groups (mission-global collapsibles) --------------------
 # Like the header form, these are shown whenever a mission is loaded, in any mode, and built
-# ONCE. The loadout is a list of (name, value1, value2) records; groups are 64 fixed records
-# with three editable ints each. Selection is inspector-local (no in-world interaction). The
-# *_syncing guards stop a programmatic repopulate from echoing back as an edit. Name/value
-# edits commit on Enter / focus-out (not per keystroke) to keep the caret; group spins commit
-# on change. Every commit replaces the whole loadout / writes one group = one undo step.
+# ONCE. The loadout is a list of kit tuples {name, ammo_primary, ammo_secondary, flags}
+# (net-re §5.63): the ammo fields are requested clip counts and flags is the per-ammo
+# damage-class request (1 = x0.9, 2 = x1.1, anything else neutral); -1 everywhere means
+# "weapon default". Groups are 64 fixed records with three editable ints each. Selection is
+# inspector-local (no in-world interaction). The *_syncing guards stop a programmatic
+# repopulate from echoing back as an edit. Name/value edits commit on Enter / focus-out (not
+# per keystroke) to keep the caret; group spins commit on change. Every commit replaces the
+# whole loadout / writes one group = one undo step.
 var _loadout_toggle: CheckButton
 var _loadout_box: VBoxContainer
 var _loadout_status: Label
 var _loadout_list: ItemList
 var _loadout_name: LineEdit
-var _loadout_value1: LineEdit
-var _loadout_value2: LineEdit
+var _loadout_ammo_pri: LineEdit
+var _loadout_ammo_sec: LineEdit
+var _loadout_damage: LineEdit
 var _loadout_delete: Button
 var _loadout_selected: int = -1
 var _loadout_syncing: bool = false
@@ -33,7 +37,7 @@ func _build_loadout_panel() -> void:
 	_loadout_toggle = CheckButton.new()
 	_loadout_toggle.name = "MissionLoadoutToggle"
 	_loadout_toggle.text = "Weapon loadout"
-	_loadout_toggle.tooltip_text = "Weapons allowed for this mission. An empty list means no restriction (the game uses its default)."
+	_loadout_toggle.tooltip_text = "The weapons the player spawns with (single player only). An empty list means the game's default kit."
 	_loadout_toggle.button_pressed = false
 	_loadout_toggle.visible = false
 	_inspector._mission_content.add_child(_loadout_toggle)
@@ -71,8 +75,12 @@ func _build_loadout_panel() -> void:
 	_loadout_box.add_child(HSeparator.new())
 	_loadout_name = _add_loadout_line("MissionLoadoutName", "Name",
 		"Weapon name, e.g. WPN_CAR15AUTO. Matched against the game's weapon table; unknown names are ignored at load.")
-	_loadout_value1 = _add_loadout_line("MissionLoadoutValue1", "Value 1", "First loadout value (usually -1).")
-	_loadout_value2 = _add_loadout_line("MissionLoadoutValue2", "Value 2", "Second loadout value (usually -1).")
+	_loadout_ammo_pri = _add_loadout_line("MissionLoadoutAmmoPrimary", "Primary ammo",
+		"Clips requested for the weapon's main ammo. -1 = the weapon's default fill.")
+	_loadout_ammo_sec = _add_loadout_line("MissionLoadoutAmmoSecondary", "Secondary ammo",
+		"Clips requested for the weapon's alternate ammo (like launcher rounds), when it has one. -1 = the weapon's default fill.")
+	_loadout_damage = _add_loadout_line("MissionLoadoutDamageClass", "Damage class",
+		"Damage adjustment for this weapon's ammo: 1 = 10% less damage, 2 = 10% more. Anything else (or -1) = normal damage. Weapons sharing the same ammo share this setting.")
 
 	_loadout_box.add_child(HSeparator.new())
 	_loadout_delete = Button.new()
@@ -90,7 +98,8 @@ func _add_loadout_line(node_name: String, label: String, tooltip: String) -> Lin
 	var lbl := Label.new()
 	lbl.text = label
 	lbl.tooltip_text = tooltip
-	lbl.custom_minimum_size = Vector2(72, 0)
+	lbl.clip_text = true
+	lbl.custom_minimum_size = Vector2(InspectorForms.LABEL_COL_WIDTH, 0)
 	row.add_child(lbl)
 	var line := LineEdit.new()
 	line.name = node_name
@@ -108,7 +117,7 @@ func _on_loadout_add_pressed() -> void:
 	var entries: Array = _inspector._controller.get_weapon_loadout()
 	# Seed a non-empty name: an empty name serializes to a leading NUL the loader treats as the chunk
 	# terminator (dropping this row and any after it). The user renames it (the name field grabs focus).
-	entries.append({ "name": "WPN_NEW", "value1": "-1", "value2": "-1" })
+	entries.append({ "name": "WPN_NEW", "ammo_primary": "-1", "ammo_secondary": "-1", "flags": "-1" })
 	_loadout_selected = entries.size() - 1
 	_inspector._controller.set_weapon_loadout(entries)
 	_loadout_name.grab_focus()
@@ -143,25 +152,28 @@ func _commit_loadout_editors() -> void:
 	var entry: Dictionary = entries[_loadout_selected]
 	# No-op edits add no undo step.
 	if String(entry.get("name", "")) == _loadout_name.text \
-			and String(entry.get("value1", "")) == _loadout_value1.text \
-			and String(entry.get("value2", "")) == _loadout_value2.text:
+			and String(entry.get("ammo_primary", "")) == _loadout_ammo_pri.text \
+			and String(entry.get("ammo_secondary", "")) == _loadout_ammo_sec.text \
+			and String(entry.get("flags", "")) == _loadout_damage.text:
 		return
 	# A weapon cannot be nameless: the .bms loadout chunk uses an empty name as its terminator, so a blank
 	# would drop the weapon (set_weapon_loadout rejects "" too — same is_empty() test, so the two layers
-	# agree). Reject the whole edit: revert ALL three fields to the stored entry (not just the name, so a
+	# agree). Reject the whole edit: revert ALL four fields to the stored entry (not just the name, so a
 	# simultaneous value edit can't be half-applied or left visually stale) and warn in the panel's own
-	# status. Remove deletes a weapon.
+	# status. Delete weapon removes it.
 	if _loadout_name.text.is_empty():
 		_loadout_syncing = true
 		_loadout_name.text = String(entry.get("name", ""))
-		_loadout_value1.text = String(entry.get("value1", ""))
-		_loadout_value2.text = String(entry.get("value2", ""))
+		_loadout_ammo_pri.text = String(entry.get("ammo_primary", ""))
+		_loadout_ammo_sec.text = String(entry.get("ammo_secondary", ""))
+		_loadout_damage.text = String(entry.get("flags", ""))
 		_loadout_syncing = false
-		_loadout_status.text = "A weapon needs a name. Use Remove to delete it."
+		_loadout_status.text = "A weapon needs a name. Use Delete weapon to remove it."
 		return
 	entry["name"] = _loadout_name.text
-	entry["value1"] = _loadout_value1.text
-	entry["value2"] = _loadout_value2.text
+	entry["ammo_primary"] = _loadout_ammo_pri.text
+	entry["ammo_secondary"] = _loadout_ammo_sec.text
+	entry["flags"] = _loadout_damage.text
 	entries[_loadout_selected] = entry
 	_inspector._controller.set_weapon_loadout(entries)
 
@@ -187,7 +199,9 @@ func _refresh_loadout_panel() -> void:
 	_loadout_list.clear()
 	for i in entries.size():
 		var e := entries[i] as Dictionary
-		_loadout_list.add_item("%s   (%s, %s)" % [String(e.get("name", "")), String(e.get("value1", "")), String(e.get("value2", ""))])
+		_loadout_list.add_item("%s   (%s, %s, %s)" % [String(e.get("name", "")),
+			String(e.get("ammo_primary", "")), String(e.get("ammo_secondary", "")),
+			String(e.get("flags", ""))])
 		if i == _loadout_selected:
 			_loadout_list.select(i)
 	_loadout_syncing = false
@@ -196,16 +210,18 @@ func _refresh_loadout_panel() -> void:
 	var sel: Dictionary = entries[_loadout_selected] if has_sel else {}
 	_loadout_syncing = true
 	_inspector._sync_line(_loadout_name, String(sel.get("name", "")))
-	_inspector._sync_line(_loadout_value1, String(sel.get("value1", "")))
-	_inspector._sync_line(_loadout_value2, String(sel.get("value2", "")))
+	_inspector._sync_line(_loadout_ammo_pri, String(sel.get("ammo_primary", "")))
+	_inspector._sync_line(_loadout_ammo_sec, String(sel.get("ammo_secondary", "")))
+	_inspector._sync_line(_loadout_damage, String(sel.get("flags", "")))
 	_loadout_syncing = false
 	_loadout_name.editable = has_sel
-	_loadout_value1.editable = has_sel
-	_loadout_value2.editable = has_sel
+	_loadout_ammo_pri.editable = has_sel
+	_loadout_ammo_sec.editable = has_sel
+	_loadout_damage.editable = has_sel
 	_loadout_delete.disabled = not has_sel
 
 	if entries.is_empty():
-		_loadout_status.text = "No weapons restricted (mission uses the default loadout). Add a weapon to restrict it."
+		_loadout_status.text = "No mission kit authored (the game uses its default). Add a weapon to build one."
 	elif not has_sel:
 		_loadout_status.text = "Select a weapon to edit its name and values."
 	else:

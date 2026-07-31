@@ -447,8 +447,8 @@ int main() {
 
 	// Phase 3: weapon loadout. The fixture canonicalizes to 7 public four-field loadout records; the
 	// earlier entity/zone edits do not touch the loadout list.
-	static_assert(offsetof(OpenNovaMissionWeaponLoadoutEntry, value3) == 192,
-	              "value3 must remain an ABI tail append");
+	static_assert(offsetof(OpenNovaMissionWeaponLoadoutEntry, flags) == 192,
+	              "flags must remain an ABI tail append");
 	static_assert(sizeof(OpenNovaMissionWeaponLoadoutEntry) == 256,
 	              "loadout ABI is four fixed 64-byte strings");
 	const size_t loadout_count = opennova_mission_weapon_loadout_count(document);
@@ -456,9 +456,9 @@ int main() {
 	OpenNovaMissionWeaponLoadoutEntry first_loadout = {};
 	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, 0, &first_loadout) == 1);
 	TEST_EXPECT(std::string(first_loadout.name) == "WPN_CAR15AUTO");
-	TEST_EXPECT(std::string(first_loadout.value1) == "-1");
-	TEST_EXPECT(std::string(first_loadout.value2) == "-1");
-	TEST_EXPECT(std::string(first_loadout.value3) == "-1");
+	TEST_EXPECT(std::string(first_loadout.ammo_primary) == "-1");
+	TEST_EXPECT(std::string(first_loadout.ammo_secondary) == "-1");
+	TEST_EXPECT(std::string(first_loadout.flags) == "-1");
 	OpenNovaMissionWeaponLoadoutEntry last_loadout = {};
 	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(document, loadout_count - 1, &last_loadout) == 1);
 	TEST_EXPECT(std::string(last_loadout.name) == "WPN_KNIFE");
@@ -476,13 +476,13 @@ int main() {
 	// Replace the loadout with a custom two-entry set; survive a byte round-trip.
 	OpenNovaMissionWeaponLoadoutEntry custom[2] = {};
 	std::snprintf(custom[0].name, sizeof(custom[0].name), "WPN_KNIFE");
-	std::snprintf(custom[0].value1, sizeof(custom[0].value1), "-1");
-	std::snprintf(custom[0].value2, sizeof(custom[0].value2), "-1");
-	std::snprintf(custom[0].value3, sizeof(custom[0].value3), "1");
+	std::snprintf(custom[0].ammo_primary, sizeof(custom[0].ammo_primary), "-1");
+	std::snprintf(custom[0].ammo_secondary, sizeof(custom[0].ammo_secondary), "-1");
+	std::snprintf(custom[0].flags, sizeof(custom[0].flags), "1");
 	std::snprintf(custom[1].name, sizeof(custom[1].name), "WPN_M9Berreta");
-	std::snprintf(custom[1].value1, sizeof(custom[1].value1), "2");
-	std::snprintf(custom[1].value2, sizeof(custom[1].value2), "0");
-	std::snprintf(custom[1].value3, sizeof(custom[1].value3), "2");
+	std::snprintf(custom[1].ammo_primary, sizeof(custom[1].ammo_primary), "2");
+	std::snprintf(custom[1].ammo_secondary, sizeof(custom[1].ammo_secondary), "0");
+	std::snprintf(custom[1].flags, sizeof(custom[1].flags), "2");
 	TEST_EXPECT(opennova_mission_set_weapon_loadout(document, custom, 2) == 1);
 	TEST_EXPECT(opennova_mission_weapon_loadout_count(document) == 2);
 	OpenNovaMissionBytes loadout_bytes = {};
@@ -493,9 +493,9 @@ int main() {
 	OpenNovaMissionWeaponLoadoutEntry reload_entry = {};
 	TEST_EXPECT(opennova_mission_get_weapon_loadout_entry(loadout_reload, 1, &reload_entry) == 1);
 	TEST_EXPECT(std::string(reload_entry.name) == "WPN_M9Berreta");
-	TEST_EXPECT(std::string(reload_entry.value1) == "2");
-	TEST_EXPECT(std::string(reload_entry.value2) == "0");
-	TEST_EXPECT(std::string(reload_entry.value3) == "2");
+	TEST_EXPECT(std::string(reload_entry.ammo_primary) == "2");
+	TEST_EXPECT(std::string(reload_entry.ammo_secondary) == "0");
+	TEST_EXPECT(std::string(reload_entry.flags) == "2");
 	opennova_mission_destroy(loadout_reload);
 	opennova_mission_free_bytes(&loadout_bytes);
 	// Clearing the loadout yields an empty chunk (the loader installs the WPN_KNIFE default at runtime).

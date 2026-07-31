@@ -1677,8 +1677,8 @@ func _groups_ctx(groups: Array) -> Dictionary:
 	return {"fake": fake, "inspector": inspector}
 
 
-func _loadout_entry(name: String, v1: String, v2: String) -> Dictionary:
-	return {"name": name, "value1": v1, "value2": v2}
+func _loadout_entry(name: String, ammo_pri: String, ammo_sec: String) -> Dictionary:
+	return {"name": name, "ammo_primary": ammo_pri, "ammo_secondary": ammo_sec, "flags": "-1"}
 
 
 func test_loadout_panel_lists_entries() -> void:
@@ -1715,6 +1715,22 @@ func test_loadout_edit_commits_on_submit() -> void:
 	assert_eq(String((committed[0] as Dictionary)["name"]), "WPN_FOO", "the edited name is committed")
 
 
+func test_loadout_ammo_and_damage_class_edits_commit() -> void:
+	# One submit commits ALL four editors in a single set_weapon_loadout call, and each value
+	# lands under its kit-tuple key — the write half of the stringly-typed panel seam (the read
+	# half is pinned by the no-op guard + blank-name revert tests).
+	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._loadout_ammo_pri.text = "5"
+	ctx.inspector._loadout_groups._loadout_ammo_sec.text = "2"
+	ctx.inspector._loadout_groups._loadout_damage.text = "1"
+	ctx.inspector._loadout_groups._loadout_damage.text_submitted.emit("1")
+	var committed := ctx.fake.set_loadout_calls.back() as Array
+	assert_eq(String((committed[0] as Dictionary)["ammo_primary"]), "5", "the edited primary-ammo request is committed")
+	assert_eq(String((committed[0] as Dictionary)["ammo_secondary"]), "2", "the edited secondary-ammo request is committed")
+	assert_eq(String((committed[0] as Dictionary)["flags"]), "1", "the damage-class editor commits as the flags field")
+
+
 func test_loadout_unchanged_edit_does_not_commit() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
 	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
@@ -1725,19 +1741,20 @@ func test_loadout_unchanged_edit_does_not_commit() -> void:
 
 func test_loadout_blank_name_is_rejected_and_reverts_all_fields() -> void:
 	# Regression (review #3 / adversarial): blanking a weapon's name must reject the whole edit (an empty
-	# name is the .bms chunk terminator and would drop the weapon), revert ALL three fields to the stored
+	# name is the .bms chunk terminator and would drop the weapon), revert ALL four fields to the stored
 	# entry (not just the name, so a simultaneous value edit can't be half-applied or left visually stale),
 	# and never reach the controller (no commit, no crash from a private call).
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
 	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
 	# Change a value AND blank the name, then submit.
-	ctx.inspector._loadout_groups._loadout_value1.text = "5"
+	ctx.inspector._loadout_groups._loadout_ammo_pri.text = "5"
 	ctx.inspector._loadout_groups._loadout_name.text = ""
 	ctx.inspector._loadout_groups._loadout_name.text_submitted.emit("")
 	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "a blank name commits nothing")
 	assert_eq(ctx.inspector._loadout_groups._loadout_name.text, "WPN_KNIFE", "name field reverts to the stored value")
-	assert_eq(ctx.inspector._loadout_groups._loadout_value1.text, "-1", "value1 field reverts too (no half-applied edit)")
-	assert_eq(ctx.inspector._loadout_groups._loadout_value2.text, "-1", "value2 field stays consistent with the model")
+	assert_eq(ctx.inspector._loadout_groups._loadout_ammo_pri.text, "-1", "primary-ammo field reverts too (no half-applied edit)")
+	assert_eq(ctx.inspector._loadout_groups._loadout_ammo_sec.text, "-1", "secondary-ammo field stays consistent with the model")
+	assert_eq(ctx.inspector._loadout_groups._loadout_damage.text, "-1", "damage-class field stays consistent with the model")
 
 
 func test_loadout_delete_calls_controller() -> void:

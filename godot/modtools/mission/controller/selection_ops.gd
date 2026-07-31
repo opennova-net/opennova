@@ -306,7 +306,7 @@ func set_game_mode(bit: int) -> void:
 
 
 # --- Weapon loadout + groups (mission-global) ---------------------------------
-# Loadout entries are dictionaries { index, name, value1, value2 }; groups are
+# Loadout entries are dictionaries { index, name, ammo_primary, ammo_secondary, flags }; groups are
 # { index, field0(flags), field8(value), field12(constant 10) }. Edits use the one-step snapshot/undo recipe.
 
 func get_weapon_loadout() -> Array:

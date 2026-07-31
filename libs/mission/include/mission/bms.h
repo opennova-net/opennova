@@ -714,11 +714,17 @@ struct BoundingBox {
     float get_max_z() const { return max_z / 65536.0f; }
 };
 
+// One weapon-loadout chunk tuple, kept as the four raw chunk strings so unusual authored
+// text round-trips byte-exactly. The format is the engine-wide kit tuple
+// {name\0 ammoPri\0 ammoSec\0 flags\0} [orig: restrictionData @ 0x24D4E00, sanitized on SP
+// load by AIProfile_SanitizeConfigData @ 0x40cfe0; net-re §5.63]: ammo_primary/ammo_secondary
+// are requested clip counts (-1 = the weapon's default fill), and flags is the per-ammo
+// damage-class request byte (1 = x0.9, 2 = x1.1, every other value neutral).
 struct WeaponLoadoutRecord {
     std::string name;
-    std::string value1;
-    std::string value2;
-    std::string value3 = "-1";
+    std::string ammo_primary;
+    std::string ammo_secondary;
+    std::string flags = "-1";
 };
 
 struct WeaponLoadout {

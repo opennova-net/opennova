@@ -112,14 +112,15 @@ typedef struct OpenNovaMissionAreaTriggerRecord {
 	int constrain_z;
 } OpenNovaMissionAreaTriggerRecord;
 
-// Loadout entry over FFI. The four on-disk strings are copied into fixed 64-char buffers (real weapon
-// names + numeric values are short); a longer field is truncated to 63 chars on read. value3 is
-// deliberately appended so the offsets of name/value1/value2 remain stable for rebuilt callers.
+// Loadout entry over FFI — the kit tuple {name, ammoPri, ammoSec, flags} (net-re §5.63). The four
+// on-disk strings are copied into fixed 64-char buffers (real weapon names + numeric values are
+// short); a longer field is truncated to 63 chars on read. flags (the per-ammo damage-class request
+// byte) sits last so the offsets of name/ammo_primary/ammo_secondary remain stable for rebuilt callers.
 typedef struct OpenNovaMissionWeaponLoadoutEntry {
 	char name[64];
-	char value1[64];
-	char value2[64];
-	char value3[64];
+	char ammo_primary[64];
+	char ammo_secondary[64];
+	char flags[64];
 } OpenNovaMissionWeaponLoadoutEntry;
 
 typedef struct OpenNovaMissionGroupRecord {

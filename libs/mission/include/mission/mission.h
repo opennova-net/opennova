@@ -133,15 +133,17 @@ struct AreaTriggerRecord {
 	bool constrain_z = false; // flags & 0x02 (else Z unbounded ±16384.0)
 };
 
-// Public editor/runtime view of one weapon-loadout record. The BMS chunk is sanitized to four
-// NUL-terminated fields (name + three values). The fourth field is load-bearing: it becomes the
-// per-ammo damage-class byte consumed by Weapon_CalcImpactDamage (1 = x0.9, 2 = x1.1, every other
-// value neutral), so it must survive every editor and FFI round-trip. New rows default it to "-1".
+// Public editor/runtime view of one weapon-loadout record — the engine-wide kit tuple
+// {name, ammoPri, ammoSec, flags} (net-re §5.63), sanitized to four NUL-terminated fields.
+// ammo_primary/ammo_secondary are requested clip counts (-1 = the weapon's default fill).
+// flags is load-bearing: it becomes the per-ammo damage-class byte consumed by
+// Weapon_CalcImpactDamage (1 = x0.9, 2 = x1.1, every other value neutral), so it must
+// survive every editor and FFI round-trip. New rows default it to "-1".
 struct WeaponLoadoutEntry {
 	std::string name;
-	std::string value1;
-	std::string value2;
-	std::string value3 = "-1";
+	std::string ammo_primary;
+	std::string ammo_secondary;
+	std::string flags = "-1";
 };
 
 // Public view of one item-availability record from the .bms secondary chunk — the

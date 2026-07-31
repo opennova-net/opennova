@@ -9,6 +9,22 @@ const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 
 
+func test_kit_from_loadout_rows_reads_the_mission_tuple_keys() -> void:
+	# The stringly-typed seam between NovaMissionData's loadout dictionaries and the sim
+	# spawn kit: feed a REAL mission document (not hand-built rows) so a key drift on either
+	# side breaks here instead of silently degrading the kit to all -1 defaults at promote.
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	assert_true(m.set_weapon_loadout([
+		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
+	var kit := MissionRuntime.kit_from_loadout_rows(m.get_weapon_loadout())
+	assert_eq(kit.size(), 1, "one mission row promotes to one kit row")
+	assert_eq(String(kit[0]["name"]), "WPN_KNIFE")
+	assert_eq(int(kit[0]["ammo_primary"]), 3, "the chunk string reaches the kit as an int")
+	assert_eq(int(kit[0]["ammo_secondary"]), 0)
+	assert_eq(int(kit[0]["flags"]), 2, "the damage class rides the flags field")
+
+
 func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
