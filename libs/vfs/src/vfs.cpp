@@ -70,7 +70,7 @@ std::string retail_archive_entry_key(const PffEntry &entry) {
 
 // Validate once before either loose or archive resolution. Both slash styles are separators
 // for loose probes, but the original spelling is retained for exact archive comparison.
-// Retail's shared front doors concatenate the unchecked query; rejecting host-root syntax and
+// Retail's shared front doors concatenate the unchecked query; rejecting rooted-path syntax and
 // traversal here is our mounted-root safety boundary.
 // [orig: FileSystem_OpenFile @ 0x75b1c0; FileSystem_FileExists @ 0x75aa50]
 bool split_retail_query(const std::string &name, std::vector<std::string> &components) {
@@ -123,7 +123,7 @@ bool path_is_within(const fs::path &root, const fs::path &candidate) {
 
 // FileSystem_OpenFile passes the complete query to each loose probe; the basename-strip
 // setter exists but is dead. Walk one component at a time to reproduce Win32-insensitive
-// matching on every host, canonicalizing each match so symlinks cannot escape the root.
+// matching on every platform, canonicalizing each match so symlinks cannot escape the root.
 // [orig: FileSystem_OpenFile @ 0x75b1c0; dead setter @ 0x75a590]
 bool resolve_retail_loose_file(const std::string &search_root,
                                const std::vector<std::string> &components,

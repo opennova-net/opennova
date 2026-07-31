@@ -97,7 +97,7 @@ WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float c
 // [orig: Math_InvertMatrix4x4_Float_ToStatic @ 0x611960]. The LOW tier
 // (render_water_strip @ 0x5c1d60, water detail <= 1: 40-byte verts, sin-table
 // Y displacement, the dbl_7DBF70 = 229.5 alpha-scale swap) is the remaining
-// unported variant — the host runs the detailed path (detail > 1).
+// unported variant — the reimpl runs the detailed path (detail > 1).
 //
 // Caller-arg semantics witnessed at the call sites [orig: @ 0x5c3489..0x5c3497
 // camera-above (blend material): (height, 0, nightvision); @ 0x5c3539..0x5c3547
@@ -113,10 +113,10 @@ WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float c
 struct WaterStripView {
 	float view[16];     // world->view [orig: viewMatrix @ 0xA7845C]
 	float view_inv[16]; // its inverse, cached per pass [orig: @ 0x611960 result]
-	// Host projection converted to the render basis/row-vector convention.
+	// Embedder projection converted to the render basis/row-vector convention.
 	// X/Y clip rows and clip-W are complete: perspective/frustum use depth W,
 	// orthographic uses constant W, and the translation/shear terms preserve
-	// off-center host projections. The witnessed retail path is the centered
+	// off-center embedder projections. The witnessed retail path is the centered
 	// perspective subset [orig: mat @ 0x2721980; m11 @ 0x2721994].
 	float proj[16];
 	// Camera world-basis rows of the render context's camera matrix
@@ -258,7 +258,7 @@ struct WaterStripRows {
 	std::vector<float> screen_pos;  // x, y pixel pairs        (+0x00/+0x04)
 	std::vector<float> depth;       // the clamped depth/fog W (+0x08)
 	// Reciprocal clip W. Retail perspective makes this 1 / view depth;
-	// the host orthographic extension carries constant clip W = 1.
+	// the reimpl orthographic extension carries constant clip W = 1.
 	std::vector<float> rhw;                                 // (+0x0C)
 	std::vector<uint32_t> diffuse;  // packed ARGB             (+0x10)
 	std::vector<uint32_t> specular; // packed ARGB             (+0x14)

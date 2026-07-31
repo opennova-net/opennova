@@ -16,7 +16,7 @@ enum class VfsSource { LooseDir, Archive };
 //   Packed                 - archives back the session default and legacy index while any are
 //                            online. Loose roots remain latent for explicit ForceLooseFirst
 //                            calls; standalone no-archive sessions fall back loose, while the
-//                            game host rejects that state via has_mounted_archive().
+//                            game runtime rejects that state via has_mounted_archive().
 //   PackedWithLooseOverride - both, loose shadowing archives. The runtime under the `/d`
 //                            dev flag, where loose files override the packed data.
 enum class VfsMountMode { LooseOnly, Packed, PackedWithLooseOverride };
@@ -53,7 +53,7 @@ struct VfsFileLocation {
 // FileSystem_OpenFile @ 0x75b1c0: they retain the full relative query and choose loose/archive
 // order per call. Packed mode is archive-default while an archive is online and keeps loose
 // roots available for ForceLooseFirst; its standalone no-archive default falls back loose, while
-// the game host rejects that state via has_mounted_archive(). See
+// the game runtime rejects that state via has_mounted_archive(). See
 // notes/vfs/phase0_ida_verification.md.
 class Vfs {
 public:

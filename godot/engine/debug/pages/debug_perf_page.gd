@@ -3,7 +3,7 @@ extends NovaDebugPage
 ## The debug overlay's Perf page: renders the PerfTimeline ring (recent mission
 ## loads as a span tree with per-stage milliseconds) plus a small set of live
 ## Performance monitors. A separate script from the overlay so tests drive it
-## directly with fabricated timelines. Host-neutral: engine deps only.
+## directly with fabricated timelines. Shell-neutral: engine deps only.
 
 const MONITOR_VALUE_WIDTH := 96.0
 

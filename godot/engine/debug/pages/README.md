@@ -63,7 +63,7 @@ func refresh() -> void:              # 0.25 s cadence, ONLY while active
 
 ## Rules
 
-- Host-neutral: engine/ui primitives only, no game/ or modtools/ imports.
+- Shell-neutral: engine/ui primitives only, no game/ or modtools/ imports.
 - Min content width <= 360 px (the panel width floor minus the sidebar);
   wide tables shrink their column minimums instead of overflowing.
 - Artist-facing copy ("draw distance", not "CDEP"); no `print` — failures

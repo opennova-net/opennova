@@ -6,7 +6,7 @@ extends RefCounted
 ## through the existing NovaFntResource (.fnt parser + Godot FontFile view).
 ## [orig: HUD_DrawTextRightAligned_HalfBright @0x580850 -> CGameFont_DrawText @0x6752c0]
 ##
-## Host-neutral static helpers. Callers should load fonts once (not per frame).
+## Shell-neutral static helpers. Callers should load fonts once (not per frame).
 ## NOTE: exact glyph spacing inside CGameFont_DrawText is a follow-up (see
 ## docs/interface/hud-re.md); this uses the NovaFntResource FontFile + Godot layout.
 

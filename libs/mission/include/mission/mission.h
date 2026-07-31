@@ -269,7 +269,7 @@ public:
 	bool load_mis_text(const std::string &text);
 	bool save_bms_file(const std::string &path);
 	bool write_bms_bytes(std::vector<uint8_t> &out);
-	// The .mis writer. `base_heights` (optional): host-sampled terrain heights under each entity,
+	// The .mis writer. `base_heights` (optional): editor-sampled terrain heights under each entity,
 	// 16.16 fixed-point, FLAT in WRITE ORDER (items, buildings, markers, organics). When provided,
 	// each in-range entry is emitted as that entity's `extra_bheight` (the baked base height the
 	// original editor subtracts from the height-locked absolute z); out-of-range / absent entries

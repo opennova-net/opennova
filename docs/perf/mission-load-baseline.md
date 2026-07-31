@@ -1,7 +1,7 @@
 # Mission-load performance baseline (2026-06-11)
 
 The recorded numbers behind the editor-depth roadmap's perf decisions. C1
-(PR #97) instrumented both hosts with `PerfTimeline`; this is the first
+(PR #97) instrumented both products with `PerfTimeline`; this is the first
 captured baseline, taken to decide which push-down the next perf slice
 should be (the roadmap's C3 placement-plan / C4 pick-collider candidates
 were *contingent on these numbers*).

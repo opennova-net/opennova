@@ -1,6 +1,6 @@
 class_name SyncGuard
 extends RefCounted
-## Lives in engine/ui (not modtools): host-neutral by contract, so both the
+## Lives in engine/ui (not modtools): shell-neutral by contract, so both the
 ## game's debug overlay and editor inspectors can use it.
 ## Reentrancy guard for inspector UI<->model sync. While run(body) executes,
 ## active is true; field setters check active and no-op so programmatic control

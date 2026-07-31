@@ -10,7 +10,7 @@ extends RefCounted
 ## routes through the editor's own code paths, and there is no script/code
 ## execution.
 
-const INSTRUCTIONS := """ONED — the OpenNova editor (Godot-hosted). You are connected to a live editor a human may be watching.
+const INSTRUCTIONS := """ONED — the OpenNova editor (Godot-based). You are connected to a live editor a human may be watching.
 
 Start with get_editor_state: the mounted resource root, every workspace (open document, dirty, capabilities), the active workspace, managed game-run status, and a log cursor.
 

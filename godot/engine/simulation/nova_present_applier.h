@@ -19,7 +19,7 @@ class Node;
 class Node3D;
 
 // The native mission present-pass row walk. MissionPresentPass (GDScript,
-// godot/engine/world/mission_present_pass.gd) stays the host-facing component —
+// godot/engine/world/mission_present_pass.gd) stays the shell-facing component —
 // this class owns its hot loop: the revision-bound row plan (resolved node,
 // capability bitmask, applied-state caches) and the per-frame walk over the
 // sim's flat PackedFloat32Array snapshot, dispatching to each resolved node's
@@ -28,7 +28,7 @@ class Node3D;
 // becomes raw pointer arithmetic; the dispatched node calls (set_part_phase,
 // play_body_clip_at, ...) keep their GDScript implementations.
 //
-// The walk itself is host presentation glue over the witnessed per-frame
+// The walk itself is shell presentation glue over the witnessed per-frame
 // cadence (entity submission is evaluated every render frame [orig:
 // GameLoop_RenderFrame @ 0x521310 -> Render_ProcessMainSceneFrame]); the
 // behavioral semantics it applies are the ones already recorded at each leg's
@@ -65,7 +65,7 @@ public:
 	void setup(Object *sim, Object *index);
 	void set_output_channels(int channels);
 	int get_output_channels() const { return output_channels_; }
-	// Shared BY REFERENCE with the host (GameWorld mutates the hidden set in
+	// Shared BY REFERENCE with the shell (GameWorld mutates the hidden set in
 	// place): the two-bit visibility ownership seam — occlusion may keep a node
 	// hidden that the sim wants visible; the release lands on the sim's intent.
 	void set_shared_visibility_maps(const Dictionary &occlusion_hidden_ids,

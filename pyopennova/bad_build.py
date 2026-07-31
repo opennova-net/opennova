@@ -1,4 +1,4 @@
-"""Host-neutral assembly of BAD/ADM export data — the inverse of animation_build.
+"""DCC-neutral assembly of BAD/ADM export data — the inverse of animation_build.
 
 A DCC adapter (Blender or 3ds Max) walks its armature and converts each frame's
 transforms into BAD coordinate space using the host-specific helpers here; this
@@ -59,7 +59,7 @@ _S_INV_ROWS: Mat3 = ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0))
 
 
 # ---------------------------------------------------------------------------
-# Coordinate inverses (host-agnostic)
+# Coordinate inverses (DCC-agnostic)
 # ---------------------------------------------------------------------------
 
 
@@ -355,7 +355,7 @@ def assemble_clip_from_max_world(
     """Invert the 3ds Max import keying into a BadClipOut.
 
     This is the exact inverse of opennova_max.animation.apply_sampled_clips +
-    build_armature_from_bad, kept host-agnostic (no pymxs) so it is testable:
+    build_armature_from_bad, kept DCC-agnostic (no pymxs) so it is testable:
 
       * per_frame_rows[f][b]      = the rotation rows of bone b's Max node.transform
       * per_frame_node_pos[f][b]  = bone b's Max node.position (world; includes root)

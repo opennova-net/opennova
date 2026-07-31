@@ -202,7 +202,7 @@ public:
 	// The editing policies the editor used to hand-roll, as engine capabilities:
 	// the items.def-type -> entity-list table, the author-time Ground-userpoint
 	// bake [orig: sub_401A90, dfx2med.exe], and the path-consistent marker
-	// item-id policy. All geometry is mission (BMS) space; Godot hosts convert
+	// item-id policy. All geometry is mission (BMS) space; the Godot shells convert
 	// with MissionObjectPlacer's axis maps (godot_to_bms_position /
 	// ground_anchor_bms) before calling in.
 	//

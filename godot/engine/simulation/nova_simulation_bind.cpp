@@ -4,7 +4,7 @@
 using namespace novasim;
 
 // The GDScript-facing seat codes are the SAME values libs/world computes with —
-// a drifted copy here would silently corrupt every host-side seat-spec walk.
+// a drifted copy here would silently corrupt every binding-side seat-spec walk.
 static_assert(NovaSimulation::SEAT_NONE == static_cast<int>(opennova::world::SeatType::None));
 static_assert(NovaSimulation::SEAT_PASSENGER == static_cast<int>(opennova::world::SeatType::Passenger));
 static_assert(NovaSimulation::SEAT_CONTROLLER == static_cast<int>(opennova::world::SeatType::Controller));

@@ -503,7 +503,7 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
             s.range_q16 = static_cast<int64_t>(ld->falloff_u) << 16;
         }
         // Axis cull then euclidean against the layer range [orig: @ 0x5285da axis
-        // abs checks; fsqrt compare @ 0x5285e0..0x528633]. Host positions are
+        // abs checks; fsqrt compare @ 0x5285e0..0x528633]. World-space positions are
         // world floats; the Q16 boundary is the curve call, like the GDScript form
         // this replaces.
         const float range_f = static_cast<float>(s.range_q16) / 65536.0f;

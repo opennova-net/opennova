@@ -5,7 +5,7 @@ extends RefCounted
 # Holds the open mission (NovaMissionData) plus its document state (path /
 # loaded / dirty) and drives the load: parse the mission file, resolve its referenced
 # terrain + environment from the shared resource root, load them through the
-# terrain editor (read-only viewport), then run the host-agnostic
+# terrain editor (read-only viewport), then run the shell-agnostic
 # MissionObjectPlacer under the terrain editor's world root. The resolve + place
 # logic is the same piece the runtime uses (GameWorld.load_mission); this is the
 # thin editor binding around it.

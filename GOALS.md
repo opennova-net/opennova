@@ -24,11 +24,11 @@ are the ones the games actually use.
 
 ## Why Godot
 
-We chose Godot as the host. Other options were considered (SDL3 + bgfx, a custom
+We chose Godot as the shell. Other options were considered (SDL3 + bgfx, a custom
 stack), but Godot is powerful enough that rebuilding the original engine's features
 on top of it is largely a matter of mapping NovaLogic concepts onto Godot ones. It
 also gives us a mature rendering pipeline, an editor framework, and cross-platform
-packaging. The portable engine core is C++; Godot is the host that renders it and
+packaging. The portable engine core is C++; Godot is the shell that renders it and
 powers the tools.
 
 ## A deep editor

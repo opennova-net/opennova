@@ -9,12 +9,12 @@
 // Mission AUTHORING facade: the editing policies the original mission editor
 // applies when the user places or moves an entity, expressed over the
 // MissionDocument mutation API so they are a reusable engine capability (an
-// in-game editor, headless tools, ctest) instead of editor-host code.
+// in-game editor, headless tools, ctest) instead of editor-shell code.
 //
 // The geometry here is mission (BMS) space: Z-up, the same axes the .bms
 // records store. Hosts that render in another space (the Godot editor is
 // Y-up) convert positions/anchors with their own linear axis map before
-// calling in; the policies below never see host coordinates.
+// calling in; the policies below never see embedder coordinates.
 
 namespace opennova::mission::authoring {
 
@@ -95,7 +95,7 @@ bool add_path_marker_grounded(MissionDocument &doc,
                               WaypointPath *out_path = nullptr);
 
 // One row of a bulk re-ground: the entity, its NEW ground hit (mission space,
-// from the host's height sampling), and its model-local ground anchor.
+// from the embedder's height sampling), and its model-local ground anchor.
 struct RegroundRequest {
 	EntityKind kind = EntityKind::Item;
 	size_t index = 0;
@@ -110,11 +110,11 @@ struct RegroundRequest {
 // Within-epsilon rows are skipped, so a no-op terrain edit moves nothing and
 // an entity already on the new ground does not churn the document. With
 // apply = false nothing is written and the return value is the would-move
-// count — the host's "terrain changed under N objects" prompt and the apply
+// count — the embedder's "terrain changed under N objects" prompt and the apply
 // share one policy, so the count can never lie. Returns the number of
 // entities moved (or that would move). `out_moved_rows`, when non-null,
 // receives the indices into `requests` of the moved (or would-move) rows in
-// request order, so a host can update its placed world in place instead of
+// request order, so an embedder can update its placed world in place instead of
 // rebuilding it.
 size_t reground_entities(MissionDocument &doc,
                          const RegroundRequest *requests,

@@ -433,7 +433,7 @@ Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
 
 // The reference distance's retail default, 1024.0 in 16.16. Terrain init may
 // lower it to 768.0 by adapter caps, but the session authority is forced back
-// to the default — the host analog for a modern renderer is the default.
+// to the default — the reimpl analog for a modern renderer is the default.
 // [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init @ 0x60fc9a/0x60fca3]
 inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
 
@@ -494,7 +494,7 @@ TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
 
 // The tile-overlay combine runs TEXTURE x DIFFUSE(HALF) under MODULATE2X, so
-// a single-multiply host shader consumes 2*HALF/255 per channel — 254/255 at
+// a single-multiply reimpl shader consumes 2*HALF/255 per channel — 254/255 at
 // the default tint (one LSB dark; the witnessed combine is near-identity,
 // NOT exact) [orig: PolyTrn_RenderTile @ 0x60df0d, combine pass 0x631].
 Rgb tile_overlay_tint_factor(const TerrainTint &tint);

@@ -53,7 +53,7 @@ public:
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override;
 
     // The post-mission pass: ONE whole-list sweep over the PostMission-flag
-    // entries, called by the host exactly once per transition — retail invokes
+    // entries, called by the embedder exactly once per transition — retail invokes
     // it from mission teardown and the SP round restart, never periodically
     // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; callers
     // Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]

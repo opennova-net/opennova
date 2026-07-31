@@ -4,7 +4,7 @@ extends Control
 ## Read-only visual preview of a hudpos.def layout for the ONED HUD workspace.
 ##
 ## Draws each HUD element at its hudpos design-space position (scaled to this
-## control's rect via the shared HudLayout) using the host-neutral HUD helpers and
+## control's rect via the shared HudLayout) using the shell-neutral HUD helpers and
 ## stubbed live values. Real element art (HUD frame, stance frame) is loaded
 ## best-effort from the mounted VFS; missing art degrades to labeled placeholder
 ## boxes so the layout is always legible. The model is the witnessed original —

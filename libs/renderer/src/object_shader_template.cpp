@@ -184,7 +184,7 @@ std::string compose_uniforms(ObjectShaderKey key) {
 
 	// The gamma-space output convention (D-RMAT-7): the witnessed math above
 	// runs on raw gamma-encoded values like the original device; this exact
-	// inverse of the host's sRGB-encoding blit makes the displayed byte equal
+	// inverse of the reimpl's sRGB-encoding blit makes the displayed byte equal
 	// the computed gamma-space byte. Body identical to
 	// godot/shaders/nova_color.gdshaderinc (the witness lives there and in
 	// render-material-re.md; the composer embeds it so generated shaders stay
@@ -314,7 +314,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 		//  Render_LightScaleRGB @ 0x8409f4].
 		f += "\tlit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	} else if (family == ObjectShaderFamily::Flag) {
-		// Two-sided cloth: light the camera-facing side (the host form of the
+		// Two-sided cloth: light the camera-facing side (the reimpl form of the
 		// cull-none FF draw); the lighting model is the standard FF combine.
 		f += "\tvec3 nfacing = surface_normal;\n";
 		f += "\tif (dot(view_dir, geom_normal) < 0.0) nfacing = -nfacing;\n";
@@ -372,7 +372,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "\t\tlit = mix(u_fog_color, lit, fog_visibility);\n";
 	f += "\t}\n";
 	// Gamma-space output (D-RMAT-7): `lit` is the witnessed gamma-space result;
-	// encode it so the host blit displays exactly those bytes.
+	// encode it so the reimpl blit displays exactly those bytes.
 	f += "\tALBEDO = nova_gamma_to_linear(lit);\n";
 	if (needs_alpha) {
 		f += "\tALPHA = clamp(alpha, 0.0, 1.0);\n";

@@ -409,7 +409,7 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
         terrain_clear = true; // both indoors: no heightfield test [orig: @ 0x53b0a0]
     }
     if (!terrain_clear && (terrain == nullptr || !terrain->valid())) {
-        terrain_clear = true; // hostless terrain: nothing to block (host seam)
+        terrain_clear = true; // unwired terrain: nothing to block (embedder seam)
     }
     if (!terrain_clear) {
         if (le == nullptr || se == nullptr) {

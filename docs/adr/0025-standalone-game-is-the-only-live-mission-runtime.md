@@ -1,7 +1,7 @@
 # ADR 0025: the standalone game is ONED's only live mission runtime
 
 - **Status**: accepted (2026-07-29)
-- **Supersedes/updates**: supersedes the embedded editor-host, self-tick,
+- **Supersedes/updates**: supersedes the embedded editor-preview, self-tick,
   editor Play/Stop, and rewind consequences of
   [ADR 0006](0006-unified-mission-runtime-present-pass.md). ADR 0006's
   consolidated game-side runtime, present sequence, and entity index remain
@@ -11,7 +11,7 @@
 
 ONED historically offered embedded mission simulation and later a
 play-in-editor local-player session. The editor toolbar also launched the game.
-Even when both hosts reused `MissionRuntime`, `LocalPlayerHost`, and the debug
+Even when both products reused `MissionRuntime`, `LocalPlayerHost`, and the debug
 overlay, they entered different scene trees and owned different transport,
 input, mouse, pause, and teardown state. Testing inside ONED therefore was not
 literally the same operation as running the game.
@@ -24,10 +24,10 @@ and state machinery that the engine itself does not need.
 ## Decision
 
 1. **ONED has no PIE or in-place mission simulation.** It does not create a
-   `GameWorld`, drive `MissionRuntime`, or host a local player for live mission
+   `GameWorld`, drive `MissionRuntime`, or run a local player for live mission
    testing. Authoring previews may still reuse runtime nodes, public engine
    functions, and sampler seams, but those previews are not gameplay.
-2. **`MainGame` / `GameWorld` is the sole live mission host.** The local
+2. **`MainGame` / `GameWorld` is the sole live mission runtime.** The local
    player, mission tick, networking, presentation sequence, audio, HUD, F3
    debug UI, and runtime automation all use the standalone game's normal
    lifecycle.
@@ -57,8 +57,8 @@ and state machinery that the engine itself does not need.
 ## Consequences
 
 - Mission testing, F3 diagnostics, player input, pause/teardown behavior, and
-  runtime automation cannot drift between an editor host and a game host;
-  there is only the game host.
+  runtime automation cannot drift between an editor-embedded runtime and the standalone game;
+  there is only the standalone game.
 - F6 retains the useful "current scene" workflow without inventing an
   in-memory mission format or state bridge. Its saved, top-level loose-file
   requirement is deliberate and visible.

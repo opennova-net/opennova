@@ -1,4 +1,4 @@
-"""Host-agnostic backend protocol for the Qt importer."""
+"""DCC-agnostic backend protocol for the Qt importer."""
 from __future__ import annotations
 
 from dataclasses import dataclass

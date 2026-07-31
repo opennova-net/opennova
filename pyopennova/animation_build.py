@@ -1,4 +1,4 @@
-"""Host-neutral BAD animation sampling.
+"""DCC-neutral BAD animation sampling.
 
 This module contains the BAD/ADM frame math shared by DCC importers.  It
 intentionally uses only plain tuples and Python math so it can run in Blender,
@@ -74,7 +74,7 @@ def sample_bad_clip(
     is_reset: bool = False,
     world_rot_corrections: Sequence[Quat] | None = None,
 ) -> SampledClip:
-    """Sample one parsed BAD file into host-neutral frame data."""
+    """Sample one parsed BAD file into DCC-neutral frame data."""
 
     frame_count = max(0, int(getattr(bad_file, "frame_count", 0)))
     bad_flags = int(getattr(bad_file, "flags", 0) if flags is None else flags)

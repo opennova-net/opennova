@@ -57,7 +57,7 @@ struct ItemSeatSpec {
     bool mount_config_valid = false;
     int32_t mount_config = 0;
     std::vector<world::Seat> seats;
-    // "armory*" userpoint locals (host feeds them only for items.def Armory-attrib
+    // "armory*" userpoint locals (the embedder feeds them only for items.def Armory-attrib
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
     std::vector<world::Vec3> armory_points;
     std::string primary_weapon;

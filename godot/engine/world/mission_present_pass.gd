@@ -23,7 +23,7 @@ extends RefCounted
 #    PF_BODY_ANIM_SLOT remains the coarse fallback for non-infantry/compat nodes.
 #
 # Targets resolve through ONE shared index (MissionEntityRegistry.resolve: bms_id primary, (kind,index)
-# fallback). Host-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
+# fallback). Shell-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
 # The per-leg behavioral semantics and their [orig] witnesses are documented at the native walk
 # (nova_present_applier.cpp) — this facade owns wiring, options, and the duck-typed sim queries.
 

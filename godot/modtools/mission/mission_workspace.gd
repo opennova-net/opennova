@@ -3,7 +3,7 @@ extends EditorWorkspace
 
 # Mission workspace: create or open a .bms/.mis mission and author its world. The mission's header
 # selects the terrain + environment, which load into the shared terrain viewport, and its placed
-# objects are instanced under the terrain world root by the host-agnostic MissionObjectPlacer.
+# objects are instanced under the terrain world root by the shell-agnostic MissionObjectPlacer.
 # New Mission builds an empty mission on the currently-loaded terrain; from there objects, zones,
 # waypoints, and scripting are editable (with undo/redo + Save / Save As).
 #

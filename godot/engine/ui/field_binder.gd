@@ -1,6 +1,6 @@
 class_name FieldBinder
 extends RefCounted
-## Lives in engine/ui (not modtools): host-neutral by contract, so both the
+## Lives in engine/ui (not modtools): shell-neutral by contract, so both the
 ## game's debug overlay and editor inspectors can use it.
 ## Declarative inspector field binding. Each bind_*(control, getter, setter) pairs
 ## a control with a getter(info_dict)->value (read from the model snapshot) and a
@@ -126,7 +126,7 @@ func bind_option(option: OptionButton, getter: Callable, setter: Callable, optio
 
 
 func bind_link(widget: Object, getter: Callable, setter: Callable) -> Object:
-	# Duck-typed link-widget contract, so this binder stays host-neutral while the
+	# Duck-typed link-widget contract, so this binder stays shell-neutral while the
 	# widget itself (e.g. the editor's ResourceRefWidget) lives with its host:
 	# the widget exposes set_value(String) / get_value() and a value_changed(String)
 	# signal, set_value MUST NOT emit value_changed, and the widget owns its own

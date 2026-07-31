@@ -12,8 +12,8 @@ easier to relay than to rediscover.
   threedi, mission, wac, world, novaworld, npwire, audio, pff, vfs, ...).
   Godot-agnostic — no Godot types ever.
   Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
-- `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
-  plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
+- `godot/` — the Godot 4.6.1 project: `engine/` (GDExtension C++ glue, `Nova*` classes,
+  plus the shared shell-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
   `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces), `game/` (the
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
@@ -80,7 +80,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   "implement X" (the HUD, a weapon, an effect) is a request to first understand how the
   original engine did X — its behavior AND its look — via the `engine-research`/`grill-ida`
   skills, then port that; it is never a request to invent an X. Excluded: CRT/OS/platform
-  primitives (strcpy/sprintf, D3D, file I/O) — use standard or host equivalents. Engine-wide
+  primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - Never carry raw original bytes through a writer to make a parity test pass — writers

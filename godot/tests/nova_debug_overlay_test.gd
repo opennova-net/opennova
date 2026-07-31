@@ -1319,7 +1319,7 @@ func after_all() -> void:
 # --- Particles tab (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
 
 func test_particles_page_toggles_ride_the_option_registry() -> void:
-	# Same host-neutral contract as every registry toggle: the checkboxes only
+	# Same shell-neutral contract as every registry toggle: the checkboxes only
 	# emit intent; the host hides the effect world / builds the box view. All
 	# access rides stable node names (ADR 0018 — no private pokes).
 	var overlay := _make_overlay()

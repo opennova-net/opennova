@@ -1,4 +1,4 @@
-"""Host-agnostic PySide6 importer dialog."""
+"""DCC-agnostic PySide6 importer dialog."""
 from __future__ import annotations
 
 import logging

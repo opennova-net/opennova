@@ -5,7 +5,7 @@ Allows pointing at a game install directory containing .pff archives instead of
 requiring pre-extracted assets. Loose files still work too.
 
 Thin wrapper over the engine-faithful native VFS (libs/vfs): mount precedence and
-SCR/BFC1 decoding happen in C, so the importer and the Godot host resolve
+SCR/BFC1 decoding happen in C, so the importer and the Godot runtime resolve
 byte-identical assets. Since the C FFI parsers take file paths (not buffers),
 resolved files are materialized to a temporary directory.
 """
@@ -121,7 +121,7 @@ class AssetResolver:
     ) -> str | None:
         """Resolve a texture name with extension fallback.
 
-        The returned path is for host/DCC loading. The authored texture name
+        The returned path is for DCC-side loading. The authored texture name
         remains owned by the material descriptor.
         """
         if not texture_name:

@@ -65,7 +65,7 @@ appear only where a record says so. Known scales, each owned by its record:
 
 ### Coordinates
 
-- The mission/world frame is **Z-up**; the Godot host is **Y-up**
+- The mission/world frame is **Z-up**; the Godot side is **Y-up**
   ([world-wac-ai-re.md §10](world/world-wac-ai-re.md)). Grid convention:
   "(x,y) = plane, z = up, y inverted"
   `[orig: Mission_LoadBMSAndExtractSpawnPoints @ 0x40d650]`
@@ -235,7 +235,7 @@ Research flows one way into the tree ([docs/README.md](README.md) conventions):
   witness-then-port: establish how the original did X — its behavior and its look —
   through the research path in §5 before writing any of it. The exclusion is
   CRT/OS/platform primitives (`strcpy`/`sprintf`/`memcpy`, D3D, file I/O): those map
-  to standard-library or host equivalents rather than being ported.
+  to standard-library or platform equivalents rather than being ported.
 - There is no scratch directory: `docs/` is kept pristine — the best current
   understanding of the original engine — and durable findings land there the same
   session they are witnessed; ephemeral working state stays in the session.

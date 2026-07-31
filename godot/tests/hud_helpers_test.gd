@@ -1,6 +1,6 @@
 extends GutTest
 
-# Pure-logic coverage for the host-neutral HUD view helpers (godot/engine/ui/hud_*.gd).
+# Pure-logic coverage for the shell-neutral HUD view helpers (godot/engine/ui/hud_*.gd).
 # Rendering is validated visually in the ONED preview / runtime; here we lock the math.
 
 

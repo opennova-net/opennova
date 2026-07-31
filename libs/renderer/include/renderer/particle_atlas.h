@@ -1,7 +1,7 @@
 #pragma once
 
 // Portable retail particle frame registration and atlas compilation. This is
-// the seam between host-loaded RGBA images and a host texture uploader: callers
+// the seam between embedder-loaded RGBA images and an embedder texture uploader: callers
 // provide raw frames and receive stable entry identities, exact UV placements,
 // and fully preprocessed page pixels without depending on Godot.
 
@@ -90,7 +90,7 @@ struct ParticleAtlasBuild {
 //
 // Registration is first-win. Re-registering an equivalent name and exact type
 // returns the original id and does not replace its spelling or pixels. build()
-// is value-returning and repeatable; host upload state remains outside.
+// is value-returning and repeatable; embedder upload state remains outside.
 class ParticleAtlasBuilder {
 public:
 	ParticleAtlasEntryId register_frame(std::string name, std::uint8_t type,

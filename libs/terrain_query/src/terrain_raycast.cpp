@@ -55,7 +55,7 @@ inline int32_t resolve_refine_height(const TerrainRaycastSampler &sampler,
 // [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80] retail returns 0 = HIT,
 // 1 = CLEAR; ported as bool hit. Retail's null-atlas early-out (no terrain
 // loaded -> return HIT without writing the hit out [orig: @ 0x60ccf7]) is not
-// ported: data presence lives behind the sampler seam, so a host without
+// ported: data presence lives behind the sampler seam, so an embedder without
 // terrain decides its own answer before calling.
 bool terrain_raycast_march(const TerrainRaycastSampler &sampler,
                            const int32_t start[3], const int32_t end[3],

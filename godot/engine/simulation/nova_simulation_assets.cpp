@@ -1,4 +1,4 @@
-// NovaSimulation — host-side asset resolution: infantry anim maps (.adm),
+// NovaSimulation — shell-side asset resolution: infantry anim maps (.adm),
 // item traits/weapons from the item database, collision instances + section
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/nova_simulation_internal.h"
@@ -67,7 +67,7 @@ void NovaSimulation::resolve_new_infantry_adm_ids() {
 }
 
 // Per-entity .adm resolution: ground each soldier off its OWN model's clip, not the shared
-// default set (adm_id 0). Retain the host inputs because multiplayer players are spawned
+// default set (adm_id 0). Retain the shell inputs because multiplayer players are spawned
 // after this mission-load sweep; the step/spawn hooks above the world layer resolve each
 // later AiSystem entry exactly once.
 void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_resource_root,

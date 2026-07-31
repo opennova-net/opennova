@@ -1,6 +1,6 @@
 """Halfspace-intersection convex-hull builder for collision volumes.
 
-Host-agnostic: takes and returns plain tuples. DCC wrappers convert to
+DCC-agnostic: takes and returns plain tuples. DCC wrappers convert to
 mathutils.Vector / pymxs Point3 at the call site.
 """
 from __future__ import annotations

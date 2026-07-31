@@ -9,7 +9,7 @@ extends Node
 # admission/deploy/loss observer, the session-loss latch, the ESC aborts, and
 # NovaWorld gate registration for a browsable listen host.
 #
-# Engine-side and host-neutral: no menu/env knowledge lives here (the shell's
+# Engine-side and shell-neutral: no menu/env knowledge lives here (the shell's
 # NetSessionController owns the entries; MainGame owns presentation). The
 # session signals stay on GameWorld — the shell contract pins them there — so
 # this drive emits them THROUGH its world reference

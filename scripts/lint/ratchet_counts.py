@@ -84,7 +84,7 @@ LIBS_PRINT = re.compile(
 
 def count_libs_stdout_prints() -> int:
     """Console writes inside libs/ (W1-3): libraries route diagnostics through
-    the io/log.h sink and stay silent by default — a host installs the sink.
+    the io/log.h sink and stay silent by default — the embedder installs the sink.
     FILE*-parameter writers (fprintf(fp, ...)) are deliberately not matched."""
     count = 0
     libs = REPO / "libs"

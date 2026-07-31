@@ -226,7 +226,7 @@ void write_mis_events(const bms::File &file, std::string &out) {
 	}
 }
 
-// `base_height` (optional) is a host-sampled terrain height under the entity, 16.16 fixed-point.
+// `base_height` (optional) is an editor-sampled terrain height under the entity, 16.16 fixed-point.
 // When provided it overrides entity.mis_extra_bheight in the emitted text; the entity's absolute
 // z is written either way and height_lock declares it absolute, so the original editor recovers
 // the terrain-relative offset as z - extra_bheight
@@ -315,7 +315,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out,
 	append_line(out);
 }
 
-// `base_heights` (optional): host-sampled terrain heights (16.16 fixed-point), FLAT and in WRITE
+// `base_heights` (optional): editor-sampled terrain heights (16.16 fixed-point), FLAT and in WRITE
 // ORDER — items, buildings, markers, organics — one per entity; entries beyond the vector fall
 // back to the entity's own mis_extra_bheight.
 void write_mis_items(const bms::File &file, std::string &out, const std::vector<int32_t> *base_heights) {

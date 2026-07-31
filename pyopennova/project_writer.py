@@ -1,4 +1,4 @@
-"""Host-neutral OpenNova project file writers."""
+"""DCC-neutral OpenNova project file writers."""
 from __future__ import annotations
 
 import logging

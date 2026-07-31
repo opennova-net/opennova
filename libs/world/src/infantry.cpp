@@ -993,7 +993,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                 ? ent->death_anim_state
                                 : compute_death_anim_state(0, 0, death_cause::kGeneric);
             if (ent != nullptr) ent->death_anim_state = 0;
-            // Stripped host .adm sets may lack the selected clip; keep the pre-P1c
+            // Stripped embedder .adm sets may lack the selected clip; keep the pre-P1c
             // stand-in ladder (torso-forward, then death_fire) rather than a T-pose.
             if (root_motion != nullptr && !root_motion->has_clip(inf.adm_id, death)) {
                 const int torso = anim_state::kDeathBulletBase + 4;
@@ -1374,7 +1374,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // chute flag 0x20 is unmodeled, so the "chute closed" leg always
             // applies): profile slot 44, refired every body tick — the engine's
             // finite channel pool folds the refires into a continuous rush; our
-            // host instead declines to restart the set while its voice still
+            // reimpl instead declines to restart the set while its voice still
             // plays. The chute family (slots 41-43 + the vel brake @0x4b7bfd)
             // rides the parachute slice. [orig: @0x4b7c4c-0x4b7c74; vel gate
             // < -0x3000 @0x4b7c52; the smoothTargetPos-delta gate skips
@@ -1417,7 +1417,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 //   tick's rotated root step carries into the slide velocity —
                 //   running momentum off a ledge — pending clears, and 31 stamps
                 //   STRAIGHT (47 while parachuting rides the unmodeled Flags 0x20;
-                //   the has_clip guard is a host guard the original lacks).
+                //   the has_clip guard is a reimpl guard the original lacks).
                 //   [orig: @0x4b7e17-0x4b7e73]
                 //   org1 (NPC): NO carry, and NO stamp on a plain fall — the 47/31
                 //   availability ladder runs ONLY while parachuting (`test al,20h`
@@ -1924,11 +1924,11 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     if ((ev & 0x8u) != 0) inf.fire_secondary_latch = true;
     if (!fire_primary && !fire_c && !inf.fire_secondary_latch) return;
 
-    // The muzzle origin: the host-fed posed gun-flash userpoint when FRESH (the
+    // The muzzle origin: the embedder-fed posed gun-flash userpoint when FRESH (the
     // D-AI-6 seam — [orig: Entity_GetAttachmentWorldPosition @0x4b2670 transforms
     // the fire-bone userpoint's local position by the ANIMATED bone matrix, called
     // from the anim-event fire block @0x4bf326..0x4bf425]); the chest-lift stand-in
-    // remains the fallback (no host pose pushed yet — headless ctests, the spawn
+    // remains the fallback (no embedder pose pushed yet — headless ctests, the spawn
     // frame, a render-skipped entity). Freshness window 4 ticks: the present layer
     // stamps every rendered frame, so a stale stamp means the pose stopped flowing.
     int32_t origin[3] = {e.pos[0], e.pos[1], e.pos[2] + 0xE666};
@@ -2123,7 +2123,7 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     infantry_weapon_channel(e, world, logic_tick);
 
     // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
-    // .adm loop rate when the host has anim data; without it the phase self-advances on a
+    // .adm loop rate when the embedder has anim data; without it the phase self-advances on a
     // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
     // anim data rate). Root motion output is discarded: the pose is wire-owned.
     if (root_motion != nullptr) {

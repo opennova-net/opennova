@@ -1,4 +1,4 @@
-"""Standalone import backends for the host-agnostic Qt importer."""
+"""Standalone import backends for the DCC-agnostic Qt importer."""
 from __future__ import annotations
 
 import logging
