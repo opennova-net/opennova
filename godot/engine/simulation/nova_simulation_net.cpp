@@ -319,8 +319,10 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 			const opennova::world::VehicleTraits *traits =
 					world_->vehicle_traits.get(local->item_id);
 			if (traits != nullptr &&
-					traits->family ==
-							opennova::world::VehicleFamily::Watercraft) {
+					(traits->family ==
+							opennova::world::VehicleFamily::Watercraft ||
+					 traits->family ==
+							opennova::world::VehicleFamily::Ground)) {
 				es.net_world_mover = true;
 				opennova::world::Entity::VehicleMotorState &m = local->veh;
 				if (es.compact_revision != m.net_seen_revision) {

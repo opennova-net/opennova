@@ -425,9 +425,15 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             // the mirrored speed/steer registers — the client-executed subset
             // of the cbot family mover [orig: @0x48D480]. Other families keep
             // the row-side chase until their prediction legs land (D-NET-161).
-            if (traits->family == VehicleFamily::Watercraft &&
-                    veh->veh.net_predicted && veh->health > 0) {
+            if (veh->veh.net_predicted && veh->health > 0 &&
+                    traits->family == VehicleFamily::Watercraft) {
                 watercraft_client_tick(world, *veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    traits->family == VehicleFamily::Ground) {
+                // Runs the motor core, whose tail already ticks the movement
+                // sound — skip the separate sound call below for this row.
+                ground_client_tick(world, *veh, *traits);
+                continue;
             }
             update_ground_vehicle_sound(world, *veh, *traits,
                                         /*wrecked=*/veh->health <= 0,

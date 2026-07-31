@@ -145,6 +145,11 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
 // per world tick on a non-authority world for staged pool-1 Watercraft entities.
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
+// The GROUND-family prediction leg: shared chase + mirrored registers driving
+// tick_vehicle_motor's core with the input block bypassed (§5.38e spec part F).
+// Also the interim stand-in for cbik until the bike mover is witnessed.
+void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_VEHICLE_MOTOR_H

@@ -435,19 +435,13 @@ inline int16_t watercraft_chase_bucket(int32_t dist) {
 
 } // namespace
 
-// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
-// remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.]
-void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+// The shared per-record vehicle chase (the §5.38e template) applied to a WORLD
+// entity's live pose — the interp block every family mover runs before its
+// physics [orig: @0x48DB6B..0x48DDD4 (watercraft instance); same constants in
+// every family]. Steps the registry position/heading and owns the stale-record
+// command coast-down.
+static void vehicle_client_chase(Entity &veh) {
     Entity::VehicleMotorState &m = veh.veh;
-    if (!m.net_predicted) return;
-    if (!m.yaw_seeded) {
-        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
-        m.yaw_seeded = true;
-    }
-
-    // ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
-    // Live pose in 16.16 for the chase math; the float registry position is the
-    // storage (sub-mm float error at mission scales).
     int32_t px = to_fixed(veh.position.x);
     int32_t py = to_fixed(veh.position.y);
     int32_t pz = to_fixed(veh.position.z);
@@ -509,6 +503,27 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
             m.net_interp_progress = static_cast<int16_t>(progress + 1);
         }
     }
+
+    veh.position.x = static_cast<float>(from_fixed(px));
+    veh.position.y = static_cast<float>(from_fixed(py));
+    veh.position.z = static_cast<float>(from_fixed(pz));
+}
+
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
+// remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.]
+void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.net_predicted) return;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        m.yaw_seeded = true;
+    }
+
+    // ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
+    vehicle_client_chase(veh);
+    int32_t px = to_fixed(veh.position.x);
+    int32_t py = to_fixed(veh.position.y);
+    int32_t pz = to_fixed(veh.position.z);
 
     // ---- 2. Register mirror: the non-driver machine adopts the received
     // speed/steer as its own drive command, every tick
@@ -662,6 +677,29 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     veh.position.z = static_cast<float>(from_fixed(pz));
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+}
+
+// The GROUND-family prediction leg (net-re §5.38e B-facet): the client subset of
+// Entity_UpdateVehiclePhysics is structurally the authority drive core minus the
+// input block [spec part F, decompile-level] — run the shared chase, adopt the
+// mirrored registers [orig: [136]=[177]/[132]=[179] @ the family mirror], and
+// drive tick_vehicle_motor's core with the input block bypassed
+// (player_control=false leaves the registers untouched and skips the occupant
+// resolve; the handbrake/aim-lock/tire-slip legs inherit their existing
+// D-NET-161 deferrals).
+void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.net_predicted) return;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        m.yaw_seeded = true;
+    }
+    vehicle_client_chase(veh);
+    m.cmd_speed = m.net_recv_speed;
+    m.steer_target_bam = m.net_recv_steer_bam;
+    VehicleTraits core = traits;
+    core.player_control = false; // bypass the occupant/input block, keep the core
+    tick_vehicle_motor(world, veh, core, nullptr);
 }
 
 } // namespace opennova::world

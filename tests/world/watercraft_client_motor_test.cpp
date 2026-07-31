@@ -168,11 +168,56 @@ bool run_steer_follows_received_register() {
 	              "the hull turns toward the received steer register");
 }
 
+bool run_ground_vehicle_glides() {
+	// The GROUND prediction leg: the shared chase + mirrored registers driving
+	// tick_vehicle_motor's core (input block bypassed). A 15.6 m/s buggy —
+	// beyond the chase-only sustain — must glide like the boat does.
+	Rig r;
+	make_rig(r);
+	r.traits.family = w::VehicleFamily::Ground;
+	r.traits.player_speed = 20972; // ~20 m/s ground max
+	r.traits.acceleration = 512;   // per-tick speed clamp: cruise in ~32 ticks
+	r.traits.deceleration = 512;   // (the predicted twin ramps like retail's)
+	r.world.env.water_z = 0; // dry land
+	w::Entity *veh = r.world.registry.get(r.boat);
+	if (!expect(veh != nullptr, "vehicle spawned")) return false;
+
+	const int32_t step_fx = 16384;
+	const int32_t x0 = w::to_fixed(100.0f);
+	const int32_t y0 = w::to_fixed(200.0f);
+	const int32_t z0 = w::to_fixed(10.0f);
+	const int kWarm = 96, kMeasure = 96, kGap = 8;
+	std::vector<int32_t> presented;
+	for (int t = 0; t < kWarm + kMeasure; ++t) {
+		if (t % kGap == 0) {
+			stage(*veh, x0 + step_fx * t, y0, z0, 0, step_fx, 0);
+		}
+		w::ground_client_tick(r.world, *veh, r.traits);
+		presented.push_back(w::to_fixed(veh->position.x));
+	}
+	int32_t max_step = 0;
+	int stalled = 0;
+	for (int t = kWarm; t < kWarm + kMeasure; ++t) {
+		const int32_t d = std::abs(presented[t] - presented[t - 1]);
+		if (d > max_step) max_step = d;
+		if (d < step_fx / 4) ++stalled;
+	}
+	std::fprintf(stderr, "[ground-fast] true step=%d  max step=%d  stalled=%d/%d\n",
+	             step_fx, max_step, stalled, kMeasure);
+	bool ok = true;
+	ok &= expect(max_step <= 2 * step_fx + 1024,
+	             "a 15.6 m/s ground vehicle glides on the prediction leg");
+	ok &= expect(stalled * 4 <= kMeasure,
+	             "the predicted ground vehicle keeps moving between records");
+	return ok;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok &= run_fast_boat_glides();
+	ok &= run_ground_vehicle_glides();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();
 	if (!ok) {
