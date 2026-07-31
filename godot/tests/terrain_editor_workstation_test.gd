@@ -58,6 +58,36 @@ class DirtyTerrainStub:
 		return ""
 
 
+# Records begin_export_terrain calls: pins the export-confirm to the workspace
+# that opened the flavor dialog (never the tab active at confirmation).
+class ExportRecordingTerrainStub:
+	extends Node
+	var exports: Array = []  # [dir_path, flavor] per call
+	var is_dirty := false  # read by the workspace's unsaved-state checks
+
+	func is_export_running() -> bool:
+		return false
+
+	func set_viewport_active(_active: bool, _edit_input: bool) -> void:
+		pass
+
+	func begin_export_terrain(dir_path: String, flavor: int) -> Error:
+		exports.append([dir_path, flavor])
+		return OK
+
+	func get_last_export_dir() -> String:
+		return ""
+
+	func has_current_project_dir() -> bool:
+		return false
+
+	func get_current_project_dir() -> String:
+		return ""
+
+	func get_last_save_dir() -> String:
+		return ""
+
+
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
@@ -1253,6 +1283,42 @@ func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
+func test_export_confirm_targets_the_initiating_workspace_after_tab_switch() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub: ExportRecordingTerrainStub = autofree(ExportRecordingTerrainStub.new())
+	# Bind only the terrain workspace — activating it would push the stub into
+	# the typed asset dock/inspector set_editor calls (the dirty-open precedent).
+	var ws: EditorWorkspace = workstation._get_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	ws.set_terrain_editor(stub)
+
+	workstation._save_export.on_export_pressed(ws)
+	var file_dialog: FileDialog = workstation._save_export._ensure_file_dialogs().get_dialog()
+	assert_not_null(file_dialog, "Export should route through the directory dialog.")
+	if file_dialog == null:
+		return
+	# A real pick closes the dialog before the signal; mirror that order so the
+	# flavor dialog can take the exclusive-window slot.
+	file_dialog.hide()
+	file_dialog.dir_selected.emit("C:/Exports/Initiator")
+
+	# The tab switch mid-dialog: the confirm below must still export Terrain.
+	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
+	var dialog = workstation.find_child("ExportFlavorDialog", true, false)
+	assert_not_null(dialog, "The flavor dialog is up while another tab is active.")
+	if dialog == null:
+		return
+	dialog.hide()
+	dialog.confirmed.emit()
+
+	assert_eq(stub.exports.size(), 1,
+		"exactly one export runs, on the workspace that opened the dialog")
+	if stub.exports.size() == 1:
+		assert_eq(stub.exports[0][0], "C:/Exports/Initiator",
+			"the export receives the directory picked from the initiating workspace")
+		assert_eq(stub.exports[0][1], ExportFlavorDialog.FLAVOR_DFX_JO,
+			"the export receives the dialog's selected flavor")
+
+
 func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:
 	var dock = add_child_autofree(TerrainEditorAssetDockScene.instantiate())
 
@@ -1976,6 +2042,27 @@ func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	await get_tree().process_frame
 	assert_true(right_split.visible, "a dock-using workspace shows the split")
+
+
+func test_wire_browser_pane_twice_stays_single_wired() -> void:
+	# Same persisted-state guard as the pane tests above.
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	await get_tree().process_frame
+
+	# _ready already wired the pane once; a re-wire must not push a
+	# duplicate-connect engine error (the connect is guarded like the split's).
+	workstation._layout.wire_browser_pane()
+	assert_engine_error_count(0,
+		"re-wiring the browser pane must not double-connect the toggle")
+
+	var toggle := workstation.get_node("%BrowserToggleButton") as Button
+	var pane_host := workstation.get_node("%ResourceBrowserPaneHost") as Control
+	toggle.button_pressed = true
+	assert_true(pane_host.visible, "one toggle-on shows the pane once")
+	toggle.button_pressed = false
+	assert_false(pane_host.visible, "one toggle-off hides it again")
 
 
 # --- Detachable panels (B6) ---

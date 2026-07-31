@@ -50,12 +50,12 @@ func on_world_teardown() -> void:
 # Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
 # inherit from the editor), skip the menu and dial the replay tool / server
 # directly — each instance gets slotted into a role on connect. True when the
-# boot was consumed.
+# session started; a rejected session returns false so the shell's normal boot
+# continues and restores the front-end.
 func maybe_launch_replay_from_env() -> bool:
 	if OS.get_environment("NW_REPLAY").is_empty():
 		return false
-	_enter_net_session()
-	return true
+	return _enter_net_session()
 
 
 # Co-op LAN demo hooks. These remain useful for deterministic smoke runs even
@@ -258,8 +258,9 @@ func _resolve_default_mission() -> String:
 # Spectate a net session (no menu). The source (replay tool or a real server) is
 # at NW_REPLAY="host:port"; the map name comes off the wire, so only the resource
 # dir is needed: NW_REPLAY_DIR (else the persisted one), NW_REPLAY_LOOSE for a flat
-# extract, and NW_REPLAY_ITEMS as an optional items.def override.
-func _enter_net_session() -> void:
+# extract, and NW_REPLAY_ITEMS as an optional items.def override. False when the
+# session was rejected (the shell has been rolled back to the menu).
+func _enter_net_session() -> bool:
 	var ep := OS.get_environment("NW_REPLAY")
 	var parts := ep.split(":")
 	_shell.enter_net_world()
@@ -273,7 +274,8 @@ func _enter_net_session() -> void:
 	})
 	if err != OK:
 		push_warning("NetSessionController: net session failed to start (%d)" % err)
-		return
+		_shell.abort_net_session(error_string(err))
+		return false
 	# Kill feed over the spectator: reads the same decoded event stream NetEventView
 	# draws in 3D, posting kill / objective lines to a top-right HUD feed.
 	if _net_killfeed == null:
@@ -281,6 +283,7 @@ func _enter_net_session() -> void:
 		_net_killfeed.name = "NetKillFeed"
 		_hud_parent.add_child(_net_killfeed)
 	_net_killfeed.set_client(_world.get_net_client())
+	return true
 
 
 # --- Shared lookups --------------------------------------------------------------

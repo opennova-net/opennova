@@ -150,6 +150,17 @@ func enter_net_world() -> void:
 		_world.load_failed.connect(_on_world_load_failed)
 
 
+## Roll a rejected net-session entry back to the front-end. The world's null
+## legs emit load_failed before load_net_session returns, so the synchronous
+## rollback has usually already run — this is the deterministic backstop for
+## any error leg that returns without emitting, idempotent via the same guard
+## as _on_session_lost.
+func abort_net_session(reason: String) -> void:
+	if _state == State.MENU and not _world_load_pending:
+		return
+	_abort_to_menu("net session entry failed", reason)
+
+
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
@@ -216,6 +227,11 @@ func _ready() -> void:
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if _net.maybe_launch_replay_from_env():
 		return
+	# A rejected replay boot ran the world->menu rollback re-entrantly above; its
+	# rootless leg raises the folder picker (GUI runs). The normal boot below owns
+	# the front-end from here — it mounts the configured dir or re-raises the
+	# picker itself — so dismiss the stale one.
+	_cleanup_picker()
 	# Editor-managed runs pass an exact process-local directory. It wins over
 	# persisted settings but is never written back.
 	var dir := NovaLaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())

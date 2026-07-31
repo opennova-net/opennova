@@ -65,6 +65,7 @@ end
 """
 const ISOLATED_ENV := [
 	"NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
+	"NW_REPLAY_DIR", "NW_REPLAY_LOOSE", "NW_REPLAY_ITEMS",
 ]
 
 
@@ -337,6 +338,31 @@ func test_session_loss_with_no_mounted_root_returns_shell_to_menu_state() -> voi
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"a rootless teardown lands on the front-end state, not WORLD")
 	assert_false(_shell.is_world_loading())
+
+
+func test_rejected_replay_boot_falls_through_to_the_menu_front_end() -> void:
+	# A replay boot whose session is rejected before connecting (here: the replay
+	# dir cannot mount) must not consume the boot: the shell falls through to the
+	# normal front-end — menu visible on main.mnu, world and HUD hidden, no kill
+	# feed — instead of ending on a blank visible world with no session.
+	OS.set_environment("NW_REPLAY", "127.0.0.1:42000")
+	OS.set_environment("NW_REPLAY_DIR", OS.get_cache_dir().path_join(
+			"opennova_nonexistent_replay_%d" % Time.get_ticks_usec()))
+	_shell = await _make_shell()  # asserts the boot lands on main.mnu
+	if _shell == null:
+		return
+	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "menu",
+			"the rejected replay session leaves the shell on the front-end state")
+	assert_false(_shell.is_world_loading())
+	assert_not_null(_shell.current_resource_root(),
+			"the fall-through boot mounted the persisted dir")
+	assert_false(_shell.get_node("World").visible,
+			"the rejected session's world reveal is rolled back")
+	assert_false(_shell.get_node("HUD/FpsLabel").visible,
+			"the HUD contents hide with the menu up")
+	assert_null(_shell.get_node("HUD").get_node_or_null("NetKillFeed"),
+			"no kill feed exists for a session that never started")
 
 
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
