@@ -127,6 +127,7 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-192 | The "GSB " record is a GATED reset (frees fields + rows only when payload dword0 == 0x00010000 `@0x63d8f2`, else skipped) and undersized FLDS/SVRS records (payload < 2, `@0x63d7c2`/`@0x63da43`) skip in place — retail has no record-level error path; our dispatcher now mirrors the reset + skips | B | FIXED 2026-07-27 | PAR-NET |
 | D-NET-193 | Retail's GSB parser is an incremental HTTP callback with NO failure return (offset persists at ctx+128; XXXX returns without advancing); our `gsb_parse_response` is deliberately one-shot + bounds-checked (XXXX required, forged lengths rejected) — documented hardening on server-supplied bytes. Also notes the `%d`-signed `@RID@` splice vs our `stoul` wrap (value-preserving) | C | PERMANENT (deliberate host hardening) | PAR-NET |
 | D-NET-194 | Retail's joiner NEVER opens the mission `.bms`: `Game_StartMission @0x524360` authority-gates every mission-file leg (exists-check `@0x524751`, both `Mission_LoadBMSFile @0x40F4E0` sites `@0x524b5d`/`@0x524ffa`), and the non-authority arm builds terrain/env from the wire S2C 0x0B header (`g_BmsHeaderBlock @0xA761D0`: map basename +0x44 = env/TOD key via `Terrain_LoadEnvironmentConfig @0x610940`, env +0xDC, tile-set +0x118 → .TGA/.TSD) with world contents from the spawn stream — no map download exists or is needed (custom missions name stock assets). OUR joiner requires the local `.bms` and aborts, which is the live custom-map join blocker; one such abort also segfaulted in native teardown after the in-match hello handoff. Port = wire-driven joiner world bring-up (net-re §5.28 correction + D-NET-194) | A | OPEN (witnessed 2026-07-27) | PAR-NET |
+| D-NET-196 | Live-join remote entities skip/teleport at the wire cadence: our joiner presents every remote entity as a zero-order hold of its last decoded `ClientEntityState` row, while a retail host's per-entity 0x0A inclusion is priority/budget-subrated (measured on the `retail-vehicle-session` golden: distant moving vehicles every 20-39 frames, 340-625 ms). Retail's client hides the cadence with per-class between-update movers, all unported (net-re §5.38e, witnessed 2026-07-31): every compact read STAGES the interp target (`+0x234/238/23C` pos, `+0x240/+0x244` heading/pitch, `interpProgress +0x27C = 0` — the §5.10/§5.13/§5.14 landing columns were the write-side view) and the class mover chases the live pose one step per 62.5 Hz tick: org1 AI infantry [orig: `Entity_UpdateInfantryAI` fall-through @ 0x4b9a8c] buckets {3,4,5,8,16} + anim root motion; org2 players [orig: `Entity_UpdateInfantryPlayerBody` @ 0x4B40E0 chase @ 0x4B4470..0x4B46C0] 2D-dist buckets 6-18 (verbatim non-monotonic ladder), heading/pitch divisor 12, own-player soft reconciliation (bucket 48 moving/512 still, position only) + root motion; vehicle families [orig: `Entity_UpdateWatercraftPhysics` @ 0x48D480 et al.] shared template (speed-gated snap 0x60000/0x20000, buckets {6,8,10,15,20,25,30}, heading `(d+10)/20` over 20 ticks, starvation speed decay) PLUS physics prediction from the mirrored speed/steer drive registers on non-driver machines. Death/respawn stays a SNAP (D-NET-66); carrier composition stays per-record (D-NET-195); `entity+0x24` bit0 rides the wire as the universal mover-skip. Red loop `netsim_remote_motion_smoothness_test` (build-only until the port). Port = stage-only fold + per-class chase + the vehicle prediction leg on the joiner's client view | A (chases + staging) / B (vehicle prediction legs whose family physics is unported, D-NET-161) | OPEN (witnessed 2026-07-31) | PAR-NET |
 
 Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
 per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
@@ -781,7 +782,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 22 | 1 | 11 | 34 | 19 |
+| Net | 23 | 1 | 11 | 35 | 19 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 56 | 4 | 6 | 66 | 27 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 4 | 19 | 11 |
@@ -799,7 +800,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 3 | 0 | 2 | 5 | 1 |
-| **Total** | **105** | **14** | **30** | **149** | 110 |
+| **Total** | **106** | **14** | **30** | **150** | 110 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 

@@ -1988,6 +1988,14 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 
 **Apply-side field map (case-2 read, witnessed 2026-07-02 — several names above are decode-era
 misnomers corrected here):**
+- **CORRECTION (2026-07-31, §5.38e / D-NET-196): offs 4–9 (position) and offs 10/11 (yaw/pitch)
+  do NOT land on the live pose on the read side.** They STAGE the interp target —
+  pos → `smoothTargetPos +0x234/238/23C` (`@0x4C0FE4/EA/F0`, world space: carrier-lifted
+  `@0x4C10D4` or anchor-added `@0x4C0FB5`), yaw`<<24` → `+0x240` (`@0x4C0FD7`), pitch`<<24` →
+  `+0x244` (`@0x4C0FF6`), `interpProgress +0x27C = 0` (`@0x4C0FFC`) — and the class mover chases
+  the live pose toward it (§5.38e). Live-pose writes happen only on the respawn edge
+  (`@0x4C113C`) and the local mount/dismount echo (`@0x4C132B`). The "→ entity+4" wording in the
+  table rows above describes the WRITE-side source fields.
 - **off 12 is the MOVEMENT-INPUT byte** (entity+0x12C low), not an anim slot: remote players are
   motor-driven from replicated input (`@0x4c11ec`; consumers `Entity_UpdatePlayerInfantryMovement
   @ 0x48496d`, stance bits re-derived from the state table `@0x4c1228-0x4c1246`). Apply is
@@ -2472,6 +2480,14 @@ from the §5.11 spawn `parentHandle`, which lands at `entity+368`
 (`occupantEntity`) and carries NO transform semantics — conflating the two
 glued world vehicles to players (D-NET-195).
 
+**CORRECTION (2026-07-31, §5.38e / D-NET-196): the read's live position stores are
+CONDITIONAL snap branches** (`@ 0x460930..0x460A50` — dead-pose/first-record forms). The
+normal alive-record path STAGES: pos → `+0x234/238/23C` (`@ 0x4607D5+`), eulerZ →
+`+0x240` (`@ 0x4607F5` — the "entity+576 verbatim" above IS the staging store),
+`interpProgress +0x27C = 0`. A remote vehicle's live pose moves between records via the
+family mover's client interp chase PLUS the physics prediction off the mirrored
+speed/steer registers — see §5.38e §4.
+
 **Field labels corrected 2026-06-17 (D-NET-63); off-13 re-corrected 2026-07-02.** The
 `eulerZ/eulerY/eulerX` triple (Z pre-branch always; X/Y mounted-only) feeds
 `Math_BuildFixedPointMatrixFromEulerAngles`; the unmounted block is weaponX + the vehicle
@@ -2576,6 +2592,14 @@ The read side runs an animation-state machine through a lookup table
 entry select whether to write +696 vs +700 — and handles a special path
 through `Entity_TryAttachOrDetach` when `flagsByte & 2` flips. None of that
 affects the wire layout.
+
+**CORRECTION (2026-07-31, §5.38e / D-NET-196): the landing column above is the
+write-side source view.** The mode-2 READ stages — pos → `+0x234/238/23C`, yaw`<<24` →
+`+0x240`, `interpProgress +0x27C = 0` — and promotes the PREVIOUS staged heading to
+`targetHeading +0x1A8` before the new store (the org1 motor's heading chase runs one
+record behind the wire). Live pose is written only on the respawn edge
+(`Entity_ResetToSpawnState`). The org1 mover (`@ 0x4b9a8c` chase + anim root motion)
+moves the live pose (§5.38e).
 
 ### 5.15 Guided weapon record — per-(mode, field-group) codec
 
@@ -3876,9 +3900,11 @@ vs **H2** the host snaps and only clients interpolate — decisively in favour o
 
 The motor interpolation branch (@0x4b9a8c) is **client-only and intentionally NOT ported** — a
 deferred client-side smoothing concern (OpenNova's SP-as-listen-server host renders its own view from
-the decoded client-view, ADR 0011; no non-authority World motor exists yet). [follow-up: client-side
-smooth-target interpolation — the @0x4b9a8c math is fully witnessed above, ready to port when a
-non-authority client path exists.]
+the decoded client-view, ADR 0011; no non-authority World motor exists yet). [follow-up CLOSED
+2026-07-31: the full client-side mover architecture — per-class chases, stage-only compact applies,
+the vehicle prediction leg — is witnessed in §5.38e; the port is tracked as D-NET-196. Note §5.38e's
+class-table correction: @0x4b9a8c is the org1 (AI infantry) chase; PLAYERS chase in
+`Entity_UpdateInfantryPlayerBody @ 0x4B40E0`.]
 
 #### 5.38b Joiner-side self-identification — the name-match in the S2C 0x0C organic-spawn stream (D.0 witness, 2026-06-23)
 
@@ -4289,6 +4315,124 @@ detector (cosmetic red/shake only, no `Radar_AddBlip`).
 `Health` up to max, store @0x43c2aa) run on the SPAWN/respawn paths — `Entity_ResetToSpawnState @0x4b9610`,
 `PlayerClass_InitEntity @0x4b1060`, `Server_ProcessPlayerDeath @0x517740` (xrefs) — NOT per-frame, so they
 are not part of the 0x0A loop.)
+
+#### 5.38e Client-side between-update movers — every class chases a STAGED target; compact reads never write the live pose (D-NET-196 grill, 2026-07-31)
+
+Closes the §5.38a bracketed follow-up ("ready to port when a non-authority client path
+exists") and corrects three landing-column claims (§5.10 case-2, §5.13 read side, §5.14).
+Everything here is client-side (`is_authority == 0`); the host disposition of §5.38a
+(snap, never interpolate) is unchanged.
+
+**1. The compact reads are STAGE-ONLY.** For an alive remote entity, none of the three
+compact applies writes the live pose — each stages the interp-target cluster and resets
+the progress counter, and the entity's own class mover moves the live pose one step per
+62.5 Hz tick:
+
+- Player compact (case-2 of `NetPacket_SerializePlayerState @ 0x4C09C0`): decompressed
+  position (carrier-lifted via `Entity_TransformLocalToWorld` `@ 0x4C10D4`, else anchor
+  `dword_A822E4/E8/EC` added `@ 0x4C0FB5` — the staged target is always WORLD space) →
+  `smoothTargetPos +0x234/238/23C` `@ 0x4C0FE4/EA/F0`; yaw byte `<<24` → `+0x240`
+  `@ 0x4C0FD7`; pitch byte `<<24` → `+0x244` `@ 0x4C0FF6`; `interpProgress +0x27C = 0`
+  `@ 0x4C0FFC`. `smoothTargetStage +0x248` is NOT touched. Live-pose writes happen only
+  on: the respawn edge (local `entity+0x24 & 2` set + wire alive → live `+4..+0x18`
+  snapped + `Entity_ResetToSpawnState` `@ 0x4C113C`), the LOCAL player's mount/dismount
+  echo (`Entity_TryAttachOrDetach` `@ 0x4C1317` → live pos from the staged target
+  `@ 0x4C132B`), and the wire-dead record path (skips position entirely). The §5.10
+  case-2 table's "→ entity+4" landing column described the WRITE-side source, not the
+  read landing.
+- Infantry compact (mode-2 of `NetPacket_SerializeInfantryEntityState @ 0x4C0320`): same
+  discipline — position staged `+0x234/238/23C`, yaw `<<24` staged `+0x240`,
+  `+0x27C = 0`, respawn edge snaps + `Entity_ResetToSpawnState`. One extra pipeline
+  stage: **the PREVIOUS staged heading is promoted to `targetHeading +0x1A8`** before
+  the new store — the org1 motor's heading-chase source runs one record behind the wire.
+- Vehicle compact (mode-2 of `Entity_SerializeVehicleState @ 0x460560`): position staged
+  `+0x234/238/23C` `@ 0x4607D5+`, eulerZ staged `+0x240` `@ 0x4607F5` (euler X/Y
+  `+0x244/+0x248` in the dead-pose branch), `+0x27C = 0`; conditional LIVE-snap branches
+  (`@ 0x460930..0x460A50`, dead-pose/first-record forms) are the origin of §5.13's
+  "direct to entity+4" reading.
+
+**2. One mover per class — the update-callback table `@ 0x82ABC0` reads
+`[tag u32][flags u32][callback u32]`** (earlier sessions paired each tag with the
+PRECEDING callback — wrong alignment; the semantic fit of the corrected read is
+conclusive: `envs`→EnvSoundEmitter, `ewep`→TransformAndTurret, `nade`→GrenadePhysics,
+…). The rows that matter here:
+
+| tag | mover | client interp shape |
+|---|---|---|
+| `org1` (AI infantry) | `Entity_UpdateInfantryAI @ 0x4b9910` | §5.38a chase: buckets {3,4,5,8,16} (`0x2AAA/0x4000/0x5555/0x8000`), snap > `0x20000`, deadband < `0x2000`, cap 512 |
+| `org2` (players) | **`Entity_UpdateInfantryPlayerBody @ 0x4B40E0`** — NOT the §5.38 motor | the richer chase below |
+| `cbot` (boats) | dispatch `@ 0x48EF90` → `Entity_UpdateWatercraftPhysics @ 0x48D480` | the vehicle template below |
+| `cveh`/`ctan`/`ctrn`/`catv` | dispatch stubs `@ 0x48EFC0/0x48EFB5+/0x48F060/0x48F010` → `Entity_UpdateVehiclePhysics @ 0x48AF00` or `Entity_ProcessInfantryPhysics @ 0x46E100` (by `itemDef+0x8DC`) | vehicle template |
+| `CHel` (helicopters) | `Entity_UpdateAircraftPhysics @ 0x490310` | vehicle template |
+| `cpln` (planes) | `0x45D6F0` (currently not a defined function in the IDB — bounds follow-up) | vehicle template (assumed; verify on define) |
+| `cbik` (bikes) | dispatch `@ 0x48EFF0` → `Entity_UpdatePlayerInfantryMovement @ 0x483FE0` (name is a misnomer — it is the cbike-family mover) | vehicle template |
+
+The §5.38 "simulate-vs-interpolate gate" analysis attributed the org2/player path to
+`Entity_UpdateInfantryAI` — with the corrected table, that function is the **org1**
+callback; players run the body pass. Both share the same top shape (bit0 early-return,
+`savedLivePose` recapture from the live pose every tick, gate on
+`is_authority || entity == g_local_player_entity`).
+
+**3. The org2 player chase (`@ 0x4B4470..0x4B46C0` inside `0x4B40E0`).** On a fresh
+record (`interpProgress == 0`): 3D dist > `0x20000` → SNAP (position always;
+yaw/pitch only for a non-local entity), then clear. Position deadband < `0x2AAA`
+(heading/pitch still chased). Otherwise the position step bucket `+0x27E` comes from
+the 2D horizontal distance: `<0x3000`→6, `<0x4000`→7, `<0x5000`→8, `<0x6000`→9,
+`<0x7000`→**7** (non-monotonic — verbatim in the ladder `@ 0x4B44C4..0x4B4581`, port
+as-is), `<0x8000`→8, `<0xA000`→10, `<0xC000`→12, `<0xE000`→14, `<0x10000`→16, else 18;
+authority bucket = 10; **the LOCAL player on a client gets bucket 48 when moving
+(MoveOrder bit 3) / 512 when still — the own-player soft position reconciliation
+(position only; the local heading is never chased)**. Steps: position
+`((N>>1)+d)/N` per axis re-stored into `+0x234..` (`idiv` `@ 0x4B459D/45AC/45BC`);
+heading/pitch `(d + divisor/2)/divisor` with divisor 12 on a client / 2 on the
+authority, re-stored into `+0x240/+0x244` (`@ 0x4B45D0/45DF`), applied while
+`progress < divisor` (and never for the local player); client vertical damping
+(Z step halved when `|dz| < 0x5555`, zeroed `< 0x2AAA`); `progress` caps at 512 →
+idle-class anim forced to state 43. After the chase the body pass continues —
+`AnimMap_UpdateDualChannels` root motion (rotated by `bodyHeading`) still applies, so
+**remote players are anim-root-motion dead-reckoned with the chase as drift
+correction** (the `0x2000`-class deadbands exist because root motion carries the bulk).
+
+**4. The vehicle-family template** (identical shape in every family mover; watercraft
+constants witnessed line-by-line, others confirmed by the same constant set): on
+`!is_authority` — AI state forced 22; fresh record: snap threshold `0x60000` when the
+speed register ≥ 293 else `0x20000` (speed-dependent); buckets {6,8,10,15,20,25,30} at
+`0x2AAA/0x4000/0x5555/0x8000/0x10000/0x20000`; position step `((N>>1)+d)/N` →
+`+0x234..`; heading step `(target − current + 10)/20` → `+0x240`, applied while
+`progress < 20`; starvation `progress ≥ 128` decays the speed register
+(`v -= (v+64)>>7`). **The prediction leg:** a non-driver machine mirrors the received
+speed/steer registers into the drive-command slots (watercraft: `[136] = [177]`,
+`[132] = [179]` `@ 0x48D480` interp tail) and the family's thrust/drag/buoyancy
+physics BELOW the (authority ∥ local-driver)-gated INPUT block keeps integrating
+`velocityX/Y` into the position every tick — a remote vehicle is **physics-predicted
+from replicated speed/steer between records, chase-corrected on each record**. That —
+not the chase alone — is why a remote boat glides.
+
+**5. `entity+0x24` bit0 rides the wire and is the mover-skip everywhere.** Setters:
+`Entity_AttachToVehicle @ 0x43C14A` (mounted riders are moved by the carrier, not the
+mover), `Server_KillPlayerAndNotify @ 0x519E92`, spawn-overlay assignment `@ 0x52A181`,
+write-side header branches `@ 0x4FF7A1/B8`. The host clears it each tick for
+owner-ready entities (`@ 0x4B99F4..0x4BA000`: owner ptr `+0x354` valid + team match +
+owner`+0x21C ≥ 0x10000`). The compact write emits `entity+36` RAW and the read lands it
+via the `0xFD` mask, so every machine's mover skips the same entities consistently
+(joining/not-ready peers freeze at their staged pose; mounted riders skip). OPEN
+QUESTION for our present pass: `present_snapshot_from_client_view` maps wire bit0 →
+`PF_HIDDEN` on the joiner — for a MOUNTED remote player (bit0 = 1 on the wire) that
+would hide the rider; verify against retail and the rider-render path.
+
+**6. Misc.** `flt_7C19E0` = 2147418112.0 — the float→int overflow clamp used by every
+dist computation here, not a tuning constant. Frame order (fold before movers) stands
+per the §5.38 witness chain (`Game_MainLoop @ 0x52b630` → `Client_ProcessNetworkFrame
+@ 0x42c180` first); every staged-target scheme above presupposes it. IDB: session
+comments landed at `0x4C0FD7`, `0x4C0320`, `0x4B40E0`, `0x4B9910`, `0x48D480`,
+`0x48AF00`, `0x490310`, `0x483FE0`, `0x460560`, `0x82ABC0`; no renames (the
+`Entity_UpdatePlayerInfantryMovement` and `Entity_UpdateAircraftPhysics` misnomer fixes
+and the `0x45D6F0` define+name are proposed follow-ups — curated names).
+
+Reimpl disposition: D-NET-196 (OPEN) — our joiner zero-order-holds decoded rows; the
+port slice lands the staged-target discipline + the per-class chases (+ the vehicle
+prediction leg per family availability) on the client view. Death/respawn stays a snap
+(D-NET-66); carrier composition stays per-record (D-NET-195).
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 
@@ -9505,6 +9649,7 @@ clear-per-record artifact):
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
 - **D-NET-50** [HIGH, FIXED] `build_tag_0a_world_reference` shipped a 623-byte verbatim retail blob (`kRetailTag0aPayload`, only bytes 0-11 patched) on a 300 ms gameplay cadence — an ADR-0003 raw-passthrough violation. Replaced with a **field-driven builder**: it constructs a `FrameUpdate` from the host's `PlayerReplicationState` + `config_.replicated_entities` (anchor = subject world position; one tag=1 compact record per replicated entity, positions 16-bit compressed relative to the anchor via the new `network_compress_fixedpoint`, classed by `GameEntitySnapshot.entity_class`) and emits it via the new `encode_frame_update` — the exact inverse of `decode_frame_update`. Ported `network_compress_fixedpoint` (with a documented zero-guard divergence) + added `encode_frame_update` / `encode_weapon_hit_record` (ingame_encode). Validated by encode↔decode round-trips (compressor + whole-frame) and a `game_session` end-to-end assertion that the tick's 0x0A `decode_frame_update`-cleans. Guided/Unknown classes are skipped (no 0x0A compact form). Vehicle-local (mounted) compression + env/timer sub-block rotation are tracked follow-ups. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop / Network_CompressFixedPoint @ 0x4C2780]
 - **D-NET-51** [HIGH, FIXED] `handle_tag_0c_player_input` now uses the shared 5-byte entity sub-header + 43-byte extended (type-10) decoder from §5.10 instead of raw offsets. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
+- **D-NET-196** [HIGH, OPEN — witnessed 2026-07-31, the live-join choppiness] A joiner presents every remote entity as a ZERO-ORDER HOLD of its last decoded `ClientEntityState` row (`NetClientView::apply` overwrites the row per fold; `present_snapshot_from_client_view` renders it wire-direct; nothing moves a row between folds), while a retail host's per-entity 0x0A inclusion is priority/budget-subrated (measured on `retail-vehicle-session`: distant moving vehicles every 20–39 frames, 340–625 ms) — remote entities skip/teleport at the wire cadence ("the boat skips instead of gliding"). Retail's client hides the cadence with the §5.38e per-class between-update movers, ALL unported: compact reads STAGE the interp target (`+0x234/238/23C` pos, `+0x240/+0x244` heading/pitch, `+0x27C = 0` — §5.10/§5.13/§5.14 landing-column corrections this session) and each class's mover chases the live pose one step per 62.5 Hz tick — org1 AI infantry `@ 0x4b9a8c` (buckets {3,4,5,8,16}, snap > 0x20000, deadband < 0x2000, cap 512) + anim root motion; org2 players in `Entity_UpdateInfantryPlayerBody @ 0x4B40E0` (2D-dist buckets 6–18 with the verbatim non-monotonic ladder `@ 0x4B44C4..0x4B4581`, heading/pitch divisor 12, snap/deadband edges, **own-player soft reconciliation bucket 48 moving / 512 still — position only**) + root motion; vehicle families (`cbot`→`Entity_UpdateWatercraftPhysics @ 0x48D480`, `cveh/ctan/ctrn/catv`→`@ 0x48AF00`/`@ 0x46E100`, `CHel`→`@ 0x490310`, `cbik`→`@ 0x483FE0`, `cpln`→`0x45D6F0`) with the shared template (speed-gated snap 0x60000/0x20000, buckets {6,8,10,15,20,25,30}, heading `(d+10)/20` over 20 ticks, starvation ≥128 speed decay) PLUS physics prediction from the mirrored speed/steer drive registers on non-driver machines. Death/respawn stays a SNAP (D-NET-66); carrier composition stays per-record (D-NET-195); `entity+0x24` bit0 rides the wire as the universal mover-skip (§5.38e §5). Port = stage-only fold + per-class chase (+ the vehicle prediction leg) on the joiner's client view — the D-NET-196 slice. Red loop: `netsim_remote_motion_smoothness_test` (build-only until the port lands). [orig: class table @ 0x82ABC0 / NetPacket_SerializePlayerState @ 0x4C09C0 (case-2 staging @ 0x4C0FD7..0x4C0FFC) / NetPacket_SerializeInfantryEntityState @ 0x4C0320 / Entity_SerializeVehicleState @ 0x460560 / Entity_UpdateInfantryAI @ 0x4b9910 / Entity_UpdateInfantryPlayerBody @ 0x4B40E0 / Entity_UpdateWatercraftPhysics @ 0x48D480]
 
 `replication_min.cpp` + `game_session.cpp` (pool-entity spawn/sync — §5.11/§5.12):
 - **D-NET-52** [DOC, FIXED] §5.6 trailer layout previously read `[u16][u32][cstring]`. The retail handler reads `aiProfile1` and `aiProfile2` with `cursor += 2` on a `uint16_t*` — both fields are **4 wire bytes** (the Hex-Rays render shows `uint16_t*` as the value type, but the cursor advance and the destination slot writes are `_DWORD`). Cross-witnessed against 195/437 trailer-carrying 0x0D records in the 2026-06-16b loopback. Update §5.6 + §5.11 (this commit). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x43311e / 0x433131)]
