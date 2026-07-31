@@ -178,6 +178,10 @@ class DefItemDef(ctypes.Structure):
         ("slip_speed", ctypes.c_int),
         ("max_slope", ctypes.c_int),
         ("slip_slope", ctypes.c_int),
+        # Air-family params (climb clamp + attitude-rate cap tokens; mirror def.h).
+        ("climb_speed", ctypes.c_int),
+        ("turn_roll", ctypes.c_int),
+        ("speed_pitch", ctypes.c_int),
         ("turn_rate", ctypes.c_int),
         ("turn_rate2", ctypes.c_int),
         # Collision speed-decay shift count ('torque', raw; mirror def.h).

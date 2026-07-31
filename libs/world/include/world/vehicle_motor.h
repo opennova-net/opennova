@@ -72,6 +72,9 @@ struct VehicleTraits {
     int32_t water_speed = 0;   // itemDef+0x8EC waterSpeed — the cbot family's max
                                // drive speed (the same slot the ground family
                                // reads as playerSpeed) [orig: @0x48E835]
+    int32_t climb_speed = 0;   // itemDef+0x920 — air vertical clamp [+cs, -2cs]
+    int32_t turn_roll = 0;     // itemDef+0x90C raw — air roll-rate cap (*192426)
+    int32_t speed_pitch = 0;   // itemDef+0x910 raw — air pitch-rate cap (*192426)
     // The VEHICLE item's own authored sound binding. This deliberately does not
     // borrow the mounted NPC's AiProfile: pool-1 vehicles need sound even when no
     // AiEntity body exists for them. Profile slots seed soundloop_1..7, then a
@@ -149,6 +152,13 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
 // tick_vehicle_motor's core with the input block bypassed (§5.38e spec part F).
 // Also the interim stand-in for cbik until the bike mover is witnessed.
 void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
+
+// The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is
+// a thunk): the client subset of Entity_UpdateAircraftPhysics @0x490310 —
+// three-register mirror, tilt-command attitude model, altitude-hold servo on the
+// record-seeded target Z (no gravity constant), airborne aero / grounded sheds,
+// and the terrain-clamp stand-in for the unported 0x47EF10 contact solve.
+void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
 

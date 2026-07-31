@@ -608,6 +608,14 @@ struct Entity {
         int16_t net_interp_steps = 0;      // [orig: +0x27E]
         int32_t net_recv_speed = 0;        // [orig: brain[177]] 16.16, stale-decays
         int32_t net_recv_steer_bam = 0;    // [orig: brain[179]]
+        int32_t net_recv_lat = 0;          // [orig: brain[178]] air lateral cmd, stale-decays
+        int32_t net_alt_target = 0;        // [orig: brain[131]] absolute target Z, never decays
+        bool net_engine_on = false;        // replicated Flags 0x80 (air engine/collective)
+        int32_t air_pitch_bam = 0;         // live attitude the air mover integrates
+        int32_t air_roll_bam = 0;
+        int32_t air_pitch_rate = 0;        // [orig: modelPtr1 +0xA8]
+        int32_t air_roll_rate = 0;         // [orig: modelPtr2 +0xAC]
+        int32_t ground_cache = INT32_MIN;  // [orig: entity+0x2A4] 8th-tick terrain sample
         uint32_t net_seen_revision = 0;    // last consumed row compact_revision
     };
     VehicleMotorState veh;

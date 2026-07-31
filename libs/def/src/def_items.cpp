@@ -292,6 +292,18 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         /* Vehicle physics-property block, scaled at parse exactly like the original loader
            [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
            turn_rate only for clarity — lower_match_key requires a separator after the key. */
+        } else if (lower_match_key(lower, ll, "climb_speed", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick (speed-family scale) */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "turnroll", 8)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            current.turn_roll = parse_int_n(v, vl); /* raw; air roll-rate cap = token*192426 at use */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "speedpitch", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.speed_pitch = parse_int_n(v, vl); /* raw; air pitch-rate cap = token*192426 at use */
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */

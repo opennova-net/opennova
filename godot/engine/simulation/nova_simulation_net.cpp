@@ -318,11 +318,7 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 		if (pool == 1 && es.cls == opennova::EntityClass::Vehicle) {
 			const opennova::world::VehicleTraits *traits =
 					world_->vehicle_traits.get(local->item_id);
-			if (traits != nullptr &&
-					(traits->family ==
-							opennova::world::VehicleFamily::Watercraft ||
-					 traits->family ==
-							opennova::world::VehicleFamily::Ground)) {
+			if (traits != nullptr) {
 				es.net_world_mover = true;
 				opennova::world::Entity::VehicleMotorState &m = local->veh;
 				if (es.compact_revision != m.net_seen_revision) {
@@ -335,6 +331,10 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 					m.net_smooth_heading = es.heading_bam;
 					m.net_recv_speed = es.vehicle_speed_reg;
 					m.net_recv_steer_bam = es.vehicle_steer_bam;
+					m.net_recv_lat = es.vehicle_lat_reg;
+					// The replicated engine/collective bit [orig: Flags 0x80,
+					// air families].
+					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
 					m.net_interp_progress = 0;
 					m.net_predicted = true;
 				}
@@ -362,6 +362,12 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 		es.y = opennova::world::to_fixed(local->position.y);
 		es.z = opennova::world::to_fixed(local->position.z);
 		es.heading_bam = local->veh.yaw_bam;
+		// Aircraft bank/pitch visibly (the air mover integrates attitude);
+		// other families keep their wire/dead-pose values.
+		if (local->veh.air_pitch_bam != 0 || local->veh.air_roll_bam != 0) {
+			es.pitch_bam = local->veh.air_pitch_bam;
+			es.roll_bam = local->veh.air_roll_bam;
+		}
 	}
 }
 

@@ -702,4 +702,308 @@ void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) 
     tick_vehicle_motor(world, veh, core, nullptr);
 }
 
+// The AIR-family prediction leg (CHel + cpln — the plane callback is a thunk onto
+// the same function): the client-executed subset of Entity_UpdateAircraftPhysics
+// [orig: @0x490310; disasm-verified spec 2026-07-31]. Commanded speeds TILT the
+// airframe and the airborne aero block converts attitude into acceleration; the
+// vertical axis is an altitude-hold servo on the record-seeded target Z — there
+// is no gravity constant in the air mover. Residual: the air contact/suspension
+// solve (loc_47EF10, undefined in the IDB) is unported — replaced by a terrain
+// clamp; the airborne/water branch picks derive locally from the ground cache
+// and water plane instead of the solve's Flags 0x2000/0x8000.
+void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.net_predicted) return;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        m.yaw_seeded = true;
+    }
+    int32_t px = to_fixed(veh.position.x);
+    int32_t py = to_fixed(veh.position.y);
+    int32_t pz = to_fixed(veh.position.z);
+
+    // Ground cache — the every-8th-tick sample [orig: entity+0x2A4 @0x4903A8..];
+    // staggering is a load-spreading detail, refreshed here per tick when cheap.
+    if (world.terrain != nullptr) {
+        const int32_t pos3[3] = {px, py, pz};
+        const GroundClearance clearance{};
+        const int32_t g =
+                calc_average_ground_height(*world.terrain, pos3, 0, clearance);
+        if (g != INT32_MIN) m.ground_cache = g;
+    }
+    const int32_t ground = m.ground_cache;
+
+    // ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
+    // snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
+    // {8,10,15,20,25,32}, yaw (d+10)/20 over 20 ticks, Z stepped like X/Y.
+    if (m.net_interp_progress == 0) {
+        const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
+        const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
+        const int64_t dz = int64_t(m.net_smooth_target[2]) - pz;
+        const double dd = std::sqrt(double(dx) * double(dx) +
+                                    double(dy) * double(dy) +
+                                    double(dz) * double(dz));
+        const int32_t dist = dd >= 2147418112.0 ? INT32_MAX
+                                                : static_cast<int32_t>(dd);
+        const int32_t snap =
+                (m.net_recv_speed < 293 && m.net_recv_lat < 293) ? 0x20000
+                                                                  : 0xA0000;
+        // Altitude register seeding [orig: @0x490998..0x490B33]: engine on ->
+        // target Z exactly; engine off -> target Z - 0x4000. (brain[137] is
+        // client-unused; the ground-at-target sample is skipped with it.)
+        m.net_alt_target = m.net_engine_on
+                ? m.net_smooth_target[2]
+                : m.net_smooth_target[2] - 0x4000;
+        if (dist > snap) {
+            px = m.net_smooth_target[0];
+            py = m.net_smooth_target[1];
+            pz = m.net_smooth_target[2];
+            m.yaw_bam = m.net_smooth_heading;
+            m.net_smooth_target[0] = 0;
+            m.net_smooth_target[1] = 0;
+            m.net_smooth_target[2] = 0;
+            m.net_interp_steps = 0;
+            m.net_smooth_heading = 0;
+        } else if (dist < 0x2AAA) {
+            m.net_smooth_target[0] = 0;
+            m.net_smooth_target[1] = 0;
+            m.net_smooth_target[2] = 0;
+            m.net_interp_steps = 0;
+            m.net_smooth_heading =
+                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+        } else {
+            int32_t n;
+            if (dist < 0x4000) n = 8;
+            else if (dist < 0x5555) n = 10;
+            else if (dist < 0x8000) n = 15;
+            else if (dist < 0x10000) n = 20;
+            else if (dist < 0x20000) n = 25;
+            else n = 32;
+            m.net_interp_steps = static_cast<int16_t>(n);
+            m.net_smooth_target[0] = (int32_t(dx) + (n >> 1)) / n;
+            m.net_smooth_target[1] = (int32_t(dy) + (n >> 1)) / n;
+            m.net_smooth_target[2] = (int32_t(dz) + (n >> 1)) / n;
+            m.net_smooth_heading =
+                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+        }
+    }
+    {
+        const int16_t progress = m.net_interp_progress;
+        if (progress < 20) m.yaw_bam += m.net_smooth_heading;
+        if (progress < m.net_interp_steps) {
+            px += m.net_smooth_target[0];
+            py += m.net_smooth_target[1];
+            pz += m.net_smooth_target[2];
+        }
+        if (progress >= 128) {
+            // BOTH mirrored commands coast; steer and altitude never decay —
+            // an abandoned aircraft predicts to a hover [orig: @0x490C64..].
+            m.net_recv_speed -= (m.net_recv_speed + 64) >> 7;
+            m.net_recv_lat -= (m.net_recv_lat + 64) >> 7;
+        } else {
+            m.net_interp_progress = static_cast<int16_t>(progress + 1);
+        }
+    }
+
+    // ---- 2. Register mirror [orig: @0x490C9E..0x490CCA].
+    m.cmd_speed = m.net_recv_speed;
+    int32_t cmd_lat = m.net_recv_lat;
+    m.steer_target_bam = m.net_recv_steer_bam;
+
+    // ---- 2a. Client engine-off override [orig: LABEL_305 @0x491C95..0x491CC2].
+    if (!m.net_engine_on) {
+        if (ground != INT32_MIN) m.net_alt_target = ground - 0x2000;
+        m.cmd_speed = 0;
+        cmd_lat = 0;
+        m.steer_target_bam = m.yaw_bam;
+    }
+
+    // ---- 3. Yaw servo (second order) [orig: @0x491CC8..0x491D27].
+    {
+        int32_t step = (m.steer_target_bam - m.yaw_bam + 8) >> 4;
+        const int32_t tr = traits.turn_rate;
+        if (step > tr) step = tr;
+        if (step < -tr) step = -tr;
+        m.wheel_rate_bam += (step + 4) >> 3;
+        const int32_t astep = step < 0 ? -step : step;
+        if (m.wheel_rate_bam > astep) m.wheel_rate_bam = astep;
+        if (m.wheel_rate_bam < -astep) m.wheel_rate_bam = -astep;
+    }
+
+    // ---- 4. Tilt commands + climb servo [orig: @0x491D2D..0x491E2F].
+    {
+        const int32_t cap = traits.acceleration << 12;
+        int32_t fwd = m.cmd_speed << 11;
+        int32_t lat = cmd_lat << 11;
+        if (fwd > cap) fwd = cap;
+        if (fwd < -cap) fwd = -cap;
+        if (lat > cap) lat = cap;
+        if (lat < -cap) lat = -cap;
+        m.air_pitch_rate -= fwd;
+        m.air_roll_rate -= lat;
+        if (to_fixed(veh.bound_radius) >= 0xF0000)
+            m.slide_z += (m.net_alt_target - pz + 0x100) >> 9; // heavy 1/512
+        else
+            m.slide_z += (m.net_alt_target - pz + 0x80) >> 8;  // light 1/256
+    }
+
+    // Airborne/grounded pick: the 0x47EF10 solve's Flags 0x2000 is unported —
+    // derive from the ground cache (well clear of the ground = airborne).
+    const bool airborne =
+            ground == INT32_MIN || pz - ground > 0x10000;
+    const bool in_water =
+            world.env.water_z != 0 && pz <= world.env.water_z;
+
+    if (airborne) {
+        // ---- 5. Airborne aero block [orig: @0x491E35..0x4922BC].
+        const int32_t vx = m.vel_x, vy = m.vel_y;
+        const int32_t vel_heading = bam_of_atan2(double(vy), double(vx));
+        const int32_t slip = m.yaw_bam - vel_heading;
+        const int32_t s22 = sin22_of_bam(slip);
+        const int32_t c22 = cos22_of_bam(slip);
+        const double dm = std::sqrt(double(vx) * double(vx) +
+                                    double(vy) * double(vy));
+        const int32_t mag =
+                dm >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dm);
+        const int32_t lateral = static_cast<int32_t>(
+                (static_cast<int64_t>(s22) * mag) >> 22);
+        const int32_t along = static_cast<int32_t>(
+                (static_cast<int64_t>(c22) * mag) >> 22);
+        m.speed = along;
+        const int32_t alat = lateral < 0 ? -lateral : lateral;
+        const int32_t aclat = cmd_lat < 0 ? -cmd_lat : cmd_lat;
+        if (alat > aclat)
+            m.air_roll_rate += 8 * cmd_lat - 8 * lateral;
+        const int32_t aalong = along < 0 ? -along : along;
+        const int32_t acmd = m.cmd_speed < 0 ? -m.cmd_speed : m.cmd_speed;
+        if (aalong > acmd) {
+            const int32_t e = along - m.cmd_speed;
+            const int32_t p32 = m.air_pitch_bam + 32 * e;
+            const int32_t ap32 = p32 < 0 ? -p32 : p32;
+            const int32_t ap = m.air_pitch_bam < 0 ? -m.air_pitch_bam
+                                                   : m.air_pitch_bam;
+            if (ap32 < ap) {
+                m.air_pitch_rate += 16 * e;
+                m.air_pitch_bam += 32 * e;
+            } else {
+                m.air_pitch_rate += 4 * e;
+                m.air_pitch_bam += 4 * e;
+            }
+        }
+        // Weathervane [orig: @0x491FA8..0x491FD9] (the occupant-analog steer
+        // feedback is input-leg, absent here).
+        m.yaw_bam += static_cast<int32_t>(
+                (static_cast<int64_t>(alat >> 6) *
+                         (vel_heading - m.yaw_bam) + 0x8000) >> 16);
+        // Tilt -> acceleration in the yaw frame [orig: @0x492006..0x492152].
+        const int32_t a_fwd = -static_cast<int32_t>(
+                (1169LL * sin22_of_bam(m.air_pitch_bam)) >> 22);
+        const int32_t roll_k = alat < aclat ? 501 : 334;
+        const int32_t a_lat = static_cast<int32_t>(
+                (static_cast<int64_t>(roll_k) *
+                         sin22_of_bam(m.air_roll_bam)) >> 22);
+        int32_t zp = static_cast<int32_t>(
+                (static_cast<int64_t>(along) *
+                         sin22_of_bam(m.air_pitch_bam)) >> 22);
+        if (zp < 0) zp >>= 2;
+        m.slide_z += zp >> 2;
+        int32_t zr = static_cast<int32_t>(
+                (static_cast<int64_t>(lateral) *
+                         sin22_of_bam(m.air_roll_bam)) >> 22);
+        if (zr < 0) zr >>= 2;
+        m.slide_z -= zr >> 3;
+        const int32_t sy = sin22_of_bam(m.yaw_bam);
+        const int32_t cy = cos22_of_bam(m.yaw_bam);
+        m.vel_x += static_cast<int32_t>((static_cast<int64_t>(a_fwd) * cy) >> 22) +
+                   static_cast<int32_t>((static_cast<int64_t>(a_lat) * sy) >> 22);
+        m.vel_y += static_cast<int32_t>((static_cast<int64_t>(a_fwd) * sy) >> 22) -
+                   static_cast<int32_t>((static_cast<int64_t>(a_lat) * cy) >> 22);
+        m.vel_x = static_cast<int32_t>((1019LL * m.vel_x + 512) >> 10);
+        m.vel_y = static_cast<int32_t>((1019LL * m.vel_y + 512) >> 10);
+        m.slide_z = static_cast<int32_t>((240LL * m.slide_z + 128) >> 8);
+        // Attitude self-righting + rate damping [orig: @0x4921CD..0x492246].
+        m.air_pitch_rate -= (m.air_pitch_bam + 0x100) >> 9;
+        m.air_pitch_bam -= (m.air_pitch_bam + 0x100) >> 9;
+        m.air_roll_rate -= (m.air_roll_bam + 0x100) >> 9;
+        m.air_roll_bam -= (m.air_roll_bam + 0x100) >> 9;
+        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) - (m.air_roll_rate >> 31);
+        m.air_pitch_rate -=
+                ((m.air_pitch_rate + 8) >> 4) - (m.air_pitch_rate >> 31);
+        if (traits.speed_pitch != 0) {
+            const int32_t pc = traits.speed_pitch * 192426;
+            if (m.air_pitch_rate > pc) m.air_pitch_rate = pc;
+            if (m.air_pitch_rate < -pc) m.air_pitch_rate = -pc;
+        }
+        if (traits.turn_roll != 0) {
+            const int32_t rc = traits.turn_roll * 192426;
+            if (m.air_roll_rate > rc) m.air_roll_rate = rc;
+            if (m.air_roll_rate < -rc) m.air_roll_rate = -rc;
+        }
+    } else {
+        // ---- 6. Grounded shed block [orig: @0x4922C1..0x492378].
+        m.vel_x -= ((m.vel_x + 2) >> 2) - (m.vel_x >> 31);
+        m.vel_y -= ((m.vel_y + 2) >> 2) - (m.vel_y >> 31);
+        m.slide_z -= ((m.slide_z + 8) >> 4) - (m.slide_z >> 31);
+        if (m.slide_z < 0) m.slide_z >>= 2;
+        m.wheel_rate_bam -= ((m.wheel_rate_bam + 4) >> 3) - (m.wheel_rate_bam >> 31);
+        m.air_roll_rate -= ((m.air_roll_rate + 4) >> 3) - (m.air_roll_rate >> 31);
+        m.air_pitch_rate -=
+                ((m.air_pitch_rate + 4) >> 3) - (m.air_pitch_rate >> 31);
+        m.net_alt_target += (pz - m.net_alt_target) >> 2;
+    }
+
+    // ---- 7. Common tail [orig: @0x49237E..0x492776].
+    if (m.cmd_speed == 0 && cmd_lat == 0) {
+        if (std::abs(m.vel_x) < 384) m.vel_x = 0;
+        if (std::abs(m.vel_y) < 384) m.vel_y = 0;
+    }
+    if (traits.climb_speed != 0) {
+        if (m.slide_z > traits.climb_speed) m.slide_z = traits.climb_speed;
+        if (m.slide_z < -2 * traits.climb_speed)
+            m.slide_z = -2 * traits.climb_speed;
+    }
+    if (!m.net_engine_on) {
+        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) - (m.air_roll_rate >> 31);
+        m.air_pitch_rate -=
+                ((m.air_pitch_rate + 8) >> 4) - (m.air_pitch_rate >> 31);
+    }
+    if (in_water) {
+        m.vel_x -= ((m.vel_x + 4) >> 3) - (m.vel_x >> 31);
+        m.vel_y -= ((m.vel_y + 4) >> 3) - (m.vel_y >> 31);
+        m.slide_z -= ((m.slide_z + 4) >> 3) - (m.slide_z >> 31);
+        m.wheel_rate_bam -= ((m.wheel_rate_bam + 8) >> 4) - (m.wheel_rate_bam >> 31);
+        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) - (m.air_roll_rate >> 31);
+        m.air_pitch_rate -=
+                ((m.air_pitch_rate + 8) >> 4) - (m.air_pitch_rate >> 31);
+    }
+    px += m.vel_x;
+    py += m.vel_y;
+    pz += m.slide_z;
+    {
+        const int32_t r = m.wheel_rate_bam;
+        m.wheel_rate_bam = r - ((r + 16) >> 5) - (r >> 31);
+    }
+    // Contact stub (the unported 0x47EF10 solve): never sink below the ground.
+    if (ground != INT32_MIN && pz < ground) {
+        pz = ground;
+        if (m.slide_z < 0) m.slide_z = 0;
+    }
+    constexpr int32_t kAttitudeRateClamp = 178956960; // 0xAAAAAA0
+    if (m.wheel_rate_bam > kAttitudeRateClamp) m.wheel_rate_bam = kAttitudeRateClamp;
+    if (m.wheel_rate_bam < -kAttitudeRateClamp) m.wheel_rate_bam = -kAttitudeRateClamp;
+    if (m.air_pitch_rate > kAttitudeRateClamp) m.air_pitch_rate = kAttitudeRateClamp;
+    if (m.air_pitch_rate < -kAttitudeRateClamp) m.air_pitch_rate = -kAttitudeRateClamp;
+    if (m.air_roll_rate > kAttitudeRateClamp) m.air_roll_rate = kAttitudeRateClamp;
+    if (m.air_roll_rate < -kAttitudeRateClamp) m.air_roll_rate = -kAttitudeRateClamp;
+    m.air_pitch_bam += m.air_pitch_rate;
+    m.air_roll_bam += m.air_roll_rate;
+    m.yaw_bam += m.wheel_rate_bam;
+
+    veh.position.x = static_cast<float>(from_fixed(px));
+    veh.position.y = static_cast<float>(from_fixed(py));
+    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.yaw = static_cast<int16_t>(std::lround(
+            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+}
+
 } // namespace opennova::world

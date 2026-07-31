@@ -212,12 +212,82 @@ bool run_ground_vehicle_glides() {
 	return ok;
 }
 
+bool run_aircraft_glides_and_holds_altitude() {
+	// The AIR prediction leg (CHel/cpln): a 25 m/s helicopter — far beyond the
+	// chase-only sustain — glides via the tilt/aero model, and an abandoned one
+	// HOLDS altitude (the record-seeded servo target never decays).
+	Rig r;
+	make_rig(r);
+	r.traits.family = w::VehicleFamily::Helicopter;
+	r.traits.acceleration = 80;      // token*4 form feeds the tilt cap (<<12)
+	r.traits.turn_rate = 0x600000;
+	r.traits.climb_speed = 10255;    // ~9.8 m/s vertical clamp
+	r.world.env.water_z = 0;
+	w::Entity *heli = r.world.registry.get(r.boat);
+	if (!expect(heli != nullptr, "heli spawned")) return false;
+	heli->position.z = 60.0f; // airborne (no terrain -> ground unknown, airborne)
+	heli->veh.net_engine_on = true;
+
+	const int32_t step_fx = 26214; // 0.4 u/tick = 25 m/s
+	const int32_t x0 = w::to_fixed(100.0f);
+	const int32_t y0 = w::to_fixed(200.0f);
+	const int32_t z0 = w::to_fixed(60.0f);
+	const int kWarm = 128, kMeasure = 96, kGap = 8;
+	std::vector<int32_t> presented;
+	for (int t = 0; t < kWarm + kMeasure; ++t) {
+		if (t % kGap == 0) {
+			w::Entity::VehicleMotorState &m = heli->veh;
+			m.net_smooth_target[0] = x0 + step_fx * t;
+			m.net_smooth_target[1] = y0;
+			m.net_smooth_target[2] = z0;
+			m.net_smooth_heading = 0;
+			m.net_recv_speed = step_fx;
+			m.net_recv_lat = 0;
+			m.net_recv_steer_bam = 0;
+			m.net_engine_on = true;
+			m.net_interp_progress = 0;
+			m.net_predicted = true;
+		}
+		w::aircraft_client_tick(r.world, *heli, r.traits);
+		presented.push_back(w::to_fixed(heli->position.x));
+	}
+	int32_t max_step = 0;
+	int stalled = 0;
+	for (int t = kWarm; t < kWarm + kMeasure; ++t) {
+		const int32_t d = std::abs(presented[t] - presented[t - 1]);
+		if (d > max_step) max_step = d;
+		if (d < step_fx / 4) ++stalled;
+	}
+	std::fprintf(stderr,
+	             "[air-fast] true step=%d  max step=%d  stalled=%d/%d  alt=%f\n",
+	             step_fx, max_step, stalled, kMeasure,
+	             double(heli->position.z));
+	bool ok = true;
+	ok &= expect(max_step <= 2 * step_fx + 2048,
+	             "a 25 m/s aircraft glides on the air prediction leg");
+	ok &= expect(stalled * 4 <= kMeasure,
+	             "the predicted aircraft keeps moving between records");
+	// Altitude hold: cruising level, Z stays near the record altitude.
+	ok &= expect(std::abs(heli->position.z - 60.0f) < 8.0f,
+	             "the altitude servo holds near the record-seeded target");
+	// Abandonment: stop records entirely; the aircraft coasts planar but HOLDS
+	// altitude (the servo target never decays).
+	for (int t = 0; t < 600; ++t)
+		w::aircraft_client_tick(r.world, *heli, r.traits);
+	std::fprintf(stderr, "[air-hover] final alt=%f  recv_speed=%d\n",
+	             double(heli->position.z), heli->veh.net_recv_speed);
+	ok &= expect(std::abs(heli->position.z - 60.0f) < 10.0f,
+	             "an abandoned aircraft predicts to a hover at record altitude");
+	return ok;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
+	ok &= run_aircraft_glides_and_holds_altitude();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();
 	if (!ok) {

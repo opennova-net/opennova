@@ -429,6 +429,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                     traits->family == VehicleFamily::Watercraft) {
                 watercraft_client_tick(world, *veh, *traits);
             } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    (traits->family == VehicleFamily::Helicopter ||
+                     traits->family == VehicleFamily::Plane)) {
+                aircraft_client_tick(world, *veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
                     traits->family == VehicleFamily::Ground) {
                 // Runs the motor core, whose tail already ticks the movement
                 // sound — skip the separate sound call below for this row.

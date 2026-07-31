@@ -174,6 +174,10 @@ struct ClientEntityState {
 	// steer-command register ([132] = [179]) for the prediction leg
 	// [orig: @0x48D480 interp tail mirror].
 	int32_t vehicle_steer_bam = 0;
+	// Air lateral command mirror (retail vehicleData[178], the read-dest of the
+	// wire weapon_aim_z, decompressed) — the CHel/cpln prediction leg's second
+	// axis [orig: the three-register air mirror @0x490C9E].
+	int32_t vehicle_lat_reg = 0;
 	// Armed by the first folded compact for this row: the chase never runs
 	// toward a zero-initialized target on rows that only ever saw load-stream
 	// spawns (pool-2/3 statics).

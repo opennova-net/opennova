@@ -518,6 +518,10 @@ typedef struct DefItemDef {
     int slip_speed;     /* +0x8F0 = token*4 [orig: @0x49dafd] */
     int max_slope;      /* +0x8F4 = deg token * 11930464 [orig: @0x49d91e] */
     int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
+    int climb_speed;    /* +0x920 = km/h token * 293 (16.16 u/tick vertical clamp; the
+                           speed-family scale — parse-site scale UNVERIFIED) ["climb_speed"] */
+    int turn_roll;      /* +0x90C raw token ("turnroll") — air roll-rate cap, *192426 at use */
+    int speed_pitch;    /* +0x910 raw token ("speedpitch") — air pitch-rate cap, *192426 at use */
     int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
     int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
     int torque;         /* +0x91C raw ("torque") — the collision speed-decay shift count:

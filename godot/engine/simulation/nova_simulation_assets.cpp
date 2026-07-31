@@ -220,7 +220,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 9 && vp[0] != 0) {
+			if (vp.size() == 12 && vp[0] != 0) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -231,6 +231,9 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
 				vt.water_speed = vp[8];
+				vt.climb_speed = vp[9];
+				vt.turn_roll = vp[10];
+				vt.speed_pitch = vp[11];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
 				// Family from the *_function tag (ai_function, else
 				// move_function — the same precedence as the replication

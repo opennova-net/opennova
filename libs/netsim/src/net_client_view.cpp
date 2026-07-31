@@ -937,6 +937,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 						network_decompress_fixedpoint(rec.vehicle.weapon_aim_y);
 				es.vehicle_steer_bam = static_cast<int32_t>(
 						rec.vehicle.weapon_heading_bam) * 65536;
+				es.vehicle_lat_reg =
+						network_decompress_fixedpoint(rec.vehicle.weapon_aim_z);
 			}
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
