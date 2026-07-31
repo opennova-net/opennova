@@ -545,10 +545,10 @@ func test_transport_controls_are_disabled_without_a_runtime() -> void:
 func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 	var session := NovaDebugSession.new()
 	NovaDebugCatalog.install(session)
-	var game_host := FakeTransportHost.new()
-	add_child_autofree(game_host)
+	var game_adapter := FakeTransportHost.new()
+	add_child_autofree(game_adapter)
 	session.set_target_source(
-			NovaDebugCatalog.TARGET_GAME_HOST, func(): return game_host)
+			NovaDebugCatalog.TARGET_GAME_SHELL, func(): return game_adapter)
 	session.set_authority_source(func(): return true)
 	session.set_edit_unlocked(true)
 
@@ -575,7 +575,7 @@ func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 	assert_string_contains(step.tooltip_text, "multiplayer")
 
 	play.pressed.emit()
-	assert_eq(game_host.actions, ["resume"])
+	assert_eq(game_adapter.actions, ["resume"])
 
 
 

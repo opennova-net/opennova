@@ -148,7 +148,7 @@ open review follow-ups from #376/#378 — none blocking:
 
 The avatar lists, cascade, team filter, name, 3D preview, ACCEPT seam, and the three
 loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) are wired
-(godot/game/player_info_menu_host.gd; grilled in docs/playerinfo/avatars-re.md
+(godot/game/player_info_menu_companion.gd; grilled in docs/playerinfo/avatars-re.md
 D-PLAYERINFO-7..12). Remaining:
 
 - [ ] Persist the avatar/class/loadout selections to the on-disk profile

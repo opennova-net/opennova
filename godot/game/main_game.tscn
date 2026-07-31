@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" path="res://engine/ui/fps_label.tscn" id="3_fps"]
 [ext_resource type="Script" uid="uid://u6bng4ck62r0" path="res://game/main_game.gd" id="4_main"]
 [ext_resource type="PackedScene" path="res://engine/world/game_world.tscn" id="10_world"]
-[ext_resource type="Script" path="res://game/nova_menu_host.gd" id="11_menu"]
+[ext_resource type="Script" path="res://game/nova_menu_shell.gd" id="11_menu"]
 
 [node name="MainGame" type="Node3D" unique_id=1969900999]
 script = ExtResource("4_main")
@@ -24,7 +24,7 @@ layout_mode = 3
 [node name="MenuLayer" type="CanvasLayer" parent="."]
 layer = 2
 
-[node name="MenuHost" type="Control" parent="MenuLayer"]
+[node name="MenuShell" type="Control" parent="MenuLayer"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

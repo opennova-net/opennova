@@ -77,7 +77,7 @@ There is no no-net path. Single-player constructs the same in-process host the L
 paths use, and the local player is a host-side server entity driven by a wire-shaped intent
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
-seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_host.gd` feeds
+seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_presenter.gd` feeds
 intent rather than writing entity state, and the wire encoders run in single-player exactly as they
 do for a joined client. The in-match runtime behind that seam is `libs/npruntime`
 ([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
@@ -126,7 +126,7 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   follow the same rule for their own systems: each reads a drain or snapshot the sim produced and
   writes shell nodes/effects, so the simulation itself stays render-free and headless-testable.
   Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off
-  `local_player_host.gd` and the `world/player_*` / `present_*` scripts on the same principle.
+  `local_player_presenter.gd` and the `world/player_*` / `present_*` scripts on the same principle.
 - **Audio** — name-keyed sound sets (`SoundProfile_FindLoadedByName @0x5274f0`); the member-selection
   state machine lives in portable `libs/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
 

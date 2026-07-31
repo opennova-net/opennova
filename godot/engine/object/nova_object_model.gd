@@ -687,7 +687,7 @@ func _advance_part_anims(delta: float) -> bool:
 
 # --- third-person aim overlay (the torso bend) ----------------------------------
 # One node-frame rotation Basis per anim overlay class; empty disables. The host that
-# owns the aim state (LocalPlayerHost) sets this each frame from
+# owns the aim state (LocalPlayerPresenter) sets this each frame from
 # NovaSimulation.get_local_player_aim_overlay(); the pose write then routes through
 # NovaSkeletalAnim.eval_pose_overlay so each skeleton segment gets its witnessed
 # aim/body blend. [orig: Entity_BuildBoneTransformMatrices @0x4b1290;
@@ -703,7 +703,7 @@ var _collapse_right_hand := false
 
 # The upper-body weapon channel: a second clip posed at its OWN playhead onto the mask
 # bones (clavicles/arms/forearms/neck/head/hands) before the aim overlay composes. The
-# host that owns the sim state (LocalPlayerHost) feeds it each frame from
+# host that owns the sim state (LocalPlayerPresenter) feeds it each frame from
 # PlayerWeaponView.body_anim_key/body_anim_phase; empty key disables. Unknown keys
 # no-op inside the native splice. [orig: the mask override @0x4b14db/@0x4b16a7 in
 # Entity_BuildBoneTransformMatrices; docs/world/world-wac-ai-re.md §14.8]

@@ -91,9 +91,9 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerHost")
-	if world == null or host == null:
-		push_error("ai_corpse_probe: main_game lacks World/LocalPlayerHost children")
+	var presenter = game.get_node_or_null("LocalPlayerPresenter")
+	if world == null or presenter == null:
+		push_error("ai_corpse_probe: main_game lacks World/LocalPlayerPresenter children")
 		quit(1)
 		return
 
@@ -111,7 +111,7 @@ func _run() -> void:
 		return
 	print("PROBE mission=%s loaded, player spawned" % OS.get_environment("NW_SP_MISSION"))
 
-	host.set_input_source(func() -> Dictionary: return {"forward": _forward})
+	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
 
 	# --- Approach (the ai_threat_probe steering): walk at the nearest NPC,
 	# correcting heading off the actual movement vector. The moment a foot NPC

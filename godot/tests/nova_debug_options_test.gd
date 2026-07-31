@@ -6,7 +6,7 @@ extends GutTest
 # the state object's single-write-path contract is pinned.
 
 const GameWorldScript := preload("res://engine/world/game_world.gd")
-const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
+const LocalPlayerPresenterScript := preload("res://engine/world/local_player_presenter.gd")
 
 
 func _script_method_names(script: Script) -> PackedStringArray:
@@ -41,7 +41,7 @@ func test_registry_rows_are_complete_and_unique() -> void:
 
 func test_every_setter_exists_on_its_target_host_script() -> void:
 	var world_methods := _script_method_names(GameWorldScript)
-	var player_methods := _script_method_names(LocalPlayerHostScript)
+	var player_methods := _script_method_names(LocalPlayerPresenterScript)
 	for option in NovaDebugOptions.OPTIONS:
 		var setter := String(option["setter"])
 		if option["target"] == NovaDebugOptions.TARGET_WORLD:
@@ -49,7 +49,7 @@ func test_every_setter_exists_on_its_target_host_script() -> void:
 					"GameWorld implements '%s' for '%s'" % [setter, option["id"]])
 		else:
 			assert_has(player_methods, setter,
-					"LocalPlayerHost implements '%s' for '%s'" % [setter, option["id"]])
+					"LocalPlayerPresenter implements '%s' for '%s'" % [setter, option["id"]])
 
 
 func test_state_defaults_and_single_write_path() -> void:

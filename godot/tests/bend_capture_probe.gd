@@ -57,14 +57,14 @@ func _ready() -> void:
 	# NOVA_VM_SWEEP=1: sweep candidate viewmodel facings (one capture each) to pin the
 	# first-person weapon model's native orientation, then quit. Tuning aid only.
 	if OS.get_environment("NOVA_VM_SWEEP") == "1":
-		var host := _find_player_host(get_tree().root)
-		if host != null:
+		var presenter := _find_player_presenter(get_tree().root)
+		if presenter != null:
 			var candidates: Array = [
 				Vector3(0, 180, 0), Vector3(0, 0, 0), Vector3(0, 90, 0), Vector3(0, -90, 0),
 				Vector3(-90, 180, 0), Vector3(90, 180, 0), Vector3(-90, 0, 0), Vector3(90, 0, 0),
 			]
 			for i in candidates.size():
-				host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = candidates[i]
+				presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT = candidates[i]
 				await _settle(8)
 				await _capture("vm_rot_%d_%s.png" % [i, str(candidates[i]).replace(" ", "")])
 		print("[bend] sweep done -> ", _out_abs)
@@ -101,11 +101,11 @@ func _ready() -> void:
 
 	# Debug experiments (the F3 View-tab toggles): back to first person with the
 	# body forced onto the world layer — look down and find our own feet.
-	var host := _find_player_host(get_tree().root)
-	if host != null:
+	var presenter := _find_player_presenter(get_tree().root)
+	if presenter != null:
 		_press_key(KEY_F4)            # back to first person
-		host.set_debug_body_in_first_person(true)
-		host.set_debug_force_viewmodel(true)
+		presenter.set_debug_body_in_first_person(true)
+		presenter.set_debug_force_viewmodel(true)
 		_look(Vector2(0, 380))        # level-ish again
 		await _settle(20)
 		await _capture("09_fp_body_level.png")
@@ -113,7 +113,7 @@ func _ready() -> void:
 		await _settle(30)
 		await _capture("10_fp_feet.png")
 	else:
-		push_warning("[bend] no LocalPlayerHost found for the FP-body captures")
+		push_warning("[bend] no LocalPlayerPresenter found for the FP-body captures")
 
 	print("[bend] done -> ", _out_abs)
 	get_tree().quit()
@@ -124,12 +124,12 @@ func _settle(frames: int) -> void:
 		await get_tree().process_frame
 
 
-# The game host owns a LocalPlayerHost; find it by capability.
-func _find_player_host(node: Node) -> Node:
+# The game shell owns a LocalPlayerPresenter; find it by capability.
+func _find_player_presenter(node: Node) -> Node:
 	if node.has_method("set_debug_body_in_first_person"):
 		return node
 	for child in node.get_children():
-		var found := _find_player_host(child)
+		var found := _find_player_presenter(child)
 		if found != null:
 			return found
 	return null
@@ -157,7 +157,7 @@ func _press_key(keycode: Key) -> void:
 
 
 # Feed relative mouse-look in small steps so per-frame handling matches a real
-# drag (the host clamps pitch per event batch either way).
+# drag (the presenter clamps pitch per event batch either way).
 func _look(total: Vector2) -> void:
 	const STEPS := 10
 	for _i in STEPS:

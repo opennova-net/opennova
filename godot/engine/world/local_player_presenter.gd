@@ -1,4 +1,4 @@
-class_name LocalPlayerHost
+class_name LocalPlayerPresenter
 extends Node
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
@@ -74,7 +74,7 @@ var _held_weapon_graphic := ""      # the gfx3 the live node was built from
 # The FSM and the VIEW STATE both tick in the sim at 62.5 Hz (libs/world
 # weapon_fsm + player_view; ADR 0016 — policy, state, and cadence live in the
 # engine): the ADS engaged bit + 15-step ease, the fov policy, and the 3P anchor
-# chase arrive as a PlayerLocalView snapshot each frame. This host places the
+# chase arrive as a PlayerLocalView snapshot each frame. This presenter places the
 # camera/avatar nodes; its collaborators carry the rest of the old monolith
 # (W4-4): raw input sampling (trigger edges, the RMB toggle REQUEST, movement,
 # gameplay keys) lives in PlayerInputRouter; the FP viewmodel node/parts, the
@@ -82,8 +82,8 @@ var _held_weapon_graphic := ""      # the gfx3 the live node was built from
 # the weapon EVENT presentation — the batch consume, the FSM event clips on BOTH
 # viewmodel parts (arms + gun share the animadm), the muzzle/shell userpoint
 # resolution, and the owner-bound effect anchors — lives in PlayerWeaponEffects.
-# All three live beside the host for the same setup -> teardown span; the pinned
-# host surface (before_world_tick / handle_key_input / handle_input / the model
+# All three live beside the presenter for the same setup -> teardown span; the pinned
+# presenter surface (before_world_tick / handle_key_input / handle_input / the model
 # accessors) delegates to them.
 var _weapon_effects: PlayerWeaponEffects = null
 var _input_router := PlayerInputRouter.new()
@@ -126,8 +126,8 @@ func is_debug_body_in_first_person() -> bool:
 func setup(world, camera: Camera3D) -> void:
 	_world = world
 	_camera = camera
-	# The weapon-event presentation lives beside the host for the same setup ->
-	# teardown span; it resolves userpoints against this host's live nodes.
+	# The weapon-event presentation lives beside the presenter for the same setup ->
+	# teardown span; it resolves userpoints against this presenter's live nodes.
 	_weapon_effects = PlayerWeaponEffects.new()
 	_weapon_effects.setup(world, self)
 	_input_router.setup(world, self)
@@ -147,7 +147,7 @@ func setup(world, camera: Camera3D) -> void:
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
 	# Attachment is the adoption boundary: discard presentation history produced
-	# before this host existed. Every event produced after setup is live, including
+	# before this presenter existed. Every event produced after setup is live, including
 	# a first-tick shot before the first active snapshot is presented.
 	if _world != null:
 		_world.drain_local_player_weapon_events()
@@ -290,7 +290,7 @@ func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
 
 
 # The gameplay keys (F4/B/N/NVG gain/stance) live in the input router; this
-# pinned host name delegates (main_game calls it).
+# pinned presenter name delegates (main_game calls it).
 func handle_key_input(event: InputEvent, active: bool) -> bool:
 	return _input_router.handle_key_input(event, active)
 
@@ -552,7 +552,7 @@ func _update_player_camera() -> void:
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
 		# The FP roll: torsoRoll + lean/4, composed in the sim (fp_roll_deg). Sign
-		# pinned host-side: lean right (positive lean) tilts the view right.
+		# pinned presenter-side: lean right (positive lean) tilts the view right.
 		# [orig: @0x437fe6 — g_view_rot_roll = entity+0x2DC + lean>>2]
 		var roll_deg := _view.fp_roll_deg if _view != null else 0.0
 		if absf(roll_deg) > 0.001:
@@ -598,7 +598,7 @@ func _set_model_lighting_context(model: Node, interior: bool,
 # The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,
 # eased by the 15-tick interp, suppressed in third person — libs/world
 # player_view [orig: g_cameraFovDeg @0x26C6848; Player_ToggleWeaponScope @0x4df401;
-# @0x4df3fa]); this host converts horizontal -> vertical through the live aspect
+# @0x4df3fa]); this presenter converts horizontal -> vertical through the live aspect
 # via the ONE shared conversion [orig: @0x58d900].
 func _update_scope_camera() -> void:
 	if _camera == null or _view == null:

@@ -11,7 +11,7 @@
 
 ONED historically offered embedded mission simulation and later a
 play-in-editor local-player session. The editor toolbar also launched the game.
-Even when both products reused `MissionRuntime`, `LocalPlayerHost`, and the debug
+Even when both products reused `MissionRuntime`, `LocalPlayerPresenter`, and the debug
 overlay, they entered different scene trees and owned different transport,
 input, mouse, pause, and teardown state. Testing inside ONED therefore was not
 literally the same operation as running the game.

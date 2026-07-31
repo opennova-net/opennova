@@ -1,7 +1,7 @@
 extends GutTest
 
 # DebugAudioPage: mission-audio counters from a duck-typed stub, the per-bus
-# knobs routed through the shared debug catalog into a public host surface,
+# knobs routed through the shared debug catalog into a public shell surface,
 # and the empty states.
 
 const PageScript := preload("res://engine/debug/pages/debug_audio_page.gd")
@@ -54,7 +54,7 @@ class StubWorld:
 		return audio
 
 
-class AudioHostStub:
+class AudioShellStub:
 	extends RefCounted
 
 	var calls: Array = []
@@ -94,14 +94,14 @@ class AudioHostStub:
 
 func _make_page(
 		world: Node = null,
-		audio_host: AudioHostStub = null) -> DebugAudioPage:
+		audio_shell: AudioShellStub = null) -> DebugAudioPage:
 	var ctx := NovaDebugContext.new()
 	ctx.options = NovaDebugOptionState.new()
 	ctx.session = NovaDebugSession.new()
 	NovaDebugCatalog.install(ctx.session)
-	var host := audio_host if audio_host != null else AudioHostStub.new()
+	var shell := audio_shell if audio_shell != null else AudioShellStub.new()
 	ctx.session.set_target_source(
-			NovaDebugCatalog.TARGET_GAME_HOST, func(): return host)
+			NovaDebugCatalog.TARGET_GAME_SHELL, func(): return shell)
 	if world != null:
 		ctx.world_source = func(): return world
 	var page: DebugAudioPage = PageScript.new()
@@ -130,8 +130,8 @@ func test_formats_the_mission_audio_counters() -> void:
 
 
 func test_mute_knobs_drive_and_mirror_the_real_buses() -> void:
-	var host := AudioHostStub.new()
-	var page := _make_page(null, host)
+	var shell := AudioShellStub.new()
+	var page := _make_page(null, shell)
 	page.refresh()
 	var sfx_bus := AudioServer.get_bus_index("SFX")
 	if sfx_bus < 0:
@@ -141,8 +141,8 @@ func test_mute_knobs_drive_and_mirror_the_real_buses() -> void:
 	assert_false(check.disabled, "a real bus arms its knob")
 
 	check.toggled.emit(true)
-	assert_eq(host.calls, [[&"mute", "SFX", true]],
-			"the knob routes through the catalog into the public host surface")
+	assert_eq(shell.calls, [[&"mute", "SFX", true]],
+			"the knob routes through the catalog into the public shell surface")
 	assert_true(AudioServer.is_bus_mute(sfx_bus))
 	AudioServer.set_bus_mute(sfx_bus, false)
 	page.refresh()
@@ -150,8 +150,8 @@ func test_mute_knobs_drive_and_mirror_the_real_buses() -> void:
 
 
 func test_dynamic_bus_knobs_share_the_catalog_actions() -> void:
-	var host := AudioHostStub.new()
-	var page := _make_page(null, host)
+	var shell := AudioShellStub.new()
+	var page := _make_page(null, shell)
 	page.refresh()
 	var sfx_bus := AudioServer.get_bus_index("SFX")
 	if sfx_bus < 0:
@@ -162,7 +162,7 @@ func test_dynamic_bus_knobs_share_the_catalog_actions() -> void:
 	(page.find_child("SoloSFX", true, false) as CheckBox).toggled.emit(true)
 	(page.find_child("BypassSFX", true, false) as CheckBox).toggled.emit(true)
 
-	assert_eq(host.calls, [
+	assert_eq(shell.calls, [
 		[&"volume", "SFX", -12.5],
 		[&"solo", "SFX", true],
 		[&"bypass", "SFX", true],

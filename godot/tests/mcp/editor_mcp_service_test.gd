@@ -202,7 +202,7 @@ func test_set_enabled_persists_and_starts() -> void:
 
 
 func test_runtime_disable_failure_is_visible_in_settings_status() -> void:
-	service.game_tool_host = DisableFailureGameTools.new()
+	service.game_tools = DisableFailureGameTools.new()
 
 	service.stop()
 	await get_tree().process_frame
@@ -213,7 +213,7 @@ func test_runtime_disable_failure_is_visible_in_settings_status() -> void:
 
 func test_reenable_ignores_stale_disable_completion() -> void:
 	var transition := DelayedDisableGameTools.new()
-	service.game_tool_host = transition
+	service.game_tools = transition
 
 	service.stop()
 	await get_tree().process_frame
@@ -234,7 +234,7 @@ func test_reenable_ignores_stale_disable_completion() -> void:
 func test_running_status_discloses_current_game_relaunch_requirement() -> void:
 	var transition := DelayedDisableGameTools.new()
 	transition.needs_relaunch = true
-	service.game_tool_host = transition
+	service.game_tools = transition
 
 	assert_eq(service.start(0), OK)
 

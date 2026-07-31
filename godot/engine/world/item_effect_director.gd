@@ -126,7 +126,7 @@ func on_effect_world_started() -> void:
 ## attached-effect owner keys reference nodes in the freed MissionObjects
 ## container — never let a reload's provider resolve against freed instances.
 ## The anchor resolvers are deliberately NOT cleared: their owners
-## (LocalPlayerHost, the present passes) unregister their own keys, exactly as
+## (LocalPlayerPresenter, the present passes) unregister their own keys, exactly as
 ## before the extraction; _particles_hidden survives reloads by design.
 func reset() -> void:
 	_item_fx_nodes.clear()

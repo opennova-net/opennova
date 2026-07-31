@@ -27,19 +27,19 @@ A behavior explicitly authored in a `.mnu` file via an `<ACTION>` element. The
 retail vocabulary includes screen/menu navigation; showing, hiding, enabling, or
 disabling a named Window; pop; URL and form submission; focus/tab operations; and
 legacy browser/LAN/application-message operations. Some Actions are completed by
-the Menu Host, but they remain Actions because the Menu authored them.
+the Menu Shell, but they remain Actions because the Menu authored them.
 _Avoid_: command, event, handler
 
 **Command**:
-Behavior supplied by the Menu Host by matching a widget's **name**, rather than
+Behavior supplied by the Menu Shell by matching a widget's **name**, rather than
 written as an `<ACTION>` (start a mission, apply video settings, quit, commit a
-loadout). An Action may also delegate work to the host; the distinction is whether
+loadout). An Action may also delegate work to the shell; the distinction is whether
 the behavior is authored in the Menu or bound externally by name.
 _Avoid_: action (reserve that strictly for the `<ACTION>` element)
 
-**Menu Host**:
+**Menu Shell**:
 The runtime front-end that loads a menu set, drives a live interactive menu, plays its audio, and supplies Commands by control name. The menu counterpart to the world runtime.
-_Avoid_: menu manager, controller
+_Avoid_: menu host (retired 2026-07), menu manager, controller
 
 **Menus workspace**:
 The OpenNova Editor (ONED) surface for authoring `.mnu` files (WYSIWYG canvas + tree + inspector).

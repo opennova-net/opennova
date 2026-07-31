@@ -1,8 +1,8 @@
-class_name GameMcpHost
+class_name GameMcpAdapter
 extends Node
 
 ## Engine-layer contract consumed by the runtime MCP transport. The game
-## application owns the concrete host; tools depend only on this public seam.
+## application owns the concrete adapter; tools depend only on this public seam.
 
 
 func get_mcp_game_state() -> Variant:

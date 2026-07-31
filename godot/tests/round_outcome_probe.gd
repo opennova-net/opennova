@@ -118,9 +118,9 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerHost")
+	var host = game.get_node_or_null("LocalPlayerPresenter")
 	if world == null or host == null:
-		push_error("round_outcome_probe: main_game lacks World/LocalPlayerHost children")
+		push_error("round_outcome_probe: main_game lacks World/LocalPlayerPresenter children")
 		quit(1)
 		return
 	world.mission_effects.connect(_on_effects)

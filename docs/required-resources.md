@@ -149,7 +149,7 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
 
 | ID | One-liner | Class | Disposition |
 |---|---|---|---|
-| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion) [orig: Expansion_LoadAssets @ 0x4a4798/@ 0x4a47da; AudioVM_InitMenuMusicStreaming @ 0x56aa60; Sbf_OpenFile_Gamemus @ 0x4ed6c0]; `godot/game/menu_shell.gd` instead scanned `.bin`/`.mus` names containing "mus" from loose paths only | A | FIXED — `menu_shell.gd` `_resolve_music_pair` resolves the witnessed hardcoded pairs (expansion `M<n>`/`G<n>` first, then the base pair, same-stem halves): `.bin` scripts load by name through the VFS (PFF-aware), `.sbf` banks stream loose by path; the game pair's bank swaps onto the director with its script |
+| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion) [orig: Expansion_LoadAssets @ 0x4a4798/@ 0x4a47da; AudioVM_InitMenuMusicStreaming @ 0x56aa60; Sbf_OpenFile_Gamemus @ 0x4ed6c0]; `godot/game/nova_menu_shell.gd` instead scanned `.bin`/`.mus` names containing "mus" from loose paths only | A | FIXED — `nova_menu_shell.gd` `_resolve_music_pair` resolves the witnessed hardcoded pairs (expansion `M<n>`/`G<n>` first, then the base pair, same-stem halves): `.bin` scripts load by name through the VFS (PFF-aware), `.sbf` banks stream loose by path; the game pair's bank swaps onto the director with its script |
 
 ## Not witnessed / follow-ups
 

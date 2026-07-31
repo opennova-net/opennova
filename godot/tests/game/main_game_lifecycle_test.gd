@@ -179,7 +179,7 @@ var _shell: Node = null
 
 func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
 	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
-	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 	assert_eq(debug_host.debug_set_audio_bus_mute("__missing_bus__", true),
 			ERR_INVALID_PARAMETER)
 	assert_eq(debug_host.debug_set_audio_bus_volume("Master", INF),
@@ -213,7 +213,7 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
 	var shell = autofree(EntityHostHarness.new())
-	var debug_host: GameDebugHost = autofree(shell.get_game_debug_host())
+	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 
 	var page: Dictionary = debug_host.get_mcp_game_entities(0, 64)
 
@@ -262,9 +262,9 @@ func after_each() -> void:
 			var world_root = world.get_resource_root()
 			if world_root != null:
 				world_root.clear()
-		var menu_host = _shell.get_node_or_null("MenuLayer/MenuHost")
-		if menu_host != null and menu_host.get_menu() != null:
-			var menu_root = menu_host.get_menu().get_resource_root()
+		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
+		if menu_shell != null and menu_shell.get_menu() != null:
+			var menu_root = menu_shell.get_menu().get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -311,7 +311,7 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	assert_null(_shell.current_resource_root(),
 			"the failed mount leaves the shell without a resource session")
 	assert_false(_shell.get_node("World").is_loaded())
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"the shell stays on the front-end state the picker contract needs")
 
@@ -330,11 +330,11 @@ func test_session_loss_with_no_mounted_root_returns_shell_to_menu_state() -> voi
 	add_child(_shell)
 	await get_tree().process_frame
 	_shell.enter_net_world()
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world",
 			"the spectate entry is in-world with no mounted root")
 	_shell.get_node("World").session_lost.emit("test: replay stream ended")
-	state = _shell.get_game_debug_host().get_mcp_game_state()
+	state = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"a rootless teardown lands on the front-end state, not WORLD")
 	assert_false(_shell.is_world_loading())
@@ -351,7 +351,7 @@ func test_rejected_replay_boot_falls_through_to_the_menu_front_end() -> void:
 	_shell = await _make_shell()  # asserts the boot lands on main.mnu
 	if _shell == null:
 		return
-	var state: Dictionary = _shell.get_game_debug_host().get_mcp_game_state()
+	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"the rejected replay session leaves the shell on the front-end state")
 	assert_false(_shell.is_world_loading())
@@ -442,9 +442,9 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 		return
 	var world = _shell.get_node("World")
 	var terrain = world.get_node("NovaTerrain")
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var boot_clear: Color = world.get_current_frame_clear_color()
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 	# Once the shell owns a mounted resource session, later persistence changes
 	# cannot redirect one consumer into a separately remounted VFS.
 	var detached_resource_dir := _temp_dir.path_join("detached")
@@ -454,7 +454,7 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 			"the persisted directory now points away from the mounted fixture")
 
 	# This is the same public intent emitted by the mission-list ACCEPT command.
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	assert_true(_shell.is_world_loading(),
 			"the loading handoff is pending before the blocking load starts")
 	assert_true(_shell.has_loading_background(),
@@ -463,32 +463,32 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 			"the world cannot finish in the callback that mounts the loading UI")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	_assert_loaded(world, terrain, menu_host)
+	_assert_loaded(world, terrain, menu_shell)
 	assert_false(world.get_current_frame_clear_color().is_equal_approx(boot_clear),
 			"the loaded mission exercised a distinct frame clear")
 
 	# The pause menu's ABORT command emits this public intent.
-	menu_host.return_to_menu_requested.emit()
+	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 	# Hiding retained terrain/environment state must not break the next load.
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	_assert_loaded(world, terrain, menu_host)
-	menu_host.return_to_menu_requested.emit()
+	_assert_loaded(world, terrain, menu_shell)
+	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 	# Failed deferred loads obey the same rollback contract.
-	menu_host.start_requested.emit("missing-mission.bms")
+	menu_shell.start_requested.emit("missing-mission.bms")
 	assert_true(_shell.is_world_loading(), "a failed load enters the deferred handoff")
 	await _wait_for_load_to_settle()
 	await get_tree().process_frame
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
 func test_join_loading_stays_raised_until_authoritative_admission() -> void:
@@ -561,30 +561,30 @@ func test_in_match_session_loss_returns_to_the_menu() -> void:
 		return
 	var world = _shell.get_node("World")
 	var terrain = world.get_node("NovaTerrain")
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var boot_clear: Color = world.get_current_frame_clear_color()
 	assert_true(world.has_signal("session_lost"),
 			"GameWorld publishes the in-match session-loss edge")
 
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	_assert_loaded(world, terrain, menu_host)
+	_assert_loaded(world, terrain, menu_shell)
 
 	world.session_lost.emit("lost connection to the host (no traffic for 120 seconds)")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 	# The shell is usable again straight afterwards: a loss is an abort, not a wedge.
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	_assert_loaded(world, terrain, menu_host)
-	menu_host.return_to_menu_requested.emit()
+	_assert_loaded(world, terrain, menu_shell)
+	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_assert_clean_menu(world, terrain, menu_host, boot_clear)
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
 func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
@@ -593,8 +593,8 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 		return
 	var world = _shell.get_node("World")
 	var terrain = world.get_node("NovaTerrain")
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
-	menu_host.start_requested.emit("mnml.bms")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
 	var runtime = world.get_runtime()
@@ -693,13 +693,13 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 			"Escape removes the click picker through the same visibility edge")
 	assert_false(overlay.get_debug_session().is_presented())
 
-	menu_host.return_to_menu_requested.emit()
+	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open(),
 			"returning to the menu cannot blanket-show a closed F3 layer")
 	assert_false(overlay.get_debug_session().is_presented())
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
 	assert_false(_shell.is_debug_overlay_open(),
@@ -712,7 +712,7 @@ func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	_shell.set_local_player_profile({
 		"player_class": 5,
 		"primary": "WPN_M4",
@@ -723,7 +723,7 @@ func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
 		"accessory_clips": -1,
 	})
 
-	menu_host.start_requested.emit("mnml.bms")
+	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await get_tree().process_frame
 
@@ -768,8 +768,8 @@ func _make_shell():
 		return null
 	add_child(shell)
 	await get_tree().process_frame
-	var menu_host = shell.get_node("MenuLayer/MenuHost")
-	assert_eq(menu_host.get_current_menu_file().to_lower(),
+	var menu_shell = shell.get_node("MenuLayer/MenuShell")
+	assert_eq(menu_shell.get_current_menu_file().to_lower(),
 			"main.mnu", "the packed fixture boots through the real menu host")
 	return shell
 
@@ -811,26 +811,26 @@ func _wait_for_load_to_settle(frame_limit := 240) -> void:
 		await get_tree().process_frame
 
 
-func _assert_loaded(world, terrain, menu_host) -> void:
+func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_false(_shell.is_world_loading(), "the loading gate closes after world_loaded")
 	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
-	assert_same(world.get_resource_root(), menu_host.get_menu().get_resource_root(),
+	assert_same(world.get_resource_root(), menu_shell.get_menu().get_resource_root(),
 			"menu, loading screen, and GameWorld share one mounted resource session")
 	assert_true(world.visible, "the loaded world is presented")
-	assert_false(menu_host.visible, "the main menu stays hidden during play")
+	assert_false(menu_shell.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
 	assert_not_null(world.get_node_or_null("MissionObjects"))
 	assert_gt(terrain.get_visible_patch_count(), 0,
 			"the loaded mission made raw RenderingServer terrain patches visible")
 
 
-func _assert_clean_menu(world, terrain, menu_host, boot_clear: Color) -> void:
+func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 	assert_false(_shell.is_world_loading(), "no loading operation leaks into the menu")
 	assert_false(world.is_loaded(), "the returned-to-menu world is unloaded")
 	assert_false(world.visible, "mission presentation is hidden behind the menu")
 	assert_eq(world.get_loaded_mission_file(), "", "the active mission filename is cleared")
-	assert_true(menu_host.visible, "the main menu is visible")
-	assert_eq(menu_host.get_current_menu_file().to_lower(), "main.mnu")
+	assert_true(menu_shell.visible, "the main menu is visible")
+	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")
 	assert_eq(terrain.get_visible_patch_count(), 0,
 			"raw terrain RIDs obey the hidden GameWorld ancestor")
 	assert_true(world.get_current_frame_clear_color().is_equal_approx(boot_clear),

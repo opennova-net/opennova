@@ -103,7 +103,7 @@ func read_control_state(id: StringName) -> NovaDebugControlState:
 		if control.allow_unresolved_intent:
 			state.available = true
 			state.writable = _write_allowed(control, false)
-			state.reason = "The runtime host applies this control."
+			state.reason = "The game applies this control."
 		else:
 			state.reason = _target_reason(control.target_id)
 		return state

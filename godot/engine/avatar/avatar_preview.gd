@@ -38,7 +38,7 @@ const EDITOR_DISTANCE_SCALE := 2.7
 const MENU_DISTANCE_SCALE := 2.7
 const MENU_PITCH := -0.06
 
-# The menu's anamorphic design space (nova_menu_host.gd scales the whole menu tree from this
+# The menu's anamorphic design space (nova_menu_shell.gd scales the whole menu tree from this
 # to the window). In menu mode the SubViewport is rendered at the on-screen pixel size
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
@@ -139,7 +139,7 @@ func set_menu_preview(enabled: bool) -> void:
 		_viewport.gui_disable_input = true
 		_viewport.msaa_3d = Viewport.MSAA_4X  # edges stay clean at the higher render res
 	# Render the 3D at true on-screen resolution. This subtree is scaled anamorphically by
-	# the menu (nova_menu_host.gd::_recompute_fit), so a design-size SubViewport gets upscaled
+	# the menu (nova_menu_shell.gd::_recompute_fit), so a design-size SubViewport gets upscaled
 	# and blurred; sizing it to on-screen px keeps it sharp and undistorted. Recompute on
 	# window resize too. No-op in the ONED workspace (no parent scale, s == 1).
 	if is_inside_tree() and get_viewport() != null \

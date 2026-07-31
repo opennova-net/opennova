@@ -1,7 +1,7 @@
 extends GutTest
 
-const DeployHost := preload("res://engine/world/deploy_screen_host.gd")
-const TMP_DIR := "res://.godot/deploy_screen_host_test"
+const DeployHost := preload("res://engine/world/deploy_screen_presenter.gd")
+const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
 
 class FakeSim:
@@ -92,7 +92,7 @@ func _open_host(sim: FakeSim):
 
 
 # The shell leaves State.WORLD on `opened` and returns on `closed`; without those
-# two signals firing, LocalPlayerHost re-captures the mouse every frame and the
+# two signals firing, LocalPlayerPresenter re-captures the mouse every frame and the
 # SPAWNPOINTS_LIST rows cannot be clicked at all.
 func test_open_and_close_emit_the_shell_state_signals() -> void:
 	var sim := FakeSim.new()

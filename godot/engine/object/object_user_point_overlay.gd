@@ -193,7 +193,7 @@ func _update_live_marker_positions() -> void:
 			# Fake-skinned rigid parts carry authored model-space user points by the
 			# same subobject/bone index. Move model space into the bone's rest frame,
 			# then through its live pose -- exactly the action-particle attachment
-			# transform used by LocalPlayerHost.
+			# transform used by LocalPlayerPresenter.
 			var model_to_world := (skeleton.global_transform
 					* skeleton.get_bone_global_pose(subobject)
 					* skeleton.get_bone_global_rest(subobject).affine_inverse())

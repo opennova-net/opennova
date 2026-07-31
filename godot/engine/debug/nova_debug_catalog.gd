@@ -1,7 +1,7 @@
 class_name NovaDebugCatalog
 ## Built-in, shell-neutral debug-control catalog.
 ##
-## Definitions name only public owner methods/properties. Host adapters bind
+## Definitions name only public owner methods/properties. Target adapters bind
 ## the corresponding target sources on NovaDebugSession.
 
 const TARGET_WORLD := &"world"
@@ -11,7 +11,7 @@ const TARGET_SIM := &"simulation"
 const TARGET_TERRAIN := &"terrain"
 const TARGET_VIEWPORT := &"viewport"
 const TARGET_SCENE_TREE := &"scene_tree"
-const TARGET_GAME_HOST := &"game_host"
+const TARGET_GAME_SHELL := &"game_shell"
 const TARGET_ENVIRONMENT := &"environment"
 const TARGET_WEATHER := &"weather"
 
@@ -98,7 +98,7 @@ static func bind_runtime_targets(
 		return null,
 		"The current world has no terrain.")
 	session.set_target_source(TARGET_PLAYER, player_source,
-			"No local player presentation host is active.")
+			"No local player presenter is active.")
 	session.set_target_source(TARGET_VIEWPORT, viewport_source,
 			"No render viewport is available.")
 	session.set_target_source(TARGET_SCENE_TREE, scene_tree_source,
@@ -117,10 +117,10 @@ static func bind_runtime_targets(
 		return _world_child(world_source, &"get_weather_node"),
 		"The current world has no weather controller.")
 	# The overlay rebinds its live world targets when it is constructed. Do
-	# not erase MainGame's process-host target when that adapter has no host
+	# not erase MainGame's process-level target when that adapter has no backing
 	# source of its own.
 	if game_host_source.is_valid():
-		session.set_target_source(TARGET_GAME_HOST, game_host_source,
+		session.set_target_source(TARGET_GAME_SHELL, game_host_source,
 				"The game shell is not available.")
 
 
@@ -247,7 +247,7 @@ static func _install_audio_actions(session: NovaDebugSession) -> void:
 	var volume := NovaDebugControlDef.action_control(
 			&"set_audio_bus_volume", &"Audio", "Set bus volume",
 			"Set one named audio bus volume in decibels.",
-			TARGET_GAME_HOST, &"debug_set_audio_bus_volume")
+			TARGET_GAME_SHELL, &"debug_set_audio_bus_volume")
 	volume.action_validator = _valid_audio_bus_volume_args
 	volume.action_returns_error = true
 	session.register_control(volume)
@@ -261,7 +261,7 @@ static func _install_audio_actions(session: NovaDebugSession) -> void:
 		var definition := NovaDebugControlDef.action_control(
 				row[0], &"Audio", row[1],
 				"Set one named audio bus %s state." % String(row[1]).trim_prefix("Set bus "),
-				TARGET_GAME_HOST, row[2])
+				TARGET_GAME_SHELL, row[2])
 		definition.action_validator = _valid_audio_bus_switch_args
 		definition.action_returns_error = true
 		session.register_control(definition)
@@ -272,7 +272,7 @@ static func _install_authoritative_runtime_controls(
 	var transport := NovaDebugControlDef.action_control(
 			&"runtime_transport", &"Sim", "Runtime transport",
 			"Resume, pause, or single-step the real game runtime.",
-			TARGET_GAME_HOST, &"mcp_game_control")
+			TARGET_GAME_SHELL, &"mcp_game_control")
 	_authoritative(transport)
 	transport.action_validator = _valid_transport_args
 	transport.action_returns_error = true
@@ -281,7 +281,7 @@ static func _install_authoritative_runtime_controls(
 	var return_to_menu := NovaDebugControlDef.action_control(
 			&"runtime_return_to_menu", &"Sim", "Return to menu",
 			"Leave the current world locally and return to the game menu.",
-			TARGET_GAME_HOST, &"debug_return_to_menu")
+			TARGET_GAME_SHELL, &"debug_return_to_menu")
 	return_to_menu.action_returns_error = true
 	session.register_control(return_to_menu)
 

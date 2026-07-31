@@ -28,7 +28,7 @@ func _ready() -> void:
 
 	var game: Node = session.game
 	var world: GameWorld = session.world
-	var host = game.find_child("LocalPlayerHost", true, false)
+	var host = game.find_child("LocalPlayerPresenter", true, false)
 	if host == null:
 		push_error("[keys] no player host")
 		get_tree().quit(1)
@@ -59,12 +59,12 @@ func _ready() -> void:
 	_check(bool(host.get("_crouch")) != crouch_before, "C toggles crouch")
 
 	# Shift: the armory — the USE-ITEM key (action 177, retail default SHIFT), via
-	# the shared NovaArmoryHost (zone-gated). Out of zone the key is ignored (the
+	# the shared NovaArmoryPresenter (zone-gated). Out of zone the key is ignored (the
 	# original's silent gate); in zone the WEAPON overlay opens.
 	var sim = world.get_sim() if world != null and world.has_method("get_sim") else null
 	var in_zone: bool = sim != null and sim.has_method("local_player_in_armory_zone") \
 			and sim.local_player_in_armory_zone()
-	var armory = game.find_child("ArmoryHost", true, false)
+	var armory = game.find_child("ArmoryPresenter", true, false)
 	_check(armory != null, "the game mounts the shared armory host")
 	_tap(KEY_SHIFT)
 	await _settle(6)
@@ -76,7 +76,7 @@ func _ready() -> void:
 			_check(not bool(armory.is_open()), "Esc closes the armory overlay")
 		else:
 			_check(not bool(armory.is_open()), "Shift out of zone stays ignored [orig: @0x4e0b4d]")
-	_check(game.find_child("GameHudHost", true, false) != null,
+	_check(game.find_child("GameHudPresenter", true, false) != null,
 		"the game mounts the shared HUD host")
 
 	print("[keys] result: %s" % ("ALL OK" if _fails == 0 else "%d FAILED" % _fails))

@@ -16,7 +16,7 @@ const KIND_ACTION := 3
 
 ## The live GameWorld host.
 const TARGET_WORLD := &"world"
-## The local player host (LocalPlayerHost).
+## The local player host (LocalPlayerPresenter).
 const TARGET_PLAYER := &"player"
 
 const OPTIONS: Array[Dictionary] = [

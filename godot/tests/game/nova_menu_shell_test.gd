@@ -1,11 +1,11 @@
 extends GutTest
 
-# Runtime menu shell (NovaMenuHost) gates: it boots the JO menu set, services the
+# Runtime menu shell (NovaMenuShell) gates: it boots the JO menu set, services the
 # host policy the menu leaves to it (cross-.mnu jumps + a file-level back stack,
 # quit), drives the music director's screen var, launches a selected mission, and
 # degrades gracefully when menu assets are missing - all headless, no blocking.
 
-const MenuHostScript := preload("res://game/nova_menu_host.gd")
+const MenuHostScript := preload("res://game/nova_menu_shell.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target

@@ -1,11 +1,11 @@
-class_name NovaArmoryHost
+class_name NovaArmoryPresenter
 extends Node
 
 ## The in-world armory surface mounted by the game shell. Kept as a standalone
-## host so every runtime entry uses one implementation.
+## presenter so every runtime entry uses one implementation.
 ##
 ## Owns a live NovaMnuMenu over the gameplay view showing weapon.mnu's WEAPON
-## screen, driven by the ArmoryMenuHost companion, zone-gated on the type-6
+## screen, driven by the ArmoryMenuCompanion companion, zone-gated on the type-6
 ## armory volume contact flag the collision resolver maintains. The world keeps
 ## ticking underneath — the witnessed armory has no world-stop leg (the screen is
 ## a live overlay; in an MP session the team scoreboard even draws over it
@@ -18,7 +18,7 @@ extends Node
 
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
-const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (NovaMenuHost's default)
+const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (NovaMenuShell's default)
 const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 
@@ -33,7 +33,7 @@ signal opened
 signal closed
 
 var _world = null          # GameWorld
-var _player_host = null    # LocalPlayerHost (viewmodel rebuild on ACCEPT)
+var _player_presenter = null    # LocalPlayerPresenter (viewmodel rebuild on ACCEPT)
 var _ui_parent: Node = null
 var _team := 0
 # The local player's class (5..9; 0 = unclassed SP spawn); the screen opens on it
@@ -43,7 +43,7 @@ var _player_class := 0
 
 var _menu: NovaMnuMenu = null
 var _menu_root: NovaResourceRoot = null  # the root the built menu was fed from
-var _armory := ArmoryMenuHost.new()
+var _armory := ArmoryMenuCompanion.new()
 
 
 func _init() -> void:
@@ -51,11 +51,11 @@ func _init() -> void:
 	_armory.armory_closed.connect(close)
 
 
-## Wire the host to a world + player host and the control the menu overlays
+## Wire the presenter to a world + player presenter and the control the menu overlays
 ## (the HUD layer in the game shell; tests pass their own parent).
 func setup(world, player_host, ui_parent: Node) -> void:
 	_world = world
-	_player_host = player_host
+	_player_presenter = player_host
 	_ui_parent = ui_parent
 	_connect_layout_source()
 
@@ -217,11 +217,11 @@ func _ensure_menu() -> bool:
 		return false
 	var bytes := root.read_file(MENU_FILE)
 	if bytes.is_empty():
-		push_warning("NovaArmoryHost: %s not found in the resource root" % MENU_FILE)
+		push_warning("NovaArmoryPresenter: %s not found in the resource root" % MENU_FILE)
 		return false
 	var doc := NovaMnuDocument.new()
 	if doc.load_from_bytes(bytes) != OK:
-		push_warning("NovaArmoryHost: %s did not parse" % MENU_FILE)
+		push_warning("NovaArmoryPresenter: %s did not parse" % MENU_FILE)
 		return false
 	_register_text_tables(root)
 	_menu = NovaMnuMenu.new()
@@ -300,8 +300,8 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			# not the armory's].
 			if _world.has_method("clear_local_player_weapon"):
 				_world.clear_local_player_weapon()
-				if _player_host != null:
-					_player_host.refresh_viewmodel()
+				if _player_presenter != null:
+					_player_presenter.refresh_viewmodel()
 			close()
 			return
 		# The sim re-selected + committed the equipped slot during the apply; install
@@ -315,8 +315,8 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 		if not equipped.is_empty() \
 				and _world.has_method("set_local_player_weapon_by_name") \
 				and _world.set_local_player_weapon_by_name(equipped) \
-				and _player_host != null:
-			_player_host.refresh_viewmodel()
+				and _player_presenter != null:
+			_player_presenter.refresh_viewmodel()
 	close()
 
 

@@ -1,6 +1,6 @@
 extends GutTest
 
-const ArmoryHost := preload("res://engine/world/armory_host.gd")
+const ArmoryPresenter := preload("res://engine/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_host_test"
 
 
@@ -201,17 +201,17 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(1600, 900)
-	var host := ArmoryHost.new()
-	add_child_autofree(host)
-	host.setup(world, player_host, overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, player_host, overlay)
 
-	assert_true(host.try_open(), "offline player in a type-6 zone opens the armory")
+	assert_true(presenter.try_open(), "offline player in a type-6 zone opens the armory")
 	var menu := overlay.get_node_or_null("ArmoryMenu") as NovaMnuMenu
 	assert_not_null(menu)
 	assert_eq(menu.size, Vector2(800, 600), "weapon.mnu keeps its authored design space")
-	assert_eq(menu.scale, Vector2(2.0, 1.5), "the design space fills a 1600x900 host")
+	assert_eq(menu.scale, Vector2(2.0, 1.5), "the design space fills a 1600x900 presenter")
 	overlay.size = Vector2(1200, 600)
-	assert_eq(menu.scale, Vector2(1.5, 1.0), "the fit follows host resizes")
+	assert_eq(menu.scale, Vector2(1.5, 1.0), "the fit follows presenter resizes")
 
 	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
 	assert_eq(spin.get_value_index(), 3, "entity class 8 selects Rifleman by value")
@@ -236,7 +236,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 		"unchanged ACCEPT preserves the entity's equipped weapon")
 	assert_eq(world.set_weapon_calls, [equipped])
 
-	assert_true(host.try_open(), "the same armory can reopen after ACCEPT")
+	assert_true(presenter.try_open(), "the same armory can reopen after ACCEPT")
 	menu = overlay.get_node("ArmoryMenu") as NovaMnuMenu
 	primary = menu.find_child("PRIMARY", true, false) as NovaMnuCombo
 	primary.select_silent(0)
@@ -295,11 +295,11 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
-	var host := ArmoryHost.new()
-	add_child_autofree(host)
-	host.setup(world, null, overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
 
-	assert_true(host.try_open(), "a fresh armory host opens for the equipped local player")
+	assert_true(presenter.try_open(), "a fresh armory presenter opens for the equipped local player")
 	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
 	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
 	assert_gt(accessory.get_selected(), 0,
@@ -366,11 +366,11 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	add_child_autofree(world)
 	var overlay := Control.new()
 	add_child_autofree(overlay)
-	var host := ArmoryHost.new()
-	add_child_autofree(host)
-	host.setup(world, null, overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
 
-	assert_true(host.try_open(), "the real weapon.mnu armory opens")
+	assert_true(presenter.try_open(), "the real weapon.mnu armory opens")
 	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
 	for i in grenade_rows.size():
 		var combo_name := "GRENADE_AMMO%d" % (i + 1)
@@ -397,13 +397,13 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 		assert_eq(int(accepted_by_name.get(grenade_name, -1)), i + 1,
 			"untouched ACCEPT preserves %s and its selected count" % grenade_name)
 		assert_has(inventory_names, grenade_name,
-			"the ArmoryHost ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
+			"the ArmoryPresenter ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
 	simulation.free()
 
 
 func test_multiplayer_open_is_live() -> void:
 	# The 0x2F loadout service exists now: a joiner's ACCEPT re-submits from the
-	# applied kit (the sim's in-match queue leg) and the listen host applies
+	# applied kit (the sim's in-match queue leg) and the listen presenter applies
 	# server-authoritatively, so the armory opens in MP like retail
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94].
 	var sim := FakeSim.new()
@@ -416,9 +416,9 @@ func test_multiplayer_open_is_live() -> void:
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
-	var host := ArmoryHost.new()
-	add_child_autofree(host)
-	host.setup(world, null, overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
 
-	assert_true(host.try_open(), "the MP armory opens over live play")
+	assert_true(presenter.try_open(), "the MP armory opens over live play")
 	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))

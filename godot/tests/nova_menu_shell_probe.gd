@@ -6,14 +6,14 @@ extends SceneTree
 # main.mnu, instantiate the runtime scene, and let its _ready -> _enter_menu run.
 # Checks it landed on the main menu with the world unloaded, then restores the
 # prior persisted dir. A clean result is written to
-# user://nova_menu_host_probe_result.txt (the stdout pipe mangles Godot's colored
+# user://nova_menu_shell_probe_result.txt (the stdout pipe mangles Godot's colored
 # output on Windows).
 #
-# Use: godot --headless --path godot -s res://tests/nova_menu_host_probe.gd
+# Use: godot --headless --path godot -s res://tests/nova_menu_shell_probe.gd
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"
-const RESULT_PATH := "user://nova_menu_host_probe_result.txt"
+const RESULT_PATH := "user://nova_menu_shell_probe_result.txt"
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 
@@ -51,14 +51,14 @@ func _run() -> void:
 	for _i in range(10):
 		await process_frame
 
-	var host = scene.get_node_or_null("MenuLayer/MenuHost")
+	var host = scene.get_node_or_null("MenuLayer/MenuShell")
 	var world = scene.get_node_or_null("World")
 	diag["menu_file"] = host.get_current_menu_file() if host != null else "<none>"
 	diag["menu_built"] = (host != null and host.get_menu() != null)
 	diag["world_loaded"] = world.is_loaded() if world != null else null
 
 	if host == null:
-		failures.append("MenuLayer/MenuHost missing from the runtime scene")
+		failures.append("MenuLayer/MenuShell missing from the runtime scene")
 	elif String(diag["menu_file"]) != "main.mnu":
 		failures.append("expected boot into main.mnu, got '%s'" % diag["menu_file"])
 	elif not diag["menu_built"]:
@@ -91,7 +91,7 @@ func _write_result(diag: Dictionary, failures: Array, skipped: bool) -> void:
 
 
 func _build_resource_dir() -> String:
-	var dir := OS.get_temp_dir().path_join("nova_menu_host_probe_root")
+	var dir := OS.get_temp_dir().path_join("nova_menu_shell_probe_root")
 	DirAccess.make_dir_recursive_absolute(dir)
 	_copy(MAIN_FIXTURE, dir.path_join("main.mnu"))
 	_copy(SP_FIXTURE, dir.path_join("sp.mnu"))

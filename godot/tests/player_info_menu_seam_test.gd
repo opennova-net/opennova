@@ -1,6 +1,6 @@
 extends GutTest
 
-# The player.mnu PLAYER_INFO screen seam: the companion (player_info_menu_host.gd)
+# The player.mnu PLAYER_INFO screen seam: the companion (player_info_menu_companion.gd)
 # drives the JO character screen by control NAME -- fills NATIONALITY / DIVISION /
 # COMBO_LIST / PLAYERVOICE from Avatars.def, runs the nationality->division->combo
 # cascade, and re-filters by the SIDE_BLUE/SIDE_RED team. This pins the wiring against
@@ -99,7 +99,7 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 
 
 func test_owns_menu_detects_player_info() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var menu := _make_menu()
 	assert_true(host.owns_menu(menu), "a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
 	var plain := Node.new()
@@ -108,7 +108,7 @@ func test_owns_menu_detects_player_info() -> void:
 
 
 func test_populates_avatar_lists_and_combo_label() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
 	host._db = db  # inject directly (no resource root in the unit)
 	var menu := _make_menu()
@@ -134,7 +134,7 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 # boot), the host resolves nationality + combo display keys to friendly names instead of the
 # raw AV_* keys [orig: GameText_GetStringWithFallback @ 0x51eb90, "Avatars" section].
 func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
 	host._db = db
 
@@ -162,7 +162,7 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 
 
 func test_division_change_refills_combos() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
 	host._db = db
 	var menu := _make_menu()
@@ -177,7 +177,7 @@ func test_division_change_refills_combos() -> void:
 
 
 func test_team_filter_partitions_nationalities_by_alignment() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
 	host._db = db
 	var menu := _make_menu()
@@ -202,7 +202,7 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 
 
 func test_initial_team_follows_checked_side_radio() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._db = _load_db()
 	var menu := _make_menu()
 	(menu.find_child("SIDE_RED", true, false) as BaseButton).button_pressed = true
@@ -211,7 +211,7 @@ func test_initial_team_follows_checked_side_radio() -> void:
 
 
 func test_degrades_without_avatar_db() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var menu := _make_menu()
 	# No resource root and no injected db: the screen wires up but the combos stay empty.
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
@@ -219,7 +219,7 @@ func test_degrades_without_avatar_db() -> void:
 
 
 func test_mounts_3d_preview_when_widget_present() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._db = _load_db()
 	var menu := _make_menu()
 	var preview_rect := Control.new()
@@ -233,7 +233,7 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 
 
 func test_snapshot_reports_current_selection() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._db = _load_db()
 	var menu := _make_menu()
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
@@ -245,7 +245,7 @@ func test_snapshot_reports_current_selection() -> void:
 
 
 func test_accept_emits_avatar_chosen() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._db = _load_db()
 	watch_signals(host)
 	var menu := _make_menu()
@@ -274,7 +274,7 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 	menu.set_resource_root(root)
 	menu.menu = doc
 
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", root)
 	watch_signals(menu)
 	var preview := menu.find_child("TESTPLAYERVOICE", true, false) as BaseButton
@@ -352,8 +352,8 @@ var _ammo_menu: Node = null  # the stand-in menu behind the current _make_ammo_h
 
 # A wired host over the stand-in loadout menu (medic/blue), for the ammo cases —
 # built through the public seams only (set_weapon_database + on_menu_built).
-func _make_ammo_host(wdb: NovaWeaponDatabase = null) -> PlayerInfoMenuHost:
-	var host := PlayerInfoMenuHost.new()
+func _make_ammo_host(wdb: NovaWeaponDatabase = null) -> PlayerInfoMenuCompanion:
+	var host := PlayerInfoMenuCompanion.new()
 	host.set_weapon_database(wdb if wdb != null else _load_weapons())
 	_ammo_menu = _make_loadout_menu()
 	host.on_menu_built(_ammo_menu, "player.mnu", "PLAYER_INFO", null)
@@ -401,7 +401,7 @@ func _combo_texts(c: NovaMnuCombo) -> Array:
 
 
 func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var wdb := _load_weapons()
 	host._weapons = wdb
 	host._menu = _make_loadout_menu()
@@ -417,7 +417,7 @@ func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
 
 
 func test_loadout_class_filter_includes_and_excludes() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._weapons = _load_weapons()
 	host._menu = _make_loadout_menu()
 	host._team = 0
@@ -434,7 +434,7 @@ func test_loadout_class_filter_includes_and_excludes() -> void:
 
 
 func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var wdb := _load_weapons()
 	host.set_weapon_database(wdb)
 	var menu := _make_loadout_menu()
@@ -462,7 +462,7 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 
 
 func test_snapshot_carries_class_without_a_weapon_database() -> void:
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	var menu := _make_loadout_menu()
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
 
@@ -491,7 +491,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 	assert_not_null(pclass, "the real player.mnu builds a PLAYERCLASS combobox")
 	assert_gt(pclass.get_item_count(), 0, "PLAYERCLASS carries its static class items")
 
-	var host := PlayerInfoMenuHost.new()
+	var host := PlayerInfoMenuCompanion.new()
 	host._db = _load_db()
 	host._weapons = _load_weapons()  # injected (root-less unit), as if weapon.def had loaded
 	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
@@ -520,7 +520,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 
 func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var ammo := _ammo_control("PRIMARY_AMMO1")
 	var maxclips := int(w.get("maxclips", 0))
@@ -536,7 +536,7 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 
 func test_none_selection_hides_ammo_and_clears_icon() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var primary := _ammo_control("PRIMARY")
 	primary.select(0)  # back to NONE
@@ -549,7 +549,7 @@ func test_none_selection_hides_ammo_and_clears_icon() -> void:
 
 func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	# The M203 carbines are rifleman-filtered; switch PLAYERCLASS to Rifleman
 	# (value 8, row 3) so the slot list offers them.
 	_ammo_control("PLAYERCLASS").select(3)
@@ -570,7 +570,7 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 
 func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var expected: Array = wdb.get_slot_weapons(
 			NovaWeaponDatabase.SLOT_GRENADE, 1, 2)  # medic/blue
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
@@ -591,7 +591,7 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 
 func test_weight_label_renders_witnessed_format_and_band() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
@@ -697,7 +697,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	# grenades default -1 -> maxclips, but a PICKED 0 stays 0 (the zero row) —
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var g := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
 	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
 		"the first grenade def carries weighable clips")

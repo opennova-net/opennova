@@ -481,7 +481,7 @@ func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
 	# AnimChannel_BlendTwoChannels slerps/lerps it into the incoming channel over
 	# 10 ticks (15 when the TARGET state's flags carry 0x400). The blend happens
 	# below the existing weapon/aim overlays, so this public model seam pins the
-	# shared primary pose instead of any one presentation host's call bookkeeping.
+	# shared primary pose instead of any one presenter's call bookkeeping.
 	var skeletal := _loaded_skeletal()
 	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
 	var walk_fps: float = skeletal.get_clip_fps("anim_walk_forward")
