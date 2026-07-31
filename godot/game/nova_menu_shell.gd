@@ -1,4 +1,4 @@
-class_name NovaMenuHost
+class_name NovaMenuShell
 extends Control
 
 # Runtime menu shell: drives a live NovaMnuMenu (the same engine node the ONED
@@ -12,10 +12,10 @@ extends Control
 #
 # The menu itself owns intra-.mnu navigation, window show/hide, the back stack,
 # and per-screen music (it pushes each screen's MUSICVAR into the director). The
-# host services the policy the menu leaves to it: cross-.mnu file jumps
+# shell services the policy the menu leaves to it: cross-.mnu file jumps
 # (menu_requested), quit (quit_requested), and the gameplay launch. Shipped JO
 # menus carry no "launch" action verb; the engine wires those by well-known
-# control NAME (START_GAME, ACCEPT, EXIT, ...), so the host scans the built tree
+# control NAME (START_GAME, ACCEPT, EXIT, ...), so the shell scans the built tree
 # for those names and connects them. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
@@ -76,7 +76,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
 
 # Well-known control names (the JO "wired by convention" launch/quit controls).
-# A button found by one of these names gets its `pressed` connected to the host.
+# A button found by one of these names gets its `pressed` connected to the shell.
 @export var start_control_names := PackedStringArray([
 	"START_GAME", "ACCEPT", "LAUNCH", "GO", "HOST_GAME", "LAN_HOSTGAME",
 ])
@@ -86,11 +86,11 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var return_control_names := PackedStringArray([
 	"QUIT_TO_MENU", "MAIN_MENU", "ABORT", "ABORT_MISSION",
 ])
-# List widgets the host fills with the resource dir's missions (.bms).
+# List widgets the shell fills with the resource dir's missions (.bms).
 @export var mission_list_names := PackedStringArray([
 	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "MAP_LIST",
 ])
-# List widgets the host fills with the expansions discoverable under the resource
+# List widgets the shell fills with the expansions discoverable under the resource
 # dir (Options -> Mods). Activating one mounts it over the base game.
 @export var mod_list_names := PackedStringArray([
 	"AVAIL_LIST", "MOD_LIST", "MODLIST", "EXPANSION_LIST",
@@ -100,7 +100,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
 # The Options -> Controls key-binding table, and the device radios that switch it
-# (Keyboard/Mouse/Joystick). The host fills the table from the libs/controls catalog.
+# (Keyboard/Mouse/Joystick). The shell fills the table from the libs/controls catalog.
 @export var control_table_names := PackedStringArray([
 	"CONTROL_MAPPING",
 ])
@@ -117,14 +117,14 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 	"NW_MULTI_PLAYER", "NOVAWORLD", "NOVAWORLD_LOGIN", "INTERNET_GAME",
 ])
 
-# Host -> main_game intents. The host never loads a world or quits the app
+# Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
 signal start_requested(bms_name: String)
 signal exit_to_desktop_requested()
 signal return_to_menu_requested()
 signal resume_requested()
 # The player chose NovaWorld (online multiplayer) from the menu. main_game
-# opens the NovaWorld panel; the host stays out of the networking itself.
+# opens the NovaWorld panel; the shell stays out of the networking itself.
 signal novaworld_requested()
 # Emitted after the Options spin list changes so an active HUD can reload its art.
 signal crosshair_style_changed(style: int)
@@ -143,8 +143,8 @@ var _selected_expansion := ""
 var _in_game := false
 var _ready_done := false
 # Optional delegates that own game-specific menus the generic shell does not handle
-# (the JO multiplayer menu — mp_menu_host.gd; the PLAYER_INFO character screen —
-# player_info_menu_host.gd). Empty for a plain shell. The first whose owns_menu()
+# (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
+# player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
 # Lazily-built Options -> Controls key-binding catalog (libs/controls).
@@ -158,7 +158,7 @@ func _ready() -> void:
 
 
 # Install a companion that owns game-specific menus the generic shell does not handle
-# (the JO multiplayer menu — mp_menu_host.gd; the PLAYER_INFO screen). The shell can
+# (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO screen). The shell can
 # drive several: companions are tried in install order, and the first whose
 # owns_menu() claims the loaded menu drives it (see _wire_named_controls).
 func add_companion(companion) -> void:
@@ -243,7 +243,7 @@ func _assemble_assets() -> void:
 func open_menu(file: String, target_screen: String) -> bool:
 	var doc := _load_doc(file)
 	if doc == null:
-		push_warning("NovaMenuHost: could not load menu '%s'" % file)
+		push_warning("NovaMenuShell: could not load menu '%s'" % file)
 		return false
 	_current_file = file
 	_selected_mission = ""
@@ -424,7 +424,7 @@ func _apply_expansion(name: String) -> void:
 	# with; this guard keeps a hand-driven selection from remounting the loose
 	# root through mount_runtime and clearing it on the inevitable failure.
 	if not _root.is_runtime_mount():
-		push_warning("NovaMenuHost: expansions need a packed game install; the loose mount stands")
+		push_warning("NovaMenuShell: expansions need a packed game install; the loose mount stands")
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
@@ -434,7 +434,7 @@ func _apply_expansion(name: String) -> void:
 	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(2, MUSICVAR)].
 	var active_music_var := NovaMusicService.get_var(MUSIC_VAR_INDEX)
 	if _root.mount_runtime(dir, name, NovaLaunchFlags.loose_override_enabled()) != OK:
-		push_warning("NovaMenuHost: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
+		push_warning("NovaMenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
 		_root.mount_runtime(dir, prev, NovaLaunchFlags.loose_override_enabled())  # rollback
 		return
 	ResourceDirSettings.set_expansion(name)
@@ -522,7 +522,7 @@ func _on_url_requested(url: String) -> void:
 	OS.shell_open(target)
 
 
-# --- Named-control handlers (host policy: launch / quit by control name) -------
+# --- Named-control handlers (shell policy: launch / quit by control name) -------
 
 func _on_start_control() -> void:
 	var mission := _selected_mission
@@ -531,7 +531,7 @@ func _on_start_control() -> void:
 		# without a list (or before a selection) can still start something.
 		mission = MissionCatalog.first_mission_name(_root)
 	if mission.is_empty():
-		push_warning("NovaMenuHost: start pressed with no mission available")
+		push_warning("NovaMenuShell: start pressed with no mission available")
 		return
 	start_requested.emit(mission)
 

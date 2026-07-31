@@ -13,7 +13,7 @@ SEQUENTIAL / RANDOM_SEQUENTIAL with per-layer cursor/bag state — originally th
 
 ## Decision
 
-Move the selection state machine into portable C++; keep the host-bound parts in GDScript.
+Move the selection state machine into portable C++; keep the shell-bound parts in GDScript.
 
 - **`libs/audio` — `opennova::audio::SoundSelector`**: `select(key, member_count, mode) -> index`,
   per-`(bank,set,layer)` state, engine-faithful machine (sequential cursor; random-anchor full

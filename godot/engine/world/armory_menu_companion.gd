@@ -1,11 +1,11 @@
-class_name ArmoryMenuHost
+class_name ArmoryMenuCompanion
 extends RefCounted
 
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
 # Drives the JO in-game armory — weapon.mnu's WEAPON screen — by control NAME, as a
-# companion the game-agnostic NovaMenuHost (nova_menu_host.gd) delegates to (the
-# mp_menu_host / player_info_menu_host pattern). The original registers exactly these
+# companion the game-agnostic NovaMenuShell (nova_menu_shell.gd) delegates to (the
+# mp_menu_companion / player_info_menu_companion pattern). The original registers exactly these
 # controls on the "WEAPON" screen [orig: WeaponDef_RegisterUICallbacks @0x567020,
 # run once from the screen's INIT event @0x567250]:
 #   PLAYER_CLASS (spinlist)                  -> handle_team_class_selection @0x566f60
@@ -160,7 +160,7 @@ func _ensure_weapons() -> void:
 		return
 	_weapons = NovaWeaponDatabase.new()
 	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
-		push_warning("ArmoryMenuHost: weapon.def not loaded (%s); armory lists stay empty"
+		push_warning("ArmoryMenuCompanion: weapon.def not loaded (%s); armory lists stay empty"
 			% _weapons.get_last_error())
 		_weapons = null
 
@@ -194,7 +194,7 @@ func _populate_classes() -> void:
 	spin.set_value_index(maxi(CLASS_VALUES.find(_selected_class_value), 0))
 	_populating = false
 	# Outside an MP session the class spin is inert [orig: @0x567370]. NovaMnuSpinList
-	# has no runtime disable; parking the subtree's processing is the host-side stand-in.
+	# has no runtime disable; parking the subtree's processing is the shell-side stand-in.
 	spin.process_mode = Node.PROCESS_MODE_INHERIT if _class_selection_enabled \
 			else Node.PROCESS_MODE_DISABLED
 

@@ -652,7 +652,7 @@ override → menu/game music) rides MUS-I's tail.
 
 ### Menus
 
-- MNU-1: **flow run mode** — host the runtime `NovaMenuHost` (menu_shell.gd's
+- MNU-1: **flow run mode** — host the runtime `NovaMenuShell` (nova_menu_shell.gd's
   node: the same `NovaMnuMenu` with `edit_mode` off, fully interactive) over
   the authored document in a sandboxed "Run" tab: navigation, back stack,
   window show/hide, per-screen MUSICVAR all execute for real; the host-policy

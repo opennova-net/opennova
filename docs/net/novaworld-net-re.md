@@ -7695,7 +7695,7 @@ loads — the expansion setting must name it (config, not code).
 
 Reimpl: `libs/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
 `weapon_inventory`), `NovaSimulation` (`rebuild_local_player_loadout` + the switch/commit
-seams), `local_player_host.gd` (keys 1..9, `[`/`]`), `armory_host.gd`/`armory_menu_host.gd`
+seams), `local_player_host.gd` (keys 1..9, `[`/`]`), `armory_host.gd`/`armory_menu_companion.gd`
 (availability filter + multi-slot ACCEPT), `mission_runtime.gd` (the .bms promote), GUT
 `nova_simulation_test.gd` / `armory_host_test.gd`.
 

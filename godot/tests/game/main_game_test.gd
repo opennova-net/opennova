@@ -42,9 +42,9 @@ func after_each() -> void:
 			var world_root = world.get_resource_root()
 			if world_root != null:
 				world_root.clear()
-		var menu_host = _shell.get_node_or_null("MenuLayer/MenuHost")
-		if menu_host != null and menu_host.get_menu() != null:
-			var menu_root = menu_host.get_menu().get_resource_root()
+		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
+		if menu_shell != null and menu_shell.get_menu() != null:
+			var menu_root = menu_shell.get_menu().get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -196,8 +196,8 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	_shell = await _make_packed_shell("jodemo")
 	if _shell == null:
 		return
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
-	var menu = menu_host.get_menu()
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var menu = menu_shell.get_menu()
 	assert_not_null(menu, "the packed fixture boots the public menu host")
 	if menu == null:
 		return

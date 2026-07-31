@@ -1,7 +1,7 @@
 extends GutTest
 
-# The in-game armory seam: weapon.mnu's WEAPON screen driven by the ArmoryMenuHost
-# companion (godot/engine/world/armory_menu_host.gd). Pins the witnessed wiring [orig:
+# The in-game armory seam: weapon.mnu's WEAPON screen driven by the ArmoryMenuCompanion
+# companion (godot/engine/world/armory_menu_companion.gd). Pins the witnessed wiring [orig:
 # WeaponDef_RegisterUICallbacks @0x567020 registers PLAYER_CLASS / PRIMARY / SECONDARY /
 # ACCESSORY / *_AMMO / ACCEPT / CANCEL on the "WEAPON" screen; population
 # populate_three_category_lists @0x566db0 (sorted rows, NONE at 0); class resolution
@@ -30,7 +30,7 @@ func _load_weapons() -> NovaWeaponDatabase:
 
 func _load_weapons_with_weight(weapon_name: String, weight: float) -> NovaWeaponDatabase:
 	# Exercise the public parser/database seam with an authored sentinel instead of
-	# reaching into ArmoryMenuHost's private row cache. Restrict the substitution to
+	# reaching into ArmoryMenuCompanion's private row cache. Restrict the substitution to
 	# the named weapon's top-level block so identically named properties elsewhere
 	# in the production-sized fixture remain untouched.
 	var source := FileAccess.get_file_as_string(WEAPON_FIXTURE)
@@ -115,7 +115,7 @@ func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	NovaStrings.register_table("gametext", t)
 	var expected := t.get_string_in_section("WepDes", "WEAP_SHORT_M4")
 	assert_true(not expected.is_empty(), "the fixture carries WepDes/WEAP_SHORT_M4")
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	var menu := _make_menu()
@@ -126,7 +126,7 @@ func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 
 
 func test_owns_menu_detects_weapon_screen() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	var menu := _make_menu()
 	assert_true(host.owns_menu(menu), "PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
@@ -143,7 +143,7 @@ func test_unclassed_default_shows_all_weapons() -> void:
 	# — the witnessed switch default is mask -1 = ALL weapons — and the spin merely
 	# shows row 0 [orig: Armory_ResolveSelectedClass @0x5642f0;
 	# SpinList_SelectItemByValue @0x64ba50 falls back to row 0].
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	var wdb := _load_weapons()
 	host.set_weapon_database(wdb)
 	var menu := _make_menu()
@@ -161,7 +161,7 @@ func test_unclassed_default_shows_all_weapons() -> void:
 
 
 func test_populates_classes_slots_and_ammo() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	var wdb := _load_weapons()
 	host.set_weapon_database(wdb)
 	# The screen opens on the player's current class + equipped primary [orig:
@@ -212,7 +212,7 @@ func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 			"the shipped GameText fixture loads")
 	NovaStrings.register_table("gametext", gametext)
 
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	host.set_current_loadout("WPN_M4AUTO")
@@ -228,7 +228,7 @@ func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 
 
 func test_class_change_refilters_slots() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	var menu := _make_menu()
@@ -247,7 +247,7 @@ func test_class_change_refilters_slots() -> void:
 
 
 func test_weight_updates_from_selection() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	host.set_current_loadout("WPN_M4AUTO")
@@ -280,7 +280,7 @@ func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	if grenades.size() < 3:
 		return
 	var banned_name := String((grenades[0] as Dictionary).get("name", ""))
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(wdb)
 	host.set_player_class(8)
 	host.set_availability_lookup(func(name: String) -> int:
@@ -335,7 +335,7 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	assert_eq(float(grenade_def.get("weight", 0.0)),
 			GRENADE_WEAPON_WEIGHT_SENTINEL,
 			"the public weapon database carries the authored weaponweight sentinel")
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(wdb)
 	host.set_player_class(8)
 	host.set_current_loadout("", "", "", [{
@@ -366,7 +366,7 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 
 
 func test_accept_emits_loadout_and_cancel_closes() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	host.set_current_loadout("WPN_M4AUTO")
@@ -395,7 +395,7 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 # on_menu_built = the on-show: it stamps the debounce; NovaArmoryHost routes the
 # key edges here while its overlay is open.
 func test_armory_accept_hotkey_debounces_until_release() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	host.set_current_loadout("WPN_M4AUTO")
@@ -419,7 +419,7 @@ func test_armory_accept_hotkey_debounces_until_release() -> void:
 
 
 func test_degrades_without_weapon_def() -> void:
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	var menu := _make_menu()
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)  # no db, no root
 	assert_eq(_combo(menu, "PRIMARY").get_item_count(), 0, "no weapon.def -> empty slots, no crash")
@@ -437,7 +437,7 @@ func test_real_weapon_mnu_populates() -> void:
 	menu.set_edit_mode(false)
 	menu.menu = doc
 
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	assert_true(host.owns_menu(menu), "the real weapon.mnu is claimed by the armory companion")
 	host.set_weapon_database(_load_weapons())
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
@@ -463,7 +463,7 @@ func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> 
 	menu.set_edit_mode(false)
 	menu.menu = doc
 
-	var host := ArmoryMenuHost.new()
+	var host := ArmoryMenuCompanion.new()
 	host.set_weapon_database(_load_weapons())
 	host.set_player_class(8)
 	host.set_current_loadout("WPN_M4AUTO", "", "WPN_SATCHEL_CHARGE")

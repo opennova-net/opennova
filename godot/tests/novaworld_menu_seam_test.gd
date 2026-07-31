@@ -6,7 +6,7 @@ extends GutTest
 # server flow (browse, host, a second client seeing the row) is the manual
 # two-client smoke recorded in plan/status.md; this pins the wiring.
 
-const MenuShell := preload("res://game/nova_menu_host.gd")
+const MenuShell := preload("res://game/nova_menu_shell.gd")
 
 
 func test_novaworld_control_names_default() -> void:

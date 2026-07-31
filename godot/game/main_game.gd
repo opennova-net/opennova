@@ -1,6 +1,6 @@
 extends Node3D
 
-# Runtime shell: boots into the game's menu front-end (NovaMenuHost, driving the
+# Runtime shell: boots into the game's menu front-end (NovaMenuShell, driving the
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
@@ -53,7 +53,7 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 @onready var _world: GameWorld = $World
 @onready var _camera: Camera3D = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
-@onready var _menu_host = $MenuLayer/MenuHost
+@onready var _menu_shell = $MenuLayer/MenuShell
 
 var _picker: FileDialog
 var _root: NovaResourceRoot
@@ -79,9 +79,9 @@ var _frame_stats := FrameStatsBoard.new()
 # Root-viewport render-time sampling for the Stats tab; the sampler owns the
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
-var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
+var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
-var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
+var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
 var _armory_host: NovaArmoryHost  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_host: NovaDeployScreenHost  # the joiner's deploy-map screen (death.mnu DEATH)
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
@@ -140,7 +140,7 @@ func current_resource_root() -> NovaResourceRoot:
 ## entry's shell half — reveal the world + HUD, enter WORLD state, and wire the
 ## load-result signals. NetSessionController drives the actual net-session load.
 func enter_net_world() -> void:
-	_menu_host.hide_menu()
+	_menu_shell.hide_menu()
 	_world.visible = true
 	_set_hud_visible(true)
 	_state = State.WORLD
@@ -164,7 +164,7 @@ func abort_net_session(reason: String) -> void:
 
 
 func _ready() -> void:
-	if _world == null or _camera == null or _menu_host == null:
+	if _world == null or _camera == null or _menu_shell == null:
 		return
 	var debug_host := get_game_debug_host()
 	add_child(debug_host)
@@ -217,7 +217,7 @@ func _ready() -> void:
 	_net = NetSessionController.new()
 	_net.name = "NetSessionController"
 	add_child(_net)
-	_net.setup(self, _world, _menu_host, _camera,
+	_net.setup(self, _world, _menu_shell, _camera,
 			_hud if _hud != null else self, $MenuLayer)
 	# One shared frame-stats board across the shell, the world host and the HUD
 	# host; the world re-hands it to each mission runtime it creates.
@@ -577,9 +577,9 @@ func _enter_menu(dir: String) -> bool:
 	_world.visible = false
 	_set_hud_visible(false)
 	_wire_host()
-	if not _menu_host.setup(_root):
-		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_host.main_menu_file)
-	_menu_host.show_menu()
+	if not _menu_shell.setup(_root):
+		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file)
+	_menu_shell.show_menu()
 	return true
 
 
@@ -587,29 +587,29 @@ func _wire_host() -> void:
 	if _host_wired:
 		return
 	_host_wired = true
-	_menu_host.start_requested.connect(_on_start_requested)
-	_menu_host.exit_to_desktop_requested.connect(_on_exit_to_desktop)
-	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
-	_menu_host.resume_requested.connect(_on_resume)
-	if _menu_host.has_signal("novaworld_requested"):
-		_menu_host.novaworld_requested.connect(_net.open_novaworld_panel)
-	if _menu_host.has_signal("crosshair_style_changed"):
-		_menu_host.crosshair_style_changed.connect(_on_crosshair_style_changed)
+	_menu_shell.start_requested.connect(_on_start_requested)
+	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
+	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
+	_menu_shell.resume_requested.connect(_on_resume)
+	if _menu_shell.has_signal("novaworld_requested"):
+		_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	if _menu_shell.has_signal("crosshair_style_changed"):
+		_menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
-	_mp_host = MpMenuHost.new()
-	_player_info_host = PlayerInfoMenuHost.new()
+	_mp_companion = MpMenuCompanion.new()
+	_player_info_companion = PlayerInfoMenuCompanion.new()
 	if ClassDB.class_exists("NovaLanSession"):
 		_lan_session = ClassDB.instantiate("NovaLanSession")
 		_lan_session.name = "LanSession"
 		add_child(_lan_session)
-		_mp_host.set_lan_session(_lan_session)
+		_mp_companion.set_lan_session(_lan_session)
 	else:
 		push_warning("MainGame: NovaLanSession is unavailable; LAN browsing is disabled")
-	_menu_host.add_companion(_mp_host)
-	_menu_host.add_companion(_player_info_host)
-	_net.wire_menu_companions(_mp_host)
-	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
+	_menu_shell.add_companion(_mp_companion)
+	_menu_shell.add_companion(_player_info_companion)
+	_net.wire_menu_companions(_mp_companion)
+	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
 
 
 # Install the in-memory local-player profile used by the next mission spawn. This
@@ -840,7 +840,7 @@ func _run_world_load(request_id: int, operation: Callable) -> void:
 
 
 func _begin_world_load(load_info: Dictionary = {}) -> void:
-	_menu_host.hide_menu()
+	_menu_shell.hide_menu()
 	_world.visible = false
 	_set_hud_visible(false)
 	_state = State.WORLD
@@ -1030,8 +1030,8 @@ func _on_camera_escape() -> void:
 
 func _pause() -> void:
 	_state = State.PAUSED
-	_menu_host.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
-	_menu_host.show_menu()
+	_menu_shell.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
+	_menu_shell.show_menu()
 
 
 func _on_resume() -> void:
@@ -1040,7 +1040,7 @@ func _on_resume() -> void:
 	if _armory_host != null and _armory_host.is_open():
 		_armory_host.close()  # Esc from ARMORY closes the overlay (no re-entry: closed
 		                      # only fires while open)
-	_menu_host.hide_menu()
+	_menu_shell.hide_menu()
 	# A joiner who paused from the deploy screen still owes its pick, so resume back
 	# into DEPLOY rather than handing the cursor back to the world.
 	_state = State.DEPLOY if (_deploy_host != null and _deploy_host.is_open()) \

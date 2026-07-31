@@ -36,7 +36,7 @@ behavior is summarized and cited.
 
 | ADR | Decision |
 |---|---|
-| [0001](adr/0001-mnu-action-command-boundary.md) | MNU: Actions live in the file, Commands come from the host by control name |
+| [0001](adr/0001-mnu-action-command-boundary.md) | MNU: Actions live in the file, Commands come from the shell by control name |
 | [0002](adr/0002-mnu-round-trip-preserves-superset.md) | MNU: round-trip preserves the format superset |
 | [0003](adr/0003-no-raw-passthrough-create-from-scratch.md) | MNU: no raw byte passthrough; documents are created from scratch |
 | [0004](adr/0004-audio-selection-pushdown.md) | Audio: member selection pushed down into portable `libs/audio` |
@@ -79,12 +79,12 @@ behavior is summarized and cited.
 | Interface | [`interface/loading-screen-re.md`](interface/loading-screen-re.md) | landed (2026-07-12: the sidecar `<missionbase>.pcx` rule, MP session text, progress bar + creep smoothing witnessed AND ported; D-LOADSCR-1..6; SP splash + joiner hold tracked) |
 | Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (2026-07-09: weapon-coupled elements witnessed AND ported — ammo/name text, clip indicator, crosshair spread, stance cross-fade, triggered text; 2026-07-11 re-grill: every ported function fresh-decompiled, seven port fixes, D-HUD-1..10; 2026-07-17: attach labels witnessed AND ported — seat/armory floats + the attachtextid chain, D-HUD-11..14, bottom prompts deferred; 2026-07-18: waypoint HUD chain + weapon heat bar + the MISSION OBJECTIVES panel witnessed AND ported — the "radar @0x599700" misnomer resolved as the heat bar, JO:CA has no in-HUD radar, D-HUD-15..18; map-overlay/MP-HUD follow-ups tracked) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown grill, D-MNU-7/8 fixed; + 2026-07-11 in-game armory re-grill, D-MNU-9; + 2026-07-16 dropdown-input grill, D-MNU-11 fixed / D-MNU-12 host mapping; + 2026-07-18 loadout grill — multi-slot ACCEPT + availability filter live, net-re §5.63) |
-| Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
+| Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (shell wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record — layering, matchmaking, and the in-match protocol; §5 carries the tag-level findings (indexed at its top), §8 the D-NET divergence catalog with per-entry fix/live-verify state and the ranked open items |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | landed (#237 merged 2026-07-16) — the `.ptl` stack + effect world; re-grilled 2026-07-12/13/15/16 (weapon/vehicle effect chains, the rewrite grill, curve-table stricmp, name-resolution case fold) |
-| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + the runtime `player.mnu` host `PlayerInfoMenuHost` ported — cascade/team/voice/preview/weapon lists live, D-PLAYERINFO-7/-10 FIXED; open: persistence D-PLAYERINFO-9, ammo + weight D-PLAYERINFO-11, selection globals D-PLAYERINFO-12, spawned-player binding D-PLAYERINFO-1) |
+| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + the runtime `player.mnu` host `PlayerInfoMenuCompanion` ported — cascade/team/voice/preview/weapon lists live, D-PLAYERINFO-7/-10 FIXED; open: persistence D-PLAYERINFO-9, ammo + weight D-PLAYERINFO-11, selection globals D-PLAYERINFO-12, spawned-player binding D-PLAYERINFO-1) |
 | Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..6) |
 | Render | [`render/render-order-re.md`](render/render-order-re.md) | landed (REN-3: the batch queues, sort keys, technique-class selection, render-state stack, and the frame pass sequence — D-RORD-1..6; the ordering ladder ported to `libs/renderer/render_order`) |
 | Render | [`render/render-lighting-re.md`](render/render-lighting-re.md) | landed (REN-5: the iris/modulator chain, the world lighting block + entity uniforms + hemisphere lights, dynamic point lights, terrain/foliage c0/c1, lighting textures + the cubemap sources — D-RLIT-1..6; ported to `libs/renderer/light_runtime` + `libs/env::ModulatorChain`; 2026-07-18: the marched iris sampling PORTED — D-RLIT-2) |

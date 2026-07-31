@@ -139,9 +139,9 @@ func after_each() -> void:
 			var world_root = world.get_resource_root()
 			if world_root != null:
 				world_root.clear()
-		var menu_host = _shell.get_node_or_null("MenuLayer/MenuHost")
-		if menu_host != null and menu_host.get_menu() != null:
-			var menu_root = menu_host.get_menu().get_resource_root()
+		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
+		if menu_shell != null and menu_shell.get_menu() != null:
+			var menu_root = menu_shell.get_menu().get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -332,8 +332,8 @@ func test_shell_returns_a_punted_deploy_screen_to_the_menu() -> void:
 	assert_false(shell_world.is_loaded(), "the world is unloaded with the session")
 	assert_false(_shell.is_gameplay_input_active(),
 			"and the cursor is never handed back to a world that cannot be played")
-	var menu_host = _shell.get_node("MenuLayer/MenuHost")
-	assert_eq(menu_host.get_current_menu_file().to_lower(), "main.mnu",
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu",
 			"the front end is back up and usable")
 
 
@@ -387,8 +387,8 @@ func _make_menu_shell():
 		return null
 	add_child(shell)
 	await get_tree().process_frame
-	var menu_host = shell.get_node("MenuLayer/MenuHost")
-	assert_eq(menu_host.get_current_menu_file().to_lower(), "main.mnu",
+	var menu_shell = shell.get_node("MenuLayer/MenuShell")
+	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu",
 			"the packed fixture boots through the real menu host")
 	return shell
 

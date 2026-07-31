@@ -1,9 +1,9 @@
 class_name MenuCompanion
 extends RefCounted
 
-# Base for the game-specific menu drivers ("companions") NovaMenuHost delegates
-# whole menus to (add_companion): the JO multiplayer menu (MpMenuHost) and the
-# PLAYER_INFO character screen (PlayerInfoMenuHost). When a companion's
+# Base for the game-specific menu drivers ("companions") NovaMenuShell delegates
+# whole menus to (add_companion): the JO multiplayer menu (MpMenuCompanion) and the
+# PLAYER_INFO character screen (PlayerInfoMenuCompanion). When a companion's
 # owns_menu() claims a freshly built menu, the shell hands it the whole
 # named-control wiring through on_menu_built() instead of running its generic
 # launch/mission wiring. Subclasses override owns_menu + _wire and share the
@@ -20,7 +20,7 @@ func owns_menu(_menu_node: Node) -> bool:
 	return false
 
 
-## Called by NovaMenuHost after each open_menu (re)build of a menu this
+## Called by NovaMenuShell after each open_menu (re)build of a menu this
 ## companion owns. The screen nodes are freshly built children, so prior
 ## connections died with the old tree; _wire rescans by name.
 func on_menu_built(menu: Node, file: String, screen: String, root: NovaResourceRoot) -> void:

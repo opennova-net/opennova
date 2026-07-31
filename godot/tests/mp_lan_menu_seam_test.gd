@@ -1,12 +1,12 @@
 extends GutTest
 
-# The mp.mnu LAN co-op menu seam: the companion (mp_menu_host.gd) drives the JO
+# The mp.mnu LAN co-op menu seam: the companion (mp_menu_companion.gd) drives the JO
 # multiplayer menu by control NAME — the same Command-by-name convention the shell's
 # start/exit controls use, but for hosting/joining a LAN game. This pins the wiring
 # (which controls do what, and the host config START_GAME reports). The live two-machine
 # flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
 
-const MenuShell := preload("res://game/nova_menu_host.gd")
+const MenuShell := preload("res://game/nova_menu_shell.gd")
 
 
 class _LanSessionStub extends RefCounted:
@@ -66,12 +66,12 @@ func _press(menu: Node, name: String) -> void:
 
 
 func test_owned_screens_default() -> void:
-	assert_true(MpMenuHost.OWNED_SCREENS.has("LAN_MULTI_PLAYER"))
-	assert_true(MpMenuHost.OWNED_SCREENS.has("MULTI_PLAYER_HOST"))
+	assert_true(MpMenuCompanion.OWNED_SCREENS.has("LAN_MULTI_PLAYER"))
+	assert_true(MpMenuCompanion.OWNED_SCREENS.has("MULTI_PLAYER_HOST"))
 
 
 func test_owns_menu_detects_mp_menu() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	var menu := _make_host_menu()
 	assert_true(mp.owns_menu(menu), "a menu carrying SELECTED_MISSIONS is the JO mp menu")
 	var plain := Node.new()
@@ -80,7 +80,7 @@ func test_owns_menu_detects_mp_menu() -> void:
 
 
 func test_add_and_remove_missions() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	var mission_list := menu.find_child("MISSION_LIST", true, false) as NovaMnuList
@@ -98,7 +98,7 @@ func test_add_and_remove_missions() -> void:
 
 
 func test_start_game_emits_host_config() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
@@ -127,7 +127,7 @@ func test_start_game_emits_host_config() -> void:
 
 
 func test_start_game_defaults() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
@@ -141,7 +141,7 @@ func test_start_game_defaults() -> void:
 
 
 func test_lan_join_emits_selected_server() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	mp._servers = [{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}]
 	# A single-click selection relays the row index through the menu's aggregate signal.
@@ -156,7 +156,7 @@ func test_lan_join_emits_selected_server() -> void:
 
 
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var menu := _make_lan_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
@@ -176,7 +176,7 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 
 
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:
-	var mp := MpMenuHost.new()
+	var mp := MpMenuCompanion.new()
 	var menu := _make_lan_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
 	var previous := _LanSessionStub.new()
@@ -195,5 +195,5 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 func test_shell_accepts_companion() -> void:
 	var host = MenuShell.new()
 	add_child_autofree(host)
-	host.add_companion(MpMenuHost.new())  # installs without a menu loaded, no crash
+	host.add_companion(MpMenuCompanion.new())  # installs without a menu loaded, no crash
 	assert_true(true, "companion installed on a menuless shell without error")

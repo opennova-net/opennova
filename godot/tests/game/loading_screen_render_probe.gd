@@ -8,7 +8,7 @@ extends SceneTree
 ##   "$GODOT_BIN" --path godot -s res://tests/game/loading_screen_render_probe.gd -- /d
 ##
 ## `/d` is load-bearing: the committed minimal fixture is loose authored data.
-## The probe drives the public MenuHost.start_requested signal, then accepts only
+## The probe drives the public MenuShell.start_requested signal, then accepts only
 ## a frame captured while MainGame.is_world_loading() is true that contains both
 ## the loading art and the witnessed red progress bar. This catches the failure
 ## where a forced draw happens before the newly-mounted Control has reached a
@@ -37,7 +37,7 @@ const RED_MIN := 0.75
 const RED_OTHER_MAX := 0.10
 
 var _scene
-var _menu_host
+var _menu_shell
 var _settings_snapshotted := false
 var _had_state_config := false
 var _saved_state_config := PackedByteArray()
@@ -81,17 +81,17 @@ func _run() -> void:
 		return
 	_scene = packed.instantiate()
 	root.add_child(_scene)
-	_menu_host = _scene.get_node_or_null("MenuLayer/MenuHost")
-	if _menu_host == null or not _menu_host.has_signal("start_requested"):
-		await _finish(1, "loading_screen_render_probe: public MenuHost.start_requested is unavailable")
+	_menu_shell = _scene.get_node_or_null("MenuLayer/MenuShell")
+	if _menu_shell == null or not _menu_shell.has_signal("start_requested"):
+		await _finish(1, "loading_screen_render_probe: public MenuShell.start_requested is unavailable")
 		return
 
 	var menu_ready := false
 	for _frame in range(MENU_WAIT_FRAMES):
 		await process_frame
-		var menu = _menu_host.get_menu() if _menu_host.has_method("get_menu") else null
-		var file := String(_menu_host.get_current_menu_file()) \
-			if _menu_host.has_method("get_current_menu_file") else ""
+		var menu = _menu_shell.get_menu() if _menu_shell.has_method("get_menu") else null
+		var file := String(_menu_shell.get_current_menu_file()) \
+			if _menu_shell.has_method("get_current_menu_file") else ""
 		if file.to_lower() == "main.mnu" and menu != null and menu.is_visible_in_tree():
 			menu_ready = true
 			break
@@ -108,7 +108,7 @@ func _run() -> void:
 	RenderingServer.frame_post_draw.connect(_on_frame_post_draw)
 	var started_ms := Time.get_ticks_msec()
 	var deadline_ms := started_ms + LOAD_TIMEOUT_MS
-	_menu_host.emit_signal("start_requested", MISSION)
+	_menu_shell.emit_signal("start_requested", MISSION)
 
 	while not _qualified and Time.get_ticks_msec() < deadline_ms:
 		if not is_instance_valid(_scene) or not bool(_scene.is_world_loading()):

@@ -155,7 +155,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Items (items.def entity defs) | `libs/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
 | HUD + interface overlays | `godot/engine/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
 | Mission loading screen | `godot/engine/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..6) |
-| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_host.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos open) |
+| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos open) |
 | Render — materials / state | `libs/oed` tag registry, `libs/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `libs/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
 | Render — lighting | `libs/renderer/light_runtime`, `libs/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |

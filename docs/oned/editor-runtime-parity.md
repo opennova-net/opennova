@@ -15,7 +15,7 @@ live behavior.**
 The Menus workspace previews `.mnu` screens by instantiating the *runtime*
 `NovaMnuMenu` node and setting `edit_mode = true`, which makes the live menu
 inert and click-through so the WYSIWYG canvas can overlay selection and drag
-gestures. The game's `NovaMenuHost` uses the same node with `edit_mode` off.
+gestures. The game's `NovaMenuShell` uses the same node with `edit_mode` off.
 "Interactive preview" re-arms navigation while sandboxing external Commands
 (launch/quit/URL) to no-ops. See CONTEXT.md ("Edit mode", "Interactive
 preview").

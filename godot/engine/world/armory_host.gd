@@ -5,7 +5,7 @@ extends Node
 ## host so every runtime entry uses one implementation.
 ##
 ## Owns a live NovaMnuMenu over the gameplay view showing weapon.mnu's WEAPON
-## screen, driven by the ArmoryMenuHost companion, zone-gated on the type-6
+## screen, driven by the ArmoryMenuCompanion companion, zone-gated on the type-6
 ## armory volume contact flag the collision resolver maintains. The world keeps
 ## ticking underneath — the witnessed armory has no world-stop leg (the screen is
 ## a live overlay; in an MP session the team scoreboard even draws over it
@@ -18,7 +18,7 @@ extends Node
 
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
-const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (NovaMenuHost's default)
+const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (NovaMenuShell's default)
 const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 
@@ -43,7 +43,7 @@ var _player_class := 0
 
 var _menu: NovaMnuMenu = null
 var _menu_root: NovaResourceRoot = null  # the root the built menu was fed from
-var _armory := ArmoryMenuHost.new()
+var _armory := ArmoryMenuCompanion.new()
 
 
 func _init() -> void:

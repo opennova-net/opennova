@@ -376,7 +376,7 @@ func test_spinlist_get_value_attr_returns_value_not_label() -> void:
 	# A host reads the item's `value=` attribute (the semantic value the original reads with wcstoul
 	# [orig: CUISpinList_ParseXMLDefinition @0x64bd10]) to map a selection to behavior — e.g. the host
 	# screen's SERVERTYPE spinlist: HG_SERVEPLAY=0 (serve-and-play) vs HG_SERVEONLY=1 (dedicated). This
-	# is distinct from get_value()'s localized DISPLAY text. (MpMenuHost._is_dedicated reads the attr.)
+	# is distinct from get_value()'s localized DISPLAY text. (MpMenuCompanion._is_dedicated reads the attr.)
 	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
 		"<WINDOW type=\"spinlist\" name=\"SERVERTYPE\">" + \

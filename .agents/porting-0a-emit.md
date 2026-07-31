@@ -291,7 +291,7 @@ target) in net-re D-NET-146.
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
 value).** The wire has advertised AS all along; the internal "COOP" label (main_game.gd /
-mp_menu_host.gd boot dicts) was a bring-up leftover and is renamed to "AS"; the menu-host
+mp_menu_companion.gd boot dicts) was a bring-up leftover and is renamed to "AS"; the menu-shell
 path now seeds the numeric gametype 0x10010 explicitly (it previously advertised 0). The
 FULL-AS-GAME gap list, in rough order:
   1. **Spawn selection** — witnessed §5.61 + slice-1 ported round 13 (0x0E pick path,
