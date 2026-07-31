@@ -1,6 +1,7 @@
 #include "simulation/nova_present_applier.h"
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -167,6 +168,35 @@ void NovaPresentApplier::_bind_methods() {
 	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("bms_to_godot_basis", "rot_deg"),
 			&NovaPresentApplier::bms_to_godot_basis);
+	ClassDB::bind_method(D_METHOD("setup_wire", "rebuild_held_weapon"),
+			&NovaPresentApplier::setup_wire);
+	ClassDB::bind_method(
+			D_METHOD("begin_wire_plan", "layout_revision", "stride",
+					"snapshot_size", "index_generation", "local_handle"),
+			&NovaPresentApplier::begin_wire_plan);
+	ClassDB::bind_method(
+			D_METHOD("append_wire_row", "node", "base", "handle", "spawned_now"),
+			&NovaPresentApplier::append_wire_row);
+	ClassDB::bind_method(D_METHOD("append_wire_deferred", "node"),
+			&NovaPresentApplier::append_wire_deferred);
+	ClassDB::bind_method(
+			D_METHOD("wire_plan_is_current", "snapshot_size", "stride",
+					"layout_revision", "index_generation", "local_handle"),
+			&NovaPresentApplier::wire_plan_is_current);
+	ClassDB::bind_method(
+			D_METHOD("present_wire_rows", "snap", "stride", "tick_delta"),
+			&NovaPresentApplier::present_wire_rows);
+	ClassDB::bind_method(D_METHOD("release_wire_handle", "handle"),
+			&NovaPresentApplier::release_wire_handle);
+	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
+			&NovaPresentApplier::reset_wire_runtime_state);
+	ClassDB::bind_static_method("NovaPresentApplier",
+			D_METHOD("held_weapon_attach_transform", "skeleton", "attach_angles_bms",
+					"hand_frame"),
+			&NovaPresentApplier::held_weapon_attach_transform);
+	ClassDB::bind_static_method("NovaPresentApplier",
+			D_METHOD("held_weapon_hand_frame_basis", "bone_model_to_world"),
+			&NovaPresentApplier::held_weapon_hand_frame_basis);
 	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("aim_root_basis", "snap", "base", "fallback"),
 			&NovaPresentApplier::aim_root_basis);
@@ -298,6 +328,49 @@ Basis NovaPresentApplier::bms_to_godot_basis(const Vector3 &rot_deg) {
 	return Basis(Vector3(0, 1, 0), Math::deg_to_rad(90.0) - yaw) *
 			Basis(Vector3(0, 0, 1), pitch) * Basis(Vector3(1, 0, 0), roll) *
 			Basis(Vector3(0, 1, 0), Math::deg_to_rad(90.0));
+}
+
+namespace {
+
+// The held weapon rides bone INDEX 16 (".bad row BN17 R Hand") with a fixed
+// pivot nudge in raw def units, X negated into the render frame — the values
+// and every derivation live at the GDScript reference, present_held_weapon.gd
+// [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
+constexpr int kHeldWeaponBoneIndex = 16;
+const Vector3 kHeldWeaponAttachNudge(-0.05f, -0.05f, 0.051f);
+// Hand-frame calibration [orig: Rz dbl_7C9BA0 / Ry dbl_7C9B98 via
+// Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0].
+constexpr double kHandFrameZRad = 0.5759761961496483;
+constexpr double kHandFrameYRad = -1.3613982818082597;
+
+} // namespace
+
+Basis NovaPresentApplier::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
+	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
+	// form; signs as authored (two inversions cancel — present_held_weapon.gd
+	// documents why) [orig: branch @ 0x4b220f, Rz @ 0x4b2215, Ry @ 0x4b2256].
+	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
+			Basis(Vector3(0, 1, 0), kHandFrameYRad);
+}
+
+Variant NovaPresentApplier::held_weapon_attach_transform(Object *skeleton,
+		const Vector3 &attach_angles_bms, bool hand_frame) {
+	Skeleton3D *skel = Object::cast_to<Skeleton3D>(skeleton);
+	if (skel == nullptr || skel->get_bone_count() <= kHeldWeaponBoneIndex) {
+		return Variant();
+	}
+	// `M16 · pivot16` IS the joint world position; the nudge rides bone 16's
+	// MODEL->WORLD rotation (pose relative to REST — the rest basis is a large
+	// rotation) [orig: translation overwrite @ 0x4b22cf..0x4b22f8].
+	const Transform3D joint_world = skel->get_global_transform() *
+			skel->get_bone_global_pose(kHeldWeaponBoneIndex);
+	const Transform3D model_to_world = joint_world *
+			skel->get_bone_global_rest(kHeldWeaponBoneIndex).affine_inverse();
+	const Basis basis = hand_frame
+			? held_weapon_hand_frame_basis(model_to_world.basis)
+			: bms_to_godot_basis(attach_angles_bms);
+	return Transform3D(basis,
+			joint_world.origin + model_to_world.basis.xform(kHeldWeaponAttachNudge));
 }
 
 Basis NovaPresentApplier::aim_root_basis(const PackedFloat32Array &snap, int base,

@@ -22,11 +22,15 @@ extends RefCounted
 # is the live §5.38b two-handle (L = local sim, H = wire identity) reconciliation.
 #
 # Host-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
-# Replicated infantry anim state and phase drive the same primary body clip as the host pass;
-# the packed aim overlay is then applied to that clip in the same snapshot row.
+#
+# This is the COLD-path facade: it owns spawn/defer/unresolved bookkeeping, the
+# liveness prune, the held-weapon model builds, spawn callbacks and stats, and
+# pushes the finished row plan into NovaPresentApplier, whose wire walk
+# (nova_present_applier_wire.cpp) owns plan validity and the per-frame per-row
+# hot path. The per-leg behavioral semantics and their [orig] witnesses are
+# documented at the native walk — this facade keeps only the cold-path anchors.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const PresentAimOverlay := preload("res://engine/world/aim_overlay_present_pass.gd")
 
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
@@ -37,67 +41,23 @@ var _defer_index           # MissionEntityRegistry (host only): rows resolving t
 var _synthetic_origin_only := false
 var _nodes := {}           # wire_handle -> Node3D
 var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same failed type each tick)
-var _respawn_revisions := {} # wire_handle -> last presented dead->alive epoch
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
 var _node_spawned_callback := Callable()
-var _row_plan_revision := -1
-var _row_plan_stride := 0
-var _row_plan_snapshot_size := -1
-var _row_plan_index_generation := -1
-var _row_plan_local_handle := -1
-var _row_bases := PackedInt32Array()
-var _row_handles := PackedInt32Array()
-var _row_types := PackedInt32Array()
-var _row_bms_ids := PackedInt32Array()
-var _row_kinds := PackedInt32Array()
-var _row_indices := PackedInt32Array()
-var _row_nodes: Array = []
-var _deferred_nodes: Array = []
-# Capability bits + last-applied edge caches, hoisted into the row plan exactly like
-# MissionPresentPass's #302 gating: the per-tick loop pays no has_method(), no aim
-# clear on already-clear rows, and no body-anim re-dispatch (with its per-call
-# state->key String) while the wire state is unchanged.
-const CAP_AIM := 1
-const CAP_CTRL := 2
-const CAP_PART := 4
-const CAP_REMOTE_BODY := 8
-const CAP_BODY_CLIP := 16
-const CAP_BODY_CLIP_AT := 32
-const CAP_BODY_SLOT_AT := 64
-const CAP_BODY_SLOT := 128
-const CAP_RHC := 256
-const CAP_WPN := 512
-const CAP_BODY_BLEND_AT := 1024
-const CAP_REMOTE_BLEND_TICK := 2048
-const CAP_PART_CLEAR := 4096
-const CAP_CTRL_BATCH := 8192
+# The native wire walk: plan validity + the per-row hot path live on the applier
+# (one instance per pass; the mission pass facade owns its own separately).
+var _applier := NovaPresentApplier.new()
 const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # MissionRuntime.MAX_CATCHUP_TICKS
-var _row_caps := PackedInt32Array()
-var _row_visual_ctrl_caps := PackedInt32Array()
-var _row_aim_valid := PackedInt32Array()
-var _row_rhc := PackedInt32Array()
-# state id -> "anim_<name>" String, memoized once per process (the same cache
-# MissionPresentPass carries): the native call allocates a fresh String per
-# invocation, which on a joiner ran twice per row per frame.
-static var _infantry_key_cache := {}
-
-var _row_anim_state := PackedInt32Array()
-var _row_anim_request := PackedInt32Array()
-var _row_remote_body_tick := PackedInt32Array()
-# Revisionless sources rebuild the row plan every call. Preserve the three
-# transition-cache scalars by stable wire handle so a cold plan cannot strand
-# an already-active receive-side blend at weight zero.
-var _remote_body_cache := {} # wire_handle -> Vector3i(state, request, latch)
 # Remote primary-channel blends are fixed-tick state, while this pass also runs
 # on zero-tick render frames and once after a multi-tick catch-up batch. Consume
 # the sim clock once per presented snapshot so every row advances by the exact
 # logic-tick delta rather than by the number of render submissions.
 var _last_present_logic_tick := -1
-var _remote_body_tick_delta := 1
 # The third-person held weapon per wire handle: {handle: Node3D} and the gfx3 each live
 # node was built from, so a weapon switch rebuilds and an unarmed row frees. Kept beside
 # _nodes rather than parented under the body: NovaObjectModel.rebuild() frees all of its
-# children, so a child weapon would vanish on any body rebuild.
+# children, so a child weapon would vanish on any body rebuild. The applier detects the
+# ADM edge and calls _rebuild_held_weapon; these maps stay here for muzzle_world_for
+# and test consumers.
 var _weapon_nodes := {}
 var _weapon_graphics := {}
 
@@ -134,6 +94,7 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 	_defer_index = defer_index
 	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
 	_last_present_logic_tick = -1
+	_applier.setup_wire(_rebuild_held_weapon)
 
 
 func get_stats() -> Dictionary:
@@ -163,9 +124,8 @@ func _free_wire_node(wire_handle: int) -> void:
 	if is_instance_valid(node_v) and node_v is Node3D:
 		(node_v as Node3D).queue_free()
 	_nodes.erase(wire_handle)
-	_respawn_revisions.erase(wire_handle)
-	_remote_body_cache.erase(wire_handle)
 	_free_held_weapon(wire_handle)
+	_applier.release_wire_handle(wire_handle)
 
 
 func _free_held_weapon(wire_handle: int) -> void:
@@ -185,163 +145,13 @@ func reset_runtime_state() -> void:
 	_weapon_graphics.clear()
 	_nodes.clear()
 	_unresolved.clear()
-	_respawn_revisions.clear()
-	_remote_body_cache.clear()
-	_clear_row_plan()
+	_applier.reset_wire_runtime_state()
 	_last_present_logic_tick = -1
 	_stats.live = 0
 
 
 func teardown() -> void:
 	reset_runtime_state()
-
-
-# Keep the wire-driven skeletal primary pose on the same projection path as
-# MissionPresentPass. Infantry uses its exact state-to-clip key; compatible
-# non-infantry nodes retain the coarse body-slot fallback. REMOTE-request rows
-# (the joiner's wire players) skip re-dispatch entirely while the wire state is
-# unchanged: the model consumes phase only on an accepted transition and already
-# early-outs on a same-state request, so the skip is behavior-identical and
-# avoids the per-call state->key String for every row every tick. Host-loopback
-# rows (remote_request 0) keep per-tick dispatch — their playhead rides
-# play_body_clip_at's phase.
-static func _infantry_key(state: int) -> String:
-	var key = _infantry_key_cache.get(state)
-	if key == null:
-		key = NovaSimulation.infantry_anim_key(state)
-		_infantry_key_cache[state] = key
-	return key
-
-
-func _apply_body_anim_gated(
-		node, snap: PackedFloat32Array, base: int, caps: int, row: int) -> void:
-	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
-	var remote_request_i := int(snap[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST])
-	var anim_pulse := int(snap[base + NovaSimulation.PF_ANIM_STATE_PULSE])
-	# Accepted/queued remote transitions advance exactly once per simulation
-	# tick. The row latch is set only when the model reports live transition
-	# work, so steady-state rows never cross a GDScript call boundary.
-	if (row >= 0 and int(_row_remote_body_tick[row]) != 0
-			and remote_request_i != 0 and anim_pulse < 0
-			and anim_state == int(_row_anim_state[row])
-			and remote_request_i == int(_row_anim_request[row])
-			and (caps & CAP_REMOTE_BLEND_TICK) != 0):
-		var ticks_left := _remote_body_tick_delta
-		while ticks_left > 0 and int(_row_remote_body_tick[row]) != 0:
-			_row_remote_body_tick[row] = (
-					1 if node.advance_remote_body_blend_tick(anim_state) else 0)
-			ticks_left -= 1
-		if row >= 0:
-			_row_anim_state[row] = anim_state
-			_row_anim_request[row] = remote_request_i
-			_store_remote_body_cache(row)
-		return
-	if (row >= 0 and remote_request_i != 0 and anim_pulse < 0
-			and anim_state == int(_row_anim_state[row])
-			and remote_request_i == int(_row_anim_request[row])):
-		return
-	if row >= 0:
-		_row_anim_state[row] = anim_state
-		_row_anim_request[row] = remote_request_i
-		_store_remote_body_cache(row)
-	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
-	var remote_request := remote_request_i != 0
-	var remote_needs_tick := false
-	# A transition state that arrived and was overwritten within one decode fold
-	# (several 0x0A datagrams can apply per render frame — a tapped prone roll is
-	# on the wire for 1-2 ticks). Dispatch it FIRST so the model's arbitration
-	# sees retail's per-record order: the locked roll accepts, the follow-up
-	# state queues behind it and promotes at clip completion.
-	# [orig: per-record remote anim apply @0x4c1153]
-	if remote_request and anim_pulse >= 0 and (caps & CAP_REMOTE_BODY) != 0:
-		var pulse_key := _infantry_key(anim_pulse)
-		if not pulse_key.is_empty():
-			remote_needs_tick = bool(node.apply_remote_body_state(
-					anim_pulse, pulse_key,
-					NovaSimulation.infantry_anim_flags(anim_pulse),
-					int(snap[base + NovaSimulation.PF_ANIM_PULSE_TICKS])))
-	if anim_state >= 0:
-		var key := _infantry_key(anim_state)
-		if not key.is_empty():
-			# NovaObjectModel owns current/pending acceptance because it also owns
-			# clip time and completion. Forward every raw wire request; the model
-			# consumes player phase only on an accepted transition and starts a
-			# queued state at tick zero. [orig: @0x4c0859/@0x4c11a6]
-			if remote_request and (caps & CAP_REMOTE_BODY) != 0:
-				remote_needs_tick = bool(node.apply_remote_body_state(
-						anim_state, key,
-						NovaSimulation.infantry_anim_flags(anim_state),
-						anim_phase))
-				if row >= 0:
-					_row_remote_body_tick[row] = 1 if remote_needs_tick else 0
-					_store_remote_body_cache(row)
-				return
-			if remote_request and (caps & CAP_BODY_CLIP) != 0:
-				node.play_body_clip(key)
-				return
-			# Host-loopback rows expose the authority's already-accepted CURRENT
-			# state and playhead. Re-arbitrating that result can defer it for an
-			# extra loop, so pose it directly as before.
-			if (not remote_request and anim_phase >= 0
-					and (caps & CAP_BODY_CLIP_AT) != 0):
-				var source_state := int(
-						snap[base + NovaSimulation.PF_ANIM_SOURCE_STATE])
-				var source_key := (
-						_infantry_key(source_state)
-						if source_state >= 0 else "")
-				var blend_weight := float(
-						snap[base + NovaSimulation.PF_ANIM_BLEND_WEIGHT])
-				if (not source_key.is_empty() and blend_weight < 1.0
-						and (caps & CAP_BODY_BLEND_AT) != 0):
-					node.play_body_blend_at(
-							source_key,
-							int(snap[base
-									+ NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS]),
-							key, anim_phase, blend_weight)
-				else:
-					node.play_body_clip_at(key, anim_phase)
-				return
-			if not remote_request and (caps & CAP_BODY_CLIP) != 0:
-				node.play_body_clip(key)
-				return
-	if not remote_request and (caps & CAP_BODY_CLIP_AT) != 0:
-		var source_state := int(
-				snap[base + NovaSimulation.PF_ANIM_SOURCE_STATE])
-		if source_state >= 0:
-			var source_key := _infantry_key(source_state)
-			if not source_key.is_empty():
-				node.play_body_clip_at(
-						source_key,
-						int(snap[base
-								+ NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS]))
-				return
-	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
-	if body_anim_slot < 0:
-		return
-	if anim_phase >= 0 and (caps & CAP_BODY_SLOT_AT) != 0:
-		node.play_body_anim_at(body_anim_slot, anim_phase)
-		return
-	if (caps & CAP_BODY_SLOT) != 0:
-		node.play_body_anim(body_anim_slot)
-
-
-# Keep dynamically materialized items on the same PANM path as placed mission
-# objects. The ACTIVE fields are publication ownership, so an owned zero phase
-# must still be written and a suppressed channel must release its prior value.
-# set_part_phase publishes to retail's fixed VEHICLE_SPECIAL1/2 registers;
-# semantic EWEAP controls remain independent.
-func _apply_procedural_part(
-		node, snap: PackedFloat32Array, base: int, caps: int) -> void:
-	if int(snap[base + NovaSimulation.PF_ACTIVE1]) > 0:
-		node.set_part_phase(1,
-				NovaSimulation.decode_present_part_anim_phase(snap, base, 1))
-	elif (caps & CAP_PART_CLEAR) != 0:
-		node.clear_part_phase(1)
-	if int(snap[base + NovaSimulation.PF_ACTIVE2]) > 0:
-		node.set_part_phase(2,
-				NovaSimulation.decode_present_part_anim_phase(snap, base, 2))
-	elif (caps & CAP_PART_CLEAR) != 0:
-		node.clear_part_phase(2)
 
 
 ## Register the render-host seam for runtime consumers that follow a dynamically
@@ -384,22 +194,23 @@ func present_snapshot(
 			or not is_instance_valid(_container)
 			or stride < NovaSimulation.PF_STRIDE):
 		return
-	_remote_body_tick_delta = _consume_present_logic_tick_delta()
+	var tick_delta := _consume_present_logic_tick_delta()
 	# Packed handle zero is a valid pool-0 identity, so the numeric getter cannot
 	# also carry presence. Fold the sim's explicit validity seam into a -1
 	# sentinel: the row filter needs no separate flag, and the row-plan key then
 	# distinguishes "no local player yet" from a genuine slot-0 local handle.
 	var local_handle := int(_sim.get_local_player_wire_handle()) \
 			if bool(_sim.has_local_player()) else -1
-	if _row_plan_is_current(snap, stride, layout_revision, local_handle):
-		for row in range(_row_nodes.size()):
-			_present_wire_row(
-					_row_nodes[row], snap, int(_row_bases[row]),
-					int(_row_handles[row]), false, 0, 0, row)
+	var index_generation := _current_index_generation()
+	if _applier.wire_plan_is_current(snap.size(), stride, layout_revision,
+			index_generation, local_handle):
+		_applier.present_wire_rows(snap, stride, tick_delta)
 		return
-	_begin_row_plan(snap, stride, layout_revision, local_handle)
+	_applier.begin_wire_plan(layout_revision, stride, snap.size(),
+			index_generation, local_handle)
 	var count: int = snap.size() / stride
 	var live := {}
+	var spawned_rows: Array = []  # [node, runtime_kind, visual_item_id] per spawn
 	for i in range(count):
 		var base := i * stride
 		var type_id := int(snap[base + NovaSimulation.PF_TYPE_ID])
@@ -431,7 +242,7 @@ func present_snapshot(
 				var placed = _defer_index.resolve(
 					int(snap[base + NovaSimulation.PF_BMS_ID]), d_kind, d_index)
 				if placed != null and is_instance_valid(placed):
-					_deferred_nodes.append(placed)
+					_applier.append_wire_deferred(placed)
 				continue
 		live[handle] = true
 		if _unresolved.has(handle):
@@ -465,9 +276,15 @@ func present_snapshot(
 			_nodes[handle] = node
 			_stats.spawned += 1
 			spawned_now = true
-		_append_row_plan(node, snap, base, handle, type_id)
-		_present_wire_row(node, snap, base, handle, spawned_now,
-				runtime_kind, visual_item_id, _row_nodes.size() - 1)
+		_applier.append_wire_row(node, base, handle, spawned_now)
+		if spawned_now:
+			spawned_rows.append([node, runtime_kind, visual_item_id])
+	_applier.present_wire_rows(snap, stride, tick_delta)
+	# Spawn registration runs after the production transform is applied, exactly
+	# as the inline cold walk ordered it.
+	if _node_spawned_callback.is_valid():
+		for row_v in spawned_rows:
+			_node_spawned_callback.call(row_v[0], int(row_v[1]), int(row_v[2]))
 	_stats.live = live.size()
 	for handle_v in _nodes.keys():
 		var handle := int(handle_v)
@@ -504,148 +321,6 @@ func _current_index_generation() -> int:
 	return 0
 
 
-func _clear_row_plan() -> void:
-	_row_plan_revision = -1
-	_row_plan_stride = 0
-	_row_plan_snapshot_size = -1
-	_row_plan_index_generation = -1
-	_row_plan_local_handle = -1
-	_row_bases.clear()
-	_row_handles.clear()
-	_row_types.clear()
-	_row_bms_ids.clear()
-	_row_kinds.clear()
-	_row_indices.clear()
-	_row_nodes.clear()
-	_deferred_nodes.clear()
-	_row_caps.clear()
-	_row_visual_ctrl_caps.clear()
-	_row_aim_valid.clear()
-	_row_rhc.clear()
-	_row_anim_state.clear()
-	_row_anim_request.clear()
-	_row_remote_body_tick.clear()
-
-
-func _begin_row_plan(
-		snap: PackedFloat32Array,
-		stride: int,
-		layout_revision: int,
-		local_handle: int) -> void:
-	_clear_row_plan()
-	_row_plan_revision = layout_revision
-	_row_plan_stride = stride
-	_row_plan_snapshot_size = snap.size()
-	_row_plan_index_generation = _current_index_generation()
-	_row_plan_local_handle = local_handle
-
-
-static func _node_caps(node: Variant, visual_ctrl_caps: int) -> int:
-	var caps := 0
-	if node.has_method("set_aim_overlay"):
-		caps |= CAP_AIM
-	if (visual_ctrl_caps & (
-			NovaPresentApplier.VISUAL_CTRL_OWNED
-			| NovaPresentApplier.VISUAL_CTRL_LEGACY)) != 0:
-		caps |= CAP_CTRL
-	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_PART_PHASE) != 0:
-		caps |= CAP_PART
-	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_PART_CLEAR) != 0:
-		caps |= CAP_PART_CLEAR
-	if (visual_ctrl_caps & NovaPresentApplier.VISUAL_CTRL_BATCH) != 0 \
-			and (caps & (CAP_CTRL | CAP_PART)) != 0:
-		caps |= CAP_CTRL_BATCH
-	if node.has_method("apply_remote_body_state"):
-		caps |= CAP_REMOTE_BODY
-	if node.has_method("play_body_clip"):
-		caps |= CAP_BODY_CLIP
-	if node.has_method("play_body_clip_at"):
-		caps |= CAP_BODY_CLIP_AT
-	if node.has_method("play_body_anim_at"):
-		caps |= CAP_BODY_SLOT_AT
-	if node.has_method("play_body_anim"):
-		caps |= CAP_BODY_SLOT
-	if node.has_method("set_right_hand_collapsed"):
-		caps |= CAP_RHC
-	if node.has_method("set_weapon_channel"):
-		caps |= CAP_WPN
-	if node.has_method("play_body_blend_at"):
-		caps |= CAP_BODY_BLEND_AT
-	if node.has_method("advance_remote_body_blend_tick"):
-		caps |= CAP_REMOTE_BLEND_TICK
-	return caps
-
-
-func _store_remote_body_cache(row: int) -> void:
-	if row < 0 or row >= _row_handles.size():
-		return
-	_remote_body_cache[int(_row_handles[row])] = Vector3i(
-			int(_row_anim_state[row]),
-			int(_row_anim_request[row]),
-			int(_row_remote_body_tick[row]))
-
-
-func _append_row_plan(
-		node: Variant,
-		snap: PackedFloat32Array,
-		base: int,
-		handle: int,
-		type_id: int) -> void:
-	_row_bases.append(base)
-	_row_handles.append(handle)
-	_row_types.append(type_id)
-	_row_bms_ids.append(int(snap[base + NovaSimulation.PF_BMS_ID]))
-	_row_kinds.append(int(snap[base + NovaSimulation.PF_KIND]))
-	_row_indices.append(int(snap[base + NovaSimulation.PF_INDEX]))
-	_row_nodes.append(node)
-	var visual_ctrl_caps := int(
-			NovaPresentApplier.get_visual_control_capabilities(node))
-	_row_visual_ctrl_caps.append(visual_ctrl_caps)
-	_row_caps.append(_node_caps(node, visual_ctrl_caps))
-	# Last-applied edge state (-1 = unknown, first hot frame always applies).
-	_row_aim_valid.append(-1)
-	_row_rhc.append(-1)
-	var body_cache: Vector3i = _remote_body_cache.get(
-			handle, Vector3i(-2, -1, 0))
-	_row_anim_state.append(body_cache.x)
-	_row_anim_request.append(body_cache.y)
-	_row_remote_body_tick.append(body_cache.z)
-
-
-func _row_plan_is_current(
-		snap: PackedFloat32Array,
-		stride: int,
-		layout_revision: int,
-		local_handle: int) -> bool:
-	# Without a source revision, preserve compatibility by taking the cold path.
-	if layout_revision < 0 \
-			or _row_plan_revision != layout_revision \
-			or _row_plan_stride != stride \
-			or _row_plan_snapshot_size != snap.size() \
-			or _row_plan_index_generation != _current_index_generation() \
-			or _row_plan_local_handle != local_handle:
-		return false
-	for row in range(_row_nodes.size()):
-		var base := int(_row_bases[row])
-		var handle := int(_row_handles[row])
-		if base < 0 or base + stride > snap.size():
-			return false
-		var node: Variant = _row_nodes[row]
-		if (node == null or not is_instance_valid(node)
-				or _nodes.get(handle) != node):
-			return false
-		if (int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) != handle
-				or int(snap[base + NovaSimulation.PF_TYPE_ID]) != int(_row_types[row])
-				or int(snap[base + NovaSimulation.PF_BMS_ID]) != int(_row_bms_ids[row])
-				or int(snap[base + NovaSimulation.PF_KIND]) != int(_row_kinds[row])
-				or int(snap[base + NovaSimulation.PF_INDEX]) != int(_row_indices[row])):
-			return false
-	for node_v in _deferred_nodes:
-		if node_v == null or not is_instance_valid(node_v):
-			return false
-	return true
-
-
 func _wire_node_matches_row(
 		node: Variant,
 		snap: PackedFloat32Array,
@@ -662,107 +337,6 @@ func _wire_node_matches_row(
 					int(snap[base + NovaSimulation.PF_INDEX])
 			and int(existing_ref.get("bms_id", 0)) ==
 					int(snap[base + NovaSimulation.PF_BMS_ID]))
-
-
-func _present_wire_row(
-		node: Variant,
-		snap: PackedFloat32Array,
-		base: int,
-		handle: int,
-		spawned_now: bool,
-		runtime_kind: int,
-		visual_item_id: int,
-		row: int = -1) -> void:
-	var visual_ctrl_caps := (
-			int(_row_visual_ctrl_caps[row])
-			if row >= 0 else int(
-					NovaPresentApplier.get_visual_control_capabilities(node)))
-	var caps := (
-			int(_row_caps[row])
-			if row >= 0 else _node_caps(node, visual_ctrl_caps))
-	var respawn_revision := int(
-			snap[base + NovaSimulation.PF_RESPAWN_REVISION])
-	var respawned_since_present := (
-			not spawned_now
-			and _respawn_revisions.has(handle)
-			and int(_respawn_revisions[handle]) != respawn_revision)
-	var pos := Vector3(
-		snap[base + NovaSimulation.PF_POS_X],
-		snap[base + NovaSimulation.PF_POS_Y],
-		snap[base + NovaSimulation.PF_POS_Z])
-	var rot := Vector3(
-		snap[base + NovaSimulation.PF_PITCH_DEG],
-		snap[base + NovaSimulation.PF_YAW_DEG],
-		snap[base + NovaSimulation.PF_ROLL_DEG])
-	var entity_basis := MissionObjectPlacer.bms_to_godot_basis(rot)
-	var root_basis := (PresentAimOverlay.root_basis(snap, base, entity_basis)
-			if (caps & CAP_AIM) != 0 else entity_basis)
-	var next_transform := Transform3D(root_basis, pos)
-	if node.transform != next_transform:
-		node.transform = next_transform
-	# The mounted right-hand collapse rides its own packed field (the bundled
-	# legacy apply() drove it); edge-gated to the value change like MissionPresentPass.
-	if caps & CAP_RHC:
-		var rhc := int(snap[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED])
-		if row < 0 or rhc != int(_row_rhc[row]):
-			node.set_right_hand_collapsed(rhc != 0)
-		if row >= 0:
-			_row_rhc[row] = rhc
-	# Aim overlay, edge-gated like MissionPresentPass: apply while valid, clear only
-	# on the valid->invalid edge instead of every tick.
-	if caps & CAP_AIM:
-		var aim_valid := int(snap[base + NovaSimulation.PF_AIM_OVERLAY_VALID])
-		if aim_valid != 0:
-			PresentAimOverlay.apply_valid(node, snap, base, false)
-		elif row < 0 or int(_row_aim_valid[row]) != 0:
-			node.set_aim_overlay([])
-		if row >= 0:
-			_row_aim_valid[row] = aim_valid
-	var ctrl_batch := (caps & CAP_CTRL_BATCH) != 0
-	if ctrl_batch:
-		node.begin_ctrl_update()
-	if caps & CAP_CTRL:
-		if caps & CAP_PART:
-			_apply_procedural_part(node, snap, base, caps)
-		# Apply all four semantic CTRL writers through the cached dispatch mode:
-		# compact joiner rows release absent authoritative fields, while direct
-		# host/synthetic rows publish vehicle, zone and attachment heat values.
-		# [orig: Entity_CacheVehicleHUDStats @0x4929B0;
-		#  BoneCallback_gnrc_World @0x4E288B..0x4E28FB;
-		#  parent UseGun attachment @0x546518 -> cache @0x440930]
-		NovaPresentApplier.wire_controls_apply_with_capabilities(
-				node, snap, base, visual_ctrl_caps)
-	elif caps & CAP_PART:
-		_apply_procedural_part(node, snap, base, caps)
-	if ctrl_batch:
-		node.end_ctrl_update()
-	if respawned_since_present and node.has_method("reset_remote_body_state"):
-		node.reset_remote_body_state()
-		if row >= 0:
-			_row_anim_state[row] = -2 # force the next body-anim dispatch through
-			_row_remote_body_tick[row] = 0
-	_apply_body_anim_gated(node, snap, base, caps, row)
-	# The upper-body weapon channel: the hold pose this player's held weapon and
-	# scope state select. The sim derives the state (there is no anim id on the
-	# wire — every observer re-derives it); -1 means this row has no channel this
-	# frame, which clears any pose left over from the weapon it was holding before.
-	# [orig: the selection Entity_UpdateInfantryPlayerBody @0x4b5dad, which retail
-	#  runs for every player body it draws, not just the local one]
-	if caps & CAP_WPN:
-		var wpn_state := int(snap[base + NovaSimulation.PF_WPN_ANIM_STATE])
-		node.set_weapon_channel(
-				_infantry_key(wpn_state) if wpn_state >= 0 else "",
-				int(snap[base + NovaSimulation.PF_WPN_PHASE_TICKS]))
-	var next_visible := (
-			int(snap[base + NovaSimulation.PF_HIDDEN]) == 0
-			and int(snap[base +
-					NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED]) == 0)
-	_update_held_weapon(handle, node, snap, base, next_visible)
-	_respawn_revisions[handle] = respawn_revision
-	if node.visible != next_visible:
-		node.visible = next_visible
-	if spawned_now and _node_spawned_callback.is_valid():
-		_node_spawned_callback.call(node, runtime_kind, visual_item_id)
 
 
 ## World position of a named userpoint on this wire body's HELD WEAPON — the anchor
@@ -802,49 +376,27 @@ func entity_count() -> int:
 	return _nodes.size()
 
 
-## This body's third-person gun — retail's draw 5, for a remote player. The sim already
-## folded the draw gate in: a hidden or unarmed body reports ADM 0, which is both our
-## weapon table's null row and the original's own `if (entity->equippedAdmIndex)`
-## precondition, so there is no separate visibility field to consult.
-##
-## The model is drawn RIGID (one matrix into every bone slot), so it needs no skeleton and
-## no clip of its own; it is posed entirely by bone 16's joint plus the weapon's own attach
-## basis, which is neither bone 16's rotation nor any aim-overlay class.
-## [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; matrix @0x4b2180..0x4b22f8;
-##  gate Entity_CanFireWeapon @0x4dcb10]
-func _update_held_weapon(
-		handle: int, node: Node3D, snap: PackedFloat32Array,
-		base: int, body_visible: bool) -> void:
-	var adm := int(snap[base + NovaSimulation.PF_HELD_WEAPON_ADM])
+## Build (or free) this wire body's third-person gun model when its ADM changes —
+## the applier's wire walk detects the edge and calls back here so the placer
+## build, node naming, and the maps muzzle_world_for/tests consume stay on the
+## facade; the per-frame rigid attach lives in the native walk.
+## [orig: the model resolve off the equipped ADM — the sim already folded the
+##  draw gate in: a hidden or unarmed body reports ADM 0]
+func _rebuild_held_weapon(handle: int, adm: int) -> Node3D:
 	var graphic := ""
 	if adm > 0 and _sim != null and _sim.has_method("get_weapon_third_person_model"):
 		graphic = String(_sim.get_weapon_third_person_model(adm))
-	if graphic != String(_weapon_graphics.get(handle, "")):
-		_free_held_weapon(handle)
-		if not graphic.is_empty() and _placer != null:
-			var built: Node3D = _placer.build_model_from_graphic(
-					graphic, "", _container, "", _env_node)
-			if built != null:
-				built.name = "WireWeapon_%04x" % handle
-				built.set_shadow_caster_enabled(true)
-				_weapon_nodes[handle] = built
-		_weapon_graphics[handle] = graphic
-	var weapon_v: Variant = _weapon_nodes.get(handle)
-	if not is_instance_valid(weapon_v) or not (weapon_v is Node3D):
-		return
-	var weapon := weapon_v as Node3D
-	if adm <= 0 or not body_visible:
-		weapon.visible = false
-		return
-	var attach: Variant = PresentHeldWeapon.attach_transform(
-			node,
-			Vector3(
-					snap[base + NovaSimulation.PF_HELD_WEAPON_PITCH_DEG],
-					snap[base + NovaSimulation.PF_HELD_WEAPON_YAW_DEG],
-					snap[base + NovaSimulation.PF_HELD_WEAPON_ROLL_DEG]),
-			snap[base + NovaSimulation.PF_HELD_WEAPON_HAND_FRAME] != 0.0)
-	if attach == null:
-		weapon.visible = false
-		return
-	weapon.global_transform = attach as Transform3D
-	weapon.visible = true
+	if graphic == String(_weapon_graphics.get(handle, "")):
+		var existing: Variant = _weapon_nodes.get(handle)
+		return existing as Node3D if is_instance_valid(existing) else null
+	_free_held_weapon(handle)
+	if not graphic.is_empty() and _placer != null:
+		var built: Node3D = _placer.build_model_from_graphic(
+				graphic, "", _container, "", _env_node)
+		if built != null:
+			built.name = "WireWeapon_%04x" % handle
+			built.set_shadow_caster_enabled(true)
+			_weapon_nodes[handle] = built
+	_weapon_graphics[handle] = graphic
+	var v: Variant = _weapon_nodes.get(handle)
+	return v as Node3D if is_instance_valid(v) else null

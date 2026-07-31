@@ -43,22 +43,21 @@ hardening, and project health. Divergences from the original engine belong in
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
-- [ ] Present-pass / entity-reconcile citation pass: `wire_present_pass.gd` now carries
-      7 `[orig]` anchors, and `mission_present_pass.gd`'s anchors moved to the native row
-      walk with #321 (`godot/engine/simulation/nova_present_applier.{h,cpp}`, 7 anchors —
-      6 in the .cpp + 1 in the header) —
+- [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
+      the native walks (`nova_present_applier.{h,cpp}` 12, the wire walk
+      `nova_present_applier_wire.cpp` 5, the `wire_present_pass.gd` facade's
+      cold-path 3, `present_held_weapon.gd`'s reference math) —
       but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
-- [ ] Wire present-pass native walk (the MP twin of #321): the SP mission present
-      row walk moved into `NovaPresentApplier` with #321, but
-      `godot/engine/world/wire_present_pass.gd` still builds and walks its own
-      GDScript row plan (`_begin_row_plan`/`_append_row_plan`) — only its
-      visual-control and aim-overlay adapters delegate to the native statics.
-      The July perf
-      program's F3 Stats reading put the MP walk at ~3.2 ms and ranked porting
-      it onto the native walk as the next present slice, ahead of the
-      env/water/sky/weather singleton `_process` set (~1 ms)
+- [ ] Wire-walk edge-gating follow-up: the native wire walk deliberately
+      transliterates the GDScript dispatch pattern, so the aim-payload,
+      ctrl-publish, and weapon-channel legs still dispatch every frame while
+      active; adopting the mission walk's change-gated edge machine for them is
+      a measured follow-up (F3 Stats wire leg before/after)
+- [ ] Env/water/sky/weather singleton `_process` set (~1 ms at the ASH_I5A
+      vantage): the July perf program's next present-side slice now that the
+      MP wire walk is native
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would

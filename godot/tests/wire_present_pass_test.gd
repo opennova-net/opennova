@@ -1231,3 +1231,67 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	presenter.present()
 	assert_eq(placer.graphic_builds.size(), 1,
 			"going unarmed frees the weapon rather than rebuilding one")
+
+
+# --- Native held-weapon parity (the PR that moves the walk native) ---------------
+
+# The native applier carries its own port of the hand-frame calibration (the
+# godot-cpp Basis(axis, angle) parity gotcha): pin the two implementations
+# together across representative bone bases — including negative-component
+# columns — so they can never drift.
+func test_native_hand_frame_basis_matches_the_gdscript_origin() -> void:
+	var bases: Array[Basis] = [
+		Basis.IDENTITY,
+		Basis(Vector3(0, 1, 0), 0.7) * Basis(Vector3(1, 0, 0), -0.4),
+		Basis(Vector3(-1, 0, 0).normalized(), 1.2),
+		Basis(Vector3(0.5, -0.5, 0.70710678).normalized(), 2.1),
+		Basis(Vector3(-0.57735, -0.57735, -0.57735).normalized(), -2.8),
+		Basis(Vector3(0, 0, -1), PI / 2.0) * Basis(Vector3(0, -1, 0), 0.3),
+	]
+	for b in bases:
+		var expected := PresentHeldWeapon.hand_frame_basis(b)
+		var got: Basis = NovaPresentApplier.held_weapon_hand_frame_basis(b)
+		assert_true(got.is_equal_approx(expected),
+				"hand-frame parity at %s: native %s vs gd %s" % [b, got, expected])
+
+
+# Full attach-transform parity against a really posed Skeleton3D, both frames,
+# across an entity-angle sweep — pins the joint/rest-inverse/nudge math.
+func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
+	var body := Node3D.new()
+	add_child_autofree(body)
+	body.global_transform = Transform3D(
+			Basis(Vector3(0, 1, 0), 0.9), Vector3(4.0, 1.5, -7.0))
+	var skeleton := Skeleton3D.new()
+	body.add_child(skeleton)
+	skeleton.position = Vector3(0.1, 0.9, 0.0)
+	for bone_index in range(PresentHeldWeapon.BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+		if bone_index > 0:
+			skeleton.set_bone_parent(bone_index, bone_index - 1)
+		# A non-trivial rest chain: the rest-inverse term must matter.
+		skeleton.set_bone_rest(bone_index, Transform3D(
+				Basis(Vector3(0, 0, 1), 0.11 * bone_index),
+				Vector3(0.05 * bone_index, 0.1, 0.02)))
+	skeleton.reset_bone_poses()
+	# Pose the hand chain away from rest so pose != rest.
+	skeleton.set_bone_pose_rotation(10,
+			Quaternion(Vector3(1, 0, 0).normalized(), 0.6))
+	skeleton.set_bone_pose_rotation(PresentHeldWeapon.BONE_INDEX,
+			Quaternion(Vector3(0.3, -0.8, 0.52).normalized(), -1.1))
+	for angles: Vector3 in [Vector3.ZERO, Vector3(15, -120, 40), Vector3(-80, 270, -30)]:
+		for hand_frame in [false, true]:
+			var expected: Variant = PresentHeldWeapon.attach_transform(
+					body, angles, hand_frame)
+			var got: Variant = NovaPresentApplier.held_weapon_attach_transform(
+					skeleton, angles, hand_frame)
+			assert_not_null(expected, "the reference places a transform")
+			assert_true((got as Transform3D).is_equal_approx(expected as Transform3D),
+					"attach parity (hand=%s, %s): native %s vs gd %s" % [
+							hand_frame, angles, got, expected])
+	# The cannot-place leg: too few bones -> null from both.
+	var short_skel := Skeleton3D.new()
+	add_child_autofree(short_skel)
+	short_skel.add_bone("only")
+	assert_null(NovaPresentApplier.held_weapon_attach_transform(
+			short_skel, Vector3.ZERO, false))
