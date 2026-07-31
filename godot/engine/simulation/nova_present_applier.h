@@ -92,6 +92,18 @@ public:
 	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
 			int base, bool drive_root_basis);
 
+	// Third-person held-weapon placement — the native twin of
+	// PresentHeldWeapon.attach_transform/hand_frame_basis (present_held_weapon.gd
+	// keeps the reference math and every [orig] derivation; the two are pinned
+	// equivalent by wire_present_pass_test.gd's parity cases — keep them in
+	// lockstep). The weapon rides bone index 16 (".bad row BN17 R Hand");
+	// returns a Transform3D, or null when the skeleton cannot place one
+	// [orig: BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99; matrix build
+	//  @ 0x4b2180..0x4b22f8; hand-frame gate @ 0x4b21b6].
+	static Variant held_weapon_attach_transform(Object *skeleton,
+			const Vector3 &attach_angles_bms, bool hand_frame);
+	static Basis held_weapon_hand_frame_basis(const Basis &bone_model_to_world);
+
 	static int get_visual_control_capabilities(Object *node);
 	// Capability-aware dispatch for presenters that already resolved the visual
 	// surface at model/row-plan construction. These never probe the node.
