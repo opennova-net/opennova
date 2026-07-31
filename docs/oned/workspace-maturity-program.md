@@ -143,14 +143,19 @@ here it is the stated gate for the new writers (hudpos in HUD-1, avatars in
 AVT-1) and every W phase after them. `libs/CLAUDE.md` points here from its
 parity-writer rule.
 
-### F5 — MissionController decomposition
+### F5 — MissionController decomposition — DONE (#204 + #373)
 
-`mission/mission_controller.gd` is 4,033 lines (largest file under any
-workspace; backlogged since #179). Decompose along its existing seams
-(placement/grounding, sim driver, environment, selection/edit ops, IO) the
-way #178 split the inspector — mechanical moves, tests remapped, no behavior
-change. Sequenced before any MIS phase. Gate: mission suites (30 files) +
-canary + full GUT keystone.
+`mission/mission_controller.gd` was 4,033 lines (largest file under any
+workspace; backlogged since #179). The decomposition landed in two mechanical
+stages, both before any MIS phase (the sequencing constraint held): the
+Wave-1 trunk (#204, 2026-07-05) cut it to 1,645 lines and created
+`mission/controller/` (the section base plus io/placement/reground/sim/
+viewport/waypoint/zone ops), and the quality campaign's W4-6b (#373,
+2026-07-30) extracted the history/selection/scripting/edit sections; #376
+later added `preview_ops` and retired `sim_ops` with the standalone runtime.
+The ~1,040-line residual is the composing facade the section framework
+prescribes — document/selection/overlay state stays on the controller by
+design (TODO.md records the same disposition).
 
 ## TST — public-seam test refits (umbrella Wave 2; ADR 0018)
 
@@ -160,7 +165,8 @@ reach-ins → public accessors (the `get_workspace_adapter` precedent), (B)
 private methods as entry points → public verbs, (C) internal state reads →
 public getters for contract state. Order: `mission_inspector_test` (301
 lines), `terrain_editor_workstation_test` (152 — the canary, handled with
-extra care), `mission_controller_test` (100, after F5), `mnu_canvas_test`
+extra care), `mission_controller_test` (100; F5 is done, so unblocked),
+`mnu_canvas_test`
 (92), the music suite (rides MUS-I's rebuild). Refit slices are
 refactor-only: identical assert counts prove it. The long tail converts
 adopt-on-touch under the ratchet.
@@ -188,9 +194,12 @@ splits, and `HudLayout.scale_rect` as scaler prior art).
 ## MUS-D / MUS-I — the Music workspace redesign (Waves 2 → 3)
 
 The maintainer's verdict: very hard to use. The structural causes are
-verified: a 1,951-line single screen owning eight concerns (transport,
-breadcrumbs, section map, program view, variables, volume meter, event log,
-follow-live); a modal map↔section canvas swap (you never see both);
+verified: a single screen owning eight concerns (transport, breadcrumbs,
+section map, program view, variables, volume meter, event log, follow-live)
+— 1,951 lines when verified; the quality campaign's W4-6a (#372, 2026-07-30)
+has since split it mechanically into a 779-line host plus four delegate
+sections, relocating the mass without changing any of these causes; a modal
+map↔section canvas swap (you never see both);
 breadcrumbs implying a hierarchy the flat state machine doesn't have;
 nested block widgets edited through popovers; the workspace opting out of
 the shell left lane (the only one); and a separate Bank mode.
@@ -212,11 +221,14 @@ the shell left lane (the only one); and a separate Bank mode.
 
 ### The MUS-D design (2026-07-12; at the maintainer gate)
 
-Deliverable of the MUS-D design spike (Wave 2). Grounded in the current code:
-the screen `godot/modtools/music/ui/live_mode.gd` (1,951 lines) + `live_mode.tscn`,
-the adapter `music_workspace.gd`, the untouched document layer
-`music_editor_document.gd` (1,315 lines), and the format/VM facts in
-`docs/audio/mus-sbf-re.md`. Ends at the maintainer gate; MUS-I implements it.
+Deliverable of the MUS-D design spike (Wave 2). Grounded in the code as of
+the design date: the screen `godot/modtools/music/ui/live_mode.gd`
+(1,951 lines then; since W4-6a (#372) a 779-line host plus the
+`live_mode_map_view/authoring_ops/nav_ops/transport_log` delegate sections) +
+`live_mode.tscn`, the adapter `music_workspace.gd`, the untouched document
+layer `music_editor_document.gd` (1,315 lines then, 1,306 today), and the
+format/VM facts in `docs/audio/mus-sbf-re.md`. Ends at the maintainer gate;
+MUS-I implements it.
 
 The 46 doc/VM tests that stay green unmodified are exactly:
 `godot/tests/modtools/music/music_document_test.gd` (19) +
@@ -436,8 +448,13 @@ replacement and it works). What changes is where nested values get edited:
 
 #### 6. Decomposition plan for MUS-I
 
-`live_mode.gd` (1,951) becomes a thin composition root plus components, one
-shippable slice per move. Every slice ends with: the 46 doc/VM tests green
+`live_mode.gd` becomes a thin composition root plus components, one
+shippable slice per move. Starting point updated 2026-07-30: W4-6a (#372)
+already cut the 1,951-line screen to a 779-line host plus four mechanical
+delegate sections (map_view/authoring_ops/nav_ops/transport_log). Those are
+mass relocations — the host still owns the behavior — not this design's
+intent-signal components, so every slice below stands; S3/S4's extractions
+now start from those helpers rather than from a monolith. Every slice ends with: the 46 doc/VM tests green
 **unmodified**, the music screen suite (rewritten per-slice, absorbing the
 TST refit — the umbrella doc already routes "the music suite" through MUS-I's
 rebuild), the canary, and FULL GUT at the end of the phase. Every slice leaves
@@ -572,7 +589,8 @@ along seams that already exist as signal boundaries in the code.
 - MIS-3: scripting depth audit — event/param coverage vs the 218-file WAC/BMS
   corpus; close typing gaps found (each new param type cited). Gate: corpus
   parse sweep, no regressions.
-- MIS-4 (= F5): controller decomposition, sequenced before MIS-1..3 land.
+- MIS-4 (= F5): controller decomposition — DONE before any MIS work
+  (#204 + #373; see F5).
 
 ### Credits
 
@@ -719,7 +737,7 @@ assumption re-scopes the phase before code lands (the faithful-port rule).
 ## Sequencing (keyed to the umbrella's waves)
 
 - **Umbrella Wave 1:** AVA (landed 2026-07-04), then F1–F5 (F5 before any
-  MIS phase).
+  MIS phase — satisfied: F5 landed via #204 + #373).
 - **Umbrella Wave 2:** the no-RE adoptions — OBJ-1/3/4, FNT-1/2, STR-1/2,
   CRE-1, MNU-1, SND-1, TER-1, ENV-1, every F3 wiring — plus TST refits,
   RSP-1..3, and MUS-D (maintainer gate at its end). R1–R7 grills run
@@ -750,8 +768,8 @@ private-poking tests.
    the witness disagrees.
 2. **F1 extraction entangles mission seams** the way A8's popover block did:
    extract with seams intact, mechanical first, redesign never mid-move.
-3. **F5 churn**: 4k lines moving while Wave-2 work proceeds elsewhere — land
-   F5 before any MIS phase, and keep it purely mechanical.
+3. **F5 churn** — retired: F5 landed purely mechanically (#204 + #373)
+   before any MIS phase; the risk did not materialize.
 4. **Flow-run sandbox escape** (MNU-1): the interceptor must catch every
    host-policy verb (quit/launch/cross-file) or a menu action closes the
    editor; the flow-run test enumerates the verbs.
