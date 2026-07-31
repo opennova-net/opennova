@@ -105,15 +105,6 @@ open review follow-ups from #376/#378 — none blocking:
       validates it — and the skew failure happens pre-descriptor anyway. Verify a
       shared build id (descriptor check plus a boot-time check), or ship one combined
       zip.
-- [ ] game_debug MCP state rows report `writable:false` / "Unlock edits" even when
-      `confirm_authority` made the write succeed: `read_control_state` hardcodes
-      `allow_authority=false` (`nova_debug_session.gd`). Thread the caller's granted
-      authority into the returned row.
-- [ ] MCP hardening: `game_screenshot` acquires the presentation lease before
-      validating its arg types (`game_mcp_tools.gd`) — a wrong-typed arg errors between
-      acquire and release and leaks the lease; and the editor's descriptor wait loops
-      (`editor_mcp_game_tools.gd`, 15 s) never check child liveness, so a child that
-      dies pre-descriptor stalls the full window.
 - [ ] Cross-mission debug-intent replay: `NovaDebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on
@@ -128,13 +119,6 @@ open review follow-ups from #376/#378 — none blocking:
       that non-debug runs never get; and `user://oned-run-*.log` files accumulate
       unbounded. Give the managed child a graceful-quit path (or a bounded grace
       window) and prune or rotate the logs.
-- [ ] Consolidation leftovers: retire the `debug_option_changed` compatibility signal
-      (its assertion sites in `nova_debug_overlay_test.gd` need porting onto the
-      session's `control_changed`/`control_invoked` signals — the repo bans back-compat
-      shims); single-source `PUBLIC_GAME_CONTROL_ACTIONS` (a hand-copy of
-      `game_debug_host.gd`'s action match arms); delete the dead
-      `NovaLaunchFlags.oned_run_id`/`oned_run_descriptor` accessors or converge
-      `GameMcpService`'s private arg parser onto them.
 
 ## Project health follow-ups
 

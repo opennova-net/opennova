@@ -211,6 +211,7 @@
     "nova_debug_overlay_test.gd|host-only",
     "terrain_editor_workstation_test.gd|%PromptHost",
     "mus_var_names.gd|8: \"Host\"",
-    "mus_var_names.gd|8=host"
+    "mus_var_names.gd|8=host",
+    "nova_debug_session_test.gd|state.reason, \"host\""
   ]
 }

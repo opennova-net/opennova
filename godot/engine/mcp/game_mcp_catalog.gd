@@ -7,6 +7,17 @@ extends RefCounted
 
 const SCREENSHOT_TIMEOUT_MS := 60_000
 
+## The one list of public game_control actions. The game_control schema enum,
+## ONED's proxy allowlist, and the GameDebugAdapter contract test all read it, so
+## the three cannot drift; GameDebugAdapter.mcp_game_control implements each.
+const PUBLIC_GAME_CONTROL_ACTIONS: Array[String] = [
+	"pause",
+	"resume",
+	"step",
+	"return_to_menu",
+	"quit",
+]
+
 
 static func definitions() -> Array[McpToolDef]:
 	return [
@@ -41,12 +52,13 @@ static func definitions() -> Array[McpToolDef]:
 				},
 			}, ["op"], false),
 		McpToolDef.make("game_control",
-			"Control the real game process. action is pause, resume, step, return_to_menu, or quit. "
+			"Control the real game process. action is %s. " % ", ".join(
+					PUBLIC_GAME_CONTROL_ACTIONS)
 			+ "Pause/step retain the runtime's multiplayer transport restrictions.",
 			{
 				"action": {
 					"type": "string",
-					"enum": ["pause", "resume", "step", "return_to_menu", "quit"],
+					"enum": PUBLIC_GAME_CONTROL_ACTIONS,
 				},
 			}, ["action"]),
 		McpToolDef.make("game_debug",

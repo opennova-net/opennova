@@ -16,11 +16,6 @@ extends CanvasLayer
 ## stale. Panel width and the last-selected page persist per user via
 ## NovaConfigStore; live toggles deliberately do not.
 
-## Post-apply notification after a NovaDebugOptions control has gone through
-## the shared session's public target. No production owner consumes it —
-## tests observe option flips here.
-signal debug_option_changed(id: StringName, value: Variant)
-
 ## Fired after a fresh debug snapshot lands on disk — the local-player pose
 ## plus every picked entity's live state. The path is absolute so it can be
 ## pasted into an issue or opened directly.
@@ -98,7 +93,6 @@ func _init(
 	NovaDebugCatalog.install(_session)
 	if shared_session == null:
 		_bind_builtin_targets()
-	_session.control_invoked.connect(_on_session_control_invoked)
 	_build_panel()
 	_session.edit_unlock_changed.connect(_on_edit_unlock_changed)
 	_on_edit_unlock_changed(_session.is_edit_unlocked())
@@ -247,8 +241,8 @@ func get_active_page_id() -> StringName:
 
 
 ## Programmatic option write (tests, automation): routes through the shared
-## state, so the owning page's control re-syncs and debug_option_changed fires
-## exactly like a click.
+## session, so the owning page's control re-syncs and the session's
+## control_invoked fires exactly like a click.
 func set_option(id: StringName, value: Variant) -> void:
 	_session.set_control_value(id, value)
 
@@ -820,11 +814,6 @@ func _runtime_status() -> Dictionary:
 		"role": role,
 		"playing": playing,
 	}
-
-
-func _on_session_control_invoked(id: StringName, value: Variant) -> void:
-	if not NovaDebugOptions.find(id).is_empty():
-		debug_option_changed.emit(id, value)
 
 
 func _on_unlock_edits_toggled(unlocked: bool) -> void:
