@@ -649,6 +649,12 @@ func _on_mns_variable_selected(_name: String) -> void:
 # Variable-row commits funnel through the Mns editor so undo/refresh stay
 # centralized (same contract as the Mnu inspector → Mnu editor flow).
 func _on_mns_inspector_edit(edit: Dictionary) -> void:
+	apply_stylesheet_edit(edit)
+
+
+## Shared stylesheet mutation seam for inspector, automation, and tests. The
+## workspace keeps preview locking and undo ownership inside MnsEditor.
+func apply_stylesheet_edit(edit: Dictionary) -> void:
 	if _mns_editor != null and is_instance_valid(_mns_editor):
 		_mns_editor.apply_edit(edit)
 
@@ -816,7 +822,10 @@ func open_file(path: String) -> Error:
 			var reload_err: Error = open_doc.open_mnu(path)
 			if reload_err != OK:
 				return reload_err
-		return activate_document(existing)
+		var activate_err := activate_document(existing)
+		if activate_err == OK:
+			_show_properties_dock()
+		return activate_err
 	# A pristine active document (fresh workspace, just-seeded tab) is reused so
 	# the first open does not leave a stray Untitled tab.
 	var reuse: bool = not _document.is_dirty and _document.current_path.is_empty()
@@ -832,7 +841,14 @@ func open_file(path: String) -> Error:
 		_tabs.add(target)
 		_bind_active_document()
 	_save_state()
+	_show_properties_dock()
 	return err
+
+
+func _show_properties_dock() -> void:
+	_dock_tab = DockTab.PROPERTIES
+	if _tab_container != null and is_instance_valid(_tab_container):
+		_tab_container.current_tab = DockTab.PROPERTIES
 
 
 # Cross-jump focus hook (EditorWorkspace.focus_reference):
@@ -936,6 +952,26 @@ func get_editor_document() -> Object:
 	if _dock_tab == DockTab.STYLES and _mns_editor != null and is_instance_valid(_mns_editor):
 		return _mns_editor
 	return _editor
+
+
+## The menu tool surface always targets the canvas editor, independent of which
+## inspector dock currently owns shell undo/redo.
+func get_menu_editor() -> Object:
+	return _editor
+
+
+## Current typed authoring resources. Consumers cross the workspace interface
+## instead of depending on its document-wrapper layout.
+func get_menu_document() -> MnuEditorDocument:
+	return _document
+
+
+func get_menu_resource() -> NovaMnuDocument:
+	return _document.resource if _document != null else null
+
+
+func get_stylesheet_resource() -> MnsStyleSheet:
+	return _mns_document.resource if _mns_document != null else null
 
 
 # Commit BOTH editors' deferred buffers (only the Mns source view has one

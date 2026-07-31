@@ -1,41 +1,29 @@
 class_name MnuPropertyInspector
 extends MarginContainer
 
-# Editable property view for the selected MNU node (a screen container or a
-# widget). Extends a container (not a bare Control) so the make_inspector_box
-# margin/scroll/box chain it hosts gets a real size: the shell mounts this into a
-# PanelContainer that sizes it to fill, and a MarginContainer in turn lays out its
-# content (a plain Control would leave the size_flags-driven children at zero size,
-# leaving the whole inspector blank). Every row commits through
-# edit_requested(edit); the workspace adapter
-# forwards that to the editor, which applies the mutation and records one undo
-# step. The inspector never mutates the document itself, so the editor owns
-# before/after and the undo stack (it also no-ops unchanged values, which makes
-# committing on both Enter and blur, including teardown, harmless).
+# Editable property view for a selected MNU screen or widget. MarginContainer
+# gives the hosted margin/scroll/box chain a real size inside the shell.
+# Every row emits edit_requested; the workspace applies it and owns snapshot
+# undo. The inspector never mutates the document, and unchanged edits no-op.
 #
 # edit dict shape: {target: "widget"|"screen", id: int, prop: String,
 #   slot: int (color/texture only), value: Variant}.
 
 signal edit_requested(edit: Dictionary)
-# Cross-workspace jump intents (handled by the workspace adapter via the shell): edit
-# the selected widget's string in Strings, its font in Fonts, or a cross-file
-# screen action's target in Menus.
+# Cross-workspace jump intents are routed through the workspace and shell.
 signal string_jump_requested(key: String)
 signal font_jump_requested(font: String)
 signal menu_jump_requested(file: String, screen: String)
-# Edit a %VAR% the selected widget references, in the Menu Styles workspace.
 signal style_jump_requested(variable: String)
-# Audition a widget's sound: the workspace resolves (trigger -> set in the menu .lwf
-# -> member -> .wav) and plays it, reusing the Sound workspace's preview player.
 signal sound_preview_requested(trigger: String, file: String)
 
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
 const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
 const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
 const MnsVariableTableScript = preload("res://modtools/mnu/mns_variable_table.gd")
+const MnuWidgetInteractionEditorScript = preload("res://modtools/mnu/mnu_widget_interaction_editor.gd")
 
-# Position spins span negative coords (a widget can sit off the authoring board);
-# sizes never do.
+# Positions allow off-board widgets; sizes do not.
 const POS_MIN := -4096
 const POS_MAX := 4096
 const SIZE_MAX := 4096
@@ -385,9 +373,22 @@ func _build_widget_rows(id: int) -> void:
 		_box.add_child(font_jump)
 
 	var wtype := _document.get_widget_type(id)
+	var interaction_editor = MnuWidgetInteractionEditorScript.new()
+	add_child(interaction_editor)
+	interaction_editor.configure(
+		_document, id, wtype, authoring, _sound_sets, _ref_services)
+	interaction_editor.edit_requested.connect(func(edit: Dictionary) -> void:
+		_emit(edit))
+	interaction_editor.rebuild_requested.connect(_rebuild)
+	interaction_editor.menu_jump_requested.connect(
+		func(file: String, screen: String) -> void:
+			menu_jump_requested.emit(file, screen))
+	interaction_editor.sound_preview_requested.connect(
+		func(trigger: String, file: String) -> void:
+			sound_preview_requested.emit(trigger, file))
+
 	_build_string_layout_section(id, authoring)
-	_build_behavior_section(id, wtype, authoring)
-	_build_hotkey_section(id, authoring)
+	interaction_editor.append_behavior_sections(_box)
 	_build_frame_section(id, authoring)
 
 	_build_color_section(id)
@@ -395,9 +396,7 @@ func _build_widget_rows(id: int) -> void:
 	_build_appearance_section(id, authoring)
 	if wtype == NovaMnuDocument.TYPE_SCROLL:
 		_build_scroll_parts_section(id, authoring)
-	_build_flag_section(id)
-	_build_action_section(id)
-	_build_sound_section(id)
+	interaction_editor.append_command_sections(_box)
 
 	# M10: nested template authoring. Item rows for list-like widgets; column
 	# header/body definitions for tables. These emit op-tagged edits that the
@@ -557,75 +556,6 @@ func _build_string_layout_section(id: int, authoring: Dictionary) -> void:
 	_build_optional_int(id, "Edge padding", data, "has_edge", "edge", ["string"], 0, SIZE_MAX)
 
 
-func _build_behavior_section(id: int, wtype: int, authoring: Dictionary) -> void:
-	var behavior: Dictionary = authoring.get("behavior", {})
-	var constraints: Dictionary = authoring.get("constraints", {})
-	MnuUiHelpersScript.add_heading(_box, "Behavior")
-	if wtype == NovaMnuDocument.TYPE_CHECKBOX:
-		var as_button := MnuUiHelpersScript.add_check_row(_box, "Button presentation",
-			bool(behavior.get("as_button", false)))
-		as_button.tooltip_text = "Lay out this checkbox as a full-rect toggle button"
-		as_button.toggled.connect(func(on: bool) -> void:
-			_emit_patch_path(id, ["behavior", "as_button"], on))
-	if wtype == NovaMnuDocument.TYPE_RADIO or wtype == NovaMnuDocument.TYPE_CHECKBOX \
-			or wtype == NovaMnuDocument.TYPE_RADIOEDIT:
-		_build_optional_int(id, "Group", behavior, "has_group", "group",
-			["behavior"], 0, SIZE_MAX)
-
-	_build_optional_int(id, "Form", behavior, "has_form", "form", ["behavior"], 0, SIZE_MAX)
-	var global_var := MnuUiHelpersScript.add_check_row(_box, "Global variable",
-		bool(behavior.get("global_var", false)))
-	global_var.toggled.connect(func(on: bool) -> void:
-		_emit_patch_path(id, ["behavior", "global_var"], on))
-
-	var is_edit := wtype == NovaMnuDocument.TYPE_EDIT \
-		or wtype == NovaMnuDocument.TYPE_MULTILINE_EDIT \
-		or wtype == NovaMnuDocument.TYPE_RADIOEDIT
-	if is_edit:
-		var password := MnuUiHelpersScript.add_check_row(_box, "Password",
-			bool(behavior.get("password", false)))
-		password.toggled.connect(func(on: bool) -> void:
-			_emit_patch_path(id, ["behavior", "password"], on))
-		var number := MnuUiHelpersScript.add_check_row(_box, "Numbers only",
-			bool(constraints.get("number", false)))
-		number.toggled.connect(func(on: bool) -> void:
-			_emit_patch_path(id, ["constraints", "number"], on))
-		_build_optional_int(id, "Minimum", constraints, "has_minval", "minval",
-			["constraints"], -2147483648, 2147483647)
-		_build_optional_int(id, "Maximum", constraints, "has_maxval", "maxval",
-			["constraints"], -2147483648, 2147483647)
-		_build_optional_int(id, "Maximum characters", constraints, "has_maxchar", "maxchar",
-			["constraints"], 0, SIZE_MAX)
-
-	if wtype == NovaMnuDocument.TYPE_SCROLL or wtype == NovaMnuDocument.TYPE_MARQUEE:
-		var orientation := MnuUiHelpersScript.add_option_row(_box, "Orientation",
-			String(behavior.get("orientation", "")), ["", "HORIZONTAL", "VERTICAL"])
-		_wire_patch_option(orientation, id, ["behavior", "orientation"])
-	if wtype == NovaMnuDocument.TYPE_MARQUEE:
-		_add_asset_row("Datasource", String(behavior.get("datasource", "")), "credits",
-			func(value: String) -> void:
-				_emit_patch_path(id, ["behavior", "datasource"], value))
-	if wtype == NovaMnuDocument.TYPE_SCROLL:
-		var scroll_size: Dictionary = authoring.get("scroll_size", {})
-		_build_optional_int(id, "Scroll height", scroll_size, "has_height", "height",
-			["scroll_size"], 0, SIZE_MAX)
-		_build_optional_int(id, "Scroll width", scroll_size, "has_width", "width",
-			["scroll_size"], 0, SIZE_MAX)
-
-	var cursor: Dictionary = authoring.get("cursor", {})
-	_add_asset_row("Pointer picture", String(cursor.get("file", "")), "texture",
-		func(value: String) -> void:
-			_emit_patch_path(id, ["cursor", "file"], value))
-	var cursor_flags := MnuUiHelpersScript.add_text_edit_row(_box, "Pointer flags",
-		String(cursor.get("flags", "")))
-	_wire_patch_text(cursor_flags, id, ["cursor", "flags"])
-
-
-func _top_rows(id: int, key: String) -> Array:
-	var state: Dictionary = _document.get_widget_authoring_state(id)
-	return Array(state.get(key, [])).duplicate(true)
-
-
 func _rows_at_path(id: int, path: Array) -> Array:
 	var current: Variant = _document.get_widget_authoring_state(id)
 	for segment in path:
@@ -674,64 +604,6 @@ func _move_path_row(id: int, path: Array, from: int, to: int) -> void:
 	rows.insert(to, row)
 	_emit_patch_path(id, path, rows)
 	_rebuild()
-
-
-func _set_top_row_field(id: int, key: String, index: int, field: String, value: Variant) -> void:
-	var rows := _top_rows(id, key)
-	if index < 0 or index >= rows.size():
-		return
-	var row: Dictionary = (rows[index] as Dictionary).duplicate()
-	if row.get(field) == value:
-		return
-	row[field] = value
-	rows[index] = row
-	_emit_patch_path(id, [key], rows)
-
-
-func _add_top_row(id: int, key: String, row: Dictionary) -> void:
-	var rows := _top_rows(id, key)
-	rows.append(row)
-	_emit_patch_path(id, [key], rows)
-	_rebuild()
-
-
-func _remove_top_row(id: int, key: String, index: int) -> void:
-	var rows := _top_rows(id, key)
-	if index < 0 or index >= rows.size():
-		return
-	rows.remove_at(index)
-	_emit_patch_path(id, [key], rows)
-	_rebuild()
-
-
-func _move_top_row(id: int, key: String, from: int, to: int) -> void:
-	var rows := _top_rows(id, key)
-	if from < 0 or from >= rows.size() or to < 0 or to >= rows.size():
-		return
-	var row = rows[from]
-	rows.remove_at(from)
-	rows.insert(to, row)
-	_emit_patch_path(id, [key], rows)
-	_rebuild()
-
-
-func _build_hotkey_section(id: int, authoring: Dictionary) -> void:
-	MnuUiHelpersScript.add_heading(_box, "Keyboard shortcuts")
-	var editor = MnuListEditorScript.new()
-	editor.configure([
-		{"key": "value", "label": "Key", "kind": "text"},
-		{"key": "virtual", "label": "Named key", "kind": "bool"},
-	])
-	_box.add_child(editor)
-	editor.set_rows(Array(authoring.get("hotkeys", [])))
-	editor.row_field_changed.connect(func(index: int, key: String, value: Variant) -> void:
-		_set_top_row_field(id, "hotkeys", index, key, value))
-	editor.row_added.connect(func() -> void:
-		_add_top_row(id, "hotkeys", {"value": "VK_RETURN", "virtual": true}))
-	editor.row_removed.connect(func(index: int) -> void:
-		_remove_top_row(id, "hotkeys", index))
-	editor.row_moved.connect(func(from: int, to: int) -> void:
-		_move_top_row(id, "hotkeys", from, to))
 
 
 func _build_frame_section(id: int, authoring: Dictionary) -> void:
@@ -951,415 +823,6 @@ func _build_add_slot(id: int, label: String, empty: Array, prop: String, default
 			return
 		_emit({"target": "widget", "id": id, "prop": prop, "slot": picker.get_selected_id(), "value": default_value})
 		_rebuild())
-
-
-# All flag toggles are shown; any toggle re-derives the whole bitmask from the
-# checkboxes so the edit carries one complete flags value.
-func _build_flag_section(id: int) -> void:
-	var labels := _document.get_flag_labels()
-	if labels.is_empty():
-		return
-	var flags := _document.get_widget_flags(id)
-	MnuUiHelpersScript.add_heading(_box, "Flags")
-	var checks: Array = []
-	for i in range(labels.size()):
-		var bit := 1 << i
-		var check := MnuUiHelpersScript.add_check_row(_box, String(labels[i]), (flags & bit) != 0)
-		checks.append([check, bit])
-	for entry in checks:
-		var check_box: CheckBox = entry[0]
-		check_box.toggled.connect(func(_pressed: bool) -> void:
-			var mask := 0
-			for e in checks:
-				if is_instance_valid(e[0]) and (e[0] as CheckBox).button_pressed:
-					mask |= int(e[1])
-			_emit({"target": "widget", "id": id, "prop": "flags", "value": mask}))
-
-
-# --- Actions (visual scripting) -------------------------------------------------
-
-# <ACTION> rows are the MNU visual-scripting surface: a button/goto dispatches
-# these navigation/window verbs through NovaMnuMenu. The editor treats the action
-# list as one property so add/remove/field edits are undoable as a single row-list
-# replacement, just like Sounds.
-func _build_action_section(id: int) -> void:
-	MnuUiHelpersScript.add_heading(_box, "Actions")
-	var actions: Array = _document.get_widget_actions(id)
-	if actions.is_empty():
-		MnuUiHelpersScript.add_muted(_box, "No navigation actions.")
-	for i in range(actions.size()):
-		_build_action_row(id, actions[i], i, actions.size())
-	var add_btn := Button.new()
-	add_btn.text = "Add action"
-	add_btn.tooltip_text = "Add a navigation/window action for this widget"
-	add_btn.pressed.connect(func() -> void: _add_action(id))
-	_box.add_child(add_btn)
-
-
-func _build_action_row(id: int, action: Dictionary, index: int, count: int) -> void:
-	var row := HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 4)
-	_box.add_child(row)
-
-	var type_value := String(action.get("type", "screen")).to_lower()
-	var type_opt := _action_option([
-		"screen", "window", "url", "form_post",
-		"glb_load", "glb_loadandping", "glb_filter", "glb_filter_num",
-		"glb_ping", "glb_join", "tab", "pop_screen", "appmsg",
-		"lan_search", "lan_join", "mnx",
-	], type_value)
-	type_opt.tooltip_text = "TAB is the retail focus/capture action; visibility tabs use WINDOW actions"
-	type_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	type_opt.item_selected.connect(func(i: int) -> void:
-		_set_action_field(id, index, "type", type_opt.get_item_text(i)))
-	row.add_child(type_opt)
-
-	var target_options := _action_target_options(id, action)
-	if target_options.is_empty():
-		var target_edit := LineEdit.new()
-		target_edit.text = String(action.get("target", ""))
-		target_edit.placeholder_text = "target"
-		target_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		target_edit.text_submitted.connect(func(t: String) -> void: _set_action_field(id, index, "target", t))
-		target_edit.focus_exited.connect(func() -> void: _set_action_field(id, index, "target", target_edit.text))
-		row.add_child(target_edit)
-	else:
-		var target_opt := _action_option(target_options, String(action.get("target", "")))
-		target_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		target_opt.item_selected.connect(func(i: int) -> void:
-			_set_action_field(id, index, "target", target_opt.get_item_text(i)))
-		row.add_child(target_opt)
-
-	var state_opt := _action_option(["", "SHOW", "HIDE", "ENABLE", "DISABLE"],
-		String(action.get("state", "")).to_upper())
-	state_opt.custom_minimum_size = Vector2(86, 0)
-	state_opt.item_selected.connect(func(i: int) -> void:
-		_set_action_field(id, index, "state", state_opt.get_item_text(i)))
-	row.add_child(state_opt)
-
-	var file_ref := ResourceRefWidget.new()
-	file_ref.custom_minimum_size = Vector2(110, 0)
-	file_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	file_ref.set_value_from_path(func(path: String) -> String: return path.get_file())
-	file_ref.configure("menu", "Target menu", _ref_services)
-	file_ref.set_value(String(action.get("file", "")))
-	file_ref.value_changed.connect(func(value: String) -> void:
-		_set_action_field(id, index, "file", value))
-	row.add_child(file_ref)
-
-	if type_value == "screen" and not String(action.get("file", "")).is_empty():
-		var jump := Button.new()
-		jump.text = "Open menu"
-		jump.tooltip_text = "Open this cross-menu action target in the Menus workspace"
-		jump.pressed.connect(func() -> void:
-			menu_jump_requested.emit(String(action.get("file", "")), String(action.get("target", ""))))
-		row.add_child(jump)
-
-	if type_value == "url":
-		var external := CheckBox.new()
-		external.text = "External browser"
-		external.tooltip_text = "Preserve the URL action's EXTERNAL_BROWSER flag"
-		external.button_pressed = bool(action.get("external_browser", false))
-		external.toggled.connect(func(pressed: bool) -> void:
-			_set_action_field(id, index, "external_browser", pressed))
-		row.add_child(external)
-
-	var up := Button.new()
-	up.text = "▲"
-	up.disabled = index == 0
-	up.pressed.connect(func() -> void: _move_action(id, index, index - 1))
-	row.add_child(up)
-	var down := Button.new()
-	down.text = "▼"
-	down.disabled = index >= count - 1
-	down.pressed.connect(func() -> void: _move_action(id, index, index + 1))
-	row.add_child(down)
-	var rm := Button.new()
-	rm.text = "✕"
-	rm.tooltip_text = "Remove this action"
-	rm.pressed.connect(func() -> void: _remove_action(id, index))
-	row.add_child(rm)
-
-	var details := GridContainer.new()
-	details.columns = 2
-	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_box.add_child(details)
-	for spec in [["Source", "source"], ["Field", "field"]]:
-		var field_key := String(spec[1])
-		details.add_child(MnuUiHelpersScript._key_label(String(spec[0])))
-		var edit := LineEdit.new()
-		edit.text = String(action.get(field_key, ""))
-		edit.placeholder_text = "(host-owned)"
-		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		edit.text_submitted.connect(func(text: String) -> void:
-			_set_action_field(id, index, field_key, text))
-		edit.focus_exited.connect(func() -> void:
-			_set_action_field(id, index, field_key, edit.text))
-		details.add_child(edit)
-
-	details.add_child(MnuUiHelpersScript._key_label("Test"))
-	var test_opt := _action_option(["", "LT", "LE", "EQ", "GE", "GT"],
-		String(action.get("test", "")).to_upper())
-	test_opt.item_selected.connect(func(i: int) -> void:
-		_set_action_field(id, index, "test", test_opt.get_item_text(i)))
-	details.add_child(test_opt)
-
-	details.add_child(MnuUiHelpersScript._key_label("Target form"))
-	var form_row := HBoxContainer.new()
-	var has_form := CheckBox.new()
-	has_form.text = "Use"
-	has_form.button_pressed = bool(action.get("has_target_form", false))
-	var target_form := SpinBox.new()
-	target_form.min_value = 0
-	target_form.max_value = SIZE_MAX
-	target_form.step = 1
-	target_form.editable = has_form.button_pressed
-	target_form.set_value_no_signal(int(action.get("target_form", 0)))
-	has_form.toggled.connect(func(on: bool) -> void:
-		target_form.editable = on
-		_set_action_field(id, index, "has_target_form", on))
-	target_form.value_changed.connect(func(value: float) -> void:
-		_set_action_field(id, index, "target_form", int(value)))
-	form_row.add_child(has_form)
-	form_row.add_child(target_form)
-	details.add_child(form_row)
-
-	details.add_child(MnuUiHelpersScript._key_label("Flags"))
-	var flags_row := HBoxContainer.new()
-	var toggle := CheckBox.new()
-	toggle.text = "Toggle"
-	toggle.button_pressed = bool(action.get("toggle", false))
-	toggle.toggled.connect(func(on: bool) -> void:
-		_set_action_field(id, index, "toggle", on))
-	flags_row.add_child(toggle)
-	details.add_child(flags_row)
-
-
-func _action_option(options: Array, value: String) -> OptionButton:
-	var opt := OptionButton.new()
-	var selected := -1
-	for i in range(options.size()):
-		var label := String(options[i])
-		opt.add_item(label, i)
-		if label == value:
-			selected = i
-	if selected < 0 and not value.is_empty():
-		opt.add_item(value, options.size())
-		selected = opt.item_count - 1
-	if selected >= 0:
-		opt.select(selected)
-	return opt
-
-
-func _action_target_options(id: int, action: Dictionary) -> Array:
-	var type_value := String(action.get("type", "")).to_lower()
-	if type_value == "screen" and String(action.get("file", "")).is_empty():
-		return _screen_names()
-	if type_value == "window":
-		return _widget_names(id)
-	return []
-
-
-func _screen_names() -> Array:
-	var out := []
-	if _document == null:
-		return out
-	for sid in _document.get_screen_ids():
-		var name := _document.get_screen_name(sid)
-		if not name.is_empty() and not out.has(name):
-			out.append(name)
-	return out
-
-
-func _widget_names(selected_id: int) -> Array:
-	var out := []
-	if _document == null:
-		return out
-	var owner := selected_id
-	while owner >= 0 and _document.widget_exists(owner) and not _document.is_screen(owner):
-		owner = _document.get_parent_id(owner)
-	if owner >= 0 and _document.is_screen(owner):
-		_collect_widget_names(_document.get_screen_root_id(owner), out, selected_id)
-	return out
-
-
-func _collect_widget_names(id: int, out: Array, selected_id: int) -> void:
-	if _document == null or id < 0 or not _document.widget_exists(id):
-		return
-	if not _document.is_screen(id) and id != selected_id:
-		var name := _document.get_widget_name(id)
-		if not name.is_empty() and not out.has(name):
-			out.append(name)
-	for child in _document.get_child_ids(id):
-		_collect_widget_names(child, out, selected_id)
-
-
-func _set_action_field(id: int, index: int, key: String, value: Variant) -> void:
-	var actions: Array = _document.get_widget_actions(id)
-	if index < 0 or index >= actions.size():
-		return
-	var row: Dictionary = (actions[index] as Dictionary).duplicate()
-	if row.get(key, "") == value:
-		return
-	row[key] = value
-	actions[index] = row
-	_emit({"target": "widget", "id": id, "prop": "actions", "value": actions})
-	_rebuild()
-
-
-func _add_action(id: int) -> void:
-	var actions: Array = _document.get_widget_actions(id)
-	actions.append({
-		"type": "screen", "target": "", "state": "", "file": "",
-		"source": "", "field": "", "test": "",
-		"has_target_form": false, "target_form": 0,
-		"toggle": false, "external_browser": false,
-	})
-	_emit({"target": "widget", "id": id, "prop": "actions", "value": actions})
-	_rebuild()
-
-
-func _remove_action(id: int, index: int) -> void:
-	var actions: Array = _document.get_widget_actions(id)
-	if index < 0 or index >= actions.size():
-		return
-	actions.remove_at(index)
-	_emit({"target": "widget", "id": id, "prop": "actions", "value": actions})
-	_rebuild()
-
-
-func _move_action(id: int, from: int, to: int) -> void:
-	var actions: Array = _document.get_widget_actions(id)
-	if from < 0 or from >= actions.size() or to < 0 or to >= actions.size():
-		return
-	var row: Dictionary = actions[from]
-	actions.remove_at(from)
-	actions.insert(to, row)
-	_emit({"target": "widget", "id": id, "prop": "actions", "value": actions})
-	_rebuild()
-
-
-# --- Sounds (hover / click) -----------------------------------------------------
-
-# Each <SOUND> row names a .lwf profile (file) and a trigger that selects a set in
-# it (MOUSE_OVER/CLICK_SELECT/...). Rows let the author retarget the trigger (from
-# the profile's real set list when loaded, else free text), edit the .lwf file,
-# preview, or remove; an "Add" button appends one. Every change replaces the whole
-# list through the normal "sounds" prop, so the editor records one undo step.
-func _build_sound_section(id: int) -> void:
-	MnuUiHelpersScript.add_heading(_box, "Sounds")
-	var sounds := _document.get_widget_sounds(id)
-	if sounds.is_empty():
-		MnuUiHelpersScript.add_muted(_box, "No interaction sounds.")
-	for i in range(sounds.size()):
-		_build_sound_row(id, sounds[i], i)
-	var add_btn := Button.new()
-	add_btn.text = "Add sound"
-	add_btn.tooltip_text = "Add a hover/click sound played from the menu .lwf profile"
-	add_btn.pressed.connect(func() -> void: _add_sound(id))
-	_box.add_child(add_btn)
-
-
-func _build_sound_row(id: int, snd: Dictionary, index: int) -> void:
-	var trigger := String(snd.get("trigger", ""))
-	var file := String(snd.get("file", ""))
-	var row := HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 6)
-	_box.add_child(row)
-
-	var state_opt := _action_option(["", "mousein", "mouseout", "selected"],
-		String(snd.get("state", "")))
-	state_opt.tooltip_text = "Widget state that enables this sound"
-	state_opt.custom_minimum_size = Vector2(78, 0)
-	state_opt.item_selected.connect(func(idx: int) -> void:
-		_set_sound_field(id, index, "state", state_opt.get_item_text(idx)))
-	row.add_child(state_opt)
-
-	# Trigger: a dropdown over the profile's real set names when one is loaded,
-	# else a free-text field (so triggers survive without a profile).
-	if _sound_sets.size() > 0:
-		var opt := OptionButton.new()
-		opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var matched := false
-		for si in range(_sound_sets.size()):
-			opt.add_item(_sound_sets[si], si)
-			if _sound_sets[si].to_upper() == trigger.to_upper():
-				opt.select(si)
-				matched = true
-		if not matched and not trigger.is_empty():
-			opt.add_item(trigger, _sound_sets.size())  # preserve an off-profile trigger
-			opt.select(opt.item_count - 1)
-		opt.item_selected.connect(func(idx: int) -> void:
-			_set_sound_field(id, index, "trigger", opt.get_item_text(idx)))
-		row.add_child(opt)
-	else:
-		var trig_edit := LineEdit.new()
-		trig_edit.text = trigger
-		trig_edit.placeholder_text = "trigger (e.g. MOUSE_OVER)"
-		trig_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		trig_edit.text_submitted.connect(func(t: String) -> void: _set_sound_field(id, index, "trigger", t))
-		trig_edit.focus_exited.connect(func() -> void: _set_sound_field(id, index, "trigger", trig_edit.text))
-		row.add_child(trig_edit)
-
-	var file_ref := ResourceRefWidget.new()
-	file_ref.custom_minimum_size = Vector2(120, 0)
-	file_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	file_ref.set_value_from_path(func(path: String) -> String: return path.get_file())
-	file_ref.configure("sound", "Sound profile", _ref_services)
-	file_ref.set_value(file)
-	file_ref.value_changed.connect(func(value: String) -> void:
-		_set_sound_field(id, index, "file", value))
-	row.add_child(file_ref)
-
-	var play := Button.new()
-	play.text = "▶"
-	play.tooltip_text = "Preview this sound"
-	play.pressed.connect(func() -> void: sound_preview_requested.emit(trigger, file))
-	row.add_child(play)
-
-	var rm := Button.new()
-	rm.text = "✕"
-	rm.tooltip_text = "Remove this sound"
-	rm.pressed.connect(func() -> void: _remove_sound(id, index))
-	row.add_child(rm)
-
-
-# Mutate one field of one sound row and commit the whole list. Re-reads from the
-# document each time so concurrent edits compose; no-ops an unchanged value.
-func _set_sound_field(id: int, index: int, key: String, value: String) -> void:
-	var sounds := _document.get_widget_sounds(id)
-	if index < 0 or index >= sounds.size():
-		return
-	var snd: Dictionary = (sounds[index] as Dictionary).duplicate()
-	if String(snd.get(key, "")) == value:
-		return
-	snd[key] = value
-	sounds[index] = snd
-	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
-	_rebuild()
-
-
-func _add_sound(id: int) -> void:
-	var sounds := _document.get_widget_sounds(id)
-	var trigger := String(_sound_sets[0]) if _sound_sets.size() > 0 else "MOUSE_OVER"
-	# Default the state to match the trigger family (cosmetic for playback, but it
-	# keeps the round-tripped <SOUND state=...> faithful to the shipped menus).
-	var up := trigger.to_upper()
-	var state := "selected" if up.contains("CLICK") or up.contains("SELECT") else "mousein"
-	sounds.append({"state": state, "trigger": trigger, "file": "menu.lwf"})
-	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
-	_rebuild()
-
-
-func _remove_sound(id: int, index: int) -> void:
-	var sounds := _document.get_widget_sounds(id)
-	if index < 0 or index >= sounds.size():
-		return
-	sounds.remove_at(index)
-	_emit({"target": "widget", "id": id, "prop": "sounds", "value": sounds})
-	_rebuild()
 
 
 # --- M10: nested template editors ----------------------------------------------

@@ -193,6 +193,54 @@ func is_interactive() -> bool:
 	return _interactive
 
 
+## Observable live-preview state for editor tools and tests. Callers never need
+## to reach through the canvas into the id-to-Control implementation map.
+func get_preview_widget_state(id: int) -> MnuPreviewWidgetState:
+	var state := MnuPreviewWidgetState.new()
+	var control: Variant = _id_to_control.get(id)
+	if control == null or not is_instance_valid(control):
+		return state
+	state.exists = true
+	state.visible = control.is_visible_in_tree()
+	state.pressable = control is BaseButton or control is NovaMnuEdit \
+		or control is NovaMnuGoto
+	if control is BaseButton:
+		var button := control as BaseButton
+		state.disabled = button.disabled
+		state.pressed = button.button_pressed
+	return state
+
+
+## Activate one live preview widget with click/hotkey semantics. The canvas owns
+## the runtime-Control mapping, so activation stays behind the same small seam
+## as preview-state queries.
+func activate_preview_widget(id: int) -> MnuPreviewWidgetState:
+	var state := get_preview_widget_state(id)
+	if not state.exists or not state.visible or not state.pressable:
+		return state
+	var control: Variant = _id_to_control.get(id)
+	if control is BaseButton:
+		var button := control as BaseButton
+		if button.disabled:
+			return state
+		if button.toggle_mode:
+			button.set_pressed(not button.button_pressed)
+		button.emit_signal(&"pressed")
+	elif control is NovaMnuEdit:
+		(control as NovaMnuEdit).trigger_hotkey()
+	elif control is NovaMnuGoto:
+		(control as NovaMnuGoto).trigger()
+	state = get_preview_widget_state(id)
+	state.activated = true
+	return state
+
+
+## The authored Rect may omit width/height for auto-sized controls. Layout tools
+## consume the rendered extent through this query rather than canvas internals.
+func get_rendered_widget_rect(id: int) -> Rect2:
+	return _abs_rect_of(id) if _is_widget(id) else Rect2()
+
+
 # Toggle the interactive "play" preview. On: the live menu's navigators wire up and
 # clicking a tab runs its window show/hide actions (the preview rebuilds, so authored
 # window visibility resets and only the current screen shows). Off: returns to the

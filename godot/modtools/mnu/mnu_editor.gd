@@ -20,9 +20,8 @@ extends Control
 
 const MnuWidgetTreeScript = preload("res://modtools/mnu/mnu_widget_tree.gd")
 const MnuCanvasScript = preload("res://modtools/mnu/mnu_canvas.gd")
+const MnuAuthoringCommandsScript = preload("res://modtools/mnu/mnu_authoring_commands.gd")
 
-# Default placement for a newly added widget (640x480 authoring coords).
-const NEW_WIDGET_RECT := Rect2(20, 20, 100, 30)
 const MENU_STYLESHEET_FILE := "menu_style.mns"
 
 signal widget_selected(id: int)
@@ -51,11 +50,11 @@ var _stylesheet_override: MnsStyleSheet
 var _unresolved_var_count := 0
 var _tree        # MnuWidgetTree
 var _canvas      # MnuCanvas
+var _authoring_commands = MnuAuthoringCommandsScript.new()
 var _selected_id := -1
 # The full selection set (parallel to the active _selected_id). Size <= 1 mirrors the
 # single-select behavior exactly; >1 is a multi-selection driven by canvas gestures.
 var _selection: PackedInt32Array = PackedInt32Array()
-var _clipboard_payload: PackedByteArray = PackedByteArray()
 var _interactive := false
 
 # Toolbar controls.
@@ -314,6 +313,17 @@ func is_selection_off_board() -> bool:
 
 func get_visible_screen_name() -> String:
 	return _canvas.get_visible_screen_name() if _canvas != null else ""
+
+
+## Rendered authoring-board extent, including live auto-sized width/height.
+func get_rendered_widget_rect(id: int) -> Rect2:
+	return _canvas.get_rendered_widget_rect(id) if _canvas != null else Rect2()
+
+
+## Observable state of a widget in the live preview without exposing canvas maps.
+func get_preview_widget_state(id: int) -> MnuPreviewWidgetState:
+	return _canvas.get_preview_widget_state(id) \
+		if _canvas != null else MnuPreviewWidgetState.new()
 
 
 func _document_resource() -> NovaMnuDocument:
@@ -592,22 +602,47 @@ func _on_canvas_rect_committed_batch(edits: Array) -> void:
 # distribute / duplicate). edits = [{id, rect(local)}, ...]. Reuses the snapshot-undo
 # path (capture_state + _push_struct), which no-ops when nothing actually moved.
 func apply_rect_batch(edits: Array) -> void:
+	_run_authoring_command(&"move_rects", {"edits": edits})
+
+
+# One narrow seam into structural authoring. The command module owns validation,
+# mutation order, clipboard state, and layout math; this facade owns preview
+# locking, document-change suppression, selection, and snapshot history.
+func _run_authoring_command(command: StringName,
+		extra_context: Dictionary = {}) -> Dictionary:
 	if _interactive:
-		return
+		return {}
 	var doc := _document_resource()
-	if doc == null or edits.is_empty():
-		return
-	var before := doc.capture_state()
-	var sel_before := _selected_id
+	if doc == null:
+		return {}
+	var context := extra_context.duplicate()
+	context["selected_id"] = _selected_id
+	context["selection"] = _selection.duplicate()
+	context["visible_screen_id"] = _screen_id_for_visible()
 	_suppress_select_emit = true
-	for e in edits:
-		var id := int(e.get("id", -1))
-		if id >= 0 and doc.widget_exists(id):
-			doc.set_window_rect(id, e["rect"])
+	var result: Dictionary = _authoring_commands.execute(doc, command, context)
 	_suppress_select_emit = false
-	if _push_struct("move_batch", before, sel_before, sel_before):
-		# Re-select the whole set so the handles + summary refresh against new rects.
-		select_widgets(_selection.duplicate())
+	if not result.has("before"):
+		return result
+	var op := String(result.get("op", command))
+	var sel_before := int(result.get("sel_before", _selected_id))
+	var sel_after := int(result.get("sel_after", sel_before))
+	if result.has("selection"):
+		if _push_struct(op, result["before"], sel_before, sel_after):
+			select_widgets(result["selection"])
+	else:
+		_commit_struct(op, result["before"], sel_before, sel_after)
+	return result
+
+
+func _rendered_rects_for_selection() -> Dictionary:
+	var ids := _selection.duplicate()
+	if ids.size() <= 1 and _selected_id >= 0:
+		ids = PackedInt32Array([_selected_id])
+	var result := {}
+	for id in ids:
+		result[id] = get_rendered_widget_rect(id)
+	return result
 
 
 # --- Fine-grained property editing + undo (M7) ----------------------------------
@@ -674,35 +709,8 @@ func apply_edit(edit: Dictionary) -> void:
 
 # --- Structural editing (M8b) ---------------------------------------------------
 
-# Parent for a new widget: the current selection (a screen redirects to its root
-# window inside add_widget) else the first screen.
-func _struct_parent_for_add() -> int:
-	var doc := _document_resource()
-	if doc == null:
-		return -1
-	if _selected_id >= 0 and doc.widget_exists(_selected_id):
-		return _selected_id
-	return doc.get_screen_ids()[0] if doc.get_screen_count() > 0 else -1
-
-
 func add_widget_action(type: int) -> int:
-	if _interactive:
-		return -1
-	var doc := _document_resource()
-	if doc == null:
-		return -1
-	var parent := _struct_parent_for_add()
-	if parent < 0:
-		return -1
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	var new_id := doc.add_widget(parent, type, NEW_WIDGET_RECT)
-	_suppress_select_emit = false
-	if new_id < 0:
-		return -1
-	_commit_struct("add_widget", before, sel_before, new_id)
-	return new_id
+	return int(_run_authoring_command(&"add_widget", {"type": type}).get("value", -1))
 
 
 # Add N widgets (each with optional initial properties) as ONE undo step — the
@@ -714,366 +722,57 @@ func add_widget_action(type: int) -> int:
 # snapshot-undo shape; a row whose add is rejected reports ok=false and the
 # batch continues (validation belongs to the caller).
 func add_widgets_batch(rows: Array) -> Array:
-	var results: Array = []
-	if _interactive:
-		return results
-	var doc := _document_resource()
-	if doc == null or rows.is_empty():
-		return results
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	var last_id := -1
-	_suppress_select_emit = true
-	for row_v in rows:
-		var row: Dictionary = row_v
-		var new_id := doc.add_widget(int(row.get("parent", -1)), int(row.get("type", -1)),
-				row.get("rect", NEW_WIDGET_RECT))
-		if new_id < 0:
-			results.append({ "ok": false })
-			continue
-		var props: Dictionary = row.get("props", {})
-		for prop in props:
-			_write_prop(doc, "widget", new_id, String(prop), -1, props[prop])
-		results.append({ "ok": true, "id": new_id })
-		last_id = new_id
-	_suppress_select_emit = false
-	if _push_struct("add_widgets_batch", before, sel_before,
-			last_id if last_id >= 0 else sel_before) and last_id >= 0:
-		select_widget(last_id)
-	return results
+	return _run_authoring_command(&"add_widgets", {"rows": rows}).get("value", [])
 
 
 func delete_selection_action() -> void:
-	if _interactive:
-		return
-	var doc := _document_resource()
-	if doc == null or _selected_id < 0 or not doc.widget_exists(_selected_id):
-		return
-	if doc.is_screen(_selected_id) or _is_root_window(_selected_id):
-		return
-	var target := _selected_id
-	var parent := doc.get_parent_id(target)
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	doc.delete_widget(target)
-	_suppress_select_emit = false
-	_commit_struct("delete_widget", before, sel_before, _resolve_existing_selection(parent))
+	_run_authoring_command(&"delete_widget")
 
 
 func reparent_action(id: int, new_parent: int, index: int) -> void:
-	if _interactive:
-		return
-	var doc := _document_resource()
-	if doc == null:
-		return
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	var ok := doc.reparent_widget(id, new_parent, index)
-	_suppress_select_emit = false
-	if not ok:
-		return
-	_commit_struct("reparent_widget", before, sel_before, id)
+	_run_authoring_command(&"reparent_widget", {
+		"id": id, "new_parent": new_parent, "index": index})
 
 
 func copy_selection_action() -> bool:
-	if _interactive:
-		return false
-	var doc := _document_resource()
-	if doc == null or _selected_id < 0 or not doc.widget_exists(_selected_id) \
-			or doc.is_screen(_selected_id) or _is_root_window(_selected_id):
-		return false
-	_clipboard_payload = doc.capture_widget_subtree(_selected_id)
-	return not _clipboard_payload.is_empty()
+	return bool(_run_authoring_command(&"copy_widget").get("value", false))
 
 
 func cut_selection_action() -> void:
-	if _interactive:
-		return
 	if copy_selection_action():
 		delete_selection_action()
 
 
-func _sibling_target(id: int) -> Dictionary:
-	var doc := _document_resource()
-	if doc == null or id < 0 or not doc.widget_exists(id):
-		return {}
-	if doc.is_screen(id):
-		return {"parent": doc.get_screen_root_id(id), "index": -1}
-	var parent := int(doc.get_parent_id(id))
-	if parent < 0 or doc.is_screen(parent):
-		return {}
-	var children: PackedInt32Array = doc.get_child_ids(parent)
-	return {"parent": parent, "index": children.find(id) + 1}
-
-
 func paste_selection_action() -> int:
-	if _interactive:
-		return -1
-	var doc := _document_resource()
-	if doc == null or _clipboard_payload.is_empty():
-		return -1
-	var target := _sibling_target(_selected_id)
-	if target.is_empty():
-		var sid := _screen_id_for_visible()
-		if sid < 0:
-			return -1
-		target = {"parent": doc.get_screen_root_id(sid), "index": -1}
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	var id := int(doc.insert_widget_subtree(int(target["parent"]), _clipboard_payload,
-		int(target["index"]), Vector2i(10, 10)))
-	_suppress_select_emit = false
-	if id >= 0:
-		_commit_struct("paste_widget", before, sel_before, id)
-	return id
+	return int(_run_authoring_command(&"paste_widget").get("value", -1))
 
 
 func duplicate_selection_action() -> int:
-	if _interactive:
-		return -1
-	var doc := _document_resource()
-	if doc == null or _selected_id < 0 or not doc.widget_exists(_selected_id) \
-			or doc.is_screen(_selected_id) or _is_root_window(_selected_id):
-		return -1
-	var payload: PackedByteArray = doc.capture_widget_subtree(_selected_id)
-	var target := _sibling_target(_selected_id)
-	if payload.is_empty() or target.is_empty():
-		return -1
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	var id := int(doc.insert_widget_subtree(int(target["parent"]), payload,
-		int(target["index"]), Vector2i(10, 10)))
-	_suppress_select_emit = false
-	if id >= 0:
-		_commit_struct("duplicate_widget", before, sel_before, id)
-	return id
-
-
-func _selected_widgets_same_parent(minimum: int = 1) -> PackedInt32Array:
-	var doc := _document_resource()
-	var ids := _selection.duplicate()
-	if ids.size() <= 1 and _selected_id >= 0:
-		ids = PackedInt32Array([_selected_id])
-	if doc == null or ids.size() < minimum:
-		return PackedInt32Array()
-	var parent := -1
-	for id in ids:
-		if not doc.widget_exists(id) or doc.is_screen(id) or _is_root_window(id):
-			return PackedInt32Array()
-		var this_parent := int(doc.get_parent_id(id))
-		if parent < 0:
-			parent = this_parent
-		elif this_parent != parent:
-			return PackedInt32Array()
-	return ids
-
-
-func _rect_preserving_auto(doc: NovaMnuDocument, id: int, position: Vector2) -> Rect2:
-	var rect := doc.get_window_rect(id)
-	var flags := int(doc.get_window_rect_flags(id))
-	var size := rect.size
-	if (flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0:
-		size.x = -1
-	if (flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0:
-		size.y = -1
-	return Rect2(position, size)
-
-
-func _layout_rect(doc: NovaMnuDocument, id: int) -> Rect2:
-	# The canvas fills omitted extents from the live Control. Alignment must use
-	# that rendered footprint or an auto-width label/button behaves as zero wide.
-	if _canvas != null:
-		var rendered: Rect2 = _canvas._abs_rect_of(id)
-		if rendered.size.x > 0.0 or rendered.size.y > 0.0:
-			return rendered
-	return doc.get_window_rect(id)
-
-
-func _layout_to_local_position(doc: NovaMnuDocument, id: int,
-		board_position: Vector2) -> Vector2:
-	var local := doc.get_window_rect(id)
-	var rendered := _layout_rect(doc, id)
-	return board_position - (rendered.position - local.position)
+	return int(_run_authoring_command(&"duplicate_widget").get("value", -1))
 
 
 func align_selection(mode: String) -> void:
-	if _interactive:
-		return
-	var ids := _selected_widgets_same_parent(2)
-	var doc := _document_resource()
-	if doc == null or ids.is_empty():
-		return
-	var bounds := _layout_rect(doc, ids[0])
-	for i in range(1, ids.size()):
-		bounds = bounds.merge(_layout_rect(doc, ids[i]))
-	var edits: Array = []
-	for id in ids:
-		var rect := _layout_rect(doc, id)
-		var pos := rect.position
-		match mode:
-			"left": pos.x = bounds.position.x
-			"right": pos.x = bounds.end.x - rect.size.x
-			"top": pos.y = bounds.position.y
-			"bottom": pos.y = bounds.end.y - rect.size.y
-			"hcenter": pos.x = bounds.get_center().x - rect.size.x * 0.5
-			"vcenter": pos.y = bounds.get_center().y - rect.size.y * 0.5
-			_: return
-		edits.append({"id": id, "rect": _rect_preserving_auto(doc, id,
-			_layout_to_local_position(doc, id, pos))})
-	apply_rect_batch(edits)
+	_run_authoring_command(&"align", {
+		"mode": mode, "rendered_rects": _rendered_rects_for_selection()})
 
 
 func distribute_selection(horizontal: bool) -> void:
-	if _interactive:
-		return
-	var ids := _selected_widgets_same_parent(3)
-	var doc := _document_resource()
-	if doc == null or ids.is_empty():
-		return
-	var rows: Array = []
-	for id in ids:
-		rows.append({"id": id, "rect": _layout_rect(doc, id)})
-	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return a["rect"].position.x < b["rect"].position.x if horizontal \
-			else a["rect"].position.y < b["rect"].position.y)
-	var first: Rect2 = rows[0]["rect"]
-	var last: Rect2 = rows[-1]["rect"]
-	var start := first.position.x if horizontal else first.position.y
-	var finish := last.end.x if horizontal else last.end.y
-	var occupied := 0.0
-	for row: Dictionary in rows:
-		var rect: Rect2 = row["rect"]
-		occupied += rect.size.x if horizontal else rect.size.y
-	var gap := (finish - start - occupied) / float(rows.size() - 1)
-	var cursor := start
-	var edits: Array = []
-	for row: Dictionary in rows:
-		var id := int(row["id"])
-		var rect: Rect2 = row["rect"]
-		var pos := rect.position
-		if horizontal:
-			pos.x = cursor
-			cursor += rect.size.x + gap
-		else:
-			pos.y = cursor
-			cursor += rect.size.y + gap
-		edits.append({"id": id, "rect": _rect_preserving_auto(doc, id,
-			_layout_to_local_position(doc, id, pos))})
-	apply_rect_batch(edits)
+	_run_authoring_command(&"distribute", {
+		"horizontal": horizontal,
+		"rendered_rects": _rendered_rects_for_selection(),
+	})
 
 
 func change_z_order(mode: String) -> void:
-	if _interactive:
-		return
-	var ids := _selected_widgets_same_parent(1)
-	var doc := _document_resource()
-	if doc == null or ids.is_empty():
-		return
-	var parent := int(doc.get_parent_id(ids[0]))
-	var children: PackedInt32Array = doc.get_child_ids(parent)
-	var desired: Array[int] = []
-	for child_id in children:
-		desired.append(child_id)
-	match mode:
-		"front":
-			desired = desired.filter(func(id: int) -> bool: return not ids.has(id))
-			for id in children:
-				if ids.has(id):
-					desired.append(id)
-		"back":
-			var reordered: Array[int] = []
-			for id in children:
-				if ids.has(id):
-					reordered.append(id)
-			for id in children:
-				if not ids.has(id):
-					reordered.append(id)
-			desired = reordered
-		"forward":
-			for i in range(desired.size() - 2, -1, -1):
-				if ids.has(desired[i]) and not ids.has(desired[i + 1]):
-					var swap := desired[i]
-					desired[i] = desired[i + 1]
-					desired[i + 1] = swap
-		"backward":
-			for i in range(1, desired.size()):
-				if ids.has(desired[i]) and not ids.has(desired[i - 1]):
-					var swap := desired[i]
-					desired[i] = desired[i - 1]
-					desired[i - 1] = swap
-		_: return
-	var unchanged := true
-	for i in range(desired.size()):
-		if desired[i] != children[i]:
-			unchanged = false
-			break
-	if unchanged:
-		return
-	var before := doc.capture_state()
-	_suppress_select_emit = true
-	for target_index in range(desired.size()):
-		var current: PackedInt32Array = doc.get_child_ids(parent)
-		var from := current.find(desired[target_index])
-		if from != target_index:
-			doc.move_widget_to_index(desired[target_index], target_index)
-	_suppress_select_emit = false
-	if _push_struct("z_order_" + mode, before, _selected_id, _selected_id):
-		select_widgets(ids)
+	_run_authoring_command(&"z_order", {"mode": mode})
 
 
 func duplicate_screen_action() -> int:
-	if _interactive:
-		return -1
-	var doc := _document_resource()
-	var sid := _screen_id_for_visible()
-	if doc == null or sid < 0:
-		return -1
-	var base := String(doc.get_screen_name(sid)) + "_COPY"
-	var name := base
-	var suffix := 2
-	while _screen_id_named_local(name) >= 0:
-		name = "%s_%d" % [base, suffix]
-		suffix += 1
-	var before := doc.capture_state()
-	_suppress_select_emit = true
-	var copied := int(doc.duplicate_screen(sid, name))
-	_suppress_select_emit = false
-	if copied >= 0:
-		_commit_struct("duplicate_screen", before, sid, copied)
-	return copied
-
-
-func _screen_id_named_local(name: String) -> int:
-	var doc := _document_resource()
-	if doc != null:
-		for sid in doc.get_screen_ids():
-			if String(doc.get_screen_name(sid)).nocasecmp_to(name) == 0:
-				return sid
-	return -1
+	return int(_run_authoring_command(&"duplicate_screen").get("value", -1))
 
 
 func move_screen_action(delta: int) -> void:
-	if _interactive:
-		return
-	var doc := _document_resource()
-	var sid := _screen_id_for_visible()
-	if doc == null or sid < 0:
-		return
-	var screens: PackedInt32Array = doc.get_screen_ids()
-	var from := screens.find(sid)
-	var to := clampi(from + delta, 0, screens.size() - 1)
-	if from == to:
-		return
-	var before := doc.capture_state()
-	_suppress_select_emit = true
-	var moved := bool(doc.move_screen_to_index(sid, to))
-	_suppress_select_emit = false
-	if moved:
-		_commit_struct("move_screen", before, sid, sid)
+	_run_authoring_command(&"move_screen", {"delta": delta})
 
 
 func _on_arrange_menu(id: int) -> void:
@@ -1092,61 +791,16 @@ func _on_arrange_menu(id: int) -> void:
 		11: change_z_order("back")
 
 
-# A default screen name not already in use. Screen visibility/selection/deletion
-# resolve screens by name, so two screens sharing a name would alias (the wrong
-# one shown or deleted); the toolbar default must stay unique. "SCREEN" is also
-# what create_empty mints, so a fresh document's first Add Screen yields SCREEN_2.
-func _unique_screen_name() -> String:
-	var doc := _document_resource()
-	if doc == null:
-		return "SCREEN"
-	var existing := {}
-	for sid in doc.get_screen_ids():
-		existing[doc.get_screen_name(sid)] = true
-	if not existing.has("SCREEN"):
-		return "SCREEN"
-	var n := 2
-	while existing.has("SCREEN_%d" % n):
-		n += 1
-	return "SCREEN_%d" % n
-
-
 # custom_name lets programmatic callers (the MCP edit_menu_screen tool) name the
 # screen up front; they own uniqueness (duplicates alias show/delete-by-name).
 # The toolbar passes nothing and keeps the unique default.
 func add_screen_action(custom_name := "") -> int:
-	if _interactive:
-		return -1
-	var doc := _document_resource()
-	if doc == null:
-		return -1
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	var sid := doc.add_screen(custom_name if not custom_name.is_empty() else _unique_screen_name())
-	_suppress_select_emit = false
-	if sid < 0:
-		return -1
-	_commit_struct("add_screen", before, sel_before, sid)
-	return sid
+	return int(_run_authoring_command(&"add_screen", {"name": custom_name}).get(
+		"value", -1))
 
 
 func delete_screen_action() -> void:
-	if _interactive:
-		return
-	var doc := _document_resource()
-	if doc == null or doc.get_screen_count() <= 1:
-		return # never delete the last screen
-	var sid := _screen_id_for_visible()
-	if sid < 0:
-		return
-	var before := doc.capture_state()
-	var sel_before := _selected_id
-	_suppress_select_emit = true
-	doc.delete_screen(sid)
-	_suppress_select_emit = false
-	var first := doc.get_screen_ids()[0] if doc.get_screen_count() > 0 else -1
-	_commit_struct("delete_screen", before, sel_before, first)
+	_run_authoring_command(&"delete_screen")
 
 
 # Record one structural undo entry (the mutation has already run) and select the

@@ -10,6 +10,7 @@ const MnuWorkspaceScript := preload("res://modtools/mnu/mnu_workspace.gd")
 
 const ALL_WIDGETS := "res://../fixtures/mnu/all_widgets.mnu"
 const JO_OPTIONS := "res://../fixtures/mnu/jo_options.mnu"
+const MENU_STYLE := "res://../fixtures/mns/menu_style.mns"
 const SAVE_DIR := "user://mcp_menu_tools_test"
 
 var ws: RefCounted
@@ -77,7 +78,7 @@ func _call(name: String, args := {}) -> McpToolResult:
 
 
 func _resource() -> NovaMnuDocument:
-	return ws.get("_document").get("resource")
+	return ws.get_menu_resource()
 
 
 func test_headline_authoring_and_preview_loop() -> void:
@@ -109,6 +110,10 @@ func test_headline_authoring_and_preview_loop() -> void:
 	# Play: press the button, land on SECOND, pop back.
 	var on: McpToolResult = await _call("preview_menu", { "op": "on" })
 	assert_false(on.is_error, str(on.content))
+	var live_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(button_id)
+	assert_true(live_state.visible,
+		"new button is live on the starting Screen")
 	var pressed: McpToolResult = await _call("preview_menu", { "op": "press", "widget": "GotoSecond" })
 	assert_false(pressed.is_error, str(pressed.content))
 	assert_eq(String(pressed.structured["visible_screen"]), "SECOND", "Pressing the button navigates.")
@@ -354,7 +359,8 @@ func test_authoring_validation_rejects_unknown_nested_keys_without_partial_edit(
 		{"parent": first, "type": "BUTTON", "rect": [0, 0, 80, 24], "name": "Atomic"},
 	]})
 	var id := int(added.structured["ids"][0])
-	var history_before: int = ws._editor._undo_stack.size()
+	var editor: Object = ws.get_editor_document()
+	editor.restore_history({})
 	for malformed in [
 		{"name": "PartiallyMutated", "authoring": {"items": {"rowz": []}}},
 		{"authoring": {"table": {"spcaing": 4}}},
@@ -366,13 +372,13 @@ func test_authoring_validation_rejects_unknown_nested_keys_without_partial_edit(
 		assert_true(refused.is_error, "malformed deep patches fail")
 		assert_eq(String(_resource().get_widget_name(id)), "Atomic",
 			"validation happens before the first scalar mutation")
-		assert_eq(ws._editor._undo_stack.size(), history_before,
+		assert_false(editor.can_undo(),
 			"rejected patches create no undo entry")
 	var noop: McpToolResult = await _call("edit_menu_widget", {"set": {
 		"id": id, "props": {"authoring": {"name": "Atomic"}},
 	}})
 	assert_false(noop.is_error)
-	assert_eq(ws._editor._undo_stack.size(), history_before,
+	assert_false(editor.can_undo(),
 		"idempotent authoring patches are strict no-ops")
 
 
@@ -387,13 +393,15 @@ func test_unsupported_item_ops_and_atomic_table_sizing() -> void:
 	var refused: McpToolResult = await _call("edit_widget_items",
 		{"id": button, "op": "item_add", "row": {"text": "Nope"}})
 	assert_true(refused.is_error, "BUTTON does not silently accept ITEMS")
-	var history_before: int = ws._editor._undo_stack.size()
+	var editor: Object = ws.get_editor_document()
+	editor.restore_history({})
 	var sized: McpToolResult = await _call("edit_widget_items",
 		{"id": table, "op": "set_table", "count": 4, "spacing": 7})
 	assert_false(sized.is_error, str(sized.content))
-	assert_eq(ws._editor._undo_stack.size(), history_before + 1,
+	assert_true(editor.can_undo(),
 		"count plus spacing share one snapshot undo")
-	ws._editor.undo()
+	editor.undo()
+	assert_false(editor.can_undo(), "the table edit contributed exactly one undo entry")
 	var table_state: Dictionary = _resource().get_widget_authoring_state(table)["table"]
 	assert_false(bool(table_state["has_count"]))
 	assert_false(bool(table_state["has_spacing"]))
@@ -424,7 +432,7 @@ func test_screen_ops_and_rules() -> void:
 
 func test_interactive_preview_locks_editing() -> void:
 	var on: McpToolResult = await _call("preview_menu", { "op": "on" })
-	assert_true(ws._editor.is_interactive(),
+	assert_true(ws.get_editor_document().is_interactive(),
 		"preview_menu uses the editor-level interaction lock")
 	assert_true(bool(on.structured["interactive"]))
 	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
@@ -440,7 +448,7 @@ func test_interactive_preview_locks_editing() -> void:
 		assert_true(result.is_error, "%s is locked while the preview plays" % spec[0])
 		assert_true(String(result.content[0]["text"]).contains("preview_menu"), "%s names the fixing tool" % spec[0])
 	var off: McpToolResult = await _call("preview_menu", { "op": "off" })
-	assert_false(ws._editor.is_interactive())
+	assert_false(ws.get_editor_document().is_interactive())
 	assert_false(bool(off.structured["interactive"]))
 	var unlocked: McpToolResult = await _call("edit_menu_screen", { "add": { "name": "X" } })
 	assert_false(unlocked.is_error, "off unlocks editing")
@@ -468,11 +476,13 @@ func test_preview_radio_dispatches_actions_and_disabled_consumes_without_activat
 	assert_false(pressed.is_error, str(pressed.content))
 	assert_eq(String(pressed.structured["actions"][0]["type"]), "window",
 		"RADIO activation reports and dispatches its authored action")
-	var radio_control = ws._editor._canvas._id_to_control.get(radio)
-	var panel_control = ws._editor._canvas._id_to_control.get(panel)
-	assert_true(radio_control is BaseButton and radio_control.button_pressed,
+	var radio_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(radio)
+	var panel_state: MnuPreviewWidgetState = \
+		ws.get_editor_document().get_preview_widget_state(panel)
+	assert_true(radio_state.pressed,
 		"radio toggles before pressed is dispatched")
-	assert_true(panel_control != null and panel_control.visible,
+	assert_true(panel_state.visible,
 		"the Window SHOW action reached the live menu")
 	await _call("preview_menu", {"op": "off"})
 
@@ -486,8 +496,8 @@ func test_preview_radio_dispatches_actions_and_disabled_consumes_without_activat
 	assert_false(disabled.is_error, "a disabled visible target consumes the press")
 	assert_true(bool(disabled.structured["disabled"]))
 	assert_false(bool(disabled.structured["activated"]))
-	panel_control = ws._editor._canvas._id_to_control.get(panel)
-	assert_true(panel_control == null or not panel_control.visible,
+	panel_state = ws.get_editor_document().get_preview_widget_state(panel)
+	assert_false(panel_state.visible,
 		"disabled radio dispatches no SHOW action")
 	await _call("preview_menu", {"op": "off"})
 
@@ -572,6 +582,22 @@ func test_get_menu_on_all_widgets_fixture() -> void:
 	assert_gt((menu.structured["screens"] as Array).size(), 0)
 	var first_tree: Dictionary = menu.structured["screens"][0]["tree"]
 	assert_true(first_tree.has("children"), "The fixture tree is populated.")
+
+
+func test_menu_tools_stay_on_the_menu_editor_after_opening_styles() -> void:
+	assert_eq(int(ws.open_file(_abs(ALL_WIDGETS))), OK)
+	assert_eq(int(ws.open_file(_abs(MENU_STYLE))), OK)
+	await get_tree().process_frame
+	var menu: McpToolResult = await _call("get_menu")
+	assert_false(menu.is_error, str(menu.content))
+	assert_eq(String(menu.structured["path"]), _abs(ALL_WIDGETS))
+	assert_gt((menu.structured["screens"] as Array).size(), 0)
+	assert_ne(ws.get_editor_document(), ws.get_menu_editor(),
+		"the successful MCP query really ran while the Styles editor was active")
+
+	assert_eq(int(ws.open_file(_abs(ALL_WIDGETS))), OK)
+	assert_eq(ws.get_editor_document(), ws.get_menu_editor(),
+		"opening an existing MNU tab returns shell undo and commands to the menu editor")
 
 
 func test_table_ops_refuse_non_table_widgets() -> void:

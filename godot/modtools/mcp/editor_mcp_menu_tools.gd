@@ -167,13 +167,14 @@ func _require_menu(ctx: McpToolContext) -> Dictionary:
 	var ws: Variant = ctx.workspace("mnu")
 	if ws == null:
 		return { "error": "The Menus workspace is unavailable — is ONED fully booted?" }
-	var editor: Variant = ws.get_editor_document()
+	var editor: Variant = ws.get_menu_editor()
 	if editor == null or not is_instance_valid(editor):
 		return { "error": "The Menus workspace has never been activated — open_in_workspace(workspace=\"mnu\", path=...) first (list candidates with list_assets(kind=\"menu\"))." }
-	var doc: Variant = ws.get("_document")
-	if doc == null or doc.get("resource") == null:
+	var doc: Variant = ws.get_menu_document()
+	var resource: Variant = ws.get_menu_resource()
+	if doc == null or resource == null:
 		return { "error": "No menu document — open_in_workspace(workspace=\"mnu\", path=...) first." }
-	return { "ws": ws, "editor": editor, "doc": doc, "resource": doc.get("resource"), "canvas": editor.get("_canvas") }
+	return { "ws": ws, "editor": editor, "doc": doc, "resource": resource, "canvas": editor.get("_canvas") }
 
 
 ## Menu present AND not playing: the Interactive preview locks every editing
@@ -1440,6 +1441,17 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 	return McpToolResult.error("op must be on | off | show | press | back | status.")
 
 
+func _preview_state_wire(state: MnuPreviewWidgetState) -> Dictionary:
+	return {
+		"exists": state.exists,
+		"visible": state.visible,
+		"pressable": state.pressable,
+		"disabled": state.disabled,
+		"pressed": state.pressed,
+		"activated": state.activated,
+	}
+
+
 # Activate a live preview Control exactly as a click would (the hotkey
 # trigger's pattern): toggle-mode buttons flip, plain buttons emit pressed
 # (NovaMnuButton dispatches its authored Actions), Gotos trigger.
@@ -1461,41 +1473,37 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 		return McpToolResult.error("press widget must be an id or a name string.")
 	if id < 0 or not resource.widget_exists(id):
 		return McpToolResult.error("No widget '%s' — get_menu lists names and ids." % [target])
-	var controls: Dictionary = canvas.get("_id_to_control") if canvas.get("_id_to_control") is Dictionary else {}
-	var control: Variant = controls.get(id)
-	if control == null or not is_instance_valid(control):
+	var before: MnuPreviewWidgetState = canvas.get_preview_widget_state(id)
+	if not before.exists:
 		return McpToolResult.error("'%s' has no live control — is it on the current Screen? (preview_menu show switches screens)." % resource.get_widget_name(id))
-	if not control.is_visible_in_tree():
+	if not before.visible:
 		return McpToolResult.error("'%s' is hidden — show its Window first (a hidden Tab panel's widgets are unclickable)." % resource.get_widget_name(id))
-	var fired: Array = resource.get_widget_actions(id)
-	if control is BaseButton:
-		if control.disabled:
-			# A visible disabled hotkey/click target consumes the match but
-			# performs no activation, matching NovaMnuMenu's dispatch path.
-			return {
-				"ok": true,
-				"pressed": resource.get_widget_name(id),
-				"activated": false,
-				"disabled": true,
-				"actions": [],
-				"visible_screen": canvas.get_visible_screen_name(),
-			}
-		if control.toggle_mode:
-			control.set_pressed(not control.button_pressed)
-		# BaseButton does not emit pressed when button_pressed is assigned.
-		# A real click/hotkey flips toggle state first, then dispatches pressed.
-		control.emit_signal("pressed")
-	elif control.has_method("trigger_hotkey"):
-		control.trigger_hotkey()
-	elif control.has_method("trigger"):
-		control.trigger()
-	else:
-		return McpToolResult.error("'%s' (%s) is not pressable — press Buttons, Checkboxes, Radios, or Gotos." % [
+	if not before.pressable:
+		return McpToolResult.error("'%s' (%s) is not pressable — press Buttons, Checkboxes, Radios, Edits, or Gotos." % [
 				resource.get_widget_name(id), String(resource.get_widget_type_name(resource.get_widget_type(id))).to_upper()])
+	var activation: MnuPreviewWidgetState = canvas.activate_preview_widget(id)
+	var fired: Array = resource.get_widget_actions(id)
+	if before.disabled:
+		# A visible disabled hotkey/click target consumes the match but performs
+		# no activation, matching NovaMnuMenu's dispatch path.
+		return {
+			"ok": true,
+			"pressed": resource.get_widget_name(id),
+			"activated": false,
+			"disabled": true,
+			"state": _preview_state_wire(activation),
+			"actions": [],
+			"visible_screen": canvas.get_visible_screen_name(),
+		}
 	await ctx.frames(1)
+	activation = canvas.get_preview_widget_state(id)
+	activation.activated = true
 	return {
 		"ok": true,
 		"pressed": resource.get_widget_name(id),
+		"activated": true,
+		"disabled": false,
+		"state": _preview_state_wire(activation),
 		"actions": fired,
 		"visible_screen": canvas.get_visible_screen_name(),
 	}

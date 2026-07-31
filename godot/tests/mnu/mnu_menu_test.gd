@@ -7,6 +7,7 @@ extends GutTest
 # reporting unresolved asset names.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
+const STYLE_FIXTURE := "res://../fixtures/mns/menu_style.mns"
 
 
 func _load_doc() -> NovaMnuDocument:
@@ -116,12 +117,14 @@ func test_get_screen_names() -> void:
 # --- M4: asset resolution ---------------------------------------------------
 
 
-func test_var_color_resolves_onto_label() -> void:
+func test_real_style_var_color_resolves_onto_label() -> void:
 	# ROOT declares FONT DEFAULT_FG=%DEF_TEXT_FG%, inherited by Title. With a
-	# stylesheet resolving that variable to white, the label adopts the color.
+	# real menu_style.mns resolving that variable to white, the label adopts the
+	# color. This is the fixture-level guard for an all-black preview regression.
 	var ss := MnsStyleSheet.new()
-	ss.set_variable("DEF_TEXT_FG", "FFFFFF")
-	ss.set_variable("DEF_FONTNAME", "Gunpl22b.fnt")
+	assert_eq(ss.load_from_bytes(FileAccess.get_file_as_bytes(STYLE_FIXTURE)), OK)
+	assert_eq(String(ss.get_variable("DEF_TEXT_FG")), "FFFFFFFF",
+		"the shipped-style fixture authors opaque white in MNU AARRGGBB order")
 
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false

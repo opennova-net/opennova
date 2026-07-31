@@ -13,9 +13,9 @@
   "counters": {
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 568,
+    "has_method_guards": 567,
     "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 57,
+    "libs_uncited_src_files": 56,
     "oversize_cpp_files": 2,
     "oversize_gd_files": 7,
     "test_private_pokes": 1313

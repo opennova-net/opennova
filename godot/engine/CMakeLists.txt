@@ -169,6 +169,7 @@ add_library(${TARGET_NAME} SHARED
     audio/nova_music_director.cpp
     audio/mus_resource_format.cpp
     mnu/nova_mnu_document.cpp
+    mnu/nova_mnu_document_state.cpp
     mnu/mns_stylesheet.cpp
     mnu/mnu_resource_format.cpp
     mnu/mns_resource_format.cpp

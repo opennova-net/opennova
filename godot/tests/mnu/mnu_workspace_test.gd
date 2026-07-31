@@ -1754,8 +1754,7 @@ func test_editor_copy_paste_and_duplicate_preserve_subtrees_one_undo_each() -> v
 		Rect2(2, 3, 20, 10)))
 	doc.set_widget_name(nested, "Nested")
 	doc.set_widget_text(nested, "Child")
-	ed._undo_stack.clear()
-	ed._redo_stack.clear()
+	ed.restore_history({})
 	ed.select_widget(start)
 	var original_count := doc.get_child_ids(root).size()
 	assert_true(ed.copy_selection_action())
@@ -1794,18 +1793,17 @@ func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> v
 	doc.set_widget_name(fixed, "RightEdge")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var rendered_before: Rect2 = ed._canvas._abs_rect_of(auto)
+	var rendered_before: Rect2 = ed.get_rendered_widget_rect(auto)
 	assert_gt(rendered_before.size.x, 0.0, "the auto widget has a live rendered width")
-	var fixed_before: Rect2 = ed._canvas._abs_rect_of(fixed)
+	var fixed_before: Rect2 = ed.get_rendered_widget_rect(fixed)
 	var expected_right := maxf(rendered_before.end.x, fixed_before.end.x)
 	var original_x := doc.get_window_rect(auto).position.x
-	ed._undo_stack.clear()
-	ed._redo_stack.clear()
+	ed.restore_history({})
 	ed.select_widgets(PackedInt32Array([auto, fixed]))
 	ed.align_selection("right")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var rendered_after: Rect2 = ed._canvas._abs_rect_of(auto)
+	var rendered_after: Rect2 = ed.get_rendered_widget_rect(auto)
 	assert_almost_eq(rendered_after.end.x, expected_right, 0.75,
 		"right alignment uses the rendered auto extent")
 	assert_eq(doc.get_window_rect_flags(auto) & NovaMnuDocument.RECT_HAS_RIGHT, 0,
@@ -1870,8 +1868,7 @@ func test_musicvar_presence_zero_is_undoable_without_destroying_value() -> void:
 	var doc: NovaMnuDocument = pair[1].resource
 	var sid := int(doc.get_screen_ids()[0])
 	doc.set_screen_property(sid, "music_var", 0)
-	ed._undo_stack.clear()
-	ed._redo_stack.clear()
+	ed.restore_history({})
 	ed.apply_edit({"target": "screen", "id": sid,
 		"prop": "has_music_var", "value": false})
 	assert_false(doc.get_screen_has_music_var(sid))
@@ -1896,14 +1893,14 @@ func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
 	add_child_autofree(dock)
 	ws.build_inspector(dock)
 	await get_tree().process_frame
-	var ed = ws._editor
-	var doc: NovaMnuDocument = ws._document.resource
+	var ed = ws.get_editor_document()
+	var doc: NovaMnuDocument = ws.get_menu_resource()
 	var start := _find_widget_id(doc,
 		doc.get_screen_root_id(doc.get_screen_ids()[0]), "StartBtn")
 	ed.select_widget(start)
 	assert_true(ed.copy_selection_action(), "seed the clipboard before preview")
 	var before_name := String(doc.get_widget_name(start))
-	var style_before := String(ws._mns_document.resource.get_source_text())
+	var style_before := String(ws.get_stylesheet_resource().get_source_text())
 
 	ed.set_interactive(true)
 	assert_true(ed.is_interactive())
@@ -1914,13 +1911,11 @@ func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
 	assert_eq(String(doc.get_widget_name(start)), before_name)
 	assert_eq(ed.paste_selection_action(), -1)
 	assert_eq(ed.duplicate_selection_action(), -1)
-	ws._mns_editor.apply_edit(
-		{"op": "add", "name": "BLOCKED_STYLE", "value": "FF00FF"})
-	ws._on_mns_inspector_edit(
+	ws.apply_stylesheet_edit(
 		{"op": "add", "name": "BLOCKED_INSPECTOR", "value": "00FF00"})
-	assert_eq(String(ws._mns_document.resource.get_source_text()), style_before,
-		"Styles editor and inspector funnels are both locked")
-	var inspector_line := _first_line_edit(ws._inspector)
+	assert_eq(String(ws.get_stylesheet_resource().get_source_text()), style_before,
+		"the Styles authoring funnel is locked")
+	var inspector_line := _first_line_edit(dock)
 	assert_not_null(inspector_line)
 	if inspector_line != null:
 		assert_false(inspector_line.editable, "menu inspector controls are locked")
@@ -1931,7 +1926,7 @@ func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
 		"prop": "name", "value": "Unlocked"})
 	assert_eq(String(doc.get_widget_name(start)), "Unlocked",
 		"leaving preview restores authoring")
-	ws._mns_editor.apply_edit(
+	ws.apply_stylesheet_edit(
 		{"op": "add", "name": "UNLOCKED_STYLE", "value": "FF00FF"})
-	assert_true(ws._mns_document.resource.has_variable("UNLOCKED_STYLE"))
+	assert_true(ws.get_stylesheet_resource().has_variable("UNLOCKED_STYLE"))
 	ws.release_viewport()
