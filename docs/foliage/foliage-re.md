@@ -4,7 +4,7 @@
 state corrected 2026-07-14 after a renderer capture exposed the missing
 combiner. The same-day follow-up also ported the mission-tile exclusion, near
 secondary LOW submission, and model-own custom `:fd` mip chain. The previous
-host runtime was deleted rather than repaired because it
+reimpl runtime was deleted rather than repaired because it
 inverted the two retail tiers and encoded several disproven geometry and color
 assumptions.
 
@@ -17,7 +17,7 @@ world-space paint and eyedropper tools with the DETAIL consumer's flat map.
 
 ## Verdict
 
-| Surface | Retail witness | Host result | Verdict |
+| Surface | Retail witness | Reimpl result | Verdict |
 |---|---|---|---|
 | Definition/map authoring | `.trn` foliage defs, charmap, foliagemap | formats retained; foliage paint/eyedrop share DETAIL's flat wrapped coordinate policy | matching format; DETAIL editing is WYSIWYG |
 | Detail-cell collection | frustum-surviving traversal nodes (level ≥ 3) hand subtrees to `Terrain_CollectNearFoliagePatches @ 0x603e60`, cap 128 | the same handoff from the ported traversal into the 16-unit mip-bound collector | matching (seating corrected 2026-07-16, D-FOLIAGE-13) |
@@ -26,7 +26,7 @@ world-space paint and eyedropper tools with the DETAIL consumer's flat map.
 | Detail pass split | high ref 180 / low ref 8 at distance 33 | separate high/low shaders and batches | matching |
 | Distant MODEL placement | `Foliage_GenerateModelTileInstances @ 0x600980` | fresh runtime, four cells, cap 21/cell | matching |
 | Distant ground fit | four corners + four edge midpoints | portable fold vectors + CPU evaluation | matching |
-| Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded host order/reflection limits |
+| Distant MODEL blend/depth | `Foliage_LoadDefAssets @ 0x6015b7`, `Foliage_DrawModelTileSlot @ 0x601d90` | additive black, alpha-tested, depth-writing mask | matching effect/state; D-FOLIAGE-10 records bounded reimpl order/reflection limits |
 | `:fd` bake/sampling | `Foliage_LoadDefAssets @ 0x601260`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`, device sampler init | exact dual-source chain, sampled anisotropically with the 4x4 terminal-mip gradient clamp (the round-4 filtering adjudication: the reference device renders anisotropic despite the cfg-0 MIP POINT register) | matching; D-FOLIAGE-5 fixed |
 | Detail lightmap input | composed per-tile render target | exact bare tile + hosted static `.til`; retail page/cache and ordered model/depth contributions absent | partial; D-FOLIAGE-7 |
 | Mission-tile exclusion | `Foliage_PathBlockedByPlacedTile @ 0x606490` | shared parsed `<mission>.til`, exact inclusive 16x16 AABB scan | matching; D-FOLIAGE-8 fixed |
@@ -95,14 +95,14 @@ the authored spawn `(297.805573,+409.123169)`, the armory-truck center
 `(318.975696,+397.309534)` remain eligible.
 `Terrain_LoadFoliageFile @ 0x60a740` loads the same `<mission>.til` array
 used by `Terrain_GetSurfaceTypeAtPosition @ 0x606510` and streamed by
-`serialize_terrain_tiles @ 0x6080f0`. The host parses it once before terrain
+`serialize_terrain_tiles @ 0x6080f0`. The reimpl parses it once before terrain
 build and shares the resource with terrain, foliage, and listen-server state.
 
 The sibling `shadow` attribute is parsed but dead. `forceon` is compared at
 `0x60f591` and ORs bit 0 at `0x60f5a8`; `shadow` is compared at
 `0x60f5bd` and ORs bit 1 at `0x60f5d4`. The only generator reads of the
 definition attribute byte consume bit 0: detail at `0x5fffb6` and silhouette
-at `0x600b5f`. No foliage draw consumes bit 1. The host therefore preserves
+at `0x600b5f`. No foliage draw consumes bit 1. The reimpl therefore preserves
 the parsed flag but explicitly disables shadow casting on all three batches.
 
 ## Detail tier
@@ -124,7 +124,7 @@ beyond distance 42, and appends at most 128 keys. Its distance combines:
   inside that interval;
 - Y distance to the node height-bounds center.
 
-The host hands off per frustum-surviving emitted patch (64-unit leaves near
+The reimpl hands off per frustum-surviving emitted patch (64-unit leaves near
 the camera) into the same 512→16 height-mipchain descent, starting at the
 handoff node's rect; sector IDs select the same four 512-unit atlas quadrants
 as terrain rendering. The 2026-07-16 grill retracted the earlier radial
@@ -152,7 +152,7 @@ feed the yaw/translation path directly at `generate_foliage_instances_0 @
 pointers and counts directly and derives its X/Z extent from the raw vertices
 at `0x60135f..0x6013b3`; the far draw matrix adds translation without another
 scale. Retail geometry scale is therefore X/Z `1.0`, Y `0.5`, matching the
-host when the imported 3DI positions themselves are faithful.
+reimpl when the imported 3DI positions themselves are faithful.
 
 The recovered `Terrain_GetSurfaceTypeAtFixedPoint` name on this path is a
 misnomer: its backing buffer is the foliagemap loaded by `Foliage_LoadFoliageMapPCX`. This is
@@ -213,13 +213,13 @@ double-sided and use terrain fog. HIGH and LOW reuse one cache revision but
 receive distinct submission IDs. Consequently detail residents/hits remain
 cell-based, while submission, intent, batch, and rendered-instance counters
 count both near draws.
-The host ports the ordered submissions, references, shared fade, blending, and
+The reimpl ports the ordered submissions, references, shared fade, blending, and
 write policy. The strict-`LESS` secondary is emulated exactly for
 same-geometry resubmission: because HIGH wrote depth precisely where its
 GREATER test passed, the secondary discards texels whose
 `:fd alpha × fade` exceeds the HIGH reference (`u_high_pass_cutoff`),
 landing only where HIGH left no depth. The reflection-scene LOW-only
-`fade × 0.1` variant is not hosted (the host does not yet render foliage
+`fade × 0.1` variant is not ported (the reimpl does not yet render foliage
 into water reflections); that gap is noted under D-FOLIAGE-10.
 
 ### Detail shader
@@ -239,7 +239,7 @@ where:
 - `c0/c1` are sky and sun lighting registers;
 - output alpha is `t0.a × v0.a` for the alpha test.
 
-The host implements the exact arithmetic and render states. For bare terrain it
+The reimpl implements the exact arithmetic and render states. For bare terrain it
 reconstructs `t1` from raw colormap RGB plus the byte-quantized
 heightfield-normal/light DOT3 alpha. `PolyTrn_RenderTile @ 0x60da70` clears
 authored colormap A in its `0x00808080` base draw, so no colormap sun mask
@@ -261,7 +261,7 @@ exactly the first vector.
 `PolyTrn_ShaderTier >= 1`. The constant at `0x7DF2E0` has bytes
 `81 80 00 3F`, the exact float encoding of `128/255`. Only the fallback at
 `0x60b06a..0x60b13e` writes the source terrain texture's average RGB divided
-by 255. The host's fixed `0.5019608` uniform is therefore exact for the top
+by 255. The reimpl's fixed `0.5019608` uniform is therefore exact for the top
 splat path, not a visual approximation; the fallback remains a distinct
 non-splat path. c6.a is still the distance/pass fade described above, and
 MODEL masks do not use this emitter factor.
@@ -269,7 +269,7 @@ MODEL masks do not use this emitter factor.
 For the analytic t1 reconstruction, EnvFile preserves the direct
 `Environment_GetLightDirectionFloat @ 0x57d870` tuple `g=(g0,g1,g2)`, not a
 Godot/world XYZ vector. PolyTrn's D3DCOLOR pack (`0x60e201..0x60e331`) writes
-GPU diffuse RGB `(g2,g0,g1)`, so the host now packs `(z,x,y)` against the
+GPU diffuse RGB `(g2,g0,g1)`, so the reimpl now packs `(z,x,y)` against the
 normal-map RGB `(grid X slope, grid Y slope, up)`; `FORMAT_RGBA8` preserves
 those channels. The old `(x,z,y)` mapping swapped the horizontal DOT3 axes.
 The 08:00 oracle is light bytes `(231,83,187)`, with slope alphas
@@ -284,7 +284,7 @@ The tile projection is explicitly **pre-wind**. In the
 at `0x5ff6df`), `mad r1.z` applies wind at `0x7de7f1` and
 `m4x4 oPos,r1,c0` consumes it at `0x7de821`; independently,
 `m4x3 r10,v0,c12` at `0x7de835` and the c7/c8 `oT1` projections at
-`0x7de881/0x7de897` still consume the original vertex. The host therefore
+`0x7de881/0x7de897` still consume the original vertex. The reimpl therefore
 derives overlay UV before displacing render Z. Its
 `fract((world.x,-world.z)/1024)` exactly inverts the hosted 1024 bake and
 matches retail `.til` X/negated-Z axes (`0x60de23/0x60de28`), patch-local
@@ -329,14 +329,14 @@ Within each cell:
 - at most 21 candidates survive per cell;
 - the same path blocker / `FORCE_ON` rule applies.
 
-Host anchors are the sim's crouched/prone infantry standing on terrain
+Reimpl anchors are the sim's crouched/prone infantry standing on terrain
 (`NovaSimulation::get_foliage_mask_anchor_positions`, from the replicated
 `net_stance_bits` + `ground_target`), corrected 2026-07-16 — the earlier
 placed-object anchor feed (D-FOLIAGE-11, FIXED) generated masks retail
 never renders and collapsed frame rate on object-dense vistas (03TR
 airfield: 1143 frustum-passing anchors thrashed the 1000-entry model
 caches at ~7k regenerations per frame, 212 ms of a 354 ms frame; with the
-witnessed gate the tier idles in object-only scenes). The host
+witnessed gate the tier idles in object-only scenes). The reimpl
 frustum-culls the surviving anchors, but retail's broader
 sector-visibility/occlusion membership is still not reproduced; see
 D-FOLIAGE-9.
@@ -434,11 +434,11 @@ color at `0x6002db..0x60030a` with the source-height bend carrier.
 `oD0=c6`. Authored leaf color therefore survives through sampled t0, not v0
 or `color_upper`.
 
-The host now builds the complete chain in portable
+The reimpl now builds the complete chain in portable
 `build_fd_rgba_mip_chain`, passes the packed levels directly to Godot, and no
 longer asks Godot to regenerate generic mips. Native and GUT literal vectors
 pin authored mip-0 RGB, the wrapped alpha, the exact 4×4 retail blend, and the
-host-required 2×2/1×1 terminal continuation. This fixes D-FOLIAGE-5 and the
+reimpl-required 2×2/1×1 terminal continuation. This fixes D-FOLIAGE-5 and the
 former flat ground-olive result. `VegAssets`' primary-submesh
 lookup remains only the binding locator: surviving geometry is still the
 aggregate of every surface of every `build_lod_submeshes(0)` result.
@@ -449,10 +449,10 @@ The retail comparison configuration has `texfilter_level=0`. The parser at
 `0x679c28..0x679c9c` and `0x677f9e..0x677ff9` then sets MAG/MIN LINEAR,
 MIP POINT, MAXMIPLEVEL 0, and a zero mip bias — the literal cfg-0 register
 state. The round-4 adjudication supersedes the register reading for the
-host: the reference machine demonstrably renders the anisotropic texfilter
+reimpl: the reference machine demonstrably renders the anisotropic texfilter
 mode (`MINFILTER=ANISOTROPIC` + `MAXANISOTROPY` per-stage select
 `@ 0x67e38a..0x67e45b`; driver-forced despite `texfilter_level=0`), so the
-host samples the `:fd` chain anisotropically through `textureGrad` with the
+reimpl samples the `:fd` chain anisotropically through `textureGrad` with the
 terminal-mip gradient clamp. It still never admits Godot's synthetic 2x2/1x1
 tail past retail's 4x4 terminal level.
 
@@ -471,10 +471,10 @@ The distant model cache in `Foliage_UpdateModelTiles @ 0x601f50` is a fixed
 geometry only when `((sceneCounter + 2 × slot) & 7) == 0` (check at
 `0x60209a`); every caller still submits the resident entry.
 
-Retail reaches that cache through one visible sector-entity walk. The host's
+Retail reaches that cache through one visible sector-entity walk. The reimpl's
 stance-gated anchor feed can still revisit the same `(slot, cell key)`
 through clustered anchors in one frame. The portable runtime therefore
-coalesces only the host-created duplicate refresh work: the first visit on the
+coalesces only the reimpl-created duplicate refresh work: the first visit on the
 exact eight-scene phase regenerates the resident, later visits retain their
 separate submissions, and geometry-identical refreshes keep the resident
 revision. At the exact `00TRe.bms` spawn's worst measured heading this made
@@ -490,7 +490,7 @@ references before erasing evicted cache entries. This preserves duplicate
 same-frame draws without stale references. A `terrain_changed` signal also
 resets the runtime when the same `NovaTerrainData` resource mutates in place.
 
-## Host architecture
+## Reimpl architecture
 
 The fresh implementation deliberately has three layers:
 
@@ -582,14 +582,14 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
 | D-FOLIAGE-3 | **FIXED 2026-07-13.** Both recovered Z-wind terms are hosted in their correct tier-specific shaders. |
 | D-FOLIAGE-4 | **SUPERSEDED/FIXED 2026-07-13.** The 2026-07-08 two-tier port was itself inverted and has been deleted. Fresh detail expansion and MODEL ground-fit paths replace it. |
 | D-FOLIAGE-5 | **FIXED 2026-07-14.** The portable custom chain keeps authored RGB at mip 0, blends recursively downsampled later retail mips toward `0x808080` with `w=min(256,floor(320*i/N))`, preserves base-chain alpha, supplies Godot's terminal levels without generic mip regeneration, and samples anisotropically with the gradient clamp that keeps selection inside retail's 4x4 terminal level (round-4 filtering adjudication). |
-| D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The host now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
+| D-FOLIAGE-6 | **FIXED 2026-07-14.** The former opaque-black conclusion missed the downstream ONE/ONE blend state. The reimpl now preserves destination color while retaining the recovered strict-alpha-tested MODEL depth write. |
 | D-FOLIAGE-7 | **OPEN, bounded.** Runtime detail reconstructs exact bare-tile RGB/heightfield-DOT3 alpha and composes hosted static `.til` RGB/tint at the exact pre-wind coordinate. Retail's general page/cache c7/c8 projection and ordered tile-model/depth-alpha RT contributions remain absent; standalone editor preview also lacks the parent normal atlas and uses its mesh-normal fallback. |
 | D-FOLIAGE-8 | **FIXED 2026-07-14.** Direct retail inspection resolved the supposed path/spacing substrate as the shared mission `.til` array. `til_blocks_foliage` ports the exact linear inclusive 16x16 AABB scan, GameWorld parses `<mission>.til` before terrain build, and terrain/foliage/network state share that resource/payload; `FORCE_ON` continues to bypass the sampler in the portable runtime. [orig: `Foliage_PathBlockedByPlacedTile @ 0x606490`; `Terrain_LoadFoliageFile @ 0x60a740`; `Terrain_GetSurfaceTypeAtPosition @ 0x606510`] |
-| D-FOLIAGE-9 | **OPEN, host mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping host `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing host-only regeneration/upload storms while this membership gap remains open. |
-| D-FOLIAGE-11 | **FIXED 2026-07-16.** The host fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query; the ONED preview feeds none (no infantry exists there), and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
-| D-FOLIAGE-13 | **FIXED 2026-07-16.** The host collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
-| D-FOLIAGE-12 | **FIXED 2026-07-17.** The portable runtime now carries separate Q16 gate callbacks: detail consumes the flat 1024-wrap lookup while MODEL retains the sector-grid-routed lookup. `foliage_sample_detail_flat_wrap` ports the loader's actual-width stride, width-derived `floor(log2(width))`, low-10-bit coordinate wrap, and host-plane Z convention without a float round-trip [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`; `Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`; `Foliage_SampleFoliageMapMask @ 0x606620`]. ONED preview, foliage paint/eyedropper, and capture probes share the flat DETAIL coordinate API. The Dvxi5 GameWorld fixture pins disjoint flat-positive/routed-negative and routed-positive/flat-negative authored-map witnesses, including the world-to-pixel mapping, then requires production detail output at the flat-positive point. |
-| D-FOLIAGE-10 | **OPEN, bounded host order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the host's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not hosted while reflections carry no foliage. |
+| D-FOLIAGE-9 | **OPEN, reimpl mapping (narrowed 2026-07-16).** The anchor CLASS is now the witnessed stance gate (D-FOLIAGE-11); what remains approximate is visibility membership — camera frustum stands in for retail's visible-sector walk + `test_sector_entity_occlusion @ 0x5c4610`. No terrain-center fallback remains. Same-frame refreshes of an overlapping reimpl `(slot, cell key)` are coalesced without removing its distinct draw submissions, preventing reimpl-only regeneration/upload storms while this membership gap remains open. |
+| D-FOLIAGE-11 | **FIXED 2026-07-16.** The reimpl fed every placed mission object as a MODEL-tier anchor; retail's sector walk generates the tier only for entities with `MoveOrder` stance bits (`0x100` prone / `0x200` crouch) and an empty `groundEntity` — the hide-in-grass masks around infantry [`orig: @ 0x5c7dc2/0x5c7ded/0x5c7dd5`]. Anchors now come from the sim's stance query; the ONED preview feeds none (no infantry exists there), and its placed-object `anchor_provider` plumbing was removed. Placed-object anchoring both drew non-retail grass masks around every object and, on object-dense vistas, thrashed the per-definition model caches into a 3 FPS frame. |
+| D-FOLIAGE-13 | **FIXED 2026-07-16.** The reimpl collected detail cells with a standalone RADIAL walk (the full 42-unit disc, ~34 cells on open ground); retail's collector is invoked only from frustum-surviving traversal nodes of level ≥ 3 [`orig: @ 0x60905c..0x60907c`], so its working set is the frustum wedge. Over-collection pushed the far-slot pool past its witnessed 16-bit-index capacity (`min(128, 65534/(36×V))` ≈ 32 for a ~54-vertex def) and the witnessed strict-first-max LRU (per-update stamps, all-ties) then hammered one slot per frame — a user-visible two-frame grass blink at working-set-over-capacity poses that retail never exhibits. Collection is now seated in the traversal handoff; at the reported 00TRa pose: 34→24 cells, 2 misses+evictions/frame→0, blink gone. |
+| D-FOLIAGE-12 | **FIXED 2026-07-17.** The portable runtime now carries separate Q16 gate callbacks: detail consumes the flat 1024-wrap lookup while MODEL retains the sector-grid-routed lookup. `foliage_sample_detail_flat_wrap` ports the loader's actual-width stride, width-derived `floor(log2(width))`, low-10-bit coordinate wrap, and reimpl-plane Z convention without a float round-trip [`orig: Foliage_LoadFoliageMapPCX @ 0x605ad0`; `Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0`; `Foliage_SampleFoliageMapMask @ 0x606620`]. ONED preview, foliage paint/eyedropper, and capture probes share the flat DETAIL coordinate API. The Dvxi5 GameWorld fixture pins disjoint flat-positive/routed-negative and routed-positive/flat-negative authored-map witnesses, including the world-to-pixel mapping, then requires production detail output at the flat-positive point. |
+| D-FOLIAGE-10 | **OPEN, bounded reimpl order.** Retail inserts each immediate MODEL depth-mask draw between its initial sector flush and later entity/foliage consumers; the reimpl's transparent-pass depth sorting reproduces the mask-occludes-farther-detail effect but cannot cull already-drawn farther tufts under a nearer mask, and cannot reproduce every arbitrary insertion point. The near secondary LOW's strict `LESS` is now emulated exactly via the high-pass cutoff discard (the 2026-07-15 grill retired the state half of this entry). The water-REFLECTION scene's LOW-only `fade × 0.1` foliage pass (arg_8 = reflectionEnabled @ `0x5c95c1/0x5c9661`) is not ported while reflections carry no foliage. |
 
 ## Cross-references
 
@@ -599,5 +599,5 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
   world-coordinate decode, and inclusive foliage blocker.
 - [Render lighting record](../render/render-lighting-re.md) — shared sky/sun
   constants and terrain/foliage lighting blocks.
-- [Correspondence matrix](../correspondence.md) — function-to-host mapping.
+- [Correspondence matrix](../correspondence.md) — function-to-reimpl mapping.
 - [Divergence ledger](../divergence-ledger.md) — canonical dispositions.

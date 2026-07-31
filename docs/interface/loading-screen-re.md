@@ -16,7 +16,7 @@ Researched 2026-07-12 (engine-research session; port landed the same session).
 | Sidecar background resolution (`<missionbase>.pcx` → `loadscrn.pcx`) | **MATCHING** (ported) | witness map below; GUT `godot/tests/game/loading_screen_test.gd` (sidecar name, fallback, custom flag) |
 | MP session text block (title/mission/game-type band + server message) | **MATCHING** (ported; glyph renderer approximated, D-LOADSCR-2) | layout constants + alignment enum + color tags witnessed; GUT gametype-key + SP/MP-split tests |
 | Progress bar (geometry, colors, smoothing, throttle) | **MATCHING** (ported) | exact integer arithmetic ported; GUT smoothing + fill-span tests |
-| Present pump during the blocking load | host code (force_draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; `RenderingServer.force_draw` + `queue_redraw` stand in for BeginScene/Present |
+| Present pump during the blocking load | reimpl code (force_draw analog of the witnessed pump) | cadence witnessed at `LoadingScreen_UpdateAndPresent @ 0x586be0`; `RenderingServer.force_draw` + `queue_redraw` stand in for BeginScene/Present |
 | Load-flow case handling (SP / host / success / failure / return) | **MATCHING** (ported) | the case matrix below (`Game_StartMission @ 0x524360`): screen resident through the load, released at the end, failure/abort → menu; GUT `main_game_lifecycle_test.gd` (load, return, reload, failed-load rollback) + `game/loading_screen_test.gd` (SP-vs-session `load_info` split) |
 | Joiner spawn-gate hold | **MATCHING** (D-LOADSCR-3 fixed 2026-07-24) | local `world_loaded` leaves the loading presentation raised; `ClientRuntime` keeps pumping while hidden and `GameWorld.join_admission_ready` releases it only at authoritative in-match admission, or transitions it to DEATH when the host requests a player-paced deploy pick |
 | ESC / disconnect abort during load | **DIVERGENT** (D-LOADSCR-7) | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` aborts to `Post Menu`; our SP/host load is one synchronous call the SceneTree cannot interrupt — no reachable window on the synchronous path |
@@ -228,7 +228,7 @@ key (`Input_HandleSpecialKeys @ 0x49c5c0`, key `dword_B3B744`, @ 0x49c887).
   same net composite the original gets by rendering glyphs into the texture then
   stretching. The bar arithmetic, colors, throttle and creep are ported integer-exact.
 - The blocking-load present pump maps to `DisplayServer`-guarded
-  `RenderingServer.force_draw()` after `queue_redraw()` — the host-side analog of
+  `RenderingServer.force_draw()` after `queue_redraw()` — the reimpl-side analog of
   Game_PumpWindowMessages + Present.
 - `GameWorld.load_progress` emits the witnessed anchor values at our stage boundaries
   (2 → 6 → 26 → 41 → 70 → 90 → 95 → 100), and `MissionObjectPlacer` pulses the constant

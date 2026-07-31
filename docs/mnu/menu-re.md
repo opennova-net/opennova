@@ -543,7 +543,7 @@ open), and clears the dropdown on screen switches (`CUIScene_SelectNodeByName @ 
 Ported as the menu-top catcher overlay + NovaMnuMenu single-open registry (D-MNU-11; the
 pre-fix reimpl let overlapped siblings steal popup clicks and stack dropdowns open). Draw
 order stays tree-positional in the original with no overlay pass; the reimpl's menu-top
-draw is a recorded host divergence, unobservable in shipped menus (D-MNU-12). Pinned by
+draw is a recorded reimpl divergence, unobservable in shipped menus (D-MNU-12). Pinned by
 the five input-routing tests in `mnu_combo_test.gd` (see the section above).
 
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
@@ -588,7 +588,7 @@ Accepted/divergent (each a documented decision, not a defect):
   plumbing follow-up (ADR 0005).
 - **D-MNU-2 (sound jitter):** the shared `SoundSelector` reproduces member selection
   but not the interleaved per-play volume/pitch jitter draws (same accepted divergence
-  as the mission sound host).
+  as the mission sound owner).
 - **D-MNU-3 (strictness / authoring superset):** the format layer preserves attributes
   the runtime ignores (ADR 0002) and a host `sound_profile` fallback services file-less
   `<SOUND>` nodes the engine would fail to parse.
@@ -638,16 +638,16 @@ Accepted/divergent (each a documented decision, not a defect):
   outside-press close/consume + dead-cell rule on the catcher, the NovaMnuMenu single-open
   registry, and close-on-screen-change/exit/hide. `godot/engine/mnu/nova_mnu_combo.cpp`,
   `nova_mnu_menu.cpp`.
-- **D-MNU-12 (popup draw order — host mapping):** the original has NO overlay draw pass —
+- **D-MNU-12 (popup draw order — reimpl mapping):** the original has NO overlay draw pass —
   the open list draws at its tree position (`CComboWnd_Render @ 0x65bfd0` child walk ->
   `CListWnd_DrawItems @ 0x643f30`), so a later sibling would paint over an open list; the
   shipped menus author every dropdown rect into empty space below/beside the widgets
   (all three `player.mnu` lists share `(0,65)-(214,306)` parent-space), which makes draw
   order unobservable in retail content. The reimpl draws the popup in the menu-top
-  overlay because that same node is the input-exclusivity host — for retail menus the
+  overlay because that same node is the input-exclusivity owner — for retail menus the
   result is pixel-equivalent; only a hypothetical mod authoring a dropdown rect over a
   later sibling would see the list above it in the reimpl but below in retail. Kept: the
-  overlay is the correct Godot host for the witnessed input model, which is the
+  overlay is the correct Godot home for the witnessed input model, which is the
   observable contract.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
@@ -656,7 +656,7 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.
 - Real 3D globe and CBIN credits custom-resource font/image resolution remain
-  separate render/data-host work (D-MNU-6 covers the latter).
+  separate render/data-supply work (D-MNU-6 covers the latter).
 
 ---
 
@@ -701,15 +701,15 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
 | `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | the catcher overlay owning all input while a dropdown is open — `NovaMnuCombo::open_popup` (D-MNU-11) |
-| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot host has no per-frame pump) |
+| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot reimpl has no per-frame pump) |
 | `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | the overlay makes non-popup widgets unpickable; `NovaMnuCombo` closes on lost tree visibility |
 | `combobox_handle_event @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `NovaMnuCombo::on_overlay_gui_input` + `on_row_pressed` + `NovaMnuMenu::register_open_combo` (D-MNU-11) |
 | `CWnd_SetShown @ 0x6480e0` (shown flag `+224`; popup flag `+660` registers `g_ui_open_popup_wnd`; was `sub_6480E0`) | popup lifecycle = overlay spawn/free in `open_popup`/`close_popup` |
 | `CUIScene_SelectNodeByName @ 0x63b6b0` (screen switch clears the popup + capture globals `@ 0x63b6b8/0x63b7c4`) | `NovaMnuMenu::show_screen`/`set_current_screen`/`clear` -> `close_active_combo_popup` |
-| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — host code / not grillable |
-| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — host code / not grillable |
-| `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — host code / not grillable |
-| `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — host code / not grillable |
+| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — reimpl code / not grillable |
+| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — reimpl code / not grillable |
+| `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
+| `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
