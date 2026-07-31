@@ -446,21 +446,23 @@ func _selected_grenade_loadout() -> Array[Dictionary]:
 # "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)" with the witnessed encumbrance bands
 # <33.3 LIGHT / <66.6 NORMAL / else HEAVY [orig: update_weapon_weight_display
 # @0x565640 — sprintf "%s %.1f %s (%s)"].
-# The witnessed encumbrance bands [orig: update_weapon_weight_display @0x565640 —
-# < 33.3 LIGHT, < 66.6 NORMAL, else HEAVY].
-const NORMAL_ENCUMBRANCE_LBS := 33.3
-const HEAVY_ENCUMBRANCE_LBS := 66.6
+# The parent-slot sum and the encumbrance bands ride the libs/def port shared
+# with PLAYER_INFO (NovaWeaponDatabase.loadout_weight/encumbrance_class —
+# [orig: calculate_loadout_weight @0x55f1f0 sibling]; ctest def_loadout_weight
+# pins the formula and the exact thresholds).
 
 func _update_weight() -> void:
-	var total := 0.0
+	if _weapons == null:
+		return  # weapon.def absent: the screen degrades with empty slot lists
+	var indices := PackedInt32Array()
+	var counts := PackedInt32Array()
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
 		var w := selected_weapon(slot_name)
 		if w.is_empty():
 			continue
-		var clips := selected_clips(slot_name)
-		if clips < 0:
-			clips = int(w.get("maxclips", 0))
-		total += float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
+		indices.append(int(w.get("index", -1)))
+		counts.append(selected_clips(slot_name))  # -1 = the def default (maxclips)
+	var total := _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
 		var combo := _combo(GRENADE_CONTROLS[i])
 		var clips := combo.get_selected() if combo != null else 0
@@ -470,10 +472,11 @@ func _update_weight() -> void:
 		# The category-3 controls are extra-ammo legs, not parent weapon slots:
 		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c].
 		total += clips * float(grenade.get("clip_weight", 0.0))
+	var band := _weapons.encumbrance_class(total)
 	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
-	if total >= HEAVY_ENCUMBRANCE_LBS:
+	if band == NovaWeaponDatabase.ENCUMBRANCE_HEAVY:
 		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif total >= NORMAL_ENCUMBRANCE_LBS:
+	elif band == NovaWeaponDatabase.ENCUMBRANCE_NORMAL:
 		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var node := _find("STATIC_TOTAL_WEIGHT")
 	var label := node as Label
