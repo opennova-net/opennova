@@ -27,10 +27,10 @@ inline int mnu_itemlist_first_selected(ItemList *list) {
 }
 
 // ItemList does not expose per-row text alignment. Keep its native selection,
-// scrolling, activation, and host-facing row interface, but suppress only its
+// scrolling, activation, and shell-facing row interface, but suppress only its
 // built-in glyphs and redraw those glyphs over the same live item rectangles.
 // Because the overlay reads ItemList on every draw, rows added later by a Menu
-// Host through inherited add_item()/set_item_text() receive the authored layout
+// Shell through inherited add_item()/set_item_text() receive the authored layout
 // without a second data model.
 struct MnuItemListTextPalette {
 	Color normal = Color(1, 1, 1, 1);

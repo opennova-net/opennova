@@ -12,8 +12,8 @@ class NovaMnuMenu;
 class NovaMnuScroll;
 
 // A multi-line MNU text field (type="multiline_edit"). Subclasses TextEdit. The
-// parsed READONLY flag maps to editable=false; a host can flip it at runtime via
-// set_readonly(). The .mnu seeds STRING text; a host drives content with TextEdit's
+// parsed READONLY flag maps to editable=false; a shell can flip it at runtime via
+// set_readonly(). The .mnu seeds STRING text; a shell drives content with TextEdit's
 // set_text()/get_text(). On edit it notifies the owning menu's widget_value_changed.
 //
 // In edit_mode the builder forces editable=false and it connects no signals.

@@ -15,9 +15,9 @@ class NovaMnuMenu;
 
 // A single-line MNU text-entry field (type="edit"). Subclasses LineEdit and adds
 // the shared MNU widget behavior (owning menu, edit_mode inert gate, sounds). The
-// .mnu is a template: the field seeds its STRING text and a runtime host drives the
+// .mnu is a template: the field seeds its STRING text and a runtime shell drives the
 // content through LineEdit's set_text()/get_text(). On change/submit it routes the
-// value to the owning menu's aggregate widget_value_changed signal; hosts that hold
+// value to the owning menu's aggregate widget_value_changed signal; shells that hold
 // the field directly use LineEdit's own text_changed / text_submitted signals.
 //
 // In edit_mode the builder leaves it non-editable and it connects no signals, so the

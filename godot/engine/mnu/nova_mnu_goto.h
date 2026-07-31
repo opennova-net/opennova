@@ -13,7 +13,7 @@ namespace godot {
 class NovaMnuMenu;
 
 // A logical navigation marker (type="goto"). Renders nothing and is zero-size; it
-// carries the MNU actions plus an optional hotkey. A host (or, later, a menu-level
+// carries the MNU actions plus an optional hotkey. A shell (or, later, a menu-level
 // hotkey router) calls trigger() to dispatch its actions through the owning menu.
 //
 // A goto with actions and no hotkey is an "immediate goto" in the reference (it

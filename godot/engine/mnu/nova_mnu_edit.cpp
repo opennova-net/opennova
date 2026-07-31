@@ -62,7 +62,7 @@ void NovaMnuEdit::on_focus_exited() {
 	const bool clamped = commit_numeric();
 	if (clamped) {
 		// set_text() is guarded while normalizing, so explicitly publish the
-		// committed value; otherwise hosts retain the preceding out-of-range text.
+		// committed value; otherwise shells retain the preceding out-of-range text.
 		behavior_.notify_value(String(get_name()), "edit", -1, get_text());
 	}
 	if (radio_editing_) {

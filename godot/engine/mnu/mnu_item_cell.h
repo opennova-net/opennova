@@ -19,23 +19,23 @@ struct MnuItemVisual {
 	String text;
 	// The item's `value=` attribute — the semantic value the original reads (e.g. SERVERTYPE
 	// 0/1, GAME_TYPE COOP=2), distinct from the localized display `text`. The original parses
-	// it with wcstoul [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10]; a host reads it to map
-	// the selection to behavior. Empty for host-supplied (set_values) text lists.
+	// it with wcstoul [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10]; a shell reads it to map
+	// the selection to behavior. Empty for shell-supplied (set_values) text lists.
 	String value;
 	Ref<Texture2D> texture;
 	Color color = Color(1, 1, 1, 1);
 };
 
-// Build a reusable item-cell under `host`: three full-rect, mouse-ignoring children —
+// Build a reusable item-cell under `mount`: three full-rect, mouse-ignoring children —
 // a Label (text/id items), a native-size centered TextureRect (image items), and a
 // ColorRect swatch (color items). Exactly one is shown per item via mnu_show_item_cell.
 // `halign` aligns the text; `label_settings` styles it (font/colour) when valid.
-void mnu_build_item_cell(Control *host, HorizontalAlignment halign,
+void mnu_build_item_cell(Control *mount, HorizontalAlignment halign,
 		const Ref<LabelSettings> &label_settings);
 
 // Toggle the cell built by mnu_build_item_cell to show `visual`. Text items show the
 // Label; image items show the native-size TextureRect (centered), the menu root's
 // anamorphic scale handling screen scaling; color items show the full-rect swatch.
-void mnu_show_item_cell(Control *host, const MnuItemVisual &visual);
+void mnu_show_item_cell(Control *mount, const MnuItemVisual &visual);
 
 } // namespace godot

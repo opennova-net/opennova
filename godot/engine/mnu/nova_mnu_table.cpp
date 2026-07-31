@@ -125,7 +125,7 @@ void NovaMnuTable::rebuild_rows() {
 	}
 
 	const float width = total_width();
-	const bool has_custom_host =
+	const bool has_custom_shell =
 			!behavior_.edit_mode && has_connections(StringName("custom_cell_requested"));
 	for (int r = 0; r < static_cast<int>(rows_.size()); ++r) {
 		Control *row = memnew(Control);
@@ -148,8 +148,8 @@ void NovaMnuTable::rebuild_rows() {
 		for (int c = 0; c < static_cast<int>(columns_.size()); ++c) {
 			const Cell cell = c < static_cast<int>(rows_[r].size()) ? rows_[r][c] : Cell();
 			const float x = column_x(c);
-			if (columns_[c].custom_draw && has_custom_host) {
-				// The table retains geometry/lifetime ownership. A connected host
+			if (columns_[c].custom_draw && has_custom_shell) {
+				// The table retains geometry/lifetime ownership. A connected shell
 				// synchronously fills this ephemeral slot when the completed row is
 				// parented below; every rebuild intentionally creates fresh slots.
 				Control *slot = memnew(Control);
@@ -378,7 +378,7 @@ void NovaMnuTable::select_row(int p_row, bool p_additive) {
 		return;
 	}
 	// The authored ITEMS/MULTISELECT policy is authoritative for both mouse
-	// input and host/API calls.  A caller cannot force an additive selection on
+	// input and shell/API calls.  A caller cannot force an additive selection on
 	// a single-select table by passing true here.
 	p_additive = multiselect_ && p_additive;
 	if (!p_additive) {

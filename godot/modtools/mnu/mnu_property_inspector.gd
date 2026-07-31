@@ -321,7 +321,7 @@ func _build_widget_rows(id: int) -> void:
 	var authored_type := MnuUiHelpersScript.add_text_edit_row(_box, "Authored type",
 		String(authoring.get("type_token", "")))
 	authored_type.placeholder_text = type_name
-	authored_type.tooltip_text = "Raw MNU TYPE token; unknown host-owned widget types are preserved verbatim"
+	authored_type.tooltip_text = "Raw MNU TYPE token; unknown game-supplied widget types are preserved verbatim"
 	_wire_patch_text(authored_type, id, ["type_token"])
 	_add_asset_row("Widget text resource", String(authoring.get("text_rsrc", "")),
 		"strings", func(value: String) -> void:

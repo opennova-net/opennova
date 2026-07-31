@@ -17,11 +17,11 @@ class NovaMnuMenu;
 
 // A tactical map view (type="map"). There is no map data in the editor, so the
 // builder shows the configured appearance/background (or a labeled placeholder in
-// edit_mode). At runtime a host supplies a map texture + markers and the view
+// edit_mode). At runtime a shell supplies a map texture + markers and the view
 // pans (drag) and zooms (wheel) over the static image.
 //
 // Honest scope: this is static-image pan/zoom, not a real projected tactical map;
-// the marker coordinate space is host-defined (pixels in the supplied texture).
+// the marker coordinate space is shell-defined (pixels in the supplied texture).
 class NovaMnuMap : public Control {
 	GDCLASS(NovaMnuMap, Control)
 

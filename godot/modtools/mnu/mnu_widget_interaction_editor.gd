@@ -376,7 +376,7 @@ func _build_action_row(box: VBoxContainer, action: Dictionary,
 		details.add_child(MnuUiHelpersScript._key_label(String(spec[0])))
 		var edit := LineEdit.new()
 		edit.text = String(action.get(field_key, ""))
-		edit.placeholder_text = "(host-owned)"
+		edit.placeholder_text = "(game-supplied)"
 		edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		edit.text_submitted.connect(func(text: String) -> void:
 			_set_action_field(index, field_key, text))
