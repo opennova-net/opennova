@@ -21,6 +21,7 @@
 
 #include "common/test_expect.h"
 
+#include <cstring>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -201,9 +202,11 @@ static int test_inline_comment_ends_value() {
 }
 
 static int test_escapes_flatten() {
-	// "\\" unescapes to a single backslash in the logical value.
+	// The editor-facing Entry unescapes "\\", but the retail evaluator copies
+	// the authored pair intact after scanning over it.
 	mns::Document doc = mns::Document::parse(std::string("FOO a\\\\b\n"));
-	TEST_EXPECT(doc.flatten().get("FOO") == "a\\b");
+	TEST_EXPECT(doc.flatten().get("FOO") == "a\\\\b");
+	TEST_EXPECT(doc.entries()[0].value == "a\\b");
 	TEST_EXPECT(doc.entries()[0].raw_value == "a\\\\b");
 	TEST_EXPECT(doc.diagnostics().empty());
 
@@ -259,7 +262,7 @@ static int test_conditionals_document() {
 	{
 		mns::Document doc = mns::Document::parse(std::string("#if 2\nZ 3\n#endif\n"));
 		TEST_EXPECT(doc.flatten().get("Z") == "3");
-		TEST_EXPECT(has_diagnostic(doc, "bad-if-arg"));
+		TEST_EXPECT(has_diagnostic(doc, "noncanonical-if-arg"));
 	}
 	// Stray #endif / #else and an unterminated #if are diagnosed.
 	TEST_EXPECT(has_diagnostic(mns::Document::parse(std::string("#endif\n")), "unbalanced-endif"));
@@ -269,14 +272,41 @@ static int test_conditionals_document() {
 		TEST_EXPECT(has_diagnostic(doc, "unterminated-if"));
 		TEST_EXPECT(!doc.flatten().has("X"));
 	}
-	// D-MNS-4: an ACTIVE define's continuation consumes the next physical line
-	// even when it looks like a directive (docs/mnu/menu-re.md).
+	// A directive encountered while a continuation is pending remains a
+	// directive; the value resumes on the next ordinary active line.
 	{
-		const std::string src = "#if 1\nFOO bar \\\n#endif\nBAZ qux\n";
+		const std::string src = "#if 1\nFOO bar \\\n#endif\nbaz\nQUX 7\n";
 		mns::Document doc = mns::Document::parse(src);
-		TEST_EXPECT(doc.flatten().get("FOO") == "bar #endif");
-		TEST_EXPECT(doc.flatten().get("BAZ") == "qux");
-		TEST_EXPECT(has_diagnostic(doc, "unterminated-if")); // the eaten #endif never closed it
+		TEST_EXPECT(doc.flatten().get("FOO") == "bar baz");
+		TEST_EXPECT(doc.flatten().get("QUX") == "7");
+		TEST_EXPECT(!has_diagnostic(doc, "unterminated-if"));
+		TEST_EXPECT(to_string(doc.serialize()) == src);
+		std::string error;
+		TEST_EXPECT(doc.set_value("FOO", "new", &error));
+		TEST_EXPECT(doc.flatten().get("FOO") == "new");
+		TEST_EXPECT(doc.flatten().get("QUX") == "7");
+		TEST_EXPECT(to_string(doc.serialize()).find("#endif\n") != std::string::npos);
+		const std::string edited = to_string(doc.serialize());
+		TEST_EXPECT(!doc.remove_define("FOO", &error));
+		TEST_EXPECT(to_string(doc.serialize()) == edited);
+		TEST_EXPECT(!doc.move_define("FOO", 0, &error));
+		TEST_EXPECT(to_string(doc.serialize()) == edited);
+	}
+	// While inactive, the retail scanner seeks the next '#' byte rather than
+	// requiring it to be line-leading.
+	{
+		const std::string src = "#if 0\nignored #else\nLIVE yes\n#endif\n";
+		mns::Document doc = mns::Document::parse(src);
+		TEST_EXPECT(doc.flatten().get("LIVE") == "yes");
+		TEST_EXPECT(!has_diagnostic(doc, "unbalanced-else"));
+		TEST_EXPECT(to_string(doc.serialize()) == src);
+	}
+	// A continuation can cross a false conditional: inactive ordinary source
+	// does not join the value, and evaluation resumes after #endif.
+	{
+		const std::string src = "FOO a \\\n#if 0\nignored\n#endif\nb\n";
+		mns::Document doc = mns::Document::parse(src);
+		TEST_EXPECT(doc.flatten().get("FOO") == "a b");
 		TEST_EXPECT(to_string(doc.serialize()) == src);
 	}
 
@@ -480,7 +510,7 @@ static int test_value_validation() {
 	// Backslashes round-trip through the "\\" escape.
 	TEST_EXPECT(doc.set_value("FOO", "a\\b", &error));
 	TEST_EXPECT(to_string(doc.serialize()) == "FOO a\\\\b\n");
-	TEST_EXPECT(doc.flatten().get("FOO") == "a\\b");
+	TEST_EXPECT(doc.flatten().get("FOO") == "a\\\\b");
 
 	// Leading/trailing whitespace is unrepresentable and gets trimmed.
 	TEST_EXPECT(doc.set_value("FOO", "  x  ", &error));
@@ -537,6 +567,53 @@ static int test_entries_groups_and_comments() {
 	return 0;
 }
 
+static bool result_has_diagnostic(const mns::EvaluationResult &result,
+		const std::string &code) {
+	for (const auto &d : result.diagnostics) {
+		if (d.code == code) return true;
+	}
+	return false;
+}
+
+static int test_retail_evaluation_result() {
+	// The retail loader checks the first character of the #if argument. It is
+	// deliberately lenient after that character and reports the odd spelling.
+	const std::string src =
+			"#if 0foo\nZERO hidden\n#else\nZERO_ELSE kept\n#endif\n"
+			"#if 1foo\nONE kept\n#endif\n"
+			"#if 2\nTWO kept\n#endif\n"
+			"Case first\nCASE last\n"
+			"PATH c:\\\\games\\\\jo\n";
+	const mns::Document doc = mns::Document::parse(src);
+	const mns::EvaluationResult result = doc.evaluate();
+	TEST_EXPECT(result.success);
+	TEST_EXPECT(!result.sheet.has("ZERO"));
+	TEST_EXPECT(result.sheet.get("ZERO_ELSE") == "kept");
+	TEST_EXPECT(result.sheet.get("ONE") == "kept");
+	TEST_EXPECT(result.sheet.get("TWO") == "kept");
+	TEST_EXPECT(result.sheet.get("case") == "last");
+	TEST_EXPECT(result.sheet.get("PATH") == "c:\\\\games\\\\jo");
+	TEST_EXPECT(result_has_diagnostic(result, "noncanonical-if-arg"));
+	TEST_EXPECT(result_has_diagnostic(result, "duplicate-name"));
+
+	// A syntax error keeps a useful partial sheet, but success is false and the
+	// legacy flat API now reports the failure instead of silently accepting it.
+	const mns::Document invalid =
+			mns::Document::parse(std::string("#else\nOK value\n"));
+	const mns::EvaluationResult failed = invalid.evaluate();
+	TEST_EXPECT(!failed.success);
+	TEST_EXPECT(failed.sheet.get("OK") == "value");
+	TEST_EXPECT(result_has_diagnostic(failed, "unbalanced-else"));
+	mns::StyleSheet flat;
+	std::string error;
+	const char *invalid_text = "#else\nOK value\n";
+	TEST_EXPECT(!mns::parse(invalid_text, std::strlen(invalid_text), flat, error));
+	TEST_EXPECT(!error.empty());
+
+	std::printf("test_retail_evaluation_result passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_real_file_byte_roundtrip();
@@ -557,6 +634,7 @@ int main() {
 	failures += test_value_validation();
 	failures += test_source_text_get_set();
 	failures += test_entries_groups_and_comments();
+	failures += test_retail_evaluation_result();
 
 	if (failures == 0) {
 		std::printf("\nAll tests passed!\n");

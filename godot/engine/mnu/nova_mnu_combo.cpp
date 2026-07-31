@@ -2,6 +2,7 @@
 
 #include "mnu_outline.h"
 #include "nova_mnu_menu.h"
+#include "nova_mnu_scroll.h"
 
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/color_rect.hpp>
@@ -284,20 +285,84 @@ void NovaMnuCombo::open_popup() {
 		popup_->add_child(bg);
 	}
 
-	// Rows live inside a ScrollContainer so an overflowing list scrolls within the
-	// clamped popup instead of spilling past the canvas. The background above stays
-	// full-rect behind the (transparent) scroller; the outline below frames it.
-	ScrollContainer *scroll = memnew(ScrollContainer);
-	scroll->set_name("Scroll");
-	scroll->set_anchors_preset(Control::PRESET_FULL_RECT);
-	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
-	popup_->add_child(scroll);
+	Control *rows = nullptr;
+	Control *row_host = nullptr;
+	if (scrollbar_style_.present) {
+		// Authored listbox scrollbars are real sprite-driven controls, not a
+		// reskinned Godot bar. Clip a plain rows Control and let NovaMnuScroll move
+		// it, reserving SB_EDGE_PAD exactly as the retail CListWnd does.
+		Control *viewport = memnew(Control);
+		viewport->set_name("ScrollViewport");
+		viewport->set_clip_contents(true);
+		viewport->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+		viewport->connect("gui_input", callable_mp(this, &NovaMnuCombo::on_popup_scroll_input));
+		float content_width = width;
+		if (scrollbar_style_.edge_pad > 0) {
+			content_width = MAX(0.0f, width - (float)scrollbar_style_.edge_pad);
+		} else if (scrollbar_style_.has_rect && scrollbar_style_.rect.position.x >= 0.0f) {
+			content_width = MIN(content_width, scrollbar_style_.rect.position.x);
+		} else {
+			content_width = MAX(0.0f, width - 16.0f);
+		}
+		viewport->set_position(Vector2());
+		viewport->set_size(Vector2(content_width, height));
+		popup_->add_child(viewport);
 
-	VBoxContainer *rows = memnew(VBoxContainer);
-	rows->set_name("Rows");
-	rows->set_h_size_flags(Control::SIZE_EXPAND_FILL); // fill popup width; height stays natural so it scrolls
-	rows->add_theme_constant_override("separation", 0);
-	scroll->add_child(rows);
+		rows = memnew(Control);
+		rows->set_name("Rows");
+		rows->set_size(Vector2(content_width,
+				static_cast<float>(items_.size() * item_height)));
+		viewport->add_child(rows);
+		row_host = rows;
+
+		popup_scrollbar_ = memnew(NovaMnuScroll);
+		popup_scrollbar_->set_name("Scrollbar");
+		popup_scrollbar_->set_menu(behavior_.menu);
+		popup_scrollbar_->set_edit_mode(false);
+		popup_scrollbar_->set_orientation_vertical(true);
+		popup_scrollbar_->set_track_texture(scrollbar_style_.track);
+		popup_scrollbar_->set_shuttle_state_textures(scrollbar_style_.shuttle,
+				scrollbar_style_.shuttle_hover, scrollbar_style_.shuttle_pressed,
+				scrollbar_style_.shuttle_disabled);
+		popup_scrollbar_->set_arrow_state_textures(scrollbar_style_.up,
+				scrollbar_style_.up_hover, scrollbar_style_.up_pressed,
+				scrollbar_style_.up_disabled, scrollbar_style_.down,
+				scrollbar_style_.down_hover, scrollbar_style_.down_pressed,
+				scrollbar_style_.down_disabled);
+		popup_scrollbar_->set_sounds(scrollbar_style_.sounds);
+		if (scrollbar_style_.up.is_valid()) {
+			popup_scrollbar_->set_arrow_extent(scrollbar_style_.up->get_height());
+		}
+		Rect2 sb_rect = scrollbar_style_.rect;
+		if (!scrollbar_style_.has_rect) {
+			const float sb_width = scrollbar_style_.edge_pad > 0
+					? (float)scrollbar_style_.edge_pad
+					: 16.0f;
+			sb_rect = Rect2(width - sb_width, 0, sb_width, height);
+		}
+		popup_scrollbar_->set_position(sb_rect.position);
+		popup_scrollbar_->set_size(sb_rect.size);
+		popup_->add_child(popup_scrollbar_);
+		popup_scrollbar_->set_range(0.0,
+				static_cast<double>(items_.size() * item_height), height);
+		popup_scrollbar_->set_step(item_height);
+		popup_scrollbar_->link_scroll_target(popup_scrollbar_->get_path_to(rows));
+	} else {
+		// Menus without authored art retain a normal Godot fallback scroller.
+		ScrollContainer *scroll = memnew(ScrollContainer);
+		scroll->set_name("Scroll");
+		scroll->set_anchors_preset(Control::PRESET_FULL_RECT);
+		scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+		popup_->add_child(scroll);
+
+		VBoxContainer *vbox = memnew(VBoxContainer);
+		vbox->set_name("Rows");
+		vbox->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		vbox->add_theme_constant_override("separation", 0);
+		scroll->add_child(vbox);
+		rows = vbox;
+		row_host = vbox;
+	}
 
 	Ref<StyleBoxFlat> hover_sb;
 	hover_sb.instantiate();
@@ -310,18 +375,45 @@ void NovaMnuCombo::open_popup() {
 		row->set_flat(true);
 		row->set_custom_minimum_size(Vector2(0, item_height));
 		row->set_text_alignment(static_cast<HorizontalAlignment>(item_align_));
+		// Button owns input/hover while an inset Label owns text layout. Godot's
+		// Button exposes horizontal alignment only, whereas LIST_BOX STRING edge
+		// and ITEMS/STRING vjustify are independent authored fields.
+		const Color transparent(1, 1, 1, 0);
+		row->add_theme_color_override("font_color", transparent);
+		row->add_theme_color_override("font_hover_color", transparent);
+		row->add_theme_color_override("font_pressed_color", transparent);
+		row->add_theme_color_override("font_hover_pressed_color", transparent);
+		row->add_theme_color_override("font_focus_color", transparent);
+		row->add_theme_color_override("font_disabled_color", transparent);
+		row->add_theme_color_override("font_outline_color", transparent);
+
+		Label *text = memnew(Label);
+		text->set_name("Text");
+		text->set_text(items_[i].text);
+		text->set_anchors_preset(Control::PRESET_FULL_RECT);
+		text->set_offset(SIDE_LEFT, item_edge_);
+		text->set_offset(SIDE_RIGHT, -item_edge_);
+		text->set_horizontal_alignment(static_cast<HorizontalAlignment>(item_align_));
+		text->set_vertical_alignment(static_cast<VerticalAlignment>(item_valign_));
+		text->set_clip_text(true);
+		text->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		if (item_font_.is_valid()) {
-			row->add_theme_font_override("font", item_font_);
+			text->add_theme_font_override("font", item_font_);
 		}
 		if (item_font_size_ > 0) {
-			row->add_theme_font_size_override("font_size", item_font_size_);
+			text->add_theme_font_size_override("font_size", item_font_size_);
 		}
 		if (has_item_font_color_) {
-			row->add_theme_color_override("font_color", item_font_color_);
+			text->add_theme_color_override("font_color", item_font_color_);
 		}
+		row->add_child(text);
 		row->add_theme_stylebox_override("hover", hover_sb);
 		row->connect("pressed", callable_mp(this, &NovaMnuCombo::on_row_pressed).bind(i));
-		rows->add_child(row);
+		if (scrollbar_style_.present) {
+			row->set_position(Vector2(0, i * item_height));
+			row->set_size(Vector2(rows->get_size().x, item_height));
+		}
+		row_host->add_child(row);
 	}
 
 	if (has_popup_outline_) {
@@ -336,6 +428,7 @@ void NovaMnuCombo::close_popup() {
 	Control *root = popup_root();
 	popup_root_id_ = ObjectID();
 	popup_ = nullptr;
+	popup_scrollbar_ = nullptr;
 	if (root == nullptr) {
 		return;
 	}
@@ -351,6 +444,21 @@ void NovaMnuCombo::close_popup() {
 	}
 	root->queue_free();
 	emit_signal("popup_closed");
+}
+
+void NovaMnuCombo::on_popup_scroll_input(const Ref<InputEvent> &p_event) {
+	if (popup_scrollbar_ == nullptr) {
+		return;
+	}
+	const Ref<InputEventMouseButton> mb = p_event;
+	if (mb.is_null() || !mb->is_pressed()) {
+		return;
+	}
+	if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP) {
+		popup_scrollbar_->set_value(popup_scrollbar_->get_value() - effective_item_height());
+	} else if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN) {
+		popup_scrollbar_->set_value(popup_scrollbar_->get_value() + effective_item_height());
+	}
 }
 
 // A left press that reaches the catcher missed the popup box. The original closes

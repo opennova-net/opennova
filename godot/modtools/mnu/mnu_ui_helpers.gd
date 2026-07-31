@@ -83,6 +83,26 @@ static func add_spin_pair_row(parent: Control, key: String, a_value: int, b_valu
 	return [a, b]
 
 
+static func add_option_row(parent: Control, key: String, value: String, options: Array) -> OptionButton:
+	var row := _row(parent)
+	row.add_child(_key_label(key))
+	var option := OptionButton.new()
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var selected := -1
+	for i in range(options.size()):
+		var label := String(options[i])
+		option.add_item(label, i)
+		if label == value:
+			selected = i
+	if selected < 0 and not value.is_empty():
+		option.add_item(value, option.item_count)
+		selected = option.item_count - 1
+	if selected >= 0:
+		option.select(selected)
+	row.add_child(option)
+	return option
+
+
 static func _make_spin(min_v: int, max_v: int, value: int) -> SpinBox:
 	var spin := SpinBox.new()
 	spin.min_value = min_v

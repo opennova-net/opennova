@@ -59,7 +59,7 @@ func _find_row_button_with_text(node: Node, row_text: String, button_text: Strin
 		var has_row_text := false
 		var button: Button = null
 		for child in node.get_children():
-			if child is LineEdit and (child as LineEdit).text == row_text:
+			if _subtree_has_line_text(child, row_text):
 				has_row_text = true
 			elif child is Button and (child as Button).text == button_text:
 				button = child
@@ -70,6 +70,15 @@ func _find_row_button_with_text(node: Node, row_text: String, button_text: Strin
 		if found != null:
 			return found
 	return null
+
+
+func _subtree_has_line_text(node: Node, text: String) -> bool:
+	if node is LineEdit and (node as LineEdit).text == text:
+		return true
+	for child in node.get_children():
+		if _subtree_has_line_text(child, text):
+			return true
+	return false
 
 
 func _inspector_for(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile):
@@ -213,6 +222,42 @@ func _find_check_box(node: Node, text: String) -> CheckBox:
 		if found != null:
 			return found
 	return null
+
+
+func _find_color_picker(node: Node) -> ColorPickerButton:
+	if node is ColorPickerButton:
+		return node as ColorPickerButton
+	for c in node.get_children():
+		var found := _find_color_picker(c)
+		if found != null:
+			return found
+	return null
+
+
+func test_widget_color_has_picker_and_preserves_raw_token_until_changed() -> void:
+	var doc := _widgets_doc()
+	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
+	assert_true(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_FG).begins_with("%"),
+		"fixture starts with a raw style-variable color")
+	var inspector = await _inspector_for(doc, root, null)
+	var picker := _find_color_picker(inspector)
+	assert_not_null(picker, "literal widget colors have a purpose-built color picker")
+	if picker == null:
+		return
+	var captured: Array = []
+	inspector.edit_requested.connect(func(e: Dictionary) -> void: captured.append(e))
+
+	# Looking at a picker must not silently materialize its preview over %VAR%.
+	picker.popup_closed.emit()
+	assert_eq(captured.size(), 0, "closing an untouched picker preserves the raw style token")
+
+	picker.color_changed.emit(Color(1, 0, 0, 1))
+	assert_eq(captured.size(), 0, "dragging previews locally instead of creating undo spam")
+	picker.popup_closed.emit()
+	assert_eq(captured.size(), 1, "the completed color gesture commits once")
+	if captured.size() == 1:
+		assert_eq(captured[0].get("prop"), "color", "picker edits the typed color slot")
+		assert_eq(captured[0].get("value"), "FFFF0000", "picker emits retail AARRGGBB")
 
 
 func test_inspector_shows_sound_rows() -> void:
@@ -359,6 +404,50 @@ func test_inspector_remove_sound_emits_shorter_list() -> void:
 	if captured.size() == 1:
 		assert_eq(captured[0].get("prop"), "sounds", "the edit targets the sounds list")
 		assert_eq((captured[0].get("value") as Array).size(), 0, "the sound was removed")
+
+
+func test_combo_exposes_closed_and_dropdown_items_separately() -> void:
+	var src := """
+<SCREEN><NAME>MAIN</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="combo" name="Mode">
+    <ITEMS><ITEM value="closed">Closed</ITEM></ITEMS>
+    <LIST_BOX><ITEMS><ITEM value="popup">Popup</ITEM></ITEMS></LIST_BOX>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var combo := int(doc.get_child_ids(root)[0])
+	var inspector = await _inspector_for(doc, combo, null)
+	var text := _all_text(inspector)
+	assert_true(text.contains("Closed / fallback items"),
+		"top-level combo ITEMS has a clearly labeled independent editor")
+	assert_true(text.contains("Dropdown items"),
+		"LIST_BOX/ITEMS has its own clearly labeled editor")
+	assert_true(text.contains("Closed"))
+	assert_true(text.contains("Popup"))
+
+
+func test_nested_rows_are_labeled_cards_with_color_pickers() -> void:
+	var src := """
+<SCREEN><NAME>MAIN</NAME><WINDOW type="window" name="ROOT">
+  <WINDOW type="button" name="Styled">
+    <APPEARANCE state="default" type="color" map_state="0" height="20">112233</APPEARANCE>
+  </WINDOW>
+</WINDOW></SCREEN>
+"""
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var styled := int(doc.get_child_ids(root)[0])
+	var inspector = await _inspector_for(doc, styled, null)
+	var text := _all_text(inspector)
+	for label in ["Row 1", "State", "Type", "Picture / color", "Use map",
+			"Map", "Use height", "Height"]:
+		assert_true(text.contains(label), "nested rows label '%s'" % label)
+	var picker := inspector.find_child("MnuNestedColorPicker", true, false)
+	assert_not_null(picker, "nested color/outline rows keep a real picker")
 
 
 func test_inspector_trigger_dropdown_from_profile_sets() -> void:

@@ -14,6 +14,7 @@
 #include "lwf/nova_lwf_data.h"
 #include "mns_stylesheet.h"
 #include "nova_mnu_document.h"
+#include "nova_mnu_widget_common.h"
 #include "resource_index/nova_resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 
@@ -106,9 +107,10 @@ private:
 
 	void apply_screen_visibility();
 	NovaMnuScreen *find_screen(const String &p_name) const;
-	// Pre-order search for a widget tagged meta "mnu_hotkey" matching p_vk
-	// (VK_RETURN/VK_ENTER treated as equivalent).
-	Node *find_hotkey_target(Node *p_node, const String &p_vk) const;
+	// Pre-order search for the first visible widget whose ordered accelerator
+	// list matches. Virtual and character bindings are kept separate because
+	// "VK_RETURN" and the literal text "V" have different input semantics.
+	Node *find_hotkey_target(Node *p_node, const String &p_key, bool p_virtual) const;
 	bool trigger_hotkey_target(Node *p_target);
 	bool has_screen(const String &p_name) const;
 	void on_screen_shown(const String &p_name);
@@ -216,16 +218,24 @@ public:
 	// Cross-.mnu jump: emits menu_requested for the host to service.
 	void navigate_to_menu(const String &p_file, const String &p_target_screen);
 	void quit_game();
-	// Show/hide/toggle a named descendant window inside the current screen.
-	bool handle_window_action(const String &p_target, const String &p_state);
+	// Show/hide/enable/disable a named descendant window inside the current
+	// screen. TOGGLE inverts the property selected by STATE.
+	bool handle_window_action(const String &p_target, const String &p_state,
+			bool p_toggle = false);
 	// Route a virtual-key hotkey (e.g. "VK_ESCAPE") to the matching widget in the
 	// current screen and fire its actions. Returns true if handled. Inert in
 	// edit_mode. Public so the input adapter and tests both reach it.
 	bool handle_hotkey(const String &p_vk);
+	// Route a literal Unicode accelerator (case-insensitive). Kept separate from
+	// handle_hotkey so a non-VIRTUAL "VK_ESCAPE" remains literal text.
+	bool handle_character_hotkey(const String &p_character);
 	// Route one widget action by its MNU verb (screen/window/pop/quit). Emits
 	// action_dispatched. Returns true if the action was handled.
 	bool dispatch_action(const String &p_type, const String &p_target,
 			const String &p_file, const String &p_window_state);
+	// Complete native action path used by built widgets. Unlike the script
+	// compatibility wrapper above, this retains TOGGLE and host-owned fields.
+	bool dispatch_widget_action(const MnuActionData &p_action);
 	void clear_navigation_stack();
 
 	// --- Audio (M5) ---

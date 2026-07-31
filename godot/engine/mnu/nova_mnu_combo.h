@@ -18,6 +18,7 @@ namespace godot {
 
 class Control;
 class NovaMnuMenu;
+class NovaMnuScroll;
 
 // A dropdown/combobox (type="combo"). The closed state is a TextureButton showing
 // the selected item; clicking opens a popup styled from the parsed LIST_BOX. The
@@ -63,6 +64,7 @@ private:
 	// with the rows, valid only while popup_root() resolves.
 	ObjectID popup_root_id_;
 	Control *popup_ = nullptr;
+	NovaMnuScroll *popup_scrollbar_ = nullptr;
 
 	// Popup styling resolved at build time.
 	bool has_popup_bg_color_ = false;
@@ -83,6 +85,9 @@ private:
 	bool has_item_font_color_ = false;
 	Color item_font_color_ = Color(1, 1, 1, 1);
 	int item_align_ = 0; // HORIZONTAL_ALIGNMENT_LEFT
+	int item_valign_ = 1; // VERTICAL_ALIGNMENT_CENTER
+	int item_edge_ = 0;
+	MnuScrollbarStyle scrollbar_style_;
 
 	void on_pressed();
 	void on_sound_mouse_entered();
@@ -91,6 +96,7 @@ private:
 	// The modal catcher's input: a left press outside both the closed cell and the
 	// popup box closes the dropdown; everything else is swallowed (exclusivity).
 	void on_overlay_gui_input(const Ref<InputEvent> &p_event);
+	void on_popup_scroll_input(const Ref<InputEvent> &p_event);
 	void update_selected_label();
 	// Resolve the live popup root (overlay or box), or null when closed/freed.
 	Control *popup_root() const;
@@ -139,6 +145,11 @@ public:
 		has_item_font_color_ = true;
 	}
 	void set_item_alignment(int p_align) { item_align_ = p_align; }
+	void set_item_vertical_alignment(int p_align) { item_valign_ = p_align; }
+	void set_item_edge(int p_edge) { item_edge_ = p_edge > 0 ? p_edge : 0; }
+	void set_scrollbar_style(const MnuScrollbarStyle &p_style) {
+		scrollbar_style_ = p_style;
+	}
 
 	// --- Runtime data binding ---
 	void clear_items();

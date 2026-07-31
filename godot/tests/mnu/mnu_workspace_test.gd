@@ -1742,3 +1742,196 @@ func test_reopening_a_clean_tab_reloads_from_disk() -> void:
 	DirAccess.remove_absolute(dir)
 	ws.release_viewport()
 	await get_tree().process_frame
+
+
+func test_editor_copy_paste_and_duplicate_preserve_subtrees_one_undo_each() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var doc: NovaMnuDocument = pair[1].resource
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var start := _find_widget_id(doc, root, "StartBtn")
+	var nested := int(doc.add_widget(start, NovaMnuDocument.TYPE_STATIC,
+		Rect2(2, 3, 20, 10)))
+	doc.set_widget_name(nested, "Nested")
+	doc.set_widget_text(nested, "Child")
+	ed._undo_stack.clear()
+	ed._redo_stack.clear()
+	ed.select_widget(start)
+	var original_count := doc.get_child_ids(root).size()
+	assert_true(ed.copy_selection_action())
+	var pasted: int = ed.paste_selection_action()
+	assert_gt(pasted, 0)
+	assert_eq(doc.get_child_ids(root).size(), original_count + 1)
+	assert_eq(String(doc.get_widget_name(pasted)), "StartBtn")
+	assert_eq(doc.get_child_ids(pasted).size(), 1, "paste preserves the subtree")
+	assert_eq(String(doc.get_widget_name(doc.get_child_ids(pasted)[0])), "Nested")
+	assert_eq(doc.get_widget_actions(pasted).size(), 1, "actions survive clipboard capture")
+	ed.undo()
+	assert_false(doc.widget_exists(pasted), "one undo removes the pasted subtree")
+	assert_false(ed.can_undo(), "paste contributed exactly one undo entry")
+
+	ed.select_widget(start)
+	var duplicated: int = ed.duplicate_selection_action()
+	assert_gt(duplicated, 0)
+	assert_eq(doc.get_child_ids(duplicated).size(), 1)
+	assert_ne(duplicated, start, "duplicate receives fresh document ids")
+	ed.undo()
+	assert_false(doc.widget_exists(duplicated), "one undo removes the duplicate")
+	assert_false(ed.can_undo(), "duplicate contributed exactly one undo entry")
+
+
+func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var doc: NovaMnuDocument = pair[1].resource
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var auto := int(doc.add_widget(root, NovaMnuDocument.TYPE_STATIC,
+		Rect2(30, 300, -1, 24)))
+	doc.set_widget_name(auto, "AutoLabel")
+	doc.set_widget_text(auto, "A rendered auto-sized label")
+	var fixed := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON,
+		Rect2(360, 300, 80, 24)))
+	doc.set_widget_name(fixed, "RightEdge")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var rendered_before: Rect2 = ed._canvas._abs_rect_of(auto)
+	assert_gt(rendered_before.size.x, 0.0, "the auto widget has a live rendered width")
+	var fixed_before: Rect2 = ed._canvas._abs_rect_of(fixed)
+	var expected_right := maxf(rendered_before.end.x, fixed_before.end.x)
+	var original_x := doc.get_window_rect(auto).position.x
+	ed._undo_stack.clear()
+	ed._redo_stack.clear()
+	ed.select_widgets(PackedInt32Array([auto, fixed]))
+	ed.align_selection("right")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var rendered_after: Rect2 = ed._canvas._abs_rect_of(auto)
+	assert_almost_eq(rendered_after.end.x, expected_right, 0.75,
+		"right alignment uses the rendered auto extent")
+	assert_eq(doc.get_window_rect_flags(auto) & NovaMnuDocument.RECT_HAS_RIGHT, 0,
+		"alignment keeps RIGHT omitted for auto width")
+	ed.undo()
+	assert_almost_eq(doc.get_window_rect(auto).position.x, original_x, 0.01)
+	assert_false(ed.can_undo(), "alignment is one undo entry")
+
+
+func test_editor_group_z_order_preserves_relative_order_and_one_undo() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var doc: NovaMnuDocument = pair[1].resource
+	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
+	var before: PackedInt32Array = doc.get_child_ids(root)
+	assert_gt(before.size(), 4)
+	var selected := PackedInt32Array([before[0], before[2]])
+	var expected := PackedInt32Array()
+	for id in before:
+		if not selected.has(id):
+			expected.append(id)
+	for id in before:
+		if selected.has(id):
+			expected.append(id)
+	ed.select_widgets(selected)
+	ed.change_z_order("front")
+	assert_eq(doc.get_child_ids(root), expected,
+		"front moves the selected group without reversing it")
+	ed.undo()
+	assert_eq(doc.get_child_ids(root), before)
+	assert_false(ed.can_undo(), "group z-order is one undo entry")
+
+
+func test_editor_duplicate_and_reorder_screen_are_undoable() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var doc: NovaMnuDocument = pair[1].resource
+	var first := int(doc.get_screen_ids()[0])
+	ed.select_widget(first)
+	var copied: int = ed.duplicate_screen_action()
+	assert_gt(copied, 0)
+	assert_eq(doc.get_screen_count(), 3)
+	assert_eq(String(doc.get_screen_name(copied)), "MAIN_COPY")
+	assert_eq(doc.get_child_ids(doc.get_screen_root_id(copied)).size(),
+		doc.get_child_ids(doc.get_screen_root_id(first)).size(),
+		"screen duplicate preserves the complete root subtree")
+	ed.undo()
+	assert_eq(doc.get_screen_count(), 2)
+	assert_false(ed.can_undo(), "screen duplicate is one undo entry")
+
+	ed.select_widget(first)
+	ed.move_screen_action(1)
+	assert_eq(int(doc.get_screen_ids()[1]), first)
+	ed.undo()
+	assert_eq(int(doc.get_screen_ids()[0]), first)
+	assert_false(ed.can_undo(), "screen reorder is one undo entry")
+
+
+func test_musicvar_presence_zero_is_undoable_without_destroying_value() -> void:
+	var pair = await _editor_with_fixture()
+	var ed = pair[0]
+	var doc: NovaMnuDocument = pair[1].resource
+	var sid := int(doc.get_screen_ids()[0])
+	doc.set_screen_property(sid, "music_var", 0)
+	ed._undo_stack.clear()
+	ed._redo_stack.clear()
+	ed.apply_edit({"target": "screen", "id": sid,
+		"prop": "has_music_var", "value": false})
+	assert_false(doc.get_screen_has_music_var(sid))
+	assert_eq(doc.get_screen_music_var(sid), 0, "the explicit zero remains latent")
+	assert_false(doc.to_byte_array().get_string_from_utf8().contains("<MUSICVAR>"))
+	ed.undo()
+	assert_true(doc.get_screen_has_music_var(sid))
+	assert_eq(doc.get_screen_music_var(sid), 0)
+	assert_true(doc.to_byte_array().get_string_from_utf8().contains(
+		"<MUSICVAR>0</MUSICVAR>"))
+	assert_false(ed.can_undo(), "presence toggle is one undo entry")
+
+
+func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
+	var ws = MnuWorkspaceScript.new()
+	var host := Control.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	ws.mount_viewport(host)
+	assert_eq(ws.open_file(FIXTURE), OK)
+	var dock := Control.new()
+	add_child_autofree(dock)
+	ws.build_inspector(dock)
+	await get_tree().process_frame
+	var ed = ws._editor
+	var doc: NovaMnuDocument = ws._document.resource
+	var start := _find_widget_id(doc,
+		doc.get_screen_root_id(doc.get_screen_ids()[0]), "StartBtn")
+	ed.select_widget(start)
+	assert_true(ed.copy_selection_action(), "seed the clipboard before preview")
+	var before_name := String(doc.get_widget_name(start))
+	var style_before := String(ws._mns_document.resource.get_source_text())
+
+	ed.set_interactive(true)
+	assert_true(ed.is_interactive())
+	assert_false(ed.can_undo())
+	assert_false(ed.can_redo())
+	ed.apply_edit({"target": "widget", "id": start,
+		"prop": "name", "value": "Blocked"})
+	assert_eq(String(doc.get_widget_name(start)), before_name)
+	assert_eq(ed.paste_selection_action(), -1)
+	assert_eq(ed.duplicate_selection_action(), -1)
+	ws._mns_editor.apply_edit(
+		{"op": "add", "name": "BLOCKED_STYLE", "value": "FF00FF"})
+	ws._on_mns_inspector_edit(
+		{"op": "add", "name": "BLOCKED_INSPECTOR", "value": "00FF00"})
+	assert_eq(String(ws._mns_document.resource.get_source_text()), style_before,
+		"Styles editor and inspector funnels are both locked")
+	var inspector_line := _first_line_edit(ws._inspector)
+	assert_not_null(inspector_line)
+	if inspector_line != null:
+		assert_false(inspector_line.editable, "menu inspector controls are locked")
+
+	ed.set_interactive(false)
+	assert_false(ed.is_interactive())
+	ed.apply_edit({"target": "widget", "id": start,
+		"prop": "name", "value": "Unlocked"})
+	assert_eq(String(doc.get_widget_name(start)), "Unlocked",
+		"leaving preview restores authoring")
+	ws._mns_editor.apply_edit(
+		{"op": "add", "name": "UNLOCKED_STYLE", "value": "FF00FF"})
+	assert_true(ws._mns_document.resource.has_variable("UNLOCKED_STYLE"))
+	ws.release_viewport()

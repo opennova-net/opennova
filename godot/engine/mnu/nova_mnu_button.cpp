@@ -61,7 +61,7 @@ void NovaMnuButton::execute_action(const MnuActionData &p_action) {
 	if (menu_ == nullptr) {
 		return;
 	}
-	menu_->dispatch_action(p_action.type, p_action.target, p_action.file, p_action.window_state);
+	menu_->dispatch_widget_action(p_action);
 }
 
 void NovaMnuButton::_bind_methods() {

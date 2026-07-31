@@ -149,13 +149,15 @@ Appearance parse_appearance(const mnu_xml::Node *app_node) {
   }
 
   std::string map_state = app_node->attr("map_state");
-  if (!map_state.empty()) {
+  if (app_node->has_attr("map_state")) {
     app.map_state = parse_int(map_state, -1);
+    app.has_map_state = true;
   }
 
   std::string height = app_node->attr("height");
-  if (!height.empty()) {
+  if (app_node->has_attr("height")) {
     app.height = parse_int(height);
+    app.has_height = true;
   }
 
   return app;
@@ -190,6 +192,14 @@ Action parse_action(const mnu_xml::Node *action_node) {
   act.type = action_node->attr("type");
   act.state = action_node->attr("state");
   act.file = action_node->attr("file");
+  act.source = action_node->attr("source");
+  act.field = action_node->attr("field");
+  if (action_node->has_attr("target_form")) {
+    act.target_form = parse_int(action_node->attr("target_form"));
+    act.has_target_form = true;
+  }
+  act.toggle = action_node->has_attr("toggle");
+  act.test = action_node->attr("test");
   act.external_browser = action_node->attr_bool("external_browser");
 
   // Target can be in attribute OR text content.
@@ -212,10 +222,14 @@ String parse_string(const mnu_xml::Node *str_node) {
   String str;
   if (!str_node) return str;
 
+  str.present = true;
   str.type = str_node->attr("type");
   str.justify = str_node->attr("justify");
   str.vjustify = str_node->attr("vjustify");
-  str.edge = parse_int(str_node->attr("edge"));
+  if (str_node->has_attr("edge")) {
+    str.edge = parse_int(str_node->attr("edge"));
+    str.has_edge = true;
+  }
   str.value = str_node->attr("id");
 
   // If no ID attribute, check for text content or value attribute.
@@ -289,7 +303,10 @@ Frame parse_frame(const mnu_xml::Node *frame_node) {
     std::string tag = opennova::strutil::to_lower(child->tag);
     if (tag == "stencil") {
       frame.stencil = child->get_direct_text();
-      frame.stencil_size = parse_int(child->attr("size"));
+      if (child->has_attr("size")) {
+        frame.stencil_size = parse_int(child->attr("size"));
+        frame.has_stencil_size = true;
+      }
       if (child->has_attr("insetx")) {
         frame.insetx = parse_int(child->attr("insetx"));
         frame.has_insetx = true;
@@ -307,7 +324,10 @@ Frame parse_frame(const mnu_xml::Node *frame_node) {
 
   // Fallback to attributes (for potential alternate format).
   if (frame.stencil.empty()) frame.stencil = frame_node->attr("stencil");
-  if (frame.stencil_size == 0) frame.stencil_size = parse_int(frame_node->attr("stencil_size"));
+  if (!frame.has_stencil_size && frame_node->has_attr("stencil_size")) {
+    frame.stencil_size = parse_int(frame_node->attr("stencil_size"));
+    frame.has_stencil_size = true;
+  }
   if (frame.brush.empty()) frame.brush = frame_node->attr("brush");
   if (frame.monogram.empty()) frame.monogram = frame_node->attr("monogram");
 
@@ -339,6 +359,8 @@ Items parse_items(const mnu_xml::Node *items_node) {
   Items items;
   if (!items_node) return items;
 
+  items.present = true;
+  items.multiselect = items_node->has_attr("multiselect");
   items.justify = items_node->attr("justify");
   items.vjustify = items_node->attr("vjustify");
 
@@ -347,8 +369,9 @@ Items parse_items(const mnu_xml::Node *items_node) {
     if (opennova::strutil::iequals(child->tag, "item")) {
       items.items.push_back(parse_item(child.get()));
     } else if (opennova::strutil::iequals(child->tag, "appearance")) {
-      // Extract selection color from appearance (state="selected", type="color")
       Appearance app = parse_appearance(child.get());
+      items.appearances.push_back(app);
+      // Convenience mirror for callers interested only in the selected color.
       if (opennova::strutil::iequals(app.state, "selected") && opennova::strutil::iequals(app.type, "color")) {
         items.selection_color = app.value;
       }
@@ -409,6 +432,8 @@ ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
       listbox.position = parse_position(child.get());
     } else if (tag == "appearance") {
       listbox.appearances.push_back(parse_appearance(child.get()));
+    } else if (tag == "string") {
+      listbox.string_data = parse_string(child.get());
     } else if (tag == "items") {
       listbox.items = parse_items(child.get());
     } else if (tag == "min_item_height") {
@@ -417,6 +442,7 @@ ListBox parse_listbox(const mnu_xml::Node *listbox_node) {
       // child->text silently dropped it (latent until a real combobox LIST_BOX
       // with MIN_ITEM_HEIGHT exercised it; see ADR 0002).
       listbox.min_item_height = parse_int(child->get_direct_text());
+      listbox.has_min_item_height = true;
     } else if (tag == "scrollbar") {
       listbox.scrollbar = parse_listbox_scrollbar(child.get());
     }
@@ -471,9 +497,15 @@ TableHeader parse_table_header(const mnu_xml::Node *node) {
 
   header.justify = node->attr("justify");
   header.vjustify = node->attr("vjustify");
-  header.column = parse_int(node->attr("column"));
+  if (node->has_attr("column")) {
+    header.column = parse_int(node->attr("column"));
+    header.has_column = true;
+  }
   header.sort = node->attr("sort");
-  header.width = parse_int(node->attr("width"));
+  if (node->has_attr("width")) {
+    header.width = parse_int(node->attr("width"));
+    header.has_width = true;
+  }
   header.type = node->attr("type");
   header.text = node->get_direct_text();
 
@@ -487,7 +519,10 @@ TableBody parse_table_body(const mnu_xml::Node *node) {
 
   body.justify = node->attr("justify");
   body.vjustify = node->attr("vjustify");
-  body.column = parse_int(node->attr("column"));
+  if (node->has_attr("column")) {
+    body.column = parse_int(node->attr("column"));
+    body.has_column = true;
+  }
 
   // Check for BITMAP_DRAW flag (bare attribute or attribute with value).
   body.bitmap_draw = node->has_attr("bitmap_draw");
@@ -503,7 +538,10 @@ TableSubst parse_table_subst(const mnu_xml::Node *node) {
   TableSubst subst;
   if (!node) return subst;
 
-  subst.column = parse_int(node->attr("column"));
+  if (node->has_attr("column")) {
+    subst.column = parse_int(node->attr("column"));
+    subst.has_column = true;
+  }
   subst.value = node->attr("value");
   subst.is_file = node->has_attr("file");
   // File path is in text content.
@@ -518,8 +556,14 @@ TableColumn parse_table_column(const mnu_xml::Node *node) {
   TableColumn col;
   if (!node) return col;
 
-  col.count = parse_int(node->attr("count"));
-  col.spacing = parse_int(node->attr("spacing"));
+  if (node->has_attr("count")) {
+    col.count = parse_int(node->attr("count"));
+    col.has_count = true;
+  }
+  if (node->has_attr("spacing")) {
+    col.spacing = parse_int(node->attr("spacing"));
+    col.has_spacing = true;
+  }
 
   for (const auto &child : node->children) {
     if (!child->is_element()) continue;
@@ -601,7 +645,10 @@ Window parse_window(const mnu_xml::Node *window_node) {
   win.modal = window_node->attr_bool("modal");
   win.readonly = window_node->attr_bool("readonly");
   win.as_button = window_node->attr_bool("as_button");
-  win.group = parse_int(window_node->attr("group"));
+  if (window_node->has_attr("group")) {
+    win.group = parse_int(window_node->attr("group"));
+    win.has_group = true;
+  }
 
   // Numeric edit-field constraints (preserved for round-trip; see ADR 0002).
   win.number = window_node->attr_bool("number");
@@ -651,10 +698,6 @@ Window parse_window(const mnu_xml::Node *window_node) {
     } else if (tag == "list_box" || tag == "listbox") {
       // LIST_BOX contains styling and items for dropdown popups.
       win.list_box = parse_listbox(child.get());
-      // Also copy items to win.items for convenience.
-      if (!win.list_box.items.items.empty()) {
-        win.items = win.list_box.items;
-      }
     } else if (tag == "spinup") {
       win.spinup = parse_spinbutton(child.get());
     } else if (tag == "spindown") {
@@ -664,6 +707,7 @@ Window parse_window(const mnu_xml::Node *window_node) {
     } else if (tag == "group") {
       // Radio button group ID (element form).
       win.group = parse_int(child->get_text());
+      win.has_group = true;
     } else if (tag == "orientation") {
       // Scroll/slider orientation.
       win.orientation = child->get_direct_text();
@@ -693,21 +737,25 @@ Window parse_window(const mnu_xml::Node *window_node) {
     } else if (tag == "min_item_height") {
       // Table minimum row height.
       win.table_data.min_item_height = parse_int(child->get_direct_text());
+      win.table_data.has_min_item_height = true;
     } else if (tag == "datasource") {
       // Data source file (for marquee_wnd credits, etc.)
       win.datasource = child->get_direct_text();
+    } else if (tag == "text_rsrc") {
+      win.text_rsrc = child->get_direct_text();
     } else if (tag == "hotkey") {
-      // Hotkey binding (e.g., VK_ESCAPE, VK_RETURN)
-      win.hotkey = child->get_direct_text();
-      win.hotkey_virtual = child->has_attr("virtual");
+      // Preserve every authored accelerator in document order.
+      win.hotkeys.push_back(
+          Hotkey{child->get_direct_text(), child->has_attr("virtual")});
     } else if (tag == "window") {
       // Nested child window.
       win.children.push_back(parse_window(child.get()));
     }
   }
 
-  // For Table type, extract outline/selection colors and multiselect from ITEMS.
-  if (win.type == WindowType::Table) {
+  // GLB_TABLE is a retail table subclass and shares the same ITEMS conveniences
+  // as the base Table widget.
+  if (win.type == WindowType::Table || win.type == WindowType::GlbTable) {
     for (const auto &child : window_node->children) {
       if (!child->is_element()) continue;
       if (opennova::strutil::iequals(child->tag, "items")) {
@@ -746,9 +794,16 @@ Screen parse_screen(const mnu_xml::Node *screen_node) {
 
   // Name, music_var, text_rsrc can be attributes or child elements.
   screen.name = attr_or_child(screen_node, "name");
-  screen.music_var = parse_int(attr_or_child(screen_node, "musicvar"));
-  if (screen.music_var == 0) {
-    screen.music_var = parse_int(attr_or_child(screen_node, "music_var"));
+  const mnu_xml::Node *music = screen_node->find_child("musicvar");
+  if (!music) music = screen_node->find_child("music_var");
+  if (screen_node->has_attr("musicvar") || screen_node->has_attr("music_var") ||
+      music != nullptr) {
+    screen.music_var = parse_int(attr_or_child(screen_node, "musicvar"));
+    if (!screen_node->has_attr("musicvar") &&
+        !screen_node->find_child("musicvar")) {
+      screen.music_var = parse_int(attr_or_child(screen_node, "music_var"));
+    }
+    screen.has_music_var = true;
   }
 
   // Parse child elements.
@@ -783,6 +838,133 @@ Screen parse_screen(const mnu_xml::Node *screen_node) {
   }
 
   return screen;
+}
+
+void append_utf8(uint32_t cp, std::string &out) {
+  if (cp <= 0x7F) {
+    out.push_back(static_cast<char>(cp));
+  } else if (cp <= 0x7FF) {
+    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else if (cp <= 0xFFFF) {
+    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else {
+    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  }
+}
+
+bool decode_source(const uint8_t *data, size_t size, SourceEncoding &encoding,
+                   std::string &utf8, std::string &error) {
+  encoding = SourceEncoding::Utf8;
+  size_t offset = 0;
+  bool utf16 = false;
+  bool big_endian = false;
+  if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB &&
+      data[2] == 0xBF) {
+    encoding = SourceEncoding::Utf8Bom;
+    offset = 3;
+  } else if (size >= 2 && data[0] == 0xFF && data[1] == 0xFE) {
+    encoding = SourceEncoding::Utf16LE;
+    offset = 2;
+    utf16 = true;
+  } else if (size >= 2 && data[0] == 0xFE && data[1] == 0xFF) {
+    encoding = SourceEncoding::Utf16BE;
+    offset = 2;
+    utf16 = true;
+    big_endian = true;
+  }
+
+  if (!utf16) {
+    utf8.assign(reinterpret_cast<const char *>(data + offset), size - offset);
+    return true;
+  }
+  if ((size - offset) % 2 != 0) {
+    error = "UTF-16 MNU input has an incomplete code unit";
+    return false;
+  }
+
+  utf8.clear();
+  utf8.reserve(size - offset);
+  auto unit_at = [&](size_t at) -> uint16_t {
+    if (big_endian)
+      return static_cast<uint16_t>((data[at] << 8) | data[at + 1]);
+    return static_cast<uint16_t>(data[at] | (data[at + 1] << 8));
+  };
+  for (size_t i = offset; i < size; i += 2) {
+    uint32_t cp = unit_at(i);
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+      if (i + 3 >= size) {
+        error = "UTF-16 MNU input ends in a high surrogate";
+        return false;
+      }
+      const uint32_t low = unit_at(i + 2);
+      if (low < 0xDC00 || low > 0xDFFF) {
+        error = "UTF-16 MNU input has an invalid surrogate pair";
+        return false;
+      }
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+      i += 2;
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+      error = "UTF-16 MNU input has an unpaired low surrogate";
+      return false;
+    }
+    append_utf8(cp, utf8);
+  }
+  return true;
+}
+
+bool decode_utf8(const std::string &text, std::vector<uint32_t> &codepoints,
+                 std::string &error) {
+  codepoints.clear();
+  for (size_t i = 0; i < text.size();) {
+    const uint8_t lead = static_cast<uint8_t>(text[i]);
+    uint32_t cp = 0;
+    size_t count = 0;
+    if (lead <= 0x7F) {
+      cp = lead;
+      count = 1;
+    } else if ((lead & 0xE0) == 0xC0) {
+      cp = lead & 0x1F;
+      count = 2;
+    } else if ((lead & 0xF0) == 0xE0) {
+      cp = lead & 0x0F;
+      count = 3;
+    } else if ((lead & 0xF8) == 0xF0) {
+      cp = lead & 0x07;
+      count = 4;
+    } else {
+      error = "MNU text contains invalid UTF-8";
+      return false;
+    }
+    if (i + count > text.size()) {
+      error = "MNU text ends in an incomplete UTF-8 sequence";
+      return false;
+    }
+    for (size_t j = 1; j < count; ++j) {
+      const uint8_t next = static_cast<uint8_t>(text[i + j]);
+      if ((next & 0xC0) != 0x80) {
+        error = "MNU text contains invalid UTF-8 continuation bytes";
+        return false;
+      }
+      cp = (cp << 6) | (next & 0x3F);
+    }
+    const bool overlong = (count == 2 && cp < 0x80) ||
+                          (count == 3 && cp < 0x800) ||
+                          (count == 4 && cp < 0x10000);
+    if (overlong || cp > 0x10FFFF ||
+        (cp >= 0xD800 && cp <= 0xDFFF)) {
+      error = "MNU text contains an invalid UTF-8 code point";
+      return false;
+    }
+    codepoints.push_back(cp);
+    i += count;
+  }
+  return true;
 }
 
 }  // namespace
@@ -826,6 +1008,55 @@ const char *window_type_name(WindowType type) {
   return "unknown";
 }
 
+const Appearance *Items::find_appearance(const std::string &state,
+                                         const std::string &type) const {
+  for (const Appearance &appearance : appearances) {
+    if (opennova::strutil::iequals(appearance.state, state) &&
+        opennova::strutil::iequals(appearance.type, type)) {
+      return &appearance;
+    }
+  }
+  return nullptr;
+}
+
+Appearance *Items::find_appearance(const std::string &state,
+                                   const std::string &type) {
+  for (Appearance &appearance : appearances) {
+    if (opennova::strutil::iequals(appearance.state, state) &&
+        opennova::strutil::iequals(appearance.type, type)) {
+      return &appearance;
+    }
+  }
+  return nullptr;
+}
+
+void Items::set_appearance_value(const std::string &state,
+                                 const std::string &type,
+                                 const std::string &value) {
+  present = true;
+  // Convenience values mirror the last matching authored row. Update that same
+  // canonical row so duplicate appearances retain their earlier ordered values.
+  Appearance *appearance = nullptr;
+  for (auto it = appearances.rbegin(); it != appearances.rend(); ++it) {
+    if (opennova::strutil::iequals(it->state, state) &&
+        opennova::strutil::iequals(it->type, type)) {
+      appearance = &*it;
+      break;
+    }
+  }
+  if (appearance == nullptr) {
+    appearances.push_back(Appearance{});
+    appearance = &appearances.back();
+    appearance->state = state;
+    appearance->type = type;
+  }
+  appearance->value = value;
+  if (opennova::strutil::iequals(state, "selected") &&
+      opennova::strutil::iequals(type, "color")) {
+    selection_color = value;
+  }
+}
+
 const Screen *Document::find_screen(const std::string &name) const {
   for (const auto &screen : screens) {
     if (opennova::strutil::iequals(screen.name, name)) {
@@ -847,7 +1078,17 @@ bool parse(const std::string &content, Document &out, std::string &error,
 
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
            const ParseOptions &options) {
-  out.screens.clear();
+  out = Document{};
+  if (!data && size != 0) {
+    error = "MNU input buffer is null";
+    return false;
+  }
+
+  std::string utf8;
+  if (size != 0 &&
+      !decode_source(data, size, out.source_encoding, utf8, error)) {
+    return false;
+  }
 
   // Parse as generic XML first.
   mnu_xml::Document xml_doc;
@@ -855,7 +1096,8 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
   xml_opts.normalize_whitespace = true;
   xml_opts.trim_text = true;
 
-  if (!mnu_xml::parse(data, size, xml_doc, error, xml_opts)) {
+  if (!mnu_xml::parse(reinterpret_cast<const uint8_t *>(utf8.data()),
+                      utf8.size(), xml_doc, error, xml_opts)) {
     return false;
   }
 
@@ -1051,23 +1293,41 @@ void write_position(const Position &pos, std::string &out, int depth,
 void write_appearance(const Appearance &app, std::string &out, int depth,
                       bool pretty, int indent_size) {
   if (app.state.empty() && app.type.empty() && app.value.empty() &&
-      app.map_state < 0 && app.height == 0) {
+      !app.has_map_state && !app.has_height) {
     return;
   }
   std::string attrs;
-  // Original format has type before state
+  // Original format has type before state.
   attrs += attr_pair("type", app.type);
   attrs += attr_pair("state", app.state);
-  if (app.map_state >= 0) {
+  if (app.has_map_state) {
     attrs += " map_state=\"" + std::to_string(app.map_state) + "\"";
   }
-  if (app.height > 0) {
+  if (app.has_height) {
     attrs += " height=\"" + std::to_string(app.height) + "\"";
   }
 
   append_line(out, depth,
               "<APPEARANCE" + attrs + ">" + escape_xml(app.value) +
                   "</APPEARANCE>",
+              pretty, indent_size);
+}
+
+void write_tagged_appearance(const Appearance &app, const char *tag,
+                             std::string &out, int depth, bool pretty,
+                             int indent_size) {
+  std::string attrs;
+  attrs += attr_pair("type", app.type);
+  attrs += attr_pair("state", app.state);
+  if (app.has_map_state) {
+    attrs += " map_state=\"" + std::to_string(app.map_state) + "\"";
+  }
+  if (app.has_height) {
+    attrs += " height=\"" + std::to_string(app.height) + "\"";
+  }
+  append_line(out, depth,
+              std::string("<") + tag + attrs + ">" + escape_xml(app.value) +
+                  "</" + tag + ">",
               pretty, indent_size);
 }
 
@@ -1085,7 +1345,9 @@ void write_sound(const Sound &snd, std::string &out, int depth, bool pretty,
 void write_action(const Action &act, std::string &out, int depth, bool pretty,
                   int indent_size) {
   if (act.type.empty() && act.state.empty() && act.file.empty() &&
-      act.target.empty()) {
+      act.source.empty() && act.field.empty() && !act.has_target_form &&
+      !act.toggle && act.test.empty() && act.target.empty() &&
+      !act.external_browser) {
     return;
   }
   std::string attrs;
@@ -1095,6 +1357,13 @@ void write_action(const Action &act, std::string &out, int depth, bool pretty,
   for (auto &c : state_upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
   attrs += attr_pair("state", state_upper);
   attrs += attr_pair("file", act.file);
+  attrs += attr_pair("source", act.source);
+  attrs += attr_pair("field", act.field);
+  if (act.has_target_form) {
+    attrs += attr_pair("target_form", std::to_string(act.target_form));
+  }
+  if (act.toggle) attrs += " TOGGLE";
+  attrs += attr_pair("test", act.test);
   if (act.external_browser) attrs += " EXTERNAL_BROWSER";
   // Don't write target as attribute - it goes in element content
 
@@ -1105,15 +1374,12 @@ void write_action(const Action &act, std::string &out, int depth, bool pretty,
 
 void write_string(const String &str, std::string &out, int depth, bool pretty,
                   int indent_size) {
-  if (str.value.empty() && str.type.empty() && str.justify.empty() &&
-      str.vjustify.empty() && str.edge == 0) {
-    return;
-  }
+  if (!str.present) return;
   std::string attrs;
   attrs += attr_pair("type", str.type);
   attrs += attr_pair("justify", str.justify);
   attrs += attr_pair("vjustify", str.vjustify);
-  if (str.edge != 0) {
+  if (str.has_edge) {
     attrs += " edge=\"" + std::to_string(str.edge) + "\"";
   }
 
@@ -1190,17 +1456,21 @@ void write_font(const Font &font, std::string &out, int depth, bool pretty,
 
 void write_frame(const Frame &frame, std::string &out, int depth, bool pretty,
                  int indent_size) {
-  if (frame.stencil.empty() && frame.stencil_size == 0 && frame.brush.empty() &&
-      frame.monogram.empty()) {
+  const bool has_stencil =
+      !frame.stencil.empty() || frame.has_stencil_size || frame.has_insetx ||
+      frame.has_insety;
+  if (!has_stencil && frame.brush.empty() && frame.monogram.empty()) {
     return;
   }
   append_line(out, depth, "<FRAME>", pretty, indent_size);
-  if (!frame.stencil.empty()) {
-    std::string size_attr = frame.stencil_size > 0
+  if (has_stencil) {
+    std::string size_attr = frame.has_stencil_size
                                 ? " size=\"" + std::to_string(frame.stencil_size) + "\""
                                 : "";
-    if (frame.has_insetx) size_attr += " insetx=\"" + std::to_string(frame.insetx) + "\"";
-    if (frame.has_insety) size_attr += " insety=\"" + std::to_string(frame.insety) + "\"";
+    if (frame.has_insetx)
+      size_attr += " insetx=\"" + std::to_string(frame.insetx) + "\"";
+    if (frame.has_insety)
+      size_attr += " insety=\"" + std::to_string(frame.insety) + "\"";
     append_line(out, depth + 1,
                 "<STENCIL" + size_attr + ">" + escape_xml(frame.stencil) + "</STENCIL>",
                 pretty, indent_size);
@@ -1219,14 +1489,41 @@ void write_frame(const Frame &frame, std::string &out, int depth, bool pretty,
 }
 
 void write_items(const Items &items, std::string &out, int depth, bool pretty,
-                 int indent_size) {
-  if (items.items.empty() && items.justify.empty() && items.vjustify.empty())
-    return;
+                 int indent_size, bool multiselect = false) {
+  if (!items.present) return;
   std::string attrs;
   attrs += attr_pair("justify", items.justify);
   attrs += attr_pair("vjustify", items.vjustify);
+  if (items.multiselect || multiselect) attrs += " MULTISELECT";
 
   append_line(out, depth, "<ITEMS" + attrs + ">", pretty, indent_size);
+  size_t last_selection = items.appearances.size();
+  for (size_t i = 0; i < items.appearances.size(); ++i) {
+    const Appearance &app = items.appearances[i];
+    if (opennova::strutil::iequals(app.state, "selected") &&
+        opennova::strutil::iequals(app.type, "color")) {
+      last_selection = i;
+    }
+  }
+  for (size_t i = 0; i < items.appearances.size(); ++i) {
+    const Appearance &app = items.appearances[i];
+    if (i == last_selection && !items.selection_color.empty() &&
+        app.value != items.selection_color) {
+      Appearance selected = app;
+      selected.value = items.selection_color;
+      write_appearance(selected, out, depth + 1, pretty, indent_size);
+    } else {
+      write_appearance(app, out, depth + 1, pretty, indent_size);
+    }
+  }
+  if (!items.selection_color.empty() &&
+      last_selection == items.appearances.size()) {
+    Appearance selection;
+    selection.type = "color";
+    selection.state = "selected";
+    selection.value = items.selection_color;
+    write_appearance(selection, out, depth + 1, pretty, indent_size);
+  }
   for (const auto &item : items.items) {
     std::string item_attrs;
     item_attrs += attr_pair("type", item.type);
@@ -1265,39 +1562,106 @@ void write_listbox_scrollbar(const ListBoxScrollbar &sb, std::string &out,
   }
   // Shuttle appearances
   for (const auto &app : sb.shuttle) {
-    Appearance shuttle_app = app;
-    append_line(out, depth + 1,
-                "<SHUTTLE" + attr_pair("type", shuttle_app.type) +
-                    attr_pair("state", shuttle_app.state) + ">" +
-                    escape_xml(shuttle_app.value) + "</SHUTTLE>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SHUTTLE", out, depth + 1, pretty,
+                            indent_size);
   }
   // Scroll up appearances
   for (const auto &app : sb.scrollup) {
-    std::string attrs;
-    attrs += attr_pair("type", app.type);
-    attrs += attr_pair("state", app.state);
-    if (app.map_state >= 0) attrs += attr_pair("map_state", std::to_string(app.map_state));
-    if (app.height > 0) attrs += attr_pair("height", std::to_string(app.height));
-    append_line(out, depth + 1,
-                "<SCROLLUP" + attrs + ">" + escape_xml(app.value) + "</SCROLLUP>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SCROLLUP", out, depth + 1, pretty,
+                            indent_size);
   }
   // Scroll down appearances
   for (const auto &app : sb.scrolldown) {
-    std::string attrs;
-    attrs += attr_pair("type", app.type);
-    attrs += attr_pair("state", app.state);
-    if (app.map_state >= 0) attrs += attr_pair("map_state", std::to_string(app.map_state));
-    if (app.height > 0) attrs += attr_pair("height", std::to_string(app.height));
-    append_line(out, depth + 1,
-                "<SCROLLDOWN" + attrs + ">" + escape_xml(app.value) + "</SCROLLDOWN>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SCROLLDOWN", out, depth + 1, pretty,
+                            indent_size);
   }
   // Sounds (CLICK_VALUE, etc.)
   for (const auto &s : sb.sounds) {
     write_sound(s, out, depth + 1, pretty, indent_size);
   }
+  write_position(sb.position, out, depth + 1, pretty, indent_size);
+  append_line(out, depth, "</SCROLLBAR>", pretty, indent_size);
+}
+
+void write_table_column(const TableColumn &column, std::string &out, int depth,
+                        bool pretty, int indent_size) {
+  // COLUMN is typed child data shared by the base Table, retail subclasses, and
+  // forward-compatible generic widgets. Its presence is determined by modeled
+  // structure rather than the WINDOW factory token.
+  if (!column.has_count && !column.has_spacing && column.headers.empty() &&
+      column.bodies.empty() && column.substitutions.empty()) {
+    return;
+  }
+
+  std::string attrs;
+  if (column.has_count)
+    attrs += attr_pair("count", std::to_string(column.count));
+  if (column.has_spacing)
+    attrs += attr_pair("spacing", std::to_string(column.spacing));
+  append_line(out, depth, "<COLUMN" + attrs + ">", pretty, indent_size);
+
+  for (const auto &header : column.headers) {
+    std::string header_attrs;
+    header_attrs += attr_pair("justify", header.justify);
+    header_attrs += attr_pair("vjustify", header.vjustify);
+    if (header.has_column)
+      header_attrs += attr_pair("column", std::to_string(header.column));
+    header_attrs += attr_pair("sort", header.sort);
+    if (header.has_width)
+      header_attrs += attr_pair("width", std::to_string(header.width));
+    header_attrs += attr_pair("type", header.type);
+    append_line(out, depth + 1,
+                "<HEADER" + header_attrs + ">" + escape_xml(header.text) +
+                    "</HEADER>",
+                pretty, indent_size);
+  }
+
+  for (const auto &body : column.bodies) {
+    std::string body_attrs;
+    body_attrs += attr_pair("justify", body.justify);
+    body_attrs += attr_pair("vjustify", body.vjustify);
+    if (body.has_column)
+      body_attrs += attr_pair("column", std::to_string(body.column));
+    if (body.bitmap_draw) body_attrs += " BITMAP_DRAW";
+    if (body.scale_bitmap) body_attrs += " SCALE_BITMAP";
+    if (body.custom_draw) body_attrs += " CUSTOM_DRAW";
+    body_attrs += attr_pair("BITMAP_FLAGS", body.bitmap_flags);
+    append_line(out, depth + 1, "<BODY" + body_attrs + "></BODY>", pretty,
+                indent_size);
+  }
+
+  for (const auto &subst : column.substitutions) {
+    std::string subst_attrs;
+    if (subst.has_column)
+      subst_attrs += attr_pair("column", std::to_string(subst.column));
+    subst_attrs += attr_pair("value", subst.value);
+    if (subst.is_file) subst_attrs += " FILE";
+    append_line(out, depth + 1,
+                "<SUBST" + subst_attrs + ">" + escape_xml(subst.file) +
+                    "</SUBST>",
+                pretty, indent_size);
+  }
+
+  append_line(out, depth, "</COLUMN>", pretty, indent_size);
+}
+
+void write_table_scrollbar(const TableScrollbar &sb, std::string &out,
+                           int depth, bool pretty, int indent_size) {
+  if (!sb.present) return;
+  append_line(out, depth, "<SCROLLBAR>", pretty, indent_size);
+  for (const auto &app : sb.track)
+    write_appearance(app, out, depth + 1, pretty, indent_size);
+  for (const auto &app : sb.shuttle)
+    write_tagged_appearance(app, "SHUTTLE", out, depth + 1, pretty,
+                            indent_size);
+  for (const auto &app : sb.scrollup)
+    write_tagged_appearance(app, "SCROLLUP", out, depth + 1, pretty,
+                            indent_size);
+  for (const auto &app : sb.scrolldown)
+    write_tagged_appearance(app, "SCROLLDOWN", out, depth + 1, pretty,
+                            indent_size);
+  for (const auto &sound : sb.sounds)
+    write_sound(sound, out, depth + 1, pretty, indent_size);
   write_position(sb.position, out, depth + 1, pretty, indent_size);
   append_line(out, depth, "</SCROLLBAR>", pretty, indent_size);
 }
@@ -1316,32 +1680,10 @@ void write_listbox(const ListBox &lb, std::string &out, int depth,
   }
   // Position
   write_position(lb.position, out, depth + 1, pretty, indent_size);
-  // Items (with selection color appearance)
-  if (!lb.items.items.empty() || !lb.items.justify.empty() ||
-      !lb.items.selection_color.empty()) {
-    std::string attrs;
-    attrs += attr_pair("justify", lb.items.justify);
-    attrs += attr_pair("vjustify", lb.items.vjustify);
-    append_line(out, depth + 1, "<ITEMS" + attrs + ">", pretty, indent_size);
-    // Selection color as appearance
-    if (!lb.items.selection_color.empty()) {
-      append_line(out, depth + 2,
-                  "<APPEARANCE type=\"color\" state=\"selected\">" +
-                      escape_xml(lb.items.selection_color) + "</APPEARANCE>",
-                  pretty, indent_size);
-    }
-    for (const auto &item : lb.items.items) {
-      std::string item_attrs;
-      item_attrs += attr_pair("type", item.type);
-      item_attrs += attr_pair("value", item.value);
-      append_line(out, depth + 2,
-                  "<ITEM" + item_attrs + ">" + escape_xml(item.text) + "</ITEM>",
-                  pretty, indent_size);
-    }
-    append_line(out, depth + 1, "</ITEMS>", pretty, indent_size);
-  }
+  write_string(lb.string_data, out, depth + 1, pretty, indent_size);
+  write_items(lb.items, out, depth + 1, pretty, indent_size);
   // MIN_ITEM_HEIGHT
-  if (lb.min_item_height > 0) {
+  if (lb.has_min_item_height) {
     append_line(out, depth + 1,
                 "<MIN_ITEM_HEIGHT>" + std::to_string(lb.min_item_height) +
                     "</MIN_ITEM_HEIGHT>",
@@ -1371,6 +1713,9 @@ void write_cursor(const Cursor &cursor, std::string &out, int depth,
 
 void write_window(const Window &win, std::string &out, int depth, bool pretty,
                   int indent_size) {
+  const bool is_list = win.type == WindowType::List;
+  const bool is_table_like =
+      win.type == WindowType::Table || win.type == WindowType::GlbTable;
   std::string attrs;
   // Prefer the authored token: an unmodelled type (generic CWnd in the original
   // [orig: @ 0x64f630]) must not degrade to "unknown" on round-trip.
@@ -1400,17 +1745,17 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   append_line(out, depth, "<WINDOW" + attrs + ">", pretty, indent_size);
 
   // GROUP as child element (not attribute, to match original format)
-  if (win.group > 0) {
+  if (win.has_group) {
     append_line(out, depth + 1,
                 "<GROUP>" + std::to_string(win.group) + "</GROUP>",
                 pretty, indent_size);
   }
 
-  // HOTKEY element (e.g., <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>)
-  if (!win.hotkey.empty()) {
+  // HOTKEY elements are ordered accelerators.
+  for (const auto &hotkey : win.hotkeys) {
     std::string hotkey_line = "<HOTKEY";
-    if (win.hotkey_virtual) hotkey_line += " VIRTUAL";
-    hotkey_line += ">" + escape_xml(win.hotkey) + "</HOTKEY>";
+    if (hotkey.virtual_key) hotkey_line += " VIRTUAL";
+    hotkey_line += ">" + escape_xml(hotkey.value) + "</HOTKEY>";
     append_line(out, depth + 1, hotkey_line, pretty, indent_size);
   }
 
@@ -1444,30 +1789,18 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   }
   // Shuttle (grabber) appearances for scroll windows
   for (const auto &app : win.shuttle) {
-    std::string attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-    if (app.map_state >= 0) attrs += attr_pair("map_state", std::to_string(app.map_state));
-    if (app.height > 0) attrs += attr_pair("height", std::to_string(app.height));
-    append_line(out, depth + 1,
-                "<SHUTTLE" + attrs + ">" + escape_xml(app.value) + "</SHUTTLE>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SHUTTLE", out, depth + 1, pretty,
+                            indent_size);
   }
   // Scrollup (left/up arrow) for scroll windows
   for (const auto &app : win.scrollup) {
-    std::string attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-    if (app.map_state >= 0) attrs += attr_pair("map_state", std::to_string(app.map_state));
-    if (app.height > 0) attrs += attr_pair("height", std::to_string(app.height));
-    append_line(out, depth + 1,
-                "<SCROLLUP" + attrs + ">" + escape_xml(app.value) + "</SCROLLUP>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SCROLLUP", out, depth + 1, pretty,
+                            indent_size);
   }
   // Scrolldown (right/down arrow) for scroll windows
   for (const auto &app : win.scrolldown) {
-    std::string attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-    if (app.map_state >= 0) attrs += attr_pair("map_state", std::to_string(app.map_state));
-    if (app.height > 0) attrs += attr_pair("height", std::to_string(app.height));
-    append_line(out, depth + 1,
-                "<SCROLLDOWN" + attrs + ">" + escape_xml(app.value) + "</SCROLLDOWN>",
-                pretty, indent_size);
+    write_tagged_appearance(app, "SCROLLDOWN", out, depth + 1, pretty,
+                            indent_size);
   }
   // TEXT_RSRC goes inside root window (after position)
   if (!win.text_rsrc.empty()) {
@@ -1494,278 +1827,59 @@ void write_window(const Window &win, std::string &out, int depth, bool pretty,
   // overwrites win.items (parse_window sets win.items = parse_items(...) per
   // ITEMS child) and the table-color extraction reads only the first <ITEMS> it
   // finds, so the split drops justify and the selection colors on save/reload.
-  if (win.type != WindowType::List && win.type != WindowType::Table) {
+  if (!is_list && !is_table_like) {
     write_items(win.items, out, depth + 1, pretty, indent_size);
   }
   write_listbox(win.list_box, out, depth + 1, pretty, indent_size);
   write_spin(win.spinup, "SPINUP", out, depth + 1, pretty, indent_size);
   write_spin(win.spindown, "SPINDOWN", out, depth + 1, pretty, indent_size);
 
-  // List-specific elements (ITEMS with justify, selection color, MIN_ITEM_HEIGHT, SCROLLBAR)
-  if (win.type == WindowType::List) {
+  // COLUMN is modeled independently of the runtime factory token. Specialized
+  // retail widgets and unknown/future generic widgets must retain it too.
+  write_table_column(win.table_data.column, out, depth + 1, pretty,
+                     indent_size);
+
+  // List-specific ITEMS aliases. The remaining table_data children are emitted
+  // once by the shared block below.
+  if (is_list) {
     const auto &td = win.table_data;
 
-    // ITEMS element with justify/vjustify attributes
-    std::string items_attrs;
-    if (!win.items.justify.empty()) items_attrs += attr_pair("justify", win.items.justify);
-    if (!win.items.vjustify.empty()) items_attrs += attr_pair("vjustify", win.items.vjustify);
-    if (td.multiselect) items_attrs += " MULTISELECT";
+    Items list_items = win.items;
+    if (list_items.selection_color.empty())
+      list_items.selection_color = td.selection_color;
+    write_items(list_items, out, depth + 1, pretty, indent_size,
+                td.multiselect);
+  }
 
-    // Only output ITEMS if we have attributes, a selection color, or rows.
-    bool has_selection = !td.selection_color.empty() || !win.items.selection_color.empty();
-    bool has_rows = !win.items.items.empty();
-    if (!items_attrs.empty() || has_selection || has_rows) {
-      append_line(out, depth + 1, "<ITEMS" + items_attrs + ">", pretty, indent_size);
-      // Selection color from table_data or items
-      std::string sel_color = !td.selection_color.empty() ? td.selection_color : win.items.selection_color;
-      if (!sel_color.empty()) {
-        append_line(out, depth + 2,
-                    "<APPEARANCE type=\"color\" state=\"selected\">" +
-                        escape_xml(sel_color) + "</APPEARANCE>",
-                    pretty, indent_size);
-      }
-      // Item rows (the row-bearing block for a List; the generic write_items above
-      // is skipped for List types so this is the single source of its ITEMS).
-      for (const auto &item : win.items.items) {
-        std::string item_attrs;
-        item_attrs += attr_pair("type", item.type);
-        item_attrs += attr_pair("value", item.value);
-        if (!item.text.empty()) {
-          append_line(out, depth + 2,
-                      "<ITEM" + item_attrs + ">" + escape_xml(item.text) +
-                          "</ITEM>",
-                      pretty, indent_size);
-        } else {
-          append_line(out, depth + 2, "<ITEM" + item_attrs + "/>", pretty,
-                      indent_size);
-        }
-      }
-      append_line(out, depth + 1, "</ITEMS>", pretty, indent_size);
-    }
-
-    // MIN_ITEM_HEIGHT
-    if (td.min_item_height > 0) {
-      append_line(out, depth + 1,
-                  "<MIN_ITEM_HEIGHT>" + std::to_string(td.min_item_height) + "</MIN_ITEM_HEIGHT>",
-                  pretty, indent_size);
-    }
-
-    // SCROLLBAR (same as Table)
-    if (td.scrollbar.present) {
-      const auto &sb = td.scrollbar;
-      append_line(out, depth + 1, "<SCROLLBAR>", pretty, indent_size);
-
-      // Track appearances
-      for (const auto &app : sb.track) {
-        write_appearance(app, out, depth + 2, pretty, indent_size);
-      }
-
-      // Shuttle appearances
-      for (const auto &app : sb.shuttle) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SHUTTLE" + s_attrs + ">" + escape_xml(app.value) + "</SHUTTLE>",
-                    pretty, indent_size);
-      }
-
-      // SCROLLUP appearances
-      for (const auto &app : sb.scrollup) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SCROLLUP" + s_attrs + ">" + escape_xml(app.value) + "</SCROLLUP>",
-                    pretty, indent_size);
-      }
-
-      // SCROLLDOWN appearances
-      for (const auto &app : sb.scrolldown) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SCROLLDOWN" + s_attrs + ">" + escape_xml(app.value) + "</SCROLLDOWN>",
-                    pretty, indent_size);
-      }
-
-      // Sounds
-      for (const auto &sound : sb.sounds) {
-        std::string sound_attrs;
-        sound_attrs += attr_pair("state", sound.state);
-        sound_attrs += attr_pair("trigger", sound.trigger);
-        append_line(out, depth + 2,
-                    "<SOUND" + sound_attrs + ">" + escape_xml(sound.file) + "</SOUND>",
-                    pretty, indent_size);
-      }
-
-      // Position
-      write_position(sb.position, out, depth + 2, pretty, indent_size);
-
-      append_line(out, depth + 1, "</SCROLLBAR>", pretty, indent_size);
+  // Table and GLB_TABLE expose convenience aliases over their ordered ITEMS
+  // rows. A nonempty table alias is canonical and updates only the final
+  // matching occurrence; earlier authored duplicates remain unchanged.
+  if (is_table_like) {
+    const auto &td = win.table_data;
+    // Explicit container omission wins over latent table aliases.
+    if (win.items.present) {
+      Items table_items = win.items;
+      if (!td.outline_color.empty())
+        table_items.set_appearance_value("default", "outline",
+                                         td.outline_color);
+      if (!td.selection_color.empty())
+        table_items.selection_color = td.selection_color;
+      write_items(table_items, out, depth + 1, pretty, indent_size,
+                  td.multiselect);
     }
   }
 
-  // Table-specific elements (COLUMN, ITEMS, MIN_ITEM_HEIGHT, SCROLLBAR)
-  if (win.type == WindowType::Table) {
-    const auto &td = win.table_data;
-
-    // COLUMN element. Emit whenever the column carries any structure so bodies and
-    // value->image SUBST cells are never dropped on save (not only when a count or
-    // header is present).
-    if (td.column.count > 0 || !td.column.headers.empty() ||
-        !td.column.bodies.empty() || !td.column.substitutions.empty()) {
-      std::string col_attrs;
-      col_attrs += attr_pair("count", std::to_string(td.column.count));
-      col_attrs += attr_pair("spacing", std::to_string(td.column.spacing));
-      append_line(out, depth + 1, "<COLUMN" + col_attrs + ">", pretty, indent_size);
-
-      // HEADER elements
-      for (const auto &h : td.column.headers) {
-        std::string h_attrs;
-        if (!h.justify.empty()) h_attrs += attr_pair("justify", h.justify);
-        if (!h.vjustify.empty()) h_attrs += attr_pair("vjustify", h.vjustify);
-        h_attrs += attr_pair("column", std::to_string(h.column));
-        if (!h.sort.empty()) h_attrs += attr_pair("sort", h.sort);
-        if (h.width > 0) h_attrs += attr_pair("width", std::to_string(h.width));
-        if (!h.type.empty()) h_attrs += attr_pair("type", h.type);
-        append_line(out, depth + 2, "<HEADER" + h_attrs + ">" + escape_xml(h.text) + "</HEADER>",
-                    pretty, indent_size);
-      }
-
-      // BODY elements
-      for (const auto &b : td.column.bodies) {
-        std::string b_attrs;
-        if (!b.justify.empty()) b_attrs += attr_pair("justify", b.justify);
-        if (!b.vjustify.empty()) b_attrs += attr_pair("vjustify", b.vjustify);
-        b_attrs += attr_pair("column", std::to_string(b.column));
-        if (b.bitmap_draw) b_attrs += " BITMAP_DRAW";
-        if (b.scale_bitmap) b_attrs += " SCALE_BITMAP";
-        if (b.custom_draw) b_attrs += " CUSTOM_DRAW";
-        if (!b.bitmap_flags.empty()) b_attrs += attr_pair("BITMAP_FLAGS", b.bitmap_flags);
-        append_line(out, depth + 2, "<BODY" + b_attrs + " ></BODY>", pretty, indent_size);
-      }
-
-      // SUBST elements (value -> image substitution). Parsed into
-      // td.column.substitutions and applied at runtime, so they must round-trip
-      // on save. Mirror the original fixture form: <SUBST column="N" value="x"
-      // FILE>img.tga</SUBST>, with the bare FILE flag emitted uppercase like BODY.
-      for (const auto &s : td.column.substitutions) {
-        std::string s_attrs = attr_pair("column", std::to_string(s.column));
-        if (!s.value.empty()) s_attrs += attr_pair("value", s.value);
-        if (s.is_file) s_attrs += " FILE";
-        append_line(out, depth + 2,
-                    "<SUBST" + s_attrs + ">" + escape_xml(s.file) + "</SUBST>",
-                    pretty, indent_size);
-      }
-
-      append_line(out, depth + 1, "</COLUMN>", pretty, indent_size);
-    }
-
-    // ITEMS element (justify/vjustify + outline/selection colors + MULTISELECT).
-    // One combined block: the generic write_items above is skipped for Table, so
-    // this is the single source of the table's ITEMS, mirroring the List path. A
-    // split (justify in an empty <ITEMS>, colors in a second) does not round-trip
-    // -- parse_window keeps only the last ITEMS for win.items and reads colors
-    // from the first, so each block would drop the other's data on save/reload.
-    {
-      std::string items_attrs;
-      if (!win.items.justify.empty())
-        items_attrs += attr_pair("justify", win.items.justify);
-      if (!win.items.vjustify.empty())
-        items_attrs += attr_pair("vjustify", win.items.vjustify);
-      if (td.multiselect) items_attrs += " MULTISELECT";
-      if (!items_attrs.empty() || !td.outline_color.empty() ||
-          !td.selection_color.empty()) {
-        append_line(out, depth + 1, "<ITEMS" + items_attrs + ">", pretty,
-                    indent_size);
-        if (!td.outline_color.empty()) {
-          append_line(out, depth + 2,
-                      "<APPEARANCE type=\"outline\" state=\"default\">" +
-                          escape_xml(td.outline_color) + "</APPEARANCE>",
-                      pretty, indent_size);
-        }
-        if (!td.selection_color.empty()) {
-          append_line(out, depth + 2,
-                      "<APPEARANCE type=\"color\" state=\"selected\">" +
-                          escape_xml(td.selection_color) + "</APPEARANCE>",
-                      pretty, indent_size);
-        }
-        append_line(out, depth + 1, "</ITEMS>", pretty, indent_size);
-      }
-    }
-
-    // MIN_ITEM_HEIGHT
-    if (td.min_item_height > 0) {
-      append_line(out, depth + 1,
-                  "<MIN_ITEM_HEIGHT>" + std::to_string(td.min_item_height) + "</MIN_ITEM_HEIGHT>",
-                  pretty, indent_size);
-    }
-
-    // SCROLLBAR
-    if (td.scrollbar.present) {
-      const auto &sb = td.scrollbar;
-      append_line(out, depth + 1, "<SCROLLBAR>", pretty, indent_size);
-
-      // Track appearances
-      for (const auto &app : sb.track) {
-        write_appearance(app, out, depth + 2, pretty, indent_size);
-      }
-
-      // Shuttle appearances
-      for (const auto &app : sb.shuttle) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SHUTTLE" + s_attrs + ">" + escape_xml(app.value) + "</SHUTTLE>",
-                    pretty, indent_size);
-      }
-
-      // Scrollup appearances
-      for (const auto &app : sb.scrollup) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SCROLLUP" + s_attrs + ">" + escape_xml(app.value) + "</SCROLLUP>",
-                    pretty, indent_size);
-      }
-
-      // Scrolldown appearances
-      for (const auto &app : sb.scrolldown) {
-        std::string s_attrs = attr_pair("type", app.type) + attr_pair("state", app.state);
-        if (app.map_state >= 0) s_attrs += attr_pair("map_state", std::to_string(app.map_state));
-        if (app.height > 0) s_attrs += attr_pair("height", std::to_string(app.height));
-        append_line(out, depth + 2,
-                    "<SCROLLDOWN" + s_attrs + ">" + escape_xml(app.value) + "</SCROLLDOWN>",
-                    pretty, indent_size);
-      }
-
-      // Sounds
-      for (const auto &snd : sb.sounds) {
-        write_sound(snd, out, depth + 2, pretty, indent_size);
-      }
-
-      // Position
-      write_position(sb.position, out, depth + 2, pretty, indent_size);
-
-      append_line(out, depth + 1, "</SCROLLBAR>", pretty, indent_size);
-    }
-  }
-
-  // MIN_ITEM_HEIGHT for list-like widgets other than List/Table (e.g. combobox,
-  // spinlist, multi): they parse a direct <MIN_ITEM_HEIGHT> child into table_data
-  // but have no dedicated emit above, so it is lost on save without this (ADR 0002).
-  if (win.type != WindowType::List && win.type != WindowType::Table &&
-      win.table_data.min_item_height > 0) {
+  // These typed children are shared by Table, list-like subclasses, and generic
+  // future widgets. Emit each exactly once regardless of WINDOW type.
+  if (win.table_data.has_min_item_height) {
     append_line(out, depth + 1,
                 "<MIN_ITEM_HEIGHT>" +
                     std::to_string(win.table_data.min_item_height) +
                     "</MIN_ITEM_HEIGHT>",
                 pretty, indent_size);
   }
+  write_table_scrollbar(win.table_data.scrollbar, out, depth + 1, pretty,
+                        indent_size);
 
   for (const auto &child : win.children) {
     write_window(child, out, depth + 1, pretty, indent_size);
@@ -1782,7 +1896,7 @@ void write_screen(const Screen &screen, std::string &out, int depth,
                 "<NAME>" + escape_xml(screen.name) + "</NAME>", pretty,
                 indent_size);
   }
-  if (screen.music_var != 0) {
+  if (screen.has_music_var) {
     append_line(out, depth + 1,
                 "<MUSICVAR>" + std::to_string(screen.music_var) +
                     "</MUSICVAR>",
@@ -1814,6 +1928,53 @@ std::string serialize(const Document &doc, bool pretty, int indent_size) {
   return out;
 }
 
+bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
+                     std::string &error, bool pretty, int indent_size) {
+  const std::string text = serialize(doc, pretty, indent_size);
+  out.clear();
+  error.clear();
+
+  if (doc.source_encoding == SourceEncoding::Utf8 ||
+      doc.source_encoding == SourceEncoding::Utf8Bom) {
+    out.reserve(text.size() +
+                (doc.source_encoding == SourceEncoding::Utf8Bom ? 3 : 0));
+    if (doc.source_encoding == SourceEncoding::Utf8Bom) {
+      out.insert(out.end(), {0xEF, 0xBB, 0xBF});
+    }
+    out.insert(out.end(), text.begin(), text.end());
+    return true;
+  }
+
+  std::vector<uint32_t> codepoints;
+  if (!decode_utf8(text, codepoints, error)) return false;
+  const bool big_endian = doc.source_encoding == SourceEncoding::Utf16BE;
+  out.reserve(2 + codepoints.size() * 2);
+  if (big_endian) {
+    out.insert(out.end(), {0xFE, 0xFF});
+  } else {
+    out.insert(out.end(), {0xFF, 0xFE});
+  }
+  auto append_unit = [&](uint16_t unit) {
+    if (big_endian) {
+      out.push_back(static_cast<uint8_t>(unit >> 8));
+      out.push_back(static_cast<uint8_t>(unit & 0xFF));
+    } else {
+      out.push_back(static_cast<uint8_t>(unit & 0xFF));
+      out.push_back(static_cast<uint8_t>(unit >> 8));
+    }
+  };
+  for (uint32_t cp : codepoints) {
+    if (cp <= 0xFFFF) {
+      append_unit(static_cast<uint16_t>(cp));
+    } else {
+      cp -= 0x10000;
+      append_unit(static_cast<uint16_t>(0xD800 | (cp >> 10)));
+      append_unit(static_cast<uint16_t>(0xDC00 | (cp & 0x3FF)));
+    }
+  }
+  return true;
+}
+
 bool serialize_file(const Document &doc, const std::string &path,
                     std::string &error, bool pretty, int indent_size) {
   std::ofstream file(path, std::ios::binary);
@@ -1821,8 +1982,10 @@ bool serialize_file(const Document &doc, const std::string &path,
     error = "Failed to open file for writing: " + path;
     return false;
   }
-  std::string data = serialize(doc, pretty, indent_size);
-  file.write(data.data(), static_cast<std::streamsize>(data.size()));
+  std::vector<uint8_t> data;
+  if (!serialize_bytes(doc, data, error, pretty, indent_size)) return false;
+  file.write(reinterpret_cast<const char *>(data.data()),
+             static_cast<std::streamsize>(data.size()));
   if (!file) {
     error = "Failed to write file: " + path;
     return false;

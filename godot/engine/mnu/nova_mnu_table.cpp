@@ -13,11 +13,15 @@
 
 using namespace godot;
 
-void NovaMnuTable::add_column(int p_width, int p_h_align, bool p_bitmap_draw) {
+void NovaMnuTable::add_column(int p_width, int p_h_align, bool p_bitmap_draw,
+		int p_v_align, bool p_scale_bitmap, bool p_custom_draw) {
 	ColumnDef col;
 	col.width = p_width > 0 ? p_width : 80;
 	col.h_align = p_h_align;
+	col.v_align = p_v_align;
 	col.bitmap_draw = p_bitmap_draw;
+	col.scale_bitmap = p_scale_bitmap;
+	col.custom_draw = p_custom_draw;
 	columns_.push_back(col);
 }
 
@@ -121,6 +125,8 @@ void NovaMnuTable::rebuild_rows() {
 	}
 
 	const float width = total_width();
+	const bool has_custom_host =
+			!behavior_.edit_mode && has_connections(StringName("custom_cell_requested"));
 	for (int r = 0; r < static_cast<int>(rows_.size()); ++r) {
 		Control *row = memnew(Control);
 		row->set_name(String("Row") + String::num_int64(r));
@@ -138,19 +144,51 @@ void NovaMnuTable::rebuild_rows() {
 			row->add_child(bg);
 		}
 
+		std::vector<Control *> custom_slots(columns_.size(), nullptr);
 		for (int c = 0; c < static_cast<int>(columns_.size()); ++c) {
 			const Cell cell = c < static_cast<int>(rows_[r].size()) ? rows_[r][c] : Cell();
 			const float x = column_x(c);
-			if (columns_[c].bitmap_draw || cell.image.is_valid()) {
+			if (columns_[c].custom_draw && has_custom_host) {
+				// The table retains geometry/lifetime ownership. A connected host
+				// synchronously fills this ephemeral slot when the completed row is
+				// parented below; every rebuild intentionally creates fresh slots.
+				Control *slot = memnew(Control);
+				slot->set_name(String("Cell") + String::num_int64(c));
+				slot->set_position(Vector2(x, 0));
+				slot->set_size(Vector2(columns_[c].width, row_height_));
+				slot->set_clip_contents(true);
+				slot->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+				row->add_child(slot);
+				custom_slots[c] = slot;
+			} else if (columns_[c].bitmap_draw || cell.image.is_valid()) {
 				TextureRect *tr = memnew(TextureRect);
 				tr->set_name(String("Cell") + String::num_int64(c));
 				if (cell.image.is_valid()) {
 					tr->set_texture(cell.image);
 				}
-				tr->set_position(Vector2(x, 0));
-				tr->set_size(Vector2(columns_[c].width, row_height_));
+				Vector2 cell_pos(x, 0);
+				Vector2 cell_size(columns_[c].width, row_height_);
+				if (!columns_[c].scale_bitmap && cell.image.is_valid()) {
+					cell_size.x = MIN(cell_size.x, static_cast<float>(cell.image->get_width()));
+					cell_size.y = MIN(cell_size.y, static_cast<float>(cell.image->get_height()));
+					if (columns_[c].h_align == HORIZONTAL_ALIGNMENT_CENTER) {
+						cell_pos.x += (columns_[c].width - cell_size.x) * 0.5f;
+					} else if (columns_[c].h_align == HORIZONTAL_ALIGNMENT_RIGHT) {
+						cell_pos.x += columns_[c].width - cell_size.x;
+					}
+					if (columns_[c].v_align == VERTICAL_ALIGNMENT_CENTER) {
+						cell_pos.y += (row_height_ - cell_size.y) * 0.5f;
+					} else if (columns_[c].v_align == VERTICAL_ALIGNMENT_BOTTOM) {
+						cell_pos.y += row_height_ - cell_size.y;
+					}
+				}
+				tr->set_position(cell_pos);
+				tr->set_size(cell_size);
+				tr->set_clip_contents(true);
 				tr->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
-				tr->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_CENTERED);
+				tr->set_stretch_mode(columns_[c].scale_bitmap
+								? TextureRect::STRETCH_SCALE
+								: TextureRect::STRETCH_KEEP_CENTERED);
 				tr->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 				row->add_child(tr);
 			} else {
@@ -160,7 +198,7 @@ void NovaMnuTable::rebuild_rows() {
 				lbl->set_size(Vector2(columns_[c].width, row_height_));
 				lbl->set_text(cell.text);
 				lbl->set_horizontal_alignment((HorizontalAlignment)columns_[c].h_align);
-				lbl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
+				lbl->set_vertical_alignment((VerticalAlignment)columns_[c].v_align);
 				lbl->set_clip_text(true);
 				lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 				if (cell_font_.is_valid()) {
@@ -186,6 +224,14 @@ void NovaMnuTable::rebuild_rows() {
 			row->add_child(rule);
 		}
 		rows_container_->add_child(row);
+		for (int c = 0; c < static_cast<int>(custom_slots.size()); ++c) {
+			if (custom_slots[c] == nullptr) {
+				continue;
+			}
+			const Cell cell = c < static_cast<int>(rows_[r].size()) ? rows_[r][c] : Cell();
+			emit_signal("custom_cell_requested", r, c,
+					cell.value.is_empty() ? cell.text : cell.value, custom_slots[c]);
+		}
 	}
 	rows_container_->set_size(Vector2(width, rows_.size() * row_height_));
 	update_scrollbar();
@@ -241,6 +287,7 @@ void NovaMnuTable::set_row(int p_row, const PackedStringArray &p_cells) {
 	for (int c = 0; c < static_cast<int>(columns_.size()) && c < p_cells.size(); ++c) {
 		rows_[p_row][c].text = p_cells[c];
 		rows_[p_row][c].image = Ref<Texture2D>();
+		rows_[p_row][c].value = String();
 	}
 	rebuild_rows();
 }
@@ -252,6 +299,7 @@ void NovaMnuTable::set_cell_text(int p_row, int p_col, const String &p_text) {
 	}
 	rows_[p_row][p_col].text = p_text;
 	rows_[p_row][p_col].image = Ref<Texture2D>();
+	rows_[p_row][p_col].value = String();
 	rebuild_rows();
 }
 
@@ -329,6 +377,10 @@ void NovaMnuTable::select_row(int p_row, bool p_additive) {
 	if (p_row < 0 || p_row >= static_cast<int>(rows_.size())) {
 		return;
 	}
+	// The authored ITEMS/MULTISELECT policy is authoritative for both mouse
+	// input and host/API calls.  A caller cannot force an additive selection on
+	// a single-select table by passing true here.
+	p_additive = multiselect_ && p_additive;
 	if (!p_additive) {
 		selected_rows_.clear();
 		selected_rows_.insert(p_row);
@@ -377,8 +429,9 @@ void NovaMnuTable::rebuild() {
 }
 
 void NovaMnuTable::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("add_column", "width", "h_align", "bitmap_draw"),
-			&NovaMnuTable::add_column);
+	ClassDB::bind_method(D_METHOD("add_column", "width", "h_align", "bitmap_draw", "v_align",
+								 "scale_bitmap", "custom_draw"),
+			&NovaMnuTable::add_column, DEFVAL(1), DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("add_row"), &NovaMnuTable::add_row);
 	ClassDB::bind_method(D_METHOD("add_row_values", "cells"), &NovaMnuTable::add_row_values);
 	ClassDB::bind_method(D_METHOD("add_rows", "rows"), &NovaMnuTable::add_rows);
@@ -404,4 +457,7 @@ void NovaMnuTable::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("row_activated", PropertyInfo(Variant::INT, "row")));
 	ADD_SIGNAL(MethodInfo("column_sorted", PropertyInfo(Variant::INT, "column"),
 			PropertyInfo(Variant::BOOL, "ascending")));
+	ADD_SIGNAL(MethodInfo("custom_cell_requested", PropertyInfo(Variant::INT, "row"),
+			PropertyInfo(Variant::INT, "column"), PropertyInfo(Variant::STRING, "value"),
+			PropertyInfo(Variant::OBJECT, "slot", PROPERTY_HINT_NODE_TYPE, "Control")));
 }

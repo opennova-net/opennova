@@ -318,7 +318,10 @@ std::string parse_attr_value(const char *&p, const char *end) {
   if (*p == '"' || *p == '\'') {
     // Quoted value.
     char quote = *p++;
-    while (p < end && *p != quote) {
+    // Retail menus contain a known missing closing quote immediately before
+    // the tag terminator (vjustify="CENTER>). Recover at '>' so the following
+    // sibling elements are not swallowed into the attribute value.
+    while (p < end && *p != quote && *p != '>') {
       if (*p == '&') {
         char decoded = decode_entity(p, end);
         if (decoded) result += decoded;
@@ -326,7 +329,7 @@ std::string parse_attr_value(const char *&p, const char *end) {
         result += *p++;
       }
     }
-    if (p < end) ++p;  // Skip closing quote.
+    if (p < end && *p == quote) ++p;  // Skip a real closing quote.
   } else {
     // Unquoted value (game allows this).
     // Value ends at whitespace, '>', or '/'.

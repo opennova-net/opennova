@@ -14,12 +14,30 @@ func _load_doc() -> NovaMnuDocument:
 	return doc
 
 
-func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
+func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
+	if doc.get_widget_name(id) == wanted:
+		return id
+	for child in doc.get_child_ids(id):
+		var found := _find_widget(doc, child, wanted)
+		if found >= 0:
+			return found
+	return -1
+
+
+func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
+	for screen_id in doc.get_screen_ids():
+		var found := _find_widget(doc, doc.get_screen_root_id(screen_id), wanted)
+		if found >= 0:
+			return found
+	return -1
+
+
+func _build_menu(edit_mode: bool = false, doc: NovaMnuDocument = null) -> NovaMnuMenu:
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(edit_mode)
-	menu.menu = _load_doc()
+	menu.menu = doc if doc != null else _load_doc()
 	return menu
 
 
@@ -46,6 +64,42 @@ func test_table_builds_columns_and_headers() -> void:
 	assert_true(h1 is Label and not (h1 is BaseButton), "non-sortable header is a Label")
 
 
+func test_table_preview_honors_cleared_presence_with_latent_values() -> void:
+	var doc := _load_doc()
+	var id := _widget_named(doc, "MissionTable")
+	assert_gte(id, 0)
+	var state: Dictionary = doc.get_widget_authoring_state(id)
+	var headers: Array = (state["table"] as Dictionary)["headers"]
+	headers = headers.duplicate(true)
+	headers[0]["has_width"] = false # retain latent width=120
+	assert_true(doc.apply_widget_patch(id, {
+		"items": {"present": false},
+		"table": {
+			"has_count": false, # retain latent count=3
+			"has_spacing": false, # retain latent spacing=4
+			"has_min_item_height": false, # retain latent height=18
+			"headers": headers,
+		},
+	}))
+	var table := _table(_build_menu(false, doc))
+	assert_eq(table.get_column_count(), 3,
+		"absent COUNT falls back to modeled header rows, not its latent scalar")
+	var h1 := table.find_child("Header1", true, false) as Control
+	assert_eq(h1.position.x, 80.0,
+		"absent WIDTH uses the runtime default and absent SPACING contributes zero")
+	assert_null(table.find_child("HeaderRule", true, false),
+		"an absent ITEMS container does not leak its latent outline color")
+	table.add_row_values(["A", "1", ""])
+	table.add_row_values(["B", "2", ""])
+	var row0 := table.find_child("Row0", true, false) as Control
+	assert_eq(row0.size.y, 16.0,
+		"absent MIN_ITEM_HEIGHT does not leak its latent authored value")
+	table.select_row(0)
+	table.select_row(1, true)
+	assert_eq(table.get_selected_rows(), PackedInt32Array([1]),
+		"an absent ITEMS container does not leak latent MULTISELECT")
+
+
 func test_table_runtime_rows_and_cells() -> void:
 	var menu := _build_menu()
 	var table := _table(menu)
@@ -59,6 +113,81 @@ func test_table_runtime_rows_and_cells() -> void:
 	assert_true(cell0 is Label, "text column renders a Label")
 	assert_eq((cell0 as Label).text, "Alpha", "cell text")
 	assert_true(cell2 is TextureRect, "BODY bitmap_draw column renders a TextureRect")
+
+
+func test_table_honors_header_body_vjustify_and_bitmap_scale_policy() -> void:
+	var doc := _load_doc()
+	var id := _widget_named(doc, "MissionTable")
+	var headers := doc.get_table_headers(id)
+	var sortable_header: Dictionary = headers[0]
+	sortable_header["vjustify"] = "TOP"
+	doc.set_table_header(id, 0, sortable_header)
+	assert_gte(doc.add_table_body(id, {
+		"has_column": true,
+		"column": 0,
+		"justify": "LEFT",
+		"vjustify": "BOTTOM",
+	}), 0)
+	var bitmap_body: Dictionary = doc.get_table_bodies(id)[0]
+	bitmap_body["vjustify"] = "TOP"
+	bitmap_body["scale_bitmap"] = false
+	doc.set_table_body(id, 0, bitmap_body)
+
+	var table := _table(_build_menu(false, doc))
+	var header_text := table.find_child("HeaderText", true, false) as Label
+	assert_not_null(header_text, "sortable header exposes a vertically aligned text layer")
+	if header_text != null:
+		assert_eq(header_text.vertical_alignment, VERTICAL_ALIGNMENT_TOP,
+			"HEADER vjustify applies to sortable headers")
+	table.add_row_values(["Alpha", "8", ""])
+	var row := table.find_child("Row0", true, false)
+	assert_eq((row.find_child("Cell0", false, false) as Label).vertical_alignment,
+		VERTICAL_ALIGNMENT_BOTTOM, "text BODY vjustify reaches the rendered cell")
+	var bitmap := row.find_child("Cell2", false, false) as TextureRect
+	assert_eq(bitmap.stretch_mode, TextureRect.STRETCH_KEEP_CENTERED,
+		"BITMAP_DRAW without SCALE_BITMAP preserves native image size")
+
+	bitmap_body["scale_bitmap"] = true
+	doc.set_table_body(id, 0, bitmap_body)
+	var scaled_table := _table(_build_menu(false, doc))
+	scaled_table.add_row_values(["Alpha", "8", ""])
+	var scaled := scaled_table.find_child("Row0", true, false).find_child(
+		"Cell2", false, false) as TextureRect
+	assert_eq(scaled.stretch_mode, TextureRect.STRETCH_SCALE,
+		"SCALE_BITMAP has a distinct fill-cell stretch policy")
+
+
+func test_table_custom_draw_requests_a_fresh_host_slot() -> void:
+	var doc := _load_doc()
+	var id := _widget_named(doc, "MissionTable")
+	var body: Dictionary = doc.get_table_bodies(id)[0]
+	body["custom_draw"] = true
+	doc.set_table_body(id, 0, body)
+	var table := _table(_build_menu(false, doc))
+	var requests: Array = []
+	table.custom_cell_requested.connect(func(row: int, column: int, value: String, slot: Control) -> void:
+		requests.append([row, column, value, slot])
+		var content := Label.new()
+		content.name = "HostContent"
+		content.text = value
+		slot.add_child(content)
+	)
+
+	table.add_row_values(["Alpha", "8", "lan"])
+	assert_eq(requests.size(), 1, "one request emitted for the CUSTOM_DRAW column")
+	assert_eq(requests[0][0], 0)
+	assert_eq(requests[0][1], 2)
+	assert_eq(requests[0][2], "lan", "effective cell value crosses the host seam")
+	var first_slot := requests[0][3] as Control
+	assert_eq(first_slot.name, "Cell2", "table owns and sizes the custom cell slot")
+	assert_not_null(first_slot.find_child("HostContent", false, false),
+		"host can populate the synchronous slot")
+
+	table.rebuild()
+	assert_eq(requests.size(), 2, "rebuild requests fresh custom content")
+	var second_slot := requests[1][3] as Control
+	assert_ne(second_slot, first_slot, "rebuilt rows never expose stale slots")
+	assert_not_null(second_slot.find_child("HostContent", false, false))
 
 
 func test_table_selection_single_and_multi() -> void:

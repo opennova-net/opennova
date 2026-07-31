@@ -9,6 +9,8 @@
 #include <mns/mns.h>
 #include <mns/mns_document.h>
 
+#include <vector>
+
 namespace godot {
 
 // Godot-facing wrapper around an MNS stylesheet: a table of %VAR% -> value
@@ -18,16 +20,20 @@ namespace godot {
 //
 // Document-backed (ADR 0014): the source of truth is a lossless mns::Document
 // (comments, grouping, alignment, conditionals, authored case all survive a
-// load -> save), and the flat StyleSheet the runtime substitutes through is
-// its flatten() cache. Lookup/substitution serve the flat view; mutations and
-// serialization go through the document, so to_byte_array()/save_to_path()
-// are byte-faithful for untouched files and minimal-delta after edits.
+// load -> save), and the StyleSheet the runtime substitutes through is its
+// separately evaluated cache. Lookup/substitution serve that evaluated view;
+// mutations and serialization go through the document, so
+// to_byte_array()/save_to_path() are byte-faithful for untouched files and
+// minimal-delta after edits. Runtime callers reject is_runtime_valid()==false;
+// the editor deliberately keeps that source open for repair.
 class MnsStyleSheet : public Resource {
 	GDCLASS(MnsStyleSheet, Resource)
 
 private:
 	mns::Document doc_;
-	mns::StyleSheet sheet_; // doc_.flatten() cache, rebuilt after every mutation
+	mns::StyleSheet sheet_; // successful/partial runtime evaluation cache
+	std::vector<mns::Diagnostic> evaluation_diagnostics_;
+	bool runtime_valid_ = true;
 
 	void _refresh();
 
@@ -45,7 +51,7 @@ public:
 	// --- Mutation (each successful mutation emits changed exactly once;
 	//     failures and no-ops emit nothing) ---
 	void set_variable(const String &p_name, const String &p_value);
-	void remove_variable(const String &p_name);
+	bool remove_variable(const String &p_name);
 	void set_variables(const Dictionary &p_variables);
 	void clear();
 
@@ -58,6 +64,10 @@ public:
 	int get_entry_count() const;
 	// {line, severity: "error"|"warning", code, message}
 	Array get_diagnostics() const;
+	// Runtime evaluation is strict even though document loading stays permissive
+	// for the repairable editor workflow.
+	bool is_runtime_valid() const { return runtime_valid_; }
+	Array get_evaluation_diagnostics() const;
 	String get_source_text() const;
 	void set_source_text(const String &p_text);
 	// p_after_name "" appends at the end of the document.

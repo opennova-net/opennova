@@ -161,6 +161,17 @@ static int test_line_continuation() {
 	return 0;
 }
 
+static int test_missing_value_delimiter_fails() {
+	mns::StyleSheet sheet;
+	std::string error;
+	const char *data = "FOO\n";
+	TEST_EXPECT(!mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(error.find("delimiter") != std::string::npos);
+
+	std::printf("test_missing_value_delimiter_fails passed\n");
+	return 0;
+}
+
 static int test_substitute() {
 	mns::StyleSheet sheet;
 	sheet.variables["FOO"] = "hello";
@@ -255,6 +266,7 @@ int main() {
 	failures += test_if_1_else();
 	failures += test_nested_if();
 	failures += test_line_continuation();
+	failures += test_missing_value_delimiter_fails();
 	failures += test_substitute();
 	failures += test_has();
 	failures += test_write();

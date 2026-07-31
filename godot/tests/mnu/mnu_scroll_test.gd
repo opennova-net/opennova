@@ -70,6 +70,56 @@ func test_linked_target_scrolls() -> void:
 	assert_eq(target.position.y, -20.0, "linked target shifts by -value along the axis")
 
 
+func test_range_target_syncs_both_directions() -> void:
+	var menu := _build_menu()
+	var scroll := _scroll(menu)
+	var native := VScrollBar.new()
+	native.name = "NativeRange"
+	native.min_value = 5
+	native.max_value = 105
+	native.page = 20
+	native.step = 2
+	native.value = 25
+	scroll.add_child(native)
+	scroll.link_range_target(NodePath("NativeRange"))
+	assert_eq(scroll.get_min(), 5.0, "authored control imports native minimum")
+	assert_eq(scroll.get_max(), 105.0, "authored control imports native maximum")
+	assert_eq(scroll.get_page(), 20.0, "authored control imports native page")
+	assert_eq(scroll.get_value(), 25.0, "authored control imports native value")
+	native.value = 45
+	assert_eq(scroll.get_value(), 45.0, "native scroll updates authored shuttle")
+	scroll.set_value(65)
+	assert_eq(native.value, 65.0, "authored control drives native range")
+
+
+func test_shipped_list_and_multiline_use_authored_scrollbar_geometry() -> void:
+	var vehicle_doc := NovaMnuDocument.new()
+	assert_eq(vehicle_doc.load_from_bytes(FileAccess.get_file_as_bytes(
+		"res://../fixtures/mnu/jo_vehicle.mnu")), OK)
+	var vehicle_menu := NovaMnuMenu.new()
+	vehicle_menu.build_on_ready = false
+	add_child_autofree(vehicle_menu)
+	vehicle_menu.menu = vehicle_doc
+	var item_list := vehicle_menu.find_child("ITEM_LIST", true, false) as NovaMnuList
+	var list_scroll := item_list.find_child("Scrollbar", false, false) as NovaMnuScroll
+	assert_not_null(list_scroll, "shipped list owns the shared authored scrollbar")
+	assert_eq(list_scroll.position, Vector2(300, 0), "list scrollbar authored origin")
+	assert_eq(list_scroll.size, Vector2(16, 200), "list scrollbar authored size")
+
+	var sp_doc := NovaMnuDocument.new()
+	assert_eq(sp_doc.load_from_bytes(FileAccess.get_file_as_bytes(
+		"res://../fixtures/mnu/jo_sp.mnu")), OK)
+	var sp_menu := NovaMnuMenu.new()
+	sp_menu.build_on_ready = false
+	add_child_autofree(sp_menu)
+	sp_menu.menu = sp_doc
+	var briefing := sp_menu.find_child("BRIEFING", true, false) as NovaMnuMultilineEdit
+	var brief_scroll := briefing.find_child("Scrollbar", false, false) as NovaMnuScroll
+	assert_not_null(brief_scroll, "shipped multiline owns the shared authored scrollbar")
+	assert_eq(brief_scroll.position, Vector2(321, 0), "multiline scrollbar authored origin")
+	assert_eq(brief_scroll.size, Vector2(20, 318), "multiline scrollbar authored size")
+
+
 func test_ratio_round_trip() -> void:
 	var menu := _build_menu()
 	var scroll := _scroll(menu)

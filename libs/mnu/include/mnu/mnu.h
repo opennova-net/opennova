@@ -9,6 +9,12 @@
 
 namespace mnu {
 
+// Presence contract: every `has_*` bit and container `present` bit is the
+// authoritative authored state. Writers ignore retained latent values when the
+// corresponding bit is false, allowing editors to disable a field/block without
+// destroying a value that may be restored later. Code-created documents must
+// set the bit explicitly; typed mutators do so when they author content.
+
 // Window/widget types in MNU files.
 enum class WindowType {
   Window,        // Generic container
@@ -66,7 +72,9 @@ struct Appearance {
   std::string state;     // "default", "mouseover", "selected", "disabled"
   std::string type;      // "image", "custom", "outline", etc.
   std::string value;     // Texture filename or color value
+  bool has_map_state = false;
   int map_state = -1;    // Sprite sheet row index (-1 = not a sprite sheet)
+  bool has_height = false;
   int height = 0;        // Height of each frame in sprite sheet
 };
 
@@ -82,15 +90,23 @@ struct Action {
   std::string type;   // "screen", "window", "POP_SCREEN"
   std::string state;  // "SHOW", "HIDE" (for window type)
   std::string file;   // Target .mnu file (for screen type)
+  std::string source; // Host-owned source name (GLB/LAN/form actions)
+  std::string field;  // Host-owned field name (form/filter actions)
+  bool has_target_form = false;
+  int target_form = 0;
+  bool toggle = false;
+  std::string test;   // LT/LE/EQ/GE/GT comparator
   std::string target; // Screen name or window name
   bool external_browser = false; // EXTERNAL_BROWSER flag (on type="URL")
 };
 
 // Text/string definition.
 struct String {
+  bool present = false;
   std::string type;     // "id" (lookup) or literal
   std::string justify;  // "LEFT", "CENTER", "RIGHT"
   std::string vjustify; // "TOP", "CENTER", "BOTTOM"
+  bool has_edge = false;
   int edge = 0;         // Padding from edge in pixels
   std::string value;    // String ID or literal text
 };
@@ -120,10 +136,26 @@ struct Item {
 
 // Items container for list-like widgets.
 struct Items {
+  bool present = false;
+  bool multiselect = false;
   std::string justify;  // "LEFT", "CENTER", "RIGHT"
   std::string vjustify; // "TOP", "CENTER", "BOTTOM"
+  // APPEARANCE rows are ordered authored data. selection_color mirrors the last
+  // selected/color row as a read/write convenience. Saving an untouched parsed
+  // Items preserves every row (including duplicates); assigning a different
+  // convenience value updates only that last row, or synthesizes one when no
+  // selected/color row exists.
+  std::vector<Appearance> appearances;
   std::string selection_color;  // Selected item highlight color
   std::vector<Item> items;
+
+  const Appearance *find_appearance(const std::string &state,
+                                    const std::string &type) const;
+  Appearance *find_appearance(const std::string &state,
+                              const std::string &type);
+  void set_appearance_value(const std::string &state,
+                            const std::string &type,
+                            const std::string &value);
 };
 
 // ListBox scrollbar definition (for dropdown popups).
@@ -142,7 +174,9 @@ struct ListBox {
   bool present = false;
   Position position;
   std::vector<Appearance> appearances;  // Background/outline colors
+  String string_data;  // Popup row text layout
   Items items;  // Items with selection color
+  bool has_min_item_height = false;
   int min_item_height = 0;  // Minimum height per item
   ListBoxScrollbar scrollbar;  // Custom scrollbar
 
@@ -155,6 +189,7 @@ struct ListBox {
 // Frame/border definition.
 struct Frame {
   std::string stencil;   // Border texture (9-slice style)
+  bool has_stencil_size = false;
   int stencil_size = 0;  // Border thickness in px (STENCIL size=, orig elem+0x284)
   std::string brush;     // Tiling background texture
   std::string monogram;  // Watermark/logo overlay
@@ -184,8 +219,10 @@ struct Cursor {
 struct TableHeader {
   std::string justify;   // "LEFT", "CENTER", "RIGHT"
   std::string vjustify;  // "TOP", "CENTER", "BOTTOM"
+  bool has_column = false;
   int column = 0;        // Column index
   std::string sort;      // Sort order ("A" for ascending)
+  bool has_width = false;
   int width = 0;         // Column width in pixels
   std::string type;      // "id" = text is a string-table key (CUIStringTable_LookupString)
   std::string text;      // Header text, or the string ID when type=="id"
@@ -195,6 +232,7 @@ struct TableHeader {
 struct TableBody {
   std::string justify;   // "LEFT", "CENTER", "RIGHT"
   std::string vjustify;  // "TOP", "CENTER", "BOTTOM"
+  bool has_column = false;
   int column = 0;        // Column index
   bool bitmap_draw = false;      // BITMAP_DRAW flag - render images in this column
   std::string bitmap_flags;      // BITMAP_FLAGS (e.g., "STANDARD_TRANSPARENT")
@@ -204,6 +242,7 @@ struct TableBody {
 
 // Value substitution for table cells (renders image based on value).
 struct TableSubst {
+  bool has_column = false;
   int column = 0;        // Column index
   std::string value;     // Value to match
   bool is_file = false;  // FILE attribute present (image substitution)
@@ -212,7 +251,9 @@ struct TableSubst {
 
 // Table column definition.
 struct TableColumn {
+  bool has_count = false;
   int count = 0;         // Number of columns
+  bool has_spacing = false;
   int spacing = 0;       // Spacing between columns
   std::vector<TableHeader> headers;
   std::vector<TableBody> bodies;
@@ -234,10 +275,18 @@ struct TableScrollbar {
 struct TableData {
   TableColumn column;
   TableScrollbar scrollbar;
+  bool has_min_item_height = false;
   int min_item_height = 0;
   std::string outline_color;    // From ITEMS default outline
   std::string selection_color;  // From ITEMS selected color
   bool multiselect = false;     // MULTISELECT attribute on ITEMS
+};
+
+// One authored accelerator. A Window may carry several HOTKEY rows; order is
+// significant because the runtime chooses the first matching visible Widget.
+struct Hotkey {
+  std::string value;
+  bool virtual_key = false;
 };
 
 // Window/widget node in the UI tree.
@@ -260,6 +309,7 @@ struct Window {
   bool modal = false;       // MODAL - dialog window
   bool readonly = false;    // READONLY - for multiline_edit
   bool as_button = false;   // AS_BUTTON - render a checkbox as a toggle button
+  bool has_group = false;
   int group = 0;            // Radio button group ID
 
   // Numeric edit-field constraints, preserved for round-trip even when the
@@ -300,9 +350,8 @@ struct Window {
   std::string text_rsrc;  // String resource file (only on root window)
   std::string datasource; // Data source file (for marquee_wnd, etc.)
 
-  // Hotkey binding (e.g., VK_ESCAPE, VK_RETURN).
-  std::string hotkey;
-  bool hotkey_virtual = false;  // VIRTUAL attribute on HOTKEY element
+  // Ordered bindings (e.g., VK_ESCAPE, "=", "-").
+  std::vector<Hotkey> hotkeys;
 
   // Scroll/slider specific fields.
   std::string orientation;                  // "HORIZONTAL" or "VERTICAL"
@@ -320,6 +369,7 @@ struct Window {
 // Screen definition (top-level container).
 struct Screen {
   std::string name;
+  bool has_music_var = false;
   int music_var = 0;       // Music track index
   std::string text_rsrc;   // String resource file (e.g., "menutxt.BIN")
   std::string cursor_file; // Default cursor file
@@ -327,9 +377,19 @@ struct Screen {
   Window root_window;      // Root window hierarchy
 };
 
+// The source encoding is document metadata, not opaque source passthrough. The
+// typed AST is always UTF-8 internally and serialization is rebuilt from it.
+enum class SourceEncoding : uint8_t {
+  Utf8,
+  Utf8Bom,
+  Utf16LE,
+  Utf16BE,
+};
+
 // Parsed MNU document containing one or more screens.
 struct Document {
   std::vector<Screen> screens;
+  SourceEncoding source_encoding = SourceEncoding::Utf8;
 
   // Find a screen by name (case-insensitive). Returns nullptr if not found.
   const Screen *find_screen(const std::string &name) const;
@@ -380,6 +440,11 @@ bool is_color_variable(const std::string &color);
 // When pretty is true, output is indented with indent_size spaces.
 std::string serialize(const Document &doc, bool pretty = true,
                       int indent_size = 2);
+
+// Serialize using Document::source_encoding.
+bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
+                     std::string &error, bool pretty = true,
+                     int indent_size = 2);
 
 // Serialize MNU document to a file on disk. Returns false on failure and sets
 // error.

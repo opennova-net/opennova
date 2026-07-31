@@ -15,12 +15,13 @@ func _load_doc() -> NovaMnuDocument:
 	return doc
 
 
-func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
+func _build_menu(edit_mode: bool = false, document: NovaMnuDocument = null) -> NovaMnuMenu:
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)  # in-tree so built widgets are not orphans
 	menu.set_edit_mode(edit_mode)
-	menu.menu = _load_doc()  # set_menu rebuilds because the node is in the tree
+	menu.menu = document if document != null else _load_doc()
+	# set_menu rebuilds because the node is in the tree
 	return menu
 
 
@@ -38,6 +39,19 @@ func test_builds_one_node_per_screen() -> void:
 	assert_true(s0 is NovaMnuScreen, "screen node is NovaMnuScreen")
 	assert_eq(s0.get_screen_name(), "MAIN", "first screen name")
 	assert_eq(s0.get_music_var(), 3, "screen music_var carried onto node")
+
+
+func test_absent_screen_music_var_ignores_its_latent_value() -> void:
+	var doc := _load_doc()
+	var screen := int(doc.get_screen_ids()[0])
+	assert_eq(doc.get_screen_music_var(screen), 3)
+	doc.set_screen_property(screen, "has_music_var", false)
+	assert_false(doc.get_screen_has_music_var(screen))
+
+	var menu := _build_menu(false, doc)
+	var s0 := menu.get_child(0) as NovaMnuScreen
+	assert_eq(s0.get_music_var(), 0,
+			"presence bit is authoritative even while the parsed value remains latent")
 
 
 func test_widget_tree_and_types() -> void:
@@ -174,6 +188,38 @@ func test_string_id_resolves_from_text_resource() -> void:
 	# A literal (non-id) string is unaffected by the text resource.
 	var version := menu.find_child("Version", true, false)
 	assert_eq(_widget_text(version), "v1.0", "literal string passes through")
+
+
+func test_each_screen_resolves_its_own_text_resource() -> void:
+	var dir := OS.get_temp_dir().path_join("mnu_screen_rtxt_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	for spec in [["one.BIN", "First screen"], ["two.BIN", "Second screen"]]:
+		var table := RtxtStringFile.new()
+		var section := table.add_section("MENU")
+		table.add_entry("SHARED", spec[1], section, Vector2i())
+		assert_eq(table.save_to_path(dir.path_join(spec[0])), OK, "temporary RTXT saves")
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK, "temporary resource root opens")
+	var bytes := ('<SCREEN><NAME>ONE</NAME><TEXT_RSRC>one.BIN</TEXT_RSRC>' +
+		'<WINDOW type="window" name="ROOT"><WINDOW type="static" name="TEXT_ONE">' +
+		'<STRING type="id">SHARED</STRING></WINDOW></WINDOW></SCREEN>' +
+		'<SCREEN><NAME>TWO</NAME><TEXT_RSRC>two.BIN</TEXT_RSRC>' +
+		'<WINDOW type="window" name="ROOT"><WINDOW type="static" name="TEXT_TWO">' +
+		'<STRING type="id">SHARED</STRING></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(bytes), OK)
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_resource_root(root)
+	menu.menu = doc
+	assert_eq(_widget_text(menu.find_child("TEXT_ONE", true, false)), "First screen",
+		"first screen uses one.BIN")
+	assert_eq(_widget_text(menu.find_child("TEXT_TWO", true, false)), "Second screen",
+		"second screen uses two.BIN")
+	DirAccess.remove_absolute(dir.path_join("one.BIN"))
+	DirAccess.remove_absolute(dir.path_join("two.BIN"))
+	DirAccess.remove_absolute(dir)
 
 
 func test_unresolved_assets_are_counted() -> void:
@@ -412,6 +458,44 @@ func test_url_action_emits_url_requested() -> void:
 	assert_signal_emitted_with_parameters(menu, "url_requested", ["www.novalogic.com/buy"])
 
 
+func test_url_action_preserves_external_browser_in_host_payload() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="button" name="BUY"><ACTION type="URL" EXTERNAL_BROWSER>' +
+		'https://example.invalid/buy</ACTION></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	watch_signals(menu)
+	(menu.find_child("BUY", true, false) as BaseButton).emit_signal("pressed")
+	assert_signal_emitted_with_parameters(
+		menu, "url_requested", ["https://example.invalid/buy"])
+	assert_signal_emitted(menu, "host_action_requested")
+	var args: Array = get_signal_parameters(menu, "host_action_requested", 0)
+	assert_eq(args[0], "url", "URL remains the host action type")
+	var payload := args[1] as Dictionary
+	assert_eq(payload.get("target"), "https://example.invalid/buy", "full target preserved")
+	assert_true(bool(payload.get("external_browser", false)),
+		"EXTERNAL_BROWSER survives into the host payload")
+
+
+func test_host_owned_action_preserves_complete_payload_without_invented_effects() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="button" name="SEARCH"><ACTION type="LAN_SEARCH" source="lan" ' +
+		'field="mode" target_form="7" test="EQ">SERVER_ROWS</ACTION></WINDOW>' +
+		'</WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	watch_signals(menu)
+	(menu.find_child("SEARCH", true, false) as BaseButton).emit_signal("pressed")
+	assert_signal_emitted(menu, "host_action_requested")
+	var args: Array = get_signal_parameters(menu, "host_action_requested", 0)
+	assert_eq(args[0], "lan_search")
+	var payload := args[1] as Dictionary
+	assert_eq(payload.get("target"), "SERVER_ROWS")
+	assert_eq(payload.get("source"), "lan")
+	assert_eq(payload.get("field"), "mode")
+	assert_eq(payload.get("target_form"), 7)
+	assert_eq(payload.get("test"), "EQ")
+	assert_eq(menu.current_screen, "S", "generic menu invents no LAN navigation effect")
+
+
 func test_monogram_parsed_but_not_drawn() -> void:
 	# The shipped engine parses a FRAME's MONOGRAM but never draws it: the window
 	# render path is frame + appearance + text only [orig: CStaticWnd_Render @ 0x657b10],
@@ -573,14 +657,40 @@ func test_hotkey_skips_hidden_widget() -> void:
 	assert_eq(menu.current_screen, "RIGHT", "hidden HIDDEN_BACK skipped; VISIBLE_OK fired")
 
 
-func test_hotkey_noop_button_does_not_consume() -> void:
-	# A hotkey on an actionless button must NOT report handled, so the key falls
-	# through (Esc-to-resume reaching the game behind a pause overlay).
+func test_hotkey_actionless_named_button_activates_and_consumes() -> void:
+	# Shipped actionless named controls are host Command seams: normal activation
+	# still emits pressed and owns the authored accelerator.
 	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<WINDOW type=\"button\" name=\"NOOP\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY></WINDOW>" + \
 		"</WINDOW></SCREEN>").to_utf8_buffer()
 	var menu := _menu_from(bytes)
-	assert_false(menu.handle_hotkey("VK_ESCAPE"), "actionless button does not consume the key")
+	var button := menu.find_child("NOOP", true, false) as BaseButton
+	watch_signals(button)
+	assert_true(menu.handle_hotkey("VK_ESCAPE"), "named actionless control owns its key")
+	assert_signal_emitted(button, "pressed")
+
+
+func test_hotkey_keeps_all_bindings_and_matches_literal_unicode_case_insensitively() -> void:
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"DUAL\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
+		"<HOTKEY>é</HOTKEY></WINDOW></WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var button := menu.find_child("DUAL", true, false) as BaseButton
+	watch_signals(button)
+	assert_true(menu.handle_character_hotkey("É"), "Unicode accelerator is case-insensitive")
+	assert_true(menu.handle_hotkey("VK_ESCAPE"), "the preceding virtual binding also remains")
+	assert_signal_emit_count(button, "pressed", 2, "both authored bindings activate normally")
+
+
+func test_literal_ascii_hotkey_routes_through_real_key_adapter() -> void:
+	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<WINDOW type=\"button\" name=\"LETTER\"><HOTKEY>V</HOTKEY></WINDOW>" + \
+		"</WINDOW></SCREEN>").to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var button := menu.find_child("LETTER", true, false) as BaseButton
+	watch_signals(button)
+	assert_true(menu.handle_key_input(_key(KEY_V)), "printable keycode reaches literal router")
+	assert_signal_emitted(button, "pressed")
 
 
 func test_hotkey_enter_aliases() -> void:
@@ -631,6 +741,45 @@ func test_checkbox_toggle_drives_underline() -> void:
 	assert_false(underline.visible, "underline hidden once unchecked")
 
 
+func test_checkbox_as_button_uses_full_rect_label_layout() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="checkbox" name="FULL" AS_BUTTON CHECKED>' +
+		'<POSITION left="0" top="0" right="120" bottom="24"></POSITION>' +
+		'<STRING justify="RIGHT">Full</STRING></WINDOW>' +
+		'<WINDOW type="checkbox" name="NORMAL">' +
+		'<POSITION left="0" top="30" right="120" bottom="54"></POSITION>' +
+		'<STRING>Normal</STRING></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var full := menu.find_child("FULL", true, false) as BaseButton
+	var full_label := full.find_child("Label", false, false) as Label
+	var normal_label := menu.find_child("NORMAL", true, false).find_child(
+		"Label", false, false) as Label
+	assert_true(full.button_pressed, "AS_BUTTON keeps normal checkbox toggle state")
+	assert_eq(full_label.anchor_right, 1.0, "AS_BUTTON label spans the full widget")
+	assert_eq(full_label.position, Vector2.ZERO, "AS_BUTTON has no checkbox-art indent")
+	assert_eq(full_label.horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT,
+		"AS_BUTTON honors authored alignment")
+	assert_eq(normal_label.position.x, 26.0, "normal checkbox label follows 24px art + 2px")
+
+
+func test_host_owned_widget_preview_is_explicit_and_never_fake_data() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="GLB_TABLE" name="GLOBAL"></WINDOW>' +
+		'<WINDOW type="LAN_LIST" name="LAN"></WINDOW>' +
+		'<WINDOW type="GOPHER" name="NEWS"></WINDOW>' +
+		'</WINDOW></SCREEN>').to_utf8_buffer()
+	var author_menu := _menu_from(bytes, true)
+	for name in ["GLOBAL", "LAN", "NEWS"]:
+		var widget := author_menu.find_child(name, true, false) as Control
+		assert_true(bool(widget.get_meta("mnu_host_owned")), "%s marks host ownership" % name)
+		var notice := widget.find_child("HostOwnedPreview", false, false) as Label
+		assert_not_null(notice, "%s has an honest authoring notice" % name)
+		assert_string_contains(notice.text, "Host-owned runtime data")
+	var runtime_menu := _menu_from(bytes)
+	assert_null(runtime_menu.find_child("HostOwnedPreview", true, false),
+		"runtime tree contains no fabricated preview rows or labels")
+
+
 func test_edit_mode_widgets_are_inert() -> void:
 	# In edit_mode the widgets connect nothing and stay disabled, so a synthetic
 	# press never navigates (the ONED preview must not drive the menu).
@@ -657,6 +806,95 @@ func test_window_action_shows_hides_toggles_descendant() -> void:
 	menu.dispatch_action("window", "SoundChk", "", "show")
 	assert_true(chk.visible, "show keeps it visible")
 	assert_signal_emitted_with_parameters(menu, "action_dispatched", ["window", "SoundChk"])
+
+
+func test_parent_reenable_preserves_child_local_disabled_state() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="window" name="PARENT">' +
+		'<WINDOW type="button" name="LOCAL_OFF" DISABLE></WINDOW>' +
+		'<WINDOW type="button" name="LOCAL_ON"></WINDOW>' +
+		'</WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var parent := menu.find_child("PARENT", true, false) as Control
+	var local_off := menu.find_child("LOCAL_OFF", true, false) as BaseButton
+	var local_on := menu.find_child("LOCAL_ON", true, false) as BaseButton
+	assert_true(local_off.disabled, "authored child starts locally disabled")
+	assert_false(local_on.disabled, "sibling starts locally enabled")
+	assert_true(menu.handle_window_action("PARENT", "DISABLE"), "parent disable handled")
+	assert_true(local_off.disabled and local_on.disabled, "parent gates both descendants")
+	assert_true(menu.handle_window_action("PARENT", "ENABLE"), "parent re-enable handled")
+	assert_true(local_off.disabled, "local authored DISABLE survives parent re-enable")
+	assert_false(local_on.disabled, "locally enabled sibling wakes back up")
+	assert_eq(parent.process_mode, Node.PROCESS_MODE_INHERIT, "parent local state restored")
+	assert_true(menu.handle_window_action("LOCAL_OFF", "ENABLE"), "child can be enabled explicitly")
+	assert_false(local_off.disabled, "explicit child ENABLE overrides its initial local state")
+
+
+func test_tab_action_focuses_named_control_without_host_dispatch() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="button" name="DO_TAB"><ACTION type="TAB">TARGET</ACTION></WINDOW>' +
+		'<WINDOW type="edit" name="TARGET"><POSITION left="0" top="0" right="120" bottom="24">' +
+		'</POSITION></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	watch_signals(menu)
+	var target := menu.find_child("TARGET", true, false) as LineEdit
+	(menu.find_child("DO_TAB", true, false) as BaseButton).emit_signal("pressed")
+	assert_true(target.has_focus(), "TAB selects the named focus target")
+	assert_signal_not_emitted(menu, "host_action_requested",
+		"TAB is menu-owned, not delegated with GLB/LAN operations")
+
+
+func test_edit_constraints_filter_clamp_password_and_notify_committed_value() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="edit" name="PIN" NUMBER PASSWORD MINVAL="1" MAXVAL="99" MAXCHAR="3">' +
+		'<POSITION left="0" top="0" right="120" bottom="24"></POSITION>' +
+		'</WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var edit := menu.find_child("PIN", true, false) as NovaMnuEdit
+	assert_not_null(edit, "constrained edit built")
+	assert_true(edit.is_numeric_only(), "NUMBER enables numeric filtering")
+	assert_true(edit.secret, "PASSWORD uses LineEdit secret display")
+	assert_eq(edit.max_length, 3, "MAXCHAR maps to max_length")
+	edit.text = "a2b"
+	edit.text_changed.emit("a2b")
+	assert_eq(edit.text, "2", "non-numeric input is filtered")
+	watch_signals(menu)
+	edit.text = "999"
+	edit.focus_exited.emit()
+	assert_eq(edit.text, "99", "focus commit clamps to MAXVAL")
+	assert_signal_emitted_with_parameters(
+		menu, "widget_value_changed", ["PIN", "edit", -1, "99"])
+
+
+func test_radioedit_select_then_edit_then_copy_back_on_focus_loss() -> void:
+	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
+		'<WINDOW type="radioedit" name="CALLSIGN" group="3">' +
+		'<POSITION left="0" top="0" right="160" bottom="24"></POSITION>' +
+		'<STRING>Alpha</STRING></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
+	var menu := _menu_from(bytes)
+	var edit := menu.find_child("CALLSIGN", true, false) as NovaMnuEdit
+	var radio := edit.find_child("Radio", false, false) as BaseButton
+	var label := radio.find_child("Label", false, false) as Label
+	assert_not_null(radio, "RADIOEDIT owns its radio presentation")
+	assert_false(radio.button_pressed, "starts unselected when CHECKED is absent")
+	assert_false(edit.editable, "edit child starts hidden behind the radio presentation")
+	# First activation selects only.
+	radio.button_down.emit()
+	radio.button_pressed = true
+	radio.pressed.emit()
+	assert_false(edit.is_radio_editing(), "first activation selects without editing")
+	assert_true(radio.visible, "radio presentation remains after first selection")
+	# Activating the selected radio opens/focuses the edit child.
+	radio.button_down.emit()
+	radio.pressed.emit()
+	assert_true(edit.is_radio_editing(), "second activation enters edit mode")
+	assert_false(radio.visible, "radio child hides while editing")
+	assert_true(edit.editable, "edit child becomes editable")
+	edit.text = "Bravo"
+	edit.focus_exited.emit()
+	assert_false(edit.is_radio_editing(), "focus loss returns to radio mode")
+	assert_true(radio.visible, "radio presentation restored")
+	assert_eq(label.text, "Bravo", "edited text copied back to radio presentation")
 
 
 func test_interactive_preview_button_runs_window_action() -> void:

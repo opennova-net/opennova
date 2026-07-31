@@ -148,6 +148,27 @@ func test_list_inert_in_edit_mode() -> void:
 	assert_signal_not_emitted(menu, "widget_value_changed")
 
 
+func test_list_honors_authored_items_alignment() -> void:
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"list\" name=\"ALIGNED_LIST\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>210</RIGHT><BOTTOM>110</BOTTOM></POSITION>" + \
+		"<ITEMS justify=\"RIGHT\" vjustify=\"TOP\"><ITEM>Authored</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic aligned list parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var list := menu.find_child("ALIGNED_LIST", true, false)
+	assert_true(list is NovaMnuList, "aligned list builds")
+	assert_eq(list.get_item_horizontal_alignment(), HORIZONTAL_ALIGNMENT_RIGHT,
+		"ITEMS justify controls authored and runtime row text")
+	assert_eq(list.get_item_vertical_alignment(), VERTICAL_ALIGNMENT_TOP,
+		"ITEMS vjustify controls authored and runtime row text")
+
+
 # --- Multi ------------------------------------------------------------------
 
 func test_multi_builds_and_multiselect() -> void:
@@ -166,6 +187,27 @@ func test_multi_builds_and_multiselect() -> void:
 	list.emit_signal("multi_selected", 1, true)
 	assert_signal_emitted_with_parameters(
 		menu, "widget_value_changed", ["MapPicker", "multi", 1, "Jungle"])
+
+
+func test_multi_honors_authored_items_alignment() -> void:
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"multi\" name=\"ALIGNED_MULTI\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>210</RIGHT><BOTTOM>110</BOTTOM></POSITION>" + \
+		"<ITEMS justify=\"CENTER\" vjustify=\"BOTTOM\"><ITEM>Authored</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic aligned multi parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var multi := menu.find_child("ALIGNED_MULTI", true, false)
+	assert_true(multi is NovaMnuMulti, "aligned multi builds")
+	assert_eq(multi.get_item_horizontal_alignment(), HORIZONTAL_ALIGNMENT_CENTER,
+		"ITEMS justify controls all multi-select row text")
+	assert_eq(multi.get_item_vertical_alignment(), VERTICAL_ALIGNMENT_BOTTOM,
+		"ITEMS vjustify controls all multi-select row text")
 
 
 # --- SpinList ---------------------------------------------------------------

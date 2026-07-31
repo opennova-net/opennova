@@ -26,16 +26,36 @@ func _load_doc(path: String = FIXTURE) -> NovaMnuDocument:
 	return doc
 
 
-func _build_menu(edit_mode: bool = false, path: String = FIXTURE) -> NovaMnuMenu:
+func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
+	if doc.get_widget_name(id) == wanted:
+		return id
+	for child in doc.get_child_ids(id):
+		var found := _find_widget(doc, child, wanted)
+		if found >= 0:
+			return found
+	return -1
+
+
+func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
+	for screen_id in doc.get_screen_ids():
+		var found := _find_widget(doc, doc.get_screen_root_id(screen_id), wanted)
+		if found >= 0:
+			return found
+	return -1
+
+
+func _build_doc_menu(doc: NovaMnuDocument, edit_mode: bool = false) -> NovaMnuMenu:
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
-	# The runtime shell pins the menu to the 800x600 design space (nova_menu_host.gd);
-	# the catcher overlay sizes itself to this rect.
 	menu.size = Vector2(800, 600)
 	menu.set_edit_mode(edit_mode)
-	menu.menu = _load_doc(path)
+	menu.menu = doc
 	return menu
+
+
+func _build_menu(edit_mode: bool = false, path: String = FIXTURE) -> NovaMnuMenu:
+	return _build_doc_menu(_load_doc(path), edit_mode)
 
 
 func _combo(menu: NovaMnuMenu) -> NovaMnuCombo:
@@ -73,6 +93,79 @@ func test_combo_builds_and_seeds() -> void:
 	assert_eq(combo.get_selected(), 0, "first option selected by default")
 	var label := combo.find_child("SelectedText", true, false) as Label
 	assert_eq(label.text, "Easy Server", "closed label shows the selection")
+
+
+func test_combo_containers_presence_and_layout_are_authoritative() -> void:
+	var fallback_doc := _load_doc()
+	var fallback_id := _widget_named(fallback_doc, "ServerList")
+	assert_gte(fallback_id, 0)
+	assert_true(fallback_doc.apply_widget_patch(fallback_id, {
+		"string": {
+			"present": true,
+			"justify": "RIGHT",
+			"vjustify": "BOTTOM",
+		},
+		"items": {
+			"present": true,
+			"justify": "CENTER",
+			"vjustify": "BOTTOM",
+			"rows": [{"type": "", "value": "9", "text": "Top fallback"}],
+		},
+		"list_box": {
+			"has_min_item_height": false,
+			"string": {
+				"present": true,
+				"has_edge": true,
+				"edge": 6,
+				"vjustify": "TOP",
+			},
+			"items": {"present": false},
+		},
+	}))
+	var fallback_menu := _build_doc_menu(fallback_doc)
+	var fallback_combo := _combo(fallback_menu)
+	assert_eq(fallback_combo.get_item_count(), 1,
+		"an absent nested ITEMS container falls back to authored top-level ITEMS")
+	assert_eq(fallback_combo.get_item_text(0), "Top fallback")
+	var closed := fallback_combo.find_child("SelectedText", true, false) as Label
+	assert_eq(closed.horizontal_alignment, HORIZONTAL_ALIGNMENT_RIGHT,
+		"the closed cell uses the Combo's outer STRING alignment")
+	assert_eq(closed.vertical_alignment, VERTICAL_ALIGNMENT_BOTTOM,
+		"the closed cell uses the Combo's outer STRING vertical alignment")
+	fallback_combo.open_popup()
+	var fallback_row := fallback_combo.get_popup().find_child("Item0", true, false) as Button
+	assert_eq(fallback_row.custom_minimum_size.y, 16.0,
+		"cleared MIN_ITEM_HEIGHT presence prevents its latent 14 from affecting preview")
+	assert_eq(fallback_row.alignment, HORIZONTAL_ALIGNMENT_CENTER,
+		"popup rows use the active ITEMS alignment")
+	var popup_text := fallback_row.find_child("Text", false, false) as Label
+	assert_not_null(popup_text, "popup row exposes its authored text layout")
+	if popup_text != null:
+		assert_eq(popup_text.vertical_alignment, VERTICAL_ALIGNMENT_BOTTOM,
+			"active ITEMS vjustify wins over the LIST_BOX STRING fallback")
+		assert_eq(popup_text.offset_left, 6.0,
+			"LIST_BOX STRING edge insets popup row text")
+		assert_eq(popup_text.offset_right, -6.0,
+			"LIST_BOX STRING edge symmetrically insets popup row text")
+	fallback_combo.close_popup()
+
+	var empty_doc := _load_doc()
+	var empty_id := _widget_named(empty_doc, "ServerList")
+	assert_true(empty_doc.apply_widget_patch(empty_id, {
+		"items": {
+			"present": true,
+			"rows": [{"type": "", "value": "9", "text": "Must stay hidden"}],
+		},
+		"list_box": {
+			"items": {
+				"present": true,
+				"rows": [],
+			},
+		},
+	}))
+	var empty_combo := _combo(_build_doc_menu(empty_doc))
+	assert_eq(empty_combo.get_item_count(), 0,
+		"an explicitly authored empty LIST_BOX/ITEMS wins over top-level fallback")
 
 
 func test_combo_runtime_populate_and_select() -> void:
@@ -280,8 +373,36 @@ func test_combo_popup_clamps_and_scrolls_long_list() -> void:
 	var natural := 200.0 * row0.custom_minimum_size.y
 	assert_lt(popup.size.y, natural, "popup height clamped below the natural list height")
 	assert_gt(popup.size.y, 0.0, "popup keeps a positive height")
-	var scroll := popup.find_child("Scroll", true, false)
-	assert_not_null(scroll, "rows wrapped in a ScrollContainer")
-	assert_true(scroll is ScrollContainer, "the wrapper is a ScrollContainer")
+	var scroll := popup.find_child("Scrollbar", true, false) as NovaMnuScroll
+	assert_not_null(scroll, "authored LIST_BOX scrollbar replaces the native fallback")
+	var viewport := popup.find_child("ScrollViewport", true, false) as Control
+	var rows := popup.find_child("Rows", true, false) as Control
+	assert_not_null(viewport, "authored path clips rows in its own viewport")
+	assert_eq(viewport.size.x, 164.0, "default 16px authored bar is reserved from row width")
+	scroll.set_value(42)
+	assert_eq(rows.position.y, -42.0, "authored shuttle moves the popup rows")
 	combo.close_popup()
 	assert_false(combo.is_popup_open(), "popup closes")
+
+
+func test_shipped_combo_honors_scrollbar_rect_edge_pad_and_sound_bank() -> void:
+	var menu := _build_menu(false, "res://../fixtures/mnu/jo_weapon.mnu")
+	var combo := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	assert_not_null(combo, "shipped PRIMARY combo built")
+	var items := PackedStringArray()
+	for i in range(12):
+		items.append("Weapon %d" % i)
+	combo.set_items(items)
+	watch_signals(menu)
+	combo.open_popup()
+	var popup := combo.get_popup()
+	var scroll := popup.find_child("Scrollbar", true, false) as NovaMnuScroll
+	var viewport := popup.find_child("ScrollViewport", true, false) as Control
+	assert_not_null(scroll, "shipped authored scrollbar built")
+	assert_eq(scroll.position, Vector2(180, 1), "SCROLLBAR POSITION origin honored")
+	assert_eq(scroll.size, Vector2(19, 98), "SCROLLBAR POSITION size honored")
+	assert_eq(viewport.size.x, 179.0, "SB_EDGE_PAD=21 reserves authored row space")
+	(scroll.find_child("ArrowDown", true, false) as BaseButton).emit_signal("pressed")
+	assert_signal_emitted_with_parameters(
+		menu, "sound_requested", ["menu.lwf", "CLICK_VALUE"])
+	combo.close_popup()

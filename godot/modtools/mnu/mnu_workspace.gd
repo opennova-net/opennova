@@ -291,6 +291,7 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_editor.widget_selected.connect(_on_widget_selected)
 		_editor.selection_changed.connect(_on_selection_changed)
+		_editor.interactive_changed.connect(_on_interactive_changed)
 		created = true
 	if _editor.get_parent() == null:
 		host.add_child(_editor)
@@ -393,6 +394,8 @@ func build_inspector(host: Control) -> void:
 	# Preview a widget's sound through the menu .lwf profile (reuses the Sound
 	# workspace's audition player); the inspector lists triggers from the same profile.
 	_inspector.sound_preview_requested.connect(_on_sound_preview)
+	if _editor != null and is_instance_valid(_editor):
+		_inspector.set_authoring_enabled(not _editor.is_interactive())
 	# Shell link-widget services for FILE references (the screen's text_rsrc);
 	# string KEYS resolve through the loaded table instead.
 	if editor_shell != null and _inspector.has_method("set_reference_services"):
@@ -432,6 +435,9 @@ func build_inspector(host: Control) -> void:
 	_mns_inspector.set_shell(editor_shell)
 	_mns_inspector.set_font_names(_list_font_names())
 	_styles_page.add_child(_mns_inspector)
+	if _editor != null and is_instance_valid(_editor):
+		_mns_editor.set_authoring_enabled(not _editor.is_interactive())
+		_mns_inspector.set_authoring_enabled(not _editor.is_interactive())
 
 	_tab_container.set_tab_title(DockTab.PROPERTIES, "Properties")
 	_tab_container.set_tab_title(DockTab.STYLES, "Styles")
@@ -508,6 +514,15 @@ func _text_resource_path() -> String:
 func _on_inspector_edit(edit: Dictionary) -> void:
 	if _editor != null and is_instance_valid(_editor):
 		_editor.apply_edit(edit)
+
+
+func _on_interactive_changed(on: bool) -> void:
+	if _inspector != null and is_instance_valid(_inspector):
+		_inspector.set_authoring_enabled(not on)
+	if _mns_editor != null and is_instance_valid(_mns_editor):
+		_mns_editor.set_authoring_enabled(not on)
+	if _mns_inspector != null and is_instance_valid(_mns_inspector):
+		_mns_inspector.set_authoring_enabled(not on)
 
 
 # Jump to the Strings workspace focused on this widget's string id, opening the menu's

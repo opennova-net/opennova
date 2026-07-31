@@ -6,8 +6,9 @@ extends RefCounted
 ## the live WYSIWYG canvas, and the Interactive preview whose buttons dispatch
 ## the real authored Actions. Vocabulary per CONTEXT.md: a SCREEN is one
 ## full-canvas layout; every tree node is a WINDOW; a WIDGET is a typed
-## Window; an ACTION is behavior the file expresses (navigate/show-hide/pop/
-## url); a COMMAND is game behavior the engine binds to a widget's NAME.
+## Window; an ACTION is file-authored behavior (navigation, Window state,
+## URL/form, GLB/LAN host requests, focus/capture, app messages, and MNX);
+## a COMMAND is game behavior the engine binds to a widget's NAME.
 
 ## Watchdog budget for the board screenshot (waits on render frames).
 const _SCREENSHOT_TIMEOUT_MS := 30000
@@ -25,9 +26,16 @@ const PRESSABLE_TYPES: Array[String] = ["BUTTON", "GOTO", "CHECKBOX", "RADIO", "
 const EMPTY_STATE_APPEARANCES: Array = [
 	{ "state": "default" }, { "state": "mouseover" }, { "state": "selected" }, { "state": "disabled" },
 ]
-const SCREEN_PROPS: Array[String] = ["name", "music_var", "text_rsrc", "cursor_file"]
-const ACTION_TYPES: Array[String] = ["screen", "window", "pop_screen", "pop", "url", "quit_game", "quit"]
-const WINDOW_STATES: Array[String] = ["", "show", "hide", "toggle"]
+const SCREEN_PROPS: Array[String] = [
+	"name", "has_music_var", "music_var", "text_rsrc", "cursor_file", "cursor_flags",
+]
+const ACTION_TYPES: Array[String] = [
+	"screen", "window", "url", "form_post",
+	"glb_load", "glb_loadandping", "glb_filter", "glb_filter_num",
+	"glb_ping", "glb_join", "tab", "pop_screen", "appmsg",
+	"lan_search", "lan_join", "mnx",
+]
+const WINDOW_STATES: Array[String] = ["", "show", "hide", "enable", "disable"]
 const COLOR_SLOTS: Array[String] = [
 	"default_fg", "default_bg", "mouseover_fg", "mouseover_bg",
 	"selected_fg", "selected_bg", "disabled_fg", "disabled_bg",
@@ -39,6 +47,10 @@ const LIST_OPS: Array[String] = [
 	"body_add", "body_remove", "body_field",
 	"subst_add", "subst_remove", "subst_field",
 ]
+const ITEM_WIDGET_TYPES: Array[String] = [
+	"LIST", "COMBOBOX", "SPINLIST", "MULTI", "TABLE", "GLB_TABLE", "LAN_LIST",
+]
+const TABLE_WIDGET_TYPES: Array[String] = ["TABLE", "GLB_TABLE"]
 
 var service: Node
 
@@ -64,7 +76,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"discard": { "type": "boolean", "default": false },
 			}, ["op"]), Callable(self, "_tool_menu_tabs"))
 	registry.register(McpToolDef.make("edit_menu_screen",
-			"One Screen operation per call. add={name, background?, frame?}: a new Screen with a game-shaped root (a MAIN window with full position and an appearance row — the original engine crashes without them); text_rsrc/cursor/music_var auto-copy from the first Screen. background = a .tga drawn as the root's backdrop (e.g. letterbox.tga, what shipped screens use over the main menu); WITHOUT it the root keeps type=\"custom\" — an ENGINE-painted backdrop, which on the main menu means the bink video shows through. frame = {stencil, stencil_size?, brush, monogram?} border assets that DRAW_FRAME children render with (options.mnu uses BORDER2.tga/BOXTILE.tga/MONOGRAM.tga). delete={screen}: shows then deletes that Screen and everything on it (refused for the last one). set={screen, props}: props from {name, music_var (int), text_rsrc, cursor_file, background, frame} — one undo step per field. show={screen}: makes that Screen visible on the authoring canvas and selects it. screen = a Screen name or id from get_menu. Marks the menu dirty (except show); never save unless asked.",
+			"One Screen operation per call. add={name, background?, frame?}: a new Screen with a game-shaped root (a MAIN window with full position and an appearance row — the original engine crashes without them); text_rsrc/cursor/MUSICVAR presence+value auto-copy from the first Screen. background = a .tga drawn as the root's backdrop. frame = {stencil, has_stencil_size?, stencil_size?, brush, monogram?}. delete={screen}: deletes that Screen (refused for the last one). set={screen, props}: props from {name, has_music_var, music_var, text_rsrc, cursor_file, cursor_flags, background, frame}. Set has_music_var=false to omit MUSICVAR; music_var=0 authors explicit zero. show={screen}: makes it visible. Screen names resolve case-insensitively. Marks the menu dirty (except show); never save unless asked.",
 			{
 				"add": { "type": "object", "properties": { "name": { "type": "string" }, "background": { "type": "string" }, "frame": { "type": "object" } }, "required": ["name"] },
 				"delete": { "type": ["string", "integer"] },
@@ -72,7 +84,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"show": { "type": ["string", "integer"] },
 			}), Callable(self, "_tool_edit_screen"))
 	registry.register(McpToolDef.make("add_menu_widgets",
-			"BATCH-create Windows with initial properties — the whole batch is ONE undo step. rows: [{parent (a widget id, or a Screen name/id to add at that Screen's root), type (widget type NAME: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND), rect [x,y,w,h] (menu-space pixels, parent-relative; later siblings draw on top; w/h null or -1 = AUTO-SIZE, which box-art toggles and labels need — an explicit width STRETCHES appearance art in the game), name?, text?, string_type? (\"id\"=string-table key, \"\"=literal), font? (.fnt name), flags? (int bitmask), group? (radio group), appearances? (per-state rows [{state, type?, value?, map_state?, height?}])}]. Game-proven shaping: BUTTON/GOTO rows without appearances get the four EMPTY state rows shipped text buttons carry; CHECKBOX/RADIO need image rows (map_state 0..3 state-strip art like btn5.tga) or the game draws nothing — pass appearances; give text colors via font %DEF_TEXT_*% vars or edit_menu_widget color (colorless text renders unreadable in the game); a RADIO's own text clips to its art — pair an art-only radio with a sibling label STATIC instead. NAMES are Command hooks — reuse shipped names exactly when reproducing shipped menus. The batch validates up front: an unknown type or parent rejects the whole call. Max 50 rows. Wire navigation afterwards with set_widget_actions. Marks the menu dirty.",
+			"BATCH-create Windows in ONE undo step. Widget types: WINDOW, STATIC, BUTTON, EDIT, MULTILINE_EDIT, LIST, CHECKBOX, RADIO, COMBOBOX, SCROLL, TABLE, SPINLIST, MULTI, MAP, GLOBE, LABEL, GOTO, MARQUEE_WND, GLB_TABLE, RADIOEDIT, LAN_LIST, GOPHER. rows carry parent, type, rect [x,y,w,h] (null/-1 extent = auto), and optional common properties/appearances. GLB_TABLE/LAN_LIST/GOPHER are host-owned: the generic preview preserves them but does not invent network/news data. Names are Command hooks. Max 50 rows.",
 			{
 				"rows": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object", "properties": {
 					"parent": { "type": ["integer", "string"] },
@@ -84,7 +96,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				}, "required": ["parent", "type", "rect"] } },
 			}, ["rows"]), Callable(self, "_tool_add_widgets"))
 	registry.register(McpToolDef.make("edit_menu_widget",
-			"Edit existing Windows — exactly one op per call. set={id, props}: props from {name (CAUTION: names are Command hooks — renaming a shipped widget can sever its game behavior), rect [x,y,w,h] (w/h null or -1 = auto-size), text, string_type, font, flags (1 Hidden, 2 Disabled, 4 Checked, 8 Draw Frame, 16 Modal, 32 Read Only), group, datasource, orientation (HORIZONTAL|VERTICAL), color {slot 0-7 or name default_fg/default_bg/mouseover_fg/mouseover_bg/selected_fg/selected_bg/disabled_fg/disabled_bg, value}, texture {slot 0-3 or name default/mouseover/selected/disabled, value}, appearances [{state, type?, value?, map_state?, height?}] (REPLACES all per-state rows — the only way to author shipped empty-state rows or custom/backdrop rows; the slot setters always write type=\"image\"), frame {stencil, stencil_size?, brush, monogram?} (border assets DRAW_FRAME children render with — normally on a screen's root window), table_count, table_spacing} — one undo step per field; values like %TITLE_COLOR% are stylesheet references, preserve them verbatim. Actions/sounds belong to set_widget_actions. move_rects={rows:[{id, rect}]}: a layout pass — up to 100 rects in ONE undo step. reparent={id, parent (widget id or Screen name), index}: moves a Window in the tree (index = position among the new parent's children = z-order). delete={id}: removes the Window and its subtree (Screens and a Screen's root window are not deletable — Screens go through edit_menu_screen). Marks the menu dirty.",
+			"Edit one Window operation. set.props accepts common scalar fields plus authoring={...}, the atomic presence-aware grouped shape returned by get_menu detail=full/widget=<id>. It covers text layout, full fonts/colors, constraints, form/global/password, cursor, ordered hotkeys, items/list-box/scrollbar/spin/table structures, frame insets, Actions, and Sounds without clearing omitted fields. Raw %VAR% tokens remain intact. move_rects is one layout undo step; reparent changes parent/z-order; delete removes the subtree.",
 			{
 				"set": { "type": "object", "properties": { "id": { "type": "integer" }, "props": { "type": "object" } }, "required": ["id", "props"] },
 				"move_rects": { "type": "object", "properties": { "rows": { "type": "array", "maxItems": 100, "items": { "type": "object", "properties": { "id": { "type": "integer" }, "rect": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 } }, "required": ["id", "rect"] } } }, "required": ["rows"] },
@@ -92,17 +104,21 @@ func register_all(registry: McpToolRegistry) -> void:
 				"delete": { "type": "integer" },
 			}), Callable(self, "_tool_edit_widget"))
 	registry.register(McpToolDef.make("set_widget_actions",
-			"REPLACE a Window's Action list and/or sound list — the navigation and audio wiring. Actions are the ENTIRE behavior vocabulary the .mnu format carries; anything else a button does is a Command the engine binds to the widget's NAME. actions: full replacement list of [{type: \"screen\" (navigate; target=Screen name; file=another .mnu for a cross-menu jump) | \"window\" (show/hide a named Window on the same Screen — the Tab pattern; target=widget name, state=SHOW|HIDE|TOGGLE) | \"pop_screen\" (back) | \"url\" (target=address, external_browser?) | \"quit_game\", target?, state?, file?, external_browser?}]. Actions run in order on press. The game REQUIRES file= on every screen action (even a same-screen-file jump — an empty file crashes the original engine): for a target in THIS document with no file, the tool auto-fills the menu's own filename; an Untitled tab is allowed but warns (save_menu, then re-wire to bake it — analyze_menu's game_safety flags it meanwhile). Validation: in-document screen targets must exist (error lists Screens); cross-file and unmatched window targets warn; type tokens are case-insensitive (shipped files use SCREEN/POP_SCREEN), stored canonical lowercase. sounds: full replacement list of [{state, trigger, file}] — triggers are sound-set names in the menu .lwf (MOUSE_OVER, CLICK_SELECT, ...). Each list replace is one undo step. Marks the menu dirty.",
+			"Replace ordered Actions and/or Sounds. Retail Action types: screen, window, url, form_post, glb_load, glb_loadandping, glb_filter, glb_filter_num, glb_ping, glb_join, tab, pop_screen, appmsg, lan_search, lan_join, mnx. Rows preserve type,target,state,file,source,field,test,has_target_form,target_form,external_browser,toggle. WINDOW state is SHOW/HIDE/ENABLE/DISABLE; toggle is a separate flag. TAB is focus/capture, not the visibility Tab convention (use WINDOW Actions). Host-owned actions are sandboxed in preview. Screen Actions require file= and same-document targets auto-fill it. Sounds are {state,trigger,file}.",
 			{
 				"id": { "type": "integer" },
 				"actions": { "type": "array", "items": { "type": "object", "properties": {
-					"type": { "type": "string" }, "target": { "type": "string" }, "state": { "type": "string" },
-					"file": { "type": "string" }, "external_browser": { "type": "boolean" } }, "required": ["type"] } },
+					"type": { "type": "string", "enum": ACTION_TYPES }, "target": { "type": "string" },
+					"state": { "type": "string", "enum": ["", "SHOW", "HIDE", "ENABLE", "DISABLE"] },
+					"file": { "type": "string" }, "source": { "type": "string" },
+					"field": { "type": "string" }, "test": { "type": "string", "enum": ["", "LT", "LE", "EQ", "GE", "GT"] },
+					"has_target_form": { "type": "boolean" }, "target_form": { "type": "integer" },
+					"external_browser": { "type": "boolean" }, "toggle": { "type": "boolean" } }, "required": ["type"] } },
 				"sounds": { "type": "array", "items": { "type": "object", "properties": {
 					"state": { "type": "string" }, "trigger": { "type": "string" }, "file": { "type": "string" } } } },
 			}, ["id"]), Callable(self, "_tool_set_actions"))
 	registry.register(McpToolDef.make("edit_widget_items",
-			"Edit a data widget's rows — List/Combo/SpinList/Multi items and Table columns. One op per call, each one undo step: item_add={row {type, value, text}}, item_remove={index}, item_move={from, to}, item_field={index, key, value}; Table columns: header_add/header_remove/header_field (rows {column, width, justify, vjustify, sort, text}), body_add/body_remove/body_field (rows {column, justify, vjustify, bitmap_draw, scale_bitmap, bitmap_flags}), subst_add/subst_remove/subst_field (rows {column, value, is_file, file}); set_table={count?, spacing?} sets a Table's column count/spacing. Returns the updated list. Marks the menu dirty.",
+			"Edit a supported data widget's rows — List/Combo/SpinList/Multi/LAN_LIST items and Table/GLB_TABLE items or columns. One op per call, each one undo step: item rows are {type,value,text}; headers preserve {has_column,column,has_width,width,justify,vjustify,sort,type,text}; bodies preserve {has_column,column,justify,vjustify,bitmap_draw,scale_bitmap,custom_draw,bitmap_flags}; substitutions preserve {has_column,column,value,is_file,file}. set_table={count?,spacing?} applies both atomically in one undo step and authors explicit zero presence.",
 			{
 				"id": { "type": "integer" },
 				"op": { "type": "string", "enum": ["item_add", "item_remove", "item_move", "item_field",
@@ -114,7 +130,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"count": { "type": "integer" }, "spacing": { "type": "integer" },
 			}, ["id", "op"]), Callable(self, "_tool_edit_items"))
 	registry.register(McpToolDef.make("preview_menu",
-			"Drive the Interactive preview — the menu PLAYS inside the canvas: navigators wire up, pressing runs window show/hide and screen Actions, while external behavior (quit, URL, cross-menu jumps) is sandboxed to no-ops. No document edits ever result, but ALL menu editing tools are locked while it plays. Ops: on (start at the visible Screen) | off (back to authoring) | show={screen} (jump the preview, no back-stack push) | press={widget id or name, resolved on the current Screen} — your substitute for clicking: activates a Button/Checkbox/Radio/Goto exactly as a click would, runs its authored Actions, returns the resulting visible Screen and the actions fired | back (pop the navigation stack) | status. Follow with menu_screenshot to see the result. Hotkeys do not exist in the preview.",
+			"Drive the sandboxed Interactive preview. Screen/Window/URL/pop Actions and widget activation use the real Menu path; host-owned external effects are swallowed. Editing locks while previewing. Ops: on | off | show={screen} | press={widget id or name} | back | status.",
 			{
 				"op": { "type": "string", "enum": ["on", "off", "show", "press", "back", "status"] },
 				"screen": { "type": "string" },
@@ -175,7 +191,7 @@ func _require_menu_editable(ctx: McpToolContext) -> Dictionary:
 
 func _screen_id_named(resource: Variant, name: String) -> int:
 	for sid in resource.get_screen_ids():
-		if String(resource.get_screen_name(sid)) == name:
+		if String(resource.get_screen_name(sid)).nocasecmp_to(name) == 0:
 			return sid
 	return -1
 
@@ -238,6 +254,395 @@ static func _rect_out(rect: Rect2) -> Array:
 	return [rect.position.x, rect.position.y, rect.size.x, rect.size.y]
 
 
+static func _rows_shape(value: Variant, path: String) -> String:
+	if not (value is Array):
+		return "%s must be an array of objects." % path
+	for i in range((value as Array).size()):
+		if not ((value as Array)[i] is Dictionary):
+			return "%s[%d] must be an object." % [path, i]
+	return ""
+
+
+static func _dict_shape(container: Dictionary, key: String, path: String) -> String:
+	if container.has(key) and not (container[key] is Dictionary):
+		return "%s.%s must be an object." % [path, key]
+	return ""
+
+
+static func _validate_keys(d: Dictionary, path: String, allowed: Array) -> String:
+	for key_value in d:
+		var key := String(key_value)
+		if not allowed.has(key):
+			return "%s.%s is unknown." % [path, key]
+	return ""
+
+
+static func _validate_scalar_types(d: Dictionary, path: String,
+		bool_keys: Array = [], int_keys: Array = [], string_keys: Array = []) -> String:
+	for key in bool_keys:
+		if d.has(key) and not (d[key] is bool):
+			return "%s.%s must be a boolean." % [path, key]
+	for key in int_keys:
+		if d.has(key) and not (d[key] is int or d[key] is float):
+			return "%s.%s must be a number." % [path, key]
+	for key in string_keys:
+		if d.has(key) and not (d[key] is String):
+			return "%s.%s must be a string." % [path, key]
+	return ""
+
+
+static func _validate_rows(value: Variant, path: String, allowed: Array,
+		bool_keys: Array = [], int_keys: Array = [], string_keys: Array = []) -> String:
+	var error := _rows_shape(value, path)
+	if not error.is_empty():
+		return error
+	var rows: Array = value
+	for i in range(rows.size()):
+		var row: Dictionary = rows[i]
+		error = _validate_keys(row, "%s[%d]" % [path, i], allowed)
+		if not error.is_empty():
+			return error
+		error = _validate_scalar_types(row, "%s[%d]" % [path, i],
+			bool_keys, int_keys, string_keys)
+		if not error.is_empty():
+			return error
+	return ""
+
+
+static func _validate_position(value: Variant, path: String) -> String:
+	if not (value is Dictionary):
+		return "%s must be an object." % path
+	var d: Dictionary = value
+	var error := _validate_keys(d, path, [
+		"left", "top", "right", "bottom",
+		"has_left", "has_top", "has_right", "has_bottom",
+	])
+	if not error.is_empty():
+		return error
+	return _validate_scalar_types(d, path,
+		["has_left", "has_top", "has_right", "has_bottom"],
+		["left", "top", "right", "bottom"])
+
+
+static func _validate_appearances(value: Variant, path: String) -> String:
+	return _validate_rows(value, path,
+		["state", "type", "value", "has_map_state", "map_state",
+			"has_height", "height"],
+		["has_map_state", "has_height"], ["map_state", "height"],
+		["state", "type", "value"])
+
+
+static func _validate_sounds(value: Variant, path: String) -> String:
+	return _validate_rows(value, path, ["state", "trigger", "file"], [], [],
+		["state", "trigger", "file"])
+
+
+static func _validate_scrollbar_shape(value: Variant, path: String) -> String:
+	if not (value is Dictionary):
+		return "%s must be an object." % path
+	var d: Dictionary = value
+	var error := _validate_keys(d, path, [
+		"present", "position", "track", "shuttle", "scrollup", "scrolldown",
+		"sounds",
+	])
+	if not error.is_empty():
+		return error
+	error = _validate_scalar_types(d, path, ["present"])
+	if not error.is_empty():
+		return error
+	if d.has("position"):
+		error = _validate_position(d["position"], path + ".position")
+		if not error.is_empty():
+			return error
+	for key in ["track", "shuttle", "scrollup", "scrolldown"]:
+		if d.has(key):
+			error = _validate_appearances(d[key], path + "." + key)
+			if not error.is_empty():
+				return error
+	if d.has("sounds"):
+		error = _validate_sounds(d["sounds"], path + ".sounds")
+		if not error.is_empty():
+			return error
+	return ""
+
+
+static func _validate_items_shape(value: Variant, path: String) -> String:
+	if not (value is Dictionary):
+		return "%s must be an object." % path
+	var d: Dictionary = value
+	var error := _validate_keys(d, path, [
+		"present", "multiselect", "justify", "vjustify", "appearances",
+		"selection_color", "rows",
+	])
+	if not error.is_empty():
+		return error
+	error = _validate_scalar_types(d, path, ["present", "multiselect"], [],
+		["justify", "vjustify", "selection_color"])
+	if not error.is_empty():
+		return error
+	if d.has("appearances"):
+		error = _validate_appearances(d["appearances"], path + ".appearances")
+		if not error.is_empty():
+			return error
+	if d.has("rows"):
+		error = _validate_rows(d["rows"], path + ".rows",
+			["type", "value", "text"], [], [], ["type", "value", "text"])
+		if not error.is_empty():
+			return error
+	return ""
+
+
+static func _validate_authoring_patch(value: Variant) -> String:
+	if not (value is Dictionary):
+		return "authoring must be an object."
+	var patch: Dictionary = value
+	var allowed := [
+		"id", "type", "type_token", "name", "text_rsrc", "position", "flags",
+		"string", "font", "constraints", "behavior", "scroll_size", "cursor",
+		"hotkeys", "items", "list_box", "spinup", "spindown", "scroll_parts",
+		"table", "scrollbar", "appearances", "sounds", "actions", "frame",
+	]
+	for key in patch:
+		if not allowed.has(String(key)):
+			return "authoring.%s is unknown." % key
+	var error := _validate_scalar_types(patch, "authoring", [], ["id", "type", "flags"],
+		["type_token", "name", "text_rsrc"])
+	if not error.is_empty():
+		return error
+	for key in ["position", "string", "font", "constraints", "behavior",
+			"scroll_size", "cursor", "list_box", "spinup", "spindown",
+			"scroll_parts", "table", "frame"]:
+		error = _dict_shape(patch, key, "authoring")
+		if not error.is_empty():
+			return error
+	if patch.has("position"):
+		error = _validate_position(patch["position"], "authoring.position")
+		if not error.is_empty():
+			return error
+	if patch.has("string"):
+		var string_data: Dictionary = patch["string"]
+		error = _validate_keys(string_data, "authoring.string",
+			["present", "type", "justify", "vjustify", "has_edge", "edge", "value"])
+		if error.is_empty():
+			error = _validate_scalar_types(string_data, "authoring.string",
+				["present", "has_edge"], ["edge"],
+				["type", "justify", "vjustify", "value"])
+		if not error.is_empty():
+			return error
+	if patch.has("font"):
+		var font: Dictionary = patch["font"]
+		var font_keys := ["name", "default_fg", "default_bg", "mouseover_fg",
+			"mouseover_bg", "selected_fg", "selected_bg", "disabled_fg",
+			"disabled_bg"]
+		error = _validate_keys(font, "authoring.font", font_keys)
+		if error.is_empty():
+			error = _validate_scalar_types(font, "authoring.font", [], [], font_keys)
+		if not error.is_empty():
+			return error
+	if patch.has("constraints"):
+		var constraints: Dictionary = patch["constraints"]
+		error = _validate_keys(constraints, "authoring.constraints", [
+			"number", "has_minval", "minval", "has_maxval", "maxval",
+			"has_maxchar", "maxchar",
+		])
+		if error.is_empty():
+			error = _validate_scalar_types(constraints, "authoring.constraints",
+				["number", "has_minval", "has_maxval", "has_maxchar"],
+				["minval", "maxval", "maxchar"])
+		if not error.is_empty():
+			return error
+	if patch.has("behavior"):
+		var behavior: Dictionary = patch["behavior"]
+		error = _validate_keys(behavior, "authoring.behavior", [
+			"as_button", "has_group", "group", "has_form", "form", "global_var",
+			"password", "datasource", "orientation",
+		])
+		if error.is_empty():
+			error = _validate_scalar_types(behavior, "authoring.behavior",
+				["as_button", "has_group", "has_form", "global_var", "password"],
+				["group", "form"], ["datasource", "orientation"])
+		if not error.is_empty():
+			return error
+	if patch.has("scroll_size"):
+		var scroll_size: Dictionary = patch["scroll_size"]
+		error = _validate_keys(scroll_size, "authoring.scroll_size",
+			["has_height", "height", "has_width", "width"])
+		if error.is_empty():
+			error = _validate_scalar_types(scroll_size, "authoring.scroll_size",
+				["has_height", "has_width"], ["height", "width"])
+		if not error.is_empty():
+			return error
+	if patch.has("cursor"):
+		var cursor: Dictionary = patch["cursor"]
+		error = _validate_keys(cursor, "authoring.cursor", ["file", "flags"])
+		if error.is_empty():
+			error = _validate_scalar_types(cursor, "authoring.cursor", [], [],
+				["file", "flags"])
+		if not error.is_empty():
+			return error
+	if patch.has("hotkeys"):
+		error = _validate_rows(patch["hotkeys"], "authoring.hotkeys",
+			["value", "virtual"], ["virtual"], [], ["value"])
+		if not error.is_empty():
+			return error
+	if patch.has("appearances"):
+		error = _validate_appearances(patch["appearances"], "authoring.appearances")
+		if not error.is_empty():
+			return error
+	if patch.has("sounds"):
+		error = _validate_sounds(patch["sounds"], "authoring.sounds")
+		if not error.is_empty():
+			return error
+	if patch.has("actions"):
+		error = _validate_rows(patch["actions"], "authoring.actions", [
+			"type", "state", "file", "source", "field", "test", "target",
+			"has_target_form", "target_form", "external_browser", "toggle",
+		], ["has_target_form", "external_browser", "toggle"], ["target_form"],
+			["type", "state", "file", "source", "field", "test", "target"])
+		if not error.is_empty():
+			return error
+	if patch.has("frame"):
+		var frame: Dictionary = patch["frame"]
+		error = _validate_keys(frame, "authoring.frame", [
+			"stencil", "has_stencil_size", "stencil_size", "brush", "monogram",
+			"has_insetx", "insetx", "has_insety", "insety",
+		])
+		if error.is_empty():
+			error = _validate_scalar_types(frame, "authoring.frame",
+				["has_stencil_size", "has_insetx", "has_insety"],
+				["stencil_size", "insetx", "insety"],
+				["stencil", "brush", "monogram"])
+		if not error.is_empty():
+			return error
+	if patch.has("items"):
+		error = _validate_items_shape(patch["items"], "authoring.items")
+		if not error.is_empty():
+			return error
+	if patch.has("list_box"):
+		var list_box: Dictionary = patch["list_box"]
+		error = _validate_keys(list_box, "authoring.list_box", [
+			"present", "position", "appearances", "string", "items",
+			"has_min_item_height", "min_item_height", "has_sb_edge_pad",
+			"sb_edge_pad", "scrollbar",
+		])
+		if error.is_empty():
+			error = _validate_scalar_types(list_box, "authoring.list_box",
+				["present", "has_min_item_height", "has_sb_edge_pad"],
+				["min_item_height", "sb_edge_pad"])
+		if not error.is_empty():
+			return error
+		if list_box.has("position"):
+			error = _validate_position(list_box["position"],
+				"authoring.list_box.position")
+			if not error.is_empty():
+				return error
+		if list_box.has("appearances"):
+			error = _validate_appearances(list_box["appearances"],
+				"authoring.list_box.appearances")
+			if not error.is_empty():
+				return error
+		if list_box.has("string"):
+			var popup_string: Dictionary = list_box["string"]
+			error = _validate_keys(popup_string, "authoring.list_box.string",
+				["present", "type", "justify", "vjustify", "has_edge", "edge",
+					"value"])
+			if error.is_empty():
+				error = _validate_scalar_types(popup_string,
+					"authoring.list_box.string", ["present", "has_edge"], ["edge"],
+					["type", "justify", "vjustify", "value"])
+			if not error.is_empty():
+				return error
+		if list_box.has("items"):
+			error = _validate_items_shape(list_box["items"],
+				"authoring.list_box.items")
+			if not error.is_empty():
+				return error
+		if list_box.has("scrollbar"):
+			error = _validate_scrollbar_shape(list_box["scrollbar"],
+				"authoring.list_box.scrollbar")
+			if not error.is_empty():
+				return error
+	for key in ["spinup", "spindown"]:
+		if patch.has(key):
+			var spin: Dictionary = patch[key]
+			error = _validate_keys(spin, "authoring." + key,
+				["present", "position", "appearances"])
+			if error.is_empty():
+				error = _validate_scalar_types(spin, "authoring." + key,
+					["present"])
+			if not error.is_empty():
+				return error
+			if spin.has("position"):
+				error = _validate_position(spin["position"],
+					"authoring." + key + ".position")
+				if not error.is_empty():
+					return error
+			if spin.has("appearances"):
+				error = _validate_appearances(spin["appearances"],
+					"authoring." + key + ".appearances")
+				if not error.is_empty():
+					return error
+	if patch.has("scroll_parts"):
+		var parts: Dictionary = patch["scroll_parts"]
+		error = _validate_keys(parts, "authoring.scroll_parts",
+			["shuttle", "scrollup", "scrolldown"])
+		if not error.is_empty():
+			return error
+		for key in ["shuttle", "scrollup", "scrolldown"]:
+			if parts.has(key):
+				error = _validate_appearances(parts[key],
+					"authoring.scroll_parts." + key)
+				if not error.is_empty():
+					return error
+	if patch.has("table"):
+		var table: Dictionary = patch["table"]
+		error = _validate_keys(table, "authoring.table", [
+			"has_count", "count", "has_spacing", "spacing", "headers", "bodies",
+			"substitutions", "has_min_item_height", "min_item_height",
+			"outline_color", "selection_color", "multiselect", "scrollbar",
+		])
+		if error.is_empty():
+			error = _validate_scalar_types(table, "authoring.table",
+				["has_count", "has_spacing", "has_min_item_height", "multiselect"],
+				["count", "spacing", "min_item_height"],
+				["outline_color", "selection_color"])
+		if not error.is_empty():
+			return error
+		if table.has("headers"):
+			error = _validate_rows(table["headers"], "authoring.table.headers", [
+				"has_column", "column", "has_width", "width", "justify",
+				"vjustify", "sort", "type", "text",
+			], ["has_column", "has_width"], ["column", "width"],
+				["justify", "vjustify", "sort", "type", "text"])
+			if not error.is_empty():
+				return error
+		if table.has("bodies"):
+			error = _validate_rows(table["bodies"], "authoring.table.bodies", [
+				"has_column", "column", "justify", "vjustify", "bitmap_draw",
+				"scale_bitmap", "bitmap_flags", "custom_draw",
+			], ["has_column", "bitmap_draw", "scale_bitmap", "custom_draw"],
+				["column"], ["justify", "vjustify", "bitmap_flags"])
+			if not error.is_empty():
+				return error
+		if table.has("substitutions"):
+			error = _validate_rows(table["substitutions"],
+				"authoring.table.substitutions",
+				["has_column", "column", "value", "is_file", "file"],
+				["has_column", "is_file"], ["column"], ["value", "file"])
+			if not error.is_empty():
+				return error
+		if table.has("scrollbar"):
+			error = _validate_scrollbar_shape(table["scrollbar"],
+				"authoring.table.scrollbar")
+			if not error.is_empty():
+				return error
+	if patch.has("scrollbar"):
+		error = _validate_scrollbar_shape(patch["scrollbar"], "authoring.scrollbar")
+		if not error.is_empty():
+			return error
+	return ""
+
+
 # Pre-order search for a widget by name within a subtree (or the whole document
 # when root_id < 0).
 func _find_widget_named(resource: Variant, name: String, root_id: int = -1) -> int:
@@ -284,6 +689,7 @@ func _widget_node(resource: Variant, id: int, full: bool, budget: Dictionary) ->
 	var sounds: Array = resource.get_widget_sounds(id)
 	var items := int(resource.get_item_count(id))
 	if full:
+		node["authoring"] = resource.get_widget_authoring_state(id)
 		if not actions.is_empty():
 			node["actions"] = actions
 		if not sounds.is_empty():
@@ -330,14 +736,16 @@ func _tool_get_menu(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var screens: Array = []
 	for sid in resource.get_screen_ids():
 		var name := String(resource.get_screen_name(sid))
-		if not only.is_empty() and name != only:
+		if not only.is_empty() and name.nocasecmp_to(only) != 0:
 			continue
 		screens.append({
 			"id": sid,
 			"name": name,
+			"has_music_var": resource.get_screen_has_music_var(sid),
 			"music_var": resource.get_screen_music_var(sid),
 			"text_rsrc": resource.get_screen_text_rsrc(sid),
 			"cursor_file": resource.get_screen_cursor_file(sid),
+			"cursor_flags": resource.get_screen_cursor_flags(sid),
 			"root_id": resource.get_screen_root_id(sid),
 			"tree": _widget_node(resource, resource.get_screen_root_id(sid), full, budget),
 		})
@@ -377,6 +785,7 @@ func _widget_card(resource: Variant, id: int) -> Dictionary:
 		"actions": resource.get_widget_actions(id),
 		"sounds": resource.get_widget_sounds(id),
 		"children": resource.get_child_ids(id),
+		"authoring": resource.get_widget_authoring_state(id),
 	}
 	var colors := {}
 	for slot in range(COLOR_SLOTS.size()):
@@ -478,10 +887,18 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 			if screen_ids.size() > 1 and int(screen_ids[0]) != sid:
 				var first := int(screen_ids[0])
 				var copies := {
-					"music_var": resource.get_screen_music_var(first),
 					"text_rsrc": String(resource.get_screen_text_rsrc(first)),
 					"cursor": String(resource.get_screen_cursor_file(first)),
+					"cursor_flags": String(resource.get_screen_cursor_flags(first)),
 				}
+				if resource.get_screen_has_music_var(first):
+					# Presence must be established separately: an explicit zero
+					# compares equal to a new Screen's numeric default.
+					editor.apply_edit({ "target": "screen", "id": sid,
+						"prop": "has_music_var", "value": true })
+					editor.apply_edit({ "target": "screen", "id": sid,
+						"prop": "music_var",
+						"value": resource.get_screen_music_var(first) })
 				for prop in copies:
 					if copies[prop] is String and String(copies[prop]).is_empty():
 						continue
@@ -529,15 +946,26 @@ func _tool_edit_screen(args: Dictionary, ctx: McpToolContext) -> Variant:
 				var existing := _screen_id_named(resource, new_name)
 				if existing >= 0 and existing != sid:
 					return McpToolResult.error("A Screen named '%s' already exists." % new_name)
+			if props.has("frame") and not (props["frame"] is Dictionary):
+				return McpToolResult.error("frame must be an object: {stencil, has_stencil_size?, stencil_size?, brush, monogram?}.")
 			var root_id := int(resource.get_screen_root_id(sid))
+			if props.has("music_var"):
+				if not resource.get_screen_has_music_var(sid):
+					editor.apply_edit({ "target": "screen", "id": sid,
+						"prop": "has_music_var", "value": true })
+				editor.apply_edit({ "target": "screen", "id": sid,
+					"prop": "music_var", "value": int(props["music_var"]) })
+			if props.has("has_music_var"):
+				editor.apply_edit({ "target": "screen", "id": sid,
+					"prop": "has_music_var", "value": bool(props["has_music_var"]) })
 			for key in props:
 				match String(key):
+					"music_var", "has_music_var":
+						pass
 					"background":
 						editor.apply_edit({ "target": "widget", "id": root_id, "prop": "appearances",
 								"value": [{ "state": "default", "type": "image", "value": String(props[key]) }] })
 					"frame":
-						if not (props[key] is Dictionary):
-							return McpToolResult.error("frame must be an object: {stencil, stencil_size?, brush, monogram?}.")
 						editor.apply_edit({ "target": "widget", "id": root_id, "prop": "frame", "value": props[key] })
 					"cursor_file":
 						editor.apply_edit({ "target": "screen", "id": sid, "prop": "cursor", "value": props[key] })
@@ -645,9 +1073,34 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 				var name := String(key)
 				if name == "actions" or name == "sounds":
 					return McpToolResult.error("Actions and sounds are wired with set_widget_actions.")
-				if not WIDGET_PROPS.has(name) and name != "color" and name != "texture":
-					return McpToolResult.error("Unknown prop '%s'. Valid: %s, color {slot, value}, texture {slot, value}. Flags: %s" % [
+				if not WIDGET_PROPS.has(name) and name != "color" and name != "texture" and name != "authoring":
+					return McpToolResult.error("Unknown prop '%s'. Valid: %s, authoring {grouped atomic patch}, color {slot, value}, texture {slot, value}. Flags: %s" % [
 							name, ", ".join(WIDGET_PROPS), resource.get_flag_labels()])
+				# Validate the entire request before the first mutation. Tool
+				# calls are not transactions across several scalar undo entries;
+				# a bad later field must never leave earlier fields applied.
+				match name:
+					"color", "texture":
+						if not (props[key] is Dictionary):
+							return McpToolResult.error("%s must be {slot, value}." % name)
+						var slot_spec: Dictionary = props[key]
+						var names := COLOR_SLOTS if name == "color" else TEXTURE_SLOTS
+						if _resolve_slot(slot_spec.get("slot"), names) < 0:
+							return McpToolResult.error("%s.slot must be 0-%d or one of: %s" % [
+								name, names.size() - 1, ", ".join(names)])
+					"rect":
+						if _rect_from(props[key]) == null:
+							return McpToolResult.error("rect must be [x, y, w, h] (w/h may be null or -1 for auto-size).")
+					"appearances":
+						if not (props[key] is Array):
+							return McpToolResult.error("appearances must be a list of presence-aware rows.")
+					"frame":
+						if not (props[key] is Dictionary):
+							return McpToolResult.error("frame must be an object: {stencil, has_stencil_size?, stencil_size?, brush, monogram?}.")
+					"authoring":
+						var authoring_error := _validate_authoring_patch(props[key])
+						if not authoring_error.is_empty():
+							return McpToolResult.error(authoring_error)
 			for key in props:
 				var name := String(key)
 				match name:
@@ -672,6 +1125,10 @@ func _tool_edit_widget(args: Dictionary, ctx: McpToolContext) -> Variant:
 						if not (props[key] is Dictionary):
 							return McpToolResult.error("frame must be an object: {stencil, stencil_size?, brush, monogram?} — DRAW_FRAME children render with the nearest ancestor's frame (put it on the screen's root window).")
 						editor.apply_edit({ "target": "widget", "id": id, "prop": "frame", "value": props[key] })
+					"authoring":
+						if not (props[key] is Dictionary):
+							return McpToolResult.error("authoring must be a grouped patch from get_menu detail=full.")
+						editor.apply_edit({ "target": "widget", "id": id, "prop": "patch", "value": props[key] })
 					_:
 						editor.apply_edit({ "target": "widget", "id": id, "prop": name, "value": props[key] })
 			return { "ok": true, "op": "set", "widget": _widget_card(resource, id), "dirty": gate["doc"].get("is_dirty") }
@@ -753,6 +1210,20 @@ func _tool_set_actions(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("No widget %d — get_menu lists ids." % id)
 	if not args.has("actions") and not args.has("sounds"):
 		return McpToolResult.error("Pass actions and/or sounds (full replacement lists).")
+	# Validate both replacement lists before either mutation so a malformed
+	# Sounds row cannot follow (and partially commit) valid Actions.
+	if args.has("actions"):
+		var action_shape := _validate_rows(args["actions"], "actions", [
+			"type", "state", "file", "source", "field", "test", "target",
+			"has_target_form", "target_form", "external_browser", "toggle",
+		], ["has_target_form", "external_browser", "toggle"], ["target_form"],
+			["type", "state", "file", "source", "field", "test", "target"])
+		if not action_shape.is_empty():
+			return McpToolResult.error(action_shape)
+	if args.has("sounds"):
+		var sound_shape := _validate_sounds(args["sounds"], "sounds")
+		if not sound_shape.is_empty():
+			return McpToolResult.error(sound_shape)
 	var warnings: Array = []
 	var undo_steps := 0
 	if args.has("actions"):
@@ -787,7 +1258,7 @@ func _tool_set_actions(args: Dictionary, ctx: McpToolContext) -> Variant:
 				"window":
 					var state := String(action.get("state", "")).to_lower()
 					if not WINDOW_STATES.has(state):
-						return McpToolResult.error("Action %d: window state must be SHOW | HIDE | TOGGLE." % i)
+						return McpToolResult.error("Action %d: window state must be SHOW | HIDE | ENABLE | DISABLE." % i)
 					var target := String(action.get("target", ""))
 					if screen_of >= 0 and not target.is_empty() and _find_widget_named(resource, target, screen_of) < 0:
 						warnings.append("action %d: no Window named '%s' on this Screen (resolved at runtime)" % [i, target])
@@ -827,19 +1298,34 @@ func _tool_edit_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var op := String(args.get("op", ""))
 	if op != "set_table" and not LIST_OPS.has(op):
 		return McpToolResult.error("Unknown op '%s'. Ops: %s, set_table" % [op, ", ".join(LIST_OPS)])
+	var tname := String(resource.get_widget_type_name(resource.get_widget_type(id))).to_upper()
+	if op.begins_with("item_") and not ITEM_WIDGET_TYPES.has(tname):
+		return McpToolResult.error("%s edits ITEMS, but widget %d is a %s. Supported: %s." % [
+			op, id, tname, ", ".join(ITEM_WIDGET_TYPES)])
 	# header_*/body_*/subst_*/set_table edit TABLE columns; on any other widget
 	# type the document silently ignores them — refuse loudly instead.
 	if not op.begins_with("item_"):
-		var tname := String(resource.get_widget_type_name(resource.get_widget_type(id))).to_upper()
-		if tname != "TABLE":
+		if not TABLE_WIDGET_TYPES.has(tname):
 			return McpToolResult.error("%s edits TABLE columns, but widget %d is a %s — List/Combo/SpinList/Multi rows are edited with item_add / item_remove / item_move / item_field." % [op, id, tname])
 	if op == "set_table":
+		if not args.has("count") and not args.has("spacing"):
+			return McpToolResult.error("set_table needs count and/or spacing.")
+		if args.has("count") and int(args["count"]) < 0:
+			return McpToolResult.error("set_table.count must be >= 0.")
+		if args.has("spacing") and int(args["spacing"]) < 0:
+			return McpToolResult.error("set_table.spacing must be >= 0.")
+		var table_patch := {}
 		if args.has("count"):
-			editor.apply_edit({ "target": "widget", "id": id, "prop": "table_count", "value": int(args["count"]) })
+			table_patch["has_count"] = true
+			table_patch["count"] = int(args["count"])
 		if args.has("spacing"):
-			editor.apply_edit({ "target": "widget", "id": id, "prop": "table_spacing", "value": int(args["spacing"]) })
+			table_patch["has_spacing"] = true
+			table_patch["spacing"] = int(args["spacing"])
+		editor.apply_edit({ "target": "widget", "id": id, "prop": "patch",
+			"value": { "table": table_patch } })
 		return { "ok": true, "op": op, "count": resource.get_table_column_count(id),
-				"spacing": resource.get_table_column_spacing(id), "dirty": gate["doc"].get("is_dirty") }
+				"spacing": resource.get_table_column_spacing(id), "undo_steps": 1,
+				"dirty": gate["doc"].get("is_dirty") }
 	var sizes := {
 		"item": resource.get_items(id).size(),
 		"header": resource.get_table_headers(id).size(),
@@ -872,6 +1358,17 @@ func _tool_edit_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("%s: index %d out of range (0..%d)." % [op, index, int(sizes[family]) - 1])
 			if String(args.get("key", "")).is_empty() or not args.has("value"):
 				return McpToolResult.error("%s needs key and value." % op)
+			var allowed := {
+				"item": ["type", "value", "text"],
+				"header": ["has_column", "column", "has_width", "width",
+					"justify", "vjustify", "sort", "type", "text"],
+				"body": ["has_column", "column", "justify", "vjustify",
+					"bitmap_draw", "scale_bitmap", "custom_draw", "bitmap_flags"],
+				"subst": ["has_column", "column", "value", "is_file", "file"],
+			}
+			if not (allowed[family] as Array).has(String(args["key"])):
+				return McpToolResult.error("%s: unknown key '%s'. Valid: %s." % [
+					op, args["key"], ", ".join(allowed[family])])
 			edit["index"] = index
 			edit["key"] = args["key"]
 			edit["value"] = args["value"]
@@ -902,11 +1399,11 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("The Menus canvas is not mounted — activate the workspace (open_in_workspace workspace=\"mnu\").")
 	match String(args.get("op", "")):
 		"on":
-			canvas.set_interactive(true)
+			editor.set_interactive(true)
 			await ctx.frames(1)
 			return { "interactive": true, "visible_screen": canvas.get_visible_screen_name() }
 		"off":
-			canvas.set_interactive(false)
+			editor.set_interactive(false)
 			await ctx.frames(1)
 			return { "interactive": false, "visible_screen": canvas.get_visible_screen_name() }
 		"show":
@@ -972,10 +1469,24 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 		return McpToolResult.error("'%s' is hidden — show its Window first (a hidden Tab panel's widgets are unclickable)." % resource.get_widget_name(id))
 	var fired: Array = resource.get_widget_actions(id)
 	if control is BaseButton:
+		if control.disabled:
+			# A visible disabled hotkey/click target consumes the match but
+			# performs no activation, matching NovaMnuMenu's dispatch path.
+			return {
+				"ok": true,
+				"pressed": resource.get_widget_name(id),
+				"activated": false,
+				"disabled": true,
+				"actions": [],
+				"visible_screen": canvas.get_visible_screen_name(),
+			}
 		if control.toggle_mode:
 			control.set_pressed(not control.button_pressed)
-		else:
-			control.emit_signal("pressed")
+		# BaseButton does not emit pressed when button_pressed is assigned.
+		# A real click/hotkey flips toggle state first, then dispatches pressed.
+		control.emit_signal("pressed")
+	elif control.has_method("trigger_hotkey"):
+		control.trigger_hotkey()
 	elif control.has_method("trigger"):
 		control.trigger()
 	else:

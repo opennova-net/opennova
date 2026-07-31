@@ -1,4 +1,4 @@
-# MNS stylesheets parse into a lossless document; the flat table is its flatten() view
+# MNS stylesheets parse into a lossless document; runtime uses its evaluated view
 
 The `.mns` menu stylesheet is a hand-authored text file. The only one NovaLogic
 shipped (`menu_style.mns`, vendored at `fixtures/mns/menu_style.mns`) opens with a
@@ -20,11 +20,13 @@ of the input. This is the ADR-0003-compatible reading of losslessness: there is 
 raw-span replay; every byte is owned by a field something can edit
 ([ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 
-The runtime keeps its flat view: `Document::flatten()` evaluates conditionals, joins
-continuations, strips comments, unescapes, uppercases keys, last duplicate wins -
-exactly the historical `mns::parse()` result, which now delegates to it so one
-tokenizer exists. This is the same preserve-vs-honor split as ADR 0002: the document
-preserves what was authored; flatten is what the engine honors.
+The runtime keeps a separate evaluated view:
+`Document::evaluate()` returns `{StyleSheet, diagnostics, success}` using the
+witnessed retail rules, while `flatten()` is the convenience for callers that
+deliberately accept diagnostics. `mns::parse()` delegates to the evaluator and
+propagates retail syntax failure. This is the same preserve-vs-honor split as
+ADR 0002: the document preserves what was authored; evaluation is what the
+engine honors.
 
 ## Decisions worth recording
 
@@ -36,19 +38,19 @@ preserves what was authored; flatten is what the engine honors.
 - **Multi-line defines collapse on edit.** Editing a continuation-spanning value
   rewrites it as one line keeping the first line's layout and coalescing every
   spanned inline comment into one trailing comment: comment *text* is never lost,
-  comment *position* is approximated. Zero shipped defines use continuations; the
-  policy is pinned by test.
-- **Inactive `#if 0` content stays text.** The runtime skips those lines one by one
-  (directives still recognized, continuations not honored), so imposing define
-  structure there would change flatten semantics. They are preserved verbatim as
-  inactive-text nodes, visible through the source view, excluded from entries().
-  The alternative - speculatively parsing them as defines - produces bogus entries
-  for continuation tails and was rejected.
-- **Diagnostics, never failures.** The in-file spec declares errors (duplicate
-  names, bare backslashes, malformed `#if`); the original only reported them in
-  debug builds. The parse stays permissive so every shipped file loads, and emits
-  `{line, severity, code, message}` diagnostics the editor surfaces
-  (D-MNS-1..4 in docs/mnu/menu-re.md).
+  comment *position* is approximated. If the continuation crosses conditional
+  directives or inactive source, those structural lines remain in place and the
+  edited value is written across the surviving value segments instead; an edit
+  must never delete control flow. Zero shipped defines use continuations; both
+  policies are pinned by test.
+- **Inactive source stays repairable.** The lossless document retains inactive
+  text and directives exactly. Runtime evaluation separately mirrors retail's
+  directive scan, including directive recognition during continuations and its
+  search for `#` inside an inactive region.
+- **Document diagnostics do not block editing; evaluator failures block
+  runtime use.** A malformed file can open, display diagnostics, and be repaired
+  without data loss. The runtime evaluator returns `success=false` for syntax
+  the original rejects, so callers cannot accidentally run a partial sheet.
 - **From-scratch documents are canonical.** A sheet built programmatically (or via
   `set_variables`) renders insertion-ordered `NAME<TAB>value` lines with CRLF (the
   ship-faithful EOL) and no BOM; a parsed document keeps whatever it had, per line.
@@ -60,5 +62,6 @@ preserves what was authored; flatten is what the engine honors.
   byte-identically, and its undo restores comments and alignment exactly (undo
   snapshots are source text).
 - The flat `mns::write()` dump remains as the documented lossy canonical form.
-- Anything consuming `mns::StyleSheet` is untouched - flatten() reproduces the
-  legacy parse bit-for-bit (guarded by `tests/mns/mns_document_test.cpp`).
+- Existing `mns::StyleSheet` consumers keep their small interface; byte/text
+  loaders now receive retail syntax failure from the evaluator instead of a
+  partial table.

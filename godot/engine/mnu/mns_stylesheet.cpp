@@ -21,7 +21,10 @@ using opennova::to_std;
 } // namespace
 
 void MnsStyleSheet::_refresh() {
-	sheet_ = doc_.flatten();
+	const mns::EvaluationResult result = doc_.evaluate();
+	sheet_ = result.sheet;
+	evaluation_diagnostics_ = result.diagnostics;
+	runtime_valid_ = result.success;
 }
 
 String MnsStyleSheet::get_variable(const String &p_name) const {
@@ -77,13 +80,18 @@ void MnsStyleSheet::set_variable(const String &p_name, const String &p_value) {
 	emit_changed();
 }
 
-void MnsStyleSheet::remove_variable(const String &p_name) {
+bool MnsStyleSheet::remove_variable(const String &p_name) {
 	std::string error;
 	if (!doc_.remove_define(to_std(p_name), &error)) {
-		return; // absent: nothing changed, nothing emitted
+		if (!error.empty()) {
+			UtilityFunctions::push_warning(
+					"MnsStyleSheet: remove_variable failed: ", error.c_str());
+		}
+		return false; // unchanged: no dirty signal
 	}
 	_refresh();
 	emit_changed();
+	return true;
 }
 
 void MnsStyleSheet::set_variables(const Dictionary &p_variables) {
@@ -105,7 +113,7 @@ void MnsStyleSheet::clear() {
 		return;
 	}
 	doc_ = mns::Document();
-	sheet_.variables.clear();
+	_refresh();
 	emit_changed();
 }
 
@@ -138,6 +146,19 @@ int MnsStyleSheet::get_entry_count() const {
 Array MnsStyleSheet::get_diagnostics() const {
 	Array out;
 	for (const mns::Diagnostic &d : doc_.diagnostics()) {
+		Dictionary row;
+		row["line"] = d.line;
+		row["severity"] = (d.severity == mns::Severity::Error) ? "error" : "warning";
+		row["code"] = to_gd(d.code);
+		row["message"] = to_gd(d.message);
+		out.append(row);
+	}
+	return out;
+}
+
+Array MnsStyleSheet::get_evaluation_diagnostics() const {
+	Array out;
+	for (const mns::Diagnostic &d : evaluation_diagnostics_) {
 		Dictionary row;
 		row["line"] = d.line;
 		row["severity"] = (d.severity == mns::Severity::Error) ? "error" : "warning";
@@ -228,8 +249,8 @@ bool MnsStyleSheet::is_valid_variable_value(const String &p_value) const {
 }
 
 Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
-	// Permissive like the original loader: shipped files always load; spec
-	// violations surface through get_diagnostics() instead of a failure.
+	// Keep the lossless document load permissive so malformed source remains
+	// repairable in the editor. Runtime callers must check is_runtime_valid().
 	doc_ = mns::Document::parse(reinterpret_cast<const char *>(p_bytes.ptr()),
 			static_cast<size_t>(p_bytes.size()));
 	_refresh();
@@ -304,6 +325,9 @@ void MnsStyleSheet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &MnsStyleSheet::get_entries);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &MnsStyleSheet::get_entry_count);
 	ClassDB::bind_method(D_METHOD("get_diagnostics"), &MnsStyleSheet::get_diagnostics);
+	ClassDB::bind_method(D_METHOD("is_runtime_valid"), &MnsStyleSheet::is_runtime_valid);
+	ClassDB::bind_method(D_METHOD("get_evaluation_diagnostics"),
+			&MnsStyleSheet::get_evaluation_diagnostics);
 	ClassDB::bind_method(D_METHOD("get_source_text"), &MnsStyleSheet::get_source_text);
 	ClassDB::bind_method(D_METHOD("set_source_text", "text"), &MnsStyleSheet::set_source_text);
 	ClassDB::bind_method(D_METHOD("add_variable", "name", "value", "after_name"), &MnsStyleSheet::add_variable, DEFVAL(String()));

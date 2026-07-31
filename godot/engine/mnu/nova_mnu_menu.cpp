@@ -3,7 +3,9 @@
 #include "nova_mnu_builder.h"
 #include "nova_mnu_button.h"
 #include "nova_mnu_combo.h"
+#include "nova_mnu_edit.h"
 #include "nova_mnu_goto.h"
+#include "nova_mnu_multiline_edit.h"
 #include "nova_mnu_screen.h"
 #include "resource_index/nova_resource_root.h"
 
@@ -16,9 +18,15 @@
 #include <godot_cpp/classes/base_button.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/item_list.hpp>
+#include <godot_cpp/classes/line_edit.hpp>
+#include <godot_cpp/classes/text_edit.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+
+#include <cctype>
+#include <map>
 
 using namespace godot;
 
@@ -177,11 +185,40 @@ void NovaMnuMenu::build() {
 	ctx.interactive = interactive_;
 
 	const mnu::Document &doc = menu_->get_native();
+	// A menu can name a different RTXT table on each screen. Keep the explicit
+	// host-provided resource as the fallback, but resolve each declared table
+	// through the resource root for the duration of that screen build.
+	std::map<std::string, Ref<RtxtStringFile>> screen_text_cache;
 	// get_screen_ids()[i] aligns with doc.screens[i] (both built in the same order by
 	// rebuild_ids), so the i-th built screen's root window id is screen_ids[i]'s root.
 	const PackedInt32Array screen_ids = menu_->get_screen_ids();
 	int screen_index = 0;
 	for (const auto &screen : doc.screens) {
+		ctx.text = text_resource_.ptr();
+		const std::string text_name = !screen.text_rsrc.empty()
+				? screen.text_rsrc
+				: screen.root_window.text_rsrc;
+		if (!text_name.empty() && resource_root_.is_valid()) {
+			std::string cache_key = text_name;
+			for (char &c : cache_key) {
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+			auto found = screen_text_cache.find(cache_key);
+			if (found == screen_text_cache.end()) {
+				Ref<RtxtStringFile> table;
+				const PackedByteArray bytes = resource_root_->read_file(String::utf8(text_name.c_str()));
+				if (!bytes.is_empty()) {
+					table.instantiate();
+					if (table->load_from_byte_array(bytes) != OK) {
+						table.unref();
+					}
+				}
+				found = screen_text_cache.emplace(cache_key, table).first;
+			}
+			if (found->second.is_valid()) {
+				ctx.text = found->second.ptr();
+			}
+		}
 		const int root_window_id = screen_index < screen_ids.size()
 				? menu_->get_screen_root_id(screen_ids[screen_index])
 				: -1;
@@ -320,7 +357,41 @@ void NovaMnuMenu::quit_game() {
 	emit_signal("quit_requested");
 }
 
-bool NovaMnuMenu::handle_window_action(const String &p_target, const String &p_state) {
+static void apply_window_enabled_state(Node *p_node, bool p_parent_enabled) {
+	if (p_node == nullptr) {
+		return;
+	}
+	const bool local_enabled = !p_node->has_meta("mnu_local_enabled") ||
+			static_cast<bool>(p_node->get_meta("mnu_local_enabled"));
+	const bool effective_enabled = p_parent_enabled && local_enabled;
+
+	// Only authored widget roots own local process state. Generated presentation
+	// children inherit it, but still receive disabled visuals/input below.
+	if (p_node->has_meta("mnu_local_enabled")) {
+		p_node->set_process_mode(effective_enabled
+						? Node::PROCESS_MODE_INHERIT
+						: Node::PROCESS_MODE_DISABLED);
+	}
+	if (BaseButton *button = Object::cast_to<BaseButton>(p_node)) {
+		button->set_disabled(!effective_enabled);
+	} else if (NovaMnuEdit *edit = Object::cast_to<NovaMnuEdit>(p_node)) {
+		edit->set_runtime_enabled(effective_enabled);
+	} else if (NovaMnuMultilineEdit *edit =
+					   Object::cast_to<NovaMnuMultilineEdit>(p_node)) {
+		edit->set_runtime_enabled(effective_enabled);
+	} else if (ItemList *list = Object::cast_to<ItemList>(p_node)) {
+		list->set_mouse_filter(effective_enabled
+						? Control::MOUSE_FILTER_STOP
+						: Control::MOUSE_FILTER_IGNORE);
+		list->set_focus_mode(effective_enabled ? Control::FOCUS_ALL : Control::FOCUS_NONE);
+	}
+	for (int i = 0; i < p_node->get_child_count(); ++i) {
+		apply_window_enabled_state(p_node->get_child(i), effective_enabled);
+	}
+}
+
+bool NovaMnuMenu::handle_window_action(const String &p_target, const String &p_state,
+		bool p_toggle) {
 	NovaMnuScreen *screen = find_screen(current_screen_);
 	if (screen == nullptr) {
 		return false;
@@ -331,13 +402,20 @@ bool NovaMnuMenu::handle_window_action(const String &p_target, const String &p_s
 		return false;
 	}
 	const String state = p_state.to_lower();
-	if (state == "hide") {
-		target->set_visible(false);
-	} else if (state == "toggle") {
-		target->set_visible(!target->is_visible());
+	if (state == "enable" || state == "disable") {
+		const bool currently_enabled = !target->has_meta("mnu_local_enabled") ||
+				static_cast<bool>(target->get_meta("mnu_local_enabled"));
+		const bool enable = p_toggle ? !currently_enabled : state == "enable";
+		target->set_meta("mnu_local_enabled", enable);
+		apply_window_enabled_state(screen, true);
 	} else {
-		// Default ("show") matches the reference.
-		target->set_visible(true);
+		// HIDE/SHOW select the visibility property. Keep the old synthetic
+		// state="toggle" spelling as a script compatibility convenience; retail
+		// carries TOGGLE as a separate flag.
+		const bool show = (p_toggle || state == "toggle")
+				? !target->is_visible()
+				: state != "hide";
+		target->set_visible(show);
 	}
 	return true;
 }
@@ -367,7 +445,8 @@ static bool hotkey_matches(const String &p_stored, const String &p_pressed) {
 	return stored_enter && pressed_enter;
 }
 
-Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_vk) const {
+Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_key,
+		bool p_virtual) const {
 	if (p_node == nullptr) {
 		return nullptr;
 	}
@@ -379,14 +458,22 @@ Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_vk) const {
 	if (ctrl != nullptr && !ctrl->is_visible()) {
 		return nullptr;
 	}
-	if (p_node->has_meta("mnu_hotkey")) {
-		const String hk = p_node->get_meta("mnu_hotkey");
-		if (hotkey_matches(hk, p_vk)) {
-			return p_node;
+	const StringName meta_name = p_virtual
+			? StringName("mnu_virtual_hotkeys")
+			: StringName("mnu_character_hotkeys");
+	if (p_node->has_meta(meta_name)) {
+		const PackedStringArray hotkeys = p_node->get_meta(meta_name);
+		for (int i = 0; i < hotkeys.size(); ++i) {
+			const bool match = p_virtual
+					? hotkey_matches(hotkeys[i], p_key)
+					: hotkeys[i].nocasecmp_to(p_key) == 0;
+			if (match) {
+				return p_node;
+			}
 		}
 	}
 	for (int i = 0; i < p_node->get_child_count(); ++i) {
-		Node *found = find_hotkey_target(p_node->get_child(i), p_vk);
+		Node *found = find_hotkey_target(p_node->get_child(i), p_key, p_virtual);
 		if (found != nullptr) {
 			return found;
 		}
@@ -394,32 +481,41 @@ Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_vk) const {
 	return nullptr;
 }
 
-// Activates a hotkey target as a mouse click would. Returns true only when the
-// activation has a real effect worth consuming the key for (a dispatched MNU
-// action, a state toggle, or a Goto), so a hotkey on an actionless button leaves
-// the key free to propagate (e.g. Esc falling through to the in-game pause).
+// Activates a hotkey target through the same signal path as a pointer click.
+// A match is consumed even without an authored ACTION because actionless named
+// controls are the retail Command seam wired by their host.
 bool NovaMnuMenu::trigger_hotkey_target(Node *p_target) {
 	BaseButton *button = Object::cast_to<BaseButton>(p_target);
 	if (button != nullptr) {
-		bool effect = false;
+		// A disabled accelerator remains owned by the visible widget but cannot
+		// activate it. Consuming it prevents a second same-key widget later in
+		// document order from firing through a disabled modal control.
+		if (button->is_disabled()) {
+			return true;
+		}
 		if (button->is_toggle_mode()) {
 			// Checkbox/radio: flip state so the "toggled" handler runs (a bare
 			// emit "pressed" does not toggle a NovaMnuCheckBox).
 			button->set_pressed(!button->is_pressed());
-			effect = true;
 		}
-		NovaMnuButton *nova = Object::cast_to<NovaMnuButton>(button);
-		if (nova != nullptr && nova->get_action_count() > 0) {
-			effect = true;
-		}
-		// Always emit so the button's own actions and any host-wired (name-keyed)
-		// handler run; `effect` only governs whether the key is consumed.
+		// Follow the same pressed signal path as a pointer activation. A matched
+		// accelerator is handled even when the button has no authored ACTION:
+		// shipped menus intentionally use actionless, name-keyed Command hooks.
 		button->emit_signal("pressed");
-		return effect;
+		return true;
 	}
 	NovaMnuGoto *go = Object::cast_to<NovaMnuGoto>(p_target);
 	if (go != nullptr) {
 		go->trigger();
+		return true;
+	}
+	if (NovaMnuEdit *edit = Object::cast_to<NovaMnuEdit>(p_target)) {
+		return edit->trigger_hotkey();
+	}
+	if (LineEdit *edit = Object::cast_to<LineEdit>(p_target)) {
+		if (edit->is_editable()) {
+			edit->grab_focus();
+		}
 		return true;
 	}
 	return false;
@@ -433,13 +529,23 @@ bool NovaMnuMenu::handle_hotkey(const String &p_vk) {
 	if (screen == nullptr) {
 		return false;
 	}
-	Node *target = find_hotkey_target(screen, p_vk);
+	Node *target = find_hotkey_target(screen, p_vk.to_upper(), true);
 	if (target == nullptr) {
 		return false;
 	}
-	// Only report handled when the activation actually did something, so a matched
-	// but inert widget does not swallow the key from the host (e.g. Esc-to-resume).
 	return trigger_hotkey_target(target);
+}
+
+bool NovaMnuMenu::handle_character_hotkey(const String &p_character) {
+	if (edit_mode_ || p_character.is_empty()) {
+		return false;
+	}
+	NovaMnuScreen *screen = find_screen(current_screen_);
+	if (screen == nullptr) {
+		return false;
+	}
+	Node *target = find_hotkey_target(screen, p_character, false);
+	return target != nullptr && trigger_hotkey_target(target);
 }
 
 bool NovaMnuMenu::handle_key_input(const Ref<InputEventKey> &p_key) {
@@ -452,10 +558,18 @@ bool NovaMnuMenu::handle_key_input(const Ref<InputEventKey> &p_key) {
 		return false;
 	}
 	const String vk = vk_name_for_keycode(p_key->get_keycode());
-	if (vk.is_empty()) {
-		return false;
+	if (!vk.is_empty() && handle_hotkey(vk)) {
+		return true;
 	}
-	return handle_hotkey(vk);
+	char32_t codepoint = p_key->get_unicode();
+	// Synthetic InputEventKey instances used by hosts/tests often omit unicode.
+	// Godot's printable Key constants are ASCII-compatible, so fill that narrow
+	// gap while real IME/non-ASCII input continues through get_unicode().
+	const uint32_t raw_keycode = static_cast<uint32_t>(p_key->get_keycode());
+	if (codepoint == 0 && raw_keycode >= 0x20 && raw_keycode <= 0x7e) {
+		codepoint = static_cast<char32_t>(raw_keycode);
+	}
+	return codepoint != 0 && handle_character_hotkey(String::chr(codepoint));
 }
 
 void NovaMnuMenu::_unhandled_key_input(const Ref<InputEvent> &p_event) {
@@ -467,26 +581,50 @@ void NovaMnuMenu::_unhandled_key_input(const Ref<InputEvent> &p_event) {
 
 bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		const String &p_file, const String &p_window_state) {
-	emit_signal("action_dispatched", p_type, p_target);
-	const String type = p_type.to_lower();
+	MnuActionData action;
+	action.type = p_type;
+	action.target = p_target;
+	action.file = p_file;
+	action.window_state = p_window_state;
+	return dispatch_widget_action(action);
+}
+
+bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
+	emit_signal("action_dispatched", p_action.type, p_action.target);
+	const String type = p_action.type.to_lower();
+	auto make_host_payload = [&p_action]() {
+		Dictionary payload;
+		payload["target"] = p_action.target;
+		payload["file"] = p_action.file;
+		payload["state"] = p_action.window_state;
+		payload["source"] = p_action.source;
+		payload["field"] = p_action.field;
+		if (p_action.has_target_form) {
+			payload["target_form"] = p_action.target_form;
+		}
+		payload["external_browser"] = p_action.external_browser;
+		payload["toggle"] = p_action.toggle;
+		payload["test"] = p_action.test;
+		return payload;
+	};
 	if (type == "window") {
-		return handle_window_action(p_target, p_window_state);
+		return handle_window_action(p_action.target, p_action.window_state, p_action.toggle);
 	}
 	if (type == "screen") {
 		// Shipped menus spell same-file jumps with their own filename
 		// (mp.mnu: <ACTION type="SCREEN" file="mp.mnu">MULTI_PLAYER_HOST</ACTION>;
 		// a screen action with NO file at all crashes the original engine), so a
 		// file matching this menu's own name is same-file navigation.
-		if (p_file.is_empty() ||
-				(!menu_file_.is_empty() && p_file.nocasecmp_to(menu_file_) == 0)) {
-			return navigate_to_screen(p_target);
+		if (p_action.file.is_empty() ||
+				(!menu_file_.is_empty() && p_action.file.nocasecmp_to(menu_file_) == 0)) {
+			return navigate_to_screen(p_action.target);
 		}
 		// Cross-.mnu jumps are host policy; the interactive preview has no host to load
 		// another file, so the jump is consumed as a no-op instead of escaping.
 		if (interactive_) {
 			return true;
 		}
-		navigate_to_menu(p_file, p_target);
+		navigate_to_menu(p_action.file, p_action.target);
 		return true;
 	}
 	if (type == "pop" || type == "pop_screen") {
@@ -508,7 +646,43 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 		if (interactive_) {
 			return true;
 		}
-		emit_signal("url_requested", p_target);
+		emit_signal("url_requested", p_action.target);
+		emit_signal("host_action_requested", p_action.type, make_host_payload());
+		return true;
+	}
+	if (type == "tab") {
+		// [orig: CUIWidget_HandleScriptedAction @ 0x649c17..0x649c55]
+		// TAB selects the named focus target; it is not a visibility tab switch.
+		NovaMnuScreen *screen = find_screen(current_screen_);
+		Control *target = screen == nullptr
+				? nullptr
+				: Object::cast_to<Control>(
+						screen->find_child(p_action.target, true, false));
+		if (target == nullptr || !target->is_visible_in_tree() ||
+				target->get_process_mode() == Node::PROCESS_MODE_DISABLED) {
+			return false;
+		}
+		if (BaseButton *button = Object::cast_to<BaseButton>(target);
+				button != nullptr && button->is_disabled()) {
+			return false;
+		}
+		if (target->get_focus_mode() != Control::FOCUS_NONE) {
+			target->grab_focus();
+		}
+		return true;
+	}
+	// The remaining retail ACTION codes are owned by form submission,
+	// multiplayer-browser, LAN, app-message, focus/capture, or MNX hosts. The
+	// generic menu preserves and reports them but never invents their effects.
+	const bool host_owned = type == "form_post" || type == "glb_load" ||
+			type == "glb_loadandping" || type == "glb_filter" ||
+			type == "glb_filter_num" || type == "glb_ping" ||
+			type == "glb_join" || type == "appmsg" ||
+			type == "lan_search" || type == "lan_join" || type == "mnx";
+	if (host_owned) {
+		if (!interactive_) {
+			emit_signal("host_action_requested", p_action.type, make_host_payload());
+		}
 		return true;
 	}
 	return false;
@@ -753,10 +927,13 @@ void NovaMnuMenu::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_menu_file", "file"), &NovaMnuMenu::set_menu_file);
 	ClassDB::bind_method(D_METHOD("get_menu_file"), &NovaMnuMenu::get_menu_file);
 	ClassDB::bind_method(D_METHOD("quit_game"), &NovaMnuMenu::quit_game);
-	ClassDB::bind_method(D_METHOD("handle_window_action", "target", "state"), &NovaMnuMenu::handle_window_action);
+	ClassDB::bind_method(D_METHOD("handle_window_action", "target", "state", "toggle"),
+			&NovaMnuMenu::handle_window_action, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("dispatch_action", "type", "target", "file", "window_state"),
 			&NovaMnuMenu::dispatch_action);
 	ClassDB::bind_method(D_METHOD("handle_hotkey", "vk"), &NovaMnuMenu::handle_hotkey);
+	ClassDB::bind_method(D_METHOD("handle_character_hotkey", "character"),
+			&NovaMnuMenu::handle_character_hotkey);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "key"), &NovaMnuMenu::handle_key_input);
 	ClassDB::bind_method(D_METHOD("clear_navigation_stack"), &NovaMnuMenu::clear_navigation_stack);
 	ClassDB::bind_method(D_METHOD("close_active_combo_popup"), &NovaMnuMenu::close_active_combo_popup);
@@ -793,6 +970,8 @@ void NovaMnuMenu::_bind_methods() {
 			PropertyInfo(Variant::STRING, "trigger")));
 	ADD_SIGNAL(MethodInfo("action_dispatched", PropertyInfo(Variant::STRING, "type"),
 			PropertyInfo(Variant::STRING, "target")));
+	ADD_SIGNAL(MethodInfo("host_action_requested", PropertyInfo(Variant::STRING, "type"),
+			PropertyInfo(Variant::DICTIONARY, "action")));
 	ADD_SIGNAL(MethodInfo("widget_value_changed", PropertyInfo(Variant::STRING, "widget_name"),
 			PropertyInfo(Variant::STRING, "kind"), PropertyInfo(Variant::INT, "index"),
 			PropertyInfo(Variant::STRING, "value")));

@@ -3,21 +3,17 @@
    parse-dropped key is absent on both sides of parse->serialize->parse, so the
    test stays green while authored data is lost. See ADR 0002.
 
-   For each committed real menu we extract the uppercased set of element tags +
-   attribute keys (including bare flags) directly from the original bytes, and
-   again from serialize(parse(original)). Every original key must survive into the
-   serialized output, modulo a small allowlist of deliberate normalizations.
-
-   The extractor is intentionally textual and parser-independent: it sees what the
-   model might drop. Limitation: element tags and attribute keys share one set, so
-   a dropped attribute whose name also appears as an element tag elsewhere would be
-   masked. Acceptable for this corpus; flagged here so a future stricter,
-   context-aware variant knows what it is replacing. */
+   For each committed real menu we extract a multiset of path-qualified element
+   and attribute occurrences directly from the original bytes, and again from
+   serialize(parse(original)). Exact multiset equality is required after the one
+   documented spelling normalization. This catches both dropped constructs and
+   unexpected additions; an attribute can no longer be masked by a same-named
+   tag elsewhere in the file. */
 
 #include <cctype>
 #include <cstdio>
 #include <fstream>
-#include <set>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -38,11 +34,29 @@ static bool read_file(const char *path, std::string &out) {
   return true;
 }
 
-// Uppercased element tags + attribute keys (incl. bare flags), skipping comments
-// and element text. Quote-aware so '>' / whitespace inside a value don't confuse
-// the scan.
-static std::set<std::string> extract_keys(const std::string &c) {
-  std::set<std::string> keys;
+using Occurrences = std::map<std::string, int>;
+
+static std::string path_for(const std::vector<std::string> &stack,
+                            const std::string &leaf) {
+  std::string path;
+  for (const auto &part : stack) path += "/" + part;
+  return path + "/" + leaf;
+}
+
+static std::string normalize_attr(std::string key) {
+  key = upper(std::move(key));
+  // The writer canonicalizes retail's two accepted disabled spellings.
+  if (key == "DISABLE") return "DISABLED";
+  return key;
+}
+
+// Parser-independent, quote-aware structural scanner. Keys are:
+//   /SCREEN/WINDOW/ITEMS                   (element occurrence)
+//   /SCREEN/WINDOW/ITEMS@MULTISELECT       (attribute occurrence)
+static Occurrences extract_occurrences(const std::string &c) {
+  Occurrences found;
+  std::vector<std::string> stack;
+  int screen_index = 0;
   size_t i = 0, n = c.size();
   while (i < n) {
     if (c[i] != '<') {
@@ -55,26 +69,46 @@ static std::set<std::string> extract_keys(const std::string &c) {
       continue;
     }
     size_t j = i + 1;
-    if (j < n && (c[j] == '/' || c[j] == '?' || c[j] == '!')) {  // close/decl
+    if (j < n && c[j] == '/') {
+      size_t e = c.find('>', j);
+      size_t name_start = j + 1;
+      while (name_start < e &&
+             isspace(static_cast<unsigned char>(c[name_start])))
+        ++name_start;
+      size_t name_end = name_start;
+      while (name_end < e &&
+             !isspace(static_cast<unsigned char>(c[name_end])) &&
+             c[name_end] != '>')
+        ++name_end;
+      // Retail fixtures contain known mismatched closers such as
+      // <SCROLLUP>...</APPEARANCE>. The lenient parser closes the current node
+      // on any end tag, so mirror that nesting rule while keeping the opening
+      // tag's own qualified identity.
+      if (!stack.empty()) stack.pop_back();
+      i = (e == std::string::npos) ? n : e + 1;
+      continue;
+    }
+    if (j < n && (c[j] == '?' || c[j] == '!')) {
       size_t e = c.find('>', j);
       i = (e == std::string::npos) ? n : e + 1;
       continue;
     }
-    // Find the matching unquoted '>'.
-    size_t e = j;
-    char q = 0;
-    for (; e < n; ++e) {
-      char ch = c[e];
-      if (q) {
-        if (ch == q) q = 0;
-      } else if (ch == '"' || ch == '\'') {
-        q = ch;
-      } else if (ch == '>') {
-        break;
-      }
-    }
+    // Retail fixtures include one malformed attribute with an unmatched quote
+    // before the element terminator. The game still terminates the tag at '>',
+    // so this structural scanner must do the same.
+    size_t e = c.find('>', j);
     if (e >= n) break;
     std::string inside = c.substr(j, e - j);
+    while (!inside.empty() &&
+           isspace(static_cast<unsigned char>(inside.back())))
+      inside.pop_back();
+    const bool self_closing = !inside.empty() && inside.back() == '/';
+    if (self_closing) {
+      inside.pop_back();
+      while (!inside.empty() &&
+             isspace(static_cast<unsigned char>(inside.back())))
+        inside.pop_back();
+    }
     // Tokenize on whitespace, respecting quotes.
     std::vector<std::string> toks;
     std::string cur;
@@ -97,25 +131,38 @@ static std::set<std::string> extract_keys(const std::string &c) {
       }
     }
     if (!cur.empty()) toks.push_back(cur);
-    for (size_t k = 0; k < toks.size(); ++k) {
-      std::string key = toks[k];
-      if (k > 0) {  // attribute: key is the part before '='
-        size_t eq = key.find('=');
-        if (eq != std::string::npos) key = key.substr(0, eq);
+    if (!toks.empty()) {
+      const std::string tag = upper(toks[0]);
+      std::string component = tag;
+      // SCREEN is the only retail document root. Reset defensively because
+      // malformed nested close spellings in one Screen must not qualify the
+      // next root beneath it.
+      if (tag == "SCREEN") {
+        stack.clear();
+        component += "[" + std::to_string(screen_index++) + "]";
+      } else if (tag == "WINDOW") {
+        for (size_t k = 1; k < toks.size(); ++k) {
+          const size_t eq = toks[k].find('=');
+          if (eq == std::string::npos) continue;
+          if (upper(toks[k].substr(0, eq)) == "NAME") {
+            component += "[" + upper(toks[k].substr(eq + 1)) + "]";
+            break;
+          }
+        }
       }
-      if (!key.empty()) keys.insert(upper(key));
+      const std::string path = path_for(stack, component);
+      ++found[path];
+      for (size_t k = 1; k < toks.size(); ++k) {
+        std::string key = toks[k];
+        const size_t eq = key.find('=');
+        if (eq != std::string::npos) key = key.substr(0, eq);
+        if (!key.empty()) ++found[path + "@" + normalize_attr(key)];
+      }
+      if (!self_closing) stack.push_back(component);
     }
     i = e + 1;
   }
-  return keys;
-}
-
-// Deliberate normalizations: original key intentionally renamed on serialize.
-static bool allowlisted(const std::string &key) {
-  static const std::set<std::string> ok = {
-      "DISABLE",  // bare DISABLE/disable -> serialized as disabled="true"
-  };
-  return ok.count(key) != 0;
+  return found;
 }
 
 static int check_menu(const char *path) {
@@ -131,17 +178,35 @@ static int check_menu(const char *path) {
     return 0;
   }
   const std::string ser = mnu::serialize(doc, true, 2);
-  std::set<std::string> a = extract_keys(src), b = extract_keys(ser);
-  std::vector<std::string> missing;
-  for (const auto &k : a)
-    if (!b.count(k) && !allowlisted(k)) missing.push_back(k);
-  if (!missing.empty()) {
-    printf("  FAIL %s dropped %zu key(s):", path, missing.size());
-    for (const auto &m : missing) printf(" %s", m.c_str());
-    printf("\n");
+  const Occurrences authored = extract_occurrences(src);
+  const Occurrences written = extract_occurrences(ser);
+  std::vector<std::string> differences;
+  for (const auto &row : authored) {
+    const auto it = written.find(row.first);
+    const int actual = it == written.end() ? 0 : it->second;
+    if (actual != row.second) {
+      differences.push_back(row.first + " expected=" +
+                            std::to_string(row.second) + " actual=" +
+                            std::to_string(actual));
+    }
+  }
+  for (const auto &row : written) {
+    if (!authored.count(row.first)) {
+      differences.push_back(row.first + " expected=0 actual=" +
+                            std::to_string(row.second));
+    }
+  }
+  if (!differences.empty()) {
+    printf("  FAIL %s has %zu structural difference(s):\n", path,
+           differences.size());
+    for (const auto &difference : differences)
+      printf("       %s\n", difference.c_str());
     return 0;
   }
-  printf("  OK   %s (%zu distinct keys preserved)\n", path, a.size());
+  int total = 0;
+  for (const auto &row : authored) total += row.second;
+  printf("  OK   %s (%d path-qualified occurrences preserved)\n", path,
+         total);
   return 1;
 }
 

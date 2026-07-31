@@ -68,13 +68,23 @@ std::string StyleSheet::substitute(const std::string &text) const {
 	return result;
 }
 
-// The single tokenizer lives in the lossless Document (mns_document.cpp);
-// this flat view is its flatten() result. Permissive like the document parse:
-// always succeeds, problems surface as Document diagnostics.
+// The single tokenizer lives in the lossless Document (mns_document.cpp).
+// The flat API routes through the retail evaluator and reports syntax errors,
+// while still returning the useful partial sheet.
 bool parse(const char *data, size_t size, StyleSheet &out, std::string &error) {
-	(void)error;
-	out = Document::parse(data, size).flatten();
-	return true;
+	const EvaluationResult result = Document::parse(data, size).evaluate();
+	out = result.sheet;
+	error.clear();
+	if (!result.success) {
+		for (const Diagnostic &diagnostic : result.diagnostics) {
+			if (diagnostic.severity != Severity::Error) continue;
+			error = "line " + std::to_string(diagnostic.line) + ": " +
+					diagnostic.message;
+			break;
+		}
+		if (error.empty()) error = "MNS evaluation failed";
+	}
+	return result.success;
 }
 
 bool parse_file(const std::string &path, StyleSheet &out, std::string &error) {
