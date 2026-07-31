@@ -22,6 +22,8 @@ const OcclusionDebugView := preload("res://engine/debug/occlusion_debug_view.gd"
 const ParticleDebugView := preload("res://engine/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://engine/debug/round_debug_view.gd")
 const HitboxDebugView := preload("res://engine/debug/hitbox_debug_view.gd")
+const NovaDebugViewStatus := preload(
+		"res://engine/debug/nova_debug_view_status.gd")
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const USER_POINT_DEBUG_NAME := "UserPointDebug"
 const COLLISION_DEBUG_NAME := "CollisionDebug"
@@ -60,6 +62,62 @@ func setup(world, user_point_sources: Callable, effect_world_getter: Callable) -
 	_world = world
 	_user_point_sources = user_point_sources
 	_effect_world_getter = effect_world_getter
+
+
+## Readback for the F3 pages: toggle intent, installed view, and whether that
+## installed view currently has anything it can draw are deliberately separate
+## facts. A retained toggle can be enabled while its mission-owned view is
+## detached during unload/reload.
+func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
+	var statuses: Array[NovaDebugViewStatus] = []
+	statuses.append(_view_status(
+			&"show_skeletons", _skeleton_debug, SKELETON_DEBUG_NAME,
+			"No skeletons to draw", "skeleton", "skeletons"))
+	statuses.append(_view_status(
+			&"show_user_points", _user_point_debug, USER_POINT_DEBUG_NAME,
+			"No user points to draw", "user point", "user points"))
+	statuses.append(_view_status(
+			&"show_collision", _collision_debug, COLLISION_DEBUG_NAME,
+			"No collision shapes to draw", "collision shape", "collision shapes"))
+	statuses.append(_view_status(
+			&"show_effect_boxes", _particle_debug, PARTICLE_DEBUG_NAME,
+			"No live effect bounds to draw", "effect box", "effect boxes"))
+	statuses.append(_view_status(
+			&"show_portal_faces", _occlusion_debug, OCCLUSION_DEBUG_NAME,
+			"No portal faces in range", "portal face", "portal faces"))
+	statuses.append(_view_status(
+			&"show_round_trails", _round_debug, ROUND_DEBUG_NAME,
+			"No recent rounds to draw", "round trail", "round trails"))
+	statuses.append(_view_status(
+			&"show_hit_meshes", _hitbox_debug, HITBOX_DEBUG_NAME,
+			"No hit meshes in range", "hit mesh", "hit meshes"))
+	return statuses
+
+
+func _view_status(id: StringName, enabled: bool, view_name: StringName,
+		empty_reason: String, singular: String, plural: String) -> NovaDebugViewStatus:
+	var view: Node = null
+	if _world != null and is_instance_valid(_world):
+		view = _world.get_node_or_null(NodePath(view_name))
+	var installed := view != null and is_instance_valid(view)
+	var drawable_count := 0
+	if installed:
+		drawable_count = int(view.call("get_debug_drawable_count")) \
+				if view.has_method("get_debug_drawable_count") else -1
+	var reason := "Disabled"
+	if enabled and not installed:
+		reason = "Waiting for a loaded world"
+	elif enabled and drawable_count < 0:
+		reason = "Enabled"
+	elif enabled and drawable_count == 0:
+		reason = empty_reason
+	elif enabled:
+		reason = "Drawing %d %s" % [
+			drawable_count,
+			singular if drawable_count == 1 else plural,
+		]
+	return NovaDebugViewStatus.new(
+			id, enabled, installed, drawable_count, reason)
 
 
 ## A load completed: rebuild every retained view whose data belongs to the

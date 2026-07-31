@@ -27,6 +27,8 @@ const PanmClockScript := preload("res://engine/world/panm_clock.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
+const NovaDebugViewStatus := preload(
+		"res://engine/debug/nova_debug_view_status.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
@@ -1739,6 +1741,10 @@ func set_occlusion_debug(enabled: bool) -> void:
 
 func is_occlusion_debug() -> bool:
 	return _debug_views.is_occlusion_debug()
+
+
+func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
+	return _debug_views.get_debug_view_statuses()
 
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is

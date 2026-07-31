@@ -37,6 +37,7 @@ const SEGMENT_DIM := 0.45      # segment line brightness vs the hit marker
 var _mesh: ImmediateMesh
 var _labels: Array[Label3D] = []
 var _signature := 0
+var _drawable_count := 0
 
 
 func _sim_debug_method() -> String:
@@ -59,13 +60,20 @@ func _refresh_from_sim(sim: Object) -> void:
 
 
 func _clear_all() -> void:
+	_drawable_count = 0
 	_mesh.clear_surfaces()
 	_signature = 0
 	for lb in _labels:
 		lb.visible = false
 
 
+## Number of recent round events currently contributing trails/markers.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
+
+
 func _update(events: Array) -> void:
+	_drawable_count = events.size()
 	# The ring only ever advances; the newest event's tick + count is a cheap
 	# change signature.
 	var sig_parts := [events.size()]

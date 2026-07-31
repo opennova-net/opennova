@@ -325,6 +325,13 @@ func set_authority_source(source: Callable) -> void:
 	_authority_source = source
 
 
+## Whether this observer may mutate host-authoritative game state right now.
+## UI shells use the same policy source as control invocation, so presentation
+## cannot claim edit access while the write path will reject it.
+func has_host_authority() -> bool:
+	return _has_host_authority()
+
+
 func set_status_source(source: Callable) -> void:
 	_status_source = source
 
@@ -480,7 +487,7 @@ func _policy_reason(control: NovaDebugControlDef) -> String:
 			and not _has_host_authority():
 		return "Only the session host can change authoritative game state."
 	if control.requires_unlock and not _edit_unlocked:
-		return "Unlock edits to use this control."
+		return "Enable Live edits to use this control."
 	return ""
 
 

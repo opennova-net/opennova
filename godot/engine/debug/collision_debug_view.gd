@@ -61,6 +61,7 @@ var _player_mesh: ImmediateMesh
 var _gap_label: Label3D
 var _hull_signature := 0        # hash of instance pose + emitted geometry
 var _hull_has_surface := false
+var _drawable_count := 0        # valid volumes plus the local-player capsule
 
 
 func _sim_debug_method() -> String:
@@ -79,11 +80,15 @@ func _build_view() -> void:
 
 func _refresh_from_sim(sim: Object) -> void:
 	var debug: Dictionary = sim.get_collision_debug()
-	_update_hulls(debug.get("instances", []))
-	_update_player(debug.get("player", {}))
+	var instances: Array = debug.get("instances", [])
+	var player: Dictionary = debug.get("player", {})
+	_drawable_count = _count_drawables(instances, player)
+	_update_hulls(instances)
+	_update_player(player)
 
 
 func _clear_all() -> void:
+	_drawable_count = 0
 	if _hull_has_surface:
 		_hull_mesh.clear_surfaces()
 		_hull_has_surface = false
@@ -91,6 +96,22 @@ func _clear_all() -> void:
 	_player_mesh.clear_surfaces()
 	if _gap_label != null:
 		_gap_label.visible = false
+
+
+## Number of logical collision shapes currently contributing overlay geometry.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
+
+
+func _count_drawables(instances: Array, player: Dictionary) -> int:
+	var count := 1 if bool(player.get("valid", false)) else 0
+	for inst_v in instances:
+		var inst: Dictionary = inst_v
+		for vol_v in inst.get("volumes", []):
+			var vol: Dictionary = vol_v
+			if (vol.get("corners", PackedVector3Array()) as PackedVector3Array).size() == 8:
+				count += 1
+	return count
 
 
 # --- Hull volumes -------------------------------------------------------------

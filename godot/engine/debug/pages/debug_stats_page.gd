@@ -154,20 +154,33 @@ func _build() -> void:
 	stats_tree.columns = 4
 	stats_tree.column_titles_visible = true
 	stats_tree.set_column_title(0, "System")
-	stats_tree.set_column_title(1, "avg ms/frame")
-	stats_tree.set_column_title(2, "peak ms/frame")
-	stats_tree.set_column_title(3, "info")
-	# Column minimums total 344 px so the page fits the panel-width floor
-	# beside the sidebar (the NovaDebugPage <= 360 px rule).
+	stats_tree.set_column_title(1, "Avg")
+	stats_tree.set_column_title(2, "Peak")
+	stats_tree.set_column_title(3, "Info")
+	stats_tree.set_column_title_tooltip_text(0, "Runtime system or subsystem")
+	stats_tree.set_column_title_tooltip_text(1, "Average milliseconds per frame")
+	stats_tree.set_column_title_tooltip_text(2, "Peak milliseconds in one frame")
+	stats_tree.set_column_title_tooltip_text(3, "Live counters and runtime context")
+	# Keep deep span nesting useful in the narrow dock: every cell clips with an
+	# ellipsis, while row tooltips below retain the complete label and info.
+	stats_tree.scroll_horizontal_enabled = false
+	stats_tree.add_theme_constant_override("item_margin", 10)
+	for column in range(stats_tree.columns):
+		stats_tree.set_column_clip_content(column, true)
+	# The 232 px floor leaves room for the Tree frame inside the 252 px page.
+	# System and Info share wider docks; the numeric columns stay compact.
 	stats_tree.set_column_expand(0, true)
-	stats_tree.set_column_custom_minimum_width(0, 120)
+	stats_tree.set_column_expand_ratio(0, 3)
+	stats_tree.set_column_custom_minimum_width(0, 92)
 	for column in [1, 2]:
 		stats_tree.set_column_expand(column, false)
-		stats_tree.set_column_custom_minimum_width(column, 72)
+		stats_tree.set_column_custom_minimum_width(column, 42)
+		stats_tree.set_column_title_alignment(column, HORIZONTAL_ALIGNMENT_RIGHT)
 	stats_tree.set_column_expand(3, true)
-	stats_tree.set_column_custom_minimum_width(3, 80)
+	stats_tree.set_column_expand_ratio(3, 2)
+	stats_tree.set_column_custom_minimum_width(3, 56)
 	stats_tree.hide_root = true
-	stats_tree.focus_mode = Control.FOCUS_NONE
+	stats_tree.focus_mode = Control.FOCUS_ALL
 	stats_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(stats_tree)
 	_build_rows()
@@ -269,11 +282,13 @@ func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
 			_KIND_SPAN:
 				var slot := int(row["slot"])
 				if counts[slot] <= 0:
-					item.set_text(1, "-")
-					item.set_text(2, "-")
+					_set_metric(item, 1, "-")
+					_set_metric(item, 2, "-")
 				else:
-					item.set_text(1, "%.2f" % (float(sums[slot]) / 1000.0 / frames))
-					item.set_text(2, "%.2f" % (float(maxes[slot]) / 1000.0))
+					_set_metric(item, 1,
+							"%.2f" % (float(sums[slot]) / 1000.0 / frames))
+					_set_metric(item, 2,
+							"%.2f" % (float(maxes[slot]) / 1000.0))
 			_KIND_GROUP:
 				var total := 0
 				var seen := false
@@ -281,19 +296,20 @@ func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
 					var slot := int(slot_v)
 					total += sums[slot]
 					seen = seen or counts[slot] > 0
-				item.set_text(1, "%.2f" % (float(total) / 1000.0 / frames) if seen else "-")
-				item.set_text(2, "")
+				_set_metric(item, 1,
+						"%.2f" % (float(total) / 1000.0 / frames) if seen else "-")
+				_set_metric(item, 2, "")
 			_KIND_RESIDUAL:
 				var base_slot := int(row["base"])
 				if counts[base_slot] <= 0:
-					item.set_text(1, "-")
+					_set_metric(item, 1, "-")
 				else:
 					var residual := int(sums[base_slot])
 					for slot_v in row["minus"]:
 						residual -= sums[int(slot_v)]
-					item.set_text(1, "%.2f" %
+					_set_metric(item, 1, "%.2f" %
 							(float(maxi(residual, 0)) / 1000.0 / frames))
-				item.set_text(2, "")
+				_set_metric(item, 2, "")
 			_:
 				pass
 	_refresh_info(sums, counts, frames, runtime, sim)
@@ -310,8 +326,13 @@ func _build_rows() -> void:
 		while stack.size() > depth + 1:
 			stack.pop_back()
 		var item := stats_tree.create_item(stack.back())
-		item.set_text(0, String(row["label"]))
-		item.set_text(1, "-")
+		var label := String(row["label"])
+		item.set_text(0, label)
+		item.set_tooltip_text(0, label)
+		item.set_text_overrun_behavior(0, TextServer.OVERRUN_TRIM_ELLIPSIS)
+		item.set_text_overrun_behavior(3, TextServer.OVERRUN_TRIM_ELLIPSIS)
+		_set_metric(item, 1, "-")
+		_set_metric(item, 2, "-")
 		for column in [1, 2]:
 			item.set_text_alignment(column, HORIZONTAL_ALIGNMENT_RIGHT)
 		_items[row["id"]] = item
@@ -321,13 +342,21 @@ func _build_rows() -> void:
 func _clear_display_values() -> void:
 	for item_v in _items.values():
 		var item := item_v as TreeItem
-		item.set_text(1, "-")
-		item.set_text(2, "-")
+		_set_metric(item, 1, "-")
+		_set_metric(item, 2, "-")
 		item.set_text(3, "")
+		item.set_tooltip_text(3, "")
+
+
+func _set_metric(item: TreeItem, column: int, text: String) -> void:
+	item.set_text(column, text)
+	item.set_tooltip_text(column, text)
 
 
 func _set_info(id: String, text: String) -> void:
-	(_items[id] as TreeItem).set_text(3, text)
+	var item := _items[id] as TreeItem
+	item.set_text(3, text)
+	item.set_tooltip_text(3, text)
 
 
 # The counter pulls: live Dictionaries/typed stats read at refresh cadence

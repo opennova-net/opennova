@@ -23,6 +23,7 @@ const CROSS := 0.05    # metres: half-length of each joint axis-cross arm
 var _root: Node                 # the subtree walked each frame (the GameWorld)
 var _mesh: ImmediateMesh
 var _segments: Array = []       # [{ a: Vector3, b: Vector3, color: Color }] gathered per frame
+var _drawable_count := 0        # skeletons with at least one drawable bone
 
 
 # `root` is the node whose subtree is searched for Skeleton3D nodes (the GameWorld); the
@@ -44,15 +45,26 @@ func setup(root: Node) -> void:
 
 func _process(_delta: float) -> void:
 	if _mesh == null or _root == null or not is_instance_valid(_root):
+		_drawable_count = 0
 		return
 	_mesh.clear_surfaces()
 	_segments.clear()
-	for skel in _collect_skeletons(_root):
+	var skeletons := _collect_skeletons(_root)
+	_drawable_count = 0
+	for skel in skeletons:
+		if skel.get_bone_count() <= 0:
+			continue
+		_drawable_count += 1
 		_draw_skeleton(skel)
 	# An empty surface is invalid -- skip emit when nothing was gathered (mirrors NetEventView).
 	if _segments.is_empty():
 		return
 	MissionOverlayUtil.emit_line_segments(_mesh, _segments)
+
+
+## Number of skeletons currently contributing geometry to this overlay.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
 
 
 # Every Skeleton3D in `node`'s subtree (recursive). A per-frame walk is cheap for the handful

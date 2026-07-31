@@ -40,6 +40,7 @@ var _labels: Array[Label3D] = []
 var _signature := 0
 var _organic_signature: Array = []
 var _organic_signature_valid := false
+var _drawable_count := 0
 
 
 # Stable per-material color: golden-ratio hue walk, saturated and bright so
@@ -162,6 +163,7 @@ func _refresh_from_sim(sim: Object) -> void:
 
 
 func _clear_all() -> void:
+	_drawable_count = 0
 	_mesh.clear_surfaces()
 	if _dyn_multimesh.instance_count != 0:
 		_dyn_multimesh.instance_count = 0
@@ -174,7 +176,23 @@ func _clear_all() -> void:
 		lb.visible = false
 
 
+## Number of static entities or organic section spheres currently contributing
+## hit-detection geometry.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
+
+
 func _update(entities: Array, organics: Array) -> void:
+	_drawable_count = 0
+	for e_v in entities:
+		var e: Dictionary = e_v
+		var materials: PackedByteArray = e.get("materials", PackedByteArray())
+		if not materials.is_empty() or float(e.get("bound_radius", 0.0)) > 0.0:
+			_drawable_count += 1
+	for o_v in organics:
+		if float((o_v as Dictionary).get("radius", 0.0)) > 0.0:
+			_drawable_count += 1
+
 	# Native debug snapshots allocate fresh containers at the fixed cadence, but
 	# the posed values often stay identical across several samples. Cache only
 	# the fields that affect emitted sphere geometry; label-only fields still

@@ -1,8 +1,8 @@
 extends GutTest
 
 # DebugStatsPage: semantic rows and capture lifecycle are exercised through the
-# public value interface. The Tree and the page host remain implementation
-# details of the F3 overlay.
+# public value interface. The focused layout case observes the rendered Tree at
+# the overlay's narrow content floor so clipped diagnostics stay usable.
 
 const PaneScript := preload("res://engine/debug/pages/debug_stats_page.gd")
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
@@ -83,6 +83,16 @@ func _row(pane: DebugStatsPage, id: StringName) -> DebugStatsDisplayRow:
 	return null
 
 
+func _find_tree_item(item: TreeItem, label: String) -> TreeItem:
+	if item.get_text(0) == label:
+		return item
+	for child in item.get_children():
+		var found := _find_tree_item(child, label)
+		if found != null:
+			return found
+	return null
+
+
 func test_rows_cover_major_systems_and_label_units() -> void:
 	var pane := _make_pane()
 	for id in [&"frame", &"world", &"foliage", &"runtime", &"sim", &"net",
@@ -93,10 +103,61 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"occl_probe", &"occl_apply", &"occl_glue", &"env", &"audio",
 			&"hud", &"render"]:
 		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
-	assert_eq(pane.stats_tree.get_column_title(1), "avg ms/frame")
-	assert_eq(pane.stats_tree.get_column_title(2), "peak ms/frame")
+	assert_eq(pane.stats_tree.get_column_title(0), "System")
+	assert_eq(pane.stats_tree.get_column_title(1), "Avg")
+	assert_eq(pane.stats_tree.get_column_title(2), "Peak")
+	assert_eq(pane.stats_tree.get_column_title(3), "Info")
+	assert_eq(pane.stats_tree.get_column_title_tooltip_text(1),
+			"Average milliseconds per frame")
+	assert_eq(pane.stats_tree.get_column_title_tooltip_text(2),
+			"Peak milliseconds in one frame")
 	assert_eq(_row(pane, &"trace").label, "Projectile trace (attributed)",
 			"the group does not claim the intentionally uncharged setup/water time")
+
+
+func test_narrow_tree_stays_inside_the_page_and_tooltips_keep_full_text() -> void:
+	var host := Control.new()
+	host.size = Vector2(252, 480)
+	add_child_autofree(host)
+	var pane: DebugStatsPage = PaneScript.new()
+	pane.setup(NovaDebugContext.new())
+	host.add_child(pane)
+	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+			"the Stats page fits the narrow debug content column")
+	assert_lte(pane.stats_tree.position.x + pane.stats_tree.size.x, pane.size.x,
+			"the Stats tree does not extend past the page")
+	var used_width := 0
+	for column in range(pane.stats_tree.columns):
+		used_width += pane.stats_tree.get_column_width(column)
+	assert_lte(used_width, int(pane.stats_tree.size.x),
+			"the columns fit without a horizontal overflow strip")
+	assert_false(pane.stats_tree.scroll_horizontal_enabled,
+			"narrow Stats stays vertically scrollable without sideways navigation")
+	assert_eq(pane.stats_tree.focus_mode, Control.FOCUS_ALL,
+			"keyboard users can navigate and expand Stats rows")
+
+	var window := _blank_window()
+	var sums: PackedInt64Array = window[0]
+	var counts: PackedInt32Array = window[2]
+	counts[FrameStatsBoard.TRACE_CALLS] = 1
+	sums[FrameStatsBoard.TRACE_CALLS] = 1
+	pane.render_window(1, sums, window[1], counts, null, null)
+	var trace := _find_tree_item(
+			pane.stats_tree.get_root(), "Projectile trace (attributed)")
+	assert_not_null(trace)
+	if trace == null:
+		return
+	assert_eq(trace.get_tooltip_text(0), "Projectile trace (attributed)")
+	assert_eq(trace.get_tooltip_text(1), trace.get_text(1))
+	assert_eq(trace.get_tooltip_text(2), trace.get_text(2),
+			"clipped numeric cells retain their complete values")
+	assert_ne(trace.get_text(3), "")
+	assert_eq(trace.get_tooltip_text(3), trace.get_text(3),
+			"the full live-info value remains available when its cell is clipped")
 
 
 func test_render_window_formats_average_peak_groups_and_residual() -> void:

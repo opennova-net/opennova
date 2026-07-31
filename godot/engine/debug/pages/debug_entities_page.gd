@@ -15,6 +15,9 @@ var _selected_entity := -1
 var _selected_identity := ""
 var _selected_ai_index := -1
 var _selected_registry_present := false
+var _edit_policy_reason := ""
+var _health_editor: HBoxContainer
+var _position_editor: VBoxContainer
 var _health_value: SpinBox
 var _position_values: Array[SpinBox] = []
 var _set_health_button: Button
@@ -25,6 +28,8 @@ var _picks_header: Label
 var _picks_rows: VBoxContainer
 var _picks_status: Label
 var _picks_signature := ""
+var _bound_pick_list: NovaDebugPickList = null
+var _pending_pick: Dictionary = {}
 
 
 func page_id() -> StringName:
@@ -33,6 +38,20 @@ func page_id() -> StringName:
 
 func page_category() -> StringName:
 	return CATEGORY_SIM
+
+
+## Overlay lifecycle seam: swapping the host-owned pick model must disconnect
+## the old signals even while this page is hidden and not on its refresh tick.
+func rebind_pick_list(pick_list: NovaDebugPickList) -> void:
+	if _bound_pick_list != pick_list:
+		_pending_pick.clear()
+	_bind_pick_list(pick_list)
+	_picks_signature = "__force_pick_row_rebuild__"
+	_refresh_picks()
+
+
+func _exit_tree() -> void:
+	_bind_pick_list(null)
 
 
 func _build() -> void:
@@ -50,29 +69,47 @@ func _build() -> void:
 	_entity_detail.text = "Select a unit to see its details."
 	add_child(_entity_detail)
 
-	var edit_row := HBoxContainer.new()
-	edit_row.name = "EntityEditHealth"
-	add_child(edit_row)
+	_health_editor = HBoxContainer.new()
+	_health_editor.name = "EntityEditHealth"
+	add_child(_health_editor)
 	var health_label := Label.new()
 	health_label.text = "Health"
-	edit_row.add_child(health_label)
+	_health_editor.add_child(health_label)
 	_health_value = SpinBox.new()
 	_health_value.name = "EntityHealthValue"
 	_health_value.min_value = NovaDebugCatalog.ENTITY_HEALTH_MIN
 	_health_value.max_value = NovaDebugCatalog.ENTITY_HEALTH_MAX
 	_health_value.step = 1.0
 	_health_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	edit_row.add_child(_health_value)
+	_health_editor.add_child(_health_value)
 	_set_health_button = Button.new()
 	_set_health_button.name = "SetEntityHealth"
 	_set_health_button.text = "Set"
 	_set_health_button.pressed.connect(_on_set_health_pressed)
-	edit_row.add_child(_set_health_button)
+	_health_editor.add_child(_set_health_button)
 
-	var position_row := HBoxContainer.new()
-	position_row.name = "EntityEditPosition"
-	add_child(position_row)
+	_position_editor = VBoxContainer.new()
+	_position_editor.name = "EntityEditPosition"
+	_position_editor.add_theme_constant_override("separation", 4)
+	add_child(_position_editor)
+	var position_header := Label.new()
+	position_header.name = "EntityPositionHeader"
+	position_header.text = "Position (mission coordinates)"
+	_position_editor.add_child(position_header)
+	var position_grid := GridContainer.new()
+	position_grid.name = "EntityPositionValues"
+	position_grid.columns = 3
+	_position_editor.add_child(position_grid)
 	for axis in ["X", "Y", "Z"]:
+		var field := VBoxContainer.new()
+		field.name = "EntityPosition%sField" % axis
+		field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		field.add_theme_constant_override("separation", 2)
+		position_grid.add_child(field)
+		var field_label := Label.new()
+		field_label.name = "EntityPosition%sLabel" % axis
+		field_label.text = axis
+		field.add_child(field_label)
 		var value := SpinBox.new()
 		value.name = "EntityPosition%s" % axis
 		value.min_value = NovaDebugCatalog.MISSION_COORD_MIN
@@ -80,14 +117,15 @@ func _build() -> void:
 		value.step = 0.1
 		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		value.tooltip_text = "%s mission coordinate" % axis
-		position_row.add_child(value)
+		field.add_child(value)
 		_position_values.append(value)
 	_set_position_button = Button.new()
 	_set_position_button.name = "SetEntityPosition"
 	_set_position_button.text = "Move"
 	_set_position_button.pressed.connect(_on_set_position_pressed)
-	position_row.add_child(_set_position_button)
+	_position_editor.add_child(_set_position_button)
 	_set_edit_enabled(false)
+	_set_editors_visible(false)
 	_edit_status = Label.new()
 	_edit_status.name = "EntityEditStatus"
 	_edit_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -130,6 +168,7 @@ func _build() -> void:
 
 
 func refresh() -> void:
+	_bind_pick_list(_ctx.pick_list)
 	_refresh_picks()
 	var sim := _ctx.sim()
 	if sim == null:
@@ -183,6 +222,20 @@ func refresh() -> void:
 		_edit_status.text = "The selected entity is no longer available."
 	_refresh_entity_detail()
 
+	# Presentation can trail the click by a frame. A pending pick takes
+	# precedence over retaining an unrelated old selection as soon as its row
+	# arrives.
+	if not _pending_pick.is_empty() and _select_pick(_pending_pick, false):
+		_pending_pick.clear()
+
+	# Picking can happen before the user opens this page. Make the newest card
+	# the initial inspector selection instead of leaving a highlighted object
+	# disconnected from an empty detail pane.
+	if _selected_entity < 0 and _ctx.pick_list != null:
+		var existing_picks := _ctx.pick_list.get_picks()
+		if not existing_picks.is_empty():
+			_select_pick(existing_picks.back(), false)
+
 
 func _clear_live() -> void:
 	if _entity_list.item_count > 0:
@@ -195,14 +248,16 @@ func _clear_live() -> void:
 	_entity_detail.text = "Select a unit to see its details."
 	_edit_status.text = ""
 	_set_edit_enabled(false)
+	_set_editors_visible(false)
 
 
-func _refresh_entity_detail() -> void:
+func _refresh_entity_detail(force_editor_values := false) -> void:
 	if _selected_entity < 0 or _selected_entity >= _entity_rows.size():
 		_selected_ai_index = -1
 		_selected_registry_present = false
 		_entity_detail.text = "Select a unit to see its details."
 		_set_edit_enabled(false)
+		_set_editors_visible(false)
 		return
 	var row: Dictionary = _entity_rows[_selected_entity]
 	var card: Dictionary = row.get("detail", {})
@@ -211,6 +266,7 @@ func _refresh_entity_detail() -> void:
 		_selected_registry_present = false
 		_entity_detail.text = "Select a unit to see its details."
 		_set_edit_enabled(false)
+		_set_editors_visible(false)
 		return
 	_selected_ai_index = int(row.get("ai_index", -1))
 	_selected_registry_present = bool(row.get("registry_present", true))
@@ -278,22 +334,64 @@ func _refresh_entity_detail() -> void:
 		lines.append("muzzle: (%.1f, %.1f, %.1f)" % [
 			muzzle.x, muzzle.y, muzzle.z])
 	_entity_detail.text = "\n".join(lines)
-	if not _entity_editor_has_focus():
+	if force_editor_values or not _entity_editor_has_focus():
 		_health_value.value = int(card.get("health", 0))
 		# get_entity_debug.position is Godot world; the public edit seam accepts
 		# mission coordinates (x, y, z) = (gx, -gz, gy).
 		_position_values[0].value = pos.x
 		_position_values[1].value = -pos.z
 		_position_values[2].value = pos.y
+	_set_editors_visible(true)
 	_refresh_edit_state()
 
 
 func _on_entity_selected(index: int) -> void:
-	_selected_entity = index
-	_selected_identity = _entity_identity(_entity_rows[index]) \
+	var next_identity := _entity_identity(_entity_rows[index]) \
 			if index >= 0 and index < _entity_rows.size() else ""
+	var identity_changed := next_identity != _selected_identity
+	_selected_entity = index
+	_selected_identity = next_identity
+	_edit_policy_reason = ""
 	_edit_status.text = ""
-	_refresh_entity_detail()
+	_refresh_entity_detail(identity_changed)
+
+
+func _select_pick(pick: Dictionary, report_missing: bool = true) -> bool:
+	for index in range(_entity_rows.size()):
+		if not _pick_matches_entity(pick, _entity_rows[index]):
+			continue
+		_entity_list.select(index)
+		_entity_list.ensure_current_is_visible()
+		_on_entity_selected(index)
+		_picks_status.text = "Inspector selected: %s" % \
+				PickDebugView.describe_pick(pick)
+		return true
+	if report_missing:
+		_picks_status.text = (
+				"Picked %s, but it has no live entity inspector row."
+				% PickDebugView.describe_pick(pick))
+	return false
+
+
+static func _pick_matches_entity(
+		pick: Dictionary,
+		row: Dictionary) -> bool:
+	var pick_net := int(pick.get("net_id", 0))
+	var row_net := int(row.get("net_id", 0))
+	if pick_net > 0 and row_net > 0:
+		return pick_net == row_net
+
+	var handle := int(pick.get("entity_handle", -1))
+	if handle >= 0 and int(row.get("wire_handle", -2)) == handle:
+		return true
+
+	var pick_bms := int(pick.get("bms_id", 0))
+	if pick_bms != 0 and int(row.get("bms_id", 0)) == pick_bms:
+		return true
+
+	return int(pick.get("kind", -1)) == int(row.get("kind", -2)) \
+			and int(pick.get("index", -1)) == int(
+					row.get("source_index", -2))
 
 
 func _find_entity_identity(identity: String) -> int:
@@ -346,23 +444,25 @@ func _resolve_selected_ai_index() -> int:
 func _refresh_edit_state() -> void:
 	if _ctx.session == null or _selected_entity < 0:
 		_set_edit_enabled(false)
+		_set_edit_policy("")
 		return
 	if _selected_ai_index < 0:
 		_set_edit_enabled(false)
-		var reason := "This client-view entity has no authoritative AI edit index."
+		_set_editors_visible(false)
+		var reason := "Read only: no authoritative AI edit target."
 		_set_health_button.tooltip_text = reason
 		_set_position_button.tooltip_text = reason
-		if _edit_status.text.is_empty():
-			_edit_status.text = reason
+		_set_edit_policy(reason)
 		return
 	if not _selected_registry_present:
 		_set_edit_enabled(false)
-		var reason := "This AI pool entry has been despawned from the world registry."
+		_set_editors_visible(false)
+		var reason := "Read only: this AI entry has despawned from the world."
 		_set_health_button.tooltip_text = reason
 		_set_position_button.tooltip_text = reason
-		if _edit_status.text.is_empty():
-			_edit_status.text = reason
+		_set_edit_policy(reason)
 		return
+	_set_edit_policy("")
 	var health := _ctx.session.get_control_state(&"set_entity_health")
 	var position := _ctx.session.get_control_state(&"set_entity_position")
 	_set_health_button.disabled = not health.available or not health.writable
@@ -382,13 +482,32 @@ func _set_edit_enabled(enabled: bool) -> void:
 		value.editable = enabled
 
 
+func _set_editors_visible(visible: bool) -> void:
+	_health_editor.visible = visible
+	_position_editor.visible = visible
+
+
+func _set_edit_policy(reason: String) -> void:
+	if reason == _edit_policy_reason:
+		if not reason.is_empty():
+			_edit_status.text = reason
+		return
+	_edit_policy_reason = reason
+	# A policy transition invalidates prior mutation feedback. Read-only state
+	# takes precedence; becoming editable starts with a clean result line.
+	_edit_status.text = reason
+
+
 func _entity_editor_has_focus() -> bool:
-	if _health_value.get_line_edit().has_focus():
-		return true
-	for value in _position_values:
-		if value.get_line_edit().has_focus():
-			return true
-	return false
+	var viewport := get_viewport()
+	if viewport == null:
+		return false
+	var focused := viewport.gui_get_focus_owner()
+	if focused == null:
+		return false
+	return focused == _health_editor or _health_editor.is_ancestor_of(focused) \
+			or focused == _position_editor \
+			or _position_editor.is_ancestor_of(focused)
 
 
 func _on_set_health_pressed() -> void:
@@ -457,13 +576,17 @@ func _refresh_picks() -> void:
 		var pick: Dictionary = picks[i]
 		var row := HBoxContainer.new()
 		row.name = "PickRow%d" % i
-		var label := Label.new()
-		label.name = "PickLabel"
-		label.text = "%s   %.0fu" % [PickDebugView.describe_pick(pick),
+		var select_button := Button.new()
+		select_button.name = "SelectPick%d" % i
+		select_button.text = "%s   %.0fu" % [PickDebugView.describe_pick(pick),
 				float(pick.get("distance_units", 0.0))]
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		row.add_child(label)
+		select_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		select_button.clip_text = true
+		select_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		select_button.tooltip_text = "Select this object in the entity inspector."
+		select_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		select_button.pressed.connect(_on_select_pick_pressed.bind(i))
+		row.add_child(select_button)
 		var remove_button := Button.new()
 		remove_button.name = "RemovePick"
 		remove_button.text = "X"
@@ -472,6 +595,50 @@ func _refresh_picks() -> void:
 		remove_button.pressed.connect(_on_remove_pick_pressed.bind(i))
 		row.add_child(remove_button)
 		_picks_rows.add_child(row)
+
+
+func _bind_pick_list(pick_list: NovaDebugPickList) -> void:
+	if _bound_pick_list == pick_list:
+		return
+	if _bound_pick_list != null:
+		if _bound_pick_list.changed.is_connected(_on_pick_list_changed):
+			_bound_pick_list.changed.disconnect(_on_pick_list_changed)
+		if _bound_pick_list.picked.is_connected(_on_pick_added):
+			_bound_pick_list.picked.disconnect(_on_pick_added)
+	_bound_pick_list = pick_list
+	if _bound_pick_list == null:
+		return
+	_bound_pick_list.changed.connect(_on_pick_list_changed)
+	_bound_pick_list.picked.connect(_on_pick_added)
+
+
+func _on_pick_list_changed() -> void:
+	if not _pending_pick.is_empty():
+		var pending_handle := int(_pending_pick.get("entity_handle", -1))
+		var still_listed := false
+		if _ctx.pick_list != null:
+			for pick in _ctx.pick_list.get_picks():
+				if int(pick.get("entity_handle", -2)) == pending_handle:
+					still_listed = true
+					break
+		if not still_listed:
+			_pending_pick.clear()
+	_refresh_picks()
+
+
+func _on_pick_added(pick: Dictionary) -> void:
+	_pending_pick = pick.duplicate(true)
+	_refresh_picks()
+	if _select_pick(pick):
+		_pending_pick.clear()
+
+
+func _on_select_pick_pressed(index: int) -> void:
+	if _ctx.pick_list == null:
+		return
+	var picks := _ctx.pick_list.get_picks()
+	if index >= 0 and index < picks.size():
+		_select_pick(picks[index])
 
 
 func _on_remove_pick_pressed(index: int) -> void:
