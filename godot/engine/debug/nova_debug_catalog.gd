@@ -98,7 +98,7 @@ static func bind_runtime_targets(
 		return null,
 		"The current world has no terrain.")
 	session.set_target_source(TARGET_PLAYER, player_source,
-			"No local player presentation host is active.")
+			"No local player presenter is active.")
 	session.set_target_source(TARGET_VIEWPORT, viewport_source,
 			"No render viewport is available.")
 	session.set_target_source(TARGET_SCENE_TREE, scene_tree_source,

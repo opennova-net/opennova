@@ -9,7 +9,7 @@ shell (`godot/game/`) and ONED's authoring/preview surfaces (`godot/modtools/`):
 - **The shared GDScript engine layer** (~36k LOC across ~150 scripts) both hosts run on:
   - `world/` — THE runtime, and by far the largest slice (~15k LOC): `game_world.gd` (the
     GameWorld host scene), `mission_runtime.gd`, `mission_present_pass.gd`,
-    `local_player_host.gd`, the per-system present passes (fire, throwable, destruction,
+    `local_player_presenter.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
     ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.
   - `debug/` (the F3 overlay — a NovaDebugPage-per-system framework: sidebar shell,

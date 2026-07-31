@@ -1,6 +1,6 @@
 extends GutTest
 
-const LocalPlayerHost := preload("res://engine/world/local_player_host.gd")
+const LocalPlayerPresenter := preload("res://engine/world/local_player_presenter.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 
@@ -76,7 +76,7 @@ class FakePosedWeaponPart:
 		return skeleton
 
 
-# A minimal LocalPlayerHost stand-in serving only the public accessors
+# A minimal LocalPlayerPresenter stand-in serving only the public accessors
 # PlayerWeaponEffects resolves userpoints against.
 class FakeEffectsHost:
 	extends RefCounted
@@ -388,7 +388,7 @@ func after_each() -> void:
 func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -417,7 +417,7 @@ func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> voi
 	world.item_db = FakeInteriorItemDb.new()
 	world.item_db.transfers[101216] = 0.2
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -447,7 +447,7 @@ func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
 	world.sim.anim_phase_ticks = 0
 	world.sim.anim_blend_weight = 0.0
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -468,7 +468,7 @@ func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -510,7 +510,7 @@ func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot
 func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -534,7 +534,7 @@ func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
 func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -557,7 +557,7 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 	# state, covered by the ctest player_look suite).
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -578,7 +578,7 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 	# refusal. [orig: input cases 170/169/172 -> C2S 0x1D @0x501c60]
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -595,7 +595,7 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -622,7 +622,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# mirror camera) and the viewmodel rides its own mirror-excluded layer.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -686,7 +686,7 @@ func test_camera_state_rides_the_sim_view() -> void:
 	# h->v conversion. 3P: the camera aims at the sim's chased anchor.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -723,7 +723,7 @@ func test_camera_state_rides_the_sim_view() -> void:
 	assert_almost_eq(to_pivot.length(), 0.75, 0.001,
 		"the camera lands on the march's last 0.25u step, not the full distance")
 	var expected_eye: Vector3 = pivot - Vector3(0, 0, -1) \
-			* LocalPlayerHost.tp_effective_distance(host.PLAYER_TP_DISTANCE)
+			* LocalPlayerPresenter.tp_effective_distance(host.PLAYER_TP_DISTANCE)
 	assert_almost_eq((camera.global_position - expected_eye).length(), 0.0, 0.001,
 		"the eye is pivot - effective_dist*forward (orbit pitch 0 at the reset)")
 
@@ -733,7 +733,7 @@ func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 	# mode; the host never carries scope state of its own.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -770,7 +770,7 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	var trigger := BootTrigger.new()
 	trigger.world = FakeWorld.new()
 	trigger.camera = Camera3D.new()
-	trigger.host = LocalPlayerHost.new()
+	trigger.host = LocalPlayerPresenter.new()
 	vp.add_child(trigger.world)
 	vp.add_child(trigger.camera)
 	vp.add_child(trigger.host)
@@ -802,7 +802,7 @@ func _visual_instances(root: Node) -> Array:
 func test_shared_host_teardown_releases_captured_mouse() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -832,7 +832,7 @@ func _weapon_view() -> PlayerWeaponView:
 func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -867,7 +867,7 @@ func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -899,7 +899,7 @@ func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> v
 func test_viewmodel_publishes_full_range_heat_glow() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1019,7 +1019,7 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 	# model's default transform at the scene origin.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
@@ -1047,7 +1047,7 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
@@ -1083,7 +1083,7 @@ func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> 
 func test_fixed_tick_viewmodel_clip_keeps_its_catchup_position() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1131,7 +1131,7 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	# (casing ejects on RECOIL rows) route through the no-effect shim @0x5419e0.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1263,7 +1263,7 @@ func test_catch_up_muzzle_events_keep_each_ticks_scope_gate() -> void:
 	# one is suppressed; the final settled view must not suppress both.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1298,7 +1298,7 @@ func test_recoil_direct_casing_spawns_every_authored_transient() -> void:
 	# retail's one global EffectWorld render pass.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1339,7 +1339,7 @@ func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
 	# recoil particle therefore removed the weapon's muzzle flash entirely.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1378,7 +1378,7 @@ func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
 func test_catch_up_weapon_action_events_are_not_coalesced() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1418,7 +1418,7 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	# replayed, so a viewmodel rebuild cannot refire historical sounds.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1467,7 +1467,7 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1500,7 +1500,7 @@ func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() 
 func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1539,7 +1539,7 @@ func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1564,7 +1564,7 @@ func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
 func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)
@@ -1579,7 +1579,7 @@ func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> 
 func test_aim_range_survives_a_world_with_no_terrain() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var host := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
 	add_child_autofree(host)

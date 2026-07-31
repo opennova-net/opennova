@@ -4,7 +4,7 @@ extends SceneTree
 # files are manual, never collected). Boots the real game shell on an SP
 # mission, waits for the spawn, and verifies the waypoint chain end to end:
 # the sim's waypoint track (list built from the mission's blue route), the
-# host's HUD info entry (resolved WPNames name + live distance), and the
+# presenter's HUD info entry (resolved WPNames name + live distance), and the
 # proximity advance after teleporting the player onto the current waypoint.
 # PASSes only when the label data is live and the advance fires; a mission
 # with NO blue route reports that and exits 0 (nothing to probe).
@@ -78,13 +78,13 @@ func _run() -> void:
 		quit(1)
 		return
 
-	# The host's HUD entry: the game HUD host must resolve a name + distance.
-	var hud_host = game.get_node_or_null("GameHudHost")
+	# The presenter's HUD entry: the game HUD presenter must resolve a name + distance.
+	var hud_presenter = game.get_node_or_null("GameHudPresenter")
 	var entry: WaypointHudEntry = null
-	if hud_host != null and hud_host.has_method("waypoint_hud_entry"):
-		entry = hud_host.waypoint_hud_entry()
+	if hud_presenter != null and hud_presenter.has_method("waypoint_hud_entry"):
+		entry = hud_presenter.waypoint_hud_entry()
 	if entry == null:
-		push_error("waypoint_hud_probe: the HUD host built no waypoint entry")
+		push_error("waypoint_hud_probe: the HUD presenter built no waypoint entry")
 		quit(1)
 		return
 	print("PROBE label: name=\"%s\" distance=%dm number=%d" %

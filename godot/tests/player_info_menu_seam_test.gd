@@ -520,7 +520,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 
 func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var ammo := _ammo_control("PRIMARY_AMMO1")
 	var maxclips := int(w.get("maxclips", 0))
@@ -536,7 +536,7 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 
 func test_none_selection_hides_ammo_and_clears_icon() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var primary := _ammo_control("PRIMARY")
 	primary.select(0)  # back to NONE
@@ -549,7 +549,7 @@ func test_none_selection_hides_ammo_and_clears_icon() -> void:
 
 func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	# The M203 carbines are rifleman-filtered; switch PLAYERCLASS to Rifleman
 	# (value 8, row 3) so the slot list offers them.
 	_ammo_control("PLAYERCLASS").select(3)
@@ -570,7 +570,7 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 
 func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var expected: Array = wdb.get_slot_weapons(
 			NovaWeaponDatabase.SLOT_GRENADE, 1, 2)  # medic/blue
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
@@ -591,7 +591,7 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 
 func test_weight_label_renders_witnessed_format_and_band() -> void:
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
@@ -697,7 +697,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	# grenades default -1 -> maxclips, but a PICKED 0 stays 0 (the zero row) —
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()
-	var _host := _make_ammo_host(wdb)
+	var _presenter := _make_ammo_host(wdb)
 	var g := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
 	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
 		"the first grenade def carries weighable clips")

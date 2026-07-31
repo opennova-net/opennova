@@ -524,7 +524,7 @@ func trigger_accept() -> void:
 ## ACCEPT. The release ARMS the key (the opener press that showed the screen must
 ## release once [orig: Input_HandleMenuKeyRelease @0x4de2d0 clears the open
 ## debounce]); an armed press is the ACCEPT accelerator [orig: the on-show
-## registration @0x5674a8]. NovaArmoryHost routes key input here while open.
+## registration @0x5674a8]. NovaArmoryPresenter routes key input here while open.
 func accept_hotkey_edge(pressed: bool) -> bool:
 	if not pressed:
 		_accept_hotkey_armed = true

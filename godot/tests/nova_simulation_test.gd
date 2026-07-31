@@ -1584,7 +1584,7 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	assert_gte(secondary_index, 0)
 	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
 
-	# First switch normally, then mirror the LocalPlayerHost installing the new
+	# First switch normally, then mirror the LocalPlayerPresenter installing the new
 	# weapon definition. Its first tick enters SWITCHTO (the draw animation).
 	sim.request_local_player_weapon_category(2)
 	for _tick in range(120):

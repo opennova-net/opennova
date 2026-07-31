@@ -14,7 +14,7 @@ extends SceneTree
 #       -s res://tests/ai_threat_probe.gd
 #
 # The resource dir is the persisted one (a PFF install — the game runtime cannot
-# mount flat extracts). Movement rides the LocalPlayerHost input_source seam +
+# mount flat extracts). Movement rides the LocalPlayerPresenter input_source seam +
 # add_local_player_look; steering self-calibrates by comparing the player's actual
 # movement vector against the target bearing, so no yaw-convention assumptions.
 
@@ -85,9 +85,9 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerHost")
-	if world == null or host == null:
-		push_error("ai_threat_probe: main_game lacks World/LocalPlayerHost children")
+	var presenter = game.get_node_or_null("LocalPlayerPresenter")
+	if world == null or presenter == null:
+		push_error("ai_threat_probe: main_game lacks World/LocalPlayerPresenter children")
 		quit(1)
 		return
 
@@ -128,8 +128,8 @@ func _run() -> void:
 			int(first.get("clip_size", -1)), int(first.get("magazine", -1)),
 			str(first.get("combat_target_valid", false)), int(first.get("state", -1))])
 
-	# The movement seam: the host polls this callable INSTEAD of the keyboard.
-	host.set_input_source(func() -> Dictionary: return {"forward": _forward})
+	# The movement seam: the presenter polls this callable INSTEAD of the keyboard.
+	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
 
 	# --- Approach: walk at the nearest NPC, correcting heading off the actual
 	# movement vector (convention-free); bang-bang gain sign self-calibrates.

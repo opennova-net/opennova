@@ -495,7 +495,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `max(4 terrain samples ±0x4000) + 0x1000` unless `Flags & 0x800000` [orig:
     `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
     [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
-    terms are also unported (their producers are open). `local_player_host.gd`.
+    terms are also unported (their producers are open). `local_player_presenter.gd`.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased
@@ -1394,7 +1394,7 @@ The local controller train remains, and mounted selection is now an animation-ow
   and hit geometry share the same retail predicate but adapt it to their respective
   skinning and final-collision-row representations.
 - **Local host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
-  `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
+  `LocalPlayerPresenter._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
   uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
@@ -1644,7 +1644,7 @@ body_anim_phase` — same-state channels remain populated because their playhead
 independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
 in `libs/anim` (`kWeaponChannelMaskBones`) + `NovaSkeletalAnim::splice_weapon_channel`
 composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
-`NovaObjectModel.set_weapon_channel` and `LocalPlayerHost._update_avatar` consumption.
+`NovaObjectModel.set_weapon_channel` and `LocalPlayerPresenter._update_avatar` consumption.
 Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, historical ONED PIE,
 JOX 05TR, F4 + R through the real input path, completion waited by state): mid-reload
 `body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
@@ -3276,7 +3276,7 @@ at round end, and what the SP player then SEES. Port surfaces:
 `libs/mission/src/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
 `libs/world/src/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
 `libs/npruntime/src/server_tick.cpp` (kill tallies, `humans`, the win-condition
-check, the respawn hold), `godot/engine/world/game_hud_host.gd` (the lose banner),
+check, the respawn hold), `godot/engine/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
 `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
@@ -3469,7 +3469,7 @@ reader rides the context pointer (unwalked). The SP world keeps ticking through
 the epilog (`humans >= 1` holds the run gate; MP freezes entities on the gate
 instead [orig: @ 0x526742]).
 
-Port: `game_hud_host.gd` resolves the lose KEY against gametext `Misc` (chat
+Port: `game_hud_presenter.gd` resolves the lose KEY against gametext `Misc` (chat
 line + stored banner); `main_game.gd` consumes the `round_end` effect →
 `mission_end_screen.gd` (win = letterbox + jo_Epil.tga + the four count lines;
 lose = jo_Epil2.tga + STROVER_MISSION_FAILED + the banner + KEYINFO), 300 s
@@ -4982,7 +4982,7 @@ the authoritative collision triangles. Its red fixture starts at 160 degrees: be
 mirror, the first `sim.step()` restored that stale look and produced a nonzero EWEAP yaw phase and
 body-segment twist; green requires snapped yaw, EWEAP_GUNYAW, and maximum segment twist all neutral
 before new look input. mission_present_pass_test.gd,
-wire_present_pass_test.gd, local_player_host_test.gd, and
+wire_present_pass_test.gd, local_player_presenter_test.gd, and
 player_weapon_view_test.gd pin named-control delivery, precedence, and stale
 clearing; two_peer_fanout_test pins live player pitch at the existing wire lift,
 and loopback_identity_test pins the client-side mounted-infantry pitch chase.

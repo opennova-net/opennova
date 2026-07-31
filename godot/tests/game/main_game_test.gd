@@ -213,9 +213,9 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	# WAC text/ptext family lands as kind=="text" with the string in "str". The
 	# old handler read nonexistent "text"/"message" keys, so mission text never
 	# reached the HUD.
-	# The surface lives on the shared NovaGameHudHost (main_game passes through);
+	# The surface lives on the shared NovaGameHudPresenter (main_game passes through);
 	# out-of-tree _make() never runs _ready, so drive the host directly.
-	var host := NovaGameHudHost.new()
+	var host := NovaGameHudPresenter.new()
 	autofree(host)
 	host.apply_mission_effects([
 		{"kind": "dialog", "a": 3},
@@ -230,7 +230,7 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	# consol/pconsol ride the distinct debug_text channel. The game does not yet
 	# present an on-screen debug console, so these effects remain intentionally
 	# unrouted instead of replacing player-facing mission text.
-	var host := NovaGameHudHost.new()
+	var host := NovaGameHudPresenter.new()
 	autofree(host)
 	host.apply_mission_effects([
 		{"kind": "text", "str": "Hold this position"},
@@ -246,7 +246,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	# the gametext KEY; the host resolves it against 'Misc' (the miss-format marker
 	# stands in when no gametext table is registered) and keeps the banner line for
 	# the MISSION FAILED screen.
-	var host := NovaGameHudHost.new()
+	var host := NovaGameHudPresenter.new()
 	autofree(host)
 	host.apply_mission_effects([
 		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
@@ -305,7 +305,7 @@ func _screen_has_label_containing(node: Node, text: String) -> bool:
 func test_crosshair_option_updates_an_existing_hud() -> void:
 	# The Options signal reaches the built HUD through the shared host's public
 	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).
-	var host := NovaGameHudHost.new()
+	var host := NovaGameHudPresenter.new()
 	autofree(host)
 	var hud := FakeGameHud.new()
 	host._game_hud = hud
@@ -335,7 +335,7 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 
 	# The mission string table selection lives on the shared HUD host now (the
 	# exists-only mission-bin fallback rides its world wiring).
-	var host := NovaGameHudHost.new()
+	var host := NovaGameHudPresenter.new()
 	autofree(host)
 	host.setup(world, null, null)
 	host._load_hud_text_tables(root)

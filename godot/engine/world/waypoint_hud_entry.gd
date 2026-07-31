@@ -2,7 +2,7 @@ class_name WaypointHudEntry
 extends RefCounted
 
 ## The waypoint label's resolved entry — the typed cross-object record (ADR 0017)
-## behind NovaGameHudHost.waypoint_hud_entry() and the HUD info transport edge.
+## behind NovaGameHudPresenter.waypoint_hud_entry() and the HUD info transport edge.
 ## One instance per frame while the label shows; absence (null) is the hidden
 ## state (ShowWaypoints off / no track / no current selection).
 ## [orig: the name+distance pair HUD_DrawWaypointNameAndDistance @0x5947a0 draws]

@@ -835,7 +835,7 @@ once first: the open stamps `g_weaponScreenOpenDebounce` `[orig: @ 0x4e0b21]`
 and only the row's KEYUP clears it (`Input_HandleMenuKeyRelease @ 0x4de2d0`).
 PORTED 2026-07-11 (the weapon round): `ArmoryMenuCompanion.accept_hotkey_edge`
 (armed-on-release debounce; `on_menu_built` = the on-show stamp) routed by
-`NovaArmoryHost._unhandled_key_input` while the overlay is open.
+`NovaArmoryPresenter._unhandled_key_input` while the overlay is open.
 
 **Control registration** `[orig: WeaponDef_RegisterUICallbacks @ 0x567020 —
 (screen "WEAPON", control, kind, handler, arg) via the shared registrar

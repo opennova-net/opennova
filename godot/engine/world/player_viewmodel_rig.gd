@@ -2,10 +2,10 @@ class_name PlayerViewmodelRig
 extends RefCounted
 
 # The local player's first-person viewmodel presentation, split out of
-# LocalPlayerHost (W4-4): the FP render pass (SubViewport + renderfov camera),
+# LocalPlayerPresenter (W4-4): the FP render pass (SubViewport + renderfov camera),
 # the viewmodel node + parts lifetime, the weapon.def placement (pos/tpos ADS
 # lerp, rotation bias, axis map), and the first-person control-register writers.
-# The host keeps the player camera, the avatar/held-weapon presentation, and
+# The presenter keeps the player camera, the avatar/held-weapon presentation, and
 # the third-person flag; per-frame inputs (the view snapshot, the weapon view,
 # the camera mode, the debug force flag) arrive as update_viewmodel arguments.
 
@@ -63,11 +63,11 @@ const CTRL_OWNER_FP_HEAT := "first_person:heat"
 const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
 const CTRL_OWNER_FP_TEAM := "first_person:team"
 
-# The world serves the viewmodel builder + def; the host serves the weapon
+# The world serves the viewmodel builder + def; the presenter serves the weapon
 # effects (play-serial resync on rebuild). Untyped for the same reason as the
-# host's _world: GUT harness worlds serve value-only doubles.
+# presenter's _world: GUT harness worlds serve value-only doubles.
 var _world
-var _host
+var _presenter
 var _camera: Camera3D = null
 var _viewmodel: Node3D = null
 # The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
@@ -78,9 +78,9 @@ var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel 
 var _vm_ctrl_caps := {}             # instance id -> caps, resolved once per build
 
 
-func setup(world, host, camera: Camera3D) -> void:
+func setup(world, presenter, camera: Camera3D) -> void:
 	_world = world
-	_host = host
+	_presenter = presenter
 	_camera = camera
 	# Deferred: the game shell calls setup() from its own _ready, while the root
 	# viewport is still mid-scene-setup — a direct add_child into it fails then
@@ -94,13 +94,13 @@ func teardown() -> void:
 	clear_viewmodel()
 	_free_viewmodel_pass()
 	_world = null
-	_host = null
+	_presenter = null
 	_camera = null
 
 
 # W4-2-style justified accessors: PlayerWeaponEffects resolves action
-# userpoints against the FP viewmodel parts, and the host stamps lighting
-# context onto them — both read through the host's vm_parts()/viewmodel()
+# userpoints against the FP viewmodel parts, and the presenter stamps lighting
+# context onto them — both read through the presenter's vm_parts()/viewmodel()
 # delegates, which land here (the rig OWNS the array and the node).
 func vm_parts() -> Array:
 	return _vm_parts
@@ -110,7 +110,7 @@ func viewmodel() -> Node3D:
 	return _viewmodel
 
 
-## The viewmodel branch of the host's model lifetime: (re)build the FP model
+## The viewmodel branch of the presenter's model lifetime: (re)build the FP model
 ## when missing, apply its weapon.def view record, and re-collect the parts.
 func ensure_viewmodel() -> void:
 	if _world == null:
@@ -128,7 +128,7 @@ func ensure_viewmodel() -> void:
 							NovaPresentApplier.get_visual_control_capabilities(
 									child))
 			# re-sync the clip serial: fresh parts replay the active clip
-			_host.weapon_effects().reset_play_serial()
+			_presenter.weapon_effects().reset_play_serial()
 
 
 ## Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM
@@ -142,7 +142,7 @@ func refresh_viewmodel() -> void:
 	_viewmodel = null
 
 
-## The viewmodel leg of the host's clear-models path.
+## The viewmodel leg of the presenter's clear-models path.
 func clear_viewmodel() -> void:
 	if _viewmodel != null and is_instance_valid(_viewmodel):
 		_viewmodel.queue_free()
@@ -152,7 +152,7 @@ func clear_viewmodel() -> void:
 
 
 # Build the dedicated FP render pass (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG): a SubViewport
-# sharing this host's World3D whose camera draws ONLY the viewmodel layer through the
+# sharing this presenter's World3D whose camera draws ONLY the viewmodel layer through the
 # weapon renderfov projection, composited over the world frame below the HUD (layer 0 —
 # the game HUD CanvasLayers sit at 1+). The container ignores the mouse so gameplay
 # input passes through.
@@ -169,9 +169,9 @@ func _build_viewmodel_pass() -> void:
 	_vm_viewport = SubViewport.new()
 	# Render the CAMERA's World3D: the pass re-renders the SAME scene, culled to the
 	# viewmodel layer [orig: one scene, second projection + depth window @0x4ded60].
-	# Assigned explicitly — this host node may live OUTSIDE the play viewport
-	# (tests host the rig off the game tree), so tree-inherited world/canvas
-	# targets would be the host window's, not the game's.
+	# Assigned explicitly — this presenter node may live OUTSIDE the play viewport
+	# (tests presenter the rig off the game tree), so tree-inherited world/canvas
+	# targets would be the presenter window's, not the game's.
 	_vm_viewport.world_3d = _camera.get_world_3d()
 	_vm_viewport.transparent_bg = true
 	_vm_viewport.handle_input_locally = false
@@ -215,7 +215,7 @@ func _update_viewmodel_pass() -> void:
 # the CAMERA by the weapon's `pos`/`tpos` view offset and draws the model at the view
 # root [orig: Player_UpdateFirstPersonCamera @0x4dd380]; placing it in camera space is
 # the faithful structural equivalent (camera.global_transform == the engine view
-# transform here). Per-frame state arrives as arguments from the host's camera pass:
+# transform here). Per-frame state arrives as arguments from the presenter's camera pass:
 # the sim view snapshot, this tick's weapon view, the camera mode, the debug force flag.
 func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 		third_person: bool, force_visible: bool) -> void:
@@ -274,7 +274,7 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 
 func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		weapon_view: PlayerWeaponView) -> void:
-	# setup()'s world contract already includes get_sim; LocalPlayerHost and its
+	# setup()'s world contract already includes get_sim; LocalPlayerPresenter and its
 	# value-only harness doubles both use that same explicit seam.
 	var sim = _world.get_sim() if _world != null else null
 	for part in _vm_parts:
@@ -343,7 +343,7 @@ func _clear_viewmodel_ctrl(
 # propagate to children - and both player models are NovaObjectModel subtrees
 # (mesh instances under Robj/Skeleton3D nodes) whose rebuild() recreates them
 # on the default layer, so the callers (this rig's viewmodel stamp and the
-# host's avatar/held-weapon stamps) re-stamp every frame.
+# presenter's avatar/held-weapon stamps) re-stamp every frame.
 static func set_visual_layers(root: Node, layer_mask: int) -> void:
 	if root is VisualInstance3D:
 		var visual := root as VisualInstance3D

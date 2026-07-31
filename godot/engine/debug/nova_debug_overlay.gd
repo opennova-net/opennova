@@ -165,10 +165,10 @@ func set_world_source(source: Callable) -> void:
 			_resolve_terrain_target, "The current world has no terrain.")
 
 
-## Supplier for LocalPlayerHost-owned presentation knobs.
+## Supplier for LocalPlayerPresenter-owned presentation knobs.
 func set_player_source(source: Callable) -> void:
 	_session.set_target_source(NovaDebugCatalog.TARGET_PLAYER, source,
-			"No local player presentation host is active.")
+			"No local player presenter is active.")
 	if visible:
 		_refresh()
 

@@ -11,7 +11,7 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
 const GameDebugHostScript := preload("res://game/game_debug_host.gd")
-const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
+const LocalPlayerPresenterScript := preload("res://engine/world/local_player_presenter.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -20,7 +20,7 @@ const CHANGE_DIR_KEY := KEY_F9
 # The objectives-panel toggle. The retail action toggles the panel's alpha byte
 # in co-op [orig: Input_HandleActionBinding case @0x49b68b — dword_24C18CC ^=
 # 0xFF]; the authored default binding rides the unported input-binding layer
-# (D-CTRL-3), so the key itself is a host mapping.
+# (D-CTRL-3), so the key itself is a reimpl mapping.
 const OBJECTIVES_KEY := KEY_O
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
@@ -58,7 +58,7 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 var _picker: FileDialog
 var _root: NovaResourceRoot
 var _state: int = State.MENU
-var _host_wired := false
+var _shell_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _debug_host: GameDebugHost
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
@@ -66,14 +66,14 @@ var _debug_host: GameDebugHost
 var _pick_list := NovaDebugPickList.new()
 var _pick_toast: Label = null
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld/replay + env hooks)
-# The in-game HUD rides NovaGameHudHost. It owns the lazy GameHud build, the
+# The in-game HUD rides NovaGameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
 # mission text feed (queued until the HUD exists); this shell only says when the
 # player is in-world.
-var _hud_host: NovaGameHudHost
-var _player_host: LocalPlayerHost = null
+var _hud_presenter: NovaGameHudPresenter
+var _player_presenter: LocalPlayerPresenter = null
 # The per-system frame-stats board behind F3 -> Stats. Created with the shell
-# and handed to every feeding host; it costs nothing until the tab opens
+# and handed to every feeding owner; it costs nothing until the tab opens
 # (capture stays inactive, every feed site gates on it).
 var _frame_stats := FrameStatsBoard.new()
 # Root-viewport render-time sampling for the Stats tab; the sampler owns the
@@ -82,8 +82,8 @@ var _render_stats := RootRenderStatsSampler.new()
 var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
 var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
-var _armory_host: NovaArmoryHost  # the SHARED in-world armory surface (weapon.mnu WEAPON)
-var _deploy_host: NovaDeployScreenHost  # the joiner's deploy-map screen (death.mnu DEATH)
+var _armory_presenter: NovaArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
+var _deploy_presenter: NovaDeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 # The mission loading screen (per-mission sidecar image / loadscrn.pcx + the red
@@ -170,47 +170,47 @@ func _ready() -> void:
 	add_child(debug_host)
 	debug_host.start_runtime_endpoint()
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
-	# host decides what it means).
+	# owner decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
 		_camera.connect("escape_pressed", _on_camera_escape)
-	_player_host = LocalPlayerHostScript.new()
-	_player_host.name = "LocalPlayerHost"
-	add_child(_player_host)
-	_player_host.setup(_world, _camera)
+	_player_presenter = LocalPlayerPresenterScript.new()
+	_player_presenter.name = "LocalPlayerPresenter"
+	add_child(_player_presenter)
+	_player_presenter.setup(_world, _camera)
 	# The in-world armory + HUD ride their shared engine hosts. Created here,
-	# not in _wire_host, so the NW_REPLAY
-	# spectator path (which never enters the menu) still gets them; the HUD host's
+	# not in _wire_shell, so the NW_REPLAY
+	# spectator path (which never enters the menu) still gets them; the HUD presenter's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
 	# lazy HUD exists).
-	_armory_host = NovaArmoryHost.new()
-	_armory_host.name = "ArmoryHost"
-	add_child(_armory_host)
-	_armory_host.setup(_world, _player_host, _hud if _hud != null else self)
-	_armory_host.opened.connect(func() -> void: _state = State.ARMORY)
-	_armory_host.closed.connect(_on_resume)
+	_armory_presenter = NovaArmoryPresenter.new()
+	_armory_presenter.name = "ArmoryPresenter"
+	add_child(_armory_presenter)
+	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
+	_armory_presenter.closed.connect(_on_resume)
 	# The joiner's deploy-map screen (death.mnu DEATH): opened when the join reaches
 	# the player-paced deployment pick, self-closing on the deployment release
 	# [orig: the 0x0A flags1 bit1 hold chain; net-re 5.61].
-	_deploy_host = NovaDeployScreenHost.new()
-	_deploy_host.name = "DeployScreenHost"
-	add_child(_deploy_host)
-	_deploy_host.setup(_world, _hud if _hud != null else self)
+	_deploy_presenter = NovaDeployScreenPresenter.new()
+	_deploy_presenter.name = "DeployScreenPresenter"
+	add_child(_deploy_presenter)
+	_deploy_presenter.setup(_world, _hud if _hud != null else self)
 	# Same contract as the armory: the screen owns the cursor while it is up, so the
-	# shell must leave State.WORLD or LocalPlayerHost re-captures the mouse every
+	# shell must leave State.WORLD or LocalPlayerPresenter re-captures the mouse every
 	# frame and the spawn rows become unclickable.
-	_deploy_host.opened.connect(func() -> void: _state = State.DEPLOY)
-	_deploy_host.closed.connect(func() -> void:
+	_deploy_presenter.opened.connect(func() -> void: _state = State.DEPLOY)
+	_deploy_presenter.closed.connect(func() -> void:
 		if _state == State.DEPLOY:
 			_state = State.WORLD
 	)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
-	_hud_host = NovaGameHudHost.new()
-	_hud_host.name = "GameHudHost"
-	add_child(_hud_host)
-	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
+	_hud_presenter = NovaGameHudPresenter.new()
+	_hud_presenter.name = "GameHudPresenter"
+	add_child(_hud_presenter)
+	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
 	# Every net-session ENTRY (LAN browser/host, NovaWorld panel, replay + env hooks)
 	# lives on the NetSessionController component; the shell keeps the state
 	# machine, the load pipeline, and the session-presentation states.
@@ -219,11 +219,11 @@ func _ready() -> void:
 	add_child(_net)
 	_net.setup(self, _world, _menu_shell, _camera,
 			_hud if _hud != null else self, $MenuLayer)
-	# One shared frame-stats board across the shell, the world host and the HUD
-	# host; the world re-hands it to each mission runtime it creates.
+	# One shared frame-stats board across the shell, the world, and the HUD
+	# presenter; the world re-hands it to each mission runtime it creates.
 	_world.set_frame_stats_board(_frame_stats)
-	_hud_host.set_frame_stats_board(_frame_stats)
-	# The shell's own round-outcome tap (the HUD host keeps its separate connection
+	_hud_presenter.set_frame_stats_board(_frame_stats)
+	# The shell's own round-outcome tap (the HUD presenter keeps its separate connection
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
@@ -262,7 +262,7 @@ func _ready() -> void:
 	_net.maybe_launch_lan_from_env()
 
 
-# Consume Esc before weapon.mnu's host-wired CANCEL hotkey and FlyCamera can both
+# Consume Esc before weapon.mnu's shell-wired CANCEL hotkey and FlyCamera can both
 # observe it. The menu button has no authored ACTION, so its generic hotkey path
 # reports unhandled even after emitting pressed; without this early claim the same
 # Esc closes ARMORY and then immediately opens PAUSE.
@@ -313,8 +313,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	# The MISSION OBJECTIVES panel toggle, in-world only.
 	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
-	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_host != null:
-		_hud_host.toggle_objectives()
+	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_presenter != null:
+		_hud_presenter.toggle_objectives()
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
@@ -333,8 +333,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_use_latched = true
 			get_viewport().set_input_as_handled()
 		return
-	# The gameplay keys (F4 first/third person, C/Z stance) live on LocalPlayerHost.
-	if _player_host != null and _player_host.handle_key_input(
+	# The gameplay keys (F4 first/third person, C/Z stance) live on LocalPlayerPresenter.
+	if _player_presenter != null and _player_presenter.handle_key_input(
 			event, is_gameplay_input_active()):
 		get_viewport().set_input_as_handled()
 
@@ -348,15 +348,15 @@ func toggle_debug_overlay() -> void:
 				NovaDebugOverlay.DEFAULT_CONFIG_PATH,
 				get_debug_session())
 		_debug_overlay.name = "DebugOverlay"
-		var host: Node = _hud if _hud != null else self
-		host.add_child(_debug_overlay)
+		var mount: Node = _hud if _hud != null else self
+		mount.add_child(_debug_overlay)
 		_debug_overlay.visibility_changed.connect(
 				_on_debug_overlay_visibility_changed)
 		_debug_overlay.set_runtime_source(_current_runtime)
 		_debug_overlay.set_view_context_source(_current_player_view_context)
 		_debug_overlay.set_frame_stats_board(_frame_stats)
 		_debug_overlay.set_world_source(func(): return _world)
-		_debug_overlay.set_player_source(func(): return _player_host)
+		_debug_overlay.set_player_source(func(): return _player_presenter)
 		_debug_overlay.set_effect_world_source(_current_effect_world)
 		_debug_overlay.set_pick_list(_pick_list)
 	_debug_overlay.toggle()
@@ -418,8 +418,8 @@ func _show_pick_toast(text: String) -> void:
 	label.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	label.offset_top = 96.0
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var host: Node = _hud if _hud != null else self
-	host.add_child(label)
+	var mount: Node = _hud if _hud != null else self
+	mount.add_child(label)
 	_pick_toast = label
 	var tween := label.create_tween()
 	tween.tween_interval(PICK_TOAST_SECONDS)
@@ -438,7 +438,7 @@ func get_game_debug_host() -> GameDebugHost:
 		_debug_host.configure(
 			_current_runtime,
 			func(): return _world,
-			func(): return _player_host,
+			func(): return _player_presenter,
 			_shell_state_name,
 			func(): return _world_load_pending,
 			is_debug_overlay_open,
@@ -492,10 +492,10 @@ func _show_end_screen() -> void:
 		outcome = {"ended": true, "winner_team": _end_winner}
 	_end_screen = MissionEndScreen.new()
 	_end_screen.name = "MissionEndScreen"
-	var banner := _hud_host.endround_banner_line() if _hud_host != null else ""
+	var banner := _hud_presenter.endround_banner_line() if _hud_presenter != null else ""
 	_end_screen.setup(outcome, banner, _root)
-	var host: Node = _hud if _hud != null else self
-	host.add_child(_end_screen)
+	var mount: Node = _hud if _hud != null else self
+	mount.add_child(_end_screen)
 	_end_screen.exit_requested.connect(_on_end_screen_exit)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -530,9 +530,9 @@ func _current_player_view_context() -> DebugViewContext:
 	var context := DebugViewContext.new()
 	if _camera != null and is_instance_valid(_camera):
 		context.camera = _camera
-	if _player_host != null and is_instance_valid(_player_host):
+	if _player_presenter != null and is_instance_valid(_player_presenter):
 		context.camera_mode_known = true
-		context.third_person = bool(_player_host.is_third_person())
+		context.third_person = bool(_player_presenter.is_third_person())
 	return context
 
 
@@ -541,15 +541,15 @@ func _current_effect_world():
 
 
 # Mission-effect passthrough + the last-text read seam: the surface lives on the
-# shared NovaGameHudHost (queued until the lazy HUD exists); these stay callable
+# shared NovaGameHudPresenter (queued until the lazy HUD exists); these stay callable
 # on the shell for drains routed here and for the parity tests (ADR 0018).
 func apply_mission_effects(effects: Array) -> void:
-	if _hud_host != null:
-		_hud_host.apply_mission_effects(effects)
+	if _hud_presenter != null:
+		_hud_presenter.apply_mission_effects(effects)
 
 
 func hud_objective_line() -> String:
-	return _hud_host.hud_objective_line() if _hud_host != null else ""
+	return _hud_presenter.hud_objective_line() if _hud_presenter != null else ""
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end
@@ -576,17 +576,17 @@ func _enter_menu(dir: String) -> bool:
 	_state = State.MENU
 	_world.visible = false
 	_set_hud_visible(false)
-	_wire_host()
+	_wire_shell()
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file)
 	_menu_shell.show_menu()
 	return true
 
 
-func _wire_host() -> void:
-	if _host_wired:
+func _wire_shell() -> void:
+	if _shell_wired:
 		return
-	_host_wired = true
+	_shell_wired = true
 	_menu_shell.start_requested.connect(_on_start_requested)
 	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
@@ -633,23 +633,23 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 
 
 func _on_crosshair_style_changed(style: int) -> void:
-	if _hud_host != null:
-		_hud_host.set_crosshair_style(style)
+	if _hud_presenter != null:
+		_hud_presenter.set_crosshair_style(style)
 
 
-# The armory key while in-world: the shared NovaArmoryHost opens weapon.mnu's
+# The armory key while in-world: the shared NovaArmoryPresenter opens weapon.mnu's
 # WEAPON screen over LIVE play when the player stands in an armory zone — the
-# world keeps ticking underneath (State.ARMORY rides the host's opened signal)
+# world keeps ticking underneath (State.ARMORY rides the presenter's opened signal)
 # [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
 # @0x4e0b44, gated on Flags & 0x400000 @0x4e0b4d + the host weapons rule
 # (dword_A85B6C, BSS 0 in SP = allowed); no world-stop leg]. Returns false when
 # out of zone (key ignored, the original's silent gate). The ACCEPT apply and
 # the class/current-loadout open protocol live on the host.
 func _try_open_armory() -> bool:
-	if _armory_host == null:
+	if _armory_presenter == null:
 		return false
-	_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
-	return _armory_host.try_open()
+	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
+	return _armory_presenter.try_open()
 
 
 # The USE-ITEM mount toggle: outside the armory volume the same key enters/exits
@@ -947,7 +947,7 @@ func _on_join_deploy_pick_required() -> void:
 	# on a later death the presentation is already down and the same screen simply
 	# reopens on the new pending edge.
 	_finish_world_load_presentation()
-	if _deploy_host.open():
+	if _deploy_presenter.open():
 		return
 	# The admission watchdog has already ended at the player-paced stage (retail
 	# waits at the DEATH screen), so a failed open with the pick still owed is a
@@ -1037,13 +1037,13 @@ func _pause() -> void:
 func _on_resume() -> void:
 	if _state != State.PAUSED and _state != State.ARMORY:
 		return
-	if _armory_host != null and _armory_host.is_open():
-		_armory_host.close()  # Esc from ARMORY closes the overlay (no re-entry: closed
+	if _armory_presenter != null and _armory_presenter.is_open():
+		_armory_presenter.close()  # Esc from ARMORY closes the overlay (no re-entry: closed
 		                      # only fires while open)
 	_menu_shell.hide_menu()
 	# A joiner who paused from the deploy screen still owes its pick, so resume back
 	# into DEPLOY rather than handing the cursor back to the world.
-	_state = State.DEPLOY if (_deploy_host != null and _deploy_host.is_open()) \
+	_state = State.DEPLOY if (_deploy_presenter != null and _deploy_presenter.is_open()) \
 			else State.WORLD
 
 
@@ -1064,20 +1064,20 @@ func _teardown_world_to_menu() -> void:
 	if _end_screen != null:
 		_end_screen.queue_free()
 		_end_screen = null
-	if _player_host != null:
-		_player_host.teardown()
-	if _armory_host != null:
-		_armory_host.teardown()  # the built menu holds the OLD world's resource root
-	if _deploy_host != null:
-		_deploy_host.teardown()  # same stale-root hazard, and the shell's blanket
+	if _player_presenter != null:
+		_player_presenter.teardown()
+	if _armory_presenter != null:
+		_armory_presenter.teardown()  # the built menu holds the OLD world's resource root
+	if _deploy_presenter != null:
+		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
 	_world.unload()
-	if _player_host != null:
-		_player_host.setup(_world, _camera)
+	if _player_presenter != null:
+		_player_presenter.setup(_world, _camera)
 	if _net != null:
 		_net.on_world_teardown()
-	if _hud_host != null:
-		_hud_host.teardown()
+	if _hud_presenter != null:
+		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
 		return
 	# No mountable root to return to: land on the pre-mount front-end state so
@@ -1157,23 +1157,23 @@ func _process(delta: float) -> void:
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
-	if _player_host != null:
+	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
-		_player_host.before_world_tick(delta, player_live, player_live)
+		_player_presenter.before_world_tick(delta, player_live, player_live)
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe_skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	if _player_host != null:
-		_player_host.after_world_tick()
+	if _player_presenter != null:
+		_player_presenter.after_world_tick()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
-	# The shared HUD host rebuilds the per-frame info while the player is in-world
+	# The shared HUD presenter rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe_skip_hud
-	if _hud_host != null and (_state == State.WORLD or _state == State.ARMORY \
+	if _hud_presenter != null and (_state == State.WORLD or _state == State.ARMORY \
 			or _state == State.DEPLOY) and not skip_hud:
-		_hud_host.tick()
+		_hud_presenter.tick()
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()
 		if probe_enabled:
@@ -1188,11 +1188,11 @@ func _process(delta: float) -> void:
 			_frame_stats.add(FrameStatsBoard.FRAME_HUD, probe_t4 - probe_t3)
 
 
-# Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);
+# Mouse-look rides the shared LocalPlayerPresenter (the yaw/pitch witnesses live there);
 # the shell only says when the player is live: gameplay input is active, the
 # world is loaded, and the mouse is captured.
 func _unhandled_input(event: InputEvent) -> void:
-	if _player_host != null and _player_host.handle_input(
+	if _player_presenter != null and _player_presenter.handle_input(
 			event,
 			is_gameplay_input_active() and _world.is_loaded() \
 					and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):

@@ -13,7 +13,7 @@ extends Node3D
 # -> render_main_scene @ 0x5c1240 (mirrored sky/terrain/world/celestial/glare;
 # no water draw)] and never the first-person arms/weapon, which retail renders
 # as its own separate near-Z viewport pass over the finished frame
-# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerHost stamps
+# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerPresenter stamps
 # the two player layers each frame and masks BODY_REFLECTION_ONLY off the
 # player camera; the mirror camera below is the only view that includes it.
 const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world instance

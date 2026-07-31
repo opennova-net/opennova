@@ -71,7 +71,7 @@ func _ready() -> void:
 	await _capture("02_fp_down.png")
 
 	# NOVA_VM_FSM=1: drive the weapon action FSM live — full-auto fire (LMB held),
-	# reload (R), ADS in/out (RMB) — through the REAL input path (LocalPlayerHost reads
+	# reload (R), ADS in/out (RMB) — through the REAL input path (LocalPlayerPresenter reads
 	# the Input singleton while the mouse is captured), logging the FSM view at each
 	# stage and capturing frames. [net-re §5.62]
 	if OS.get_environment("NOVA_VM_FSM") == "1":

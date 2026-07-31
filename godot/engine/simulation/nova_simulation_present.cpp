@@ -1047,7 +1047,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[field] = 0.0f;
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
-		// it back in 0x0A; we draw our local player L via LocalPlayerHost, so drop the wire
+		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
 		// echo here. The row stays at its zero/unresolved defaults (PF_TYPE_ID 0), which the
 		// wire render pass skips. [net-re §5.38b two-handle L-vs-H reconciliation]
 		if (joiner_ && runtime_->has_self_handle() &&

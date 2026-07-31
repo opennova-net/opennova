@@ -27,7 +27,7 @@ const _REFRESH_DIVIDER := 2
 const _ROWS := [
 	{"id": "frame", "label": "Frame (wall)", "depth": 0, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_WALL},
-	{"id": "before", "label": "Player host (pre)", "depth": 1, "kind": _KIND_SPAN,
+	{"id": "before", "label": "Player presenter (pre)", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_PLAYER_BEFORE},
 	{"id": "world", "label": "World tick", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_WORLD},
@@ -87,7 +87,7 @@ const _ROWS := [
 					FrameStatsBoard.WORLD_IRIS]},
 	{"id": "audio", "label": "Audio", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.WORLD_AUDIO},
-	{"id": "after", "label": "Player host (post)", "depth": 1, "kind": _KIND_SPAN,
+	{"id": "after", "label": "Player presenter (post)", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_PLAYER_AFTER},
 	{"id": "hud", "label": "HUD tick", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.FRAME_HUD},

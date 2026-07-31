@@ -17,7 +17,7 @@ const CARD_WEAPON := "WPN_RPG"    # Scoped (flags 1) + 2 sights rows in JOX -> t
 
 var _out_abs := ""
 var _world = null
-var _host = null
+var _presenter = null
 
 
 func _ready() -> void:
@@ -39,7 +39,7 @@ func _ready() -> void:
 	if not String(session.get("error", "")).is_empty():
 		push_error("[wr] " + String(session.error)); get_tree().quit(1); return
 	_world = session.world
-	_host = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	_presenter = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if _world == null:
 		push_error("[wr] no weapon world"); get_tree().quit(1); return
 
@@ -182,8 +182,8 @@ func _equip_direct(weapon: String) -> void:
 	if not _world.set_local_player_weapon_by_name(weapon):
 		print("[wr] %s not in this root's weapon.def — staying on the default" % weapon)
 		return
-	if _host != null and _host.has_method("refresh_viewmodel"):
-		_host.refresh_viewmodel()
+	if _presenter != null and _presenter.has_method("refresh_viewmodel"):
+		_presenter.refresh_viewmodel()
 	await _settle(90)
 
 
@@ -197,14 +197,14 @@ func _anim_trace() -> void:
 	var tracef := FileAccess.open(_out_abs + "/animtrace.log", FileAccess.WRITE)
 	var part: Node = null
 	for _attempt in range(120):  # the equip rebuilds the viewmodel over several frames
-		if _host != null and _host.vm_parts().size() > 0:
-			part = _host.vm_parts()[0]
+		if _presenter != null and _presenter.vm_parts().size() > 0:
+			part = _presenter.vm_parts()[0]
 			break
 		await get_tree().process_frame
 	if part == null:
 		var diag := "no viewmodel part: host=%s vm=%s def=%s" % [
-				str(_host != null),
-				str(_host.viewmodel()) if _host != null else "-",
+				str(_presenter != null),
+				str(_presenter.viewmodel()) if _presenter != null else "-",
 				str(_world.local_player_viewmodel_def() != null)
 						if _world.has_method("local_player_viewmodel_def") else "?"]
 		print("[wr] ANIMTRACE: ", diag)

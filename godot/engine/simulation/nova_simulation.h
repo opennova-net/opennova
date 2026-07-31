@@ -708,7 +708,7 @@ private:
 	// @ 0x4dfa40 stamps g_pendingWeaponSlot + queues the action; the handler's
 	// completion consumes it].
 	bool weapon_switch_in_flight_ = false;
-	// LocalPlayerHost emits category/cycle input once per press. If that edge lands
+	// LocalPlayerPresenter emits category/cycle input once per press. If that edge lands
 	// during SWITCHTO, retain the requested outgoing action here until the draw can
 	// transition to it; the portable queue writer keeps its witnessed refusal.
 	int32_t weapon_switch_deferred_action_ = -1;
@@ -1109,7 +1109,7 @@ public:
 	// The local player's wire identity ((pool<<12)|slot). Packed zero is valid: callers that
 	// need presence use has_local_player()/the runtime's has_self_handle() instead of a sentinel.
 	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
-	// wire-present pass excludes while LocalPlayerHost draws the distinct local motor entity L.
+	// wire-present pass excludes while LocalPlayerPresenter draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean

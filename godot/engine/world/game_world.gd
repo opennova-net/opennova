@@ -112,7 +112,7 @@ var _effect_world: NovaEffectWorld  # the runtime .ptl effect world (render-only
 # Host-owned first-person presentation seam. MissionRuntime invokes GameWorld
 # once per completed fixed tick; this callback consumes that tick's weapon
 # events before EffectWorld advances, matching retail's action -> particle-pass
-# order without coupling the simulation to LocalPlayerHost Nodes.
+# order without coupling the simulation to LocalPlayerPresenter Nodes.
 var _local_player_weapon_tick_consumer := Callable()
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
@@ -708,7 +708,7 @@ func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
 
-## The mounted world's shared weapon.def database. ArmoryHost consumes this on
+## The mounted world's shared weapon.def database. ArmoryPresenter consumes this on
 ## first open so its canonical parent tuples and its visible rows resolve against
 ## the same catalog; the FP viewmodel reuses it below (ADR 0018 resource seam).
 func get_weapon_database() -> NovaWeaponDatabase:
@@ -1316,7 +1316,7 @@ func get_destruction_present_stats() -> RefCounted:
 
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
-## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third
+## own). The caller (LocalPlayerPresenter) positions it and swaps its visual layer per first/third
 ## person: in first person the body stays renderable on the reflection-only layer, because the
 ## witnessed water mirror re-renders the world scene, local body included
 ## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
@@ -1347,7 +1347,7 @@ func build_local_player_avatar() -> Node3D:
 	return _placer.build_player_animated_model(0x14B9, self, _env)
 
 
-# Resolve the .3DI definitions that LocalPlayerHost would otherwise load only on
+# Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
 # its first visible frame. Retail's Game_ReloadEntityModelsAndCallbacks and HUD
 # model pass load the player + current weapon overlay before sub_5B3A80 freezes
 # the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
@@ -1637,7 +1637,7 @@ func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 
 
 ## Register the host-side presenter for fixed-tick weapon events. The game
-## installs LocalPlayerHost here; headless/runtime-only hosts leave it
+## installs LocalPlayerPresenter here; headless/runtime-only hosts leave it
 ## invalid and may drain the typed event queue explicitly.
 func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 	_local_player_weapon_tick_consumer = consumer
@@ -1645,7 +1645,7 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
 ## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
-## degrees) LocalPlayerHost consumes — decoded from NovaWeaponDatabase's transport dict
+## degrees) LocalPlayerPresenter consumes — decoded from NovaWeaponDatabase's transport dict
 ## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
 ## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
 ## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
@@ -2238,7 +2238,7 @@ func get_water_node() -> Node:
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
 ## One-line delegates into the item-effect director (item_effect_director.gd):
-## the names stay on GameWorld — LocalPlayerHost and the present passes
+## the names stay on GameWorld — LocalPlayerPresenter and the present passes
 ## register through the world, and harness worlds pin these methods.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
 	_item_fx.register_effect_anchor(owner_key, resolver)
