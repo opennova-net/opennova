@@ -19,7 +19,7 @@ func test_runtime_descriptor_rejects_path_like_run_ids() -> void:
 	assert_false(GameMcpService.is_launch_descriptor_safe("../run-17", path))
 
 
-func test_endpoint_shutdown_removes_handshake_without_stopping_game_host() -> void:
+func test_endpoint_shutdown_removes_handshake_without_stopping_the_game() -> void:
 	var service: GameMcpService = add_child_autofree(GameMcpService.new())
 	var game_adapter: GameMcpAdapter = add_child_autofree(GameMcpAdapter.new())
 	var descriptor_path := ProjectSettings.globalize_path(

@@ -818,7 +818,7 @@ int main() {
     }
 
     // Restoring occupied control seats republishes one per-vehicle lifecycle edge so
-    // hosts can rebuild effects that were cleared with the transient EffectLog.
+    // embedders can rebuild effects that were cleared with the transient EffectLog.
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;

@@ -43,7 +43,7 @@ const NovaObjectMaterials := preload("res://engine/object/nova_object_materials.
 const NovaObjectSceneBuilder := preload("res://engine/object/nova_object_scene_builder.gd")
 # The ADR 0017 typed env record moved with the materials helper; this alias
 # keeps NovaObjectModel.EnvLightValues the public type (mission_object_placer,
-# tests) and the host annotations unchanged.
+# tests) and the owner annotations unchanged.
 const EnvLightValues = NovaObjectMaterials.EnvLightValues
 
 var object_data: NovaObjectData
@@ -123,7 +123,7 @@ var _shadow_receiver_material: ShaderMaterial
 
 # NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
 # for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
-# model frame; the host maps the whole rig to the camera in one container transform. Set by
+# model frame; the owner maps the whole rig to the camera in one container transform. Set by
 # the placer BEFORE set_object_data. World models keep the default flipped frame.
 var native_frame := false
 
@@ -203,7 +203,7 @@ var _model_light_preview_enabled := false
 
 
 # The W4-6c section helpers (RefCounted; a plain back-ref cannot cycle --
-# the host is a manually-managed Node3D). Constructed in _init so they
+# the owner is a manually-managed Node3D). Constructed in _init so they
 # exist before any pre-_ready set_object_data/rebuild.
 var _body_anim: NovaObjectBodyAnim
 var _materials: NovaObjectMaterials
@@ -332,7 +332,7 @@ func set_interior_section_light_transfer(daylight: float) -> void:
 	_last_env_gen = -1
 	_last_env_values = null
 	_last_section_env_values = null
-	# The exterior/interior split is part of the material-cache key. Hosts
+	# The exterior/interior split is part of the material-cache key. Owners
 	# normally configure it before set_object_data(), but preserve correctness
 	# for a live reconfiguration too.
 	if object_data != null and object_data.has_document():
@@ -413,7 +413,7 @@ func reset_animation_time() -> void:
 # seeded selection, remote body-state arbitration, muzzle userpoint,
 # playhead scrub, PLAYPARTANIM part-anim channels, aim overlay, pose
 # evaluation) moved verbatim to nova_object_body_anim.gd. ALL state stays
-# on this host; the delegates below preserve the external surface and
+# on this owner; the delegates below preserve the external surface and
 # test-subclass override dispatch.
 
 func set_skeletal_anim(skeletal) -> void:
@@ -686,7 +686,7 @@ func _advance_part_anims(delta: float) -> bool:
 
 
 # --- third-person aim overlay (the torso bend) ----------------------------------
-# One node-frame rotation Basis per anim overlay class; empty disables. The host that
+# One node-frame rotation Basis per anim overlay class; empty disables. The owner that
 # owns the aim state (LocalPlayerPresenter) sets this each frame from
 # NovaSimulation.get_local_player_aim_overlay(); the pose write then routes through
 # NovaSkeletalAnim.eval_pose_overlay so each skeleton segment gets its witnessed
@@ -703,7 +703,7 @@ var _collapse_right_hand := false
 
 # The upper-body weapon channel: a second clip posed at its OWN playhead onto the mask
 # bones (clavicles/arms/forearms/neck/head/hands) before the aim overlay composes. The
-# host that owns the sim state (LocalPlayerPresenter) feeds it each frame from
+# owner that owns the sim state (LocalPlayerPresenter) feeds it each frame from
 # PlayerWeaponView.body_anim_key/body_anim_phase; empty key disables. Unknown keys
 # no-op inside the native splice. [orig: the mask override @0x4b14db/@0x4b16a7 in
 # Entity_BuildBoneTransformMatrices; docs/world/world-wac-ai-re.md §14.8]
@@ -737,7 +737,7 @@ func rebuild() -> void:
 # split @ 0x5d932e..0x5d9354 + the flush bracket @ 0x5c9596 / @ 0x5c967a].
 # Retail bins per STRIP per frame; we bin per MODEL from its placed height
 # (D-RORD-3). With no water in the session this is the default rung (0).
-# Hosts that move a model across the water plane re-call this.
+# Owners that move a model across the water plane re-call this.
 func refresh_render_order() -> void:
 	if _alpha_materials.is_empty() or not is_inside_tree():
 		return
@@ -775,7 +775,7 @@ func _process(delta: float) -> void:
 
 
 ## Advance the model's render-time state once. This is the public equivalent
-## of the engine process callback for deterministic hosts and tests: clocks
+## of the engine process callback for deterministic owners and tests: clocks
 ## continue while hidden, while render-derived work waits until the model can
 ## be submitted again.
 func advance_runtime_frame(delta: float) -> void:
@@ -784,7 +784,7 @@ func advance_runtime_frame(delta: float) -> void:
 	# Retail evaluates material constants / PANM transforms / light state per
 	# SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the batch
 	# computes constants for the models it draws]. is_visible_in_tree() is only
-	# the retained host's hierarchy-visibility gate: it skips explicitly hidden
+	# the retained owner's hierarchy-visibility gate: it skips explicitly hidden
 	# props/buildings, but it does not prove camera/frustum submission. Exact
 	# noise-call cadence therefore remains a renderer-scheduling gap (D-3DI-2),
 	# not something this SceneTree callback can reconstruct. Time-ACCUMULATING

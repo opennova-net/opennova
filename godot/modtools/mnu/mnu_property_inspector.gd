@@ -2,7 +2,7 @@ class_name MnuPropertyInspector
 extends MarginContainer
 
 # Editable property view for a selected MNU screen or widget. MarginContainer
-# gives the hosted margin/scroll/box chain a real size inside the shell.
+# gives the mounted margin/scroll/box chain a real size inside the shell.
 # Every row emits edit_requested; the workspace applies it and owns snapshot
 # undo. The inspector never mutates the document, and unchanged edits no-op.
 #

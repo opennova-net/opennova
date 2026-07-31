@@ -71,8 +71,8 @@ func test_global_colors_scale_at_runtime_without_mutating_authored_values() -> v
 	assert_eq(_color_units(data.get_lightning_color()), [201, 101, 51])
 
 
-func test_hosted_static_blocks_snap_to_scaled_targets() -> void:
-	var env := _add_environment(_make_static_data(), "HostedStaticEnv")
+func test_world_driven_static_blocks_snap_to_scaled_targets() -> void:
+	var env := _add_environment(_make_static_data(), "WorldDrivenStaticEnv")
 	var weather := _add_world_driven_weather(env, "WorldDrivenStaticWeather")
 
 	assert_eq(_units(weather.get_smooth_ceiling()), [35, 30, 25])

@@ -119,7 +119,7 @@ struct Clip {
 // uninitialized stack floats there -- UB, ported as zeros; divergence ledger D-INF-15).
 // A row's parent equal to itself normalizes to -1 (the table stores the root's parent as
 // itself; the original's in-place multiply against the model-origin root pivot is a no-op).
-// ClipBone.name is empty for rows past the .bad's records -- hosts synthesize names.
+// ClipBone.name is empty for rows past the .bad's records -- embedders synthesize names.
 // This is what makes broken BadBone.position corpora irrelevant: 12 of 43 JO viewmodel
 // rigs ship zeroed/stale positions and retail renders them all (data sweep 2026-07-09).
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},

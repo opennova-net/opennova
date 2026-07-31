@@ -8,7 +8,7 @@
 
 namespace opennova::particle {
 
-// Host safety ceiling for a single emitter. The retail JO PTL corpus tops out
+// Reimpl safety ceiling for a single emitter. The retail JO PTL corpus tops out
 // at emit_maxoverride=400 (17 non-zero values across 1,402 field records); 4096
 // preserves more than 10x that authored headroom while bounding hostile mods.
 inline constexpr std::size_t kEmitterHardParticleLimit = 4096;
@@ -113,7 +113,7 @@ struct Emitter {
 	float gravity_accel = 0.0f;     // retail authored gravity × -0.09803897
 	float drag_coefficient = 0.0f;  // retail authored drag × 0.01
 	// Runtime radians/sec, converted after signed-randomizing authored
-	// orbitalspeed +/- orbitalspeed_adj (which are degrees/sec). The host ORBIT
+	// orbitalspeed +/- orbitalspeed_adj (which are degrees/sec). The reimpl ORBIT
 	// integrator remains an approximation of retail's basis/age chain.
 	float orbit_speed = 0.0f;
 

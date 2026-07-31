@@ -1,7 +1,7 @@
 class_name PerfTimeline
 extends RefCounted
 
-## Named nested wall-clock spans for one operation (a mission load). A host
+## Named nested wall-clock spans for one operation (a mission load). An owner
 ## creates a timeline with begin(), brackets stages with span()/end_span(), and
 ## finish()es it — which prints one structured line and retains the timeline in
 ## a small static ring so later tooling (the debug overlay's perf pane) can
@@ -111,7 +111,7 @@ func summary(top_n := 4) -> String:
 
 ## The label-less timing line ("2.4s — terrain 1.8s, objects 520ms"): total plus
 ## the largest top-level spans (descending, up to `top_n`). For embedding in a
-## host's own status message.
+## owner's own status message.
 func brief(top_n := 4) -> String:
 	var tops: Array = []
 	for s in _spans:

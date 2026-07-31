@@ -45,7 +45,7 @@ public:
 	// The water-plane transparent bracket (maturity REN-3,
 	// docs/render/render-order-re.md): the session's water height splits
 	// blended world materials into the far/camera-side priority rungs.
-	// Set by the water host node when a water plane exists; cleared with it.
+	// Set by the water owner node when a water plane exists; cleared with it.
 	void set_water_split_height(float height);
 	void clear_water_split_height();
 	bool has_water_split_height() const;

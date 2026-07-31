@@ -4,7 +4,7 @@ extends RefCounted
 ## The local player's view-state snapshot — the typed record behind
 ## `NovaSimulation.get_local_player_view()`'s transport Dictionary (ADR 0017).
 ## Ticked in the SIM at the world cadence (62.5 Hz), so the ADS ease, the fov
-## policy, and the third-person anchor chase are render-rate independent; hosts
+## policy, and the third-person anchor chase are render-rate independent; owners
 ## only read it and place nodes. [orig: the 15-step scope interp @0x4df36e;
 ## g_scopeEngaged @0x82CE94; fov policy Player_ToggleWeaponScope @0x4df0c0..401;
 ## anchor chase ThirdPersonCamera_Update @0x437c8d]
@@ -14,7 +14,7 @@ var mounted := false
 var vehicle_attack_context := false
 var scope_fraction := 0.0     # 0 = hip .. 1 = sighted, over the toggle's ease steps
 # The NoCardSwitch reload rule: true while the slot is mid-RELOAD on a weapon
-# WITHOUT NoCardSwitch — the FP view bias is dropped for the frame (the host
+# WITHOUT NoCardSwitch — the FP view bias is dropped for the frame (the presenter
 # reads the eased fraction as 0). [orig: Player_UpdateFirstPersonCamera
 # @0x4dd439/@0x4dd4cc; predicate Player_IsReloadingCardSwitchWeapon @0x4dcdd0]
 var suppress_view_bias := false

@@ -821,15 +821,15 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
 	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
-	var play := _find_node_by_name(host, "PreviewPlayButton") as Button
-	var reset := _find_node_by_name(host, "PreviewResetButton") as Button
-	var wire := _find_node_by_name(host, "PreviewWireCheck") as CheckBox
-	var ctrl_value := _find_node_by_name(host, "ControlRegisterValue_0") as SpinBox
+	var play := _find_node_by_name(mount, "PreviewPlayButton") as Button
+	var reset := _find_node_by_name(mount, "PreviewResetButton") as Button
+	var wire := _find_node_by_name(mount, "PreviewWireCheck") as CheckBox
+	var ctrl_value := _find_node_by_name(mount, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(preview)
 	assert_not_null(play)
 	assert_not_null(reset)
@@ -860,13 +860,13 @@ func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_ret
 	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
 	assert_not_null(preview)
 
-	var unknown_host = add_child_autofree(Control.new())
+	var unknown_mount = add_child_autofree(Control.new())
 	workspace.build_workflow_inspector(
-			ObjectEditorWorkspace.Workflow.PREVIEW, unknown_host)
+			ObjectEditorWorkspace.Workflow.PREVIEW, unknown_mount)
 	var unknown_label := _find_node_by_name(
-			unknown_host, "ControlRegisterLabel_0") as Label
+			unknown_mount, "ControlRegisterLabel_0") as Label
 	var unknown_value := _find_node_by_name(
-			unknown_host, "ControlRegisterValue_0") as SpinBox
+			unknown_mount, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(unknown_label)
 	assert_not_null(unknown_value)
 	if unknown_label != null:
@@ -928,12 +928,12 @@ func test_object_workspace_preview_userpoint_toggle_controls_overlay() -> void:
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
 	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
-	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	var check := _find_node_by_name(mount, "PreviewUserPointsCheck") as CheckBox
 	assert_not_null(preview)
 	assert_not_null(check)
 	if preview == null or check == null:
@@ -952,12 +952,12 @@ func test_object_workspace_preview_userpoint_toggle_disables_without_points() ->
 	assert_eq(workspace.new_current(), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
 	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
-	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	var check := _find_node_by_name(mount, "PreviewUserPointsCheck") as CheckBox
 	assert_not_null(preview)
 	assert_not_null(check)
 	if preview == null or check == null:
@@ -977,7 +977,7 @@ func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> 
 	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, preview_mount)
 
 	assert_null(_find_node_by_name(detail_mount, "ObjectDetailDock"), "Preview should not reserve a right pane.")
-	assert_eq(detail_mount.get_child_count(), 0, "Preview should leave the right-pane host empty.")
+	assert_eq(detail_mount.get_child_count(), 0, "Preview should leave the right-pane mount empty.")
 
 	var lods_mount = add_child_autofree(Control.new())
 	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, lods_mount)
@@ -1055,11 +1055,11 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
 
-	var host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
-	var mtrl := _find_node_by_name(host, "ObjectExportMtrlCheck") as CheckBox
-	var lght := _find_node_by_name(host, "ObjectExportLghtCheck") as CheckBox
-	var panm := _find_node_by_name(host, "ObjectExportPanmCheck") as CheckBox
+	var mount = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
+	var mtrl := _find_node_by_name(mount, "ObjectExportMtrlCheck") as CheckBox
+	var lght := _find_node_by_name(mount, "ObjectExportLghtCheck") as CheckBox
+	var panm := _find_node_by_name(mount, "ObjectExportPanmCheck") as CheckBox
 	assert_not_null(mtrl)
 	assert_not_null(lght)
 	assert_not_null(panm)
@@ -1079,17 +1079,17 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 func test_object_lods_inspector_exposes_scene_and_project_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(4, host)
+	workspace.build_workflow_inspector(4, mount)
 
-	assert_not_null(_find_node_by_name(host, "ObjectLodsList"), "LOD inspector should list project LOD scene bindings.")
-	assert_not_null(_find_node_by_name(host, "ObjectAddLodSceneButton"), "LOD inspector should expose an add scene control.")
-	assert_not_null(_find_node_by_name(host, "ObjectReplaceLodSceneButton"), "LOD inspector should expose a replace scene control.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodThreshold"), "LOD inspector should expose the selected LOD threshold.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodAttributes"), "LOD inspector should expose selected LOD attributes.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodRenderFunction"), "LOD inspector should expose selected LOD render function.")
-	assert_not_null(_find_node_by_name(host, "ObjectPolyCollisionLod"), "LOD inspector should expose the project collision LOD setting.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodsList"), "LOD inspector should list project LOD scene bindings.")
+	assert_not_null(_find_node_by_name(mount, "ObjectAddLodSceneButton"), "LOD inspector should expose an add scene control.")
+	assert_not_null(_find_node_by_name(mount, "ObjectReplaceLodSceneButton"), "LOD inspector should expose a replace scene control.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodThreshold"), "LOD inspector should expose the selected LOD threshold.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodAttributes"), "LOD inspector should expose selected LOD attributes.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodRenderFunction"), "LOD inspector should expose selected LOD render function.")
+	assert_not_null(_find_node_by_name(mount, "ObjectPolyCollisionLod"), "LOD inspector should expose the project collision LOD setting.")
 
 
 func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
@@ -1101,13 +1101,13 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	assert_true(data.set_lod_field(0, "threshold", 12.5))
 	assert_true(data.set_project_field("poly_collision_lod", 3))
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, host)
-	var threshold := _find_node_by_name(host, "ObjectLodThreshold") as SpinBox
-	var attributes := _find_node_by_name(host, "ObjectLodAttributes") as SpinBox
-	var render_function := _find_node_by_name(host, "ObjectLodRenderFunction") as LineEdit
-	var poly_lod := _find_node_by_name(host, "ObjectPolyCollisionLod") as SpinBox
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, mount)
+	var threshold := _find_node_by_name(mount, "ObjectLodThreshold") as SpinBox
+	var attributes := _find_node_by_name(mount, "ObjectLodAttributes") as SpinBox
+	var render_function := _find_node_by_name(mount, "ObjectLodRenderFunction") as LineEdit
+	var poly_lod := _find_node_by_name(mount, "ObjectPolyCollisionLod") as SpinBox
 	assert_not_null(threshold)
 	assert_not_null(attributes)
 	assert_not_null(render_function)
@@ -1934,7 +1934,7 @@ func test_object_materials_dock_survives_editor_state_sync_without_rebuild() -> 
 		return
 	var id := detail.get_instance_id()
 
-	# The workstation re-calls BOTH set_asset_dock (same host) and sync_asset_dock
+	# The workstation re-calls BOTH set_asset_dock (same mount) and sync_asset_dock
 	# on every editor-state sync (e.g. each time-of-day drag step). Neither may
 	# rebuild the dock while the same object is open.
 	workspace.set_asset_dock(detail_mount)
@@ -2523,8 +2523,8 @@ func test_object_lists_use_compact_list_floor() -> void:
 
 
 func test_inspector_box_disables_horizontal_scroll() -> void:
-	var host = add_child_autofree(Control.new())
-	var box = InspectorForms.make_inspector_box(host)
+	var mount = add_child_autofree(Control.new())
+	var box = InspectorForms.make_inspector_box(mount)
 	var scroll := box.get_parent() as ScrollContainer
 	assert_not_null(scroll, "make_inspector_box should wrap content in a ScrollContainer.")
 	if scroll != null:

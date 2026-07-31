@@ -55,7 +55,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # @0x4dee29 / restore 0.2 @0x4df0aa, fov = WeaponDef+0x148 @0x4dee71 -> h->v conversion in
 # Render_SetViewAndProjectionMatrices @0x58d900, depth remap Render_SetViewportDepth01 @0x58a7b0;
 # default 80.0 = flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov'
-# @0x54482a]. Hosted as a SubViewport sharing the world, camera cull-masked to the viewmodel
+# @0x54482a]. Ported as a SubViewport sharing the world, camera cull-masked to the viewmodel
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const VIEWMODEL_PASS_NEAR := 0.05
@@ -255,7 +255,7 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 		vm_basis, bias * _viewmodel_offset(view_units))
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
-	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]; in the port, the dedicated layer is drawn
 	# only by the pass camera (and excluded by the mirror camera's cull_mask).
 	set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
 	# The card switch: while the SIGHTS card is up, the FP model does not draw —

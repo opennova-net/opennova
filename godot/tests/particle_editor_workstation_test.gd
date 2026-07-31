@@ -83,7 +83,7 @@ func _find_inspector_of_type(root: Node, script: Script) -> Node:
 	return null
 
 
-# The viewport lane now hosts the blueprint screen (graph + preview), so the
+# The viewport lane now holds the blueprint screen (graph + preview), so the
 # ParticlePreview is nested rather than the lane's direct child.
 func _preview_in(root: Node) -> ParticlePreview:
 	if root is ParticlePreview:
@@ -247,7 +247,7 @@ func test_particle_viewport_is_shell_managed() -> void:
 	assert_eq(lane.get_child_count(), 1, "Particle workspace should mount exactly one viewport child.")
 	assert_eq(str(lane.get_child(0).name), "ParticleBlueprint",
 			"Particle workspace should mount the blueprint screen (graph + preview).")
-	assert_not_null(_preview_in(lane), "The blueprint screen should host a ParticlePreview.")
+	assert_not_null(_preview_in(lane), "The blueprint screen should hold a ParticlePreview.")
 	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
 	assert_not_null(adapter.get_viewport_camera(),
 			"The workspace should expose the nested preview camera to shared shell controls.")

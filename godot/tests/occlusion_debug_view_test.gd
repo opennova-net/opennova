@@ -10,7 +10,7 @@ extends GutTest
 const ViewScript := preload("res://engine/debug/occlusion_debug_view.gd")
 
 
-# Node-based doubles: the view's setup takes the host's world NODE (a GameWorld
+# Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld
 # in production) and duck-types get_sim()/get_occlusion_portal_debug() off it.
 class FakeSim:
 	extends Node

@@ -108,7 +108,7 @@ func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:
 		"The foliage oracle must not PASS 00TRe when dispatch produced nothing.")
 	assert_false(ProbeScript.runtime_foliage_validation_error(
 		"00TRe.bms", {"runtime_detail_intents": 1}, 1).is_empty(),
-		"Intent-only 00TRe output is not enough when the host has no detail instances.")
+		"Intent-only 00TRe output is not enough when the reimpl has no detail instances.")
 	assert_eq(ProbeScript.runtime_foliage_validation_error("00TRe.bms", {
 		"runtime_detail_intents": 1,
 		"detail_high_instances": 1,

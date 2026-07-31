@@ -53,9 +53,9 @@ func _init() -> void:
 
 ## Wire the presenter to a world + player presenter and the control the menu overlays
 ## (the HUD layer in the game shell; tests pass their own parent).
-func setup(world, player_host, ui_parent: Node) -> void:
+func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	_world = world
-	_player_presenter = player_host
+	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_connect_layout_source()
 
@@ -206,7 +206,7 @@ func teardown() -> void:
 # Build the runtime menu node over the gameplay view: the same NovaMnuMenu the
 # menu shell drives (edit_mode off), fed weapon.mnu from the WORLD's mounted
 # resource root, with the canonical stylesheet and the current root's
-# menutxt/gametext tables. Direct/headless world hosts may not have run the
+# menutxt/gametext tables. Direct/headless world owners may not have run the
 # front-end text bootstrap.
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
@@ -322,7 +322,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 
 # The armory's text lookups (WepDes weapon names, CHARCLASS_* rows, TOTAL_WEIGHT)
 # ride the shared NovaStrings registry; the game shell registers these at boot,
-# while direct/headless world hosts may not — fill only the missing tables.
+# while direct/headless world owners may not — fill only the missing tables.
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: NovaResourceRoot) -> void:
 	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "gametext.bin"],

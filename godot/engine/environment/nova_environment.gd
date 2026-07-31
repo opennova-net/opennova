@@ -87,7 +87,7 @@ var _mission_advance_per_tick: int = int(
 # colors against the weather's modulated writeback — the whole scene then
 # strobes between the two at the tick/frame beat (the 2026-07-13 "black
 # flicker" regression, introduced when #224's mission clock made _update_tod
-# per-tick). Standalone hosts (the editor env preview without a weather node)
+# per-tick). Standalone owners (the editor env preview without a weather node)
 # keep the direct writes.
 var _weather_driven := false
 
@@ -247,7 +247,7 @@ func _update_tod() -> void:
 		_cloud_tint_rt = get_cloud_tint_target()
 		_floor_color_rt = get_floor_color_target()
 		# Fog/skyfog blocks operate in undoubled authored bytes. Standalone
-		# hosts derive the same post-blend doubled colors that NovaWeather
+		# owners derive the same post-blend doubled colors that NovaWeather
 		# writes after its block tick.
 		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
 		_fog_color_rt = _double_vec3(fog_raw)

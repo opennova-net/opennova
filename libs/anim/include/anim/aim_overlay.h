@@ -127,7 +127,7 @@ struct AimOverlayInputs {
     // zeroed. [orig: @ 0x4b17d3]
     bool rolling = false;
     // entity Flags & 0x100000: the non-aim branch keeps even the arms on the body
-    // matrix. Semantics unconfirmed (swim-family suspected); hosts pass false.
+    // matrix. Semantics unconfirmed (swim-family suspected); embedders pass false.
     bool arms_locked = false;
     // The target item definition's authored phrase_set dword (+0x86c).  Validity is
     // independent of its value because zero is a witnessed gunner configuration;

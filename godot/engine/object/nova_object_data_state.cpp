@@ -8,7 +8,7 @@
 using namespace novaobj;
 
 // --- Edit-state snapshots (B3) ----------------------------------------------
-// In-process undo payload only — raw little-host POD bytes behind a magic +
+// In-process undo payload only — raw little-endian POD bytes behind a magic +
 // version tag, never persisted. The blob carries exactly the OED-editable
 // state; geometry stays outside, so apply() validates the geometry-fixed
 // counts (materials/lights/LODs) and rejects a blob from a different model.

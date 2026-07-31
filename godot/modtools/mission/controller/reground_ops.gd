@@ -204,7 +204,7 @@ func reground_all() -> Dictionary:
 # they do after a drag and refresh on the next re-bake. A moved entity with
 # zero pickable records is skipped, not a failure: the placer found it
 # unresolved at place time, so nothing is rendered for it (this also keeps
-# headless hosts on the targeted path). Returns false when a matched record's
+# headless owners on the targeted path). Returns false when a matched record's
 # backing node was freed underneath us — the caller falls back to the full
 # re-bake, which rebuilds everything from the document.
 func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,

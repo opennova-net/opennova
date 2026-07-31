@@ -460,7 +460,7 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 		PackedInt32Array indices;
 		// Per-vertex skinning, emitted only for skinned primitives. ARRAY_BONES carries 4
 		// *skeleton* bone indices (the per-vertex bone_indices are local indices into this
-		// primitive's bone_table, which maps local -> skeleton; we remap here so the host
+		// primitive's bone_table, which maps local -> skeleton; we remap here so the owner
 		// can bind one whole-skeleton Skin). ARRAY_WEIGHTS carries the 4 matching weights.
 		// [orig: the runtime skins via the .bad skeleton; bone_table is the per-strip remap.]
 		const bool skinned = prim.bone_table_length > 0;

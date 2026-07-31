@@ -46,11 +46,11 @@ func _init() -> void:
 
 	var placer := MissionObjectPlacer.new()
 	placer.resource_root = res
-	var host := Node3D.new()
-	get_root().add_child(host)
+	var mount := Node3D.new()
+	get_root().add_child(mount)
 
 	# A real posed character, because attach_transform reads bone 16 off a live skeleton.
-	var body: Node3D = placer.build_player_animated_model(0x14B9, host, null)
+	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, null)
 	if body == null:
 		print("FAIL: the player character model did not build")
 		quit(1)
@@ -87,7 +87,7 @@ func _init() -> void:
 			bi, _v(origins[bi]) if origins.size() > bi else Vector3.INF])
 
 	# The model frame this probe reasons against, measured rather than assumed.
-	var weapon: Node3D = placer.build_model_from_graphic("M4_3RD", "", host, "", null)
+	var weapon: Node3D = placer.build_model_from_graphic("M4_3RD", "", mount, "", null)
 	if weapon == null:
 		print("FAIL: M4_3RD did not build")
 		quit(1)

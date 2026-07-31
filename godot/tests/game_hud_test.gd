@@ -431,7 +431,7 @@ func test_heat_bar_draws_at_nonzero_heat() -> void:
 
 # The waypoint label draws name + distance at the HUDWPDINFO anchor for every
 # alignment form (with a REAL .fnt so the draw math runs), and hides cleanly
-# when the host omits the entry.
+# when the presenter omits the entry.
 # [orig: HUD_DrawWaypointNameAndDistance @0x5947a0; retail authors align "right"]
 func test_waypoint_label_draws_each_alignment() -> void:
 	for align in ["right", "center", "left"]:

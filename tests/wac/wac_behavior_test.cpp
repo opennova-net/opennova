@@ -170,7 +170,7 @@ static void test_wac_wave_emits_dialog_wav() {
 // Mission text and the on-screen debug console are separate retail channels:
 // text/text# (and their peer-broadcast ptext twin) feed the player message
 // presentation, while consol/consol# and pconsol feed Chat_AddDebugMessage and
-// must remain distinguishable for hosts that deliberately do not present them.
+// must remain distinguishable for embedders that deliberately do not present them.
 static void test_wac_text_and_console_use_distinct_effect_channels() {
     World w = make_world();
     WacSystem sys;

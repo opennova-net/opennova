@@ -189,7 +189,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 
 	# Building batch visibility + per-section masks (bit N = render part N,
 	# forced-visible def bits already merged by the sim), applied as CHANGES:
-	# the sim diffs against what this host last applied, so a steady frame
+	# the sim diffs against what this shell last applied, so a steady frame
 	# walks nothing. Batch culls claim the occlusion-hidden bit; the same
 	# verdicts as the full-walk form land on the nodes.
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]
@@ -339,7 +339,7 @@ func release_overrides(_reset_semantics: bool) -> void:
 
 
 # Forget the sim's applied-state baseline so the next occlusion frame re-emits
-# everything (the host caches were dropped or the A/B skip ended).
+# everything (the shell caches were dropped or the A/B skip ended).
 func _reset_apply_baseline() -> void:
 	var sim := _occlusion_sim()
 	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):

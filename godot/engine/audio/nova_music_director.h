@@ -1,7 +1,7 @@
 #ifndef NOVA_MUSIC_DIRECTOR_H
 #define NOVA_MUSIC_DIRECTOR_H
 
-// NovaMusicDirector hosts a libs/mus VM and routes its hooks to Godot
+// NovaMusicDirector embeds a libs/mus VM and routes its hooks to Godot
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
 // by the play / playw opcodes.
 //

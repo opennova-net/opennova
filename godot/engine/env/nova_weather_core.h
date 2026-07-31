@@ -13,7 +13,7 @@ namespace godot {
 
 // The per-tick weather state cluster of [orig: Environment_UpdateWeatherTick
 // @ 0x57e9b0]: the wind-sway oscillator, both lightning flash sequencers,
-// rain fade, and the fourteen color blocks with live host consumers (ground/
+// rain fade, and the fourteen color blocks with live owner consumers (ground/
 // fill, directional light, fog, sky ambient, skyfog, ceiling/cloud/floor, and
 // the six dome ramps). All
 // math lives in libs/env
@@ -79,14 +79,14 @@ public:
 
 	// One 62 Hz weather tick in the witnessed order: oscillator, wind-decay
 	// extension, rain fade, lightning sequencers (additive slot rewrites on
-	// epoch), the fourteen hosted block pipelines in retail order, then the
+	// epoch), the fourteen world-driven block pipelines in retail order, then the
 	// cloud-scroll ramp + accumulators (the tick's tail).
 	void tick(const Color &p_fill_target, const Color &p_sun_target,
 			const Color &p_fog_target, const Color &p_sky_target,
 			const Color &p_lightning_color, float p_sky_speed);
 
 	// The cloud-scroll sub-tick alone (rate ramp toward sky_speed << 10 +
-	// the four accumulators) — for hosts that own no weather colors (the
+	// the four accumulators) — for owners with no weather colors (the
 	// standalone-sky fallback path). tick() calls this itself.
 	void tick_cloud_scroll(float p_sky_speed);
 
@@ -115,7 +115,7 @@ public:
 	static constexpr int32_t kIrisSampleIndoor = -1;
 	static constexpr int32_t kIrisSampleIndoorNoData = -2;
 
-	// The in-world marched exposure (D-RLIT-2's sampling geometry): the host
+	// The in-world marched exposure (D-RLIT-2's sampling geometry): the shell
 	// supplies one classification per marched sample (kIrisSampleIndoor /
 	// kIrisSampleIndoorNoData / outdoor sun level 0..8); each runs the iris
 	// curve — indoors against the static ceiling/floor indoor-ambient colors

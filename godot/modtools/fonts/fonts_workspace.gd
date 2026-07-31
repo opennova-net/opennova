@@ -115,7 +115,7 @@ func _make_inspector() -> Control:
 	meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(meta_label)
 
-	# "Used by" rides the shell's reference index; headless hosts get no strip.
+	# "Used by" rides the shell's reference index; headless owners get no strip.
 	var services := get_reference_services()
 	if services != null:
 		var strip := ReferenceStrip.new()

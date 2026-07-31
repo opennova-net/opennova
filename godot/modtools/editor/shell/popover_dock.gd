@@ -3,7 +3,7 @@ extends RefCounted
 
 ## The shell's corner popovers as one surface: camera / environment / settings
 ## visibility with their mutual exclusion and Escape routing, the detachable
-## camera/environment panel hosts with their persisted floating preference
+## camera/environment panel mounts with their persisted floating preference
 ## (restore dicts cache the config so per-toggle decisions never re-read it),
 ## and the camera/environment popover content builders. The settings popover's
 ## CONTENT lives in ShellSettingsPanel; only its visibility (it joins the
@@ -42,7 +42,7 @@ var _settings_popup_close: Button
 
 var _camera_settings_panel: Control
 # Detachable panels (B6): the camera/environment popovers can pop their
-# content into floating windows. State machines live in the hosts; the cached
+# content into floating windows. State machines live in the mounts; the cached
 # restore dicts make persisted "open floating" decisions without re-reading
 # the config per toggle (the save handlers keep them current).
 var _camera_panel_mount: DetachablePanelMount

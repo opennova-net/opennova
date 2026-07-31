@@ -32,15 +32,15 @@ func test_workflows_advertised():
 
 func test_mount_unmount_does_not_crash():
 	var ws = MusicWorkspaceAdapter.new()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
-	assert_eq(host.get_child_count(), 1, "root mounted")
-	ws.unmount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
+	assert_eq(mount.get_child_count(), 1, "root mounted")
+	ws.unmount_viewport(mount)
 	# queue_free is async; flush
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_eq(host.get_child_count(), 0, "root unmounted")
+	assert_eq(mount.get_child_count(), 0, "root unmounted")
 
 
 func test_workflow_panels_coexist_on_one_screen():
@@ -48,10 +48,10 @@ func test_workflow_panels_coexist_on_one_screen():
 	# screen. The raw-script (Script) panel is gone -- the blueprint is the language.
 	# Activating the single workflow toggles nothing.
 	var ws = MusicWorkspaceAdapter.new()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
-	var root: Control = host.get_child(0)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
+	var root: Control = mount.get_child(0)
 	assert_not_null(root.find_child("Bank", true, false), "Tracks (Bank) dock present")
 	assert_null(root.find_child("Script", true, false), "the raw-script panel is gone")
 	assert_not_null(root.find_child("Live", true, false), "Live screen present")
@@ -85,12 +85,12 @@ func test_bind_document_fans_out_to_panels():
 	# Direction-B wiring: the root fans the shared document to every embedded
 	# panel via find_child. Opening a bank must populate the Tracks (Bank) dock.
 	var ws = MusicWorkspaceAdapter.new()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	assert_eq(ws.open_file(BANK_FIXTURE), OK, "bank opens")
 	await get_tree().process_frame
-	var root: Control = host.get_child(0)
+	var root: Control = mount.get_child(0)
 	var bank: Control = root.find_child("Bank", true, false)
 	assert_not_null(bank, "Tracks (Bank) dock present")
 	var tree: Tree = bank.get_node("%TrackTree")

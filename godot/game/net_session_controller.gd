@@ -33,9 +33,9 @@ func setup(shell, world: GameWorld, menu_shell, camera: Camera3D,
 
 
 # The multiplayer menu companion's session requests route here.
-func wire_menu_companions(mp_host: MpMenuCompanion) -> void:
-	mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
-	mp_host.lan_join_requested.connect(join_lan_server)
+func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
+	mp_companion.lan_host_start_requested.connect(_on_lan_host_start_requested)
+	mp_companion.lan_join_requested.connect(join_lan_server)
 
 
 # Net-session teardown that rides the shell's world-to-menu rollback.
@@ -66,8 +66,8 @@ func maybe_launch_replay_from_env() -> bool:
 # an explicit legacy/debug override for isolating the already-loaded joiner
 # runtime. Two instances on localhost = the bidirectional co-op demo.
 func maybe_launch_lan_from_env() -> bool:
-	var lan_host := OS.get_environment("NW_LAN_HOST")
-	if not lan_host.is_empty():
+	var lan_mission := OS.get_environment("NW_LAN_HOST")
+	if not lan_mission.is_empty():
 		# game_type = the numeric session g_GameType the host config chooses at host start
 		# [orig: g_GameType = session gametype setting @0x4a6657]. This LAN slice is Co-op;
 		# retail derives 0x30020 from ATTRIB_COOP (the record's default). NW_LAN_GAMETYPE
@@ -76,7 +76,7 @@ func maybe_launch_lan_from_env() -> bool:
 		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
 		var lan_port := OS.get_environment("NW_LAN_PORT")
 		var demo_config := HostSessionConfig.new()
-		demo_config.mission = lan_host
+		demo_config.mission = lan_mission
 		demo_config.server_name = "DEMOHOST"
 		demo_config.max_players = 4
 		if not lan_port.is_empty():

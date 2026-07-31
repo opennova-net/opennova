@@ -163,9 +163,9 @@ func test_can_save_false_on_fresh_true_after_dirty_with_path() -> void:
 
 func test_save_current_flushes_pending_source_edits() -> void:
 	var ws = autofree(CreditsWorkspaceScript.new())
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	var err = ws.open_file(_kda_path)
@@ -200,9 +200,9 @@ func test_save_current_flushes_pending_source_edits() -> void:
 
 func test_visual_save_ignores_hidden_stale_source_text_and_preserves_entries() -> void:
 	var ws = autofree(CreditsWorkspaceScript.new())
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	var err = ws.open_file(_kda_path)

@@ -64,14 +64,14 @@ func _init() -> void:
 
 	var placer := MissionObjectPlacer.new()
 	placer.resource_root = res
-	var host := Node3D.new()
-	get_root().add_child(host)
+	var mount := Node3D.new()
+	get_root().add_child(mount)
 
 	for target in TARGETS:
 		var users: Array = gfx3_users.get(target.to_lower(), [])
-		_report_weapon(placer, host, target, users)
+		_report_weapon(placer, mount, target, users)
 
-	_report_character(placer, host)
+	_report_character(placer, mount)
 	_report_composition()
 	quit(0)
 
@@ -109,12 +109,12 @@ func _report_composition() -> void:
 # ---------------------------------------------------------------------------- weapons
 
 
-func _report_weapon(placer, host: Node3D, gfx3: String, users: Array) -> void:
+func _report_weapon(placer, mount: Node3D, gfx3: String, users: Array) -> void:
 	print("")
 	print("================================================================")
 	print("MODEL gfx3=%s   weapon.def rows using it: %s" % [gfx3, str(users)])
 	print("================================================================")
-	var model: Node3D = placer.build_model_from_graphic(gfx3, "", host, "", null)
+	var model: Node3D = placer.build_model_from_graphic(gfx3, "", mount, "", null)
 	if model == null:
 		print("  <no model built>")
 		return
@@ -305,12 +305,12 @@ func _scan_axis(verts: PackedVector3Array, box: AABB, axis: int) -> void:
 # ---------------------------------------------------------------------------- character
 
 
-func _report_character(placer, host: Node3D) -> void:
+func _report_character(placer, mount: Node3D) -> void:
 	print("")
 	print("================================================================")
 	print("CHARACTER runtime type 0x14B9 (build_player_animated_model)")
 	print("================================================================")
-	var body: Node3D = placer.build_player_animated_model(0x14B9, host, null)
+	var body: Node3D = placer.build_player_animated_model(0x14B9, mount, null)
 	if body == null:
 		print("  <player character model did not build>")
 		return

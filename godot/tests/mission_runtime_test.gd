@@ -3,7 +3,7 @@ extends GutTest
 # MissionRuntime is GameWorld's live mission driver: it owns a real
 # NovaSimulation, present pass, and entity index and ticks them in one order.
 # These focused tests instantiate it directly over fixture nodes to prove the
-# engine path without introducing a second editor gameplay host.
+# engine path without introducing a second editor gameplay runtime.
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
@@ -167,7 +167,7 @@ class FireAudioStub:
 		return true
 
 
-class CatchupEffectAnchorHost:
+class CatchupEffectAnchorMount:
 	extends RefCounted
 	var anchors: Dictionary = {}
 
@@ -180,7 +180,7 @@ class CatchupEffectAnchorHost:
 
 class CatchupEffectWorld:
 	extends RefCounted
-	var anchor_mount: CatchupEffectAnchorHost
+	var anchor_mount: CatchupEffectAnchorMount
 	var owner_key: Variant
 	var group_live := false
 	var spawn_count := 0
@@ -189,8 +189,8 @@ class CatchupEffectWorld:
 	var active_poses: Array[Transform3D] = []
 	var stops_after_advance: Array[int] = []
 
-	func _init(host: CatchupEffectAnchorHost) -> void:
-		anchor_mount = host
+	func _init(mount: CatchupEffectAnchorMount) -> void:
+		anchor_mount = mount
 
 	func spawn_effect_owned_request(key: Variant, _name: String,
 			_position: Vector3, _orientation: Vector3) -> Dictionary:
@@ -470,7 +470,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 
 
 func test_effects_drained_signal_fires() -> void:
-	# A mission runtime drains side effects each tick; the host listens on effects_drained. Build an
+	# A mission runtime drains side effects each tick; the shell listens on effects_drained. Build an
 	# unconditional OutputText event and confirm the signal carries it.
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -548,7 +548,7 @@ func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
 
 func test_tick_realtime_presents_latest_state_once() -> void:
 	# The node is authored far from spawn; after a catch-up batch the single present puts it on the
-	# sim's LATEST position (decoupled render = present once per host frame, no inter-tick interpolation).
+	# sim's LATEST position (decoupled render = present once per render frame, no inter-tick interpolation).
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
@@ -599,7 +599,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# flashbang exercises the same attached-effect path as the smoke grenade in
 	# a short, production-authored lifetime.
 	var w := _make_world(Transform3D.IDENTITY)
-	var anchor_mount := CatchupEffectAnchorHost.new()
+	var anchor_mount := CatchupEffectAnchorMount.new()
 	var effect_world := CatchupEffectWorld.new(anchor_mount)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)

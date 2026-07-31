@@ -15,7 +15,7 @@ const LOAD_TIMEOUT_MSEC := 240_000
 
 
 static func boot(
-		host: Node,
+		mount: Node,
 		resource_dir: String,
 		mission_name: String,
 		expansion: String = "",
@@ -24,8 +24,8 @@ static func boot(
 	var dir: String = resource_dir.strip_edges()
 	var bms: String = mission_name.strip_edges().replace("\\", "/")
 	var saved_path: String = saved_mission_path.strip_edges().replace("\\", "/")
-	if host == null or not is_instance_valid(host):
-		return {"error": "probe host is unavailable"}
+	if mount == null or not is_instance_valid(mount):
+		return {"error": "probe mount is unavailable"}
 	if not ResourceDirSettings.is_valid_root(dir):
 		return {"error": "invalid resource dir: %s" % dir}
 	if bms.is_empty() or bms != bms.get_file() \
@@ -52,7 +52,7 @@ static func boot(
 	ResourceDirSettings.set_resource_dir(dir)
 	ResourceDirSettings.set_expansion(expansion)
 	var game: Node = MainGameScene.instantiate()
-	host.add_child(game)
+	mount.add_child(game)
 	ResourceDirSettings.set_resource_dir(previous_dir)
 	ResourceDirSettings.set_expansion(previous_expansion)
 
@@ -77,7 +77,7 @@ static func boot(
 			Callable(world, "load_mission_data").bind(saved_mission, bms))
 	var started: int = Time.get_ticks_msec()
 	while world.get_sim() == null or not world.get_sim().has_local_player():
-		await host.get_tree().process_frame
+		await mount.get_tree().process_frame
 		if not load_error[0].is_empty():
 			game.queue_free()
 			return {"error": load_error[0]}

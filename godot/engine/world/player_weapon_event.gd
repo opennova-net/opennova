@@ -3,7 +3,7 @@ extends RefCounted
 
 ## One logic tick's ordered presentation outputs from the local weapon FSM. The C++
 ## binding encodes these records as Dictionaries at the transport seam; GameWorld
-## decodes them immediately so hosts consume a typed contract (ADR 0017). Within a
+## decodes them immediately so owners consume a typed contract (ADR 0017). Within a
 ## record the observable order is clip start, ACTION begin leg, ACTION end leg. The
 ## production-tick position keeps delayed 3D audio spatially faithful during catch-up.
 var age_ticks := 0
@@ -28,7 +28,7 @@ var action_end_soundset := ""
 var action_effect := -1
 var effect_particle := ""
 var effect_particle_userpoint := ""
-## A committed weapon switch: the newly equipped weapon.def name — the host
+## A committed weapon switch: the newly equipped weapon.def name — the shell
 ## reinstalls the FP viewmodel/FSM for it [orig: the mount's model re-resolve;
 ## equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
 var switch_to_weapon := ""

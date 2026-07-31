@@ -84,7 +84,7 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 			_bool(state, "jump"))
 		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
 		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
-		# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+		# computed sim-side in the original @0x4b6bb3 — in the port, the render skeleton is
 		# the sample source (D-INF-18)].
 		var head: Vector3 = _presenter.avatar_head_world()
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,

@@ -84,10 +84,10 @@ func _ready() -> void:
 	# Rest pose makes skinning mathematically identity (pose == bind), isolating mesh/skin
 	# plumbing from pose deformation; the unmirror isolates the (-x,y,z) handedness question.
 	if OS.get_environment("NOVA_VM_LAB") == "1":
-		var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+		var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 		var vm_models := _viewmodel_models(get_tree().root)
-		print("[fp] lab: host=%s models=%d" % [str(host != null), vm_models.size()])
-		if host != null:
+		print("[fp] lab: presenter=%s models=%d" % [str(presenter != null), vm_models.size()])
+		if presenter != null:
 			# Runtime oracle: the skeleton rest carries the bind rotations and the reset
 			# clip's channels ARE the bind (bind == frame-0 channel on every shipped .bad),
 			# so rest-vs-eval_pose(anim_reset) angles ~0 prove the convention holds on the
@@ -163,9 +163,9 @@ func _fsm_sequence() -> void:
 	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
 	await _settle(30)
 	await _capture("33_fsm_ads.png")
-	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-	if host != null:
-		var cam: Camera3D = host.get("_camera")
+	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	if presenter != null:
+		var cam: Camera3D = presenter.get("_camera")
 		var pv: PlayerLocalView = world.local_player_view() \
 				if world.has_method("local_player_view") else null
 		print("[fp] fsm ads: engaged=%s fraction=%.2f cam_fov=%.1f" % [
@@ -238,7 +238,7 @@ func _look(total: Vector2) -> void:
 
 func _capture(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	# The standalone window carries both the world and shared HUD host.
+	# The standalone window carries both the world and shared HUD presenter.
 	var img: Image = get_viewport().get_texture().get_image()
 	if img != null:
 		img.save_png(_out_abs.path_join(name))

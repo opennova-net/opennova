@@ -352,7 +352,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="CameraSettingsHost" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupContent"]
+[node name="CameraSettingsMount" type="VBoxContainer" parent="TopPopoverLayer/CameraPopup/CameraPopupMargin/CameraPopupBox/CameraPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -422,7 +422,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="EnvironmentActionsHost" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
+[node name="EnvironmentActionsMount" type="VBoxContainer" parent="TopPopoverLayer/EnvironmentPopup/EnvironmentPopupMargin/EnvironmentPopupBox/EnvironmentPopupContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
@@ -628,7 +628,7 @@ layout_mode = 2
 size_flags_horizontal = 1
 size_flags_vertical = 3
 
-[node name="ResourceBrowserPaneHost" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/RightSplit"]
+[node name="ResourceBrowserPaneMount" type="PanelContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit/RightSplit"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(260, 0)

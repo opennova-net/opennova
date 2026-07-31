@@ -3,7 +3,7 @@ extends EditorWorkspace
 
 # Adapter for the Avatars workspace: opens, edits, and saves an Avatars.def
 # character database (head/body/arms parts composed into combos under a
-# nationality -> division tree). The main viewport hosts a 3D preview that
+# nationality -> division tree). The main viewport shows a 3D preview that
 # composes the selected combo's parts; the left lane offers three workflow
 # inspectors — the nationality/division/combo Tree, the parts editor, and the
 # combos editor. All edits flow through the AvatarsDocument (set_model -> the

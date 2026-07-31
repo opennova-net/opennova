@@ -3,7 +3,7 @@ extends GutTest
 ## Guarded end-to-end probe for mission DIALOG audio (the .dbf path) on real JO data
 ## (Desktop/JOX). Loads 00TRg, confirms its .DBF dialog ids resolve to sound
 ## sets the loaded banks contain, and reports how many PlayDialog commands fire on
-## host-ungated ticks (pins the host-trigger-gating follow-up). Skips without the data.
+## sim-ungated ticks (pins the sim-trigger-gating follow-up). Skips without the data.
 
 const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
 
@@ -57,7 +57,7 @@ func test_00trg_mission_dialog_resolves() -> void:
 			gut.p("z00gr100.wav (IMA-ADPCM) decoded: %d bytes 16-bit @ %d Hz" % [stream.data.size(), stream.mix_rate])
 
 	# Diagnostic: how many "dialog" effects fire on ungated ticks? (If zero, the mission's
-	# dialog is all host-trigger-gated -> the documented follow-up.)
+	# dialog is all sim-trigger-gated -> the documented follow-up.)
 	var sim := NovaSimulation.new()
 	if sim.load_from_mission_data(mission):
 		var fired := 0

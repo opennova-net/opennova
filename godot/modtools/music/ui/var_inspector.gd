@@ -1,7 +1,7 @@
 class_name MusicVarInspector
 extends Control
 
-# A variable was renamed (the profile sidecar changed): hosts refresh every
+# A variable was renamed (the profile sidecar changed): owners refresh every
 # other surface that shows var names (blueprint bodies, pickers, event log).
 signal names_changed
 

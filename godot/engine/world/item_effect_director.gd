@@ -3,14 +3,14 @@ extends RefCounted
 
 # The per-item ITEMS.DEF particle-effect director, extracted from GameWorld:
 # the mission-lifetime owner of the entity-attached / static / controller-gated
-# item emitters, the host-registered effect-anchor resolvers, and the retail
+# item emitters, the owner-registered effect-anchor resolvers, and the retail
 # master particle switch. Plain RefCounted on the internal-member pattern
 # (DebugViewSet/NetSessionDrive, minus tree presence: it owns no Nodes and runs
 # no coroutines — the item-FX emitters attach to game nodes through the effect
 # world). Owned by GameWorld as _item_fx, constructed in the world's _init and
 # wired once through setup(). GameWorld keeps one-line public delegates
 # (set_particles_hidden, register_effect_anchor/unregister_effect_anchor) so
-# the host-facing names never moved.
+# the owner-facing names never moved.
 #
 # Shared state is reached through the world's PUBLIC surface —
 # get_effect_world() / get_runtime() / get_node_or_null — with TWO lent
@@ -37,7 +37,7 @@ var _item_db_source := Callable()  # () -> item database or null (duck-typed; se
 var _particles_hidden := false
 
 # owner key -> Callable returning the live anchor Transform3D (or null once
-# stale) for host-owned owner-bound effect groups; consulted before the
+# stale) for registered owner-bound effect groups; consulted before the
 # item-fx/SSN legs by _effect_owner_transform.
 var _effect_anchor_resolvers: Dictionary = {}
 
@@ -93,7 +93,7 @@ func particles_hidden() -> bool:
 	return _particles_hidden
 
 
-## A host registers a live pose resolver for an owner-bound effect group it
+## An owner registers a live pose resolver for an owner-bound effect group it
 ## spawned (e.g. the local muzzle flash riding the viewmodel userpoint). The
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
@@ -147,7 +147,7 @@ func reset() -> void:
 # entity's current value snapshot. The Node remains only as a pre-first-tick
 # seed and lifetime fallback for non-sim-owned callers.
 func _effect_owner_transform(owner_key: Variant) -> Variant:
-	# Host-owned live anchors first (the local weapon flash follows its viewmodel
+	# Registered live anchors first (the local weapon flash follows its viewmodel
 	# userpoint for the emitter group's whole life [orig: the actionEffectHandle
 	# per-tick tracker in WeaponAction_ProcessFrame @ 0x540edf]).
 	var anchor: Variant = _effect_anchor_resolvers.get(owner_key)

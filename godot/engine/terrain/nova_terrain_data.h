@@ -294,7 +294,7 @@ public:
 	// is clear or no terrain data is mounted. Samples the LIVE editable heightmap
 	// when mounted, else the baked CPT heights (the same substrate split as
 	// sample_height_world_live vs get_height_world_bilinear); the working segment
-	// is host-clipped to the authored-extent XZ AABB before entering the 16.16
+	// is reimpl-clipped to the authored-extent XZ AABB before entering the 16.16
 	// fixed-point core.
 	Vector3 raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const;
 	Rect2i get_cell_atlas_rect(int row, int col) const;

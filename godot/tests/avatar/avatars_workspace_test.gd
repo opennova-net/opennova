@@ -60,23 +60,23 @@ func test_status_context_reports_parser_diagnostics() -> void:
 
 
 func test_mount_viewport_adds_child_and_release_tears_down() -> void:
-	var host := Control.new()
-	add_child_autofree(host)
-	_ws.mount_viewport(host)
-	assert_eq(host.get_child_count(), 1, "mount adds the preview")
-	var first_preview = host.get_child(0)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	_ws.mount_viewport(mount)
+	assert_eq(mount.get_child_count(), 1, "mount adds the preview")
+	var first_preview = mount.get_child(0)
 
 	# A remount reuses the single preview (no second instance).
-	_ws.unmount_viewport(host)
-	assert_eq(host.get_child_count(), 0, "unmount detaches the preview")
-	_ws.mount_viewport(host)
-	assert_eq(host.get_child_count(), 1, "remount re-attaches")
-	assert_eq(host.get_child(0), first_preview, "remount reuses the same preview")
+	_ws.unmount_viewport(mount)
+	assert_eq(mount.get_child_count(), 0, "unmount detaches the preview")
+	_ws.mount_viewport(mount)
+	assert_eq(mount.get_child_count(), 1, "remount re-attaches")
+	assert_eq(mount.get_child(0), first_preview, "remount reuses the same preview")
 
 	assert_not_null(_ws.get_viewport_camera(), "preview exposes its camera")
 
 	_ws.release_viewport()
-	assert_eq(host.get_child_count(), 0, "release tears the preview down")
+	assert_eq(mount.get_child_count(), 0, "release tears the preview down")
 
 
 func test_each_workflow_inspector_builds() -> void:
@@ -84,10 +84,10 @@ func test_each_workflow_inspector_builds() -> void:
 	if FileAccess.file_exists(path):
 		_ws.open_file(path)
 	for workflow_id in [_ws.Workflow.TREE, _ws.Workflow.PARTS, _ws.Workflow.COMBOS]:
-		var host := Control.new()
-		add_child_autofree(host)
-		_ws.build_workflow_inspector(workflow_id, host)
-		assert_gt(host.get_child_count(), 0, "workflow %d builds inspector content" % workflow_id)
+		var mount := Control.new()
+		add_child_autofree(mount)
+		_ws.build_workflow_inspector(workflow_id, mount)
+		assert_gt(mount.get_child_count(), 0, "workflow %d builds inspector content" % workflow_id)
 
 
 func test_parts_inspector_uses_reference_widgets() -> void:
@@ -96,13 +96,13 @@ func test_parts_inspector_uses_reference_widgets() -> void:
 		pending("Avatars.def fixture missing")
 		return
 	assert_eq(_ws.open_file(path), OK)
-	var host := Control.new()
-	add_child_autofree(host)
-	_ws.build_workflow_inspector(_ws.Workflow.PARTS, host)
-	var graphic := host.find_child("PartGraphicRef", true, false) as ResourceRefWidget
+	var mount := Control.new()
+	add_child_autofree(mount)
+	_ws.build_workflow_inspector(_ws.Workflow.PARTS, mount)
+	var graphic := mount.find_child("PartGraphicRef", true, false) as ResourceRefWidget
 	assert_not_null(graphic, "graphic field uses ResourceRefWidget")
 	assert_true(graphic.get_value().to_lower().ends_with(".3di"), "graphic ref keeps .3di filename")
-	var display := host.find_child("PartDisplayRef", true, false) as StringRefWidget
+	var display := mount.find_child("PartDisplayRef", true, false) as StringRefWidget
 	assert_not_null(display, "display key uses StringRefWidget")
 
 
@@ -132,9 +132,9 @@ func test_selecting_combo_composes_preview() -> void:
 		pending("Avatars.def fixture missing")
 		return
 	assert_eq(_ws.open_file(path), OK)
-	var host := Control.new()
-	add_child_autofree(host)
-	_ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	_ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	# Find a (nat, div, combo) and drive the preview. Without a mounted resource
@@ -152,7 +152,7 @@ func test_selecting_combo_composes_preview() -> void:
 			break
 	assert_true(shown, "found a combo to show")
 	# The preview node exists and survived the show_combo call.
-	assert_eq(host.get_child_count(), 1, "preview still mounted after show_combo")
+	assert_eq(mount.get_child_count(), 1, "preview still mounted after show_combo")
 
 
 func test_apply_model_marks_dirty() -> void:

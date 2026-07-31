@@ -139,9 +139,9 @@ func _norm_path(path: String) -> String:
 	return path.rstrip("/").replace("\\", "/").to_lower()
 
 
-func _workspace_action_texts(host: Node) -> Array:
+func _workspace_action_texts(mount: Node) -> Array:
 	var texts := []
-	for child in host.get_children():
+	for child in mount.get_children():
 		if child is Button:
 			texts.append((child as Button).text)
 	return texts
@@ -170,8 +170,8 @@ func _find_button_by_text_deep(root: Node, text: String) -> Button:
 	return null
 
 
-func _overflow_popup(host: Node) -> PopupMenu:
-	var more := host.find_child("MoreActionsButton", true, false) as MenuButton
+func _overflow_popup(mount: Node) -> PopupMenu:
+	var more := mount.find_child("MoreActionsButton", true, false) as MenuButton
 	return null if more == null else more.get_popup()
 
 
@@ -372,7 +372,7 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var asset_dock: Control = workstation.get_node("%AssetDock")
 	assert_eq(workstation.get_node("%ContextWorkspaceLabel").text, "Mission", "An unloaded Mission workspace names itself in the context header.")
 	assert_eq(workstation.get_node("%ContextDocLabel").text, "", "With no mission open the doc half stays empty (no 'Mission / Mission').")
-	assert_true(asset_dock.visible, "Mission authoring hosts its per-selection editor + Mission form in the shared right dock.")
+	assert_true(asset_dock.visible, "Mission authoring parks its per-selection editor + Mission form in the shared right dock.")
 	assert_null(workstation.get_node_or_null("%FileMenu"), "Global File menu should be removed.")
 	assert_null(workstation.get_node_or_null("%SaveButton"), "Global Save button should be removed.")
 	assert_null(workstation.get_node_or_null("%ExportButton"), "Global Export button should be removed.")
@@ -726,7 +726,7 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	await get_tree().process_frame
 
 	var popup: PanelContainer = workstation.get_node("%EnvironmentPopup")
-	var actions_mount: VBoxContainer = workstation.get_node("%EnvironmentActionsHost")
+	var actions_mount: VBoxContainer = workstation.get_node("%EnvironmentActionsMount")
 	var save_button := _find_button_by_text(actions_mount, "Save Environment")
 	var inspector_mount: Control = workstation.get_node("%EnvironmentInspectorMount")
 	var inspector := inspector_mount.get_child(inspector_mount.get_child_count() - 1)
@@ -768,7 +768,7 @@ func test_environment_open_uses_resource_browser() -> void:
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
 	sun_button.toggled.emit(true)
 	await get_tree().process_frame
-	var open_button := _find_button_by_text(workstation.get_node("%EnvironmentActionsHost"), "Open Environment...")
+	var open_button := _find_button_by_text(workstation.get_node("%EnvironmentActionsMount"), "Open Environment...")
 	assert_not_null(open_button, "Environment popup should expose Open Environment.")
 	if open_button == null:
 		return
@@ -853,7 +853,7 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 	await get_tree().process_frame
 
 	var popup: PanelContainer = workstation.get_node("%CameraPopup")
-	var settings_mount: Control = workstation.get_node("%CameraSettingsHost")
+	var settings_mount: Control = workstation.get_node("%CameraSettingsMount")
 	var settings_panel: Control = settings_mount.get_child(0)
 	var fly_speed_spin: SpinBox = settings_panel.get_node("%FlySpeedSpin")
 	var near_plane_spin: SpinBox = settings_panel.get_node("%NearPlaneSpin")
@@ -883,15 +883,15 @@ func test_camera_button_targets_object_preview_camera_when_object_is_active() ->
 	await get_tree().process_frame
 	var editor: TerrainEditor = app.get_terrain_editor()
 	var workstation: EditorWorkstation = app.workstation
-	var host: Control = workstation.get_node("%ViewportMount")
+	var mount: Control = workstation.get_node("%ViewportMount")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
 	await get_tree().process_frame
 
-	var preview := _find_node_by_name(host, "ObjectPreview")
+	var preview := _find_node_by_name(mount, "ObjectPreview")
 	var object_camera := _find_node_by_type(preview, "Camera3D") as Camera3D
 	var terrain_camera := editor.camera
-	assert_not_null(preview, "Object workspace should mount its preview in the shared viewport host.")
+	assert_not_null(preview, "Object workspace should mount its preview in the shared viewport mount.")
 	assert_not_null(object_camera, "Object preview should expose a fly camera for global camera settings.")
 	assert_not_null(terrain_camera, "Terrain editor should still keep its camera while Object is active.")
 	if object_camera == null or terrain_camera == null:
@@ -903,7 +903,7 @@ func test_camera_button_targets_object_preview_camera_when_object_is_active() ->
 	await get_tree().process_frame
 
 	var popup: PanelContainer = workstation.get_node("%CameraPopup")
-	var settings_mount: Control = workstation.get_node("%CameraSettingsHost")
+	var settings_mount: Control = workstation.get_node("%CameraSettingsMount")
 	var settings_panel: Control = settings_mount.get_child(0)
 	var fly_speed_spin: SpinBox = settings_panel.get_node("%FlySpeedSpin")
 	assert_true(popup.visible, "Camera settings should open while Object is active.")
@@ -919,14 +919,14 @@ func test_object_workspace_uses_only_global_environment_viewport_button() -> voi
 	await get_tree().process_frame
 	var editor: TerrainEditor = app.get_terrain_editor()
 	var workstation: EditorWorkstation = app.workstation
-	var host: Control = workstation.get_node("%ViewportMount")
+	var mount: Control = workstation.get_node("%ViewportMount")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
 	await get_tree().process_frame
 
 	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
 	assert_not_null(environment_button, "Global environment button should stay available from Object.")
-	assert_null(_find_node_by_name(host, "ObjectEnvironmentButton"), "Object preview should not add a second environment button over the viewport.")
+	assert_null(_find_node_by_name(mount, "ObjectEnvironmentButton"), "Object preview should not add a second environment button over the viewport.")
 
 	environment_button.toggled.emit(true)
 	await get_tree().process_frame
@@ -1011,12 +1011,12 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	var dock: Control = workstation.get_node("%AssetDock")
-	assert_true(dock.visible, "Terrain should show the shared right dock host.")
-	assert_not_null(_find_node_by_name(dock, "TerrainAssetDock"), "Terrain should mount its asset dock inside the shared right dock host.")
+	assert_true(dock.visible, "Terrain should show the shared right dock mount.")
+	assert_not_null(_find_node_by_name(dock, "TerrainAssetDock"), "Terrain should mount its asset dock inside the shared right dock mount.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
 
-	assert_false(dock.visible, "Object Preview should hide the shared right dock host.")
+	assert_false(dock.visible, "Object Preview should hide the shared right dock mount.")
 	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Preview should not mount an empty detail dock.")
 	assert_null(_find_node_by_name(dock, "TerrainAssetDock"), "Switching to Object should remove Terrain's dock content.")
 	assert_not_null(_find_node_by_name(workstation.get_node("%ViewportMount"), "ObjectPreview"), "Object preview should stay in the center viewport.")
@@ -1025,7 +1025,7 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 	assert_not_null(materials_button, "Object workspace should expose Materials mode.")
 	if materials_button != null:
 		materials_button.pressed.emit()
-	assert_true(dock.visible, "Object Materials should show the shared right dock host.")
+	assert_true(dock.visible, "Object Materials should show the shared right dock mount.")
 	assert_not_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object Materials should mount its detail dock.")
 	assert_not_null(_find_node_by_name(dock, "MaterialDetailPanel"), "Object Materials should expose right-pane material details.")
 
@@ -1033,21 +1033,21 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 	assert_not_null(parts_button, "Object workspace should expose Part Anims mode.")
 	if parts_button != null:
 		parts_button.pressed.emit()
-	assert_true(dock.visible, "Object Part anims should show the shared right dock host.")
+	assert_true(dock.visible, "Object Part anims should show the shared right dock mount.")
 	assert_not_null(_find_node_by_name(dock, "PartAnimDetailsEmpty"), "Object Part anims should expose right-pane animation details.")
 
 	var lights_button := _find_button_by_text(workstation.get_node("%ModeRail"), "Lights")
 	assert_not_null(lights_button, "Object workspace should expose Lights mode.")
 	if lights_button != null:
 		lights_button.pressed.emit()
-	assert_true(dock.visible, "Object Lights should show the shared right dock host.")
+	assert_true(dock.visible, "Object Lights should show the shared right dock mount.")
 	assert_not_null(_find_node_by_name(dock, "LightDetailPanel"), "Object Lights should expose right-pane light details.")
 
 	var lods_button := _find_button_by_text(workstation.get_node("%ModeRail"), "LODs")
 	assert_not_null(lods_button, "Object workspace should expose LODs mode.")
 	if lods_button != null:
 		lods_button.pressed.emit()
-	assert_false(dock.visible, "Object LODs should hide the shared right dock host until they have a real detail editor.")
+	assert_false(dock.visible, "Object LODs should hide the shared right dock mount until they have a real detail editor.")
 	assert_null(_find_node_by_name(dock, "ObjectDetailDock"), "Object LODs should not mount placeholder right-pane content.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
@@ -1062,26 +1062,26 @@ func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
 	await get_tree().process_frame
 	var editor: TerrainEditor = app.get_terrain_editor()
 	var workstation: EditorWorkstation = app.workstation
-	var host: Control = workstation.get_node("%ViewportMount")
+	var mount: Control = workstation.get_node("%ViewportMount")
 
-	assert_eq(host.get_child_count(), 1, "Mission should own the viewport host by default.")
-	assert_eq(host.get_child(0).name, "MissionViewport", "Mission should mount its read-only terrain viewport by default.")
+	assert_eq(mount.get_child_count(), 1, "Mission should own the viewport mount by default.")
+	assert_eq(mount.get_child(0).name, "MissionViewport", "Mission should mount its read-only terrain viewport by default.")
 	assert_true(editor.is_viewport_active(), "Mission should keep the loaded terrain visible.")
 	assert_false(editor.is_viewport_edit_input_active(), "Mission should disable terrain brush and shortcut input.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	await get_tree().process_frame
 
-	assert_eq(host.get_child_count(), 1, "Terrain should replace Mission as the only viewport owner.")
-	assert_eq(host.get_child(0).name, "TerrainViewport", "Terrain should mount through TerrainViewport.")
+	assert_eq(mount.get_child_count(), 1, "Terrain should replace Mission as the only viewport owner.")
+	assert_eq(mount.get_child(0).name, "TerrainViewport", "Terrain should mount through TerrainViewport.")
 	assert_true(editor.is_viewport_active(), "Terrain editor rendering should be active while Terrain owns the viewport.")
 	assert_true(editor.is_viewport_edit_input_active(), "Terrain should enable terrain edit input.")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 	await get_tree().process_frame
 
-	assert_eq(host.get_child_count(), 1, "Returning to Mission should still leave one viewport owner.")
-	assert_eq(host.get_child(0).name, "MissionViewport", "MissionViewport should remount when Mission becomes active again.")
+	assert_eq(mount.get_child_count(), 1, "Returning to Mission should still leave one viewport owner.")
+	assert_eq(mount.get_child(0).name, "MissionViewport", "MissionViewport should remount when Mission becomes active again.")
 	assert_true(editor.is_viewport_active(), "Mission should keep the terrain visible when it owns the viewport again.")
 	assert_false(editor.is_viewport_edit_input_active(), "Terrain edit input should stay off while Mission owns the viewport.")
 
@@ -1393,11 +1393,11 @@ func test_asset_dock_slot_card_title_does_not_share_row_with_buttons() -> void:
 
 
 func test_sculpt_inspector_syncs_from_editor_ui_state_signal() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := SculptInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	editor.set_brush_radius_value(37.0)
 
@@ -1443,12 +1443,12 @@ func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
 
 
 func test_layout_inspector_is_trimmed_to_board_and_legend() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 
 	assert_eq(editor.current_tool, TerrainEditorScript.Tool.EDIT_SECTORS, "Layout inspector should force sector editing when it becomes active.")
@@ -1458,12 +1458,12 @@ func test_layout_inspector_is_trimmed_to_board_and_legend() -> void:
 
 
 func test_layout_inspector_sector_overlay_toggle_syncs_with_editor() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := LayoutInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.set_sector_overlay_visible(true)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 
 	assert_true(inspector._sector_overlay_toggle.button_pressed, "Layout inspector should reflect the editor's current sector overlay visibility.")
@@ -1473,14 +1473,14 @@ func test_layout_inspector_sector_overlay_toggle_syncs_with_editor() -> void:
 
 
 func test_foliage_inspector_selection_updates_editor_selection() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
 	editor.add_foliage_def()
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	inspector._on_list_selected(1)
 
@@ -1489,7 +1489,7 @@ func test_foliage_inspector_selection_updates_editor_selection() -> void:
 
 
 func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := ScatterInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor.add_foliage_def()
@@ -1497,7 +1497,7 @@ func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
 	editor.current_tool = TerrainEditorScript.Tool.FOLIAGE_PAINT
 	editor.set_selected_foliage_def_index(1)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 
 	var list: ItemList = inspector._list
@@ -1512,16 +1512,16 @@ func test_foliage_inspector_reflects_editor_selection_and_add_remove() -> void:
 
 
 func test_stamp_inspector_removes_entry_list_and_apply_workflow() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
-	inspector.build_main(host)
+	inspector.build_main(mount)
 
 	assert_not_null(inspector._selection_done, "Tile inspector should expose a direct exit action for selection mode.")
 	assert_not_null(inspector._selection_delete, "Tile inspector should expose a direct delete action for the selected tile.")
 
 
 func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
@@ -1529,7 +1529,7 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	inspector._on_atlas_selected(5)
 
@@ -1539,7 +1539,7 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 
 
 func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
@@ -1552,7 +1552,7 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	inspector.sync_from_editor()
 
@@ -1563,7 +1563,7 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 
 
 func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.data = NovaTerrainData.new()
@@ -1572,7 +1572,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 	var tilestrip := ImageTexture.create_from_image(strip_image)
 	editor._document.data.set_tilestrip_tex(tilestrip)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	var cache_size: int = inspector._tile_icon_cache.size()
 	var first: Texture2D = inspector._build_icon(tilestrip, 2, 4)
@@ -1583,7 +1583,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 
 
 func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
@@ -1591,7 +1591,7 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	inspector._on_flip_x(true)
 
@@ -1601,12 +1601,12 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 
 
 func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 
 	var done_button: Button = inspector._selection_done
@@ -1618,7 +1618,7 @@ func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:
 
 
 func test_stamp_inspector_done_clears_selection() -> void:
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
 	editor._document.new_tileinfo()
@@ -1626,7 +1626,7 @@ func test_stamp_inspector_done_clears_selection() -> void:
 	editor._document.stamp_tileinfo_cell(3, 4)
 	editor.select_tileinfo_entry(0)
 
-	inspector.build_main(host)
+	inspector.build_main(mount)
 	inspector.set_editor(editor)
 	inspector._on_selection_done_pressed()
 
@@ -1860,20 +1860,20 @@ func test_browser_pane_defaults_hidden_and_toggles_without_closing_popovers() ->
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
-	var host := workstation.get_node("%ResourceBrowserPaneHost") as Control
+	var mount := workstation.get_node("%ResourceBrowserPaneMount") as Control
 	var toggle := workstation.get_node("%BrowserToggleButton") as Button
-	assert_false(host.visible, "the pane defaults hidden (protects the 1024x640 window floor)")
+	assert_false(mount.visible, "the pane defaults hidden (protects the 1024x640 window floor)")
 	assert_false(toggle.button_pressed, "the toggle starts unpressed")
 
 	workstation._popovers.set_settings_visible(true)
 	toggle.button_pressed = true
-	assert_true(host.visible, "the toggle shows the pane")
+	assert_true(mount.visible, "the toggle shows the pane")
 	assert_true(workstation.get_node("%SettingsPopup").visible,
 		"a dock toggle must not close popovers (it is not in the mutual-exclusion chain)")
 	workstation._popovers.set_settings_visible(false)
 
 	toggle.button_pressed = false
-	assert_false(host.visible, "the toggle hides the pane again")
+	assert_false(mount.visible, "the toggle hides the pane again")
 
 
 func test_browser_pane_lists_and_filters_by_kind() -> void:
@@ -1932,7 +1932,7 @@ func test_browser_pane_visibility_and_split_persist() -> void:
 
 	var second = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
-	assert_true((second.get_node("%ResourceBrowserPaneHost") as Control).visible,
+	assert_true((second.get_node("%ResourceBrowserPaneMount") as Control).visible,
 		"a fresh shell restores the pane's visibility")
 	assert_true((second.get_node("%BrowserToggleButton") as Button).button_pressed,
 		"...with the toggle pressed to match")
@@ -2060,7 +2060,7 @@ func test_wire_browser_pane_twice_stays_single_wired() -> void:
 		"re-wiring the browser pane must not double-connect the toggle")
 
 	var toggle := workstation.get_node("%BrowserToggleButton") as Button
-	var pane_mount := workstation.get_node("%ResourceBrowserPaneHost") as Control
+	var pane_mount := workstation.get_node("%ResourceBrowserPaneMount") as Control
 	toggle.button_pressed = true
 	assert_true(pane_mount.visible, "one toggle-on shows the pane once")
 	toggle.button_pressed = false
@@ -2103,7 +2103,7 @@ func test_environment_detach_button_pops_content_into_window() -> void:
 		"the environment content now lives in its own Window")
 	assert_true((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
 		"the rail toggle stays pressed while floating")
-	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0,
+	assert_gt(workstation.get_node("%EnvironmentActionsMount").get_child_count(), 0,
 		"the floating panel carries the document actions")
 	assert_gt(inspector_mount.get_child_count(), 0,
 		"...and the environment inspector")
@@ -2145,7 +2145,7 @@ func test_window_close_redocks_environment_content() -> void:
 	await get_tree().process_frame
 	_attach_environment_document(workstation)
 	workstation._popovers.set_environment_visible(true)
-	var actions_before: int = workstation.get_node("%EnvironmentActionsHost").get_child_count()
+	var actions_before: int = workstation.get_node("%EnvironmentActionsMount").get_child_count()
 	assert_gt(actions_before, 0, "the docked popover carries document actions")
 	_detach_environment(workstation)
 	var window: Window = workstation._popovers.environment_panel_mount().get_window()
@@ -2162,7 +2162,7 @@ func test_window_close_redocks_environment_content() -> void:
 
 	workstation._popovers.set_environment_visible(true)
 	assert_true(workstation.get_node("%EnvironmentPopup").visible, "the toggle reopens it docked")
-	assert_eq(workstation.get_node("%EnvironmentActionsHost").get_child_count(), actions_before,
+	assert_eq(workstation.get_node("%EnvironmentActionsMount").get_child_count(), actions_before,
 		"reopening must not duplicate the action buttons")
 	await _teardown(workstation)
 
@@ -2254,7 +2254,7 @@ func test_set_editor_rebuilds_content_inside_detached_window() -> void:
 	await get_tree().process_frame
 	var environment_editor = _attach_environment_document(workstation)
 	_detach_environment(workstation)
-	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0)
+	assert_gt(workstation.get_node("%EnvironmentActionsMount").get_child_count(), 0)
 
 	# set_editor resets the environment popup content; a floating window must
 	# get its content rebuilt immediately, not sit empty until the next toggle.
@@ -2262,7 +2262,7 @@ func test_set_editor_rebuilds_content_inside_detached_window() -> void:
 	editor.environment_editor = environment_editor
 	workstation.set_editor(editor)
 	assert_true(workstation._popovers.environment_panel_mount().is_floating(), "the panel keeps floating")
-	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0,
+	assert_gt(workstation.get_node("%EnvironmentActionsMount").get_child_count(), 0,
 		"the rebuilt actions land inside the floating window")
 	assert_gt((workstation.get_node("%EnvironmentInspectorMount") as Control).get_child_count(), 0,
 		"...with the rebuilt inspector")
@@ -2283,7 +2283,7 @@ func test_floating_environment_still_owns_the_open_marker() -> void:
 
 
 func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> void:
-	# The camera panel shares the host machinery but has its own shell guards:
+	# The camera panel shares the mount machinery but has its own shell guards:
 	# detach needs a live camera, and losing the camera force-redocks WITHOUT
 	# erasing the user's floating preference (transient editor rebinds).
 	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())

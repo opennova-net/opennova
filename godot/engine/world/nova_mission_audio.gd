@@ -522,7 +522,7 @@ func set_simulation(sim: Object) -> void:
 ## MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 reimpl territory). Stable
 ## candidate IDs let selected incumbents continue while an entrant restarts,
 ## matching transient registration. `delta` free-runs the autonomous 62.5 Hz eval
-## clock only for hosts that never push logic ticks (editor idle) — see
+## clock only for owners that never push logic ticks (editor idle) — see
 ## docs/audio/lwf-dbf-sound-re.md §driver cadence (D-SND-16, ported).
 func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	var start := Time.get_ticks_usec()
@@ -533,7 +533,7 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		_perf_voice_writes = 0
 		_perf_tick_us = Time.get_ticks_usec() - start
 		return
-	# Autonomous hosts register at the current clock before consuming this
+	# Autonomous owners register at the current clock before consuming this
 	# render frame's elapsed time. World-driven callers normally flush chronologically
 	# from advance_ticks above; the fallback handles a late same-tick delivery.
 	_flush_sound_emitters(int(_mixer.clock_tick()))

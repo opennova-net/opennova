@@ -8,7 +8,7 @@ extends RefCounted
 # slice F1); TerrainEditor is the first owner, the Object place-on-terrain and
 # Sound at-distance previews are the next consumers.
 #
-# Host-specific reads stay behind seam Callables captured at construction
+# Owner-specific reads stay behind seam Callables captured at construction
 # (the parity doc's sampler-seam pattern, A8's captured-lambda rule): the
 # surface material, the document's water height, the live-surface height
 # sampler, and the owner's UI fan-out. The service never reaches back into
@@ -43,10 +43,10 @@ var _time_of_day_override := 0.0
 var _terrain_material_instance_id := 0
 var _terrain_env_generation := -1
 
-# func() -> ShaderMaterial: the host's live surface material receiving the
+# func() -> ShaderMaterial: the owner's live surface material receiving the
 # env terrain uniforms (null when no surface is live).
 var _get_material: Callable
-# func() -> float: the host document's authored water height (world units).
+# func() -> float: the owner document's authored water height (world units).
 var _get_water_height: Callable
 # func(world_x: float, world_z: float) -> float: live-surface height under a
 # world-space point; NAN when no surface is live or the point is off it.
@@ -186,7 +186,7 @@ func apply_environment_to_preview() -> void:
 
 
 ## Restamp the live terrain material when weather/TOD moves the environment or
-## the host replaces its surface material. The generation comparison keeps the
+## the owner replaces its surface material. The generation comparison keeps the
 ## normal per-frame editor poll O(1) after the weather smoother settles.
 func sync_environment_to_preview(force: bool = false) -> void:
 	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
@@ -227,7 +227,7 @@ func get_water_node() -> Node3D:
 
 # --- Grounding ----------------------------------------------------------------
 
-# Live-surface height under (world_x, world_z) through the host's sampler
+# Live-surface height under (world_x, world_z) through the owner's sampler
 # seam; NAN when no surface is live or the point is off it.
 func sample_height(world_x: float, world_z: float) -> float:
 	return float(_sample_height.call(world_x, world_z))
@@ -242,7 +242,7 @@ func ground_position(world_pos: Vector3) -> Vector3:
 	return Vector3(world_pos.x, height, world_pos.z)
 
 
-# Teardown: unbind the document and free the furniture. Hosts whose world root
+# Teardown: unbind the document and free the furniture. Owners whose world root
 # dies with the scene tree may skip this (the nodes are tree children — the
 # pre-extraction TerrainEditor lifecycle); explicit consumers call it. init_*
 # after release() rebuilds fresh furniture.

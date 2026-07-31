@@ -9,7 +9,7 @@ extends Control
 # It replaces nothing: it gives Fonts/Strings/HUD a truthful "how the game draws
 # it" panel beside their authoring surfaces (FNT-1 / STR-1 / HUD-3 adopt it).
 #
-# The anchor POSITION inside the panel is a hosting choice (kept mid-panel by
+# The anchor POSITION inside the panel is an owner choice (kept mid-panel by
 # alignment); everything from the anchor onward — scaling, ascent offset,
 # alignment shift, fixed pixel size, half-bright — is the engine path.
 #

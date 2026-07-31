@@ -63,8 +63,8 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerPresenter")
-	if world == null or host == null:
+	var presenter = game.get_node_or_null("LocalPlayerPresenter")
+	if world == null or presenter == null:
 		push_error("stand_bounce_probe: main_game lacks World/LocalPlayerPresenter children")
 		quit(1)
 		return
@@ -84,7 +84,7 @@ func _run() -> void:
 	print("PROBE mission=%s loaded, player spawned" % OS.get_environment("NW_SP_MISSION"))
 
 	# Pin the input: no movement, no jump — the player must stand dead still.
-	host.set_input_source(func() -> Dictionary: return {})
+	presenter.set_input_source(func() -> Dictionary: return {})
 
 	await _mission_wait(SETTLE_MISSION_SECONDS)
 	var z0: float = world.get_sim().get_local_player_position().y

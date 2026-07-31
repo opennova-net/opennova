@@ -261,7 +261,7 @@ func build() -> void:
 	# color at depth 1 - 2^-15 and re-renders sky dome, lo-res terrain, the
 	# reflected world, celestial bodies + sun glare [orig:
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240];
-	# hosted, the shared World3D's sky/environment covers the skyfog clear
+	# world-driven, the shared World3D's sky/environment covers the skyfog clear
 	# and the mirror camera sees the same live scene.
 	if reflection_viewport == null:
 		reflection_viewport = SubViewport.new()
@@ -340,7 +340,7 @@ func _process(delta: float) -> void:
 	_noise_color_tex.update(_noise_color_img)
 	_noise_normal_tex.update(_noise_normal_img)
 
-	# Strip inputs default to the shader-uniform stand-in values so hosts
+	# Strip inputs default to the shader-uniform stand-in values so owners
 	# without a loaded env still march strips.
 	var murk := water_alpha
 	var fog_end := 1000.0
@@ -363,7 +363,7 @@ func _process(delta: float) -> void:
 		# The witnessed UV transform (scale/bias from the fog-distance INT
 		# part, offsets from the layer-1 cloud accumulators + 32x camera)
 		# [orig: render_water_surface @ 0x5c3348..0x5c33db]. The weather node
-		# owns the shared accumulators; standalone hosts tick a private core.
+		# owns the shared accumulators; standalone owners tick a private core.
 		if not _cached_weather or not _cached_weather.is_inside_tree():
 			_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
 		if _cached_weather and _cached_weather.has_method("get_water_uv_state"):
@@ -540,7 +540,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	# screen-marched row coordinates registered to the actual main view.
 	_water_core.strip_set_view(_cached_cam.get_camera_transform(),
 			_cached_cam.get_camera_projection(), vp_size, pass_fog_end)
-	# The nightvision redraw variant is a FrameFX pass, not hosted yet.
+	# The nightvision redraw variant is a FrameFX pass, not ported yet.
 	var rows: int = _water_core.strip_build(water_height, murk, lit,
 			uv_state.x, uv_state.y, underwater, false)
 	if rows < 2:
@@ -566,7 +566,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM2_SHIFT))
 	mesh.surface_set_material(0, water_material)
 	# The witnessed per-side material swap: camera-above -> the blend material,
-	# underwater -> the opaque one (blend off, flags 0x20000) — hosted as the
+	# underwater -> the opaque one (blend off, flags 0x20000) — ported as the
 	# shader's u_underwater_view branch [orig: selection @ 0x5c33e6..0x5c34ea;
 	# Water_ShaderOpaque @ 0x28ee8c8].
 	water_material.set_shader_parameter("u_underwater_view", underwater)

@@ -172,7 +172,7 @@ func test_knobs_and_lightning_poke_the_live_nodes() -> void:
 	assert_almost_eq(float((world.env as StubEnv).time_of_day), 2200.0, 0.001,
 			"scrubbing the clock uses the shared public control")
 	assert_eq((world.weather as StubWeather).color_resyncs, 1,
-			"the host immediately resyncs rendered weather for paused scrubs")
+			"the world immediately resyncs rendered weather for paused scrubs")
 	(page.find_child("WindStrength", true, false) as HSlider).value = 10
 	assert_almost_eq(float((world.weather as StubWeather).wind_strength), 10.0, 0.001)
 
@@ -206,7 +206,7 @@ func test_public_clock_scrub_reseeds_the_fixed_point_mission_clock() -> void:
 	env.advance_mission_clock(1)
 
 	assert_gt(env.time_of_day, 1234.0,
-			"the next hosted tick advances from the scrub instead of restoring the old clock")
+			"the next world-driven tick advances from the scrub instead of restoring the old clock")
 	assert_lt(env.time_of_day, 1235.0)
 	var advanced: float = env.time_of_day
 	assert_eq(env.debug_set_mission_minute_of_day(1440.0), ERR_INVALID_PARAMETER)

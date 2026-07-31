@@ -281,7 +281,7 @@ static func seat_pose_index_for_user_point(name: String) -> int:
 
 static func canonical_seat_name(name: String) -> String:
 	# Entity_GetBoneSlotType performs a case-insensitive comparison at byte zero
-	# of the model's USRP row name. Whitespace trimming is host-side string hygiene;
+	# of the model's USRP row name. Whitespace trimming is reimpl-side string hygiene;
 	# embedded tokens are not seats.
 	# [orig: strnicmp(name, "sitex"/"ctrlx"/"UseGun"/"drvrx", 5/6) @0x434ED0]
 	return name.to_lower().strip_edges()

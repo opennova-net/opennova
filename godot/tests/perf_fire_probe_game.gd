@@ -623,13 +623,13 @@ func _equip_clip_weapon() -> void:
 		if equipped.is_empty():
 			continue
 		# Mirror the armory's post-apply install exactly: world weapon THEN the
-		# player host's viewmodel refresh, or the first-person arms keep the
+		# player presenter's viewmodel refresh, or the first-person arms keep the
 		# knife while the sim fires the rifle.
 		if _gw != null and _gw.has_method("set_local_player_weapon_by_name") \
 				and bool(_gw.set_local_player_weapon_by_name(equipped)):
-			var player_host = _main.get("_player_presenter") if _main != null else null
-			if player_host != null and player_host.has_method("refresh_viewmodel"):
-				player_host.refresh_viewmodel()
+			var player_presenter = _main.get("_player_presenter") if _main != null else null
+			if player_presenter != null and player_presenter.has_method("refresh_viewmodel"):
+				player_presenter.refresh_viewmodel()
 		await _settle_ms(1500)  # draw anim settles before the baseline
 		var view = _gw.local_player_weapon_view() if _gw != null \
 				and _gw.has_method("local_player_weapon_view") else null

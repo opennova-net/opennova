@@ -2,8 +2,8 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-# THE host destruction-presentation pass: presents the sim's item destruction on
-# the viewing host — the husk model swap on destroyed items, the death-piece
+# THE shell destruction-presentation pass: presents the sim's item destruction on
+# the viewing peer — the husk model swap on destroyed items, the death-piece
 # debris (trail effects riding the sim's piece pool), the section-debris bursts,
 # the death/fire/other wreck effect families with the random fire crackle, and
 # the destruction sounds. Drains NovaSimulation.drain_destruction_events() +
@@ -375,7 +375,7 @@ func _set_husk_static_shadow(model: Node, enabled: bool) -> void:
 
 
 # Node-less wrecks still move while death physics settles them. Resolve the
-# same compact present pose consumed by the other host presentation paths.
+# same compact present pose consumed by the other shell presentation paths.
 func _present_transform_for_identity(bms_id: int,
 		spawn_origin_v: Variant = null) -> Variant:
 	if _sim == null:

@@ -389,7 +389,7 @@ func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	# The evaluator's zero-scale BN17 pose is a clip marker, not a world-space
 	# destination. Exercise NovaObjectModel's no-overlay fallback at a non-zero
-	# placement: the host must collapse the bone at its current joint. Sending
+	# placement: the owner must collapse the bone at its current joint. Sending
 	# partially weighted vertices to world origin stretches triangles across the
 	# frame instead of clipping the baked weapon.
 	var data := _open(CHARMODEL)

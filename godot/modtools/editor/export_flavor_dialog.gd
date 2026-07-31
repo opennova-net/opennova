@@ -1,7 +1,7 @@
 class_name ExportFlavorDialog
 extends ConfirmationDialog
 
-## Native themed replacement for the in-card export format chooser. Hosts the
+## Native themed replacement for the in-card export format chooser. Holds the
 ## mutually-exclusive BHD vs JO/DFX toggles and relabels the OK button to
 ## "Export". Flavor values mirror TerrainEditorWorkspace.ExportFlavor
 ## { BHD = 0, DFX_JO = 1 } so get_flavor() can be passed straight to begin_export.

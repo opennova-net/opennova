@@ -6,11 +6,11 @@ extends RefCounted
 # userpoint, playhead scrub, the PLAYPARTANIM part-anim channels, the
 # aim-overlay/weapon-channel setters, and advance_body_animation pose
 # evaluation. ALL state, constants and signals stay on the composing
-# NovaObjectModel, reached through `_m`; every moved method keeps a host
+# NovaObjectModel, reached through `_m`; every moved method keeps an owner
 # delegate, so the external surface (and test-subclass overrides, e.g.
-# _resolve_anim_channel_register) are unchanged. The host is a Node3D --
+# _resolve_anim_channel_register) are unchanged. The owner is a Node3D --
 # manually managed, not refcounted -- so this plain back-reference cannot
-# cycle: the host owns the helper; the helper points back at the Node.
+# cycle: the owner owns the helper; the helper points back at the Node.
 
 var _m
 
@@ -664,8 +664,8 @@ func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 ## sweeps live in 0..0x10000, but zero-time retail arithmetic can wrap outside
 ## that range and the publisher copies it without another clamp.
 ## The faithful runtime path: NovaSimulation/the AI brain integrates the PLAYPARTANIM phase in-engine
-## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the host just writes it to the PANM
-## control register here. Distinct from play_part_anim (the editor/object-preview host-side integrator).
+## (Entity_ApplyCommand @0x43ab60 + the per-frame consumer), and the owner just writes it to the PANM
+## control register here. Distinct from play_part_anim (the editor/object-preview owner-side integrator).
 func set_part_phase(channel: int, phase: int) -> void:
 	var slot := channel - 1
 	var register: String = _m._resolve_anim_channel_register(slot)
@@ -673,7 +673,7 @@ func set_part_phase(channel: int, phase: int) -> void:
 	if register.is_empty() or owner.is_empty():
 		return
 	var next_phase: int = int(_m._ctrl_dword(phase))
-	_m._part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
+	_m._part_anims.erase(register)  # the engine owns this channel's phase; no owner integrator on it
 	# Keep the source tag so stale teardown cannot clear a newer writer. Retail
 	# has one current slot value, not a rollback stack: clearing this current
 	# publication removes it instead of resurrecting an older authored value.
@@ -793,7 +793,7 @@ func set_right_hand_collapsed(collapsed: bool) -> void:
 
 ## Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
 ## evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
-## the bone pose. Public so deterministic hosts can advance the render-time channel without
+## the bone pose. Public so deterministic owners can advance the render-time channel without
 ## reaching through Godot's private _process callback.
 ## write_pose=false advances the clip clock and latches _body_pose_dirty
 ## without writing bones — the hidden-model leg: the pose re-derives from

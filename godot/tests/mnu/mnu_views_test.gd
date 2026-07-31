@@ -2,7 +2,7 @@ extends GutTest
 
 # M9.6 gate: the special view widgets (Map, Globe, Marquee). They are inherently
 # runtime/data-driven, so the builder shows a styled background or labeled
-# placeholder and a host drives them. Map pans/zooms a supplied image + markers,
+# placeholder and the shell drives them. Map pans/zooms a supplied image + markers,
 # Globe auto-rotates a supplied image, Marquee scrolls DATASOURCE/STRING text.
 
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
@@ -38,7 +38,7 @@ func test_map_builds_and_data_binding() -> void:
 	assert_not_null(map.find_child("MapImage", true, false), "runtime map image layer")
 	var tex := _tex()
 	map.set_map_texture(tex)
-	assert_eq(map.get_map_texture(), tex, "host map texture round-trips")
+	assert_eq(map.get_map_texture(), tex, "shell map texture round-trips")
 	map.set_zoom(10.0)
 	assert_eq(map.get_zoom(), 4.0, "zoom clamps to max")
 	var id: int = map.add_marker(tex, Vector2(5, 5))
@@ -115,7 +115,7 @@ func test_marquee_set_content_runtime() -> void:
 	var m := menu.find_child("Credits", true, false)
 	m.set_content("Hello\nWorld")
 	var lbl := m.find_child("Content", true, false) as Label
-	assert_eq(lbl.text, "Hello\nWorld", "host content drives the label")
+	assert_eq(lbl.text, "Hello\nWorld", "shell content drives the label")
 
 
 # --- Faithful partial-POSITION layout ----------------------------------------

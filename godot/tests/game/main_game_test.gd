@@ -198,7 +198,7 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 		return
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var menu = menu_shell.get_menu()
-	assert_not_null(menu, "the packed fixture boots the public menu host")
+	assert_not_null(menu, "the packed fixture boots the public menu shell")
 	if menu == null:
 		return
 	var root: NovaResourceRoot = menu.get_resource_root()
@@ -214,15 +214,15 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	# old handler read nonexistent "text"/"message" keys, so mission text never
 	# reached the HUD.
 	# The surface lives on the shared NovaGameHudPresenter (main_game passes through);
-	# out-of-tree _make() never runs _ready, so drive the host directly.
-	var host := NovaGameHudPresenter.new()
-	autofree(host)
-	host.apply_mission_effects([
+	# out-of-tree _make() never runs _ready, so drive the presenter directly.
+	var presenter := NovaGameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([
 		{"kind": "dialog", "a": 3},
 		{"kind": "text", "str": "Proceed to the beach"},
 		{"kind": "text", "str": ""},
 	])
-	assert_eq(host.hud_objective_line(), "Proceed to the beach",
+	assert_eq(presenter.hud_objective_line(), "Proceed to the beach",
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
 
 
@@ -230,33 +230,33 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	# consol/pconsol ride the distinct debug_text channel. The game does not yet
 	# present an on-screen debug console, so these effects remain intentionally
 	# unrouted instead of replacing player-facing mission text.
-	var host := NovaGameHudPresenter.new()
-	autofree(host)
-	host.apply_mission_effects([
+	var presenter := NovaGameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([
 		{"kind": "text", "str": "Hold this position"},
 		{"kind": "debug_text", "str": "trigger 17 entered"},
 	])
-	assert_eq(host.hud_objective_line(), "Hold this position",
+	assert_eq(presenter.hud_objective_line(), "Hold this position",
 		"debug_text stays off the player-facing HUD mission-text channel")
 
 
 func test_lose_effect_sets_endround_banner_and_message() -> void:
-	# The WAC Lose banner trio is host presentation [orig: WacAction_Lose @0x4ed3f0 ->
+	# The WAC Lose banner trio is shell presentation [orig: WacAction_Lose @0x4ed3f0 ->
 	# GameMsg_AddChatLineAndRelay/SetBannerText/SetTeamBannerText]: the effect carries
-	# the gametext KEY; the host resolves it against 'Misc' (the miss-format marker
+	# the gametext KEY; the presenter resolves it against 'Misc' (the miss-format marker
 	# stands in when no gametext table is registered) and keeps the banner line for
 	# the MISSION FAILED screen.
-	var host := NovaGameHudPresenter.new()
-	autofree(host)
-	host.apply_mission_effects([
+	var presenter := NovaGameHudPresenter.new()
+	autofree(presenter)
+	presenter.apply_mission_effects([
 		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
 	])
-	assert_string_contains(host.endround_banner_line(), "STRMISC_KILLEDGREEN",
+	assert_string_contains(presenter.endround_banner_line(), "STRMISC_KILLEDGREEN",
 			"the lose banner resolves (or marks) the Misc gametext key")
-	assert_eq(host.pending_hud_message_count(), 1,
+	assert_eq(presenter.pending_hud_message_count(), 1,
 			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
-	host.teardown()
-	assert_eq(host.endround_banner_line(), "",
+	presenter.teardown()
+	assert_eq(presenter.endround_banner_line(), "",
 			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")
 
 
@@ -303,13 +303,13 @@ func _screen_has_label_containing(node: Node, text: String) -> bool:
 
 
 func test_crosshair_option_updates_an_existing_hud() -> void:
-	# The Options signal reaches the built HUD through the shared host's public
+	# The Options signal reaches the built HUD through the shared presenter's public
 	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).
-	var host := NovaGameHudPresenter.new()
-	autofree(host)
+	var presenter := NovaGameHudPresenter.new()
+	autofree(presenter)
 	var hud := FakeGameHud.new()
-	host._game_hud = hud
-	host.set_crosshair_style(13)
+	presenter._game_hud = hud
+	presenter.set_crosshair_style(13)
 	assert_eq(hud.crosshair_style, 13, "A paused game's HUD adopts the menu selection immediately.")
 
 
@@ -333,12 +333,12 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	assert_eq(runtime.get_mission_file(), "mnml.bms",
 			"the shared F3 runtime receives the mission that actually loaded")
 
-	# The mission string table selection lives on the shared HUD host now (the
+	# The mission string table selection lives on the shared HUD presenter now (the
 	# exists-only mission-bin fallback rides its world wiring).
-	var host := NovaGameHudPresenter.new()
-	autofree(host)
-	host.setup(world, null, null)
-	host._load_hud_text_tables(root)
+	var presenter := NovaGameHudPresenter.new()
+	autofree(presenter)
+	presenter.setup(world, null, null)
+	presenter._load_hud_text_tables(root)
 
 	assert_not_null(NovaStrings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")

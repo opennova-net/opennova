@@ -25,7 +25,7 @@ static func make(p_referrers: Callable, p_is_ready: Callable, p_jump: Callable) 
 
 
 ## The editor trio over a shell's reference index; null when the shell (or its
-## index/jump surface) is missing — headless tests, runtime hosts. Referrer
+## index/jump surface) is missing — headless tests, runtime owners. Referrer
 ## edges carry VFS-logical source names, so the jump resolves them through the
 ## shell root first (ReferenceStrip.resolve_source_path).
 static func from_shell(shell: Object) -> ReferenceServices:

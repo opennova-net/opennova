@@ -3,10 +3,10 @@ extends RefCounted
 # THE mission present pass: applies the client-view entity state onto placed scene nodes for
 # MissionRuntime. It consolidated the historical game's MissionCommandHost (PANM part-anim only) and
 # the editor's MissionSimDriver._apply (position + yaw only); those divergent paths remain retired.
-# `GameWorld`, under `MainGame`, is the sole live mission host and ONED has no PIE host. Tests and
+# `GameWorld`, under `MainGame`, is the sole live mission runtime and ONED has no PIE runtime. Tests and
 # non-gameplay tooling previews may still instantiate MissionRuntime and this RefCounted pass directly.
 #
-# Hybrid split (the engine decides, the host draws): it pulls ONE batched snapshot from the sim
+# Hybrid split (the engine decides, the shell draws): it pulls ONE batched snapshot from the sim
 # (NovaSimulation.get_present_snapshot -- a flat PackedFloat32Array) and the NATIVE row walk
 # (NovaPresentApplier, godot/engine/simulation) owns the plan + per-row reads + change-gated
 # dispatch; each resolved node's duck-typed NovaEntityVisual surface (ADR 0007) keeps its GDScript
@@ -40,7 +40,7 @@ var _applier: NovaPresentApplier = null
 
 
 ## options: { drive_transform, drive_part_anim, drive_visibility,
-## drive_body_anim } (all default true), plus the host's shared
+## drive_body_anim } (all default true), plus the shell's shared
 ## occlusion_hidden_ids and present_visibility maps (shared BY REFERENCE:
 ## GameWorld mutates the hidden set in place; the release lands on the sim's
 ## current intent so neither visibility writer fights the other).

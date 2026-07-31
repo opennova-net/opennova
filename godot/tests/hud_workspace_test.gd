@@ -37,22 +37,22 @@ func test_open_populates() -> void:
 
 
 func test_viewport_and_inspector() -> void:
-	var host := Control.new()
-	add_child_autofree(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
 
-	_ws.mount_viewport(host)
-	var preview := host.get_child(0) if host.get_child_count() > 0 else null
+	_ws.mount_viewport(mount)
+	var preview := mount.get_child(0) if mount.get_child_count() > 0 else null
 	assert_not_null(preview, "mount_viewport adds the preview control.")
 	assert_true(preview is HudLayoutPreview, "Preview is a HudLayoutPreview.")
 
 	var inspector_mount := Control.new()
 	add_child_autofree(inspector_mount)
 	_ws.build_inspector(inspector_mount)
-	assert_gt(inspector_mount.get_child_count(), 0, "build_inspector populates the host.")
+	assert_gt(inspector_mount.get_child_count(), 0, "build_inspector populates the mount.")
 
 	# Opening after mount refreshes the preview without error.
 	var abs := ProjectSettings.globalize_path(HUDPOS_PATH)
 	assert_eq(_ws.open_file(abs), OK)
 
 	_ws.release_viewport()
-	assert_eq(host.get_child_count(), 0, "release_viewport detaches the preview.")
+	assert_eq(mount.get_child_count(), 0, "release_viewport detaches the preview.")

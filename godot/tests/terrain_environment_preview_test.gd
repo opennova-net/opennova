@@ -16,7 +16,7 @@ func test_water_height_override_drives_height() -> void:
 	# Clearing the override (NaN) hands control back to the env/terrain fallback.
 	water.set_height_override(NAN)
 	water.water_height = 7.0
-	assert_almost_eq(water.water_height, 7.0, 0.001, "After clearing the override the host can set height freely.")
+	assert_almost_eq(water.water_height, 7.0, 0.001, "After clearing the override the owner can set height freely.")
 
 
 func test_weather_exposes_resync_for_discrete_scrubs() -> void:

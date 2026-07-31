@@ -141,7 +141,7 @@ public:
 	// enforced by mount_runtime itself [orig: PFF_OpenAllArchives @ 0x4a4310;
 	// fatal check @ 0x4a6f44]. boot_resource_failure_text quotes the
 	// witnessed failure behavior for a manifest name ("" for unknown names)
-	// so hosts can raise honest missing-resource errors.
+	// so owners can raise honest missing-resource errors.
 	PackedStringArray list_missing_boot_resources() const;
 	String boot_resource_failure_text(const String &name) const;
 

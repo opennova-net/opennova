@@ -23,7 +23,7 @@ extends Node3D
 # Constant on-screen size: _process scales the node by camera distance, so the gizmo stays
 # a roughly fixed pixel size. Geometry constants below are in BASE units (pre-scale).
 
-# authored degrees (Vector3) -> Basis. Hosts with a domain rotation convention inject
+# authored degrees (Vector3) -> Basis. Owners with a domain rotation convention inject
 # theirs (mission: MissionObjectPlacer.bms_to_godot_basis); unset falls back to the
 # plain euler default.
 var basis_builder: Callable = Callable()

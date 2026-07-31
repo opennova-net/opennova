@@ -60,7 +60,7 @@ func test_same_mask_reapply_is_a_no_op() -> void:
 	var m := _model_with_parts(2)
 	m.set_section_visibility_mask(0b10)
 	var part: Node3D = m.get_render_part_nodes()[0]
-	part.visible = true  # host override; an identical mask must not stomp it
+	part.visible = true  # owner override; an identical mask must not stomp it
 	m.set_section_visibility_mask(0b10)
 	assert_true(part.visible, "re-applying the same mask changes nothing")
 

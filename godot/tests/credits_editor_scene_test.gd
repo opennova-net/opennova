@@ -73,7 +73,7 @@ func test_editor_panes_clip_preview_and_list_overflow() -> void:
 
 	assert_true(left_pane.clip_contents, "left editor pane clips card overflow at the split")
 	assert_true(right_pane.clip_contents, "right preview pane clips preview overflow at the split")
-	assert_true(preview_mount.clip_contents, "preview host clips its contents")
+	assert_true(preview_mount.clip_contents, "preview mount clips its contents")
 	assert_true(player.clip_contents, "player clips generated fixed-image overlays")
 
 func test_editor_binds_document_and_loads_kda() -> void:
@@ -96,12 +96,12 @@ func test_editor_binds_document_and_loads_kda() -> void:
 func test_credits_workspace_injects_font_link_services_on_mount() -> void:
 	var workspace = autofree(CreditsWorkspaceScript.new())
 	var shell: RefShell = add_child_autofree(RefShell.new())
-	var host: Control = add_child_autofree(Control.new())
+	var mount: Control = add_child_autofree(Control.new())
 	workspace.set_editor_shell(shell)
-	workspace.mount_viewport(host)
+	workspace.mount_viewport(mount)
 	await get_tree().process_frame
 
-	var editor: Node = host.get_child(0)
+	var editor: Node = mount.get_child(0)
 	editor.set_resource_root(null)
 	var doc: Object = workspace.get_editor_document()
 	var entry := CbinTextEntry.new()

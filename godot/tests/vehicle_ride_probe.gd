@@ -78,8 +78,8 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerPresenter")
-	if world == null or host == null:
+	var presenter = game.get_node_or_null("LocalPlayerPresenter")
+	if world == null or presenter == null:
 		_fail("main_game lacks World/LocalPlayerPresenter children")
 		return
 
@@ -93,7 +93,7 @@ func _run() -> void:
 	if sim == null:
 		_fail("no sim after player spawn")
 		return
-	host.set_input_source(func() -> Dictionary: return {"forward": _forward})
+	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
 	await _mission_wait(1.0)
 
 	# --- Locate the truck + the player's AI row.

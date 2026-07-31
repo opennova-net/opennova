@@ -1,8 +1,8 @@
 class_name EnvRenderCamera
 extends RefCounted
 
-# The one camera lookup the environment hosts (sky / water / celestial) share:
-# the editor's 3D viewport camera when running inside the editor (these hosts
+# The one camera lookup the environment nodes (sky / water / celestial) share:
+# the editor's 3D viewport camera when running inside the editor (these nodes
 # are sanctioned editor-aware — they render live in the Terrain/Object
 # workspaces), else the node's own scene viewport camera.
 

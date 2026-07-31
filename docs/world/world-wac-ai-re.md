@@ -3627,7 +3627,7 @@ pose lives and feeds back (the binding-fed input pattern, like the terrain sampl
 - `AiSystem::infantry_fire_pass` spawns rounds from the stamp while FRESH
   (≤ 4 ticks), else the chest-lift stand-in (headless ctests, out-of-view NPCs).
 
-Evidence: `ai` ctest `test_fire_pass_uses_host_fed_muzzle` (stamp used when fresh,
+Evidence: `ai` ctest `test_fire_pass_uses_embedder_fed_muzzle` (stamp used when fresh,
 fallback when absent/stale); in-game `godot/tests/ai_muzzle_probe.gd` on CP01 —
 PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
 (chest-height, along the aimed rifle), zero head-height origins.

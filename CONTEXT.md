@@ -52,7 +52,7 @@ _Avoid_: preview mode, design mode
 **Interactive preview**:
 An Edit-mode menu the Menus workspace can put into a "play" state: navigators
 wire up so clicking a Tab runs its Window and Screen Actions, while external
-effects (Commands plus URL, cross-menu, and hosted Actions) are sandboxed to
+effects (Commands plus URL, cross-menu, and shell-owned Actions) are sandboxed to
 no-ops. Lets an author preview tab/screen flow without leaving the editor.
 _Avoid_: play mode, runtime (it is still a preview)
 
@@ -66,9 +66,9 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim host scene (`godot/engine/world/game_world.tscn`): terrain,
+The runtime world-sim scene (`godot/engine/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
-game is the sole live mission host; ONED authoring previews do not run gameplay
+game is the sole live mission runtime; ONED authoring previews do not run gameplay
 (ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
@@ -91,10 +91,16 @@ serve original clients, and opennova↔opennova works the same way. The protocol
 record is `docs/net/novaworld-net-re.md`.
 _Avoid_: "our own protocol", custom packet format
 
-**Host / Client**:
-The authoritative side of an in-match session (the **host**) versus a connected peer (a
-**client**). Under the listen server the host runs a local client too.
-_Avoid_: master/slave, owner (when you mean the host)
+**Host / Joiner**:
+The authoritative side of an in-match session (the **host**) versus a remote peer that
+came in through the join handshake (a **joiner**). Under the listen server the host runs
+a local client too; "client" survives in wire-protocol prose (retail message names).
+This is the ONLY meaning of "host" in this codebase. UI attach-points are **Mounts**,
+presentation owners are **Presenters**, application front-ends are **Shells**, the
+application embedding a portable lib is its **embedder**, and our engine contrasted
+with retail is **the reimpl** — never "the host". Enforced by `scripts/lint/host_lint.py`.
+_Avoid_: master/slave, owner (when you mean the host); host for anything that is not
+the authoritative session side
 
 **Listen server**:
 A host that is simultaneously the authoritative server and a local client. OpenNova's
@@ -117,6 +123,13 @@ runtime** (`libs/npruntime`)
 runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is where the
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
+
+**Presenter**:
+A runtime node that owns one presentation surface and projects sim or menu state onto
+it: `LocalPlayerPresenter` (FP camera/input/viewmodel — every peer runs one for its own
+player, joiners included), `NovaGameHudPresenter`, `NovaArmoryPresenter`,
+`NovaDeployScreenPresenter`.
+_Avoid_: host, view controller
 
 ## 3DI collision authoring
 
@@ -202,6 +215,11 @@ _Avoid_: promote (for anything but the mission→world spawn)
 
 ## Editor & Runtime
 
+**Mount**:
+A Control the shell hands a workspace or widget to build UI into
+(`build_inspector(mount)`, `mount_viewport(mount)`, `InspectorMount`, `DetailDockMount`).
+_Avoid_: host, slot, container (for the attach-point)
+
 **ONED**:
 The OpenNova Editor (`godot/modtools/`): the authoring application, thirteen workspaces over
 one code-first framework. "ONED" or "the editor" in prose.
@@ -220,6 +238,6 @@ _Avoid_: overlay (that is the debug overlay), UI (too broad)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes
-(`MissionPresentPass`). It runs once in the standalone game host; F6 tests the
+(`MissionPresentPass`). It runs once in the standalone game runtime; F6 tests the
 current saved loose mission through that same game path (ADRs 0006 and 0025).
 _Avoid_: render pass, sync pass

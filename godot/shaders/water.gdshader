@@ -24,7 +24,7 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // (depth, rhw, screen U, screen V) - the projective depth pair + the
 // texm3x2 screen coordinates - and CUSTOM2 the texm3x2 perturbation basis
 // (t1.xy, t2.xy). The reflection RTT consumer is LIVE too (env #30):
-// NovaWater hosts the mirrored-scene SubViewport and the fragment below
+// NovaWater owns the mirrored-scene SubViewport and the fragment below
 // runs the witnessed texm3x2 lookup against it (the fog term rides the
 // per-row spec-alpha factor — see v_fog). Remaining variants: the LOW tier
 // (render_water_strip @ 0x5c1d60) and the nightvision redraw.
@@ -33,7 +33,7 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // @ 0x5c19b0; selection in render_water_surface @ 0x5c33e6..0x5c34ea]:
 // - camera ABOVE water: the BLENDED material (ONE + dst*SRCALPHA, ported via
 //   the premul trick above); camera BELOW (underwater view of the surface):
-//   the OPAQUE material - hosted as the u_underwater_view branch below
+//   the OPAQUE material - ported as the u_underwater_view branch below
 //   (blend-off = ALPHA 1.0 under the premul pass);
 // - nightvision post-redraw picks NV variants (FrameFX; out of scope here);
 // - all water passes are two-sided (pass flags 0x400000 -> cull NONE
@@ -52,14 +52,14 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 //     +mul_x2 r0.a, t3.a, v0.a / add r0.rgb, r0, v1
 //   (t2 = the bump-perturbed reflection sample; the fragment below runs the
 //   chain against NovaWater's mirror-scene RTT, u_water_color standing in
-//   only on reflection-less hosts). FF fallback: s0 MOD2X(reflection,
+//   only on reflection-less owners). FF fallback: s0 MOD2X(reflection,
 //   diffuse), s1 MOD2X(noise, current), alpha MOD(noise.a, diffuse.a).
 
 // Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
 #include "res://shaders/nova_color.gdshaderinc"
 
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
-// stand-in for the t2 sample (headless hosts/tests, u_has_reflection false).
+// stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
 // The reflection RTT (env #30): NovaWater's mirror-camera SubViewport
 // texture, the chain's t2 [orig: texm3x2pad/texm3x2tex t2 —
@@ -170,7 +170,7 @@ void fragment() {
 	// Godot's square mirror projection; without that sim/present-boundary conversion,
 	// the reflected image swims vertically as the view rotates on a widescreen
 	// display. The clamp is the RTT edge address mode.
-	// Reflection-less hosts (headless/tests) keep u_water_color as the
+	// Reflection-less owners (headless/tests) keep u_water_color as the
 	// tracked t2 stand-in.
 	vec3 t2_sample = u_water_color;
 	if (u_has_reflection) {

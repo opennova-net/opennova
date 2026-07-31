@@ -3,8 +3,8 @@ extends RefCounted
 
 ## One document-action rail (New/Open/Save/Save As/Export) over a mount
 ## container, driven by the workspace's document-action capability hooks.
-## Horizontal hosts (the top bar) fold the secondary actions into a "More"
-## menu; vertical hosts (the environment popup) list every action inline.
+## Horizontal mounts (the top bar) fold the secondary actions into a "More"
+## menu; vertical mounts (the environment popup) list every action inline.
 ## The shell owns one instance per mount and routes presses back through the
 ## Callable it injected.
 
@@ -52,7 +52,7 @@ func buttons() -> Dictionary:
 
 static func action_defs_for(workspace: EditorWorkspace) -> Array:
 	# "overflow" marks the secondary actions the horizontal top bar folds into
-	# the More menu; vertical hosts (environment popup) ignore it.
+	# the More menu; vertical mounts (environment popup) ignore it.
 	var action_defs := [
 		{"id": Action.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label(), "overflow": false},
 		{"id": Action.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label(), "overflow": false},

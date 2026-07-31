@@ -116,7 +116,7 @@ func _unregister_effect_anchors() -> void:
 	_registered_effect_anchor_keys.clear()
 
 
-# Drain any ordered presentation events left for hosts that do not install the
+# Drain any ordered presentation events left for owners that do not install the
 # fixed-tick callback. In the game, _present_fixed_weapon_tick consumes
 # each 62.5 Hz batch before that tick's particle update. Every clip/begin/end
 # payload survives either route; pre-aged fallback clips resume at their source age.
@@ -315,7 +315,7 @@ func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
 # Rigid first-person gun parts ride the .adm skeleton by subobject/bone index, so
 # applying only the model root leaves authored muzzle points in the rest pose (and,
 # for the AK, behind the gameplay camera). Convert model space into the bone's rest
-# frame, then back through its current global pose — the hosted equivalent of the
+# frame, then back through its current global pose — the ported equivalent of the
 # original action-bone transform.
 # [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
 func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transform3D:

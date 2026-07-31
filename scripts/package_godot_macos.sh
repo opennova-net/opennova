@@ -10,7 +10,7 @@
 # right-click -> Open, or `xattr -dr com.apple.quarantine <App>.app`. They are
 # NOT notarized (CI has no Apple Developer certificate).
 #
-# Mirrors scripts/package_godot_windows.ps1. Requires a macOS host with cmake +
+# Mirrors scripts/package_godot_windows.ps1. Requires a macOS machine with cmake +
 # Xcode command line tools, and initialised submodules (third_party/godot-cpp).
 #
 # Usage: scripts/package_godot_macos.sh [all|editor|runtime]

@@ -172,7 +172,7 @@ int main() {
 	TEST_EXPECT(parsed.bms_file().items[0].mis_height_lock == 1);
 	TEST_EXPECT(parsed.bms_file().items[0].mis_extra_bheight == 0);
 
-	// Host-provided base heights (flat, in write order) bake into the emitted extra_bheight; the
+	// Editor-provided base heights (flat, in write order) bake into the emitted extra_bheight; the
 	// absolute z is untouched and the source document's entity is not mutated by the writer.
 	{
 		const std::string baked_path = temp_path("mission_mis_baked_heights.mis");

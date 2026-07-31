@@ -100,7 +100,7 @@ func _ready() -> void:
 	_add_button(csv_buttons, "StringsExportCsvButton", "Export...", _on_export_csv)
 
 	# "Used by" rides the shell's reference index, asked of the workspace (the
-	# inspector never touches the shell); headless hosts get no strip.
+	# inspector never touches the shell); headless owners get no strip.
 	var services: ReferenceServices = _ws.get_reference_services() if _ws != null else null
 	if services != null:
 		_used_by_strip = ReferenceStrip.new()

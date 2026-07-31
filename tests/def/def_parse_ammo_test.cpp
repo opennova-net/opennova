@@ -72,7 +72,7 @@ int main(void) {
         def_free_ammo(&ammo);
         return 1;
     }
-    /* The tracer round's item graphic id (raw type id kept, host resolves) and the
+    /* The tracer round's item graphic id (raw type id kept, embedder resolves) and the
        in-flight glow: `frndlyTrcrID 4502`, `light_move 6.0 128 120 80`
        [orig: AmmoDef_ParseProperty @0x40a5f8 -> +16; light_move -> +120 fp16 /
        +124 = ((r<<8)+g)<<8 + b]. */

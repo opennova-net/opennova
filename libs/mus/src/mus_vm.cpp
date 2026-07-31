@@ -331,7 +331,7 @@ static void op_nop(MusVM *vm) { (void)vm; }
 
 /* [orig: AudioVM_Op_IncGlobal/DecGlobal @ 0x672AE0/0x672AF0] inc/dec a single
    BYTE at globals[off] (NOT a full int32). D-MUS-5: unlike pop_g, the original
-   does NOT raise the globals-dirty signal (dword_3246B28) and fires no host
+   does NOT raise the globals-dirty signal (dword_3246B28) and fires no embedder
    notification here, so we deliberately omit notify_var_changed to match. */
 static void op_inc_g(MusVM *vm) {
     int byte_off = read_u8(vm);
@@ -652,7 +652,7 @@ static void op_setstate(MusVM *vm) {
    STC (halt) identically -- the original makes NO play-vs-wait behavioral
    distinction; the only real difference is the operand width (u8 vs u16, so
    0x3D allows sound indices > 255). The `wait` arg we pass to on_play_sound is
-   a reimpl convenience, not a witnessed semantic; hosts should treat both as
+   a reimpl convenience, not a witnessed semantic; embedders should treat both as
    "start sound idx". */
 static void op_play (MusVM *vm) {
     int idx = read_u8(vm);
@@ -818,7 +818,7 @@ static void intrinsic_gsv(MusVM *vm) {
 /* Witnessed: Jointops.exe!Intrinsic_GSDV @ 0x672120.
    Sets right-channel only. Reuse on_volume_changed but pass current(left)
    unchanged; we don't track the previous left value, so pass `fixed` for
-   both channels and let the host disambiguate. */
+   both channels and let the embedder disambiguate. */
 static void intrinsic_gsdv(MusVM *vm) {
     int32_t v = vm_pop(vm);
     int32_t clipped = v;
@@ -971,7 +971,7 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     int budget = kTickBudget;
     /* Safety ceiling on the soft-drain extension: a well-formed statement is far
        under this, but a malformed `goto`-loop that never drains/halts would spin
-       forever (the original hangs too); cap it so the host never wedges. */
+       forever (the original hangs too); cap it so the embedder never wedges. */
     int extension = kTickBudget * 64;
     for (;;) {
         if (vm->state != MUS_VM_RUNNING) break;

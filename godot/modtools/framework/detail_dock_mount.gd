@@ -16,7 +16,7 @@ extends RefCounted
 #                            change forces a rebuild on routine re-mounts
 #
 # Mission and terrain keep their own dock shapes on purpose (persistent
-# inspector delegation / scene instantiation) — this hosts the conditional
+# inspector delegation / scene instantiation) — this owns the conditional
 # cached pattern only.
 
 var _dock_name: StringName

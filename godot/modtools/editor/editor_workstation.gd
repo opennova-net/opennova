@@ -46,14 +46,14 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _camera_popup_close: Button = %CameraPopupClose
 @onready var _camera_popup_detach: Button = %CameraPopupDetach
 @onready var _camera_popup_content: Control = %CameraPopupContent
-@onready var _camera_settings_mount: Control = %CameraSettingsHost
+@onready var _camera_settings_mount: Control = %CameraSettingsMount
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
 @onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
 @onready var _environment_popup_detach: Button = %EnvironmentPopupDetach
 @onready var _environment_popup_content: Control = %EnvironmentPopupContent
-@onready var _environment_actions_mount: VBoxContainer = %EnvironmentActionsHost
+@onready var _environment_actions_mount: VBoxContainer = %EnvironmentActionsMount
 @onready var _environment_inspector_mount: Control = %EnvironmentInspectorMount
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
 @onready var _settings_popup: PopoverPanel = %SettingsPopup
@@ -78,7 +78,7 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _play_in_game_button: Button = %PlayInGameButton
 @onready var _play_current_mission_button: Button = %PlayCurrentMissionButton
 @onready var _stop_game_button: Button = %StopGameButton
-@onready var _browser_pane_mount: PanelContainer = %ResourceBrowserPaneHost
+@onready var _browser_pane_mount: PanelContainer = %ResourceBrowserPaneMount
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
 @onready var _status_context_label: Label = %StatusContextLabel

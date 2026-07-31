@@ -150,7 +150,7 @@ static func resolve_background(root: NovaResourceRoot, mission_file: String) -> 
 	return {"name": FALLBACK_IMAGE, "custom": false}
 
 
-## Public texture-load seam for hosts/tests; avoids private-state inspection (ADR 0018).
+## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
 ## [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 static func load_background_texture(root: NovaResourceRoot, image_name: String) -> Texture2D:
 	if root == null or image_name.is_empty():
@@ -239,7 +239,7 @@ func present(force := false) -> void:
 	_displayed = step_displayed(_displayed, _reported)
 	queue_redraw()
 	# The original pumps window messages and presents mid-load; process_events
-	# + force_draw are the host-side equivalents so the OS window stays live
+	# + force_draw are the shell-side equivalents so the OS window stays live
 	# and the screen refreshes while the load blocks the main loop
 	# [orig: Game_PumpWindowMessages @ 0x586be6 + Present @ 0x586d53].
 	if is_inside_tree() and DisplayServer.get_name() != "headless":
@@ -283,7 +283,7 @@ func session_overlay_lines() -> PackedStringArray:
 	return PackedStringArray([_title, _mission_name, _game_type_text, _custom_text])
 
 
-## Whether setup resolved and decoded loading art. Hosts and tests should not
+## Whether setup resolved and decoded loading art. Owners and tests should not
 ## inspect the screen's private texture resource directly (ADR 0018).
 func has_background() -> bool:
 	return _texture != null

@@ -343,7 +343,7 @@ func _on_image_y_changed(value: float) -> void:
 	(_entry as CbinImageEntry).set_display_y(int(value))
 
 # The editor accent, read from the theme at use time (the card sits under the
-# shell's themed tree; standalone hosts fall back to the engine default).
+# shell's themed tree; standalone owners fall back to the engine default).
 func _accent() -> Color:
 	return get_theme_color(&"accent", &"EditorPalette")
 

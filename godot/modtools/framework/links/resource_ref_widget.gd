@@ -7,7 +7,7 @@ extends HBoxContainer
 ## set_value never emits).
 ##
 ## Services arrive as Callables so the widget works anywhere: with no services
-## (headless tests, runtime hosts) it degrades to a plain name field — badge,
+## (headless tests, runtime owners) it degrades to a plain name field — badge,
 ## browse, and jump simply hide. services_from_shell builds the editor trio.
 
 signal value_changed(value: String)

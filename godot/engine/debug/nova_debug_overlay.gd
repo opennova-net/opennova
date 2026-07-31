@@ -17,7 +17,7 @@ extends CanvasLayer
 ## NovaConfigStore; live toggles deliberately do not.
 
 ## Post-apply notification after a NovaDebugOptions control has gone through
-## the shared session's public target. No production host consumes it —
+## the shared session's public target. No production owner consumes it —
 ## tests observe option flips here.
 signal debug_option_changed(id: StringName, value: Variant)
 
@@ -140,7 +140,7 @@ func set_view_context_source(source: Callable) -> void:
 	_ctx.view_context_source = source
 
 
-## Convenience for hosts holding one runtime instance directly.
+## Convenience for owners holding one runtime instance directly.
 func set_runtime(runtime) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
@@ -155,7 +155,7 @@ func set_effect_world_source(source: Callable) -> void:
 		_refresh()
 
 
-## Supplier of the world host (GameWorld or null) for world-fed pages (the
+## Supplier of the world owner (GameWorld or null) for world-fed pages (the
 ## Stats page's counters today).
 func set_world_source(source: Callable) -> void:
 	_ctx.world_source = source
@@ -186,7 +186,7 @@ func get_debug_session() -> NovaDebugSession:
 	return _session
 
 
-## The host-owned debug pick list (see NovaDebugPickList): the Entities page
+## The shell-owned debug pick list (see NovaDebugPickList): the Entities page
 ## renders/curates it and snapshots embed it. Null detaches.
 func set_pick_list(pick_list: NovaDebugPickList) -> void:
 	_ctx.pick_list = pick_list
@@ -215,7 +215,7 @@ func close() -> void:
 		toggle()
 
 
-## The host-owned FrameStatsBoard feeding the Stats page (null detaches).
+## The shell-owned FrameStatsBoard feeding the Stats page (null detaches).
 func set_frame_stats_board(board) -> void:
 	_stats_pane.set_frame_stats_board(board)
 
@@ -797,7 +797,7 @@ func _runtime_status() -> Dictionary:
 	if runtime == null or sim == null:
 		return {
 			"label": "No mission",
-			"detail": "F3 remains available for host-wide diagnostics.",
+			"detail": "F3 remains available for process-wide diagnostics.",
 		}
 	var mission_name := ""
 	if runtime.has_method("get_mission_name"):

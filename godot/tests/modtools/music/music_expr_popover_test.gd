@@ -155,7 +155,7 @@ func test_apply_after_intervening_change_uses_fresh_bodies():
 	# 1) open the CONDITION popover...
 	blk._cond_chip.pressed.emit()
 	assert_true(v._popover.is_open())
-	# 2) ...then a DIFFERENT edit lands (retarget the then branch) and the host
+	# 2) ...then a DIFFERENT edit lands (retarget the then branch) and the owner
 	# re-renders, as live_mode would on document.changed.
 	var win_idx := -1
 	for i in range(snames.size()):

@@ -41,7 +41,7 @@ func test_scroll_builds_with_parts() -> void:
 func test_range_and_value_clamp() -> void:
 	var menu := _build_menu()
 	var scroll := _scroll(menu)
-	scroll.set_range(0, 100, 10)  # host binds the real range
+	scroll.set_range(0, 100, 10)  # shell binds the real range
 	scroll.set_value(50)
 	assert_eq(scroll.get_value(), 50.0, "value set within range")
 	scroll.set_value(200)

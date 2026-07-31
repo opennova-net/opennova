@@ -166,9 +166,9 @@ func abort_net_session(reason: String) -> void:
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_shell == null:
 		return
-	var debug_host := get_game_debug_adapter()
-	add_child(debug_host)
-	debug_host.start_runtime_endpoint()
+	var debug_adapter := get_game_debug_adapter()
+	add_child(debug_adapter)
+	debug_adapter.start_runtime_endpoint()
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# owner decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):

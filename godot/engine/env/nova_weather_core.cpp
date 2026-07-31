@@ -259,7 +259,7 @@ void NovaWeatherCore::set_exposure_from_iris_samples(const PackedInt32Array &p_s
 		const Vector3 &p_light_dir, const Color &p_ceiling, const Color &p_floor,
 		float p_iris_percent, float p_iris_center) {
 	// The in-world marched exposure: three samples along the clipped 8-unit
-	// camera ray, each classified by the host (indoor / indoor-without-interior-
+	// camera ray, each classified by the shell (indoor / indoor-without-interior-
 	// data / outdoor sun level 0..8), each run through the iris curve, the INT
 	// gains averaged /3 [orig: compute_ambient_light_along_direction @ 0x5c7a00 —
 	// samples at hit, hit+(cam-hit)/3, hit+2(cam-hit)/3; (s0+s1+s2)/3 @ 0x5c7b45].
@@ -345,7 +345,7 @@ Color NovaWeatherCore::get_sky() const {
 
 Color NovaWeatherCore::get_skyfog() const {
 	// Retail overwrites skyfog[0] with the horizon blend in undoubled space,
-	// then applies the same saturating x2 as fog. The host's modulate2x clear
+	// then applies the same saturating x2 as fog. The reimpl's modulate2x clear
 	// and dome-fog paths consume this final color verbatim.
 	const opennova::env::Rgb blended = opennova::env::horizon_blend_skyfog(
 			packed_to_rgb01(fog_block.render_color),

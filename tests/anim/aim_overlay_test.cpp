@@ -31,7 +31,7 @@ Quat quat_axis_angle(float ax, float ay, float az, float rad) {
 
 float quat_angle_between(Quat a, Quat b) {
     // atan2 on the vector part, not acos(w): acos is ill-conditioned at identity in
-    // float32 (one ulp of w below 1.0 reads as ~7e-4 rad), which flips with the host's
+    // float32 (one ulp of w below 1.0 reads as ~7e-4 rad), which flips with the platform's
     // FMA contraction. The vector part carries small angles at full precision.
     Quat d = quat_mul(quat_inv(a), b);
     const float v = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);

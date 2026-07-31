@@ -1,13 +1,13 @@
 class_name DebugViewSet
 extends Node
 
-# The F3 debug-view host — the world-space debug views (skeleton, user points,
+# The F3 debug-view owner — the world-space debug views (skeleton, user points,
 # collision, effect boxes, round trails, hit meshes, portal faces) plus the
 # pick highlight/click stack, built on demand and torn down per mission.
 # Owned by GameWorld as an internal child node (the NetSessionDrive pattern):
 # constructed in the world's _init, wired once through setup().
 #
-# The views add as CHILDREN OF THE WORLD NODE, not of this set: hosts and
+# The views add as CHILDREN OF THE WORLD NODE, not of this set: owners and
 # tests pin them as world-relative lookups (main_game_lifecycle_test resolves
 # SkeletonDebug/PickDebug/PickClickCatcher under the world) and they draw
 # world-space geometry over the world's subtree. Each view receives the WORLD
@@ -299,14 +299,14 @@ func is_hitbox_debug() -> bool:
 
 
 # --- Pick debug (the F3 pick list: world highlight + overlay-open clicking) --
-# The pick list itself is HOST-owned (crosshair picks work before F3 ever
+# The pick list itself is SHELL-owned (crosshair picks work before F3 ever
 # opens); the world only renders it and, while the overlay is up, feeds it
 # from clicks. Same build/free contract as every debug view.
 
 var _pick_list: NovaDebugPickList = null
 
 
-## Install (or clear, with null) the host's pick list: builds the world
+## Install (or clear, with null) the shell's pick list: builds the world
 ## highlight view that follows it. The click catcher (see below) picks into
 ## the same list.
 func set_pick_debug(pick_list: NovaDebugPickList) -> void:

@@ -104,7 +104,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"delete": { "type": "integer" },
 			}), Callable(self, "_tool_edit_widget"))
 	registry.register(McpToolDef.make("set_widget_actions",
-			"Replace ordered Actions and/or Sounds. Retail Action types: screen, window, url, form_post, glb_load, glb_loadandping, glb_filter, glb_filter_num, glb_ping, glb_join, tab, pop_screen, appmsg, lan_search, lan_join, mnx. Rows preserve type,target,state,file,source,field,test,has_target_form,target_form,external_browser,toggle. WINDOW state is SHOW/HIDE/ENABLE/DISABLE; toggle is a separate flag. TAB is focus/capture, not the visibility Tab convention (use WINDOW Actions). Host-owned actions are sandboxed in preview. Screen Actions require file= and same-document targets auto-fill it. Sounds are {state,trigger,file}.",
+			"Replace ordered Actions and/or Sounds. Retail Action types: screen, window, url, form_post, glb_load, glb_loadandping, glb_filter, glb_filter_num, glb_ping, glb_join, tab, pop_screen, appmsg, lan_search, lan_join, mnx. Rows preserve type,target,state,file,source,field,test,has_target_form,target_form,external_browser,toggle. WINDOW state is SHOW/HIDE/ENABLE/DISABLE; toggle is a separate flag. TAB is focus/capture, not the visibility Tab convention (use WINDOW Actions). Game-supplied actions are sandboxed in preview. Screen Actions require file= and same-document targets auto-fill it. Sounds are {state,trigger,file}.",
 			{
 				"id": { "type": "integer" },
 				"actions": { "type": "array", "items": { "type": "object", "properties": {
@@ -1255,7 +1255,7 @@ func _tool_set_actions(args: Dictionary, ctx: McpToolContext) -> Variant:
 							action["file"] = own_file
 							warnings.append("action %d: file auto-filled to '%s' (the game crashes on screen actions without file=)" % [i, own_file])
 					elif own_file.is_empty() or file.nocasecmp_to(own_file) != 0:
-						warnings.append("action %d: cross-menu target %s/%s not validated (jumps are host policy)" % [i, file, target])
+						warnings.append("action %d: cross-menu target %s/%s not validated (jumps are shell policy)" % [i, file, target])
 				"window":
 					var state := String(action.get("state", "")).to_lower()
 					if not WINDOW_STATES.has(state):

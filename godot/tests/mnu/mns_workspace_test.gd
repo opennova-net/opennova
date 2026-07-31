@@ -50,10 +50,10 @@ func _cleanup_dir(dir_path: String) -> void:
 func _mounted_workspace() -> Array:
 	var ws = MnuEditorWorkspaceScript.new()
 	ws._dock_tab = MnuEditorWorkspaceScript.DockTab.STYLES
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
-	return [ws, host]
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
+	return [ws, mount]
 
 
 func _collect_text(node: Node) -> String:
@@ -109,9 +109,9 @@ func test_document_open_clean_with_status() -> void:
 func test_mount_unmount_does_not_crash() -> void:
 	var pair := _mounted_workspace()
 	var ws = pair[0]
-	var host: Control = pair[1]
-	ws.unmount_viewport(host)
-	ws.mount_viewport(host)
+	var mount: Control = pair[1]
+	ws.unmount_viewport(mount)
+	ws.mount_viewport(mount)
 	assert_eq(ws.open_file(FIXTURE), OK, "open works across a remount")
 	ws.release_viewport()
 	pass_test("mount/unmount/remount survived")
@@ -273,7 +273,7 @@ func test_inspector_populates_for_selection() -> void:
 	add_child_autofree(dock)
 	assert_eq(ws.open_file(FIXTURE), OK)
 	ws.build_inspector(dock)
-	# The Styles tab page hosts the per-variable inspector below the editor.
+	# The Styles tab page mounts the per-variable inspector below the editor.
 	var styles_page: Control = ws._styles_page
 	assert_not_null(styles_page, "Styles tab page exists")
 	var text := _collect_text(styles_page)

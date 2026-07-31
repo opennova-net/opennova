@@ -708,7 +708,7 @@ func _find_mission_list() -> NovaMnuList:
 	return null
 
 
-# Accessors for hosts / tests.
+# Accessors for owners / tests.
 func get_menu() -> NovaMnuMenu:
 	return _menu
 

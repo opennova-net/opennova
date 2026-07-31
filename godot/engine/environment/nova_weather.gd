@@ -157,7 +157,7 @@ func _tick_weather(tick_count: int) -> void:
 	if env_data:
 		# lightning_rgb is a global parser color, so it takes the same envscale
 		# engine view as the world-driven static blocks and water. Keep a raw fallback
-		# for duck-typed legacy environment hosts.
+		# for duck-typed legacy environment owners.
 		if env.has_method("get_lightning_color_target"):
 			lightning = _vec3_color(env.get_lightning_color_target())
 		else:

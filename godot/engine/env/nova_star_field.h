@@ -14,7 +14,7 @@ namespace godot {
 // [orig: Star_GenerateInstanceTable @ 0x5ac850; render_star_field @ 0x5ad9c0].
 // The binding serves GODOT-space data (the engine->render basis
 // godot = (-engY, engZ, engX) / 65536, the Math_FixedPointToFloat3_YNegated
-// convention); NovaCelestial hosts the billboards. Like the water noise
+// convention); NovaCelestial owns the billboards. Like the water noise
 // field, the retail table content depends on the shared PRNG's call history
 // at load — the reimpl generates from a documented seed for a deterministic
 // witnessed-faithful instance.

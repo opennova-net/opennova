@@ -66,7 +66,7 @@ func refresh_points() -> void:
 	_rebuild()
 
 
-## Resolve the current source pose immediately. Debug hosts and tests use this
+## Resolve the current source pose immediately. Debug owners and tests use this
 ## instead of reaching through the process callback.
 func refresh_now() -> void:
 	_update_live_marker_positions()

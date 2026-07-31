@@ -125,7 +125,7 @@ struct EffectLoadReport {
 };
 
 // Catch-up aging is presentation compensation, not an arbitrary seek loop.
-// Four seconds leaves ample host/network headroom while bounding hostile or
+// Four seconds leaves ample local/network headroom while bounding hostile or
 // corrupted requests that would otherwise advance emitters billions of times.
 inline constexpr std::uint32_t kEffectInitialAgeTickLimit = 256;
 
@@ -332,7 +332,7 @@ public:
 	void reset_runtime_state();
 
 	// Advances all live emitters and reclaims completed groups without copying
-	// render values. Hosts that batch multiple fixed ticks materialize only the
+	// render values. Embedders that batch multiple fixed ticks materialize only the
 	// final frame through write_snapshot().
 	void advance_simulation(const EffectAdvanceRequest &request);
 	// Rewrites a retained snapshot in deterministic spawn order, reusing its

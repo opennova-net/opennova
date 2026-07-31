@@ -1199,7 +1199,7 @@ func test_inspector_has_no_embedded_runtime_controls() -> void:
 	await get_tree().process_frame
 
 	assert_null(inspector.find_child("MissionSimBar", true, false),
-		"mission testing is launched by the editor toolbar, not hosted by the inspector")
+		"mission testing is launched by the editor toolbar, not owned by the inspector")
 	assert_null(inspector.find_child("MissionDebugBtn", true, false),
 		"F3 belongs to the launched game")
 
@@ -2303,9 +2303,9 @@ func test_scripting_ref_integrity_flags_bad_group() -> void:
 	assert_true(ctx.inspector._scripting._sc_diagnostics.text.find("references group 7") != -1, "an out-of-range group ref is flagged")
 
 
-# --- Two-host split: browser left, editor in the right dock -------------------
-# When the workspace forwards a dock host, the per-selection editor + the Mission form mount in the
-# dock while the mode tabs + lists stay in the inspector's own _root. With no host (the one-arg
+# --- Two-mount split: browser left, editor in the right dock -------------------
+# When the workspace forwards a dock mount, the per-selection editor + the Mission form mount in the
+# dock while the mode tabs + lists stay in the inspector's own _root. With no mount (the one-arg
 # setup the rest of this file uses) the whole tree stays under _root, so every find_child /
 # is_visible_in_tree assertion above keeps working unchanged.
 
@@ -2334,7 +2334,7 @@ func test_split_editor_lands_in_dock_browser_stays_left() -> void:
 	assert_not_null(ctx.dock.find_child("MissionProp_mission_name", true, false), "the Mission header form is in the dock")
 
 
-func test_split_null_host_keeps_everything_under_root() -> void:
+func test_split_null_mount_keeps_everything_under_root() -> void:
 	# The regression guard for the one-arg path the rest of this file uses: with no dock, the editor
 	# subtree falls back under _root, so find_child / is_visible_in_tree still reach it.
 	var ctx := _make(_sample_entity())
@@ -2380,11 +2380,11 @@ func test_split_set_detail_mount_null_evacuates_without_freeing() -> void:
 	# Re-mount (switch-back).
 	ctx.inspector.set_detail_mount(ctx.dock)
 	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "re-mounting puts it back in the dock")
-	# A repeated set with the same host is an idempotent no-op (the shell re-asserts the dock on
+	# A repeated set with the same mount is an idempotent no-op (the shell re-asserts the dock on
 	# every editor-state sync).
 	var parent_before: Node = ctx.inspector._detail_root.get_parent()
 	ctx.inspector.set_detail_mount(ctx.dock)
-	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-host re-mount does not thrash the subtree")
+	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-mount re-mount does not thrash the subtree")
 
 
 # --- B8: Mission-tab bulk re-ground button --------------------------------------

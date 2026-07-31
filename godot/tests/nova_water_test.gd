@@ -63,9 +63,9 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	water.set_world_rendering_enabled(false)
 	simulate(water, 1, TICK)
 	assert_true(water.is_water_active(),
-			"retained authored height survives an unloaded host")
+			"retained authored height survives an unloaded owner")
 	assert_false(water.is_water_render_active(),
-			"host lifecycle gates render consumers independently of height")
+			"owner lifecycle gates render consumers independently of height")
 	assert_false(water.mesh_instance.visible)
 	assert_eq(water.reflection_viewport.render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)

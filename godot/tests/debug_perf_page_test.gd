@@ -67,12 +67,12 @@ func test_render_timeline_builds_the_span_tree_by_depth() -> void:
 
 
 func test_span_tree_keeps_time_readable_in_a_narrow_perf_page() -> void:
-	var host := Control.new()
-	host.size = Vector2(388, 560)
-	add_child_autofree(host)
+	var mount := Control.new()
+	mount.size = Vector2(388, 560)
+	add_child_autofree(mount)
 	var pane: DebugPerfPage = PaneScript.new()
 	pane.setup(NovaDebugContext.new())
-	host.add_child(pane)
+	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var long_label := \
 			"Mission load with a deliberately long authored path and diagnostic context ".repeat(4)
@@ -80,7 +80,7 @@ func test_span_tree_keeps_time_readable_in_a_narrow_perf_page() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+	assert_lte(pane.get_combined_minimum_size().x, mount.size.x,
 			"live span text cannot widen the Perf page past its dock")
 	assert_lte(pane.span_tree.position.x + pane.span_tree.size.x, pane.size.x,
 			"the span tree remains inside the narrow content column")
@@ -130,12 +130,12 @@ func test_monitors_populate() -> void:
 
 
 func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> void:
-	var host := Control.new()
-	host.size = Vector2(388, 900)
-	add_child_autofree(host)
+	var mount := Control.new()
+	mount.size = Vector2(388, 900)
+	add_child_autofree(mount)
 	var pane: DebugPerfPage = PaneScript.new()
 	pane.setup(NovaDebugContext.new())
-	host.add_child(pane)
+	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var long_label := \
 			"Mission load with objects effects terrain textures and a long authored path ".repeat(5)
@@ -144,8 +144,8 @@ func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> 
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var mount_rect := host.get_global_rect()
-	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+	var mount_rect := mount.get_global_rect()
+	assert_lte(pane.get_combined_minimum_size().x, mount.size.x,
 			"load summaries and monitor text cannot widen Perf past the dock")
 	assert_lte(pane.history_option.get_global_rect().end.x, mount_rect.end.x,
 			"the retained-load selector clips instead of widening every row")
@@ -214,7 +214,7 @@ func test_refresh_is_the_overlays_entry_point() -> void:
 
 
 func test_overlay_refreshes_perf_without_a_live_sim() -> void:
-	# The ring is host-wide state: "that load was slow, let me look" must work
+	# The ring is mount-wide state: "that load was slow, let me look" must work
 	# from the menu, after the mission (and its runtime) are gone.
 	var overlay = add_child_autofree(OverlayScript.new(
 			"user://test_perf_overlay_%d.cfg" % Time.get_ticks_usec()))

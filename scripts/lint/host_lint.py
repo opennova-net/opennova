@@ -92,7 +92,7 @@ COMMENT_MARKERS = {
 FROZEN_TOKENS = (
     "ClientHostRequest", "ClientHostUpdate", "ClientStopHosting",
     "ClientHostPlayerAdded", "ClientHostPlayerRemoved", "ServerHostResult",
-    "HostAcceptEvent", "HostSessionAccept", "\"HostSetup\"", "\"Host\"",
+    "HostAcceptEvent", "HostSessionAccept", "\"HostSetup\"", "_var_list(\"Host\"",
     "MULTI_PLAYER_HOST", "HG_SERVEPLAY", "HG_SERVEONLY", "HOST_URL",
     "HOSTKEY", "hostIp", "hostPort", "/api/hosts", "active_hosts",
     "host_players",
@@ -168,8 +168,11 @@ class Allowlist:
         return any(fnmatch.fnmatch(rel, g) for g in self.comment_ok_paths)
 
     def line_allowed(self, rel: str, line: str) -> bool:
-        key = f"{rel}|{line.strip()}"
-        return any(entry in key for entry in self.line_allow)
+        for entry in self.line_allow:
+            path_sub, _, frag = entry.partition("|")
+            if path_sub in rel and frag and frag in line:
+                return True
+        return False
 
 
 def scan(allow: Allowlist):
@@ -282,6 +285,8 @@ def frozen_audit(diff_range: str) -> int:
 
 
 def main() -> int:
+    # Windows consoles default to cp1252; doc lines carry arrows/dashes.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", action="store_true",
                         help="list every uncovered hit, grouped by file")

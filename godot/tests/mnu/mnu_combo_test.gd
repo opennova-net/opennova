@@ -1,7 +1,7 @@
 extends GutTest
 
 # M9.4 gate: NovaMnuCombo builds a closed TextureButton + selected-text label and an
-# in-tree popup styled from LIST_BOX. Options seed from the file or a host populates
+# in-tree popup styled from LIST_BOX. Options seed from the file or the shell populates
 # them at runtime; selection relays through the menu. The popup never opens in
 # edit_mode.
 #
@@ -10,7 +10,7 @@ extends GutTest
 # [orig: dispatch_mouse_event @ 0x63ab00; scene_end_frame @ 0x63e600;
 # CWnd_IsVisibleInHierarchy @ 0x646290], only one dropdown is open per scene
 # [orig: combobox_handle_event @ 0x65c190 (@ 0x65c210)], and a press outside both
-# the closed cell and the list closes it, consumed [@ 0x65c290]. The reimpl hosts
+# the closed cell and the list closes it, consumed [@ 0x65c290]. The reimpl parks
 # that as a full-menu catcher overlay added as the menu's LAST child, so it wins
 # Godot picking/draw by tree order; the tests below pin the structure and the
 # close semantics against the shipped jo_player.mnu combo stack the bug reproduced
@@ -63,7 +63,7 @@ func _combo(menu: NovaMnuMenu) -> NovaMnuCombo:
 
 
 func _overlay(menu: NovaMnuMenu) -> Control:
-	# The popup host: a transparent full-menu catcher parked on the menu itself.
+	# The popup mount: a transparent full-menu catcher parked on the menu itself.
 	var overlays: Array[Node] = []
 	for child in menu.get_children():
 		if child.name.begins_with("ComboPopupOverlay") and not child.is_queued_for_deletion():
@@ -171,7 +171,7 @@ func test_combo_containers_presence_and_layout_are_authoritative() -> void:
 func test_combo_runtime_populate_and_select() -> void:
 	var menu := _build_menu()
 	var combo := _combo(menu)
-	combo.set_items(["Alpha", "Bravo"])  # host repopulates (server browser refresh)
+	combo.set_items(["Alpha", "Bravo"])  # shell repopulates (server browser refresh)
 	assert_eq(combo.get_item_count(), 2, "set_items replaced the seed")
 	watch_signals(menu)
 	watch_signals(combo)
@@ -236,11 +236,11 @@ func test_combo_popup_uses_authored_listbox_rect() -> void:
 	combo.close_popup()
 
 
-func test_combo_popup_overlay_hosts_exclusive_input() -> void:
+func test_combo_popup_overlay_owns_exclusive_input() -> void:
 	# While open, everything under the overlay is mouse-dead: the catcher is the
 	# menu's LAST child (wins Godot picking and draw by tree order), covers the
 	# whole menu, and stops mouse events; the popup box sits inside it so its rows
-	# stay pickable. This is the reimpl host of the original's exclusive routing
+	# stay pickable. This is the reimpl home of the original's exclusive routing
 	# [orig: 0x63abb5 / 0x63e691 / 0x646299] (D-MNU-11).
 	var menu := _build_menu()
 	var combo := _combo(menu)
@@ -330,7 +330,7 @@ func test_screen_change_closes_popup() -> void:
 
 
 func test_combo_popup_fallback_when_no_listbox_rect() -> void:
-	# A bare combo with no owning menu (host/test builds; the original has no such
+	# A bare combo with no owning menu (shell/test builds; the original has no such
 	# case) keeps the legacy child-of-combo popup: dropped below, clamped to the
 	# window, scrolling. No overlay exists on this path.
 	var combo := NovaMnuCombo.new()

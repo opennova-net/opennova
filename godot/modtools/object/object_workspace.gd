@@ -36,7 +36,7 @@ var environment_editor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _mount: ViewportMount
-# The asset-dock detail pane, hosted by the framework's DetailDockMount: it owns
+# The asset-dock detail pane, mounted by the framework's DetailDockMount: it owns
 # the lazy panel, the conditional mount, and the rebuild-only-on-real-change
 # policy (a routine editor-state sync — e.g. a time-of-day drag — must never
 # tear the pane down; that was the TOD lag).

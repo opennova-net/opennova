@@ -2,13 +2,13 @@ class_name MusicBankMode
 extends Control
 
 # View of the current document's NovaSbfBank. The track Tree lists every
-# entry (#, name, preview button column); the toolbar above hosts the
+# entry (#, name, preview button column); the toolbar above carries the
 # reorder / rename / replace / add / delete affordances. The Replace WAV
 # and Add Track flows arrive in Phase E3.
 
 ## Import/replace failures surface twice on purpose: the console line stays at
 ## the source (push_error) and this signal carries the same message upward for
-## the shell toast (root relays it to the workspace; standalone hosts just log).
+## the shell toast (root relays it to the workspace; standalone owners just log).
 signal error_reported(message: String)
 
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")

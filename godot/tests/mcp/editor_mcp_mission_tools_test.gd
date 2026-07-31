@@ -8,7 +8,7 @@ extends GutTest
 #
 # Assertions read mission records (never MultiMesh readbacks — headless gotcha).
 
-# The editor scene: an EditorApp root hosting the TerrainEditor node, whose
+# The editor scene: an EditorApp root holding the TerrainEditor node, whose
 # open_trn() loads live terrain heights.
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const MissionWorkspace := preload("res://modtools/mission/mission_workspace.gd")
@@ -383,9 +383,9 @@ func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -
 	var out: Dictionary = result.structured
 	assert_eq(String(out["runtime_parity"]["shared_rules"]), "MissionRuntime")
 	assert_eq(String(out["runtime_parity"]["editor_mode"]), "static_analysis",
-		"the editor predicts from authored data instead of hosting gameplay")
-	assert_eq(String(out["runtime_parity"]["live_host"]), "GameWorld",
-		"only the standalone GameWorld hosts the live mission")
+		"the editor predicts from authored data instead of running gameplay")
+	assert_eq(String(out["runtime_parity"]["live_runtime"]), "GameWorld",
+		"only the standalone GameWorld runs the live mission")
 	var mounts: Array = out["mounts"]
 	assert_eq(mounts.size(), 1)
 	var row: Dictionary = mounts[0]

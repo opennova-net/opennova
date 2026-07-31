@@ -364,7 +364,7 @@ func test_pending_add_opens_the_new_rows_editor():
 	v._add_kind_at(6, -1)  # "set a variable" -> default "Var00 = 0"
 	assert_signal_emitted_with_parameters(v, "add_statement_requested",
 		[0, PackedStringArray(["Var00 = 0"])])
-	# The host would apply + re-render; simulate the post-add section.
+	# The owner would apply + re-render; simulate the post-add section.
 	v.show_section(_sec([
 		{"kind": "assign", "code_offset": 0, "var_name": "Var00", "var_offset": 0,
 			"is_local": false, "rhs": "0", "text": "Var00 = 0"},

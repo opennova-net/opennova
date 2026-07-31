@@ -128,7 +128,7 @@ func set_class_selection_enabled(enabled: bool) -> void:
 	_class_selection_enabled = enabled
 
 
-# Inject a pre-loaded weapon.def database (ADR 0018 seam: tests and hosts that
+# Inject a pre-loaded weapon.def database (ADR 0018 seam: tests and owners that
 # already carry the db hand it in; on_menu_built otherwise loads it from the root).
 func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
 	_weapons = weapons

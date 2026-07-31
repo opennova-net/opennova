@@ -14,7 +14,7 @@ const MENU_STYLE := "res://../fixtures/mns/menu_style.mns"
 const SAVE_DIR := "user://mcp_menu_tools_test"
 
 var ws: RefCounted
-var host: Control
+var mount: Control
 var service: EditorMcpService
 var shell: Node
 
@@ -43,9 +43,9 @@ func before_each() -> void:
 	if FileAccess.file_exists(MnuWorkspaceScript.STATE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(MnuWorkspaceScript.STATE_PATH))
 	ws = MnuWorkspaceScript.new()
-	host = add_child_autofree(Control.new())
-	host.size = Vector2(800, 600)
-	ws.mount_viewport(host)
+	mount = add_child_autofree(Control.new())
+	mount.size = Vector2(800, 600)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	shell = add_child_autofree(ShellStub.new())
 	shell._workspaces = { 0: ws }

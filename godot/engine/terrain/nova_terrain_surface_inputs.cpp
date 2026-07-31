@@ -401,7 +401,7 @@ bool NovaTerrainSurfaceInputs::rebuild_detail_textures() {
 
 	// Retail's t0 is the per-patch tile-cache render target whose resolution
 	// drops with the patch LOD (1024 >> lod per 512u quadrant); a box-mipped
-	// colormap is the byte-closest hosted surrogate while the RT lifecycle
+	// colormap is the byte-closest ported surrogate while the RT lifecycle
 	// stays open under D-TERRAIN-7.
 	opennova::terrain::Rgba8Image colormap_source;
 	if (texture_to_rgba8(terrain_data->get_colormap(), colormap_source)) {

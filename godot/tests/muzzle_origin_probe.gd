@@ -12,7 +12,7 @@ extends SceneTree
 #     player's EYE anchor, and the origin we put on the wire for our own shots,
 #   * bone 16 "BN17 R Hand" — the held-weapon joint,
 #   * the 0.9 u chest-lift fallback (pos.z + 0xE666) the AI fire path uses when no
-#     host-pushed muzzle is fresh,
+#     binding-pushed muzzle is fresh,
 #   * the M4_3RD gfx3's MFLASH01 userpoint carried through
 #     PresentHeldWeapon.attach_transform (both attach frames) — the REAL muzzle of the
 #     gun we actually draw in the hand.

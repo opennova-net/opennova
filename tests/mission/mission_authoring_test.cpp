@@ -1,5 +1,5 @@
 // Unit test for the mission authoring facade (mission/authoring.h): the
-// editing policies the editor host used to hand-roll — the item-type -> entity
+// editing policies the editor shell used to hand-roll — the item-type -> entity
 // list table, the path-consistent marker item-id policy, and the author-time
 // Ground-userpoint bake [orig: sub_401A90, dfx2med.exe] — now portable engine
 // capabilities over MissionDocument.

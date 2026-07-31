@@ -90,8 +90,8 @@ struct Action {
   std::string type;   // "screen", "window", "POP_SCREEN"
   std::string state;  // "SHOW", "HIDE" (for window type)
   std::string file;   // Target .mnu file (for screen type)
-  std::string source; // Host-owned source name (GLB/LAN/form actions)
-  std::string field;  // Host-owned field name (form/filter actions)
+  std::string source; // Shell-owned source name (GLB/LAN/form actions)
+  std::string field;  // Shell-owned field name (form/filter actions)
   bool has_target_form = false;
   int target_form = 0;
   bool toggle = false;
@@ -237,7 +237,7 @@ struct TableBody {
   bool bitmap_draw = false;      // BITMAP_DRAW flag - render images in this column
   std::string bitmap_flags;      // BITMAP_FLAGS (e.g., "STANDARD_TRANSPARENT")
   bool scale_bitmap = false;     // SCALE_BITMAP flag
-  bool custom_draw = false;      // CUSTOM_DRAW flag - host-drawn cell
+  bool custom_draw = false;      // CUSTOM_DRAW flag - shell-drawn cell
 };
 
 // Value substitution for table cells (renders image based on value).

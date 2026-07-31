@@ -5,10 +5,10 @@ extends RefCounted
 # motion shape): _create_material and its texture/shadow-receiver helpers,
 # the dynamic-material classifier, the EnvLightValues typed record, and
 # the static env-value derivation the mission placer's static batches also
-# consume (via the host's static delegates). ALL state and constants stay
+# consume (via the owner's static delegates). ALL state and constants stay
 # on the composing NovaObjectModel, reached through `_m`; the statics use
-# no instance state and read the host's DEFAULT_* lighting registers via
-# the NovaObjectModel class name. The host is a Node3D -- manually
+# no instance state and read the owner's DEFAULT_* lighting registers via
+# the NovaObjectModel class name. The owner is a Node3D -- manually
 # managed, not refcounted -- so this plain back-reference cannot cycle.
 
 var _m

@@ -182,7 +182,7 @@ func test_leading_frame_enter_becomes_the_inputs_card():
 	var card := v.inputs_card()
 	assert_not_null(card, "leading frame setup -> Inputs from caller card")
 	assert_eq((card as MusicInputsCard).input_rows().size(), 2, "one row per banked value")
-	assert_eq(v.section_inputs_count(), 2, "the host still reads the total")
+	assert_eq(v.section_inputs_count(), 2, "the owner still reads the total")
 	# While the pc sits on the hidden frame op, the first real row glows.
 	v.set_active_offset(0)
 	assert_eq((v.top_level_rows()[0] as Control).modulate, ACTIVE,
@@ -238,7 +238,7 @@ func test_begin_tail_renders_behind_the_divider():
 	var divider := v.dispatch_divider()
 	assert_not_null(divider, "Begin's leaked main loop sits behind a divider")
 	assert_null(v.inputs_card(), "a TAIL frame op is engine payload, not a caller card")
-	assert_eq(v.section_inputs_count(), 2, "the host still reads Begin's input total")
+	assert_eq(v.section_inputs_count(), 2, "the owner still reads Begin's input total")
 	# The divider explains the engine-handed values in words.
 	var explain := ""
 	for c in divider.get_child(0).get_children():

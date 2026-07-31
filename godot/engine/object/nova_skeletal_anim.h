@@ -25,9 +25,9 @@ namespace godot {
 class NovaResourceRoot;
 class Skeleton3D;
 
-// Host adapter over the portable .bad/.adm skeletal runtime (libs/anim + libs/bad +
+// Godot adapter over the portable .bad/.adm skeletal runtime (libs/anim + libs/bad +
 // libs/adm). Loads a model's .adm (a key -> .bad-basename map), parses + samples every
-// referenced .bad clip, and exposes Godot-typed results so the GDScript host can build a
+// referenced .bad clip, and exposes Godot-typed results so the GDScript owner can build a
 // Skeleton3D + Skin + drive per-bone poses:
 //   - get_skeleton_bones(): bind-pose bones (name/parent/parent-local rest Transform3D)
 //   - eval_pose(key, t):    per-bone parent-local pose Transform3D at playhead t (seconds)
@@ -194,7 +194,7 @@ public:
 	PackedInt32Array get_overlay_classes() const;
 
 	// eval_pose plus the third-person aim overlay — the torso bend. p_deltas is one
-	// node-frame rotation Basis per anim::OverlayClass (the host builds them from
+	// node-frame rotation Basis per anim::OverlayClass (the owner builds them from
 	// NovaSimulation.get_local_player_aim_overlay() angles via the single-sourced
 	// MissionObjectPlacer.bms_to_godot_basis); p_classes from get_overlay_classes().
 	// Only local rotations change — origins survive the pivot re-anchor identically.

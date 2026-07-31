@@ -67,7 +67,7 @@ func test_inspector_rename_updates_row_and_announces():
 	vi.names_changed.connect(func(): announced.append(1))
 	vi._apply_rename(5, "Tension")
 	assert_eq(vi.get_row_label_text(5), "Tension (Var05)", "the inspector row shows the new name")
-	assert_eq(announced, [1], "names_changed lets the host refresh its other surfaces")
+	assert_eq(announced, [1], "names_changed lets the owner refresh its other surfaces")
 
 
 func test_inspector_rename_disabled_without_profile_path():

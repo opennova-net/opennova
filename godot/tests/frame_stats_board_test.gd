@@ -62,7 +62,7 @@ func test_drain_reports_render_frames_and_resets_atomically() -> void:
 	await get_tree().process_frame
 	var first := board.drain()
 	assert_true(first.frames >= 2,
-			"window length comes from real render frames, host-independent")
+			"window length comes from real render frames, owner-independent")
 	assert_eq(first.sums[FrameStatsBoard.FRAME_WALL], 1000)
 	var second := board.drain()
 	assert_eq(second.sums[FrameStatsBoard.FRAME_WALL], 0,

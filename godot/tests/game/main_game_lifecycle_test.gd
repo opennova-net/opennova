@@ -161,7 +161,7 @@ class EntityRuntimeStub:
 		return sim
 
 
-class EntityHostHarness:
+class EntityShellHarness:
 	extends "res://game/main_game.gd"
 
 	var runtime_stub := EntityRuntimeStub.new()
@@ -179,12 +179,12 @@ var _shell: Node = null
 
 func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> void:
 	var shell: Node = autofree(MAIN_GAME_SCENE.instantiate())
-	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
-	assert_eq(debug_host.debug_set_audio_bus_mute("__missing_bus__", true),
+	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
+	assert_eq(debug_adapter.debug_set_audio_bus_mute("__missing_bus__", true),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_host.debug_set_audio_bus_volume("Master", INF),
+	assert_eq(debug_adapter.debug_set_audio_bus_volume("Master", INF),
 			ERR_INVALID_PARAMETER)
-	assert_eq(debug_host.debug_set_audio_bus_volume(
+	assert_eq(debug_adapter.debug_set_audio_bus_volume(
 			"Master", NovaDebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
@@ -197,10 +197,10 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 		"solo": AudioServer.is_bus_solo(bus),
 		"bypass": AudioServer.is_bus_bypassing_effects(bus),
 	}
-	assert_eq(debug_host.debug_set_audio_bus_volume("SFX", -14.5), OK)
-	assert_eq(debug_host.debug_set_audio_bus_mute("SFX", true), OK)
-	assert_eq(debug_host.debug_set_audio_bus_solo("SFX", true), OK)
-	assert_eq(debug_host.debug_set_audio_bus_bypass("SFX", true), OK)
+	assert_eq(debug_adapter.debug_set_audio_bus_volume("SFX", -14.5), OK)
+	assert_eq(debug_adapter.debug_set_audio_bus_mute("SFX", true), OK)
+	assert_eq(debug_adapter.debug_set_audio_bus_solo("SFX", true), OK)
+	assert_eq(debug_adapter.debug_set_audio_bus_bypass("SFX", true), OK)
 	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
 	assert_true(AudioServer.is_bus_mute(bus))
 	assert_true(AudioServer.is_bus_solo(bus))
@@ -212,10 +212,10 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
-	var shell = autofree(EntityHostHarness.new())
-	var debug_host: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
+	var shell = autofree(EntityShellHarness.new())
+	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 
-	var page: Dictionary = debug_host.get_mcp_game_entities(0, 64)
+	var page: Dictionary = debug_adapter.get_mcp_game_entities(0, 64)
 
 	assert_eq(page["total"], 3)
 	assert_eq(page["entities"][0]["index"], 0)
@@ -233,8 +233,8 @@ func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> voi
 	assert_eq(page["entities"][2]["net_id"], 111)
 	assert_eq(page["entities"][2]["ai_index"], 0)
 	assert_gt(shell.runtime_stub.sim.present_snapshot_reads, 0)
-	assert_eq(debug_host.get_mcp_game_entity(0)["name"], "AI one")
-	assert_eq(debug_host.get_mcp_game_entity(0)["ai_index"], 1)
+	assert_eq(debug_adapter.get_mcp_game_entity(0)["name"], "AI one")
+	assert_eq(debug_adapter.get_mcp_game_entity(0)["ai_index"], 1)
 
 
 func before_each() -> void:
@@ -632,7 +632,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	var view: Dictionary = payload.get("view", {})
 	var camera_snapshot: Dictionary = view.get("camera", {})
 	assert_false(camera_snapshot.is_empty(),
-			"the game host supplies its actual foliage-dispatch camera")
+			"the game shell supplies its actual foliage-dispatch camera")
 	assert_eq(String(camera_snapshot.get("mode", "")), "first_person")
 	var actual_camera := _shell.get_node("Camera3D") as Camera3D
 	var dumped_camera: Dictionary = camera_snapshot.get("position_godot", {})
@@ -770,7 +770,7 @@ func _make_shell():
 	await get_tree().process_frame
 	var menu_shell = shell.get_node("MenuLayer/MenuShell")
 	assert_eq(menu_shell.get_current_menu_file().to_lower(),
-			"main.mnu", "the packed fixture boots through the real menu host")
+			"main.mnu", "the packed fixture boots through the real menu shell")
 	return shell
 
 

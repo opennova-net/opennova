@@ -1,7 +1,7 @@
 """DCC-neutral assembly of BAD/ADM export data — the inverse of animation_build.
 
 A DCC adapter (Blender or 3ds Max) walks its armature and converts each frame's
-transforms into BAD coordinate space using the host-specific helpers here; this
+transforms into BAD coordinate space using the DCC-specific helpers here; this
 module then stacks those frames into the neutral carriers that the C serializer
 (``bad_write``/``adm_write``) consumes. It is pure tuples + math so it runs in
 Blender, 3ds Max's bundled Python, and ordinary CI.

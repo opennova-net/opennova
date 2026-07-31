@@ -237,7 +237,7 @@ func set_asset_dock(dock: Control) -> void:
 	if _asset_dock.has_method("set_editor"):
 		_asset_dock.set_editor(terrain_editor)
 	# "Used by" (which missions sit on this terrain) rides the shell's reference
-	# index; headless hosts get no strip. Injected here because the dock is the
+	# index; headless owners get no strip. Injected here because the dock is the
 	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
 	var services := get_reference_services()

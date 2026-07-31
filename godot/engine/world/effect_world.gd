@@ -310,7 +310,7 @@ func spawn_effect_request(name: String, transform: Transform3D,
 ## ~90 ms hitch on the player's first live shot. Retail pays this at load —
 ## CEffectSystem_Init loads every .ptl AND its textures up front
 ## [orig: @ 0x5f6070 <- Game_StartMission @ 0x524980]; the deferred-resolve
-## host path is what made first fire hitch. The caller renders a frame or two
+## shell path is what made first fire hitch. The caller renders a frame or two
 ## (advancing the fixed tick so fresh emitters actually emit and draw), then
 ## clears the warm spawns via reset_runtime_state(). Returns spawn count.
 func warm_all_effects(position: Vector3) -> int:

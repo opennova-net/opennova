@@ -27,7 +27,7 @@ func _init(document: Object, limit: int = 100) -> void:
 	_limit = limit
 
 
-func _host() -> Object:
+func _document() -> Object:
 	return _document_ref.get_ref() if _document_ref != null else null
 
 
@@ -41,7 +41,7 @@ func _ensure_history() -> NovaEditHistory:
 ## Open an editing burst: the next commit_edit() folds every change in between
 ## into a single undo step. Idempotent while a session is open.
 func begin_edit() -> void:
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return
 	var snap: Variant = document._snapshot()
@@ -53,7 +53,7 @@ func begin_edit() -> void:
 ## Close the burst; records one step iff the document actually changed
 ## (equal-gated in the core), marking dirty and notifying on a real change.
 func commit_edit() -> void:
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return
 	var snap: Variant = document._snapshot()
@@ -73,7 +73,7 @@ func commit_edit() -> void:
 func record_shadow_step(before: Variant) -> bool:
 	if before == null or _burst_open:
 		return false
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return false
 	var live: Variant = document._snapshot()
@@ -93,7 +93,7 @@ func flush_edit() -> void:
 ## the caller applies itself (silent: the caller emits its own signals after
 ## mutating). Clears redo.
 func record_undo_step() -> void:
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return
 	var snap: Variant = document._snapshot()
@@ -104,7 +104,7 @@ func record_undo_step() -> void:
 ## Bracket a single structural mutation as one equal-gated undo step, marking
 ## dirty and notifying ("step") only when it really changed the document.
 func push_undo_step(mutation: Callable) -> void:
-	var document := _host()
+	var document := _document()
 	if document == null:
 		mutation.call()
 		return
@@ -133,7 +133,7 @@ func undo() -> void:
 	flush_edit()
 	if _history == null:
 		return
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return
 	var live: Variant = document._snapshot()
@@ -152,7 +152,7 @@ func redo() -> void:
 	flush_edit()
 	if _history == null:
 		return
-	var document := _host()
+	var document := _document()
 	if document == null:
 		return
 	var live: Variant = document._snapshot()

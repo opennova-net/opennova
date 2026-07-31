@@ -45,10 +45,10 @@ func _ready() -> void:
 
 	# Sanity: the standalone GameplayOverlay must carry the root viewport rect;
 	# a zero size here clips the HUD and armory to nothing.
-	var hud_host := _find_by_method(get_tree().root, "hud_objective_line")
-	if hud_host != null:
-		hud_host.tick()  # force the lazy HUD build
-		var hud = hud_host.get_hud()
+	var hud_presenter := _find_by_method(get_tree().root, "hud_objective_line")
+	if hud_presenter != null:
+		hud_presenter.tick()  # force the lazy HUD build
+		var hud = hud_presenter.get_hud()
 		if hud != null:
 			var ov: Control = hud.get_parent()
 			print("[wr] overlay=%s rect=%s hud_rect=%s" % [
@@ -202,7 +202,7 @@ func _anim_trace() -> void:
 			break
 		await get_tree().process_frame
 	if part == null:
-		var diag := "no viewmodel part: host=%s vm=%s def=%s" % [
+		var diag := "no viewmodel part: presenter=%s vm=%s def=%s" % [
 				str(_presenter != null),
 				str(_presenter.viewmodel()) if _presenter != null else "-",
 				str(_world.local_player_viewmodel_def() != null)

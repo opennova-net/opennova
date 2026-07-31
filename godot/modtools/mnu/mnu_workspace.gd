@@ -1,9 +1,9 @@
 class_name MnuEditorWorkspace
 extends EditorWorkspace
 
-# Adapter for the Menus workspace. The main viewport hosts one shared MnuEditor
+# Adapter for the Menus workspace. The main viewport owns one shared MnuEditor
 # (widget tree + WYSIWYG preview) rebound across document tabs; the right dock
-# hosts a [Properties | Styles] tab strip. Properties is the per-widget inspector;
+# owns a [Properties | Styles] tab strip. Properties is the per-widget inspector;
 # Styles is the menu stylesheet editor (variables/source) plus its per-variable
 # inspector. Both tabs operate on shared workspace state — the canvas IS the live
 # stylesheet preview, so unsaved Styles edits show on every Menus canvas refresh.

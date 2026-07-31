@@ -49,7 +49,7 @@ extends RefCounted
 #     has_unsaved_changes override.
 #   Shell services (call, don't override): _notify_status, _sync_shell,
 #     _mount_under_shell, get_reference_services, _resource_root — the guarded
-#     seams to the hosting shell. Workspaces call these instead of duck-typing
+#     seams to the owning shell. Workspaces call these instead of duck-typing
 #     editor_shell; every one is a safe no-op without a shell (headless tests).
 #   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
 #   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
@@ -530,7 +530,7 @@ func redo() -> void:
 
 
 # --- Shell services ---------------------------------------------------------
-# The guarded seams to the hosting shell. Workspaces call these instead of
+# The guarded seams to the owning shell. Workspaces call these instead of
 # duck-typing editor_shell (the has_method guards live here, in one place);
 # every one is a safe no-op without a shell (headless tests).
 

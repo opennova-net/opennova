@@ -4,7 +4,7 @@ extends Control
 ## The runtime in-game HUD overlay. A full-rect Control on the gameplay HUD layer
 ## (a child of the $HUD CanvasLayer, so the shell's _set_hud_visible hides it behind
 ## menus). It draws the witnessed HUD elements from a hudpos.def layout (NovaHudPos)
-## plus a per-frame "info" dict the host rebuilds each frame — mirroring the original,
+## plus a per-frame "info" dict the presenter rebuilds each frame — mirroring the original,
 ## which rebuilds its per-frame HUD info struct every frame and then dispatches the
 ## element draws. [orig: HUD_BuildEntityInfo @0x4b8440 -> HUD_RenderOverlays @0x5a7bb0]
 ##
@@ -79,7 +79,7 @@ var _stance_prev := 0
 var _stance_cur := 0
 var _stance_stamp := 0
 
-# Per-frame state, rebuilt by the host. Defaults keep the HUD sane before the first update.
+# Per-frame state, rebuilt by the presenter. Defaults keep the HUD sane before the first update.
 var _info: Dictionary = {
 	"health_fraction": 1.0,
 	"stance": 0,
@@ -281,7 +281,7 @@ func _draw() -> void:
 	# This overlay is a Control parented directly to a CanvasLayer, which does not drive a child
 	# Control's layout — so our own `size` can stay (0,0) and every scaled element would collapse.
 	# Draw against the viewport rect, which is the real screen the original scales its HUD to.
-	# A host that sizes this Control (tests pin exact geometry) wins over the
+	# An owner that sizes this Control (tests pin exact geometry) wins over the
 	# viewport rect.
 	# [orig: overlayCtx @0x24c1420 screen_w/h -> Viewport_ScaleToVirtualCoords @0x5d2b20]
 	var surface := size if size.x > 1.0 and size.y > 1.0 else get_viewport_rect().size
@@ -456,7 +456,7 @@ func _draw_power_bar(surface: Vector2) -> void:
 
 
 # The waypoint name + distance label at the HUDWPDINFO anchor. Gates: the mission
-# ShowWaypoints flag and a live current waypoint (the host omits the entry
+# ShowWaypoints flag and a live current waypoint (the presenter omits the entry
 # otherwise). Field 3 of the token hides only the wireframe BOX (which frames the
 # distance number); the element itself has no hide field. Align: 0 = name to the
 # right of the distance, 1 = name right-aligned at the anchor with the distance
@@ -516,7 +516,7 @@ func _draw_waypoint_info(surface: Vector2) -> void:
 # (x=15, y=240 design), the gametext header, then one row per shown win
 # condition — a checkbox that gains a checkmark when the subgoal is won, the
 # row text dimming to gray on completion (the witnessed +0xFF808081 color fold
-# collapses white -> 0x808080 gray at full alpha). Host feeds resolved rows
+# collapses white -> 0x808080 gray at full alpha). The presenter feeds resolved rows
 # ({text, done}); an empty array hides the panel (the retail toggle's off
 # state). Stand-ins recorded as D-HUD-18: the exact checkbox line geometry
 # (the ten draw_clipped_2d_line calls decompile with elided operands) and the
@@ -572,10 +572,10 @@ func _draw_objectives_panel(surface: Vector2) -> void:
 		row_y += row_h + 4.0
 
 
-# The floating seat/armory attach labels, host-projected to screen pixels: each entry
+# The floating seat/armory attach labels, presenter-projected to screen pixels: each entry
 # {screen: Vector2, text: String, nearest: bool}. The nearest candidate draws the full
 # HUD text color; every other label the witnessed dim transform. Distance/LOS/occupancy
-# selection happened sim-side; the host dropped behind-camera points at projection.
+# selection happened sim-side; the presenter dropped behind-camera points at projection.
 # [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — called unconditionally by
 #  HUD_RenderOverlays @0x5a7daa; nearest full `alpha` color @0x5a362d, others
 #  ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @0x5a364e]

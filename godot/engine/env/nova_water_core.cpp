@@ -137,7 +137,7 @@ void NovaWaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	inv[15] = 1.0f;
 
 	// Projection [orig: mat @ 0x2721980; m11 read @ 0x2721994].
-	// Preserve the complete host matrix so the screen march also serves
+	// Preserve the complete shell matrix so the screen march also serves
 	// orthographic and off-center frustum cameras. Godot is column-vector
 	// while the strip core is row-vector, but both layouts index a coefficient
 	// as [input][output], so flattening columns is direct. Only the view-Z

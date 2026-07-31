@@ -58,7 +58,7 @@ func test_brief_lists_top_level_spans_without_label() -> void:
 	var brief := timeline.brief(2)
 	assert_string_contains(brief, "alpha")
 	assert_string_contains(brief, "beta")
-	assert_false(brief.contains("op"), "brief omits the label (hosts embed it in their own status)")
+	assert_false(brief.contains("op"), "brief omits the label (owners embed it in their own status)")
 	assert_string_contains(timeline.summary(2), "op", "summary carries the label")
 
 

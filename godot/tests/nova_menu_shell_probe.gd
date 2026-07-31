@@ -51,13 +51,13 @@ func _run() -> void:
 	for _i in range(10):
 		await process_frame
 
-	var host = scene.get_node_or_null("MenuLayer/MenuShell")
+	var shell = scene.get_node_or_null("MenuLayer/MenuShell")
 	var world = scene.get_node_or_null("World")
-	diag["menu_file"] = host.get_current_menu_file() if host != null else "<none>"
-	diag["menu_built"] = (host != null and host.get_menu() != null)
+	diag["menu_file"] = shell.get_current_menu_file() if shell != null else "<none>"
+	diag["menu_built"] = (shell != null and shell.get_menu() != null)
 	diag["world_loaded"] = world.is_loaded() if world != null else null
 
-	if host == null:
+	if shell == null:
 		failures.append("MenuLayer/MenuShell missing from the runtime scene")
 	elif String(diag["menu_file"]) != "main.mnu":
 		failures.append("expected boot into main.mnu, got '%s'" % diag["menu_file"])

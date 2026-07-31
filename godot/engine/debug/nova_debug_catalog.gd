@@ -75,7 +75,7 @@ static func bind_runtime_targets(
 		player_source: Callable = Callable(),
 		viewport_source: Callable = Callable(),
 		scene_tree_source: Callable = Callable(),
-		game_host_source: Callable = Callable()) -> void:
+		game_shell_source: Callable = Callable()) -> void:
 	if session == null:
 		return
 	session.set_target_source(TARGET_RUNTIME, runtime_source,
@@ -119,8 +119,8 @@ static func bind_runtime_targets(
 	# The overlay rebinds its live world targets when it is constructed. Do
 	# not erase MainGame's process-level target when that adapter has no backing
 	# source of its own.
-	if game_host_source.is_valid():
-		session.set_target_source(TARGET_GAME_SHELL, game_host_source,
+	if game_shell_source.is_valid():
+		session.set_target_source(TARGET_GAME_SHELL, game_shell_source,
 				"The game shell is not available.")
 
 

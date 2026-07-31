@@ -1,7 +1,7 @@
 extends GutTest
 
 const ArmoryPresenter := preload("res://engine/world/armory_presenter.gd")
-const TMP_DIR := "res://.godot/armory_host_test"
+const TMP_DIR := "res://.godot/armory_presenter_test"
 
 
 class FakeSim:
@@ -76,7 +76,7 @@ class FakeWorld:
 		clear_calls += 1
 
 
-class FakePlayerHost:
+class FakePlayerPresenter:
 	extends RefCounted
 	var refresh_calls := 0
 
@@ -197,13 +197,13 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	world.weapons = weapons
 	world.sim = sim
 	add_child_autofree(world)
-	var player_host := FakePlayerHost.new()
+	var player_presenter := FakePlayerPresenter.new()
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(1600, 900)
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup(world, player_host, overlay)
+	presenter.setup(world, player_presenter, overlay)
 
 	assert_true(presenter.try_open(), "offline player in a type-6 zone opens the armory")
 	var menu := overlay.get_node_or_null("ArmoryMenu") as NovaMnuMenu
@@ -244,7 +244,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_eq(String((sim.applies.back() as Dictionary)["primary"]), "",
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
-	assert_eq(player_host.refresh_calls, 2, "both equip and unequip rebuild the FP view")
+	assert_eq(player_presenter.refresh_calls, 2, "both equip and unequip rebuild the FP view")
 
 
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:

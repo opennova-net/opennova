@@ -282,7 +282,7 @@ struct WeatherColorBlock {
 
 // The ten weather color blocks beyond the world-lighting quartet: skyfog, the
 // three static ceiling/cloud/floor blocks, then the six sky/cloud TOD ramps.
-// Their hosted consumers span the sky pass, frame clear, and indoor iris.
+// Their world-driven consumers span the sky pass, frame clear, and indoor iris.
 // The three explicit tick methods preserve the witnessed grouping and order
 // while every block reads the same fresh modulator.
 // [orig: Environment_UpdateWeatherTick @ 0x57efc9..0x57f03c]

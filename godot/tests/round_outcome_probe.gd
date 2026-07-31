@@ -118,8 +118,8 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	var world = game.get_node_or_null("World")
-	var host = game.get_node_or_null("LocalPlayerPresenter")
-	if world == null or host == null:
+	var presenter = game.get_node_or_null("LocalPlayerPresenter")
+	if world == null or presenter == null:
 		push_error("round_outcome_probe: main_game lacks World/LocalPlayerPresenter children")
 		quit(1)
 		return
@@ -144,7 +144,7 @@ func _run() -> void:
 		quit(1)
 		return
 
-	host.set_input_source(func() -> Dictionary: return {"forward": _forward})
+	presenter.set_input_source(func() -> Dictionary: return {"forward": _forward})
 
 	# --- Aim calibration once (closed-loop gains off the real FP camera).
 	var cam := root.get_viewport().get_camera_3d()

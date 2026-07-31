@@ -44,9 +44,9 @@ func _ready() -> void:
 	_play_viewport = session.viewport
 
 	var world: GameWorld = session.world
-	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-	if world == null or host == null:
-		push_error("[holds] no weapon world/host"); get_tree().quit(1); return
+	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	if world == null or presenter == null:
+		push_error("[holds] no weapon world/presenter"); get_tree().quit(1); return
 
 	# Third person (F4 through the real key path), clear the spawn tents.
 	_hold(KEY_F4, true); await _settle(2); _hold(KEY_F4, false)

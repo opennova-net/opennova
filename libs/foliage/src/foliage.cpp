@@ -250,7 +250,7 @@ bool foliage_detail_flat_wrap_position(const FoliageMap &map,
 	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0]
 	// Retail applies the loader's width exponent to both wrapped axes. Its
 	// sampler receives retail Z and negates it; world_z_fixed is already
-	// -retailZ in the host plane.
+	// -retailZ in the reimpl plane.
 	map_x = -1;
 	map_y = -1;
 	const int exponent = detail_map_exponent(map);

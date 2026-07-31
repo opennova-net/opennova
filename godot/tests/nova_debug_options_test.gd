@@ -2,7 +2,7 @@ extends GutTest
 
 # NovaDebugOptions + NovaDebugOptionState: the declarative option registry
 # that keeps the game shell and the editor wired identically. Rows are
-# integrity-checked against the REAL host scripts (setter must exist), and
+# integrity-checked against the REAL target scripts (setter must exist), and
 # the state object's single-write-path contract is pinned.
 
 const GameWorldScript := preload("res://engine/world/game_world.gd")
@@ -39,7 +39,7 @@ func test_registry_rows_are_complete_and_unique() -> void:
 			"unknown ids resolve to an empty row")
 
 
-func test_every_setter_exists_on_its_target_host_script() -> void:
+func test_every_setter_exists_on_its_target_script() -> void:
 	var world_methods := _script_method_names(GameWorldScript)
 	var player_methods := _script_method_names(LocalPlayerPresenterScript)
 	for option in NovaDebugOptions.OPTIONS:

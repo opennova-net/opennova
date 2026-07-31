@@ -891,7 +891,7 @@ func test_create_default_save_as_mis_and_reopen() -> void:
 
 func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
 	# A .mis export declares every entity's z ABSOLUTE (height_lock 1) and bakes the
-	# host-sampled terrain height under it as extra_bheight, so the original editor
+	# editor-sampled terrain height under it as extra_bheight, so the original editor
 	# recovers the terrain-relative offset as z - extra_bheight
 	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
 	var m := NovaMissionData.new()

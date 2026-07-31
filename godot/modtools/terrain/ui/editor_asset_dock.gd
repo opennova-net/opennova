@@ -18,7 +18,7 @@ var _slot_state_labels: Dictionary = {}
 var _file_dialog: FileDialogHelper
 # "Used by" (which missions sit on this terrain), mounted under the name row
 # once the workspace injects the shell's reference services. Null on headless
-# hosts (no shell, no strip).
+# owners (no shell, no strip).
 var _used_by_strip: ReferenceStrip
 
 
@@ -63,7 +63,7 @@ func _sync_from_editor() -> void:
 
 
 ## "Used by" services from the workspace (the strip rides the shell's reference
-## index, so only a shell-hosted dock ever receives this). Builds the strip once
+## index, so only a shell-mounted dock ever receives this). Builds the strip once
 ## into the Properties tab under the terrain-name row, then retargets it from
 ## the editor state on every sync (open / new / save-as move the identity).
 func set_reference_services(services: ReferenceServices) -> void:

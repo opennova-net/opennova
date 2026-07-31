@@ -1,7 +1,7 @@
 extends GutTest
 
 # M9.5 gate: NovaMnuTable builds the column template (headers, widths, justify,
-# bitmap columns, value->image SUBST) and a host populates rows at runtime. Covers
+# bitmap columns, value->image SUBST) and the shell populates rows at runtime. Covers
 # row binding, single/multi selection, header-click sort, the SUBST image cell, and
 # edit_mode inertness.
 
@@ -105,7 +105,7 @@ func test_table_runtime_rows_and_cells() -> void:
 	var table := _table(menu)
 	table.add_row_values(["Alpha", "8", "30"])
 	table.add_row_values(["Bravo", "12", "45"])
-	assert_eq(table.get_row_count(), 2, "host populated two rows")
+	assert_eq(table.get_row_count(), 2, "shell populated two rows")
 	var row0 := table.find_child("Row0", true, false)
 	assert_not_null(row0, "Row0 built")
 	var cell0 := row0.find_child("Cell0", true, false)
@@ -157,7 +157,7 @@ func test_table_honors_header_body_vjustify_and_bitmap_scale_policy() -> void:
 		"SCALE_BITMAP has a distinct fill-cell stretch policy")
 
 
-func test_table_custom_draw_requests_a_fresh_host_slot() -> void:
+func test_table_custom_draw_requests_a_fresh_shell_slot() -> void:
 	var doc := _load_doc()
 	var id := _widget_named(doc, "MissionTable")
 	var body: Dictionary = doc.get_table_bodies(id)[0]
@@ -168,7 +168,7 @@ func test_table_custom_draw_requests_a_fresh_host_slot() -> void:
 	table.custom_cell_requested.connect(func(row: int, column: int, value: String, slot: Control) -> void:
 		requests.append([row, column, value, slot])
 		var content := Label.new()
-		content.name = "HostContent"
+		content.name = "ShellContent"
 		content.text = value
 		slot.add_child(content)
 	)
@@ -177,17 +177,17 @@ func test_table_custom_draw_requests_a_fresh_host_slot() -> void:
 	assert_eq(requests.size(), 1, "one request emitted for the CUSTOM_DRAW column")
 	assert_eq(requests[0][0], 0)
 	assert_eq(requests[0][1], 2)
-	assert_eq(requests[0][2], "lan", "effective cell value crosses the host seam")
+	assert_eq(requests[0][2], "lan", "effective cell value crosses the shell seam")
 	var first_slot := requests[0][3] as Control
 	assert_eq(first_slot.name, "Cell2", "table owns and sizes the custom cell slot")
-	assert_not_null(first_slot.find_child("HostContent", false, false),
-		"host can populate the synchronous slot")
+	assert_not_null(first_slot.find_child("ShellContent", false, false),
+		"shell can populate the synchronous slot")
 
 	table.rebuild()
 	assert_eq(requests.size(), 2, "rebuild requests fresh custom content")
 	var second_slot := requests[1][3] as Control
 	assert_ne(second_slot, first_slot, "rebuilt rows never expose stale slots")
-	assert_not_null(second_slot.find_child("HostContent", false, false))
+	assert_not_null(second_slot.find_child("ShellContent", false, false))
 
 
 func test_table_selection_single_and_multi() -> void:

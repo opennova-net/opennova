@@ -279,7 +279,7 @@ float sample_live_height_at(const opennova::terrain::SectorLayout &layout,
 }
 
 // --- The raycast sampler adapter (ENG-3 B1b) --------------------------------
-// Host substrate behind NovaTerrainData::raycast_terrain: one
+// Reimpl substrate behind NovaTerrainData::raycast_terrain: one
 // TerrainRaycastSampler (terrain/terrain_raycast.h) over BOTH height
 // substrates — the LIVE editable FORMAT_RF image when mounted (what the
 // brushes mutate and the placement raycasts must see), else the BAKED CPT
@@ -1631,7 +1631,7 @@ Vector3 NovaTerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p
 	// NO substrate at all -> the all-NAN miss. Retail's null-atlas raycast
 	// returns HIT there instead ("blocked" is the runtime's no-data default
 	// [orig: @ 0x60ccf7]) — that is runtime-substrate behavior; this binding is
-	// the editor-host surface, so no-data misses: the same deliberate
+	// the editor-mode surface, so no-data misses: the same deliberate
 	// editor-guard divergence class as the sampler's kOutOfExtent
 	// (terrain/terrain_raycast.h header note).
 	RaycastSubstrate substrate;
@@ -1648,7 +1648,7 @@ Vector3 NovaTerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p
 	}
 	substrate.layout = editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
 
-	// HOST bounding, not part of the witnessed core: clip the working segment
+	// REIMPL bounding, not part of the witnessed core: clip the working segment
 	// to the authored-extent XZ AABB (replacing the editor's old GDScript slab
 	// test) plus a generous height band so the 16.16 quantization below cannot
 	// overflow — callers pass long probe segments (the editor mouse ray uses

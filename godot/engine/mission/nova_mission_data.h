@@ -219,11 +219,11 @@ public:
 	// carries { kind, index, ground_hit_bms: Vector3, ground_anchor_bms: Vector3 };
 	// rows whose baked origin is within `epsilon` of the stored one are skipped
 	// (markers store the hit directly, like move_entity_grounded). apply = false
-	// counts the would-move rows without writing, so the host's prompt count and
+	// counts the would-move rows without writing, so the editor's prompt count and
 	// the apply share one policy. Returns the moved (or would-move) count; dirty
 	// only when something actually moved.
 	int reground_entities(const Array &requests, float epsilon = 0.01f, bool apply = true);
-	// Apply-mode bulk re-ground that also reports WHICH rows moved, so the host
+	// Apply-mode bulk re-ground that also reports WHICH rows moved, so the editor
 	// can update its placed world in place instead of re-baking it. Returns
 	// { "moved": int, "rows": PackedInt32Array, "positions": PackedVector3Array }
 	// where rows are indices into the CALLER'S `requests` Array (the parser skips
@@ -367,7 +367,7 @@ public:
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);
-	// Stage host-sampled terrain base heights for the NEXT save that routes through the
+	// Stage editor-sampled terrain base heights for the NEXT save that routes through the
 	// .mis writer: one 16.16 fixed-point height per entity, FLAT in WRITE ORDER (items,
 	// buildings, markers, organics). The .mis writer emits each as the entity's
 	// `extra_bheight` — the baked base height the original editor subtracts from the

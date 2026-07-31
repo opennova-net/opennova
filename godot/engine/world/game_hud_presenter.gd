@@ -1,7 +1,7 @@
 class_name NovaGameHudPresenter
 extends Node
 
-## Hosts the in-game HUD (GameHud) over a live GameWorld for the game shell.
+## Owns the in-game HUD (GameHud) over a live GameWorld for the game shell.
 ## Owns the lazy build (hudpos.def layout + string tables),
 ## the per-frame info rebuild from the authoritative local player, and the mission
 ## text feed. The shells only say when the player is in-world (they gate tick()).
@@ -38,9 +38,9 @@ var _endround_banner := ""
 var _objectives_visible := false
 
 
-func setup(world, player_host, ui_parent: Node) -> void:
+func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	_world = world
-	_player_presenter = player_host
+	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only

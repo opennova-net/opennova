@@ -56,7 +56,7 @@ func test_init_creates_the_five_furniture_nodes_once_with_exact_names() -> void:
 	assert_eq(preview.get_weather_node().environment_path, NodePath("../EditorEnvironment"), "Weather resolves the environment relatively.")
 	assert_eq(preview.get_water_node().environment_path, NodePath("../EditorEnvironment"), "Water resolves the environment relatively.")
 	assert_almost_eq(preview.get_water_node().water_height, STUB_WATER_HEIGHT, 0.001,
-		"init_water_plane drives the height override through the host's water-height seam.")
+		"init_water_plane drives the height override through the owner's water-height seam.")
 
 	# Re-init must not duplicate the furniture.
 	preview.init_environment_preview()
@@ -136,7 +136,7 @@ func test_bind_environment_editor_fans_out_to_the_furniture() -> void:
 	var env_node: Node = preview.get_environment_node()
 	assert_eq(env_node.environment_data, env_editor.env_file, "Binding pushes the document's env file into the environment node.")
 	assert_almost_eq(env_node.time_of_day, env_editor.time_of_day, 0.001, "Binding pushes the document's preview time.")
-	assert_gt(int(calls.get("state", 0)), 0, "Binding fans out through the host's state-changed seam.")
+	assert_gt(int(calls.get("state", 0)), 0, "Binding fans out through the owner's state-changed seam.")
 
 	# A discrete TOD scrub on the document must reach the preview nodes.
 	var before := int(calls.get("state", 0))
@@ -225,7 +225,7 @@ func test_grounding_helpers_route_through_the_sampler_seam() -> void:
 	assert_almost_eq(preview.sample_height(10.0, 20.0), STUB_GROUND_HEIGHT, 0.001, "sample_height returns the stubbed surface height.")
 	assert_eq(preview.ground_position(Vector3(10.0, 99.0, 20.0)), Vector3(10.0, STUB_GROUND_HEIGHT, 20.0),
 		"ground_position snaps the point onto the sampled surface.")
-	assert_true(is_nan(preview.sample_height(5000.0, 0.0)), "Off-surface points sample NAN, the host sampler's contract.")
+	assert_true(is_nan(preview.sample_height(5000.0, 0.0)), "Off-surface points sample NAN, the owner sampler's contract.")
 	assert_eq(preview.ground_position(Vector3(5000.0, 7.0, 3.0)), Vector3(5000.0, 7.0, 3.0),
 		"Points the sampler cannot ground come back unchanged.")
 

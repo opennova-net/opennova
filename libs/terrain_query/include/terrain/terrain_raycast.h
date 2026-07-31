@@ -39,7 +39,7 @@
 // vs coords_runtime_options in terrain/coords.h): retail clamps an
 // out-of-extent sector-grid cell to the grid edge, so terrain continues
 // forever [orig: the OOB masks @ 0x31a0010/0x319fc0c, the ~(cell >> 31)
-// clamp-to-edge @ 0x60cd50..0x60cd62]. Our editor hosts instead report
+// clamp-to-edge @ 0x60cd50..0x60cd62]. Our editor shells instead report
 // kOutOfExtent from the sampler and the core marches on WITHOUT any terrain
 // test there — no hit, and no height-0 floor. A D-TERRAIN row gets minted at
 // the B1b record update if the divergence is observable in a shipped surface.
@@ -76,7 +76,7 @@ constexpr int32_t TERRAIN_RAYCAST_REFINE_BISECT_ITERATIONS = 8;
 //                  @ 0x60cea0..0x60cf4c] and bilinear consumers resolve it to
 //                  height 0 [orig: Terrain_SampleHeightBilinear @ 0x6067b0,
 //                  empty cell -> 0 — the height-0 plane].
-//   kOutOfExtent — beyond the authored sector grid (editor hosts; see the
+//   kOutOfExtent — beyond the authored sector grid (editor shells; see the
 //                  divergence note above): no terrain, no floor.
 // height_1616 is ignored for kEmpty/kOutOfExtent.
 struct TerrainRaycastSample {

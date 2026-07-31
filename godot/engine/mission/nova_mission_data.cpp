@@ -1404,7 +1404,7 @@ Error NovaMissionData::save_as(const String &path) {
 	const String ext = path.get_extension().to_lower();
 	bool ok = false;
 	if (ext == "mis") {
-		// The .mis writer takes the host-sampled terrain heights (flat, write order) and emits
+		// The .mis writer takes the editor-sampled terrain heights (flat, write order) and emits
 		// them as each entity's extra_bheight next to the height_lock declaration; see
 		// MissionDocument::save_mis_file and docs/mission/mis-format-re.md (D-MIS-4).
 		std::vector<int32_t> base_heights;

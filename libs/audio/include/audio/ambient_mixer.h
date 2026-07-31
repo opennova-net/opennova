@@ -153,7 +153,7 @@ public:
     // tick). Also drives the mix's lifetime clock.
     void advance_to_tick(int64_t tick);
 
-    // Autonomous clock for hosts with no logic tick source (editor idle): bank wall
+    // Autonomous clock for embedders with no logic tick source (editor idle): bank wall
     // seconds and derive 62.5 Hz ticks internally.
     void advance_seconds(float dt);
 

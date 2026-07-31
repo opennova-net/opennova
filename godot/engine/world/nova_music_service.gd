@@ -71,7 +71,7 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Music
 		# The expansion bank lives inside the expansion folder, streamed loose
 		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
 		# Resolve its spelling case-insensitively, as retail did on Windows. Keep
-		# the actual on-disk spelling for case-sensitive hosts, and poison an
+		# the actual on-disk spelling for case-sensitive filesystems, and poison an
 		# ambiguous duplicate instead of choosing by enumeration order.
 		var expansion_dir: String = root.get_root_dir().path_join("expansion").path_join(exp_name)
 		var bank_path := _resolve_loose_file(expansion_dir, stem + ".sbf")
