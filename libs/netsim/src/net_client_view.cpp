@@ -207,7 +207,7 @@ void NetClientView::land_compact_pose(ClientEntityState &es, int32_t wx,
 		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
 		bool force_live_snap) {
 	es.net_has_compact = true;
-	if (!remote_motion_mode_ || force_live_snap) {
+	if (!remote_motion_mode_ || force_live_snap || es.net_world_mover) {
 		// Live snap: the host/SP roles (full-rate loopback; the authority never
 		// interpolates, D-NET-89), the respawn edge [orig: live snap +
 		// Entity_ResetToSpawnState @0x4C113C], and the vehicle dead-pose form.
@@ -340,6 +340,8 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 			}
 			continue;
 		}
+		// A world-side family mover owns this row's motion (§5.38e B-facet).
+		if (es.net_world_mover) continue;
 		// The universal mover-skip: wire bit0 (mounted/killed/not-ready) freezes
 		// the row at its staged pose [orig: the Flags&1 early return @0x4b9a03 /
 		// the body-pass twin; the bit rides the wire raw, §5.38e §5].
@@ -933,6 +935,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			if (!rec.vehicle.is_dead_pose) {
 				es.vehicle_speed_reg =
 						network_decompress_fixedpoint(rec.vehicle.weapon_aim_y);
+				es.vehicle_steer_bam = static_cast<int32_t>(
+						rec.vehicle.weapon_heading_bam) * 65536;
 			}
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
@@ -988,6 +992,10 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
 			es.anim_pulse_ratio = prev_anim_ratio;
 		}
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
+				rec.cls == EntityClass::Vehicle) {
+			++es.compact_revision;
+		}
 		// A free-standing record clears any retained seat-local pose — the
 		// carrier field is consumed per record (D-NET-195); carrier-local
 		// records refresh it in the second pass below.
@@ -1013,7 +1021,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 				has_heading_target) {
 			// Carrier-local vehicle positions defer to the second pass, but the
 			// wire euler stays world-absolute and lands now [orig: @0x4607f5].
-			if (remote_motion_mode_ && !force_live_snap) {
+			if (remote_motion_mode_ && !force_live_snap && !es.net_world_mover) {
 				es.net_smooth_heading = heading_target;
 			} else {
 				es.heading_bam = heading_target;

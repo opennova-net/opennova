@@ -1145,6 +1145,12 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+# The joiner-side watercraft prediction (D-NET-196 B-facet): fast-boat glide
+# beyond the chase-only sustain limit, coast-down, and the steer chain.
+add_executable(watercraft_client_motor_test world/watercraft_client_motor_test.cpp)
+target_link_libraries(watercraft_client_motor_test PRIVATE opennova_world)
+add_test(NAME watercraft_client_motor COMMAND watercraft_client_motor_test)
+
 # The USE-ITEM mount chain (Entity_ToggleVehicleMount @0x436950 + the nearest-seat scan
 # @0x435d50 + the deck best-seat @0x4351f0), the BMS Player mount triggers (subs 38-41),
 # the vehicle AI-driver/parked leg (@0x48bc12-0x48c034), and the player deploy group

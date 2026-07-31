@@ -301,7 +301,7 @@ void NovaSimulation::sync_joiner_authoritative_mount() {
 // it locally; the render pose rides the present rows).
 void NovaSimulation::mirror_client_view_mission_entities() {
 	if (!joiner_ || !world_ || runtime_ == nullptr) return;
-	for (const opennova::netsim::ClientEntityState &es :
+	for (opennova::netsim::ClientEntityState &es :
 			runtime_->state().entities) {
 		const opennova::world::EntityHandle h{es.handle};
 		const int pool = h.pool();
@@ -310,9 +310,56 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 		if (local == nullptr || local->spawn_origin == 0xFFFFFFFFu ||
 				static_cast<uint16_t>(local->item_id) != es.type_id)
 			continue;
+		// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
+		// vehicle's motion is owned by the WORLD-side client mover — stage the
+		// latest wire sample + registers on a fresh compact and let
+		// watercraft_client_tick chase + predict; the row is mirrored BACK
+		// after the tick (mirror_predicted_vehicles_to_view).
+		if (pool == 1 && es.cls == opennova::EntityClass::Vehicle) {
+			const opennova::world::VehicleTraits *traits =
+					world_->vehicle_traits.get(local->item_id);
+			if (traits != nullptr &&
+					traits->family ==
+							opennova::world::VehicleFamily::Watercraft) {
+				es.net_world_mover = true;
+				opennova::world::Entity::VehicleMotorState &m = local->veh;
+				if (es.compact_revision != m.net_seen_revision) {
+					m.net_seen_revision = es.compact_revision;
+					// The fold live-snapped the row to the wire sample; that
+					// sample is the staged target [orig: the mode-2 staging].
+					m.net_smooth_target[0] = es.x;
+					m.net_smooth_target[1] = es.y;
+					m.net_smooth_target[2] = es.z;
+					m.net_smooth_heading = es.heading_bam;
+					m.net_recv_speed = es.vehicle_speed_reg;
+					m.net_recv_steer_bam = es.vehicle_steer_bam;
+					m.net_interp_progress = 0;
+					m.net_predicted = true;
+				}
+				continue; // the world mover owns the registry position now
+			}
+		}
 		local->position.x = static_cast<float>(es.x) / 65536.0f;
 		local->position.y = static_cast<float>(es.y) / 65536.0f;
 		local->position.z = static_cast<float>(es.z) / 65536.0f;
+	}
+}
+
+// The world->view half of the watercraft prediction: after the tick, the
+// predicted registry pose becomes the presented row pose (present reads the
+// client view, ADR 0011). Heading gains the mover's full BAM precision.
+void NovaSimulation::mirror_predicted_vehicles_to_view() {
+	if (!joiner_ || !world_ || runtime_ == nullptr) return;
+	for (opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		if (!es.net_world_mover) continue;
+		const opennova::world::EntityHandle h{es.handle};
+		opennova::world::Entity *local = world_->registry.get(h);
+		if (local == nullptr || !local->veh.net_predicted) continue;
+		es.x = opennova::world::to_fixed(local->position.x);
+		es.y = opennova::world::to_fixed(local->position.y);
+		es.z = opennova::world::to_fixed(local->position.z);
+		es.heading_bam = local->veh.yaw_bam;
 	}
 }
 
@@ -352,6 +399,7 @@ void NovaSimulation::joiner_pump() {
 
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	mirror_predicted_vehicles_to_view(); // predicted boat poses -> the presented rows
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail

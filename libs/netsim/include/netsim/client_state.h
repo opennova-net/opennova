@@ -168,6 +168,12 @@ struct ClientEntityState {
 	// 0x60000) and decays on starvation [orig: @0x48D480 interp block]; also the
 	// prediction leg's commanded-speed source ([136] = [177] mirror).
 	int32_t vehicle_speed_reg = 0;
+	// Vehicle steer register mirror (retail vehicleData[179], the read-dest of
+	// the wire weapon_heading_bam whose write source is the host's steer target
+	// [132] — §5.13/D-NET-63). The non-driver machine adopts it as its own
+	// steer-command register ([132] = [179]) for the prediction leg
+	// [orig: @0x48D480 interp tail mirror].
+	int32_t vehicle_steer_bam = 0;
 	// Armed by the first folded compact for this row: the chase never runs
 	// toward a zero-initialized target on rows that only ever saw load-stream
 	// spawns (pool-2/3 statics).
@@ -178,6 +184,14 @@ struct ClientEntityState {
 	// carrier attach each frame (the rider's own mover is bit0-skipped)
 	// [orig: Entity_AttachToVehicle bit0 set @0x43C14A; the D-NET-67 lift]. A
 	// record with carrier 0xFFFF clears it (per-record consumption, D-NET-195).
+	// Set by the embedding sim when a WORLD-side family mover owns this row's
+	// motion (the joiner's pool-1 prediction, §5.38e B-facet): the fold live-
+	// snaps the wire sample, tick_remote_motion skips the row, and the sim
+	// mirrors the predicted world pose back after each tick.
+	bool net_world_mover = false;
+	// Bumped once per folded compact record for this row — the sim's staging
+	// edge detector (a fresh wire sample arrived since it last staged).
+	uint32_t compact_revision = 0;
 	int32_t net_seat_local[3] = {};
 	uint8_t net_seat_local_yaw_byte = 0;
 	// Player/infantry seats compose the carrier yaw; a carrier-local VEHICLE

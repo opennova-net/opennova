@@ -220,7 +220,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 8 && vp[0] != 0) {
+			if (vp.size() == 9 && vp[0] != 0) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -230,7 +230,26 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.turn_rate2 = vp[5];
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
+				vt.water_speed = vp[8];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
+				// Family from the *_function tag (ai_function, else
+				// move_function — the same precedence as the replication
+				// class stamp; §5.38e movers).
+				{
+					const String fam_tag = ai_fn.is_empty()
+							? p_item_db->get_move_function(def_id)
+							: ai_fn;
+					const String fam = fam_tag.to_lower();
+					if (fam == "cbot") {
+						vt.family = opennova::world::VehicleFamily::Watercraft;
+					} else if (fam == "chel") {
+						vt.family = opennova::world::VehicleFamily::Helicopter;
+					} else if (fam == "cpln") {
+						vt.family = opennova::world::VehicleFamily::Plane;
+					} else {
+						vt.family = opennova::world::VehicleFamily::Ground;
+					}
+				}
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
 				// mounted NPC's AiProfile. Resolve the profile name and the
 				// item-level soundloop overrides once at this portable boundary.

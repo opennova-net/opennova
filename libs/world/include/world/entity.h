@@ -595,6 +595,20 @@ struct Entity {
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick
                                       // re-derives it from the terrain clamp
+
+        // --- Joiner-side vehicle prediction (net-re §5.38e, D-NET-196). The
+        // wire record apply stages these and the family client mover chases +
+        // predicts between records [orig: the @0x48D480 interp block + register
+        // mirror; brain[177]/[179] = net-received speed/steer]. Only meaningful
+        // when net_predicted (the joiner staged this vehicle).
+        bool net_predicted = false;
+        int32_t net_smooth_target[3] = {}; // staged wire target -> per-step vector
+        int32_t net_smooth_heading = 0;    // staged heading -> per-step delta
+        int16_t net_interp_progress = 0;   // [orig: +0x27C]
+        int16_t net_interp_steps = 0;      // [orig: +0x27E]
+        int32_t net_recv_speed = 0;        // [orig: brain[177]] 16.16, stale-decays
+        int32_t net_recv_steer_bam = 0;    // [orig: brain[179]]
+        uint32_t net_seen_revision = 0;    // last consumed row compact_revision
     };
     VehicleMotorState veh;
 };

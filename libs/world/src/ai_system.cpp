@@ -420,6 +420,15 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
+            // The joiner-side watercraft prediction (net-re §5.38e B-facet):
+            // chases the staged wire target and predicts between records from
+            // the mirrored speed/steer registers — the client-executed subset
+            // of the cbot family mover [orig: @0x48D480]. Other families keep
+            // the row-side chase until their prediction legs land (D-NET-161).
+            if (traits->family == VehicleFamily::Watercraft &&
+                    veh->veh.net_predicted && veh->health > 0) {
+                watercraft_client_tick(world, *veh, *traits);
+            }
             update_ground_vehicle_sound(world, *veh, *traits,
                                         /*wrecked=*/veh->health <= 0,
                                         /*collided=*/false);

@@ -50,6 +50,7 @@ private:
 		int acceleration = 0; // +0x8E0
 		int deceleration = 0; // +0x8E4
 		int player_speed = 0; // +0x8E8 (16.16 u/tick)
+		int water_speed = 0;  // +0x8EC (16.16 u/tick — the cbot family's max drive speed)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
 		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]

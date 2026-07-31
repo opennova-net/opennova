@@ -46,6 +46,16 @@ class World;
 // player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
 // accel/decel token*4. The host's item-traits sweep fills the table from the item db
 // (NovaSimulation::resolve_item_traits); tests stamp it directly.
+// The items.def *_function family tag, the per-class mover selector (the
+// update-callback table keys on it [orig: the [tag,flags,callback] rows
+// @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv/cbik.
+enum class VehicleFamily : uint8_t {
+    Ground = 0,
+    Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
+    Helicopter, // chel/CHel -> Entity_UpdateAircraftPhysics @0x490310
+    Plane,      // cpln
+};
+
 struct VehicleTraits {
     int32_t physics = 0;       // itemDef+0x8DC selector; 0 = never runs the vehicle motor
     int32_t player_speed = 0;  // itemDef+0x8E8
@@ -58,6 +68,10 @@ struct VehicleTraits {
     int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
+    VehicleFamily family = VehicleFamily::Ground; // *_function tag (§5.38e movers)
+    int32_t water_speed = 0;   // itemDef+0x8EC waterSpeed — the cbot family's max
+                               // drive speed (the same slot the ground family
+                               // reads as playerSpeed) [orig: @0x48E835]
     // The VEHICLE item's own authored sound binding. This deliberately does not
     // borrow the mounted NPC's AiProfile: pool-1 vehicles need sound even when no
     // AiEntity body exists for them. Profile slots seed soundloop_1..7, then a
@@ -119,6 +133,17 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
 // block-level cites inline]
 void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                         const VehicleDriveCmd *ai_cmd = nullptr);
+
+// The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
+// subset of the cbot family function for a REMOTE (non-driven) boat — per-record
+// chase + register mirror + steer/thrust/drag/keel prediction + contact drags +
+// X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480, the path
+// outside the (authority || local driver) input gate]. Z and hull attitude belong
+// to the platform solve (@0x481870, unported — D-NET-161): here Z moves ONLY via
+// the per-record chase, never a one-sided gravity integration that would sink the
+// hull. Consumes the staged VehicleMotorState net_* cluster; the sim runs it once
+// per world tick on a non-authority world for staged pool-1 Watercraft entities.
+void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
 

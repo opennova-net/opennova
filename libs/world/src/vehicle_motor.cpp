@@ -412,4 +412,256 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     update_ground_vehicle_sound(world, veh, traits, wrecked, collided);
 }
 
+namespace {
+
+// atan2 in this engine's BAM convention: radians * 2^31/pi, with the exact
+// binary constant (the pair with the sin/cos scale below is deliberately NOT an
+// exact inverse — port both verbatim) [orig: dbl_7C19D8 = 683565275.5764316].
+inline int32_t bam_of_atan2(double y, double x) {
+    if (y == 0.0 && x == 0.0) return 0; // fpatan(0,0) == 0
+    return static_cast<int32_t>(std::atan2(y, x) * 683565275.5764316);
+}
+
+// The vehicle-template chase bucket [orig: @0x48D480 interp — {6,8,10,15,20,25,30}].
+inline int16_t watercraft_chase_bucket(int32_t dist) {
+    if (dist < 0x2AAA) return 6;
+    if (dist < 0x4000) return 8;
+    if (dist < 0x5555) return 10;
+    if (dist < 0x8000) return 15;
+    if (dist < 0x10000) return 20;
+    if (dist < 0x20000) return 25;
+    return 30;
+}
+
+} // namespace
+
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
+// remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.]
+void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.net_predicted) return;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(veh.yaw);
+        m.yaw_seeded = true;
+    }
+
+    // ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
+    // Live pose in 16.16 for the chase math; the float registry position is the
+    // storage (sub-mm float error at mission scales).
+    int32_t px = to_fixed(veh.position.x);
+    int32_t py = to_fixed(veh.position.y);
+    int32_t pz = to_fixed(veh.position.z);
+    if (m.net_interp_progress == 0) {
+        const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
+        const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
+        const int64_t dz = int64_t(m.net_smooth_target[2]) - pz;
+        const double dd = std::sqrt(double(dx) * double(dx) +
+                                    double(dy) * double(dy) +
+                                    double(dz) * double(dz));
+        const int32_t dist = dd >= 2147418112.0 ? INT32_MAX
+                                                : static_cast<int32_t>(dd);
+        // Snap radius 0x60000 while the received speed says "moving" (>= 293),
+        // else 0x20000 [orig: @0x48DB9B..0x48DBAC].
+        const int32_t snap = m.net_recv_speed >= 293 ? 0x60000 : 0x20000;
+        if (dist > snap) {
+            px = m.net_smooth_target[0];
+            py = m.net_smooth_target[1];
+            pz = m.net_smooth_target[2];
+            m.yaw_bam = m.net_smooth_heading;
+            m.net_smooth_target[0] = 0;
+            m.net_smooth_target[1] = 0;
+            m.net_smooth_target[2] = 0;
+            m.net_interp_steps = 0;
+            m.net_smooth_heading = 0;
+        } else if (dist < 0x2000) {
+            m.net_smooth_target[0] = 0;
+            m.net_smooth_target[1] = 0;
+            m.net_smooth_target[2] = 0;
+            m.net_interp_steps = 0;
+            m.net_smooth_heading =
+                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+        } else {
+            const int32_t n = watercraft_chase_bucket(dist);
+            m.net_interp_steps = static_cast<int16_t>(n);
+            m.net_smooth_target[0] =
+                    (int32_t(dx) + (n >> 1)) / n;
+            m.net_smooth_target[1] =
+                    (int32_t(dy) + (n >> 1)) / n;
+            m.net_smooth_target[2] =
+                    (int32_t(dz) + (n >> 1)) / n;
+            m.net_smooth_heading =
+                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+        }
+    }
+    {
+        const int16_t progress = m.net_interp_progress;
+        if (progress < 20) m.yaw_bam += m.net_smooth_heading;
+        if (progress < m.net_interp_steps) {
+            px += m.net_smooth_target[0];
+            py += m.net_smooth_target[1];
+            pz += m.net_smooth_target[2];
+        }
+        if (progress >= 128) {
+            // Stale records: the mirrored command coasts to zero so an
+            // abandoned boat predicts to a stop [orig: @0x48DDC0..0x48DDCE].
+            m.net_recv_speed -= (m.net_recv_speed + 64) >> 7;
+        } else {
+            m.net_interp_progress = static_cast<int16_t>(progress + 1);
+        }
+    }
+
+    // ---- 2. Register mirror: the non-driver machine adopts the received
+    // speed/steer as its own drive command, every tick
+    // [orig: brain[136]=[177], brain[132]=[179] @0x48DDD4..0x48DDF4].
+    m.cmd_speed = m.net_recv_speed;
+    m.steer_target_bam = m.net_recv_steer_bam;
+
+    // ---- 3. Steer/rudder integrator [orig: @0x48E82C..0x48E926].
+    {
+        const int32_t turn_rate = traits.turn_rate;
+        const int32_t water_spd =
+                traits.water_speed != 0 ? traits.water_speed : traits.player_speed;
+        int32_t min_rate = turn_rate >> 2;
+        if (traits.turn_rate2 != 0) min_rate = traits.turn_rate2;
+        int32_t f = 0;
+        if (water_spd != 0) {
+            f = 0x10000 - static_cast<int32_t>(
+                    (static_cast<int64_t>(m.speed) << 16) / water_spd);
+        }
+        if (f < 0) f = 0;
+        // No upper clamp — a reversing hull over-rotates, witnessed absent.
+        const int32_t eff = min_rate + static_cast<int32_t>(
+                (static_cast<int64_t>(turn_rate - min_rate) * f + 0x8000) >> 16);
+        int32_t delta = (m.steer_target_bam - m.yaw_bam + 32) >> 6;
+        if (delta > eff) delta = eff;
+        if (delta < -eff) delta = -eff;
+        m.steer_state += (4 - 32 * delta - m.steer_state) >> 3;
+        // Yaw-rate recompute is airborne-gated in retail; without the platform
+        // solve the airborne flag never sets here, so the gate is always open —
+        // the afloat case retail always recomputes too [orig: @0x48E8E3..0x48E920].
+        m.wheel_rate_bam = static_cast<int32_t>(
+                (static_cast<int64_t>(-m.speed) * (m.steer_state >> 2) + 0x8000) >> 16);
+    }
+
+    // ---- 4. Thrust [orig: @0x48E926..0x48EA12].
+    int32_t vertical_thrust = 0;
+    {
+        const int32_t cmd = m.cmd_speed;
+        if (cmd == 0) {
+            if (std::abs(m.vel_x) < 384) m.vel_x = 0;
+            if (std::abs(m.vel_y) < 384) m.vel_y = 0;
+        } else {
+            const int32_t a = std::abs(cmd);
+            int32_t acc = traits.acceleration + (a >> 8) + (a >> 7);
+            const int32_t accel = cmd >= 0 ? std::min(acc, cmd)
+                                           : std::max(-acc, cmd);
+            // Forward from the live heading. Retail builds the full euler
+            // matrix from the entity pose (incl. platform pitch/roll); the
+            // platform solve is unported so the hull is level here — the
+            // capsize up[2]>0 gate is trivially open [orig: @0x48E972..0x48E9FF].
+            const int32_t c = cos22_of_bam(m.yaw_bam) >> 6; // 2^22 -> 16.16
+            const int32_t s = sin22_of_bam(m.yaw_bam) >> 6;
+            m.vel_x += static_cast<int32_t>(
+                    (static_cast<int64_t>(accel) * c + 0x8000) >> 16);
+            m.vel_y += static_cast<int32_t>(
+                    (static_cast<int64_t>(accel) * s + 0x8000) >> 16);
+            vertical_thrust = accel; // level hull: the fwd[2] beach gate term
+                                     // reduces to the thrust sign
+        }
+    }
+
+    // ---- 5. Drag / slip / keel [orig: @0x48EA14..0x48EBB3, FPU-reconstructed].
+    {
+        m.vel_x -= m.vel_x >> 6;
+        m.vel_y -= m.vel_y >> 6;
+        const int32_t vx = m.vel_x, vy = m.vel_y;
+        const int32_t vel_heading = bam_of_atan2(double(vy), double(vx));
+        const int32_t slip = m.yaw_bam - vel_heading;
+        const int32_t s22 = sin22_of_bam(slip);
+        const int32_t c22 = cos22_of_bam(slip);
+        const double dm = std::sqrt(double(vx) * double(vx) +
+                                    double(vy) * double(vy));
+        int32_t mag = dm >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(dm);
+        if (mag > 0x10000) mag = 0x10000; // 1.0 u/tick planar clamp
+        const int32_t lateral = static_cast<int32_t>(
+                (static_cast<int64_t>(s22) * mag) >> 22); // no rounding bias
+        const int32_t along = static_cast<int32_t>(
+                (static_cast<int64_t>(c22) * mag) >> 22);
+        m.speed = along; // currentSpeed — signed, negative in reverse
+        // Keel: bleed 1/32 of the cross-track speed along the beam axis. The
+        // beam constant is the raw 0x3FFFFFC0 (+90 deg minus 0x40 under the
+        // pi=0x7FFF8000 convention) — port verbatim, do not "fix" it.
+        const int32_t beam = m.yaw_bam + 0x3FFFFFC0;
+        const int32_t bs22 = sin22_of_bam(beam);
+        const int32_t bc22 = cos22_of_bam(beam);
+        m.vel_x += static_cast<int32_t>(
+                (static_cast<int64_t>(lateral >> 5) * bc22) >> 22);
+        m.vel_y += static_cast<int32_t>(
+                (static_cast<int64_t>(lateral >> 5) * bs22) >> 22);
+        if (along > m.cmd_speed) { // overspeed shed
+            m.vel_x -= m.vel_x >> 6;
+            m.vel_y -= m.vel_y >> 6;
+        }
+    }
+
+    // ---- 6. Contact drags [orig: @0x48EBB5..0x48ECA6]. The afloat/land branch
+    // keys on the platform solve's afloat flag; unported, so derive it from the
+    // water plane: in water = terrain under the hull below the water line.
+    {
+        bool afloat = false;
+        int32_t ground_here = INT32_MIN;
+        if (world.terrain != nullptr) {
+            const int32_t pos3[3] = {px, py, pz};
+            const GroundClearance clearance{};
+            ground_here =
+                    calc_average_ground_height(*world.terrain, pos3, 0, clearance);
+        }
+        if (world.env.water_z != 0 && ground_here != INT32_MIN)
+            afloat = ground_here < world.env.water_z;
+        else if (world.env.water_z != 0 && world.terrain == nullptr)
+            afloat = true; // headless/no-terrain world with water: float
+        if (!afloat) {
+            // Landed hull: planar and yaw-rate sheds (the slideDecay gravity
+            // leg stays with the unported platform solve; Z is chase-owned).
+            m.vel_x -= (m.vel_x + 4) >> 3;
+            m.vel_y -= (m.vel_y + 4) >> 3;
+            m.wheel_rate_bam -= (m.wheel_rate_bam + 2) >> 2;
+        }
+        // Shore look-ahead: sample terrain at the NEXT position.
+        if (world.terrain != nullptr && world.env.water_z != 0) {
+            const int32_t ahead3[3] = {px + m.vel_x, py + m.vel_y, pz};
+            const GroundClearance clearance{};
+            const int32_t ground =
+                    calc_average_ground_height(*world.terrain, ahead3, 0, clearance);
+            if (ground != INT32_MIN && ground >= world.env.water_z) {
+                m.vel_x -= (m.vel_x + 4) >> 3;
+                m.vel_y -= (m.vel_y + 4) >> 3;
+                m.wheel_rate_bam -= (m.wheel_rate_bam + 2) >> 2;
+                if (vertical_thrust > 0 && ground - world.env.water_z > 30583 &&
+                        !veh.ground_target.valid()) {
+                    m.vel_x = 0;
+                    m.vel_y = 0;
+                    m.wheel_rate_bam = 0;
+                }
+            }
+        }
+    }
+
+    // ---- 7. Integration + yaw application [orig: @0x48ECA8..0x48ECF2]. Z is
+    // chase-only (platform-solve residual, see the header note).
+    px += m.vel_x;
+    py += m.vel_y;
+    {
+        const int32_t r = m.wheel_rate_bam;
+        m.wheel_rate_bam = r - ((r + 16) >> 5) - (r >> 31); // decay toward zero
+    }
+    m.yaw_bam += m.wheel_rate_bam;
+
+    veh.position.x = static_cast<float>(from_fixed(px));
+    veh.position.y = static_cast<float>(from_fixed(py));
+    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.yaw = static_cast<int16_t>(std::lround(
+            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+}
+
 } // namespace opennova::world
