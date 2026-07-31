@@ -13,11 +13,6 @@ hardening, and project health. Divergences from the original engine belong in
       fields are dropdowns already
 - [ ] Zones are awkward to create
 - [ ] AI class and AI script: should be a selection, not a free input, if we can pull the options from a loadable resource (def, etc)
-- [ ] Apply the grilled loadout-tuple semantics to the "Weapon loadout" panel: the IDA
-      grill is DONE (net-re §5.63, D-MIS-2 closed — tuples are
-      `{name, ammoPri, ammoSec, flags}` sanitized by `AIProfile_SanitizeConfigData @ 0x40cfe0`),
-      but `loadout_groups_inspector.gd` still shows "Value 1"/"Value 2" with "usually -1"
-      tooltips and `bms.h` still names the fields `value1/value2/value3`
 - [ ] Group record semantics: the field WIDTHS are grilled (`bms.h`,
       `[orig: Med_WriteBmsFile @ 0x44f920]` — @0 a 2-bit flags, @8 the only free int,
       @12 the literal 10) and the editor clamps to that shape, but the two flag bits and

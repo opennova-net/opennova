@@ -771,9 +771,9 @@ int main() {
 		const std::vector<opennova::mission::WeaponLoadoutEntry> reread = doc.weapon_loadout();
 		TEST_EXPECT(reread.size() == 2);
 		TEST_EXPECT(reread[0].name == "WPN_A");
-		TEST_EXPECT(reread[0].value3 == "1");
+		TEST_EXPECT(reread[0].flags == "1");
 		TEST_EXPECT(reread[1].name == "WPN_B");
-		TEST_EXPECT(reread[1].value3 == "2");
+		TEST_EXPECT(reread[1].flags == "2");
 		// Deleting every weapon (an empty list) is still valid: the chunk goes to length 0.
 		TEST_EXPECT(doc.set_weapon_loadout({}));
 		TEST_EXPECT(doc.weapon_loadout().empty());

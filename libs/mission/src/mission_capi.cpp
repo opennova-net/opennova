@@ -654,9 +654,9 @@ int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *doc
 	}
 	const WeaponLoadoutEntry &entry = entries[index];
 	copy_cstr(out_entry->name, sizeof(out_entry->name), entry.name);
-	copy_cstr(out_entry->value1, sizeof(out_entry->value1), entry.value1);
-	copy_cstr(out_entry->value2, sizeof(out_entry->value2), entry.value2);
-	copy_cstr(out_entry->value3, sizeof(out_entry->value3), entry.value3);
+	copy_cstr(out_entry->ammo_primary, sizeof(out_entry->ammo_primary), entry.ammo_primary);
+	copy_cstr(out_entry->ammo_secondary, sizeof(out_entry->ammo_secondary), entry.ammo_secondary);
+	copy_cstr(out_entry->flags, sizeof(out_entry->flags), entry.flags);
 	return 1;
 }
 
@@ -671,10 +671,10 @@ int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
 	for (size_t i = 0; i < count; ++i) {
 		WeaponLoadoutEntry record;
 		record.name = fixed_string(entries[i].name, sizeof(entries[i].name));
-		record.value1 = fixed_string(entries[i].value1, sizeof(entries[i].value1));
-		record.value2 = fixed_string(entries[i].value2, sizeof(entries[i].value2));
-		record.value3 = fixed_string(entries[i].value3, sizeof(entries[i].value3));
-		if (record.value3.empty()) record.value3 = "-1";
+		record.ammo_primary = fixed_string(entries[i].ammo_primary, sizeof(entries[i].ammo_primary));
+		record.ammo_secondary = fixed_string(entries[i].ammo_secondary, sizeof(entries[i].ammo_secondary));
+		record.flags = fixed_string(entries[i].flags, sizeof(entries[i].flags));
+		if (record.flags.empty()) record.flags = "-1";
 		records.push_back(std::move(record));
 	}
 	return document->document.set_weapon_loadout(records) ? 1 : 0;

@@ -292,8 +292,9 @@ public:
 	bool remove_area_trigger(int index);
 
 	// --- Weapon loadout + groups (mission-global, Phase 3) --------------------
-	// The weapon loadout is stored as canonical four-field BMS records. get_weapon_loadout() returns
-	// dictionaries {index, name, value1, value2, value3}; value3 is the per-ammo damage-class input
+	// The weapon loadout is stored as canonical four-field BMS records — the kit tuple
+	// {name, ammoPri, ammoSec, flags} (net-re §5.63). get_weapon_loadout() returns dictionaries
+	// {index, name, ammo_primary, ammo_secondary, flags}; flags is the per-ammo damage-class input
 	// (1 = x0.9, 2 = x1.1, otherwise neutral). set_weapon_loadout() requires only a name; omitted
 	// values default to "-1", and all four strings survive re-serialization.
 	// Dirty on success.
