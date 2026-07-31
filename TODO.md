@@ -157,10 +157,6 @@ loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) are wired
 (godot/game/player_info_menu_host.gd; grilled in docs/playerinfo/avatars-re.md
 D-PLAYERINFO-7..12). Remaining:
 
-- [ ] Converge `armory_menu_host.gd`'s GDScript weight sum onto the
-      `NovaWeaponDatabase.loadout_weight`/`encumbrance_class` bindings the player-info
-      host consumes (its strings are pinned by `armory_menu_seam_test`; the
-      maturity-program armory-derivation row names this residual).
 - [ ] Persist the avatar/class/loadout selections to the on-disk profile
       (D-PLAYERINFO-9 — the NAME half is done: `NovaPlayerProfile.save_callsign` writes
       `user://player_profile.cfg`; the ammo/type picks now ride `snapshot()` as
