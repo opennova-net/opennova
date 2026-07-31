@@ -37,12 +37,12 @@ func _add_environment(data: EnvFile, node_name: String) -> NovaEnvironment:
 	return env
 
 
-func _add_hosted_weather(env: NovaEnvironment, node_name: String) -> NovaWeather:
+func _add_world_driven_weather(env: NovaEnvironment, node_name: String) -> NovaWeather:
 	var weather := NovaWeather.new()
 	weather.name = node_name
 	weather.environment_path = env.get_path()
 	add_child_autofree(weather)
-	weather.prepare_hosted()
+	weather.prepare_world_driven()
 	return weather
 
 
@@ -73,7 +73,7 @@ func test_global_colors_scale_at_runtime_without_mutating_authored_values() -> v
 
 func test_hosted_static_blocks_snap_to_scaled_targets() -> void:
 	var env := _add_environment(_make_static_data(), "HostedStaticEnv")
-	var weather := _add_hosted_weather(env, "HostedStaticWeather")
+	var weather := _add_world_driven_weather(env, "WorldDrivenStaticWeather")
 
 	assert_eq(_units(weather.get_smooth_ceiling()), [35, 30, 25])
 	assert_eq(_units(weather.get_smooth_cloud()), [45, 60, 75])
@@ -127,8 +127,8 @@ func test_lightning_consumes_the_scaled_runtime_color() -> void:
 	var reference_env := _add_environment(
 		_make_black_lightning_data(1.0, Color8(100, 50, 25)),
 		"ReferenceLightningEnv")
-	var scaled_weather := _add_hosted_weather(scaled_env, "ScaledLightningWeather")
-	var reference_weather := _add_hosted_weather(reference_env, "ReferenceLightningWeather")
+	var scaled_weather := _add_world_driven_weather(scaled_env, "ScaledLightningWeather")
+	var reference_weather := _add_world_driven_weather(reference_env, "ReferenceLightningWeather")
 
 	scaled_weather.trigger_lightning_short()
 	reference_weather.trigger_lightning_short()

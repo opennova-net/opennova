@@ -60,7 +60,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 			SubViewport.UPDATE_ALWAYS)
 	assert_true(cache.has_water_split_height())
 
-	water.set_host_rendering_enabled(false)
+	water.set_world_rendering_enabled(false)
 	simulate(water, 1, TICK)
 	assert_true(water.is_water_active(),
 			"retained authored height survives an unloaded host")
@@ -71,7 +71,7 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 			SubViewport.UPDATE_DISABLED)
 	assert_false(cache.has_water_split_height())
 
-	water.set_host_rendering_enabled(true)
+	water.set_world_rendering_enabled(true)
 	water.water_height = 0.0
 	simulate(water, 1, TICK)
 	assert_false(water.is_water_active())

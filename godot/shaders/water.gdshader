@@ -119,20 +119,20 @@ void vertex() {
 	// the SPECULAR ALPHA, which the rows fill with dist_alpha (255 near -> 0 far)
 	// [orig: RS28 on via pass bit 0x20000 @ 0x68324f; spec.a = dist_alpha
 	// @ 0x5c2eb5..0x5c2ef4]. NOT the terrain fog table — the old
-	// jointops_fog_factor curve here was a host invention.
+	// jointops_fog_factor curve here was a reimpl invention.
 	v_fog = CUSTOM1.a;
 	// The witnessed depth model: retail computes the strip depth as an arithmetic
 	// replica of the scene projection ((t*uvScale - uvBias)*rhw = viewportMaxZ *
 	// zproj(near 0.2, far = fog-int) [orig: depth chain @ 0x5c2c0c..0x5c2c4a; scale
 	// build @ 0x5c3348; near 0.2 @ 0x58ac0a, mission far 1024 @ 0x524721, viewport
 	// depth 0.99996948 = 1 - 2^-15 @ 0x58ac32]) — same-curve depths make the
-	// shoreline winner deterministic on the 16/24-bit z-buffer. The host cannot
+	// shoreline winner deterministic on the 16/24-bit z-buffer. The reimpl cannot
 	// unify cross-shader depth arithmetic, so the water pulls toward the camera by
 	// a RELATIVE view-depth factor (3e-4 of the ray): scaling the view-space
 	// position uniformly preserves NDC x/y exactly (pure depth pull, zero screen
 	// shift), and the bias tracks the ray length — above the per-frame
 	// re-tessellation jitter at the shoreline, far below the water/terrain
-	// separation at range. A TRACKED host approximation (env #29 row) standing in
+	// separation at range. A TRACKED reimpl approximation (env #29 row) standing in
 	// for retail's same-curve determinism. (The first form — 2^-15 of the
 	// remaining NDC range — swamped the far-field separation under reverse-Z's
 	// hyperbolic compression: water overpainted above-waterline terrain from
@@ -167,7 +167,7 @@ void fragment() {
 	// so _bx2 passes the rows' screen component through at weight 1 while
 	// R/G perturb it. The dots remain the witnessed lookup verbatim. Their
 	// result is then mapped from the main viewport's normalized projection to
-	// Godot's square mirror projection; without that host-boundary conversion,
+	// Godot's square mirror projection; without that sim/present-boundary conversion,
 	// the reflected image swims vertically as the view rotates on a widescreen
 	// display. The clamp is the RTT edge address mode.
 	// Reflection-less hosts (headless/tests) keep u_water_color as the

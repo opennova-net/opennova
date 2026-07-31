@@ -273,7 +273,7 @@ func _set_body_shader_parameter(body: Dictionary, parameter: StringName, value) 
 			(material as ShaderMaterial).set_shader_parameter(parameter, value)
 
 
-# env #33: the star field host — one MultiMesh of camera-facing quads under
+# env #33: the star field owner — one MultiMesh of camera-facing quads under
 # the additive celestial shader, textured with the star 3DI's diffuse. The
 # witnessed placement is camera + offset per star with per-star twinkle
 # brightness [orig: render_star_field @ 0x5ad9c0]; the near-light cull and
@@ -357,7 +357,7 @@ func _tint_for(env: Node, tint_key: String) -> Vector3:
 # hit is NAN (the refine only sharpens the hit point — the clear/blocked answer
 # is the march's). No terrain loaded = clear (nothing occludes) — the
 # editor-guard divergence from retail's null-atlas return-HIT, kept
-# deliberately: an unloaded host has nothing to block the sun
+# deliberately: an unloaded world has nothing to block the sun
 # (docs/terrain/terrain-re.md §Runtime terrain queries).
 func _glare_ray_clear(from_pos: Vector3, sun_dir: Vector3, ray_length: float, jitter: Vector3) -> bool:
 	if terrain_data == null or not terrain_data.is_loaded():

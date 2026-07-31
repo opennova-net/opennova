@@ -12,7 +12,7 @@ extends Node3D
 # like NovaTerrain's weather_path; resolved lazily in _process).
 @export var weather_path: NodePath
 
-# Optional host-owned BG_COLOR resource. WorldContextPreview supplies this so
+# Optional owner-supplied BG_COLOR resource. WorldContextPreview supplies this so
 # the dome's faithful below-rim region clears to skyfog instead of black.
 var frame_clear_environment: Environment = null
 
