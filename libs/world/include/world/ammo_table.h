@@ -86,10 +86,12 @@ inline constexpr uint32_t kAmmoFlagInstantKillZone = 0x400u;
 inline constexpr uint32_t kAmmoFlagUseOwnMove = 0x2000u;
 inline constexpr uint32_t kAmmoFlagNoAge = 0x4000u;
 inline constexpr uint32_t kAmmoFlagForceTracer = 0x8000u;
+inline constexpr uint32_t kAmmoFlagShotgun = 0x10000u;
 inline constexpr uint32_t kAmmoFlagClaymore = 0x20000u;
 inline constexpr uint32_t kAmmoFlagNoOItems = 0x80000u;
 inline constexpr uint32_t kAmmoFlagNoMItems = 0x100000u;
 inline constexpr uint32_t kAmmoFlagNoDItems = 0x200000u;
+inline constexpr uint32_t kAmmoFlagDesignateTarget = 0x2000000u;
 inline constexpr uint32_t kAmmoFlagIgnorFoilage = 0x4000000u; // sic — the witnessed token spelling
 // (parity static_asserts against DEF_AMMO_FLAG_* live in npruntime/src/weapon_table_build.cpp)
 
@@ -100,6 +102,10 @@ struct AmmoTableEntry {
     int32_t max_age_ticks = 0;      // +8, 62 Hz ticks [orig: sub_40A0F0 = (62*fp16+0x8000)>>16]
     int32_t arm_age_ticks = 0;      // +12 — a hit before arming swaps in notarmmed_ammo
     float spread_error = 0.0f;      // +24 ballistic dispersion (16.16 -> float)
+    int32_t spread_error_fp16 = 0;  // +24 exact source value; spread uses this carrier
+                                    // [orig: AmmoDef_ParseProperty @0x40A2D0]
+    uint8_t recoil[3] = {0, 0, 0};  // bytes +227..+229, prone/crouch/standing impulse
+                                    // [orig: AmmoDef_ParseProperty @0x40A2D0]
     float drag = 0.0f;              // +28 (16.16 -> float)
     int32_t drag_fp16 = 0;          // +28 exact source value; flight uses this carrier
     float bullet_radius = 0.0f;     // +32 hit-test radius (16.16 -> float)

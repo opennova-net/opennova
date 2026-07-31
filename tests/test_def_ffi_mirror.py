@@ -86,6 +86,29 @@ def test_blender_mirror_layouts_match_pyopennova():
             f"{name}: sizeof diverged — the array stride is broken in one mirror")
 
 
+def test_weapon_exact_carriers_are_append_only_in_both_mirrors():
+    """The native DefWeaponDef appends these fields to preserve all prior offsets.
+
+    Pinning the tail independently of the cross-mirror comparison prevents both
+    mirrors from accidentally agreeing on the same stale, short array stride.
+    """
+    expected_tail = [
+        "error_fp16",
+        "error_hip_theta_fp16",
+        "error_up_theta_fp16",
+        "weaponweight_fp16",
+        "clipweight_fp16",
+    ]
+    blender = _load_blender_def_ffi()
+    for weapon_cls in (py_def.DefWeaponDef, blender.DefWeaponDef):
+        names = [name for name, _ctype in weapon_cls._fields_]
+        assert names[-len(expected_tail):] == expected_tail
+        assert weapon_cls.error_fp16.size == ctypes.sizeof(ctypes.c_int * 6)
+        fields_end = weapon_cls.clipweight_fp16.offset + ctypes.sizeof(ctypes.c_int)
+        assert fields_end <= ctypes.sizeof(weapon_cls)
+        assert ctypes.sizeof(weapon_cls) - fields_end < ctypes.alignment(weapon_cls)
+
+
 def _skip_without_native():
     try:
         py_def._bind()

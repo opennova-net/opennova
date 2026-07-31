@@ -40,6 +40,7 @@
 #include <world/world.h>
 
 #include <cmath>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -160,9 +161,187 @@ void deliver_all(const Drained &drained, ns::UdpSessionTransport &client) {
 	for (const std::vector<uint8_t> &raw : drained.raw) client.push_inbound(raw);
 }
 
+bool test_retail_random_spread_vectors() {
+	struct Vector {
+		int32_t spread;
+		uint32_t seed;
+		int32_t vertical;
+		bool alternate;
+		int32_t yaw;
+		int32_t pitch;
+	};
+	// Independent IDA/x87 oracle vectors. In particular, strict-f32
+	// intermediates miss several of these by 1-4 BAM units.
+	// [orig: Weapon_CalcRandomSpreadOffset @0x4E4120]
+	constexpr std::array<Vector, 11> vectors{{
+		{0x00000000, 0xFFFFFFFFu, 0x00010000, false, 0, 0},
+		{0x00010000, 0x00000000u, 0, false, -7340450, 6771822},
+		{0x00010000, 0x12345678u, 0, false, -4357031, 7278683},
+		{0x00010000, 0x12345678u, 0x00008000, false, -4357031, 3639341},
+		{0x00010000, 0x12345678u, 0, true, 9357827, -5601610},
+		{0x00010000, 0x12345678u, 0x00008000, true, 9357827, 66155},
+		{0x00028000, 0x80000000u, 0x00008000, false, -20294730, 3391413},
+		{0x00028000, 0x80000000u, 0x00008000, true, 16461567, 1713528},
+		{0x00004000, 0xFFFFFFFFu, 0, false, 1199147, 1599490},
+		{0x00004000, 0xFFFFFFFFu, 0x00018000, true, 244338, -1924904},
+		{static_cast<int32_t>(0xFFFF0000u), 0xDEADBEEFu, 0, false, 225733, -8847762},
+	}};
+	for (const Vector &v : vectors) {
+		const w::RandomSpreadOffset got = w::weapon_calc_random_spread_offset(
+				v.spread, v.seed, v.vertical, v.alternate);
+		if (!expect(got.yaw_bam == v.yaw && got.pitch_bam == v.pitch,
+		            "retail random-spread vector matches IDA/x87 oracle")) {
+			std::fprintf(stderr,
+			             "  spread=%08X seed=%08X vertical=%08X alt=%d got=(%d,%d) expected=(%d,%d)\n",
+			             static_cast<uint32_t>(v.spread), v.seed,
+			             static_cast<uint32_t>(v.vertical), v.alternate ? 1 : 0,
+			             got.yaw_bam, got.pitch_bam, v.yaw, v.pitch);
+			return false;
+		}
+	}
+
+	struct ShotgunVector {
+		int32_t pie_slice;
+		uint16_t radial;
+		uint16_t phase;
+		int32_t yaw;
+		int32_t pitch;
+	};
+	static constexpr ShotgunVector shotgun_vectors[] = {
+		{0x01000000, 12695, 50206, 1614661, -15924875},
+		{0x00100000, 1, 32785, -1048573, -1706},
+		{0x00280000, 65518, 32478, -1133, 31},
+		{0x00010000, 28826, 12516, 18303, 47072},
+	};
+	for (const ShotgunVector &v : shotgun_vectors) {
+		const w::RandomSpreadOffset got =
+				w::weapon_calc_shotgun_spread_offset(
+						v.pie_slice, v.radial, v.phase);
+		if (!expect(got.yaw_bam == v.yaw && got.pitch_bam == v.pitch,
+		            "retail shotgun radial-spread vector matches IDA/x87 oracle"))
+			return false;
+	}
+	return true;
+}
+
+bool test_spawn_spread_then_recoil() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::AiSystem ai;
+	world.ai = &ai;
+	w::PlayerSpawn seed;
+	seed.net_id = 41;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = ai.for_handle(shooter);
+	if (!expect(shooter.valid() && body != nullptr,
+	            "spread/recoil integration player spawned"))
+		return false;
+
+	world.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	ammo.recoil[0] = 1;
+	ammo.recoil[1] = 2;
+	ammo.recoil[2] = 3;
+	world.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.weapons.entries[1];
+	weapon.valid = true;
+	weapon.error_fp16[2] = 0x10000;
+
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 0;
+	const w::RandomSpreadOffset first_error =
+			w::weapon_calc_random_spread_offset(0x10000, 0, 0, false);
+	const int first = world.round_sim.spawn(world, params);
+	if (!expect(first >= 0, "ordinary weapon round spawned")) return false;
+	if (!expect(world.round_sim.rounds[static_cast<size_t>(first)].yaw_bam ==
+	                    first_error.yaw_bam &&
+	                    world.round_sim.rounds[static_cast<size_t>(first)].pitch_bam ==
+	                    first_error.pitch_bam,
+	            "current shot uses static ERROR before adding its recoil"))
+		return false;
+	if (!expect(body->inf.recoil_pitch == (3 << 18),
+	            "standing ammo recoil is added after successful spawn"))
+		return false;
+	if (!expect(world.round_sim.fired.size() == 1 &&
+	                    world.round_sim.fired[0].yaw_bam == 0 &&
+	                    world.round_sim.fired[0].pitch_bam == 0,
+	            "fire descriptor remains pre-random-spread"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	body->inf.scope_raised = true;
+	world.registry.get(shooter)->flags |= w::kEntityFlagScopeRaised;
+	const int scoped = world.round_sim.spawn(world, params);
+	if (!expect(scoped >= 0 && body->inf.recoil_pitch == ((3 << 18) * 3 / 4),
+	            "scope-raised recoil applies the exact binary32 0.75 scale"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	body->inf.scope_raised = false;
+	world.registry.get(shooter)->flags &= ~w::kEntityFlagScopeRaised;
+	world.round_sim.weapon_spread_enabled = false;
+	const int gated = world.round_sim.spawn(world, params);
+	if (!expect(gated >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(gated)].yaw_bam == 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(gated)].pitch_bam == 0 &&
+	                    body->inf.recoil_pitch == (3 << 18),
+	            "weapon rules gate suppresses ERROR but never recoil"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	world.round_sim.weapon_spread_enabled = true;
+	ammo.flags = w::kAmmoFlagShotgun;
+	ammo.spread_count = 1;
+	ammo.kz_pieslice_bam = 0x01000000;
+	world.throwables.fan_prng_state = 0x2B0749C1u;
+	const int shotgun = world.round_sim.spawn(world, params);
+	if (!expect(shotgun >= 0 &&
+	                    world.round_sim.rounds[static_cast<size_t>(shotgun)].yaw_bam ==
+	                            1614661 &&
+	                    world.round_sim.rounds[static_cast<size_t>(shotgun)].pitch_bam ==
+	                            -15924875 &&
+	                    body->inf.recoil_pitch == (3 << 18),
+	            "shotgun uses its radial fan, skips weapon ERROR, and applies recoil"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	ammo.flags = w::kAmmoFlagDesignateTarget;
+	const int designator = world.round_sim.spawn(world, params);
+	if (!expect(designator < 0 && world.round_sim.active_count == 0 &&
+	                    world.round_sim.fired.empty() && body->inf.recoil_pitch == 0,
+	            "designator returns before projectile allocation and recoil"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	ammo.flags = 0;
+	body->pos[2] = 1 << 16;
+	world.env.water_z = 2 << 16;
+	const int submerged = world.round_sim.spawn(world, params);
+	if (!expect(submerged >= 0 && body->inf.recoil_pitch == (3 << 20),
+	            "submerged source uses standing-row recoil at the underwater shift"))
+		return false;
+
+	return true;
+}
+
 } // namespace
 
 int main() {
+	if (!test_retail_random_spread_vectors()) return 1;
+	if (!test_spawn_spread_then_recoil()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;

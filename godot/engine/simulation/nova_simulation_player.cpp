@@ -1283,6 +1283,11 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	if (!p) return;
 	refresh_local_player_view_effects();
 	opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
+	// g_weaponScopeActive is the post-ease promotion, not raw scope intent.
+	// This one value feeds body pose, per-shot recoil scaling, and CanFire.
+	// [orig: promoter @0x4DE4F7; local body mirror @0x4B5D95]
+	const bool scope_promoted = weapon_active_ && player_view_.scope_engaged &&
+			!opennova::world::player_view_scope_ease_active(player_view_);
 	// The local-player weapon-channel inputs, refreshed before the body updater runs —
 	// the Flags-bit refresh (Flags|0x10 from g_weaponScopeActive; the binoculars bit
 	// stays false until a shell binoculars input exists). This is the ONLY part of the
@@ -1292,25 +1297,78 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	// original does [orig: @ 0x4b5dba], which is the same path a remote player's pose
 	// resolves through. Keeping a local-only scalar beside that table read would put two
 	// sources behind one value and let the two disagree across a weapon switch.
+	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
 		if (weapon_active_) {
 			opennova::world::infantry_weapon_switch_stamp(
 					p->inf, weapon_anim_map_serial_);
 		}
-		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
+		p->inf.scope_raised = scope_promoted;
 		p->inf.binoculars_raised = player_view_.binoculars_raised;
 		// The run-gait class + ForceCrouch mirror, same per-tick re-read pattern as the
 		// hold kind [orig: the selection reads AdmDefs[+0x2B0]+0xAC each pass @ 0x4b72cf;
 		// the ForceCrouch checks read the equipped def flags @ 0x4b7245/@ 0x4e0d8a].
 		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
 		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
+
+		// The body updater and HUD share retail's Player_CanFireWeapon verdict.
+		// A promoted Scoped weapon (Flags bit 0) is rejected while moving and
+		// submerged. The second predicate, misleadingly named as a vehicle-gunner
+		// helper in the IDB, is actually promoted Sighted (bit 1, except SWITCHFROM)
+		// with no mount gate; it bypasses those two ordinary checks. Both still lose
+		// to InAir. ForceScoped is the final first-person override, but never bypasses
+		// the earlier card-switch reload or seat rejection.
+		// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80;
+		// Sighted helper @0x4dcd30; HUD row select @0x592b87]
+		const opennova::world::Entity *local =
+				world_->registry.get(world_->cached.local_player);
+		bool mount_allows_aimed_shot = local != nullptr;
+		if (local != nullptr && local->mounted) {
+			mount_allows_aimed_shot =
+					local->mount_type == opennova::world::SeatType::Passenger ||
+					(local->mount_type == opennova::world::SeatType::Gunner &&
+							local_usegun_slot_active_);
+		}
+		const opennova::world::WeaponSlotState &active_slot =
+				*active_local_weapon_slot();
+		const uint32_t weapon_flags =
+				static_cast<uint32_t>(weapon_def_.flags);
+		const uint32_t entity_flags = local != nullptr
+				? local->flags | local->engine_flags
+				: 0;
+		const bool card_switch_reload =
+				active_slot.current == opennova::world::weapon_action::kReload &&
+				(weapon_flags & DEF_WEAPON_FLAG_NOCARDSWITCH) == 0;
+		const bool scoped_aimed_shot = scope_promoted &&
+				(weapon_flags & DEF_WEAPON_FLAG_SCOPED) != 0;
+		const bool sighted_aimed_shot = scope_promoted &&
+				(weapon_flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
+				active_slot.current != opennova::world::weapon_action::kSwitchFrom;
+		const bool in_air = p->inf.airborne ||
+				(entity_flags & opennova::world::kEntityFlagInAir) != 0;
+		// Retail adds CameraOffset.Z to this test. That offset is not represented,
+		// so the fixed body Z plus the Drowning flag is the bounded projection.
+		const bool submerged =
+				(entity_flags & opennova::world::kEntityFlagDrowning) != 0 ||
+				(world_->env.water_z != 0 && p->pos[2] < world_->env.water_z);
+		const bool ordinary_aimed_shot = !in_air &&
+				(sighted_aimed_shot ||
+						(scoped_aimed_shot && !p->inf.player_moving)) &&
+				(sighted_aimed_shot || !submerged);
+		const bool force_scoped =
+				(weapon_flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
+		p->inf.aimed_shot_available = local != nullptr && local->alive &&
+				local->health > 0 && weapon_active_ && mount_allows_aimed_shot &&
+				!card_switch_reload && !player_view_.third_person &&
+				!player_view_.binoculars_view_active &&
+				(force_scoped || ordinary_aimed_shot);
 	}
 	if (opennova::world::Entity *entity =
 				world_->registry.get(world_->cached.local_player)) {
 		uint32_t view_flags = 0;
 		if (player_view_.nvg_active) view_flags |= 0x4u;
 		if (player_view_.binoculars_raised) view_flags |= 0x8u;
-		if (weapon_active_ && player_view_.scope_engaged) view_flags |= 0x10u;
+		if (scope_promoted) view_flags |= 0x10u;
 		entity->flags = (entity->flags & ~0x1cu) | view_flags;
 	}
 }
@@ -1608,9 +1666,8 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-conform
 	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
 	// (entity+0x2DC, infantry_torso_roll_tick); body_pitch is the slope-conform
-	// body pitch (entity+0x90; both fed by infantry_slope_pass). pitch_blend
-	// stays 0 until its sim source (recoil impulses) is ported — the formulas
-	// carry the term so it drops in without touching this seam.
+	// body pitch (entity+0x90; both fed by infantry_slope_pass). pitch_blend is
+	// the live recoil accumulator (entity+0x380), supplied by the shared helper.
 	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
 	opennova::anim::compute_aim_overlay_angles(in, angles);
 
@@ -2173,6 +2230,23 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
 			-player_view_.tp_anchor[1]);
 	out["tp_anchor_valid"] = player_view_.tp_anchor_valid;
+	// The first-person camera consumes twice entity+0x380. Export the already
+	// wrapped composition separately from authoritative look pitch so the host
+	// cannot accidentally apply it to third person or aim rays.
+	// [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	{
+		float fp_pitch_recoil_deg = 0.0f;
+		if (world_ && world_->ai && world_->cached.local_player.valid()) {
+			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player)) {
+				const int32_t doubled =
+						opennova::io::bam_dbl(p->inf.recoil_pitch);
+				fp_pitch_recoil_deg = static_cast<float>(
+						static_cast<double>(doubled) *
+						opennova::world::kDegreesPerBam);
+			}
+		}
+		out["fp_pitch_recoil_deg"] = fp_pitch_recoil_deg;
+	}
 	// The FP camera roll in degrees: roll = torsoRoll + lean/4 [orig: the on-foot
 	// person leg @ 0x437fe6 — g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)].
 	{
@@ -2417,7 +2491,12 @@ void NovaSimulation::tick_local_player_weapon() {
 				// fp_impact_probe pin; the same mistake D-NET-153 records for the
 				// wire leg).
 				const int32_t dir_yaw = p->heading;
-				const int32_t dir_pitch = p->pitch;
+				// Fire position/direction sees the undoubled recoil accumulator;
+				// the camera is the separate 2*R consumer. Spread below still
+				// samples R>>8 before this shot adds its own impulse.
+				// [orig: Entity_CalcWeaponFirePosition @0x4DC847]
+				const int32_t dir_pitch = opennova::io::bam_add(
+						p->pitch, p->inf.recoil_pitch);
 				local_round_sequence_ =
 						static_cast<uint16_t>(local_round_sequence_ + 1u);
 				const uint16_t shot_seq = local_round_sequence_;
@@ -2470,6 +2549,7 @@ void NovaSimulation::tick_local_player_weapon() {
 				round.ammo_index = adm->ammo_index;
 				round.adm_index = adm_index;
 				round.shot_seq = shot_seq;
+				round.subtype = round_event.subtype;
 				round.charge = pending_throw_charge_;
 				if (joiner_ && runtime_ != nullptr)
 					// The joiner's OWN predicted round runs the wire-proxy walk with
@@ -2752,6 +2832,66 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = active_slot.clip;
 	out["reserve"] = active_slot.reserve;
 	out["kick"] = static_cast<int>(active_slot.kick);
+	// Crosshair spread remains in retail's exact integer domains through the
+	// presentation edge: choose the stance triplet, then add the two arithmetic
+	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
+	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
+	// shared Player_CanFireWeapon verdict stamped before the body tick.
+	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
+	{
+		int32_t recoil_pitch = 0;
+		int32_t weapon_weight_spread = 0;
+		int category = 2;
+		bool aimed_shot_available = false;
+		const opennova::world::Entity *local = nullptr;
+		const AiEntity *body = nullptr;
+		if (world_ && world_->ai && world_->cached.local_player.valid()) {
+			local = world_->registry.get(world_->cached.local_player);
+			body = world_->ai->for_handle(world_->cached.local_player);
+		}
+		if (body != nullptr) {
+			recoil_pitch = body->inf.recoil_pitch;
+			weapon_weight_spread = body->inf.weapon_weight_spread;
+			aimed_shot_available = body->inf.aimed_shot_available;
+			// Retail tests Position.Z + CameraOffset.Z here. CameraOffset.Z is
+			// not represented in the current world model, so raw fixed body Z
+			// plus the independently mirrored Drowning flag is our bounded projection.
+			// [orig: HUD_DrawCrosshair @0x592b35; source gate @0x4ec2de]
+			const bool below_water = world_->env.water_z != 0 &&
+					body->pos[2] < world_->env.water_z;
+			if (body->inf.stance ==
+					opennova::world::InfantryState::Stance::kProne)
+				category = 0;
+			else if (body->inf.stance ==
+					opennova::world::InfantryState::Stance::kCrouch)
+				category = 1;
+			if (body->inf.airborne || below_water ||
+					(local != nullptr &&
+					 ((local->flags | local->engine_flags) &
+							(opennova::world::kEntityFlagInAir |
+							 opennova::world::kEntityFlagDrowning)) != 0))
+				category = 2;
+		}
+		if (local != nullptr && local->mounted) category = 1;
+		const int row = category + (aimed_shot_available ? 3 : 0);
+		const opennova::world::WeaponTableEntry *weapon =
+				world_ != nullptr && local != nullptr
+				? world_->weapons.by_index(local->equipped_adm_index)
+				: nullptr;
+		const int32_t authored_error = weapon != nullptr
+				? weapon->error_fp16[row]
+				: 0;
+		const int32_t live_error = opennova::io::bam_add(
+				authored_error,
+				opennova::io::bam_add(
+						opennova::io::bam_sar(recoil_pitch, 7),
+						opennova::io::bam_sar(weapon_weight_spread, 7)));
+		out["recoil_pitch_bam"] = recoil_pitch;
+		out["weapon_weight_spread_bam"] = weapon_weight_spread;
+		out["aimed_shot_available"] = aimed_shot_available;
+		out["hud_spread_row"] = row;
+		out["hud_spread_fp16"] = live_error;
+	}
 	// Weapon heat has two retail consumers with different clamps: HUD info stops
 	// at 0xFFFF, while the first-person model publishes HEAT_GLOW on the signed
 	// CTRL bus through the exact 0x10000 endpoint.

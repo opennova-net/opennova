@@ -26,6 +26,10 @@ selection + auto-advance, name resolve, the HUDWPDINFO label, the
 show-waypoints mission gate) and resolved the `@0x599700` "minimap" misnomer —
 it is the **weapon heat bar**; the real map element is
 `HUD_DrawMapOverlay @0x5a5f40` (located + structured, port deferred).
+The 2026-07-31 recoil/spread grill then closed the write side behind the
+crosshair's two dynamic terms: the round-spawn impulse, the infantry-body
+decay/drift, the local movement/weapon-weight accumulator, and their distinct
+projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 
 ## Verdict table
 
@@ -38,7 +42,7 @@ it is the **weapon heat bar**; the real map element is
 | HUD text + half-bright | ported (`hud_text.gd`) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
 | Ammo count + weapon name text | **ported** (`hud_weapon_text.gd`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
 | Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`hud_clip_indicator.gd`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
-| Crosshair / reticle + spread | **ported** (`hud_crosshair.gd`, D-HUD-7/8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @0x590f50]`; spread math `hud_helpers_test.gd` |
+| Crosshair / reticle + spread | **ported** (`hud_crosshair.gd`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_view_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `game_hud.gd` materializes the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `nova_simulation_test.gd` + `game_hud_test.gd` |
 | ALPHAFADE semantics | **ported** (`hud_fade.gd`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
 | Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `hud_attach_labels.gd` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
@@ -293,16 +297,17 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   the spread crosshair draws when the player **cannot** take an aimed shot —
   `!Player_CanFireWeapon() || vehicle auto-aim || (dword_A8235C && gunner
   scoped)` `[orig: @0x592adc..0x592b01]`. `Player_CanFireWeapon @0x5cf780`
-  requires the **settled Scoped** view (`Player_IsEquippedWeaponScoped
-  @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) and returns 0
-  under `g_camera_mode` `[orig: @0x5cf807/@0x5cf828]`. That predicate feeds
-  one standard-card selector, but it is not the complete SIGHTS-card gate:
-  Sighted has a separate selector at `0x4dcd30`. Thus, for Scoped weapons, the
-  crosshair draws from the hip, **all through the ADS ease**, and in every
-  external-camera mode; it yields only once fully scoped (D-HUD-9: the
-  `@0x4de4f7` promoter is the only writer of `g_weaponScopeActive`). The
-  Sighted-only distinction is the narrow remaining D-HUD-9 tail. Its can't-fire
-  path also resets `g_cameraFovDeg = 5242880` = **80.0 deg** 16.16
+  requires either the **settled Scoped** view (`Player_IsEquippedWeaponScoped
+  @0x4dcc80` = `WeaponDef.Flags & 1` plus `g_weaponScopeActive`) or the separate
+  settled **Sighted** predicate (`@0x4dcd30` = `Flags & 2`, promoted active,
+  and current action is not SWITCHFROM). The ordinary Scoped leg rejects
+  movement and drowning/below-water state; Sighted bypasses those two gates.
+  Both reject external camera and dead/airborne state, and card-switch reload
+  is an earlier return `[orig: @0x5cf7be..0x5cf874]`. ForceScoped overwrites
+  the scope/movement/air/water verdicts in first person, but not the early
+  slot/seat/reload rejects. Thus the crosshair draws throughout ADS ease and
+  whenever the applicable CanFire gate fails. Its can't-fire path also resets
+  `g_cameraFovDeg = 5242880` = **80.0 deg** 16.16
   `[orig: @0x5cf88e]` — the port's `fov_deg` default.
 - **Anchor**: the offset applies to the **virtual-space** projection of the
   aim point (`Viewport_ScreenToVirtual`). For the on-foot local player with no
@@ -335,14 +340,67 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   **`pixel = (ERROR_16.16[row] + recoil terms) · screen_w / int(fov_deg) >> 16`**.
   `ERROR` is parsed as six sequential 16.16 **degree** values into
   `weapon+0xB0..0xC4` via `Math_ParseFixedPoint16 @0x6131f0` (a digit parser,
-  not atof) `[orig: parse @0x543b21]` — rows hip prone/crouch/stand then
-  scoped prone/crouch/stand (retail sample `error 0.05 0.2 0.25 0.05 0.1
-  0.15`). `libs/def` stores the rows as float degrees and the port re-quantizes
-  `int(deg × 65536)` at consumption — equal for retail data; values whose f32
-  rounds down (e.g. `0.7`) can read 1 16.16-LSB (0.000015 deg) low, invisible
-  at pixel altitude. The recoil accumulators `player+0x380/+0x384` (pitchBlend
-  et al, see `docs/world/world-wac-ai-re.md`) are not yet surfaced by the
-  runtime — D-HUD-7.
+  not atof) `[orig: WeaponDefs_ParseLineCallback @ 0x543b21]` — rows hip
+  prone/crouch/stand then scoped prone/crouch/stand (retail sample `error
+  0.05 0.2 0.25 0.05 0.1 0.15`). `libs/def` and the runtime weapon table now
+  retain those exact integers; no float round-trip sits on the parity path.
+  The two live terms are likewise carried as signed BAM/fixed-point integers
+  through the sim and HUD. The port's below-water row gate compares body
+  position rather than retail's `Position.Z + CameraOffset.Z`; the missing
+  world-side eye-height projection remains under D-INF-18 and is outside the
+  accumulator closure. D-HUD-7 is closed.
+
+#### Recoil and movement-spread terms (witnessed and ported 2026-07-31)
+
+The two entity fields used by the HUD have different producers and different
+roles in projectile spread:
+
+- `R = entity+0x380` (`pitchBlend`) is the shot-recoil accumulator. Ammo
+  `recoil a b c` parses with `atol` into three bytes at AmmoDef
+  `+0xE3..+0xE5`; narrowing is modulo 256, not clamped. A shot selects prone,
+  crouch, or standing from `MoveOrder & 0x100/0x200`, forces standing while
+  airborne or submerged, and forces crouch while attached. Retail tests
+  submersion at `Position.Z + CameraOffset.Z`; the portable world projection
+  currently uses body position plus Drowning (D-INF-18). Its impulse is
+  `ammo.recoil[category] << 18`, or `<< 20` while drowning/underwater; a raised
+  scope multiplies it by the exact binary32 `0.75` and truncates toward zero.
+  The impulse is added after an ordinary round allocation or after the shotgun
+  fan call, so spawned pellets see the pre-shot accumulator. It is not gated by the
+  `mp_NoWeaponRecoil` rule. Instant/detonator/designator and claymore returns do
+  not add it. `[orig: AmmoDef_ParseProperty @ 0x40a2d0]`
+  `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+- Every infantry-body tick decays `R` with signed x86 wrap/arithmetic-shift
+  semantics: `t=(R+4)>>3`, `half=t>>1`, `R-=half`, then zero at `R<=0x300`.
+  The same pass adds `t>>3` to entity pitch, consumes one PRNG value even when
+  `R` is zero, and adds `half` to yaw for an even value or subtracts it for an
+  odd value. There is no upper clamp.
+  This body pass precedes camera construction and the later weapon action/spawn;
+  the firing round therefore uses the previous value, and the next body update
+  starts from the newly stamped impulse.
+  `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`
+- `M = entity+0x384` is movement/weapon-weight instability. Its local-player
+  writer is active only while moving (`MoveOrder & 8`), on foot, with a live
+  equipped definition. It starts from the wrapping 16.16 sum
+  `clipweight + weaponweight`, then wrap-adds one third when an aimed shot
+  is available, one third while prone and not drowning, two thirds while
+  crouched and not drowning, otherwise one-and-a-half. The one-third leg is
+  signed integer division; the two-thirds and one-and-a-half legs use the
+  retail floating conversion and truncate toward zero. Rising while
+  airborne performs a second wrapping add of `0x01000000`; there is no upper
+  clamp. The shared decay follows those local-player adds in the same tick:
+  `M -= (M+4)>>4`, zeroing it at `M<=0x300`. Remote players and AI skip the
+  producer but run the same decay, so a local shot later in the tick sees the
+  already-decayed new movement contribution.
+  `[orig: WeaponDefs_ParseLineCallback @ 0x5440db]`
+  `[orig: WeaponDefs_ParseLineCallback @ 0x54410d]`
+  `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`
+
+The HUD deliberately uses `R>>7` and `M>>7`; ordinary projectile magnitude
+uses `R>>8` and `M>>7`. The projectile ERROR selector is also independent of
+the HUD selector: `verticalSpread ? 3 : category`, whereas the HUD uses
+`stance + 3*Player_CanFireWeapon()`. Keeping those two consumers separate is
+required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+`[orig: HUD_DrawCrosshair @ 0x592640]`
 - **Unported sub-elements of the same function** (witnessed 2026-07-11,
   explicitly out of the SP weapon-cluster port):
   - the **target-tracking cursor** — with a tracked entity (`ptr @0x27234F0`)
@@ -372,9 +430,10 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   `[orig: GDynamicVB_DrawPrimitive @0x6788e0]` (D-HUD-8 on the color stage).
 
 Port: `hud_crosshair.gd` (spread_px / error_row / the 5 strips as UV'd
-polygons); visibility + row select in `game_hud.gd _draw_crosshair` (hidden
-once generic ADS is settled). That timing matches the Scoped path; retail's
-Sighted-only crosshair distinction remains the adjacent D-HUD-9 note.
+polygons); visibility + row select in `game_hud.gd _draw_crosshair`, fed by
+the sim's shared `Player_CanFireWeapon` projection. Scoped/Sighted,
+promotion timing, movement, camera, reload, air/water, ForceScoped, and the
+seat gates therefore select visibility and the ERROR triplet together.
 
 ### Standard weapon SIGHTS card — `Render_ProcessMainSceneFrame @0x5ca299..0x5cab15` (corrected 2026-07-19)
 
@@ -776,9 +835,9 @@ behind it.
 | D-HUD-4 | — | Health bar *fill width* uses the capped `+92` ratio; *fill color* uses an uncapped recomputed ratio (`HUD_DrawHealthBar @0x5a2e50`) | Equivalent over `[0,1]`; recorded so the port matches both reads rather than collapsing to one. |
 | D-HUD-5 | `hud_clip_indicator.gd` restamps its flash on (`round_type`, reserve) change | restamp keys are (`weapondef+220` ammo class, reserve, `weapondef+216` pool id) `[orig: @0x599ab2]` | Our weapon model runs a single ammo pool (net-re D-WPN-2), so the ammo-class/pool ids aren't distinct state yet; the proxy fires on the same reload/switch transitions. Revisit with per-class pools. |
 | D-HUD-6 | `hud_messages.gd` is a timed line feed (930-tick life, ≥186 stagger, wrap, two-space continuation indent) drawn at the `HUDCHATTEXT` anchor | triggered text rides the full chat system: channel-2 ring buffers `[orig: Chat_AddDebugMessage @0x4987f0]`, display rebuild `[orig: @0x498bd0]`, and a channel geometry table (`dword_28E4DF8`, writer unwitnessed) | Message-line altitude port. The channel's exact screen geometry, per-line fade curve, and the player-chat channel are the chat-pipeline follow-up. |
-| D-HUD-7 | crosshair spread = the ERROR term only | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` — the recoil/aim accumulators `[orig: @0x592b95..0x592bc8]` | The runtime does not yet surface those accumulators (they live in the entity angle state; see `docs/world/world-wac-ai-re.md` pitchBlend). Wire them when the recoil write-side is witnessed. |
+| D-HUD-7 | **CLOSED 2026-07-31.** The HUD consumes the exact ERROR integer plus the sim's signed `pitchBlend(+0x380)>>7` and movement/weapon-weight `(+0x384)>>7`; the same live `pitchBlend` feeds the first-person camera and local/decoded-player aim overlays | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` `[orig: HUD_DrawCrosshair @ 0x592640]`; the write/decay side is `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]` | **FIXED.** Exact integer carriers now run ammo/weapon parse → runtime tables → round/body sim → local HUD/camera/overlay; decoded rows stamp and decay recoil, while their movement term remains the retail zero of a local-only producer. The projectile's intentionally different `R>>8` stays separate. The water-height category's position-only `CameraOffset.Z` projection remains D-INF-18, not D-HUD-7. Pinned by `npruntime_round_sim`, `infantry`, `netsim_client_view_recoil`, and `hud_helpers_test.gd`. |
 | D-HUD-8 | crosshair color multiplies the texture (canvas modulate); default white | the strip writes the color to the **specular** channel with `diffuse = 1.0` `[orig: @0x5914d7]`; the blend-stage setup lives in the HUD shader pass (`GfxShader_ApplyPassChecked @0x677020`, unwitnessed); color source = user config `dword_25510E0` | Identical for the default white; witness the texture-stage state (and the config default) before modeling the user crosshair color. |
-| D-HUD-9 | the crosshair hides at settled generic ADS (`scope_engaged && scope_fraction >= 1`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose settle predicate is specifically `Player_IsEquippedWeaponScoped @0x4dcc80` (`Flags & 1` + `g_weaponScopeActive`, promoted at `@0x4de4f7`), not the separate Sighted-card predicate at `0x4dcd30` | Timing FIXED 2026-07-11 for Scoped weapons: it stays up through the ease and the row select stays hip (`@0x592b87`). Narrow tail OPEN 2026-07-19: a Sighted-only weapon selects its 2D card but does not satisfy retail's Scoped-only crosshair-hide predicate; the port currently hides it. |
+| D-HUD-9 | **CLOSED 2026-07-31.** The crosshair previously hid from generic settled ADS | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose promoted predicates are Scoped (`Flags & 1`) or Sighted (`Flags & 2`, except SWITCHFROM); movement/water reject only the ordinary Scoped leg, while reload-card-switch, camera, dead/airborne, ForceScoped, and seat gates complete the verdict | **FIXED.** The sim now stamps that bounded retail verdict once and feeds both visibility and ERROR row selection. The reticle remains through ADS ease and follows the witnessed Scoped/Sighted failure/override gates rather than raw `scope_engaged`. |
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `NovaGameHudPresenter` feeds it to both shells. |
 | D-HUD-11 | the label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat (`NovaSimulation::get_attach_labels`) | `Player_CanFireWeapon @0x5cf780` additionally requires no camera mode (`g_camera_mode`), not underwater (`Position.Z + CameraOffset.Z < Env_WaterHeightFixed` with the 0x8000 flag), and the settled-scope legs | The extra legs are presentation/render state the sim doesn't carry; on foot with a weapon the observable difference is the underwater/camera cases. Wire when those states reach the sim. |
 | D-HUD-12 | label text metrics ride the `.fnt` fixed size through Godot layout (`hud_attach_labels.gd`) | `HUD_MeasureTextWH @0x580ab0` measures through the fontObj `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph source; exact per-glyph spacing is the standing CGameFont follow-up. Box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` is ported verbatim. |
@@ -810,8 +869,6 @@ behind it.
 - **Chat channel geometry** — the `dword_28E4DF8` table (rows 1/2 chat, 3/4
   system/debug) that `Chat_RebuildDisplayBuffers @0x498bd0` wraps against and
   the drawer anchors with; its writer is unwitnessed (D-HUD-6).
-- **Crosshair recoil accumulators** — the write side of `player+0x380/+0x384`
-  (fire recoil / decay), needed to close D-HUD-7.
 - **Crosshair color config** — `dword_25510E0` default + the HUD shader pass
   texture-stage state (D-HUD-8); the crosshair styles' count (`cross%02d.tga`).
 - **Crosshair sub-elements** — the target-tracking cursor
@@ -855,6 +912,8 @@ behind it.
 
 ## IDB changes
 
+The 2026-07-31 recoil/spread grill was read-only; it made no IDB changes.
+
 Applied 2026-07-11 (auto-name renames at anchored confidence + appended
 comments; IDB saved):
 
@@ -864,8 +923,9 @@ comments; IDB saved):
 - **Rename** `sub_5804C0` → `HUD_DrawTextLeft_HalfBright` (anchored: drawFlags
   init 0 `@0x5804da`).
 - **Comment** at `0x592b87`: the ERROR row select = `stance +
-  3*Player_CanFireWeapon()`; +3 reachable only via the vehicle
-  auto-aim/gunner-scoped cases.
+  3*Player_CanFireWeapon()`. The 2026-07-19 re-witness supersedes the old
+  vehicle-only interpretation: `0x4dcd30` is the Sighted predicate with no
+  mount gate, alongside the Scoped predicate at `0x4dcc80`.
 - **Comment** at `0x51f1c8`: the `dword_24C1930 & 0x10000` → `"&"` replacement
   quirk (writer unwitnessed).
 

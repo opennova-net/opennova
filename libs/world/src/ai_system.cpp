@@ -510,7 +510,8 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             origin[2] = gunner->muzzle_world[2];
         }
         if (fire_ai_round(world, *gunner, origin, gunner->heading,
-                          gunner->pitch, weapon->ammo_index))
+                          io::bam_add(gunner->pitch, gunner->inf.recoil_pitch),
+                          weapon->ammo_index))
             gunner->inf.aim_ref0 = gunner->inf.combat_target;
     }
 }

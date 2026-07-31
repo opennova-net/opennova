@@ -80,10 +80,11 @@ decided it needs answered. Get the current list straight from the ledger:
 grep -n 'NEEDS-RE' docs/divergence-ledger.md
 ```
 
-Five rows across the ledger are explicitly tagged **`research starter`** in their
-Slice column — three `NEEDS-RE` (D-NET-49, D-THROW-6, D-PLAYERINFO-1) and two
-`OPEN` rows waiting on one specific witness (D-HUD-6, D-HUD-7). Those are the
-ones scoped small enough to be somebody's first grill.
+Four rows across the ledger are explicitly tagged **`research starter`** in their
+Slice column — three `NEEDS-RE` (D-NET-49, D-THROW-6, D-PLAYERINFO-1) and one
+`OPEN` row waiting on a specific witness (D-HUD-6). D-HUD-7 closed with the
+2026-07-31 recoil/spread grill. The remaining four are scoped small enough to be
+somebody's first grill.
 
 ## The instruments that keep this honest
 

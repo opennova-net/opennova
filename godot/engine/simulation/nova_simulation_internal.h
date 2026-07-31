@@ -157,6 +157,10 @@ inline opennova::anim::AimOverlayInputs aim_overlay_inputs_for(
 	in.leg_yaw_r = entity.inf.leg_yaw[0];
 	in.leg_yaw_l = entity.inf.leg_yaw[1];
 	in.pitch_kick_accum = entity.inf.pitch_kick_accum;
+	// The body overlay consumes the undoubled recoil accumulator. The camera is
+	// the separate consumer that adds 2*R. [orig: entity+0x380 read
+	// @0x4b1bce; Player_UpdateFirstPersonCamera @0x437fdb]
+	in.pitch_blend = entity.inf.recoil_pitch;
 	in.lean = entity.inf.lean_angle;
 	in.roll = entity.roll;
 	in.body_pitch = entity.body_pitch;
@@ -450,8 +454,7 @@ inline bool aim_overlay_inputs_for_client(
 		return false;
 
 	out = opennova::anim::AimOverlayInputs{};
-	out.aim_yaw = static_cast<int32_t>(
-			static_cast<uint32_t>(entity.yaw_byte) << 24);
+	out.aim_yaw = entity.heading_bam;
 	out.aim_pitch = static_cast<int32_t>(
 			static_cast<uint32_t>(
 					entity.cls == opennova::EntityClass::Player
@@ -477,6 +480,11 @@ inline bool aim_overlay_inputs_for_client(
 	// which is the ONLY feedback a pure client gets [orig: consumer @0x4b1bd4/@0x4b1c1b,
 	//  producer @0x4b5cab..0x4b5ce7].
 	out.pitch_kick_accum = entity.pitch_kick_accum;
+	// Recoil is not a wire field: the decoded client stamps it from the same
+	// received round event and decays it in its local body pass. Presentation
+	// consumes that reconstructed entity+0x380 exactly like an authority body.
+	// [orig: overlay consumer @0x4b1bce; round impulse @0x4ec378/@0x4ec8a3]
+	out.pitch_blend = entity.recoil_pitch;
 
 	// Both witnessed compact organic records already carry the carrier and raw
 	// seat bone. Bone zero is the standing-on/deck form, not a mount. Resolve

@@ -313,6 +313,9 @@ public:
 
 	const netsim::ClientState &state() const { return view_.state(); }
 	netsim::ClientState &state() { return view_.state(); }
+	// Called by the joiner simulation after decoded round events have stamped
+	// remote recoil, preserving retail's receive -> body-decay frame order.
+	void tick_remote_recoil() { view_.tick_recoil(); }
 	netsim::NetClientView &view() { return view_; }
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 

@@ -37,6 +37,7 @@ public:
 	// frame). [orig: decay @0x4b5c97, then the ramp @0x4b7dbf/@0x4b7dd6]
 	void tick_lean();
 	void tick_arms_dip();
+	void tick_recoil();
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -140,6 +141,11 @@ private:
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::size_t unknown_tags_ = 0;
 	uint32_t game_type_ = 0;
+	// BSS-zero PRNG_Next16 stand-in shared by every decoded row in this view. The
+	// body consumes one draw per person per tick even when recoil is zero. Retail
+	// also has unrelated process-global consumers that this decoded seam cannot
+	// honestly order against; algorithm and local call history remain exact.
+	uint32_t prng16_ = 0;
 };
 
 } // namespace opennova::netsim

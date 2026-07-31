@@ -53,6 +53,15 @@ var heat := 0
 # [orig: Player_RenderFirstPersonViewModel @ 0x4DEEC2..0x4DEEF5]
 var heat_glow := 0
 var kick := 0              # recoil kick intensity 0..20 [orig: MountSlot+0x5B]
+# Exact live aim-instability carriers. They stay integer-valued at the transport
+# edge so the HUD never round-trips retail's signed shifts through float.
+# `hud_spread_fp16` is ERROR[row] + (recoil_pitch_bam>>7) +
+# (weapon_weight_spread_bam>>7). [orig: HUD_DrawCrosshair @0x592b07..0x592bf5]
+var recoil_pitch_bam := 0
+var weapon_weight_spread_bam := 0
+var aimed_shot_available := false
+var hud_spread_fp16 := 0
+var hud_spread_row := 0
 # The PowerThrow windup, feeding the HUD charge bar [orig: g_fireChargeStartTick
 # @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
 var windup_active := false
@@ -99,6 +108,11 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.heat = int(d.get("heat", 0))
 	out.heat_glow = int(d.get("heat_glow", 0))
 	out.kick = int(d.get("kick", 0))
+	out.recoil_pitch_bam = int(d.get("recoil_pitch_bam", 0))
+	out.weapon_weight_spread_bam = int(d.get("weapon_weight_spread_bam", 0))
+	out.aimed_shot_available = bool(d.get("aimed_shot_available", false))
+	out.hud_spread_fp16 = int(d.get("hud_spread_fp16", 0))
+	out.hud_spread_row = int(d.get("hud_spread_row", 0))
 	out.windup_active = bool(d.get("windup_active", false))
 	out.windup_held_ticks = int(d.get("windup_held_ticks", 0))
 	out.emplaced_controls_valid = bool(

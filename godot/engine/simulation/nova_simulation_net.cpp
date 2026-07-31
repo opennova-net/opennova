@@ -777,6 +777,9 @@ void NovaSimulation::joiner_apply_authoritative_health() {
 					inf.reload_anim_ticks = 0;
 					inf.arms_dip_ticks = 0;
 					inf.pitch_kick_accum = 0;
+					inf.recoil_pitch = 0;
+					inf.weapon_weight_spread = 0;
+					inf.aimed_shot_available = false;
 					inf.idle_counter = 0;
 					inf.lean_left = false;
 					inf.lean_right = false;
@@ -903,12 +906,11 @@ void NovaSimulation::refresh_joiner_projectile_proxies() {
 			proxy.model_id = shape.model_id;
 			proxy.position_q16 = opennova::world::FixedVec3{
 					entity.x, entity.y, entity.z};
-			// The decoded pose mirrors the retail client entity fields: live
-			// coarse heading (compact high byte -> entity+16) plus the retained
+			// The decoded pose mirrors the retail client entity fields: the compact
+			// heading sample plus locally integrated sub-byte body motion, and retained
 			// spawn/dead pitch/roll samples (entity+20/+24, live compacts omit
 			// both for vehicles).
-			proxy.heading_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(entity.yaw_byte) << 24);
+			proxy.heading_bam = entity.heading_bam;
 			proxy.pitch_bam = entity.pitch_bam;
 			proxy.roll_bam = entity.roll_bam;
 			proxy.bound_radius_q16 = shape.bound_radius > 0.0f
@@ -946,6 +948,7 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 				world_->weapons.by_index(ev.adm_index);
 		if (adm == nullptr || adm->ammo_index < 0) continue;
 		opennova::world::RoundSpawnParams round;
+		opennova::world::RoundSourceState source;
 		round.owner = opennova::world::EntityHandle{};
 		round.shooter_handle = ev.shooter_handle;
 		// The mounted shooter's own vehicle joins the trace exclusion exactly
@@ -956,9 +959,43 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		// spawned round — the friend/enemy throwable item and tracer styling key
 		// on it. Without this every remote grenade wore the enemy variant (and a
 		// variant with no motor row froze mid-air). [orig: @0x4ec705]
-		if (const opennova::netsim::ClientEntityState *shooter_row =
-					client_entity_for_handle(runtime_->state(), ev.shooter_handle))
+		if (opennova::netsim::ClientEntityState *shooter_row =
+					runtime_->state().find(ev.shooter_handle)) {
 			round.shooter_team = shooter_row->team;
+			const int anim = shooter_row->anim_state_id;
+			// The category follows the retail animation-flags table, not a
+			// hand-maintained list of familiar locomotion clips. In particular,
+			// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
+			// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
+			// RoundData_SpawnRound @0x4EC252..0x4EC27A]
+			const uint32_t anim_flags =
+					opennova::world::infantry_anim_flags(anim);
+			const bool prone = (anim_flags & 0x200u) != 0;
+			const bool crouched = (anim_flags & 0x100u) != 0;
+			const bool swimming = anim == 36 || anim == 37 || anim == 154;
+			const bool mounted = round.shooter_carrier_handle != 0xFFFF;
+			// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
+			// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
+			// decoded row has no CameraOffset carrier, so raw fixed position Z is
+			// the bounded projection; the swimming anim remains an independent
+			// positive witness. Do not invent a standing-eye constant here.
+			const bool below_water = world_->env.water_z != 0 &&
+					shooter_row->z < world_->env.water_z;
+			source.person_with_item_def =
+					shooter_row->cls == opennova::EntityClass::Player ||
+					shooter_row->cls == opennova::EntityClass::Infantry;
+			source.player = shooter_row->cls == opennova::EntityClass::Player;
+			source.underwater = swimming || below_water;
+			// Mounted is the later retail override and therefore wins even while
+			// below water; otherwise the underwater predicate forces standing row 2.
+			source.stance_category = mounted ? 1 : (source.underwater ? 2 :
+					(prone ? 0 : (crouched ? 1 : 2)));
+			source.scope_raised =
+					(shooter_row->state_flags &
+					 opennova::world::kEntityFlagScopeRaised) != 0;
+			source.recoil_pitch = &shooter_row->recoil_pitch;
+			round.source_state = &source;
+		}
 		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
 		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
 		round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
@@ -967,6 +1004,7 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		round.ammo_index = adm->ammo_index;
 		round.adm_index = ev.adm_index;
 		round.shot_seq = ev.shot_seq;
+		round.subtype = ev.subtype;
 		round.charge = ev.slot_byte;
 		// Carry the arm through so presentation can honour retail's split: the
 		// adm-indexed arm spawns no ammo-def effect at the wire position (which is
@@ -1051,6 +1089,11 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		if (player != nullptr && player->inf.active)
 			player->inf.reload_anim_ticks = 80;
 	}
+
+	// Decoded shots above stamp the peer accumulator first; retail's client body
+	// update then decays it in this same frame. Locally predicted fire is pumped
+	// later, after the local World body tick, so it begins decaying next frame.
+	runtime_->tick_remote_recoil();
 }
 
 void NovaSimulation::enable_listen_server(bool p_enable) {

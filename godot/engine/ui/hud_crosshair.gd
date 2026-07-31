@@ -27,12 +27,39 @@ const TAPER := 0.1 # inner-vertex pull-back factor [orig: 0x590f50 all cases]
 ## degrees→binary-angle factors (2^31/180) cancel between spread and fov scale.
 ## [orig: HUD_DrawCrosshair @0x592b07..0x592bf5 — flt_7D76D0 = 11930464 = 2^31/180
 ## on both sides; fov = HIWORD(g_cameraFovDeg 16.16)]
-static func spread_px(spread_deg: float, fov_deg: float, screen_w: float) -> float:
+static func spread_px_fp16(spread_fp16: int, fov_deg: float,
+		screen_w: float) -> float:
 	var fov_i := int(fov_deg) # HIWORD truncation of the 16.16 fov register
 	if fov_i <= 0:
 		return 0.0
-	var spread_fp16 := int(spread_deg * 65536.0)
 	return float(int(float(spread_fp16) * screen_w / float(fov_i)) >> 16)
+
+
+## Compatibility entry for degree-valued callers. Dynamic weapon spread uses the
+## fixed-point entry above so the two accumulator shifts remain lossless.
+static func spread_px(spread_deg: float, fov_deg: float, screen_w: float) -> float:
+	return spread_px_fp16(int(spread_deg * 65536.0), fov_deg, screen_w)
+
+
+## Retail's HUD instability sum before projection into pixels. GDScript's signed
+## right shift is arithmetic, matching the two x86 SAR instructions.
+## [orig: HUD_DrawCrosshair @0x592b07..0x592b28]
+static func total_spread_fp16(error_fp16: int, recoil_pitch_bam: int,
+		weapon_weight_spread_bam: int) -> int:
+	var wrapped := _wrap_i32(error_fp16 + (recoil_pitch_bam >> 7))
+	return _wrap_i32(wrapped + (weapon_weight_spread_bam >> 7))
+
+
+static func _wrap_i32(value: int) -> int:
+	return ((value + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+
+
+## Ordinary on-foot aimed shots hide the reticle. Retail's vehicle/gunner leg
+## can explicitly keep it while using the second ERROR triplet.
+## [orig: HUD_DrawCrosshair gate @0x592afa]
+static func should_draw(aimed_shot_available: bool,
+		keep_while_aimed: bool = false) -> bool:
+	return not aimed_shot_available or keep_while_aimed
 
 
 ## The ERROR-table row for the crosshair spread: stance (0=prone, 1=crouch, 2=stand)

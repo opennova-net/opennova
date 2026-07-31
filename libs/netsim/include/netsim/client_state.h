@@ -36,6 +36,13 @@ struct ClientEntityState {
 	int32_t y = 0;                                // compact position + the frame anchor)
 	int32_t z = 0;
 	uint8_t yaw_byte = 0;                         // coarse heading (compact high byte)
+	// Full client-side entity+0x10 heading (BAM32) — presentation reads THIS,
+	// not yaw_byte. Snap mode (host/SP fold) re-seeds it from each compact
+	// sample (yaw_byte << 24 / vehicle euler_z << 16); remote-motion mode
+	// maintains it via the per-class chase (the mover cluster below). Body-local
+	// effects can then retain sub-byte motion (notably the PRNG-signed recoil
+	// half-step) without changing the wire sample.
+	int32_t heading_bam = 0;
 	// Full/reconstructed entity+20 pitch plus entity+24 roll. Vehicles retain the
 	// last spawn/dead-pose values because live compacts omit both. Infantry pitch
 	// is reconstructed here from the compact aim target using retail's one-eighth
@@ -106,6 +113,10 @@ struct ClientEntityState {
 	// pitchKickAccum in the IDB and pitch_kick_accum across the port on 2026-07-27.
 	// [orig: entity+0x36C, driven @0x4b5cb7, eased @0x4b5cc7..0x4b5cd5]
 	int32_t pitch_kick_accum = 0;
+	// Remote recoil accumulator (entity+0x380). Round receive applies the
+	// stance-indexed ammo impulse after calculating that shot's spread; the
+	// client body pass decays it later in the same frame.
+	int32_t recoil_pitch = 0;
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
 	// NetClientView captures this row's rigid parent-local pose after the whole
 	// batch is present, then recomposes it from each decoded parent sample. This
@@ -137,13 +148,9 @@ struct ClientEntityState {
 	// --- The client-side between-update mover cluster (net-re §5.38e, D-NET-196).
 	// On a JOINER (remote-motion mode), every compact read STAGES the target here
 	// and NetClientView::tick_remote_motion chases the live pose (x/y/z above =
-	// retail entity+4/+8/+0xC; heading_bam below = entity+0x10) one step per
+	// retail entity+4/+8/+0xC; heading_bam above = entity+0x10) one step per
 	// 62.5 Hz tick. On the host/SP roles the fold keeps writing the live pose
 	// directly (full-rate loopback; the authority never interpolates, D-NET-89).
-	// Live heading, BAM32 (retail entity+0x10). Maintained by the fold in snap
-	// mode (yaw_byte << 24 / vehicle euler_z << 16) and by the chase in
-	// remote-motion mode; presentation reads THIS, not yaw_byte.
-	int32_t heading_bam = 0;
 	// Staged wire target; the per-class chase overwrites it with the per-step
 	// vector at staging time, exactly like retail [orig: entity+0x234/238/23C,
 	// step re-store @0x4b9b2e (org1) / @0x4B459F (org2) / watercraft @0x48D480].

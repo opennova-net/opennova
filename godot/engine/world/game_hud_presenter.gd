@@ -228,6 +228,7 @@ func tick() -> void:
 	var binocular_range := 1
 	var nvg_visible := false
 	var nvg_gain := 0
+	var vehicle_attack_context := false
 	var lv: PlayerLocalView = _world.local_player_view()
 	if lv != null:
 		scope_engaged = lv.scope_engaged
@@ -237,6 +238,7 @@ func tick() -> void:
 		binoculars_view_active = lv.binoculars_view_active
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
+		vehicle_attack_context = lv.vehicle_attack_context
 	if binoculars_view_active and _player_presenter != null:
 		binocular_range = clampi(int(_player_presenter.aim_range_units()), 1, 1000)
 
@@ -254,8 +256,9 @@ func tick() -> void:
 		"clip": clip,
 		"reserve": reserve,
 		"scope_engaged": scope_engaged,
-		# The ease progress: the crosshair yields only at the SETTLED sight view
-		# (fraction 1) [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
+		# The ease progress remains a compatibility input; the exact crosshair gate
+		# below uses the sim's promoted aimed-shot verdict.
+		# [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
 		"scope_fraction": scope_fraction,
 		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
 		"scope_card": scope_card,
@@ -274,6 +277,19 @@ func tick() -> void:
 		# vehicle heavy guns author heat_values, so this stays 0 on foot.
 		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
 		"heat": wv.heat if wv != null and wv.active else 0,
+		# Exact crosshair dispersion, including both live body accumulators. The
+		# simulation owns the stance/aimed-shot row because those are body-state
+		# predicates, while the HUD owns only projection. [orig: @0x592b07..0x592bf5]
+		"hud_spread_fp16": wv.hud_spread_fp16 \
+				if wv != null and wv.active else 0,
+		"hud_spread_row": wv.hud_spread_row \
+				if wv != null and wv.active else 0,
+		"aimed_shot_available": wv.aimed_shot_available \
+				if wv != null and wv.active else false,
+		# The witnessed gunner/vehicle keep-up leg may draw while the same aimed
+		# verdict selects ERROR's second triplet. The current modeled vehicle attack
+		# context is the host's structural proxy for that override.
+		"keep_crosshair_while_aimed": vehicle_attack_context,
 		# The PowerThrow windup driving the charge bar; the drawer derives the
 		# witnessed fill curve from held ticks. [orig: g_fireChargeStartTick
 		# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830]
