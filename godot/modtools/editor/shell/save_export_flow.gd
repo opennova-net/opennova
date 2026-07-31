@@ -28,6 +28,9 @@ var _cdep_dialog: ConfirmationDialog
 var _cdep_fix_callback: Callable = Callable()
 var _export_dialog: ExportFlavorDialog
 var _pending_export_dir: String = ""
+# The workspace that opened the flavor dialog; the confirm exports it, never
+# the tab active at confirmation. Cleared with the dir on confirm and cancel.
+var _pending_export_workspace: EditorWorkspace = null
 
 
 func setup(
@@ -171,7 +174,7 @@ func on_export_pressed(workspace: EditorWorkspace = null) -> void:
 		return
 	var choose_export_dir := func(dir_path: String) -> void:
 		if not workspace.get_export_flavors().is_empty():
-			show_export_flavor_dialog(dir_path)
+			show_export_flavor_dialog(dir_path, workspace)
 		else:
 			var err: Error = workspace.begin_export(dir_path, 0)
 			if err == OK:
@@ -277,28 +280,32 @@ func _on_prompt_keep_editing() -> void:
 		cb.call()
 
 
-func show_export_flavor_dialog(dir_path: String) -> void:
+func show_export_flavor_dialog(dir_path: String, workspace: EditorWorkspace = null) -> void:
 	_pending_export_dir = dir_path
+	# Retain the initiator: the confirm must export the workspace that opened the
+	# dialog, not whichever tab is active when OK lands. The one-arg form falls
+	# back to the workspace active at open time.
+	_pending_export_workspace = workspace if workspace != null else _active_workspace.call()
 	_ensure_export_dialog()
 	_export_dialog.select_flavor(ExportFlavorDialog.FLAVOR_DFX_JO)
 	_export_dialog.popup_centered()
 
 
 func _on_prompt_export_confirmed() -> void:
-	if _shell.get("editor") == null or _pending_export_dir.is_empty():
+	if _pending_export_workspace == null or _pending_export_dir.is_empty():
 		return
-	var workspace: EditorWorkspace = _active_workspace.call()
-	if workspace == null:
-		return
+	var workspace: EditorWorkspace = _pending_export_workspace
 	var flavor: int = _export_dialog.get_flavor() if _export_dialog != null else ExportFlavorDialog.FLAVOR_DFX_JO
 	var err: Error = workspace.begin_export(_pending_export_dir, flavor)
 	_pending_export_dir = ""
+	_pending_export_workspace = null
 	if err != OK:
 		_show_status.call("Export failed (error %d)" % err, 6.0)
 
 
 func _on_prompt_cancel() -> void:
 	_pending_export_dir = ""
+	_pending_export_workspace = null
 
 
 func _ensure_unsaved_dialog() -> void:

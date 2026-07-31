@@ -97,7 +97,8 @@ func save_split_layout() -> void:
 func wire_browser_pane() -> void:
 	if _browser_toggle_button != null:
 		_browser_toggle_button.icon = EditorIconLibrary.resolve(&"browser")
-		_browser_toggle_button.toggled.connect(set_browser_pane_visible)
+		if not _browser_toggle_button.toggled.is_connected(set_browser_pane_visible):
+			_browser_toggle_button.toggled.connect(set_browser_pane_visible)
 	if _right_split != null and not _right_split.drag_ended.is_connected(_save_browser_state):
 		_right_split.drag_ended.connect(_save_browser_state)
 	# Startup restore is a read-only apply (mirrors apply_split_layout): test
