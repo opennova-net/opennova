@@ -34,7 +34,7 @@ combo -> spawned-player 3D model binding remains unwitnessed/open as
 | Voice preview + PLAYERVOICE list | **matching (ported 2026-07-22)** | `PlayerInfoMenuHost` binds the real `TESTPLAYERVOICE` control and requests the selected avatar's `VOICE_%d` trigger through `menu.lwf`; `player_info_menu_seam_test` pins the public sound request. Persisted profile overrides remain part of D-PLAYERINFO-9. `[orig: PlayerInfo_PreviewVoice @ 0x55ff70; PlayerInfo_HandleVoiceSelect @ 0x55fe00]` |
 | ACCEPT commit + profile persistence | **partial (seam + callsign ported)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; the host wires ACCEPT → `commit`/`avatar_chosen` and main_game persists the callsign (`NovaPlayerProfile.save_callsign` → `user://player_profile.cfg`); persisting + restoring the avatar/class/loadout selection remains D-PLAYERINFO-9 (selection-state globals D-PLAYERINFO-12) |
 | Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `populate_weapon_slot_lists @ 0x560430`; ported in `libs/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `NovaWeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
-| Loadout ammo combos + weight readout | **matching (read-only grill)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0` (ammo combos) and the weight budget `update_player_info_weight_and_weapon_icons @ 0x55f480` (encumbrance ≥66.6 HEAVY / ≥33.3 NORMAL / else LIGHT; `calculate_loadout_weight @ 0x55f1f0`; icons from weapon `+144`) anchored; host implementation is the next slice (D-PLAYERINFO-11) |
+| Loadout ammo combos + weight readout + icons | **matching (ported 2026-07-30)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0`, `populate_ammo_combo_boxes @ 0x55def0`, `update_player_info_weight_and_weapon_icons @ 0x55f480`, `calculate_loadout_weight @ 0x55f1f0` fully decompiled + the handler map off `PlayerInfo_RegisterAllControls @ 0x561470` (see "Ammo combos, weight, and icons" below); ported in `PlayerInfoMenuHost` (`_populate_slot_ammo`/`_populate_grenades`/`_update_weight`/`_update_icons`) over the `NovaWeaponDatabase.loadout_weight`/`encumbrance_class` bindings; `player_info_menu_seam_test` pins the row models, labels, defaults, the `flags2 0x40` type lock, the subclass walk, the weight format, and the snapshot clips (D-PLAYERINFO-11 FIXED; saved-kit restore rides D-PLAYERINFO-9) |
 
 ## Load entry — witness map
 
@@ -420,6 +420,96 @@ Reimpl plan (now fully witnessed; producer + consumer + masks): extend `libs/def
 `DefWeaponDef` to capture the loadout fields above + add VFS (in-memory) parsers, add
 a `NovaWeaponDatabase` binding, then wire the host combos + ammo + weight. Tracked in
 TODO.md (Player info / loadout).
+
+### Ammo combos, weight, and icons (D-PLAYERINFO-11 — witnessed 2026-07-30)
+
+All decompiled this session; every read below is a field slice of
+`g_weaponDefTable @ 0x2540CE0` (192 B/entry — the offsets in the producer map
+above), never `g_ammoDefTable`. Entry 0 is the `"None"` record, and the combo
+get-selected helper returns 0 for "no selection", so a NONE selection resolves
+every lookup to the null entry.
+
+**Saved-kit consumption — `[orig: populate_weapon_accessory_ammo_ui @ 0x55e8b0]`.**
+The input is the profile kit page (net-re §5.66): repeated 4-string tuples
+`(name, ammoPri, ammoSec, flags)` until an empty name. Per tuple:
+`ammoPri` → `g_playerInfoAmmoPriCounts[2*idx] @ 0x25DC560`, `ammoSec` →
+`g_playerInfoAmmoSecCounts[2*idx] @ 0x25DC564` (interleaved pair; `-1` = default;
+the ammoSec store is gated on the subclass walk finding a differing round name),
+`flags` → `g_playerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68` (the
+ammo-TYPE byte, stored per team) — for PRIMARY/SECONDARY-class defs respectively.
+`weapon_class` 1/2/0 selects the def in the PRIMARY/SECONDARY/ACCESSORY combo;
+class 3 appends the def index to `g_playerInfoGrenadeSlots @ 0x25DC554` (3 slots).
+It then fills the ammo combos (slots 0/1/3 via `@ 0x55def0`; the ACCESSORY block
+is inlined) and is itself called from `populate_weapon_slot_lists @ 0x560430`.
+
+**Ammo-combo fill — `[orig: populate_ammo_combo_boxes @ 0x55def0]`** (slot 0 =
+PRIMARY, 1 = SECONDARY, 2 = ACCESSORY, ≥3 = grenades):
+
+- `*_AMMO1`: hidden when nothing is selected or `clipsize <= 0`; else rows
+  **1..maxclips**, label `sprintf("%d - %s", i*clipsize, round_type)`, row value
+  = the def index. Selection = the saved count's row; saved `-1` selects the
+  **maxclips** row (full default).
+- `*_AMMO1_TYPE` (PRIMARY/SECONDARY only — the .mnu authors the FMJ/AP/SP
+  statics, values 0/1/2): shown/hidden with AMMO1; selection = the saved
+  per-team type byte (`-1` → 0). Weapon `flags2 (+188)` bit `0x40` = "no type
+  choice": the combo is made non-interactive (`UIWidget_SetInteractiveRecursive
+  @ 0x6462E0` — recursive widget flag) and the saved type byte is reset to 0.
+- `*_AMMO2` (the sub-weapon): the walk starts at the parent's next table entry
+  and skips entries whose `round_type` equals the parent's, bounded by
+  `loadout_subclasses (+36)`; the first **differing** entry is the sub-weapon
+  (satchel → detonator). Hidden when the walk finds none or the sub-def's
+  `clipsize <= 0`; else rows 1..sub.maxclips from the sub-def's fields, selection
+  from the saved ammoSec count (same `-1` = max rule).
+- Grenades: walk the whole table in order; a def qualifies when
+  `loadout_selectable && (charfilter & g_playerInfoClassMask) && (teamfilter &
+  g_playerInfoTeamMask) && weapon_class == 3`; the first three fill
+  `GRENADE_AMMO1..3` (and `g_playerInfoGrenadeSlots`), leftover widgets are
+  **hidden**. Rows **0..maxclips including the zero row**, row value =
+  `count*clipsize` (rounds); selection = saved count's row, `-1` → maxclips row.
+
+**Recompute graph — `[orig: PlayerInfo_RegisterAllControls @ 0x561470]`** (all
+handlers gate on notify `0x5000001`): PRIMARY/SECONDARY select
+(`@ 0x55f710`/`@ 0x55f790`) → refill that slot's ammo combos + weight/icons;
+ACCESSORY select (`handle_accessory_ammo_slot_selection @ 0x55f810`) → inlined
+slot-2 refill + weight/icons; `*_AMMO1`/`*_AMMO2`
+(`@ 0x55f730`/`@ 0x55f7b0`/`@ 0x55fb40`, ctx 0/1 = pri/sec column) → store
+`selected_row + 1` keyed by the row's def-index value + weight/icons;
+`*_AMMO1_TYPE` (`@ 0x55f760`/`@ 0x55f7e0`) → store the row value byte per team +
+weight/icons; `GRENADE_AMMO1..3` (`@ 0x55fb70`, ctx 0..2) → store the **row
+value** (rounds — see the quirk below) + weight/icons; ACCEPT (`@ 0x55fdf0`) →
+`save_player_info_from_dialog`; SIDE_BLUE/SIDE_RED →
+`PlayerInfo_SaveAndRepopulate(0/1)`.
+
+**Weight + icons — `[orig: update_player_info_weight_and_weapon_icons @
+0x55f480]`.** Weight = `calculate_loadout_weight @ 0x55f1f0` →
+`g_playerInfoLoadoutWeight @ 0x25DCD5C`; bands ≥66.6 HEAVY / ≥33.3 NORMAL / else
+LIGHT; rendered into `STATIC_TOTAL_WEIGHT` as `sprintf("%s %.1f %s (%s)")` with
+menu-string keys `TOTAL_WEIGHT`, `LBS`, `LIGHT_/NORMAL_/HEAVY_ENCUMBRANCE`
+(resolved through the control's own string table — the armory sibling
+`update_weapon_weight_display @ 0x565640` uses the same keys). Icons: the
+`PRIMARY/SECONDARY/ACCESSORY_ICON` windows are textured from the selected def's
+`loadout_menu_icon (+144)`; no selection resolves to entry 0 (blank);
+`GRENADE_ICON` is never touched (it keeps the .mnu's authored `m_nades.tga`).
+
+**Weight terms — `[orig: calculate_loadout_weight @ 0x55f1f0]`** (confirms the
+ported `def_loadout_weight` for parents, refines the rest):
+
+- Parent slots (PRIMARY/SECONDARY/ACCESSORY): `weaponweight (+120) +
+  effAmmo*clipweight (+140)`, `effAmmo = saved <= 0 ? maxclips : saved` — exactly
+  `def_loadout_weight`'s contract.
+- Sub-weapon (only when the `*_AMMO2` control exists, the subclass walk hits,
+  and the sub-def's `clipsize > 0`): **clip term only** — no base weight — with
+  the same `<= 0` → maxclips default.
+- Grenades (only for grenade controls that exist **and are shown**): **clip term
+  only**, with `saved == -1` → maxclips (a saved **0 stays 0** — the zero row).
+
+**Kit-page writer — `[orig: serialize_weapon_loadout @ 0x55e4b0]`** (doc-only;
+the write side is D-PLAYERINFO-9): first entry = the knife —
+`g_playerInfoTeamMask & 2 || mask == 0` → `WPN_KNIFE`, else `WPN_KNIFE2` — then
+`WPN_MEDPACK` when the class byte is 5 (medic), then the three category
+selections and the grenade/registered tail; every entry is the 4-string tuple
+with `"-1"` as the default filler. Field-level mining deferred to the
+D-PLAYERINFO-9 session.
 
 ## Divergence / quirk catalog (D-PLAYERINFO)
 

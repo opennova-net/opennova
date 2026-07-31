@@ -391,7 +391,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration host wiring: `PlayerInfoMenuHost` (godot/game/player_info_menu_host.gd) drives the live `player.mnu` screen — nat→div→combo cascade, SIDE_BLUE/SIDE_RED team filter, RTXT "Avatars" display resolve, 3D preview `[orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; PlayerInfo_HandleNationalitySelect @ 0x560600; PlayerInfo_HandleDivisionSelect @ 0x560690; populate_avatar_combo_list @ 0x560210]`; the witnessed 28-control registration maps onto wiring the .mnu's own control tree by name; GUT `player_info_menu_seam_test` pins the seams | A | FIXED (landed 2026-06-23, recorded 2026-07-30) | PAR-UI |
 | D-PLAYERINFO-9 | ACCEPT/commit + profile persistence: the ACCEPT seam is wired (`commit` → `avatar_chosen` → main_game `[orig: save_player_info_from_dialog @ 0x55ee10]`) and the NAME half persists (`NovaPlayerProfile.save_callsign` → `user://player_profile.cfg`); residual = persisting the avatar/class/loadout selection (in-memory `_chosen_avatar` only) + restoring it into the screen on entry | A | OPEN (partial; seam landed 2026-06-23, callsign persistence 2026-07-27 with #300) | PAR-UI |
 | D-PLAYERINFO-10 | Voice preview host wiring now binds `TESTPLAYERVOICE` and requests the selected avatar's `VOICE_%d` through `menu.lwf` `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]`; `test_voice_preview_requests_selected_avatar_voice` pins the public sound request (persisted profile override remains under D-PLAYERINFO-9) | A | FIXED 2026-07-22 | PAR-UI |
-| D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
+| D-PLAYERINFO-11 | Loadout ammo combos + weight readout + icons: witnessed 2026-07-30 (`@ 0x55e8b0`/`@ 0x55def0`/`@ 0x55f480`/`@ 0x55f1f0` decompiled — row models, handler map, weight terms in avatars-re.md) and ported the same day — `PlayerInfoMenuHost` fills `*_AMMO1`/`*_AMMO1_TYPE` (flags2 `0x40` lock)/`*_AMMO2` (subclass walk)/`GRENADE_AMMO1..3` (zero row, table order), renders `STATIC_TOTAL_WEIGHT` through the `NovaWeaponDatabase.loadout_weight`/`encumbrance_class` bindings, and textures the `*_ICON` windows from `+144`; `player_info_menu_seam_test` pins rows/labels/defaults/lock/walk/weight/snapshot. Saved-kit restore rides D-PLAYERINFO-9 | A | FIXED 2026-07-30 | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals not modeled: retail remembers the selection per profile slot and team; the shipped `PlayerInfoMenuHost` keeps a single current selection (`snapshot()`). Port = the per-slot/per-team memory + restore on screen entry (witness in avatars-re.md §Screen orchestration) | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-SND-16 | Ambient marker eval RAN per render frame in `NovaMissionAudio.tick`; retail registers each placed marker every 8th 62.5 Hz tick (pool-2 `tick&7` stagger in `Entity_UpdateAllEntities @ 0x4c2100`, keep-alive lifetimes in ticks) and only the live-slot Top8 mix runs per render frame (audio record §driver cadence) | A | FIXED 2026-07-28 (ported same day: `libs/audio` `AmbientMixer` staggered eval + 767-slot table + live-slot mix + the curve statics; `ambient_mixer` ctest + the GUT audio suites) | perf: F3 ranked slice 1 |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename to `HUD_DrawStanceIndicator` applied 2026-07-16 | A | FIXED (2026-07-09 port; IDB rename applied 2026-07-16) | PAR-UI |
@@ -784,7 +784,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 22 | 1 | 11 | 34 | 19 |
 | Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 56 | 4 | 6 | 66 | 27 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 15 | 1 | 4 | 20 | 10 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 14 | 1 | 4 | 19 | 11 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 15 |
@@ -799,7 +799,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 2 | 0 | 1 | 3 | 3 |
 | Render — lighting | 3 | 0 | 2 | 5 | 1 |
-| **Total** | **106** | **14** | **30** | **150** | 109 |
+| **Total** | **105** | **14** | **30** | **149** | 110 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-165, D-NET-169, D-NET-179, D-NET-181, D-NET-182, D-NET-64.
 

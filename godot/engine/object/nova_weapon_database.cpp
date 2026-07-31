@@ -10,6 +10,12 @@ using namespace godot;
 
 static_assert(NovaWeaponDatabase::FLAG_EMPLACED == DEF_WEAPON_FLAG_EMPLACED,
               "FLAG_EMPLACED drifted from def.h");
+static_assert(NovaWeaponDatabase::FLAG2_NOAMMOTYPES == DEF_WEAPON_FLAG2_NOAMMOTYPES,
+              "FLAG2_NOAMMOTYPES drifted from def.h");
+static_assert(NovaWeaponDatabase::ENCUMBRANCE_LIGHT == DEF_ENCUMBRANCE_LIGHT &&
+              NovaWeaponDatabase::ENCUMBRANCE_NORMAL == DEF_ENCUMBRANCE_NORMAL &&
+              NovaWeaponDatabase::ENCUMBRANCE_HEAVY == DEF_ENCUMBRANCE_HEAVY,
+              "ENCUMBRANCE_* drifted from def.h");
 
 void NovaWeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaWeaponDatabase::load);
@@ -24,12 +30,20 @@ void NovaWeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_weapons"), &NovaWeaponDatabase::get_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapon", "index"), &NovaWeaponDatabase::get_weapon);
 	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &NovaWeaponDatabase::find_weapon);
+	ClassDB::bind_method(D_METHOD("loadout_weight", "weapon_indices", "ammo_counts"),
+			&NovaWeaponDatabase::loadout_weight);
+	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
+			&NovaWeaponDatabase::encumbrance_class);
 
 	BIND_CONSTANT(SLOT_ACCESSORY);
 	BIND_CONSTANT(SLOT_PRIMARY);
 	BIND_CONSTANT(SLOT_SECONDARY);
 	BIND_CONSTANT(SLOT_GRENADE);
 	BIND_CONSTANT(FLAG_EMPLACED);
+	BIND_CONSTANT(FLAG2_NOAMMOTYPES);
+	BIND_CONSTANT(ENCUMBRANCE_LIGHT);
+	BIND_CONSTANT(ENCUMBRANCE_NORMAL);
+	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
 }
 
 Error NovaWeaponDatabase::load(const String &path) {
@@ -87,6 +101,7 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.round_type = String(e.round_type);
 	w.icon = String(e.loadout_menu_icon);
 	w.selectable = e.loadout_selectable;
+	w.loadout_subclasses = e.loadout_subclasses;
 	w.slot = e.weapon_class_slot;
 	w.team_mask = e.teamfilter_mask;
 	w.class_mask = e.charfilter_mask;
@@ -197,6 +212,7 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["round_type"] = w.round_type;
 	d["icon"] = w.icon;
 	d["selectable"] = w.selectable;
+	d["loadout_subclasses"] = w.loadout_subclasses; // (+36) the *_AMMO2 walk bound
 	d["slot"] = w.slot;
 	d["team_mask"] = w.team_mask;
 	d["class_mask"] = w.class_mask;
@@ -290,4 +306,32 @@ Array NovaWeaponDatabase::get_weapons() const {
 
 Dictionary NovaWeaponDatabase::get_weapon(int index) const {
 	return weapon_dict(index);
+}
+
+double NovaWeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices,
+		const PackedInt32Array &ammo_counts) const {
+	// def_loadout_weight reads only weaponweight/maxclips/clipweight, so temp
+	// records carrying just those fields forward the stored rows faithfully.
+	std::vector<DefWeaponDef> defs;
+	std::vector<int> counts;
+	defs.reserve(weapon_indices.size());
+	counts.reserve(weapon_indices.size());
+	for (int i = 0; i < weapon_indices.size(); ++i) {
+		const int index = weapon_indices[i];
+		if (index < 0 || index >= static_cast<int>(weapons.size())) {
+			continue;
+		}
+		const Weapon &w = weapons[index];
+		DefWeaponDef d = {};
+		d.weaponweight = w.weight;
+		d.maxclips = w.maxclips;
+		d.clipweight = w.clip_weight;
+		defs.push_back(d);
+		counts.push_back(i < ammo_counts.size() ? ammo_counts[i] : -1);
+	}
+	return def_loadout_weight(defs.data(), counts.data(), defs.size());
+}
+
+int NovaWeaponDatabase::encumbrance_class(double weight) const {
+	return static_cast<int>(def_encumbrance_class(weight));
 }
