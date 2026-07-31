@@ -168,6 +168,28 @@ void NovaPresentApplier::_bind_methods() {
 	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("bms_to_godot_basis", "rot_deg"),
 			&NovaPresentApplier::bms_to_godot_basis);
+	ClassDB::bind_method(D_METHOD("setup_wire", "sim", "rebuild_held_weapon"),
+			&NovaPresentApplier::setup_wire);
+	ClassDB::bind_method(
+			D_METHOD("begin_wire_plan", "layout_revision", "stride",
+					"snapshot_size", "index_generation", "local_handle"),
+			&NovaPresentApplier::begin_wire_plan);
+	ClassDB::bind_method(
+			D_METHOD("append_wire_row", "node", "base", "handle", "spawned_now"),
+			&NovaPresentApplier::append_wire_row);
+	ClassDB::bind_method(D_METHOD("append_wire_deferred", "node"),
+			&NovaPresentApplier::append_wire_deferred);
+	ClassDB::bind_method(
+			D_METHOD("wire_plan_is_current", "snapshot_size", "stride",
+					"layout_revision", "index_generation", "local_handle"),
+			&NovaPresentApplier::wire_plan_is_current);
+	ClassDB::bind_method(
+			D_METHOD("present_wire_rows", "snap", "stride", "tick_delta"),
+			&NovaPresentApplier::present_wire_rows);
+	ClassDB::bind_method(D_METHOD("release_wire_handle", "handle"),
+			&NovaPresentApplier::release_wire_handle);
+	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
+			&NovaPresentApplier::reset_wire_runtime_state);
 	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("held_weapon_attach_transform", "skeleton", "attach_angles_bms",
 					"hand_frame"),

@@ -115,7 +115,14 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   mission and wire passes share one implementation. The basis convention is single-sourced in
   `MissionObjectPlacer.bms_to_godot_basis` (`Entity_SpawnFromBMSRecord @0x40eb66` +
   `Math_BuildFixedPointMatrixFromEulerAngles @0x613f40`); the native twin is pinned to it by
-  `mission_present_pass_test.gd`'s basis parity case. Measured on the ASH_I5A spawn (143-marker / ~200-model vantage, matched ~10 ms frames): the runtime present leg 1.73 -> 1.21 ms avg; under CPU contention the native walk degrades far less (3.3 -> 1.5 ms at ~22 ms frames). The sibling passes listed in the map above
+  `mission_present_pass_test.gd`'s basis parity case. Measured on the ASH_I5A spawn (143-marker / ~200-model vantage, matched ~10 ms frames): the runtime present leg 1.73 -> 1.21 ms avg; under CPU contention the native walk degrades far less (3.3 -> 1.5 ms at ~22 ms frames).
+  The WIRE pass (`wire_present_pass.gd`, the MP twin) follows the same split: its
+  per-row hot walk — plan validity, snapshot reads, body-anim arbitration, the
+  rigid held-weapon attach (parity-pinned against `present_held_weapon.gd`'s
+  reference math) — is native (`nova_present_applier_wire.cpp`, same class),
+  while the facade keeps the cold path: spawn/defer/unresolved bookkeeping, the
+  liveness prune, held-weapon model builds, spawn callbacks, and stats.
+  The sibling passes listed in the map above
   follow the same rule for their own systems: each reads a drain or snapshot the sim produced and
   writes host nodes/effects, so the simulation itself stays render-free and headless-testable.
   Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off

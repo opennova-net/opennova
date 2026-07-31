@@ -2,6 +2,8 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -13,6 +15,7 @@
 
 namespace godot {
 
+class Node;
 class Node3D;
 
 // The native mission present-pass row walk. MissionPresentPass (GDScript,
@@ -91,6 +94,45 @@ public:
 			bool drive_root_basis);
 	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
 			int base, bool drive_root_basis);
+
+	// --- The WIRE (joiner/MP) walk: plan + per-row hot path (the facade
+	// wire_present_pass.gd keeps the cold spawn/defer/prune path and pushes the
+	// finished plan here; nova_present_applier_wire.cpp holds the bodies). The
+	// wire pass's capability superset, resolved once per append.
+	enum WireRowCaps {
+		WIRE_CAP_AIM = 1,
+		WIRE_CAP_CTRL = 2,
+		WIRE_CAP_PART = 4,
+		WIRE_CAP_REMOTE_BODY = 8,
+		WIRE_CAP_BODY_CLIP = 16,
+		WIRE_CAP_BODY_CLIP_AT = 32,
+		WIRE_CAP_BODY_SLOT_AT = 64,
+		WIRE_CAP_BODY_SLOT = 128,
+		WIRE_CAP_RHC = 256,
+		WIRE_CAP_WPN = 512,
+		WIRE_CAP_BODY_BLEND_AT = 1024,
+		WIRE_CAP_REMOTE_BLEND_TICK = 2048,
+		WIRE_CAP_PART_CLEAR = 4096,
+		WIRE_CAP_CTRL_BATCH = 8192,
+		WIRE_CAP_RESET_REMOTE = 16384,
+	};
+
+	// `sim` is duck-typed (weapon-model lookups); `rebuild_held_weapon(handle,
+	// adm) -> Node3D|null` stays on the facade, which owns the weapon-node maps
+	// its consumers (muzzle_world_for, tests) read.
+	void setup_wire(Object *sim, const Callable &rebuild_held_weapon);
+	void begin_wire_plan(int64_t layout_revision, int stride,
+			int64_t snapshot_size, int64_t index_generation, int local_handle);
+	void append_wire_row(Object *node, int base, int handle, bool spawned_now);
+	void append_wire_deferred(Object *node);
+	bool wire_plan_is_current(int64_t snapshot_size, int stride,
+			int64_t layout_revision, int64_t index_generation, int local_handle);
+	void present_wire_rows(const PackedFloat32Array &snap, int stride,
+			int tick_delta);
+	// A freed/swapped wire node invalidates the plan and its per-handle caches.
+	void release_wire_handle(int handle);
+	void reset_wire_runtime_state();
+	static int wire_node_caps(Object *node, int visual_ctrl_caps);
 
 	// Third-person held-weapon placement — the native twin of
 	// PresentHeldWeapon.attach_transform/hand_frame_basis (present_held_weapon.gd
@@ -190,6 +232,29 @@ private:
 		float body_blend_weight = 1.0f;
 	};
 
+	struct WireRow {
+		int base = 0;
+		int handle = 0;
+		ObjectID node_id;
+		int caps = 0;
+		int visual_ctrl_caps = 0;
+		bool spawned_now = false;
+		// Last-applied edge state (-1 = unknown, first hot frame applies).
+		int32_t aim_valid = -1;
+		int32_t rhc = -1;
+		// The remote body-transition scalars (re-seeded from the per-handle
+		// cache on every plan build).
+		int32_t anim_state = -2;
+		int32_t anim_request = -1;
+		int32_t remote_body_tick = 0;
+	};
+
+	struct RemoteBodyCache {
+		int32_t state = -2;
+		int32_t request = -1;
+		int32_t latch = 0;
+	};
+
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
@@ -197,6 +262,32 @@ private:
 	void release_part_anim_outputs();
 	int64_t current_index_generation();
 	const String &infantry_key(int state);
+
+	void present_one_wire_row(WireRow &row, Node3D *node,
+			const PackedFloat32Array &snap, int tick_delta);
+	void apply_wire_procedural_part(const WireRow &row, Node3D *node,
+			const PackedFloat32Array &snap);
+	void apply_wire_body_anim(WireRow &row, Node3D *node,
+			const PackedFloat32Array &snap, int tick_delta);
+	void store_wire_remote_body_cache(const WireRow &row);
+	void update_wire_held_weapon(WireRow &row, Node3D *node,
+			const PackedFloat32Array &snap, bool body_visible);
+	static Object *find_wire_skeleton(Node *root);
+
+	ObjectID wire_sim_id_;
+	Callable wire_rebuild_held_weapon_;
+	std::vector<WireRow> wire_rows_;
+	std::vector<ObjectID> wire_deferred_ids_;
+	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
+	HashMap<int32_t, int32_t> wire_respawn_revisions_;
+	HashMap<int32_t, int32_t> wire_held_weapon_adm_;
+	HashMap<int32_t, ObjectID> wire_held_weapon_ids_;
+	int64_t wire_plan_revision_ = -1;
+	int wire_plan_stride_ = 0;
+	int64_t wire_plan_snapshot_size_ = -1;
+	int64_t wire_plan_index_generation_ = -1;
+	int wire_plan_local_handle_ = -1;
+	bool wire_plan_dirty_ = true;
 
 	ObjectID sim_id_;
 	ObjectID index_id_;
