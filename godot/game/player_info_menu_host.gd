@@ -146,9 +146,12 @@ func _display_name(key: String) -> String:
 
 ## Inject a weapon database for tests or another host-owned resource mount. Keeping
 ## this as a public seam lets callers exercise the same menu population path without
-## reaching into host internals.
+## reaching into host internals. The recorded ammo picks are keyed by table index,
+## so a table swap invalidates them — clear rather than misapply.
 func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
 	_weapons = weapons
+	_ammo_pri.clear()
+	_ammo_sec.clear()
 	if _menu != null:
 		_populate_loadout()
 
@@ -278,9 +281,13 @@ func _populate_slot_ammo(control: String) -> void:
 			type_combo.disabled = locked
 			if locked:
 				_slot_type_store(control)[_team] = 0
-			var saved_type := int(_slot_type_store(control).get(_team, 0))
-			if type_combo.get_item_count() > 0:
-				type_combo.select_silent(clampi(saved_type, 0, type_combo.get_item_count() - 1))
+			# Select by the row's authored VALUE (0/1/2), not its position — the
+			# saved byte is the value [orig: the @ 0x55def0 row select].
+			var saved_type := str(int(_slot_type_store(control).get(_team, 0)))
+			for row in type_combo.get_item_count():
+				if type_combo.get_item_value(row) == saved_type:
+					type_combo.select_silent(row)
+					break
 	if ammo2 != null:
 		var sub := _subclass_weapon(w)
 		var sub_ok := has_ammo and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0
@@ -391,6 +398,7 @@ func _on_ammo1_selected(row: int, _value: String, control: String) -> void:
 	if index >= 0:
 		_ammo_pri[index] = row + 1  # [orig: @ 0x55f730 — stores selected_row + 1]
 	_update_weight()
+	_update_icons()  # the original's combined refresh [orig: @ 0x55f480]
 
 
 func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
@@ -400,14 +408,16 @@ func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
 	if index >= 0:
 		_ammo_sec[index] = row + 1  # [orig: @ 0x55f730 ctx 1 — the interleaved pair]
 	_update_weight()
+	_update_icons()
 
 
-func _on_type_selected(row: int, _value: String, control: String) -> void:
+func _on_type_selected(_row: int, value: String, control: String) -> void:
 	if _populating:
 		return
-	# [orig: @ 0x55f760/0x55f7e0 — the row value byte, stored per team]
-	_slot_type_store(control)[_team] = row
+	# [orig: @ 0x55f760/0x55f7e0 — the row VALUE byte, stored per team]
+	_slot_type_store(control)[_team] = int(value) if value.is_valid_int() else 0
 	_update_weight()
+	_update_icons()  # the original's combined refresh [orig: @ 0x55f480]
 
 
 func _on_grenade_selected(row: int, _value: String, i: int) -> void:
@@ -420,6 +430,7 @@ func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 		# [orig: @ 0x55fb70].)
 		_ammo_pri[int(_grenade_rows[i].get("index", -1))] = row
 	_update_weight()
+	_update_icons()
 
 
 # --- Weight readout + weapon icons (D-PLAYERINFO-11) ----------------------------
@@ -442,13 +453,19 @@ func _update_weight() -> void:
 		var index := int(w.get("index", -1))
 		indices.append(index)
 		counts.append(int(_ammo_pri.get(index, -1)))
+		# The witnessed sub-weapon term is gated on the *_AMMO2 control existing.
 		var sub := _subclass_weapon(w)
-		if not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
+		if _combo(control + "_AMMO2") != null \
+				and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
 			var saved2 := int(_ammo_sec.get(index, -1))
 			var eff2 := int(sub.get("maxclips", 0)) if saved2 <= 0 else saved2
 			total += eff2 * float(sub.get("clip_weight", 0.0))
 	total += _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
+		# The witnessed grenade term is gated on the control existing AND shown.
+		var combo := _combo(GRENADE_CONTROLS[i]) if i < GRENADE_CONTROLS.size() else null
+		if combo == null or not combo.visible:
+			continue
 		var g := _grenade_rows[i]
 		var saved := int(_ammo_pri.get(int(g.get("index", -1)), -1))
 		var clips := int(g.get("maxclips", 0)) if saved == -1 else saved

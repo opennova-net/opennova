@@ -692,6 +692,28 @@ end
 	DirAccess.remove_absolute(path)
 
 
+func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
+	# The witnessed asymmetry [orig: calculate_loadout_weight @ 0x55f1f0]:
+	# grenades default -1 -> maxclips, but a PICKED 0 stays 0 (the zero row) —
+	# unlike the parents' <=0 -> maxclips rule.
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
+	var g := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
+	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
+		"the first grenade def carries weighable clips")
+	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
+			.find_child("Label", false, false) as Label
+	var default_text := label.text  # -1 default = full grenades weighed in
+	_ammo_control("GRENADE_AMMO1").select(0)  # the zero row
+	assert_ne(label.text, default_text,
+		"picking the zero row removes that grenade's clip term")
+	var zero_total := float(label.text.get_slice(" ", 2))
+	var default_total := float(default_text.get_slice(" ", 2))
+	assert_almost_eq(default_total - zero_total,
+		int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0)), 0.06,
+		"the delta is exactly the grenade's maxclips*clip_weight term")
+
+
 func test_weapon_dict_carries_loadout_subclasses() -> void:
 	var wdb := _load_weapons()
 	var idx := wdb.find_weapon("WPN_M4M203AUTO")
