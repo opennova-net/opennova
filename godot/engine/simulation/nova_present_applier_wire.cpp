@@ -122,8 +122,7 @@ int NovaPresentApplier::wire_node_caps(Object *node, int visual_ctrl_caps) {
 	return caps;
 }
 
-void NovaPresentApplier::setup_wire(Object *sim, const Callable &rebuild_held_weapon) {
-	wire_sim_id_ = sim != nullptr ? ObjectID(sim->get_instance_id()) : ObjectID();
+void NovaPresentApplier::setup_wire(const Callable &rebuild_held_weapon) {
 	wire_rebuild_held_weapon_ = rebuild_held_weapon;
 	wire_plan_dirty_ = true;
 	wire_rows_.clear();

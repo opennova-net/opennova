@@ -168,7 +168,7 @@ void NovaPresentApplier::_bind_methods() {
 	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("bms_to_godot_basis", "rot_deg"),
 			&NovaPresentApplier::bms_to_godot_basis);
-	ClassDB::bind_method(D_METHOD("setup_wire", "sim", "rebuild_held_weapon"),
+	ClassDB::bind_method(D_METHOD("setup_wire", "rebuild_held_weapon"),
 			&NovaPresentApplier::setup_wire);
 	ClassDB::bind_method(
 			D_METHOD("begin_wire_plan", "layout_revision", "stride",

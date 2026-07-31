@@ -94,7 +94,7 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 	_defer_index = defer_index
 	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
 	_last_present_logic_tick = -1
-	_applier.setup_wire(_sim, _rebuild_held_weapon)
+	_applier.setup_wire(_rebuild_held_weapon)
 
 
 func get_stats() -> Dictionary:

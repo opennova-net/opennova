@@ -117,10 +117,10 @@ public:
 		WIRE_CAP_RESET_REMOTE = 16384,
 	};
 
-	// `sim` is duck-typed (weapon-model lookups); `rebuild_held_weapon(handle,
-	// adm) -> Node3D|null` stays on the facade, which owns the weapon-node maps
-	// its consumers (muzzle_world_for, tests) read.
-	void setup_wire(Object *sim, const Callable &rebuild_held_weapon);
+	// `rebuild_held_weapon(handle, adm) -> Node3D|null` stays on the facade,
+	// which owns the sim graphic resolve and the weapon-node maps its consumers
+	// (muzzle_world_for, tests) read.
+	void setup_wire(const Callable &rebuild_held_weapon);
 	void begin_wire_plan(int64_t layout_revision, int stride,
 			int64_t snapshot_size, int64_t index_generation, int local_handle);
 	void append_wire_row(Object *node, int base, int handle, bool spawned_now);
@@ -274,7 +274,6 @@ private:
 			const PackedFloat32Array &snap, bool body_visible);
 	static Object *find_wire_skeleton(Node *root);
 
-	ObjectID wire_sim_id_;
 	Callable wire_rebuild_held_weapon_;
 	std::vector<WireRow> wire_rows_;
 	std::vector<ObjectID> wire_deferred_ids_;
