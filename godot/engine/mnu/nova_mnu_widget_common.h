@@ -14,18 +14,18 @@ namespace godot {
 struct MnuActionData {
 	// Lowercased retail ACTION verb as it appears in the MNU markup. The generic
 	// menu owns SCREEN/WINDOW/URL/TAB/POP_SCREEN; form, GLB, LAN, APPMSG, and MNX
-	// payloads cross the explicit host_action_requested boundary.
+	// payloads cross the explicit shell_action_requested boundary.
 	String type;
 	String target; // screen or window name
 	String file; // external .mnu file (type=="screen" cross-menu jump)
 	String window_state; // "show", "hide", "enable", "disable" (type=="window")
-	String source; // Host-owned GLB/LAN/form source name
-	String field; // Host-owned form/filter field name
+	String source; // Shell-owned GLB/LAN/form source name
+	String field; // Shell-owned form/filter field name
 	bool has_target_form = false;
 	int target_form = 0;
 	bool external_browser = false; // URL EXTERNAL_BROWSER flag
 	bool toggle = false; // Retail TOGGLE flag: invert the state-selected property
-	String test; // Host-owned comparison token (LT/LE/EQ/GE/GT)
+	String test; // Shell-owned comparison token (LT/LE/EQ/GE/GT)
 };
 
 // Per-state widget sound slots.
@@ -71,7 +71,7 @@ struct MnuWidgetSounds {
 };
 
 // Resolved authored scrollbar presentation shared by list, combo, multiline,
-// and table hosts. Geometry is parent-relative in MNU design space.
+// and table shells. Geometry is parent-relative in MNU design space.
 struct MnuScrollbarStyle {
 	bool present = false;
 	bool has_rect = false;

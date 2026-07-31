@@ -14,7 +14,7 @@ const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 
 var _shell  # MainGame: start_world_load / enter_net_world / current_resource_root
 var _world: GameWorld
-var _menu_host  # NovaMenuHost (nova_menu_host.gd)
+var _menu_shell  # NovaMenuShell (nova_menu_shell.gd)
 var _camera: Camera3D
 var _hud_parent: Node   # where the spectator kill feed mounts
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
@@ -22,20 +22,20 @@ var _novaworld_panel: NovaWorldPanel
 var _net_killfeed  # net spectator kill feed, built while in a replay session
 
 
-func setup(shell, world: GameWorld, menu_host, camera: Camera3D,
+func setup(shell, world: GameWorld, menu_shell, camera: Camera3D,
 		hud_parent: Node, panel_layer: Node) -> void:
 	_shell = shell
 	_world = world
-	_menu_host = menu_host
+	_menu_shell = menu_shell
 	_camera = camera
 	_hud_parent = hud_parent
 	_panel_layer = panel_layer
 
 
 # The multiplayer menu companion's session requests route here.
-func wire_menu_companions(mp_host: MpMenuHost) -> void:
-	mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
-	mp_host.lan_join_requested.connect(join_lan_server)
+func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
+	mp_companion.lan_host_start_requested.connect(_on_lan_host_start_requested)
+	mp_companion.lan_join_requested.connect(join_lan_server)
 
 
 # Net-session teardown that rides the shell's world-to-menu rollback.
@@ -66,8 +66,8 @@ func maybe_launch_replay_from_env() -> bool:
 # an explicit legacy/debug override for isolating the already-loaded joiner
 # runtime. Two instances on localhost = the bidirectional co-op demo.
 func maybe_launch_lan_from_env() -> bool:
-	var lan_host := OS.get_environment("NW_LAN_HOST")
-	if not lan_host.is_empty():
+	var lan_mission := OS.get_environment("NW_LAN_HOST")
+	if not lan_mission.is_empty():
 		# game_type = the numeric session g_GameType the host config chooses at host start
 		# [orig: g_GameType = session gametype setting @0x4a6657]. This LAN slice is Co-op;
 		# retail derives 0x30020 from ATTRIB_COOP (the record's default). NW_LAN_GAMETYPE
@@ -76,7 +76,7 @@ func maybe_launch_lan_from_env() -> bool:
 		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
 		var lan_port := OS.get_environment("NW_LAN_PORT")
 		var demo_config := HostSessionConfig.new()
-		demo_config.mission = lan_host
+		demo_config.mission = lan_mission
 		demo_config.server_name = "DEMOHOST"
 		demo_config.max_players = 4
 		if not lan_port.is_empty():
@@ -182,7 +182,7 @@ func open_novaworld_panel() -> void:
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
 	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
 	_novaworld_panel.resource_root = _resource_root()
-	_menu_host.hide_menu()
+	_menu_shell.hide_menu()
 	_panel_layer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
@@ -194,7 +194,7 @@ func open_novaworld_panel() -> void:
 
 func _on_novaworld_closed() -> void:
 	_dismiss_novaworld_panel()
-	_menu_host.show_menu()
+	_menu_shell.show_menu()
 
 
 func _dismiss_novaworld_panel() -> void:
@@ -244,8 +244,8 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 # A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
 # first .bms the resource root exposes. Empty when no mission is reachable.
 func _resolve_default_mission() -> String:
-	if _menu_host != null and _menu_host.has_method("get_selected_mission"):
-		var sel := String(_menu_host.get_selected_mission())
+	if _menu_shell != null and _menu_shell.has_method("get_selected_mission"):
+		var sel := String(_menu_shell.get_selected_mission())
 		if not sel.is_empty():
 			return sel
 	# The mounted menu root — the world's own root stays null until a mission loads. This is the same

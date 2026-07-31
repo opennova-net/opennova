@@ -143,7 +143,7 @@ yet witnessed (D-EVT-4).
 | change | grounding |
 |---|---|
 | `event_runtime`: full `UpdateEntry` port — activation delay + repeat cooldown words, 64-unit decrement, unsigned-load/signed-test wrap, latch semantics, arming-call early-return, concurrent decrement | @0x454c30 |
-| `event_runtime`: three passes — pre (flag&2, whole list), post (flag&4, whole list, host-set phase), normal (16-tick gate + quarter cursor) | @0x454dc0/@0x454e00/@0x454d50/@0x51d7e0 |
+| `event_runtime`: three passes — pre (flag&2, whole list), post (flag&4, whole list, runtime-set phase), normal (16-tick gate + quarter cursor) | @0x454dc0/@0x454e00/@0x454d50/@0x51d7e0 |
 | `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; NovaSimulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
 | `wac_system`: the 62-tick divider moved INSIDE WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`, run counter `dword_C6EAD8`); skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
@@ -151,7 +151,7 @@ yet witnessed (D-EVT-4).
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
-| engine: NovaSimulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a host frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
+| engine: NovaSimulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a render frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
@@ -172,14 +172,14 @@ at low FPS).
 `MissionRuntime.tick_realtime(delta)` now ports the original's accumulator: it banks `delta`,
 runs `floor(accum / (1/62.5))` single ticks (clamped to `MAX_CATCHUP_TICKS = 31`, the 500 ms
 cap), and presents **once** after the batch — sim at a constant 62.5 Hz, render decoupled at the
-host frame rate, no inter-tick interpolation (faithful to §1.6). The single-tick
+render frame rate, no inter-tick interpolation (faithful to §1.6). The single-tick
 `MissionRuntime.tick()` survives as the deterministic primitive for the standalone game's
 F3/MCP Step, tests, and isolated tooling previews. `MainGame` → `GameWorld` is now the sole
-live real-time host. When this accumulator landed, the old ONED mission preview also threaded
+live real-time runtime. When this accumulator landed, the old ONED mission preview also threaded
 real `delta` through `MissionRuntime._process` self-tick; [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md)
-later retired that host. F5/F6 now launch the standalone game from saved loose assets, where
+later retired that embedded preview. F5/F6 now launch the standalone game from saved loose assets, where
 `game_world.tick` → `tick_realtime` drives the cadence. The portable `libs/world` per-tick
-motors are unchanged — they were already correct per tick; only the host tick **cadence** was
+motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
 wrong. Pinned by `mission_runtime_test.gd`
 (`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
 
@@ -199,12 +199,12 @@ Retired: one `bool step()` (false only when no mission is loaded), no enum, no
 branch of `MissionRuntime._advance_one_tick_no_present` hard-coded `did_tick = true`, so an
 unloaded sim reported a tick it never ran; the merged path returns the honest `step()`
 result. Cadence parity among `MissionRuntime` consumers is now structural (one
-path) rather than asserted, so the standalone host and
+path) rather than asserted, so the standalone game and
 direct test/tooling fixtures cannot select divergent step implementations.
 `mission_controller_test.gd`'s obsolete tick-mode assert is gone and its
 `loco_scale` assert stands.
 
-Naming: `step()` survives over `advance_frame()` because a host frame runs 0..N ticks (§2a)
+Naming: `step()` survives over `advance_frame()` because a render frame runs 0..N ticks (§2a)
 — "frame" in our vocabulary is the render frame, not the engine tick. The
 `Game_ProcessMainFrame @0x5263f0` correspondence lives in the `[orig:]` comment at the port
 site, where this repo keeps such citations.
@@ -253,7 +253,7 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   pass; cat-1 sub 11 needs the
   held-object link (entity +616); the cat-2 alert/count subs (3/6/9/12/14) and
   the 42-45 distance/LOS family stay unwitnessed. Cat 7's input/view family
-  rides its host subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
+  rides its owning subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
   (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
   `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session
   load reads 0, restart 1; save-persisted @0x4acee1/@0x4ad1ab, unported: no
@@ -271,7 +271,7 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   the SP round-restart routine @0x5263a0 (kong-misnamed "Game_PlayVideoFile";
   a third xref @0x51ea89 sits in an unreachable dead blob). Our earlier
   per-phase-tick evaluation was itself a divergence; the port now exposes
-  `run_post_mission_pass()` as the host one-shot and documents the
+  `run_post_mission_pass()` as the binding's one-shot and documents the
   one-pre-call contract (NovaSimulation delivers exactly one).
 - **D-EVT-5 — the BMS second chunk (header +0x246) is runtime-opaque.**
   Witnessed: `Mission_LoadBMSFile` fseeks past it on BOTH paths (in-session

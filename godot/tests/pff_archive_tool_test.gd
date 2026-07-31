@@ -137,10 +137,10 @@ func test_extract_reports_raw_fallback() -> void:
 # ---------------------------------------------------------------------------
 
 func _new_tool() -> EditorPffTool:
-	var host := Control.new()
-	add_child_autofree(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
 	var t := EditorPffTool.new()
-	t.setup(host, _stub_open_files, _stub_open_dir, _stub_show_status, _stub_on_extracted)
+	t.setup(mount, _stub_open_files, _stub_open_dir, _stub_show_status, _stub_on_extracted)
 	t._ensure_dialog()
 	return t
 

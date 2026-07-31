@@ -25,7 +25,7 @@ var _sim = null
 var _effect_world = null
 var _main = null
 var _gw = null
-var _hud_host = null
+var _hud_presenter = null
 var _vprid := RID()
 # Frame segmentation: [post_draw -> process_frame] = swap/present + OS pump +
 # physics; [process_frame -> pre_draw] = the process step; [pre -> post] = draw.
@@ -124,7 +124,7 @@ func _run() -> void:
 	_effect_world = _find_by_method(root, "get_debug_group_report")
 	_main = game
 	_gw = world
-	_hud_host = _main.get("_hud_host")
+	_hud_presenter = _main.get("_hud_presenter")
 	_enable_perf_probe_spans()
 
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
@@ -198,7 +198,7 @@ func _run() -> void:
 	# only the GameHud Control left sibling HUD elements visible). Ticks still
 	# run — this isolates the _draw/canvas side from the info-build side.
 	var hud_node: Node = null
-	var hh = _main.get("_hud_host") if _main != null else null
+	var hh = _main.get("_hud_presenter") if _main != null else null
 	if hh != null:
 		var parent = hh.get("_ui_parent")
 		var gh = hh.get("_game_hud")
@@ -515,8 +515,8 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 			spans += " main{before=%.1f world=%.1f after=%.1f hud=%.1f}" % [
 					float(mg.get("before", 0)) / 1000.0, float(mg.get("world", 0)) / 1000.0,
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]
-		if _hud_host != null and not hud_producer_skipped:
-			var hg = _hud_host.get("_perf_probe_spans")
+		if _hud_presenter != null and not hud_producer_skipped:
+			var hg = _hud_presenter.get("_perf_probe_spans")
 			if hg is Dictionary and not (hg as Dictionary).is_empty():
 				spans += " hud{scal=%.1f attach=%.1f wp=%.1f info=%.1f flush=%.1f}" % [
 						float(hg.get("scalars", 0)) / 1000.0,
@@ -623,13 +623,13 @@ func _equip_clip_weapon() -> void:
 		if equipped.is_empty():
 			continue
 		# Mirror the armory's post-apply install exactly: world weapon THEN the
-		# player host's viewmodel refresh, or the first-person arms keep the
+		# player presenter's viewmodel refresh, or the first-person arms keep the
 		# knife while the sim fires the rifle.
 		if _gw != null and _gw.has_method("set_local_player_weapon_by_name") \
 				and bool(_gw.set_local_player_weapon_by_name(equipped)):
-			var player_host = _main.get("_player_host") if _main != null else null
-			if player_host != null and player_host.has_method("refresh_viewmodel"):
-				player_host.refresh_viewmodel()
+			var player_presenter = _main.get("_player_presenter") if _main != null else null
+			if player_presenter != null and player_presenter.has_method("refresh_viewmodel"):
+				player_presenter.refresh_viewmodel()
 		await _settle_ms(1500)  # draw anim settles before the baseline
 		var view = _gw.local_player_weapon_view() if _gw != null \
 				and _gw.has_method("local_player_weapon_view") else null
@@ -712,7 +712,7 @@ func _report(label: String, st: Dictionary) -> void:
 
 
 func _enable_perf_probe_spans() -> void:
-	for target_v in [_main, _hud_host, _gw]:
+	for target_v in [_main, _hud_presenter, _gw]:
 		var target := target_v as Object
 		var setter_method := StringName()
 		if is_instance_valid(target) and target.has_method("set_perf_probe_enabled"):

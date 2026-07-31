@@ -3605,7 +3605,7 @@ OpenNova models that lifecycle at the common `NovaObjectData.open_from_resource_
 boundary: mission load resets the registry before celestial/terrain work, successful
 mounted loads register by case-folded filename, foliage loads mark their shared
 definition excluded, and `GameWorld` prewarms the joiner's player avatar plus the
-current FP gun/arms definitions (the late `LocalPlayerHost` builders then hit the same
+current FP gun/arms definitions (the late `LocalPlayerPresenter` builders then hit the same
 placer cache) before freezing the page after mission runtime/model setup but before
 `world_loaded`. A same-packet S2C spawn + `0x68` regression proves network
 entities cannot enter or reorder the page. The writer adds the two model-row fields
@@ -3990,7 +3990,7 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
   `type_id`, posed from the decoded `0x0A` position + coarse yaw. The host keeps the registry-resolved
   `MissionPresentPass` for its placed NPCs and adds the wire pass ONLY for un-placed spawned players (an
   admitted joiner has no `.bms` node) — so co-op is bidirectional on both sides. Each side excludes its own
-  local player from the wire pass (drawn by `LocalPlayerHost`); the joiner keys that exclusion on **H**,
+  local player from the wire pass (drawn by `LocalPlayerPresenter`); the joiner keys that exclusion on **H**,
   not L (L collides with a host-side slot). The present buffer gained `PF_TYPE_ID`/`PF_WIRE_HANDLE`.
 - **Refinement [D-NET-96]:** the host surfaces `PeerSpawned` REACTIVELY, from `handle_datagram` on an
   incoming SESSION packet (`host_session_accept.cpp` — not from `tick_handshakes`), so once the
@@ -4410,7 +4410,7 @@ renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them
   for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
   pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
 
-**Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `local_player_host.gd` uses
+**Port (2026-07-08 controller train; corrected 2026-07-13 ×2):** `local_player_presenter.gd` uses
 the IN-PLAY chase state — distance **1.0**, orbit yaw/pitch **0**, the round-start reset
 (`Camera_ResetToLocalPlayer @ 0x4a3d30` ← `Game_StartMission @ 0x525c54` /
 `Game_InitNewRound @ 0x4227a2`; the tight over-the-shoulder view). The 3.0 / 5.625°
@@ -4464,7 +4464,7 @@ kill-cam distance reel, the weather/impact shake.
   binocular-VIEW flag (`Player_UpdatePerFrame @ 0x4de382` copies `g_binocularsToggle`, forced 0
   when dead / spawn-gated / any move key (`g_inputFlags & 0x1E`) / camera mode 1). It gates the
   crosshair, the FP-model draw, several HUD overlays, and the scoped mouse reduction.
-- **Ported this pass** (libs/world + NovaSimulation + LocalPlayerHost): the shared
+- **Ported this pass** (libs/world + NovaSimulation + LocalPlayerPresenter): the shared
   `player_body_select` (run promotion + idle_mortar + prone rolls + the 4th-tick cadence for the
   LOCAL player too), `infantry_lean_tick`, the primary channel's clip-end pending promotion
   [orig: @ 0x40b77b], the full mouse pipeline (`player_look_apply`), stance SELECT requests with
@@ -4541,7 +4541,7 @@ three stacked misreadings, each now witnessed and ported:
 deltas, identity rest, model pivots via `NovaObjectData.get_bone_origins`); the FP meshes build in
 the NATIVE frame (`build_lod_submeshes(…, native_frame)` — no import flip, winding re-reversed for
 Godot's CCW cull) so mesh, skeleton, and Skin (`T(−abs pivot)` from identity rests) share one frame;
-`LocalPlayerHost` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
+`LocalPlayerPresenter` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
 view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCamera @0x4dd444]`).
 Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
 (`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
@@ -4719,7 +4719,7 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`.
    `GameWorld.build_local_player_viewmodel` resolves the fixed default weapon
    (`WPN_AK47AUTO`; `NOVA_VM_WEAPON` overrides the name for rig A/B checks) from the
-   MOUNTED root's weapon.def and `LocalPlayerHost` applies the resolved
+   MOUNTED root's weapon.def and `LocalPlayerPresenter` applies the resolved
    `pos`/`rot`/`tpos`/`renderfov`; the witnessed JOX AK-47 constants survive only as the
    no-def fallback. Equipped-weapon resolution (the def per the player's actual weapon)
    remains the follow-up — the plumbing no longer cares which weapon it is.
@@ -4744,7 +4744,7 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    mismatches against the plain-file evaluator, and the ak47 preview's canonical-camera
    idle matches `vm_mesh_probe`'s j37 discriminator (barrel → +Z, belly → −Y). A US01 body
    previews through the same semantics. ctest `def_parse_weapons` pins the renderfov
-   default + override; GUT `anims_inspector`/`local_player_host`/`game_world`/
+   default + override; GUT `anims_inspector`/`local_player_presenter`/`game_world`/
    `object_editor` green in isolation. The drive surface at the time was curated ONED MCP tools
    (`object_load_anims`/`object_play_clip`/`object_rig_state` rest+posed joint dumps;
    `mission_play` for the now-retired Play-in-Editor path). Current live mission validation
@@ -6661,8 +6661,8 @@ header); `JoinerConnection::set_player_paced_deployment` + `frame_deployment_pic
 (the AwaitDeployPick stage — the shell paces the pick, re-picks allowed, headless
 callers keep the auto parameter-0 default) + `frame_loadout_resubmit` (the armory
 ACCEPT re-send) with `ClientRuntime` queueing; `NovaSimulation.get_deploy_spawn_zones`
-/ `send_deployment_pick` / `get_join_assigned_team`; `NovaDeployScreenHost`
-(godot/engine/world/deploy_screen_host.gd — death.mnu DEATH over the live world, the
+/ `send_deployment_pick` / `get_join_assigned_team`; `NovaDeployScreenPresenter`
+(godot/engine/world/deploy_screen_presenter.gd — death.mnu DEATH over the live world, the
 witnessed populate/colors/row-0, self-closing on the release); the game_world join
 watchdog now ENDS at the player-paced pick. Pinned by `npruntime_client_runtime`
 `run_roundtrip_with_spawn_zones(paced)` (park → invalid pick silently dropped →
@@ -6900,7 +6900,7 @@ How the equipped weapon animates and sequences: the weapon.def ACTION rows bind 
 per-weapon **12-slot action table** and one per-tick pump advances an action QUEUE on the
 equipped slot. Witnessed end to end this session (all anchored, Jointops.exe.kong.i64);
 ported as `libs/world/weapon_fsm.{h,cpp}` + the `NovaSimulation` slot pump + the
-GameWorld/LocalPlayerHost host wiring (PR #213 train). This is the runtime half the §5.16
+GameWorld/LocalPlayerPresenter host wiring (PR #213 train). This is the runtime half the §5.16
 fire pipeline and §5.58 reload round-trip plug into.
 
 **The ACTION-row registry** [orig: `ActionDef_ParseScriptLine @ 0x4023c0`]. `action
@@ -7081,7 +7081,7 @@ logic tick after the world advances (all four paths), keeps latest-value snapsho
 serials for diagnostics/rebuild, and appends each tick's clip/begin/end payload to an
 ordered destructive event batch with `age_ticks`; `GameWorld` bakes from the resolved
 weapon dict + the loaded viewmodel's clip lengths and types the drained records;
-`LocalPlayerHost` feeds LMB/R/RMB through the world-tick input path, drains every event
+`LocalPlayerPresenter` feeds LMB/R/RMB through the world-tick input path, drains every event
 in order, plays FSM clips on BOTH viewmodel parts at their catch-up age, and realizes
 ADS: the eased pos→tpos view bias
 (15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
@@ -7315,7 +7315,7 @@ sound fields and the engine plays them at different phase edges:
 
 Port row: each tick's `WeaponFsmEvents` clip/begin/end payload is copied into
 `NovaSimulation`'s ordered event batch → `GameWorld.drain_local_player_weapon_events`
-types and destructively drains it → `LocalPlayerHost` consumes every record in order.
+types and destructively drains it → `LocalPlayerPresenter` consumes every record in order.
 Each record carries `age_ticks`, the production-tick position, and the settled,
 third-person, and vehicle-attack routing flags after that tick's view promoter, so a clip
 emitted early in a multi-tick catch-up starts at its correct presentation age, 3D sounds
@@ -7333,10 +7333,10 @@ rows render generically as independent unsuppressed `Always` transients through 
 bone, including REVX02 `WPN_M4AUTO`'s RECOIL/`MFLASH01` muzzle and FIRE/`BCASING` casing.
 The shared value scene, atlas, packet compiler, and ordered RD renderer close D-PTL-16
 (`weapon_fsm_test.cpp`, `nova_simulation_test.gd`,
-`local_player_host_test.gd`).
+`local_player_presenter_test.gd`).
 The witness record for the spawn/attach machinery is
 [particles/ptl-format-re.md §4](../particles/ptl-format-re.md). ctest
-`weapon_fsm` pins both legs + the silent abort; GUT `local_player_host_test` pins
+`weapon_fsm` pins both legs + the silent abort; GUT `local_player_presenter_test` pins
 the sound drains.
 
 **The FLAGS table + the ADS toggle protocol (2026-07-10, the nocardswitch grill).**
@@ -7653,7 +7653,7 @@ The implemented **world-model `HEAT_GLOW` CTRL register** is global ordinal 54 i
    The first-person path writes at `0x4DEEC2..0x4DEEF5`
    `[orig: Player_RenderFirstPersonViewModel @ 0x4DED60]` and is now hosted:
    `NovaSimulation::get_local_player_weapon_state` emits `heat_glow` clamped to
-   `[0,0x10000]`, `PlayerWeaponView` carries it, and `LocalPlayerHost` writes it
+   `[0,0x10000]`, `PlayerWeaponView` carries it, and `LocalPlayerPresenter` writes it
    on every owned viewmodel submit, including literal zero. The register is
    cleared only when viewmodel ownership ends.
 
@@ -7695,7 +7695,7 @@ loads — the expansion setting must name it (config, not code).
 
 Reimpl: `libs/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
 `weapon_inventory`), `NovaSimulation` (`rebuild_local_player_loadout` + the switch/commit
-seams), `local_player_host.gd` (keys 1..9, `[`/`]`), `armory_host.gd`/`armory_menu_host.gd`
+seams), `local_player_presenter.gd` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
 (availability filter + multi-slot ACCEPT), `mission_runtime.gd` (the .bms promote), GUT
 `nova_simulation_test.gd` / `armory_host_test.gd`.
 
@@ -8004,7 +8004,7 @@ only, composes a player-facing reason from DPC/DC/DDSTR/DSTR, and fails the conn
 `Phase::Error`, so `session_lost()` is true at ANY phase (the 120000 ms silence reap of
 D-NET-177 stays the in-match fallback for a host that vanishes without one). Host surfacing:
 `NovaSimulation::is_session_lost()` is the bound state test (the reason string is presentation,
-not state); `NovaDeployScreenHost` checks it before the deployment-release edge and calls
+not state); `NovaDeployScreenPresenter` checks it before the deployment-release edge and calls
 `teardown()` instead of emitting `closed` — the punt clears the same pick-pending flag a release
 does, and closing there handed the shell back to `State.WORLD` over a dead session; `main_game`
 routes both loss causes through one `_abort_to_menu(stage, reason)` leg. Pinned by
@@ -9418,7 +9418,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
 - **D-NET-167** [LOW, OPEN] The game ClientAuth never carries the join-password `FID` or team-choice `JSP` CUs. `@0x512100`'s squad-password (DC=21) and side-password (DC=18/19/20, `jsp[60]` team choice) legs therefore reject every OpenNova join to a password-protected host. Close with a join-password prompt feeding `FID` (+ `JSP` for the team preference). LAN-reachable: retail LAN hosts can set passwords.
 - **D-NET-168** [MED, FIXED 2026-07-24] The joiner's post-`0x1A` `0x2F` pair uploaded a FIXED default kit (capture-shaped header `02 08 C3|D4` + seven ADM rows) — the shell's applied local kit had no wire seam, so the host's granted per-slot table reflected the default, not the player's pick. Closed by the client-builder witness (§5.56, `NetPacket_SendLoadoutSubmit @ 0x42cdc0`): `JoinerConnection` now latches the wire team from the S2C 0x04 tail byte (`byte_A85B48` parity) and composes both submissions from the binding's `set_loadout_kit` seam (`NovaSimulation::push_joiner_loadout_kit` — the applied spawn kit's ADM rows, the latched class, slot 195 then the equipped combo, mirroring `Game_StartMission @ 0x525836/@ 0x525c2e`). Headless callers keep the capture-default kit byte-for-byte. Pinned by `npruntime_client_runtime` (exact canned pair under the 0x04 team; injected kit through the zones e2e) and `nw_ingame_encode` `loadout_submit_roundtrip`.
 - **D-NET-169** [MED, OPEN (guarded) + NEEDS-RE] Self-identification stays NAME-MATCH (D.0/§5.23) while retail's is numeric (`Player_FindLocalPlayerEntity @0x4e0090` walks the player table by ConnectionId/dcb; the roster binding arrives via 0x4D player-index + 0x46 player-sync `entity_slot_id`, §5.21). Name-match cannot disambiguate two live players sharing a callsign. GUARDS (2026-07-24): the joiner fails the join with a duplicate-callsign error when a second same-name organic record with a different slot arrives pre-release (post-release it keeps its latched handle), and the shell's default callsign is uniquified per machine (`NovaPlayerProfile`). Burn-down = witness the 0x4D semantics and port the numeric walk.
-- **D-NET-170** [HIGH, FIXED 2026-07-24] S2C `0x5A` is now an authoritative receive-side state channel, not merely a deploy-release signal: `ClientRuntime` retains the newest decoded `WeaponLoadout` with a revision, and `NovaSimulation` rebuilds the local slot pool from that grant before actions without sending a new C2S `0x2F`. S2C `0x6F` and `0x53` are retained per zone; the DEATH list overlays BMS zone identity with the live 0x6F team/value/limit secured gate. Real-UDP tests pin mid-session grant replacement and live zone removal/reappearance; `deploy_screen_host_test.gd` pins stable selection by the zone's wire parameter rather than row index. [orig: `WeaponLoadout_ApplyFromBuffer @0x4290E0`; `UI_UpdateDeathScreenContent @0x5536a0`]
+- **D-NET-170** [HIGH, FIXED 2026-07-24] S2C `0x5A` is now an authoritative receive-side state channel, not merely a deploy-release signal: `ClientRuntime` retains the newest decoded `WeaponLoadout` with a revision, and `NovaSimulation` rebuilds the local slot pool from that grant before actions without sending a new C2S `0x2F`. S2C `0x6F` and `0x53` are retained per zone; the DEATH list overlays BMS zone identity with the live 0x6F team/value/limit secured gate. Real-UDP tests pin mid-session grant replacement and live zone removal/reappearance; `deploy_screen_presenter_test.gd` pins stable selection by the zone's wire parameter rather than row index. [orig: `WeaponLoadout_ApplyFromBuffer @0x4290E0`; `UI_UpdateDeathScreenContent @0x5536a0`]
 - **D-NET-175** [HIGH, FIXED 2026-07-24] The full periodic request trio is live (§5.34): one holdoff-gated, MTU-batched send boundary carries `0x1C`, `0x08`, and `0x3D`. `0x3D` pages the renderer-finalized registry of unique loaded non-foliage `.3DI` definitions, frozen before world reveal, and later S2C spawns cannot mutate it. `0x1C` now comes from the real boot-soft `charattr.def` domain: an exact 16×124-byte CHARACTER table with retail section/key/value semantics, wrapped class selection plus active/id validation, and ordered S2C `0x41` property clears. The stock class-8 row CRC `0x22A25E01` reproduces two independent retail replies; missing resources and invalid classes retain retail's zero result.
 
 `gate_response.cpp` (A2):

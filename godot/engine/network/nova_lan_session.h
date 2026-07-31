@@ -20,7 +20,7 @@ namespace godot {
 // retail enumerator cadence, then collects the 0x81 ServerHello replies for
 // the retail 30-second discovery window. The portable npruntime helper owns
 // the wire format; this node owns only Godot UDP, result normalization, and
-// the MpMenuHost-facing signal.
+// the MpMenuCompanion-facing signal.
 class NovaLanSession : public Node {
 	GDCLASS(NovaLanSession, Node)
 

@@ -8,7 +8,7 @@
 // machinery is a device-era artifact and is NOT reproduced; what this module
 // carries is the ORDER ITSELF: the sort-key semantics, the technique-class
 // selection, the transparent queue split around the water plane, and the
-// frame's transparent ordering ladder that the Godot host applies as
+// frame's transparent ordering ladder that the Godot layer applies as
 // render_priority rungs (generalizing the celestial ladder).
 //
 // Pure C++, no Godot deps. T1-pinned by renderer_state_vectors (section 3)
@@ -95,7 +95,7 @@ enum class TransparentQueue : uint8_t {
 };
 TransparentQueue transparent_queue_for(float world_height, float water_height);
 
-// The frame's transparent ordering ladder, applied by the Godot host as
+// The frame's transparent ordering ladder, applied by the Godot layer as
 // render_priority rungs (within one rung Godot's per-object back-to-front
 // depth sort matches the per-queue ~float-bits keys above). Witnessed frame
 // bracket [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]: sky pass

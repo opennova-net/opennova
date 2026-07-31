@@ -65,7 +65,7 @@ appear only where a record says so. Known scales, each owned by its record:
 
 ### Coordinates
 
-- The mission/world frame is **Z-up**; the Godot host is **Y-up**
+- The mission/world frame is **Z-up**; the Godot side is **Y-up**
   ([world-wac-ai-re.md §10](world/world-wac-ai-re.md)). Grid convention:
   "(x,y) = plane, z = up, y inverted"
   `[orig: Mission_LoadBMSAndExtractSpawnPoints @ 0x40d650]`
@@ -155,7 +155,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Items (items.def entity defs) | `libs/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
 | HUD + interface overlays | `godot/engine/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
 | Mission loading screen | `godot/engine/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..6) |
-| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_host.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos open) |
+| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos open) |
 | Render — materials / state | `libs/oed` tag registry, `libs/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `libs/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
 | Render — lighting | `libs/renderer/light_runtime`, `libs/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |
@@ -235,7 +235,7 @@ Research flows one way into the tree ([docs/README.md](README.md) conventions):
   witness-then-port: establish how the original did X — its behavior and its look —
   through the research path in §5 before writing any of it. The exclusion is
   CRT/OS/platform primitives (`strcpy`/`sprintf`/`memcpy`, D3D, file I/O): those map
-  to standard-library or host equivalents rather than being ported.
+  to standard-library or platform equivalents rather than being ported.
 - There is no scratch directory: `docs/` is kept pristine — the best current
   understanding of the original engine — and durable findings land there the same
   session they are witnessed; ephemeral working state stays in the session.

@@ -9,7 +9,7 @@ namespace godot {
 
 // Thin Godot binding over opennova::audio::SoundSelector: the portable sound-set member-selection
 // state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ), pushed down out of nova_sound_bank.gd so the
-// engine core stays C++ and a headless host could resolve the same member. The GDScript sound bank
+// engine core stays C++ and a headless embedder could resolve the same member. The GDScript sound bank
 // holds ONE of these per loaded bank set and asks it for a member index per (bank, set, layer) when
 // it spawns a voice; the bank still owns the .lwf data access and the AudioStreamPlayer spawning.
 class NovaSoundSelector : public RefCounted {

@@ -279,7 +279,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 default:
                     break;
             }
-            // The remaining Player subs (view modes, dialog, satchel) ride their host
+            // The remaining Player subs (view modes, dialog, satchel) ride their embedder
             // subsystems' ports; false until witnessed-wired.
             return false;
         }
@@ -352,13 +352,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::OutputText:
             w.effects.push({"text", a.param1, 0, 0, 0, std::string()});
             break;
-        // Host-presentation effects: the engine hands these to the host's audio/HUD/overlay.
+        // Presentation effects: the engine hands these to the embedder's audio/HUD/overlay.
         case bms::ActionType::PlayWavList: // play dialog/wav param1 (param2 = always-play flag)
             w.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
             break;
         case bms::ActionType::ShowWaypoints:
             // The engine flag the waypoint HUD label + SP cycle key gate on
-            // (init 1 at HUD bring-up); the effect stays as the host log.
+            // (init 1 at HUD bring-up); the effect stays as the presentation log.
             // [orig: action 40 -> Game_SetShowWaypoints @0x58fb50 ->
             //  g_showWaypoints @0x27238BC, init @0x5a4913]
             w.waypoints.show = (a.param1 != 0);
@@ -385,7 +385,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x45447b/0x454495/0x4544af -> Server_ProcessRoundEnd(1/2/0); the call
         // sites gate on g_spawn_success_gate — process_round_end's own latch covers
-        // that]. The "win" effect stays as the host-presentation signal.
+        // that]. The "win" effect stays as the presentation signal.
         case bms::ActionType::BlueWin:
             w.effects.push({"win", 1, 0, 0, 0, std::string()});
             w.process_round_end(1);
@@ -456,13 +456,13 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
             break;
         case bms::ActionType::ExecuteWac:
             // One front-end invoking the other: the BMS action installs/runs a
-            // WAC program. Recorded as an effect here; the host wires the actual
+            // WAC program. Recorded as an effect here; the embedder wires the actual
             // WAC invocation (the WacSystem) at runtime.
             w.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
             break;
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
-            // diagnostic only — never a host presentation effect). Supported missions should
+            // diagnostic only — never a presentation effect). Supported missions should
             // emit zero of these; a test asserts that. [tracked-TODO, not a command stream.]
             w.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
                             a.param1, a.param2, std::string()});
@@ -473,7 +473,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
 void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // [orig: the dispatch loops @0x454ca6/@0x454d0e — every action entry in order.
     //  The g_InputActionBits/g_EventInputBitsMirror commit around the dispatch
-    //  (input-trigger bit consumption) is a host input subsystem not ported here;
+    //  (input-trigger bit consumption) is an embedder input subsystem not ported here;
     //  recorded in docs/mission/bms-event-runtime-re.md.]
     for (const bms::Action &a : se.actions) dispatch_action(w, a);
     // The waypoint completion hook: a fired event completes every route marker
@@ -533,7 +533,7 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
 }
 
 void BmsEventSystem::run_post_mission_pass(World &w) {
-    // ONE whole-list sweep over the PostMission-flag entries, called by the host
+    // ONE whole-list sweep over the PostMission-flag entries, called by the embedder
     // exactly once per transition — never periodically, so an authored post
     // delay of 1 fires at the transition and larger delays effectively never do
     // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; one-shot
@@ -551,7 +551,7 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
 
     if (ctx.pre_mission) {
         // Pre-mission pass: every PreMission-flag entry, one whole-list sweep.
-        // The host contract is ONE pre_mission tick per mission start, before
+        // The embedder contract is ONE pre_mission tick per mission start, before
         // the clock runs (NovaSimulation delivers exactly one) — retail's pre
         // pass is a single call, never periodic (D-EVT-4).
         // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller

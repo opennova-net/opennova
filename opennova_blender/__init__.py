@@ -1,4 +1,4 @@
-"""Standalone Blender-backed importer host."""
+"""Standalone Blender-backed importer backend."""
 from __future__ import annotations
 
 from .backend import BlenderBackend, StandaloneBackend

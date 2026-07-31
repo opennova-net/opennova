@@ -3,7 +3,7 @@ shader_type spatial;
 // Retail computes source = TEXTURE * DIFFUSE and blends it with
 // SRC=DESTCOLOR, DST=SRCCOLOR, producing 2 * source * framebuffer. Godot has
 // no separate-factor equivalent, so blend_mul with a doubled source preserves
-// the same color equation (subject to the host framebuffer's normal clamp).
+// the same color equation (subject to the target framebuffer's normal clamp).
 render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
 
 uniform sampler2D albedo_tex : source_color, filter_linear, repeat_disable;

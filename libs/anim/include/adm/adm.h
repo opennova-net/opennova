@@ -40,7 +40,7 @@ ADM_EXPORT int adm_parse(const char *path, AdmFile *out);
 
 // Parse a .adm from an in-memory buffer (does not take ownership of `bytes`).
 // Returns 0 on success, -1 on error. On success, caller must call adm_free().
-// Used by hosts that read assets from a VFS (PFF archive) rather than disk.
+// Used by embedders that read assets from a VFS (PFF archive) rather than disk.
 ADM_EXPORT int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out);
 
 // Free all allocations inside an AdmFile.

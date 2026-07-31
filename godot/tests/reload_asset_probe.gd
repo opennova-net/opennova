@@ -83,8 +83,8 @@ func _run() -> void:
 	print("=== remote player (wire type 0x14B9) asset chain ===")
 	var placer = MissionObjectPlacer.new()
 	placer.resource_root = res
-	var host := Node3D.new()
-	root.add_child(host)
+	var mount := Node3D.new()
+	root.add_child(mount)
 	await _frames(2)
 
 	var visual_item := int(placer.resolve_player_visual_item_id(PLAYER_RUNTIME_TYPE_ID))

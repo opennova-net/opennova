@@ -3,7 +3,7 @@
 // The retail terrain segment raycast (ENG-3 B1) — a faithful structural
 // translation of the Jointops.exe heightmap raycast chain, Godot-agnostic,
 // running over a caller-supplied world-space height sampler so the editor
-// host (live Image sampling) and the runtime host (baked CPT atlas) adopt the
+// shell (live Image sampling) and the runtime shell (baked CPT atlas) adopt the
 // same core. Witness record: docs/terrain/terrain-re.md §"Runtime terrain
 // queries (ENG-3 B0)".
 //
@@ -29,7 +29,7 @@
 //     (retail stores the V-flipped y step in Terrain_LastRayStepY @ 0x319a29c
 //     and negates it back in the refine);
 //   - the coarse point sample retail takes at the biased coordinate (i.e. the
-//     NEAREST texel of the world coordinate) is the host point callback's
+//     NEAREST texel of the world coordinate) is the embedder point callback's
 //     policy — the core passes unbiased world coordinates to both callbacks.
 // The step vector retail publishes through the Terrain_LastRayStep* globals
 // (@ 0x319a298..a0, written on hit when a hit out was requested) is
@@ -39,7 +39,7 @@
 // vs coords_runtime_options in terrain/coords.h): retail clamps an
 // out-of-extent sector-grid cell to the grid edge, so terrain continues
 // forever [orig: the OOB masks @ 0x31a0010/0x319fc0c, the ~(cell >> 31)
-// clamp-to-edge @ 0x60cd50..0x60cd62]. Our editor hosts instead report
+// clamp-to-edge @ 0x60cd50..0x60cd62]. Our editor shells instead report
 // kOutOfExtent from the sampler and the core marches on WITHOUT any terrain
 // test there — no hit, and no height-0 floor. A D-TERRAIN row gets minted at
 // the B1b record update if the divergence is observable in a shipped surface.
@@ -69,14 +69,14 @@ constexpr int32_t TERRAIN_RAYCAST_REFINE_WALK_BUDGET = 8;
 // [orig: @ 0x60e7f9..0x60e834] exactly eight bisection iterations.
 constexpr int32_t TERRAIN_RAYCAST_REFINE_BISECT_ITERATIONS = 8;
 
-// One height sample from the host.
+// One height sample from the embedder.
 //   kHeight      — height_1616 carries the terrain height (16.16 world units).
 //   kEmpty       — an authored-empty sector (retail: a null tile). The march
 //                  applies the height-0 floor there [orig: the null-tile loop
 //                  @ 0x60cea0..0x60cf4c] and bilinear consumers resolve it to
 //                  height 0 [orig: Terrain_SampleHeightBilinear @ 0x6067b0,
 //                  empty cell -> 0 — the height-0 plane].
-//   kOutOfExtent — beyond the authored sector grid (editor hosts; see the
+//   kOutOfExtent — beyond the authored sector grid (editor shells; see the
 //                  divergence note above): no terrain, no floor.
 // height_1616 is ignored for kEmpty/kOutOfExtent.
 struct TerrainRaycastSample {
@@ -93,7 +93,7 @@ struct TerrainRaycastSample {
 // uses a coarse POINT sample (a single floor-texel read of the biased
 // coordinate = the nearest texel of the world coordinate [orig: @ 0x60cdca])
 // and confirms with the BILINEAR sampler [orig: Terrain_SampleHeightBilinear
-// @ 0x6067b0]; the shortcut and the refine sample bilinear only. A host may
+// @ 0x6067b0]; the shortcut and the refine sample bilinear only. An embedder may
 // map both callbacks to bilinear; the structural translation calls point for
 // the coarse test. Both callbacks receive unbiased 16.16 world coordinates
 // and must be non-null; ctx is passed through verbatim.

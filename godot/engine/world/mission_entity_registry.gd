@@ -8,7 +8,7 @@ extends RefCounted
 # part animation, so they are out of scope as PLAYPARTANIM targets. Identity is read from each node's
 # "entity_ref" meta, which MissionObjectPlacer tags in both runtime and editor.
 #
-# Host-agnostic, RefCounted, referenced via preload() (same convention as MissionObjectPlacer) so it
+# Shell-agnostic, RefCounted, referenced via preload() (same convention as MissionObjectPlacer) so it
 # resolves without an editor re-import.
 
 var _by_bms_id: Dictionary = {}     # bms_id (SSN) -> Node

@@ -1,11 +1,11 @@
-class_name PlayerInfoMenuHost
+class_name PlayerInfoMenuCompanion
 extends MenuCompanion
 
 # Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
 # NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
-# filter. It is a companion the game-agnostic NovaMenuHost (nova_menu_host.gd) delegates
-# to -- the same pattern as mp_menu_host.gd -- claimed by the NATIONALITY + COMBO_LIST
+# filter. It is a companion the game-agnostic NovaMenuShell (nova_menu_shell.gd) delegates
+# to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
 # controls unique to this screen.
 #
 # Faithful to the witnessed original (docs/playerinfo/avatars-re.md, "Screen
@@ -122,7 +122,7 @@ func _ensure_db() -> void:
 		return
 	_db = NovaAvatarDatabase.new()
 	if _db.load_from_resource_root(_root, "Avatars.def") != OK or not _db.is_loaded():
-		push_warning("PlayerInfoMenuHost: Avatars.def not loaded (%s); avatar combos stay empty"
+		push_warning("PlayerInfoMenuCompanion: Avatars.def not loaded (%s); avatar combos stay empty"
 			% _db.get_last_error())
 		_db = null
 
@@ -144,9 +144,9 @@ func _display_name(key: String) -> String:
 
 # --- Loadout (weapon slot lists) ----------------------------------------------
 
-## Inject a weapon database for tests or another host-owned resource mount. Keeping
+## Inject a weapon database for tests or another shell-owned resource mount. Keeping
 ## this as a public seam lets callers exercise the same menu population path without
-## reaching into host internals. The recorded ammo picks are keyed by table index,
+## reaching into companion internals. The recorded ammo picks are keyed by table index,
 ## so a table swap invalidates them — clear rather than misapply.
 func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
 	_weapons = weapons
@@ -162,7 +162,7 @@ func _ensure_weapons() -> void:
 		return
 	_weapons = NovaWeaponDatabase.new()
 	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
-		push_warning("PlayerInfoMenuHost: weapon.def not loaded (%s); loadout combos stay empty"
+		push_warning("PlayerInfoMenuCompanion: weapon.def not loaded (%s); loadout combos stay empty"
 			% _weapons.get_last_error())
 		_weapons = null
 

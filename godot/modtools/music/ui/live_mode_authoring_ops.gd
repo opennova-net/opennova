@@ -4,7 +4,7 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 # intent handlers, Add State + the empty-state welcome installer, the
 # level-2 program-view drill-in installer, and the state-level rename /
 # delete operations with their dialogs and context menu. Verbatim motion
-# from live_mode.gd; state stays on the host, reached through `_lm`.
+# from live_mode.gd; state stays on the mount, reached through `_lm`.
 
 
 # --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---

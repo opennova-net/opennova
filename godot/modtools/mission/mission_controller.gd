@@ -5,7 +5,7 @@ extends RefCounted
 # Holds the open mission (NovaMissionData) plus its document state (path /
 # loaded / dirty) and drives the load: parse the mission file, resolve its referenced
 # terrain + environment from the shared resource root, load them through the
-# terrain editor (read-only viewport), then run the host-agnostic
+# terrain editor (read-only viewport), then run the shell-agnostic
 # MissionObjectPlacer under the terrain editor's world root. The resolve + place
 # logic is the same piece the runtime uses (GameWorld.load_mission); this is the
 # thin editor binding around it.
@@ -53,7 +53,7 @@ enum Mode { OBJECTS, WAYPOINTS, AREA_TRIGGERS, SCRIPTING }
 var terrain_editor: Node
 
 var _mission: NovaMissionData
-# Parsed co-named <mission>.til. This is the editor host's copy of GameWorld's
+# Parsed co-named <mission>.til. This is the editor mount's copy of GameWorld's
 # mission-scoped terrain override: the same resource drives tile composition
 # and foliage exclusion while the Mission workspace is active.
 var _mission_tile_info: NovaTerrainTileInfo
@@ -168,7 +168,7 @@ var _selected_user_point_overlay: ObjectUserPointOverlay
 var _selected_user_points_visible := false
 # In-editor PLAYPARTANIM preview: the model node currently being previewed (or null), plus a registry
 # (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
-# target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime host uses.
+# target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime mount uses.
 var _preview_node: Node3D
 var _preview_registry
 var _preview_registry_rev: int = -1

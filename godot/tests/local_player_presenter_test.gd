@@ -1,6 +1,6 @@
 extends GutTest
 
-const LocalPlayerHost := preload("res://engine/world/local_player_host.gd")
+const LocalPlayerPresenter := preload("res://engine/world/local_player_presenter.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 
@@ -76,9 +76,9 @@ class FakePosedWeaponPart:
 		return skeleton
 
 
-# A minimal LocalPlayerHost stand-in serving only the public accessors
+# A minimal LocalPlayerPresenter stand-in serving only the public accessors
 # PlayerWeaponEffects resolves userpoints against.
-class FakeEffectsHost:
+class FakeEffectsPresenter:
 	extends RefCounted
 	var parts: Array = []
 
@@ -100,13 +100,13 @@ class FakeEffectsHost:
 
 class ActionParticleEffectsHarness:
 	extends PlayerWeaponEffects
-	var effects_host := FakeEffectsHost.new()
+	var effects_mount := FakeEffectsPresenter.new()
 
 	func _init() -> void:
-		setup(null, effects_host)
+		setup(null, effects_mount)
 
 	func configure_viewmodel_parts(parts: Array) -> void:
-		effects_host.parts = parts
+		effects_mount.parts = parts
 
 	func action_particle_world_position(userpoint: String) -> Vector3:
 		return _action_particle_world_position(userpoint)
@@ -316,7 +316,7 @@ class FakeWorld:
 	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
 	var view = null  # PlayerLocalView
 	var nvg_view_calls: Array = []
-	# The ordered action-sound + effect-world seams the host drains on the event batch.
+	# The ordered action-sound + effect-world seams the presenter drains on the event batch.
 	var mission_audio = null  # FakeMissionAudio
 	var effect_world = null   # FakeEffectWorld
 	var weapon_tick_consumer := Callable()
@@ -385,18 +385,18 @@ func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
-func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
+func test_shared_presenter_drives_simultaneous_raw_input_before_world_tick() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {"forward": true, "left": true, "lean_left": true, "jump": true})
 
-	host.before_world_tick(0.016)
+	presenter.before_world_tick(0.016)
 
 	assert_eq(world.sim.input_calls.size(), 1)
 	var call: Dictionary = world.sim.input_calls[0]
@@ -407,8 +407,8 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_false(call["back"])
 	assert_false(call["right"])
 	assert_false(call["lean_right"])
-	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared host")
-	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
+	assert_eq(world.avatar_count, 1, "3P avatar is owned by the shared presenter")
+	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared presenter")
 
 
 func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> void:
@@ -417,23 +417,23 @@ func test_viewmodel_lighting_tracks_first_blink_parent_not_indoors_flag() -> voi
 	world.item_db = FakeInteriorItemDb.new()
 	world.item_db.transfers[101216] = 0.2
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_not_null(world.last_weapon_part)
 	assert_eq(world.last_weapon_part.lighting_contexts.back(),
 			[1.0, true, 0.2],
 			"the FP submit keeps effectScale 1 and uses the blink parent's transfer")
 	world.sim.interior_item_id = 0
-	host.after_world_tick()
+	presenter.after_world_tick()
 	assert_eq(world.last_weapon_part.lighting_contexts.back(),
 			[1.0, false, 0.0],
 			"walking out refreshes the model lighting on the live render frame")
@@ -447,16 +447,16 @@ func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
 	world.sim.anim_phase_ticks = 0
 	world.sim.anim_blend_weight = 0.0
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	var avatar := world.last_avatar as FakeAvatar
 	assert_not_null(avatar)
 	assert_eq(avatar.body_calls[0].slice(0, 5), [
@@ -468,41 +468,41 @@ func test_local_avatar_consumes_authoritative_primary_blend_tuple() -> void:
 func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(world.viewmodel_count, 1)
 
 	var event := PlayerWeaponEvent.new()
 	event.switch_to_weapon = "WPN_EMPLCD50"
 	event.preserve_slot_state = true
 	world.weapon_events.append(event)
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_eq(world.weapon_switch_calls, [{
 		"name": "WPN_EMPLCD50",
 		"preserve_slot_state": true,
 	}], "the mount commit installs the parent weapon definition through the FP seam")
-	# refresh_viewmodel invalidates immediately; the normal next host frame owns
+	# refresh_viewmodel invalidates immediately; the normal next presenter frame owns
 	# the asynchronous scene rebuild.
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(world.viewmodel_count, 2,
 			"the stale personal viewmodel is replaced by the emplacement viewmodel")
 
 	var clear_event := PlayerWeaponEvent.new()
 	clear_event.clear_weapon = true
 	world.weapon_events.append(clear_event)
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(world.weapon_clear_calls, 1,
 			"an unarmed detach explicitly clears the emplaced presentation")
 
@@ -510,12 +510,12 @@ func test_usegun_switch_event_rebuilds_borrowed_viewmodel_without_resetting_slot
 func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	world.weapon_view = null
 	var event := PlayerWeaponEvent.new()
@@ -523,8 +523,8 @@ func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
 	event.preserve_slot_state = true
 	world.weapon_events.append(event)
 
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(world.weapon_switch_calls, [{
 		"name": "WPN_EMPLCD50",
 		"preserve_slot_state": true,
@@ -534,15 +534,15 @@ func test_unarmed_usegun_switch_is_consumed_without_a_weapon_view() -> void:
 func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {"forward": true, "left": true, "lean_left": true, "jump": true})
 
-	host.before_world_tick(0.016, false, false)
+	presenter.before_world_tick(0.016, false, false)
 
 	assert_eq(world.sim.input_calls.size(), 1, "the live overlay still submits one input frame")
 	var call: Dictionary = world.sim.input_calls[0]
@@ -551,24 +551,24 @@ func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking()
 
 
 func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
-	# The host no longer scales or accumulates look: raw pixel deltas go to
+	# The presenter no longer scales or accumulates look: raw pixel deltas go to
 	# NovaSimulation.add_local_player_look (the witnessed integer pipeline —
 	# sens<<11, scoped zoom reduction, the prone 40-degree up-clamp — is SIM
 	# state, covered by the ctest player_look suite).
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
 
 	var motion := InputEventMouseMotion.new()
 	motion.relative = Vector2(17.0, -6.0)
-	assert_true(host.handle_input(motion, true))
+	assert_true(presenter.handle_input(motion, true))
 	assert_eq(world.sim.look_calls.size(), 1)
 	assert_eq(world.sim.look_calls[0], Vector2(17.0, -6.0))
-	assert_false(host.handle_input(motion, false), "inactive input is not forwarded")
+	assert_false(presenter.handle_input(motion, false), "inactive input is not forwarded")
 	assert_eq(world.sim.look_calls.size(), 1)
 
 
@@ -578,34 +578,34 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 	# refusal. [orig: input cases 170/169/172 -> C2S 0x1D @0x501c60]
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
 
 	for keycode in [KEY_Z, KEY_X, KEY_C]:
 		var key := InputEventKey.new()
 		key.keycode = keycode
 		key.pressed = true
-		assert_true(host.handle_key_input(key, true))
+		assert_true(presenter.handle_key_input(key, true))
 	assert_eq(world.sim.stance_requests, [2, 1, 0])
 
 
 func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
 
 	for keycode in [KEY_B, KEY_N, KEY_EQUAL, KEY_MINUS]:
 		var key := InputEventKey.new()
 		key.physical_keycode = keycode
 		key.pressed = true
-		assert_true(host.handle_key_input(key, true))
+		assert_true(presenter.handle_key_input(key, true))
 	assert_eq(world.sim.binocular_toggle_requests, 1)
 	assert_eq(world.sim.nvg_toggle_requests, 1)
 	assert_eq(world.sim.nvg_gain_requests, [1, -1])
@@ -616,23 +616,23 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# world scene, which CONTAINS the local player's body; the first-person
 	# arms/weapon are a separate near-Z overlay that never enters it
 	# [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
-	# @ 0x5c1240; Player_RenderFirstPersonViewModel @ 0x4ded60]. Hosted, that
+	# @ 0x5c1240; Player_RenderFirstPersonViewModel @ 0x4ded60]. World-driven, that
 	# is LAYER plumbing: in first person the body stays visible on the
 	# reflection-only layer (masked off the player camera, kept by NovaWater's
 	# mirror camera) and the viewmodel rides its own mirror-excluded layer.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	await get_tree().process_frame  # setup() mounts the FP pass deferred
 
-	host.before_world_tick(0.016)  # builds the avatar + viewmodel
-	host.after_world_tick()        # first person by default: placement + layer stamps
+	presenter.before_world_tick(0.016)  # builds the avatar + viewmodel
+	presenter.after_world_tick()        # first person by default: placement + layer stamps
 
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"setup() masks the reflection-only body layer off the player camera")
@@ -642,7 +642,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster marker layers cannot make the reflection-only body visible to the player")
-	var pass_cam: Camera3D = host.viewmodel_rig().get("_vm_camera")
+	var pass_cam: Camera3D = presenter.viewmodel_rig().get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
 		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
@@ -663,8 +663,8 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_VIEWMODEL,
 			"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
 
-	host.set_third_person(true)
-	host.after_world_tick()
+	presenter.set_third_person(true)
+	presenter.after_world_tick()
 
 	for vi in _visual_instances(world.last_avatar):
 		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_WORLD,
@@ -672,7 +672,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	assert_true(world.last_avatar.visible, "the body shows in third person")
 	assert_false(world.last_viewmodel.visible, "the FP overlay hides entirely in third person")
 
-	host.teardown()
+	presenter.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
@@ -681,23 +681,23 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 
 func test_camera_state_rides_the_sim_view() -> void:
 	# ADR 0016: the ADS ease, the fov policy, and the 3P anchor are SIM state at
-	# the world cadence — the host reads the PlayerLocalView snapshot and places
+	# the world cadence — the presenter reads the PlayerLocalView snapshot and places
 	# nodes. Scoped fov: the sim's horizontal policy value through the ONE shared
 	# h->v conversion. 3P: the camera aims at the sim's chased anchor.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
 	world.view = PlayerLocalView.new()
 	world.view.fov_h_deg = 20.0  # the sim's sighted 80/4 policy value
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	var size := camera.get_viewport().get_visible_rect().size
 	assert_almost_eq(camera.fov,
 		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
@@ -710,42 +710,42 @@ func test_camera_state_rides_the_sim_view() -> void:
 	# up = (0,1,0).
 	world.view.tp_anchor = Vector3(4.0, 2.0, -6.0)
 	world.view.tp_anchor_valid = true
-	host.set_third_person(true)
-	host.after_world_tick()
+	presenter.set_third_person(true)
+	presenter.after_world_tick()
 	var pivot: Vector3 = world.view.tp_anchor \
 			+ (Vector3(0, 0, -1) + Vector3(-1, 0, 0) + Vector3(0, 1, 0)) \
-			* host.PLAYER_TP_PIVOT_NUDGE
+			* presenter.PLAYER_TP_PIVOT_NUDGE
 	var to_pivot: Vector3 = pivot - camera.global_position
-	assert_almost_eq(host.PLAYER_TP_DISTANCE, 1.0, 0.001,
+	assert_almost_eq(presenter.PLAYER_TP_DISTANCE, 1.0, 0.001,
 		"the in-play chase distance is the reset 1.0 [orig: @0x4a3d4c]")
 	# The march's no-collision landing: (floor(1.0/0.25) - 1) * 0.25 = 0.75 back
 	# [orig: @0x438213..0x43832e — the eye stays on the LAST 0.25u step].
 	assert_almost_eq(to_pivot.length(), 0.75, 0.001,
 		"the camera lands on the march's last 0.25u step, not the full distance")
 	var expected_eye: Vector3 = pivot - Vector3(0, 0, -1) \
-			* LocalPlayerHost.tp_effective_distance(host.PLAYER_TP_DISTANCE)
+			* LocalPlayerPresenter.tp_effective_distance(presenter.PLAYER_TP_DISTANCE)
 	assert_almost_eq((camera.global_position - expected_eye).length(), 0.0, 0.001,
 		"the eye is pivot - effective_dist*forward (orbit pitch 0 at the reset)")
 
 
 func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 	# The sim owns g_camera_mode's consequences and the ADS gates: F4 pushes the
-	# mode; the host never carries scope state of its own.
+	# mode; the presenter never carries scope state of its own.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)  # _reset_state syncs the initial mode
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)  # _reset_state syncs the initial mode
 	world.sim.camera_mode_calls.clear()
 
 	var f4 := InputEventKey.new()
 	f4.keycode = KEY_F4
 	f4.pressed = true
-	assert_true(host.handle_key_input(f4, true))
+	assert_true(presenter.handle_key_input(f4, true))
 	assert_eq(world.sim.camera_mode_calls, [true], "F4 pushes third person into the sim")
-	assert_true(host.handle_key_input(f4, true))
+	assert_true(presenter.handle_key_input(f4, true))
 	assert_eq(world.sim.camera_mode_calls, [true, false], "and back")
 
 
@@ -757,12 +757,12 @@ func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
 # is deferred for exactly this boot shape; this pins it.
 class BootTrigger:
 	extends Node
-	var host
+	var presenter
 	var world: Node3D
 	var camera: Camera3D
 
 	func _ready() -> void:
-		host.setup(world, camera)
+		presenter.setup(world, camera)
 
 
 func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
@@ -770,26 +770,26 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	var trigger := BootTrigger.new()
 	trigger.world = FakeWorld.new()
 	trigger.camera = Camera3D.new()
-	trigger.host = LocalPlayerHost.new()
+	trigger.presenter = LocalPlayerPresenter.new()
 	vp.add_child(trigger.world)
 	vp.add_child(trigger.camera)
-	vp.add_child(trigger.host)
-	vp.add_child(trigger)  # last: world/camera/host are in-tree when _ready fires
+	vp.add_child(trigger.presenter)
+	vp.add_child(trigger)  # last: world/camera/presenter are in-tree when _ready fires
 	# Entering the tree makes vp's children ready — vp is "busy" exactly while
 	# BootTrigger's _ready runs setup(), the game shell's boot shape.
 	add_child_autofree(vp)
 	await get_tree().process_frame
 
-	var pass_layer: CanvasLayer = trigger.host.viewmodel_rig().get("_vm_pass_layer")
+	var pass_layer: CanvasLayer = trigger.presenter.viewmodel_rig().get("_vm_pass_layer")
 	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
 	if pass_layer != null:
 		assert_true(pass_layer.is_inside_tree(),
 			"the FP pass mounted despite the busy boot (a failed add_child leaves it orphaned)")
 		assert_eq(pass_layer.get_parent(), vp,
-			"the pass composites into the camera's viewport, not this host's ancestor")
+			"the pass composites into the camera's viewport, not this presenter's ancestor")
 
 
-# Every VisualInstance3D under `root`, inclusive (mirrors the host's stamping walk).
+# Every VisualInstance3D under `root`, inclusive (mirrors the presenter's stamping walk).
 func _visual_instances(root: Node) -> Array:
 	var out: Array = []
 	if root is VisualInstance3D:
@@ -799,17 +799,17 @@ func _visual_instances(root: Node) -> Array:
 	return out
 
 
-func test_shared_host_teardown_releases_captured_mouse() -> void:
+func test_shared_presenter_teardown_releases_captured_mouse() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
 
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	host.teardown()
+	presenter.teardown()
 
 	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE)
 
@@ -832,19 +832,19 @@ func _weapon_view() -> PlayerWeaponView:
 func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.weapon_view.emplaced_controls_valid = true
 	world.weapon_view.emplaced_gun_yaw = 0x2345
 	world.weapon_view.emplaced_gun_pitch = 0xDCBA
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary: return {})
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary: return {})
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_not_null(world.last_weapon_part)
 	assert_eq(world.last_weapon_part.ctrl_values, {
@@ -855,8 +855,8 @@ func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 	}, "the FP weapon receives cold heat plus the emplaced semantic pair")
 
 	world.weapon_view.emplaced_controls_valid = false
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(world.last_weapon_part.ctrl_values, {
 		"TEX_TEAM": 1,
 		"HEAT_GLOW": 0,
@@ -867,31 +867,31 @@ func test_viewmodel_tracks_and_clears_emplaced_weapon_controls() -> void:
 func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.sim.player_team = 0xFE
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary: return {})
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary: return {})
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_eq(world.last_weapon_part.ctrl_values.get("TEX_TEAM"), -2,
 			"the FP store sign-extends retail's entity team byte")
-	host.set_third_person(true)
-	host.after_world_tick()
+	presenter.set_third_person(true)
+	presenter.after_world_tick()
 	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
 			"a third-person frame does not execute any FP CTRL writer")
 
-	host.set_third_person(false)
+	presenter.set_third_person(false)
 	world.sim.player_team = 2
-	host.after_world_tick()
+	presenter.after_world_tick()
 	assert_eq(world.last_weapon_part.ctrl_values.get("TEX_TEAM"), 2)
 	world.view.binoculars_view_active = true
-	host.after_world_tick()
+	presenter.after_world_tick()
 	assert_true(world.last_weapon_part.ctrl_values.is_empty(),
 			"the binocular card path suppresses the FP model submit and TEX_TEAM")
 
@@ -899,23 +899,23 @@ func test_viewmodel_tex_team_is_signed_and_only_written_on_visible_submit() -> v
 func test_viewmodel_publishes_full_range_heat_glow() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.weapon_view.heat_glow = 0x10000
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary: return {})
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary: return {})
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(int(world.last_weapon_part.ctrl_values.get("HEAT_GLOW", -1)),
 			0x10000, "the FP writer keeps retail's exact 1.0 endpoint")
 
 	world.weapon_view.heat_glow = 0
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(int(world.last_weapon_part.ctrl_values.get("HEAT_GLOW", -1)), 0,
 			"the first-person writer stores literal zero on every cool submit")
 
@@ -1019,24 +1019,24 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 	# model's default transform at the scene origin.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	add_child_autofree(fx)
 	world.sim.player_position = Vector3(17.0, 2.0, -9.0)
 	world.sim.player_yaw_deg = 35.0
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_FirstTickMF"))
 
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_eq(fx.spawns.size(), 1, "the post-setup first-tick FIRE event remains live")
 	assert_almost_eq(Vector3(fx.spawns[0]["pos"]), world.last_weapon_part.global_position,
@@ -1047,19 +1047,19 @@ func test_first_tick_muzzle_uses_the_current_viewmodel_root() -> void:
 func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	add_child_autofree(fx)
 	world.sim.player_position = Vector3(6.0, 1.0, -4.0)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary: return {})
-	host.before_world_tick(0.016)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary: return {})
+	presenter.before_world_tick(0.016)
 
 	var event := PlayerWeaponEvent.new()
 	event.action_effect = 3
@@ -1072,28 +1072,28 @@ func test_fixed_tick_weapon_callback_spawns_before_frame_finalization_once() -> 
 			"the production tick presents its direct effect before EffectWorld advances")
 	assert_eq(int(fx.spawns[0].initial_age_ticks), 0,
 			"a current-tick action is not artificially pre-aged")
-	host.after_world_tick()
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 1,
 			"render-frame finalization drains no duplicate after the fixed-tick callback")
-	host.teardown()
+	presenter.teardown()
 	assert_false(world.weapon_tick_consumer.is_valid(),
-			"teardown releases the world-to-host callback")
+			"teardown releases the world-to-presenter callback")
 
 
 func test_fixed_tick_viewmodel_clip_keeps_its_catchup_position() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.view = PlayerLocalView.new()
 	world.weapon_view = _weapon_view()
 	world.weapon_view.play_serial = 1
 	world.weapon_view.anim_key = "anim_wpn_fire"
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary: return {})
-	host.before_world_tick(0.048)
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary: return {})
+	presenter.before_world_tick(0.048)
 
 	var early := PlayerWeaponEvent.new()
 	early.anim_key = "anim_wpn_fire"
@@ -1119,7 +1119,7 @@ func test_fixed_tick_viewmodel_clip_keeps_its_catchup_position() -> void:
 	world.present_weapon_tick(late_batch)
 	assert_almost_eq(world.last_weapon_part.times.back(), 0.0, 0.00001,
 			"a late catch-up event remains at its production-tick pose")
-	host.after_world_tick()
+	presenter.after_world_tick()
 	assert_almost_eq(world.last_weapon_part.times.back(), 0.0, 0.00001,
 			"render-frame finalization does not double-advance fixed-tick phase")
 
@@ -1131,28 +1131,28 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	# (casing ejects on RECOIL rows) route through the no-effect shim @0x5419e0.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(fx)
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
 	# Adopt the view baseline (snapshot payloads never replay).
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 0, "snapshot adoption spawns nothing")
 
 	# RECOIL begin with a particle (the casing row): no local spawn.
 	world.weapon_events.append(_weapon_particle_event(3, "Effect_TestCas"))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 0, "non-fire local begins spawn no particle [orig: @0x541b17]")
 
 	# FIRE begin unscoped: the muzzle flash spawns through the slot+24-style guard.
@@ -1160,12 +1160,12 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	fire_event.age_ticks = 2
 	world.weapon_events.append(fire_event)
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 1, "FIRE begins spawn the muzzle particle")
 	assert_eq(String(fx.spawns[0]["effect"]), "Effect_TestMF")
 	assert_true(fx.spawns[0].owner is String,
-			"the muzzle guard is keyed by action-slot generation, not the host object")
+			"the muzzle guard is keyed by action-slot generation, not the presenter object")
 	assert_almost_eq((fx.spawns[0].orientation as Vector3).length(), 1.0, 0.001,
 			"the user-point/camera direction reaches the particle descriptor")
 	var first_options: Dictionary = fx.spawns[0].options
@@ -1186,14 +1186,14 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	assert_true(first_options.owner_transform is Transform3D,
 			"the spawn seeds the anchor pose")
 	assert_true(world.effect_anchors.has(first_options.owner_key),
-			"the host registers the live anchor resolver on the world")
+			"the presenter registers the live anchor resolver on the world")
 	var resolver: Callable = world.effect_anchors[first_options.owner_key]
 	var live_pose: Variant = resolver.call()
 	assert_true(live_pose is Transform3D, "the anchor resolves the live userpoint pose")
 	assert_almost_eq((live_pose as Transform3D).origin,
 			(first_options.owner_transform as Transform3D).origin, Vector3.ONE * 0.001,
 			"the resolver and the spawn read the same userpoint")
-	host.refresh_viewmodel()
+	presenter.refresh_viewmodel()
 	assert_true(world.effect_anchors.is_empty(),
 			"a viewmodel re-mount drops the stale anchors [slot generation turnover]")
 
@@ -1208,16 +1208,16 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	world.view = scoped_view
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 2, "mid-raise scoped fire keeps the muzzle flash [orig: promoter @0x4de4f7]")
 
 	# FIRE begin SETTLED-scoped in first person: suppressed.
 	scoped_view.scope_fraction = 1.0
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 2, "settled-scoped FP fire shows no muzzle flash [orig: @0x541aba]")
 
 	# Mounted local fire uses the vehicle-capable leg and is not hidden by ADS.
@@ -1225,8 +1225,8 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	scoped_view.vehicle_attack_context = true
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true, false, true))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 3, "mounted scoped fire keeps the muzzle flash")
 	assert_eq(int((fx.spawns[2].options as Dictionary).render_domain),
 			NovaEffectScene.RENDER_DOMAIN_WORLD,
@@ -1235,24 +1235,24 @@ func test_action_particles_gate_on_fire_and_scope() -> void:
 	scoped_view.vehicle_attack_context = false
 
 	# The same scoped fire in THIRD person spawns (the 3P leg [orig: @0x541a70]).
-	host.set_third_person(true)
+	presenter.set_third_person(true)
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF", true, true))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 4, "3P scoped fire keeps the muzzle flash")
 	assert_eq(int((fx.spawns[3].options as Dictionary).render_domain),
 			NovaEffectScene.RENDER_DOMAIN_WORLD,
 			"third-person weapon particles stay in the world pass")
 
 	var first_owner: String = fx.spawns[0].owner
-	host.refresh_viewmodel()
+	presenter.refresh_viewmodel()
 	world.view = PlayerLocalView.new()
-	host.set_third_person(false)
+	presenter.set_third_person(false)
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_TestMF"))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_ne(String(fx.spawns[4].owner), first_owner,
 			"a weapon re-mount gets a fresh action-slot effect handle")
 
@@ -1263,29 +1263,29 @@ func test_catch_up_muzzle_events_keep_each_ticks_scope_gate() -> void:
 	# one is suppressed; the final settled view must not suppress both.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(fx)
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	var final_view := PlayerLocalView.new()
 	final_view.scope_engaged = true
 	final_view.scope_fraction = 1.0
 	world.view = final_view
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_Earlier", false))
 	world.weapon_events.append(_weapon_particle_event(2, "Effect_Settled", true))
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.032)
-	host.after_world_tick()
+	presenter.before_world_tick(0.032)
+	presenter.after_world_tick()
 
 	assert_eq(fx.spawns.size(), 1, "only the pre-settle tick spawns a muzzle")
 	assert_eq(String(fx.spawns[0].effect), "Effect_Earlier")
@@ -1298,23 +1298,23 @@ func test_recoil_direct_casing_spawns_every_authored_transient() -> void:
 	# retail's one global EffectWorld render pass.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(fx)
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	var settled := PlayerLocalView.new()
 	settled.scope_engaged = true
 	settled.scope_fraction = 1.0
 	world.view = settled
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	for shot in range(2):
 		var event := PlayerWeaponEvent.new()
 		event.action_effect = 3
@@ -1324,8 +1324,8 @@ func test_recoil_direct_casing_spawns_every_authored_transient() -> void:
 		event.third_person = shot == 1
 		world.weapon_events.append(event)
 		world.weapon_view = _weapon_view()
-		host.before_world_tick(0.016)
-		host.after_world_tick()
+		presenter.before_world_tick(0.016)
+		presenter.after_world_tick()
 	assert_eq(fx.spawns.size(), 2,
 			"every authored casing event reaches the batched transient path")
 	assert_eq([fx.spawns[0].initial_age_ticks, fx.spawns[1].initial_age_ticks], [1, 2])
@@ -1339,23 +1339,23 @@ func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
 	# recoil particle therefore removed the weapon's muzzle flash entirely.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var fx := FakeEffectWorld.new()
 	add_child_autofree(fx)
 	world.effect_world = fx
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	var settled := PlayerLocalView.new()
 	settled.scope_engaged = true
 	settled.scope_fraction = 1.0
 	world.view = settled
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	var event := PlayerWeaponEvent.new()
 	event.action_effect = 3
@@ -1364,8 +1364,8 @@ func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
 	world.weapon_events.append(event)
 	world.weapon_events.append(event)
 	world.weapon_view = _weapon_view()
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_eq(fx.spawns.size(), 2,
 			"repeated direct effects are Always transients, not live-slot suppressed")
@@ -1378,22 +1378,22 @@ func test_revx02_recoil_authored_muzzle_effect_is_presented() -> void:
 func test_catch_up_weapon_action_events_are_not_coalesced() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var audio := FakeMissionAudio.new()
 	add_child_autofree(audio)
 	world.mission_audio = audio
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
 	var baseline := _weapon_view()
 	baseline.action_end_serial = 7
 	world.weapon_view = baseline
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(audio.oneshots.size(), 0, "snapshot diagnostics never replay sounds")
 
 	world.weapon_events.append(_weapon_end_event("GS_FIRST"))
@@ -1402,8 +1402,8 @@ func test_catch_up_weapon_action_events_are_not_coalesced() -> void:
 	catch_up.action_end_serial = 9
 	catch_up.action_end_soundset = "GS_SECOND"
 	world.weapon_view = catch_up
-	host.before_world_tick(0.032)
-	host.after_world_tick()
+	presenter.before_world_tick(0.032)
+	presenter.after_world_tick()
 
 	assert_eq(audio.oneshots.size(), 2, "two fixed ticks drain two ordered END legs")
 	if audio.oneshots.size() == 2:
@@ -1418,15 +1418,15 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	# replayed, so a viewmodel rebuild cannot refire historical sounds.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var audio := FakeMissionAudio.new()
 	add_child_autofree(audio)
 	world.mission_audio = audio
-	host.setup(world, camera)
-	host.set_input_source(func() -> Dictionary:
+	presenter.setup(world, camera)
+	presenter.set_input_source(func() -> Dictionary:
 		return {})
 
 	# Snapshot diagnostics may arrive non-zero; without a queued event nothing plays.
@@ -1436,15 +1436,15 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	v.action_soundset = "GF_RL_TEST"
 	v.action_end_soundset = "GS_TEST"
 	world.weapon_view = v
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(audio.oneshots.size(), 0, "snapshot diagnostics do not replay sounds")
 
 	# End leg: the finished action's soundsetend plays at the player.
 	world.weapon_events.append(_weapon_end_event("GS_TEST"))
 	v.action_end_serial = 8
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(audio.oneshots.size(), 1, "the drained end leg plays one set")
 	if audio.oneshots.size() == 1:
 		assert_eq(String(audio.oneshots[0]["set"]), "GS_TEST",
@@ -1455,8 +1455,8 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 	# Begin leg: its soundset plays too.
 	world.weapon_events.append(_weapon_begin_event("GF_RL_TEST"))
 	v.action_serial = 5
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 	assert_eq(audio.oneshots.size(), 2, "the drained begin leg plays one set")
 	if audio.oneshots.size() == 2:
 		assert_eq(String(audio.oneshots[1]["set"]), "GF_RL_TEST",
@@ -1467,15 +1467,15 @@ func test_action_sound_legs_drain_to_mission_audio() -> void:
 func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	var audio := FakeMissionAudio.new()
 	add_child_autofree(audio)
 	world.mission_audio = audio
 	world.weapon_events.append(_weapon_end_event("GS_STALE"))
-	host.setup(world, camera)
+	presenter.setup(world, camera)
 
 	world.weapon_view = _weapon_view()
 	var live := PlayerWeaponEvent.new()
@@ -1485,8 +1485,8 @@ func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() 
 	live.action_end_soundset = "GS_LIVE"
 	live.world_position = Vector3(4.0, 5.0, 6.0)
 	world.weapon_events.append(live)
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_eq(audio.oneshots.size(), 2, "setup discards only pre-attachment history")
 	if audio.oneshots.size() == 2:
@@ -1500,11 +1500,11 @@ func test_weapon_event_attachment_discards_backlog_but_keeps_first_live_batch() 
 func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
-	host.setup(world, camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
 
 	var view := _weapon_view()
 	view.anim_key = "anim_wpn_fire"
@@ -1516,8 +1516,8 @@ func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 	event.anim_key = "anim_wpn_fire"
 	event.anim_variant = 2
 	world.weapon_events.append(event)
-	host.before_world_tick(0.016)
-	host.after_world_tick()
+	presenter.before_world_tick(0.016)
+	presenter.after_world_tick()
 
 	assert_not_null(world.last_weapon_part)
 	if world.last_weapon_part != null:
@@ -1539,52 +1539,52 @@ func test_catch_up_clip_resumes_at_its_tick_age() -> void:
 func test_aim_range_measures_to_the_terrain_raycast_hit() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.sim.player_position = Vector3.ZERO
 	world.sim.player_yaw_deg = 0.0
 	world.sim.player_pitch_deg = 0.0
 	world.terrain_data = FakeTerrainData.new()
 	# Yaw 0 / pitch 0 looks down -Z; the eye sits PLAYER_EYE_HEIGHT above the feet,
 	# so a hit 250 u ahead at eye height is 250 u from the player position too.
-	var eye_h: float = host.PLAYER_EYE_HEIGHT
+	var eye_h: float = presenter.PLAYER_EYE_HEIGHT
 	world.terrain_data.hit = Vector3(0.0, eye_h, -250.0)
-	host.setup(world, camera)
+	presenter.setup(world, camera)
 
-	assert_eq(host.aim_range_units(), 250)
+	assert_eq(presenter.aim_range_units(), 250)
 	assert_eq(world.terrain_data.calls.size(), 1, "one terrain trace per query")
 	var call: Dictionary = world.terrain_data.calls[0]
 	assert_almost_eq(float(call["from"].y), eye_h, 0.001, "traced from the eye")
-	assert_almost_eq(float(call["to"].z), -host.AIM_PROJECT_RANGE, 0.001,
+	assert_almost_eq(float(call["to"].z), -presenter.AIM_PROJECT_RANGE, 0.001,
 			"traced out to the retail 1000-unit projection")
 
 
 func test_aim_range_falls_back_to_the_far_endpoint_when_the_terrain_misses() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = FakeTerrainData.new()  # all-NAN = miss
-	host.setup(world, camera)
+	presenter.setup(world, camera)
 
 	# Retail clamps the four-digit readout to 1..1000, and the projection is 1000.
-	assert_eq(host.aim_range_units(), 1000)
+	assert_eq(presenter.aim_range_units(), 1000)
 
 
 func test_aim_range_survives_a_world_with_no_terrain() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
-	var host := LocalPlayerHost.new()
+	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(world)
 	add_child_autofree(camera)
-	add_child_autofree(host)
+	add_child_autofree(presenter)
 	world.sim.player_position = Vector3.ZERO
 	world.terrain_data = null
-	host.setup(world, camera)
+	presenter.setup(world, camera)
 
-	assert_eq(host.aim_range_units(), 1000)
+	assert_eq(presenter.aim_range_units(), 1000)

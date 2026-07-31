@@ -664,7 +664,7 @@ static int test_vm_intrinsic_gfb(void) {
     mus_vm_load_script(vm, &s);
     mus_vm_start(vm);
     mus_vm_tick(vm, 16);
-    /* No assertion beyond "doesn't crash"; GFB has no host hook. */
+    /* No assertion beyond "doesn't crash"; GFB has no embedder hook. */
     mus_vm_destroy(vm);
     mus_script_free(&s);
     return 1;

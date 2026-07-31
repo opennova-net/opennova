@@ -263,7 +263,7 @@ typedef enum MusVMState {
     MUS_VM_ERROR   = 4,
 } MusVMState;
 
-/* Host-supplied callbacks. All take a void* user pointer the host registered
+/* Embedder-supplied callbacks. All take a void* user pointer the embedder registered
    with `mus_vm_set_hooks`. Any callback may be NULL, in which case the VM
    silently elides the call. Hook signatures match the witnessed Jointops.exe
    side-effects (Phase A revisions, see spec §"libs/mus C API"). */
@@ -295,7 +295,7 @@ MusVM *mus_vm_create(void);
 /* Free the VM. Idempotent on NULL. */
 void mus_vm_destroy(MusVM *vm);
 
-/* Replace the host hook table. Pass NULL `hooks` to clear all hooks. The
+/* Replace the embedder hook table. Pass NULL `hooks` to clear all hooks. The
    pointed-to MusVMHooks struct is copied by value; the caller may free it
    immediately after. */
 void mus_vm_set_hooks(MusVM *vm, const MusVMHooks *hooks);
@@ -319,7 +319,7 @@ void mus_vm_resume(MusVM *vm);
    32-instruction budget, then continues only while the data stack is not
    drained; halt opcodes (play/playw/done/setstate), pc out of bounds, and
    errors still stop earlier. dt_ms is currently informational (returned to
-   the host) and reserved for future timer support. Returns the dt_ms argument
+   the embedder) and reserved for future timer support. Returns the dt_ms argument
    on success, 0 if the VM is not RUNNING. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 

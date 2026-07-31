@@ -2,7 +2,7 @@
 class_name NovaWeather
 extends Node3D
 
-# Weather/light smoothing host. NovaWeatherCore (godot/engine/env, math in
+# Weather/light smoothing owner. NovaWeatherCore (godot/engine/env, math in
 # libs/env) owns the witnessed state cluster of
 # [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind PRNG/sway
 # oscillator, both lightning flash sequencers
@@ -25,9 +25,9 @@ var _configured_wind_intensity := 256
 var _cached_env: Node = null
 var _colors_synced := false
 var _tick_credit := 0.0
-var _host_tick_driven := false
+var _world_tick_driven := false
 
-# The marched iris-exposure samples (D-RLIT-2): the in-world host stamps
+# The marched iris-exposure samples (D-RLIT-2): the in-world shell stamps
 # three per-sample classification codes each frame (NovaSimulation.
 # compute_iris_samples — indoor / indoor-no-data / outdoor sun level); empty
 # keeps the outdoor fallback sample (editor previews with no world)
@@ -54,7 +54,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _host_tick_driven:
+	if _world_tick_driven:
 		return
 	_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
 	var tick_count := int(floor(_tick_credit + 1.0e-9))
@@ -73,27 +73,27 @@ func _process(delta: float) -> void:
 ## GameWorld owns the recovered 62 Hz weather/TOD accumulator while a mission
 ## runtime is active. Standalone/editor previews leave this false and keep the
 ## autonomous render-delta accumulator above.
-func set_host_tick_driven(enabled: bool) -> void:
-	if _host_tick_driven == enabled:
+func set_world_tick_driven(enabled: bool) -> void:
+	if _world_tick_driven == enabled:
 		return
-	_host_tick_driven = enabled
+	_world_tick_driven = enabled
 	_tick_credit = 0.0
 
 
-## Enter hosted mode and snap every block at the mission's authored T0 before
+## Enter world-driven mode and snap every block at the mission's authored T0 before
 ## the first clock advance. Lazy-snapping after T1 would skip retail's first
 ## target chase.
-func prepare_hosted() -> void:
+func prepare_world_driven() -> void:
 	_reset_for_environment(true)
 
 
 ## Start an independently ticking environment from the same deterministic
-## mission reset epoch used by hosted play.
+## mission reset epoch used by world-driven play.
 func prepare_autonomous() -> void:
 	_reset_for_environment(false)
 
 
-func _reset_for_environment(host_tick_driven: bool) -> void:
+func _reset_for_environment(world_tick_driven: bool) -> void:
 	# GameWorld retains this node across missions, but retail's environment
 	# start re-seeds the PRNG and clears every transient weather channel. A new
 	# core is the single complete reset for oscillator/rings, lightning, rain,
@@ -101,13 +101,13 @@ func _reset_for_environment(host_tick_driven: bool) -> void:
 	_core = NovaWeatherCore.new()
 	_core.set_wind_intensity(_configured_wind_intensity)
 	iris_samples = PackedInt32Array()
-	_host_tick_driven = host_tick_driven
+	_world_tick_driven = world_tick_driven
 	_tick_credit = 0.0
 	resync_colors()
 	_tick_weather(0)
 
 
-## Advance exactly one recovered weather tick. The host advances the integer
+## Advance exactly one recovered weather tick. The shell advances the integer
 ## mission clock immediately before this call, so every target read below sees
 ## curtime + advance like Environment_UpdateWeatherTick.
 func tick_fixed() -> void:
@@ -156,14 +156,14 @@ func _tick_weather(tick_count: int) -> void:
 	var lightning := Color.WHITE
 	if env_data:
 		# lightning_rgb is a global parser color, so it takes the same envscale
-		# engine view as the hosted static blocks and water. Keep a raw fallback
-		# for duck-typed legacy environment hosts.
+		# engine view as the world-driven static blocks and water. Keep a raw fallback
+		# for duck-typed legacy environment owners.
 		if env.has_method("get_lightning_color_target"):
 			lightning = _vec3_color(env.get_lightning_color_target())
 		else:
 			lightning = env_data.get_lightning_color()
 		# The iris auto-exposure target (env #17): the marched in-world gain
-		# when the host stamps samples, else the outdoor fallback — chased by
+		# when the shell stamps samples, else the outdoor fallback — chased by
 		# the modulator over 62 ticks; retail re-targets every render pass,
 		# i.e. every tick
 		# [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
@@ -248,7 +248,7 @@ func resync_colors() -> void:
 
 
 ## Discrete runtime scrubs must update the rendered currents even while the
-## mission transport is paused (and therefore no hosted weather tick runs).
+## mission transport is paused (and therefore no world-driven weather tick runs).
 ## A zero-tick refresh snaps the core to the new targets and writes them back
 ## without advancing wind, lightning, rain, or the mission clock.
 func resync_colors_now() -> void:

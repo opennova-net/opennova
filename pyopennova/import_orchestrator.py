@@ -1,4 +1,4 @@
-"""Host-neutral scaffolding for loose / definition imports.
+"""DCC-neutral scaffolding for loose / definition imports.
 
 Both ``opennova_max/import_runner.py`` and ``opennova_blender/import_runner.py``
 had parallel copies of the same orchestration: resolve the import plan, walk

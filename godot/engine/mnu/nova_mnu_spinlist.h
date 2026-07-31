@@ -16,7 +16,7 @@ class NovaMnuMenu;
 // A spinner (type="spinlist"): a value cell cycled by SpinUp / SpinDown button
 // children. Each item is text, an image, or a color swatch (the original draws the
 // selected item three ways: text, a native-size image, or a full-rect color swatch
-// [orig: CSpinListWnd_Render @ 0x64b220]). The .mnu seeds the item set; a runtime host
+// [orig: CSpinListWnd_Render @ 0x64b220]). The .mnu seeds the item set; a runtime shell
 // can replace the text values via set_values() (e.g. the cyclable difficulty list).
 // Up/down wrap and emit value_changed(index, value) and relay through the owning menu.
 // Inert in edit_mode (the spin buttons are built disabled and nothing is wired).
@@ -27,7 +27,7 @@ private:
 	MnuWidgetBehavior behavior_;
 	std::vector<MnuItemVisual> visuals_;
 	int index_ = 0;
-	Control *value_host_ = nullptr;
+	Control *value_mount_ = nullptr;
 
 	void on_spin_up();
 	void on_sound_mouse_entered();
@@ -49,7 +49,7 @@ public:
 	void set_item_visuals(const std::vector<MnuItemVisual> &p_visuals);
 
 	// --- Runtime data binding ---
-	void set_values(const PackedStringArray &p_values); // text-only items (host)
+	void set_values(const PackedStringArray &p_values); // text-only items (shell)
 	void set_value_index(int p_index); // programmatic; clamps, no emit
 	int get_value_index() const { return index_; }
 	String get_value() const;

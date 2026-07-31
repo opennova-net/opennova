@@ -9,7 +9,7 @@ extends GutTest
 const ViewScript := preload("res://engine/debug/collision_debug_view.gd")
 
 
-# Node-based doubles: the view's setup takes the host's world NODE (a GameWorld
+# Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld
 # in production) and duck-types get_sim()/get_collision_debug() off it.
 class FakeSim:
 	extends Node

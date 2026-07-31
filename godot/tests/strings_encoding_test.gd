@@ -27,7 +27,7 @@ extends GutTest
 #     chars 32..255 only (libs/fnt fnt.h, FNT_FIRST_CHAR/FNT_GLYPH_COUNT).
 #   - byte 0x20 (space) is advance-only in the FontFile view (no drawn rect).
 #   - retail's text drawer and measurer skip bytes 0x7F, 0x80, and 0x81 as
-#     non-printing controls; the FontFile omits those slots and disables host
+#     non-printing controls; the FontFile omits those slots and disables system-font
 #     fallback so decoded U+20AC does not become a system-font Euro glyph.
 #
 # D-FNT-4 closed the audited 0x80..0x9F glyph-stage divergence: decoded text
@@ -127,7 +127,7 @@ func test_specials_zone_glyphs_follow_decoded_cp1252_codepoints() -> void:
 	# [orig: CGameFont_DrawText @ 0x6752c0]. OpenNova decodes table text to a
 	# Unicode Godot String first, so the FontFile boundary must expose that same
 	# slot under the byte's decoded cp1252 codepoint. Otherwise Godot substitutes
-	# a host-system glyph for shipped curly quotes and dashes (D-FNT-4).
+	# a system-font glyph for shipped curly quotes and dashes (D-FNT-4).
 	var font := _fixture_font()
 	if font == null:
 		return
@@ -144,10 +144,10 @@ func test_specials_zone_glyphs_follow_decoded_cp1252_codepoints() -> void:
 	assert_false(glyphs.has(UNDEFINED_81_CONTROL_CODEPOINT),
 		"retail control byte 0x81 remains non-printing")
 	assert_false(font.is_allow_system_fallback(),
-		"retail bitmap fonts never substitute glyphs from a host-system face")
+		"retail bitmap fonts never substitute glyphs from a system-font face")
 
 	# The decoded codepoint must retain the source slot's own metric (advance =
 	# rect width + shadow_offset - 1: 10 + 0 - 1 in this fixture). This proves
-	# the engine draw resolves the bitmap font, not a host fallback face.
+	# the engine draw resolves the bitmap font, not a system fallback face.
 	assert_eq(font.get_string_size(String.chr(LEFT_QUOTE_CODEPOINT), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 9.0,
 		"decoded U+201C renders with byte 0x93's retail .fnt metric")

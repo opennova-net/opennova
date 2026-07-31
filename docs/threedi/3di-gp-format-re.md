@@ -282,7 +282,7 @@ The producer census partitions all 96 ordinals without an unclassified tail:
 | Producer status | Count | Ordinals |
 |---|---:|---|
 | exact value/state projection hosted in its bounded semantic scope | 10 | **8, 54–56, 61–62, 71–72, 91–92** |
-| dedicated retail writer exists; exact host publisher remains open | 68 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90, 93–95** |
+| dedicated retail writer exists; exact original publisher remains open | 68 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90, 93–95** |
 | no dedicated writer found; only the generic path can reach nonzero members | 18 | **0–2, 11–13, 37–40, 42–45, 48–51** |
 
 This is a producer-status partition, not a format-support partition: every one
@@ -681,7 +681,7 @@ ledger's permanent register carries D-3DI-1.
 
 | ID | Divergence | Disposition |
 |---|---|---|
-| D-3DI-1 | Byte-exact `MTRX` output requires OED's x87 `_PC_24` (24-bit single) precision (§1 "Derived chunks" MTRX derivation + §1 "OED x87 control word"); a 64-bit SSE2 build diverges in low FP bits. A parity sub-build restores byte-exactness via `_controlfp(_PC_24, _MCW_PC)` early in `main()`. | **PERMANENT** — a host FP-precision constraint, not a math error; the parity sub-build is the documented path when byte-exactness is needed. [orig: ComputeMTRX @ 0x452990 / WriteMTRX @ 0x452FA0 / _setdefaultprecision @ 0x52A27C] |
+| D-3DI-1 | Byte-exact `MTRX` output requires OED's x87 `_PC_24` (24-bit single) precision (§1 "Derived chunks" MTRX derivation + §1 "OED x87 control word"); a 64-bit SSE2 build diverges in low FP bits. A parity sub-build restores byte-exactness via `_controlfp(_PC_24, _MCW_PC)` early in `main()`. | **PERMANENT** — an x87 FP-precision constraint, not a math error; the parity sub-build is the documented path when byte-exactness is needed. [orig: ComputeMTRX @ 0x452990 / WriteMTRX @ 0x452FA0 / _setdefaultprecision @ 0x52A27C] |
 
 The §2.14 "Open items" are unresearched questions (no witnessed behavior gap yet)
 and stay there; the §2 verdict tables are `MATCHING`/true-padding facts, not

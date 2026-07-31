@@ -1,4 +1,4 @@
-"""Persistent preferences shared by hosts of the Qt importer dialog."""
+"""Persistent preferences shared by embedders of the Qt importer dialog."""
 from __future__ import annotations
 
 import json

@@ -39,7 +39,7 @@ var _bank_names: Array = []
 
 # Supply the context every form/picker needs: the section-name list, the
 # variable picker list, the NovaMusicScript used to validate expressions, and
-# the bank track names. Safe to call repeatedly; hosts refresh it on every
+# the bank track names. Safe to call repeatedly; owners refresh it on every
 # document change so pickers see current state.
 func configure(section_names: PackedStringArray, var_list: Array, mus, bank_names: Array) -> void:
 	_section_names = section_names
@@ -60,7 +60,7 @@ func mus_script():
 	return _mus
 
 
-# True for the kinds that take no inputs (return/yield): the host inserts their
+# True for the kinds that take no inputs (return/yield): the mount inserts their
 # canonical lines directly, no editor.
 func is_inputless(kind: String) -> bool:
 	return kind == "return" or kind == "yield"

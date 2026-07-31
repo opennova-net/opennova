@@ -254,7 +254,7 @@ public:
 	// p_native_frame: emit vertices/normals/tangents in the NATIVE model frame (no (-x,y,z)
 	// import flip) with triangle winding reversed to stay front-facing under Godot's CCW cull.
 	// For the first-person viewmodel rigs, whose skeletal runtime (NovaSkeletalAnim model_bind)
-	// poses in the native frame; the host maps the whole rig to the camera in one container
+	// poses in the native frame; the owner maps the whole rig to the camera in one container
 	// transform. World models keep the default flipped frame.
 	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0,
 			bool p_native_frame = false) const;

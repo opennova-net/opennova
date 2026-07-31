@@ -19,22 +19,22 @@ func _anim_root() -> NovaResourceRoot:
 
 
 # A workspace with the Shed fixture open, the preview mounted, soldier.adm
-# loaded, and the ANIMS workflow built (main into `host`, detail into `dock`).
+# loaded, and the ANIMS workflow built (main into `mount`, detail into `dock`).
 func _anims_workspace() -> Dictionary:
 	var ws = ObjectWorkspaceScript.new()
 	ws.set_editor_shell(self)
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK, "Shed fixture opens")
-	var viewport_host: Control = add_child_autofree(Control.new())
-	ws.mount_viewport(viewport_host)
+	var viewport_mount: Control = add_child_autofree(Control.new())
+	ws.mount_viewport(viewport_mount)
 	var preview: ObjectPreview = ws._preview
 	assert_not_null(preview, "mounting the viewport builds the preview")
 	var keys: PackedStringArray = preview.load_animation_set("soldier.adm", _anim_root())
 	assert_false(keys.is_empty(), "soldier.adm loads: %s" % preview.get_animation_error())
 	var dock: Control = add_child_autofree(PanelContainer.new())
 	ws.set_asset_dock(dock)
-	var host: Control = add_child_autofree(Control.new())
-	ws.build_workflow_inspector(ObjectWorkspaceScript.Workflow.ANIMS, host)
-	return {"ws": ws, "preview": preview, "host": host, "dock": dock, "keys": keys}
+	var mount: Control = add_child_autofree(Control.new())
+	ws.build_workflow_inspector(ObjectWorkspaceScript.Workflow.ANIMS, mount)
+	return {"ws": ws, "preview": preview, "mount": mount, "dock": dock, "keys": keys}
 
 
 func test_anims_workflow_appended_with_stable_ids() -> void:
@@ -53,9 +53,9 @@ func test_anims_workflow_appended_with_stable_ids() -> void:
 
 func test_clip_list_shows_every_clip_with_metadata() -> void:
 	var parts := _anims_workspace()
-	var host: Control = parts.host
+	var mount: Control = parts.mount
 	var keys: PackedStringArray = parts.keys
-	var list := host.find_child("AnimsClipList", true, false) as ItemList
+	var list := mount.find_child("AnimsClipList", true, false) as ItemList
 	assert_not_null(list, "the main pane lists the loaded clips")
 	if list == null:
 		return
@@ -64,14 +64,14 @@ func test_clip_list_shows_every_clip_with_metadata() -> void:
 		assert_string_contains(list.get_item_text(i), String(keys[i]), "rows carry the clip key")
 	assert_string_contains(list.get_item_text(0), "fr @", "rows carry frame-count/fps metadata")
 	assert_string_contains(list.get_item_text(0), " s", "rows carry the clip length in seconds")
-	assert_not_null(host.find_child("AdmNameEdit", true, false), "the .adm name row moved here")
-	assert_not_null(host.find_child("AdmStatusLabel", true, false))
+	assert_not_null(mount.find_child("AdmNameEdit", true, false), "the .adm name row moved here")
+	assert_not_null(mount.find_child("AdmStatusLabel", true, false))
 
 
 func test_selecting_a_clip_plays_it_and_scrub_poses_while_paused() -> void:
 	var parts := _anims_workspace()
 	var preview: ObjectPreview = parts.preview
-	var list := (parts.host as Control).find_child("AnimsClipList", true, false) as ItemList
+	var list := (parts.mount as Control).find_child("AnimsClipList", true, false) as ItemList
 	var slider := (parts.dock as Control).find_child("AnimsScrubSlider", true, false) as HSlider
 	assert_not_null(slider, "the detail dock holds the scrub slider")
 	if slider == null:
@@ -126,7 +126,7 @@ func test_selecting_a_shorter_clip_fires_no_phantom_scrub() -> void:
 		pass_test("All fixture clips share one length; the shrink path cannot be exercised here.")
 		return
 
-	var list := (parts.host as Control).find_child("AnimsClipList", true, false) as ItemList
+	var list := (parts.mount as Control).find_child("AnimsClipList", true, false) as ItemList
 	var slider := (parts.dock as Control).find_child("AnimsScrubSlider", true, false) as HSlider
 	preview.set_playing(false)
 	list.select(longer)
@@ -148,7 +148,7 @@ func test_selecting_a_shorter_clip_fires_no_phantom_scrub() -> void:
 func test_play_pause_reset_wiring() -> void:
 	var parts := _anims_workspace()
 	var preview: ObjectPreview = parts.preview
-	var list := (parts.host as Control).find_child("AnimsClipList", true, false) as ItemList
+	var list := (parts.mount as Control).find_child("AnimsClipList", true, false) as ItemList
 	list.select(0)
 	list.item_selected.emit(0)
 	var dock: Control = parts.dock
@@ -199,14 +199,14 @@ func test_preview_workflow_no_longer_carries_the_adm_block() -> void:
 	var ws = ObjectWorkspaceScript.new()
 	ws.set_editor_shell(self)
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK)
-	var viewport_host: Control = add_child_autofree(Control.new())
-	ws.mount_viewport(viewport_host)
-	var host: Control = add_child_autofree(Control.new())
-	ws.build_workflow_inspector(ObjectWorkspaceScript.Workflow.PREVIEW, host)
-	assert_not_null(host.find_child("PreviewPlayButton", true, false),
+	var viewport_mount: Control = add_child_autofree(Control.new())
+	ws.mount_viewport(viewport_mount)
+	var mount: Control = add_child_autofree(Control.new())
+	ws.build_workflow_inspector(ObjectWorkspaceScript.Workflow.PREVIEW, mount)
+	assert_not_null(mount.find_child("PreviewPlayButton", true, false),
 		"PREVIEW keeps its pinned playback controls")
-	assert_null(host.find_child("AdmNameEdit", true, false), "the .adm block moved to ANIMS")
-	assert_null(host.find_child("AdmClipPicker", true, false))
-	assert_null(host.find_child("ArmsLoadButton", true, false))
+	assert_null(mount.find_child("AdmNameEdit", true, false), "the .adm block moved to ANIMS")
+	assert_null(mount.find_child("AdmClipPicker", true, false))
+	assert_null(mount.find_child("ArmsLoadButton", true, false))
 	assert_false(ws.get_workflow_inspector(ObjectWorkspaceScript.Workflow.PREVIEW).has_detail(),
 		"PREVIEW still mounts no detail dock")

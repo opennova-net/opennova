@@ -32,7 +32,7 @@ func setup(workspace: StringsEditorWorkspace) -> void:
 func _ready() -> void:
 	var box := InspectorForms.make_inspector_box(self)
 	# make_inspector_box adds a MarginContainer to this bare Control, which does not
-	# lay out its children — stretch that wrapper to fill the inspector host.
+	# lay out its children — stretch that wrapper to fill the inspector mount.
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	InspectorForms.add_section_heading(box, "Find")
@@ -100,7 +100,7 @@ func _ready() -> void:
 	_add_button(csv_buttons, "StringsExportCsvButton", "Export...", _on_export_csv)
 
 	# "Used by" rides the shell's reference index, asked of the workspace (the
-	# inspector never touches the shell); headless hosts get no strip.
+	# inspector never touches the shell); headless owners get no strip.
 	var services: ReferenceServices = _ws.get_reference_services() if _ws != null else null
 	if services != null:
 		_used_by_strip = ReferenceStrip.new()

@@ -76,7 +76,7 @@ int foliage_remap_indices(FoliageMap &map, const std::array<uint8_t, 256> &lut);
 
 // Detail foliage uses retail's flat, repeating world lookup rather than the
 // sector-routed terrain lookup used by the MODEL tier. Coordinates are in the
-// host plane, where world Z is already the negation of retail Z.
+// reimpl plane, where world Z is already the negation of retail Z.
 int foliage_detail_sample_resolution(const FoliageMap &map);
 bool foliage_detail_flat_wrap_position(const FoliageMap &map,
                                         int32_t world_x_fixed,

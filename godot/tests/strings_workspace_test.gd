@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Shell-integration tests: the Strings workspace appears in the rail, mounts its
-## table in the viewport host, and exposes its document actions.
+## table in the viewport mount, and exposes its document actions.
 
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
@@ -39,9 +39,9 @@ func test_strings_workspace_mounts_self_contained_view() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
-	assert_eq(host.get_child_count(), 1, "Strings should own the viewport host while active.")
-	var view: Control = host.get_child(0)
+	var mount: Control = workstation.get_node("%ViewportMount")
+	assert_eq(mount.get_child_count(), 1, "Strings should own the viewport mount while active.")
+	var view: Control = mount.get_child(0)
 	assert_eq(view.name, "StringsEditorView", "Strings should mount its self-contained editor view.")
 	# The view bundles the table and the detail editor (no separate right dock).
 	assert_not_null(view.find_child("StringsTableView", true, false), "The view should contain the entry table.")
@@ -57,7 +57,7 @@ func test_strings_workspace_exposes_document_actions() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 
-	var actions: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions: BoxContainer = workstation.get_node("%WorkspaceActionsMount")
 	assert_not_null(_find_button_by_text(actions, "Open Strings..."), "Strings should expose an Open action.")
 	assert_not_null(_find_button_by_text(actions, "New Strings"), "Strings should expose a New action.")
 
@@ -73,8 +73,8 @@ func test_open_populates_table() -> void:
 	assert_eq(err, OK, "opening the fixture should succeed")
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
-	var tree: Tree = host.get_child(0).find_child("StringsTree", true, false)
+	var mount: Control = workstation.get_node("%ViewportMount")
+	var tree: Tree = mount.get_child(0).find_child("StringsTree", true, false)
 	assert_not_null(tree, "the table Tree should exist")
 	var root := tree.get_root()
 	assert_not_null(root, "the table should have a root")
@@ -128,12 +128,12 @@ func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
 	ws.set_editor_shell(shell)
 	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
 
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.build_inspector(mount)
 	await get_tree().process_frame
 
-	var strip = host.find_child("StringsUsedByStrip", true, false)
+	var strip = mount.find_child("StringsUsedByStrip", true, false)
 	assert_not_null(strip, "the stub shell offers the index, so the strip mounts")
 	if strip == null:
 		return
@@ -201,12 +201,12 @@ func test_detail_game_preview_renders_selected_entry_through_engine_font() -> vo
 		"fonts load through the runtime path (VFS read -> NovaFntResource -> FontFile)")
 
 	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
-	var preview: Control = host.find_child("StringsGamePreview", true, false)
+	var preview: Control = mount.find_child("StringsGamePreview", true, false)
 	assert_not_null(preview, "the detail panel mounts the engine text preview")
 	if preview == null:
 		return
@@ -216,14 +216,14 @@ func test_detail_game_preview_renders_selected_entry_through_engine_font() -> vo
 	assert_eq(preview.get_sample_text(), "New Game",
 		"the selected entry renders as the game shows it ({hot} marker stripped)")
 
-	var picker: OptionButton = host.find_child("StringsPreviewFontOption", true, false)
+	var picker: OptionButton = mount.find_child("StringsPreviewFontOption", true, false)
 	assert_not_null(picker, "the preview font is chooseable")
 	if picker != null:
 		assert_false(picker.disabled, "fonts exist, so the picker is live")
 		assert_eq(picker.get_item_text(0), "Serpen24.fnt")
 
 	# Selecting another entry re-renders the panel with that entry's display text.
-	var detail: Control = host.find_child("StringsDetailPanel", true, false)
+	var detail: Control = mount.find_child("StringsDetailPanel", true, false)
 	assert_not_null(detail)
 	if detail != null:
 		detail.show_entry(5)  # HUD_AMMO -> "Ammo"
@@ -241,16 +241,16 @@ func test_detail_game_preview_without_a_mounted_root_offers_no_fonts() -> void:
 		"headless / no mounted folder yields no fonts (strings stays shell-only)")
 
 	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
-	var preview: Control = host.find_child("StringsGamePreview", true, false)
+	var preview: Control = mount.find_child("StringsGamePreview", true, false)
 	assert_not_null(preview, "the panel still mounts without fonts")
 	if preview != null:
 		assert_false(preview.has_font(), "no font claim is rendered without a mounted game folder")
-	var picker: OptionButton = host.find_child("StringsPreviewFontOption", true, false)
+	var picker: OptionButton = mount.find_child("StringsPreviewFontOption", true, false)
 	assert_not_null(picker)
 	if picker != null:
 		assert_true(picker.disabled, "the picker states the gap instead of listing nothing")
@@ -266,8 +266,8 @@ func test_section_filter_scopes_rows() -> void:
 	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
-	var tree: Tree = host.get_child(0).find_child("StringsTree", true, false)
+	var mount: Control = workstation.get_node("%ViewportMount")
+	var tree: Tree = mount.get_child(0).find_child("StringsTree", true, false)
 
 	assert_eq(tree.get_root().get_child_count(), 6, "the All filter should show every entry")
 
@@ -289,8 +289,8 @@ func test_detail_panel_content_fills_panel() -> void:
 	for _i in 3:
 		await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
-	var detail: Control = host.get_child(0).find_child("StringsDetailPanel", true, false)
+	var mount: Control = workstation.get_node("%ViewportMount")
+	var detail: Control = mount.get_child(0).find_child("StringsDetailPanel", true, false)
 	assert_not_null(detail, "detail panel should be mounted")
 	assert_gt(detail.size.x, 50.0, "detail panel should have a real width from the split")
 	var wrapper: Control = detail.get_child(0)
@@ -329,7 +329,7 @@ func test_inspector_lookup_tester_resolves_like_the_game() -> void:
 
 	var lookup: LineEdit = workstation.find_child("StringsLookupEdit", true, false)
 	var result: RichTextLabel = workstation.find_child("StringsLookupResult", true, false)
-	assert_not_null(lookup, "the inspector should host the lookup tester")
+	assert_not_null(lookup, "the inspector should mount the lookup tester")
 	assert_not_null(result, "the lookup tester should have a result readout")
 
 	lookup.text = "menu_main:BTN_NEW_GAME"

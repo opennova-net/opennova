@@ -86,7 +86,7 @@ func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
 	assert_eq(model.light_applies, 1, "render work resumes on the visible frame")
 	assert_eq(model.env_applies, 1)
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 62 * 1048,
-			"two half-second host frames preserve retail's fixed 16 ms tick count")
+			"two half-second render frames preserve retail's fixed 16 ms tick count")
 	model.advance_runtime_frame(0.008)
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 65536,
 			"the 63rd retail tick strictly overshoots and clamps the sweep endpoint")

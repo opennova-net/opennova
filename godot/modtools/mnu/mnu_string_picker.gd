@@ -4,7 +4,7 @@ extends PopupPanel
 # A searchable picker over an RTXT string table: type to filter by key or resolved
 # text, then double-click / Enter / "Use selected" to choose. Emits picked(key) with
 # the chosen entry's key and hides. Self-contained (depends only on an RtxtStringFile)
-# so it can be reused wherever a widget references a string id. The host adds it as a
+# so it can be reused wherever a widget references a string id. The mount adds it as a
 # child once, then calls open_for(text_resource, current_key) and listens for picked.
 #
 # Populating (set_table / filter) is split from showing (open_for) so the filtering

@@ -69,8 +69,8 @@ prohibited, so deliberately *not* reproducing them is the faithful choice.
 
 ### Permanent register
 
-**Platform / host-structural.** The host cannot or should not reproduce the original's
-substrate; the divergence is wire/visually equivalent or host-internal.
+**Platform / reimpl-structural.** The reimpl cannot or should not reproduce the original's
+substrate; the divergence is wire/visually equivalent or reimpl-internal.
 
 - **D-3DI-1** — byte-exact MTRX output requires OED's x87 `_PC_24` (24-bit) precision; a
   64-bit SSE2 build diverges in low FP bits. The record documents the
@@ -81,14 +81,14 @@ substrate; the divergence is wire/visually equivalent or host-internal.
   sends its local player header-only frames); the frame never leaves the process
   ([ADR 0011](0011-single-player-in-process-listen-server.md)).
 - **D-RORD-2** — retail's per-frame CPU opaque quicksort (alpha-test bit → depth slabs →
-  effect index → fine depth) is a device-era mechanism; the host's internal opaque
+  effect index → fine depth) is a device-era mechanism; the reimpl's internal opaque
   ordering serves the same intent, with the key semantics preserved as T1-pinned pure
   functions. (Ratified at REN-3; entry back-filled here 2026-07-06.)
-- **D-RMAT-8** — framebuffer blending runs on the host's blit-encoded (linear) values;
+- **D-RMAT-8** — framebuffer blending runs on the reimpl's blit-encoded (linear) values;
   retail blends gamma bytes. Under D-RMAT-7's gamma-space convention, opaque and
   alpha-tested surfaces display byte-exact; translucent composites diverge boundedly
   (alpha midtone shift, additive accumulates dimmer). Blending in gamma space would
-  require a gamma framebuffer the host does not expose; reopen only if a T3 scene shows
+  require a gamma framebuffer the reimpl does not expose; reopen only if a T3 scene shows
   an objectionable composite.
 
 **Original-bug / garbage class** (basis:

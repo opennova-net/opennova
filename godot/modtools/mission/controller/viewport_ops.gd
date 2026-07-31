@@ -580,7 +580,7 @@ func _free_selected_user_points_overlay() -> void:
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
 # Play a scripting PLAYPARTANIM action's part animation on its target model in the editor viewport so an
 # author can see the motion without launching the game. Reuses the runtime path: it resolves the action's
-# target (SSN / group / zone) through the same MissionEntityRegistry the host uses, then drives
+# target (SSN / group / zone) through the same MissionEntityRegistry the mount uses, then drives
 # NovaObjectModel.restart_part_anim (a clean-from-rest variant of the runtime play_part_anim). The placed
 # model already _process-ticks in the viewport, so the sweep animates live.
 

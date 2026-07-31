@@ -135,16 +135,16 @@ func test_fonts_workspace_exposes_document_actions_and_inspector() -> void:
 	assert_eq(workspace.get_project_title(), "Serpen24", "Workspace title should show loaded basename.")
 	assert_string_contains(workspace.get_status_context(), "224 glyphs", "Status should summarize glyph count.")
 
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.build_inspector(mount)
 	await get_tree().process_frame
-	assert_gt(host.get_child_count(), 0, "Fonts workspace should mount an inspector.")
-	var label := host.get_child(0).get_node_or_null("Box/FontLabel") as Label
+	assert_gt(mount.get_child_count(), 0, "Fonts workspace should mount an inspector.")
+	var label := mount.get_child(0).get_node_or_null("Box/FontLabel") as Label
 	assert_not_null(label, "Inspector should include a font label.")
 	if label != null:
 		assert_string_contains(label.text, "Serpen24", "Inspector should show the loaded font name.")
-	assert_null(host.get_child(0).get_node_or_null("Box/UsedByStrip"),
+	assert_null(mount.get_child(0).get_node_or_null("Box/UsedByStrip"),
 		"Without a shell there is no reference index, so no Used-by strip mounts.")
 
 
@@ -192,12 +192,12 @@ func test_inspector_offers_used_by_without_triggering_index_build() -> void:
 	workspace.set_editor_shell(shell)
 	assert_eq(workspace.open_file(FNT_PATH), OK)
 
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.build_inspector(mount)
 	await get_tree().process_frame
 
-	var strip = host.get_child(0).get_node_or_null("Box/UsedByStrip")
+	var strip = mount.get_child(0).get_node_or_null("Box/UsedByStrip")
 	assert_not_null(strip, "With a shell the inspector mounts the Used-by strip.")
 	if strip == null:
 		return

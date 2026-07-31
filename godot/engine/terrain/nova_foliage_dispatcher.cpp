@@ -639,7 +639,7 @@ MeshInstance3D *NovaFoliageDispatcher::_ensure_draw_node(
     // two-sided rasterization, and wind deformation without dark rectangles.
     // Keep foliage on the ordinary world layer until the retail tile-cache
     // compositor (which supplies the alpha-lighting term before this pass) is
-    // hosted.
+    // ported.
     instance->set_layer_mask(1u << 0);
     instance->set_extra_cull_margin(8.0f);
     instance->set_visible(false);

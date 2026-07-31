@@ -18,10 +18,10 @@ extends RefCounted
 #
 # The joiner's OWN player (wire handle H) is already self-filtered out of the snapshot in
 # present_snapshot_from_client_view (its row carries PF_TYPE_ID 0), so it is never built
-# here — it is drawn by LocalPlayerHost as the smooth, motor-driven local avatar L. That
+# here — it is drawn by LocalPlayerPresenter as the smooth, motor-driven local avatar L. That
 # is the live §5.38b two-handle (L = local sim, H = wire identity) reconciliation.
 #
-# Host-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
+# Shell-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
 #
 # This is the COLD-path facade: it owns spawn/defer/unresolved bookkeeping, the
 # liveness prune, the held-weapon model builds, spawn callbacks and stats, and
@@ -216,7 +216,7 @@ func present_snapshot(
 		var type_id := int(snap[base + NovaSimulation.PF_TYPE_ID])
 		var handle := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
 		# A zero type row is the joiner's self-filtered echo (H) or an unresolved record;
-		# the local player handle is drawn by LocalPlayerHost. Packed handle zero is a
+		# the local player handle is drawn by LocalPlayerPresenter. Packed handle zero is a
 		# valid pool-0 slot, so local_handle is -1 (never a wire value) with no local player.
 		if type_id == 0 or handle == local_handle:
 			continue

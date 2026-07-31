@@ -233,7 +233,7 @@ public:
 	// Per-widget navigation/window actions. Each row is
 	// {type,target,state,file,source,field,test,has_target_form,target_form,
 	// toggle,external_browser}: the lossless structured editor view of <ACTION>,
-	// including retail host-owned GLB/LAN/form/app-message verbs.
+	// including retail shell-owned GLB/LAN/form/app-message verbs.
 	TypedArray<Dictionary> get_widget_actions(int p_id) const;
 	void set_widget_actions(int p_id, const TypedArray<Dictionary> &p_actions);
 

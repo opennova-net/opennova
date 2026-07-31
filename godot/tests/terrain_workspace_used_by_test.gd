@@ -63,13 +63,13 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 	assert_eq(shell.root.set_root_dir(root_dir), OK)
 	workspace.set_editor_shell(shell)
 
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.set_asset_dock(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.set_asset_dock(mount)
 	await get_tree().process_frame
 
-	var dock = host.get_node_or_null("TerrainAssetDock")
-	assert_not_null(dock, "the workspace builds its dock into the host")
+	var dock = mount.get_node_or_null("TerrainAssetDock")
+	assert_not_null(dock, "the workspace builds its dock into the mount")
 	if dock == null:
 		return
 	var strip = dock.find_child("TerrainUsedByStrip", true, false)
@@ -110,16 +110,16 @@ func test_asset_dock_without_shell_mounts_no_strip() -> void:
 	await get_tree().process_frame
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.set_asset_dock(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.set_asset_dock(mount)
 	await get_tree().process_frame
 
-	var dock = host.get_node_or_null("TerrainAssetDock")
+	var dock = mount.get_node_or_null("TerrainAssetDock")
 	assert_not_null(dock, "the dock itself builds with or without a shell")
 	if dock != null:
 		assert_null(dock.find_child("TerrainUsedByStrip", true, false),
-			"headless host: no shell, no reference index, no strip")
+			"headless mount: no shell, no reference index, no strip")
 	workspace.set_asset_dock(null)
 
 

@@ -68,12 +68,12 @@ func test_editor_panes_clip_preview_and_list_overflow() -> void:
 
 	var left_pane: Control = editor.get_node("HSplit/LeftPane")
 	var right_pane: Control = editor.get_node("HSplit/RightPane")
-	var preview_host: Control = editor.get_node("%PreviewHost")
+	var preview_mount: Control = editor.get_node("%PreviewMount")
 	var player: NovaCreditsPlayer = editor.get_node("%Player")
 
 	assert_true(left_pane.clip_contents, "left editor pane clips card overflow at the split")
 	assert_true(right_pane.clip_contents, "right preview pane clips preview overflow at the split")
-	assert_true(preview_host.clip_contents, "preview host clips its contents")
+	assert_true(preview_mount.clip_contents, "preview mount clips its contents")
 	assert_true(player.clip_contents, "player clips generated fixed-image overlays")
 
 func test_editor_binds_document_and_loads_kda() -> void:
@@ -96,12 +96,12 @@ func test_editor_binds_document_and_loads_kda() -> void:
 func test_credits_workspace_injects_font_link_services_on_mount() -> void:
 	var workspace = autofree(CreditsWorkspaceScript.new())
 	var shell: RefShell = add_child_autofree(RefShell.new())
-	var host: Control = add_child_autofree(Control.new())
+	var mount: Control = add_child_autofree(Control.new())
 	workspace.set_editor_shell(shell)
-	workspace.mount_viewport(host)
+	workspace.mount_viewport(mount)
 	await get_tree().process_frame
 
-	var editor: Node = host.get_child(0)
+	var editor: Node = mount.get_child(0)
 	editor.set_resource_root(null)
 	var doc: Object = workspace.get_editor_document()
 	var entry := CbinTextEntry.new()
@@ -223,10 +223,10 @@ func test_editor_chrome_uses_compact_command_and_preview_controls() -> void:
 		assert_not_null(toolbar.get_node_or_null("ToolbarMargin/ToolbarRow/Speed"),
 			"toolbar should contain preview speed controls.")
 
-	var add_row_frame := editor.get_node("HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame") as PanelContainer
+	var add_row_frame := editor.get_node("HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame") as PanelContainer
 	assert_eq(add_row_frame.theme_type_variation, &"FlatPanel",
 		"The add command strip should use the flat panel theme.")
-	assert_null(editor.get_node_or_null("HSplit/RightPane/PreviewHost/Toolbar"),
+	assert_null(editor.get_node_or_null("HSplit/RightPane/PreviewMount/Toolbar"),
 		"preview controls should live in the editor toolbar instead of inside the preview pane.")
 
 func test_missing_image_warning_is_not_shown_under_toolbar() -> void:
@@ -312,7 +312,7 @@ func test_switching_source_to_visual_applies_valid_pending_source() -> void:
 	source.button_pressed = true
 	await get_tree().process_frame
 
-	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewMount/CodeEdit")
 	code_edit.text = MINIMAL_SOURCE
 
 	var visual: Button = editor.get_node("%VisualButton")
@@ -344,7 +344,7 @@ func test_switching_source_to_visual_with_parse_error_preserves_source_mode_and_
 	source.button_pressed = true
 	await get_tree().process_frame
 
-	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewMount/CodeEdit")
 	code_edit.text = MALFORMED_SOURCE
 
 	var visual: Button = editor.get_node("%VisualButton")
@@ -408,7 +408,7 @@ func test_flush_pending_source_edits_applies_code_edit_to_resource() -> void:
 	source.button_pressed = true
 	await get_tree().process_frame
 
-	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewMount/CodeEdit")
 	code_edit.text = MINIMAL_SOURCE
 
 	var err: int = editor.flush_pending_edits()
@@ -435,7 +435,7 @@ func test_flush_pending_source_parse_error_preserves_resource() -> void:
 	source.button_pressed = true
 	await get_tree().process_frame
 
-	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewHost/CodeEdit")
+	var code_edit: CodeEdit = editor.get_node("HSplit/LeftPane/ContentStack/SourceViewMount/CodeEdit")
 	code_edit.text = MALFORMED_SOURCE
 
 	var err: int = editor.flush_pending_edits()

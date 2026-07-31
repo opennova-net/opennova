@@ -67,11 +67,11 @@ func test_inspector_builds_and_shows_model_fields() -> void:
 	var editor = pair[1]
 	editor.env_file.set_sun_3di("msun.3di")
 
-	var host = add_child_autofree(Control.new())
-	ws.build_inspector(host)
-	# Inspector is a child of host; sync runs on _ready.
-	assert_eq(host.get_child_count(), 1, "build_inspector should mount one inspector.")
-	var inspector = host.get_child(0)
+	var mount = add_child_autofree(Control.new())
+	ws.build_inspector(mount)
+	# Inspector is a child of mount; sync runs on _ready.
+	assert_eq(mount.get_child_count(), 1, "build_inspector should mount one inspector.")
+	var inspector = mount.get_child(0)
 	assert_true(inspector.has_method("sync_from_editor"), "Mounted node should be the EnvironmentInspector.")
 	inspector.sync_from_editor()
 	assert_eq(inspector._sun_model.get_value(), "msun.3di", "Inspector should show the env's sun model name.")

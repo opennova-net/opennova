@@ -160,7 +160,7 @@ unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="BlockListHost" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack"]
+[node name="BlockListMount" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack"]
 unique_name_in_owner = true
 anchors_preset = 15
 anchor_right = 1.0
@@ -168,46 +168,46 @@ anchor_bottom = 1.0
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="BlockScroll" type="ScrollContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost"]
+[node name="BlockScroll" type="ScrollContainer" parent="HSplit/LeftPane/ContentStack/BlockListMount"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="BlockList" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost/BlockScroll"]
+[node name="BlockList" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack/BlockListMount/BlockScroll"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 script = ExtResource("BlockList")
 
-[node name="AddRowFrame" type="PanelContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost"]
+[node name="AddRowFrame" type="PanelContainer" parent="HSplit/LeftPane/ContentStack/BlockListMount"]
 size_flags_horizontal = 3
 theme_type_variation = &"FlatPanel"
 
-[node name="AddRowMargin" type="MarginContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame"]
+[node name="AddRowMargin" type="MarginContainer" parent="HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame"]
 theme_override_constants/margin_left = 6
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_bottom = 6
 
-[node name="AddRow" type="HBoxContainer" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame/AddRowMargin"]
+[node name="AddRow" type="HBoxContainer" parent="HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame/AddRowMargin"]
 theme_override_constants/separation = 6
 
-[node name="AddTextButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame/AddRowMargin/AddRow"]
+[node name="AddTextButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame/AddRowMargin/AddRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 text = "+ Text"
 
-[node name="AddImageButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame/AddRowMargin/AddRow"]
+[node name="AddImageButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame/AddRowMargin/AddRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 text = "+ Image"
 
-[node name="AddNewlineButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListHost/AddRowFrame/AddRowMargin/AddRow"]
+[node name="AddNewlineButton" type="Button" parent="HSplit/LeftPane/ContentStack/BlockListMount/AddRowFrame/AddRowMargin/AddRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 text = "+ Newline"
 
-[node name="SourceViewHost" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack"]
+[node name="SourceViewMount" type="VBoxContainer" parent="HSplit/LeftPane/ContentStack"]
 unique_name_in_owner = true
 visible = false
 anchors_preset = 15
@@ -217,26 +217,26 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("SourceView")
 
-[node name="ApplyBar" type="HBoxContainer" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
+[node name="ApplyBar" type="HBoxContainer" parent="HSplit/LeftPane/ContentStack/SourceViewMount"]
 theme_override_constants/separation = 8
 
-[node name="ApplyLabel" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+[node name="ApplyLabel" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewMount/ApplyBar"]
 theme_type_variation = &"Muted"
 text = "Raw credits source"
 vertical_alignment = 1
 
-[node name="ApplySpacer" type="Control" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+[node name="ApplySpacer" type="Control" parent="HSplit/LeftPane/ContentStack/SourceViewMount/ApplyBar"]
 size_flags_horizontal = 3
 
-[node name="ApplyButton" type="Button" parent="HSplit/LeftPane/ContentStack/SourceViewHost/ApplyBar"]
+[node name="ApplyButton" type="Button" parent="HSplit/LeftPane/ContentStack/SourceViewMount/ApplyBar"]
 tooltip_text = "Parse the source text and rebuild the entry cards"
 text = "Apply"
 
-[node name="CodeEdit" type="CodeEdit" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
+[node name="CodeEdit" type="CodeEdit" parent="HSplit/LeftPane/ContentStack/SourceViewMount"]
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="StatusBar" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewHost"]
+[node name="StatusBar" type="Label" parent="HSplit/LeftPane/ContentStack/SourceViewMount"]
 
 [node name="EmptyHint" type="CenterContainer" parent="HSplit/LeftPane/ContentStack"]
 unique_name_in_owner = true
@@ -280,31 +280,31 @@ text = "Mouse wheel scrubs"
 horizontal_alignment = 2
 vertical_alignment = 1
 
-[node name="PreviewHost" type="VBoxContainer" parent="HSplit/RightPane"]
+[node name="PreviewMount" type="VBoxContainer" parent="HSplit/RightPane"]
 unique_name_in_owner = true
 clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="PreviewScreen" type="PanelContainer" parent="HSplit/RightPane/PreviewHost"]
+[node name="PreviewScreen" type="PanelContainer" parent="HSplit/RightPane/PreviewMount"]
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_styles/panel = SubResource("PreviewScreen")
 
-[node name="Player" type="NovaCreditsPlayer" parent="HSplit/RightPane/PreviewHost/PreviewScreen"]
+[node name="Player" type="NovaCreditsPlayer" parent="HSplit/RightPane/PreviewMount/PreviewScreen"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="ScrubRow" type="HBoxContainer" parent="HSplit/RightPane/PreviewHost"]
+[node name="ScrubRow" type="HBoxContainer" parent="HSplit/RightPane/PreviewMount"]
 theme_override_constants/separation = 8
 
-[node name="ScrubLabel" type="Label" parent="HSplit/RightPane/PreviewHost/ScrubRow"]
+[node name="ScrubLabel" type="Label" parent="HSplit/RightPane/PreviewMount/ScrubRow"]
 theme_type_variation = &"Muted"
 text = "Scrub"
 vertical_alignment = 1
 
-[node name="Scrub" type="HSlider" parent="HSplit/RightPane/PreviewHost/ScrubRow"]
+[node name="Scrub" type="HSlider" parent="HSplit/RightPane/PreviewMount/ScrubRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 4

@@ -75,7 +75,7 @@ public:
   Callable get_foliage_sampler() const;
 
   // Anchors for the distant silhouette/depth-mask tier: crouched/prone
-  // infantry standing on terrain, supplied per frame by the host (the sim's
+  // infantry standing on terrain, supplied per frame by the binding (the sim's
   // stance query in the game; none in the editor preview)
   // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);

@@ -112,7 +112,7 @@ var _effect_world: NovaEffectWorld  # the runtime .ptl effect world (render-only
 # Host-owned first-person presentation seam. MissionRuntime invokes GameWorld
 # once per completed fixed tick; this callback consumes that tick's weapon
 # events before EffectWorld advances, matching retail's action -> particle-pass
-# order without coupling the simulation to LocalPlayerHost Nodes.
+# order without coupling the simulation to LocalPlayerPresenter Nodes.
 var _local_player_weapon_tick_consumer := Callable()
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
@@ -268,10 +268,10 @@ func _ready() -> void:
 	# Both retained render systems start dormant until a successful load chooses
 	# their host mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
-	_set_water_host_rendering_enabled(false)
+	_set_water_world_rendering_enabled(false)
 	# Freeze the retained weather node until a load selects autonomous bare/net
 	# rendering or prepares a mission-owned fixed tick.
-	_set_weather_host_tick_driven(true)
+	_set_weather_world_tick_driven(true)
 
 
 func _notification(what: int) -> void:
@@ -304,7 +304,7 @@ func load_world(dir: String = "") -> int:
 		load_failed.emit("%s not found in %s" % [env_file, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
-	_set_water_host_rendering_enabled(false)
+	_set_water_world_rendering_enabled(false)
 	_set_mission_water_height_override(NAN)
 	_clear_mission_tile_info()
 	_resource_root = resource_root
@@ -317,7 +317,7 @@ func load_world(dir: String = "") -> int:
 
 	_loaded = true
 	_prepare_autonomous_weather()
-	_set_water_host_rendering_enabled(true)
+	_set_water_world_rendering_enabled(true)
 	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
@@ -511,8 +511,8 @@ func _on_net_mission(mission_name: String) -> void:
 	# A wire map is a small transaction over both required render resources.
 	# Keep retained consumers dormant and the BMS retryable until ENV + TRN have
 	# both loaded; otherwise a valid terrain could resurrect stale atmosphere.
-	_set_weather_host_tick_driven(true)
-	_set_water_host_rendering_enabled(false)
+	_set_weather_world_tick_driven(true)
+	_set_water_world_rendering_enabled(false)
 	_load_mission_tile_info(mission_name, _resource_root)
 	var env_name := mission.get_environment_ref() + ".env"
 	if not _resource_root.has_file(env_name) or not _load_environment(env_name):
@@ -528,7 +528,7 @@ func _on_net_mission(mission_name: String) -> void:
 	_loaded_mission = mission
 	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
 	_prepare_autonomous_weather()
-	_set_water_host_rendering_enabled(true)
+	_set_water_world_rendering_enabled(true)
 	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
 
 
@@ -546,8 +546,8 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, resource_root.get_root_dir()])
 		return ERR_FILE_NOT_FOUND
 
-	_set_weather_host_tick_driven(true)
-	_set_water_host_rendering_enabled(false)
+	_set_weather_world_tick_driven(true)
+	_set_water_world_rendering_enabled(false)
 	# Keep stage attribution stable so load timelines remain comparable.
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
 	_resource_root = resource_root
@@ -610,7 +610,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
-	_prepare_hosted_weather()
+	_prepare_world_driven_weather()
 	load_progress.emit(90)
 	timeline.span("effects")
 	_start_effect_world()
@@ -628,7 +628,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.finish()
 	_loaded_mission_file = bms_name
 	_loaded = true
-	_set_water_host_rendering_enabled(true)
+	_set_water_world_rendering_enabled(true)
 	load_progress.emit(100)
 	_debug_views.on_loaded()
 	world_loaded.emit()
@@ -654,7 +654,7 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 
 
 # Populate the world with the mission's placed objects under a MissionObjects node.
-# Shares the host-agnostic placer with the editor Mission workspace.
+# Shares the shell-agnostic placer with the editor Mission workspace.
 func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = null) -> void:
 	if _resource_root == null or mission == null:
 		return
@@ -708,7 +708,7 @@ func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
 
-## The mounted world's shared weapon.def database. ArmoryHost consumes this on
+## The mounted world's shared weapon.def database. ArmoryPresenter consumes this on
 ## first open so its canonical parent tuples and its visible rows resolve against
 ## the same catalog; the FP viewmodel reuses it below (ADR 0018 resource seam).
 func get_weapon_database() -> NovaWeaponDatabase:
@@ -742,8 +742,8 @@ func unload() -> void:
 	# Net-session teardown: the preload sim/root, the notification latches, the
 	# typed request staging, and the NovaWorld gate registration.
 	_net_drive.reset()
-	_set_weather_host_tick_driven(true)
-	_set_water_host_rendering_enabled(false)
+	_set_weather_world_tick_driven(true)
+	_set_water_world_rendering_enabled(false)
 	_local_player_spawn_loadout = {}
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
@@ -857,9 +857,9 @@ func _set_mission_water_height_override(world_height: float) -> void:
 		_water.set_mission_water_height_override(world_height)
 
 
-func _set_water_host_rendering_enabled(enabled: bool) -> void:
-	if _water != null and _water.has_method("set_host_rendering_enabled"):
-		_water.set_host_rendering_enabled(enabled)
+func _set_water_world_rendering_enabled(enabled: bool) -> void:
+	if _water != null and _water.has_method("set_world_rendering_enabled"):
+		_water.set_world_rendering_enabled(enabled)
 
 
 # Runtime water exposes a render-aware predicate so its retained authored
@@ -873,20 +873,20 @@ func is_water_render_active() -> bool:
 	return not _water.has_method("is_water_active") or bool(_water.is_water_active())
 
 
-func _set_weather_host_tick_driven(enabled: bool) -> void:
+func _set_weather_world_tick_driven(enabled: bool) -> void:
 	_weather_tick_credit = 0.0
 	var weather := get_node_or_null("NovaWeather")
-	if weather != null and weather.has_method("set_host_tick_driven"):
-		weather.set_host_tick_driven(enabled)
+	if weather != null and weather.has_method("set_world_tick_driven"):
+		weather.set_world_tick_driven(enabled)
 
 
-func _prepare_hosted_weather() -> void:
+func _prepare_world_driven_weather() -> void:
 	_weather_tick_credit = 0.0
 	var weather := get_node_or_null("NovaWeather")
-	if weather != null and weather.has_method("prepare_hosted"):
-		weather.prepare_hosted()
+	if weather != null and weather.has_method("prepare_world_driven"):
+		weather.prepare_world_driven()
 	else:
-		_set_weather_host_tick_driven(true)
+		_set_weather_world_tick_driven(true)
 
 
 func _prepare_autonomous_weather() -> void:
@@ -895,10 +895,10 @@ func _prepare_autonomous_weather() -> void:
 	if weather != null and weather.has_method('prepare_autonomous'):
 		weather.prepare_autonomous()
 	else:
-		_set_weather_host_tick_driven(false)
+		_set_weather_world_tick_driven(false)
 
 
-func _advance_hosted_weather(delta: float) -> void:
+func _advance_world_driven_weather(delta: float) -> void:
 	_weather_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
 	var tick_count := int(floor(_weather_tick_credit + 1.0e-9))
 	if tick_count <= 0:
@@ -1175,7 +1175,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	probe_phase_start = Time.get_ticks_usec() if timing else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
-		_advance_hosted_weather(delta)
+		_advance_world_driven_weather(delta)
 	if timing:
 		var weather_us := Time.get_ticks_usec() - probe_phase_start
 		if probe_enabled:
@@ -1316,7 +1316,7 @@ func get_destruction_present_stats() -> RefCounted:
 
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
-## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third
+## own). The caller (LocalPlayerPresenter) positions it and swaps its visual layer per first/third
 ## person: in first person the body stays renderable on the reflection-only layer, because the
 ## witnessed water mirror re-renders the world scene, local body included
 ## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
@@ -1347,7 +1347,7 @@ func build_local_player_avatar() -> Node3D:
 	return _placer.build_player_animated_model(0x14B9, self, _env)
 
 
-# Resolve the .3DI definitions that LocalPlayerHost would otherwise load only on
+# Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
 # its first visible frame. Retail's Game_ReloadEntityModelsAndCallbacks and HUD
 # model pass load the player + current weapon overlay before sub_5B3A80 freezes
 # the C2S 0x3D source; doing the lightweight data lookup here gives our snapshot
@@ -1637,7 +1637,7 @@ func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 
 
 ## Register the host-side presenter for fixed-tick weapon events. The game
-## installs LocalPlayerHost here; headless/runtime-only hosts leave it
+## installs LocalPlayerPresenter here; headless/runtime-only hosts leave it
 ## invalid and may drain the typed event queue explicitly.
 func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 	_local_player_weapon_tick_consumer = consumer
@@ -1645,7 +1645,7 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
 ## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
-## degrees) LocalPlayerHost consumes — decoded from NovaWeaponDatabase's transport dict
+## degrees) LocalPlayerPresenter consumes — decoded from NovaWeaponDatabase's transport dict
 ## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
 ## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
 ## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
@@ -2238,7 +2238,7 @@ func get_water_node() -> Node:
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
 ## One-line delegates into the item-effect director (item_effect_director.gd):
-## the names stay on GameWorld — LocalPlayerHost and the present passes
+## the names stay on GameWorld — LocalPlayerPresenter and the present passes
 ## register through the world, and harness worlds pin these methods.
 func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
 	_item_fx.register_effect_anchor(owner_key, resolver)

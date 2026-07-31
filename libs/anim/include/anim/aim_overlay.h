@@ -11,7 +11,7 @@
 //
 // All angles are BAM32 (2^32 = full turn); blends are exact int32 arithmetic with the
 // original's arithmetic shift steps, so BAM wraparound behaves identically. Conversion
-// to host-space bases happens in the host layer (single-sourced there); this header owns
+// to embedder-space bases happens in the embedder layer (single-sourced there); this header owns
 // the blend math and the bone-class map only.
 
 #ifndef OPENNOVA_ANIM_AIM_OVERLAY_H
@@ -81,7 +81,7 @@ inline constexpr bool weapon_channel_masks_bone(int model_bone_index) {
 }
 
 // Mounted overlay selection belongs to animation because it chooses which of the
-// retail body/aim/counter-lean matrices each skeletal class consumes.  World/host
+// retail body/aim/counter-lean matrices each skeletal class consumes.  World/embedder
 // layers translate their seat facts into this small input; rendering and collision
 // then call the same builder.
 // [orig: parentSlot 2/3/5 dispatch @ 0x4b1868..0x4b1ba9]
@@ -127,7 +127,7 @@ struct AimOverlayInputs {
     // zeroed. [orig: @ 0x4b17d3]
     bool rolling = false;
     // entity Flags & 0x100000: the non-aim branch keeps even the arms on the body
-    // matrix. Semantics unconfirmed (swim-family suspected); hosts pass false.
+    // matrix. Semantics unconfirmed (swim-family suspected); embedders pass false.
     bool arms_locked = false;
     // The target item definition's authored phrase_set dword (+0x86c).  Validity is
     // independent of its value because zero is a witnessed gunner configuration;
@@ -186,7 +186,7 @@ AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in);
 // pivot recomposition (modelDef+56 pivot table): with parent-local transforms the pivot
 // re-anchor preserves every local origin, so only local rotations change:
 //   W[k] = FK(pose);  F[k] = delta[class[k]] * W[k];  L'[k] = inv(F[parent]) * F[k].
-// deltas are node-frame rotations (host frame), one per OverlayClass; bone_class is per
+// deltas are node-frame rotations (embedder frame), one per OverlayClass; bone_class is per
 // bone (values >= kOverlayClassCount clamp to kOverlayBody).
 // [orig: the multiply @ 0x4b1fe0 + pivot block @ 0x4b201e..0x4b2162]
 void apply_aim_overlay(const std::vector<int> &parent_index,

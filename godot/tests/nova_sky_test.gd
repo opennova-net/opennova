@@ -64,7 +64,7 @@ func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> v
 	], "six sky/cloud constants use retail 2/255; active packed skyfog stays byte/255")
 
 
-func test_weather_core_ticks_every_hosted_sky_block_and_doubles_fog_afterward() -> void:
+func test_weather_core_ticks_every_world_driven_sky_block_and_doubles_fog_afterward() -> void:
 	var core := NovaWeatherCore.new()
 	var black := Color8(0, 0, 0)
 	core.snap_colors(black, black, black, black)

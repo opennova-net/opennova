@@ -302,7 +302,7 @@ func _drain_slot_sounds() -> void:
 
 # Entity-attached loop registrations (vehicle idle/drive/reverse today) share
 # the native ambient emitter table and its loudest-eight physical pool. The
-# audio host replays the bounded latest intents at their producer ticks before
+# audio layer replays the bounded latest intents at their producer ticks before
 # advancing to the end of a catch-up frame, preserving the 30-tick keep-alive.
 # [orig: SoundEmitter_RegisterSetLayers @0x528340;
 # SoundEmitter_UpdateAndMixTop8 @0x5284a0]

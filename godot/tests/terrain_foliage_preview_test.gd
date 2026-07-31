@@ -15,7 +15,7 @@ func test_preview_accepts_and_clears_injected_tile_context_without_anchors() -> 
 		"A standalone preview without editor surface inputs has no active overrides.")
 
 	assert_true(preview.has_method("get_tile_info"),
-		"The preview needs a public blocker diagnostic at its host seam.")
+		"The preview needs a public blocker diagnostic at its owner seam.")
 	if not preview.has_method("get_tile_info"):
 		return
 

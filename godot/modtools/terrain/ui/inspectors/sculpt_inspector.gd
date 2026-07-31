@@ -2,7 +2,7 @@ class_name SculptInspector
 extends TerrainInspector
 
 ## Sculpt workflow: raise / lower / smooth / flatten tool buttons plus the
-## shared brush controls. Code-first; built into the inspector host by the
+## shared brush controls. Code-first; built into the inspector mount by the
 ## terrain workspace and synced from the editor's ui_state_changed signal.
 
 
@@ -28,8 +28,8 @@ func set_editor(value: TerrainEditor) -> void:
 		terrain_editor.set_tool(TerrainEditor.Tool.RAISE)
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_root = box
 	_add_section_heading(box, "Sculpt")
 

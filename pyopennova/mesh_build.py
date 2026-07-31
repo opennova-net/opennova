@@ -1,4 +1,4 @@
-"""Host-agnostic mesh flattener.
+"""DCC-agnostic mesh flattener.
 
 Walks a ``Threedi3di3`` LOD and emits one ``FlatMesh`` per part with
 plain Python data: vertex positions, triangle indices, per-face material
@@ -8,7 +8,7 @@ result feeds either Blender (``mesh_data.from_pydata``) or 3ds Max
 
 Mirrors the per-part grouping, index winding, skin-weight preservation,
 and empty-subobject behaviour used by
-``apps.importer.scene_builder.meshes`` (`_create_meshes_for_lod`) so host
+``apps.importer.scene_builder.meshes`` (`_create_meshes_for_lod`) so DCC
 importers can share one topology builder.
 """
 from __future__ import annotations

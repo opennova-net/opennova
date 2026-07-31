@@ -16,7 +16,7 @@ class NovaMnuScroll;
 // template: the file may seed rows (a static options list) but most lists are
 // populated at runtime by the engine (mission lists, server browsers) through
 // set_items()/add_item(). Selection relays to the owning menu's aggregate
-// widget_value_changed signal; hosts that hold the list use ItemList's own
+// widget_value_changed signal; shells that hold the list use ItemList's own
 // item_selected / item_activated signals. Inert + non-focusable in edit_mode.
 class NovaMnuList : public ItemList {
 	GDCLASS(NovaMnuList, ItemList)
@@ -62,7 +62,7 @@ public:
 		return static_cast<int>(item_text_layout_.vertical);
 	}
 
-	// --- Runtime data binding (host-facing; add_item/clear/select/get_item_text/
+	// --- Runtime data binding (shell-facing; add_item/clear/select/get_item_text/
 	// set_item_metadata are inherited from ItemList) ---
 	void set_items(const PackedStringArray &items);
 	int get_selected_index() const;

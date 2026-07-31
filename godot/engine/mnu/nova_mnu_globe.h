@@ -13,11 +13,11 @@ class NovaMnuMenu;
 
 // A campaign-select globe (type="globe"). There is no globe data in the editor, so
 // the builder shows the configured appearance (or a labeled placeholder). At runtime
-// a host supplies a globe image; the view can auto-rotate.
+// a shell supplies a globe image; the view can auto-rotate.
 //
 // Honest scope: this is a 2D fake (the supplied image is spun in-plane), NOT a real
 // textured 3D sphere. A faithful sphere (SubViewport + MeshInstance3D) is future
-// work; the data API is shaped so that upgrade is transparent to hosts.
+// work; the data API is shaped so that upgrade is transparent to shells.
 class NovaMnuGlobe : public Control {
 	GDCLASS(NovaMnuGlobe, Control)
 

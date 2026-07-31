@@ -1037,24 +1037,24 @@ Control *build_placeholder(MnuBuildContext &ctx, const mnu::Window &w, const mnu
 	return panel;
 }
 
-Control *build_host_owned_placeholder(MnuBuildContext &ctx, const mnu::Window &w,
+Control *build_shell_owned_placeholder(MnuBuildContext &ctx, const mnu::Window &w,
 		const mnu::Font &font) {
 	Control *panel = build_placeholder(ctx, w, font);
-	panel->set_meta("mnu_host_owned", true);
-	panel->set_meta("mnu_host_widget_type",
+	panel->set_meta("mnu_shell_owned", true);
+	panel->set_meta("mnu_shell_widget_type",
 			to_gd(mnu::window_type_name(w.type)).to_upper());
 	if (ctx.edit_mode) {
 		// These retail factories exist, but their rows/content are populated by
-		// multiplayer or news hosts. The authoring canvas labels that boundary
+		// multiplayer or news shells. The authoring canvas labels that boundary
 		// explicitly instead of fabricating representative server data.
 		Label *notice = memnew(Label);
-		notice->set_name("HostOwnedPreview");
+		notice->set_name("ShellOwnedPreview");
 		notice->set_anchors_preset(Control::PRESET_FULL_RECT);
 		notice->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 		notice->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
 		notice->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		notice->set_text(to_gd(mnu::window_type_name(w.type)).to_upper() +
-				"\nHost-owned runtime data");
+				"\nGame-supplied runtime data");
 		notice->add_theme_color_override("font_color", Color(0.72, 0.78, 0.86, 0.9));
 		panel->add_child(notice);
 	}
@@ -1109,7 +1109,7 @@ void apply_input_font(MnuBuildContext &ctx, Control *node, const mnu::Font &font
 	}
 }
 
-// Single-line text field (type="edit"). Seeds STRING text; a host drives content
+// Single-line text field (type="edit"). Seeds STRING text; a shell drives content
 // at runtime. Inert + non-editable in edit_mode.
 Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuEdit *edit = memnew(NovaMnuEdit);
@@ -1126,7 +1126,7 @@ Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 
 	apply_input_font(ctx, edit, font);
 
-	// Colour background -> StyleBoxFlat (LineEdit can't host a render-behind child).
+	// Colour background -> StyleBoxFlat (LineEdit can't shell a render-behind child).
 	if (has_color(w.appearances)) {
 		bool found = false;
 		const Color bg = get_appearance_color(ctx, w.appearances, "color", "default", found);
@@ -1243,7 +1243,7 @@ Control *build_multiline_edit(MnuBuildContext &ctx, const mnu::Window &w, const 
 		edit->set_placeholder("Multiline edit");
 	}
 
-	edit->set_readonly(w.readonly); // host can flip at runtime
+	edit->set_readonly(w.readonly); // shell can flip at runtime
 	edit->set_runtime_enabled(!w.disabled);
 	const MnuScrollbarStyle scrollbar_style =
 			make_scrollbar_style(ctx, w.table_data.scrollbar);
@@ -1510,12 +1510,12 @@ Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	spin->set_edit_mode(ctx.edit_mode);
 	spin->set_sounds(make_widget_sounds(w.sounds));
 
-	// The value cell hosts a text label, an image preview, or a color swatch; the
+	// The value cell shells a text label, an image preview, or a color swatch; the
 	// spinlist shows the right one per selected item.
-	Control *value_host = memnew(Control);
-	value_host->set_name("Value");
-	value_host->set_anchors_preset(Control::PRESET_FULL_RECT);
-	value_host->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	Control *value_mount = memnew(Control);
+	value_mount->set_name("Value");
+	value_mount->set_anchors_preset(Control::PRESET_FULL_RECT);
+	value_mount->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	const String justify = w.items.present
 			? to_gd(w.items.justify).to_upper()
 			: String();
@@ -1525,8 +1525,8 @@ Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 	} else if (justify == "RIGHT") {
 		halign = HORIZONTAL_ALIGNMENT_RIGHT;
 	}
-	mnu_build_item_cell(value_host, halign, make_label_settings(ctx, font));
-	spin->add_child(value_host);
+	mnu_build_item_cell(value_mount, halign, make_label_settings(ctx, font));
+	spin->add_child(value_mount);
 
 	std::vector<MnuItemVisual> visuals;
 	if (w.items.present) {
@@ -1547,7 +1547,7 @@ Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::F
 }
 
 // Dropdown (type="combo"). Closed TextureButton + selected-text label; the LIST_BOX
-// supplies the popup styling and any seed options (a host can repopulate at runtime).
+// supplies the popup styling and any seed options (a shell can repopulate at runtime).
 Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuCombo *combo = memnew(NovaMnuCombo);
 	combo->set_ignore_texture_size(true);
@@ -1707,7 +1707,7 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 }
 
 // Themed scrollbar / slider (type="scroll"). Resolves the track / shuttle / arrow
-// art and orientation; the value range is bound by a host at runtime.
+// art and orientation; the value range is bound by a shell at runtime.
 Control *build_scroll(MnuBuildContext &ctx, const mnu::Window &w) {
 	NovaMnuScroll *scroll = memnew(NovaMnuScroll);
 	scroll->set_menu(ctx.owner);
@@ -1729,7 +1729,7 @@ Control *build_scroll(MnuBuildContext &ctx, const mnu::Window &w) {
 }
 
 // Table view (type="table"). Builds the column template + header cells, the clipped
-// viewport over a host-populated rows container, and an embedded NovaMnuScroll. Rows
+// viewport over a shell-populated rows container, and an embedded NovaMnuScroll. Rows
 // are added at runtime; the SUBST elements resolve to value->image cells.
 Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuTable *table = memnew(NovaMnuTable);
@@ -1956,7 +1956,7 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	}
 	table->add_child(header);
 
-	// Clipped viewport over a host-populated rows container.
+	// Clipped viewport over a shell-populated rows container.
 	Control *viewport = memnew(Control);
 	viewport->set_name("Viewport");
 	viewport->set_clip_contents(true);
@@ -2043,7 +2043,7 @@ void add_view_background(MnuBuildContext &ctx, Control *parent, const mnu::Windo
 	}
 }
 
-// Tactical map (type="map"): styled background; a host supplies the map + markers.
+// Tactical map (type="map"): styled background; a shell supplies the map + markers.
 Control *build_map(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuMap *map = memnew(NovaMnuMap);
 	map->set_menu(ctx.owner);
@@ -2052,7 +2052,7 @@ Control *build_map(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &
 	return map;
 }
 
-// Campaign globe (type="globe"): styled background; a host supplies the globe image.
+// Campaign globe (type="globe"): styled background; a shell supplies the globe image.
 Control *build_globe(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuGlobe *globe = memnew(NovaMnuGlobe);
 	globe->set_menu(ctx.owner);
@@ -2082,7 +2082,7 @@ String resolve_marquee_datasource(MnuBuildContext &ctx, const mnu::Window &w) {
 // not plain text — reading it as a string surfaced the "CBIN" magic instead of credits.
 // A CBIN datasource is routed to the dedicated scroller; a plain-text datasource (e.g.
 // credits.txt) falls through to the simple marquee [orig: marquee_load_credits_from_ini
-// @ 0x65c5a0]. A host can repush content at runtime.
+// @ 0x65c5a0]. A shell can repush content at runtime.
 Control *build_marquee(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	if (!w.datasource.empty() && ctx.root != nullptr) {
 		const PackedByteArray bytes = ctx.root->read_file(to_gd(w.datasource));
@@ -2260,7 +2260,7 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 		case mnu::WindowType::GlbTable:
 		case mnu::WindowType::LanList:
 		case mnu::WindowType::Gopher:
-			node = build_host_owned_placeholder(ctx, w, font);
+			node = build_shell_owned_placeholder(ctx, w, font);
 			break;
 		default:
 			node = build_placeholder(ctx, w, font);

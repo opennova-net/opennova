@@ -16,7 +16,7 @@ extends Resource
 @export var label: String = ""
 @export var tooltip: String = ""
 ## The inspector Script. The shell instantiates it on demand and drives it via
-## build_main(host): terrain workflows use .new(), object workflows use
+## build_main(mount): terrain workflows use .new(), object workflows use
 ## .new(self) so the inspector receives its owning workspace.
 @export var inspector_script: Script
 

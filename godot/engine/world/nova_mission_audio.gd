@@ -20,7 +20,7 @@ extends RefCounted
 ## when the .dbf exists, with a .pwf fallback). We load one merged chain with
 ## the co-named bank first (it carries the dialog voices) then the globals in
 ## the engine's slot order; expansion banks are not loaded yet (no expansion
-## name is plumbed into the world — host follow-up).
+## name is plumbed into the world — reimpl follow-up).
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
@@ -76,7 +76,7 @@ var _audio_root: Node3D
 var _markers: Array = []
 # The native emitter system (libs/audio AmbientMixer): staggered tick&7 marker
 # eval/registration on the logic-tick clock + the per-frame live-slot ranking
-# (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). The host keeps the
+# (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). This node keeps the
 # per-candidate descriptors for stream resolution and the voice binding below.
 var _mixer: NovaAmbientMixer = null
 var _candidate_lookup: Dictionary = {}  # candidate_id -> {descriptor[, bus]}
@@ -90,11 +90,11 @@ var _queued_sound_emitters: Array = []
 # remain stable across per-tick refreshes so an incumbent physical channel does
 # not restart; a set change or explicit clear retires the old IDs.
 var _dynamic_emitter_states: Dictionary = {}
-# Latched once a hosted logic tick arrives (advance_ticks): the world tick owns
+# Latched once a world-driven logic tick arrives (advance_ticks): the world tick owns
 # the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
-# (editor-idle hosts — the nova_weather host/autonomous split).
-var _hosted_ticks := false
-var _hosted_tick_offset := 0
+# (editor-idle owners — the nova_weather world-driven/autonomous split).
+var _world_driven_ticks := false
+var _world_driven_tick_offset := 0
 # At most MIX_CHANNELS entries: [{player:AudioStreamPlayer3D, candidate_id:int}].
 var _channels: Array = []
 var _next_candidate_id := 1
@@ -146,7 +146,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	if mission == null or container == null or _resource_root == null:
 		return _stats
 	var mission_info: Dictionary = mission.get_info()
-	# A repeated setup is not the normal host lifecycle, but it must not orphan
+	# A repeated setup is not the normal owner lifecycle, but it must not orphan
 	# an earlier physical pool or carry dialog state into the next mission.
 	_stop_all_ambient_channels()
 	_reset_mission_playback_state()
@@ -199,7 +199,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			if not _is_envs_item(item_id):
 				continue
 		elif int(entity.get("kind", -1)) != NovaMissionData.KIND_MARKER:
-			# Preserve the two explicit host-only fallback strategies on the
+			# Preserve the two explicit reimpl-only fallback strategies on the
 			# marker pool; only the faithful item dispatch crosses BMS kinds.
 			continue
 		_stats.markers_total += 1
@@ -475,26 +475,26 @@ func _resolve_wav(filename: String) -> AudioStreamWAV:
 	return stream
 
 
-## Host pump for the mission clock; HHMM like NovaEnvironment.time_of_day.
+## Pump for the mission clock; HHMM like NovaEnvironment.time_of_day.
 func set_time_of_day_hhmm(hhmm: float) -> void:
 	_time_of_day_hhmm = hhmm
 	if _mixer != null:
 		_mixer.set_time_of_day_hours(_hhmm_to_hours(hhmm))
 
 
-## Hosted eval clock: the world tick pushes the sim's logic tick after each
+## World-driven eval clock: the world tick pushes the sim's logic tick after each
 ## tick_realtime batch, and the native mixer runs the witnessed staggered cohort
 ## walk for the elapsed ticks — each placed marker re-evaluates every 8th 62.5 Hz
 ## tick [orig: Entity_UpdateAllEntities @ 0x4c225a pool-2 walk;
-## Entity_UpdateEnvSoundEmitter @ 0x4a8080]. The first hosted tick rebases the
+## Entity_UpdateEnvSoundEmitter @ 0x4a8080]. The first world-driven tick rebases the
 ## clock so an editor session that free-ran before Play keeps its slot lifetimes.
 func advance_ticks(logic_tick: int) -> void:
 	if _mixer == null:
 		return
-	if not _hosted_ticks:
-		_hosted_ticks = true
-		_hosted_tick_offset = maxi(0, int(_mixer.clock_tick()) - logic_tick)
-	var target_tick := logic_tick + _hosted_tick_offset
+	if not _world_driven_ticks:
+		_world_driven_ticks = true
+		_world_driven_tick_offset = maxi(0, int(_mixer.clock_tick()) - logic_tick)
+	var target_tick := logic_tick + _world_driven_tick_offset
 	# Apply each intent at its producer tick before advancing to the end of a
 	# catch-up batch. A lane last refreshed early in the batch therefore spends
 	# the elapsed ticks from its real 30-tick lifetime.
@@ -518,11 +518,11 @@ func set_simulation(sim: Object) -> void:
 ## called once per render frame from the Game Loop render callback @ 0x521341]:
 ## the native mixer (libs/audio AmbientMixer) ranks the LIVE emitter slots —
 ## registered at the witnessed staggered tick cadence via advance_ticks — through
-## the two-radius member-0 curve with occlusion, and this host binds the loudest
-## MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 host territory). Stable
+## the two-radius member-0 curve with occlusion, and this node binds the loudest
+## MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 reimpl territory). Stable
 ## candidate IDs let selected incumbents continue while an entrant restarts,
 ## matching transient registration. `delta` free-runs the autonomous 62.5 Hz eval
-## clock only for hosts that never push logic ticks (editor idle) — see
+## clock only for owners that never push logic ticks (editor idle) — see
 ## docs/audio/lwf-dbf-sound-re.md §driver cadence (D-SND-16, ported).
 func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	var start := Time.get_ticks_usec()
@@ -533,11 +533,11 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		_perf_voice_writes = 0
 		_perf_tick_us = Time.get_ticks_usec() - start
 		return
-	# Autonomous hosts register at the current clock before consuming this
-	# render frame's elapsed time. Hosted callers normally flush chronologically
+	# Autonomous owners register at the current clock before consuming this
+	# render frame's elapsed time. World-driven callers normally flush chronologically
 	# from advance_ticks above; the fallback handles a late same-tick delivery.
 	_flush_sound_emitters(int(_mixer.clock_tick()))
-	if not _hosted_ticks and delta > 0.0:
+	if not _world_driven_ticks and delta > 0.0:
 		_mixer.advance_seconds(delta)
 	var rows: PackedFloat32Array = _mixer.mix_v2(camera_pos)
 	const row_stride := 6
@@ -750,8 +750,8 @@ func teardown() -> void:
 	_retired_candidate_ids.clear()
 	_queued_sound_emitters.clear()
 	_dynamic_emitter_states.clear()
-	_hosted_ticks = false
-	_hosted_tick_offset = 0
+	_world_driven_ticks = false
+	_world_driven_tick_offset = 0
 	_bank = null
 
 
@@ -759,7 +759,7 @@ func teardown() -> void:
 
 # Push the resolved marker/layer data into a fresh native mixer. The mixer owns
 # the witnessed cadence (staggered eval, tick-unit slot lifetimes) and the ranked
-# mix; the host keeps each candidate's descriptor for stream resolution by id.
+# mix; this node keeps each candidate's descriptor for stream resolution by id.
 func _feed_mixer() -> void:
 	_mixer = NovaAmbientMixer.new()
 	_mixer.set_occlusion_provider(_simulation)
@@ -769,8 +769,8 @@ func _feed_mixer() -> void:
 	_retired_candidate_ids.clear()
 	_queued_sound_emitters.clear()
 	_dynamic_emitter_states.clear()
-	_hosted_ticks = false
-	_hosted_tick_offset = 0
+	_world_driven_ticks = false
+	_world_driven_tick_offset = 0
 	for mi in _markers.size():
 		var marker: Dictionary = _markers[mi]
 		var pos: Vector3 = marker.get("pos", Vector3.ZERO)
@@ -821,8 +821,8 @@ func _flush_sound_emitters(final_tick: int) -> void:
 		var event: Dictionary = event_value
 		var event_tick := int(event.get(
 				"emitted_tick", int(_mixer.clock_tick())))
-		if _hosted_ticks:
-			event_tick += _hosted_tick_offset
+		if _world_driven_ticks:
+			event_tick += _world_driven_tick_offset
 		event_tick = mini(event_tick, final_tick)
 		if event_tick > int(_mixer.clock_tick()):
 			_mixer.advance_to_tick(event_tick)

@@ -15,7 +15,7 @@ live behavior.**
 The Menus workspace previews `.mnu` screens by instantiating the *runtime*
 `NovaMnuMenu` node and setting `edit_mode = true`, which makes the live menu
 inert and click-through so the WYSIWYG canvas can overlay selection and drag
-gestures. The game's `NovaMenuHost` uses the same node with `edit_mode` off.
+gestures. The game's `NovaMenuShell` uses the same node with `edit_mode` off.
 "Interactive preview" re-arms navigation while sandboxing external Commands
 (launch/quit/URL) to no-ops. See CONTEXT.md ("Edit mode", "Interactive
 preview").
@@ -70,7 +70,7 @@ rather than adding an editor-owned transport around the simulation.
 
 ### Local player and debug UI — game-owned surfaces
 
-`godot/engine/world/local_player_host.gd` is instantiated only by the game
+`godot/engine/world/local_player_presenter.gd` is instantiated only by the game
 shell. Gameplay input, mouse ownership, the viewmodel render pass, HUD feeds,
 and F3 therefore have one boot path and one lifecycle. Editor automation may
 control or inspect the managed child through the runtime debug/MCP seam, but

@@ -11,7 +11,7 @@ namespace godot {
 // The sun-glare terrain-occlusion state of [orig: render_skybox_sun_glow
 // @ 0x5acd00] (env #14): two jittered rays per frame feed an 8-bit sliding
 // visibility window; brightness steps +-16 (dead-band) toward
-// popcount * 32 * fog/1000. All math lives in libs/env; the HOST casts the
+// popcount * 32 * fog/1000. All math lives in libs/env; the shell casts the
 // two rays (camera -> camera + sun_dir * 1024 + jitter) against terrain and
 // reports visibility. RE record: docs/env/env-tod-re.md "Celestial bodies".
 class NovaGlareOcclusion : public RefCounted {

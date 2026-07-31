@@ -1,7 +1,7 @@
-class_name NovaGameHudHost
+class_name NovaGameHudPresenter
 extends Node
 
-## Hosts the in-game HUD (GameHud) over a live GameWorld for the game shell.
+## Owns the in-game HUD (GameHud) over a live GameWorld for the game shell.
 ## Owns the lazy build (hudpos.def layout + string tables),
 ## the per-frame info rebuild from the authoritative local player, and the mission
 ## text feed. The shells only say when the player is in-world (they gate tick()).
@@ -14,7 +14,7 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 var _world: GameWorld = null
-var _player_host = null     # LocalPlayerHost (reserved for the weapon-round anchors)
+var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
 var _ui_parent: Node = null
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
@@ -38,14 +38,14 @@ var _endround_banner := ""
 var _objectives_visible := false
 
 
-func setup(world, player_host, ui_parent: Node) -> void:
+func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	_world = world
-	_player_host = player_host
+	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
-	# host's lifetime — teardown only resets per-mission state.
+	# presenter's lifetime — teardown only resets per-mission state.
 	if _world != null and not _world.mission_effects.is_connected(apply_mission_effects):
 		_world.mission_effects.connect(apply_mission_effects)
 
@@ -85,8 +85,8 @@ func _ensure_game_hud() -> void:
 	_game_hud = GameHudScript.new()
 	_game_hud.name = "GameHud"
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var host: Node = _ui_parent if _ui_parent != null else self
-	host.add_child(_game_hud)
+	var mount: Node = _ui_parent if _ui_parent != null else self
+	mount.add_child(_game_hud)
 	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
 	# zero rect, and a clipping UI parent can then clip every HUD element to
 	# nothing.
@@ -112,7 +112,7 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 	if root == null:
 		return
 	# Refresh this global registry from the current world's root every build.
-	# Otherwise a second runtime or direct-host test can silently reuse the first root's
+	# Otherwise a second runtime or direct-mount test can silently reuse the first root's
 	# strings. The gametext table IS gametext.bin [orig: Game_InitSubsystems
 	# @0x4a6cd0 — TextResource_LoadFromArchive("gametext.bin") -> g_TextGameText;
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
@@ -237,8 +237,8 @@ func tick() -> void:
 		binoculars_view_active = lv.binoculars_view_active
 		nvg_visible = lv.nvg_visible
 		nvg_gain = lv.nvg_gain
-	if binoculars_view_active and _player_host != null:
-		binocular_range = clampi(int(_player_host.aim_range_units()), 1, 1000)
+	if binoculars_view_active and _player_presenter != null:
+		binocular_range = clampi(int(_player_presenter.aim_range_units()), 1, 1000)
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var attach_labels := _build_attach_labels()
@@ -265,8 +265,8 @@ func tick() -> void:
 		"nvg_gain": nvg_gain,
 		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
 		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
-		"aim_screen": _player_host.aim_screen_point() \
-				if _player_host != null else Vector2.INF,
+		"aim_screen": _player_presenter.aim_screen_point() \
+				if _player_presenter != null else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 		"attach_labels": attach_labels,
@@ -538,7 +538,7 @@ func _build_objectives() -> Array:
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.
-## This is the ADR 0018 read seam for host tests and diagnostics.
+## This is the ADR 0018 read seam for presenter tests and diagnostics.
 func pending_hud_message_count() -> int:
 	return _pending_hud_messages.size()
 

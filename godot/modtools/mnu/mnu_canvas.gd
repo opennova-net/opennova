@@ -1,7 +1,7 @@
 class_name MnuCanvas
 extends Control
 
-# WYSIWYG edit surface for the Menus workspace. Hosts a live NovaMnuMenu in
+# WYSIWYG edit surface for the Menus workspace. Owns a live NovaMnuMenu in
 # edit_mode (inert: no navigation, audio, or cursor side effects) scaled to the
 # fixed 800x600 design space all Joint Operations (JO) and newer menus are authored
 # in. The fit is anamorphic (independent X/Y factors, no letterbox bars), matching

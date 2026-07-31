@@ -331,7 +331,7 @@ func test_static_shadow_caster_policy_matches_retail_terrain_tile_admission() ->
 
 
 func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> void:
-	# The host's static light reaches only the terrain receiver layer, so an
+	# The reimpl's static light reaches only the terrain receiver layer, so an
 	# all-eligible batch can carry both the ordinary world and static-caster
 	# marker without self-shadowing. This avoids one duplicate MultiMesh per
 	# submesh while preserving the visible draw.

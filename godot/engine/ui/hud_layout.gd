@@ -5,7 +5,7 @@ extends RefCounted
 ## HUD surface. The original scales every HUD element this way before drawing.
 ## [orig: Viewport_ScaleToVirtualCoords @0x5d2b20] — see docs/interface/hud-re.md.
 ##
-## Host-neutral: pure math, no nodes. Shared by the ONED HUD preview and the runtime
+## Shell-neutral: pure math, no nodes. Shared by the ONED HUD preview and the runtime
 ## HUD overlay so the two interpret hudpos.def identically.
 
 const DESIGN_WIDTH := 1024.0

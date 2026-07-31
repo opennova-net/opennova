@@ -74,8 +74,8 @@ func _detail_panel_node_name() -> StringName:
 
 # --- Build -----------------------------------------------------------------------
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_build_adm_row(box)
 	_build_list_panel(box)
 
@@ -114,7 +114,7 @@ func _resync_detail(index: int) -> bool:
 
 func refresh() -> void:
 	# Resync in place; never rebuild the detail dock from a routine editor-state
-	# sync (the DetailDockHost rebuild-only-on-real-change policy).
+	# sync (the DetailDockMount rebuild-only-on-real-change policy).
 	_refresh_list()
 	_sync_transport_controls()
 

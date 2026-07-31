@@ -2,24 +2,24 @@ class_name FileDialogHelper
 extends RefCounted
 
 ## Reusable "open a file" dialog. Lazily creates one native FileDialog under a
-## host node, then on each open() rebinds the title/filters/dir and a one-shot
+## parent_node node, then on each open() rebinds the title/filters/dir and a one-shot
 ## file_selected callback (clearing any prior connection). Collapses the
 ## copy-pasted create-once / reconnect-one-shot / popup blocks in the terrain
 ## asset dock and tile inspector into one place.
 ##
 ## Usage:
-##   var _files := FileDialogHelper.new(self)   # host owns the dialog node
+##   var _files := FileDialogHelper.new(self)   # parent_node owns the dialog node
 ##   _files.open("Load tile layout", PackedStringArray(["*.til ; Tiles"]),
 ##       func(path): editor.load_tileinfo(path), editor.get_last_open_dir())
 
 const _DEFAULT_MIN_SIZE := Vector2i(760, 520)
 
-var _host: Node
+var _parent_node: Node
 var _dialog: FileDialog
 
 
-func _init(host: Node) -> void:
-	_host = host
+func _init(parent_node: Node) -> void:
+	_parent_node = parent_node
 
 
 func _ensure() -> FileDialog:
@@ -28,7 +28,7 @@ func _ensure() -> FileDialog:
 		_dialog.use_native_dialog = true
 		_dialog.access = FileDialog.ACCESS_FILESYSTEM
 		_dialog.min_size = _DEFAULT_MIN_SIZE
-		_host.add_child(_dialog)
+		_parent_node.add_child(_dialog)
 	return _dialog
 
 

@@ -1,6 +1,6 @@
 extends GutTest
 
-# MissionEntityRegistry resolves a host action's target (SSN / group / zone) back to the live animatable
+# MissionEntityRegistry resolves an event action's target (SSN / group / zone) back to the live animatable
 # model nodes the placer tagged with "entity_ref" meta. Asset-free: fake animatable nodes (exposing
 # play_part_anim, the marker the registry filters on) + a fake mission supplying area-trigger rects.
 

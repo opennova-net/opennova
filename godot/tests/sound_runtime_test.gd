@@ -183,7 +183,7 @@ func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
 	var bank = NovaSoundBankScript.new(null)
 	# A layer with NO falloff radius plays at the RAW emitter volume — the
 	# member volume is not consulted [orig: SoundBank_PlayTriggerEntries
-	# @ 0x75cf88 stores emitter_info[2], host emitter = full 255].
+	# @ 0x75cf88 stores emitter_info[2], reimpl emitter = full 255].
 	var quiet := {"volume": 100, "clamp_volume": 255}
 	assert_eq(bank.oneshot_distance_volume(500 << 16, {}, quiet), 255)
 	# A min-only layer computes the proximity stage but the no-falloff branch

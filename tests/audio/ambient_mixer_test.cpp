@@ -1,5 +1,5 @@
 // opennova::audio::AmbientMixer: the placed-marker ambient emitter system pushed
-// down from the Godot host (nova_mission_audio.gd tick / nova_sound_bank.gd curve
+// down from the Godot layer (nova_mission_audio.gd tick / nova_sound_bank.gd curve
 // statics). Curve integers mirror the GUT pins in godot/tests/sound_runtime_test.gd;
 // the cadence cases pin the witnessed split clock (docs/audio/lwf-dbf-sound-re.md
 // §driver cadence, D-SND-16): staggered tick&7 registration
@@ -278,7 +278,7 @@ int main() {
     }
 
     // --- Entity-attached emitters share the retail slot table and loudest-first
-    //     ranking with placed markers; pitch survives into the host candidate ---
+    //     ranking with placed markers; pitch survives into the embedder candidate ---
     {
         AmbientMixer mx;
         const int32_t all_regions[4] = {0, 0, 0, 0};

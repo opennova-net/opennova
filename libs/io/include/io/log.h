@@ -1,11 +1,11 @@
 #pragma once
 // The one diagnostic channel for every libs/ library. Libraries never write to
 // stdout/stderr themselves (the `libs_stdout_prints` ratchet holds that at
-// zero): they call io::logf and stay SILENT unless the host — an app binary,
+// zero): they call io::logf and stay SILENT unless the embedder — an app binary,
 // the GDExtension, a test — installs a sink with io::set_log_sink. The
 // formatted message is assembled only when a sink is installed, so a silent
 // library pays one branch per call (this is what makes per-tick diagnostics
-// affordable in the 62 Hz host loop). Messages arrive WITHOUT a trailing
+// affordable in the 62 Hz main loop). Messages arrive WITHOUT a trailing
 // newline; the sink owns presentation.
 #include <cstdarg>
 #include <cstdio>
@@ -16,7 +16,7 @@ namespace opennova {
 namespace io {
 
 enum class LogLevel {
-	kDebug = 0, // high-volume tracing (per-tick, per-record); hosts usually filter it out
+	kDebug = 0, // high-volume tracing (per-tick, per-record); embedders usually filter it out
 	kInfo = 1,  // lifecycle narration (a service started, a stage completed)
 	kWarn = 2,  // tolerated anomaly (parse oddity, clamped value, ignored row)
 	kError = 3, // an operation failed; the caller is also reporting it via its return path

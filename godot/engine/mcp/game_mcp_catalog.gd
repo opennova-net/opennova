@@ -8,8 +8,8 @@ extends RefCounted
 const SCREENSHOT_TIMEOUT_MS := 60_000
 
 ## The one list of public game_control actions. The game_control schema enum,
-## ONED's proxy allowlist, and the GameDebugHost contract test all read it, so
-## the three cannot drift; GameDebugHost.mcp_game_control implements each.
+## ONED's proxy allowlist, and the GameDebugAdapter contract test all read it, so
+## the three cannot drift; GameDebugAdapter.mcp_game_control implements each.
 const PUBLIC_GAME_CONTROL_ACTIONS: Array[String] = [
 	"pause",
 	"resume",

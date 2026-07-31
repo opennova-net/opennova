@@ -59,7 +59,7 @@ var _copy_button: Button
 var _copy_feedback_timer: Timer
 var _page_list: ItemList
 var _compact_page_picker: OptionButton
-var _page_host: ScrollContainer
+var _page_mount: ScrollContainer
 
 var _pages: Array[NovaDebugPage] = []
 var _active_page: NovaDebugPage = null
@@ -134,7 +134,7 @@ func set_view_context_source(source: Callable) -> void:
 	_ctx.view_context_source = source
 
 
-## Convenience for hosts holding one runtime instance directly.
+## Convenience for owners holding one runtime instance directly.
 func set_runtime(runtime) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
@@ -149,7 +149,7 @@ func set_effect_world_source(source: Callable) -> void:
 		_refresh()
 
 
-## Supplier of the world host (GameWorld or null) for world-fed pages (the
+## Supplier of the world owner (GameWorld or null) for world-fed pages (the
 ## Stats page's counters today).
 func set_world_source(source: Callable) -> void:
 	_ctx.world_source = source
@@ -159,10 +159,10 @@ func set_world_source(source: Callable) -> void:
 			_resolve_terrain_target, "The current world has no terrain.")
 
 
-## Supplier for LocalPlayerHost-owned presentation knobs.
+## Supplier for LocalPlayerPresenter-owned presentation knobs.
 func set_player_source(source: Callable) -> void:
 	_session.set_target_source(NovaDebugCatalog.TARGET_PLAYER, source,
-			"No local player presentation host is active.")
+			"No local player presenter is active.")
 	if visible:
 		_refresh()
 
@@ -180,7 +180,7 @@ func get_debug_session() -> NovaDebugSession:
 	return _session
 
 
-## The host-owned debug pick list (see NovaDebugPickList): the Entities page
+## The shell-owned debug pick list (see NovaDebugPickList): the Entities page
 ## renders/curates it and snapshots embed it. Null detaches.
 func set_pick_list(pick_list: NovaDebugPickList) -> void:
 	_ctx.pick_list = pick_list
@@ -209,7 +209,7 @@ func close() -> void:
 		toggle()
 
 
-## The host-owned FrameStatsBoard feeding the Stats page (null detaches).
+## The shell-owned FrameStatsBoard feeding the Stats page (null detaches).
 func set_frame_stats_board(board) -> void:
 	_stats_pane.set_frame_stats_board(board)
 
@@ -223,7 +223,7 @@ func register_page(page: NovaDebugPage) -> void:
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_pages.append(page)
-	_page_host.add_child(page)
+	_page_mount.add_child(page)
 	_rebuild_page_list()
 
 
@@ -475,16 +475,16 @@ func _build_panel() -> void:
 	_page_list.item_selected.connect(_on_page_row_selected)
 	body.add_child(_page_list)
 
-	_page_host = ScrollContainer.new()
-	_page_host.name = "PageHost"
-	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_mount = ScrollContainer.new()
+	_page_mount.name = "PageMount"
+	_page_mount.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_page_mount.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# SHOW_NEVER is the width firewall: unlike DISABLED, it does not promote a
 	# wide page child's minimum width into the dock's own minimum size.
-	_page_host.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
-	_page_host.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_page_host.follow_focus = true
-	body.add_child(_page_host)
+	_page_mount.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_page_mount.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_page_mount.follow_focus = true
+	body.add_child(_page_mount)
 
 	_copy_feedback_timer = Timer.new()
 	_copy_feedback_timer.name = "CopyFeedbackTimer"
@@ -589,7 +589,7 @@ func _activate_page(page: NovaDebugPage, persist: bool) -> void:
 	if _active_page != null:
 		_active_page.visible = false
 		_active_page.set_capture_active(false)
-	_page_host.scroll_vertical = 0
+	_page_mount.scroll_vertical = 0
 	_active_page = page
 	if page == null:
 		_update_page_header()
@@ -791,7 +791,7 @@ func _runtime_status() -> Dictionary:
 	if runtime == null or sim == null:
 		return {
 			"label": "No mission",
-			"detail": "F3 remains available for host-wide diagnostics.",
+			"detail": "F3 remains available for process-wide diagnostics.",
 		}
 	var mission_name := ""
 	if runtime.has_method("get_mission_name"):

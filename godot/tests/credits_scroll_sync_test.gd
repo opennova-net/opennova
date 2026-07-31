@@ -240,10 +240,10 @@ func test_mouse_wheel_over_preview_scrubs_preview() -> void:
 	assert_gt(player.get_scroll_offset(), 0.0, "wheel down over preview advances the preview offset")
 	assert_not_null(block_list._selected_entry, "wheel scrub syncs editor selection")
 
-# CRE-1 transport: play/pause buttons and the scrub bar drive the HOSTED
+# CRE-1 transport: play/pause buttons and the scrub bar drive the EMBEDDED
 # engine player (NovaCreditsPlayer), so the roll itself — not just the layout —
 # previews in-editor. Public seams only: named nodes + the player's API.
-func test_transport_play_pause_and_scrub_drive_the_hosted_player() -> void:
+func test_transport_play_pause_and_scrub_drive_the_embedded_player() -> void:
 	var editor = CreditsEditorScene.instantiate()
 	add_child_autofree(editor)
 	editor.set_size(Vector2(1280, 720))
@@ -266,7 +266,7 @@ func test_transport_play_pause_and_scrub_drive_the_hosted_player() -> void:
 		"the scrub range spans the whole roll, not just the viewport")
 
 	play_button.pressed.emit()
-	assert_true(player.is_playing(), "Play rolls the hosted engine player")
+	assert_true(player.is_playing(), "Play rolls the embedded engine player")
 	pause_button.pressed.emit()
 	assert_false(player.is_playing(), "Pause freezes the roll")
 	assert_eq(play_button.text, "Resume", "the play button offers Resume while paused")

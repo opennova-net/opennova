@@ -636,11 +636,11 @@ func test_object_workspace_viewport_uses_global_environment_button_only() -> voi
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(shell)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var viewport_host = add_child_autofree(Control.new())
-	workspace.mount_viewport(viewport_host)
+	var viewport_mount = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_mount)
 	await get_tree().process_frame
 
-	assert_null(_find_node_by_name(viewport_host, "ObjectEnvironmentButton"), "Object workspace should leave environment controls to the global viewport rail.")
+	assert_null(_find_node_by_name(viewport_mount, "ObjectEnvironmentButton"), "Object workspace should leave environment controls to the global viewport rail.")
 	workspace.release_viewport()
 
 
@@ -819,17 +819,17 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var viewport_host = add_child_autofree(Control.new())
-	workspace.mount_viewport(viewport_host)
-	var host = add_child_autofree(Control.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_mount)
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
-	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
-	var play := _find_node_by_name(host, "PreviewPlayButton") as Button
-	var reset := _find_node_by_name(host, "PreviewResetButton") as Button
-	var wire := _find_node_by_name(host, "PreviewWireCheck") as CheckBox
-	var ctrl_value := _find_node_by_name(host, "ControlRegisterValue_0") as SpinBox
+	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
+	var play := _find_node_by_name(mount, "PreviewPlayButton") as Button
+	var reset := _find_node_by_name(mount, "PreviewResetButton") as Button
+	var wire := _find_node_by_name(mount, "PreviewWireCheck") as CheckBox
+	var ctrl_value := _find_node_by_name(mount, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(preview)
 	assert_not_null(play)
 	assert_not_null(reset)
@@ -855,18 +855,18 @@ func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_ret
 	assert_true(workspace.object_editor.object_data.set_control_register_name(
 			0, "NOT_A_RETAIL_REGISTER"))
 
-	var viewport_host = add_child_autofree(Control.new())
-	workspace.mount_viewport(viewport_host)
-	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
+	var viewport_mount = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_mount)
+	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
 	assert_not_null(preview)
 
-	var unknown_host = add_child_autofree(Control.new())
+	var unknown_mount = add_child_autofree(Control.new())
 	workspace.build_workflow_inspector(
-			ObjectEditorWorkspace.Workflow.PREVIEW, unknown_host)
+			ObjectEditorWorkspace.Workflow.PREVIEW, unknown_mount)
 	var unknown_label := _find_node_by_name(
-			unknown_host, "ControlRegisterLabel_0") as Label
+			unknown_mount, "ControlRegisterLabel_0") as Label
 	var unknown_value := _find_node_by_name(
-			unknown_host, "ControlRegisterValue_0") as SpinBox
+			unknown_mount, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(unknown_label)
 	assert_not_null(unknown_value)
 	if unknown_label != null:
@@ -880,13 +880,13 @@ func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_ret
 	assert_true(workspace.object_editor.object_data.set_control_register_name(0, ""))
 	if preview != null:
 		preview.clear_ctrl_values()
-	var empty_host = add_child_autofree(Control.new())
+	var empty_mount = add_child_autofree(Control.new())
 	workspace.build_workflow_inspector(
-			ObjectEditorWorkspace.Workflow.PREVIEW, empty_host)
+			ObjectEditorWorkspace.Workflow.PREVIEW, empty_mount)
 	var empty_label := _find_node_by_name(
-			empty_host, "ControlRegisterLabel_0") as Label
+			empty_mount, "ControlRegisterLabel_0") as Label
 	var empty_value := _find_node_by_name(
-			empty_host, "ControlRegisterValue_0") as SpinBox
+			empty_mount, "ControlRegisterValue_0") as SpinBox
 	assert_not_null(empty_label,
 			"Empty CTRL records remain visible rather than being dropped.")
 	assert_not_null(empty_value)
@@ -926,14 +926,14 @@ func test_object_workspace_preview_userpoint_toggle_controls_overlay() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
-	var viewport_host = add_child_autofree(Control.new())
-	workspace.mount_viewport(viewport_host)
-	var host = add_child_autofree(Control.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_mount)
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
-	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
-	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
+	var check := _find_node_by_name(mount, "PreviewUserPointsCheck") as CheckBox
 	assert_not_null(preview)
 	assert_not_null(check)
 	if preview == null or check == null:
@@ -950,14 +950,14 @@ func test_object_workspace_preview_userpoint_toggle_disables_without_points() ->
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.new_current(), OK)
-	var viewport_host = add_child_autofree(Control.new())
-	workspace.mount_viewport(viewport_host)
-	var host = add_child_autofree(Control.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_mount)
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
 
-	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
-	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	var preview := _find_node_by_name(viewport_mount, "ObjectPreview") as ObjectPreview
+	var check := _find_node_by_name(mount, "PreviewUserPointsCheck") as CheckBox
 	assert_not_null(preview)
 	assert_not_null(check)
 	if preview == null or check == null:
@@ -970,19 +970,19 @@ func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> 
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
 
-	var preview_host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, preview_host)
+	var preview_mount = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, preview_mount)
 
-	assert_null(_find_node_by_name(detail_host, "ObjectDetailDock"), "Preview should not reserve a right pane.")
-	assert_eq(detail_host.get_child_count(), 0, "Preview should leave the right-pane host empty.")
+	assert_null(_find_node_by_name(detail_mount, "ObjectDetailDock"), "Preview should not reserve a right pane.")
+	assert_eq(detail_mount.get_child_count(), 0, "Preview should leave the right-pane mount empty.")
 
-	var lods_host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, lods_host)
+	var lods_mount = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, lods_mount)
 
-	assert_null(_find_node_by_name(detail_host, "ObjectDetailDock"), "LODs should keep their editor in the left pane until a real detail editor exists.")
+	assert_null(_find_node_by_name(detail_mount, "ObjectDetailDock"), "LODs should keep their editor in the left pane until a real detail editor exists.")
 
 
 func test_object_workspace_new_creates_empty_saveable_project() -> void:
@@ -1055,11 +1055,11 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
 
-	var host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
-	var mtrl := _find_node_by_name(host, "ObjectExportMtrlCheck") as CheckBox
-	var lght := _find_node_by_name(host, "ObjectExportLghtCheck") as CheckBox
-	var panm := _find_node_by_name(host, "ObjectExportPanmCheck") as CheckBox
+	var mount = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, mount)
+	var mtrl := _find_node_by_name(mount, "ObjectExportMtrlCheck") as CheckBox
+	var lght := _find_node_by_name(mount, "ObjectExportLghtCheck") as CheckBox
+	var panm := _find_node_by_name(mount, "ObjectExportPanmCheck") as CheckBox
 	assert_not_null(mtrl)
 	assert_not_null(lght)
 	assert_not_null(panm)
@@ -1079,17 +1079,17 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 func test_object_lods_inspector_exposes_scene_and_project_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(4, host)
+	workspace.build_workflow_inspector(4, mount)
 
-	assert_not_null(_find_node_by_name(host, "ObjectLodsList"), "LOD inspector should list project LOD scene bindings.")
-	assert_not_null(_find_node_by_name(host, "ObjectAddLodSceneButton"), "LOD inspector should expose an add scene control.")
-	assert_not_null(_find_node_by_name(host, "ObjectReplaceLodSceneButton"), "LOD inspector should expose a replace scene control.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodThreshold"), "LOD inspector should expose the selected LOD threshold.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodAttributes"), "LOD inspector should expose selected LOD attributes.")
-	assert_not_null(_find_node_by_name(host, "ObjectLodRenderFunction"), "LOD inspector should expose selected LOD render function.")
-	assert_not_null(_find_node_by_name(host, "ObjectPolyCollisionLod"), "LOD inspector should expose the project collision LOD setting.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodsList"), "LOD inspector should list project LOD scene bindings.")
+	assert_not_null(_find_node_by_name(mount, "ObjectAddLodSceneButton"), "LOD inspector should expose an add scene control.")
+	assert_not_null(_find_node_by_name(mount, "ObjectReplaceLodSceneButton"), "LOD inspector should expose a replace scene control.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodThreshold"), "LOD inspector should expose the selected LOD threshold.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodAttributes"), "LOD inspector should expose selected LOD attributes.")
+	assert_not_null(_find_node_by_name(mount, "ObjectLodRenderFunction"), "LOD inspector should expose selected LOD render function.")
+	assert_not_null(_find_node_by_name(mount, "ObjectPolyCollisionLod"), "LOD inspector should expose the project collision LOD setting.")
 
 
 func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
@@ -1101,13 +1101,13 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	assert_true(data.set_lod_field(0, "threshold", 12.5))
 	assert_true(data.set_project_field("poly_collision_lod", 3))
 	workspace.object_editor.mark_clean()
-	var host = add_child_autofree(Control.new())
+	var mount = add_child_autofree(Control.new())
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, host)
-	var threshold := _find_node_by_name(host, "ObjectLodThreshold") as SpinBox
-	var attributes := _find_node_by_name(host, "ObjectLodAttributes") as SpinBox
-	var render_function := _find_node_by_name(host, "ObjectLodRenderFunction") as LineEdit
-	var poly_lod := _find_node_by_name(host, "ObjectPolyCollisionLod") as SpinBox
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LODS, mount)
+	var threshold := _find_node_by_name(mount, "ObjectLodThreshold") as SpinBox
+	var attributes := _find_node_by_name(mount, "ObjectLodAttributes") as SpinBox
+	var render_function := _find_node_by_name(mount, "ObjectLodRenderFunction") as LineEdit
+	var poly_lod := _find_node_by_name(mount, "ObjectPolyCollisionLod") as SpinBox
 	assert_not_null(threshold)
 	assert_not_null(attributes)
 	assert_not_null(render_function)
@@ -1140,23 +1140,23 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
 	assert_false(workspace.uses_asset_dock(), "Object Preview should not reserve the terrain-style right dock.")
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
 	assert_true(workspace.uses_asset_dock(), "Object part animations should use the terrain-style right dock for detail editing.")
 
-	var list_pane := _find_node_by_name(list_host, "PartAnimListPane")
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var lod_index := _find_node_by_name(list_host, "PartAnimLodIndex") as SpinBox
-	var add_button := _find_node_by_name(list_host, "PartAnimAddButton") as Button
-	var duplicate_button := _find_node_by_name(list_host, "PartAnimDuplicateButton") as Button
-	var delete_button := _find_node_by_name(list_host, "PartAnimDeleteButton") as Button
-	var detail_dock := _find_node_by_name(detail_host, "ObjectDetailDock")
-	var target_part := _find_node_by_name(detail_host, "PartAnimTargetPart") as OptionButton
-	var parent_part := _find_node_by_name(detail_host, "PartAnimParentPart") as OptionButton
+	var list_pane := _find_node_by_name(list_mount, "PartAnimListPane")
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var lod_index := _find_node_by_name(list_mount, "PartAnimLodIndex") as SpinBox
+	var add_button := _find_node_by_name(list_mount, "PartAnimAddButton") as Button
+	var duplicate_button := _find_node_by_name(list_mount, "PartAnimDuplicateButton") as Button
+	var delete_button := _find_node_by_name(list_mount, "PartAnimDeleteButton") as Button
+	var detail_dock := _find_node_by_name(detail_mount, "ObjectDetailDock")
+	var target_part := _find_node_by_name(detail_mount, "PartAnimTargetPart") as OptionButton
+	var parent_part := _find_node_by_name(detail_mount, "PartAnimParentPart") as OptionButton
 	assert_not_null(list, "Part animation inspector should expose a stable list node.")
 	assert_not_null(lod_index, "Part animation inspector should expose the editable LOD index.")
 	assert_not_null(list_pane, "Part animation workflow should use the left inspector as a list pane.")
@@ -1166,9 +1166,9 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	assert_not_null(detail_dock, "Part animation workflow should mount details in the right dock.")
 	assert_not_null(target_part, "Right detail dock should expose semantic animated-part selection.")
 	assert_not_null(parent_part, "Right detail dock should expose semantic parent selection.")
-	assert_null(_find_node_by_name(detail_host, "PartAnimTransformAs"), "PANM detail UI should not expose raw transform_as.")
-	assert_null(_find_node_by_name(detail_host, "PartAnimScaleType"), "PANM detail UI should not expose raw scale type values.")
-	assert_null(_find_node_by_name(detail_host, "PartAnimTrack_rotation_xFunction"), "PANM detail UI should not expose raw track function fields.")
+	assert_null(_find_node_by_name(detail_mount, "PartAnimTransformAs"), "PANM detail UI should not expose raw transform_as.")
+	assert_null(_find_node_by_name(detail_mount, "PartAnimScaleType"), "PANM detail UI should not expose raw scale type values.")
+	assert_null(_find_node_by_name(detail_mount, "PartAnimTrack_rotation_xFunction"), "PANM detail UI should not expose raw track function fields.")
 	if list == null or lod_index == null or target_part == null or parent_part == null:
 		return
 
@@ -1215,15 +1215,15 @@ func test_object_part_anims_left_actions_add_duplicate_and_delete_entries() -> v
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var add_button := _find_node_by_name(list_host, "PartAnimAddButton") as Button
-	var duplicate_button := _find_node_by_name(list_host, "PartAnimDuplicateButton") as Button
-	var delete_button := _find_node_by_name(list_host, "PartAnimDeleteButton") as Button
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var add_button := _find_node_by_name(list_mount, "PartAnimAddButton") as Button
+	var duplicate_button := _find_node_by_name(list_mount, "PartAnimDuplicateButton") as Button
+	var delete_button := _find_node_by_name(list_mount, "PartAnimDeleteButton") as Button
 	assert_not_null(list)
 	assert_not_null(add_button)
 	assert_not_null(duplicate_button)
@@ -1257,14 +1257,14 @@ func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(PanelContainer.new())
-	detail_host.custom_minimum_size = Vector2(360, 640)
-	detail_host.size = Vector2(360, 640)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(PanelContainer.new())
+	detail_mount.custom_minimum_size = Vector2(360, 640)
+	detail_mount.size = Vector2(360, 640)
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
 	assert_not_null(list)
 	if list == null:
 		return
@@ -1272,7 +1272,7 @@ func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
 	list.item_selected.emit(0)
 	await get_tree().process_frame
 
-	var detail_box := _find_node_by_name(detail_host, "ObjectDetailDockBox") as Control
+	var detail_box := _find_node_by_name(detail_mount, "ObjectDetailDockBox") as Control
 	assert_not_null(detail_box)
 	if detail_box == null:
 		return
@@ -1289,7 +1289,7 @@ func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
 		"PartAnimTranslationAxis",
 		"PartAnimTranslationMode",
 	]:
-		var control := _find_node_by_name(detail_host, control_name) as Control
+		var control := _find_node_by_name(detail_mount, control_name) as Control
 		assert_not_null(control, "%s should exist in the PANM detail dock." % control_name)
 		if control == null:
 			continue
@@ -1306,16 +1306,16 @@ func test_object_part_anim_value_edits_keep_preview_signal_safe() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
-	var viewport_host = add_child_autofree(Control.new())
-	viewport_host.size = Vector2(640, 480)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(PanelContainer.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	viewport_mount.size = Vector2(640, 480)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(PanelContainer.new())
 
-	workspace.mount_viewport(viewport_host)
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	workspace.mount_viewport(viewport_mount)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
 	await get_tree().process_frame
-	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	var preview = _find_node_by_name(viewport_mount, "ObjectPreview")
 	assert_not_null(preview, "Object workspace should mount a live object preview.")
 	if preview == null:
 		return
@@ -1324,8 +1324,8 @@ func test_object_part_anim_value_edits_keep_preview_signal_safe() -> void:
 	var before_bounds: AABB = model.get_model_bounds()
 	assert_true(_aabb_is_finite(before_bounds), "Preview bounds should be finite before PANM edits.")
 
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var rotation_x_to := _find_node_by_name(detail_host, "PartAnimRotationXTo") as SpinBox
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var rotation_x_to := _find_node_by_name(detail_mount, "PartAnimRotationXTo") as SpinBox
 	assert_not_null(list)
 	assert_not_null(rotation_x_to)
 	if list == null or rotation_x_to == null:
@@ -1348,25 +1348,25 @@ func test_object_part_anim_sine_translation_end_edit_does_not_rebuild_preview_no
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
-	var viewport_host = add_child_autofree(Control.new())
-	viewport_host.size = Vector2(640, 480)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(PanelContainer.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	viewport_mount.size = Vector2(640, 480)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(PanelContainer.new())
 
-	workspace.mount_viewport(viewport_host)
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	workspace.mount_viewport(viewport_mount)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
 	await get_tree().process_frame
-	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	var preview = _find_node_by_name(viewport_mount, "ObjectPreview")
 	assert_not_null(preview, "Object workspace should mount a live object preview.")
 	if preview == null:
 		return
 	var model = preview.call("get_object_model")
 	assert_not_null(model, "Object preview should expose the runtime model.")
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var translation_enabled := _find_node_by_name(detail_host, "PartAnimTranslationEnabled") as CheckBox
-	var translation_mode := _find_node_by_name(detail_host, "PartAnimTranslationMode") as OptionButton
-	var translation_to := _find_node_by_name(detail_host, "PartAnimTranslationTo") as SpinBox
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var translation_enabled := _find_node_by_name(detail_mount, "PartAnimTranslationEnabled") as CheckBox
+	var translation_mode := _find_node_by_name(detail_mount, "PartAnimTranslationMode") as OptionButton
+	var translation_to := _find_node_by_name(detail_mount, "PartAnimTranslationTo") as SpinBox
 	assert_not_null(list)
 	assert_not_null(translation_enabled)
 	assert_not_null(translation_mode)
@@ -1415,16 +1415,16 @@ func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
 	var lod_info: Dictionary = data.get_render_lod_info(0)
 	var part_count := int(lod_info.get("part_count", lod_info.get("render_object_count", 0)))
 	assert_gt(part_count, 1, "Fixture should expose multiple parts for target reassignment.")
-	var viewport_host = add_child_autofree(Control.new())
-	viewport_host.size = Vector2(640, 480)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(PanelContainer.new())
+	var viewport_mount = add_child_autofree(Control.new())
+	viewport_mount.size = Vector2(640, 480)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(PanelContainer.new())
 
-	workspace.mount_viewport(viewport_host)
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
+	workspace.mount_viewport(viewport_mount)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
 	await get_tree().process_frame
-	var preview = _find_node_by_name(viewport_host, "ObjectPreview")
+	var preview = _find_node_by_name(viewport_mount, "ObjectPreview")
 	assert_not_null(preview)
 	if preview == null:
 		return
@@ -1433,8 +1433,8 @@ func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
 	var before_bounds: AABB = model.get_model_bounds()
 	assert_true(_aabb_is_finite(before_bounds), "Preview bounds should be finite before target edits.")
 
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var target_part := _find_node_by_name(detail_host, "PartAnimTargetPart") as OptionButton
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var target_part := _find_node_by_name(detail_mount, "PartAnimTargetPart") as OptionButton
 	assert_not_null(list)
 	assert_not_null(target_part)
 	if list == null or target_part == null:
@@ -1470,19 +1470,19 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_light_count(), 0, "Fixture should expose object lights.")
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
-	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
-	var start_color := _find_node_by_name(detail_host, "LightStartColor") as ColorPickerButton
-	var end_color := _find_node_by_name(detail_host, "LightEndColor") as ColorPickerButton
-	var attenuation_start := _find_node_by_name(detail_host, "LightAttenuationStart") as SpinBox
-	var style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
-	var disable_corona := _find_node_by_name(detail_host, "LightDisableCorona") as CheckBox
-	var disable_terrain := _find_node_by_name(detail_host, "LightDisableTerrain") as CheckBox
-	var disable_objects := _find_node_by_name(detail_host, "LightDisableObjects") as CheckBox
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_mount)
+	var list := _find_node_by_name(list_mount, "ObjectLightsList") as ItemList
+	var start_color := _find_node_by_name(detail_mount, "LightStartColor") as ColorPickerButton
+	var end_color := _find_node_by_name(detail_mount, "LightEndColor") as ColorPickerButton
+	var attenuation_start := _find_node_by_name(detail_mount, "LightAttenuationStart") as SpinBox
+	var style := _find_node_by_name(detail_mount, "LightStyle") as OptionButton
+	var disable_corona := _find_node_by_name(detail_mount, "LightDisableCorona") as CheckBox
+	var disable_terrain := _find_node_by_name(detail_mount, "LightDisableTerrain") as CheckBox
+	var disable_objects := _find_node_by_name(detail_mount, "LightDisableObjects") as CheckBox
 	assert_not_null(list, "Light inspector should expose a stable list node.")
 	assert_not_null(start_color)
 	assert_not_null(end_color)
@@ -1547,16 +1547,16 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	var light_count := data.get_light_count()
 	assert_gt(light_count, 0, "Fixture should expose object lights.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_mount)
 
-	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	var list := _find_node_by_name(list_mount, "ObjectLightsList") as ItemList
 	assert_not_null(list, "Light inspector should expose the light list.")
 	if list == null:
 		return
-	var first_style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
+	var first_style := _find_node_by_name(detail_mount, "LightStyle") as OptionButton
 	assert_not_null(first_style, "Light inspector should expose its consumer-specific style options.")
 	if first_style != null:
 		assert_eq(
@@ -1567,9 +1567,9 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 				_option_text_by_id(first_style, 115),
 				"Wave: triangle",
 				"Light style 115 should be labeled as its waveform fallback.")
-		var phase := _find_node_by_name(detail_host, "LightPhase") as SpinBox
+		var phase := _find_node_by_name(detail_mount, "LightPhase") as SpinBox
 		var control_reference := _find_node_by_name(
-				detail_host, "LightControlRegister") as OptionButton
+				detail_mount, "LightControlRegister") as OptionButton
 		assert_not_null(phase)
 		assert_not_null(control_reference)
 		var wave_index := _option_index_by_id(first_style, 115)
@@ -1584,7 +1584,7 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 	for i in range(light_count):
 		list.select(i)
 		list.item_selected.emit(i)
-		var style := _find_node_by_name(detail_host, "LightStyle") as OptionButton
+		var style := _find_node_by_name(detail_mount, "LightStyle") as OptionButton
 		assert_not_null(style, "Light %d should expose a Style dropdown." % i)
 		if style == null:
 			continue
@@ -1598,20 +1598,20 @@ func test_object_lights_editor_uses_left_list_and_right_detail_dock() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_light_count(), 0, "Fixture should expose object lights.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
-	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
-	var detail := _find_node_by_name(detail_host, "LightDetailPanel") as Control
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_mount)
+	var list := _find_node_by_name(list_mount, "ObjectLightsList") as ItemList
+	var detail := _find_node_by_name(detail_mount, "LightDetailPanel") as Control
 	assert_not_null(list, "Light left pane should expose the light list.")
 	assert_not_null(detail, "Light right dock should expose the selected light detail editor.")
-	assert_null(_find_node_by_name(list_host, "LightStartColor"), "Light color editing should move out of the left pane.")
-	assert_null(_find_node_by_name(list_host, "LightAttenuationStart"), "Light attenuation editing should move out of the left pane.")
-	assert_not_null(_find_node_by_name(detail_host, "LightStartColor"), "Light color editing should live in the right dock.")
-	assert_not_null(_find_node_by_name(detail_host, "LightAttenuationStart"), "Light attenuation editing should live in the right dock.")
-	assert_not_null(_find_node_by_name(detail_host, "LightPositiveFlags"), "Light output toggles should live in the right dock.")
+	assert_null(_find_node_by_name(list_mount, "LightStartColor"), "Light color editing should move out of the left pane.")
+	assert_null(_find_node_by_name(list_mount, "LightAttenuationStart"), "Light attenuation editing should move out of the left pane.")
+	assert_not_null(_find_node_by_name(detail_mount, "LightStartColor"), "Light color editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_mount, "LightAttenuationStart"), "Light attenuation editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_mount, "LightPositiveFlags"), "Light output toggles should live in the right dock.")
 
 
 func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
@@ -1620,16 +1620,16 @@ func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: NovaObjectData = workspace.object_editor.object_data
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
-	var list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
-	var flags := _find_node_by_name(detail_host, "LightPositiveFlags") as VBoxContainer
-	var draw_corona := _find_node_by_name(detail_host, "LightDrawCorona") as CheckBox
-	var light_terrain := _find_node_by_name(detail_host, "LightTerrain") as CheckBox
-	var light_objects := _find_node_by_name(detail_host, "LightObjects") as CheckBox
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_mount)
+	var list := _find_node_by_name(list_mount, "ObjectLightsList") as ItemList
+	var flags := _find_node_by_name(detail_mount, "LightPositiveFlags") as VBoxContainer
+	var draw_corona := _find_node_by_name(detail_mount, "LightDrawCorona") as CheckBox
+	var light_terrain := _find_node_by_name(detail_mount, "LightTerrain") as CheckBox
+	var light_objects := _find_node_by_name(detail_mount, "LightObjects") as CheckBox
 	assert_not_null(list)
 	assert_not_null(flags, "Positive OED light toggles should be stacked for the side panel.")
 	assert_not_null(draw_corona)
@@ -1673,18 +1673,18 @@ func test_object_materials_inspector_populates_material_slots() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	assert_not_null(_find_node_by_name(list_host, "MaterialsList"), "Materials inspector should expose the material list.")
-	assert_not_null(_find_node_by_name(detail_host, "ShaderTagOption"), "Materials inspector should expose shader tag selection.")
-	var slot1_name := _find_node_by_name(detail_host, "TextureSlot1Name") as LineEdit
-	var slot1_status := _find_node_by_name(detail_host, "TextureSlot1Status") as Label
-	var slot2_name := _find_node_by_name(detail_host, "TextureSlot2Name") as LineEdit
-	var slot2_status := _find_node_by_name(detail_host, "TextureSlot2Status") as Label
+	assert_not_null(_find_node_by_name(list_mount, "MaterialsList"), "Materials inspector should expose the material list.")
+	assert_not_null(_find_node_by_name(detail_mount, "ShaderTagOption"), "Materials inspector should expose shader tag selection.")
+	var slot1_name := _find_node_by_name(detail_mount, "TextureSlot1Name") as LineEdit
+	var slot1_status := _find_node_by_name(detail_mount, "TextureSlot1Status") as Label
+	var slot2_name := _find_node_by_name(detail_mount, "TextureSlot2Name") as LineEdit
+	var slot2_status := _find_node_by_name(detail_mount, "TextureSlot2Status") as Label
 	assert_not_null(slot1_name)
 	assert_not_null(slot1_status)
 	assert_not_null(slot2_name)
@@ -1694,43 +1694,43 @@ func test_object_materials_inspector_populates_material_slots() -> void:
 	assert_string_contains(slot1_status.text.to_lower(), "karm1_o.tga")
 	assert_eq(slot2_name.text, "KRE_1_O.tga", "Slot 2 should show the detail texture name from the 3DI.")
 	assert_string_contains(slot2_status.text, "Resolved")
-	assert_not_null(_find_node_by_name(detail_host, "TextureAnimationSection"), "Materials inspector should expose texture animation controls.")
+	assert_not_null(_find_node_by_name(detail_mount, "TextureAnimationSection"), "Materials inspector should expose texture animation controls.")
 
 
 func test_object_materials_editor_uses_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
-	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
-	var copy_button := _find_node_by_name(list_host, "MaterialCopyButton") as Button
-	var paste_button := _find_node_by_name(list_host, "MaterialPasteButton") as Button
-	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel") as Control
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
+	var list := _find_node_by_name(list_mount, "MaterialsList") as ItemList
+	var copy_button := _find_node_by_name(list_mount, "MaterialCopyButton") as Button
+	var paste_button := _find_node_by_name(list_mount, "MaterialPasteButton") as Button
+	var detail := _find_node_by_name(detail_mount, "MaterialDetailPanel") as Control
 	assert_not_null(list, "Materials left pane should expose the material list.")
 	assert_not_null(copy_button, "Materials left pane should expose Copy.")
 	assert_not_null(paste_button, "Materials left pane should expose Paste.")
 	assert_not_null(detail, "Materials right dock should expose the selected material detail editor.")
-	assert_null(_find_node_by_name(list_host, "ShaderTagPicker"), "Shader editing should move out of the left pane.")
-	assert_null(_find_node_by_name(list_host, "TextureSlot1Widget"), "Texture slot editing should move out of the left pane.")
-	assert_not_null(_find_node_by_name(detail_host, "ShaderTagPicker"), "Shader editing should live in the right dock.")
-	assert_not_null(_find_node_by_name(detail_host, "TextureSlot1Widget"), "Texture slot editing should live in the right dock.")
-	assert_not_null(_find_node_by_name(detail_host, "TextureAnimationSection"), "Texture animation controls should live in the right dock.")
+	assert_null(_find_node_by_name(list_mount, "ShaderTagPicker"), "Shader editing should move out of the left pane.")
+	assert_null(_find_node_by_name(list_mount, "TextureSlot1Widget"), "Texture slot editing should move out of the left pane.")
+	assert_not_null(_find_node_by_name(detail_mount, "ShaderTagPicker"), "Shader editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_mount, "TextureSlot1Widget"), "Texture slot editing should live in the right dock.")
+	assert_not_null(_find_node_by_name(detail_mount, "TextureAnimationSection"), "Texture animation controls should live in the right dock.")
 
 
 func test_object_materials_inspector_edits_texture_slot_and_marks_dirty() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
-	var slot1_name := _find_node_by_name(detail_host, "TextureSlot1Name") as LineEdit
-	var slot1_status := _find_node_by_name(detail_host, "TextureSlot1Status") as Label
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
+	var slot1_name := _find_node_by_name(detail_mount, "TextureSlot1Name") as LineEdit
+	var slot1_status := _find_node_by_name(detail_mount, "TextureSlot1Status") as Label
 	assert_not_null(slot1_name)
 	assert_not_null(slot1_status)
 
@@ -1750,14 +1750,14 @@ func test_object_materials_inspector_gates_slots_from_shader_flags() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP"), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var slot2_name := _find_node_by_name(detail_host, "TextureSlot2Name") as LineEdit
-	var slot2_status := _find_node_by_name(detail_host, "TextureSlot2Status") as Label
+	var slot2_name := _find_node_by_name(detail_mount, "TextureSlot2Name") as LineEdit
+	var slot2_status := _find_node_by_name(detail_mount, "TextureSlot2Status") as Label
 	assert_not_null(slot2_name)
 	assert_not_null(slot2_status)
 	assert_false(slot2_name.editable, "Detail slot should be disabled when the shader does not support a secondary texture.")
@@ -1769,21 +1769,21 @@ func test_object_materials_inspector_generator_rows_follow_style() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
-	var u_section := _find_node_by_name(detail_host, "UGeneratorSection") as Control
-	var u_style := _find_node_by_name(detail_host, "UGeneratorStyleOption") as OptionButton
-	var u_phase := _find_node_by_name(detail_host, "UGeneratorPhase") as SpinBox
-	var u_rate := _find_node_by_name(detail_host, "UGeneratorRate") as SpinBox
-	var u_reg := _find_node_by_name(detail_host, "UGeneratorControlReg") as OptionButton
-	var rgb_style := _find_node_by_name(detail_host, "RgbGeneratorStyleOption") as OptionButton
-	var rgb_phase := _find_node_by_name(detail_host, "RgbGeneratorPhase") as SpinBox
-	var rgb_reg := _find_node_by_name(detail_host, "RgbGeneratorControlReg") as OptionButton
-	var alpha_style := _find_node_by_name(detail_host, "AlphaGeneratorStyleOption") as OptionButton
-	var alpha_phase := _find_node_by_name(detail_host, "AlphaGeneratorPhase") as SpinBox
-	var alpha_reg := _find_node_by_name(detail_host, "AlphaGeneratorControlReg") as OptionButton
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
+	var u_section := _find_node_by_name(detail_mount, "UGeneratorSection") as Control
+	var u_style := _find_node_by_name(detail_mount, "UGeneratorStyleOption") as OptionButton
+	var u_phase := _find_node_by_name(detail_mount, "UGeneratorPhase") as SpinBox
+	var u_rate := _find_node_by_name(detail_mount, "UGeneratorRate") as SpinBox
+	var u_reg := _find_node_by_name(detail_mount, "UGeneratorControlReg") as OptionButton
+	var rgb_style := _find_node_by_name(detail_mount, "RgbGeneratorStyleOption") as OptionButton
+	var rgb_phase := _find_node_by_name(detail_mount, "RgbGeneratorPhase") as SpinBox
+	var rgb_reg := _find_node_by_name(detail_mount, "RgbGeneratorControlReg") as OptionButton
+	var alpha_style := _find_node_by_name(detail_mount, "AlphaGeneratorStyleOption") as OptionButton
+	var alpha_phase := _find_node_by_name(detail_mount, "AlphaGeneratorPhase") as SpinBox
+	var alpha_reg := _find_node_by_name(detail_mount, "AlphaGeneratorControlReg") as OptionButton
 	assert_not_null(u_section)
 	assert_not_null(u_style)
 	assert_not_null(u_phase)
@@ -1811,8 +1811,8 @@ func test_object_materials_inspector_generator_rows_follow_style() -> void:
 				"Alpha style 114 should be labeled as its waveform fallback.")
 
 	# The raw numeric twins are internal and must not be user-facing.
-	assert_null(_find_node_by_name(detail_host, "UGeneratorStyle"), "Raw generator style number should be gone from the UI.")
-	assert_null(_find_node_by_name(detail_host, "UGeneratorReg"), "Raw control-register number should be gone from the UI.")
+	assert_null(_find_node_by_name(detail_mount, "UGeneratorStyle"), "Raw generator style number should be gone from the UI.")
+	assert_null(_find_node_by_name(detail_mount, "UGeneratorReg"), "Raw control-register number should be gone from the UI.")
 
 	# Style None -> the generator's parameter rows collapse away.
 	var none_index := _option_index_by_id(u_style, 0)
@@ -1876,24 +1876,24 @@ func test_object_materials_inspector_uses_compact_layout_and_named_generator_con
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
-	var list_panel := _find_node_by_name(list_host, "MaterialListPanel") as Control
-	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel") as Control
-	var shader_picker := _find_node_by_name(detail_host, "ShaderTagPicker") as OptionButton
-	var slot1_clear := _find_node_by_name(detail_host, "TextureSlot1Clear") as Button
-	var slot1_options := _find_node_by_name(detail_host, "TextureSlot1OptionsRow") as Control
-	var u_style := _find_node_by_name(detail_host, "UGeneratorStyleOption") as OptionButton
-	var u_reg := _find_node_by_name(detail_host, "UGeneratorControlReg") as OptionButton
-	assert_null(_find_node_by_name(list_host, "MaterialInspectorSplit"), "Materials inspector should not use a horizontal split inside the side panel.")
-	assert_null(_find_node_by_name(detail_host, "MaterialDetailScroll"), "Materials inspector should rely on the side panel's existing scroll area.")
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
+	var list_panel := _find_node_by_name(list_mount, "MaterialListPanel") as Control
+	var detail := _find_node_by_name(detail_mount, "MaterialDetailPanel") as Control
+	var shader_picker := _find_node_by_name(detail_mount, "ShaderTagPicker") as OptionButton
+	var slot1_clear := _find_node_by_name(detail_mount, "TextureSlot1Clear") as Button
+	var slot1_options := _find_node_by_name(detail_mount, "TextureSlot1OptionsRow") as Control
+	var u_style := _find_node_by_name(detail_mount, "UGeneratorStyleOption") as OptionButton
+	var u_reg := _find_node_by_name(detail_mount, "UGeneratorControlReg") as OptionButton
+	assert_null(_find_node_by_name(list_mount, "MaterialInspectorSplit"), "Materials inspector should not use a horizontal split inside the side panel.")
+	assert_null(_find_node_by_name(detail_mount, "MaterialDetailScroll"), "Materials inspector should rely on the side panel's existing scroll area.")
 	assert_not_null(list_panel, "Materials inspector should expose a compact list panel.")
 	assert_not_null(detail, "Materials inspector should expose a stable detail panel.")
-	assert_null(_find_node_by_name(list_host, "ShaderTagPicker"), "Shader editing should not live in the left list pane.")
-	assert_null(_find_node_by_name(list_host, "TextureSlot1Widget"), "Texture slots should not live in the left list pane.")
+	assert_null(_find_node_by_name(list_mount, "ShaderTagPicker"), "Shader editing should not live in the left list pane.")
+	assert_null(_find_node_by_name(list_mount, "TextureSlot1Widget"), "Texture slots should not live in the left list pane.")
 	assert_not_null(shader_picker, "Materials inspector should use the shader tag picker.")
 	assert_not_null(slot1_clear, "Texture slot controls should expose a clear button.")
 	assert_not_null(slot1_options, "Texture slot options should be on a second compact row.")
@@ -1923,25 +1923,25 @@ func test_object_materials_dock_survives_editor_state_sync_without_rebuild() -> 
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var detail := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	var detail := _find_node_by_name(detail_mount, "MaterialDetailPanel")
 	assert_not_null(detail, "Materials dock should build the detail panel.")
 	if detail == null:
 		return
 	var id := detail.get_instance_id()
 
-	# The workstation re-calls BOTH set_asset_dock (same host) and sync_asset_dock
+	# The workstation re-calls BOTH set_asset_dock (same mount) and sync_asset_dock
 	# on every editor-state sync (e.g. each time-of-day drag step). Neither may
 	# rebuild the dock while the same object is open.
-	workspace.set_asset_dock(detail_host)
+	workspace.set_asset_dock(detail_mount)
 	workspace.sync_asset_dock()
-	workspace.set_asset_dock(detail_host)
+	workspace.set_asset_dock(detail_mount)
 
-	var after := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	var after := _find_node_by_name(detail_mount, "MaterialDetailPanel")
 	assert_not_null(after, "Materials detail dock should still exist after an editor-state sync.")
 	if after == null:
 		return
@@ -1955,12 +1955,12 @@ func test_object_materials_detail_rebuilds_when_object_changes() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var panel_before := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	var panel_before := _find_node_by_name(detail_mount, "MaterialDetailPanel")
 	assert_not_null(panel_before, "Materials dock should build the detail panel.")
 	if panel_before == null:
 		return
@@ -1969,7 +1969,7 @@ func test_object_materials_detail_rebuilds_when_object_changes() -> void:
 	workspace.new_current()
 	workspace.sync_asset_dock()
 
-	var panel_after := _find_node_by_name(detail_host, "MaterialDetailPanel")
+	var panel_after := _find_node_by_name(detail_mount, "MaterialDetailPanel")
 	assert_not_null(panel_after, "Materials dock should still expose a detail panel for the new object.")
 	if panel_after == null:
 		return
@@ -1983,13 +1983,13 @@ func test_object_materials_selection_resyncs_without_rebuilding_detail_nodes() -
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Selection test needs at least two materials.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
-	var picker_before := _find_node_by_name(detail_host, "ShaderTagPicker")
+	var list := _find_node_by_name(list_mount, "MaterialsList") as ItemList
+	var picker_before := _find_node_by_name(detail_mount, "ShaderTagPicker")
 	assert_not_null(list, "Materials left pane should expose the material list.")
 	assert_not_null(picker_before, "Materials dock should build the shader tag picker.")
 	if list == null or picker_before == null:
@@ -2000,7 +2000,7 @@ func test_object_materials_selection_resyncs_without_rebuilding_detail_nodes() -
 	await get_tree().process_frame
 
 	assert_true(is_instance_valid(picker_before), "Selecting a material should not free the existing detail controls.")
-	var picker_after := _find_node_by_name(detail_host, "ShaderTagPicker")
+	var picker_after := _find_node_by_name(detail_mount, "ShaderTagPicker")
 	assert_eq(picker_after, picker_before, "Selecting a material should re-sync existing controls, not rebuild the detail dock.")
 
 
@@ -2012,13 +2012,13 @@ func test_object_material_rgb_gen_colors_are_opaque_rgb_only() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 0, "Fixture should expose materials.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var start_color := _find_node_by_name(detail_host, "RgbGeneratorStartColor") as ColorPickerButton
-	var end_color := _find_node_by_name(detail_host, "RgbGeneratorEndColor") as ColorPickerButton
+	var start_color := _find_node_by_name(detail_mount, "RgbGeneratorStartColor") as ColorPickerButton
+	var end_color := _find_node_by_name(detail_mount, "RgbGeneratorEndColor") as ColorPickerButton
 	assert_not_null(start_color, "Materials dock should expose the RGB-gen start color picker.")
 	assert_not_null(end_color, "Materials dock should expose the RGB-gen end color picker.")
 	if start_color == null or end_color == null:
@@ -2034,14 +2034,14 @@ func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Copy/paste test needs at least two materials.")
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.MATERIALS, list_mount)
 
-	var list := _find_node_by_name(list_host, "MaterialsList") as ItemList
-	var copy_button := _find_node_by_name(list_host, "MaterialCopyButton") as Button
-	var paste_button := _find_node_by_name(list_host, "MaterialPasteButton") as Button
+	var list := _find_node_by_name(list_mount, "MaterialsList") as ItemList
+	var copy_button := _find_node_by_name(list_mount, "MaterialCopyButton") as Button
+	var paste_button := _find_node_by_name(list_mount, "MaterialPasteButton") as Button
 	assert_not_null(list)
 	assert_not_null(copy_button)
 	assert_not_null(paste_button)
@@ -2070,20 +2070,20 @@ func test_object_part_anim_detail_dock_edits_semantic_channels() -> void:
 	var data: NovaObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
 
-	workspace.set_asset_dock(detail_host)
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_host)
-	var list := _find_node_by_name(list_host, "PartAnimList") as ItemList
-	var rotation_enabled := _find_node_by_name(detail_host, "PartAnimRotationEnabled") as CheckBox
-	var rotation_mode := _find_node_by_name(detail_host, "PartAnimRotationMode") as OptionButton
-	var rotation_x_to := _find_node_by_name(detail_host, "PartAnimRotationXTo") as SpinBox
-	var rotation_speed := _find_node_by_name(detail_host, "PartAnimRotationSpeed") as SpinBox
-	var scale_enabled := _find_node_by_name(detail_host, "PartAnimScaleEnabled") as CheckBox
-	var scale_mode := _find_node_by_name(detail_host, "PartAnimScaleMode") as OptionButton
-	var translation_enabled := _find_node_by_name(detail_host, "PartAnimTranslationEnabled") as CheckBox
-	var translation_axis := _find_node_by_name(detail_host, "PartAnimTranslationAxis") as OptionButton
+	workspace.set_asset_dock(detail_mount)
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, list_mount)
+	var list := _find_node_by_name(list_mount, "PartAnimList") as ItemList
+	var rotation_enabled := _find_node_by_name(detail_mount, "PartAnimRotationEnabled") as CheckBox
+	var rotation_mode := _find_node_by_name(detail_mount, "PartAnimRotationMode") as OptionButton
+	var rotation_x_to := _find_node_by_name(detail_mount, "PartAnimRotationXTo") as SpinBox
+	var rotation_speed := _find_node_by_name(detail_mount, "PartAnimRotationSpeed") as SpinBox
+	var scale_enabled := _find_node_by_name(detail_mount, "PartAnimScaleEnabled") as CheckBox
+	var scale_mode := _find_node_by_name(detail_mount, "PartAnimScaleMode") as OptionButton
+	var translation_enabled := _find_node_by_name(detail_mount, "PartAnimTranslationEnabled") as CheckBox
+	var translation_axis := _find_node_by_name(detail_mount, "PartAnimTranslationAxis") as OptionButton
 	assert_not_null(list)
 	assert_not_null(rotation_enabled)
 	assert_not_null(rotation_mode)
@@ -2093,8 +2093,8 @@ func test_object_part_anim_detail_dock_edits_semantic_channels() -> void:
 	assert_not_null(scale_mode)
 	assert_not_null(translation_enabled)
 	assert_not_null(translation_axis)
-	assert_null(_find_node_by_name(detail_host, "PartAnimRotationType"), "Semantic PANM UI should not expose raw rotation type values.")
-	assert_null(_find_node_by_name(detail_host, "PartAnimTranslateType"), "Semantic PANM UI should not expose raw translation type values.")
+	assert_null(_find_node_by_name(detail_mount, "PartAnimRotationType"), "Semantic PANM UI should not expose raw rotation type values.")
+	assert_null(_find_node_by_name(detail_mount, "PartAnimTranslateType"), "Semantic PANM UI should not expose raw translation type values.")
 	if list == null or rotation_enabled == null or rotation_mode == null or rotation_x_to == null or rotation_speed == null or scale_enabled == null or scale_mode == null or translation_enabled == null or translation_axis == null:
 		return
 
@@ -2504,27 +2504,27 @@ func test_object_lists_use_compact_list_floor() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var list_host = add_child_autofree(Control.new())
-	var detail_host = add_child_autofree(Control.new())
-	workspace.set_asset_dock(detail_host)
+	var list_mount = add_child_autofree(Control.new())
+	var detail_mount = add_child_autofree(Control.new())
+	workspace.set_asset_dock(detail_mount)
 
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_host)
-	var lights_list := _find_node_by_name(list_host, "ObjectLightsList") as ItemList
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.LIGHTS, list_mount)
+	var lights_list := _find_node_by_name(list_mount, "ObjectLightsList") as ItemList
 	assert_not_null(lights_list, "Lights inspector should expose its list.")
 	if lights_list != null:
 		assert_eq(lights_list.custom_minimum_size.y, 200.0, "Object lists should use a compact 200px floor so short windows aren't dominated by the list.")
 
-	var parts_host = add_child_autofree(Control.new())
-	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, parts_host)
-	var part_list := _find_node_by_name(parts_host, "PartAnimList") as ItemList
+	var parts_mount = add_child_autofree(Control.new())
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PARTS, parts_mount)
+	var part_list := _find_node_by_name(parts_mount, "PartAnimList") as ItemList
 	assert_not_null(part_list, "Part anims inspector should expose its list.")
 	if part_list != null:
 		assert_eq(part_list.custom_minimum_size.y, 200.0, "Part anim list should use the compact 200px floor.")
 
 
 func test_inspector_box_disables_horizontal_scroll() -> void:
-	var host = add_child_autofree(Control.new())
-	var box = InspectorForms.make_inspector_box(host)
+	var mount = add_child_autofree(Control.new())
+	var box = InspectorForms.make_inspector_box(mount)
 	var scroll := box.get_parent() as ScrollContainer
 	assert_not_null(scroll, "make_inspector_box should wrap content in a ScrollContainer.")
 	if scroll != null:

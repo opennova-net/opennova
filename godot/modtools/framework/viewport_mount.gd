@@ -17,8 +17,8 @@ func _init(node_name: StringName, factory: Callable) -> void:
 	_factory = factory
 
 
-func mount(host: Control) -> Control:
-	if host == null:
+func mount(mount: Control) -> Control:
+	if mount == null:
 		return _node
 	if _node == null:
 		_node = _factory.call()
@@ -29,7 +29,7 @@ func mount(host: Control) -> Control:
 		_node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_node.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if _node.get_parent() == null:
-		host.add_child(_node)
+		mount.add_child(_node)
 		_node.set_anchors_preset(Control.PRESET_FULL_RECT)
 	return _node
 

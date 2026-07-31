@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Host-agnostic placement of a mission's entities into a 3D scene.
+# Shell-agnostic placement of a mission's entities into a 3D scene.
 #
 # Given a parsed mission (NovaMissionData), a resource root, and an item database
 # (items.def), this resolves each placed entity to its visual model and instances
@@ -31,7 +31,7 @@ extends RefCounted
 # NovaObjectShaderCache materials) by building one template model off-tree and
 # harvesting its rest-pose meshes + materials.
 #
-# Not host-specific and intentionally free of editor/runtime types so both callers
+# Not caller-specific and intentionally free of editor/runtime types so both callers
 # can share it. Reference via preload(), not class_name, so it resolves without an
 # editor re-import (same convention as veg_assets.gd).
 
@@ -286,7 +286,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			entity.get("rotation_deg", Vector3.ZERO))
 		if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
-			# MissionEntityRegistry can resolve SSN/group/zone host-action targets to this live model.
+			# MissionEntityRegistry can resolve SSN/group/zone event-action targets to this live model.
 			animated.append({
 				"graphic": graphic,
 				"item_id": item_id,
@@ -358,7 +358,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
 			if all_static_shadow:
-				# The host's static directional approximation reaches only the
+				# The reimpl's static directional approximation reaches only the
 				# terrain receiver layer. An all-eligible visible batch can therefore
 				# carry the static-caster marker without self-shadowing, avoiding
 				# a full duplicate MultiMesh per submesh.
@@ -487,7 +487,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 					env_node,
 					"live%d" % stats.animated)
 		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
-		# SSN/group/zone host-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
+		# SSN/group/zone event-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
 		# colliders stay editor-only.
 		var ref := {
 			"kind": int(a.get("kind", -1)),
@@ -519,7 +519,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 
 
 ## Build ONE animated NovaObjectModel for an item type, in its rest pose, parented under
-## `parent` -- for a host-managed entity with no BMS placement (the local-player avatar in
+## `parent` -- for an owner-managed entity with no BMS placement (the local-player avatar in
 ## first/third-person). The caller positions/orients it and toggles visibility; it is NOT
 ## tagged or registered for the present pass. Returns null when the item type has no
 ## resolvable graphic (the same resolution path the animated entities in place() use).
@@ -563,7 +563,7 @@ func build_player_animated_model(runtime_type_id: int, parent: Node3D, env_node:
 
 
 ## Build ONE animated NovaObjectModel from an EXPLICIT graphic (.3di basename) + an explicit .adm
-## name, in rest pose, parented under `parent`. For host-managed viewmodels that resolve their
+## name, in rest pose, parented under `parent`. For owner-managed viewmodels that resolve their
 ## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
 ## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
 func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null, rig_graphic: String = "") -> Node3D:
@@ -751,7 +751,7 @@ func _add_individual_static_shadow_siblings(
 	# Visible portal/PANM models live below camera-masked ROBJ nodes. Retail's
 	# terrain-tile collector ignores those masks and submits every selected-LOD
 	# ROBJ, so harvest one independent all-section shadow-only sibling per
-	# submesh. The host's static light reaches only the terrain receiver.
+	# submesh. The reimpl's static light reaches only the terrain receiver.
 	var batches := _get_static_batches(graphic, env_node, model)
 	for batch in batches:
 		var mm := MultiMesh.new()

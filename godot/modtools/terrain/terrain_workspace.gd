@@ -14,7 +14,7 @@ const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 # while the terrain port is in progress.
 
 var terrain_editor: Node
-var _asset_dock_host: Control
+var _asset_dock_mount: Control
 var _asset_dock: Control
 var _mount: ViewportMount
 
@@ -127,16 +127,16 @@ func deactivate() -> void:
 		terrain_editor.set_viewport_active(false, false)
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null or terrain_editor == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null or terrain_editor == null:
 		return
-	var viewport := _ensure_mount().mount(host)
+	var viewport := _ensure_mount().mount(mount)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
 		viewport.set_edit_input_enabled(true)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
 	if _mount != null:
@@ -225,19 +225,19 @@ func set_asset_dock(dock: Control) -> void:
 		if _asset_dock != null:
 			_asset_dock.free()
 			_asset_dock = null
-		_asset_dock_host = null
+		_asset_dock_mount = null
 		return
-	_asset_dock_host = dock
+	_asset_dock_mount = dock
 	if _asset_dock == null:
 		_asset_dock = TerrainAssetDockScene.instantiate()
 		_asset_dock.name = "TerrainAssetDock"
 		_asset_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_asset_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_asset_dock_host.add_child(_asset_dock)
+	_asset_dock_mount.add_child(_asset_dock)
 	if _asset_dock.has_method("set_editor"):
 		_asset_dock.set_editor(terrain_editor)
 	# "Used by" (which missions sit on this terrain) rides the shell's reference
-	# index; headless hosts get no strip. Injected here because the dock is the
+	# index; headless owners get no strip. Injected here because the dock is the
 	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
 	var services := get_reference_services()
@@ -273,11 +273,11 @@ func activate_workflow(workflow_id: int) -> void:
 		terrain_editor.set_tool(TerrainEditor.Tool.EDIT_SECTORS)
 
 
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	var code_inspector := get_workflow_inspector(workflow_id)
 	if code_inspector == null:
 		return
-	code_inspector.build_main(host)
+	code_inspector.build_main(mount)
 	code_inspector.set_editor(terrain_editor)
 
 

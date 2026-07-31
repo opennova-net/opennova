@@ -40,7 +40,7 @@ static void copy_trimmed(char *dst, size_t dst_size,
 // --------------------------------------------------------------------------
 
 // Parse a .adm from an in-memory buffer (does not take ownership of `bytes`).
-// Used by hosts that read assets from a VFS (PFF archive) rather than disk.
+// Used by embedders that read assets from a VFS (PFF archive) rather than disk.
 int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out) {
     char *data = NULL;
     size_t data_size;

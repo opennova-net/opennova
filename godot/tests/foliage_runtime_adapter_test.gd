@@ -241,7 +241,7 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 		):
 			visible_draws.append(child)
 	assert_eq(visible_draws.size(), int(stats.detail_cache_submissions),
-		"Every portable detail submission must remain a distinct host draw.")
+		"Every portable detail submission must remain a distinct reimpl draw.")
 
 	var found_ordered_pair := false
 	for index in range(visible_draws.size() - 1):
@@ -444,7 +444,7 @@ func test_detail_mesh_cache_reuses_resident_geometry() -> void:
 	_dispatcher.render_preview(_camera_xform())
 	var reused := _dispatcher.get_frame_stats()
 	assert_eq(int(reused.detail_mesh_uploads), 0,
-		"Stable cache revisions must not rebuild ArrayMeshes every host tick.")
+		"Stable cache revisions must not rebuild ArrayMeshes every render tick.")
 	assert_gt(int(reused.detail_mesh_hits), 0)
 	assert_eq(int(reused.detail_mesh_hits), int(reused.detail_cache_submissions))
 

@@ -6,7 +6,7 @@
 
 namespace renderer {
 
-// Deterministic UNORM conversion for host-authored color/tint values. Keeping
+// Deterministic UNORM conversion for caller-authored color/tint values. Keeping
 // every float-to-integer cast inside the proven finite range avoids C++ UB for
 // NaN, infinities, and hostile PTL values.
 inline std::uint8_t particle_unit_byte(float value) noexcept {

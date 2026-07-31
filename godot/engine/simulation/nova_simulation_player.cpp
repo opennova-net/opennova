@@ -381,7 +381,7 @@ TypedArray<Dictionary> NovaSimulation::get_attach_labels() const {
 	    (player->flags & opennova::world::kEntityFlagArmoryZone) != 0;
 	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
 	// and parentSlot not 2/5 (ctrl/drvr); the camera-mode/underwater/scope legs live
-	// host-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
+	// shell-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
 	const bool can_fire =
 	    player->equipped_adm_index != 0xFF &&
 	    !(player->mounted && opennova::world::is_vehicle_control_seat(player->mount_type));
@@ -1027,7 +1027,7 @@ opennova::world::WeaponSwitchGates NovaSimulation::local_weapon_switch_gates() c
 void NovaSimulation::commit_pending_weapon_switch() {
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
 	// consumes g_pendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
-	// @ 0x4dd727; the FP model re-resolve runs host-side off the event].
+	// @ 0x4dd727; the FP model re-resolve runs shell-side off the event].
 	weapon_switch_in_flight_ = false;
 	weapon_switch_deferred_action_ = -1;
 	nvg_scope_restore_ = false;
@@ -1122,7 +1122,7 @@ void NovaSimulation::handle_weapon_switch_outcome(
 			if (active_slot->current ==
 					opennova::world::weapon_action::kSwitchTo) {
 				// The witnessed writer refuses during SWITCHTO. Unlike the original
-				// dispatcher, this host supplies one press edge, so retain it beside
+				// dispatcher, this shell supplies one press edge, so retain it beside
 				// the already-stamped pending combo and keep restoring next after
 				// SWITCHTO's delay-start initializer writes its resume action.
 				weapon_switch_deferred_action_ = action;
@@ -1285,7 +1285,7 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
 	// The local-player weapon-channel inputs, refreshed before the body updater runs —
 	// the Flags-bit refresh (Flags|0x10 from g_weaponScopeActive; the binoculars bit
-	// stays false until a host binoculars input exists). This is the ONLY part of the
+	// stays false until a shell binoculars input exists). This is the ONLY part of the
 	// weapon channel the original gates on locality [orig: @ 0x4b5d7f]; the hold kind is
 	// NOT mirrored here any more — infantry_weapon_channel re-reads it from the ADM
 	// table by the entity's own equipped index every selection pass, exactly as the
@@ -1526,7 +1526,7 @@ float NovaSimulation::get_local_player_pitch_deg() const {
 int NovaSimulation::get_local_player_body_anim_slot() const {
 	if (!world_ || !world_->cached.local_player.valid()) return -1;
 	// The same Entity.body_anim_slot the present pass reads for NPC models (written by the
-	// infantry motor mirror, infantry.cpp). The avatar is host-managed and not in the present
+	// infantry motor mirror, infantry.cpp). The avatar is shell-managed and not in the present
 	// registry, so main_game drives its body clip from this getter.
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	return e ? e->body_anim_slot : -1;
@@ -1590,7 +1590,7 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	// blends [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14],
 	// converted once here to mission-euler degrees — yaw via the canonical (90 - heading),
 	// pitch unchanged (the retail placement builder applies authored pitch as Ry(-pitch),
-	// and MissionObjectPlacer performs the matching basis conjugation). The host builds
+	// and MissionObjectPlacer performs the matching basis conjugation). The shell builds
 	// Godot bases from these with that single-sourced conversion; delta(body class) is
 	// identity by construction.
 	Dictionary out;
@@ -1836,7 +1836,7 @@ void NovaSimulation::install_local_player_weapon(const Dictionary &p_def,
 	// ForceCrouch (0x40000): idle_mortar promotion + stance-change refusal.
 	weapon_run_anim_ = int(int64_t(p_def.get("run_anim", 0)));
 	weapon_force_crouch_ = (flags & DEF_WEAPON_FLAG_FORCECROUCH) != 0;
-	// A held-AnimMap CHANGE advances a host serial; the local InfantryState observes
+	// A held-AnimMap CHANGE advances a binding serial; the local InfantryState observes
 	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
 	// resolved map identity, not the weapon name: two weapon records sharing one
 	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
@@ -2148,7 +2148,7 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	out["scope_fraction"] = opennova::world::player_view_scope_fraction(player_view_);
 	// The NoCardSwitch reload rule: while the equipped slot is mid-RELOAD on a
 	// weapon WITHOUT NoCardSwitch (flags 0x2000000), the FP camera drops the ADS
-	// view bias for the frame — the host reads the eased fraction as 0.
+	// view bias for the frame — the shell reads the eased fraction as 0.
 	// [orig: Player_UpdateFirstPersonCamera @ 0x4dd439/@ 0x4dd4cc; the same
 	//  predicate is Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0 (ex kong
 	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
@@ -2195,7 +2195,7 @@ float NovaSimulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_as
 }
 
 // One 62.5 Hz pump of the local player's slot, after the world logic tick. The world
-// tick now owns the parallel NPC UseGun parent-slot pump; this host method remains the
+// tick now owns the parallel NPC UseGun parent-slot pump; this binding method remains the
 // first-person player's presentation/input seam.
 // [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
 void NovaSimulation::tick_local_player_weapon() {
@@ -2315,7 +2315,7 @@ void NovaSimulation::tick_local_player_weapon() {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
 		weapon_anim_tick_ = world_->logic_tick;
-		// The play consumes the slot ring and latches the served variant — the host
+		// The play consumes the slot ring and latches the served variant — the shell
 		// plays exactly this variant on every viewmodel part
 		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
 		//  the served entry at animState+68].
@@ -2363,7 +2363,7 @@ void NovaSimulation::tick_local_player_weapon() {
 		has_presentation_event = true;
 	}
 	// Preserve the retail call order within one pump: clip start, begin leg, then
-	// finish leg. Records themselves stay in logic-tick order until the host drains.
+	// finish leg. Records themselves stay in logic-tick order until the shell drains.
 	if (has_presentation_event) {
 		pending.world_position = get_local_player_position();
 		pending.scope_settled = player_view_.scope_engaged &&
@@ -2809,7 +2809,7 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 		out["last_round_seq"] = round.shot_seq;
 	}
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
-	// + its own playhead for the host's mask-bone override. The key remains populated
+	// + its own playhead for the shell's mask-bone override. The key remains populated
 	// when the state id matches the primary because the two playheads are independent.
 	// Empty means the override gate is off (weapon in hands + allowed mount class +
 	// primary state flag 0x40).

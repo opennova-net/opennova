@@ -2590,7 +2590,7 @@ func test_move_selected_event_action_reorders_the_chain() -> void:
 
 # --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
 # The preview resolves a scripting action's target to its live model (the same MissionEntityRegistry the
-# runtime host uses) and drives it. Asset-free: a fake model tagged with entity_ref under a synthetic
+# runtime owner uses) and drives it. Asset-free: a fake model tagged with entity_ref under a synthetic
 # MissionObjects container (no .3di / real mission needed for routing).
 
 class FakeModel:

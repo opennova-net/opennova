@@ -61,7 +61,7 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_TWO_SIDED", THREEDI_MATERIAL_FLAG_TWO_SIDED);
 
 	// The composed-key DETAIL capability bit, single-sourced from
-	// libs/renderer: the host material path masks it off when a material's
+	// libs/renderer: the reimpl material path masks it off when a material's
 	// secondary texture fails to resolve, so the _MT Modulate2x stage is
 	// dropped exactly like retail drops a NULL-texture stage instead of
 	// running x2 over a placeholder (render-material-re.md §FF technique
@@ -141,7 +141,7 @@ bool NovaObjectShaderCache::has_water_split_height() const {
 int32_t NovaObjectShaderCache::alpha_rung_for_height(float world_height) const {
 	// The water-plane transparent bracket [orig: @ 0x5d932e..0x5d9354 vs
 	// g_WaterSplitHeightFloat @ 0x8437C4]. No water in the session -> the
-	// default camera-side rung. The host applies the camera-above case
+	// default camera-side rung. The reimpl applies the camera-above case
 	// statically (docs/render/render-order-re.md D-RORD-3 note).
 	if (!water_split_set) {
 		return renderer::kRungAlphaCameraSide;

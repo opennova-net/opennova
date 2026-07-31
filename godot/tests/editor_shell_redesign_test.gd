@@ -54,17 +54,17 @@ func test_dock_buttons_advertise_their_ctrl_hotkeys() -> void:
 
 func test_ctrl_p_opens_quick_open_browser() -> void:
 	var shell := _shell()
-	var host: Control = shell.get_node("%ResourceBrowserPaneHost")
+	var mount: Control = shell.get_node("%ResourceBrowserPaneMount")
 	# A prior session may have persisted the pane open (shared user:// state), so
 	# establish the hidden precondition rather than assuming it.
 	shell._layout.set_browser_pane_visible(false)
-	assert_false(host.visible, "precondition: the browser pane is hidden")
+	assert_false(mount.visible, "precondition: the browser pane is hidden")
 	var ev := InputEventKey.new()
 	ev.keycode = KEY_P
 	ev.ctrl_pressed = true
 	ev.pressed = true
 	shell._unhandled_input(ev)
-	assert_true(host.visible, "Ctrl+P reveals the resource browser pane")
+	assert_true(mount.visible, "Ctrl+P reveals the resource browser pane")
 	assert_not_null(shell._layout.browser_pane(), "Ctrl+P instantiates the browser pane")
 	# Headless has no display, so the deferred search-focus grab is not asserted.
 	# Restore the hidden default: save_browser_state() writes user:// unconditionally,
@@ -165,15 +165,15 @@ func test_empty_state_panel_offers_new_open_and_browse() -> void:
 	var shell := _shell()
 	shell.set_active_workspace(EditorWorkstationScript.Workspace.FONTS)
 	await get_tree().process_frame
-	var host: Control = add_child_autofree(PanelContainer.new())
-	shell._build_empty_state_panel(host, "Nothing open here.", &"fonts")
-	assert_not_null(host.find_child("EmptyStatePanel", true, false), "builds the empty-state panel")
-	assert_not_null(host.find_child("EmptyStateMessage", true, false), "carries a guidance message")
-	assert_not_null(host.find_child("EmptyStateNewActionButton", true, false),
+	var mount: Control = add_child_autofree(PanelContainer.new())
+	shell._build_empty_state_panel(mount, "Nothing open here.", &"fonts")
+	assert_not_null(mount.find_child("EmptyStatePanel", true, false), "builds the empty-state panel")
+	assert_not_null(mount.find_child("EmptyStateMessage", true, false), "carries a guidance message")
+	assert_not_null(mount.find_child("EmptyStateNewActionButton", true, false),
 		"offers New for a New-capable active workspace")
-	assert_not_null(host.find_child("EmptyStateOpenActionButton", true, false),
+	assert_not_null(mount.find_child("EmptyStateOpenActionButton", true, false),
 		"offers Open for an Open-capable active workspace")
-	assert_not_null(host.find_child("EmptyStateBrowseButton", true, false),
+	assert_not_null(mount.find_child("EmptyStateBrowseButton", true, false),
 		"offers a quick-open browse button")
 
 

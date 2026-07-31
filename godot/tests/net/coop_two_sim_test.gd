@@ -1570,7 +1570,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 			switched = true
 			break
 	assert_true(switched, "the joiner switched to its secondary before the echo")
-	# Mirror LocalPlayerHost consuming the committed switch event: mount the
+	# Mirror LocalPlayerPresenter consuming the committed switch event: mount the
 	# newly selected definition so later ticks bridge the M9 FSM to the M9 slot.
 	joiner.set_local_player_weapon(_retail_m9(), {})
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_m4_clip,

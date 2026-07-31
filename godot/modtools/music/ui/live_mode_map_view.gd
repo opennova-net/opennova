@@ -5,8 +5,8 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 # track-chip preview, and the map-node input/selection handlers. The
 # director's _on_section transition handler lives here too: its job is
 # the map refresh + follow-live re-drill, so it moves with the cluster it
-# drives. Verbatim motion from live_mode.gd; state stays on the host,
-# reached through `_lm`; cross-cluster calls go through host delegates.
+# drives. Verbatim motion from live_mode.gd; state stays on the mount,
+# reached through `_lm`; cross-cluster calls go through mount delegates.
 
 
 # --- Director signal handlers ------------------------------------------

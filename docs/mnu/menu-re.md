@@ -51,13 +51,13 @@ preserves `FILE`, `FIELD`, `SOURCE`, `TARGET_FORM`, `EXTERNAL_BROWSER`,
 (`[orig: state switch @ 0x6498f7..0x6499c9]`).
 
 The dispatcher handles screen selection, Window state, URL, form submission,
-the GLB/LAN/application host operations, and pop. Type `TAB` is a special
+the GLB/LAN/application shell operations, and pop. Type `TAB` is a special
 focus-target action on the form event subtype (`@ 0x649c17..0x649c55`), not
 the common menu convention called a Tab; shipped Tabs are sibling panels
 shown/hidden by ordinary `WINDOW` Actions. The committed JO fixtures use only
 `SCREEN`, `WINDOW`, `URL`, and `POP_SCREEN`, but the remaining authored types
 are still format data and must round-trip and remain available to their hosts.
-`QUIT` is not a parsed Action type; exit buttons are host Commands bound by
+`QUIT` is not a parsed Action type; exit buttons are shell Commands bound by
 Window name (ADR 0001).
 
 ## Layout `[orig: @ 0x648120 parse tail; adjust_rect_to_text_size @ 0x6575f0]`
@@ -145,7 +145,7 @@ parent chain (`CWnd_AccumulateAncestorOffset @ 0x6465e0`).
 
 Reimpl: the menu-root CanvasItem is given an 800x600 box and a non-uniform
 `scale = (screenW/800, screenH/600)`, position 0 — authored coords stay in 800x600 design
-space (`menu_shell.gd::_recompute_fit`, `mnu_canvas.gd::_recompute_fit`). The old reimpl
+space (`nova_menu_shell.gd::_recompute_fit`, `mnu_canvas.gd::_recompute_fit`). The old reimpl
 used a hardcoded 640x480 board with uniform letterbox + centering, which overhung and
 mis-centered the 800x600 `jo_game.mnu` (the badly-placed ESC menu) and letterboxed every
 menu. `D-MNU-4`: the original truncates each scaled quad to int per element; the reimpl
@@ -172,7 +172,7 @@ full-rect ColorRect and shows the one matching the current item, swapping as the
 cycles. The old code ran every item through `resolve_item_text` and drew the raw string,
 so an image item showed its filename (`cross01.tga`) and a color item showed its hex
 (`FFFFFF`) as text — the crosshair-preview and color-picker bugs. The same model backs
-combo/list items (a host can populate text-only at runtime). `D-MNU-5`: shipped menus use
+combo/list items (the shell can populate text-only at runtime). `D-MNU-5`: shipped menus use
 image/color items only in spinlists; the combo closed cell still renders text-only (its
 LIST_BOX items are all `type="id"`).
 
@@ -240,7 +240,7 @@ height `[orig: sub_653680 @ 0x653680]`, overridden by `this+201` (the `<MI>` /
 
 Reimpl `NovaMnuCombo`: a TextureButton + an in-tree layered popup. `build_combo` now
 passes the authored `list_box.position` via `set_popup_rect`, and `open_popup` opens at
-that rect (falling back to a below-combo clamped/scrollable box only for host-built combos
+that rect (falling back to a below-combo clamped/scrollable box only for shell-built combos
 with no authored LIST_BOX, e.g. server browsers); `effective_item_height` uses the
 authored `MIN_ITEM_HEIGHT`, else the item font line height, else 16. Top-level `ITEMS`
 and `LIST_BOX/ITEMS` remain independent: an authored nested collection wins even when
@@ -319,7 +319,7 @@ drawn on top but siblings stole its clicks, and nothing closed on outside press,
 implements the witnessed outside-press close/consume + dead-cell rule; `NovaMnuMenu`
 tracks the single active combo (`register_open_combo`/`close_active_combo_popup`) and
 closes it on every screen change; a combo leaving the tree or losing tree visibility
-closes its own popup. Bare host-built combos with no owning menu (a case the original
+closes its own popup. Bare shell-built combos with no owning menu (a case the original
 does not have) keep the legacy child-of-combo popup. See **D-MNU-11** (fixed) and
 **D-MNU-12** (kept). Pinned by `mnu_combo_test.gd::test_combo_popup_overlay_hosts_exclusive_input`,
 `::test_combo_single_open_per_menu`, `::test_combo_outside_press_closes_and_nothing_else_opens`,
@@ -342,9 +342,9 @@ root (text scrolls with the default font); a follow-up.
 ## Controls / key-binding table (CONTROL_MAPPING) `[orig: UI_PopulateControlMappingList @ 0x55c0c0]`
 
 The Options screen's **Controls** tab hosts a `type="table"` named `CONTROL_MAPPING` (3 columns
-Class / Action / Control) the host fills with the player's key bindings, switched by an input
+Class / Action / Control) the shell fills with the player's key bindings, switched by an input
 device (Keyboard / Mouse / Joystick). The `.mnu` declares only the table template; the rows are
-host-populated, like the mission/mod lists (see menu-wiring.md). The 2026-06-23b grill.
+shell-populated, like the mission/mod lists (see menu-wiring.md). The 2026-06-23b grill.
 
 **Data model.** A static action catalog `aAbsoluteTurnLe @ 0x8159cb` (108-byte stride, ~112
 entries) holds per action: a marker-prefixed English display NAME (offset 0; the leading `!`/`|`
@@ -386,9 +386,9 @@ byte-exact names/tokens/Class id + the default VK binding from the catalog's bin
 validated Forward=W/Up, Reload=R, Jump=Space, …), the Class-name table (`action_class_name`), the
 VK decoder (`key_name`), and the binding format (`format_binding`); `build_rows(device)` mirrors
 `UI_PopulateControlMappingList`. The Godot wrapper **`NovaControlsModel`** hands rows to
-`godot/game/menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
+`godot/game/nova_menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
 `CONTROL_MAPPING` `NovaMnuTable` via `add_rows` and wires the Keyboard/Mouse/Joystick radios to
-repopulate. The earlier reimpl left the table empty — `menu_shell` had no host path for a
+repopulate. The earlier reimpl left the table empty — `nova_menu_shell` had no populate path for a
 `type="table"`, so the Controls tab rendered floating headers over a blank grid.
 
 The table render itself was also corrected this pass (see Table render below). This pass is
@@ -413,9 +413,9 @@ The reimplementation's table template is carried by `build_table` and
   alignment; a scaled bitmap fills its cell. `BITMAP_FLAGS` remains
   preservation-only because decoded Godot textures have no proven one-to-one
   mapping for the legacy DirectDraw flag vocabulary.
-- **`CUSTOM_DRAW` has an explicit host seam.** At runtime a connected
+- **`CUSTOM_DRAW` has an explicit shell seam.** At runtime a connected
   `custom_cell_requested(row, column, value, slot)` handler synchronously fills a
-  table-owned cell slot. With no host—or in Edit mode—the normal cell fallback
+  table-owned cell slot. With no shell—or in Edit mode—the normal cell fallback
   remains visible; slots are recreated on every rebuild and must not be cached.
 - **The scrollbar honors the authored `<SCROLLBAR><POSITION>`** (table-relative) and art width
   instead of a hardcoded 16px right strip; the track texture is applied like `build_scroll`. The
@@ -441,7 +441,7 @@ Reimpl: `MnuWidgetSounds` (per-state slots) on each widget;
 `play_lwf_set` (reusing `opennova::audio::SoundSelector` from the sound slice);
 `master_volume` property. The old model keyed sounds on trigger SUBSTRINGS
 (`MOUSE`/`OVER` -> hover, `CLICK`/`SELECT` -> click), had no MOUSEOUT, and routed every
-widget through a single host `.lwf` profile - all corrected.
+widget through a single shell `.lwf` profile - all corrected.
 
 `g_MenuSoundBank @ 0x25DC3E0` (the hardcoded `menu.lwf` load at profile-selector init
 `@ 0x5613bf`) is a RED HERRING: it is the player-info VOICE preview bank
@@ -466,11 +466,11 @@ set `0xC0-0xFF` + `laquo/raquo`. There is NO `&apos;`. An unknown entity (no mat
 
 ## `%VAR%` expansion `[orig: NapiXML_ExpandVariablesInText @ 0x63a000]`
 
-The engine expands `%name%` from a host-supplied list at `ctx+84` over the whole
+The engine expands `%name%` from a shell-supplied list at `ctx+84` over the whole
 buffer before parse (`<RAW_TEXT>` is copied verbatim; an unresolved `%name%` is kept
 literal). OpenNova keeps raw tokens in the document and expands per consumed field at
-build time (colors/fonts/textures/text) - see ADR 0005. Documented gap: host variables
-in non-themed fields need a host var map plumbed into the builder.
+build time (colors/fonts/textures/text) - see ADR 0005. Documented gap: shell variables
+in non-themed fields need a shell var map plumbed into the builder.
 
 ## MNS stylesheet format `[orig: Menu_InitShellResources @ 0x552500; parse_key_value_buffer @ 0x639870]`
 
@@ -543,7 +543,7 @@ open), and clears the dropdown on screen switches (`CUIScene_SelectNodeByName @ 
 Ported as the menu-top catcher overlay + NovaMnuMenu single-open registry (D-MNU-11; the
 pre-fix reimpl let overlapped siblings steal popup clicks and stack dropdowns open). Draw
 order stays tree-positional in the original with no overlay pass; the reimpl's menu-top
-draw is a recorded host divergence, unobservable in shipped menus (D-MNU-12). Pinned by
+draw is a recorded reimpl divergence, unobservable in shipped menus (D-MNU-12). Pinned by
 the five input-routing tests in `mnu_combo_test.gd` (see the section above).
 
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
@@ -584,13 +584,13 @@ Accepted/divergent (each a documented decision, not a defect):
   persistence are deferred (no game input-action layer consumes the bindings yet).
 
 - **D-MNU-1 (`%VAR%` mechanism):** per-field build-time expansion vs whole-buffer
-  pre-parse - the runtime result matches for stylesheet vars; host-var-in-text is a
+  pre-parse - the runtime result matches for stylesheet vars; shell-var-in-text is a
   plumbing follow-up (ADR 0005).
 - **D-MNU-2 (sound jitter):** the shared `SoundSelector` reproduces member selection
   but not the interleaved per-play volume/pitch jitter draws (same accepted divergence
-  as the mission sound host).
+  as the mission sound owner).
 - **D-MNU-3 (strictness / authoring superset):** the format layer preserves attributes
-  the runtime ignores (ADR 0002) and a host `sound_profile` fallback services file-less
+  the runtime ignores (ADR 0002) and a shell `sound_profile` fallback services file-less
   `<SOUND>` nodes the engine would fail to parse.
 - **D-MNU-4 (per-quad int truncation):** the original truncates each scaled element rect
   to int per element (`@ 0x647d40`); the reimpl applies one float CanvasItem scale to the
@@ -614,7 +614,7 @@ Accepted/divergent (each a documented decision, not a defect):
   text bled through — the "overlapping dropdown" look. Fixed: `build_combo` passes
   `list_box.position` via `NovaMnuCombo::set_popup_rect`; `open_popup` uses the authored
   rect when present (which also gives PLAYERVOICE its upward open), else the below-combo
-  fallback for host-built combos.
+  fallback for shell-built combos.
 - **D-MNU-8 (combo row-height default) — FIXED 2026-06-23c:** the list row height is the
   font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> sub_653680 @ 0x653680]`,
   overridden by `this+201` (the `<MI>`/`<MIN_ITEM_HEIGHT>` value; ctor default `-1`
@@ -638,16 +638,16 @@ Accepted/divergent (each a documented decision, not a defect):
   outside-press close/consume + dead-cell rule on the catcher, the NovaMnuMenu single-open
   registry, and close-on-screen-change/exit/hide. `godot/engine/mnu/nova_mnu_combo.cpp`,
   `nova_mnu_menu.cpp`.
-- **D-MNU-12 (popup draw order — host mapping):** the original has NO overlay draw pass —
+- **D-MNU-12 (popup draw order — reimpl mapping):** the original has NO overlay draw pass —
   the open list draws at its tree position (`CComboWnd_Render @ 0x65bfd0` child walk ->
   `CListWnd_DrawItems @ 0x643f30`), so a later sibling would paint over an open list; the
   shipped menus author every dropdown rect into empty space below/beside the widgets
   (all three `player.mnu` lists share `(0,65)-(214,306)` parent-space), which makes draw
   order unobservable in retail content. The reimpl draws the popup in the menu-top
-  overlay because that same node is the input-exclusivity host — for retail menus the
+  overlay because that same node is the input-exclusivity owner — for retail menus the
   result is pixel-equivalent; only a hypothetical mod authoring a dropdown rect over a
   later sibling would see the list above it in the reimpl but below in retail. Kept: the
-  overlay is the correct Godot host for the witnessed input model, which is the
+  overlay is the correct Godot home for the witnessed input model, which is the
   observable contract.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
@@ -656,7 +656,7 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.
 - Real 3D globe and CBIN credits custom-resource font/image resolution remain
-  separate render/data-host work (D-MNU-6 covers the latter).
+  separate render/data-supply work (D-MNU-6 covers the latter).
 
 ---
 
@@ -675,7 +675,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 
 | Original | OpenNova |
 |---|---|
-| `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/menu_shell.gd` |
+| `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/nova_menu_shell.gd` |
 | `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `libs/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless editor model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
@@ -693,7 +693,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `build_combo` `set_popup_rect(list_box.position)` — `godot/engine/mnu/nova_mnu_builder.cpp` (D-MNU-7) |
 | `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> `build_container` gates `add_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
-| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` / `mnu_canvas.gd` |
+| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` / `mnu_canvas.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
 | `CUIElement_DrawStretchedTexture @ 0x647d40` | `apply_position` texture-into-rect; the scaled-rect int truncation is D-MNU-4 |
 | `CWnd_AccumulateAncestorOffset @ 0x6465e0` (was `sub_6465E0`) | Godot parent-child nesting (positions are parent-relative) |
@@ -701,31 +701,31 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
 | `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | the catcher overlay owning all input while a dropdown is open — `NovaMnuCombo::open_popup` (D-MNU-11) |
-| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot host has no per-frame pump) |
+| `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot reimpl has no per-frame pump) |
 | `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | the overlay makes non-popup widgets unpickable; `NovaMnuCombo` closes on lost tree visibility |
 | `combobox_handle_event @ 0x65c190` (toggle `0x3000001`; single-open `@ 0x65c210`; outside-press close `@ 0x65c261`; `LISTBOX_WND` `0x5000001` pick `@ 0x65c2fd`) | `NovaMnuCombo::on_overlay_gui_input` + `on_row_pressed` + `NovaMnuMenu::register_open_combo` (D-MNU-11) |
 | `CWnd_SetShown @ 0x6480e0` (shown flag `+224`; popup flag `+660` registers `g_ui_open_popup_wnd`; was `sub_6480E0`) | popup lifecycle = overlay spawn/free in `open_popup`/`close_popup` |
 | `CUIScene_SelectNodeByName @ 0x63b6b0` (screen switch clears the popup + capture globals `@ 0x63b6b8/0x63b7c4`) | `NovaMnuMenu::show_screen`/`set_current_screen`/`clear` -> `close_active_combo_popup` |
-| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — host code / not grillable |
-| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — host code / not grillable |
-| `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — host code / not grillable |
-| `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — host code / not grillable |
+| `dispatch_mouse_event_to_children @ 0x647900` (active-combo priority peek `@ 0x647917`; press-capture bypass `@ 0x647932`) + `widget_process_mouse_event @ 0x647a00` (reverse child walk; per-frame claim `scene+16`) | Godot viewport GUI picking (reverse tree order) — reimpl code / not grillable |
+| `CButtonWnd_HandleNamedEvent @ 0x658340` (press sets `g_ui_mouse_capture_wnd` `@ 0x65839c`, release clears `@ 0x6583ed`; pressed-texture swap; was `sub_658340`) | Godot `BaseButton` press capture — reimpl code / not grillable |
+| `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
+| `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
-| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `nova_menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `libs/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
-| `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
+| `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) | `build_table` — `nova_mnu_builder.cpp` (id lookup + body justify + authored scrollbar) + `NovaMnuTable` |
 | `NovaControlsModel` (Godot wrapper) | `godot/engine/mnu/nova_controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
-| `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuHost._populate_classes` |
-| `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuHost._resolve_selected_class` + select-by-value |
-| `populate_three_category_lists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuHost._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
-| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuHost._update_weight` (witnessed format + encumbrance bands; D-MNU-9 on the ammo model) |
-| `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuHost._on_accept/_on_cancel` -> the shell's SP apply |
+| `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |
+| `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuCompanion._resolve_selected_class` + select-by-value |
+| `populate_three_category_lists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuCompanion._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
+| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuCompanion._update_weight` (witnessed format + encumbrance bands; D-MNU-9 on the ammo model) |
+| `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuCompanion._on_accept/_on_cancel` -> the shell's SP apply |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
 CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `CUIScene_GetActiveScreenName ->
@@ -788,7 +788,7 @@ round-tripped by `libs/mnu`.
 The in-match loadout UI is **weapon.mnu's WEAPON screen** (a boot resource of the
 game.mnu family) — NOT the loadout.mnu/LOADOUT screen found in some extracts, which
 retail `Jointops.exe` never references (no `loadout` string exists in the image).
-Reimpl: `ArmoryMenuHost` (companion) + the shell armory key +
+Reimpl: `ArmoryMenuCompanion` (companion) + the shell armory key +
 `NovaSimulation.apply_local_player_loadout`; GUT `armory_menu_seam_test.gd`.
 
 **Open paths (three, all -> `UI_OpenMenuScreen("weapon.mnu", "WEAPON", 0)
@@ -833,9 +833,9 @@ the on-show clears then re-adds them on the ACCEPT control
 key doubles as ACCEPT while the screen is up. The opener press must RELEASE
 once first: the open stamps `g_weaponScreenOpenDebounce` `[orig: @ 0x4e0b21]`
 and only the row's KEYUP clears it (`Input_HandleMenuKeyRelease @ 0x4de2d0`).
-PORTED 2026-07-11 (the weapon round): `ArmoryMenuHost.accept_hotkey_edge`
+PORTED 2026-07-11 (the weapon round): `ArmoryMenuCompanion.accept_hotkey_edge`
 (armed-on-release debounce; `on_menu_built` = the on-show stamp) routed by
-`NovaArmoryHost._unhandled_key_input` while the overlay is open.
+`NovaArmoryPresenter._unhandled_key_input` while the overlay is open.
 
 **Control registration** `[orig: WeaponDef_RegisterUICallbacks @ 0x567020 —
 (screen "WEAPON", control, kind, handler, arg) via the shared registrar
@@ -922,10 +922,10 @@ item_availability promote; values in net-re §5.63), the witnessed weight
 format, and the offline ACCEPT collect/apply seam — now the full multi-slot
 kit into the sim's slot pool with requested-ammo pool fills (net-re §5.63).
 The standalone game's `GameWorld` exposes its lazily loaded weapon catalog to
-the armory host, so this canonical reselect also runs on the first production
-visit (fixed 2026-07-21 after the unit proxy had masked the missing host seam).
+the armory companion, so this canonical reselect also runs on the first production
+visit (fixed 2026-07-21 after the unit proxy had masked the missing shell seam).
 Kept divergence: **D-MNU-9**. Deferred (unported sub-elements, tracked here +
-in `ArmoryMenuHost`'s header): the per-class loadout buffer MEMORY
+in `ArmoryMenuCompanion`'s header): the per-class loadout buffer MEMORY
 (save-on-flip + remembered ammo counts), live MP C2S 0x2F / S2C 0x5A
 submission (the UI stays gated in a network session until that authoritative
 path is exposed; the S2C 0x66/admin availability writers ride it), MP class

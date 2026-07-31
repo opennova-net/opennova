@@ -68,7 +68,7 @@ var _has_trace_stats_sampling := false
 var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
-# Stable mission identity for host-neutral diagnostics such as the F3 overlay.
+# Stable mission identity for shell-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
 var _mission_name := ""
 var _setup_error := OK

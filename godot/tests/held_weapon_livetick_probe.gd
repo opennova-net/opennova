@@ -51,8 +51,8 @@ func _run() -> void:
 
 	var placer := MissionObjectPlacer.new()
 	placer.resource_root = res
-	var host := Node3D.new()
-	get_root().add_child(host)
+	var mount := Node3D.new()
+	get_root().add_child(mount)
 
 	var picked: Array = []
 	var seen := {}
@@ -70,7 +70,7 @@ func _run() -> void:
 
 	var models: Array = []
 	for row in picked:
-		var m: Node3D = placer.build_model_from_graphic(String(row[1]), "", host, "", null)
+		var m: Node3D = placer.build_model_from_graphic(String(row[1]), "", mount, "", null)
 		if m == null:
 			print("  %-18s gfx3=%-14s <no model built>" % [row[0], row[1]])
 			continue

@@ -337,7 +337,7 @@ func test_blueprint_builds_nodes_from_model() -> void:
 	await get_tree().process_frame
 
 	var graph := _find_graphedit(screen)
-	assert_not_null(graph, "The blueprint screen should host a GraphEdit.")
+	assert_not_null(graph, "The blueprint screen should hold a GraphEdit.")
 	var node_count := 0
 	for child in graph.get_children():
 		if child is GraphNode:

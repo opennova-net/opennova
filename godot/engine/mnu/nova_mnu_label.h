@@ -8,7 +8,7 @@ namespace godot {
 
 // A menu text label (port of mnu_label.gd). The builder resolves the RTXT
 // string at build time, so at runtime this mostly carries its string_id so the
-// editor can address it and a host can re-resolve text after swapping the text
+// editor can address it and a shell can re-resolve text after swapping the text
 // resource. Used both as a standalone Static/Label widget's text node and as the
 // "Label" child of buttons/checkboxes.
 class NovaMnuLabel : public Label {

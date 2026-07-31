@@ -9,7 +9,7 @@ extends PanelContainer
 # gamemus Begin's) are explained by the dispatch divider instead, not here.
 #
 # Editable mode renders each name as a LineEdit: committing one reports
-# through on_rename (the host persists it in the .music_profile.json sidecar;
+# through on_rename (the mount persists it in the .music_profile.json sidecar;
 # display-only -- the script keeps its l_N tokens).
 
 const MusDisplayNames = preload("res://modtools/music/mus_display_names.gd")

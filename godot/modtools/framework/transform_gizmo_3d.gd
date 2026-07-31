@@ -6,24 +6,24 @@ extends Node3D
 # An ImGuizmo-style "universal" gizmo: three world-aligned translate arrows (X/Y/Z) and
 # three rotate rings (one per authored angle component). It owns only geometry,
 # screen-space hit-testing, and PURE drag-delta math -- it knows nothing about any
-# document. The host picks a handle, feeds mouse rays in, and applies the returned
-# delta through its own commit spine; selection/picking stays host policy (mission
+# document. The owner picks a handle, feeds mouse rays in, and applies the returned
+# delta through its own commit spine; selection/picking stays owner policy (mission
 # keeps its physics-pick bodies, see editor-runtime parity rule 3: editor interaction
 # attaches AROUND shared nodes).
 #
-# Rotation frame: the host's authored angles may be nested in an euler convention with
+# Rotation frame: the owner's authored angles may be nested in an euler convention with
 # no closed-form inverse (mission's bms_to_godot_basis is
 # RotY(90-yaw)*RotZ(pitch)*RotX(roll)*RotY(90)), so each ring's world rotation axis is
 # derived numerically (finite difference) from the current authored degrees through the
 # injected `basis_builder` -- see _compute_ring_axes. A ring drag maps its swept angle
-# back to a delta on exactly that one authored component, so the host's commit path
+# back to a delta on exactly that one authored component, so the owner's commit path
 # needs no new code. The default builder is a plain euler Basis (authored X/Y/Z degrees
 # about the world axes).
 #
 # Constant on-screen size: _process scales the node by camera distance, so the gizmo stays
 # a roughly fixed pixel size. Geometry constants below are in BASE units (pre-scale).
 
-# authored degrees (Vector3) -> Basis. Hosts with a domain rotation convention inject
+# authored degrees (Vector3) -> Basis. Owners with a domain rotation convention inject
 # theirs (mission: MissionObjectPlacer.bms_to_godot_basis); unset falls back to the
 # plain euler default.
 var basis_builder: Callable = Callable()

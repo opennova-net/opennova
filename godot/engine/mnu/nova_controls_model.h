@@ -8,7 +8,7 @@
 namespace godot {
 
 // Thin GDScript-facing wrapper over the portable libs/controls catalog. Hands the
-// menu host the Class/Action/Control rows for the Options -> Controls (CONTROL_MAPPING)
+// menu shell the Class/Action/Control rows for the Options -> Controls (CONTROL_MAPPING)
 // table, per input device. Read-only: rebinding/persistence are not modelled here.
 // The engine logic (catalog, key-name decode, binding format) lives in libs/controls
 // [orig: UI_PopulateControlMappingList @ 0x55c0c0].

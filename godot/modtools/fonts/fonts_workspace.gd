@@ -46,8 +46,8 @@ func get_status_context() -> String:
 	]
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	if _editor == null:
 		_editor = FntEditorScript.new()
@@ -55,12 +55,12 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if _editor.get_parent() == null:
-		host.add_child(_editor)
+		mount.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_editor.set_document(_document)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _editor != null and _editor.get_parent() != null:
 		_editor.get_parent().remove_child(_editor)
 
@@ -78,11 +78,11 @@ func release_viewport() -> void:
 		_editor = null
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	if _inspector_root != null and is_instance_valid(_inspector_root):
 		_inspector_root.queue_free()
 	_inspector_root = _make_inspector()
-	host.add_child(_inspector_root)
+	mount.add_child(_inspector_root)
 	_populate_inspector()
 	if not _document.state_changed.is_connected(_populate_inspector):
 		_document.state_changed.connect(_populate_inspector)
@@ -115,7 +115,7 @@ func _make_inspector() -> Control:
 	meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(meta_label)
 
-	# "Used by" rides the shell's reference index; headless hosts get no strip.
+	# "Used by" rides the shell's reference index; headless owners get no strip.
 	var services := get_reference_services()
 	if services != null:
 		var strip := ReferenceStrip.new()

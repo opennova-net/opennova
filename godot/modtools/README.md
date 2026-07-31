@@ -1,12 +1,12 @@
 # OpenNova Editor (ONED)
 
-The OpenNova Editor (ONED) is the authoring side of OpenNova: a Godot-hosted,
+The OpenNova Editor (ONED) is the authoring side of OpenNova: a Godot-based,
 code-first editor for NovaLogic Joint Operations (JO) and newer game data. Each
 kind of asset gets its own *workspace*, and every workspace reads and writes the
 game's canonical formats directly. Everything here is pre-1.0 and under active
 development.
 
-OpenNova reimplements the NovaLogic engine on a Godot host; ONED is where you author
+OpenNova reimplements the NovaLogic engine on a Godot-based runtime; ONED is where you author
 the data that engine runs. See [GOALS.md](../../GOALS.md) for the project vision.
 
 This folder holds the editor shell, the workspace framework, and one subfolder
@@ -179,7 +179,7 @@ Settings on shared machines. The Environment workspace's time-of-day remains
 an authoring control; while Mission is active, its preview uses the BMS
 `start_time` without mutating the saveable `.env` document.
 
-Code: transport/protocol core in `godot/engine/mcp/` (host-agnostic), ONED
+Code: transport/protocol core in `godot/engine/mcp/` (shell-agnostic), ONED
 tool catalog + service in `mcp/` (`editor_mcp_tools.gd` editor-wide,
 `editor_mcp_mission_tools.gd` mission authoring).
 

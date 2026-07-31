@@ -1,7 +1,7 @@
 extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
-const ArmoryHost := preload("res://engine/world/armory_host.gd")
+const ArmoryPresenter := preload("res://engine/world/armory_presenter.gd")
 
 
 func after_each() -> void:
@@ -498,7 +498,7 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 
 func test_tick_gates_the_runtime_on_its_transport() -> void:
-	# The game host's tick must respect MissionRuntime's play flag - the debug
+	# The game shell's tick must respect MissionRuntime's play flag - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
 	# (before it, play()/pause() were inert in the game).
 	var world := _make_world()
@@ -511,7 +511,7 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 	assert_eq(runtime.ticks, 0, "a paused runtime never ticks")
 	runtime.play()
 	world.tick(Vector3.ZERO)
-	assert_eq(runtime.ticks, 1, "a playing runtime ticks once per host frame")
+	assert_eq(runtime.ticks, 1, "a playing runtime ticks once per render frame")
 	runtime.pause()
 	world.tick(Vector3.ZERO)
 	assert_eq(runtime.ticks, 1, "pausing stops it again")
@@ -683,12 +683,12 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	water.water_height = 10.0
 	assert_true(water.is_water_active(), "the authored height remains retained")
 	assert_false(water.is_water_render_active(),
-		"the packaged host keeps retained water out of rendering before a load")
+		"the packaged shell keeps retained water out of rendering before a load")
 	assert_false(world.is_water_render_active(),
 		"frame clear and occlusion use the lifecycle-aware water predicate")
-	water.set_host_rendering_enabled(true)
+	water.set_world_rendering_enabled(true)
 	assert_true(world.is_water_render_active())
-	water.set_host_rendering_enabled(false)
+	water.set_world_rendering_enabled(false)
 
 
 func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
@@ -810,7 +810,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
 	assert_true(world.has_method("get_weapon_database"),
-		"the production world exposes the same weapon database seam ArmoryHost consumes")
+		"the production world exposes the same weapon database seam ArmoryPresenter consumes")
 	if not world.has_method("get_weapon_database"):
 		return
 	var weapons := world.call("get_weapon_database") as NovaWeaponDatabase
@@ -833,10 +833,10 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
-	var host := ArmoryHost.new()
-	add_child_autofree(host)
-	host.setup(armory_world, null, overlay)
-	assert_true(host.try_open(), "the production world catalog reaches first armory open")
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(armory_world, null, overlay)
+	assert_true(presenter.try_open(), "the production world catalog reaches first armory open")
 	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
 	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
 	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
@@ -976,7 +976,7 @@ func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> v
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]. Pin the packaged scene's
 	# mirror cull_mask so first-person arms can never leak back into the
 	# reflection (and the FP-mode body, parked on the reflection-only layer by
-	# LocalPlayerHost, always renders in it).
+	# LocalPlayerPresenter, always renders in it).
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
@@ -1081,7 +1081,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.unload()
 
 
-func _hosted_weather_state_after(deltas: Array) -> Array:
+func _world_driven_weather_state_after(deltas: Array) -> Array:
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
@@ -1125,9 +1125,9 @@ func _hosted_weather_state_after(deltas: Array) -> Array:
 	return state
 
 
-func test_hosted_weather_is_invariant_to_render_batching() -> void:
-	var slow: Array = await _hosted_weather_state_after([0.128])
-	var split: Array = await _hosted_weather_state_after([
+func test_world_driven_weather_is_invariant_to_render_batching() -> void:
+	var slow: Array = await _world_driven_weather_state_after([0.128])
+	var split: Array = await _world_driven_weather_state_after([
 		0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016,
 	])
 	assert_eq(slow, split,
@@ -1142,7 +1142,7 @@ func test_hosted_weather_is_invariant_to_render_batching() -> void:
 	expected_seven.free()
 
 	var eighth_delta := 8.0 / GameWorld.WEATHER_TICK_HZ - 0.128 + 0.000001
-	var boundary: Array = await _hosted_weather_state_after([0.128, eighth_delta])
+	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
 	var expected_eight := NovaEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)
 	expected_eight.advance_mission_clock(8)

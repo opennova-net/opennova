@@ -82,7 +82,7 @@ void NovaMnuMenu::set_music_director(NovaMusicDirector *p_director) {
 	if (music_director_ == p_director) {
 		return;
 	}
-	// The menu does not own the director; track its tree_exiting so a host that
+	// The menu does not own the director; track its tree_exiting so a shell that
 	// frees it cannot leave us with a dangling pointer to deref on the next
 	// screen change.
 	const Callable cb = callable_mp(this, &NovaMnuMenu::on_director_exiting);
@@ -188,7 +188,7 @@ void NovaMnuMenu::build() {
 
 	const mnu::Document &doc = menu_->get_native();
 	// A menu can name a different RTXT table on each screen. Keep the explicit
-	// host-provided resource as the fallback, but resolve each declared table
+	// shell-provided resource as the fallback, but resolve each declared table
 	// through the resource root for the duration of that screen build.
 	std::map<std::string, Ref<RtxtStringFile>> screen_text_cache;
 	// get_screen_ids()[i] aligns with doc.screens[i] (both built in the same order by
@@ -339,8 +339,8 @@ bool NovaMnuMenu::navigate_to_screen(const String &p_name) {
 
 bool NovaMnuMenu::pop_screen() {
 	if (nav_stack_.is_empty()) {
-		// Popping past the root is a host-level back/quit; in the interactive preview
-		// there is no host, so it is a silent no-op rather than a quit.
+		// Popping past the root is a shell-level back/quit; in the interactive preview
+		// there is no shell, so it is a silent no-op rather than a quit.
 		if (!interactive_) {
 			emit_signal("quit_requested");
 		}
@@ -491,7 +491,7 @@ Node *NovaMnuMenu::find_hotkey_target(Node *p_node, const String &p_key,
 
 // Activates a hotkey target through the same signal path as a pointer click.
 // A match is consumed even without an authored ACTION because actionless named
-// controls are the retail Command seam wired by their host.
+// controls are the retail Command seam wired by their shell.
 bool NovaMnuMenu::trigger_hotkey_target(Node *p_target) {
 	BaseButton *button = Object::cast_to<BaseButton>(p_target);
 	if (button != nullptr) {
@@ -570,7 +570,7 @@ bool NovaMnuMenu::handle_key_input(const Ref<InputEventKey> &p_key) {
 		return true;
 	}
 	char32_t codepoint = p_key->get_unicode();
-	// Synthetic InputEventKey instances used by hosts/tests often omit unicode.
+	// Synthetic InputEventKey instances used by shells/tests often omit unicode.
 	// Godot's printable Key constants are ASCII-compatible, so fill that narrow
 	// gap while real IME/non-ASCII input continues through get_unicode().
 	const uint32_t raw_keycode = static_cast<uint32_t>(p_key->get_keycode());
@@ -600,7 +600,7 @@ bool NovaMnuMenu::dispatch_action(const String &p_type, const String &p_target,
 bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
 	emit_signal("action_dispatched", p_action.type, p_action.target);
 	const String type = p_action.type.to_lower();
-	auto make_host_payload = [&p_action]() {
+	auto make_shell_payload = [&p_action]() {
 		Dictionary payload;
 		payload["target"] = p_action.target;
 		payload["file"] = p_action.file;
@@ -627,7 +627,7 @@ bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
 				(!menu_file_.is_empty() && p_action.file.nocasecmp_to(menu_file_) == 0)) {
 			return navigate_to_screen(p_action.target);
 		}
-		// Cross-.mnu jumps are host policy; the interactive preview has no host to load
+		// Cross-.mnu jumps are shell policy; the interactive preview has no shell to load
 		// another file, so the jump is consumed as a no-op instead of escaping.
 		if (interactive_) {
 			return true;
@@ -639,7 +639,7 @@ bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
 		return pop_screen();
 	}
 	if (type == "quit" || type == "quit_game") {
-		// Must not bubble out of the editor's interactive preview to the host.
+		// Must not bubble out of the editor's interactive preview to the shell.
 		if (interactive_) {
 			return true;
 		}
@@ -647,15 +647,15 @@ bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
 		return true;
 	}
 	if (type == "url") {
-		// type="URL" actions (shipped menus' website/buy buttons) are host policy:
+		// type="URL" actions (shipped menus' website/buy buttons) are shell policy:
 		// the runtime opens them externally. EXTERNAL_BROWSER is preserved on the
-		// model for round-trip; the runtime always routes URLs to the host. The
+		// model for round-trip; the runtime always routes URLs to the shell. The
 		// interactive preview swallows them so an authoring click never opens a browser.
 		if (interactive_) {
 			return true;
 		}
 		emit_signal("url_requested", p_action.target);
-		emit_signal("host_action_requested", p_action.type, make_host_payload());
+		emit_signal("shell_action_requested", p_action.type, make_shell_payload());
 		return true;
 	}
 	if (type == "tab") {
@@ -680,16 +680,16 @@ bool NovaMnuMenu::dispatch_widget_action(const MnuActionData &p_action) {
 		return true;
 	}
 	// The remaining retail ACTION codes are owned by form submission,
-	// multiplayer-browser, LAN, app-message, focus/capture, or MNX hosts. The
+	// multiplayer-browser, LAN, app-message, focus/capture, or MNX shells. The
 	// generic menu preserves and reports them but never invents their effects.
-	const bool host_owned = type == "form_post" || type == "glb_load" ||
+	const bool shell_owned = type == "form_post" || type == "glb_load" ||
 			type == "glb_loadandping" || type == "glb_filter" ||
 			type == "glb_filter_num" || type == "glb_ping" ||
 			type == "glb_join" || type == "appmsg" ||
 			type == "lan_search" || type == "lan_join" || type == "mnx";
-	if (host_owned) {
+	if (shell_owned) {
 		if (!interactive_) {
-			emit_signal("host_action_requested", p_action.type, make_host_payload());
+			emit_signal("shell_action_requested", p_action.type, make_shell_payload());
 		}
 		return true;
 	}
@@ -727,7 +727,7 @@ void NovaMnuMenu::play_widget_sound(const String &p_trigger, const String &p_fil
 	int bank_id = 0;
 	Ref<NovaLwfData> bank = resolve_sound_bank(p_file, bank_id);
 	if (bank.is_null() && sound_profile_.is_valid()) {
-		// Authoring fallback: the host profile services file-less or unresolved
+		// Authoring fallback: the shell profile services file-less or unresolved
 		// <SOUND> nodes (the original fails the element parse / stays silent).
 		bank = sound_profile_;
 		bank_id = 0;
@@ -779,7 +779,7 @@ bool NovaMnuMenu::play_lwf_set(const Ref<NovaLwfData> &p_bank, int p_bank_id, co
 		// Set-level pitch composes multiplicatively with the member pitch
 		// (Q16; 0xFFFF ~ 1.0) [orig: (member * set) >> 16 @ 0x75c0be]. The
 		// per-play pitch/volume jitter draws are not reproduced (same accepted
-		// divergence as the mission sound host; see docs/audio/lwf-dbf-sound-re.md).
+		// divergence as the mission sound owner; see docs/audio/lwf-dbf-sound-re.md).
 		const double set_pitch = double((int64_t)set_d.get("pitch_base", 0xFFFF)) / 65536.0;
 		const Array layers = set_d.get("layers", Array());
 		bool played = false;
@@ -978,7 +978,7 @@ void NovaMnuMenu::_bind_methods() {
 			PropertyInfo(Variant::STRING, "trigger")));
 	ADD_SIGNAL(MethodInfo("action_dispatched", PropertyInfo(Variant::STRING, "type"),
 			PropertyInfo(Variant::STRING, "target")));
-	ADD_SIGNAL(MethodInfo("host_action_requested", PropertyInfo(Variant::STRING, "type"),
+	ADD_SIGNAL(MethodInfo("shell_action_requested", PropertyInfo(Variant::STRING, "type"),
 			PropertyInfo(Variant::DICTIONARY, "action")));
 	ADD_SIGNAL(MethodInfo("widget_value_changed", PropertyInfo(Variant::STRING, "widget_name"),
 			PropertyInfo(Variant::STRING, "kind"), PropertyInfo(Variant::INT, "index"),

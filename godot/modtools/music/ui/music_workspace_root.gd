@@ -13,7 +13,7 @@ extends Control
 signal workflow_requested(workflow_id: int)
 
 ## Relayed panel failures (Bank WAV import/replace); the workspace turns these
-## into shell toasts. Standalone scene hosts (tests) can just ignore it.
+## into shell toasts. Standalone scene owners (tests) can just ignore it.
 signal error_reported(message: String)
 
 var _document: RefCounted   # MusicEditorDocument

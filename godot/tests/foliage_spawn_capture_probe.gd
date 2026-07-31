@@ -108,7 +108,7 @@ func _ready() -> void:
 		_fail("game viewport unavailable")
 		return
 
-	# Freeze the real game-loop host. Rendering stays live, while the player,
+	# Freeze the real game loop. Rendering stays live, while the player,
 	# camera, mission clock, and foliage dispatch stay bit-identical for the A/B.
 	world.process_mode = Node.PROCESS_MODE_DISABLED
 	var dispatcher = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
@@ -196,7 +196,7 @@ static func runtime_foliage_validation_error(
 	var detail_instances := int(frame_stats.get("detail_high_instances", 0)) \
 		+ int(frame_stats.get("detail_low_instances", 0))
 	if detail_instances <= 0:
-		return "00TRe exact spawn produced no hosted detail foliage instances"
+		return "00TRe exact spawn produced no live detail foliage instances"
 	if total_instances <= 0:
 		return "00TRe exact spawn produced no dispatcher foliage instances"
 	return ""

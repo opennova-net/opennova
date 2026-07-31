@@ -193,7 +193,7 @@ func test_canvas_builds_inert_preview_with_single_screen() -> void:
 	await get_tree().process_frame
 
 	var preview := canvas.get_node_or_null("Preview")
-	assert_not_null(preview, "Canvas hosts a NovaMnuMenu preview.")
+	assert_not_null(preview, "Canvas holds a NovaMnuMenu preview.")
 	assert_true(preview is NovaMnuMenu, "Preview is a NovaMnuMenu.")
 	assert_true(preview.get_edit_mode(), "Preview is in edit_mode (inert: no nav/audio/cursor).")
 
@@ -243,7 +243,7 @@ func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
 	await get_tree().process_frame
 
 	var preview := ed._canvas.get_node_or_null("Preview") as NovaMnuMenu
-	assert_not_null(preview, "Editor canvas should host a NovaMnuMenu preview.")
+	assert_not_null(preview, "Editor canvas should mount a NovaMnuMenu preview.")
 	if preview == null:
 		return
 	var sheet := preview.get_stylesheet()
@@ -372,25 +372,25 @@ func test_workspace_adapter_actions_and_inspector() -> void:
 	assert_eq(ws.get_project_title(), "widgets", "Title shows the loaded basename.")
 	assert_string_contains(ws.get_status_context(), "2 screen", "Status summarizes the screen count.")
 
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
-	assert_gt(host.get_child_count(), 0, "Adapter mounts the editor in the viewport.")
+	assert_gt(mount.get_child_count(), 0, "Adapter mounts the editor in the viewport.")
 
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	ws.build_inspector(inspector_host)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
-	assert_gt(inspector_host.get_child_count(), 0, "Adapter mounts the property inspector.")
-	assert_string_contains(_collect_text(inspector_host), "MAIN",
+	assert_gt(inspector_mount.get_child_count(), 0, "Adapter mounts the property inspector.")
+	assert_string_contains(_collect_text(inspector_mount), "MAIN",
 		"Inspector shows the default-selected first screen.")
 
 	var start_id := _first_root_child(ws._document.resource, 1)
 	ws._on_widget_selected(start_id)
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "StartBtn",
+	assert_string_contains(_collect_text(inspector_mount), "StartBtn",
 		"Selecting a widget updates the right-dock inspector.")
 
 
@@ -451,25 +451,25 @@ func test_adapter_save_predicates() -> void:
 func test_adapter_remount_reuses_single_editor() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
 
-	ws.mount_viewport(host)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	var ed = ws._editor
-	# The merged workspace mounts two editors into the viewport host: the menu
+	# The merged workspace mounts two editors into the viewport mount: the menu
 	# editor (visible) and the Mns editor (parked invisible until build_inspector
 	# reparents it into the Styles tab).
-	assert_eq(host.get_child_count(), 2, "Menu editor and parked Mns editor mount once each.")
+	assert_eq(mount.get_child_count(), 2, "Menu editor and parked Mns editor mount once each.")
 
-	ws.unmount_viewport(host)
-	assert_eq(host.get_child_count(), 0, "Unmount removes both editors without freeing them.")
+	ws.unmount_viewport(mount)
+	assert_eq(mount.get_child_count(), 0, "Unmount removes both editors without freeing them.")
 
-	ws.mount_viewport(host)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	assert_same(ws._editor, ed, "Remount reuses the same editor instance.")
-	assert_eq(host.get_child_count(), 2, "Both editors re-parent exactly once.")
+	assert_eq(mount.get_child_count(), 2, "Both editors re-parent exactly once.")
 	assert_eq(ed.widget_selected.get_connections().size(), 1,
 		"widget_selected stays connected once, not re-connected on remount.")
 
@@ -477,20 +477,20 @@ func test_adapter_remount_reuses_single_editor() -> void:
 func test_adapter_release_viewport_tears_down() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	ws.mount_viewport(mount)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 
 	ws.release_viewport()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_eq(host.get_child_count(), 0, "release_viewport frees the editor.")
-	assert_eq(inspector_host.get_child_count(), 0, "release_viewport frees the inspector.")
+	assert_eq(mount.get_child_count(), 0, "release_viewport frees the editor.")
+	assert_eq(inspector_mount.get_child_count(), 0, "release_viewport frees the inspector.")
 	assert_null(ws._editor, "release_viewport nulls the editor reference.")
 	assert_null(ws._inspector, "release_viewport nulls the inspector reference.")
 
@@ -507,10 +507,10 @@ func test_adapter_status_reports_unresolved_assets() -> void:
 	assert_false(ws.get_status_context().contains("unresolved"),
 		"No unresolved tail before mount (the editor-null guard).")
 
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	# With no resource root the fixture's .tga textures cannot resolve.
 	assert_gt(ws._editor.get_unresolved_asset_count(), 0,
@@ -522,24 +522,24 @@ func test_adapter_status_reports_unresolved_assets() -> void:
 func test_inspector_resyncs_to_first_screen_after_reload() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	ws.mount_viewport(mount)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 
 	# Push a widget selection, then reload the document.
 	ws._on_widget_selected(_first_root_child(ws._document.resource, 1))
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "StartBtn", "Inspector shows the selection.")
+	assert_string_contains(_collect_text(inspector_mount), "StartBtn", "Inspector shows the selection.")
 
 	assert_eq(ws._document.open_mnu(FIXTURE), OK)
 	await get_tree().process_frame
 	# The editor resets to the first screen on reload and pushes it to the inspector.
-	assert_string_contains(_collect_text(inspector_host), "MAIN",
+	assert_string_contains(_collect_text(inspector_mount), "MAIN",
 		"Inspector resyncs to the first screen after a document reload.")
 
 
@@ -688,10 +688,10 @@ func test_editor_apply_edit_noop_when_unchanged() -> void:
 func test_editor_rect_edit_round_trips_through_save() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	var start_id := _first_root_child(ws._document.resource, 1)
@@ -762,10 +762,10 @@ func test_adapter_delegates_undo_redo() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_false(ws.can_undo(), "No editor yet -> nothing to undo.")
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	var start_id := _first_root_child(ws._document.resource, 1)
@@ -1052,10 +1052,10 @@ func test_editor_delete_last_screen_refused() -> void:
 func test_struct_edit_then_save_reload_roundtrip() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
@@ -1176,10 +1176,10 @@ func test_editor_item_field_edit_keeps_selection_and_undo() -> void:
 func test_editor_combo_item_add_round_trips_through_save() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(ALL_WIDGETS), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var combo := _widget_named(doc, "ServerList")
@@ -1287,10 +1287,10 @@ func test_inspector_renders_action_rows() -> void:
 func test_editor_add_color_slot_persists_through_save_and_undo() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var root := _main_root(doc)
@@ -1319,10 +1319,10 @@ func test_editor_add_color_slot_persists_through_save_and_undo() -> void:
 func test_editor_table_subst_edit_and_round_trip() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(ALL_WIDGETS), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var table := _widget_named(doc, "MissionTable")
@@ -1418,20 +1418,20 @@ func test_inspector_show_selection_summary() -> void:
 func test_adapter_routes_multi_selection_to_inspector() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
 	assert_eq(ws.open_file(FIXTURE), OK)
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	ws.mount_viewport(mount)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var a := _first_root_child(doc, 1)
 	var b := _first_root_child(doc, 0)
 	ws._editor.select_widgets(PackedInt32Array([a, b]))
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "2 widgets selected",
+	assert_string_contains(_collect_text(inspector_mount), "2 widgets selected",
 		"A multi-selection routes to the inspector summary through the adapter.")
 
 
@@ -1701,10 +1701,10 @@ func test_reopening_a_clean_tab_reloads_from_disk() -> void:
 	# An externally rewritten file (another tool, a hand edit) must not be
 	# shadowed by a stale clean tab; unsaved edits still win.
 	var ws = autofree(MnuWorkspaceScript.new())
-	var host := Control.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 600)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	var dir := OS.get_cache_dir().path_join("opennova_mnu_reload_test")
@@ -1884,10 +1884,10 @@ func test_musicvar_presence_zero_is_undoable_without_destroying_value() -> void:
 
 func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
 	var ws = MnuWorkspaceScript.new()
-	var host := Control.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	ws.mount_viewport(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 600)
+	add_child_autofree(mount)
+	ws.mount_viewport(mount)
 	assert_eq(ws.open_file(FIXTURE), OK)
 	var dock := Control.new()
 	add_child_autofree(dock)

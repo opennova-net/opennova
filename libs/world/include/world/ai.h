@@ -285,14 +285,14 @@ struct AiEntity {
     // [orig: selector @0x4ba10f / @0x4b6d99]
     uint32_t def_attrib = 0;
 
-    // --- host-fed muzzle seam (D-AI-6) ---
+    // --- embedder-fed muzzle seam (D-AI-6) ---
     // The posed muzzle world position (16.16 fixed, mission frame), pushed once per
-    // frame by the host's present layer: the model's gun-flash userpoint (US01
+    // frame by the embedder's present layer: the model's gun-flash userpoint (US01
     // "GFlash01", SASBODY1 "MFlash01"/"bullet") transformed by the ANIMATED skeleton.
     // [orig: the anim-event fire transforms the fire-bone userpoint by the live pose —
     // Entity_GetAttachmentWorldPosition @0x4b2670 (userpoint local pos x posed bone
     // matrix, model userpoint table @model+0xC0) from the fire block @0x4bf326..0x4bf425;
-    // libs/world carries no skeletal pose, so the host feeds the result back.]
+    // libs/world carries no skeletal pose, so the embedder feeds the result back.]
     // muzzle_tick stamps the world logic tick of the push; the fire pass consumes the
     // value only while FRESH and otherwise falls back to the chest-lift stand-in.
     int32_t muzzle_world[3] = {};
@@ -533,11 +533,11 @@ public:
     AiEntity *for_handle(EntityHandle h);
     int count() const { return static_cast<int>(entities_.size()); }
 
-    // Host muzzle seam (D-AI-6): stamp an entity's posed muzzle world position
+    // Embedder muzzle seam (D-AI-6): stamp an entity's posed muzzle world position
     // (16.16 fixed, mission frame) for the fire pass to consume while fresh.
-    // The host's present layer pushes this each frame from the model's gun-flash
+    // The embedder's present layer pushes this each frame from the model's gun-flash
     // userpoint x the animated skeleton. [orig: Entity_GetAttachmentWorldPosition
-    // @0x4b2670 — computed inline in the original's fire block; ours is host-fed
+    // @0x4b2670 — computed inline in the original's fire block; ours is embedder-fed
     // because libs/world carries no skeletal pose.]
     void set_entity_muzzle(EntityHandle h, const int32_t pos[3], uint32_t logic_tick);
 

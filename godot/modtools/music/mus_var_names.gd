@@ -6,7 +6,7 @@ extends RefCounted
 # Each .bin is its own program, so we can't infer var roles from compiled
 # bytecode in general. For NovaLogic's well-known shipping scripts
 # (gamescript and menuscript, shipped as separate GAMEMUS.BIN / MENUMUS.BIN
-# SCR0 files) the var roles are pinned by the HOST side in Jointops.exe: the
+# SCR0 files) the var roles are pinned by the ENGINE side in Jointops.exe: the
 # game writes each slot via AudioVM_SetVariable @ 0x671FA0, so the (index ->
 # meaning) map is read straight off the call sites (see the per-script comments
 # below). This is corroborated by a hand-annotated menumus decompile from the
@@ -23,7 +23,7 @@ const KNOWN := {
 	# menuscript (menumus.bin):
 	# Var00: documented as "Entry point selector (1-3 all go to Main)"
 	# Var02: the MUSICVAR; current menu screen ID (1=main, 5/6=MP, 8=host,
-	#        9=options, 10=player, 11=SP, 0=error). BINARY-CONFIRMED: the host
+	#        9=options, 10=player, 11=SP, 0=error). BINARY-CONFIRMED: the engine
 	#        writes Var02 from the active menu's MUSICVAR field (the .mnu
 	#        <MUSICVAR> attribute, UIScene+0x14) every screen event.
 	#        Witnessed: Jointops.exe!UI_DispatchScreenEvent @ 0x54E6A0 (store at
@@ -35,7 +35,7 @@ const KNOWN := {
 		2: "MenuScreen",
 		14: "IntroPlayed",
 	},
-	# gamescript (gamemus.bin). The in-game host drives these via
+	# gamescript (gamemus.bin). The in-game shell drives these via
 	# AudioVM_SetVariable(idx, val) @ Jointops.exe!0x671FA0 (g_audiovm_globals[idx]=val):
 	#   - seeded once at mission start: Jointops.exe!Game_StartMission @ 0x524360
 	#     (Var01=dword_A762E0, Var07=100, Var02..06/08..12=0)
@@ -81,7 +81,7 @@ const KNOWN := {
 #   kind "enum"   -> OptionButton; "options" maps the stored int value -> label
 #   kind "int" / no entry -> SpinBox (full int32 range unless min/max given)
 # These are a UI convenience layered over the binary-grounded KNOWN map; the
-# ranges/labels mirror the host-side semantics documented in KNOWN above.
+# ranges/labels mirror the engine-side semantics documented in KNOWN above.
 const META := {
 	"gamescript": {
 		1: {"kind": "bool"},                          # MissionActive: gate flag

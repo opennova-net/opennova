@@ -49,13 +49,13 @@ func test_build_inspector_renders_file_and_counts() -> void:
 	if err != OK:
 		return
 
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.build_inspector(mount)
 	await get_tree().process_frame
 
-	assert_gt(host.get_child_count(), 0, "inspector mounts a child")
-	var box := host.get_child(0).get_node_or_null("Box")
+	assert_gt(mount.get_child_count(), 0, "inspector mounts a child")
+	var box := mount.get_child(0).get_node_or_null("Box")
 	assert_not_null(box, "inspector has a Box VBox")
 	var file_label: Label = box.get_node_or_null("FileLabel") as Label
 	var entries_label: Label = box.get_node_or_null("EntriesLabel") as Label
@@ -70,12 +70,12 @@ func test_inspector_refreshes_on_state_change() -> void:
 	var err = workspace.new_current()
 	assert_eq(err, OK, "new_current should succeed")
 
-	var host := Control.new()
-	add_child_autofree(host)
-	workspace.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	workspace.build_inspector(mount)
 	await get_tree().process_frame
 
-	var entries_label: Label = host.get_child(0).get_node("Box/EntriesLabel") as Label
+	var entries_label: Label = mount.get_child(0).get_node("Box/EntriesLabel") as Label
 	var initial_text := entries_label.text
 
 	# Mutate the resource so state_changed fires.

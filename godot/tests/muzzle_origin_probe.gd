@@ -8,11 +8,11 @@ extends SceneTree
 #   * which userpoint the model's muzzle resolver picks, and on which bone,
 #   * NovaObjectModel.get_muzzle_world_position() (what the mission presenter
 #     feeds NovaSimulation.set_ai_muzzle_world),
-#   * the HEAD bone (LocalPlayerHost.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
+#   * the HEAD bone (LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
 #     player's EYE anchor, and the origin we put on the wire for our own shots,
 #   * bone 16 "BN17 R Hand" — the held-weapon joint,
 #   * the 0.9 u chest-lift fallback (pos.z + 0xE666) the AI fire path uses when no
-#     host-pushed muzzle is fresh,
+#     binding-pushed muzzle is fresh,
 #   * the M4_3RD gfx3's MFLASH01 userpoint carried through
 #     PresentHeldWeapon.attach_transform (both attach frames) — the REAL muzzle of the
 #     gun we actually draw in the hand.
@@ -30,12 +30,12 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const PresentHeldWeapon := preload("res://engine/world/present_held_weapon.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
-const HEAD_BONE_INDEX := 14      # LocalPlayerHost.PLAYER_HEAD_BONE_INDEX
+const HEAD_BONE_INDEX := 14      # LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX
 const HAND_BONE_INDEX := 16      # PresentHeldWeapon.BONE_INDEX
 const FALLBACK_LIFT := 0.9       # 0xE666 in 16.16 — infantry.cpp:1849 / ai.cpp:1194
 
 var _placer
-var _host: Node3D
+var _presenter: Node3D
 var _body: Node3D
 var _skel: Skeleton3D
 var _body_graphic := ""
@@ -66,8 +66,8 @@ func _run() -> void:
 
 	_placer = MissionObjectPlacer.new()
 	_placer.resource_root = res
-	_host = Node3D.new()
-	root.add_child(_host)
+	_presenter = Node3D.new()
+	root.add_child(_presenter)
 	await _frames(2)
 
 	var visual_item := int(_placer.resolve_player_visual_item_id(PLAYER_RUNTIME_TYPE_ID))
@@ -75,7 +75,7 @@ func _run() -> void:
 	print("player runtime type 0x%X -> visual item %d -> graphic '%s'"
 			% [PLAYER_RUNTIME_TYPE_ID, visual_item, _body_graphic])
 
-	_body = _placer.build_player_animated_model(PLAYER_RUNTIME_TYPE_ID, _host, null)
+	_body = _placer.build_player_animated_model(PLAYER_RUNTIME_TYPE_ID, _presenter, null)
 	if _body == null:
 		print("FAIL: the player character model did not build")
 		quit(1)
@@ -118,7 +118,7 @@ func _run() -> void:
 	# ---- 3. the held weapon's userpoints -----------------------------------------
 	print("")
 	print("=== held weapon M4_3RD userpoints ===")
-	var weapon: Node3D = _placer.build_model_from_graphic("M4_3RD", "", _host, "", null)
+	var weapon: Node3D = _placer.build_model_from_graphic("M4_3RD", "", _presenter, "", null)
 	if weapon == null:
 		print("FAIL: M4_3RD did not build")
 		quit(1)

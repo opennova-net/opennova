@@ -64,7 +64,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
 | `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | body entries index-verified vs IDB; full table is 253 entries — body 0–239 + `wpn_*` 240–251 + `EOF` 252 (§14.8.2) | **matching** (body slice) |
 | promote `init_infantry` + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer | **matching** |
-| `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
+| `InfantryRootMotion` (engine binding) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
 | `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
 | WAC VM (`libs/wac`) | `Script_Compile`/`WacScript_ExecuteBytecode` | 0x4f31f0/0x4f58b0 | oracle-extracted ISA + corpus | **matching** (165-cmd table, 0x7A7A7A7A) |
 | `player_toggle_vehicle_mount` | `Entity_ToggleVehicleMount` (+ `Entity_TryEnterNearestVehicle`) | 0x436950 / 0x4368c0 | §23.1 witness; ctest `vehicle_mount` | **matching** w/ D-AI-11 (weapon gate at the sim binding) |
@@ -381,7 +381,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
     partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
     target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
-    mount occupants already authored near a host-provided seat, render `UseGun`/gunner seats with
+    mount occupants already authored near a binding-provided seat, render `UseGun`/gunner seats with
     `anim_emplaced` plus available variants (00TRa class), and carry a UseGun occupant at the live
     control-posed parent userpoint. Remaining gaps: staged E/S/G/H walk-to-seat, 126/127,
     child-seat traversal, true bone-transform follow for non-UseGun seats, and driver-lean poses.
@@ -489,13 +489,13 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
     mounting slice. `infantry_lean_tick` / `player_body_select`.
   - **D-INF-18** the FP eye's terrain clamp and the remote CameraOffset approximation
-    unported. The local head-bone eye is sampled host-side from the render skeleton (the
+    unported. The local head-bone eye is sampled binding-side from the render skeleton (the
     structural translation of the `@0x4b6bb3` bone path, floored at Position + 0.125
     [orig min `0x2000 @0x4b6b98`]); the original additionally floors it at
     `max(4 terrain samples ±0x4000) + 0x1000` unless `Flags & 0x800000` [orig:
     `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
     [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
-    terms are also unported (their producers are open). `local_player_host.gd`.
+    terms are also unported (their producers are open). `local_player_presenter.gd`.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased
@@ -507,7 +507,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     60°/48° thresholds, 2-tick cadence, 41/42 roll-write skip, corpse-only `Pitch`
     tip). Ported as `AiSystem::infantry_slope_pass` with both legs; `AiEntity.body_pitch`
     (+0x90) added and fed to the §14 overlay body-pitch term; `AiEntity.def_attrib`
-    carries the `def+84 & 0x200` selector leg (host wiring deferred — JO infantry defs
+    carries the `def+84 & 0x200` selector leg (binding wiring deferred — JO infantry defs
     leave it clear). Residuals: the dead+airborne corpse TUMBLE branch [orig: `@0x4ba0b2` /
     `@0x4b6ccb`] unported (the pass holds instead); the dead leg's `Flags & 0x10A000`
     swim/parachute exclusion unmodeled (rides D-INF-17's flag legs); org1 cadence uses the
@@ -590,7 +590,7 @@ and faced east: a direction-dependent error, not a constant offset.
 
 **Fix (shipped):** store `heading` in the ENGINE frame everywhere, matching the original — seed
 `(90 − yaw) · kBamPerDegree` (promote), mount pose `(90 − occ.yaw)`, and convert back once at the
-present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot host basis
+present boundary (`mission_yaw = 90 − heading / kBamPerDegree`). The Godot basis
 (`MissionObjectPlacer.bms_to_godot_basis`) already applies the faithful `RotY(90 − v)` plus a
 `RotY(90)` .3di model-forward correction (net `RotY(180 − v)`) where `v` is the MISSION yaw — the
 `90 − yaw` belongs in the basis builder, never doubled into the seed.
@@ -757,7 +757,7 @@ mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4
 both the command mount and authoritative attach-apply paths run `presnap_vehicle_attach_heading`
 before writing the relationship. The request-time seat yaw is copied into `Entity.yaw` and the
 occupant's `AiEntity.heading`; for the local player it also initializes
-`InfantryState.target_heading`. `NovaSimulation` owns an additional host-only
+`InfantryState.target_heading`. `NovaSimulation` owns an additional binding-only
 `PlayerInput.look_heading` latch that retail does not need because its input and entity yaw are one
 state. `sync_local_mounted_input_heading` mirrors the snapped local target into that latch immediately
 after a successful mount toggle and after local/host logic ticks, before the next
@@ -798,15 +798,15 @@ the former failure. Deviations (NOT silently absorbed):
 1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
    link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
    placed on its gun; wrong if two guns overlap.
-2. **Seat specs are host-fed.** The original reads model seat bones directly (model[605..]); the
-   port consumes host-extracted model userpoints through `ItemSeatSpec`, so callers without model
+2. **Seat specs are binding-fed.** The original reads model seat bones directly (model[605..]); the
+   port consumes binding-extracted model userpoints through `ItemSeatSpec`, so callers without model
    metadata still seed no seats.
 3. **Child-entity seat traversal** deferred (single-entity seats only).
 4. **Mounted-pose variants.** `UseGun` consumes the target definition's production-parsed
    `phrase_set` (including valid zero), and non-gunners consume numbered `sit_N`. The sit_24
    driver-lean 107–110 variants remain open.
 5. **Generic seat-local pose stand-in** — UseGun root position now follows the owning part's live
-   control-posed userpoint, but non-UseGun seats still use host-fed `seat_local`/`yaw_offset` rather
+   control-posed userpoint, but non-UseGun seats still use binding-fed `seat_local`/`yaw_offset` rather
    than the true per-tick `Entity_GetBoneTransformAndOrientation @ 0x4b0c50` result. The full UseGun
    matrix basis is also not claimed. These residuals remain distinct from the matching request-time
    yaw pre-snap.
@@ -814,7 +814,7 @@ the former failure. Deviations (NOT silently absorbed):
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
 ### 10.1 The BMS↔Godot convention lives in GDScript (and the godot-cpp Basis trap)
-Mission frame is Z-up; the Godot host is Y-up. The conversion is single-sourced in GDScript
+Mission frame is Z-up; the Godot side is Y-up. The conversion is single-sourced in GDScript
 (`MissionObjectPlacer` statics, used by both present + placer): basis =
 `Basis(UP, 90−yaw) · Basis(BACK, −pitch) · Basis(RIGHT, roll) · Basis(UP, 90)` (engine heading +
 .3di model-forward correction; see §7.2 for the 90−yaw truth).
@@ -1180,7 +1180,7 @@ chase yaws.
   zeroed by AudioMixer_Init @ 0x7bd405; the MMX blend routine ptr @ 0x3346F9C]`. The
   "recoil twitch" on fire is literally the game's LOUDNESS kicking the POV body's
   head/aim pitch — own gunfire being the loudest nearby source. There is no dedicated
-  rifle recoil body anim. Porting it needs an audio-output level tap in the host mixer
+  rifle recoil body anim. Porting it needs an audio-output level tap in the reimpl mixer
   (deferred; the overlay input carries the term).
 - **Rigid defs**: `itemDef->attrib & 0x200` → every overlay = body matrix (no aim skeleton).
 
@@ -1327,7 +1327,7 @@ parses do disagree, and only the former may be used for a runtime ADM index.
 
 - ~~`dword_3346FA8` (local pitch kick): value source unwitnessed~~ **RESOLVED
   2026-07-09**: the audio mixer's output power meter, renamed `g_audioOutLevel` — full
-  verdict in §14.3's local-player bullet. Remaining: the host-side port needs a mixer
+  verdict in §14.3's local-player bullet. Remaining: the Godot-side port needs a mixer
   output-level tap (the overlay carries the term, fed 0).
 - `dword_C6EC38` (view/local entity): reads witnessed only; no direct writer xref (register-based
   store suspected). Name-proposal held until a writer is pinned.
@@ -1393,8 +1393,8 @@ The local controller train remains, and mounted selection is now an animation-ow
   for COBJ 16 and emits the witnessed literal all-zero `CollisionMatrix`. Rendering
   and hit geometry share the same retail predicate but adapt it to their respective
   skinning and final-collision-row representations.
-- **Local host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
-  `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
+- **Local presenter**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
+  `LocalPlayerPresenter._update_avatar` builds the per-class deltas via the single-sourced
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
   uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
@@ -1644,7 +1644,7 @@ body_anim_phase` — same-state channels remain populated because their playhead
 independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
 in `libs/anim` (`kWeaponChannelMaskBones`) + `NovaSkeletalAnim::splice_weapon_channel`
 composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
-`NovaObjectModel.set_weapon_channel` and `LocalPlayerHost._update_avatar` consumption.
+`NovaObjectModel.set_weapon_channel` and `LocalPlayerPresenter._update_avatar` consumption.
 Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, historical ONED PIE,
 JOX 05TR, F4 + R through the real input path, completion waited by state): mid-reload
 `body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
@@ -1659,7 +1659,7 @@ refresh) and stamps the fire-path attack via `infantry_weapon_attack_stamp`
 (`[orig: @ 0x542bbc..0x542bea]`, repeat-stamp keeps the playhead);
 `infantry_weapon_channel` now runs the full witnessed ladder — kinds 1–8 → 50–61 with
 the scoped +1 variants, the scoped rifle-mirror coercion to 49, binoculars 64
-(the `binoculars_raised` input exists and is tested; the host input toggle is deferred
+(the `binoculars_raised` input exists and is tested; the shell input toggle is deferred
 until a binoculars item exists), reload 65 / reload2 66 by kind==2 — plus the exact
 +0x371 arms-dip block (dip-before-ease, double decrement) feeding
 `InfantryState.head_look_decay` into the §14 overlay's `head_look_decay` term, seeded
@@ -1714,7 +1714,7 @@ The runtime consumers of the `.3di` collision block (CDTA: CMDL/BVOL/BPLN/COBJ �
 format landed in [3di-gp-format-re.md](../threedi/3di-gp-format-re.md), previously
 "no downstream consumer traced"). Ported as `libs/world/collision.{h,cpp}`
 (`CollisionWorld` + the query set), consumed by the infantry motor's vertical
-resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the host sweep
+resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the binding sweep
 `NovaSimulation::resolve_collision_instances`. Evidence ctest: `collision`
 (tests/world/collision_test.cpp). All addresses: retail `Jointops.exe`
 (`Jointops.exe.kong.i64`, imagebase 0x400000). The 2026-07-11 full re-grill
@@ -1775,7 +1775,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   calls that same transformer. The port mirrors this with one frame-guarded
   32-bit `PanmClock` sample shared by visual/material and collision paths
   (deterministic `logic_tick * 16` only when a direct/headless sim has no
-  host clock). The float multiply follows the witnessed x87 PC53 operand order
+  driving clock). The float multiply follows the witnessed x87 PC53 operand order
   before the one binary32 store/final fixed truncation. `[orig:
   Math_TransformPointWithTranslation22 @ 0x412f60 (translate-then-rotate — the
   inverse application), Math_TransformPointFixedPoint22 @ 0x412e90 (rotate only),
@@ -2248,7 +2248,7 @@ transform chain match. Static placement uses D-COL-1's full-Euler entity matrix;
 live non-organic effective-LOD0 PANM runs the retail float sandwich (fixed
 entity `@ 0x611080` → x87-PC53 row-vector pose × entity → final
 Q22/16.16 `@ 0x611140`) through `ICollisionSectionMatrixProvider`
-and the production `NovaSimulation` host. Local LOD0 PANM suppresses
+and the production `NovaSimulation` binding. Local LOD0 PANM suppresses
 the model-level fallback even when inert; LOD1+ never drives COBJ. The visual
 model and collision provider consume one frame-sampled 32-bit presentation
 clock. Pool-0 persons use the separate
@@ -2387,7 +2387,7 @@ neutral damage and is never the normal retail path.
 The mission-start graphic sweep is not a lifetime assumption. `NovaSimulation`
 retains the item database and placer caches, and both RoundSim and F3 request an
 idempotent collision attach when a player or scripted organic appears later.
-Packed pool handles can be reused, so registry entities carry a host-only
+Packed pool handles can be reused, so registry entities carry a binding-only
 monotonic spawn identity; collision instances, skeletal sources, and negative
 resolution attempts all validate that identity before reuse. Editor snapshot
 restore preserves the live identity high-water mark. Thus a failed lookup for
@@ -2894,7 +2894,7 @@ internals — the D-AI-7 sector leg). All addresses retail `Jointops.exe` (image
 PORT (same day, worktree play): the ammo.def presentation tokens = `libs/def`
 (`def_parse_ammo` + `ammo_tracer_type_from_name`) → `AmmoTableEntry` (npruntime
 builder); the tracer decision + the per-spawn `FireEvent` record =
-`world::RoundSim::spawn`; the host drains = `NovaSimulation::
+`world::RoundSim::spawn`; the binding drains = `NovaSimulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
 replaced by the witnessed trail channels, §24); the presentation itself =
 `godot/engine/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
@@ -2925,7 +2925,7 @@ warnings `"couldn't find ammodef frndlyTrcrID"` / `"... type_id"`
 `[orig: @ 0x40a5f8-0x40a68d]` — PARSED 2026-07-18 (`frndlyTrcrID`/`foeTrcrID` in
 libs/def, raw type ids in the ammo table; the model leg itself rides D-AI-12d,
 §24.4). Our port stores names/ids instead of resolved pointers/handles and
-resolves in the host at use time — same case-insensitive namespaces (the bank's
+resolves in the reimpl at use time — same case-insensitive namespaces (the bank's
 soundsets, the effect world's interned .ptl names, the item list).
 
 ### 18.2 The fire sound leg — `Sound_PlayWithDistanceAttenuation @ 0x528e40`
@@ -3276,7 +3276,7 @@ at round end, and what the SP player then SEES. Port surfaces:
 `libs/mission/src/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
 `libs/world/src/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
 `libs/npruntime/src/server_tick.cpp` (kill tallies, `humans`, the win-condition
-check, the respawn hold), `godot/engine/world/game_hud_host.gd` (the lose banner),
+check, the respawn hold), `godot/engine/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
 `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
@@ -3334,7 +3334,7 @@ active music state) + winner==1 ? `Cine_InitPlayback @ 0x578390` +
 `MusicCtx_SelectEndTrack(2)`.
 
 Port: `World::process_round_end` carries the guard, the winner, the latch, and
-surfaces the SP tail as the `round_end` host effect; the scoring pass, the
+surfaces the SP tail as the `round_end` shell effect; the scoring pass, the
 scoreboard block, and every wire leg are cited stubs (net track).
 
 The gate CLEARS at `Game_StartMission @ 0x524a1f` and the client GameReset
@@ -3469,7 +3469,7 @@ reader rides the context pointer (unwalked). The SP world keeps ticking through
 the epilog (`humans >= 1` holds the run gate; MP freezes entities on the gate
 instead [orig: @ 0x526742]).
 
-Port: `game_hud_host.gd` resolves the lose KEY against gametext `Misc` (chat
+Port: `game_hud_presenter.gd` resolves the lose KEY against gametext `Misc` (chat
 line + stored banner); `main_game.gd` consumes the `round_end` effect →
 `mission_end_screen.gd` (win = letterbox + jo_Epil.tga + the four count lines;
 lose = jo_Epil2.tga + STROVER_MISSION_FAILED + the banner + KEYINFO), 300 s
@@ -3608,10 +3608,10 @@ Ground truth (retail JOX models): US01 = `GFlash01`@part15 + `Look`; EIndo01-08 
 `MFlash01`/`bullet` (+`GFlash01`/`bcasing` on some); CIndo civilians = `LOOK` only
 (no muzzle — civilians never fire).
 
-### 21.3 The port: the host muzzle seam
+### 21.3 The port: the binding muzzle seam
 
 libs/world carries no skeletal pose, so the posed-muzzle transform runs where the
-pose lives and feeds back (the host-fed input pattern, like the terrain sampler):
+pose lives and feeds back (the binding-fed input pattern, like the terrain sampler):
 
 - `NovaObjectModel` resolves the gun-flash userpoint at rebuild (name preference
   `*flash*` > `bullet`/`*muzzle*`; the rig is index-driven so the userpoint's
@@ -3627,14 +3627,14 @@ pose lives and feeds back (the host-fed input pattern, like the terrain sampler)
 - `AiSystem::infantry_fire_pass` spawns rounds from the stamp while FRESH
   (≤ 4 ticks), else the chest-lift stand-in (headless ctests, out-of-view NPCs).
 
-Evidence: `ai` ctest `test_fire_pass_uses_host_fed_muzzle` (stamp used when fresh,
+Evidence: `ai` ctest `test_fire_pass_uses_embedder_fed_muzzle` (stamp used when fresh,
 fallback when absent/stale); in-game `godot/tests/ai_muzzle_probe.gd` on CP01 —
 PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
 (chest-height, along the aimed rifle), zero head-height origins.
 
 ### 21.4 Divergences + open follow-ups
 
-D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the host seam.
+D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the binding seam.
 Residuals: (a) the LOS endpoints and the aim-solution eye point still use the
 chest-lift stand-in (the originals are the muzzle/person-leg vectors above);
 (b) the def-authored userpoint NAMES (def+0x61B..0x6CB) are unplumbed — the
@@ -3718,7 +3718,7 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
   momentum carry, the 30→pending-31 stamp, ordered after the vertical resolve.
 - The airborne edge is per motor (corrected by the 2026-07-17 validation grill —
   a first cut stamped both motors): the PLAYER stamps 31 straight with the 3/4
-  momentum carry (the `has_clip` guard is a host guard the original lacks); org1
+  momentum carry (the `has_clip` guard is a reimpl guard the original lacks); org1
   keeps its clip on a plain fall — its 47→31 ladder is parachute-gated
   (`@ 0x4bf8d8`) — and clears pending only. `player_body_select` lost its
   airborne stand-in branch in favor of the witnessed selection gate. Review
@@ -3831,12 +3831,12 @@ others: the bone euler yaw), then applies directly on the authority
 OpenNova now performs that snap before either in-process attach relationship is written. Because the
 port splits retail's body/look state across records, `presnap_vehicle_attach_heading` synchronizes the
 registry `Entity.yaw`, `AiEntity.heading`, and the local player's
-`InfantryState.target_heading`. The Godot host had one more stale copy:
+`InfantryState.target_heading`. The Godot side had one more stale copy:
 `player_input_.look_heading`; the next `apply_player_input_pre_tick` overwrote the otherwise-correct
 core snap. `sync_local_mounted_input_heading` now copies the snapped target back immediately after a
 successful local toggle and after local/host logic ticks. Both operations intentionally leave pitch
 unchanged. `vehicle_mount::test_usegun_attach_presnaps_local_look` pins the core fields and first pose;
-the asset-backed B50 GUT pins the immediate toggle-side host latch through the first `sim.step()`.
+the asset-backed B50 GUT pins the immediate toggle-side binding latch through the first `sim.step()`.
 Joiner attach/detach now uses C2S 0x26/0x27 and applies the requester-local relationship only after the
 authoritative S2C 0x0A carrier/bone echo. The generic live seat-bone transform follow remains deferred
 (§9.2.5). The separate live UseGun root-position path is matched in §23.5.
@@ -4370,7 +4370,7 @@ slots whose entity pointer matches. It does NOT touch the 256x180-B
 `g_death_piece_pool @ 0x26BAC58`: death-piece slots carry no owner pointer,
 and `Entity_SpawnDeathPieces` writes none.
 
-Port status: the host creates at most one origin-anchored group for each
+Port status: the reimpl creates at most one origin-anchored group for each
 authored Dead/water, Fire, and Other family and performs one crackle roll per
 wreck. It does not populate or follow the four bone slots independently. It
 also does not sample fire-bone submersion or emit `g_fx_Boat01Steam`: the
@@ -4792,7 +4792,7 @@ previously updated only `Entity.yaw` from the posed seat on the following tick; 
 `AiEntity.heading` and local `target_heading` then restored the pre-attach look, immediately feeding a
 false EWEAP yaw phase and the configured emplaced-body counter-lean. The shared attach helper now
 synchronizes all three core yaw representations before the relationship goes live. A focused
-NovaSimulation red test then exposed the host's fourth representation: even with the core fixed,
+NovaSimulation red test then exposed the Godot side's fourth representation: even with the core fixed,
 `player_input_.look_heading` still reapplied the stale look at the top of the next step. The simulation
 now mirrors the snapped `target_heading` into that input latch immediately on mount and again after
 local/host logic ticks. The joiner path queues C2S 0x26/0x27, waits for the requester-local S2C 0x0A
@@ -4978,11 +4978,11 @@ not generalize full-basis parity to seats with non-identity rest-part frames or 
 The EWEAP articulation regression is asset-backed: nova_simulation_test.gd
 mounts a deliberately yaw-misaligned local player on fixture B50Cal, requires the attach to establish
 the neutral UseGun base before look input, and proves both yaw and pitch then move
-the authoritative collision triangles. Its red fixture starts at 160 degrees: before the host-latch
+the authoritative collision triangles. Its red fixture starts at 160 degrees: before the binding-latch
 mirror, the first `sim.step()` restored that stale look and produced a nonzero EWEAP yaw phase and
 body-segment twist; green requires snapped yaw, EWEAP_GUNYAW, and maximum segment twist all neutral
 before new look input. mission_present_pass_test.gd,
-wire_present_pass_test.gd, local_player_host_test.gd, and
+wire_present_pass_test.gd, local_player_presenter_test.gd, and
 player_weapon_view_test.gd pin named-control delivery, precedence, and stale
 clearing; two_peer_fanout_test pins live player pitch at the existing wire lift,
 and loopback_identity_test pins the client-side mounted-infantry pitch chase.
@@ -5058,7 +5058,7 @@ satchel model and receive the `schl` class bind. A missing friendly TrcrID or
 global NoTracers suppression yields no model and **no motor** — the round
 drifts and only the fuse leg still runs.
 
-The host keeps the selected item id on every bound round, but
+The sim keeps the selected item id on every bound round, but
 `NovaSimulation::get_throwable_visuals` exposes it to
 `throwable_present_pass.gd` only when `round.tracer` is true. Thus class binding
 remains independent of the per-shot tracer-rate decision while the flying
@@ -5143,7 +5143,7 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
 ### 27.4 The grenade motor — `Entity_UpdateGrenadePhysics @ 0x443F50` (defined this session)
 
 An environment water height of zero means **no authored water**; the throwable
-motor maps that host sentinel to `INT32_MIN` before all comparisons, rather
+motor maps that binding-fed sentinel to `INT32_MIN` before all comparisons, rather
 than treating every position at/below world z=0 as submerged.
 
 Per tick, Q16 with +0x8000 rounding throughout: drag (+28) on velX/velY then

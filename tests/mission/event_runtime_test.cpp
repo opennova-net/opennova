@@ -317,7 +317,7 @@ static void test_pre_mission_pass() {
     CHECK(w.effects.count("text") == 2); // +1 from the normal event, pre event excluded
 }
 
-// A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no host
+// A ChangeSingleAI/PLAYPARTANIM action mutates the target's AI brain IN-ENGINE (no embedder
 // effect), faithful to Entity_ApplyCommand @0x43ab60 case 0x22; the AI integrator then
 // advances the channel phase. Proves the in-engine action-dispatch path end to end.
 static void test_playpartanim_mutates_brain() {
@@ -358,7 +358,7 @@ static void test_playpartanim_mutates_brain() {
         ai.advance_part_anim(*ae);
         CHECK(ae->brain.f[world::AiBrain::kPartAnimPhase0] == 2096);
     }
-    // In-engine mutation, NOT a host effect.
+    // In-engine mutation, NOT an embedder effect.
     CHECK(w.effects.count("unported_action") == 0);
 }
 
@@ -434,7 +434,7 @@ static void test_redirect_actions_preserve_authored_node() {
     CHECK(w.relations.single_visited(43, 2, 1));
 }
 
-// Host-presentation actions surface as presentation-only EffectLog entries; an unmodelled
+// Presentation actions surface as presentation-only EffectLog entries; an unmodelled
 // action records as "unported_action" (diagnostic), never as a real effect.
 static void test_presentation_effects() {
     World w;
@@ -840,7 +840,7 @@ static void test_player_mount_trigger_dispatch() {
     }
 }
 
-// The post pass is a host-called one-shot sweep, never periodic (D-EVT-4)
+// The post pass is an embedder-called one-shot sweep, never periodic (D-EVT-4)
 // [orig: UpdateAllWithFlag4 @0x454e00, one call per teardown/restart]. Normal
 // ticks must never touch a PostMission-flag entry.
 static void test_post_pass_is_a_one_shot() {

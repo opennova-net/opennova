@@ -163,9 +163,9 @@ int test_event_scripting_cpp(const std::vector<uint8_t> &original) {
 	MissionActionRecord reset_throwaway;
 	reset_throwaway.action_type = static_cast<int>(bms::ActionType::ResetEvent);
 	reset_throwaway.param1 = static_cast<int>(throwaway_index);
-	MissionEventRecord host;
-	TEST_EXPECT(doc.get_event(base_events - 1, host));
-	TEST_EXPECT(doc.insert_event_action(base_events - 1, host.action_count, reset_throwaway));
+	MissionEventRecord record;
+	TEST_EXPECT(doc.get_event(base_events - 1, record));
+	TEST_EXPECT(doc.insert_event_action(base_events - 1, record.action_count, reset_throwaway));
 	TEST_EXPECT(doc.remove_event(throwaway_index));
 	MissionEventChain after_exact;
 	TEST_EXPECT(doc.get_event_chain(base_events - 1, after_exact));

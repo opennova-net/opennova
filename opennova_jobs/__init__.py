@@ -1,7 +1,7 @@
 """Shared orchestration models for OpenNova importers.
 
 This package is intentionally pure data and validation logic. It must not
-import Qt, Blender, bpy, or any host-specific integration.
+import Qt, Blender, bpy, or any DCC-specific integration.
 """
 from __future__ import annotations
 

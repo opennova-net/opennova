@@ -24,7 +24,7 @@ func _init() -> void:
 	_checker.name = "PreviewChecker"
 	_checker.texture = _ensure_checker()
 	_checker.stretch_mode = TextureRect.STRETCH_TILE
-	# The display layers never take mouse events themselves; hosts that accept
+	# The display layers never take mouse events themselves; owners that accept
 	# drops over the preview need the walk to reach the box (and beyond).
 	_checker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_checker)

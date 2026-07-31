@@ -1,12 +1,12 @@
 class_name NovaSunShadow
 extends DirectionalLight3D
 
-# Shadow-only host adapter. The fixed-function terrain/object shaders keep
+# Shadow-only shell adapter. The fixed-function terrain/object shaders keep
 # owning all color lighting; these lights are visible only to their black
 # ATTENUATION catcher pass. Retail has two independent projection lists:
 # pose-derived live entity silhouettes can reach world models, while pool-2 /
 # StaticShadow silhouettes are composed into terrain tiles and foliage only.
-# The host static adapter exposes terrain only; alpha-tested foliage waits for
+# The reimpl static adapter exposes terrain only; alpha-tested foliage waits for
 # an alpha-aware tile-cache compositor.
 
 enum {

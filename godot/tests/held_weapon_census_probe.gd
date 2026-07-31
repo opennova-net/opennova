@@ -35,8 +35,8 @@ func _init() -> void:
 
 	var placer := MissionObjectPlacer.new()
 	placer.resource_root = res
-	var host := Node3D.new()
-	get_root().add_child(host)
+	var mount := Node3D.new()
+	get_root().add_child(mount)
 
 	print("%-5s %-18s %-16s %-24s %-24s %s" % [
 			"row", "weapon", "gfx3", "size", "centre", "LONG"])
@@ -55,7 +55,7 @@ func _init() -> void:
 			print("%-5d %-18s %-16s  (same model as row %d)" % [i + 1, nm, gfx3, seen[key]])
 			continue
 		seen[key] = i + 1
-		var model: Node3D = placer.build_model_from_graphic(gfx3, "", host, "", null)
+		var model: Node3D = placer.build_model_from_graphic(gfx3, "", mount, "", null)
 		if model == null:
 			print("%-5d %-18s %-16s  <model did not build>" % [i + 1, nm, gfx3])
 			continue

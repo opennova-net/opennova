@@ -3,25 +3,25 @@ extends RefCounted
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
-# The local player's weapon-EVENT presentation, split out of LocalPlayerHost
+# The local player's weapon-EVENT presentation, split out of LocalPlayerPresenter
 # (W4-4): the fixed-tick event batch consume (switch/clear/fire/recoil/
 # end-sound), the FSM event clips on the viewmodel parts, the muzzle/shell
-# userpoint resolution (FP + 3P), and the owner-bound effect anchors. The host
+# userpoint resolution (FP + 3P), and the owner-bound effect anchors. The presenter
 # keeps the camera/avatar/viewmodel NODES and the registered fixed-tick
 # consumer (_present_fixed_weapon_tick — the cross-concern interlock that
 # stamps the camera at production-tick pose); this class presents each batch
-# against the host's live nodes through its public accessors.
+# against the presenter's live nodes through its public accessors.
 
 const WEAPON_TICK_DT := MissionRuntime.TICK_DT  # the weapon FSM runs on the engine tick
 
 # The world serves the presentation seams: the event drain, mission audio, the
 # effect world, and the effect-anchor registry. Untyped for the same reason as
-# the host's _world: GUT harness worlds serve value-only doubles.
+# the presenter's _world: GUT harness worlds serve value-only doubles.
 var _world
-# The owning LocalPlayerHost. Untyped: the class reads host presentation state
-# (viewmodel parts, held weapon, camera, 1P/3P mode) through the host's public
-# accessors, and GUT harnesses serve minimal host doubles in its place.
-var _host
+# The owning LocalPlayerPresenter. Untyped: the class reads presenter presentation state
+# (viewmodel parts, held weapon, camera, 1P/3P mode) through the presenter's public
+# accessors, and GUT harnesses serve minimal presenter doubles in its place.
+var _presenter
 var _viewmodel_generation := 0      # action-slot owner identity across weapon re-mounts
 # Live owner-bound effect anchors registered on the world (slot_key -> true);
 # dropped whenever the viewmodel generation turns over.
@@ -30,9 +30,9 @@ var _weapon_play_serial := -1
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 
 
-func setup(world, host) -> void:
+func setup(world, presenter) -> void:
 	_world = world
-	_host = host
+	_presenter = presenter
 
 
 func teardown() -> void:
@@ -43,28 +43,28 @@ func teardown() -> void:
 	# Callable keeps this object alive, so the invalid-callable reap never fires).
 	_unregister_effect_anchors()
 	_world = null
-	_host = null
+	_presenter = null
 
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
-# so a cached reference would go stale (the host follows the same rule).
+# so a cached reference would go stale (the presenter follows the same rule).
 func _sim():
 	return _world.get_sim() if _world != null else null
 
 
-## This tick's FSM view snapshot — the host's avatar body channel and the
+## This tick's FSM view snapshot — the presenter's avatar body channel and the
 ## emplaced viewmodel controls read it here.
 func weapon_view() -> PlayerWeaponView:
 	return _weapon_view
 
 
-## The host's pre-adoption stamp: adopt the tick's snapshot before the camera
+## The presenter's pre-adoption stamp: adopt the tick's snapshot before the camera
 ## pass so the avatar's body channel is current while visual roots are placed.
 func set_weapon_view(view: PlayerWeaponView) -> void:
 	_weapon_view = view
 
 
-## Drop the presentation latches (the host's no-player / reset-state path).
+## Drop the presentation latches (the presenter's no-player / reset-state path).
 func reset() -> void:
 	_weapon_play_serial = -1
 	_weapon_view = null
@@ -75,7 +75,7 @@ func reset_play_serial() -> void:
 	_weapon_play_serial = -1
 
 
-## A viewmodel re-mount (the host's refresh_viewmodel): the action slots get a
+## A viewmodel re-mount (the presenter's refresh_viewmodel): the action slots get a
 ## new owner generation and the old generation's live anchors drop.
 func on_viewmodel_refresh() -> void:
 	_viewmodel_generation += 1
@@ -91,7 +91,7 @@ func _apply_weapon_switch(weapon_name: String,
 		preserve_slot_state: bool = false) -> void:
 	if _world == null:
 		return
-	var viewmodel: Node3D = _host.viewmodel()
+	var viewmodel: Node3D = _presenter.viewmodel()
 	if (String(_world.local_player_weapon_name()).nocasecmp_to(weapon_name) == 0
 			and viewmodel != null and is_instance_valid(viewmodel)):
 		return
@@ -99,14 +99,14 @@ func _apply_weapon_switch(weapon_name: String,
 			weapon_name, true)) if preserve_slot_state else bool(
 					_world.set_local_player_weapon_by_name(weapon_name))
 	if switched:
-		_host.refresh_viewmodel()
+		_presenter.refresh_viewmodel()
 
 
 func _apply_weapon_clear() -> void:
 	if _world == null:
 		return
 	_world.clear_local_player_weapon()
-	_host.refresh_viewmodel()
+	_presenter.refresh_viewmodel()
 
 
 func _unregister_effect_anchors() -> void:
@@ -116,7 +116,7 @@ func _unregister_effect_anchors() -> void:
 	_registered_effect_anchor_keys.clear()
 
 
-# Drain any ordered presentation events left for hosts that do not install the
+# Drain any ordered presentation events left for owners that do not install the
 # fixed-tick callback. In the game, _present_fixed_weapon_tick consumes
 # each 62.5 Hz batch before that tick's particle update. Every clip/begin/end
 # payload survives either route; pre-aged fallback clips resume at their source age.
@@ -240,7 +240,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	if event.action_started != WEAPON_ACTION_FIRE:
 		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
 	# The suppression reads the event's SETTLED scope state. Retail promotes
-	# g_weaponScopeActive before weapon actions on every tick; one host frame can
+	# g_weaponScopeActive before weapon actions on every tick; one render frame can
 	# drain several ticks spanning that boundary, so the final render snapshot is
 	# not a valid substitute. [orig: promoter @0x4de4f7 before weapon pump call
 	# @0x526786; gate @0x541aba !g_weaponScopeActive]
@@ -252,8 +252,8 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	var pos := _action_particle_world_position(event.action_particle_userpoint)
 	var forward := _action_particle_world_forward(event.action_particle_userpoint)
 	# The live handle belongs to the runtime ACTION slot, not the whole player
-	# host. A weapon re-mount creates a new slot generation. (The instance id is
-	# this presentation object's — it lives setup-to-teardown with the host.)
+	# presenter. A weapon re-mount creates a new slot generation. (The instance id is
+	# this presentation object's — it lives setup-to-teardown with the presenter.)
 	var slot_key := "%d:%d:%d" % [get_instance_id(), _viewmodel_generation, event.action_started]
 	var anchor_transform := _weapon_effect_transform(pos, forward)
 	# The live group follows the SPAWNING action's userpoint for its whole life:
@@ -261,7 +261,7 @@ func _fire_action_effects(event: PlayerWeaponEvent) -> void:
 	# the emitter to that action's bone every tick, releasing it only on death
 	# [orig: ActionSlot_SpawnEffect handle/action record @ 0x40208f/0x402092 ->
 	# the +0x18 tracker leg in WeaponAction_ProcessFrame @ 0x540edf ->
-	# CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]. The host analog is an
+	# CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]. The presenter analog is an
 	# owner-bound group whose anchor resolver re-reads the live userpoint pose.
 	_world.register_effect_anchor(slot_key,
 			_weapon_effect_anchor_transform.bind(event.action_particle_userpoint))
@@ -301,9 +301,9 @@ func _fire_direct_action_effect(event: PlayerWeaponEvent) -> void:
 ## [orig: the actionEffectHandle tracker @ 0x540edf re-reads
 ## actionTable[slot+0x28]'s bone until the emitter dies].
 func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
-	if _host == null:
+	if _presenter == null:
 		return null  # torn down; a stale resolver poll must degrade, not error
-	var viewmodel: Node3D = _host.viewmodel()
+	var viewmodel: Node3D = _presenter.viewmodel()
 	if viewmodel == null or not is_instance_valid(viewmodel):
 		return null
 	var pos := _action_particle_world_position(userpoint)
@@ -315,7 +315,7 @@ func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
 # Rigid first-person gun parts ride the .adm skeleton by subobject/bone index, so
 # applying only the model root leaves authored muzzle points in the rest pose (and,
 # for the AK, behind the gameplay camera). Convert model space into the bone's rest
-# frame, then back through its current global pose — the hosted equivalent of the
+# frame, then back through its current global pose — the ported equivalent of the
 # original action-bone transform.
 # [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
 func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transform3D:
@@ -339,7 +339,7 @@ func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transfor
 # person at all [orig: the FP bit gate @0x540e8c..0x540eca requires g_camera_mode == 0;
 # the gfx1/gfx3 resolvers @0x54039e/@0x54040f].
 #
-# This matters because the host's vm_parts are the FIRST-PERSON viewmodel: it is
+# This matters because the presenter's vm_parts are the FIRST-PERSON viewmodel: it is
 # re-pinned to the camera every frame and merely HIDDEN in third person, never
 # detached, so resolving against it while in third person anchors the muzzle flash
 # to the player's own eye.
@@ -347,9 +347,9 @@ func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transfor
 # just rides that transform.
 # Returns { "pos": Vector3, "dir": Vector3 } or an empty Dictionary when unresolved.
 func _third_person_action_particle(userpoint: String) -> Dictionary:
-	if not _host.is_third_person() or userpoint.is_empty():
+	if not _presenter.is_third_person() or userpoint.is_empty():
 		return {}
-	var held_weapon: Node3D = _host.held_weapon()
+	var held_weapon: Node3D = _presenter.held_weapon()
 	if held_weapon == null or not is_instance_valid(held_weapon) \
 			or not held_weapon.visible or not held_weapon.has_method("get_object_data"):
 		return {}
@@ -375,7 +375,7 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 	if not tp.is_empty():
 		return tp["pos"]
 	var fallback := Vector3.INF
-	for part in _host.vm_parts():
+	for part in _presenter.vm_parts():
 		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
 			continue
 		if fallback == Vector3.INF:
@@ -403,7 +403,7 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 	var tp := _third_person_action_particle(userpoint)
 	if not tp.is_empty():
 		return tp["dir"]
-	for part in _host.vm_parts():
+	for part in _presenter.vm_parts():
 		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
 			continue
 		var data = part.get_object_data()
@@ -418,7 +418,7 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 			var world_direction: Vector3 = model_to_world.basis * direction
 			if world_direction.length_squared() > 0.000001:
 				return world_direction.normalized()
-	var camera: Camera3D = _host.camera()
+	var camera: Camera3D = _presenter.camera()
 	if camera != null:
 		return -camera.global_transform.basis.z.normalized()
 	return Vector3(0, 0, 1)
@@ -447,7 +447,7 @@ func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0,
 	if key.is_empty():
 		return
 	var seconds := float(maxi(age_ticks, 0)) * WEAPON_TICK_DT
-	for part in _host.vm_parts():
+	for part in _presenter.vm_parts():
 		if part == null or not is_instance_valid(part):
 			continue
 		if authoritative_phase and part.has_method("play_body_clip_variant_at_time"):

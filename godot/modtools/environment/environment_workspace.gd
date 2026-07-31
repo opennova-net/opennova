@@ -140,11 +140,11 @@ func get_save_dialog_dir() -> String:
 	return environment_editor.get_last_save_dir() if environment_editor else ""
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	if environment_editor == null:
 		return
 	var inspector := EnvironmentInspector.new()
-	host.add_child(inspector)
+	mount.add_child(inspector)
 	inspector.set_environment_editor(environment_editor)
 	if editor_shell != null:
 		inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))

@@ -95,11 +95,11 @@ func test_pathless_save_returns_the_shell_save_as_code() -> void:
 
 func test_undo_history_survives_tab_switches() -> void:
 	var ws = autofree(MnuWorkspaceScript.new())
-	var host := Control.new()
-	host.size = Vector2(800, 480)
-	add_child_autofree(host)
+	var mount := Control.new()
+	mount.size = Vector2(800, 480)
+	add_child_autofree(mount)
 	assert_eq(ws.open_file(FIXTURE), OK)
-	ws.mount_viewport(host)
+	ws.mount_viewport(mount)
 	await get_tree().process_frame
 
 	# An inspector-style edit through the editor builds real undo history.

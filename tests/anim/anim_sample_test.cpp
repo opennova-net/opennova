@@ -417,7 +417,7 @@ int main() {
         TEST_EXPECT(tc.bones[1].parent_index == 0);
         TEST_EXPECT(tc.bones[2].parent_index == 1);
         TEST_EXPECT(tc.bones[3].parent_index == 0);
-        TEST_EXPECT(tc.bones[2].name.empty());                // no .bad record -> host names it
+        TEST_EXPECT(tc.bones[2].name.empty());                // no .bad record -> embedder names it
         for (size_t b = 0; b < 4; ++b) {                      // pivots from the table, never .bad pos
             TEST_EXPECT(approx(tc.bones[b].rest_position[0], pivots[b].x) &&
                     approx(tc.bones[b].rest_position[1], pivots[b].y) &&

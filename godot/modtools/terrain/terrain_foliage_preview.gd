@@ -12,7 +12,7 @@ extends Node3D
 const INVALID_HEIGHT := -1000000.0
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 
-## Narrow host snapshot of the editor-only surface inputs injected into the
+## Narrow mount snapshot of the editor-only surface inputs injected into the
 ## native foliage dispatcher. The dispatcher's wider frame telemetry remains
 ## an implementation detail of this module.
 class SurfaceInputDiagnostics:
@@ -209,7 +209,7 @@ func rebuild_if_needed() -> void:
 	_dispatcher.render_preview(_camera.global_transform)
 
 
-## Public host diagnostic for ONED/runtime parity probes.
+## Public mount diagnostic for ONED/runtime parity probes.
 func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
 	var diagnostics := SurfaceInputDiagnostics.new()
 	if _dispatcher == null:
@@ -220,6 +220,6 @@ func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
 	return diagnostics
 
 
-## Effective Mission blocker resource, exposed for host diagnostics and tests.
+## Effective Mission blocker resource, exposed for mount diagnostics and tests.
 func get_tile_info() -> NovaTerrainTileInfo:
 	return _tile_info

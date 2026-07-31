@@ -3,7 +3,7 @@ extends GutTest
 # NovaObjectModel.play_part_anim drives a per-channel phase sweep onto the retail
 # VEHICLE_SPECIAL1/2 CTRL bus. The resolver is overridden for the missing-register
 # case; time advancement uses the same public deterministic-frame seam as runtime
-# hosts, backed by the smallest committed object fixture.
+# owners, backed by the smallest committed object fixture.
 # [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22; integrator @0x456710,
 #  velocity-from-current, wrapping dword arithmetic, and strict overshoot clamps.]
 

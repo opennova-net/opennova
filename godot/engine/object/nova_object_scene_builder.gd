@@ -3,7 +3,7 @@ extends RefCounted
 # NovaObjectModel's retained-scene construction module. Its single rebuild()
 # interface hides child teardown, cache reset, Skeleton3D/Skin construction,
 # mesh/material assembly, and the initial runtime-state application. All state
-# stays on the composing NovaObjectModel, reached through `_m`; the host owns
+# stays on the composing NovaObjectModel, reached through `_m`; the owner owns
 # this helper for its full Node lifetime and the plain Node back-reference
 # cannot form a RefCounted ownership cycle.
 

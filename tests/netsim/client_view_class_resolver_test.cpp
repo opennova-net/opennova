@@ -53,7 +53,7 @@ constexpr uint16_t kNoCallbackHandle = 0x2005; // pool-2 static
 constexpr uint16_t kVehicleHandle = 0x1002;    // pool-1 vehicle
 constexpr uint16_t kInfantryHandle = 0x0003;   // pool-0 organic
 
-// The items.def-derived classifier the Godot host installs (NovaSimulation::
+// The items.def-derived classifier the Godot binding installs (NovaSimulation::
 // resolve_item_traits builds the same shape from NovaItemDatabase).
 nw::EntityClass items_table_classify(uint16_t type_id) {
 	static const std::unordered_map<uint16_t, nw::EntityClass> table = {

@@ -1,7 +1,7 @@
 class_name MusicVarInspector
 extends Control
 
-# A variable was renamed (the profile sidecar changed): hosts refresh every
+# A variable was renamed (the profile sidecar changed): owners refresh every
 # other surface that shows var names (blueprint bodies, pickers, event log).
 signal names_changed
 
@@ -252,7 +252,7 @@ func refresh_from_director() -> void:
 
 # One-line rename popup: the new display name (empty clears the custom name and
 # falls back to the built-in / raw form). Writes through MusVarNames.set_label,
-# rebuilds the rows, and announces names_changed for the host's other surfaces.
+# rebuilds the rows, and announces names_changed for the mount's other surfaces.
 func _open_rename_popup(var_index: int) -> void:
 	var dlg := ConfirmationDialog.new()
 	dlg.title = "Name Var%02d" % var_index

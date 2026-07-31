@@ -42,7 +42,7 @@ forbidden-family export guard) read as folklore rather than structure.
    `scripts/lint/link_graph_check.py` remains authoritative and walks the
    TRANSITIVE closure, so a forbidden consumer linking a family that
    contains a forbidden lib still fails. Nothing under `libs/` links a
-   family target; families exist for hosts/apps above the lib layer.
+   family target; families exist for the shells/apps above the lib layer.
 5. **The "fold `libs/renderer`" clause is reversed** (decided in ADR 0023,
    recorded here where the clause originated): REN grew `libs/renderer`
    into the witnessed render library (render_order, light_runtime, uv_anim,

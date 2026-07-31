@@ -4,7 +4,7 @@ Structure-mapping record for the original engine's **`.fnt`** bitmap-font format
 (the menu/HUD fonts `Arial12b`/`14n`/`14b`/`16n`/`16b`, `Impac22b`, `Impac38b`,
 `Arials18`, `Arial22`, `couri20b`) and its runtime `CGameFont`. The
 reimplementation surface is `libs/fnt` (`fnt_font_t` / `fnt_parse`) and the Godot
-wrapper `NovaFntResource` (`godot/engine/fnt`); rasterization is host-side (Godot
+wrapper `NovaFntResource` (`godot/engine/fnt`); rasterization is Godot-side (
 `TextServer`, ENG-4). Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the `D-FNT-…` divergence catalog. Produced by a read-only
@@ -19,7 +19,7 @@ IDA session (PAR-R4, 2026-07-05); no IDB renames were made. It converts the
 | Font load path | **witnessed** | `sub_580400 @ 0x580400` (alloc `CGameFont` 0x1318 B → `CGameFont_Init @ 0x673a60` → `File_LoadResource @ 0x75b540` → `sub_674740` parse → free the file buffer) |
 | Boot font set + slot scales | **witnessed** | `HUD_InitAllFonts @ 0x51ee20 → sub_580400(path, slot, scaleFP)`; the slot scale is `scaleFP × 0.000015258789` = **scaleFP / 65536** (16.16 fixed) written to slot+4 / slot+8; a null font slot leaves scale 1.0 (graceful, no crash — required-resources.md) |
 | Version/design-width handling | **FIXED 2026-07-05** | D-FNT-1/2 — reader reads +4 as the design width, scales `800/dw`, no equality gate; `fnt_roundtrip` pins a non-800 font parsing |
-| Host glyph indexing (byte → glyph) | **MATCHING (D-FNT-4 FIXED 2026-07-19)** | retail selects the 20-byte glyph record from the unsigned text byte, skipping controls 0x7F–0x81 `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`; `to_font_file` exposes each remaining record at that byte's decoded cp1252 codepoint and disables host-system fallback, so U+201C draws byte 0x93's bitmap and metric (`strings_encoding_test.gd`) |
+| Reimpl glyph indexing (byte → glyph) | **MATCHING (D-FNT-4 FIXED 2026-07-19)** | retail selects the 20-byte glyph record from the unsigned text byte, skipping controls 0x7F–0x81 `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`; `to_font_file` exposes each remaining record at that byte's decoded cp1252 codepoint and disables system-font fallback, so U+201C draws byte 0x93's bitmap and metric (`strings_encoding_test.gd`) |
 
 ## The witnessed format (`sub_674740 @ 0x674740`)
 
@@ -51,9 +51,9 @@ Each page becomes a GPU texture named `GFONT<this>:<NN>` (`GTexture_FindOrCreate
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
 | D-FNT-1 | A | **FIXED 2026-07-05** | Offset `+4` is the design-width scale reference (`this+4844 = 800.0 / it`), NOT a version — the engine never validates it. Our reader treated it as a version and rejected `!= 800`. **Fixed:** `fnt_parse_header` drops the equality gate; a non-800 font parses (pinned in `fnt_roundtrip_test`). `libs/fnt` `fnt_font_t.version` renamed to `design_width`. |
-| D-FNT-2 | A | **FIXED 2026-07-05** | The per-font design scale `800.0 / designWidth` is now retained: `fnt_parse` stores the file's `+4` word into `design_width`, `fnt_design_scale()` computes `800/dw` `[orig: @ 0x674740]`, and the from-scratch writer emits the font's own design width. The host applies the scale at render (ENG-4). |
+| D-FNT-2 | A | **FIXED 2026-07-05** | The per-font design scale `800.0 / designWidth` is now retained: `fnt_parse` stores the file's `+4` word into `design_width`, `fnt_design_scale()` computes `800/dw` `[orig: @ 0x674740]`, and the from-scratch writer emits the font's own design width. The reimpl applies the scale at render (ENG-4). |
 | D-FNT-3 | B | NEEDS-RE (narrowed) | Offset `+12` (`hdr3`, `this+356`) is named `shadow_offset` but the loader only STORES it. **Narrowed 2026-07-05:** the text drawer `CGameFont_DrawText @ 0x6752c0` renders its shadow from a FORMAT FLAG (`BYTE1(textBuffer)`) + fixed sub-pixel offsets (`cursorX-0.5`, `y-1.5`), NOT from `this+356` — so "shadow_offset" is unsupported by the draw path. Its real consumer (if any) is elsewhere; leave the name until a positive `this+356` reader is found rather than rename speculatively. |
-| D-FNT-4 | A | **FIXED 2026-07-19** | Retail indexes glyphs BY BYTE: printable bytes directly select their 20-byte FNT records, while 0x7F/0x80/0x81 are skipped by both measurement and drawing `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`. The host now single-sources the RTXT and font-boundary mapping in `util/nova_cp1252.h`; `NovaFntResource::to_font_file` keys each printable byte's record at the decoded cp1252 Unicode codepoint, omits the three retail controls, and disables system-font fallback. `strings_encoding_test.gd` pins byte 0x93 → U+201C with the source slot's 9 px metric, the control omissions, and no fallback. This closes the shipped-data-visible substitution (67/98 JO bins carry bytes ≥ 0x80). |
+| D-FNT-4 | A | **FIXED 2026-07-19** | Retail indexes glyphs BY BYTE: printable bytes directly select their 20-byte FNT records, while 0x7F/0x80/0x81 are skipped by both measurement and drawing `[orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]`. The reimpl now single-sources the RTXT and font-boundary mapping in `util/nova_cp1252.h`; `NovaFntResource::to_font_file` keys each printable byte's record at the decoded cp1252 Unicode codepoint, omits the three retail controls, and disables system-font fallback. `strings_encoding_test.gd` pins byte 0x93 → U+201C with the source slot's 9 px metric, the control omissions, and no fallback. This closes the shipped-data-visible substitution (67/98 JO bins carry bytes ≥ 0x80). |
 
 **D-FNT-2 render-scale confirmed:** the same drawer reads `this+4844` (our
 `fnt_design_scale` = `800/dw`) and multiplies it into every glyph's width/height
@@ -65,6 +65,6 @@ now retain is exactly the engine's glyph render scale `[orig: @ 0x6752c0]`.
 - Reimpl: `libs/fnt` (`fnt.h`/`fnt.c`), `godot/engine/fnt/nova_fnt_resource`,
   `godot/engine/util/nova_cp1252.h`,
   `godot/modtools/fonts/` (the editor workspace), `fnt_rasterizer.gd` (the
-  host shelf packer / TextServer rasterization, ENG-4's `libs/fnt` consumer).
-- The FNT shelf-packer + host rasterization stay host-side (ENG-4); this record
+  reimpl shelf packer / TextServer rasterization, ENG-4's `libs/fnt` consumer).
+- The FNT shelf-packer + TextServer rasterization stay Godot-side (ENG-4); this record
   covers the format + load contract.

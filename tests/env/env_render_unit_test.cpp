@@ -547,7 +547,7 @@ int main() {
 		if (!expect(rain_block.render_color == 0x407F2064u, "block rain-half modulation")) return 1;
 		if (!expect(rain_block.pre_mod_color == 0x80FF40C8u, "pre-mod color unaffected by rain")) return 1;
 
-		// The hosted sky cluster keeps skyfog, the static colors, and the six
+		// The world-driven sky cluster keeps skyfog, the static colors, and the six
 		// dome ramps in witnessed order while delegating every channel to the
 		// same WeatherColorBlock pipeline.
 		SkyWeatherColorBlocks sky_blocks;
@@ -1075,7 +1075,7 @@ int main() {
 		            "row1 marches 2 px (the stride floor)")) return 1;
 
 		// Every emitted vertex must reproject to the screen coordinate carried
-		// by its texm3x2 row. This pins the host extension of the witnessed
+		// by its texm3x2 row. This pins the reimpl extension of the witnessed
 		// centered-perspective march to off-center perspective and orthographic
 		// projections without weakening the retail fixture above.
 		const auto row_vertex_reprojects = [&](const WaterStripView &test_view,

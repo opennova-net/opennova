@@ -16,7 +16,7 @@ constexpr float kDegreesToRadians = 0.01745329251994329577f;
 // Numerically-stable LCG. Constants are the classic glibc `rand()` parameters.
 // We don't need engine bit-exact RNG output because the simulator is not
 // claiming byte parity with retail; we DO need cross-platform determinism so
-// tests that pin spawn positions hold on every host.
+// tests that pin spawn positions hold on every platform.
 std::uint32_t lcg_step(std::uint32_t &state) noexcept {
 	state = state * 1103515245u + 12345u;
 	return (state >> 16) & 0x7FFFu;

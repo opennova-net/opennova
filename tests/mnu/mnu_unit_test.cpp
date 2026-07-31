@@ -1268,7 +1268,7 @@ bool test_create_from_scratch() {
   combo.list_box.min_item_height = 20;
   root.children.push_back(combo);
 
-  mnu::Window table;  // table column body drawn by the host
+  mnu::Window table;  // table column body drawn by the shell
   table.name = "ROSTER";
   table.type = mnu::WindowType::Table;
   table.table_data.column.has_count = true;

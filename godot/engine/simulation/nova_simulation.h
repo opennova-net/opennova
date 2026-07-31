@@ -66,21 +66,21 @@ class NovaSkeletalAnim;
 class NovaItemDatabase;
 class NovaResourceRoot;
 
-// THE mission runtime binding: a thin host shell over the portable libs/world runtime.
+// THE mission runtime binding: a thin shell over the portable libs/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
 // them through World::run_logic_tick — one logic tick per step(), the original's
-// 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). A host frame runs
+// 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). A render frame runs
 // 0..N of those: the wall-clock accumulator lives in the driver (MissionRuntime.
 // tick_realtime), faithful to Game_MainLoop @0x52b630. The per-system
 // cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
 // 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
-// (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live host for
+// (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live owner for
 // this path; focused tests and non-gameplay tools may instantiate it directly:
 // promote a parsed BMS mission into the world
 // (mission/promote.h), register the systems in the faithful order
 // (mission/mission_systems.h), run a pre-mission pass, then tick. Entity transforms
 // (mission space -> Godot space) and the part-anim phase are exposed for a scene/renderer
-// to draw; host-presentation side effects (text/dialog/win) drain out of the World
+// to draw; presentation side effects (text/dialog/win) drain out of the World
 // EffectLog each tick. Runtime transport and fixture teardown use the same
 // play/pause/step/restart surface.
 class NovaSimulation : public Node3D,
@@ -93,13 +93,13 @@ public:
 	// PackedFloat32Array call replaces the per-entity scalar getters in the per-tick present loop
 	// (the scalar getters box a Variant each; see feedback_dispatcher_callable_perf). Mirrored on the
 	// GDScript side via these bound constants so the layout has a single source of truth (C++).
-	// Rotation is emitted as mission-space degrees (pitch, yaw, roll) so the host builds the basis
+	// Rotation is emitted as mission-space degrees (pitch, yaw, roll) so the shell builds the basis
 	// through the one placer convention (MissionObjectPlacer.bms_to_godot_basis); position is already
 	// in Godot space (x, z, -y). Pitch/roll are 0 today (yaw-only locomotion) — reserved for parity.
 	enum PresentField {
 		PF_KIND = 0,   // mission ItemType (3 = Organic), -1 if none
 		PF_INDEX,      // index within its kind's list
-		PF_BMS_ID,     // file entity id; host maps this to a placed node (primary key)
+		PF_BMS_ID,     // file entity id; the shell maps this to a placed node (primary key)
 		PF_NET_ID,     // runtime SSN (WAC/BMS addressing)
 		PF_POS_X,      // Godot-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
 		PF_POS_Y,
@@ -223,7 +223,7 @@ public:
 
 	// Typed record returned by get_entity_effect_state_for_ssn(). Position is
 	// already in Godot space; rotation remains mission Euler degrees so the
-	// host applies the one MissionObjectPlacer basis conversion.
+	// the shell applies the one MissionObjectPlacer basis conversion.
 	enum EffectStateField {
 		EFFECT_STATE_POSITION = 0,
 		EFFECT_STATE_ROTATION_DEG,
@@ -268,7 +268,7 @@ private:
 	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
 	opennova::world::CollisionWorld collision_world_;
 	void apply_collision_to_ai();
-	// Mission-lifetime collision graphic cache and host inputs. The initial
+	// Mission-lifetime collision graphic cache and shell inputs. The initial
 	// mission sweep and demand resolution for late-spawned players share these
 	// exact model ids; repeated sweeps only attach instances and never duplicate
 	// the model registry. MissionObjectPlacer is RefCounted, so retaining it also
@@ -292,7 +292,7 @@ private:
 	std::unordered_map<std::string, CollisionHuskPieceInfo>
 			collision_husk_pieces_by_graphic_;
 	// Negative demand cache: one unresolved entity is attempted at most once per
-	// mission unless the host explicitly asks for another full resolve sweep.
+	// mission unless the shell explicitly asks for another full resolve sweep.
 	std::unordered_map<uint16_t, uint64_t> collision_resolution_attempted_;
 	// Wire-side collision resolution for decoded pool-1 movers: runtime type id
 	// -> {model id, bound radius}, sharing the by-graphic caches above. -1 model
@@ -320,7 +320,7 @@ private:
 		PackedInt32Array overlay_classes;
 	};
 	std::unordered_map<uint16_t, SkeletalCollisionSource> collision_skeletal_sources_;
-	// A non-negative value is the host's once-per-frame retail presentation
+	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
 	bool ensure_collision_instance(opennova::world::World &p_world,
@@ -342,7 +342,7 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
-	// Delta baselines for the render-occlusion apply path: what the host last
+	// Delta baselines for the render-occlusion apply path: what the shell last
 	// applied, so steady frames emit nothing. Cleared on world reset and via
 	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full
 	// re-emit).
@@ -443,7 +443,7 @@ private:
 	// start_host_session's gating [orig: the §5.0 listen-host bring-up, SinglePlayer_StartMission @0x561af0].
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
-	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot host (which owns the resource
+	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot shell (which owns the resource
 	// root) before load; copied into ctx_.terrain_til_data at bring-up so the initial-state burst streams
 	// the S2C 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
 	std::vector<uint8_t> terrain_til_data_;
@@ -556,7 +556,7 @@ private:
 	uint8_t local_usegun_saved_adm_ = 0xFF;
 	int32_t local_usegun_switch_action_ = -1;
 	// Retail's render gate reads the resolved Def.fpModel pointer, not merely the
-	// authored gfx1 token. The host reports which equipped Def actually owns the
+	// authored gfx1 token. The shell reports which equipped Def actually owns the
 	// resolved first-person model; 0xFF means no model resolved.
 	uint8_t local_first_person_model_adm_ = 0xFF;
 	opennova::world::WeaponSlotState *active_local_weapon_slot();
@@ -579,7 +579,7 @@ private:
 	// The equipped .adm's per-slot VARIANT rings — multi-clip rows rotate round-robin.
 	// The sim owns the ring heads exactly where the original keeps them (the weapon's
 	// animState slot array +72): bake duration reads and play starts both SERVE the
-	// head then ADVANCE it, and the play latches the served index for the host's clip
+	// head then ADVANCE it, and the play latches the served index for the shell's clip
 	// playback (both viewmodel parts follow one latch, so arms and gun never split).
 	// [orig: Anim_GetDurationTicks @ 0x53ee10; AnimMap_PlayAnimBySlot @ 0x40bda0
 	//  (+68 entry latch); ring build AnimMap_RegisterBoneNode @ 0x40c2d0]
@@ -616,7 +616,7 @@ private:
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	// The action-begin seam: serial + the started slot id; the state dict resolves
-	// the started action's soundset/particle names for the host's sound/muzzle legs
+	// the started action's soundset/particle names for the shell's sound/muzzle legs
 	// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
 	uint64_t weapon_action_serial_ = 0;
 	int weapon_action_started_ = -1;
@@ -626,7 +626,7 @@ private:
 	uint64_t weapon_action_end_serial_ = 0;
 	int weapon_action_finished_ = -1;
 	// One tick's presentation payload, copied while the mounted def and variant-ring
-	// result are still authoritative. A host frame drains these records in tick order;
+	// result are still authoritative. A render frame drains these records in tick order;
 	// the tick stamp lets delayed clip starts resume at the correct playhead.
 	struct PendingWeaponEvent {
 		uint32_t tick = 0;
@@ -646,20 +646,20 @@ private:
 		int action_finished = -1;
 		String action_end_soundset;
 		// The recoil-row DIRECT effect leg (casing eject / bolt smoke): the action id
-		// plus its authored particle/userpoint. The host spawns it with no scope gate
+		// plus its authored particle/userpoint. The shell spawns it with no scope gate
 		// and no live-handle suppression [orig: WeaponAction_Recoil @ 0x542dd0 gate
 		// @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64, param7=0].
 		int action_effect = -1;
 		String effect_particle;
 		String effect_particle_userpoint;
-		// A committed weapon switch: the newly equipped def's name — the host
+		// A committed weapon switch: the newly equipped def's name — the shell
 		// reinstalls the viewmodel/FSM for it [orig: the mount's model re-resolve;
 		// the equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
 		String switch_to_weapon;
 		// Explicit no-weapon commit. Empty switch_to_weapon alone means an event
 		// with no switch; it cannot represent restoring an unarmed personal slot.
 		bool clear_weapon = false;
-		// A UseGun commit selects an already-live parent/personal slot. The host
+		// A UseGun commit selects an already-live parent/personal slot. The shell
 		// may rebake/rebuild the model definition but must not reset that slot.
 		bool preserve_slot_state = false;
 		// The switch-walk wrap-around deny [orig: PlaySoundOnDedicatedServer
@@ -708,7 +708,7 @@ private:
 	// @ 0x4dfa40 stamps g_pendingWeaponSlot + queues the action; the handler's
 	// completion consumes it].
 	bool weapon_switch_in_flight_ = false;
-	// LocalPlayerHost emits category/cycle input once per press. If that edge lands
+	// LocalPlayerPresenter emits category/cycle input once per press. If that edge lands
 	// during SWITCHTO, retain the requested outgoing action here until the draw can
 	// transition to it; the portable queue writer keeps its witnessed refusal.
 	int32_t weapon_switch_deferred_action_ = -1;
@@ -788,11 +788,11 @@ private:
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
 	void tick_local_player_view();
-	// The host-sampled head-bone eye (mission space), the 3P anchor-chase target
+	// The shell-sampled head-bone eye (mission space), the 3P anchor-chase target
 	// [orig: ThirdPersonCamera_Update @ 0x437b70 target = Position + CameraOffset,
 	//  the posed head bone]. The original computes CameraOffset sim-side from its
-	//  bone matrices (@ 0x4b6bb3); hosted, the render skeleton lives host-side, so
-	//  the host feeds its sample each frame (D-INF-18). Invalid -> Position + 1.0
+	//  bone matrices (@ 0x4b6bb3); in the port, the render skeleton lives shell-side, so
+	//  the shell feeds its sample each frame (D-INF-18). Invalid -> Position + 1.0
 	//  (the non-person bump [orig: @ 0x437e8f]).
 	float local_eye_mission_[3] = {0.0f, 0.0f, 0.0f};
 	bool local_eye_valid_ = false;
@@ -894,7 +894,7 @@ private:
 	// (items.def graphic -> the shared by-graphic collision model cache).
 	WireCollisionShape wire_collision_shape_for_type(uint16_t type_id);
 
-	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
+	// Terrain the AI grounds on. We own copies of the shell's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
 	// a reload (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no grounding.
 	std::vector<uint16_t> terrain_heightmap_;
@@ -967,8 +967,8 @@ public:
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
 	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns
 	// false when no mission is loaded. Banking wall-clock and dispatching 0..N of these per
-	// host frame is the driver's job (MissionRuntime.tick_realtime, the Game_MainLoop
-	// @0x52b630 accumulator) — a host frame is NOT one tick.
+	// render frame is the driver's job (MissionRuntime.tick_realtime, the Game_MainLoop
+	// @0x52b630 accumulator) — a render frame is NOT one tick.
 	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
 	bool step();
 	void restart();        // Restore the runtime-start baseline (rewinds world + AI)
@@ -983,7 +983,7 @@ public:
 
 	// Feed the mission's raw terrain-tile (.til) file bytes so the listen host streams the S2C 0x45
 	// terrain-tile load to joiners (climbs the client's g_loading_progress 5 -> 6; §5.37). The Godot
-	// host owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
+	// shell owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
 	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
 
@@ -1109,7 +1109,7 @@ public:
 	// The local player's wire identity ((pool<<12)|slot). Packed zero is valid: callers that
 	// need presence use has_local_player()/the runtime's has_self_handle() instead of a sentinel.
 	// The host returns its pool-0 player; a joiner returns H, the host-assigned identity that its
-	// wire-present pass excludes while LocalPlayerHost draws the distinct local motor entity L.
+	// wire-present pass excludes while LocalPlayerPresenter draws the distinct local motor entity L.
 	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. Movement keys + the lean
@@ -1151,12 +1151,12 @@ public:
 	// [orig: Armory_ResolveSelectedClass @0x5642f0; Player_MountWeaponSlot @0x4dfa40]
 	int get_local_player_class() const;
 	String get_local_player_weapon_name() const;
-	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
+	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The shell
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
 	int get_local_player_body_anim_slot() const;
 	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
 	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
-	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
+	// shell plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
 	int get_local_player_anim_phase_ticks() const;
 	String get_local_player_anim_source_key() const;
@@ -1167,7 +1167,7 @@ public:
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
 	//   angles: PackedVector3Array[9] mission-euler degrees per anim::OverlayClass.
 	// The blends run in exact BAM int math [orig: Entity_BuildBoneTransformMatrices
-	// @0x4b1290; docs/world/world-wac-ai-re.md §14]; the host converts each triple with
+	// @0x4b1290; docs/world/world-wac-ai-re.md §14]; the shell converts each triple with
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds NovaObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Dictionary get_local_player_aim_overlay() const;
@@ -1217,10 +1217,10 @@ public:
 	// Retail actions 56/57 (default +/-), available even while NVG is off.
 	// Returns the clamped gain in [0,4].
 	int request_local_player_nvg_gain(int p_delta);
-	// The host's camera mode, driving the fov suppression + anchor chase
+	// The shell's camera mode, driving the fov suppression + anchor chase
 	// [orig: g_camera_mode @ 0xA890C8].
 	void set_local_player_camera_third_person(bool p_third_person);
-	// The host-sampled head-bone eye (Godot space) for the 3P anchor chase; pass
+	// The shell-sampled head-bone eye (Godot space) for the 3P anchor chase; pass
 	// valid=false when no skeleton sample exists (falls back to Position + 1.0).
 	void set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid);
 	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
@@ -1240,12 +1240,12 @@ public:
 	// exactly the panel's row walk [orig: HUD_DrawWinConditions @0x5ba9e0..;
 	// shown = show-win bit, done = won bit].
 	Array get_objectives_view() const;
-	// The FSM snapshot for the host: latest clip/action payloads, diagnostic serials,
+	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
 	Dictionary get_local_player_weapon_state() const;
 	// Destructively drain the ordered presentation outputs accumulated since the
-	// previous host frame. Each Dictionary encodes one PlayerWeaponEvent.
+	// previous render frame. Each Dictionary encodes one PlayerWeaponEvent.
 	Array drain_local_player_weapon_events();
 	// Destructively drain the flight sim's resolved round impacts, each row already
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
@@ -1367,7 +1367,7 @@ public:
 	// is applied in-engine, never here.
 	Array drain_effects();
 
-	// The host fire-presentation drain: one Dictionary per round spawned since the
+	// The shell fire-presentation drain: one Dictionary per round spawned since the
 	// last call — {origin: Vector3 (godot), forward: Vector3 (godot, unit),
 	// shooter_handle, is_local_player, ammo_index, sound_set, effect, mf_light} with
 	// the ammo-def 'ai_launch'/'ai_launcheffect' names resolved. The fire present
@@ -1391,7 +1391,7 @@ public:
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
 	// Drain persistent entity-attached emitter registrations. Producers refresh
-	// a keyed (source_spawn_id, lane) intent; the audio host expands `set` into
+	// a keyed (source_spawn_id, lane) intent; the audio layer expands `set` into
 	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
 	// Rows are {source_spawn_id, handle, source_bms_id, pos, lane, slot,
 	// lifetime, emitted_tick, pitch_q16, volume_q8_8, source_only, set}.
@@ -1496,14 +1496,14 @@ public:
 	// The adjacent retail transition-arbitration flags table (off_8139E8).
 	static int64_t infantry_anim_flags(int p_state);
 
-	// Entity query. The (kind, index) pair lets a host map a sim entity back to
+	// Entity query. The (kind, index) pair lets the shell map a sim entity back to
 	// its promoted mission record and already-rendered node.
 	int get_entity_count() const;
 	int get_entity_kind(int p_index) const;         // mission ItemType (3 = Organic), -1 if none
 	int get_entity_index(int p_index) const;        // index within its kind's list
 	Vector3 get_entity_position(int p_index) const; // mission (x,y,z) -> Godot (x, z, -y), units
 	float get_entity_yaw(int p_index) const;        // BAM heading -> radians
-	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for host remap)
+	float get_entity_yaw_deg(int p_index) const;    // heading in mission degrees (for shell remap)
 	int get_entity_state(int p_index) const;        // AI state id (16 = GROUND_FOLLOWWP)
 	int get_entity_net_id(int p_index) const;       // runtime SSN (WAC/BMS addressing), 0 if none
 	// Empty when no LIVE registry entity owns p_ssn. Unlike the AI-indexed
@@ -1516,7 +1516,7 @@ public:
 	PackedVector3Array get_present_effect_state_for_wire_handle(int p_wire_handle) const;
 	PackedVector3Array get_present_effect_state_for_bms_id(int p_bms_id) const;
 	PackedVector3Array get_present_effect_state_for_origin(int p_kind, int p_index) const;
-	int get_entity_bms_id(int p_index) const;       // file entity id; the host maps this to a placed node
+	int get_entity_bms_id(int p_index) const;       // file entity id; the shell maps this to a placed node
 	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
 	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity
 	// Godot-space positions of the entities the distant MODEL/depth-mask foliage
@@ -1533,7 +1533,7 @@ public:
 			const PackedFloat32Array &p_snapshot, int p_base, int p_channel);
 	// Raw signed part-anim channel dword (PLAYPARTANIM); channel is 1 or 2.
 	// Ordinary sweeps occupy 0..0x10000, while zero-time wrapping states are
-	// preserved. The host renders the model part from this value.
+	// preserved. The shell renders the model part from this value.
 	int get_entity_part_anim_phase(int p_index, int channel) const;
 	// True when the authority publishes this semantic channel. This is an
 	// ownership predicate, not a movement predicate: owned endpoints, including
@@ -1541,7 +1541,7 @@ public:
 	// ItemDefAttrib 0x1000; channel 2 is unconditional.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
 	// Entity.body_anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written
-	// by EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam
+	// by EntityCommands::set_ssn_anim; consumed only by the shell's deferred apply_body_anim seam
 	// today (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 =
 	// none. (Distinct from world Entity.anim_slot = the retail +0x374 character-model selector.)
 	int get_entity_body_anim_slot(int p_index) const;
@@ -1560,7 +1560,7 @@ public:
 	}
 	int get_present_stride() const { return PF_STRIDE; }
 
-	// Wire the terrain the AI grounds on (the host's loaded NovaTerrainData). Copies the depth
+	// Wire the terrain the AI grounds on (the shell's loaded NovaTerrainData). Copies the depth
 	// buffer + sector layout so the portable height field outlives the source and survives reload.
 	// Null/unloaded clears grounding (entities keep their authored Z). GameWorld
 	// and direct test/tooling fixtures call this through MissionRuntime.setup().
@@ -1572,7 +1572,7 @@ public:
 	int get_loco_scale() const;
 
 	// Wire the infantry root-motion source: resolve a model's .adm (e.g. "E_STAND.adm")
-	// through the host's resource root and keep its clips' root tracks. Returns the number
+	// through the shell's resource root and keep its clips' root tracks. Returns the number
 	// of anim states with a usable clip (0 = nothing loaded; org1 soldiers then stand —
 	// motion comes from clips, as in the original). Survives reset_world like the terrain.
 	int set_infantry_anim_map(const Ref<class NovaResourceRoot> &p_resource_root, const String &p_adm_name);
@@ -1641,7 +1641,7 @@ public:
 	// bms_ids of non-building entities the collector gates culled this frame.
 	PackedInt32Array get_render_culled_bms_ids() const;
 	// Delta form of get_building_visibility(): only pairs whose packed value
-	// changed since the last call, so the host applies changes instead of
+	// changed since the last call, so the shell applies changes instead of
 	// re-walking the whole building set every frame.
 	PackedInt64Array get_building_visibility_changes();
 	// Delta form of get_render_culled_bms_ids():
@@ -1652,7 +1652,7 @@ public:
 	// hidden entity never flashes for a frame.
 	bool entity_present_visible(int p_bms_id) const;
 	// Forget the applied-state baselines: the next delta call re-emits the
-	// full frame state (the occlusion A/B seam and host cache resets use it).
+	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
 	bool occlusion_camera_indoors() const;
@@ -1798,7 +1798,7 @@ public:
 	// the STROVER_USEGUN default). Armory mode rides the zone flag; the can-fire
 	// nearest-only gate models EquippedSlot presence + the ctrl/drvr seat reject.
 	// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 selection half;
-	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are host state,
+	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are shell state,
 	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
 	TypedArray<Dictionary> get_attach_labels() const;
 

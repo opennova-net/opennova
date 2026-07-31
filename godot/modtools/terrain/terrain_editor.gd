@@ -58,7 +58,7 @@ var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
 
 # Method-bundle sections (W4-6d): operation clusters extracted off the
-# facade. ALL state stays here on the host; sections reach back via `_te`.
+# facade. ALL state stays here on the mount; sections reach back via `_te`.
 var _tileinfo_ops  # TerrainEditorTileinfoOps (created in _init)
 var _foliage_ops  # TerrainEditorFoliageOps (created in _init)
 var _io_ops  # TerrainEditorIoOps (created in _init)
@@ -195,7 +195,7 @@ var sector_overlay_visible: bool = false
 # never share state.
 var grid_guide_visible: bool = false
 
-# The app-owned environment DOCUMENT handle. Host-owned on purpose — the shell,
+# The app-owned environment DOCUMENT handle. Mount-owned on purpose — the shell,
 # boot probe, and tests read or assign it directly; set_environment_editor
 # routes the world-preview binding through _world_preview.
 var environment_editor
@@ -255,7 +255,7 @@ func _ready() -> void:
 	camera.rotation_degrees = Vector3(-30, 0, 0)
 	# World furniture: the shared WorldContextPreview service owns the
 	# environment/sky/weather/water nodes. The lambdas capture this editor's
-	# document/mesh reads so the service never reaches back into the host.
+	# document/mesh reads so the service never reaches back into the mount.
 	_world_preview = WorldContextPreview.new(
 		terrain_world_root,
 		func() -> ShaderMaterial: return _get_material(),
@@ -365,7 +365,7 @@ func _init_foliage_preview() -> void:
 
 
 ## Wire the app-owned environment document into the world preview. The document
-## var stays on the host (duck-typed consumers and tests assign it directly);
+## var stays on the mount (duck-typed consumers and tests assign it directly);
 ## the service owns the signal binding and the node fan-out.
 func set_environment_editor(value) -> void:
 	environment_editor = value

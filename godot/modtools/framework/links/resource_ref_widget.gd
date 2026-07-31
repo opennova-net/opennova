@@ -7,7 +7,7 @@ extends HBoxContainer
 ## set_value never emits).
 ##
 ## Services arrive as Callables so the widget works anywhere: with no services
-## (headless tests, runtime hosts) it degrades to a plain name field — badge,
+## (headless tests, runtime owners) it degrades to a plain name field — badge,
 ## browse, and jump simply hide. services_from_shell builds the editor trio.
 
 signal value_changed(value: String)
@@ -52,7 +52,7 @@ func _init() -> void:
 	name_edit.text_submitted.connect(func(value: String) -> void: _commit(value))
 	name_edit.focus_exited.connect(func() -> void:
 		# A focus_exited fired while the row is being torn down (inspector
-		# rebuild) must not commit the in-flight text - mirrors the host
+		# rebuild) must not commit the in-flight text - mirrors the mount
 		# inspectors' _wire_text teardown skip.
 		if name_edit.is_inside_tree() and name_edit.text != _shown:
 			_commit(name_edit.text))

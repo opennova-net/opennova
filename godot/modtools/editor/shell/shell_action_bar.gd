@@ -1,18 +1,18 @@
 class_name ShellActionBar
 extends RefCounted
 
-## One document-action rail (New/Open/Save/Save As/Export) over a host
+## One document-action rail (New/Open/Save/Save As/Export) over a mount
 ## container, driven by the workspace's document-action capability hooks.
-## Horizontal hosts (the top bar) fold the secondary actions into a "More"
-## menu; vertical hosts (the environment popup) list every action inline.
-## The shell owns one instance per host and routes presses back through the
+## Horizontal mounts (the top bar) fold the secondary actions into a "More"
+## menu; vertical mounts (the environment popup) list every action inline.
+## The shell owns one instance per mount and routes presses back through the
 ## Callable it injected.
 
 ## Stable ids for the document-action cluster. PopupMenu item ids reuse them,
 ## so the More menu routes through the same pressed handler as the buttons.
 enum Action { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
-var _host: BoxContainer
+var _mount: BoxContainer
 var _on_pressed: Callable
 # func() -> bool: any workspace busy (disables the whole rail).
 var _busy: Callable
@@ -28,7 +28,7 @@ var _overflow_button: MenuButton
 
 
 func setup(
-	host: BoxContainer,
+	mount: BoxContainer,
 	on_pressed: Callable,
 	busy: Callable,
 	active_workspace: Callable,
@@ -36,7 +36,7 @@ func setup(
 	name_prefix := "",
 	min_height := 34.0
 ) -> void:
-	_host = host
+	_mount = mount
 	_on_pressed = on_pressed
 	_busy = busy
 	_active_workspace = active_workspace
@@ -52,7 +52,7 @@ func buttons() -> Dictionary:
 
 static func action_defs_for(workspace: EditorWorkspace) -> Array:
 	# "overflow" marks the secondary actions the horizontal top bar folds into
-	# the More menu; vertical hosts (environment popup) ignore it.
+	# the More menu; vertical mounts (environment popup) ignore it.
 	var action_defs := [
 		{"id": Action.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label(), "overflow": false},
 		{"id": Action.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label(), "overflow": false},
@@ -114,16 +114,16 @@ static func action_enabled(workspace: EditorWorkspace, action_id: int, busy: boo
 
 
 func rebuild(workspace: EditorWorkspace) -> void:
-	for child in _host.get_children():
-		_host.remove_child(child)
+	for child in _mount.get_children():
+		_mount.remove_child(child)
 		child.free()
 	_buttons.clear()
-	# The freed children included the previous More menu (top-bar host only).
-	if _host is HBoxContainer:
+	# The freed children included the previous More menu (top-bar mount only).
+	if _mount is HBoxContainer:
 		_overflow_button = null
 
 	if workspace == null:
-		_host.visible = false
+		_mount.visible = false
 		return
 
 	var action_defs := action_defs_for(workspace)
@@ -131,7 +131,7 @@ func rebuild(workspace: EditorWorkspace) -> void:
 	for action_def in action_defs:
 		if not bool(action_def["visible"]):
 			continue
-		if _host is HBoxContainer and bool(action_def.get("overflow", false)):
+		if _mount is HBoxContainer and bool(action_def.get("overflow", false)):
 			overflow_defs.append(action_def)
 			continue
 		var btn := Button.new()
@@ -140,21 +140,21 @@ func rebuild(workspace: EditorWorkspace) -> void:
 		btn.text = String(action_def["label"])
 		btn.icon = EditorIconLibrary.resolve(icon_id_for(action_id))
 		btn.focus_mode = Control.FOCUS_NONE
-		if _host is HBoxContainer:
+		if _mount is HBoxContainer:
 			btn.custom_minimum_size = Vector2(112, _min_height)
 			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		else:
 			btn.custom_minimum_size = Vector2(0, _min_height)
 			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		btn.pressed.connect(_on_pressed.bind(action_id))
-		_host.add_child(btn)
+		_mount.add_child(btn)
 		_buttons[action_id] = btn
 
 	if not overflow_defs.is_empty():
 		_overflow_button = _make_overflow_button(overflow_defs)
-		_host.add_child(_overflow_button)
+		_mount.add_child(_overflow_button)
 
-	_host.visible = not _buttons.is_empty() or (_host is HBoxContainer and _overflow_button != null)
+	_mount.visible = not _buttons.is_empty() or (_mount is HBoxContainer and _overflow_button != null)
 	refresh_state(workspace)
 
 

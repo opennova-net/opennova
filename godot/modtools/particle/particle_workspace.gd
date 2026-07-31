@@ -32,8 +32,8 @@ func _init() -> void:
 	particle_editor = ParticleEditorScript.new()
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	if _screen == null:
 		# The blueprint screen owns the node graph + the live preview. We keep a
@@ -44,7 +44,7 @@ func mount_viewport(host: Control) -> void:
 		_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_screen.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_screen.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		host.add_child(_screen)  # builds the GraphEdit + preview in _ready
+		mount.add_child(_screen)  # builds the GraphEdit + preview in _ready
 		_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_screen.set_workspace(self)
 		_screen.set_particle_editor(particle_editor)
@@ -55,12 +55,12 @@ func mount_viewport(host: Control) -> void:
 				and not particle_editor.preview_refresh_requested.is_connected(_preview.request_live_refresh):
 			particle_editor.preview_refresh_requested.connect(_preview.request_live_refresh)
 	elif _screen.get_parent() == null:
-		host.add_child(_screen)
+		mount.add_child(_screen)
 		_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_apply_current_selection_to_preview()
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _screen == null:
 		return
 	if _screen.get_parent() != null:
@@ -183,7 +183,7 @@ func select_workflow(workflow_id: int) -> void:
 	_sync_shell_workflow()
 
 
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	if particle_editor == null:
 		return
 	var inspector: Control
@@ -197,7 +197,7 @@ func build_workflow_inspector(workflow_id: int, host: Control) -> void:
 			inspector = TableInspectorScene.instantiate()
 		_:
 			return
-	host.add_child(inspector)
+	mount.add_child(inspector)
 	if inspector.has_method("set_particle_editor"):
 		inspector.set_particle_editor(particle_editor)
 	if inspector.has_method("set_workspace"):

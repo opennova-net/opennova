@@ -3,13 +3,13 @@ extends GutTest
 # NovaDebugOverlay: the shared F3 mission inspector. Most legacy tests drive
 # its runtime-free panes; the player tests use a small public-contract fake so
 # no listen-server auto-spawn can make the pose/no-player cases nondeterministic.
-# MissionRuntime metadata and game/ONED host wiring are covered separately.
+# MissionRuntime metadata and game/ONED shell wiring are covered separately.
 
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
-# Pages mount under the sidebar shell's page host; option checkboxes are
+# Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
-const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
+const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageMount"
 const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/Rounds/show_collision")
 const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
@@ -330,7 +330,7 @@ class AuthorityTarget:
 		calls += 1
 
 
-class FakeTransportHost:
+class FakeTransportAdapter:
 	extends Node
 	var actions: Array[String] = []
 
@@ -445,7 +445,7 @@ func test_without_runtime_reports_no_mission() -> void:
 	var compact_picker := overlay.find_child(
 			"CompactPagePicker", true, false) as OptionButton
 	assert_true(page_list.visible or compact_picker.visible,
-		"the page list stays usable (the perf page works from host-wide state, no sim needed)")
+		"the page list stays usable (the perf page works from process-wide state, no sim needed)")
 	var entity_list := overlay.find_child("EntityList", true, false) as ItemList
 	assert_eq(entity_list.item_count, 0, "the sim-fed pages sit empty")
 
@@ -545,10 +545,10 @@ func test_transport_controls_are_disabled_without_a_runtime() -> void:
 func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 	var session := NovaDebugSession.new()
 	NovaDebugCatalog.install(session)
-	var game_host := FakeTransportHost.new()
-	add_child_autofree(game_host)
+	var game_adapter := FakeTransportAdapter.new()
+	add_child_autofree(game_adapter)
 	session.set_target_source(
-			NovaDebugCatalog.TARGET_GAME_HOST, func(): return game_host)
+			NovaDebugCatalog.TARGET_GAME_SHELL, func(): return game_adapter)
 	session.set_authority_source(func(): return true)
 	session.set_edit_unlocked(true)
 
@@ -575,7 +575,7 @@ func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 	assert_string_contains(step.tooltip_text, "multiplayer")
 
 	play.pressed.emit()
-	assert_eq(game_host.actions, ["resume"])
+	assert_eq(game_adapter.actions, ["resume"])
 
 
 
@@ -589,7 +589,7 @@ func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 
 
 func test_skeleton_toggle_lives_on_the_animation_page() -> void:
-	# Registry toggles need no runtime and only emit intent for the host to act
+	# Registry toggles need no runtime and only emit intent for the shell to act
 	# on (build/free the 3D view) — everything rides ONE generic channel now.
 	# The View page is gone; the bone views live with the animation data.
 	var overlay := _make_overlay()
@@ -902,7 +902,7 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 
 	var panel := overlay.find_child("DebugPanel", true, false) as Control
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
 	var player_page := overlay.get_node(PAGES + "/Player") as Control
 	var inventory_label := overlay.get_node(
 			PAGES + "/Player/PlayerInventory") as Label
@@ -918,11 +918,11 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 	assert_false(inventory_toggle.button_pressed,
 			"verbose inventory starts collapsed so actions stay above the fold")
 	assert_false(inventory_label.visible)
-	assert_true(page_host.get_global_rect().encloses(dump.get_global_rect()),
+	assert_true(page_mount.get_global_rect().encloses(dump.get_global_rect()),
 			"snapshot action is visible without scrolling past inventory")
-	assert_true(page_host.get_global_rect().encloses(teleport.get_global_rect()),
+	assert_true(page_mount.get_global_rect().encloses(teleport.get_global_rect()),
 			"teleport action is visible without scrolling past inventory")
-	assert_false(page_host.get_v_scroll_bar().visible,
+	assert_false(page_mount.get_v_scroll_bar().visible,
 			"the default populated Player summary fits the live 1600x900 dock")
 
 	inventory_toggle.set_pressed_no_signal(true)
@@ -944,10 +944,10 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 	assert_gte(page_list.get_global_rect().position.x,
 			viewport_rect.position.x,
 			"the Player loadout cannot push the other page tabs off-screen")
-	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+	assert_lte(player_page.get_combined_minimum_size().x, page_mount.size.x,
 			"the populated page itself fits rather than relying on hidden clipping")
 	assert_lte(player_page.get_global_rect().end.x,
-			page_host.get_global_rect().end.x + 1.0,
+			page_mount.get_global_rect().end.x + 1.0,
 			"expanded loadout controls remain inside the visible page column")
 
 	viewport.size = Vector2i(360, 900)
@@ -957,10 +957,10 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 			viewport_rect.position.x + 7.0)
 	assert_lte(panel.get_global_rect().end.x,
 			viewport_rect.end.x - 7.0)
-	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+	assert_lte(player_page.get_combined_minimum_size().x, page_mount.size.x,
 			"the real loadout also fits the compact single-column dock")
 	assert_lte(player_page.get_global_rect().end.x,
-			page_host.get_global_rect().end.x + 1.0,
+			page_mount.get_global_rect().end.x + 1.0,
 			"compact loadout content wraps instead of being silently clipped")
 
 
@@ -976,28 +976,28 @@ func test_player_page_scrolls_without_moving_the_sidebar() -> void:
 	assert_true(overlay.select_page(&"Player"))
 	await wait_process_frames(2)
 
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
 	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
-	assert_not_null(page_host)
-	assert_eq(page_host.horizontal_scroll_mode,
+	assert_not_null(page_mount)
+	assert_eq(page_mount.horizontal_scroll_mode,
 			ScrollContainer.SCROLL_MODE_SHOW_NEVER)
-	assert_false(page_host.get_h_scroll_bar().visible,
+	assert_false(page_mount.get_h_scroll_bar().visible,
 			"page content never pushes the whole dock sideways")
-	var vertical_bar := page_host.get_v_scroll_bar()
+	var vertical_bar := page_mount.get_v_scroll_bar()
 	assert_true(vertical_bar.visible)
 	assert_gt(vertical_bar.max_value, vertical_bar.page,
-			"the shared host makes the bottom of a tall page reachable")
+			"the shared mount makes the bottom of a tall page reachable")
 	var sidebar_before := page_list.get_global_rect()
 	vertical_bar.value = vertical_bar.max_value
 	await wait_process_frames(2)
-	assert_true(page_host.get_global_rect().intersects(teleport.get_global_rect()),
+	assert_true(page_mount.get_global_rect().intersects(teleport.get_global_rect()),
 			"scrolling reaches the Player page's final action")
 	assert_eq(page_list.get_global_rect(), sidebar_before,
 			"page scrolling leaves navigation fixed")
 	assert_true(overlay.select_page(&"Stats"))
 	await wait_process_frames(2)
-	assert_eq(page_host.scroll_vertical, 0,
+	assert_eq(page_mount.scroll_vertical, 0,
 			"a newly selected page always opens at its top")
 
 
@@ -1012,18 +1012,18 @@ func test_redesigned_diagnostic_pages_fit_the_compact_dock() -> void:
 	overlay.toggle()
 	await wait_process_frames(2)
 
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
-	assert_not_null(page_host)
-	assert_false(page_host.get_h_scroll_bar().visible,
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
+	assert_not_null(page_mount)
+	assert_false(page_mount.get_h_scroll_bar().visible,
 			"the compact dock never needs whole-page horizontal scrolling")
 	for page_id in [&"Entities", &"Animation", &"Occlusion", &"Particles", &"Rendering"]:
 		assert_true(overlay.select_page(page_id))
 		await wait_process_frames(2)
 		var page := overlay.get_node(NodePath(PAGES + "/" + String(page_id))) as Control
-		assert_lte(page.get_combined_minimum_size().x, page_host.size.x,
+		assert_lte(page.get_combined_minimum_size().x, page_mount.size.x,
 				"%s fits the compact page column" % page_id)
 		assert_lte(page.get_global_rect().end.x,
-				page_host.get_global_rect().end.x + 1.0,
+				page_mount.get_global_rect().end.x + 1.0,
 				"%s stays inside the visible dock" % page_id)
 
 
@@ -1325,8 +1325,8 @@ func after_all() -> void:
 # --- Particles tab (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
 
 func test_particles_page_toggles_ride_the_option_registry() -> void:
-	# Same host-neutral contract as every registry toggle: the checkboxes only
-	# emit intent; the host hides the effect world / builds the box view. All
+	# Same shell-neutral contract as every registry toggle: the checkboxes only
+	# emit intent; the shell hides the effect world / builds the box view. All
 	# access rides stable node names (ADR 0018 — no private pokes).
 	var overlay := _make_overlay()
 	overlay.toggle()
@@ -1701,33 +1701,33 @@ func test_selection_and_width_persist_across_instances() -> void:
 			"double-clicking the resize divider restores the default width")
 
 
-class TestHostPage:
+class TestShellPage:
 	extends NovaDebugPage
 	var refreshed := 0
 
 	func page_id() -> StringName:
-		return &"HostExtras"
+		return &"ShellExtras"
 
 	func page_title() -> String:
-		return "Host extras"
+		return "Shell extras"
 
 	func page_category() -> StringName:
-		return &"Host"
+		return &"Shell"
 
 	func refresh() -> void:
 		refreshed += 1
 
 
-func test_register_page_appends_a_host_page() -> void:
+func test_register_page_appends_a_shell_page() -> void:
 	var overlay := _make_overlay()
-	var page := TestHostPage.new()
+	var page := TestShellPage.new()
 	overlay.register_page(page)
 	overlay.toggle()
-	assert_true(overlay.select_page(&"HostExtras"), "the registered page selects by id")
+	assert_true(overlay.select_page(&"ShellExtras"), "the registered page selects by id")
 	assert_gt(page.refreshed, 0, "selection refreshes the newly active page")
 	var texts := _page_list_texts(overlay)
-	assert_has(texts, "HOST", "a custom category grows its own section")
-	assert_has(texts, "Host extras", "the page lists under it")
+	assert_has(texts, "SHELL", "a custom category grows its own section")
+	assert_has(texts, "Shell extras", "the page lists under it")
 
 
 # --- The pick list + snapshot embedding ---------------------------------------
@@ -1819,7 +1819,7 @@ func test_replacing_pick_list_detaches_entities_even_while_page_is_inactive() ->
 	overlay.close()
 	overlay.set_pick_list(new_picks)
 	assert_eq(old_picks.picked.get_connections().size(), 0,
-			"the inactive page no longer listens to the retired host list")
+			"the inactive page no longer listens to the retired pick list")
 	assert_eq(new_picks.picked.get_connections().size(), 1,
 			"the replacement binds without waiting for Entities to refresh")
 	assert_eq(rows.get_child_count(), 0,
@@ -1827,5 +1827,5 @@ func test_replacing_pick_list_detaches_entities_even_while_page_is_inactive() ->
 
 	overlay.set_pick_list(null)
 	assert_eq(new_picks.picked.get_connections().size(), 0,
-			"detaching the host pick model removes the last page callback")
+			"detaching the shell pick model removes the last page callback")
 	await wait_process_frames(2)

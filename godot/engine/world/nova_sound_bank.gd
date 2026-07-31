@@ -203,7 +203,7 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 	if loc.is_empty():
 		return false
 	# Exclusive one-shots: a non-empty key declines to RESTART the set while its
-	# previous voice still plays. Host stand-in for the engine folding every-tick
+	# previous voice still plays. Reimpl stand-in for the engine folding every-tick
 	# refires (chute flap / freefall retrigger each body tick) into its finite
 	# channel pool — audibly one continuous sound either way (audio doc D-SND-10).
 	if not exclusive_key.is_empty():
@@ -345,7 +345,7 @@ static func volume_db_from_255(vol255: int) -> float:
 ## volume runs vol * (1 - d/r)^2, ceilinged by `clamp_vol`. The master-fade
 ## global (g_SoundMasterFadeQ24, steady state 0xFF0000) folds in as
 ## (vol * 255) >> 8; the underwater halving flag and the pan half of the packed
-## return are host territory (bus volume / Godot's panner). Distances are Q16.16
+## return are reimpl territory (bus volume / Godot's panner). Distances are Q16.16
 ## like the original's; both arms of the engine pass a consistent scale so only
 ## the ratio matters.
 static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, clamp_vol: int) -> int:
@@ -377,7 +377,7 @@ static func emitter_layer_volume(dist_q16: int, falloff_u: int, min_u: int, vol_
 ## from the emitter path here). A layer with NO falloff radius plays at the RAW
 ## emitter volume — member volume is not consulted, and a min-only layer's
 ## proximity result is discarded with it [orig: @ 0x75cf88 the no-falloff branch
-## stores emitter_info[2]]. Host emitter volume is full (255): the engine's
+## stores emitter_info[2]]. Reimpl emitter volume is full (255): the engine's
 ## fire-time (vol * g_SoundVolumeOption) >> 8 folds the options slider we map to
 ## bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).
 func oneshot_distance_volume(dist_q16: int, layer_d: Dictionary, member: Dictionary) -> int:

@@ -178,7 +178,7 @@ Array NovaSimulation::drain_effects() {
 	return out;
 }
 
-// The host fire-presentation drain — see the header note. Direction math mirrors
+// The shell fire-presentation drain — see the header note. Direction math mirrors
 // the round spawn's mission-frame forward (cos yaw * cp, sin yaw * cp, sin pitch)
 // [orig: RoundData_SpawnRound @0x4ec5e9], axis-mapped mission -> godot (x, z, -y).
 Array NovaSimulation::drain_fire_presentation_events() {
@@ -528,7 +528,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["clip_size"] = e->profile.clip_size;
 	out["magazine"] = static_cast<int>(e->inf.magazine);
 	out["combat_target_valid"] = e->inf.combat_target.valid();
-	// The D-AI-6 muzzle seam readback (probe surface): the host-fed posed muzzle.
+	// The D-AI-6 muzzle seam readback (probe surface): the shell-fed posed muzzle.
 	out["muzzle_valid"] = e->muzzle_valid;
 	out["muzzle"] = godot_from_fixed3(e->muzzle_world);
 	// Death presentation (P1c): the damage-time selection still pending consume,
@@ -590,7 +590,7 @@ Vector3 NovaSimulation::get_entity_position(int p_index) const {
 
 // The AI brain stores heading in the ENGINE frame (90 - mission yaw): the spawn seed and the
 // waypoint mover (atan2(dY,dX) bearing) both use it, so a unit faces consistently whether parked or
-// moving. The host basis (MissionObjectPlacer.bms_to_godot_basis) takes the MISSION yaw and internally
+// moving. The shell basis (MissionObjectPlacer.bms_to_godot_basis) takes the MISSION yaw and internally
 // applies the faithful (90 - yaw) engine heading, so the present converts engine -> mission here:
 // mission_yaw = 90 - engine_heading. (Stationary units still report their authored yaw.)
 float NovaSimulation::get_entity_yaw(int p_index) const {
@@ -1047,7 +1047,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[field] = 0.0f;
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
-		// it back in 0x0A; we draw our local player L via LocalPlayerHost, so drop the wire
+		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
 		// echo here. The row stays at its zero/unresolved defaults (PF_TYPE_ID 0), which the
 		// wire render pass skips. [net-re §5.38b two-handle L-vs-H reconciliation]
 		if (joiner_ && runtime_->has_self_handle() &&

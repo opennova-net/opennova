@@ -23,7 +23,7 @@ GLB/LAN browser operations, focus (`TAB`), pop, app messages, and MNX actions,
 including their source, field, comparison, target-form, toggle, and external-
 browser fields. The Interactive toggle puts the preview into a play state:
 menu-owned navigation and window state respond to clicks while cross-menu and
-host-owned effects stay sandboxed, so you can click through a menu's flow
+game-supplied effects stay sandboxed, so you can click through a menu's flow
 without leaving the editor. Name-bound game behavior remains a Command, not an
 invented Action.
 

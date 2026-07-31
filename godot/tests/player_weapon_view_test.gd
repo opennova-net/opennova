@@ -2,7 +2,7 @@ extends GutTest
 
 # The weapon typed records (ADR 0017): PlayerWeaponView decodes the sim's FSM state
 # dict (net-re §5.62) and PlayerViewmodelDef carries the new ADS/FSM def fields
-# (flags / scope_max_mag / clipsize) the host gates on.
+# (flags / scope_max_mag / clipsize) the sim gates on.
 
 
 func test_weapon_view_decodes_state_dict() -> void:

@@ -1,7 +1,7 @@
 extends GutTest
 
 # PickDebugView: the world highlight for the debug pick list. Draws rows from
-# the injected host-owned model, re-resolves mover positions through the sim
+# the injected shell-owned model, re-resolves mover positions through the sim
 # accessor it names, and clears cleanly when the list empties.
 
 const ViewScript := preload("res://engine/debug/pick/pick_debug_view.gd")

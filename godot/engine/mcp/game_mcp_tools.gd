@@ -1,23 +1,23 @@
 class_name GameMcpTools
 extends RefCounted
 
-## Curated runtime tool handlers. The host is MainGame through narrow public
+## Curated runtime tool handlers. The adapter fronts MainGame through narrow public
 ## methods; this module never reaches into its scene or the simulation's
 ## private state. ONED registers the same definitions with proxy handlers.
 
 const INTERNAL_SHUTDOWN_ACTION := "_oned_shutdown_runtime_debug"
 
 var service: Node
-var host: GameMcpHost
+var adapter: GameMcpAdapter
 var _endpoint_shutdown := Callable()
 
 
 func _init(
 		game_service: Node,
-		game_host: GameMcpHost,
+		game_adapter: GameMcpAdapter,
 		endpoint_shutdown: Callable = Callable()) -> void:
 	service = game_service
-	host = game_host
+	adapter = game_adapter
 	_endpoint_shutdown = endpoint_shutdown
 	if not _endpoint_shutdown.is_valid() and service != null:
 		_endpoint_shutdown = Callable(service, "request_endpoint_shutdown")
@@ -31,15 +31,15 @@ func register_all(registry: McpToolRegistry) -> void:
 
 
 func _tool_game_state(_args: Dictionary, _ctx: McpToolContext) -> Variant:
-	if host == null:
+	if adapter == null:
 		return McpToolResult.error("The game shell is not ready.")
-	var state: Variant = host.get_mcp_game_state()
+	var state: Variant = adapter.get_mcp_game_state()
 	return state if state is Dictionary else McpToolResult.error(
 			"The game shell returned an invalid state snapshot.")
 
 
 func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
-	if host == null:
+	if adapter == null:
 		return McpToolResult.error("The game's entity diagnostics are unavailable.")
 	var op := String(args.get("op", ""))
 	match op:
@@ -50,7 +50,7 @@ func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
 					or limit == null or int(limit) < 1 or int(limit) > 128:
 				return McpToolResult.error(
 						"game_entities op=list requires offset >= 0 and limit from 1 to 128.")
-			var page_value: Variant = host.get_mcp_game_entities(
+			var page_value: Variant = adapter.get_mcp_game_entities(
 					int(offset), int(limit))
 			if not (page_value is Dictionary):
 				return McpToolResult.error(
@@ -65,7 +65,7 @@ func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
 			if index == null or int(index) < 0:
 				return McpToolResult.error(
 						"game_entities op=inspect requires a non-negative integer index.")
-			var entity_value: Variant = host.get_mcp_game_entity(int(index))
+			var entity_value: Variant = adapter.get_mcp_game_entity(int(index))
 			if not (entity_value is Dictionary):
 				return McpToolResult.error(
 						"The game returned invalid entity diagnostics.")
@@ -87,21 +87,21 @@ func _tool_game_control(args: Dictionary, _ctx: McpToolContext) -> Variant:
 					"The runtime debug endpoint cannot shut down cleanly.")
 		_endpoint_shutdown.call()
 		return {"ok": true, "debug_endpoint": "stopping"}
-	if host == null:
+	if adapter == null:
 		return McpToolResult.error("The game shell cannot be controlled yet.")
-	var result := host.mcp_game_control(action)
+	var result := adapter.mcp_game_control(action)
 	if result != OK:
 		return McpToolResult.error(
 				"Game control '%s' failed: %s." % [
 					action, error_string(int(result))])
-	var state: Variant = host.get_mcp_game_state()
+	var state: Variant = adapter.get_mcp_game_state()
 	return state if state is Dictionary else {"ok": true}
 
 
 func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
-	if host == null:
+	if adapter == null:
 		return McpToolResult.error("The game's debug session is unavailable.")
-	var session := host.get_debug_session()
+	var session := adapter.get_debug_session()
 	if session == null:
 		return McpToolResult.error("The game's debug session is unavailable.")
 	var op := String(args.get("op", ""))
@@ -177,7 +177,7 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 
 
 func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
-	if host == null:
+	if adapter == null:
 		return McpToolResult.error("The game shell is not ready.")
 	# Validate argument types before acquiring the presentation lease: a script
 	# error between acquire and release would leak the lease and pin expensive
@@ -191,10 +191,10 @@ func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error(
 				"game_screenshot requires an integer max_dim, a string format, "
 				+ "and a numeric quality.")
-	var debug_session := host.get_debug_session()
+	var debug_session := adapter.get_debug_session()
 	if debug_session != null:
 		debug_session.acquire_presentation_source(&"mcp_screenshot")
-	var viewport := host.get_viewport()
+	var viewport := adapter.get_viewport()
 	var outcome: Dictionary = await McpScreenshot.capture(viewport, {
 		"max_dim": int(max_dim),
 		"format": String(format),

@@ -278,7 +278,7 @@ func deactivate() -> void:
 			_save_state()
 			dialog.queue_free()
 		)
-		_host_under_shell(dialog)
+		_mount_under_shell(dialog)
 		dialog.popup_centered()
 		return
 	_save_state()
@@ -316,18 +316,18 @@ func _load_state() -> void:
 		_root.set_active_workflow(_active_workflow)
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	if _root == null:
 		_root = RootScene.instantiate()
 		# Bank import failures relayed by the root become shell toasts (the
 		# console line stays at the source — B10's deferred reroutes).
 		_root.error_reported.connect(_on_root_error)
-	if _root.get_parent() != host:
+	if _root.get_parent() != mount:
 		if _root.get_parent() != null:
 			_root.get_parent().remove_child(_root)
-		host.add_child(_root)
+		mount.add_child(_root)
 	_root.bind_document(_document)
 	if _root.has_signal("workflow_requested"):
 		if not _root.workflow_requested.is_connected(activate_workflow):
@@ -339,15 +339,15 @@ func _on_root_error(message: String) -> void:
 	_notify_status(message, &"error")
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _root != null:
 		_root.queue_free()
 		_root = null
 
 
 # Music opts out of the shell left lane (uses_left_lane == false), so there is no
-# inspector host to populate. Explicit no-op: the live section map IS the section
+# inspector mount to populate. Explicit no-op: the live section map IS the section
 # index (single-click selects/jumps, double-click opens its blueprint, right-click
 # renames/deletes).
-func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
+func build_workflow_inspector(_workflow_id: int, _mount: Control) -> void:
 	pass

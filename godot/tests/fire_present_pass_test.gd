@@ -227,7 +227,7 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	presenter.teardown()
 
 
-func test_persistent_sound_emitters_drain_into_the_shared_audio_host() -> void:
+func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	var sim := SimStub.new()
 	var audio := AudioStub.new()
 	var presenter = _make_pass(sim, audio)

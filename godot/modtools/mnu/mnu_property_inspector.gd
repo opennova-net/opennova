@@ -2,7 +2,7 @@ class_name MnuPropertyInspector
 extends MarginContainer
 
 # Editable property view for a selected MNU screen or widget. MarginContainer
-# gives the hosted margin/scroll/box chain a real size inside the shell.
+# gives the mounted margin/scroll/box chain a real size inside the shell.
 # Every row emits edit_requested; the workspace applies it and owns snapshot
 # undo. The inspector never mutates the document, and unchanged edits no-op.
 #
@@ -321,7 +321,7 @@ func _build_widget_rows(id: int) -> void:
 	var authored_type := MnuUiHelpersScript.add_text_edit_row(_box, "Authored type",
 		String(authoring.get("type_token", "")))
 	authored_type.placeholder_text = type_name
-	authored_type.tooltip_text = "Raw MNU TYPE token; unknown host-owned widget types are preserved verbatim"
+	authored_type.tooltip_text = "Raw MNU TYPE token; unknown game-supplied widget types are preserved verbatim"
 	_wire_patch_text(authored_type, id, ["type_token"])
 	_add_asset_row("Widget text resource", String(authoring.get("text_rsrc", "")),
 		"strings", func(value: String) -> void:
@@ -1051,7 +1051,7 @@ func _build_table_section(id: int, authoring: Dictionary) -> void:
 		{"key": "vjustify", "label": "Vertical", "kind": "enum", "options": ["", "TOP", "CENTER", "BOTTOM"]},
 		{"key": "bitmap_draw", "label": "Bitmap", "kind": "bool"},
 		{"key": "scale_bitmap", "label": "Scale", "kind": "bool"},
-		{"key": "custom_draw", "label": "Host draw", "kind": "bool"},
+		{"key": "custom_draw", "label": "Game-drawn", "kind": "bool"},
 		{"key": "bitmap_flags", "label": "Bitmap flags", "kind": "text"},
 	], false)
 	_box.add_child(bodies)

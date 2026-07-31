@@ -37,9 +37,9 @@ func _ready() -> void:
 	_play_viewport = session.viewport
 
 	var world: GameWorld = session.world
-	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-	if world == null or host == null:
-		push_error("[body] no weapon world/host"); get_tree().quit(1); return
+	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	if world == null or presenter == null:
+		push_error("[body] no weapon world/presenter"); get_tree().quit(1); return
 
 	# Third person (F4 through the real key path), clear the spawn tents.
 	_hold(KEY_F4, true); await _settle(2); _hold(KEY_F4, false)
@@ -49,7 +49,7 @@ func _ready() -> void:
 	await _settle(40)
 	await _capture("01_tp_idle.png")
 
-	var avatar: Node = host.get("_avatar")
+	var avatar: Node = presenter.get("_avatar")
 	_check(avatar != null, "avatar model present")
 	var fore_idle := _mask_bone_rot(avatar)
 	print("[body] idle: ", _body_str(world.local_player_weapon_view()))

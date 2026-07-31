@@ -161,7 +161,7 @@ struct RuntimeStats {
 	CacheStats detail{};
 	CacheStats model{};
 	// Deterministic work counter for MODEL resident-key lookup. One step is one
-	// candidate cache entry examined (or one indexed lookup once hosted).
+	// candidate cache entry examined (or one indexed lookup once ported).
 	uint64_t model_key_lookup_steps = 0;
 	uint32_t terrain_scene_counter = 0;
 };

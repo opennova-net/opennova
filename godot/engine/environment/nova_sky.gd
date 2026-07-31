@@ -12,7 +12,7 @@ extends Node3D
 # like NovaTerrain's weather_path; resolved lazily in _process).
 @export var weather_path: NodePath
 
-# Optional host-owned BG_COLOR resource. WorldContextPreview supplies this so
+# Optional owner-supplied BG_COLOR resource. WorldContextPreview supplies this so
 # the dome's faithful below-rim region clears to skyfog instead of black.
 var frame_clear_environment: Environment = null
 
@@ -24,7 +24,7 @@ var _bound_cloud_tex2: Texture2D = null
 var _cached_env: Node = null
 var _cached_weather: Node = null
 var _cached_cam: Camera3D = null
-# Standalone fallback (hosts with no weather node): a private core ticked for
+# Standalone fallback (owners with no weather node): a private core ticked for
 # its cloud scroll only — the integer math has ONE home either way.
 var _fallback_scroll: NovaWeatherCore = null
 var _fallback_tick_credit := 0.0
@@ -163,7 +163,7 @@ func _update_cloud_textures(env: Node) -> void:
 
 
 # The faithful sky dome is open below its rim. Retail clears that region to
-# the horizon-blended skyfog block; editor hosts provide the BG_COLOR resource.
+# the horizon-blended skyfog block; editor shells provide the BG_COLOR resource.
 func sync_frame_clear_color() -> void:
 	if frame_clear_environment == null:
 		return

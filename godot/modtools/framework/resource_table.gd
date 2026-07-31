@@ -12,7 +12,7 @@ extends VBoxContainer
 
 signal entry_activated(entry: Dictionary)
 signal selection_changed(has_selection: bool)
-## Emitted after every rebuild with the post-filter row count, so hosts can
+## Emitted after every rebuild with the post-filter row count, so owners can
 ## drive hint/empty-state copy without reaching into the Tree.
 signal list_changed(visible_count: int)
 

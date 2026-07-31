@@ -6,7 +6,7 @@ class_name DebugEntityPicker
 ## snapshot can replay it later.
 
 ## The aim projection distance, matching the binocular rangefinder
-## (LocalPlayerHost.AIM_PROJECT_RANGE).
+## (LocalPlayerPresenter.AIM_PROJECT_RANGE).
 const PICK_RANGE_UNITS := 1000.0
 
 

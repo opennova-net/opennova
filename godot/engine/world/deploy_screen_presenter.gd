@@ -1,4 +1,4 @@
-class_name NovaDeployScreenHost
+class_name NovaDeployScreenPresenter
 extends Node
 
 ## The deploy-map screen — death.mnu's DEATH screen — shown while the host holds
@@ -196,7 +196,7 @@ func _find(control_name: String) -> Node:
 	return _menu.find_child(control_name, true, false)
 
 
-# Build the runtime menu the same way the armory host does: the shared NovaMnuMenu
+# Build the runtime menu the same way the armory presenter does: the shared NovaMnuMenu
 # fed death.mnu from the world's mounted resource root.
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
@@ -207,11 +207,11 @@ func _ensure_menu() -> bool:
 		return false
 	var bytes := root.read_file(MENU_FILE)
 	if bytes.is_empty():
-		push_warning("NovaDeployScreenHost: %s not found in the resource root" % MENU_FILE)
+		push_warning("NovaDeployScreenPresenter: %s not found in the resource root" % MENU_FILE)
 		return false
 	var doc := NovaMnuDocument.new()
 	if doc.load_from_bytes(bytes) != OK:
-		push_warning("NovaDeployScreenHost: %s did not parse" % MENU_FILE)
+		push_warning("NovaDeployScreenPresenter: %s did not parse" % MENU_FILE)
 		return false
 	_register_text_tables(root)
 	_menu = NovaMnuMenu.new()

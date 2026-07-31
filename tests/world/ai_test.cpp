@@ -112,11 +112,11 @@ void test_vehicle_death_rows() {
     }
 }
 
-// The D-AI-6 muzzle seam: a FRESH host-fed posed muzzle replaces the chest-lift
+// The D-AI-6 muzzle seam: a FRESH embedder-fed posed muzzle replaces the chest-lift
 // origin for spawned rounds; absent or stale stamps fall back. [orig: the
 // anim-event fire spawns from Entity_GetAttachmentWorldPosition @0x4b2670 —
-// the posed gun-flash userpoint; our host present layer feeds it back.]
-static void test_fire_pass_uses_host_fed_muzzle() {
+// the posed gun-flash userpoint; our embedder present layer feeds it back.]
+static void test_fire_pass_uses_embedder_fed_muzzle() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 8);
     Entity seed{};
@@ -1942,7 +1942,7 @@ int main() {
     }
 
     test_vehicle_death_rows();
-    test_fire_pass_uses_host_fed_muzzle();
+    test_fire_pass_uses_embedder_fed_muzzle();
     test_world_feed_never_engages_same_team();
     test_berserk_candidate_is_intentional_team_exception();
     test_damage_hit_sets_retail_alert_state();

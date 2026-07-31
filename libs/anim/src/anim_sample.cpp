@@ -229,7 +229,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             //
             // Everything stays in the NATIVE model frame (pivots, deltas, translations). The
             // original's builders emit S*A^T*S with x-negated pivots/translations -- that
-            // diag(-1,1,1) conjugation is its model->render frame map, which the host realizes
+            // diag(-1,1,1) conjugation is its model->render frame map, which the embedder realizes
             // instead by building the FP mesh in the native frame and mapping the whole rig to
             // the camera in one container transform. [orig: the copy loops @0x40c4d8..0x40c57c
             // / @0x40c84c..0x40c8f5.]
@@ -243,7 +243,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                 bind_rot[b] = mat3_to_quat(bind_bad.bones[b].rotation);
             }
         } else if (bone != nullptr) {
-            // Carry the raw BadBone BIND rotation so the host can build the Skeleton3D rest from
+            // Carry the raw BadBone BIND rotation so the embedder can build the Skeleton3D rest from
             // it; the rest ORIGIN follows the same source as the FK (model pivots when shared), so
             // the Skeleton3D bind and the FK agree. (Model-table rows past the .bad's records keep
             // the identity default.)

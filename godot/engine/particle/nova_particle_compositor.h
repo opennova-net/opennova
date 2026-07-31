@@ -16,7 +16,7 @@
 
 namespace godot {
 
-// Immutable, host-uploadable atlas catalog. The main thread builds this only
+// Immutable, upload-ready atlas catalog. The main thread builds this only
 // when the mounted PTL catalog changes; render callbacks retain it by value.
 struct NovaParticleAtlasPageSnapshot {
 	std::uint8_t type = 0;
@@ -70,7 +70,7 @@ public:
 	void clear_submission();
 	void set_particles_hidden(bool p_hidden);
 	// The real World path owns RenderingDevice pipelines whose framebuffer
-	// format is known only inside the compositor callback. A loading host
+	// format is known only inside the compositor callback. A loading owner
 	// requests the warm here, then force_draw() services it synchronously.
 	void request_pipeline_warm();
 	void cancel_pipeline_warm();

@@ -1,5 +1,5 @@
-class_name GameDebugHost
-extends GameMcpHost
+class_name GameDebugAdapter
+extends GameMcpAdapter
 
 ## Game-shell adapter for F3 and the ephemeral runtime MCP endpoint.
 ##
@@ -245,7 +245,7 @@ func runtime_status() -> Dictionary:
 	if runtime == null or sim == null:
 		return {
 			"label": "No mission",
-			"detail": "F3 remains available for host-wide diagnostics.",
+			"detail": "F3 remains available for process-wide diagnostics.",
 			"playing": false,
 			"authority": false,
 		}

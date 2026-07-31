@@ -1,11 +1,11 @@
 extends GutTest
 
-# Runtime menu shell (NovaMenuHost) gates: it boots the JO menu set, services the
-# host policy the menu leaves to it (cross-.mnu jumps + a file-level back stack,
+# Runtime menu shell (NovaMenuShell) gates: it boots the JO menu set, services the
+# shell policy the menu leaves to it (cross-.mnu jumps + a file-level back stack,
 # quit), drives the music director's screen var, launches a selected mission, and
 # degrades gracefully when menu assets are missing - all headless, no blocking.
 
-const MenuHostScript := preload("res://game/nova_menu_host.gd")
+const MenuShellScript := preload("res://game/nova_menu_shell.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
@@ -56,17 +56,17 @@ func after_each() -> void:
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
-# stub mission), and a host pointed at it. Returns null when a real temp root is
+# stub mission), and a shell pointed at it. Returns null when a real temp root is
 # unavailable in this environment (the caller pass_test-skips, as mnu_menu_test does).
-func _make_host(dir: String):
+func _make_shell(dir: String):
 	var root := NovaResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		return null
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)  # in-tree so the built menu's widgets are not orphans
-	host.setup(root)
-	return host
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)  # in-tree so the built menu's widgets are not orphans
+	shell.setup(root)
+	return shell
 
 
 func _make_dir() -> String:
@@ -96,13 +96,13 @@ func _cleanup(dir: String) -> void:
 
 func test_boots_into_main_menu_startup() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable in this environment")
 		_cleanup(dir)
 		return
-	assert_eq(host.get_current_menu_file(), "main.mnu", "main menu opened on setup")
-	var menu = host.get_menu()
+	assert_eq(shell.get_current_menu_file(), "main.mnu", "main menu opened on setup")
+	var menu = shell.get_menu()
 	assert_not_null(menu, "menu node built")
 	assert_eq(menu.current_screen, "STARTUP", "STARTUP screen shown")
 	_cleanup(dir)
@@ -110,8 +110,8 @@ func test_boots_into_main_menu_startup() -> void:
 
 func test_startup_drives_music_var() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
@@ -119,101 +119,101 @@ func test_startup_drives_music_var() -> void:
 	# discriminator var. menumus reads var INDEX 2 (golden test); at index 0 the
 	# MUSICVAR was inert and the menu played the wrong section. Track the shell's
 	# constant so this stays in sync.
-	var idx: int = MenuHostScript.MUSIC_VAR_INDEX
-	assert_eq(host.get_music_director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
+	var idx: int = MenuShellScript.MUSIC_VAR_INDEX
+	assert_eq(shell.get_music_director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
 	_cleanup(dir)
 
 
 func test_cross_mnu_jump_and_back_stack() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	var menu = host.get_menu()
-	# A cross-.mnu jump (file set) routes through menu_requested -> host opens it.
+	var menu = shell.get_menu()
+	# A cross-.mnu jump (file set) routes through menu_requested -> shell opens it.
 	menu.navigate_to_menu("sp.mnu", "")
-	assert_eq(host.get_current_menu_file(), "sp.mnu", "host loaded the requested menu")
-	assert_eq(host.get_menu_stack_depth(), 1, "previous menu pushed onto the back stack")
+	assert_eq(shell.get_current_menu_file(), "sp.mnu", "shell loaded the requested menu")
+	assert_eq(shell.get_menu_stack_depth(), 1, "previous menu pushed onto the back stack")
 	# A top-level back (empty in-menu stack) pops the file stack back to main.mnu.
 	menu.pop_screen()
-	assert_eq(host.get_current_menu_file(), "main.mnu", "back returned to the main menu")
-	assert_eq(host.get_menu_stack_depth(), 0, "file back stack emptied")
+	assert_eq(shell.get_current_menu_file(), "main.mnu", "back returned to the main menu")
+	assert_eq(shell.get_menu_stack_depth(), 0, "file back stack emptied")
 	_cleanup(dir)
 
 
 func test_failed_cross_mnu_jump_does_not_change_back_stack() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	host.get_menu().navigate_to_menu("missing.mnu", "")
-	assert_eq(host.get_current_menu_file(), "main.mnu",
+	shell.get_menu().navigate_to_menu("missing.mnu", "")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
 		"a rejected cross-menu jump keeps the current menu")
-	assert_eq(host.get_menu_stack_depth(), 0,
+	assert_eq(shell.get_menu_stack_depth(), 0,
 		"a rejected cross-menu jump cannot add a no-op Back step")
 	_cleanup(dir)
 
 
 func test_top_level_quit_requests_exit() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	watch_signals(host)
-	host.get_menu().quit_game()  # main menu, empty stack -> exit to desktop
-	assert_signal_emitted(host, "exit_to_desktop_requested")
+	watch_signals(shell)
+	shell.get_menu().quit_game()  # main menu, empty stack -> exit to desktop
+	assert_signal_emitted(shell, "exit_to_desktop_requested")
 	_cleanup(dir)
 
 
 func test_in_game_back_requests_resume() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
 	# Enter the pause context. game.mnu is absent so the overlay fails to load, but
 	# the in-game flag is set, so a top-level back now means resume, not exit.
-	host.open_ingame_menu()
-	watch_signals(host)
-	host.get_menu().quit_game()
-	assert_signal_emitted(host, "resume_requested")
-	assert_signal_not_emitted(host, "exit_to_desktop_requested")
+	shell.open_ingame_menu()
+	watch_signals(shell)
+	shell.get_menu().quit_game()
+	assert_signal_emitted(shell, "resume_requested")
+	assert_signal_not_emitted(shell, "exit_to_desktop_requested")
 	_cleanup(dir)
 
 
 func test_start_emits_selected_mission() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	watch_signals(host)
+	watch_signals(shell)
 	# A mission-list selection relayed through the menu, then a start control press.
-	host.get_menu().notify_widget_value("MISSION_LIST", "list", 0, "test.bms")
-	assert_eq(host.get_selected_mission(), "test.bms", "selection tracked from the list relay")
-	host._on_start_control()
-	assert_signal_emitted_with_parameters(host, "start_requested", ["test.bms"])
+	shell.get_menu().notify_widget_value("MISSION_LIST", "list", 0, "test.bms")
+	assert_eq(shell.get_selected_mission(), "test.bms", "selection tracked from the list relay")
+	shell._on_start_control()
+	assert_signal_emitted_with_parameters(shell, "start_requested", ["test.bms"])
 	_cleanup(dir)
 
 
 func test_start_without_selection_falls_back_to_first_mission() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	watch_signals(host)
-	host._on_start_control()  # no selection -> first .bms in the dir (test.bms)
-	assert_signal_emitted_with_parameters(host, "start_requested", ["test.bms"])
+	watch_signals(shell)
+	shell._on_start_control()  # no selection -> first .bms in the dir (test.bms)
+	assert_signal_emitted_with_parameters(shell, "start_requested", ["test.bms"])
 	_cleanup(dir)
 
 
@@ -221,27 +221,27 @@ func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
 	var saved := NovaResourceDirSettings.get_crosshair_style()
 	NovaResourceDirSettings.set_crosshair_style(11)
 	var dir := _make_runtime_dir()
-	var host = _make_runtime_host(dir)
-	if host == null:
+	var shell = _make_runtime_shell(dir)
+	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
 		NovaResourceDirSettings.set_crosshair_style(saved)
 		_rm_runtime_dir(dir)
 		return
-	var spin = host.get_menu().find_child("XHAIR_APPEARANCE", true, false)
+	var spin = shell.get_menu().find_child("XHAIR_APPEARANCE", true, false)
 	assert_true(spin is NovaMnuSpinList, "Options builds the crosshair spin list.")
 	if spin is NovaMnuSpinList:
 		assert_eq((spin as NovaMnuSpinList).get_value_index(), 11,
 			"The spin list starts on the persisted crosshair.")
-	watch_signals(host)
-	host.get_menu().notify_widget_value("XHAIR_APPEARANCE", "spinlist", 18, "cross19.tga")
+	watch_signals(shell)
+	shell.get_menu().notify_widget_value("XHAIR_APPEARANCE", "spinlist", 18, "cross19.tga")
 	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
-	assert_signal_emitted_with_parameters(host, "crosshair_style_changed", [18])
-	host.get_menu().get_resource_root().clear()
+	assert_signal_emitted_with_parameters(shell, "crosshair_style_changed", [18])
+	shell.get_menu().get_resource_root().clear()
 	NovaResourceDirSettings.set_crosshair_style(saved)
 	_rm_runtime_dir(dir)
 
 
-# Options -> Mods: the host lists discoverable expansions in AVAIL_LIST by name, and
+# Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
 # activating one mounts it over the base game, fills MOD_DESC, persists the choice
 # (read back by main_game at the next launch), and announces it. Uses a runtime
 # (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
@@ -249,8 +249,8 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	var saved := NovaResourceDirSettings.get_expansion()
 	NovaResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
 	var dir := _make_runtime_dir()
-	var host = _make_runtime_host(dir)
-	if host == null:
+	var shell = _make_runtime_shell(dir)
+	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
 		NovaResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
@@ -260,14 +260,14 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin")
 	assert_eq(NovaMusicService.get_var(2), 9, "OPTIONS MUSICVAR drives Var2 before the swap")
-	var menu = host.get_menu()
+	var menu = shell.get_menu()
 	var avail = menu.find_child("AVAIL_LIST", true, false)
 	assert_not_null(avail, "AVAIL_LIST built")
 	assert_eq(avail.item_count, 1, "one expansion discovered under expansion/")
 	assert_eq(avail.get_item_text(0), "jox01")
 	# Activation mounts + persists + describes.
-	host._on_mod_activated(0)
-	assert_eq(host.get_selected_expansion(), "jox01")
+	shell._on_mod_activated(0)
+	assert_eq(shell.get_selected_expansion(), "jox01")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
 	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
 	if NovaMusicService.current_script() != null:
@@ -279,39 +279,39 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_not_null(desc, "MOD_DESC built")
 	assert_string_contains(desc.text, "Kendari", "friendly expansion name shown")
 	# The expansion's packed asset is now reachable through the live root.
-	assert_eq(host._root.read_file("expmodel.3di").get_string_from_utf8(), "exp model",
+	assert_eq(shell._root.read_file("expmodel.3di").get_string_from_utf8(), "exp model",
 		"expansion archive mounted over the base game")
-	host._root.clear()  # release PFF handles before deleting the temp archives
+	shell._root.clear()  # release PFF handles before deleting the temp archives
 	NovaResourceDirSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
 
 # Options -> Mods OK (the ACCEPT button) must APPLY the highlighted expansion, not
 # launch a mission. ACCEPT is overloaded across JO screens (launch on Single Player,
-# plain OK on Options); the host scopes it by screen role, so on a Mods screen (mod
+# plain OK on Options); the shell scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
 func test_mods_ok_applies_expansion_without_launching() -> void:
 	var saved := NovaResourceDirSettings.get_expansion()
 	NovaResourceDirSettings.set_expansion("")  # so the apply is not a no-op
 	var dir := _make_runtime_dir()
-	var host = _make_runtime_host(dir)
-	if host == null:
+	var shell = _make_runtime_shell(dir)
+	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
 		NovaResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
-	var menu = host.get_menu()
+	var menu = shell.get_menu()
 	var avail = menu.find_child("AVAIL_LIST", true, false)
 	assert_not_null(avail, "AVAIL_LIST built")
 	avail.select(0)  # highlight jox01 (no double-click / activation)
 	var accept = menu.find_child("ACCEPT", true, false)
 	assert_not_null(accept, "options ACCEPT button built")
-	watch_signals(host)
+	watch_signals(shell)
 	(accept as BaseButton).pressed.emit()  # press OK
-	assert_signal_not_emitted(host, "start_requested", "OK on the Mods screen must not launch")
-	assert_eq(host.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
+	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
+	assert_eq(shell.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
-	host._root.clear()
+	shell._root.clear()
 	NovaResourceDirSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
@@ -341,12 +341,12 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	])
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
-	var host = MenuHostScript.new()
-	host.main_menu_file = "options.mnu"
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	assert_true(host.setup(root), "the loose root serves the menu fixture")
-	var menu = host.get_menu()
+	var shell = MenuShellScript.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the loose root serves the menu fixture")
+	var menu = shell.get_menu()
 	var avail = menu.find_child("AVAIL_LIST", true, false)
 	assert_not_null(avail)
 	assert_eq(avail.item_count, 1, "the packed expansion is still discoverable on disk")
@@ -354,7 +354,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	var accept = menu.find_child("ACCEPT", true, false)
 	assert_not_null(accept)
 	(accept as BaseButton).pressed.emit()
-	assert_eq(host.get_selected_expansion(), "", "the loose mount refuses the switch")
+	assert_eq(shell.get_selected_expansion(), "", "the loose mount refuses the switch")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "", "nothing persisted")
 	assert_false(root.read_file("options.mnu").is_empty(),
 			"the live loose mount survives untouched (no clear())")
@@ -376,26 +376,26 @@ func test_play_screen_accept_still_launches() -> void:
 	if f != null:
 		f.store_buffer(PackedByteArray([0]))
 		f.close()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("main.mnu"))
 		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 		DirAccess.remove_absolute(dir)
 		return
-	var accept = host.get_menu().find_child("ACCEPT", true, false)
+	var accept = shell.get_menu().find_child("ACCEPT", true, false)
 	assert_not_null(accept, "SP ACCEPT button built")
-	watch_signals(host)
+	watch_signals(shell)
 	(accept as BaseButton).pressed.emit()  # no explicit pick -> first .bms
 	# ACCEPT on a mission-list screen still launches (first .bms, none selected).
-	assert_signal_emitted_with_parameters(host, "start_requested", ["alpha.bms"])
+	assert_signal_emitted_with_parameters(shell, "start_requested", ["alpha.bms"])
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 	DirAccess.remove_absolute(dir)
 
 
 # The menu stylesheet (menu_style.mns) ships PFF-archived. It is indexed as the
-# "menu_style" kind (so list_files surfaces it for editor browsing), but the host
+# "menu_style" kind (so list_files surfaces it for editor browsing), but the shell
 # still loads it by its canonical name through the VFS -- the engine contract is the
 # fixed file name; otherwise %DEF_TEXT_*% colors (incl. the button hover colour) never
 # resolve and mouse-over has no visible effect. Regression for that hover fix.
@@ -418,11 +418,11 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	assert_eq(listed.size(), 1, ".mns is a recognized kind (menu_style), so list_files surfaces it")
 	if listed.size() == 1:
 		assert_eq(String(listed[0]).to_lower(), "menu_style.mns", "the archived stylesheet is listed by name")
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
-	var style = host.get_menu().get_stylesheet()
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
+	var style = shell.get_menu().get_stylesheet()
 	assert_not_null(style, "menu_style.mns loaded from the PFF by canonical name")
 	if style != null:
 		assert_eq(style.substitute("%DEF_TEXT_MOUSEOVER_FG%"), "FFFF0000",
@@ -466,10 +466,10 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_ctx_dir(dir)
 		return
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
 	assert_eq(NovaMusicService.current_context(), "menu", "setup opens the MENU music context")
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin",
@@ -535,18 +535,18 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_exp_dir(dir)
 		return
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
 	assert_eq(NovaMusicService.current_context(), "menu", "menu context opened")
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
 			"M<n>.bin preferred over menumus.bin (complete pair)")
-	var menu_pair: MusicPair = host.resolve_music_pair("M", "menumus")
+	var menu_pair: MusicPair = shell.resolve_music_pair("M", "menumus")
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
-	var game_pair: MusicPair = host.resolve_music_pair("G", "gamemus")
+	var game_pair: MusicPair = shell.resolve_music_pair("G", "gamemus")
 	assert_eq(String(game_pair.script_name), "Gjox01.bin",
 		"missing G<n>.sbf does not reselect the base script")
 	assert_true(String(game_pair.bank).ends_with("Gjox01.sbf"),
@@ -579,11 +579,11 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_bank_only_dir(dir)
 		return
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
-	var pair: MusicPair = host.resolve_music_pair("G", "gamemus")
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
+	var pair: MusicPair = shell.resolve_music_pair("G", "gamemus")
 	assert_eq(String(pair.script_name), "Gjox01.bin",
 		"bank-only G stem keeps the missing expansion script name")
 	assert_true(String(pair.bank).ends_with("Gjox01.sbf"),
@@ -621,15 +621,15 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_base_dir(dir)
 		return
-	var host = MenuHostScript.new()
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
+	var shell = MenuShellScript.new()
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
 	assert_eq(NovaMusicService.current_context(), "",
 		"musicless mounted expansion leaves the menu context silent")
 	assert_null(NovaMusicService.current_script(),
 		"musicless mounted expansion does not load MENUMUS.BIN")
-	var pair: MusicPair = host.resolve_music_pair("M", "menumus")
+	var pair: MusicPair = shell.resolve_music_pair("M", "menumus")
 	assert_true(String(pair.bank).ends_with("Mjox01.sbf"),
 		"musicless mounted expansion keeps the missing expansion bank path")
 	assert_eq(String(pair.script_name), "Mjox01.bin",
@@ -657,14 +657,14 @@ func test_missing_assets_degrade_without_crashing() -> void:
 	var dir := OS.get_temp_dir().path_join("menu_shell_bare_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
 	_copy(MAIN_FIXTURE, dir.path_join("main.mnu"))
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("main.mnu"))
 		DirAccess.remove_absolute(dir)
 		return
-	assert_eq(host.get_current_menu_file(), "main.mnu", "menu still opens with no companion assets")
-	assert_not_null(host.get_music_director(), "director created even without a music script")
+	assert_eq(shell.get_current_menu_file(), "main.mnu", "menu still opens with no companion assets")
+	assert_not_null(shell.get_music_director(), "director created even without a music script")
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir)
 
@@ -688,21 +688,21 @@ func _make_runtime_dir() -> String:
 	])
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# Deliberately use retail-style uppercase to pin case-insensitive resolution
-	# on Linux/macOS while preserving the actual host path.
+	# on Linux/macOS while preserving the actual shell path.
 	_copy(SBF_FIXTURE, dir.path_join("expansion/jox01/MJOX01.SBF"))
 	return dir
 
 
-func _make_runtime_host(dir: String):
+func _make_runtime_shell(dir: String):
 	var root := NovaResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		return null
-	var host = MenuHostScript.new()
-	host.main_menu_file = "options.mnu"  # open the menu that carries the Mods tab
-	host.size = Vector2(800, 600)
-	add_child_autofree(host)
-	host.setup(root)
-	return host
+	var shell = MenuShellScript.new()
+	shell.main_menu_file = "options.mnu"  # open the menu that carries the Mods tab
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	shell.setup(root)
+	return shell
 
 
 func _rm_runtime_dir(dir: String) -> void:
@@ -763,17 +763,17 @@ class _FakeCompanion extends RefCounted:
 # owns_menu() claims a built menu drives it, and a non-owning companion is skipped.
 func test_multiple_companions_first_owner_drives_menu() -> void:
 	var dir := _make_dir()
-	var host = _make_host(dir)
-	if host == null:
+	var shell = _make_shell(dir)
+	if shell == null:
 		pass_test("temp resource root unavailable in this environment")
 		_cleanup(dir)
 		return
-	assert_true(host.has_method("add_companion"), "the shell exposes the multi-companion hook")
+	assert_true(shell.has_method("add_companion"), "the shell exposes the multi-companion hook")
 	var skipped := _FakeCompanion.new(false)
 	var owner := _FakeCompanion.new(true)
-	host.add_companion(skipped)
-	host.add_companion(owner)
-	host.open_menu("main.mnu", "")  # re-wire with the companions installed
+	shell.add_companion(skipped)
+	shell.add_companion(owner)
+	shell.open_menu("main.mnu", "")  # re-wire with the companions installed
 	assert_false(skipped.built, "a non-owning companion is skipped")
 	assert_true(owner.built, "the first owning companion drives the menu")
 	_cleanup(dir)

@@ -132,7 +132,7 @@ live in this doc's git history; the outcome per phase:
 - **B8 — SearchField**: `framework/search_field.gd`, adopted at the six
   bespoke search-bar sites (`search_field_test.gd`).
 - **B9 — shell services**: protected `EditorWorkspace` helpers
-  (`_notify_status`, `_sync_shell`, `_host_under_shell`) replaced the
+  (`_notify_status`, `_sync_shell`, `_mount_under_shell`) replaced the
   duck-typed `has_method` blocks; five user-actionable `push_error`s reroute
   to toasts over the new seam.
 - **B10 — toast severity**: `show_status_message(text, duration, severity)`

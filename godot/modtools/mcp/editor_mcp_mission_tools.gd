@@ -674,7 +674,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"runtime_parity": {
 			"shared_rules": "MissionRuntime",
 			"editor_mode": "static_analysis",
-			"live_host": "GameWorld",
+			"live_runtime": "GameWorld",
 			"source": "static",
 		},
 		"mounts": page,

@@ -37,7 +37,7 @@ var _selector_chip: Button = null
 var _action_opt: OptionButton = null
 var _add_case: Button = null
 var _snames_snapshot: PackedStringArray = PackedStringArray()
-var _host = null
+var _mount = null
 
 
 func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary = {}) -> MusicStmtSwitchBlock:
@@ -45,7 +45,7 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	_ctx = ctx
 	_opts = opts
 	ordinal = p_ordinal
-	_host = ctx.get("view")
+	_mount = ctx.get("view")
 	action = String(stmt.get("action", "enter"))
 	_editable = bool(ctx.get("editable", false)) and not bool(opts.get("read_only", false))
 	set_meta("ordinal", ordinal)
@@ -151,8 +151,8 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton and event.pressed \
 				and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-			if _host != null:
-				_host.notify_selected(ordinal))
+			if _mount != null:
+				_mount.notify_selected(ordinal))
 	return self
 
 
@@ -363,8 +363,8 @@ func _open_button(target: String) -> Button:
 	open.focus_mode = Control.FOCUS_NONE
 	open.flat = true
 	open.pressed.connect(func():
-		if _host != null:
-			_host.notify_open(StringName(target)))
+		if _mount != null:
+			_mount.notify_open(StringName(target)))
 	return open
 
 

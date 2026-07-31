@@ -1,7 +1,7 @@
 #pragma once
 
 // Portable particle frame compilation. This is the seam between an immutable
-// simulation snapshot and a host renderer. It owns ordering and packet
+// simulation snapshot and an embedding renderer. It owns ordering and packet
 // formation; there are no Godot or particle-simulator dependencies.
 
 #include <cstddef>

@@ -35,7 +35,7 @@ extends GutTest
 #   doubling @ 0x57f1b1], and the modulate2x-path Clear (the framebuffer
 #   this host reproduces, D-RMAT-7) consumes it verbatim [orig:
 #   Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792; the halving
-#   @ 0x67715d is the non-modulate2x fallback, no host analog]. The re-dump
+#   @ 0x67715d is the non-modulate2x fallback, no reimpl analog]. The re-dump
 #   moved ONLY the frame-clear token (14) of the 27 env-cell rows:
 #   new = min(2*old, 255) per channel.
 #   #22-#24 CLOSED 2026-07-05 (the ENG-2 weather-core port): the wa/wb/we
@@ -98,7 +98,7 @@ extends GutTest
 #   wa/k064, wa/k256, wb/k016..k096, we/k016, we/k032 - the smoothed colors
 #   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
 #   float, sky, water, celestial, and level-only key UNCHANGED.
-#   D-RLIT-1 hosted-sky closure 2026-07-21: skyfog plus the six dome
+#   D-RLIT-1 world-driven-sky closure 2026-07-21: skyfog plus the six dome
 #   sky/cloud ramps now run through their retail WeatherColorBlock pipelines
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
@@ -706,7 +706,7 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
 	var pre_surfaces: int = (water.mesh_instance.mesh as ArrayMesh).get_surface_count()
 
-	# Height ladder, override rung: host-driven height wins; clearing (NAN)
+	# Height ladder, override rung: world-driven height wins; clearing (NAN)
 	# hands control back (terrain_environment_preview_test.gd precedent).
 	# (Still no camera here — same order as before the strip port.)
 	water.set_height_override(42.5)
@@ -834,7 +834,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:
 	# NovaColorSmoother snap/step sequences [orig: interpolate_weather_color
 	# @ 0x57d9e0] — guards the statics' GDScript-visible contract during the
-	# ENG-2 host thinning.
+	# ENG-2 reimpl thinning.
 	var decay := NovaColorSmoother.new()
 	decay.snap(Color(1.0, 0.5, 0.25))
 	var decay_seq := PackedStringArray()
@@ -1026,7 +1026,7 @@ func test_nvg_view_applies_retail_hemisphere_gain() -> void:
 	assert_almost_eq(nvg_sky.z, 0.195, FLOAT_EPSILON, "NVG sky blue")
 	assert_eq(env.get_sun_light(), sun, "NVG rewrites hemispheres, not direct sun")
 
-	# Identical host updates are common each frame and must not churn materials.
+	# Identical owner updates are common each frame and must not churn materials.
 	env.set_nvg_view(true, 2)
 	assert_eq(env.get_env_generation(), generation + 1, "identical NVG state is idempotent")
 
@@ -1035,7 +1035,7 @@ func test_nvg_view_applies_retail_hemisphere_gain() -> void:
 	assert_almost_eq(env.get_fill_light().x, 0.250, FLOAT_EPSILON, "NVG gain clamps high")
 	assert_eq(env.get_env_generation(), generation + 2, "gain change invalidates consumers")
 
-	# The host supplies first-person visibility. Suppressing it restores the
+	# The shell supplies first-person visibility. Suppressing it restores the
 	# untouched weather values while retaining the clamped gain for later use.
 	env.set_nvg_view(false, 99)
 	assert_eq(env.get_fill_light(), fill, "hidden NVG restores unmodified fill")

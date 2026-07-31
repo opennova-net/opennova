@@ -1,7 +1,7 @@
 extends GutTest
 
 # Throwable weapon-switch + PowerThrow lifecycle against the committed JO defs,
-# driven the way the game hosts drive NovaSimulation (loadout -> switch walk ->
+# driven the way the game shells drive NovaSimulation (loadout -> switch walk ->
 # commit events -> def installs, including the FP model resolve's delayed
 # same-weapon re-install). Pins the PR #282 field bugs:
 #  - a same-name install landing during a SWITCHFROM must not destroy the
@@ -59,7 +59,7 @@ func _rebake(weapon_name: String) -> void:
 	_sim.rebake_local_player_weapon(_db.get_weapon(idx), {})
 
 
-# Step + drain like the hosts: a switch event installs the def, and the rebuilt
+# Step + drain like the shells: a switch event installs the def, and the rebuilt
 # viewmodel installs the SAME def again ~a frame later (the FP model resolve —
 # GameWorld's local-player weapon setup). The re-install racing the FSM is the
 # regression surface this file exists for.

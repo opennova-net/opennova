@@ -200,7 +200,7 @@ func test_present_tracks_reported_progress_then_leads() -> void:
 func test_background_availability_is_publicly_observable() -> void:
 	var screen := _setup_screen({"mission_file": "00TRg.bms"})
 	assert_true(screen.has_background(),
-		"tests and hosts can observe whether setup found loading art")
+		"tests and owners can observe whether setup found loading art")
 
 
 func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:

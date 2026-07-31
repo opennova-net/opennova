@@ -453,7 +453,7 @@ func test_music_changed_fires_on_screen_show() -> void:
 
 func test_url_action_emits_url_requested() -> void:
 	# <ACTION type="URL"> (shipped splash "buy"/website buttons) routes to
-	# url_requested for the host to open externally; it is not intra-menu nav.
+	# url_requested for the shell to open externally; it is not intra-menu nav.
 	var menu := _build_menu()
 	watch_signals(menu)
 	var handled := menu.dispatch_action("url", "www.novalogic.com/buy", "", "")
@@ -461,7 +461,7 @@ func test_url_action_emits_url_requested() -> void:
 	assert_signal_emitted_with_parameters(menu, "url_requested", ["www.novalogic.com/buy"])
 
 
-func test_url_action_preserves_external_browser_in_host_payload() -> void:
+func test_url_action_preserves_external_browser_in_shell_payload() -> void:
 	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
 		'<WINDOW type="button" name="BUY"><ACTION type="URL" EXTERNAL_BROWSER>' +
 		'https://example.invalid/buy</ACTION></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
@@ -470,16 +470,16 @@ func test_url_action_preserves_external_browser_in_host_payload() -> void:
 	(menu.find_child("BUY", true, false) as BaseButton).emit_signal("pressed")
 	assert_signal_emitted_with_parameters(
 		menu, "url_requested", ["https://example.invalid/buy"])
-	assert_signal_emitted(menu, "host_action_requested")
-	var args: Array = get_signal_parameters(menu, "host_action_requested", 0)
-	assert_eq(args[0], "url", "URL remains the host action type")
+	assert_signal_emitted(menu, "shell_action_requested")
+	var args: Array = get_signal_parameters(menu, "shell_action_requested", 0)
+	assert_eq(args[0], "url", "URL remains the shell action type")
 	var payload := args[1] as Dictionary
 	assert_eq(payload.get("target"), "https://example.invalid/buy", "full target preserved")
 	assert_true(bool(payload.get("external_browser", false)),
-		"EXTERNAL_BROWSER survives into the host payload")
+		"EXTERNAL_BROWSER survives into the shell payload")
 
 
-func test_host_owned_action_preserves_complete_payload_without_invented_effects() -> void:
+func test_shell_owned_action_preserves_complete_payload_without_invented_effects() -> void:
 	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
 		'<WINDOW type="button" name="SEARCH"><ACTION type="LAN_SEARCH" source="lan" ' +
 		'field="mode" target_form="7" test="EQ">SERVER_ROWS</ACTION></WINDOW>' +
@@ -487,8 +487,8 @@ func test_host_owned_action_preserves_complete_payload_without_invented_effects(
 	var menu := _menu_from(bytes)
 	watch_signals(menu)
 	(menu.find_child("SEARCH", true, false) as BaseButton).emit_signal("pressed")
-	assert_signal_emitted(menu, "host_action_requested")
-	var args: Array = get_signal_parameters(menu, "host_action_requested", 0)
+	assert_signal_emitted(menu, "shell_action_requested")
+	var args: Array = get_signal_parameters(menu, "shell_action_requested", 0)
 	assert_eq(args[0], "lan_search")
 	var payload := args[1] as Dictionary
 	assert_eq(payload.get("target"), "SERVER_ROWS")
@@ -661,7 +661,7 @@ func test_hotkey_skips_hidden_widget() -> void:
 
 
 func test_hotkey_actionless_named_button_activates_and_consumes() -> void:
-	# Shipped actionless named controls are host Command seams: normal activation
+	# Shipped actionless named controls are shell Command seams: normal activation
 	# still emits pressed and owns the authored accelerator.
 	var bytes := ("<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<WINDOW type=\"button\" name=\"NOOP\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY></WINDOW>" + \
@@ -765,7 +765,7 @@ func test_checkbox_as_button_uses_full_rect_label_layout() -> void:
 	assert_eq(normal_label.position.x, 26.0, "normal checkbox label follows 24px art + 2px")
 
 
-func test_host_owned_widget_preview_is_explicit_and_never_fake_data() -> void:
+func test_shell_owned_widget_preview_is_explicit_and_never_fake_data() -> void:
 	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
 		'<WINDOW type="GLB_TABLE" name="GLOBAL"></WINDOW>' +
 		'<WINDOW type="LAN_LIST" name="LAN"></WINDOW>' +
@@ -774,12 +774,12 @@ func test_host_owned_widget_preview_is_explicit_and_never_fake_data() -> void:
 	var author_menu := _menu_from(bytes, true)
 	for name in ["GLOBAL", "LAN", "NEWS"]:
 		var widget := author_menu.find_child(name, true, false) as Control
-		assert_true(bool(widget.get_meta("mnu_host_owned")), "%s marks host ownership" % name)
-		var notice := widget.find_child("HostOwnedPreview", false, false) as Label
+		assert_true(bool(widget.get_meta("mnu_shell_owned")), "%s marks shell ownership" % name)
+		var notice := widget.find_child("ShellOwnedPreview", false, false) as Label
 		assert_not_null(notice, "%s has an honest authoring notice" % name)
-		assert_string_contains(notice.text, "Host-owned runtime data")
+		assert_string_contains(notice.text, "Game-supplied runtime data")
 	var runtime_menu := _menu_from(bytes)
-	assert_null(runtime_menu.find_child("HostOwnedPreview", true, false),
+	assert_null(runtime_menu.find_child("ShellOwnedPreview", true, false),
 		"runtime tree contains no fabricated preview rows or labels")
 
 
@@ -833,7 +833,7 @@ func test_parent_reenable_preserves_child_local_disabled_state() -> void:
 	assert_false(local_off.disabled, "explicit child ENABLE overrides its initial local state")
 
 
-func test_tab_action_focuses_named_control_without_host_dispatch() -> void:
+func test_tab_action_focuses_named_control_without_shell_dispatch() -> void:
 	var bytes := ('<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">' +
 		'<WINDOW type="button" name="DO_TAB"><ACTION type="TAB">TARGET</ACTION></WINDOW>' +
 		'<WINDOW type="edit" name="TARGET"><POSITION left="0" top="0" right="120" bottom="24">' +
@@ -843,7 +843,7 @@ func test_tab_action_focuses_named_control_without_host_dispatch() -> void:
 	var target := menu.find_child("TARGET", true, false) as LineEdit
 	(menu.find_child("DO_TAB", true, false) as BaseButton).emit_signal("pressed")
 	assert_true(target.has_focus(), "TAB selects the named focus target")
-	assert_signal_not_emitted(menu, "host_action_requested",
+	assert_signal_not_emitted(menu, "shell_action_requested",
 		"TAB is menu-owned, not delegated with GLB/LAN operations")
 
 
@@ -918,7 +918,7 @@ func test_interactive_preview_button_runs_window_action() -> void:
 
 
 func test_interactive_preview_clamps_external_side_effects() -> void:
-	# The interactive sandbox must not reach the editor host: quit/url/cross-file are
+	# The interactive sandbox must not reach the editor shell: quit/url/cross-file are
 	# no-ops, while window show/hide still runs.
 	var xml := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT"><WINDOW type="window" name="PANEL"></WINDOW></WINDOW></SCREEN>'
 	var menu := _menu_from(xml.to_utf8_buffer(), true)
@@ -954,7 +954,7 @@ func _screen_visible(menu: NovaMnuMenu, name: String) -> bool:
 
 
 func test_navigate_to_menu_emits_menu_requested() -> void:
-	# Cross-.mnu jumps are host policy: navigate_to_menu (and a screen action with a
+	# Cross-.mnu jumps are shell policy: navigate_to_menu (and a screen action with a
 	# file) emit menu_requested instead of navigating in-menu.
 	var menu := _build_menu()
 	watch_signals(menu)
@@ -1092,7 +1092,7 @@ func _menu_with_root_only() -> NovaMnuMenu:
 
 
 func test_widget_sound_resolves_per_element_bank_without_profile() -> void:
-	# The faithful path needs no host profile: the <SOUND> file names the bank,
+	# The faithful path needs no shell profile: the <SOUND> file names the bank,
 	# which loads into the menu's cache on first use, and the trigger names a
 	# set inside it [orig: sound_bank_collection_add_or_ref @ 0x652b40 from
 	# CUIElement_ParseXMLDefinition @ 0x648ada].

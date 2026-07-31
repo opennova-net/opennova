@@ -460,7 +460,7 @@ func _per_cell_diff(a: Image, b: Image, manifest: Dictionary) -> Dictionary:
 
 func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: Texture2D, normal: Texture2D) -> ShaderMaterial:
 	# Mirrors nova_object_model.gd _create_material's uniform setup so the
-	# swatch pins the same host state the runtime binds.
+	# swatch pins the same owner state the runtime binds.
 	var material := ShaderMaterial.new()
 	var key: int = cache.classify(cell["tag"], cell["flags"], cell["em"], cell["gl"], cell["atb"])
 	material.shader = cache.get_shader_for_key(key)

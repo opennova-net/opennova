@@ -11,7 +11,7 @@ const OUT_DIR := "res://../.scratch/leantp"
 
 var _out_abs := ""
 var _world: Node = null
-var _host: Node = null
+var _presenter: Node = null
 var _cam: Camera3D = null
 
 
@@ -33,10 +33,10 @@ func _ready() -> void:
 		push_error("[leantp] " + String(session.error)); get_tree().quit(1); return
 
 	_world = session.world
-	_host = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	_presenter = _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	_cam = session.camera
-	print("[leantp] world=%s host=%s cam=%s" % [str(_world != null), str(_host != null), str(_cam != null)])
-	if _world == null or _host == null or _cam == null:
+	print("[leantp] world=%s presenter=%s cam=%s" % [str(_world != null), str(_presenter != null), str(_cam != null)])
+	if _world == null or _presenter == null or _cam == null:
 		get_tree().quit(1); return
 
 	# Walk clear of the spawn tents.
@@ -87,23 +87,23 @@ func _ready() -> void:
 	_project_points("C fp", ray_points)
 	await _capture("C_fp_aim.png")
 	# A synthesized keypress can be swallowed by editor focus — press until the
-	# host's mode actually flips.
+	# presenter's mode actually flips.
 	for _attempt in 5:
 		_press(KEY_F4)
 		await _settle(10)
-		if _host.is_third_person():
+		if _presenter.is_third_person():
 			break
 	await _settle(50)
 	_dump("C tp settled")
 	_project_points("C tp", ray_points)
-	var aim: Vector2 = _host.aim_screen_point()
+	var aim: Vector2 = _presenter.aim_screen_point()
 	var vp_size: Vector2 = _cam.get_viewport().get_visible_rect().size
 	print("[leantp] C tp aim_screen_point=%s viewport=%s center=%s" % [str(aim), str(vp_size), str(vp_size * 0.5)])
 	await _capture("C_tp_aim.png")
 	for _attempt in 5:
 		_press(KEY_F4)
 		await _settle(10)
-		if not _host.is_third_person():
+		if not _presenter.is_third_person():
 			break
 
 	print("[leantp] done -> ", _out_abs)
@@ -122,7 +122,7 @@ func _dump(tag: String) -> void:
 	print("[leantp] %s: fp_roll_deg=%.2f cam_roll=%.2f cam_pos=%s player=%s anim=%s yaw=%.1f pitch=%.1f third=%s" % [
 		tag, roll, roll_deg, str(_cam.global_position), str(pos), anim,
 		_world.get_sim().get_local_player_yaw_deg(), _world.get_sim().get_local_player_pitch_deg(),
-		str(_host.is_third_person())])
+		str(_presenter.is_third_person())])
 
 
 # World points at the given ranges along the CURRENT FP camera's forward — the

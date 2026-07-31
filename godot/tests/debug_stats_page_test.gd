@@ -116,17 +116,17 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 
 
 func test_narrow_tree_stays_inside_the_page_and_tooltips_keep_full_text() -> void:
-	var host := Control.new()
-	host.size = Vector2(252, 480)
-	add_child_autofree(host)
+	var mount := Control.new()
+	mount.size = Vector2(252, 480)
+	add_child_autofree(mount)
 	var pane: DebugStatsPage = PaneScript.new()
 	pane.setup(NovaDebugContext.new())
-	host.add_child(pane)
+	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
+	assert_lte(pane.get_combined_minimum_size().x, mount.size.x,
 			"the Stats page fits the narrow debug content column")
 	assert_lte(pane.stats_tree.position.x + pane.stats_tree.size.x, pane.size.x,
 			"the Stats tree does not extend past the page")

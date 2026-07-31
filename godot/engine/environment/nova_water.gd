@@ -13,7 +13,7 @@ extends Node3D
 # -> render_main_scene @ 0x5c1240 (mirrored sky/terrain/world/celestial/glare;
 # no water draw)] and never the first-person arms/weapon, which retail renders
 # as its own separate near-Z viewport pass over the finished frame
-# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerHost stamps
+# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerPresenter stamps
 # the two player layers each frame and masks BODY_REFLECTION_ONLY off the
 # player camera; the mirror camera below is the only view that includes it.
 const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world instance
@@ -22,7 +22,7 @@ const VISUAL_LAYER_VIEWMODEL := 1 << 11  # the FP arms/weapon overlay; mirror-ex
 const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mirror-visible, main-excluded
 # Shadow participation is orthogonal to camera visibility. Retail renders live
 # entity silhouettes and static terrain-tile silhouettes through separate
-# projection lists, so the host lights select these marker layers with
+# projection lists, so the reimpl lights select these marker layers with
 # shadow_caster_mask without re-lighting the hand-lit base materials.
 const VISUAL_LAYER_STATIC_SHADOW_CASTER := 1 << 13
 const VISUAL_LAYER_DYNAMIC_SHADOW_CASTER := 1 << 14
@@ -32,7 +32,7 @@ const VISUAL_LAYER_SHADOW_CASTER_MASK := \
 		| VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
 # Retail allocates a square 256 RTT at water detail 2; only detail >= 3 or the
 # capture override selects 512 [orig: sub_5C08B0 @ 0x5c08d1..0x5c0937].
-# The host has no higher-detail/capture selector, so its witnessed mapping is 256.
+# The reimpl has no higher-detail/capture selector, so its witnessed mapping is 256.
 const REFLECTION_RTT_SIZE := Vector2i(256, 256)
 
 @export var environment_path: NodePath
@@ -56,7 +56,7 @@ const REFLECTION_RTT_SIZE := Vector2i(256, 256)
 		_sync_render_activity()
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
 
-# When set (not NaN), the host drives water height directly and the env/terrain
+# When set (not NaN), the world drives water height directly and the env/terrain
 # fallback is ignored — the terrain editor authors height through its document.
 var _height_override: float = NAN
 # The mission header's attrib-gated water value is a distinct rung from the
@@ -66,7 +66,7 @@ var _height_override: float = NAN
 var _mission_water_height_override: float = NAN
 # GameWorld retains this node across unload/reload; unhosted authoring previews
 # do not need to opt in, so a standalone water node starts enabled.
-var _host_rendering_enabled := true
+var _world_rendering_enabled := true
 
 
 func set_height_override(value: float) -> void:
@@ -82,8 +82,8 @@ func set_mission_water_height_override(value: float) -> void:
 
 
 ## Disable retained runtime rendering while no world is loaded.
-func set_host_rendering_enabled(value: bool) -> void:
-	_host_rendering_enabled = value
+func set_world_rendering_enabled(value: bool) -> void:
+	_world_rendering_enabled = value
 	_sync_render_activity()
 
 
@@ -97,7 +97,7 @@ func is_water_active() -> bool:
 ## between loads. Consumers that decide whether water participates in a render
 ## frame must use this predicate rather than the height sentinel alone.
 func is_water_render_active() -> bool:
-	return _host_rendering_enabled and is_water_active()
+	return _world_rendering_enabled and is_water_active()
 
 
 # Publish this water plane's height as the session's transparent water-split
@@ -159,7 +159,7 @@ var water_material: ShaderMaterial
 # The reflection RTT rig (env #30): retail prerenders the mirrored scene
 # into Water_ReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
 # @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
-# @ 0x5c1240]. The host form is a SubViewport on the SAME World3D with a
+# @ 0x5c1240]. The reimpl form is a SubViewport on the SAME World3D with a
 # mirrored camera; Godot renders SubViewports ahead of the viewport that
 # samples them, preserving the witnessed prerender order.
 var reflection_viewport: SubViewport = null
@@ -230,7 +230,7 @@ func build() -> void:
 	mesh_instance.mesh = mesh
 	# Strip vertices are ABSOLUTE world positions (the plane height rides the
 	# rows, not the node): pin the mesh at the world origin; top_level guards
-	# against a transformed host parent.
+	# against a transformed parent node.
 	mesh_instance.top_level = true
 	mesh_instance.position = Vector3.ZERO
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -261,7 +261,7 @@ func build() -> void:
 	# color at depth 1 - 2^-15 and re-renders sky dome, lo-res terrain, the
 	# reflected world, celestial bodies + sun glare [orig:
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240];
-	# hosted, the shared World3D's sky/environment covers the skyfog clear
+	# world-driven, the shared World3D's sky/environment covers the skyfog clear
 	# and the mirror camera sees the same live scene.
 	if reflection_viewport == null:
 		reflection_viewport = SubViewport.new()
@@ -305,14 +305,14 @@ func _process(delta: float) -> void:
 	# water node with no authoritative env/terrain keeps its direct property.
 	if _cached_env and _cached_env.has_method("is_loaded") and _cached_env.is_loaded():
 		_apply_environment_water_height()
-	# The murk uniform feed stays for host/probe compatibility even though the
+	# The murk uniform feed stays for world/probe compatibility even though the
 	# shader's murk role moved to the per-vertex COLOR.a (env #29).
 	water_material.set_shader_parameter("u_water_murk", water_alpha)
 
 	if (not _cached_cam or not _cached_cam.is_inside_tree()
 			or not _cached_cam.current):
 		_cached_cam = EnvRenderCamera.find(self)
-	if (not _host_rendering_enabled or not is_water_active()
+	if (not _world_rendering_enabled or not is_water_active()
 			or not is_visible_in_tree() or _cached_cam == null):
 		_clear_strip_surfaces()
 		_sync_render_activity()
@@ -340,7 +340,7 @@ func _process(delta: float) -> void:
 	_noise_color_tex.update(_noise_color_img)
 	_noise_normal_tex.update(_noise_normal_img)
 
-	# Strip inputs default to the shader-uniform stand-in values so hosts
+	# Strip inputs default to the shader-uniform stand-in values so owners
 	# without a loaded env still march strips.
 	var murk := water_alpha
 	var fog_end := 1000.0
@@ -363,7 +363,7 @@ func _process(delta: float) -> void:
 		# The witnessed UV transform (scale/bias from the fog-distance INT
 		# part, offsets from the layer-1 cloud accumulators + 32x camera)
 		# [orig: render_water_surface @ 0x5c3348..0x5c33db]. The weather node
-		# owns the shared accumulators; standalone hosts tick a private core.
+		# owns the shared accumulators; standalone owners tick a private core.
 		if not _cached_weather or not _cached_weather.is_inside_tree():
 			_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
 		if _cached_weather and _cached_weather.has_method("get_water_uv_state"):
@@ -406,7 +406,7 @@ func _process(delta: float) -> void:
 # backwards); negating the up column restores det +1 (the conjugated rotation
 # = yaw kept, pitch/roll negated) and renders the vertical mirror the rows'
 # vbase - screenV coordinate expects, so the fragment lookup stays the
-# witnessed row math before a host projection-scale correction. (Negating any
+# witnessed row math before a reimpl projection-scale correction. (Negating any
 # other column would instead need matching flips in the shader.)
 func _update_reflection_camera() -> void:
 	if reflection_viewport == null or reflection_camera == null:
@@ -471,7 +471,7 @@ func _update_reflection_camera() -> void:
 				source_horizontal_fov = rad_to_deg(2.0 * atan(
 						tan(deg_to_rad(_cached_cam.fov) * 0.5) * source_aspect))
 			# Camera3D accepts [1, 179] degrees. Very thin but still
-			# drawable host viewports asymptotically approach 180 degrees.
+			# drawable Godot viewports asymptotically approach 180 degrees.
 			reflection_camera.set_perspective(
 					clampf(source_horizontal_fov, 1.0, 179.0),
 					_cached_cam.near, _cached_cam.far)
@@ -485,7 +485,7 @@ func _update_reflection_camera() -> void:
 	# The strip rows encode normalized coordinates from the source viewport.
 	# Preserving horizontal FOV makes the square mirror's X focal scale match,
 	# but its Y focal scale is source_height/source_width of the main camera's.
-	# Convert the complete witnessed texm3x2 result at the host boundary so a
+	# Convert the complete witnessed texm3x2 result at the sim/present boundary so a
 	# fixed reflected world point remains registered while the view rotates.
 	water_material.set_shader_parameter("u_reflection_uv_scale",
 			Vector2(1.0, 1.0 / source_aspect))
@@ -493,7 +493,7 @@ func _update_reflection_camera() -> void:
 	# the mirrored scene against the water surface — the PolyTrn context arms
 	# a below-plane clip at waterHeight - 0.1 [orig: plane block wh - 0.1,
 	# render_main_scene @ 0x5c1240]. Godot exposes no oblique clip plane, so
-	# the host does NOT clip: the mirrored camera predominantly sees
+	# the reimpl does NOT clip: the mirrored camera predominantly sees
 	# above-water geometry anyway.
 
 
@@ -540,7 +540,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	# screen-marched row coordinates registered to the actual main view.
 	_water_core.strip_set_view(_cached_cam.get_camera_transform(),
 			_cached_cam.get_camera_projection(), vp_size, pass_fog_end)
-	# The nightvision redraw variant is a FrameFX pass, not hosted yet.
+	# The nightvision redraw variant is a FrameFX pass, not ported yet.
 	var rows: int = _water_core.strip_build(water_height, murk, lit,
 			uv_state.x, uv_state.y, underwater, false)
 	if rows < 2:
@@ -566,7 +566,7 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM2_SHIFT))
 	mesh.surface_set_material(0, water_material)
 	# The witnessed per-side material swap: camera-above -> the blend material,
-	# underwater -> the opaque one (blend off, flags 0x20000) — hosted as the
+	# underwater -> the opaque one (blend off, flags 0x20000) — ported as the
 	# shader's u_underwater_view branch [orig: selection @ 0x5c33e6..0x5c34ea;
 	# Water_ShaderOpaque @ 0x28ee8c8].
 	water_material.set_shader_parameter("u_underwater_view", underwater)
@@ -584,7 +584,7 @@ func _clear_strip_surfaces() -> void:
 func _apply_environment_water_height() -> void:
 	# The witnessed precedence is BMS > TRN(flagged) > ENV [orig: env parse
 	# @ 0x52073b, then Terrain_Init @ 0x60fcba overrides when flagged, then
-	# the BMS override @ 0x525371] — the host override rung is the authoring
+	# the BMS override @ 0x525371] — the reimpl override rung is the authoring
 	# seam on top (env #28).
 	if not is_nan(_height_override):
 		water_height = _height_override

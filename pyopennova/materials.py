@@ -1,6 +1,6 @@
-"""Host-neutral material interpretation for OpenNova 3DI3 model data.
+"""DCC-neutral material interpretation for OpenNova 3DI3 model data.
 
-This module intentionally contains no Blender or PyMXS imports.  DCC hosts use
+This module intentionally contains no Blender or PyMXS imports.  DCC embedders use
 the descriptors here to build their own native material objects while sharing
 texture-slot parsing, path resolution, diagnostics, and export metadata.
 """
@@ -394,7 +394,7 @@ def describe_material(
     texture_strategy: str | None = None,
     uv1_tiling_override: Tuple[float, float] | None = None,
 ) -> MaterialDescriptor:
-    """Interpret one ``TdpMaterial`` into host-neutral material data.
+    """Interpret one ``TdpMaterial`` into DCC-neutral material data.
 
     ``uv1_tiling_override`` (when provided) sets the channel-1 tiling that the
     model's MTRL chunk doesn't natively carry. Compute it once per 3DI3 model via
@@ -568,11 +568,11 @@ def descriptor_from_user_props(
     *,
     resolver=None,
 ) -> MaterialDescriptor:
-    """Rebuild a MaterialDescriptor from a host-stored user-props dict.
+    """Rebuild a MaterialDescriptor from a DCC-stored user-props dict.
 
-    Used by hosts that round-trip materials through a DCC scene (e.g. the
+    Used by DCC embedders that round-trip materials through a DCC scene (e.g. the
     Blender ASE exporter, which reads the props ``BlenderSceneBuilder`` stored
-    via ``material_user_props`` during import). Fields the host did not store
+    via ``material_user_props`` during import). Fields the DCC did not store
     fall back to defaults; ``classify_material_shader`` derives the semantic
     signals from the shader tag.
     """
@@ -756,7 +756,7 @@ def descriptor_from_user_props(
 
 
 def material_user_props(desc: MaterialDescriptor) -> Dict[str, Any]:
-    """Return common custom/export properties for host material objects."""
+    """Return common custom/export properties for DCC material objects."""
 
     props: Dict[str, Any] = {
         "ase_material_name": desc.name,

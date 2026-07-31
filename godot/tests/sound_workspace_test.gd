@@ -28,7 +28,7 @@ func test_document_save_and_inspector() -> void:
 	assert_false(ws.can_save(), "save unavailable with no path")
 	assert_eq(ws.get_project_title(), "untitled.lwf", "plain title before any load")
 
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.build_inspector(host)
-	assert_gt(host.get_child_count(), 0, "build_inspector mounts a child")
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.build_inspector(mount)
+	assert_gt(mount.get_child_count(), 0, "build_inspector mounts a child")

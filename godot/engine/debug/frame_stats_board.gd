@@ -36,10 +36,10 @@ class CaptureWindow:
 enum {
 	# main_game frame legs (game shell _process)
 	FRAME_WALL,            # true wall time between consecutive shell frames
-	FRAME_PLAYER_BEFORE,   # LocalPlayerHost.before_world_tick
+	FRAME_PLAYER_BEFORE,   # LocalPlayerPresenter.before_world_tick
 	FRAME_WORLD,           # GameWorld.tick total
-	FRAME_PLAYER_AFTER,    # LocalPlayerHost.after_world_tick
-	FRAME_HUD,             # GameHudHost.tick total
+	FRAME_PLAYER_AFTER,    # LocalPlayerPresenter.after_world_tick
+	FRAME_HUD,             # GameHudPresenter.tick total
 	# GameWorld.tick legs
 	WORLD_FOLIAGE,
 	WORLD_RUNTIME,
@@ -76,7 +76,7 @@ enum {
 	PRESENT_FIRE,
 	PRESENT_DESTRUCTION,
 	PRESENT_THROWABLE,
-	# GameHudHost.tick legs
+	# GameHudPresenter.tick legs
 	HUD_SCALARS,
 	HUD_ATTACH,
 	HUD_WAYPOINT,

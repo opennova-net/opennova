@@ -93,10 +93,10 @@ typedef struct DefAmmoDef {
     int tumble_error_fp16;   /* +180: below-stable random deflection, 16.16 */
     int tracer_rate;         /* byte +226 ('tracerRate') */
     char notarmmed_ammo[64]; /* +241: the not-armed child ammo name ('notarmmedammo') */
-    /* Host fire-presentation fields (world-wac-ai-re §17.4). The original resolves
+    /* Embedder fire-presentation fields (world-wac-ai-re §17.4). The original resolves
      * both names at parse time (+64 = SoundBank_FindSetByNameAnyBank set ptr, +68 =
      * CEffectWorld_InternEffectHandle handle [orig: AmmoDef_ParseProperty
-     * @0x40a8c8/@0x40a8f6]); we keep the names and resolve in the host at play. */
+     * @0x40a8c8/@0x40a8f6]); we keep the names and resolve in the embedder at play. */
     char ai_launch[64];       /* +64: 'ai_launch' fire sound-set name */
     char ai_launcheffect[64]; /* +68: 'ai_launcheffect' muzzle effect name */
     int mf_light;             /* +36: 'MF_Light' presence flag [orig: @0x40a81b = 1] */
@@ -109,7 +109,7 @@ typedef struct DefAmmoDef {
      * 'foeTrcrID <type_id>'. The original resolves the ITEMS.DEF type id to an item
      * INDEX at parse (ItemList_FindIndexByTypeId, name fallback, warning on miss)
      * [orig: AmmoDef_ParseProperty @0x40a5f8-0x40a68d -> +16/+20]; we keep the raw
-     * type id and the host resolves at use. 0 = none. */
+     * type id and the embedder resolves at use. 0 = none. */
     int frndly_trcr_type_id; /* +16 (pre-resolve) */
     int foe_trcr_type_id;    /* +20 (pre-resolve) */
     /* The in-flight round glow, 'light_move <radius> <r> <g> <b>' — spawned per round

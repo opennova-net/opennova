@@ -65,6 +65,10 @@ jobs:
           python scripts/lint/maturity_lint.py --enforce
           python scripts/lint/link_graph_check.py --enforce
           python scripts/lint/ledger_check.py --check
+          # Host-terminology gate (CONTEXT.md Host / Joiner): "host" means
+          # the game/server host and nothing else. Any uncovered use fails;
+          # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
+          python scripts/lint/host_lint.py --enforce
 
       - name: Build and test
         shell: bash

@@ -49,7 +49,7 @@ func test_multiline_readonly_flag() -> void:
 	assert_true(notes.get_readonly(), "READONLY flag parsed -> not editable")
 	assert_false((notes as TextEdit).editable, "readonly maps to editable=false")
 	notes.set_readonly(false)
-	assert_true((notes as TextEdit).editable, "host can clear readonly at runtime")
+	assert_true((notes as TextEdit).editable, "shell can clear readonly at runtime")
 
 
 # --- Goto -------------------------------------------------------------------
@@ -128,7 +128,7 @@ func test_list_builds_and_seeds() -> void:
 func test_list_runtime_data_binding_and_relay() -> void:
 	var menu := _build_menu()
 	var list := menu.find_child("MissionList", true, false) as ItemList
-	# A runtime host replaces the template rows with live data (mission list).
+	# The runtime shell replaces the template rows with live data (mission list).
 	list.set_items(["Alpha", "Bravo", "Charlie"])
 	assert_eq(list.item_count, 3, "set_items replaced the seed")
 	list.select(1)
@@ -315,7 +315,7 @@ func test_spinlist_structure_and_values() -> void:
 	assert_true(spin is Control, "NovaMnuSpinList is a Control")
 	assert_eq(spin.get_value_count(), 3, "three values seeded from ITEMS")
 	assert_eq(spin.get_value(), "OPTION_LOW", "starts on first value")
-	assert_not_null(spin.find_child("Value", true, false), "has a Value cell host")
+	assert_not_null(spin.find_child("Value", true, false), "has a Value cell mount")
 	var up := spin.find_child("SpinUp", true, false)
 	var down := spin.find_child("SpinDown", true, false)
 	assert_true(up is NovaMnuButton, "SpinUp built from SPINUP art")
@@ -373,10 +373,10 @@ func test_spinlist_color_items_render_swatches() -> void:
 
 
 func test_spinlist_get_value_attr_returns_value_not_label() -> void:
-	# A host reads the item's `value=` attribute (the semantic value the original reads with wcstoul
+	# The shell reads the item's `value=` attribute (the semantic value the original reads with wcstoul
 	# [orig: CUISpinList_ParseXMLDefinition @0x64bd10]) to map a selection to behavior — e.g. the host
 	# screen's SERVERTYPE spinlist: HG_SERVEPLAY=0 (serve-and-play) vs HG_SERVEONLY=1 (dedicated). This
-	# is distinct from get_value()'s localized DISPLAY text. (MpMenuHost._is_dedicated reads the attr.)
+	# is distinct from get_value()'s localized DISPLAY text. (MpMenuCompanion._is_dedicated reads the attr.)
 	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
 		"<WINDOW type=\"spinlist\" name=\"SERVERTYPE\">" + \

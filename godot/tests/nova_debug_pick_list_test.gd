@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaDebugPickList: the host-owned debug pick set. Cap, dedupe-by-handle
+# NovaDebugPickList: the shell-owned debug pick set. Cap, dedupe-by-handle
 # (refresh in place), removal, and the changed signal — the model contract
 # the overlay's picks section and the highlight view both build on.
 

@@ -4,7 +4,7 @@ extends EditorWorkspace
 ## ONED workspace for authoring NovaLogic .lwf sound profiles.
 ##
 ## A non-3D data editor (no viewport camera) mirroring the Strings workspace:
-## the center viewport host carries a self-contained SoundEditorView (a Tree of
+## the center viewport mount carries a self-contained SoundEditorView (a Tree of
 ## Sound Sets -> Layers -> Members with an add/remove/reorder toolbar and per-row
 ## Play buttons); the left inspector carries the per-selection property form. This
 ## adapter owns the SoundController document and fans its change channels out:
@@ -72,7 +72,7 @@ func _ensure_editor() -> void:
 		return
 	controller = SoundControllerScript.new()
 	controller.name = "SoundController"
-	_host_under_shell(controller)
+	_mount_under_shell(controller)
 	controller.new_profile(false)
 	controller.structure_changed.connect(_on_structure_changed)
 	controller.selection_changed.connect(_on_selection_changed)
@@ -83,7 +83,7 @@ func _ensure_preview() -> SoundPreviewPlayer:
 	if _preview == null:
 		_preview = SoundPreviewPlayerScript.new()
 		_preview.name = "SoundPreviewPlayer"
-		_host_under_shell(_preview)
+		_mount_under_shell(_preview)
 	return _preview
 
 
@@ -100,16 +100,16 @@ func _create_view() -> Control:
 	return _view
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	_ensure_editor()
-	_ensure_mount().mount(host)
+	_ensure_mount().mount(mount)
 	if _view != null:
 		_view.set_workspace(self)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _mount != null:
 		_mount.unmount()
 
@@ -124,10 +124,10 @@ func release_viewport() -> void:
 
 # --- Left: inspector ---
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	_ensure_editor()
 	_inspector = SoundInspectorScript.new()
-	host.add_child(_inspector)
+	mount.add_child(_inspector)
 	_inspector.setup(self)
 
 

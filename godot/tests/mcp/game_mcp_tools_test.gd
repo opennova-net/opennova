@@ -84,8 +84,8 @@ class DebugSessionStub:
 		presentation_releases += 1
 
 
-class HostStub:
-	extends GameMcpHost
+class AdapterStub:
+	extends GameMcpAdapter
 
 	var debug := DebugSessionStub.new()
 	var last_action := ""
@@ -125,15 +125,15 @@ class RuntimeServiceStub:
 		shutdown_requested = true
 
 
-var host: HostStub
+var adapter: AdapterStub
 var tools: GameMcpTools
 var registry: McpToolRegistry
 var ctx := McpToolContext.new()
 
 
 func before_each() -> void:
-	host = add_child_autofree(HostStub.new())
-	tools = GameMcpTools.new(null, host)
+	adapter = add_child_autofree(AdapterStub.new())
+	tools = GameMcpTools.new(null, adapter)
 	registry = McpToolRegistry.new()
 	tools.register_all(registry)
 	ctx = McpToolContext.new()
@@ -155,7 +155,7 @@ func test_shared_catalog_registers_all_runtime_tools() -> void:
 		assert_true(registry.has_tool(name), "registered %s" % name)
 
 
-func test_entity_listing_and_inspection_route_through_public_host_seams() -> void:
+func test_entity_listing_and_inspection_route_through_public_adapter_seams() -> void:
 	var result := await _call("game_entities", {
 		"op": "list",
 		"offset": 0,
@@ -178,16 +178,16 @@ func test_entity_listing_and_inspection_route_through_public_host_seams() -> voi
 	assert_true(invalid.is_error)
 
 
-func test_game_control_routes_through_public_host_seam() -> void:
+func test_game_control_routes_through_public_adapter_seam() -> void:
 	var result := await _call("game_control", {"action": "pause"})
-	assert_eq(host.last_action, "pause")
+	assert_eq(adapter.last_action, "pause")
 	assert_eq(result.structured["shell"]["state"], "world")
 
 
 func test_internal_debug_shutdown_stops_endpoint_without_quitting_game() -> void:
 	var runtime_service: RuntimeServiceStub = add_child_autofree(
 			RuntimeServiceStub.new())
-	var runtime_tools := GameMcpTools.new(runtime_service, host)
+	var runtime_tools := GameMcpTools.new(runtime_service, adapter)
 	var runtime_registry := McpToolRegistry.new()
 	runtime_tools.register_all(runtime_registry)
 
@@ -196,7 +196,7 @@ func test_internal_debug_shutdown_stops_endpoint_without_quitting_game() -> void
 	}, ctx)
 
 	assert_true(runtime_service.shutdown_requested)
-	assert_eq(host.last_action, "",
+	assert_eq(adapter.last_action, "",
 			"the reserved endpoint control never reaches MainGame quit")
 	assert_eq(result.structured["debug_endpoint"], "stopping")
 
@@ -208,9 +208,9 @@ func test_debug_set_forwards_per_call_authority_confirmation() -> void:
 		"value": 2.0,
 		"confirm_authority": true,
 	})
-	assert_eq(host.debug.set_id, &"terrain_lod_quality")
-	assert_eq(host.debug.set_value, 2.0)
-	assert_true(host.debug.set_authority)
+	assert_eq(adapter.debug.set_id, &"terrain_lod_quality")
+	assert_eq(adapter.debug.set_value, 2.0)
+	assert_true(adapter.debug.set_authority)
 	assert_eq(result.structured["id"], "terrain_lod_quality")
 
 
@@ -223,27 +223,27 @@ func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
 		"id": "terrain_lod_quality",
 		"confirm_authority": true,
 	})
-	assert_true(host.debug.read_authority,
+	assert_true(adapter.debug.read_authority,
 			"op=get threads the caller's confirmed authority into the row")
 
-	host.debug.read_authority = false
+	adapter.debug.read_authority = false
 	await _call("game_debug", {
 		"op": "set",
 		"id": "terrain_lod_quality",
 		"value": 2.0,
 		"confirm_authority": true,
 	})
-	assert_true(host.debug.read_authority,
+	assert_true(adapter.debug.read_authority,
 			"the row returned after a confirmed set reflects that authority")
 
 	await _call("game_debug", {"op": "list", "confirm_authority": true})
-	assert_true(host.debug.list_authority)
+	assert_true(adapter.debug.list_authority)
 	await _call("game_debug", {"op": "snapshot", "confirm_authority": true})
-	assert_true(host.debug.snapshot_authority)
+	assert_true(adapter.debug.snapshot_authority)
 
-	host.debug.read_authority = true
+	adapter.debug.read_authority = true
 	await _call("game_debug", {"op": "get", "id": "terrain_lod_quality"})
-	assert_false(host.debug.read_authority,
+	assert_false(adapter.debug.read_authority,
 			"an unconfirmed caller still sees the locked F3 policy view")
 
 
@@ -279,7 +279,7 @@ func test_authority_confirmation_requires_a_json_boolean() -> void:
 		"value": 2.0,
 		"confirm_authority": "true",
 	})
-	assert_false(host.debug.set_authority,
+	assert_false(adapter.debug.set_authority,
 			"a truthy string cannot opt into authoritative mutation")
 
 
@@ -295,9 +295,9 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"confirm_authority": true,
 	})
 	assert_eq(result.structured["error"], OK)
-	assert_eq(host.debug.invoked_id, &"teleport_local_player")
-	assert_eq(host.debug.invoked_args, [Vector3(12.0, 34.0, 56.0), 90.0, -10.0])
-	assert_true(host.debug.invoked_authority)
+	assert_eq(adapter.debug.invoked_id, &"teleport_local_player")
+	assert_eq(adapter.debug.invoked_args, [Vector3(12.0, 34.0, 56.0), 90.0, -10.0])
+	assert_true(adapter.debug.invoked_authority)
 
 	await _call("game_debug", {
 		"op": "invoke",
@@ -305,7 +305,7 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"args": {"entity": 7, "health": 25},
 		"confirm_authority": true,
 	})
-	assert_eq(host.debug.invoked_args, [7, 25])
+	assert_eq(adapter.debug.invoked_args, [7, 25])
 
 	await _call("game_debug", {
 		"op": "invoke",
@@ -313,7 +313,7 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"args": {"action": "pause"},
 		"confirm_authority": true,
 	})
-	assert_eq(host.debug.invoked_args, "pause")
+	assert_eq(adapter.debug.invoked_args, "pause")
 
 	await _call("game_debug", {
 		"op": "invoke",
@@ -321,34 +321,34 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"args": {"index": 17, "value": -3},
 		"confirm_authority": true,
 	})
-	assert_eq(host.debug.invoked_args, [17, -3])
+	assert_eq(adapter.debug.invoked_args, [17, -3])
 
 	await _call("game_debug", {
 		"op": "invoke",
 		"id": "set_audio_bus_volume",
 		"args": {"bus": "SFX", "volume_db": -12.5},
 	})
-	assert_eq(host.debug.invoked_args, ["SFX", -12.5])
+	assert_eq(adapter.debug.invoked_args, ["SFX", -12.5])
 
 	await _call("game_debug", {
 		"op": "invoke",
 		"id": "set_audio_bus_mute",
 		"args": {"bus": "SFX", "muted": true},
 	})
-	assert_eq(host.debug.invoked_args, ["SFX", true])
+	assert_eq(adapter.debug.invoked_args, ["SFX", true])
 
 
 func test_f3_unlock_cannot_substitute_for_mcp_per_call_confirmation() -> void:
 	# The stub deliberately accepts any write, like a shared session whose F3
 	# edit latch is already open. The MCP adapter must reject before reaching it.
-	host.debug.invoked_id = &""
+	adapter.debug.invoked_id = &""
 	var result := await _call("game_debug", {
 		"op": "invoke",
 		"id": "set_entity_health",
 		"args": {"entity": 0, "health": 25},
 	})
 	assert_true(result.is_error)
-	assert_eq(host.debug.invoked_id, &"")
+	assert_eq(adapter.debug.invoked_id, &"")
 	assert_true(String(result.content[0]["text"]).contains(
 			"confirm_authority"))
 
@@ -385,7 +385,7 @@ func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
 		},
 	]
 	for row in cases:
-		host.debug.invoked_id = &""
+		adapter.debug.invoked_id = &""
 		var result := await _call("game_debug", {
 			"op": "invoke",
 			"id": row["id"],
@@ -394,7 +394,7 @@ func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
 		})
 		assert_true(result.is_error,
 				"Bad numeric input errors for %s" % row["id"])
-		assert_eq(host.debug.invoked_id, &"",
+		assert_eq(adapter.debug.invoked_id, &"",
 				"Bad numeric input never reaches %s" % row["id"])
 
 
@@ -421,8 +421,8 @@ func test_cancelled_screenshot_releases_its_presentation_lease() -> void:
 	ctx.cancelled = true
 	var result := await _call("game_screenshot")
 	assert_true(result.is_error)
-	assert_eq(host.debug.presentation_acquires, 1)
-	assert_eq(host.debug.presentation_releases, 1,
+	assert_eq(adapter.debug.presentation_acquires, 1)
+	assert_eq(adapter.debug.presentation_releases, 1,
 			"cooperative cancellation drops expensive debug views immediately")
 
 
@@ -437,6 +437,6 @@ func test_wrong_typed_screenshot_args_error_before_the_lease_is_acquired() -> vo
 	]:
 		var result := await _call("game_screenshot", args)
 		assert_true(result.is_error, "wrong-typed %s errors" % [args])
-	assert_eq(host.debug.presentation_acquires, 0,
+	assert_eq(adapter.debug.presentation_acquires, 0,
 			"invalid args never touch the presentation lease")
-	assert_eq(host.debug.presentation_releases, 0)
+	assert_eq(adapter.debug.presentation_releases, 0)

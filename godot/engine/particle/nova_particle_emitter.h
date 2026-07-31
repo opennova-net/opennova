@@ -54,7 +54,7 @@ private:
 	// descriptor carries a direction vector).
 	Vector3 emission_forward = Vector3(0, 0, 1);
 	String texture_dir;
-	// Host texture seam: when valid, called with the graphic-layer texture NAME
+	// Owner texture seam: when valid, called with the graphic-layer texture NAME
 	// and expected to return a Texture2D (or null). Lets the game runtime serve
 	// textures from its mounted archives (the engine reads particle textures
 	// from tga\ + the mounted volumes [orig: CEffectSystem_Init @ 0x5f6070]);

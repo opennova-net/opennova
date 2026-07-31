@@ -20,7 +20,7 @@ class Range;
 // also can't take the discrete SHUTTLE/SCROLLUP/SCROLLDOWN sprite art + per-button
 // sounds), so this is a custom-draw Control owning a track TextureRect, two arrow
 // TextureButtons, and a draggable shuttle. Exposes Range-like value semantics; a
-// host binds the real min/max/page (the .mnu is a template with no data). This is
+// shell binds the real min/max/page (the .mnu is a template with no data). This is
 // the reusable scroll embedded by NovaMnuCombo's popup and NovaMnuTable.
 //
 // Inert in edit_mode: the art lays out but the arrows are disabled and no drag is

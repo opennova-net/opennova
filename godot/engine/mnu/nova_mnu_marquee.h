@@ -15,7 +15,7 @@ class NovaMnuMenu;
 
 // A scrolling credits/marquee window (type="marquee" / marquee_wnd). The builder
 // resolves the DATASOURCE text file through the resource root (falling back to the
-// STRING text or a sample in edit_mode); a host can also push content at runtime.
+// STRING text or a sample in edit_mode); a shell can also push content at runtime.
 // The clipped Label auto-scrolls (vertically by default, horizontally if
 // ORIENTATION is HORIZONTAL). Static (non-scrolling) in edit_mode.
 //

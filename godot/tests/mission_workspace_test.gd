@@ -165,10 +165,10 @@ func test_active_mission_context_uses_bms_clock_and_clear_drops_only_the_overrid
 
 func test_build_inspector_mounts_a_panel() -> void:
 	var ws = MissionWorkspace.new()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.build_inspector(host)
-	assert_gt(host.get_child_count(), 0, "the mission inspector panel is mounted into the host")
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.build_inspector(mount)
+	assert_gt(mount.get_child_count(), 0, "the mission inspector panel is mounted into the mount")
 
 
 # --- New + undo / redo hooks --------------------------------------------------
@@ -212,23 +212,23 @@ func test_uses_asset_dock() -> void:
 	assert_true(ws.uses_asset_dock(), "the mission workspace opts into the right dock")
 
 
-func test_asset_dock_before_build_hosts_the_editor() -> void:
+func test_asset_dock_before_build_mounts_the_editor() -> void:
 	# The shell forwards the dock (set_asset_dock) BEFORE building the inspector on activation; the
 	# adapter caches it so the fresh inspector builds its editor straight into the dock.
 	var ws = MissionWorkspace.new()
 	var dock := PanelContainer.new()
 	add_child_autofree(dock)
-	var host := Control.new()
-	add_child_autofree(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
 	ws.set_asset_dock(dock)
-	ws.build_inspector(host)
+	ws.build_inspector(mount)
 	assert_not_null(dock.find_child("MissionPosX", true, false), "the entity editor mounts in the dock")
-	assert_null(host.find_child("MissionPosX", true, false), "and not in the left inspector host")
+	assert_null(mount.find_child("MissionPosX", true, false), "and not in the left inspector mount")
 	# On switch-away the shell calls set_asset_dock(null) before clearing the dock; the editor must
-	# reparent back under the inspector (host) rather than be freed.
+	# reparent back under the inspector (mount) rather than be freed.
 	ws.set_asset_dock(null)
 	assert_null(dock.find_child("MissionPosX", true, false), "the dock is emptied of the editor")
-	assert_not_null(host.find_child("MissionPosX", true, false), "the editor is reparented under the inspector host")
+	assert_not_null(mount.find_child("MissionPosX", true, false), "the editor is reparented under the inspector mount")
 
 
 # --- B8: the activate-time re-ground prompt ------------------------------------
@@ -371,13 +371,13 @@ func _shelled_workspace() -> MissionWorkspace:
 
 func test_workspace_has_no_embedded_game_runtime_or_debug_ui() -> void:
 	var ws := _shelled_workspace()
-	var host := Control.new()
-	add_child_autofree(host)
-	ws.build_inspector(host)
+	var mount := Control.new()
+	add_child_autofree(mount)
+	ws.build_inspector(mount)
 
-	assert_null(host.find_child("MissionDebugBtn", true, false),
+	assert_null(mount.find_child("MissionDebugBtn", true, false),
 		"F3 belongs to the separately launched game")
-	assert_null(host.find_child("MissionSimBar", true, false),
+	assert_null(mount.find_child("MissionSimBar", true, false),
 		"mission testing is launched from the editor toolbar")
 	for method in [
 		"play_mission", "stop_play_mission", "is_playing_mission", "play_controller",

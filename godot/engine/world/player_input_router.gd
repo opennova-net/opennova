@@ -1,20 +1,20 @@
 class_name PlayerInputRouter
 extends RefCounted
 
-# The local player's input sampling/routing, split out of LocalPlayerHost
+# The local player's input sampling/routing, split out of LocalPlayerPresenter
 # (W4-4): the movement-state sampling into the sim, the weapon trigger/switch
 # edge latches, the gameplay keys (F4/B/N/NVG/stance), mouse look, and mouse
-# capture/release. The host keeps the camera cluster, the avatar/viewmodel
+# capture/release. The presenter keeps the camera cluster, the avatar/viewmodel
 # presentation, and the third-person FLAG (camera state) — F4 flips it through
-# host.set_third_person(). The host's before_world_tick / handle_key_input /
+# presenter.set_third_person(). The presenter's before_world_tick / handle_key_input /
 # handle_input stay the externally pinned names and delegate here.
 
-# The world serves the sim; the host serves the presentation surfaces this
+# The world serves the sim; the presenter serves the presentation surfaces this
 # router drives around the sample (fly-camera lock, model lifetime, the
-# head-bone eye). Untyped for the same reason as the host's _world: GUT
+# head-bone eye). Untyped for the same reason as the presenter's _world: GUT
 # harness worlds serve value-only doubles.
 var _world
-var _host
+var _presenter
 var _input_source := Callable()
 var _fire_was_held := false
 var _reload_was_down := false
@@ -33,19 +33,19 @@ var _cycle_prev_was_down := false
 var _cycle_next_was_down := false
 
 
-func setup(world, host) -> void:
+func setup(world, presenter) -> void:
 	_world = world
-	_host = host
+	_presenter = presenter
 
 
 func teardown() -> void:
 	_world = null
-	_host = null
+	_presenter = null
 	_input_source = Callable()
 
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
-# so a cached reference would go stale (the host follows the same rule).
+# so a cached reference would go stale (the presenter follows the same rule).
 # Untyped: GUT harness worlds serve value-only sim doubles.
 func _sim():
 	return _world.get_sim() if _world != null else null
@@ -57,17 +57,17 @@ func set_input_source(source: Callable) -> void:
 
 func before_world_tick(_delta: float, capture_mouse: bool = false,
 		gameplay_input_active: bool = true) -> void:
-	if _host == null:
+	if _presenter == null:
 		return
-	if not _host.has_player():
-		_host.set_fly_camera_locked(false)
+	if not _presenter.has_player():
+		_presenter.set_fly_camera_locked(false)
 		release_mouse_capture()
-		_host.clear_models()
+		_presenter.clear_models()
 		return
-	_host.set_fly_camera_locked(true)
+	_presenter.set_fly_camera_locked(true)
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	_host.ensure_models()
+	_presenter.ensure_models()
 	# A live UI overlay keeps the world ticking but must actively submit a neutral
 	# movement frame. Skipping this call leaves the sim holding its previous input,
 	# so a player who opened the armory while running would keep running under it.
@@ -84,9 +84,9 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 			_bool(state, "jump"))
 		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
 		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
-		# computed sim-side in the original @0x4b6bb3 — hosted, the render skeleton is
+		# computed sim-side in the original @0x4b6bb3 — in the port, the render skeleton is
 		# the sample source (D-INF-18)].
-		var head: Vector3 = _host.avatar_head_world()
+		var head: Vector3 = _presenter.avatar_head_world()
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
 	_send_weapon_input()
@@ -145,20 +145,20 @@ func _send_weapon_switch_input(captured: bool) -> void:
 # @ 0xA890C8; view actions 400/402/412 @ 0x49C073; ThirdPersonCamera_Update @0x437af0
 # — full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11),
 # net-re §5.39 2026-07-08 addendum]. The third-person flag is CAMERA state and stays
-# on the host — F4 flips it through host.set_third_person(). Stance is the witnessed
+# on the presenter — F4 flips it through presenter.set_third_person(). Stance is the witnessed
 # 3-key SELECT — Z prone, X crouch, C stand (catalog ids 9/10/11, defaults Z/X/C) —
 # each key REQUESTS its stance from the sim, which applies the mutual exclusion and
 # the ForceCrouch refusal (the C2S 0x1D semantics). [orig: input cases 170/169/172
 # @0x4e0df3/@0x4e0d77/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
 func handle_key_input(event: InputEvent, active: bool) -> bool:
-	if not active or _host == null or not _host.has_player() \
+	if not active or _presenter == null or not _presenter.has_player() \
 			or not (event is InputEventKey):
 		return false
 	var key := event as InputEventKey
 	if not key.pressed or key.echo:
 		return false
 	if key.keycode == KEY_F4:
-		_host.set_third_person(not _host.is_third_person())
+		_presenter.set_third_person(not _presenter.is_third_person())
 		return true
 	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
 	var sim = _sim()
@@ -200,7 +200,7 @@ func _request_stance(stance: int) -> void:
 # owns sensitivity, the scoped zoom reduction, Y-invert, and the pitch clamps).
 # [orig: Input_ProcessMouseAxisBindings @0x499680 -> the axis cases 166/164]
 func handle_input(event: InputEvent, active: bool) -> bool:
-	if not active or _host == null or not _host.has_player() \
+	if not active or _presenter == null or not _presenter.has_player() \
 			or not (event is InputEventMouseMotion):
 		return false
 	var sim = _sim()
@@ -211,7 +211,7 @@ func handle_input(event: InputEvent, active: bool) -> bool:
 	return true
 
 
-## Drop the trigger latches (the host's reset-state path). The switch-key
+## Drop the trigger latches (the presenter's reset-state path). The switch-key
 ## latches are deliberately NOT reset: a category key held across a mission
 ## reload must not fire a spurious switch edge on the first new-sim frame.
 func reset() -> void:

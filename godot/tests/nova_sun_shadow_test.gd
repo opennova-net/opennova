@@ -16,7 +16,7 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 			NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
 
 
-func test_static_projection_only_reaches_the_host_terrain_receiver() -> void:
+func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
 	var light: NovaSunShadow = NovaSunShadowScript.new()
 	light.projection_mode = NovaSunShadow.PROJECTION_STATIC_TERRAIN
 	add_child_autofree(light)

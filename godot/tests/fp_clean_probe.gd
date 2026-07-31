@@ -41,10 +41,10 @@ func _ready() -> void:
 	# NOVA_VM_SWEEP=1: capture the four cardinal container yaws to pin the rig->camera
 	# axis map against the retail look in one run (PLAYER_VIEWMODEL_ROT is a live var).
 	if OS.get_environment("NOVA_VM_SWEEP") == "1":
-		var sweep_host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-		if sweep_host != null:
-			var pvp: SubViewport = sweep_host.viewmodel_rig().get("_vm_viewport")
-			var pcam: Camera3D = sweep_host.viewmodel_rig().get("_vm_camera")
+		var sweep_presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+		if sweep_presenter != null:
+			var pvp: SubViewport = sweep_presenter.viewmodel_rig().get("_vm_viewport")
+			var pcam: Camera3D = sweep_presenter.viewmodel_rig().get("_vm_camera")
 			print("[fp] pass: vp=%s size=%s cam=%s current=%s fov=%.1f cull=%d world_shared=%s" % [
 				str(pvp != null), str(pvp.size) if pvp != null else "-", str(pcam != null),
 				str(pcam.current) if pcam != null else "-", pcam.fov if pcam != null else -1.0,
@@ -59,19 +59,19 @@ func _ready() -> void:
 				if pimg != null:
 					pimg.save_png(_out_abs.path_join("pass_view.png"))
 					print("[fp] wrote pass_view.png")
-			var restore: Vector3 = sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT
+			var restore: Vector3 = sweep_presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT
 			for y in [0, 90, 180, 270]:
-				sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)
+				sweep_presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)
 				await _settle(6)
 				await _capture("sweep_yaw_%03d.png" % y)
-			sweep_host.viewmodel_rig().PLAYER_VIEWMODEL_ROT = restore
+			sweep_presenter.viewmodel_rig().PLAYER_VIEWMODEL_ROT = restore
 			await _settle(6)
 	_look(Vector2(0, 260))   # ~30 deg down at 0.12 deg/px -- see the gun + hands
 	await _settle(24)
 	await _capture("02_fp_down.png")
 
 	# NOVA_VM_FSM=1: drive the weapon action FSM live — full-auto fire (LMB held),
-	# reload (R), ADS in/out (RMB) — through the REAL input path (LocalPlayerHost reads
+	# reload (R), ADS in/out (RMB) — through the REAL input path (LocalPlayerPresenter reads
 	# the Input singleton while the mouse is captured), logging the FSM view at each
 	# stage and capturing frames. [net-re §5.62]
 	if OS.get_environment("NOVA_VM_FSM") == "1":
@@ -84,10 +84,10 @@ func _ready() -> void:
 	# Rest pose makes skinning mathematically identity (pose == bind), isolating mesh/skin
 	# plumbing from pose deformation; the unmirror isolates the (-x,y,z) handedness question.
 	if OS.get_environment("NOVA_VM_LAB") == "1":
-		var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+		var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 		var vm_models := _viewmodel_models(get_tree().root)
-		print("[fp] lab: host=%s models=%d" % [str(host != null), vm_models.size()])
-		if host != null:
+		print("[fp] lab: presenter=%s models=%d" % [str(presenter != null), vm_models.size()])
+		if presenter != null:
 			# Runtime oracle: the skeleton rest carries the bind rotations and the reset
 			# clip's channels ARE the bind (bind == frame-0 channel on every shipped .bad),
 			# so rest-vs-eval_pose(anim_reset) angles ~0 prove the convention holds on the
@@ -163,9 +163,9 @@ func _fsm_sequence() -> void:
 	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
 	await _settle(30)
 	await _capture("33_fsm_ads.png")
-	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
-	if host != null:
-		var cam: Camera3D = host.get("_camera")
+	var presenter := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	if presenter != null:
+		var cam: Camera3D = presenter.get("_camera")
 		var pv: PlayerLocalView = world.local_player_view() \
 				if world.has_method("local_player_view") else null
 		print("[fp] fsm ads: engaged=%s fraction=%.2f cam_fov=%.1f" % [
@@ -238,7 +238,7 @@ func _look(total: Vector2) -> void:
 
 func _capture(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	# The standalone window carries both the world and shared HUD host.
+	# The standalone window carries both the world and shared HUD presenter.
 	var img: Image = get_viewport().get_texture().get_image()
 	if img != null:
 		img.save_png(_out_abs.path_join(name))

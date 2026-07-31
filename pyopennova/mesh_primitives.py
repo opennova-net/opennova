@@ -1,4 +1,4 @@
-"""Pure-Python mesh primitive generators (host-agnostic).
+"""Pure-Python mesh primitive generators (DCC-agnostic).
 
 Each function returns ``(verts, faces)`` as plain Python tuples. DCC
 wrappers feed the result into their own mesh API (``mesh.from_pydata``

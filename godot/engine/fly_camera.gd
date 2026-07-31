@@ -4,7 +4,7 @@ extends Camera3D
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
 
-# Esc was pressed. Host-neutral: each shell decides what the key means.
+# Esc was pressed. Shell-neutral: each shell decides what the key means.
 signal escape_pressed
 
 @export var mouse_sensitivity: float = 0.003

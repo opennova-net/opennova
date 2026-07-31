@@ -31,14 +31,14 @@ AI/entity motor runs every tick — witnessed in
 
 ```
 main_game.gd
-  -> GameWorld.tick(camera, delta)                  sole live host frame
+  -> GameWorld.tick(camera, delta)                  sole live runtime frame
        foliage dispatch                             client render pass
        MissionRuntime.tick_realtime(delta)          == the fixed-timestep server tick + entity render:
          bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
            NovaSimulation.step()                        one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
              World.run_logic_tick()                       WAC -> BMS -> AI over one world
              NetSystem drain/emit                         the in-match seam (ADR 0009/0011/0012)
-           drain effects -> effects_drained             host-presentation side effects (per tick)
+           drain effects -> effects_drained             presentation side effects (per tick)
          present passes, in this fixed order:          draw once after the batch, never per sim tick
            MissionPresentPass.present()                  placed .bms entities: transform/PANM/visibility
            WirePresentPass.present()                     wire-spawned entities with no .bms placement
@@ -48,7 +48,7 @@ main_game.gd
        NovaMissionAudio.tick(camera)                 audio render pass
 ```
 
-`GameWorld`, entered through `MainGame`, is the sole live host of
+`GameWorld`, entered through `MainGame`, is the sole live owner of
 `MissionRuntime`. ONED has no embedded mission simulation: F5 launches the
 normal standalone game, F6 launches the current saved top-level loose `.bms`,
 and F8 stops the one managed child. Launch reads saved loose assets from the
@@ -77,7 +77,7 @@ There is no no-net path. Single-player constructs the same in-process host the L
 paths use, and the local player is a host-side server entity driven by a wire-shaped intent
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
-seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_host.gd` feeds
+seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_presenter.gd` feeds
 intent rather than writing entity state, and the wire encoders run in single-player exactly as they
 do for a joined client. The in-match runtime behind that seam is `libs/npruntime`
 ([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
@@ -104,13 +104,13 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   single-sources the per-tick order (advance → drain → present). `tick_realtime(delta)` is the
   fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
   the deterministic single-tick primitive (runtime debug / MCP / tests).
-  `game_world.gd` is its only live host; ONED authoring previews do not drive a
+  `game_world.gd` is its only live owner; ONED authoring previews do not drive a
   mission runtime.
 - **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
-  host writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
+  shell writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
   is native — `NovaPresentApplier` (`godot/engine/simulation/nova_present_applier.cpp`), with the
-  GDScript file as the host-facing facade and the node-side visual contract (ADR 0007) still
+  GDScript file as the shell-facing facade and the node-side visual contract (ADR 0007) still
   GDScript; the aim-overlay/emplaced-weapon adapters delegate to the same native statics so the
   mission and wire passes share one implementation. The basis convention is single-sourced in
   `MissionObjectPlacer.bms_to_godot_basis` (`Entity_SpawnFromBMSRecord @0x40eb66` +
@@ -124,16 +124,16 @@ path (`wire_present_pass.gd`). Converging them is a tracked decision, not an ove
   liveness prune, held-weapon model builds, spawn callbacks, and stats.
   The sibling passes listed in the map above
   follow the same rule for their own systems: each reads a drain or snapshot the sim produced and
-  writes host nodes/effects, so the simulation itself stays render-free and headless-testable.
+  writes shell nodes/effects, so the simulation itself stays render-free and headless-testable.
   Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off
-  `local_player_host.gd` and the `world/player_*` / `present_*` scripts on the same principle.
+  `local_player_presenter.gd` and the `world/player_*` / `present_*` scripts on the same principle.
 - **Audio** — name-keyed sound sets (`SoundProfile_FindLoadedByName @0x5274f0`); the member-selection
   state machine lives in portable `libs/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
 
 ## F3 frame-stat diagnostics
 
 The shipped F3 **Stats** tab observes the same runtime rather than installing a
-second update loop. A host-owned `FrameStatsBoard` is the fixed-slot boundary:
+second update loop. A shell-owned `FrameStatsBoard` is the fixed-slot boundary:
 opening the tab emits one capture edge, producers add integer microseconds (or
 plain counts), and the pane drains a roughly half-second window. Multiple
 62.5 Hz catch-up ticks written during one render frame are folded before the
@@ -141,7 +141,7 @@ peak comparison, so the displayed peak is a worst **render frame**, not a
 worst individual fixed tick.
 
 Capture is default-off. The close edge disables native runtime profiling and
-both measured viewports immediately; leaving their host trees performs the
+both measured viewports immediately; leaving their parent trees performs the
 same teardown. While closed, the trace/net/occlusion paths take no diagnostic
 clock reads. While open, `MissionRuntime` samples projectile attribution
 without a per-tick `Dictionary`: `NovaSimulation` returns value types through
@@ -181,10 +181,10 @@ owner/exclusion setup are intentionally outside those native timing buckets.
   at a constant rate decoupled from the render frame rate, faithful to `Game_MainLoop @0x52b630`
   ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6 / §2a). There is no inter-tick
   render interpolation — entities step at 62.5 Hz and the present pass writes current state once per
-  host frame; this matches the original (which also does not interpolate), so it is a faithful
+  render frame; this matches the original (which also does not interpolate), so it is a faithful
   property, not a gap.
 - Audio: reverb preset table (`Audio_LoadReverbDefs @0x766d80`) and MUS music
-  (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays host-side (it is bound
+  (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays shell-side (it is bound
   to `NovaDbfData`).
 - The exact main-loop / entity-render order is cited from existing RE notes; a focused `grill-ida`
   pass to pin `WacScript_AdvanceTick`'s surroundings + the entity-render function is a tracked

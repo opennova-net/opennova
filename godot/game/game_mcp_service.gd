@@ -1,7 +1,7 @@
 class_name GameMcpService
 extends Node
 
-## Ephemeral runtime MCP host for an editor-managed game process. A normal
+## Ephemeral runtime MCP service for an editor-managed game process. A normal
 ## standalone game never starts it: both an opaque run id and an explicit
 ## descriptor path must be present. The descriptor is the one-way readiness
 ## handshake ONED watches before connecting its stable MCP proxy.
@@ -12,8 +12,8 @@ const LOG_PATH_ARG := "--oned-run-log"
 
 var server: McpServer = null
 var log_hub: McpLogHub = null
-var tool_host: GameMcpTools = null
-var game_host: GameMcpHost = null
+var tools: GameMcpTools = null
+var game_adapter: GameMcpAdapter = null
 
 var _run_id := ""
 var _descriptor_path := ""
@@ -41,22 +41,22 @@ static func should_start() -> bool:
 	return not launch_metadata().is_empty()
 
 
-func setup(host: GameMcpHost) -> Error:
+func setup(adapter: GameMcpAdapter) -> Error:
 	var metadata := launch_metadata()
 	if metadata.is_empty():
 		return ERR_UNAVAILABLE
-	return setup_from_metadata(host, metadata)
+	return setup_from_metadata(adapter, metadata)
 
 
 ## Start the ephemeral endpoint from already-parsed launch metadata. The game
 ## shell uses setup(); this seam keeps launch validation and endpoint lifecycle
 ## testable without mutating process command-line state.
-func setup_from_metadata(host: GameMcpHost, metadata: Dictionary) -> Error:
+func setup_from_metadata(adapter: GameMcpAdapter, metadata: Dictionary) -> Error:
 	var run_id := String(metadata.get("run_id", ""))
 	var descriptor_path := String(metadata.get("descriptor_path", ""))
-	if host == null or not is_launch_descriptor_safe(run_id, descriptor_path):
+	if adapter == null or not is_launch_descriptor_safe(run_id, descriptor_path):
 		return ERR_INVALID_PARAMETER
-	game_host = host
+	game_adapter = adapter
 	_run_id = run_id
 	_descriptor_path = descriptor_path
 	_log_path = String(metadata.get("log_path", ""))
@@ -72,9 +72,9 @@ func setup_from_metadata(host: GameMcpHost, metadata: Dictionary) -> Error:
 	server.context_factory = _make_context
 	server.log_sink = _on_server_log
 	add_child(server)
-	tool_host = GameMcpTools.new(
-			self, game_host, request_endpoint_shutdown)
-	tool_host.register_all(server.registry)
+	tools = GameMcpTools.new(
+			self, game_adapter, request_endpoint_shutdown)
+	tools.register_all(server.registry)
 	var err := server.start(0)
 	if err != OK:
 		log_hub.note("server", "error",
