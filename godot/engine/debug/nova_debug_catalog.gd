@@ -1,5 +1,5 @@
 class_name NovaDebugCatalog
-## Built-in, host-neutral debug-control catalog.
+## Built-in, shell-neutral debug-control catalog.
 ##
 ## Definitions name only public owner methods/properties. Host adapters bind
 ## the corresponding target sources on NovaDebugSession.

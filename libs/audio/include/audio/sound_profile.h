@@ -15,7 +15,7 @@
 //
 // Slot resolution to playable sound-set ids happens at mission start against
 // the loaded .lwf banks [orig: resolve_sound_profile_triggers @ 0x528210 ->
-// SoundBank_FindTriggerByName]. Our host resolves by NAME at play time
+// SoundBank_FindTriggerByName]. The embedder resolves by NAME at play time
 // (NovaSoundBank is name-keyed), so this store keeps the authored set names
 // and the world emits them directly; an empty slot name is the id-0 no-op.
 #ifndef OPENNOVA_AUDIO_SOUND_PROFILE_H

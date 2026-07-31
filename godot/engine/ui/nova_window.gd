@@ -1,7 +1,7 @@
 class_name NovaWindow
 extends RefCounted
 
-## Fullscreen as a core engine concept: one host-neutral helper every surface
+## Fullscreen as a core engine concept: one shell-neutral helper every surface
 ## routes through — the game shell's and ONED's F11 key, the editor MCP's
 ## set_fullscreen tool, and scripted capture drivers — so the behavior (and any
 ## future window-state policy) lives in exactly one place. F11 is the canonical

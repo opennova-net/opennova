@@ -212,8 +212,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // (GameMsg_AddChatLineAndRelay @0x5ba170 — the KEY rides the wire, clients
     // re-resolve locally / GameMsg_SetBannerText @0x5ba200 / GameMsg_SetTeamBannerText
     // @0x5ba1d0), then Server_ProcessRoundEnd(2): red wins, the player side loses.
-    // Any other team id is a NO-OP returning 0. The banner trio is host
-    // presentation — the effect carries the gametext key, the host resolves it
+    // Any other team id is a NO-OP returning 0. The banner trio is embedder
+    // presentation — the effect carries the gametext key, the embedder resolves it
     // against the 'Misc' section; the banners persist until the next round start
     // (cleared by the round-start HUD reset @0x5b71b0).]
     if (ieq(n, "lose")) {

@@ -114,7 +114,7 @@ struct GlareRayJitter {
 GlareRayJitter glare_ray_jitter(uint32_t jitter_index);
 
 // One frame: advances the window with the two samples' visibility and steps
-// the brightness. The host casts the two rays (sample indices jitter_index+1
+// the brightness. The embedder casts the two rays (sample indices jitter_index+1
 // and jitter_index+2 BEFORE the call).
 void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visible_b,
                           float fog_distance_world);

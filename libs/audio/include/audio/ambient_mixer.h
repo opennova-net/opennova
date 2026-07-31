@@ -1,6 +1,6 @@
 // Portable ambient sound-marker emitter system: the placed-marker eval/registration
 // at the witnessed staggered tick cadence, the transient emitter slot table, and the
-// per-frame loudest-N candidate ranking — pushed down out of the Godot host
+// per-frame loudest-N candidate ranking — pushed down out of the Godot layer
 // (godot/engine/world/nova_mission_audio.gd) so the engine core stays C++ and the
 // per-frame cost is the live-slot mix, not an every-marker eval
 // (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
@@ -18,9 +18,9 @@
 //   [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, called from the Game Loop mode
 //   render callback GameLoop_RenderFrame @ 0x521341].
 //
-// The host keeps everything Godot: LWF data access, stream decode, the eight
+// The embedder keeps everything Godot: LWF data access, stream decode, the eight
 // persistent AudioStreamPlayer3D channels (D-SND-6), and bus/pan/doppler mapping
-// (D-SND-8). Positions are host-world floats (1 unit = 1 game unit); distances enter
+// (D-SND-8). Positions are world-space floats (1 unit = 1 game unit); distances enter
 // the witnessed curve as Q16.16, exactly like the GDScript form this replaces.
 #ifndef OPENNOVA_AUDIO_AMBIENT_MIXER_H
 #define OPENNOVA_AUDIO_AMBIENT_MIXER_H
@@ -67,7 +67,7 @@ struct TimeOfDayRegion {
 };
 TimeOfDayRegion time_of_day_region(float hours);
 
-// Occlusion seam: inflate `dist_q16` between listener and source through the host's
+// Occlusion seam: inflate `dist_q16` between listener and source through the embedder's
 // two-ray LOS [orig: Sound_ApplyOcclusionDistance @ 0x529970, called from the mix
 // @ 0x528659]. Rays run only for slots already audible at the raw distance — the
 // shipped D-SND-7 form (inflation only ever reduces volume, so a raw-silent slot
@@ -77,8 +77,8 @@ using OcclusionFn = int64_t (*)(void *ctx, const float listener[3],
                                 int64_t source_id);
 
 // One ranked audible layer, in mix order (volume desc, candidate_id tie-break — the
-// host's deterministic-membership form of the original's slot-order-stable top-8
-// sort @ 0x5287ab). The host binds the first N non-failed entries to its persistent
+// reimpl's deterministic-membership form of the original's slot-order-stable top-8
+// sort @ 0x5287ab). The embedder binds the first N non-failed entries to its persistent
 // channels and resolves streams by candidate_id.
 struct AmbientCandidate {
     int32_t candidate_id;
@@ -142,7 +142,7 @@ public:
 
     int marker_count() const { return static_cast<int>(markers_.size()); }
 
-    // Host clock pump (HHMM already converted to hours by the host).
+    // Embedder clock pump (HHMM already converted to hours by the embedder).
     void set_time_of_day_hours(float hours) { tod_hours_ = hours; }
 
     // Advance the eval clock to logic tick `tick`, running the staggered cohort walk
@@ -162,7 +162,7 @@ public:
     // cached falloff range [orig: @ 0x52856a/@ 0x5285da], inflate the distance
     // through `occl` (once per marker per mix, only when raw-audible), compute the
     // witnessed layer volume, and return every audible candidate sorted loudest
-    // first. The host cuts to its channel budget after filtering decode failures —
+    // first. The embedder cuts to its channel budget after filtering decode failures —
     // the original's bad-wave slots drop out pre-sort the same way [orig: @ 0x52870e].
     const std::vector<AmbientCandidate> &mix(const float listener[3],
                                              OcclusionFn occl = nullptr,

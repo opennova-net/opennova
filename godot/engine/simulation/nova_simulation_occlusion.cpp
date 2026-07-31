@@ -43,7 +43,7 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 	const Vector3 c(cam.pos_float[0], cam.pos_float[1], cam.pos_float[2]);
 
 	// The 5-plane view frustum (near + 4 sides), inward normals, in render
-	// float space — the host stand-in for the retail viewport projector
+	// float space — the reimpl stand-in for the retail viewport projector
 	// [orig: g_CameraFrustumPlanes5 @ 0xA7849C; D-OCC-12].
 	const double half_v = Math::deg_to_rad(p_fov_y_deg) * 0.5;
 	const double tan_v = std::tan(half_v);
@@ -119,7 +119,7 @@ PackedInt64Array NovaSimulation::get_building_visibility() const {
 	// Pairs [bms_id, visible<<32 | mask] for every building with an OCCLUSION
 	// instance, plus collision-backed de-batched buildings that still entered
 	// the retail building batch. OOBJ instances apply their section mask.
-	// Without OOBJ there is no safe host part-to-section map, so those buildings
+	// Without OOBJ there is no safe reimpl part-to-section map, so those buildings
 	// keep all render parts while still receiving batch/frustum/TOC visibility.
 	world_->registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;

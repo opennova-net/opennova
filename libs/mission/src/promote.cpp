@@ -91,7 +91,7 @@ void apply_command_mounts(const std::vector<PendingCommandMount> &pending, World
 Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t origin) {
     Entity s;
     s.net_id = ssn;
-    s.bms_id = e.id; // carry the file entity id so the host can map this entity back to its placed node
+    s.bms_id = e.id; // carry the file entity id so the embedder can map this entity back to its placed node
     s.kind = kind;
     s.item_id = e.type_id;
     s.position.x = e.get_x();
@@ -114,7 +114,7 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // streams it raw (D-NET-147/150). [orig: Entity_SpawnFromBMSRecord @0x40e9f0: attrib
     // 0x200000 -> 0x4000000 (Indestructible), 0x800000 -> 0x400 (Reflective),
     // 0x1000000 -> 0x1000000 (NoShadow)]. The item-def part (Building 0x20000 is kind-known
-    // here; hp==0 -> 0x4000000 + subType 0xFF needs the item db) completes in the host's
+    // here; hp==0 -> 0x4000000 + subType 0xFF needs the item db) completes in the embedder's
     // item-traits sweep [orig: Entity_InitFromModel @0x40e105 / @0x40dc8e].
     using bms::BmsiAttributeFlags;
     const uint32_t attrib = e.bmsi_attributes;
@@ -150,7 +150,7 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // (90 - yaw) degrees, NOT yaw [orig: Entity_SpawnFromBMSRecord @0x40e9f0 entity+4 =
     // ((90 - yaw)<<16/360)<<16]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
-    // whether parked or moving; the host present converts engine-heading -> mission yaw for the basis.
+    // whether parked or moving; the present pass converts engine-heading -> mission yaw for the basis.
     ae.pos[0] = e.x;
     ae.pos[1] = e.y;
     ae.pos[2] = e.z;

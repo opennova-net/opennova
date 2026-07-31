@@ -1,4 +1,4 @@
-"""Host-agnostic mesh flattener.
+"""DCC-agnostic mesh flattener.
 
 Walks a ``Threedi3di3`` LOD and emits one ``FlatMesh`` per part with
 plain Python data: vertex positions, triangle indices, per-face material

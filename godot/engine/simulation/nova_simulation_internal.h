@@ -201,7 +201,7 @@ inline const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
 
 // The mounted shooter's own vehicle joins the projectile trace exclusion exactly like
 // retail's mount rule (Controller/Gunner/Driver seats only — passengers keep clipping
-// their ride) — resolved from the wire shooter row's carrier + the host-fed seat table
+// their ride) — resolved from the wire shooter row's carrier + the binding-fed seat table
 // instead of live mount pointers. Returns 0xFFFF when unmounted, passenger-seated, or
 // the rows aren't streamed yet. Used for BOTH decoded remote rounds and the joiner's
 // own predicted rounds: on a joiner the local ignored-mount leg is dead (wire_projected
@@ -480,7 +480,7 @@ inline bool aim_overlay_inputs_for_client(
 
 	// Both witnessed compact organic records already carry the carrier and raw
 	// seat bone. Bone zero is the standing-on/deck form, not a mount. Resolve
-	// the carrier's wire type into the host-fed production seat table; never
+	// the carrier's wire type into the binding-fed production seat table; never
 	// synthesize a config byte or alias a missing definition to config zero.
 	if (entity.carrier_handle == 0xFFFFu || entity.mount_bone == 0) return true;
 	const opennova::netsim::ClientEntityState *carrier =

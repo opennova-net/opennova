@@ -1,4 +1,4 @@
-"""Coordinate-space converters and 3x3 matrix helpers (host-agnostic).
+"""Coordinate-space converters and 3x3 matrix helpers (DCC-agnostic).
 
 Engine source coordinates are Y-up. Both Blender and 3ds Max are Z-up
 right-handed, so the source-side transforms here apply unchanged for

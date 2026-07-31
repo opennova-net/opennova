@@ -14,8 +14,8 @@ math living in `godot/engine/environment/*.gd` instead of `libs/env`.
 ## Decisions worth recording
 
 - **Layering.** `libs/` (portable C++, Godot-free) is the engine.
-  `godot/engine/` is the host adapter: bindings and thin hosts, plus the
-  host-neutral GDScript glue that exists only to wire Godot nodes to engine
+  `godot/engine/` is the shell adapter: bindings and thin wrappers, plus the
+  shell-neutral GDScript glue that exists only to wire Godot nodes to engine
   facts. `godot/modtools/` (ONED) and `godot/game/` are applications over
   public engine APIs. Dependencies point one way: applications → adapter →
   engine. **Nothing in `libs/` or `godot/engine/` may depend on
@@ -29,7 +29,7 @@ math living in `godot/engine/environment/*.gd` instead of `libs/env`.
   re-derivation, after which the test pins the single path instead.
 - **Engine behavior does not live in GDScript.** Witnessed engine math
   (`[orig]`-cited behavior) belongs in `libs/` as a structural translation.
-  GDScript in `godot/engine/` may host, wire, and adapt — it may not carry
+  GDScript in `godot/engine/` may embed, wire, and adapt — it may not carry
   the algorithm. Existing violations are worked off through the maturity
   program's conformance checklist (the environment port is the largest);
   new ones are rejected at review.

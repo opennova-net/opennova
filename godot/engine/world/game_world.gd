@@ -654,7 +654,7 @@ func _mount_runtime_root(dir: String) -> NovaResourceRoot:
 
 
 # Populate the world with the mission's placed objects under a MissionObjects node.
-# Shares the host-agnostic placer with the editor Mission workspace.
+# Shares the shell-agnostic placer with the editor Mission workspace.
 func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = null) -> void:
 	if _resource_root == null or mission == null:
 		return

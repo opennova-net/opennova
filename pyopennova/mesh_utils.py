@@ -1,4 +1,4 @@
-"""Pure-Python mesh utilities (host-agnostic).
+"""Pure-Python mesh utilities (DCC-agnostic).
 
 Moved out of ``apps/importer/scene_builder.py`` so the same algorithms
 can run from a 3ds Max scene builder without pulling in Blender.

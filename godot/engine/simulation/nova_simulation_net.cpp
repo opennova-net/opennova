@@ -26,7 +26,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// fold it into ClientState (runtime_) to render the host's own view.
 	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
 	// host's own player); isolated test/tooling MissionRuntime instantiations keep that default too.
-	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission host
+	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission runtime
 	// (ADR 0025). A LAN host honors the UI server-type (host_serve_and_play_, from
 	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +
 	// the local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
@@ -160,7 +160,7 @@ bool environment_flag_enabled(const char *name) {
 } // namespace
 
 // P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
-// (libs/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot host can no
+// (libs/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
 // longer drift. NovaSimulation supplies the socket (a NovaUdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
@@ -318,7 +318,7 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 
 // host_pump's dispatch_event + admit_peer were promoted into libs/npruntime (np::dispatch_event /
 // np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
-// the Godot host and the headless server can no longer drift.
+// the Godot binding and the headless server can no longer drift.
 
 // The joiner's per-frame pump. Retail dispatches received messages before the
 // entity/weapon-action pumps, so decoded consequences are applied to L before

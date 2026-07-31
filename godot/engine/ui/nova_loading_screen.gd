@@ -18,7 +18,7 @@ extends Control
 ## texture stretched and draw the text in image space under the same scale
 ## transform — the same net result.
 ##
-## Host-neutral presentation mounted by the game shell around GameWorld loads.
+## Shell-neutral presentation mounted by the game shell around GameWorld loads.
 ## No world/menu knowledge lives here.
 
 ## Fallback background when the mission has no sidecar image

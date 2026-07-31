@@ -124,7 +124,7 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
             copy_key(out.anim_key, desc.anim_key);
         }
     }
-    // else: the anim channel keeps advancing on its own (the host owns clip playback).
+    // else: the anim channel keeps advancing on its own (the embedder owns clip playback).
 }
 
 // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 (desc, slot, entity, nextAction)]:
@@ -290,7 +290,7 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     if (slot.counter != 0) return; // [orig: @ 0x542eb7]
     // The recoil-row DIRECT effect leg (casing eject / bolt smoke) at the arbiter tick:
     // emitted when the row authors a particle. For the local player the original's only
-    // extra gate is the FP weapon-view flag (host-side; treated always-on) — NOT the
+    // extra gate is the FP weapon-view flag (embedder-side; treated always-on) — NOT the
     // scope state — and the spawn never records a live handle (param7=0), so it is
     // never suppressed by a previous casing group still alive.
     // [orig: WeaponAction_Recoil gate @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64]
@@ -322,7 +322,7 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                     weapon_heat::kCeiling / def.heat_decay_per_tick + 1; // [orig: @ 0x542fdc]
     }
     // (the overheat glow emitter — actionTable[11] muzzle FX @ 0x54109e..0x54122c —
-    //  is a host effect seam, D-WPN-28)
+    //  is an embedder effect seam, D-WPN-28)
     if (!in.is_local) { // [orig: @ 0x542fe9 -> LABEL_59]
         slot.counter = desc.delay_end;
         return;
@@ -475,7 +475,7 @@ void handler_switchrank(const WeaponFsmDef &, const WeaponFsmAction &desc,
 
 // [orig: WeaponAction_ScopeUp @ 0x543290 / ..ScopeDown @ 0x543320] Timed one-shots —
 // the ADS easing states. JOX/REVX ship no scopeup/scopedown ACTION rows, so both bake
-// to zero-length pass-throughs; the camera easing lives host-side (§5.41 interp).
+// to zero-length pass-throughs; the camera easing lives embedder-side (§5.41 interp).
 void handler_scope(const WeaponFsmDef &, const WeaponFsmAction &desc,
                    WeaponSlotState &slot, const WeaponFsmInputs &in,
                    WeaponFsmEvents &out) {

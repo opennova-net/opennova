@@ -60,7 +60,7 @@ struct BoneSample {
 struct ClipBone {
     std::string name;
     int parent_index = -1;
-    // BIND pose the host builds the Skeleton3D REST from. Default mode: the raw BadBone 3x3
+    // BIND pose the embedder builds the Skeleton3D REST from. Default mode: the raw BadBone 3x3
     // world bind rotation (row-major) + bind position, straight from the .bad (matching oscarmike
     // adm_import_plugin + the Blender importer's build_armature_from_bad). model_bind mode:
     // IDENTITY rotation -- the original's bind is a pure translation (the skin bind-inverse is
@@ -99,7 +99,7 @@ struct Clip {
 // a standalone channel; a rig's clips MUST pass the shared skeleton .bad or every clip
 // self-cancels at its start frame and the rig freezes at the authored bind (T-pose). Use
 // with the model's bone pivots as shared_rest_origins. Everything stays in the NATIVE model
-// frame -- the host renders these rigs with a native-frame mesh (NovaObjectData
+// frame -- the embedder renders these rigs with a native-frame mesh (NovaObjectData
 // native_frame submeshes) and maps the whole rig to the camera in one container transform;
 // the original's S=diag(-1,1,1) conjugation + x-negated pivots/translations in its composed
 // builders are its model->render frame map, realized here at that container boundary

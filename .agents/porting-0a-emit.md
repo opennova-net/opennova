@@ -344,4 +344,4 @@ numbering").
   sending guessed bytes that regress the client (env sub-block would darken the sky).
 - Never carry raw capture bytes through the encoder (ADR 0003).
 - After a `libs/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
-  kill the running Godot host first) before a live test.
+  kill the running Godot instance first) before a live test.

@@ -1,4 +1,4 @@
-"""Host-agnostic Qt importer UI.
+"""DCC-agnostic Qt importer UI.
 
 Importing this package exposes pure backend types without importing PySide6.
 Qt widgets load lazily when callers request the dialog entry points.

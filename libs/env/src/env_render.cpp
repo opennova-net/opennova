@@ -824,7 +824,7 @@ void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_hei
 			// Under constant-W orthographic projection, however, a zero march
 			// component leaves that coordinate unconstrained; anchoring it at an
 			// outer edge combines with the literal row-dy guard to collapse the
-			// first row. Use the viewport center only for that host extension.
+			// first row. Use the viewport center only for that reimpl extension.
 			const bool constant_clip_w = view.proj[11] == 0.0f && view.proj[15] != 0.0f;
 			if (constant_clip_w) {
 				// Start one pixel inside the entering edge. At the exact edge,
@@ -991,7 +991,7 @@ int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &p
                            WaterStripRows &out) {
 	// [orig: render_water_strip_detailed @ 0x5c27d0] — structural translation
 	// of the march loop; the device/VB setup and the batch submits stay with
-	// the host (water_strip_batches expresses the submit shape). x87
+	// the embedder (water_strip_batches expresses the submit shape). x87
 	// intermediates approximated as double, stored float32 like the original
 	// stack spills (the sky-dome port's convention).
 	out.screen_pos.clear();

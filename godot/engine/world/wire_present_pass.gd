@@ -21,7 +21,7 @@ extends RefCounted
 # here — it is drawn by LocalPlayerHost as the smooth, motor-driven local avatar L. That
 # is the live §5.38b two-handle (L = local sim, H = wire identity) reconciliation.
 #
-# Host-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
+# Shell-agnostic, RefCounted, preload-referenced (same convention as MissionPresentPass).
 #
 # This is the COLD-path facade: it owns spawn/defer/unresolved bookkeeping, the
 # liveness prune, the held-weapon model builds, spawn callbacks and stats, and

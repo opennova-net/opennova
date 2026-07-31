@@ -1,7 +1,7 @@
 # Editor framework
 
 Shared, workspace-agnostic building blocks for the OpenNova Editor's shell and
-inspectors. Everything here is editor-only (lives under `modtools/`); host-neutral
+inspectors. Everything here is editor-only (lives under `modtools/`); shell-neutral
 UI primitives (FieldBinder, SyncGuard, UiBox) live in `godot/engine/ui/` instead.
 
 ## Drag-as-link: the LinkPayload contract

@@ -34,12 +34,12 @@ int SoundSelector::select(uint64_t key, int member_count, int mode) {
     const uint32_t count = static_cast<uint32_t>(member_count);
     switch (mode) {
         case kFirst:
-            // Host extension for deterministic authoring/preview; the engine has no such mode.
+            // Reimpl extension for deterministic authoring/preview; the engine has no such mode.
             return 0;
         case kSequential: {
             LayerState &st = state_[key];
             if (st.seq >= count) {
-                st.seq = 0; // host safety: a shrunk layer must not index out of range
+                st.seq = 0; // reimpl safety: a shrunk layer must not index out of range
             }
             const uint32_t idx = st.seq;
             st.seq = (st.seq + 1u >= count) ? 0u : st.seq + 1u; // [orig: @ 0x75cd6f..0x75cd79]
@@ -60,7 +60,7 @@ int SoundSelector::select(uint64_t key, int member_count, int mode) {
             // [orig: @ 0x75cdb3..0x75cddf] play cursor, advance+wrap; cycle completes when the
             // cursor comes back around to the anchor.
             if (st.seq >= count) {
-                st.seq = 0; // host safety
+                st.seq = 0; // reimpl safety
             }
             const uint32_t idx = st.seq;
             st.seq = (st.seq + 1u >= count) ? 0u : st.seq + 1u;

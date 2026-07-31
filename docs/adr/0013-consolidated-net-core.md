@@ -35,7 +35,7 @@ consolidation problems:
    registry; per-connection state duplicated fields the authoritative pool-0 entity
    already owns; a client-side load gate was modeled as host state.
 3. **The host bring-up / config / sequencing was copy-pasted** across the CLI server,
-   the Godot host, and the LAN responder.
+   the Godot binding, and the LAN responder.
 
 The hard constraint throughout: **no wire changes.** Every consolidation must keep byte
 output identical, proven by the golden harness and the byte-parity ctests.
@@ -91,7 +91,7 @@ no local client. Both continue through `set_transport_mode` → `create_session`
 [→ `Server_InitNewRoundState`] → `configure_session_runtime`; only mode 3 runs the
 own-player spawn/initial-stream path
 [orig: `SinglePlayer_StartMission @0x561af0`;
-`UI_HandleHostSessionStart @0x556d00`]. The Godot host (`NovaSimulation`) delegates to
+`UI_HandleHostSessionStart @0x556d00`]. The Godot binding (`NovaSimulation`) delegates to
 the same helper as the CLI harness and host-session tests. `create_session` owns the
 single `Server_InitNewRoundState` call.
 

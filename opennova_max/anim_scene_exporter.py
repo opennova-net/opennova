@@ -1,6 +1,6 @@
 """Current-scene Novalogic ADM + BAD animation export for 3ds Max.
 
-The coordinate inversion lives in the host-neutral, CI-tested
+The coordinate inversion lives in the DCC-neutral, CI-tested
 pyopennova.bad_build.assemble_clip_from_max_world; this module is the thin pymxs
 adapter that samples the live skeleton's world transforms per frame and feeds
 them in. It is the inverse of opennova_max.scene_builder.build_armature_from_bad

@@ -9,7 +9,7 @@ editor's main toolbar to test the loose mission. Part of the
 
 A mission's header selects its terrain and environment; both load into the shared
 terrain viewport, and the mission's placed objects are instanced on top by the
-host-agnostic placer. New Mission builds an empty mission on the currently loaded
+shell-agnostic placer. New Mission builds an empty mission on the currently loaded
 terrain. From there you place entities from the object palette, move them with
 viewport drag (terrain-grounded), and edit per-entity properties in the inspector:
 identity, team, AI class and script, behavior, weapon loadout, and group fields,

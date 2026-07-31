@@ -454,7 +454,7 @@ bool NovaSimulation::step() {
 	if (!loaded_) return false;
 	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates to every
 	// 62nd tick and the BMS evaluator quarter-passes every 16th, inside their systems —
-	// exactly where the original keeps those dividers. A host frame runs 0..N of these;
+	// exactly where the original keeps those dividers. A render frame runs 0..N of these;
 	// the accumulator that decides N lives in MissionRuntime.tick_realtime
 	// [orig: Game_MainLoop @ 0x52b630].
 	//
@@ -728,7 +728,7 @@ Error NovaSimulation::debug_set_entity_health(int p_index, int p_hp) {
 // rounds from it while fresh. Godot (x, up, z) -> mission (x, -gz, gy) in 16.16
 // fixed — the inverse of the present mapping godot = (mx, mz, -my).
 // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 from the anim-event fire block
-// @0x4bf326 — computed inline against the engine-side skeleton; ours is host-fed.]
+// @0x4bf326 — computed inline against the engine-side skeleton; ours is shell-fed.]
 void NovaSimulation::set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos) {
 	if (!ai_ || !world_) return;
 	// Keyed by the row's PF_NET_ID (the authored SSN) — the wire handle is

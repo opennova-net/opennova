@@ -14,7 +14,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// The host's IRootMotionSource: a registry of per-model .adm clip sets, each reduced to
+// The embedder's IRootMotionSource: a registry of per-model .adm clip sets, each reduced to
 // per-state root-motion tracks. Each in-mission soldier grounds + locomotes off its OWN
 // model's clip (its adm_id), not one shared set, matching the original which evaluates the
 // entity's own anim map per frame [orig: AnimMap_UpdateEntity @0x40b5f0 per entity;

@@ -6,7 +6,7 @@ extends RefCounted
 ##
 ## `fraction` is the witnessed 16.16 health ratio expressed as 0..1. Color thresholds:
 ## > 0.75 (0xC000) good, > ~0.437 (0x6FFF) mid, else bad. An all-zero rect means the
-## element is disabled (the original early-returns). Host-neutral.
+## element is disabled (the original early-returns). Shell-neutral.
 
 const GOOD_THRESHOLD := 49152.0 / 65536.0 # 0xC000
 const MID_THRESHOLD := 28671.0 / 65536.0  # 0x6FFF

@@ -1,4 +1,4 @@
-"""Host-neutral material interpretation for OpenNova 3DI3 model data.
+"""DCC-neutral material interpretation for OpenNova 3DI3 model data.
 
 This module intentionally contains no Blender or PyMXS imports.  DCC hosts use
 the descriptors here to build their own native material objects while sharing
@@ -394,7 +394,7 @@ def describe_material(
     texture_strategy: str | None = None,
     uv1_tiling_override: Tuple[float, float] | None = None,
 ) -> MaterialDescriptor:
-    """Interpret one ``TdpMaterial`` into host-neutral material data.
+    """Interpret one ``TdpMaterial`` into DCC-neutral material data.
 
     ``uv1_tiling_override`` (when provided) sets the channel-1 tiling that the
     model's MTRL chunk doesn't natively carry. Compute it once per 3DI3 model via

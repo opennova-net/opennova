@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Host-agnostic placement of a mission's entities into a 3D scene.
+# Shell-agnostic placement of a mission's entities into a 3D scene.
 #
 # Given a parsed mission (NovaMissionData), a resource root, and an item database
 # (items.def), this resolves each placed entity to its visual model and instances

@@ -2,9 +2,9 @@
 //
 // A NovaLogic sound set (.lwf Multi) has one or more layers, each holding a list of member
 // sounds and selection flags that decide which member plays when the set is triggered. This is
-// the faithful port of the engine's per-layer member selection, pulled out of the Godot host
+// the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
 // (godot/engine/world/nova_sound_bank.gd) so the engine core stays C++ and a headless server can
-// resolve the same member without Godot. The host keeps the lwf data access and the
+// resolve the same member without Godot. The embedder keeps the lwf data access and the
 // AudioStreamPlayer spawning; this only decides WHICH member index plays.
 //
 // Grilled vs Jointops.exe 2026-06-09 (see docs/audio/lwf-dbf-sound-re.md):
@@ -27,7 +27,7 @@ namespace opennova::audio {
 // kFirst has no engine equivalent (the engine default is kRandom); it is kept as a
 // deterministic authoring/preview mode for the editor.
 enum SelectionMode {
-    kFirst = 0,      // always the first member (host extension, not engine behavior)
+    kFirst = 0,      // always the first member (reimpl extension, not engine behavior)
     kRandom = 1,     // a scaled-random member each time (the engine DEFAULT for unflagged layers)
     kSequential = 2, // members in order, wrapping (flag 0x10)
     kRandomSeq = 3,  // random anchor, then a full in-order cycle back to the anchor (flag 0x80)
@@ -36,7 +36,7 @@ enum SelectionMode {
 // Per-(bank,set,layer) member selection. State (sequence cursor / cycle anchor) is kept per key,
 // so one selector instance backs a whole loaded bank set. The RNG is one shared stream across all
 // keys, exactly like the engine's global @ 0x85A3DC. Caveat: the engine interleaves volume/pitch
-// jitter draws on the same stream during playback; the host does not reproduce those draws, so
+// jitter draws on the same stream during playback; the reimpl does not reproduce those draws, so
 // long-run streams diverge from a real game session even though the algorithm and seed match.
 class SoundSelector {
 public:
@@ -49,7 +49,7 @@ public:
     // the engine never reseeds it across bank reloads.
     void reset();
 
-    // Compose the per-layer key the host addresses state by. Distinct (bank,set,layer) triples map
+    // Compose the per-layer key the embedder addresses state by. Distinct (bank,set,layer) triples map
     // to distinct keys for the bank sizes the format allows.
     static uint64_t make_key(int bank, int set_index, int layer_index) {
         return (static_cast<uint64_t>(static_cast<uint32_t>(bank)) << 42) ^
