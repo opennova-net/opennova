@@ -1231,7 +1231,7 @@ func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
 	var stub: DirtyTerrainStub = autofree(DirtyTerrainStub.new())
 	# Bind only the terrain workspace (set_editor's full bind would drag every
 	# workspace through a remount this test doesn't exercise).
-	var ws: EditorWorkspace = workstation._get_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	var ws: EditorWorkspace = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.TERRAIN)
 	ws.set_terrain_editor(stub)
 
 	assert_eq(ws.open_file("C:/maps/next.trn"), OK, "A dirty-guarded open reports OK while the prompt owns the action.")
@@ -1248,10 +1248,11 @@ func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
 	dialog.hide()
 	dialog.confirmed.emit()
 	assert_eq(stub.saved_dirs.size(), 0, "Without a project dir the save waits for the Save As pick.")
-	var file_dialog: FileDialog = workstation._save_export._ensure_file_dialogs().get_dialog()
-	assert_not_null(file_dialog, "Save should route through the Save As directory dialog.")
-	if file_dialog == null:
+	var save_dialogs: Array = workstation.find_children("", "FileDialog", true, false)
+	assert_eq(save_dialogs.size(), 1, "Save should route through the Save As directory dialog.")
+	if save_dialogs.size() != 1:
 		return
+	var file_dialog: FileDialog = save_dialogs[0] as FileDialog
 	file_dialog.dir_selected.emit("C:/maps/project")
 
 	assert_eq(stub.saved_dirs, PackedStringArray(["C:/maps/project"]), "The picked directory receives the save.")
@@ -1288,14 +1289,15 @@ func test_export_confirm_targets_the_initiating_workspace_after_tab_switch() -> 
 	var stub: ExportRecordingTerrainStub = autofree(ExportRecordingTerrainStub.new())
 	# Bind only the terrain workspace — activating it would push the stub into
 	# the typed asset dock/inspector set_editor calls (the dirty-open precedent).
-	var ws: EditorWorkspace = workstation._get_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	var ws: EditorWorkspace = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.TERRAIN)
 	ws.set_terrain_editor(stub)
 
 	workstation._save_export.on_export_pressed(ws)
-	var file_dialog: FileDialog = workstation._save_export._ensure_file_dialogs().get_dialog()
-	assert_not_null(file_dialog, "Export should route through the directory dialog.")
-	if file_dialog == null:
+	var file_dialogs: Array = workstation.find_children("", "FileDialog", true, false)
+	assert_eq(file_dialogs.size(), 1, "Export should route through the directory dialog.")
+	if file_dialogs.size() != 1:
 		return
+	var file_dialog: FileDialog = file_dialogs[0] as FileDialog
 	# A real pick closes the dialog before the signal; mirror that order so the
 	# flavor dialog can take the exclusive-window slot.
 	file_dialog.hide()
