@@ -222,6 +222,19 @@ class FailingShutdownPeer:
 		return McpToolResult.error("expected endpoint failure")
 
 
+class DyingChildSession:
+	extends RuntimeGateSession
+
+	var polls := 0
+
+	func _init(shared_events: Array) -> void:
+		super(shared_events)
+
+	func poll() -> void:
+		polls += 1
+		running = false
+
+
 func _context(session_id: String) -> McpToolContext:
 	var ctx := McpToolContext.new()
 	ctx.args = {"_session_id": session_id}
@@ -274,6 +287,25 @@ func test_graceful_quit_retires_the_no_wait_peer() -> void:
 	assert_true(peer.closed)
 	assert_false(proxy.request_runtime_quit("run-17", "ignored"),
 			"the no-wait response cannot leak into a later request")
+
+
+func test_descriptor_wait_fails_fast_when_the_child_process_dies() -> void:
+	var events: Array = []
+	var session := DyingChildSession.new(events)
+	var service: Node = add_child_autofree(Node.new())
+	var bridge := EditorGameRunBridge.new(session)
+	var proxy := EditorMcpGameTools.new(service, bridge)
+
+	var started_ms := Time.get_ticks_msec()
+	var result: McpToolResult = await proxy.forward_runtime_tool(
+			"run-17", "user://missing-runtime-gate-descriptor.json",
+			"game_state", {})
+
+	assert_true(result.is_error)
+	assert_string_contains(String(result.content[0]["text"]), "exited")
+	assert_gt(session.polls, 0, "the wait loop re-polls child liveness")
+	assert_lt(int(Time.get_ticks_msec() - started_ms), 5_000,
+			"a dead child cannot pin the caller for the full descriptor window")
 
 
 func test_mcp_stop_reports_managed_process_failure() -> void:

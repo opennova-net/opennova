@@ -24,8 +24,8 @@ var request_refresh := Callable()
 var session: NovaDebugSession = null
 
 ## The shared NovaDebugOptions value store. Pages build controls against it
-## (NovaDebugPage.add_option_check); the overlay re-emits its `changed` as
-## `debug_option_changed` (observed by tests; hosts read the shared session).
+## (NovaDebugPage.add_option_check); the overlay routes its `changed` through
+## the shared session, whose `control_invoked` is the observable channel.
 var options: NovaDebugOptionState = null
 
 ## The HOST-owned debug pick list (null until the host injects one). Pages

@@ -10,7 +10,7 @@ extends RefCounted
 signal catalog_changed
 signal control_changed(id: StringName, state: NovaDebugControlState)
 ## Emitted after a public setter/action was accepted. Kept intentionally
-## presentation-neutral; the legacy overlay host relay also consumes it.
+## presentation-neutral.
 signal control_invoked(id: StringName, value: Variant)
 signal edit_unlock_changed(unlocked: bool)
 signal presented_changed(presented: bool)
@@ -64,9 +64,13 @@ func definition(id: StringName) -> NovaDebugControlDef:
 
 
 ## JSON-safe definitions paired with a live state, suitable for MCP.
+## `allow_authority` mirrors the write path's per-call confirmation: rows
+## report writability for THAT caller, so an MCP client holding
+## confirm_authority is not told its own successful writes are locked.
 func list_controls(
 		page_id: StringName = &"",
-		filter_text: String = "") -> Array[Dictionary]:
+		filter_text: String = "",
+		allow_authority: bool = false) -> Array[Dictionary]:
 	sync()
 	var output: Array[Dictionary] = []
 	var needle := filter_text.strip_edges().to_lower()
@@ -81,12 +85,14 @@ func list_controls(
 			if not haystack.contains(needle):
 				continue
 		var row: Dictionary = control.to_json_value()
-		row["state"] = read_control_state(id).to_json_value()
+		row["state"] = read_control_state(id, allow_authority).to_json_value()
 		output.append(row)
 	return output
 
 
-func read_control_state(id: StringName) -> NovaDebugControlState:
+func read_control_state(
+		id: StringName,
+		allow_authority: bool = false) -> NovaDebugControlState:
 	var state := NovaDebugControlState.new()
 	state.id = id
 	var control := definition(id)
@@ -102,7 +108,7 @@ func read_control_state(id: StringName) -> NovaDebugControlState:
 		state.value = state.desired_value
 		if control.allow_unresolved_intent:
 			state.available = true
-			state.writable = _write_allowed(control, false)
+			state.writable = _write_allowed(control, allow_authority)
 			state.reason = "The runtime host applies this control."
 		else:
 			state.reason = _target_reason(control.target_id)
@@ -114,7 +120,7 @@ func read_control_state(id: StringName) -> NovaDebugControlState:
 		state.reason = _missing_operation_reason(control, target)
 		return state
 
-	state.writable = _write_allowed(control, false)
+	state.writable = _write_allowed(control, allow_authority)
 	if not state.writable:
 		state.reason = _policy_reason(control)
 
@@ -136,9 +142,11 @@ func read_control_state(id: StringName) -> NovaDebugControlState:
 	return state
 
 
-func get_control_state(id: StringName) -> NovaDebugControlState:
+func get_control_state(
+		id: StringName,
+		allow_authority: bool = false) -> NovaDebugControlState:
 	sync()
-	return read_control_state(id)
+	return read_control_state(id, allow_authority)
 
 
 func set_control_value(
@@ -189,17 +197,17 @@ func invoke_control(
 	sync()
 	var control := definition(id)
 	if control == null:
-		return _invoke_result(ERR_DOES_NOT_EXIST, null, id)
+		return _invoke_result(ERR_DOES_NOT_EXIST, null, id, allow_authority)
 	if control.kind != NovaDebugControlDef.Kind.ACTION:
 		var error := set_control_value(id, args, allow_authority)
-		return _invoke_result(error, null, id)
+		return _invoke_result(error, null, id, allow_authority)
 	if not _write_allowed(control, allow_authority):
-		return _invoke_result(ERR_UNAUTHORIZED, null, id)
+		return _invoke_result(ERR_UNAUTHORIZED, null, id, allow_authority)
 	var target := _resolve_target(control.target_id)
 	if target == null:
-		return _invoke_result(ERR_UNAVAILABLE, null, id)
+		return _invoke_result(ERR_UNAVAILABLE, null, id, allow_authority)
 	if control.action == &"" or not target.has_method(control.action):
-		return _invoke_result(ERR_UNAVAILABLE, null, id)
+		return _invoke_result(ERR_UNAVAILABLE, null, id, allow_authority)
 	var call_args: Array = []
 	if args is Array:
 		call_args = args
@@ -207,15 +215,15 @@ func invoke_control(
 		call_args = [args]
 	if control.action_validator.is_valid() \
 			and not bool(control.action_validator.call(call_args)):
-		return _invoke_result(ERR_INVALID_PARAMETER, null, id)
+		return _invoke_result(ERR_INVALID_PARAMETER, null, id, allow_authority)
 	var result: Variant = target.callv(control.action, call_args)
 	if control.action_returns_error and typeof(result) == TYPE_INT \
 			and int(result) != OK:
 		var action_error: Error = int(result)
-		return _invoke_result(action_error, null, id)
+		return _invoke_result(action_error, null, id, allow_authority)
 	control_invoked.emit(id, args)
 	control_changed.emit(id, read_control_state(id))
-	return _invoke_result(OK, result, id)
+	return _invoke_result(OK, result, id, allow_authority)
 
 
 func set_edit_unlocked(unlocked: bool) -> void:
@@ -349,12 +357,14 @@ func runtime_status() -> Variant:
 
 
 ## JSON-facing snapshot; typed controls are serialized only at this boundary.
-func capture_snapshot(filter_text: String = "") -> Variant:
+func capture_snapshot(
+		filter_text: String = "",
+		allow_authority: bool = false) -> Variant:
 	return {
 		"runtime": runtime_status(),
 		"edit_unlocked": _edit_unlocked,
 		"presented": _presented,
-		"controls": list_controls(&"", filter_text),
+		"controls": list_controls(&"", filter_text, allow_authority),
 	}
 
 
@@ -526,11 +536,15 @@ func _has_property(target: Object, property_name: StringName) -> bool:
 	return false
 
 
-func _invoke_result(error: Error, result: Variant, id: StringName) -> Dictionary:
+func _invoke_result(
+		error: Error,
+		result: Variant,
+		id: StringName,
+		allow_authority: bool = false) -> Dictionary:
 	return {
 		"error": int(error),
 		"result": NovaDebugControlState._json_value(result),
-		"state": read_control_state(id).to_json_value(),
+		"state": read_control_state(id, allow_authority).to_json_value(),
 	}
 
 

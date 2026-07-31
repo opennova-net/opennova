@@ -21,7 +21,8 @@ extends RefCounted
 ##                 (ADR 0025).
 ##   --oned-run-id / --oned-run-descriptor
 ##                 opaque editor-run identity consumed by the optional runtime
-##                 control service. Ordinary standalone launches omit both.
+##                 control service. Ordinary standalone launches omit both;
+##                 GameMcpService owns their parsing and validation.
 ##
 ## Flags are scanned from both the engine args and the user args (anything after
 ## a `--` separator), case-insensitively, so either launch style works.
@@ -96,14 +97,3 @@ static func loose_root_allowed() -> bool:
 		if arg.to_lower() == "--loose-root":
 			return true
 	return false
-
-
-## Opaque editor-run identity and the absolute descriptor path the runtime
-## control service should publish. They stay independent so malformed/manual
-## launches can be rejected by that service without affecting ordinary boot.
-static func oned_run_id() -> String:
-	return _value_after("--oned-run-id")
-
-
-static func oned_run_descriptor() -> String:
-	return _value_after("--oned-run-descriptor")

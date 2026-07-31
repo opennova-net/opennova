@@ -283,6 +283,46 @@ func test_edit_confirmation_and_host_authority_are_distinct_gates() -> void:
 	assert_eq(target.calls, ["go", "ui"])
 
 
+func test_state_rows_report_writability_for_a_confirmed_authority_caller() -> void:
+	var target := FakeTarget.new()
+	var session := _catalog([target])
+	session.definition(&"enabled").requires_unlock = true
+
+	var locked := session.get_control_state(&"enabled")
+	assert_false(locked.writable, "the F3 view stays locked without the latch")
+	assert_string_contains(locked.reason, "Live edits")
+
+	var confirmed := session.get_control_state(&"enabled", true)
+	assert_true(confirmed.writable,
+			"a per-call authority confirmation sees the write it may make")
+	assert_eq(confirmed.reason, "")
+
+	var rows := session.list_controls(&"Test", "enabled", true)
+	assert_eq(rows.size(), 1)
+	assert_true(bool(rows[0]["state"]["writable"]),
+			"listed rows reflect the same caller authority")
+
+	var action := session.definition(&"act")
+	action.requires_unlock = true
+	var outcome := session.invoke_control(&"act", "go", true)
+	assert_eq(int(outcome["error"]), OK)
+	assert_true(bool(outcome["state"]["writable"]),
+			"the result row cannot claim the accepted invoke was locked")
+
+
+func test_confirmed_authority_never_overrides_missing_host_authority() -> void:
+	var target := FakeTarget.new()
+	var session := _catalog([target])
+	var control := session.definition(&"enabled")
+	control.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	session.set_authority_source(func(): return false)
+
+	var state := session.get_control_state(&"enabled", true)
+	assert_false(state.writable,
+			"joiner authority is not a per-call confirmation matter")
+	assert_string_contains(state.reason, "host")
+
+
 func test_action_validation_and_error_returns_stop_false_success() -> void:
 	var target := FakeTarget.new()
 	var session := _catalog([target])
