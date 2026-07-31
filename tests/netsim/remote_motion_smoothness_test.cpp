@@ -94,10 +94,10 @@ nw::FrameUpdate player_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t az
 }
 
 // One tag-1 live vehicle compact at world x (16.16), unparented, healthy. The
-// speed register rides weapon_aim_y (retail vehicleData[177]); >= 293 selects
-// the fast-vehicle 0x60000 snap threshold.
+// speed rides weapon_aim_y compressed (retail vehicleData[177], decompressed
+// at the store); decompressed >= 293 (~0.28 m/s) selects the 0x60000 snap.
 nw::FrameUpdate vehicle_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t az,
-                              int32_t x, uint16_t speed_reg = 300) {
+                              int32_t x, int32_t speed_fx = 8192) {
 	nw::FrameUpdate fu = header_only_frame();
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;
@@ -114,7 +114,7 @@ nw::FrameUpdate vehicle_frame(uint16_t handle, int32_t ax, int32_t ay, int32_t a
 	r.vehicle.flags_byte = 0;      // live form
 	r.vehicle.is_dead_pose = false;
 	r.vehicle.health_word = 100;   // 0 would kill the vehicle every fold
-	r.vehicle.weapon_aim_y = speed_reg;
+	r.vehicle.weapon_aim_y = nw::network_compress_fixedpoint(speed_fx);
 	fu.records.push_back(r);
 	return fu;
 }

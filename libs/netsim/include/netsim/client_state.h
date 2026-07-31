@@ -162,12 +162,12 @@ struct ClientEntityState {
 	// Chase bookkeeping [orig: entity+0x27C / entity+0x27E].
 	int16_t net_interp_progress = 0;
 	int16_t net_interp_steps = 0;
-	// Vehicle speed register mirror (raw wire halfword; retail vehicleData[177]).
-	// Gates the fast-vehicle snap threshold (>= 293 -> 0x60000) and decays on
-	// starvation [orig: @0x48D480 interp block]. Whether retail decompresses the
-	// store is an open §5.38e question; the compare is implemented on the raw
-	// halfword as read.
-	uint16_t vehicle_speed_reg = 0;
+	// Vehicle speed register mirror (retail vehicleData[177]) — the DECOMPRESSED
+	// 16.16 wire value [orig: the mode-2 read decompresses weaponAimY before the
+	// store]. Gates the fast-vehicle snap threshold (>= 293 ~ 0.28 m/s ->
+	// 0x60000) and decays on starvation [orig: @0x48D480 interp block]; also the
+	// prediction leg's commanded-speed source ([136] = [177] mirror).
+	int32_t vehicle_speed_reg = 0;
 	// Armed by the first folded compact for this row: the chase never runs
 	// toward a zero-initialized target on rows that only ever saw load-stream
 	// spawns (pool-2/3 statics).

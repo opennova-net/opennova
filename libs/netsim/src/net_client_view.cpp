@@ -931,7 +931,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			// The raw speed register mirror ([177] source field) — gates the
 			// fast-vehicle snap threshold and decays on starvation (§5.38e §4).
 			if (!rec.vehicle.is_dead_pose) {
-				es.vehicle_speed_reg = rec.vehicle.weapon_aim_y;
+				es.vehicle_speed_reg =
+						network_decompress_fixedpoint(rec.vehicle.weapon_aim_y);
 			}
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
