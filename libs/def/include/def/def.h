@@ -355,6 +355,22 @@ typedef struct DefWeaponDef {
     int heat_decay_per_tick;   /* +0x370, 16.16 per logic tick */
     int heat_glow_threshold;   /* +0x374, 16.16; heat above this spawns the glow */
     char heat_effect[64];      /* +0x358, the glow effect name ("heat") */
+    /* Exact spread and weapon-weight carriers. Appended so every preceding C ABI
+       field keeps its offset; the float mirrors above remain available to existing
+       consumers while parity-sensitive simulation uses the original integers.
+       ERROR stores six consecutive 16.16 values at AdmDef+0xB0..+0xC4, followed by
+       the two optional theta values at +0xCC/+0xD0. [orig:
+       WeaponDefs_ParseLineCallback ERROR @ 0x543B21, error_hipTheta @ 0x543BC0,
+       error_upTheta @ 0x543BF2; Math_ParseFixedPoint16 @ 0x6131F0] */
+    int error_fp16[6];
+    int error_hip_theta_fp16;
+    int error_up_theta_fp16;
+    /* These authored weights are also parsed as 16.16 before the infantry-body
+       instability accumulator consumes their sum. [orig:
+       WeaponDefs_ParseLineCallback clipweight store @ 0x5440DB,
+       weaponweight store @ 0x54410D] */
+    int weaponweight_fp16;
+    int clipweight_fp16;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

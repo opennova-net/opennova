@@ -218,10 +218,16 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (lower_match_key(lower, ll, "weaponweight", 12)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
                 cw.weaponweight = parse_float_n(v, vl);
+                /* [orig: WeaponDefs_ParseLineCallback store @ 0x54410D;
+                   Math_ParseFixedPoint16 @ 0x6131F0] */
+                cw.weaponweight_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "clipweight", 10)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 cw.clipweight = parse_float_n(v, vl);
+                /* [orig: WeaponDefs_ParseLineCallback store @ 0x5440DB;
+                   Math_ParseFixedPoint16 @ 0x6131F0] */
+                cw.clipweight_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "loadout_menu_textid", 19)) {
                 consume_value_str(trimmed, tlen, 19, cw.loadout_menu_textid, sizeof(cw.loadout_menu_textid));
@@ -293,7 +299,28 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 /* Unknown flags fall through to raw_lines */
             } else if (lower_match_key(lower, ll, "error", 5)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-                parse_floats(v, vl, cw.error, 6);
+                /* Six independent 16.16 parses, stored consecutively at
+                   AdmDef+0xB0..+0xC4. Keep the float view for existing callers.
+                   [orig: WeaponDefs_ParseLineCallback @ 0x543B21-0x543BB5;
+                   Math_ParseFixedPoint16 @ 0x6131F0] */
+                Token values[6];
+                int count = split_values(v, vl, values, 6);
+                for (int i = 0; i < count; ++i) {
+                    cw.error[i] = parse_float_n(values[i].s, values[i].len);
+                    cw.error_fp16[i] = parse_fixed16_digits_n(values[i].s, values[i].len);
+                }
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "error_hiptheta", 14)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                /* [orig: WeaponDefs_ParseLineCallback @ 0x543BC0, store +0xCC
+                   @ 0x543BE7; Math_ParseFixedPoint16 @ 0x6131F0] */
+                cw.error_hip_theta_fp16 = parse_fixed16_digits_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "error_uptheta", 13)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+                /* [orig: WeaponDefs_ParseLineCallback @ 0x543BF2, store +0xD0
+                   @ 0x543C19; Math_ParseFixedPoint16 @ 0x6131F0] */
+                cw.error_up_theta_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "renderfov", 9)) {
                 /* [orig: weapon.def parser key 'renderfov' @ 0x54482a] */

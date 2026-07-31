@@ -20,6 +20,11 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		// 16.16 file values -> float mission units (the sim works in floats; the parse
 		// kept the original fixed encoding).
 		e.spread_error = static_cast<float>(d.error_fp16) / 65536.0f;
+		e.spread_error_fp16 = d.error_fp16;
+		// The parser's atol results are assigned directly into three bytes, so values
+		// outside 0..255 narrow modulo 256. [orig: AmmoDef_ParseProperty @0x40A2D0]
+		for (int stance = 0; stance < 3; ++stance)
+			e.recoil[stance] = static_cast<uint8_t>(d.recoil[stance]);
 		e.drag = static_cast<float>(d.drag_fp16) / 65536.0f;
 		e.drag_fp16 = d.drag_fp16;
 		e.bullet_radius = static_cast<float>(d.bullet_radius_fp16) / 65536.0f;

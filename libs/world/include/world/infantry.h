@@ -290,6 +290,17 @@ struct InfantryState {
     // [orig: @ 0x4b5cab..0x4b5ce7; consumed by the section-14.2 aim overlay]
     int32_t arms_dip_ticks = 0;
     int32_t pitch_kick_accum = 0;
+    // Recoil and movement/weapon-weight dispersion accumulators. Both decay in
+    // every person body tick. A successful ballistic/shotgun spawn adds the
+    // stance-indexed ammo impulse to recoil_pitch after that shot's spread has
+    // already been calculated; only the local player produces weight sway.
+    // [orig: entity+0x380/+0x384; body updater + RoundData_SpawnRound @0x4EC0D0]
+    int32_t recoil_pitch = 0;
+    int32_t weapon_weight_spread = 0;
+    // Host-fed Player_CanFireWeapon analogue used by the weight multiplier and
+    // by HUD ERROR's second stance triplet. It is true only for a settled aimed
+    // shot in a camera mode that permits it.
+    bool aimed_shot_available = false;
     // Standing-idle tick counter (entity+0x148): the player-body idle starts at 43 and
     // promotes to 44 once >= 62 idle ticks; any movement resets it. [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),
@@ -383,6 +394,26 @@ struct InfantryState {
     bool aim_valid = false;           // entity aimFlag
     int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
+
+// Pure retail body-tick kernels, exposed so deterministic tests can pin the
+// wrap/arithmetic-shift behavior independently of locomotion.
+// [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
+void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
+                          int32_t &pitch, int32_t random16);
+
+struct InfantryWeightSpreadInputs {
+    bool produce = false;
+    bool aimed_shot_available = false;
+    bool prone = false;
+    bool crouched = false;
+    bool drowning = false;
+    bool airborne_rising = false;
+    int32_t weaponweight_fp16 = 0;
+    int32_t clipweight_fp16 = 0;
+};
+
+void infantry_weapon_weight_spread_tick(
+        InfantryState &inf, const InfantryWeightSpreadInputs &inputs);
 
 // The fire-path 3P attack stamp, keyed on the held weapon's attack kind (attack_anim):
 // 1 -> 62 knife_attack, 2 -> 63 grenade_attack, anything else -> no body stamp (rifle

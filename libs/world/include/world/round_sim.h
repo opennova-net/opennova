@@ -39,10 +39,12 @@
 //  * useownmove rounds run the throwable class motors (world/throwables.cpp,
 //    world-wac-ai-re §27): grenade arc/bounce/fuse, satchel/claymore stick +
 //    placed-device conversion; the spawn dispatches instantkillzone (0x400),
-//    Detonatesatchels (0x20), and the claymore pellet fan (0x20000) before the
-//    ballistic default, and the PowerThrow charge byte scales launch speed.
-//  * no spawn-time Weapon_CalcRandomSpreadOffset, impact-energy armor-density loss,
-//    or shell-eject physics yet.
+//    Detonatesatchels (0x20), DesignateTarget (0x02000000), and the claymore
+//    pellet fan (0x20000) before the ballistic default, and the PowerThrow charge
+//    byte scales launch speed.
+//  * spawn-time Weapon_CalcRandomSpreadOffset and recoil follow the recovered
+//    player/rules/stance gates. Impact-energy armor-density loss and shell-eject
+//    physics remain outside this model.
 //  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
 //    spawn a sim round.
 #ifndef OPENNOVA_WORLD_ROUND_SIM_H
@@ -80,6 +82,39 @@ enum class RoundConsequenceMode : uint8_t {
     VisualOnly,
 };
 
+// The shooter fields RoundData_SpawnRound reads while applying weapon ERROR and
+// ammo recoil. Ordinary authoritative shots resolve these from the World owner;
+// a pure client has no World entity for a decoded peer, so its persistent wire
+// row supplies this immediate, non-owning projection instead.
+// [orig: RoundData_SpawnRound @0x4EC0D0]
+struct RoundSourceState {
+    bool person_with_item_def = false;
+    bool player = false;
+    uint8_t stance_category = 2; // 0 prone, 1 crouch/mounted, 2 standing/air/water
+    bool scope_raised = false;
+    bool underwater = false;
+    int32_t *recoil_pitch = nullptr;              // entity+0x380
+    const int32_t *weapon_weight_spread = nullptr; // entity+0x384
+};
+
+struct RandomSpreadOffset {
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+};
+
+// Deterministic retail dispersion helper. Constants are loaded as binary32 but
+// the x87 intermediates remain PC53 until the final truncations.
+// [orig: Weapon_CalcRandomSpreadOffset @0x4E4120]
+RandomSpreadOffset weapon_calc_random_spread_offset(
+        int32_t spread_fp16, uint32_t seed, int32_t vertical_fp16,
+        bool use_spread_two);
+
+// The distinct shotgun pellet-fan distribution: one draw selects a radial
+// distance through cos([0,pi/2]), the next selects its full-circle phase.
+// [orig: Weapon_SpawnProjectileBurstWithSpread @0x4EBBB0]
+RandomSpreadOffset weapon_calc_shotgun_spread_offset(
+        int32_t pie_slice_bam, uint16_t radial_draw, uint16_t phase_draw);
+
 struct RoundSpawnParams {
     EntityHandle owner;               // the shooter entity (skipped in the hit test)
     uint16_t shooter_handle = 0xFFFF; // pool<<12|slot, for death credit
@@ -99,6 +134,9 @@ struct RoundSpawnParams {
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;
+    // Shooter fire-context composite (ring+31). Bit 7 selects the vertical
+    // projectile ERROR row; the remaining bits are opaque here.
+    uint8_t subtype = 0;
     // The PowerThrow charge byte [orig: fire descriptor +20 <- MountSlot+0x5C;
     // 1..254 scale the ammo velocity by charge/256 @ 0x4ec5bb, 0/255 = full].
     // Rides the wire as the round event's slot_byte (ring+32).
@@ -107,6 +145,9 @@ struct RoundSpawnParams {
     // descriptor. Zero for host/AI-originated fire. See FireEvent::wire_round_flags.
     // [orig: NetPacket_DeserializeRoundEvent @0x42f270 arm tests @0x42f521/@0x42f6ce]
     uint8_t wire_round_flags = 0;
+    // Immediate-only source override for a decoded remote shooter that has no
+    // Entity/AiEntity in this World. Never retained by RoundSim.
+    RoundSourceState *source_state = nullptr;
 };
 
 // One in-flight round. [orig: 780-B record; the fields we simulate: pos, velocity
@@ -342,6 +383,11 @@ public:
     // The MP NoTracers rules bit [orig: dword_24D1E34 & 1] — kills the tracer visual
     // unless FORCETRACER. SP hosts leave it false; the net seam wires it later.
     bool no_tracers_rule = false;
+    // Raw retail weapon-dispersion rules seam. Session rules bit 0x2000 and
+    // offline rules bit 0x4000 select this same helper gate; recoil, shotgun
+    // fans, and ammo-def fallback ERROR do not read it.
+    // [orig: RoundData_SpawnRound @0x4EC0D0]
+    bool weapon_spread_enabled = true;
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
@@ -351,7 +397,8 @@ public:
     // The pellet fan for claymore-flag ammo [orig: Weapon_SpawnProjectileBurst
     // @ 0x4EB900]. Returns the first pellet slot or -1.
     int spawn_burst(World &world, const RoundSpawnParams &params,
-                    const AmmoTableEntry &ammo, RoundConsequenceMode mode);
+                    const AmmoTableEntry &ammo, RoundConsequenceMode mode,
+                    bool shotgun_spread = false);
 
     // One 62 Hz step for every live round [orig: Weapon_UpdateAllProjectiles @ 0x4EC020
     // -> Projectile_UpdatePhysics @ 0x4E9D70]: advance along velocity, terrain stop,

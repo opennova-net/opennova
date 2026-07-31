@@ -134,6 +134,23 @@ inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
 }
 
+inline void apply_wire_heading(ClientEntityState &es, uint8_t yaw_byte) {
+	es.yaw_byte = yaw_byte;
+	es.heading_bam = static_cast<int32_t>(static_cast<uint32_t>(yaw_byte) << 24);
+}
+
+// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
+// recoil-yaw sign; preserve the complete state because decoded rows share one
+// stream rather than owning one generator each. Other process-global retail
+// consumers remain outside this view's bounded call-history seam.
+inline int32_t prng_next16(uint32_t &state) {
+	const uint32_t rol11 = (state << 11) | (state >> 21);
+	uint32_t next = state + rol11;
+	next = ((next << 4) | (next >> 28)) ^ 1u;
+	state = next;
+	return static_cast<int32_t>(next);
+}
+
 inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
 	const int32_t target = static_cast<int32_t>(
 			static_cast<uint32_t>(target_byte) << 24);
@@ -155,9 +172,10 @@ void NetClientView::apply_organic_spawn(const std::vector<uint8_t> &body) {
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
-		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
+		apply_wire_heading(es, yaw_byte_from_bam(rec.orientation));
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
+		es.recoil_pitch = 0;
 		es.team = rec.team;
 	}
 }
@@ -200,6 +218,22 @@ void NetClientView::tick_arms_dip() {
 	}
 }
 
+void NetClientView::tick_recoil() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		const int32_t random16 = prng_next16(prng16_); // unconditional [orig: body updater]
+		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
+		const int32_t half = io::bam_sar(step, 1);
+		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);
+		if (es.recoil_pitch <= 0x300) es.recoil_pitch = 0;
+		es.pitch_bam = io::bam_add(es.pitch_bam, io::bam_sar(step, 3));
+		es.heading_bam = (random16 & 1) == 0
+				? io::bam_add(es.heading_bam, half)
+				: io::bam_sub(es.heading_bam, half);
+	}
+}
+
 void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	decode_pool_spawn_batch(body.data(), body.size(), batch);
@@ -213,7 +247,7 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
-		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		apply_wire_heading(es, yaw_byte_from_bam(rec.euler_z));
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
 		// Flag-gated values are zero in the decoded record when omitted.
@@ -341,8 +375,8 @@ void NetClientView::refresh_parented_pool_entities() {
 			child.x = posed.x;
 			child.y = posed.y;
 			child.z = posed.z;
-			child.yaw_byte = static_cast<uint8_t>(
-					parent->yaw_byte + child.parent_local_yaw_byte);
+			apply_wire_heading(child, static_cast<uint8_t>(
+					parent->yaw_byte + child.parent_local_yaw_byte));
 			child.pitch_bam = static_cast<int32_t>(
 					static_cast<uint32_t>(parent->pitch_bam) +
 					static_cast<uint32_t>(child.parent_local_pitch_bam));
@@ -368,7 +402,7 @@ void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
-		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		apply_wire_heading(es, yaw_byte_from_bam(rec.euler_z));
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
 		es.team = rec.team_byte;
@@ -386,7 +420,8 @@ void NetClientView::apply_pool3_batch(const std::vector<uint8_t> &body) {
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
-		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
+		apply_wire_heading(es,
+		                   yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val)));
 		es.pitch_bam = 0; // pool-3 sync carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
 		es.team = rec.team_byte;
@@ -543,7 +578,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 						rec.player.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
-				es.yaw_byte = rec.player.yaw_byte;
+				apply_wire_heading(es, rec.player.yaw_byte);
 			}
 			break;
 		case EntityClass::Vehicle:
@@ -568,8 +603,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 						0, /*compose_yaw=*/false});
 				skip_pos = true;
 			}
-			es.yaw_byte = static_cast<uint8_t>(
-					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+			apply_wire_heading(es, static_cast<uint8_t>(
+					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8));
 			es.state_flags = rec.vehicle.flags_byte;
 			es.health_word = rec.vehicle.health_word;
 			es.health_known = true;
@@ -606,7 +641,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 						rec.infantry.yaw_byte, /*compose_yaw=*/true});
 				skip_pos = true;
 			} else {
-				es.yaw_byte = rec.infantry.yaw_byte;
+				apply_wire_heading(es, rec.infantry.yaw_byte);
 			}
 			break;
 		default:
@@ -654,7 +689,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// world-absolute wire euler instead (compose_yaw false) [orig: the
 		// untransformed entity+576 store @0x4607f5].
 		if (pending.compose_yaw)
-			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
+			apply_wire_heading(
+					*child, uint8_t(carrier->yaw_byte + pending.local_yaw_byte));
 	}
 
 	refresh_parented_pool_entities();

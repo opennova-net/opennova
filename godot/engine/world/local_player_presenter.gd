@@ -505,7 +505,7 @@ func _find_skeleton(root: Node) -> Skeleton3D:
 # Place the camera from the player's authoritative pose. First person: eye = the
 # head-bone anchor pulled back 0.1875u along the view, looking along the facing,
 # rolled by torsoRoll + lean/4 [orig: the on-foot person leg @0x437f9c..0x438031 —
-# pitch = entPitch + 2*pitchBlend (pitchBlend = the unported recoil impulse),
+# pitch = entPitch + 2*pitchBlend,
 # roll = torsoRoll + lean/4 @0x437fe6, then eye += R*(-0x3000, 0, 0)].
 # Third person (F4): (yaw + orbit_yaw, pitch + orbit_pitch) seeds the R*(-dist,0,0)
 # eye offset from the NUDGED pivot (anchor + R*(0.125 fwd/left/up)); the original's
@@ -522,6 +522,11 @@ func _update_player_camera() -> void:
 	var sim = _sim()
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var angles := _aim_angles_deg()
+	# The live recoil accumulator is doubled only by retail's first-person camera.
+	# Third-person orbit, projectile aim, and the HUD anchor retain the base look
+	# pitch. [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	if not _third_person and _view != null:
+		angles.y += _view.fp_pitch_recoil_deg
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))

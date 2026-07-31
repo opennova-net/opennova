@@ -256,7 +256,13 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     ev.dir_yaw = yaw_bam;
     ev.dir_pitch = pitch_bam;
     ev.shot_seq = fire_shot_seq;
-    ev.adm_index = static_cast<uint8_t>(ammo_index & 0xFF);
+    const Entity *shooter = world.registry.get(e.handle);
+    const uint8_t adm_index = shooter != nullptr &&
+                                      world.weapons.by_index(
+                                              shooter->equipped_adm_index) != nullptr
+            ? shooter->equipped_adm_index
+            : static_cast<uint8_t>(ammo_index & 0xFF);
+    ev.adm_index = adm_index;
     world.rounds.add(ev);
 
     RoundSpawnParams rp;
@@ -268,7 +274,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     rp.dir_yaw_bam = yaw_bam;
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
-    rp.adm_index = static_cast<uint8_t>(ammo_index & 0xFF);
+    rp.adm_index = adm_index;
     rp.shot_seq = fire_shot_seq;
     world.round_sim.spawn(world, rp);
 

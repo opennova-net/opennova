@@ -398,6 +398,34 @@ func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
 	return float(angles[4].x) if angles.size() > 4 else 0.0
 
 
+func _aim_verdict_sim(flags: int) -> NovaSimulation:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.set_local_player_weapon({
+		"name": "WPN_AIM_VERDICT",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+			{"name": "reload", "delaystart": 8, "delayend": 8},
+			{"name": "scopeup", "delaystart": 0, "delayend": 0},
+			{"name": "scopedown", "delaystart": 0, "delayend": 0},
+		],
+		"flags": flags,
+		"clipsize": 30,
+		"startrounds": 60,
+	}, {})
+	return sim
+
+
+func _aimed_shot_available(sim: NovaSimulation) -> bool:
+	return bool(sim.get_local_player_weapon_state().get(
+			"aimed_shot_available", false))
+
+
 func _present_field_for_origin(sim: NovaSimulation, kind: int, index: int,
 		field: int) -> int:
 	var snapshot := sim.get_present_snapshot()
@@ -565,6 +593,246 @@ func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
 	assert_gt(absf(authored_pitch), 0.5, "look input produced a signed pitch witness")
 	assert_almost_eq(arm_pitch, authored_pitch, 0.01,
 		"overlay pitch stays in authored sign for MissionObjectPlacer")
+	sim.free()
+
+
+func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
+	# HUD ERROR is selected from two stance triplets. Air/water/mount overrides
+	# live in the body; this public seam pins the ordinary stance order and the
+	# settled-first-person +3 verdict. [orig: HUD_DrawCrosshair
+	# @0x592b35..0x592b87; Player_CanFireWeapon @0x5cf780]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	# A compact deterministic FSM is enough for the view toggle; the entity's
+	# equipped ADM index still resolves the exact M4 ERROR table loaded above.
+	sim.set_local_player_weapon({
+		"name": "WPN_M4AUTO",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "scopeup", "delaystart": 0, "delayend": 0},
+			{"name": "scopedown", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0x1,
+		"clipsize": 30,
+		"startrounds": 300,
+	}, {})
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 2,
+			"standing selects row 2")
+
+	assert_true(sim.request_local_player_stance(2))
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+			"prone selects row 0")
+
+	sim.set_water_z(1.0)
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 2,
+			"below-water source height forces the standing row")
+	sim.set_water_z(0.0)
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+			"leaving water restores the authored prone row")
+
+	assert_true(sim.request_local_player_scope_toggle())
+	var aimed_row_seen := false
+	for _i in range(15):
+		sim.step()
+		assert_false(_aimed_shot_available(sim),
+				"Scoped ADS never promotes before the ease endpoint")
+	for _i in range(9):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)) == 3:
+			aimed_row_seen = true
+			break
+	assert_true(aimed_row_seen,
+			"settled first-person aim adds the second-triplet offset")
+
+	sim.set_local_player_camera_third_person(true)
+	sim.step()
+	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+			"third person clears aimed-shot availability without changing stance")
+	sim.free()
+
+
+func test_aimed_shot_verdict_uses_both_promoted_optic_predicates() -> void:
+	# Player_CanFireWeapon calls both helpers: Scoped is Flags bit 0, while the
+	# misleadingly named second helper is simply Sighted bit 1 outside SWITCHFROM.
+	# Both read the same post-ease promoted active bit. [orig: @0x4dcc80/@0x4dcd30]
+	for case in [
+		{"flags": 0x1, "expected": true, "name": "Scoped"},
+		{"flags": 0x2, "expected": true, "name": "Sighted-only"},
+	]:
+		var sim := _aim_verdict_sim(int(case["flags"]))
+		sim.step()
+		assert_true(sim.request_local_player_scope_toggle())
+		for _i in range(15):
+			sim.step()
+			assert_false(_aimed_shot_available(sim),
+					"%s never promotes during the ease" % case["name"])
+		# The current host order ticks the view after the body; the next body tick
+		# observes the now-promoted endpoint. It may be one tick late, never early.
+		sim.step()
+		assert_eq(_aimed_shot_available(sim), bool(case["expected"]),
+				"%s uses the correct aimed-shot predicate" % case["name"])
+		if int(case["flags"]) == 0x2:
+			sim.set_water_z(1.0)
+			sim.set_player_input(true, false, false, false, false, false, false)
+			sim.step()
+			assert_true(_aimed_shot_available(sim),
+					"promoted Sighted bypasses the movement/water checks")
+		sim.free()
+
+
+func test_ordinary_aimed_shot_rejects_water_and_movement() -> void:
+	var sim := _aim_verdict_sim(0x1)
+	sim.step()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(16):
+		sim.step()
+	assert_true(_aimed_shot_available(sim), "settled stationary Scoped view is aimed")
+
+	sim.set_water_z(1.0)
+	sim.step()
+	assert_false(_aimed_shot_available(sim),
+			"Drowning/raw fixed source height rejects ordinary aimed fire")
+	sim.set_water_z(0.0)
+	sim.step()
+	assert_true(_aimed_shot_available(sim), "leaving water restores aimed fire")
+
+	sim.free()
+
+	# The normal Scoped move path also requests an unscope, but its public result
+	# pins Player_CanFireWeapon's MoveOrder&8 rejection end-to-end.
+	sim = _aim_verdict_sim(0x1)
+	sim.step()
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(16):
+		sim.step()
+	assert_true(_aimed_shot_available(sim))
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_false(_aimed_shot_available(sim),
+			"MoveOrder moving rejects an ordinary aimed shot")
+	sim.free()
+
+
+func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> void:
+	# ForceScoped overwrites the ordinary scope/movement/air/water verdict in
+	# first person. The reload test sits earlier in Player_CanFireWeapon and is
+	# therefore still terminal. [orig: @0x5cf7c7 and @0x5cf845..0x5cf874]
+	var sim := _aim_verdict_sim(0x20000001)
+	sim.step()
+	assert_true(_aimed_shot_available(sim),
+			"ForceScoped is aimed even without an ordinary promoted scope")
+	sim.set_water_z(1.0)
+	sim.set_player_input(true, false, false, false, false, false, false)
+	sim.step()
+	assert_true(_aimed_shot_available(sim),
+			"ForceScoped preserves its movement/water override")
+	sim.set_water_z(0.0)
+	sim.set_player_input(false, false, false, false, false, false, false)
+
+	# Spend one round so the public reload input gate can enter action 4.
+	sim.set_local_player_weapon_input(false, true, false)
+	var spent_round := false
+	for _i in range(12):
+		sim.step()
+		var state: Dictionary = sim.get_local_player_weapon_state()
+		if int(state.get("clip", 30)) == 29 and int(state.get("current", -1)) == 0:
+			spent_round = true
+			break
+	assert_true(spent_round, "fixture reached idle with a partial magazine")
+	sim.set_local_player_weapon_input(false, false, true)
+	sim.step()
+	sim.set_local_player_weapon_input(false, false, false)
+	var reload_seen := false
+	for _i in range(12):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("current", -1)) == 4:
+			reload_seen = true
+			sim.step() # aimed verdict samples the already-current reload action
+			break
+	assert_true(reload_seen, "fixture entered the card-switch reload action")
+	assert_false(_aimed_shot_available(sim),
+			"ForceScoped cannot bypass the earlier card-switch reload rejection")
+	sim.free()
+
+
+func test_decoded_round_stance_uses_retail_animation_flags() -> void:
+	# The decoded-round bridge consumes these 0x100/0x200 bits directly. Pin the
+	# transition rows that the former hand-maintained list missed, plus
+	# idle_mortar, which it incorrectly called crouched. Live IDA table reads:
+	# 46=0x008, 169..171=0x18D, 172=0x28D.
+	# [orig: g_animStateFlagsTable @0x8139E8]
+	for row in [
+		{"anim": 46, "flags": 0x008, "category": 2},
+		{"anim": 169, "flags": 0x18D, "category": 1},
+		{"anim": 170, "flags": 0x18D, "category": 1},
+		{"anim": 171, "flags": 0x18D, "category": 1},
+		{"anim": 172, "flags": 0x28D, "category": 0},
+	]:
+		var flags := int(NovaSimulation.infantry_anim_flags(int(row["anim"])))
+		assert_eq(flags, int(row["flags"]), "retail flags for anim %d" % row["anim"])
+		var category := 0 if (flags & 0x200) != 0 else (1 if (flags & 0x100) != 0 else 2)
+		assert_eq(category, int(row["category"]),
+				"decoded recoil category for anim %d" % row["anim"])
+
+
+func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
+	# Keep the world's built-in player ItemDef traits intact: the compact items.def
+	# fixture intentionally lacks retail's player template 105305, while recoil's
+	# source gate requires a person with an ItemDef. [orig: RoundData_SpawnRound
+	# @0x4ec0d0; recoil add @0x4ec8a3]
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
+	sim.set_local_player_weapon({
+		"name": "WPN_M4AUTO",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "fire", "delaystart": 0, "delayend": 0},
+			{"name": "recoil", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0,
+		"clipsize": 30,
+		"startrounds": 300,
+	}, {})
+	sim.step()
+	sim.set_local_player_weapon_input(false, true, false)
+	for _i in range(4):
+		sim.step()
+		if int(sim.get_local_player_weapon_state().get("fired_serial", 0)) > 0:
+			break
+
+	var weapon_state := sim.get_local_player_weapon_state()
+	var recoil_pitch := int(weapon_state.get("recoil_pitch_bam", 0))
+	var weight_spread := int(weapon_state.get("weapon_weight_spread_bam", 0))
+	assert_gt(recoil_pitch, 0,
+			"the successful M4 round stamps the standing ammo recoil impulse")
+	assert_eq(int(weapon_state.get("hud_spread_row", -1)), 2,
+			"standing hip fire selects the first triplet's standing row")
+	assert_eq(int(weapon_state.get("hud_spread_fp16", -1)),
+			0x4000 + (recoil_pitch >> 7) + (weight_spread >> 7),
+			"HUD spread preserves exact ERROR plus both live SAR terms")
+	var recoil_view: Dictionary = sim.get_local_player_view()
+	assert_almost_eq(float(recoil_view.get("fp_pitch_recoil_deg", 0.0)),
+			float(recoil_pitch) * 2.0 * 360.0 / 4294967296.0, 0.0001,
+			"the bridge exports retail's wrapped 2*recoil camera pitch")
 	sim.free()
 
 

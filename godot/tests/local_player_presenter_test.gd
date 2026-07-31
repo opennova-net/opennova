@@ -703,6 +703,15 @@ func test_camera_state_rides_the_sim_view() -> void:
 		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
 		"the camera fov is the sim's policy value through the shared conversion")
 
+	# The camera consumes retail's already-doubled recoil pitch only in first
+	# person. It must not mutate the sim aim or leak into the 3P orbit.
+	# [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	world.view.fp_pitch_recoil_deg = 8.0
+	presenter.after_world_tick()
+	var fp_forward := -camera.global_basis.z
+	assert_almost_eq(rad_to_deg(asin(fp_forward.y)), 8.0, 0.001,
+			"first-person camera adds the 2*recoil pitch term")
+
 	# Third person: the camera backs off the NUDGED pivot — the sim's chased
 	# anchor + R*(0.125 fwd/left/up) — by the round-start reset distance 1.0
 	# with orbit yaw/pitch 0 [orig: Camera_ResetToLocalPlayer @0x4a3d30; the
@@ -712,6 +721,9 @@ func test_camera_state_rides_the_sim_view() -> void:
 	world.view.tp_anchor_valid = true
 	presenter.set_third_person(true)
 	presenter.after_world_tick()
+	var tp_forward_actual := -camera.global_basis.z
+	assert_almost_eq(rad_to_deg(asin(tp_forward_actual.y)), 0.0, 0.001,
+			"third-person orbit excludes the first-person recoil doubling")
 	var pivot: Vector3 = world.view.tp_anchor \
 			+ (Vector3(0, 0, -1) + Vector3(-1, 0, 0) + Vector3(0, 1, 0)) \
 			* presenter.PLAYER_TP_PIVOT_NUDGE

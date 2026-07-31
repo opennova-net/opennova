@@ -593,7 +593,7 @@ were found. Divergence IDs referenced here are defined in the §8 catalog.
 | 5.57 | The weapon.def loadout pipeline — AdmDef table, C2S 0x2F → S2C 0x5A derivation, ammo semantics (2026-07-02) |
 | 5.58 | The reload round-trip — C2S 0x25 → S2C 0x49 (2026-07-02) |
 | 5.59 | The character-slot binding family — C2S 0x29, S2C 0x29/0x50/0x51, and the registry/blip structures (2026-07-02) |
-| 5.60 | The authoritative round simulation, damage, and the death broadcast family (engine-research scope, 2026-07-03) |
+| 5.60 | The authoritative round simulation, exact recoil/spread, damage, and the death broadcast family (2026-07-03; recoil/spread re-grill 2026-07-31) |
 | 5.61 | Advance & Secure — spawn selection, the zone chain, and the capture loop (engine-research scope, 2026-07-03) |
 | 5.62 | The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09) |
 | 5.63 | The spawn-kit chain, the per-player slot pool, map availability rules, and manual switching (the loadout grill, 2026-07-18) |
@@ -6102,6 +6102,157 @@ trail emitter + glow light. Other SpawnRound callers: the client's own-fire pred
 (`Entity_HandleInfantryDeath @ 0x443670`, `Entity_HandleDeathExplosion`,
 `Entity_HandleVehicleDeathExplosion`), and save-load.
 
+#### Exact ordinary-round spread and recoil (re-grilled and ported 2026-07-31)
+
+The tag-2 ring remains a **pre-spread** fire log. `RoundData_AddRound` copies the
+claimed yaw/pitch into the ring before its inline spawn; only the allocated live
+round receives the final offsets. A receiving client therefore replays the same
+deterministic calculation from the wire's `shot_seq`, rather than receiving final
+trajectory angles. `[orig: RoundData_AddRound @ 0x4fdb40]`
+`[orig: NetPacket_DeserializeRoundEvent @ 0x42f270]`
+
+`RoundData_SpawnRound` classifies the shooter once for both weapon ERROR and
+ammo recoil: prone (`MoveOrder & 0x100`) = 0, crouch (`&0x200`) = 1, otherwise
+standing = 2; airborne or submerged forces 2, while an attached/mounted shooter
+forces 1. Retail's submerged predicate compares signed
+`Position.Z + CameraOffset.Z` against `Env_WaterHeightFixed`
+(`entity+0x0C + entity+0x74` at `0x4ec2de..0x4ec2ef`). The portable host
+projection uses fixed body position plus the Drowning flag; the decoded visual
+projection uses the fixed wire-row position plus its swimming classification.
+Neither core carries `CameraOffset.Z`, so that bounded eye-height residual
+remains under D-INF-18. The fire-context subtype's high bit is
+`verticalSpread`; the ordinary
+weapon ERROR row is `verticalSpread ? 3 : category`. This selector is **not**
+the HUD selector (`stance + 3*Player_CanFireWeapon()`, hud-re D-HUD-7).
+`[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+
+For an ordinary weapon round, the spread magnitude in 16.16 degrees is
+
+`S = weapon.ERROR[row] + (entity+0x380 >> 8) + (entity+0x384 >> 7)`.
+
+The optional second-axis magnitude is `error_upTheta` (`weapon+0xD0`) when
+`verticalSpread || prone`, otherwise `error_hipTheta` (`weapon+0xCC`). Both
+theta fields default to zero. `ERROR` occupies six exact 16.16 rows at
+`weapon+0xB0..+0xC4`; all eight values use `Math_ParseFixedPoint16`, not
+`atof`. `[orig: WeaponDefs_ParseLineCallback @ 0x543b21]`
+`[orig: Math_ParseFixedPoint16 @ 0x6131f0]`
+`[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+
+The weapon path requires a weapon definition, a source entity carrying the
+player flag `0x100`, and the weapon-spread rules gate: session rules bit
+`0x2000`, or offline rules bit `0x4000`. That gate controls only the ordinary
+weapon helper. AmmoDef `error` (`+0x18`) remains the fallback when no weapon
+definition exists; recoil, shotgun spread, and that ammo fallback do not read
+the weapon-spread gate. AI fire with a weapon definition does not take this
+player-only weapon ERROR path. Weapon flag `UseSpreadTwo = 0x00400000` selects
+the helper's alternate distribution. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+
+The portable sim represents the resolved rules outcome directly as
+`RoundSim::weapon_spread_enabled` and defaults it on when no rules owner is
+present. The original session/offline bit sources above are not mislabeled as
+a recoil rule; plumbing a future rules object consists only of setting this
+raw seam from the applicable bit.
+
+`Weapon_CalcRandomSpreadOffset` returns exact zero offsets when `S==0`;
+otherwise it is a uint32-wrap hash followed by x87 trig. For seed `n` (the
+allocated round's `shot_seq` at round `+0x78`), let
+
+```
+p  = uint64(n) * n
+lo = uint32(p) - n
+hi = ror32((uint32(p >> 32) ^ 0xCC1CDC1D) + 0xC11ABB09, 16)
+h  = rol32(lo + hi, 18); h += (int32(h) < 0 ? 0x001ABB09 : 0)
+q  = rol32(h, 12);      q += (int32(q) < 0 ? 0x001ABB09 : 0)
+a  = q & 0xFFFF; b = (h >> 8) & 0xFFFF
+```
+
+The constants are exact binary32 values loaded into the x87 path:
+`B=0x43360B60` (182.04443359375), `Q=0x37C90FD0`, `T=0x38C90FD0`, and
+`U=0x37800000` (1/65536). With truncation toward zero, normal mode produces
+`yawOff = trunc(S*B*cos(a*Q)*sin(b*T))` and
+`pitchOff = trunc((V ? V : S)*B*cos(a*Q)*cos(b*T))`. Alternate mode with
+`V==0` uses radius `S*B*b*U` and angle `b*T`; with `V!=0`, yaw uses
+`S*B*b*U*cos(b*T)` while pitch uses `V*B*a*U*sin(a*T)`. Yaw and pitch offsets
+are wrap-added to the requested BAM32 angles. The binary32 constants are
+promoted for the x87 intermediates: forcing every intermediate back to float
+changes some retail answers by 1–4 BAM units. `[orig:
+Weapon_CalcRandomSpreadOffset @ 0x4e4120]`
+
+Representative retail vectors (decimal output BAM32 offsets):
+
+| Mode | `S` | seed | `V` | yaw offset | pitch offset |
+|---|---:|---:|---:|---:|---:|
+| normal | `0x00010000` | `0x00000000` | 0 | -7340450 | 6771822 |
+| normal | `0x00010000` | `0x12345678` | `0x00008000` | -4357031 | 3639341 |
+| alternate | `0x00010000` | `0x12345678` | 0 | 9357827 | -5601610 |
+| alternate | `0x00010000` | `0x12345678` | `0x00008000` | 9357827 | 66155 |
+| normal | `0xFFFF0000` | `0xDEADBEEF` | 0 | 225733 | -8847762 |
+
+These are pinned at the portable boundary by `npruntime_round_sim`; the signed
+case guards both wrap and arithmetic conversion behavior.
+
+The recoil impulse is deliberately **after** the successful ordinary spawn,
+so this round uses the previous `entity+0x380`. Ammo `recoil` parses with
+`atol` into three bytes at `+0xE3..+0xE5` (modulo narrowing). The selected
+impulse is `recoil[category] << 18`, changed to `<< 20` while drowning or
+underwater; `Flags & 0x10` (scope raised) applies exact binary32 0.75 and
+truncates toward zero. There is no `mp_NoWeaponRecoil` read. The source must
+exist, carry an ItemDef, and be a type-3 person. `[orig:
+AmmoDef_ParseProperty @ 0x40a2d0]` `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
+
+The special branches preserve their retail ordering: shotgun flag `0x10000`
+spawns its distinct radial pellet fan, then adds recoil, and returns without the ordinary
+weapon ERROR/+0x380/+0x384 helper; claymore flag `0x20000` returns after its
+fan and before stance/recoil; instant, detonator, and designator returns also
+precede recoil. The shotgun helper uses draw one for
+`radius = trunc(kz_pieslice*cos(draw*pi/2/65536))` and draw two for the
+full-circle yaw/pitch pair; it is not the claymore's rectangular fan. `[orig:
+RoundData_SpawnRound @ 0x4ec0d0; Weapon_SpawnProjectileBurstWithSpread
+@ 0x4ebbb0]`
+
+#### Per-tick accumulator order
+
+Before camera construction and the later weapon-action/spawn pass,
+`Entity_UpdateInfantryPlayerBody` updates the two signed accumulators:
+
+- For recoil `R=entity+0x380`, compute `t=(R+4)>>3`, `half=t>>1`, subtract
+  `half`, and snap to zero at signed `R<=0x300`. Add `t>>3` to entity pitch;
+  always consume one `PRNG_Next16`, even at zero, and add `half` to yaw for an
+  even result or subtract it for an odd result. There is no upper clamp.
+- The local-player-only movement producer runs while moving (`MoveOrder&8`),
+  on foot, with an equipped definition. It wrap-adds a stance/aim-scaled
+  `clipweight+weaponweight` contribution to `M=entity+0x384`: one third when
+  `Player_CanFireWeapon` succeeds, one third prone/not-drowning, two thirds
+  crouched/not-drowning, otherwise 1.5. The one-third leg is signed integer
+  division; the two floating legs truncate toward zero. Rising while airborne
+  wrap-adds `0x01000000`. The shared local/remote/
+  AI decay then applies `M -= (M+4)>>4` and snaps signed `M<=0x300` to zero;
+  there is no upper clamp.
+
+All additions and shifts above retain x86 32-bit wrap/arithmetic-shift
+semantics. A local round spawned later in the same tick sees the already
+decayed movement contribution and the pre-impulse recoil value. On a receiving
+client, the tag-2 apply precedes that entity update, so a remote recoil impulse
+is stamped and then decayed in the same frame. `[orig:
+Entity_UpdateInfantryPlayerBody @ 0x4b40e0]` `[orig:
+Entity_UpdateInfantryAI @ 0x4b9910]`
+
+The client-side port retains `R` and a full sub-byte heading on each decoded
+player row and performs the same stamp-before-decay ordering
+(`netsim_client_view_recoil`). Its yaw leg uses the exact
+`PRNG_Next16` recurrence and consumes one draw per decoded person in pass order;
+the stream is subsystem-local and zero-seeded, however. Authority/local/AI
+recoil likewise uses the exact recurrence and body-pass order, but its
+`AiSystem` state is separate from other ported consumers of retail's same
+process-global stream. Unrelated calls can therefore shift sign history on
+either path (D-WPN-35). This bounded
+visual-yaw residual does not change `R`, pitch drift, projectile/HUD spread, or
+the recoil impulse. The port does not invent or transmit `M`: decoded remote
+rows never run the local-only producer, so their zero-initialized value remains
+the retail-equivalent zero.
+
+The 2026-07-31 recoil/spread grill was read-only; it made no IDB changes.
+
 **Authority: damage is host-only — witnessed in three independent gates.**
 `Weapon_CalcImpactDamage @ 0x4EC920` returns 0 for a non-authority session peer
 (`@0x4ec933`); `Projectile_ProcessDamageOnTarget @ 0x4E7FB0` guards the health write and
@@ -6480,8 +6631,7 @@ re-fixed; HUD count re-verifies v31.
 **Remaining port follow-ups:** the payload writers
 (`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
 `NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
-the exact spawn-spread math (`Weapon_CalcRandomSpreadOffset` on the ammo `error`) and the
-threshold-crossing tumble PRNG/local frame;
+the threshold-crossing tumble PRNG/local frame (spawn-time recoil/spread is closed above);
 the SpawnRound default-path field flow into the 780-B round record (the array
 `@ 0xB7E1A8`, 128 groups × 4 × 780 B, active-flag bytes `@ 0xB7DFA0` — witnessed via
 `Weapon_UpdateAllProjectiles @ 0x4EC020`, zone floats RESOLVED: head 1.25 `flt_7C6F18`,
