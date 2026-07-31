@@ -1,4 +1,4 @@
-class_name DetachablePanelHost
+class_name DetachablePanelMount
 extends RefCounted
 ## The two-state pop-out machine behind a detachable panel: DOCKED (the content
 ## sits where the scene put it) or FLOATING (the content lives in a Window —

@@ -10,7 +10,7 @@ extends Control
 # metaphor fits BETWEEN states); inside a state, programs are lists.
 #
 # Built purely from NovaMusicScript.get_program_ast(section). The view never
-# writes bytecode; it emits add/replace/delete/reorder/move intents the host
+# writes bytecode; it emits add/replace/delete/reorder/move intents the mount
 # (live_mode) hands to the document's parity-gated, undoable write path.
 #
 # Engine artifacts the stack hides or explains instead of rendering raw:
@@ -33,7 +33,7 @@ extends Control
 
 signal statement_selected(section_index: int, ordinal: int)
 signal open_section_requested(section_name: StringName)
-# Authoring intents (host routes them to the document's parity-gated write path):
+# Authoring intents (mount routes them to the document's parity-gated write path):
 signal add_statement_requested(section_index: int, lines: PackedStringArray)
 signal replace_statement_requested(section_index: int, ordinal: int, lines: PackedStringArray)
 signal delete_statement_requested(section_index: int, ordinal: int)
@@ -44,7 +44,7 @@ signal set_run_count_requested(section_index: int, start_ordinal: int, old_count
 signal add_play_requested(section_name: StringName, track: int)
 signal input_renamed(section_name: String, input_index: int, label: String)
 signal author_failed(message: String)
-# An edit control just opened: the host pins follow-live so the VM can't yank
+# An edit control just opened: the mount pins follow-live so the VM can't yank
 # the canvas (and the edit with it) out from under the user.
 signal inline_edit_started
 
@@ -77,13 +77,13 @@ var _pending_offsets: Array = []
 # reset on section change.
 var _unfolded: Dictionary = {}
 # Caller-input bookkeeping: leading frame ops feed the card, tail ones the
-# divider; the total stays available to the host (and the Input pickers).
+# divider; the total stays available to the mount (and the Input pickers).
 var _section_inputs: int = 0
 var _leading_inputs: int = 0
 var _tail_inputs: int = 0
 var _locals_base: int = MusDisplayNames.DEFAULT_LOCALS_BASE
 
-# Authoring context (set by the host via configure_authoring).
+# Authoring context (set by the mount via configure_authoring).
 var _editable: bool = false
 var _forms = MusForms.new()
 var _section_names: PackedStringArray = PackedStringArray()
@@ -146,7 +146,7 @@ func _ready() -> void:
 	_scroll.get_v_scroll_bar().value_changed.connect(func(_v): _popover.reposition())
 
 
-# Supply the context rows and the palette need + flip editing on/off. The host
+# Supply the context rows and the palette need + flip editing on/off. The mount
 # calls this on each drill-in and on every document.changed refresh, BEFORE
 # show_section. profile_path / inputs_by_section feed the input-name sidecar
 # and the call-site "hands it" chips.
@@ -382,7 +382,7 @@ func _row_ctx() -> Dictionary:
 
 # The freshest AST dict for a top-level ordinal: blocks resolve through this
 # at mutation time so a delayed apply (popover) never resurrects stale bodies.
-# _section_dict is replaced by every show_section, which the host re-runs on
+# _section_dict is replaced by every show_section, which the mount re-runs on
 # every document change.
 func _stmt_at(ordinal: int) -> Dictionary:
 	var stmts: Array = _section_dict.get("statements", [])
@@ -391,12 +391,12 @@ func _stmt_at(ordinal: int) -> Dictionary:
 	return {}
 
 
-# A picker/popover just opened: the host pins follow-live.
+# A picker/popover just opened: the mount pins follow-live.
 func notify_edit_started() -> void:
 	inline_edit_started.emit()
 
 
-# The Inputs card committed a rename: the host persists it (sidecar) and
+# The Inputs card committed a rename: the mount persists it (sidecar) and
 # re-populates, so the new name reaches the pickers and sentences too.
 func _on_card_input_renamed(input_index: int, label: String) -> void:
 	input_renamed.emit(_section_name, input_index, label)
@@ -659,7 +659,7 @@ func set_active_offset(pc: int) -> void:
 	_active_row = best
 
 
-# Bring the live row into view (the host calls this while follow-live is on).
+# Bring the live row into view (the mount calls this while follow-live is on).
 func scroll_to_active() -> void:
 	if _active_row != null and is_instance_valid(_active_row) and _scroll != null:
 		_scroll.ensure_control_visible(_active_row)
@@ -673,7 +673,7 @@ func _apply_restored_scroll() -> void:
 	_restore_scroll_to = 0
 
 
-# --- host surface ----------------------------------------------------------
+# --- mount surface ----------------------------------------------------------
 
 
 # How many values a caller (or the engine) hands the shown state -- the hidden
@@ -803,7 +803,7 @@ func _drop_data(_pos: Vector2, data) -> void:
 	add_play_requested.emit(StringName(_section_name), int((data as Dictionary).get("index", -1)))
 
 
-# --- introspection (tests + host) -------------------------------------------
+# --- introspection (tests + mount) -------------------------------------------
 
 # The stack's statement rows/blocks in program order (cards/dividers excluded).
 func top_level_rows() -> Array:

@@ -2368,22 +2368,22 @@ func test_split_edit_through_dock_widget_commits_via_controller() -> void:
 	assert_eq(ctx.fake.last_team, 2, "with the new value")
 
 
-func test_split_set_detail_host_null_evacuates_without_freeing() -> void:
+func test_split_set_detail_mount_null_evacuates_without_freeing() -> void:
 	var ctx := _make_split(_sample_entity())
 	var edit_box = ctx.inspector._edit_box
 	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "editor starts in the dock")
 	# Evacuate (the shell calls this on switch-away, before it frees the dock's children).
-	ctx.inspector.set_detail_host(null)
+	ctx.inspector.set_detail_mount(null)
 	assert_true(is_instance_valid(edit_box), "the editor is reparented, not freed")
 	assert_not_null(ctx.inspector._root.find_child("MissionPosX", true, false), "and now lives under _root")
 	assert_null(ctx.dock.find_child("MissionPosX", true, false), "no longer under the dock")
 	# Re-mount (switch-back).
-	ctx.inspector.set_detail_host(ctx.dock)
+	ctx.inspector.set_detail_mount(ctx.dock)
 	assert_not_null(ctx.dock.find_child("MissionPosX", true, false), "re-mounting puts it back in the dock")
 	# A repeated set with the same host is an idempotent no-op (the shell re-asserts the dock on
 	# every editor-state sync).
 	var parent_before: Node = ctx.inspector._detail_root.get_parent()
-	ctx.inspector.set_detail_host(ctx.dock)
+	ctx.inspector.set_detail_mount(ctx.dock)
 	assert_eq(ctx.inspector._detail_root.get_parent(), parent_before, "same-host re-mount does not thrash the subtree")
 
 

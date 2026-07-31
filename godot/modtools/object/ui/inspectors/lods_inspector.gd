@@ -4,8 +4,8 @@ extends ObjectInspector
 ## attributes, and render function plus the project poly-collision LOD.
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}
 	var lods: Array = data.get_project_lods() if data != null else []
@@ -92,11 +92,11 @@ func build_main(host: Control) -> void:
 		files.open("Choose an ASE scene", PackedStringArray(["*.ase,*.ASE ; ASE scene"]),
 			func(path: String) -> void:
 				if _ws.add_lod_scene(path, replace_index) == OK:
-					var old_children := host.get_children()
+					var old_children := mount.get_children()
 					for child in old_children:
-						host.remove_child(child)
+						mount.remove_child(child)
 						child.queue_free()
-					build_main(host))
+					build_main(mount))
 	add_button.pressed.connect(func() -> void:
 		pick_scene.call(-1)
 	)

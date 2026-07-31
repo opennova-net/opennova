@@ -7,8 +7,8 @@ extends ObjectInspector
 const CollisionHull = preload("res://engine/object/collision_hull.gd")
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	var summary := object_editor.object_data.get_summary() if object_editor and object_editor.object_data else {}
 	for key in ["source_kind", "lod_count", "material_count", "light_count", "userpoint_count"]:
 		var row := Label.new()

@@ -180,7 +180,7 @@ class CatchupEffectAnchorHost:
 
 class CatchupEffectWorld:
 	extends RefCounted
-	var anchor_host: CatchupEffectAnchorHost
+	var anchor_mount: CatchupEffectAnchorHost
 	var owner_key: Variant
 	var group_live := false
 	var spawn_count := 0
@@ -190,7 +190,7 @@ class CatchupEffectWorld:
 	var stops_after_advance: Array[int] = []
 
 	func _init(host: CatchupEffectAnchorHost) -> void:
-		anchor_host = host
+		anchor_mount = host
 
 	func spawn_effect_owned_request(key: Variant, _name: String,
 			_position: Vector3, _orientation: Vector3) -> Dictionary:
@@ -208,7 +208,7 @@ class CatchupEffectWorld:
 		fixed_advance_count += 1
 		if not group_live:
 			return
-		var resolver: Variant = anchor_host.anchors.get(owner_key)
+		var resolver: Variant = anchor_mount.anchors.get(owner_key)
 		if not (resolver is Callable) or not (resolver as Callable).is_valid():
 			return
 		var pose: Variant = (resolver as Callable).call()
@@ -599,13 +599,13 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# flashbang exercises the same attached-effect path as the smoke grenade in
 	# a short, production-authored lifetime.
 	var w := _make_world(Transform3D.IDENTITY)
-	var anchor_host := CatchupEffectAnchorHost.new()
-	var effect_world := CatchupEffectWorld.new(anchor_host)
+	var anchor_mount := CatchupEffectAnchorHost.new()
+	var effect_world := CatchupEffectWorld.new(anchor_mount)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {
 		"fire_fx": func() -> Variant: return effect_world,
-		"game_world": anchor_host,
+		"game_world": anchor_mount,
 	})
 	var def_root := NovaResourceRoot.new()
 	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))

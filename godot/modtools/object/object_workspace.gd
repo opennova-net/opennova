@@ -36,11 +36,11 @@ var environment_editor
 var _active_workflow_id: int = Workflow.PREVIEW
 var _preview: ObjectPreview
 var _mount: ViewportMount
-# The asset-dock detail pane, hosted by the framework's DetailDockHost: it owns
+# The asset-dock detail pane, hosted by the framework's DetailDockMount: it owns
 # the lazy panel, the conditional mount, and the rebuild-only-on-real-change
 # policy (a routine editor-state sync — e.g. a time-of-day drag — must never
 # tear the pane down; that was the TOD lag).
-var _detail_dock: DetailDockHost
+var _detail_dock: DetailDockMount
 var _export_update_mask: int = OED_UPDATE_NONE
 # Preview guide visibility, driven by the shell's View settings. Stored here so a
 # re-mounted preview (ViewportMount rebuilds it) inherits the current choice.
@@ -143,14 +143,14 @@ func _create_preview() -> Control:
 	return _preview
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	_ensure_object_editor()
-	_ensure_mount().mount(host)
+	_ensure_mount().mount(mount)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _mount != null:
 		_mount.unmount()
 
@@ -227,16 +227,16 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
-	_ensure_detail_dock().set_host(dock)
+	_ensure_detail_dock().set_mount(dock)
 
 
 func sync_asset_dock() -> void:
 	_ensure_detail_dock().ensure_mounted()
 
 
-func _ensure_detail_dock() -> DetailDockHost:
+func _ensure_detail_dock() -> DetailDockMount:
 	if _detail_dock == null:
-		_detail_dock = DetailDockHost.new(&"ObjectDetailDock", &"ObjectDetailDockBox",
+		_detail_dock = DetailDockMount.new(&"ObjectDetailDock", &"ObjectDetailDockBox",
 			_active_workflow_uses_detail_dock,
 			func(box: Control) -> void:
 				var inspector := _inspector_for(_active_workflow_id)
@@ -256,12 +256,12 @@ func activate_workflow(workflow_id: int) -> void:
 	_ensure_detail_dock().sync_mount()
 
 
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	_ensure_object_editor()
 	_active_workflow_id = workflow_id
 	var inspector := _inspector_for(workflow_id)
 	if inspector != null:
-		inspector.build_main(host)
+		inspector.build_main(mount)
 	_ensure_detail_dock().sync_mount()
 
 
@@ -411,10 +411,10 @@ func get_export_dialog_dir() -> String:
 	return object_editor.get_last_export_dir() if object_editor else ""
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	var inspector := _inspector_for(Workflow.PREVIEW)
 	if inspector != null:
-		inspector.build_main(host)
+		inspector.build_main(mount)
 
 
 func _build_inspector_defs() -> Array:
@@ -445,7 +445,7 @@ func _ensure_object_editor() -> void:
 		return
 	object_editor = ObjectEditorScript.new()
 	object_editor.name = "ObjectEditor"
-	_host_under_shell(object_editor)
+	_mount_under_shell(object_editor)
 	object_editor.create_empty_object(false)
 	object_editor.state_changed.connect(_after_document_changed)
 	_sync_export_update_mask_from_dirty()

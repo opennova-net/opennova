@@ -321,7 +321,7 @@ func _build_reground_requests() -> Array:
 		})
 		points.append(Vector2(ground_godot.x, ground_godot.z))
 	# Pass 2: sample — batched when the editor offers it, else the scalar loop so
-	# any duck-typed host (a headless stub faking the surface) keeps working.
+	# any duck-typed mount (a headless stub faking the surface) keeps working.
 	var heights: PackedFloat32Array
 	if _c.terrain_editor.has_method("sample_heights_world"):
 		heights = _c.terrain_editor.sample_heights_world(points)

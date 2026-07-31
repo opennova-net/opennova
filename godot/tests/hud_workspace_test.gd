@@ -45,10 +45,10 @@ func test_viewport_and_inspector() -> void:
 	assert_not_null(preview, "mount_viewport adds the preview control.")
 	assert_true(preview is HudLayoutPreview, "Preview is a HudLayoutPreview.")
 
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	_ws.build_inspector(inspector_host)
-	assert_gt(inspector_host.get_child_count(), 0, "build_inspector populates the host.")
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	_ws.build_inspector(inspector_mount)
+	assert_gt(inspector_mount.get_child_count(), 0, "build_inspector populates the host.")
 
 	# Opening after mount refreshes the preview without error.
 	var abs := ProjectSettings.globalize_path(HUDPOS_PATH)

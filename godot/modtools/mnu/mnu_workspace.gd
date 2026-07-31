@@ -280,8 +280,8 @@ func get_status_context() -> String:
 	return context
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	var created := false
 	if _editor == null:
@@ -294,7 +294,7 @@ func mount_viewport(host: Control) -> void:
 		_editor.interactive_changed.connect(_on_interactive_changed)
 		created = true
 	if _editor.get_parent() == null:
-		host.add_child(_editor)
+		mount.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_editor.set_resource_root(_resource_root_or_settings())
 	_editor.set_document(_document)
@@ -305,22 +305,22 @@ func mount_viewport(host: Control) -> void:
 		_editor.restore_history(_histories.get(_document, {}))
 	# The Mns editor owns the .mns undo stack and document binding; it needs to
 	# be in the tree (for _ready / _build_ui) before build_inspector reparents it
-	# into the Styles tab. Park it under the viewport host (invisible) until then.
+	# into the Styles tab. Park it under the viewport mount (invisible) until then.
 	if _mns_editor == null:
 		_mns_editor = MnsEditorScript.new()
 		_mns_editor.variable_selected.connect(_on_mns_variable_selected)
 	if _mns_editor.get_parent() == null:
-		host.add_child(_mns_editor)
+		mount.add_child(_mns_editor)
 		_mns_editor.visible = false
 	_mns_editor.set_document(_mns_document)
 	_push_stylesheet_to_editor()
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _editor != null and _editor.get_parent() != null:
 		_editor.get_parent().remove_child(_editor)
 	# When the inspector hasn't been built yet (or has been torn down), the Mns
-	# editor lives under the viewport host. Pull it out so the host can be reused.
+	# editor lives under the viewport mount. Pull it out so the mount can be reused.
 	if _mns_editor != null and _mns_editor.get_parent() != null \
 			and _mns_editor.get_parent() != _styles_page:
 		_mns_editor.get_parent().remove_child(_mns_editor)
@@ -352,7 +352,7 @@ func release_viewport() -> void:
 		_mns_editor = null
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	if _tab_container != null and is_instance_valid(_tab_container):
 		_disconnect_inspector(_inspector)
 		_disconnect_mns_inspector(_mns_inspector)
@@ -369,7 +369,7 @@ func build_inspector(host: Control) -> void:
 	# Style jumps and dock activity drive the inspector; this signal carries the
 	# user's manual switch back the other way.
 	_tab_container.tab_changed.connect(_on_dock_tab_changed)
-	host.add_child(_tab_container)
+	mount.add_child(_tab_container)
 
 	# --- Properties page ----------------------------------------------------
 	_properties_page = MarginContainer.new()
@@ -413,7 +413,7 @@ func build_inspector(host: Control) -> void:
 	_styles_page.add_theme_constant_override("separation", 6)
 	_tab_container.add_child(_styles_page)
 
-	# The Mns editor was parked under the viewport host by mount_viewport so its
+	# The Mns editor was parked under the viewport mount by mount_viewport so its
 	# _ready ran; reparent it into the Styles tab body now and make it visible.
 	if _mns_editor == null:
 		_mns_editor = MnsEditorScript.new()
@@ -604,7 +604,7 @@ func _ensure_preview():
 	if _preview == null or not is_instance_valid(_preview):
 		_preview = SoundPreviewPlayerScript.new()
 		_preview.name = "MnuSoundPreview"
-		_host_under_shell(_preview)
+		_mount_under_shell(_preview)
 	return _preview
 
 

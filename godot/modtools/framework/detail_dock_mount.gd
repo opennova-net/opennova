@@ -1,10 +1,10 @@
-class_name DetailDockHost
+class_name DetailDockMount
 extends RefCounted
 
 # The asset-dock detail-pane state machine, extracted verbatim from the Object
 # workspace: lazy panel creation, conditional mount, and the load-bearing
-# rebuild policy — a genuine host change or a workflow switch rebuilds the
-# pane's content (sync_mount), while a routine same-host re-sync (the shell
+# rebuild policy — a genuine mount change or a workflow switch rebuilds the
+# pane's content (sync_mount), while a routine same-mount re-sync (the shell
 # re-forwards the dock on EVERY editor-state sync, e.g. each time-of-day drag
 # step) keeps the existing content unless it is empty or a different document
 # is open (ensure_mounted; tearing down here was the TOD lag).
@@ -26,7 +26,7 @@ var _build_content: Callable
 var _content_key: Callable
 var _separation: int
 
-var _host: Control
+var _mount: Control
 var _dock: Control
 var _content_id: int = 0
 
@@ -41,15 +41,15 @@ func _init(dock_name: StringName, box_name: StringName, uses_detail: Callable,
 	_separation = separation
 
 
-## The workspace's set_asset_dock body: adopt the (possibly new) host. A real
-## host change rebuilds; the same host re-forwarded only re-ensures.
-func set_host(dock: Control) -> void:
-	var host_changed := dock != _host
-	_host = dock
+## The workspace's set_asset_dock body: adopt the (possibly new) mount. A real
+## mount change rebuilds; the same mount re-forwarded only re-ensures.
+func set_mount(dock: Control) -> void:
+	var mount_changed := dock != _mount
+	_mount = dock
 	if dock == null:
 		free_dock()
 		return
-	if host_changed:
+	if mount_changed:
 		sync_mount()
 	else:
 		ensure_mounted()
@@ -124,15 +124,15 @@ func free_dock() -> void:
 
 
 func _ensure_dock() -> void:
-	if _host == null or not bool(_uses_detail.call()):
+	if _mount == null or not bool(_uses_detail.call()):
 		return
 	if _dock == null or not is_instance_valid(_dock):
 		_dock = PanelContainer.new()
 		_dock.name = _dock_name
 		_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if _dock.get_parent() != _host:
+	if _dock.get_parent() != _mount:
 		var old_parent := _dock.get_parent()
 		if old_parent != null:
 			old_parent.remove_child(_dock)
-		_host.add_child(_dock)
+		_mount.add_child(_dock)

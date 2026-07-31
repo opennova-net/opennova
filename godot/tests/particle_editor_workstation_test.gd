@@ -227,9 +227,9 @@ func test_particles_workspace_actions_listed() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.PARTICLE)
 	await get_tree().process_frame
 
-	var actions_host: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions_mount: BoxContainer = workstation.get_node("%WorkspaceActionsMount")
 	var labels: Array = []
-	for child in actions_host.get_children():
+	for child in actions_mount.get_children():
 		if child is Button:
 			labels.append((child as Button).text)
 	# Save As rides the shell's overflow ("More") menu alongside the primary
@@ -240,7 +240,7 @@ func test_particles_workspace_actions_listed() -> void:
 
 func test_particle_viewport_is_shell_managed() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.PARTICLE)
 	await get_tree().process_frame
@@ -299,7 +299,7 @@ func test_particle_preview_spawns_visible_instances_after_selection() -> void:
 	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
 	var err: Error = adapter.open_file(_fixture("buildup.ptl"))
 	assert_eq(err, OK, "buildup.ptl should load via the workspace adapter.")
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
@@ -324,7 +324,7 @@ func test_particle_preview_populates_render_instances_after_selection() -> void:
 	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
 	var err: Error = adapter.open_file(_fixture("buildup.ptl"))
 	assert_eq(err, OK, "buildup.ptl should load via the workspace adapter.")
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
@@ -1048,7 +1048,7 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 	var flash: NovaParticleDef = adapter.particle_editor.particle_file.find_particle("30mmFlash")
 	assert_not_null(flash, "Fixture should include the short-lived 30mmFlash particle.")
 	adapter.select_particle(flash)
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 
@@ -1098,7 +1098,7 @@ func test_effect_preview_uses_all_referenced_particle_defs() -> void:
 	adapter.select_effect(effect)
 	await get_tree().process_frame
 
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	assert_eq(lane.get_child_count(), 1, "Particle preview should stay in the shell viewport lane.")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
@@ -1122,7 +1122,7 @@ func test_particle_preview_reports_present_graphic_layers() -> void:
 	adapter.select_particle(selected)
 	await get_tree().process_frame
 
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 	assert_eq(preview.get_emitter_count(), 1,
@@ -1166,7 +1166,7 @@ func test_particle_preview_routes_particles_to_selected_graphic_layer() -> void:
 	assert_not_null(selected, "Fixture should include a particle with multiple graphic layers.")
 	adapter.select_particle(selected)
 
-	var lane: Control = workstation.get_node("%ViewportHost")
+	var lane: Control = workstation.get_node("%ViewportMount")
 	var preview := _preview_in(lane)
 	assert_not_null(preview, "Viewport lane child should be a ParticlePreview.")
 	preview.set_paused(true)
@@ -1209,22 +1209,22 @@ func test_workflow_swap_mounts_correct_inspector() -> void:
 
 	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
 	adapter.open_file(_fixture("30MM.ptl"))
-	var inspector_host: Control = workstation.get_node("%InspectorHost")
+	var inspector_mount: Control = workstation.get_node("%InspectorMount")
 
 	# Default workflow is PARTICLES.
 	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE).select_workflow(ParticleWorkspaceScript.Workflow.PARTICLES)
 	await get_tree().process_frame
-	assert_not_null(_find_inspector_of_type(inspector_host, ParticleDefInspectorScript),
+	assert_not_null(_find_inspector_of_type(inspector_mount, ParticleDefInspectorScript),
 			"Particles workflow should mount the particle inspector.")
 
 	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE).select_workflow(ParticleWorkspaceScript.Workflow.EFFECTS)
 	await get_tree().process_frame
-	assert_not_null(_find_inspector_of_type(inspector_host, ParticleEffectInspectorScript),
+	assert_not_null(_find_inspector_of_type(inspector_mount, ParticleEffectInspectorScript),
 			"Effects workflow should mount the effect inspector.")
 
 	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE).select_workflow(ParticleWorkspaceScript.Workflow.TABLES)
 	await get_tree().process_frame
-	assert_not_null(_find_inspector_of_type(inspector_host, ParticleTableInspectorScript),
+	assert_not_null(_find_inspector_of_type(inspector_mount, ParticleTableInspectorScript),
 			"Tables workflow should mount the table inspector.")
 
 

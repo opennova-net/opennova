@@ -196,8 +196,8 @@ static func build_channel_card(parent: VBoxContainer, node_name: String) -> VBox
 	return box
 
 
-static func make_inspector_box(host: Control) -> VBoxContainer:
-	return UiBox.make_inspector_box(host)
+static func make_inspector_box(mount: Control) -> VBoxContainer:
+	return UiBox.make_inspector_box(mount)
 
 
 static func add_section_heading(parent: Control, text: String) -> Label:

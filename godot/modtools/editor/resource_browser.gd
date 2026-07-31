@@ -6,7 +6,7 @@ extends RefCounted
 ## editor_workstation.gd (B5-3b); the list itself is the shared ResourceTable
 ## (A10), which the persistent browser pane reuses.
 ##
-## The dialog is built as a child of the host shell so the shell's existing
+## The dialog is built as a child of the mount shell so the shell's existing
 ## find_child("ResourceBrowserDialog") lookups (and the named sub-nodes) keep
 ## resolving. The capabilities the browser can't own itself are injected as
 ## Callables in setup() so it never reaches into the shell's internals:
@@ -22,7 +22,7 @@ extends RefCounted
 
 const ResourceTableScript := preload("res://modtools/framework/resource_table.gd")
 
-var _host: Control
+var _mount: Control
 var _library: EditorResourceLibrary
 var _open_file_dialog: Callable
 var _open_settings: Callable
@@ -48,8 +48,8 @@ var _open_action: Callable = Callable()
 var _picked: bool = false
 
 
-func setup(host: Control, library: EditorResourceLibrary, open_file_dialog: Callable, open_settings: Callable, current_resource_path: Callable, scan_root: Callable) -> void:
-	_host = host
+func setup(mount: Control, library: EditorResourceLibrary, open_file_dialog: Callable, open_settings: Callable, current_resource_path: Callable, scan_root: Callable) -> void:
+	_mount = mount
 	_library = library
 	_open_file_dialog = open_file_dialog
 	_open_settings = open_settings
@@ -136,9 +136,9 @@ func _ensure_dialog() -> void:
 	# theme's Window/AcceptDialog styles). The embedded window is given the shell's
 	# theme explicitly so it resolves the dark styling even though it is a separate
 	# Window, replacing the old borderless + hand-coded-stylebox workaround.
-	if _host != null and _host.theme != null:
-		_dialog.theme = _host.theme
-	_host.add_child(_dialog)
+	if _mount != null and _mount.theme != null:
+		_dialog.theme = _mount.theme
+	_mount.add_child(_dialog)
 
 	# The dialog panel owns the body inset, so the content VBox attaches directly.
 	var box := VBoxContainer.new()

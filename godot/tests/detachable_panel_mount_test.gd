@@ -1,13 +1,13 @@
 extends GutTest
 
-# DetachablePanelHost: the two-state pop-out machine behind detachable panels.
+# DetachablePanelMount: the two-state pop-out machine behind detachable panels.
 # Headless runs lack native subwindows, so the default window takes the
 # embedded path — which IS the production fallback, making the whole state
 # machine pinnable without an OS window: reparent targets, dock-slot
 # restoration, owner/%-name survival, the save-state contract, and rect
 # clamping.
 
-const HostScript := preload("res://modtools/framework/detachable_panel_host.gd")
+const HostScript := preload("res://modtools/framework/detachable_panel_mount.gd")
 
 
 func _make_dock() -> Dictionary:
@@ -36,8 +36,8 @@ func _make_dock() -> Dictionary:
 	return {"root": root, "box": box, "content": content, "deep": deep}
 
 
-func _make_host(dock: Dictionary, saves: Array = []) -> DetachablePanelHost:
-	var host: DetachablePanelHost = HostScript.new(&"camera", "Camera", Vector2i(300, 200))
+func _make_host(dock: Dictionary, saves: Array = []) -> DetachablePanelMount:
+	var host: DetachablePanelMount = HostScript.new(&"camera", "Camera", Vector2i(300, 200))
 	host.setup(dock["content"], dock["root"],
 		func(docked: bool, rect: Rect2i) -> void: saves.append([docked, rect]))
 	return host
@@ -81,7 +81,7 @@ func test_redock_restores_content_at_original_child_index() -> void:
 func test_detach_uses_injected_window_factory() -> void:
 	var dock := _make_dock()
 	var made: Array = []
-	var host: DetachablePanelHost = HostScript.new(&"camera", "Camera", Vector2i(300, 200),
+	var host: DetachablePanelMount = HostScript.new(&"camera", "Camera", Vector2i(300, 200),
 		func(title: String, min_size: Vector2i) -> Window:
 			var w := Window.new()
 			w.title = "FACTORY " + title

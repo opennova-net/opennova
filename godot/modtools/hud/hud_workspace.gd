@@ -49,8 +49,8 @@ func get_status_context() -> String:
 
 
 # --- Viewport (the 2D HUD preview; a Control, not a 3D view) ---
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	if _preview == null:
 		_preview = HudLayoutPreviewScript.new()
@@ -58,12 +58,12 @@ func mount_viewport(host: Control) -> void:
 		_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if _preview.get_parent() == null:
-		host.add_child(_preview)
+		mount.add_child(_preview)
 		_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_refresh_preview()
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _preview != null and _preview.get_parent() != null:
 		_preview.get_parent().remove_child(_preview)
 
@@ -85,11 +85,11 @@ func _refresh_preview() -> void:
 
 
 # --- Inspector (read-only) ---
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	if _inspector_root != null and is_instance_valid(_inspector_root):
 		_inspector_root.queue_free()
 	_inspector_root = _make_inspector()
-	host.add_child(_inspector_root)
+	mount.add_child(_inspector_root)
 	_populate_inspector()
 
 

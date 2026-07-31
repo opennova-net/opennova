@@ -11,8 +11,8 @@ enum Mode { VISUAL, SOURCE }
 @onready var _scroll_rate_spin: SpinBox = %ScrollRateSpin
 @onready var _vertical_space_spin: SpinBox = %VerticalSpaceSpin
 @onready var _center_x_spin: SpinBox = %CenterXSpin
-@onready var _block_list_host: Control = %BlockListHost
-@onready var _source_view_host: Control = %SourceViewHost
+@onready var _block_list_mount: Control = %BlockListMount
+@onready var _source_view_mount: Control = %SourceViewMount
 @onready var _block_list: Control = %BlockList
 @onready var _add_text_button: Button = %AddTextButton
 @onready var _add_image_button: Button = %AddImageButton
@@ -44,8 +44,8 @@ func set_document(value: CreditsEditorDocument) -> void:
 	_document = value
 	if _block_list != null and _block_list.has_method("set_document"):
 		_block_list.set_document(_document)
-	if _source_view_host != null and _source_view_host.has_method("set_document"):
-		_source_view_host.set_document(_document)
+	if _source_view_mount != null and _source_view_mount.has_method("set_document"):
+		_source_view_mount.set_document(_document)
 	if _document != null:
 		_document.resource_loaded.connect(_on_resource_loaded)
 		_document.resource_changed.connect(_on_resource_changed)
@@ -70,8 +70,8 @@ func set_reference_services(services: Dictionary) -> void:
 		_block_list.set_reference_services(services)
 
 func flush_pending_edits() -> Error:
-	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("apply_pending"):
-		return _source_view_host.apply_pending()
+	if _mode == Mode.SOURCE and _source_view_mount != null and _source_view_mount.has_method("apply_pending"):
+		return _source_view_mount.apply_pending()
 	return OK
 
 # Visual-mode keyboard editing. Runs before viewport focus navigation, but after
@@ -130,8 +130,8 @@ func _ready() -> void:
 	# the nodes exist.
 	if _block_list.has_method("set_document"):
 		_block_list.set_document(_document)
-	if _source_view_host.has_method("set_document"):
-		_source_view_host.set_document(_document)
+	if _source_view_mount.has_method("set_document"):
+		_source_view_mount.set_document(_document)
 	# The env-bar spin bursts fold on their line edits' focus exit (mirrors the
 	# card spins); arrow-only edits fold on the next flush.
 	for env_spin: SpinBox in [_scroll_rate_spin, _vertical_space_spin, _center_x_spin]:
@@ -140,8 +140,8 @@ func _ready() -> void:
 		_block_list.set_resource_root(_resource_root)
 	if not _ref_services.is_empty() and _block_list.has_method("set_reference_services"):
 		_block_list.set_reference_services(_ref_services)
-	if _source_view_host.has_signal("pending_edits_changed"):
-		_source_view_host.pending_edits_changed.connect(_on_source_pending_edits_changed)
+	if _source_view_mount.has_signal("pending_edits_changed"):
+		_source_view_mount.pending_edits_changed.connect(_on_source_pending_edits_changed)
 	_player.mouse_filter = Control.MOUSE_FILTER_STOP
 	_visual_button.tooltip_text = "Edit credits as cards"
 	_source_button.tooltip_text = "Edit credits as text"
@@ -167,30 +167,30 @@ func _set_mode(value: Mode) -> void:
 			_apply_mode_state()
 			return
 	_mode = value
-	if _mode == Mode.SOURCE and _source_view_host != null and _source_view_host.has_method("refresh_from_resource"):
-		_source_view_host.refresh_from_resource(true)
+	if _mode == Mode.SOURCE and _source_view_mount != null and _source_view_mount.has_method("refresh_from_resource"):
+		_source_view_mount.refresh_from_resource(true)
 	_apply_mode_state()
 
 func _apply_mode_state() -> void:
-	_block_list_host.visible = _mode == Mode.VISUAL
-	_source_view_host.visible = _mode == Mode.SOURCE
+	_block_list_mount.visible = _mode == Mode.VISUAL
+	_source_view_mount.visible = _mode == Mode.SOURCE
 	_visual_button.set_pressed_no_signal(_mode == Mode.VISUAL)
 	_source_button.set_pressed_no_signal(_mode == Mode.SOURCE)
 	_refresh_empty_hint()
 
 func _apply_pending_source_for_visual_mode() -> Error:
-	if _source_view_host == null or not _source_view_host.has_method("apply_pending"):
+	if _source_view_mount == null or not _source_view_mount.has_method("apply_pending"):
 		return OK
-	if _source_view_host.has_method("has_pending_edits") and not _source_view_host.has_pending_edits():
+	if _source_view_mount.has_method("has_pending_edits") and not _source_view_mount.has_pending_edits():
 		return OK
-	return _source_view_host.apply_pending()
+	return _source_view_mount.apply_pending()
 
 func _on_resource_loaded(resource: CbinCreditsResource) -> void:
 	_refresh_env_bar(resource)
 	if _block_list and _block_list.has_method("set_resource"):
 		_block_list.set_resource(resource)
-	if _source_view_host and _source_view_host.has_method("set_resource"):
-		_source_view_host.set_resource(resource)
+	if _source_view_mount and _source_view_mount.has_method("set_resource"):
+		_source_view_mount.set_resource(resource)
 	_set_preview_resource(resource, true)
 	_refresh_empty_hint()
 	_refresh_add_buttons_enabled()
@@ -201,8 +201,8 @@ func _on_resource_changed() -> void:
 	_refresh_env_bar(_document.resource)
 	if _block_list and _block_list.has_method("set_resource"):
 		_block_list.set_resource(_document.resource)
-	if _source_view_host and _source_view_host.has_method("set_resource"):
-		_source_view_host.set_resource(_document.resource)
+	if _source_view_mount and _source_view_mount.has_method("set_resource"):
+		_source_view_mount.set_resource(_document.resource)
 	_set_preview_resource(_document.resource, false)
 	_refresh_empty_hint()
 	_refresh_add_buttons_enabled()

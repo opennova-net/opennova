@@ -36,8 +36,8 @@ var _detail_root: Control = null
 var _shader_catalog_cache: Array = []
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_build_list_panel(box)
 
 	var material_toolbar := HBoxContainer.new()

@@ -5,10 +5,10 @@ extends WorkflowInspector
 ## the build/refresh contract and the InspectorForms wrappers come from
 ## WorkflowInspector). Wired to a TerrainEditor rather than a workspace
 ## coordinator and single-pane (no detail dock). Both the workspace and the
-## tests drive it the same way: set_editor(editor) + build_main(host).
+## tests drive it the same way: set_editor(editor) + build_main(mount).
 ##
 ## The inspector re-syncs on the editor's ui_state_changed signal. Because the
-## host is cleared when the workflow/workspace changes (freeing the built nodes)
+## mount is cleared when the workflow/workspace changes (freeing the built nodes)
 ## while the inspector instance persists, refresh() guards on the stored root so
 ## a stray signal after teardown is a no-op until build_main rebuilds.
 
@@ -37,7 +37,7 @@ func _on_editor_ui_state_changed(_version: int) -> void:
 
 
 # True while the built UI is alive; subclasses guard refresh() with this so a
-# ui_state_changed that arrives after the host was cleared is a safe no-op.
+# ui_state_changed that arrives after the mount was cleared is a safe no-op.
 func _ui_alive() -> bool:
 	return _root != null and is_instance_valid(_root)
 

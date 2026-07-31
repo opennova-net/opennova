@@ -3,7 +3,7 @@ extends EditorWorkspace
 
 ## ONED workspace for editing RTXT localized string tables (strings/*.bin).
 ##
-## A non-3D data editor. The center viewport host holds one self-contained view
+## A non-3D data editor. The center viewport mount holds one self-contained view
 ## (StringsEditorView = table + per-entry detail in an HSplit); the left inspector
 ## holds search / section management / validation / CSV. There is no right asset
 ## dock, which keeps the detail editor always visible and avoids the shell's
@@ -140,7 +140,7 @@ func _ensure_editor() -> void:
 func _create_document() -> StringsEditor:
 	var doc: StringsEditor = StringsEditorScript.new()
 	doc.name = "StringsEditor"
-	_host_under_shell(doc)
+	_mount_under_shell(doc)
 	doc.new_table(false)
 	doc.structure_changed.connect(_on_doc_structure_changed.bind(doc))
 	doc.edited.connect(_on_doc_edited.bind(doc))
@@ -217,18 +217,18 @@ func _create_view() -> Control:
 	return _view
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	_ensure_editor()
-	_ensure_mount().mount(host)
+	_ensure_mount().mount(mount)
 	if _view != null:
 		_view.set_document(strings_editor)
 		_view.set_filter(_search, _section_filter)
 		_view.set_font_service(_preview_font_service())
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _mount != null:
 		_mount.unmount()
 
@@ -241,13 +241,13 @@ func release_viewport() -> void:
 
 # --- Left: inspector controls ---
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	_ensure_editor()
 	_inspector = StringsInspectorScript.new()
 	# setup() precedes the tree entry: _ready builds shell-dependent sections
 	# (the Used-by strip), so the workspace ref must already be there.
 	_inspector.setup(self)
-	host.add_child(_inspector)
+	mount.add_child(_inspector)
 	_inspector.refresh()
 
 

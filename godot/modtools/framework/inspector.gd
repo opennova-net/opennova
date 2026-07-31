@@ -16,7 +16,7 @@ func _init(workspace = null) -> void:
 
 
 # --- Build hooks (overridden by subclasses) ---
-func build_main(_host: Control) -> void:
+func build_main(_mount: Control) -> void:
 	pass
 
 
@@ -82,8 +82,8 @@ func _build_channel_card(parent: VBoxContainer, node_name: String) -> VBoxContai
 	return InspectorForms.build_channel_card(parent, node_name)
 
 
-func _make_inspector_box(host: Control) -> VBoxContainer:
-	return InspectorForms.make_inspector_box(host)
+func _make_inspector_box(mount: Control) -> VBoxContainer:
+	return InspectorForms.make_inspector_box(mount)
 
 
 # --- Capability hooks (read by the workspace coordinator / registry) ---

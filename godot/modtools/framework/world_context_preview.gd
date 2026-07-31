@@ -5,14 +5,14 @@ extends RefCounted
 # (docs/oned/editor-runtime-parity.md, "direct runtime-node reuse") — over a
 # caller-provided world root, plus the grounding sampler seam for putting
 # things on the live surface. Extracted verbatim from TerrainEditor (maturity
-# slice F1); TerrainEditor is the first host, the Object place-on-terrain and
+# slice F1); TerrainEditor is the first owner, the Object place-on-terrain and
 # Sound at-distance previews are the next consumers.
 #
 # Host-specific reads stay behind seam Callables captured at construction
 # (the parity doc's sampler-seam pattern, A8's captured-lambda rule): the
 # surface material, the document's water height, the live-surface height
-# sampler, and the host's UI fan-out. The service never reaches back into
-# its host.
+# sampler, and the owner's UI fan-out. The service never reaches back into
+# its owner.
 #
 # Node names are contract — "EditorEnvironment", "EditorSky", "EditorWeather",
 # "WaterPlane": sky/weather/water resolve the environment through the relative
@@ -29,7 +29,7 @@ const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
 const HHMM_DAY := NovaEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT (EnvironmentEditor); null until
-# bind_environment_editor. The host keeps its own handle for shell consumers.
+# bind_environment_editor. The owner keeps its own handle for shell consumers.
 var environment_editor
 
 var _world_root: Node3D
@@ -51,7 +51,7 @@ var _get_water_height: Callable
 # func(world_x: float, world_z: float) -> float: live-surface height under a
 # world-space point; NAN when no surface is live or the point is off it.
 var _sample_height: Callable
-# func() -> void: the host's UI fan-out after environment state changes.
+# func() -> void: the owner's UI fan-out after environment state changes.
 var _on_state_changed: Callable
 
 

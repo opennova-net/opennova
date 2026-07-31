@@ -22,9 +22,9 @@ extends RefCounted
 #     activate / deactivate   — workspace gained / lost focus
 #
 #   Inspector — pick ONE style:
-#     single-pane    : build_inspector(host)
+#     single-pane    : build_inspector(mount)
 #     multi-workflow : get_workflows + get_active_workflow_id +
-#                      activate_workflow + build_workflow_inspector(id, host)
+#                      activate_workflow + build_workflow_inspector(id, mount)
 #
 #   Viewport (only if the workspace shows a 3D view):
 #     mount_viewport / unmount_viewport / release_viewport,
@@ -48,7 +48,7 @@ extends RefCounted
 #     on a different object than their edit history (fonts/mnu) keep their own
 #     has_unsaved_changes override.
 #   Shell services (call, don't override): _notify_status, _sync_shell,
-#     _host_under_shell, get_reference_services, _resource_root — the guarded
+#     _mount_under_shell, get_reference_services, _resource_root — the guarded
 #     seams to the hosting shell. Workspaces call these instead of duck-typing
 #     editor_shell; every one is a safe no-op without a shell (headless tests).
 #   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
@@ -128,11 +128,11 @@ func deactivate() -> void:
 	pass
 
 
-func mount_viewport(_host: Control) -> void:
+func mount_viewport(_mount: Control) -> void:
 	pass
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	pass
 
 
@@ -168,7 +168,7 @@ func uses_asset_dock() -> bool:
 	return false
 
 
-# The shell's left lane (workflow picker + inspector host). Workspaces that
+# The shell's left lane (workflow picker + inspector mount). Workspaces that
 # present their whole UI in the viewport can opt out to reclaim the width (e.g.
 # Music's unified screen, whose section map already indexes every section).
 func uses_left_lane() -> bool:
@@ -238,7 +238,7 @@ func activate_workflow(_workflow_id: int) -> void:
 	pass
 
 
-func build_workflow_inspector(_workflow_id: int, _host: Control) -> void:
+func build_workflow_inspector(_workflow_id: int, _mount: Control) -> void:
 	pass
 
 
@@ -500,7 +500,7 @@ func get_export_dialog_dir() -> String:
 	return ""
 
 
-func build_inspector(_host: Control) -> void:
+func build_inspector(_mount: Control) -> void:
 	pass
 
 
@@ -565,7 +565,7 @@ func _sync_shell_workflow() -> void:
 ## transient dialogs, preview players. RefCounted workspaces have no tree of
 ## their own; without a shell the node stays parentless and the caller's
 ## setup continues (headless).
-func _host_under_shell(node: Node) -> void:
+func _mount_under_shell(node: Node) -> void:
 	if editor_shell != null:
 		editor_shell.add_child(node)
 

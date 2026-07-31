@@ -22,7 +22,7 @@ var _mount: ViewportMount
 # dock via set_asset_dock BEFORE build_inspector on activation, so we cache it and hand it over when
 # the inspector is built (or push it into an already-built inspector on a re-sync / teardown).
 var _inspector  # MissionInspector (preloaded, no class_name)
-var _detail_host: Control
+var _detail_mount: Control
 # The live "Terrain changed under N objects" confirm (see _prompt_reground), so a
 # re-activate while it is open cannot stack a second one.
 var _reground_dialog: ConfirmationDialog
@@ -159,7 +159,7 @@ func activate() -> void:
 # lands on the decline path (acknowledge: quiet until the next height edit).
 func _prompt_reground(count: int) -> void:
 	if editor_shell == null:
-		return  # headless host: the inspector's manual Re-ground button still covers it
+		return  # headless mount: the inspector's manual Re-ground button still covers it
 	if _reground_dialog != null and is_instance_valid(_reground_dialog):
 		return
 	var dialog := ConfirmationDialog.new()
@@ -184,7 +184,7 @@ func _prompt_reground(count: int) -> void:
 		_reground_dialog = null
 		dialog.queue_free())
 	_reground_dialog = dialog
-	_host_under_shell(dialog)
+	_mount_under_shell(dialog)
 	dialog.popup_centered()
 
 
@@ -208,11 +208,11 @@ func deactivate() -> void:
 		terrain_editor.set_viewport_active(false, false)
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null or terrain_editor == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null or terrain_editor == null:
 		return
 	_sync_mission_preview_context()
-	var viewport := _ensure_mount().mount(host)
+	var viewport := _ensure_mount().mount(mount)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
 		# Terrain brush stays dormant; the controller handles picking / dragging via the
@@ -221,7 +221,7 @@ func mount_viewport(host: Control) -> void:
 		viewport.set_input_target(_controller)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	_detach_input_target()
 	if terrain_editor != null:
 		terrain_editor.set_viewport_active(false, false)
@@ -434,19 +434,19 @@ func _on_controller_status(message: String, is_error: bool) -> void:
 
 # --- Inspector ----------------------------------------------------------------
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	_inspector = MissionInspectorScript.new()
-	host.add_child(_inspector)
-	# The dock host was forwarded just before this (set_asset_dock at shell line 585, build_inspector
+	mount.add_child(_inspector)
+	# The dock mount was forwarded just before this (set_asset_dock at shell line 585, build_inspector
 	# at 592), so it is already cached: the fresh inspector builds its editor + Mission form straight
 	# into the dock with no reparent.
-	_inspector.setup(_controller, _detail_host)
+	_inspector.setup(_controller, _detail_mount)
 	if editor_shell != null and _inspector.has_method("set_reference_services"):
 		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 
 
 # --- Asset dock (the right pane) ----------------------------------------------
-# Opt into %AssetDock and host the per-selection editor + the Mission form there, keeping the left
+# Opt into %AssetDock and mount the per-selection editor + the Mission form there, keeping the left
 # pane to just the mode tabs + the current mode's list/palette. The inspector owns the dock subtree
 # and reparents it back under its own root on teardown (set_asset_dock(null)) before the shell frees
 # the dock's children, so the editor widgets are never torn down.
@@ -456,13 +456,13 @@ func uses_asset_dock() -> bool:
 
 
 func set_asset_dock(dock: Control) -> void:
-	_detail_host = dock
+	_detail_mount = dock
 	# is_instance_valid guards the gap between switch-away (old inspector freed) and switch-back
 	# (set_asset_dock fires before build_inspector rebuilds it): skip the stale ref, just cache.
 	if _inspector != null and is_instance_valid(_inspector):
-		_inspector.set_detail_host(dock)
+		_inspector.set_detail_mount(dock)
 
 
 func sync_asset_dock() -> void:
-	if _inspector != null and is_instance_valid(_inspector) and _detail_host != null:
-		_inspector.set_detail_host(_detail_host)
+	if _inspector != null and is_instance_valid(_inspector) and _detail_mount != null:
+		_inspector.set_detail_mount(_detail_mount)

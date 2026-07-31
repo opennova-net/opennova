@@ -145,10 +145,10 @@ var _logic_section_name: String = ""
 # --- W4-6a decomposition: Live-mode operation sections ------------------
 # Method bundles in the F5 controller-section shape (see
 # modtools/mission/controller/controller_section.gd): ALL state stays on
-# this host (sections reach it through `_lm`); every moved method keeps a
+# this mount (sections reach it through `_lm`); every moved method keeps a
 # delegate below, so callers, .connect targets and tests never moved.
 # Constructed in _init (not _ready) so any pre-ready call path -- e.g. a
-# host that binds the document before mounting -- already has them.
+# mount that binds the document before mounting -- already has them.
 const LiveModeMapView := preload("res://modtools/music/ui/live_mode_map_view.gd")
 const LiveModeAuthoringOps := preload("res://modtools/music/ui/live_mode_authoring_ops.gd")
 const LiveModeNavOps := preload("res://modtools/music/ui/live_mode_nav_ops.gd")
@@ -444,7 +444,7 @@ func _apply_state_label(state: int) -> void:
 # --- W4-6a section delegates --------------------------------------------
 # Every method that moved to a live_mode_*.gd section keeps a thin delegate
 # here, so signal wiring, tests, the workspace's duck-typed stop_director
-# hook, and cross-section calls all keep resolving on the host.
+# hook, and cross-section calls all keep resolving on the mount.
 
 # -> live_mode_map_view.gd
 

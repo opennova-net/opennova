@@ -9,7 +9,7 @@ const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page host; option checkboxes are
 # named after their registry id.
-const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageHost"
+const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageMount"
 const COLLISION_TOGGLE_PATH := NodePath(PAGES + "/Rounds/show_collision")
 const PLAYER_POSITION_PATH := NodePath(PAGES + "/Player/PlayerPosition")
 const PLAYER_ORIENTATION_PATH := NodePath(PAGES + "/Player/PlayerOrientation")
@@ -896,7 +896,7 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 
 	var panel := overlay.find_child("DebugPanel", true, false) as Control
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
 	var player_page := overlay.get_node(PAGES + "/Player") as Control
 	var inventory_label := overlay.get_node(
 			PAGES + "/Player/PlayerInventory") as Label
@@ -912,11 +912,11 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 	assert_false(inventory_toggle.button_pressed,
 			"verbose inventory starts collapsed so actions stay above the fold")
 	assert_false(inventory_label.visible)
-	assert_true(page_host.get_global_rect().encloses(dump.get_global_rect()),
+	assert_true(page_mount.get_global_rect().encloses(dump.get_global_rect()),
 			"snapshot action is visible without scrolling past inventory")
-	assert_true(page_host.get_global_rect().encloses(teleport.get_global_rect()),
+	assert_true(page_mount.get_global_rect().encloses(teleport.get_global_rect()),
 			"teleport action is visible without scrolling past inventory")
-	assert_false(page_host.get_v_scroll_bar().visible,
+	assert_false(page_mount.get_v_scroll_bar().visible,
 			"the default populated Player summary fits the live 1600x900 dock")
 
 	inventory_toggle.set_pressed_no_signal(true)
@@ -938,10 +938,10 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 	assert_gte(page_list.get_global_rect().position.x,
 			viewport_rect.position.x,
 			"the Player loadout cannot push the other page tabs off-screen")
-	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+	assert_lte(player_page.get_combined_minimum_size().x, page_mount.size.x,
 			"the populated page itself fits rather than relying on hidden clipping")
 	assert_lte(player_page.get_global_rect().end.x,
-			page_host.get_global_rect().end.x + 1.0,
+			page_mount.get_global_rect().end.x + 1.0,
 			"expanded loadout controls remain inside the visible page column")
 
 	viewport.size = Vector2i(360, 900)
@@ -951,10 +951,10 @@ func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
 			viewport_rect.position.x + 7.0)
 	assert_lte(panel.get_global_rect().end.x,
 			viewport_rect.end.x - 7.0)
-	assert_lte(player_page.get_combined_minimum_size().x, page_host.size.x,
+	assert_lte(player_page.get_combined_minimum_size().x, page_mount.size.x,
 			"the real loadout also fits the compact single-column dock")
 	assert_lte(player_page.get_global_rect().end.x,
-			page_host.get_global_rect().end.x + 1.0,
+			page_mount.get_global_rect().end.x + 1.0,
 			"compact loadout content wraps instead of being silently clipped")
 
 
@@ -970,28 +970,28 @@ func test_player_page_scrolls_without_moving_the_sidebar() -> void:
 	assert_true(overlay.select_page(&"Player"))
 	await wait_process_frames(2)
 
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
 	var teleport := overlay.get_node(PAGES + "/Player/TeleportPlayer") as Button
-	assert_not_null(page_host)
-	assert_eq(page_host.horizontal_scroll_mode,
+	assert_not_null(page_mount)
+	assert_eq(page_mount.horizontal_scroll_mode,
 			ScrollContainer.SCROLL_MODE_SHOW_NEVER)
-	assert_false(page_host.get_h_scroll_bar().visible,
+	assert_false(page_mount.get_h_scroll_bar().visible,
 			"page content never pushes the whole dock sideways")
-	var vertical_bar := page_host.get_v_scroll_bar()
+	var vertical_bar := page_mount.get_v_scroll_bar()
 	assert_true(vertical_bar.visible)
 	assert_gt(vertical_bar.max_value, vertical_bar.page,
 			"the shared host makes the bottom of a tall page reachable")
 	var sidebar_before := page_list.get_global_rect()
 	vertical_bar.value = vertical_bar.max_value
 	await wait_process_frames(2)
-	assert_true(page_host.get_global_rect().intersects(teleport.get_global_rect()),
+	assert_true(page_mount.get_global_rect().intersects(teleport.get_global_rect()),
 			"scrolling reaches the Player page's final action")
 	assert_eq(page_list.get_global_rect(), sidebar_before,
 			"page scrolling leaves navigation fixed")
 	assert_true(overlay.select_page(&"Stats"))
 	await wait_process_frames(2)
-	assert_eq(page_host.scroll_vertical, 0,
+	assert_eq(page_mount.scroll_vertical, 0,
 			"a newly selected page always opens at its top")
 
 
@@ -1006,18 +1006,18 @@ func test_redesigned_diagnostic_pages_fit_the_compact_dock() -> void:
 	overlay.toggle()
 	await wait_process_frames(2)
 
-	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
-	assert_not_null(page_host)
-	assert_false(page_host.get_h_scroll_bar().visible,
+	var page_mount := overlay.find_child("PageMount", true, false) as ScrollContainer
+	assert_not_null(page_mount)
+	assert_false(page_mount.get_h_scroll_bar().visible,
 			"the compact dock never needs whole-page horizontal scrolling")
 	for page_id in [&"Entities", &"Animation", &"Occlusion", &"Particles", &"Rendering"]:
 		assert_true(overlay.select_page(page_id))
 		await wait_process_frames(2)
 		var page := overlay.get_node(NodePath(PAGES + "/" + String(page_id))) as Control
-		assert_lte(page.get_combined_minimum_size().x, page_host.size.x,
+		assert_lte(page.get_combined_minimum_size().x, page_mount.size.x,
 				"%s fits the compact page column" % page_id)
 		assert_lte(page.get_global_rect().end.x,
-				page_host.get_global_rect().end.x + 1.0,
+				page_mount.get_global_rect().end.x + 1.0,
 				"%s stays inside the visible dock" % page_id)
 
 

@@ -2,10 +2,10 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 
 # MusicLiveMode's transport + events-log operations (W4-6a): the
 # Start/Pause/Resume/Stop handlers, stop_director (the workspace's
-# duck-typed capability hook -- the host keeps the delegate), the
+# duck-typed capability hook -- the mount keeps the delegate), the
 # director event callbacks, the coalescing events log, and the
 # state-label / button-state chrome. Verbatim motion from live_mode.gd;
-# state stays on the host, reached through `_lm`.
+# state stays on the mount, reached through `_lm`.
 
 
 func _on_start() -> void:

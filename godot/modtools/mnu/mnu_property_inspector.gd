@@ -1051,7 +1051,7 @@ func _build_table_section(id: int, authoring: Dictionary) -> void:
 		{"key": "vjustify", "label": "Vertical", "kind": "enum", "options": ["", "TOP", "CENTER", "BOTTOM"]},
 		{"key": "bitmap_draw", "label": "Bitmap", "kind": "bool"},
 		{"key": "scale_bitmap", "label": "Scale", "kind": "bool"},
-		{"key": "custom_draw", "label": "Host draw", "kind": "bool"},
+		{"key": "custom_draw", "label": "Game-drawn", "kind": "bool"},
 		{"key": "bitmap_flags", "label": "Bitmap flags", "kind": "text"},
 	], false)
 	_box.add_child(bodies)
