@@ -197,7 +197,7 @@ The maintainer's verdict: very hard to use. The structural causes are
 verified: a single screen owning eight concerns (transport, breadcrumbs,
 section map, program view, variables, volume meter, event log, follow-live)
 — 1,951 lines when verified; the quality campaign's W4-6a (#372, 2026-07-30)
-has since split it mechanically into a 779-line host plus four delegate
+has since split it mechanically into a 779-line core plus four delegate
 sections, relocating the mass without changing any of these causes; a modal
 map↔section canvas swap (you never see both);
 breadcrumbs implying a hierarchy the flat state machine doesn't have;
@@ -223,7 +223,7 @@ the shell left lane (the only one); and a separate Bank mode.
 
 Deliverable of the MUS-D design spike (Wave 2). Grounded in the code as of
 the design date: the screen `godot/modtools/music/ui/live_mode.gd`
-(1,951 lines then; since W4-6a (#372) a 779-line host plus the
+(1,951 lines then; since W4-6a (#372) a 779-line core plus the
 `live_mode_map_view/authoring_ops/nav_ops/transport_log` delegate sections) +
 `live_mode.tscn`, the adapter `music_workspace.gd`, the untouched document
 layer `music_editor_document.gd` (1,315 lines then, 1,306 today), and the
@@ -450,9 +450,9 @@ replacement and it works). What changes is where nested values get edited:
 
 `live_mode.gd` becomes a thin composition root plus components, one
 shippable slice per move. Starting point updated 2026-07-30: W4-6a (#372)
-already cut the 1,951-line screen to a 779-line host plus four mechanical
+already cut the 1,951-line screen to a 779-line core plus four mechanical
 delegate sections (map_view/authoring_ops/nav_ops/transport_log). Those are
-mass relocations — the host still owns the behavior — not this design's
+mass relocations — the core still owns the behavior — not this design's
 intent-signal components, so every slice below stands; S3/S4's extractions
 now start from those helpers rather than from a monolith. Every slice ends with: the 46 doc/VM tests green
 **unmodified**, the music screen suite (rewritten per-slice, absorbing the
@@ -467,7 +467,7 @@ the workspace fully usable.
 | S3 — transport extraction | Transport bar component owns buttons, status label + warning flash, now-playing, Follow toggle, mini meter; Play folds start/resume | `ui/transport_bar.gd` | transport cases move to `music_transport_test` |
 | S4 — map panel extraction | GraphEdit build/layout/fit/highlight/context-menu/add-section/empty-state into a component emitting `section_selected` / `play_from_here` / rename/delete/add intents | `ui/section_map_panel.gd` | `music_live_map_test` → `music_section_map_test` |
 | S5 — activity feed extraction | De-spam/idle/coalescing rules into a testable model; the strip widget renders it (ticker + expanded feed + filters) | `music_event_feed.gd` (RefCounted), `ui/activity_strip.gd` | log cases leave `music_live_mode_test` for `music_event_feed_test` |
-| S6 — program pane + inline band | Wrap `MusicSectionProgramView` with the section header; `expr_popover.gd` → inline `ui/expr_band.gd`; delete the re-anchor machinery; keyed reopen after re-render | `ui/program_pane.gd`, `ui/expr_band.gd` | `music_expr_popover_test` → `music_expr_band_test` (same assertions, new host) |
+| S6 — program pane + inline band | Wrap `MusicSectionProgramView` with the section header; `expr_popover.gd` → inline `ui/expr_band.gd`; delete the re-anchor machinery; keyed reopen after re-render | `ui/program_pane.gd`, `ui/expr_band.gd` | `music_expr_popover_test` → `music_expr_band_test` (same assertions, new owner) |
 | S7 — inspector depth | Compose becomes the full `ListDetailInspector` (detail: rename/delete/transitions/inputs); Audition binds feed filters; selection sync across list/map/pane | inspectors from S1 grow | new `music_compose_inspector_test` |
 | S8 — root diet + sweep | `live_mode.gd/tscn` → `music_screen.gd/tscn` (composition root only); state→section copy sweep; README rewrite; screenshot re-baseline; MUS-G (F3 wiring) rides this tail | renames | suite-wide path sweep + GUT silent-drop check |
 
@@ -652,10 +652,10 @@ override → menu/game music) rides MUS-I's tail.
 
 ### Menus
 
-- MNU-1: **flow run mode** — host the runtime `NovaMenuShell` (nova_menu_shell.gd's
+- MNU-1: **flow run mode** — run the runtime `NovaMenuShell` (nova_menu_shell.gd's
   node: the same `NovaMnuMenu` with `edit_mode` off, fully interactive) over
   the authored document in a sandboxed "Run" tab: navigation, back stack,
-  window show/hide, per-screen MUSICVAR all execute for real; the host-policy
+  window show/hide, per-screen MUSICVAR all execute for real; the shell-policy
   verbs (cross-file jump, quit, gameplay launch) route to an editor
   interceptor that logs/navigates instead of quitting or launching. Gate: new
   flow-run test + mnu suites (32 files).
@@ -677,7 +677,7 @@ override → menu/game music) rides MUS-I's tail.
   save wired through the standard document hooks. The layout canvas stays as
   the authoring surface. Gate: new `hud_editor_undo_test` + hud suite.
 - HUD-3: **live engine preview** — replace the truth-claim of the hand-drawn
-  preview: host the game's HUD draw (GameHud path from the runtime bring-up)
+  preview: run the game's HUD draw (GameHud path from the runtime bring-up)
   fed by a sample-state source (health/ammo cycling, stance switching,
   static-frame animation), so the preview is the engine rendering the edited
   layout. RE-gated on R4 for any element whose draw is still unwitnessed
@@ -771,11 +771,11 @@ private-poking tests.
 3. **F5 churn** — retired: F5 landed purely mechanically (#204 + #373)
    before any MIS phase; the risk did not materialize.
 4. **Flow-run sandbox escape** (MNU-1): the interceptor must catch every
-   host-policy verb (quit/launch/cross-file) or a menu action closes the
+   shell-policy verb (quit/launch/cross-file) or a menu action closes the
    editor; the flow-run test enumerates the verbs.
 5. **Game-session scope creep** (F3): the shell owns exactly one standalone
    child, three lifecycle gestures (F5/F6/F8), and the stable loopback debug
-   proxy. It does not host gameplay, stage assets, or mirror runtime state.
+   proxy. It does not run gameplay, stage assets, or mirror runtime state.
 6. **Avatars drift** (AVA): the branch predates the editor-layer program AND
    this program's standards — expect adapter-contract and framework deltas;
    the merge train budgets a conformance pass, not a blind rebase.

@@ -211,7 +211,7 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 	AudioServer.set_bus_bypass_effects(bus, bool(previous["bypass"]))
 
 
-func test_game_debug_host_handles_every_cataloged_public_control_action() -> void:
+func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> void:
 	# GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS is the one action list; the
 	# adapter's match arms are its implementation. An action added to the catalog
 	# without an adapter arm would fall through to ERR_INVALID_PARAMETER here.
