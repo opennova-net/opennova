@@ -154,7 +154,9 @@ func enter_net_world() -> void:
 ## legs emit load_failed before load_net_session returns, so the synchronous
 ## rollback has usually already run — this is the deterministic backstop for
 ## any error leg that returns without emitting, idempotent via the same guard
-## as _on_session_lost.
+## as _on_session_lost. (That re-entrant rollback is safe only because
+## load_net_session emits load_failed strictly BEFORE constructing children;
+## an emit added mid-construction would tear down live construction.)
 func abort_net_session(reason: String) -> void:
 	if _state == State.MENU and not _world_load_pending:
 		return
