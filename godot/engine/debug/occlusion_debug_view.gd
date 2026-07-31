@@ -64,6 +64,7 @@ var _mesh: ImmediateMesh
 var _labels: Node3D
 var _signature := 0             # hash of building poses + record geometry
 var _has_surface := false
+var _drawable_count := 0        # portal/occluder records with outline segments
 
 
 func _sim_debug_method() -> String:
@@ -89,11 +90,17 @@ func _refresh_from_sim(sim: Object) -> void:
 
 
 func _clear_all() -> void:
+	_drawable_count = 0
 	if _has_surface:
 		_mesh.clear_surfaces()
 		_has_surface = false
 		_signature = 0
 	_clear_labels()
+
+
+## Number of portal/occluder records currently contributing outline geometry.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
 
 
 func _clear_labels() -> void:
@@ -118,6 +125,7 @@ func _update_geometry(buildings: Array) -> void:
 	_signature = sig
 	_mesh.clear_surfaces()
 	_has_surface = false
+	_drawable_count = 0
 	_clear_labels()
 
 	var segments: Array = []
@@ -129,6 +137,8 @@ func _update_geometry(buildings: Array) -> void:
 			var rtype := int(rec.get("type", 0))
 			var color := type_color(rtype)
 			var pts: PackedVector3Array = rec.get("segments", PackedVector3Array())
+			if pts.size() >= 2:
+				_drawable_count += 1
 			for i in range(0, pts.size() - 1, 2):
 				segments.append({ "a": pts[i], "b": pts[i + 1], "color": color })
 			# Portal-type records carry a section label (record normal points

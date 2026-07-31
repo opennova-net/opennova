@@ -88,7 +88,7 @@ const OPTIONS: Array[Dictionary] = [
 		"getter": &"is_particle_debug",
 		"setter": &"set_particle_debug",
 		"expensive": true,
-		"tooltip": "Draw a red wireframe box (retail's debug box color) + effect name over every live emitter; effects with missing textures list them on the label.",
+		"tooltip": "Draw a red wireframe box (retail's debug box color) and effect name over every live emitter. Missing textures stay in the Particles catalog issues report.",
 	},
 	{
 		"id": &"show_portal_faces",

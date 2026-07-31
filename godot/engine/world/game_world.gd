@@ -1741,6 +1741,10 @@ func is_occlusion_debug() -> bool:
 	return _debug_views.is_occlusion_debug()
 
 
+func get_debug_view_status() -> Dictionary:
+	return _debug_views.get_debug_view_status()
+
+
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
 ## Delegates to the item-effect director; the name stays on GameWorld for the

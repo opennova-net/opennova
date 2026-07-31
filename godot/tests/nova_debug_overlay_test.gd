@@ -20,6 +20,7 @@ const USER_POINTS_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_user_points")
 const OCCLUSION_TOGGLE_PATH := NodePath(PAGES + "/Occlusion/show_portal_faces")
 const OCCLUSION_STATUS_PATH := NodePath(PAGES + "/Occlusion/OcclusionStatus")
 const OCCLUSION_LIST_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildings")
+const OCCLUSION_DETAIL_PATH := NodePath(PAGES + "/Occlusion/OcclusionBuildingDetail")
 const ROUNDS_STATUS_PATH := NodePath(PAGES + "/Rounds/RoundsStatus")
 const ROUNDS_LIST_PATH := NodePath(PAGES + "/Rounds/RoundEvents")
 const SKELETON_TOGGLE_PATH := NodePath(PAGES + "/Animation/show_skeletons")
@@ -667,9 +668,9 @@ func test_set_option_syncs_the_owning_control_and_emits() -> void:
 
 
 func test_occlusion_tab_reports_frame_state() -> void:
-	# The Occlusion tab renders the sim's get_occlusion_debug() snapshot: the
-	# camera line, the frame counts, one row per building with its section mask
-	# and culling stage, and the weld rows.
+	# The Occlusion tab turns the sim's snapshot into decisions: exceptional
+	# buildings lead, rows are selectable, and welds explain only the selected
+	# building instead of masquerading as more table rows.
 	var runtime := FakeOcclusionRuntime.new()
 	add_child_autofree(runtime)
 	runtime.sim.occlusion = {
@@ -701,16 +702,21 @@ func test_occlusion_tab_reports_frame_state() -> void:
 	overlay.select_page(&"Occlusion")
 
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
-	assert_string_contains(status.text, "indoors", "the camera line reports the blink state")
+	assert_string_contains(status.text, "Camera: INDOORS",
+			"the camera line reports the blink state")
 	assert_string_contains(status.text, "1 drawn", "the batch split totals surface")
-	assert_string_contains(status.text, "1 occluder-culled")
-	assert_string_contains(status.text, "entities hidden 4")
+	assert_string_contains(status.text, "1 culled")
+	assert_string_contains(status.text, "4 entities hidden")
 	var list := overlay.get_node(OCCLUSION_LIST_PATH) as ItemList
-	assert_eq(list.item_count, 3, "two building rows + one weld row")
-	assert_string_contains(list.get_item_text(0), "mask 0000000B")
-	assert_string_contains(list.get_item_text(0), "[W]")
-	assert_string_contains(list.get_item_text(1), "occluder-culled")
-	assert_string_contains(list.get_item_text(2), "weld  #42 s1 <-> #43 s2")
+	assert_eq(list.item_count, 2, "only the two inspectable buildings are rows")
+	assert_string_contains(list.get_item_text(0), "CULLED")
+	assert_string_contains(list.get_item_text(0), "#43")
+	assert_string_contains(list.get_item_text(1), "DRAWN")
+	assert_string_contains(list.get_item_text(1), "#42")
+	var detail := overlay.get_node(OCCLUSION_DETAIL_PATH) as Label
+	assert_string_contains(detail.text, "Building #43")
+	assert_string_contains(detail.text, "Welded connections: 1")
+	assert_string_contains(detail.text, "building #42 section 1")
 
 
 func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
@@ -987,6 +993,32 @@ func test_player_page_scrolls_without_moving_the_sidebar() -> void:
 	await wait_process_frames(2)
 	assert_eq(page_host.scroll_vertical, 0,
 			"a newly selected page always opens at its top")
+
+
+func test_redesigned_diagnostic_pages_fit_the_compact_dock() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(360, 900)
+	add_child_autofree(viewport)
+	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
+	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
+	var overlay: CanvasLayer = OverlayScript.new(config_path)
+	viewport.add_child(overlay)
+	overlay.toggle()
+	await wait_process_frames(2)
+
+	var page_host := overlay.find_child("PageHost", true, false) as ScrollContainer
+	assert_not_null(page_host)
+	assert_false(page_host.get_h_scroll_bar().visible,
+			"the compact dock never needs whole-page horizontal scrolling")
+	for page_id in [&"Entities", &"Animation", &"Occlusion", &"Particles", &"Rendering"]:
+		assert_true(overlay.select_page(page_id))
+		await wait_process_frames(2)
+		var page := overlay.get_node(NodePath(PAGES + "/" + String(page_id))) as Control
+		assert_lte(page.get_combined_minimum_size().x, page_host.size.x,
+				"%s fits the compact page column" % page_id)
+		assert_lte(page.get_global_rect().end.x,
+				page_host.get_global_rect().end.x + 1.0,
+				"%s stays inside the visible dock" % page_id)
 
 
 func test_player_teleport_has_separate_policy_and_result_feedback() -> void:
@@ -1326,20 +1358,154 @@ func test_particles_tab_reports_counts_and_peak_reset() -> void:
 
 	stub.alive = 7
 	overlay.refresh_now()
-	assert_string_contains(counts.text, "7 / 7", "current and peak track the live count")
-	assert_eq(groups.item_count, 3, "group header + emitter row + missing-texture row")
+	assert_string_contains(counts.text, "Live effects: 7 (peak 7)",
+			"the effect-world entry count is named as live effects")
+	assert_string_contains(counts.text, "Alive particles: 7",
+			"emitter particle instances are counted separately")
+	assert_string_contains(counts.text, "Drawn quads: 7",
+			"rendered particle quads are counted separately")
+	assert_eq(groups.item_count, 1,
+			"the live list has one selectable row per group, not raw emitter rows")
 
 	stub.alive = 3
 	overlay.refresh_now()
-	assert_string_contains(counts.text, "3 / 7", "the peak latches")
+	assert_string_contains(counts.text, "Live effects: 3 (peak 7)", "the peak latches")
 
 	stub.alive = 0
 	overlay.refresh_now()
-	assert_string_contains(counts.text, "0 / 0", "the peak resets at zero, like retail")
+	assert_string_contains(counts.text, "Live effects: 0 (peak 0)",
+			"the peak resets at zero, like retail")
+
+
+func test_particles_tab_prioritizes_silent_groups_and_explains_the_selection() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	overlay.select_page(&"Particles")
+	var stub := _StubEffectWorld.new()
+	stub.groups = [
+		{
+			"id": 10,
+			"name": "healthy sparks",
+			"source": "sparks.ptl",
+			"forever": false,
+			"emitters": [{"name": "SparkFan", "alive": 6, "rendered": 6}],
+		},
+		{
+			"id": 2,
+			"name": "silent smoke",
+			"source": "smoke.ptl",
+			"forever": true,
+			"emitters": [{"name": "SmokeColumn", "alive": 4, "rendered": 0}],
+		},
+	]
+	add_child_autofree(stub)
+	overlay.set_effect_world_source(func(): return stub)
+	overlay.refresh_now()
+
+	var groups := overlay.find_child("ParticleGroups", true, false) as ItemList
+	var detail := overlay.find_child("ParticleGroupDetail", true, false) as Label
+	assert_eq(groups.item_count, 2)
+	assert_true(groups.is_item_selectable(0), "live groups can be inspected")
+	assert_eq(int(groups.get_item_metadata(0)), 2,
+			"a group with live particles but no drawn quads rises above healthy groups")
+	assert_eq(groups.get_selected_items(), PackedInt32Array([0]),
+			"the highest-attention group is inspected immediately")
+	assert_string_contains(detail.text, "silent smoke")
+	assert_string_contains(detail.text, "smoke.ptl")
+	assert_string_contains(detail.text, "SmokeColumn")
+	assert_string_contains(detail.text, "alive but no quads are drawn",
+			"the detail explains why the group needs attention")
+
+
+func test_particles_tab_keeps_catalog_issues_out_of_the_live_group_list() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	overlay.select_page(&"Particles")
+	var stub := _StubEffectWorld.new()
+	add_child_autofree(stub)
+	overlay.set_effect_world_source(func(): return stub)
+	overlay.refresh_now()
+
+	var groups := overlay.find_child("ParticleGroups", true, false) as ItemList
+	var catalog_status := overlay.find_child(
+			"ParticleCatalogStatus", true, false) as Label
+	var catalog_issues := overlay.find_child(
+			"ParticleCatalogIssues", true, false) as ItemList
+	assert_eq(groups.item_count, 1)
+	assert_false(groups.get_item_text(0).contains("SMOKE1.TGA"),
+			"asset problems do not masquerade as live particle groups")
+	assert_string_contains(catalog_status.text, "2 definitions")
+	assert_string_contains(catalog_status.text, "1 missing texture")
+	assert_eq(catalog_issues.item_count, 1)
+	assert_string_contains(catalog_issues.get_item_text(0), "SMOKE1.TGA")
+
+
+func test_particles_tab_preserves_selection_by_group_id_when_attention_order_changes() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	overlay.select_page(&"Particles")
+	var stub := _StubEffectWorld.new()
+	stub.groups = [
+		{
+			"id": 2, "name": "smoke", "source": "smoke.ptl",
+			"emitters": [{"name": "Smoke", "alive": 4, "rendered": 0}],
+		},
+		{
+			"id": 10, "name": "sparks", "source": "sparks.ptl",
+			"emitters": [{"name": "Sparks", "alive": 6, "rendered": 6}],
+		},
+	]
+	add_child_autofree(stub)
+	overlay.set_effect_world_source(func(): return stub)
+	overlay.refresh_now()
+	var groups := overlay.find_child("ParticleGroups", true, false) as ItemList
+	var detail := overlay.find_child("ParticleGroupDetail", true, false) as Label
+
+	groups.select(1)
+	groups.item_selected.emit(1)
+	assert_string_contains(detail.text, "sparks")
+	stub.groups = [
+		{
+			"id": 2, "name": "smoke", "source": "smoke.ptl",
+			"emitters": [{"name": "Smoke", "alive": 4, "rendered": 4}],
+		},
+		{
+			"id": 10, "name": "sparks", "source": "sparks.ptl",
+			"emitters": [{"name": "Sparks", "alive": 6, "rendered": 0}],
+		},
+	]
+	overlay.refresh_now()
+
+	var selected := groups.get_selected_items()
+	assert_eq(selected.size(), 1)
+	assert_eq(int(groups.get_item_metadata(selected[0])), 10,
+			"refresh follows the selected group identity, not its former row index")
+	assert_string_contains(detail.text, "sparks")
+
+
+func test_particles_tab_explains_when_hide_toggle_suppresses_live_diagnostics() -> void:
+	var overlay := _make_overlay()
+	overlay.toggle()
+	overlay.select_page(&"Particles")
+	var stub := _StubEffectWorld.new()
+	stub.alive = 4
+	add_child_autofree(stub)
+	overlay.set_effect_world_source(func(): return stub)
+	overlay.set_option(&"hide_particles", true)
+	overlay.refresh_now()
+
+	var counts := overlay.find_child("ParticleCounts", true, false) as Label
+	var groups := overlay.find_child("ParticleGroups", true, false) as ItemList
+	var detail := overlay.find_child("ParticleGroupDetail", true, false) as Label
+	assert_string_contains(counts.text, "PARTICLES HIDDEN")
+	assert_eq(groups.item_count, 0,
+			"a suppressed live report cannot masquerade as a real empty effect set")
+	assert_string_contains(detail.text, "diagnostics are suppressed")
 
 
 class _StubEffectWorld extends Node3D:
 	var alive := 0
+	var groups: Array = []
 
 	func active_entry_count() -> int:
 		return alive
@@ -1348,6 +1514,8 @@ class _StubEffectWorld extends Node3D:
 		return 2
 
 	func get_debug_group_report() -> Array:
+		if not groups.is_empty():
+			return groups
 		return [{
 			"id": 1,
 			"name": "puff",
@@ -1378,7 +1546,8 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 	for header in ["SIMULATION", "WORLD", "PLAYER", "DIAGNOSTICS"]:
 		assert_has(texts, header, "the %s section header is present" % header)
 	for page_title in ["Entities", "Sim", "Vars", "Net", "Particles", "Occlusion",
-			"Rounds & collision", "Terrain & foliage", "Environment", "Audio",
+			"Rounds & collision", "Terrain & foliage", "Rendering & overlays",
+			"Environment", "Audio",
 			"Animation & models", "Player", "Stats", "Perf"]:
 		assert_has(texts, page_title, "the %s page is listed" % page_title)
 	assert_false(texts.has("View"), "the dissolved View page is gone")
@@ -1388,50 +1557,29 @@ func test_sidebar_lists_every_page_under_its_category() -> void:
 			"section headers keep readable contrast without becoming selectable")
 
 
-func test_empty_search_hides_the_active_page_and_restores_it_when_cleared() -> void:
+func test_shell_omits_search_and_page_count_chrome() -> void:
 	var overlay := _make_overlay()
-	assert_true(overlay.select_page(&"Rounds"))
-	var rounds := overlay.get_node(PAGES + "/Rounds") as Control
-	assert_true(rounds.visible)
-	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
-	var title := overlay.find_child("ActivePageTitle", true, false) as Label
-	var list := overlay.find_child("PageList", true, false) as ItemList
-
-	search.text = "definitely-no-debug-page-matches-this"
-	search.text_changed.emit(search.text)
-	assert_eq(list.item_count, 0)
-	assert_eq(String(overlay.get_active_page_id()), "")
-	assert_false(rounds.visible, "the previously active page is not left behind")
-	assert_eq(title.text, "No matching page")
-
-	search.text = ""
-	search.text_changed.emit(search.text)
-	assert_eq(String(overlay.get_active_page_id()), "Rounds",
-			"clearing the filter restores the page active before the empty result")
-	assert_true(rounds.visible)
-	assert_eq(title.text, "Rounds & collision")
+	assert_null(overlay.find_child("DebugSearch", true, false),
+			"the categorized sidebar does not need another page/control search")
+	assert_null(overlay.find_child("DebugSearchResults", true, false),
+			"the shell does not spend space announcing how many pages it owns")
+	var help := overlay.find_child("ActivePageHelp", true, false) as Label
+	assert_false(help.text.to_lower().contains("control"),
+			"page headings communicate location without catalog-count noise")
 
 
-func test_search_reports_page_matches_and_copy_always_captures_every_control() -> void:
+func test_copy_always_captures_every_control() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
-	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
-	var result_count := overlay.find_child(
-			"DebugSearchResults", true, false) as Label
 	var copy := overlay.find_child("CopyDebugSnapshot", true, false) as Button
 	var feedback_timer := overlay.find_child(
 			"CopyFeedbackTimer", true, false) as Timer
 	var full_control_count: int = overlay.list_controls().size()
 
-	search.text = "teleport_local_player"
-	search.text_changed.emit(search.text)
-	assert_eq(result_count.text, "1 match")
-	var filtered_control_count: int = overlay.list_controls(&"", search.text).size()
-	assert_lt(filtered_control_count, full_control_count)
 	var copied_payload: Dictionary = overlay.capture_clipboard_snapshot()
 	assert_eq((copied_payload.get("controls", []) as Array).size(),
 			full_control_count,
-			"search navigates pages but never silently filters the copied snapshot")
+			"the shell copy captures the complete public control catalog")
 
 	copy.pressed.emit()
 	assert_eq(copy.text, "Copied")
@@ -1440,23 +1588,16 @@ func test_search_reports_page_matches_and_copy_always_captures_every_control() -
 	assert_eq(copy.text, "Copy", "copy confirmation resets instead of sticking forever")
 
 
-func test_search_and_page_navigation_have_a_keyboard_path() -> void:
+func test_page_navigation_is_focused_on_open_and_escape_closes() -> void:
 	var overlay := _make_overlay()
 	overlay.toggle()
 	assert_true(overlay.select_page(&"Rounds"))
-	var search := overlay.find_child("DebugSearch", true, false) as LineEdit
 	var page_list := overlay.find_child("PageList", true, false) as ItemList
+	var compact_picker := overlay.find_child(
+			"CompactPagePicker", true, false) as OptionButton
 	assert_eq(page_list.focus_mode, Control.FOCUS_ALL)
-
-	search.text = "terrain"
-	search.text_changed.emit(search.text)
-	var escape := InputEventKey.new()
-	escape.keycode = KEY_ESCAPE
-	escape.pressed = true
-	assert_true(overlay.handle_key_input(escape))
-	assert_eq(search.text, "")
-	assert_true(overlay.visible,
-			"the first Escape clears an active search instead of closing the dock")
+	assert_true(page_list.has_focus() or compact_picker.has_focus(),
+			"opening F3 puts keyboard focus on the navigation that remains")
 
 	var active_before: StringName = overlay.get_active_page_id()
 	var next_page := InputEventKey.new()
@@ -1466,18 +1607,18 @@ func test_search_and_page_navigation_have_a_keyboard_path() -> void:
 	assert_true(overlay.handle_key_input(next_page))
 	assert_ne(overlay.get_active_page_id(), active_before)
 
-	search.grab_focus()
-	var down := InputEventKey.new()
-	down.keycode = KEY_DOWN
-	down.pressed = true
-	search.gui_input.emit(down)
-	var compact_picker := overlay.find_child(
-			"CompactPagePicker", true, false) as OptionButton
-	assert_true(page_list.has_focus() or compact_picker.has_focus(),
-			"Down moves from page search into the matching navigation rows")
+	var find_shortcut := InputEventKey.new()
+	find_shortcut.keycode = KEY_F
+	find_shortcut.ctrl_pressed = true
+	find_shortcut.pressed = true
+	assert_false(overlay.handle_key_input(find_shortcut),
+			"Ctrl+F is not captured after removing the redundant shell search")
 
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.pressed = true
 	assert_true(overlay.handle_key_input(escape))
-	assert_false(overlay.visible, "Escape closes when there is no search to clear")
+	assert_false(overlay.visible, "Escape closes the dock in one step")
 
 
 func test_page_cycle_shortcut_precedes_focused_page_controls() -> void:
@@ -1645,10 +1786,39 @@ func test_entities_page_renders_and_curates_the_pick_list() -> void:
 	var header := overlay.find_child("PicksHeader", true, false) as Label
 	assert_string_contains(header.text, "(2/8)")
 	assert_string_contains(
-			(rows.get_child(0).get_node("PickLabel") as Label).text, "crate_a")
+			(rows.get_child(0).get_node("SelectPick0") as Button).text, "crate_a")
 
 	(rows.get_child(0).get_node("RemovePick") as Button).pressed.emit()
 	assert_eq(picks.size(), 1, "the row's X removes exactly that pick")
 	assert_eq(int(picks.get_picks()[0].get("entity_handle", -1)), 2)
 	(overlay.find_child("ClearPicks", true, false) as Button).pressed.emit()
 	assert_eq(picks.size(), 0, "Clear picks empties the set")
+	await wait_process_frames(2)
+
+
+func test_replacing_pick_list_detaches_entities_even_while_page_is_inactive() -> void:
+	var overlay := _make_overlay()
+	var old_picks := NovaDebugPickList.new()
+	var new_picks := NovaDebugPickList.new()
+	old_picks.add(_fabricated_pick(8, "old_pick"))
+	overlay.set_pick_list(old_picks)
+	overlay.toggle()
+	assert_true(overlay.select_page(&"Entities"))
+	assert_eq(old_picks.picked.get_connections().size(), 1)
+	var rows := overlay.find_child("PickRows", true, false)
+	assert_eq(rows.get_child_count(), 1)
+
+	assert_true(overlay.select_page(&"Particles"))
+	overlay.close()
+	overlay.set_pick_list(new_picks)
+	assert_eq(old_picks.picked.get_connections().size(), 0,
+			"the inactive page no longer listens to the retired host list")
+	assert_eq(new_picks.picked.get_connections().size(), 1,
+			"the replacement binds without waiting for Entities to refresh")
+	assert_eq(rows.get_child_count(), 0,
+			"an empty replacement cannot leave stale pick buttons on the hidden page")
+
+	overlay.set_pick_list(null)
+	assert_eq(new_picks.picked.get_connections().size(), 0,
+			"detaching the host pick model removes the last page callback")
+	await wait_process_frames(2)

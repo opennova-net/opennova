@@ -59,8 +59,6 @@ var _status_label: Label
 var _runtime_status_label: Label
 var _page_title_label: Label
 var _page_help_label: Label
-var _search_edit: LineEdit
-var _search_result_label: Label
 var _unlock_edits: CheckButton
 var _copy_button: Button
 var _copy_feedback_timer: Timer
@@ -70,7 +68,6 @@ var _page_host: ScrollContainer
 
 var _pages: Array[NovaDebugPage] = []
 var _active_page: NovaDebugPage = null
-var _empty_search_restore_page: NovaDebugPage = null
 var _row_pages: Dictionary = {}  # sidebar row index -> NovaDebugPage
 var _panel_width := DEFAULT_PANEL_WIDTH
 var _applied_panel_width := DEFAULT_PANEL_WIDTH
@@ -193,6 +190,8 @@ func get_debug_session() -> NovaDebugSession:
 ## renders/curates it and snapshots embed it. Null detaches.
 func set_pick_list(pick_list: NovaDebugPickList) -> void:
 	_ctx.pick_list = pick_list
+	if _entities_pane != null:
+		_entities_pane.rebind_pick_list(pick_list)
 	if visible:
 		_refresh()
 
@@ -208,8 +207,7 @@ func toggle() -> void:
 		_active_page.set_capture_active(visible)
 	if visible:
 		_refresh()
-		if _search_edit != null:
-			_search_edit.grab_focus()
+		_focus_page_list()
 
 
 func close() -> void:
@@ -430,28 +428,6 @@ func _build_panel() -> void:
 	close_button.pressed.connect(close)
 	header.add_child(close_button)
 
-	var search_row := HBoxContainer.new()
-	search_row.name = "DebugSearchRow"
-	search_row.add_theme_constant_override("separation", 6)
-	box.add_child(search_row)
-
-	_search_edit = LineEdit.new()
-	_search_edit.name = "DebugSearch"
-	_search_edit.placeholder_text = "Find a page or control…"
-	_search_edit.clear_button_enabled = true
-	_search_edit.tooltip_text = \
-			"Find the page that owns a matching public debug control (Ctrl+F)."
-	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search_edit.text_changed.connect(_on_search_changed)
-	_search_edit.gui_input.connect(_on_search_input)
-	search_row.add_child(_search_edit)
-
-	_search_result_label = Label.new()
-	_search_result_label.name = "DebugSearchResults"
-	_search_result_label.text = "0 pages"
-	_search_result_label.tooltip_text = "Pages matching this search."
-	search_row.add_child(_search_result_label)
-
 	_status_label = Label.new()
 	_status_label.name = "DebugStatus"
 	_status_label.text = "NO MISSION · Host-wide diagnostics remain available."
@@ -562,7 +538,6 @@ func _rebuild_page_list() -> void:
 	_page_list.clear()
 	_compact_page_picker.clear()
 	_row_pages.clear()
-	var filter_text := _search_edit.text.strip_edges() if _search_edit != null else ""
 	var categories: Array[StringName] = CATEGORY_ORDER.duplicate()
 	for page in _pages:
 		if not categories.has(page.page_category()):
@@ -570,7 +545,7 @@ func _rebuild_page_list() -> void:
 	for category in categories:
 		var members: Array[NovaDebugPage] = []
 		for page in _pages:
-			if page.page_category() == category and _page_matches(page, filter_text):
+			if page.page_category() == category:
 				members.append(page)
 		if members.is_empty():
 			continue
@@ -588,7 +563,6 @@ func _rebuild_page_list() -> void:
 			_compact_page_picker.set_item_metadata(picker_index, page)
 			_compact_page_picker.set_item_tooltip(picker_index, "%s · %s" % [
 				page.page_title(), String(page.page_category())])
-	_update_search_result_label(filter_text)
 	_sync_page_list_selection()
 
 
@@ -610,20 +584,7 @@ func _sync_page_list_selection() -> void:
 					_compact_page_picker.get_item_tooltip(index)
 			return
 	if _compact_page_picker.item_count == 0:
-		_compact_page_picker.tooltip_text = "No pages match the current search."
-
-
-func _update_search_result_label(filter_text: String) -> void:
-	if _search_result_label == null:
-		return
-	var page_count := _row_pages.size()
-	if page_count == 0:
-		_search_result_label.text = "No matches"
-	elif filter_text.is_empty():
-		_search_result_label.text = "%d pages" % page_count
-	else:
-		_search_result_label.text = "%d match%s" % [
-			page_count, "" if page_count == 1 else "es"]
+		_compact_page_picker.tooltip_text = "No debug pages are available."
 
 
 func _activate_page(page: NovaDebugPage, persist: bool) -> void:
@@ -664,56 +625,19 @@ func _on_compact_page_selected(index: int) -> void:
 		_activate_page(page, true)
 
 
-func _on_search_changed(_text: String) -> void:
-	_rebuild_page_list()
-	if _active_page != null and _row_pages.values().has(_active_page):
-		_empty_search_restore_page = null
-		return
-	if _row_pages.is_empty():
-		if _active_page != null:
-			_empty_search_restore_page = _active_page
-		_activate_page(null, false)
-		return
-	if _empty_search_restore_page != null \
-			and _row_pages.values().has(_empty_search_restore_page):
-		var restore_page := _empty_search_restore_page
-		_empty_search_restore_page = null
-		_activate_page(restore_page, false)
-		return
-	_empty_search_restore_page = null
-	for row in _row_pages:
-		_activate_page(_row_pages[row], false)
-		return
-
-
-func _page_matches(page: NovaDebugPage, filter_text: String) -> bool:
-	var needle := filter_text.to_lower()
-	if needle.is_empty():
-		return true
-	var page_text := ("%s %s %s" % [
-			page.page_id(), page.page_title(), page.page_category()]).to_lower()
-	if page_text.contains(needle):
-		return true
-	return not _session.list_controls(page.page_id(), needle).is_empty()
-
-
 func _update_page_header() -> void:
 	if _page_title_label == null or _page_help_label == null:
 		return
 	if _active_page == null:
-		_page_title_label.text = "No matching page"
-		_page_help_label.text = "Clear search"
+		_page_title_label.text = "No debug page"
+		_page_help_label.text = ""
 		_page_help_label.tooltip_text = _page_help_label.text
 		return
 	_page_title_label.text = _active_page.page_title()
-	var control_count := _session.list_controls(_active_page.page_id()).size()
-	var count_text := "%d control%s" % [
-		control_count, "" if control_count == 1 else "s"]
 	if _active_page.page_title() == String(_active_page.page_category()):
-		_page_help_label.text = count_text
+		_page_help_label.text = ""
 	else:
-		_page_help_label.text = "%s · %s" % [
-			String(_active_page.page_category()), count_text]
+		_page_help_label.text = String(_active_page.page_category())
 	_page_help_label.tooltip_text = _page_help_label.text
 
 
@@ -930,16 +854,6 @@ func _reset_copy_feedback() -> void:
 	_copy_button.tooltip_text = COPY_TOOLTIP
 
 
-func _on_search_input(event: InputEvent) -> void:
-	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
-		return
-	if key.keycode == KEY_DOWN or key.keycode == KEY_ENTER \
-			or key.keycode == KEY_KP_ENTER:
-		_focus_page_list()
-		_search_edit.accept_event()
-
-
 func _focus_page_list() -> void:
 	if _page_list == null or _row_pages.is_empty():
 		return
@@ -979,14 +893,7 @@ func handle_key_input(event: InputEvent) -> bool:
 	if not visible or key == null or not key.pressed or key.echo:
 		return false
 	if key.keycode == KEY_ESCAPE:
-		if _search_edit != null and not _search_edit.text.is_empty():
-			_search_edit.clear()
-			return true
 		close()
-		return true
-	elif key.keycode == KEY_F and key.ctrl_pressed and _search_edit != null:
-		_search_edit.grab_focus()
-		_search_edit.select_all()
 		return true
 	elif key.ctrl_pressed and key.keycode == KEY_PAGEUP:
 		return _cycle_page(-1)

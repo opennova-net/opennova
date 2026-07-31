@@ -64,6 +64,16 @@ func get_static_overlay_count() -> int:
 	return _static_overlay_count
 
 
+## Number of named user-point markers currently contributed by live and static
+## model overlays.
+func get_debug_drawable_count() -> int:
+	var count := 0
+	for child in get_children():
+		if child.has_method("get_user_point_count"):
+			count += int(child.call("get_user_point_count"))
+	return count
+
+
 func _process(_delta: float) -> void:
 	refresh_now()
 

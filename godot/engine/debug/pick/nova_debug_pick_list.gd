@@ -13,6 +13,10 @@ extends RefCounted
 ## oldest — the developer curates the set.
 
 signal changed
+## Emitted only for a successful add/refresh, with the accepted card. Unlike
+## `changed`, consumers can use this to focus the object the developer just
+## picked without treating remove/clear as another selection.
+signal picked(pick: Dictionary)
 
 const MAX_PICKS := 8
 
@@ -32,11 +36,13 @@ func add(pick: Dictionary) -> int:
 		if int(_picks[i].get("entity_handle", -1)) == handle:
 			_picks[i] = pick.duplicate(true)
 			changed.emit()
+			picked.emit(_picks[i].duplicate(true))
 			return i
 	if _picks.size() >= MAX_PICKS:
 		return -1
 	_picks.append(pick.duplicate(true))
 	changed.emit()
+	picked.emit(_picks.back().duplicate(true))
 	return _picks.size() - 1
 
 

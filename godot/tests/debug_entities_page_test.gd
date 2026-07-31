@@ -8,6 +8,7 @@ class StubSim:
 
 	var action_error: Error = OK
 	var vehicle_first := false
+	var guard_present := true
 	var health_calls: Array[Dictionary] = []
 	var position_calls: Array[Dictionary] = []
 	var cards := [
@@ -49,8 +50,12 @@ class StubSim:
 				42, 1002, 501, Vector3(11.0, 2.0, -31.0))
 		var vehicle := _present_row(
 				77, 2001, 777, Vector3(20.0, 4.0, -40.0))
-		snapshot.append_array(vehicle if vehicle_first else guard)
-		snapshot.append_array(guard if vehicle_first else vehicle)
+		if vehicle_first or not guard_present:
+			snapshot.append_array(vehicle)
+		if guard_present:
+			snapshot.append_array(guard)
+		if not vehicle_first and guard_present:
+			snapshot.append_array(vehicle)
 		return snapshot
 
 	func get_world_entity_debug(net_id: int) -> Dictionary:
@@ -104,11 +109,14 @@ class StubRuntime:
 		return sim
 
 
-func _make_page(runtime: StubRuntime) -> DebugEntitiesPage:
+func _make_page(
+		runtime: StubRuntime,
+		picks: NovaDebugPickList = null) -> DebugEntitiesPage:
 	add_child_autofree(runtime)
 	var ctx := NovaDebugContext.new()
 	ctx.runtime_source = func(): return runtime
 	ctx.world_source = func(): return null
+	ctx.pick_list = picks
 	ctx.options = NovaDebugOptionState.new()
 	ctx.session = NovaDebugSession.new()
 	NovaDebugCatalog.install(ctx.session)
@@ -121,6 +129,42 @@ func _make_page(runtime: StubRuntime) -> DebugEntitiesPage:
 	add_child_autofree(page)
 	page.refresh()
 	return page
+
+
+func _guard_pick() -> Dictionary:
+	return {
+		"hit": true,
+		"entity_handle": 1002,
+		"pool": 1,
+		"kind": 1,
+		"index": 42,
+		"bms_id": 1042,
+		"net_id": 42,
+		# Pick cards carry the visual/authored item id while PF_TYPE_ID is the
+		# runtime type. Exact wire/net identity must win when those domains differ.
+		"item_id": 9001,
+		"name": "Live guard",
+		"position_godot": Vector3(11.0, 2.0, -31.0),
+		"distance_units": 12.0,
+		"tick": 77,
+	}
+
+
+func _vehicle_pick() -> Dictionary:
+	return {
+		"hit": true,
+		"entity_handle": 2001,
+		"pool": 2,
+		"kind": 1,
+		"index": 77,
+		"bms_id": 1077,
+		"net_id": 77,
+		"item_id": 7007,
+		"name": "Client vehicle",
+		"position_godot": Vector3(20.0, 4.0, -40.0),
+		"distance_units": 20.0,
+		"tick": 76,
+	}
 
 
 func test_client_present_rows_keep_order_and_ai_edit_identity() -> void:
@@ -198,6 +242,101 @@ func test_mutation_editors_appear_only_after_an_editable_selection() -> void:
 			"an editable AI-backed selection exposes position editing")
 
 
+func test_successful_world_pick_selects_and_opens_the_matching_inspector() -> void:
+	var runtime := StubRuntime.new()
+	var picks := NovaDebugPickList.new()
+	var page := _make_page(runtime, picks)
+	var list := page.find_child("EntityList", true, false) as ItemList
+	var health_editor := page.find_child(
+			"EntityEditHealth", true, false) as Control
+	var value := page.find_child("EntityHealthValue", true, false) as SpinBox
+	var set_health := page.find_child("SetEntityHealth", true, false) as Button
+
+	assert_true(list.get_selected_items().is_empty())
+	picks.add(_guard_pick())
+
+	assert_true(list.is_selected(0),
+			"a successful pick selects the same live entity in the inspector")
+	assert_true(health_editor.visible,
+			"the selected AI-backed pick exposes its mutation affordances")
+	assert_false(set_health.disabled)
+	value.value = 39
+	set_health.pressed.emit()
+	assert_eq(runtime.sim.health_calls, [{"index": 1, "health": 39}],
+			"pick-driven selection still mutates through the authoritative AI index")
+
+
+func test_picked_entity_card_can_reselect_its_inspector_row() -> void:
+	var runtime := StubRuntime.new()
+	var picks := NovaDebugPickList.new()
+	picks.add(_guard_pick())
+	var page := _make_page(runtime, picks)
+	var list := page.find_child("EntityList", true, false) as ItemList
+	list.deselect_all()
+
+	var select_pick := page.find_child("SelectPick0", true, false) as Button
+	assert_not_null(select_pick,
+			"picked cards are navigation affordances, not passive labels")
+	if select_pick != null:
+		select_pick.pressed.emit()
+		assert_true(list.is_selected(0))
+
+
+func test_pick_waits_for_a_new_live_row_instead_of_retaining_an_old_selection() -> void:
+	var runtime := StubRuntime.new()
+	var picks := NovaDebugPickList.new()
+	var page := _make_page(runtime, picks)
+	var list := page.find_child("EntityList", true, false) as ItemList
+	var saved_cards: Array = runtime.sim.cards.duplicate(true)
+
+	# The click can arrive one presentation beat before the picked actor's row.
+	# Keep another row selected so a simple "select last pick only when empty"
+	# implementation cannot accidentally pass.
+	runtime.sim.cards = []
+	runtime.sim.guard_present = false
+	page.refresh()
+	list.select(0)
+	list.item_selected.emit(0)
+	assert_string_contains(list.get_item_text(0), "ssn 77")
+	picks.add(_guard_pick())
+	assert_true(list.is_selected(0), "the old vehicle remains while the guard is absent")
+
+	runtime.sim.cards = saved_cards
+	runtime.sim.guard_present = true
+	page.refresh()
+	assert_true(list.is_selected(0),
+			"the pending pick wins as soon as its guard row appears")
+	assert_string_contains(list.get_item_text(0), "ssn 42")
+	var detail := page.find_child("EntityDetail", true, false) as Label
+	assert_string_contains(detail.text, "Live guard")
+
+
+func test_removing_a_pending_pick_cancels_its_future_auto_selection() -> void:
+	var runtime := StubRuntime.new()
+	var saved_cards: Array = runtime.sim.cards.duplicate(true)
+	runtime.sim.cards = []
+	runtime.sim.guard_present = false
+	var picks := NovaDebugPickList.new()
+	var page := _make_page(runtime, picks)
+	var list := page.find_child("EntityList", true, false) as ItemList
+
+	picks.add(_vehicle_pick())
+	picks.add(_guard_pick())
+	assert_true(list.is_selected(0))
+	picks.remove_at(1)
+	assert_eq(picks.size(), 1, "the unrelated vehicle pick remains")
+
+	runtime.sim.cards = saved_cards
+	runtime.sim.guard_present = true
+	page.refresh()
+	var selected := list.get_selected_items()
+	assert_eq(selected.size(), 1)
+	assert_eq(int(selected[0]), 1,
+			"removing the pending guard keeps the selected vehicle after rows reorder")
+	assert_string_contains(list.get_item_text(selected[0]), "ssn 77")
+	await wait_process_frames(2)
+
+
 func test_position_editor_labels_axes_and_stays_compact() -> void:
 	var page := _make_page(StubRuntime.new())
 	var list := page.find_child("EntityList", true, false) as ItemList
@@ -248,6 +387,52 @@ func test_live_reorder_cannot_retarget_the_selected_entity_edit() -> void:
 	value.value = 62
 	health.pressed.emit()
 	assert_eq(runtime.sim.health_calls.back(), {"index": 1, "health": 62})
+
+
+func test_refresh_preserves_a_staged_value_after_tabbing_to_its_apply_button() -> void:
+	var page := _make_page(StubRuntime.new())
+	var list := page.find_child("EntityList", true, false) as ItemList
+	list.item_selected.emit(0)
+	var value := page.find_child("EntityHealthValue", true, false) as SpinBox
+	var apply := page.find_child("SetEntityHealth", true, false) as Button
+	value.value = 33
+	apply.grab_focus()
+
+	page.refresh()
+
+	assert_eq(value.value, 33.0,
+			"the live refresh cannot overwrite an edit staged for the focused Set button")
+
+
+func test_pick_selection_replaces_staged_values_before_retargeting_edits() -> void:
+	var runtime := StubRuntime.new()
+	runtime.sim.cards.append({
+		"name": "Client vehicle",
+		"net_id": 77,
+		"position": Vector3(20.0, 4.0, -40.0),
+		"pool": 2,
+		"wire_handle": 2001,
+		"alive": true,
+		"health": 400,
+		"ai_health": 400,
+	})
+	var picks := NovaDebugPickList.new()
+	var page := _make_page(runtime, picks)
+	var list := page.find_child("EntityList", true, false) as ItemList
+	var value := page.find_child("EntityHealthValue", true, false) as SpinBox
+	var apply := page.find_child("SetEntityHealth", true, false) as Button
+	list.item_selected.emit(0)
+	value.value = 33
+	apply.grab_focus()
+
+	picks.add(_vehicle_pick())
+
+	assert_true(list.is_selected(1))
+	assert_eq(value.value, 400.0,
+			"changing entity identity replaces the previous target's staged value")
+	apply.pressed.emit()
+	assert_eq(runtime.sim.health_calls.back(), {"index": 2, "health": 400},
+			"the focused editor cannot apply entity A's value to picked entity B")
 
 
 func test_despawned_ai_pool_entries_are_explicit_and_not_editable() -> void:

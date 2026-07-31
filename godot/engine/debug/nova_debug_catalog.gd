@@ -210,22 +210,6 @@ static func _install_rendering(session: NovaDebugSession) -> void:
 	draw_mode.expensive = true
 	session.register_control(draw_mode)
 
-	var collisions := NovaDebugControlDef.check(
-			&"physics_collision_shapes", &"Rendering", "Collision shapes",
-			"Draw physics collision shapes over the game.",
-			TARGET_SCENE_TREE, &"", &"", false)
-	collisions.property_name = &"debug_collisions_hint"
-	collisions.expensive = true
-	session.register_control(collisions)
-
-	var navigation := NovaDebugControlDef.check(
-			&"navigation_paths", &"Rendering", "Navigation",
-			"Draw navigation regions and paths over the game.",
-			TARGET_SCENE_TREE, &"", &"", false)
-	navigation.property_name = &"debug_navigation_hint"
-	navigation.expensive = true
-	session.register_control(navigation)
-
 
 static func _install_edit_actions(session: NovaDebugSession) -> void:
 	var teleport := NovaDebugControlDef.action_control(

@@ -28,6 +28,7 @@ const BOX_EDGES := [
 var _effect_world_source := Callable()
 var _lines: ImmediateMesh
 var _labels: Dictionary = {}  # group id -> Label3D, reused across refreshes
+var _drawable_count := 0      # live emitters with non-empty bounds
 
 
 ## `source` resolves the live NovaEffectWorld (or null) on every refresh —
@@ -52,6 +53,7 @@ func _process(_delta: float) -> void:
 
 func refresh_now() -> void:
 	_lines.clear_surfaces()
+	_drawable_count = 0
 	if not _effect_world_source.is_valid():
 		_hide_stale_labels({})
 		return
@@ -73,6 +75,7 @@ func refresh_now() -> void:
 			_append_box(segments, bounds, group_color)
 			group_center += bounds.get_center()
 			group_boxes += 1
+			_drawable_count += 1
 		if group_boxes > 0:
 			var id := int(group.get("id", 0))
 			seen[id] = true
@@ -87,6 +90,11 @@ func refresh_now() -> void:
 		_lines.surface_set_color(seg[2])
 		_lines.surface_add_vertex(seg[1])
 	_lines.surface_end()
+
+
+## Number of live emitter bounds currently contributing geometry.
+func get_debug_drawable_count() -> int:
+	return _drawable_count
 
 
 func _append_box(segments: Array, box: AABB, color: Color) -> void:
