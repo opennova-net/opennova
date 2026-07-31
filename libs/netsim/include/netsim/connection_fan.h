@@ -36,6 +36,15 @@ namespace opennova::netsim {
 // [orig: dispatch_entity_packet_callback @0x4D6A80 gates on g_napi_np_ctx.is_authority].
 void drain_connection_c2s(world::World &world, const Connection &conn);
 
+// The per-frame 0x0A byte cap, header included [orig: g_entity_send_budget
+// @0xC8FC50, default 600, runtime-set by the BANDWIDTH server command clamped
+// 100-1600]. A global like retail's; the host session applies GameConfig's
+// value at bring-up. Lowering it rotates entities out of each frame exactly
+// the way a populated retail host does (D-NET-154) — the honest subrate lever
+// for tests.
+void set_entity_send_budget(int bytes);
+int entity_send_budget();
+
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
 // `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`
 // is the world snapshot built ONCE by the caller [orig: NapiNPServer_SendToConn @0x4c4f20 per node].

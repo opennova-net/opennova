@@ -4,6 +4,7 @@
 #include "npruntime/server_spawn.h"   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
 #include "npruntime/server_tick.h"    // Server_TickUpdate
 
+#include <netsim/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
 #include <npwire/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
 #include <npwire/ingame_encode.h> // encode_organic_spawn_batch
 #include <npwire/nw_session_framing.h>
@@ -250,6 +251,10 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
+	// Apply the configured 0x0A byte cap to the netsim global (the retail
+	// BANDWIDTH command's target [orig: g_entity_send_budget @0xC8FC50]).
+	netsim::set_entity_send_budget(
+			static_cast<int>(cfg.config.entity_send_budget));
 	// Select the witnessed §5.0 table row: serve-and-play is mode 3 (host + local client);
 	// dedicated/headless is mode 1 (host only, no dcb-2 loopback player).
 	set_connection_mode(

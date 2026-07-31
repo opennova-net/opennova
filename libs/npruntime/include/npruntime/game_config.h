@@ -103,6 +103,10 @@ struct GameConfig {
 	uint32_t spawn_z = 0x003a5e6au;
 	std::vector<std::string> spawn_names;
 	std::vector<uint8_t> mission_header_blob;
+	// The per-frame 0x0A byte cap [orig: g_entity_send_budget @0xC8FC50, the
+	// BANDWIDTH server command, clamped 100-1600]. start_host_session applies
+	// it to the netsim global at bring-up.
+	uint32_t entity_send_budget = 600;
 };
 
 } // namespace opennova::np

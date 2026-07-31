@@ -1058,6 +1058,11 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 		config.game_type = dictionary_u32(p_options, "game_type", config.game_type);
 	}
 	config.mp_attributes = dictionary_u32(p_options, "mpattrib", config.mp_attributes);
+	// The witnessed BANDWIDTH server command (100-1600, clamped at apply):
+	// lowers the per-frame 0x0A byte cap so entity records rotate across frames
+	// [orig: g_entity_send_budget @0xC8FC50].
+	config.entity_send_budget =
+			dictionary_u32(p_options, "bandwidth", config.entity_send_budget);
 	if (p_options.has("fat_bullets"))
 		config.fat_bullets = static_cast<bool>(p_options["fat_bullets"]);
 	if (p_options.has("one_shot_kill"))

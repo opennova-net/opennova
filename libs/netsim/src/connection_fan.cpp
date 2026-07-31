@@ -344,7 +344,21 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 // via the BANDWIDTH server command (100-1600). The new/stale-recipient halving
 // (budget >>= 1 iff slot+89876 congestion flag or connection uptime > 2000
 // [orig: @0x517c62]) is deferred — no congestion-callback model yet.
-constexpr int kEntitySendBudget = 600;
+int g_entity_send_budget = 600;
+
+} // namespace
+
+void set_entity_send_budget(int bytes) {
+	// The witnessed BANDWIDTH server-command clamp [orig: 100-1600 onto
+	// g_entity_send_budget @0xC8FC50].
+	if (bytes < 100) bytes = 100;
+	if (bytes > 1600) bytes = 1600;
+	g_entity_send_budget = bytes;
+}
+
+int entity_send_budget() { return g_entity_send_budget; }
+
+namespace {
 
 // Age-array index for one entity: pool-0 ages [0..255], pool-1 [256..511], slot & 0xFF
 // [orig: idx = handle & 0xFFF, +256 if pool 1, @0x50f15c].
@@ -443,7 +457,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 		selected.push_back(*s.snap);
 		conn.s2c_entity_age[age_index(*s.snap)] = 0; // [orig: @0x50f168]
 		written += record_wire_size(*s.snap);
-		if (written >= std::size_t(kEntitySendBudget)) break; // [orig: @0x50f34b]
+		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
 	return selected;
 }
@@ -698,7 +712,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// entities absorb the remainder — same cap, and the retail decode loop is
 	// tag-driven either way. (D-NET-152/154)
 	std::vector<RoundEventRecord> rounds =
-			select_round_events(w, conn, anchor, std::size_t(kEntitySendBudget) - header_bytes);
+			select_round_events(w, conn, anchor, std::size_t(g_entity_send_budget) - header_bytes);
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);

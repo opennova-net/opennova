@@ -1730,13 +1730,13 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 		joiner_impacts.append_array(joiner.drain_round_impacts())
 		OS.delay_msec(2)
 
-	# The minimal test items.def lacks retail's id-105305 multiplayer Player
-	# template (it only carries the distinct id-105310 SP player), so the host's
-	# faithful ItemDef-null guard consumes the person collision without damage.
-	# The authoritative collision itself is pinned by host_impacts below; retail
-	# data supplies the real 0x14B9 ItemDef and therefore reaches damage.
-	assert_eq(host.get_local_player_health(), host_health_before,
-			"the stripped fixture cannot apply player damage without ItemDef 105305")
+	# The fixture now carries the id-105305 multiplayer Player template (added
+	# for the D-NET-196 glide leg: the traits sweep classifies it `plyr` like
+	# retail data), so the authoritative person collision reaches real damage —
+	# the retail-data behavior the old stripped-fixture negative documented as
+	# unreachable.
+	assert_lt(host.get_local_player_health(), host_health_before,
+			"the authoritative person collision applies player damage (ItemDef 105305)")
 	assert_eq(joiner.get_local_player_health(), joiner_health_before,
 			"the shooter's peer proxy cannot mutate its local World health")
 	assert_eq(host_impacts.size(), 1,
@@ -1982,6 +1982,101 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
 			"the echoed S2C 0x49 refilled the pre-spawn-kit joiner")
 	assert_eq(int(reloaded.get("clip", -1)), 30, "the clip refilled to capacity")
+
+	joiner.free()
+	host.free()
+
+
+func _subrate_walk_mission() -> NovaMissionData:
+	# A populated-enough entity set that the BANDWIDTH-capped 0x0A rotates
+	# entities across frames (the D-NET-154 regime): eight parked AI organics
+	# plus the deploy markers. They sit far from the walkers so nothing
+	# interacts; they exist purely to fill the per-frame byte budget.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	for i in range(8):
+		assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+				Vector3(120 + 6 * i, 140, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
+	return md
+
+
+func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> void:
+	# D-NET-196 (net-re 5.38e): with the witnessed BANDWIDTH cap forcing the
+	# per-entity 0x0A rotation, the joiner's presented pose for the HOST's
+	# walking player must keep advancing every tick through the ported
+	# per-class chase - never hold-then-teleport at the wire cadence.
+	var mission := _subrate_walk_mission()
+	var host := NovaSimulation.new()
+	host.configure_host_session({"gametype": 0x30020, "bandwidth": 100})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1),
+			"host spawned its own player")
+
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "GlideObserver"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"glide observer reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	# Move the host player authoritatively at run speed (the GUT anim fixtures
+	# carry no root translation, so input-walking moves nothing; the wire and
+	# the joiner-side chase under test are identical either way).
+	var step_m := 0.0625 # per-tick run displacement (3.9 m/s at 62.5 Hz)
+	var tick_i := 0
+	for _warm in range(32):
+		tick_i += 1
+		host.debug_teleport_local_player(
+				Vector3(tick_i * step_m, 0.0, 0.0), 0.0, 0.0)
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+
+	var samples: Array[Vector3] = []
+	for _t in range(64):
+		tick_i += 1
+		host.debug_teleport_local_player(
+				Vector3(tick_i * step_m, 0.0, 0.0), 0.0, 0.0)
+		host.step()
+		joiner.step()
+		var p := _present_position_for_type(joiner, 0x14B9)
+		assert_true(p.is_finite(), "the joiner presents the host player row")
+		if not p.is_finite():
+			break
+		samples.append(p)
+		OS.delay_msec(2)
+
+	if samples.size() < 32:
+		joiner.free()
+		host.free()
+		return
+	var total := 0.0
+	var max_step := 0.0
+	var stalled := 0
+	for i in range(1, samples.size()):
+		var d := samples[i].distance_to(samples[i - 1])
+		total += d
+		max_step = maxf(max_step, d)
+		if d < 0.005:
+			stalled += 1
+	assert_gt(total, 1.0, "the remote player visibly walked during the window")
+	var steps := float(samples.size() - 1)
+	var mean_step := total / steps
+	assert_lt(float(stalled) / steps, 0.25,
+			"the presented pose keeps advancing between wire records (no ZOH holds)")
+	assert_lt(max_step, maxf(3.0 * mean_step, 0.02),
+			"no hold-then-teleport step (bounded near the mean advance)")
 
 	joiner.free()
 	host.free()
