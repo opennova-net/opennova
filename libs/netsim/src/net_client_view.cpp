@@ -6,6 +6,8 @@
 #include <io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 
 namespace opennova::netsim {
 
@@ -156,6 +158,7 @@ void NetClientView::apply_organic_spawn(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
+		es.heading_bam = rec.orientation;
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
 		es.team = rec.team;
@@ -200,6 +203,336 @@ void NetClientView::tick_arms_dip() {
 	}
 }
 
+void NetClientView::land_compact_pose(ClientEntityState &es, int32_t wx,
+		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
+		bool force_live_snap) {
+	es.net_has_compact = true;
+	if (!remote_motion_mode_ || force_live_snap) {
+		// Live snap: the host/SP roles (full-rate loopback; the authority never
+		// interpolates, D-NET-89), the respawn edge [orig: live snap +
+		// Entity_ResetToSpawnState @0x4C113C], and the vehicle dead-pose form.
+		es.x = wx;
+		es.y = wy;
+		es.z = wz;
+		if (has_heading) es.heading_bam = heading_bam;
+		if (force_live_snap && remote_motion_mode_) {
+			// Retail stages the target BEFORE the respawn branch snaps the live
+			// pose [orig: LABEL_123 staging precedes the +0x24&2 snap @0x4C1109+]
+			// — the staged target stays at the wire pose, so the next mover tick
+			// sees a zero delta (deadband) instead of gliding anywhere.
+			es.net_smooth_target[0] = wx;
+			es.net_smooth_target[1] = wy;
+			es.net_smooth_target[2] = wz;
+			es.net_smooth_heading = has_heading ? heading_bam : es.heading_bam;
+			es.net_target_heading_bam = es.net_smooth_heading;
+			es.net_interp_steps = 0;
+			es.net_interp_progress = 0;
+		}
+		return;
+	}
+	// STAGE-ONLY (net-re §5.38e): the compact read never writes the live pose of
+	// an alive remote entity — it stages the target cluster and resets the
+	// progress counter; tick_remote_motion moves the live pose.
+	// [orig: case-2 @0x4C0FE4/EA/F0 + @0x4C0FD7/@0x4C0FF6 + @0x4C0FFC;
+	//  infantry mode-2 incl. the targetHeading promote; vehicle mode-2 @0x4607D5+]
+	es.net_smooth_target[0] = wx;
+	es.net_smooth_target[1] = wy;
+	es.net_smooth_target[2] = wz;
+	if (has_heading) {
+		if (es.cls == EntityClass::Infantry) {
+			// org1: the PREVIOUS staged heading becomes the chase target — one
+			// record behind the wire [orig: the +0x1A8 promote in @0x4C0320].
+			es.net_target_heading_bam = es.net_smooth_heading;
+		}
+		es.net_smooth_heading = heading_bam;
+		if (es.cls == EntityClass::Player) {
+			es.net_smooth_pitch = static_cast<int32_t>(
+					static_cast<uint32_t>(es.pitch_byte) << 24);
+		}
+	}
+	es.net_interp_progress = 0; // [orig: @0x4C0FFC — bucket +0x27E is NOT reset]
+}
+
+namespace {
+
+// The org1 position-chase bucket [orig: Entity_UpdateInfantryAI ladder
+// @0x4b9b0b-region — {3,4,5,8,16} at 0x2AAA/0x4000/0x5555/0x8000].
+inline int16_t org1_bucket(int32_t dist) {
+	if (dist < 0x2AAA) return 3;
+	if (dist < 0x4000) return 4;
+	if (dist < 0x5555) return 5;
+	if (dist < 0x8000) return 8;
+	return 16;
+}
+
+// The org2 position-chase bucket from the 2D horizontal distance — the ladder
+// is verbatim from the binary INCLUDING the non-monotonic [0x6000,0x7000)->7
+// step [orig: Entity_UpdateInfantryPlayerBody @0x4B44C4..0x4B4581].
+inline int16_t org2_bucket(int32_t dist2d) {
+	if (dist2d < 0x3000) return 6;
+	if (dist2d < 0x4000) return 7;
+	if (dist2d < 0x5000) return 8;
+	if (dist2d < 0x6000) return 9;
+	if (dist2d < 0x7000) return 7;
+	if (dist2d < 0x8000) return 8;
+	if (dist2d < 0xA000) return 10;
+	if (dist2d < 0xC000) return 12;
+	if (dist2d < 0xE000) return 14;
+	if (dist2d < 0x10000) return 16;
+	return 18;
+}
+
+// The vehicle-family bucket [orig: Entity_UpdateWatercraftPhysics
+// @0x48D480 (shared template) — {6,8,10,15,20,25,30}].
+inline int16_t vehicle_bucket(int32_t dist) {
+	if (dist < 0x2AAA) return 6;
+	if (dist < 0x4000) return 8;
+	if (dist < 0x5555) return 10;
+	if (dist < 0x8000) return 15;
+	if (dist < 0x10000) return 20;
+	if (dist < 0x20000) return 25;
+	return 30;
+}
+
+// 3D / 2D distance of a 16.16 delta, clamped like retail's float->int path
+// (flt_7C19E0 is the overflow clamp, not tuning).
+inline int32_t dist_16_16(int64_t dx, int64_t dy, int64_t dz) {
+	const double d = std::sqrt(double(dx) * double(dx) +
+	                           double(dy) * double(dy) +
+	                           double(dz) * double(dz));
+	return d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+}
+
+// Per-step delta with retail's signed half-add rounding: (d + N/2) / N via
+// idiv truncation [orig: @0x4b9b2e / @0x4B459D / the family movers].
+inline int32_t chase_step(int32_t d, int32_t n) { return (d + (n >> 1)) / n; }
+
+} // namespace
+
+void NetClientView::tick_remote_motion(uint16_t self_handle) {
+	if (!remote_motion_mode_) return;
+	for (ClientEntityState &es : state_.entities) {
+		if (!es.net_has_compact) continue;
+		const bool chased_class = es.cls == EntityClass::Player ||
+		                          es.cls == EntityClass::Infantry ||
+		                          es.cls == EntityClass::Vehicle;
+		if (!chased_class) continue;
+
+		// Carried rows follow the carrier attach every tick instead of chasing;
+		// their own mover is bit0-skipped in retail [orig: bit0 set on attach
+		// @0x43C14A; the rendered seat pose rides the carrier each frame].
+		if (es.net_seat_valid && es.carrier_handle != 0xFFFFu) {
+			const ClientEntityState *carrier = state_.find(es.carrier_handle);
+			if (carrier != nullptr) {
+				const WorldPose w = network_transform_local_to_world(
+						es.net_seat_local[0], es.net_seat_local[1],
+						es.net_seat_local[2], carrier->x, carrier->y, carrier->z,
+						uint32_t(carrier->heading_bam), uint32_t(carrier->pitch_bam),
+						uint32_t(carrier->roll_bam));
+				es.x = w.x;
+				es.y = w.y;
+				es.z = w.z;
+				if (es.net_seat_compose_yaw) {
+					es.heading_bam = carrier->heading_bam +
+							static_cast<int32_t>(
+									uint32_t(es.net_seat_local_yaw_byte) << 24);
+				}
+			}
+			continue;
+		}
+		// The universal mover-skip: wire bit0 (mounted/killed/not-ready) freezes
+		// the row at its staged pose [orig: the Flags&1 early return @0x4b9a03 /
+		// the body-pass twin; the bit rides the wire raw, §5.38e §5].
+		if (es.state_flags_known && (es.state_flags & 0x01u) != 0u) continue;
+		// A dead row holds its death pose until the respawn snap (D-NET-66).
+		if (es.state_flags_known &&
+				(es.state_flags & world::kEntityFlagDead) != 0u)
+			continue;
+
+		// Saved-live recapture, every tick [orig: @0x4b9a5f / each family head].
+		es.net_saved_live_pose[0] = es.x;
+		es.net_saved_live_pose[1] = es.y;
+		es.net_saved_live_pose[2] = es.z;
+
+		const bool is_self = es.handle == self_handle;
+		const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
+		const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
+		const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;
+
+		switch (es.cls) {
+		case EntityClass::Player: {
+			// The org2 body-pass chase [orig: Entity_UpdateInfantryPlayerBody
+			// @0x4B4470..0x4B46C0]. Client heading/pitch divisor = 12.
+			constexpr int32_t kOrg2HeadingDiv = 12;
+			if (es.net_interp_progress == 0) {
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > 0x20000) {
+					// Snap: position always; heading only for a non-self row.
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					if (!is_self) es.heading_bam = es.net_smooth_heading;
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = 0;
+					es.net_smooth_pitch = 0;
+				} else if (dist < 0x2AAA) {
+					// Position deadband — heading/pitch still chase.
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = chase_step(
+							es.net_smooth_heading - es.heading_bam, kOrg2HeadingDiv);
+					es.net_smooth_pitch = 0;
+				} else {
+					if (is_self) {
+						// The own-player soft reconciliation: 48 moving / 512
+						// still, position only [orig: @0x4B4490/@0x4B449E].
+						es.net_interp_steps =
+								(es.move_input & 0x08u) != 0u ? 48 : 512;
+					} else {
+						es.net_interp_steps =
+								org2_bucket(dist_16_16(dx, dy, 0));
+					}
+					const int32_t n = es.net_interp_steps;
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					int32_t step_z = chase_step(int32_t(dz), n);
+					// Client vertical damping [orig: @0x4B4626/@0x4B4635].
+					const int32_t adz =
+							int32_t(dz < 0 ? -dz : dz);
+					if (adz < 0x5555) step_z >>= 1;
+					if (adz < 0x2AAA) step_z = 0;
+					es.net_smooth_target[2] = step_z;
+					es.net_smooth_heading = chase_step(
+							es.net_smooth_heading - es.heading_bam, kOrg2HeadingDiv);
+					es.net_smooth_pitch = 0; // pitch chase deferred: player
+					// presentation pitch rides pitch_byte, not a chased BAM
+					// (scope note in §5.38e port disposition).
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			if (progress < kOrg2HeadingDiv && !is_self) {
+				es.heading_bam += es.net_smooth_heading;
+			}
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress < 512) es.net_interp_progress = progress + 1;
+			// progress >= 512 idle-anim force needs g_animStateFlagsTable —
+			// presentation anim already freezes with the record stream; the
+			// held pose is the substantive starved behavior.
+			break;
+		}
+		case EntityClass::Infantry: {
+			// The org1 motor fall-through [orig: @0x4b9a8c].
+			if (es.net_interp_progress == 0) {
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > 0x20000) {
+					// Snap is position-only for org1.
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+				} else if (dist < 0x2000) {
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+				} else {
+					const int32_t n = org1_bucket(dist);
+					es.net_interp_steps = static_cast<int16_t>(n);
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					es.net_smooth_target[2] = chase_step(int32_t(dz), n);
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress < 512) es.net_interp_progress = progress + 1;
+			// Heading: the promoted target chased with the org1 body
+			// quarter-step, clamped [orig: the body chase @0x4be8fd — ±69273360
+			// per tick; the target is one record behind the wire (§5.38e §1)].
+			{
+				int32_t step = (es.net_target_heading_bam - es.heading_bam) >> 2;
+				if (step > 69273360) step = 69273360;
+				if (step < -69273360) step = -69273360;
+				es.heading_bam += step;
+			}
+			break;
+		}
+		case EntityClass::Vehicle: {
+			// The vehicle-family template [orig: Entity_UpdateWatercraftPhysics
+			// @0x48D480 et al.] — chase leg only (the physics-prediction leg is
+			// the open D-NET-196 B-facet).
+			if (es.net_interp_progress == 0) {
+				const int32_t snap_threshold =
+						es.vehicle_speed_reg >= 293 ? 0x60000 : 0x20000;
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > snap_threshold) {
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					es.heading_bam = es.net_smooth_heading;
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = 0;
+				} else if (dist < 0x2000) {
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading =
+							(es.net_smooth_heading - es.heading_bam + 10) / 20;
+				} else {
+					const int32_t n = vehicle_bucket(dist);
+					es.net_interp_steps = static_cast<int16_t>(n);
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					es.net_smooth_target[2] = chase_step(int32_t(dz), n);
+					es.net_smooth_heading =
+							(es.net_smooth_heading - es.heading_bam + 10) / 20;
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			// Heading steps for exactly 20 ticks (the /20 divisor).
+			if (progress < 20) es.heading_bam += es.net_smooth_heading;
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress >= 128) {
+				// Starvation: the speed register decays; progress freezes
+				// [orig: (v+64)>>7 drain @0x48D480 interp tail].
+				es.vehicle_speed_reg = static_cast<uint16_t>(
+						es.vehicle_speed_reg -
+						((es.vehicle_speed_reg + 64) >> 7));
+			} else {
+				es.net_interp_progress = progress + 1;
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+}
+
 void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	decode_pool_spawn_batch(body.data(), body.size(), batch);
@@ -214,6 +547,7 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.heading_bam = rec.euler_z;
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
 		// Flag-gated values are zero in the decoded record when omitted.
@@ -343,6 +677,9 @@ void NetClientView::refresh_parented_pool_entities() {
 			child.z = posed.z;
 			child.yaw_byte = static_cast<uint8_t>(
 					parent->yaw_byte + child.parent_local_yaw_byte);
+			child.heading_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(parent_yaw_bam) +
+					(static_cast<uint32_t>(child.parent_local_yaw_byte) << 24));
 			child.pitch_bam = static_cast<int32_t>(
 					static_cast<uint32_t>(parent->pitch_bam) +
 					static_cast<uint32_t>(child.parent_local_pitch_bam));
@@ -369,6 +706,7 @@ void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.heading_bam = rec.euler_z;
 		es.pitch_bam = rec.euler_x;
 		es.roll_bam = rec.euler_y;
 		es.team = rec.team_byte;
@@ -387,6 +725,7 @@ void NetClientView::apply_pool3_batch(const std::vector<uint8_t> &body) {
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
 		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
+		es.heading_bam = static_cast<int32_t>(rec.movement_val);
 		es.pitch_bam = 0; // pool-3 sync carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
 		es.team = rec.team_byte;
@@ -501,6 +840,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			has_state_flags = true;
 			state_flags = rec.infantry.flags_byte;
 		}
+		bool respawned_this_record = false;
 		if (has_state_flags) {
 			const bool was_known = es.state_flags_known;
 			const bool was_dead = (es.state_flags & world::kEntityFlagDead) != 0u;
@@ -509,8 +849,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.state_flags_known = true;
 			if (was_known && was_dead && is_alive) {
 				++es.respawn_revision;
+				respawned_this_record = true;
 			}
 		}
+		const bool wire_dead =
+				has_state_flags && (state_flags & world::kEntityFlagDead) != 0u;
 
 		// Reconstruct world position: decompress the compact (per-axis) and add the
 		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
@@ -523,6 +866,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// updated the view. Production order is pool-0 child before pool-1 carrier.
 		uint16_t cx = 0, cy = 0, cz = 0;
 		bool skip_pos = false;
+		// The record's decoded orientation target (BAM32). Players/infantry carry
+		// the 8-bit yaw high byte; vehicles the 16-bit euler_z high half — the
+		// wire precision each class actually has (§5.38e).
+		int32_t heading_target = 0;
+		bool has_heading_target = false;
 		switch (rec.cls) {
 		case EntityClass::Player:
 			cx = rec.player.pos_x_compressed;
@@ -544,6 +892,9 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.player.yaw_byte;
+				heading_target = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.player.yaw_byte) << 24);
+				has_heading_target = true;
 			}
 			break;
 		case EntityClass::Vehicle:
@@ -570,9 +921,18 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			}
 			es.yaw_byte = static_cast<uint8_t>(
 					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+			// The vehicle heading target keeps the wire's full 16-bit euler_z —
+			// world-absolute even for carrier-local positions [orig: @0x4607f5].
+			heading_target = static_cast<int32_t>(rec.vehicle.euler_z) * 65536;
+			has_heading_target = true;
 			es.state_flags = rec.vehicle.flags_byte;
 			es.health_word = rec.vehicle.health_word;
 			es.health_known = true;
+			// The raw speed register mirror ([177] source field) — gates the
+			// fast-vehicle snap threshold and decays on starvation (§5.38e §4).
+			if (!rec.vehicle.is_dead_pose) {
+				es.vehicle_speed_reg = rec.vehicle.weapon_aim_y;
+			}
 			// Live vehicle compacts omit entity+20/+24. Preserve the last full
 			// spawn/dead-pose values until the short dead-pose form carries new
 			// signed high words [orig: @0x460d4c/@0x460d52].
@@ -607,6 +967,9 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.infantry.yaw_byte;
+				heading_target = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.infantry.yaw_byte) << 24);
+				has_heading_target = true;
 			}
 			break;
 		default:
@@ -624,10 +987,36 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
 			es.anim_pulse_ratio = prev_anim_ratio;
 		}
+		// A free-standing record clears any retained seat-local pose — the
+		// carrier field is consumed per record (D-NET-195); carrier-local
+		// records refresh it in the second pass below.
 		if (!skip_pos) {
-			es.x = fu.anchor_x + network_decompress_fixedpoint(cx);
-			es.y = fu.anchor_y + network_decompress_fixedpoint(cy);
-			es.z = fu.anchor_z + network_decompress_fixedpoint(cz);
+			es.net_seat_valid = false;
+		}
+		// A vehicle wreck's short form re-lands the full frozen orientation;
+		// treat it as the live-snap branch of the read [orig: the conditional
+		// live stores @0x460930..0x460A50].
+		const bool force_live_snap = respawned_this_record ||
+				(rec.cls == EntityClass::Vehicle && rec.vehicle.is_dead_pose);
+		if (!skip_pos && !(remote_motion_mode_ && wire_dead)) {
+			// Retail's client read skips the position path entirely for a
+			// wire-dead record [orig: the case-2 dead branch -> LABEL_151, no
+			// position store]; the snap fold keeps its historical apply
+			// (host/SP loopback rows refresh at full rate).
+			const int32_t wx = fu.anchor_x + network_decompress_fixedpoint(cx);
+			const int32_t wy = fu.anchor_y + network_decompress_fixedpoint(cy);
+			const int32_t wz = fu.anchor_z + network_decompress_fixedpoint(cz);
+			land_compact_pose(es, wx, wy, wz, has_heading_target, heading_target,
+			                  force_live_snap);
+		} else if (skip_pos && rec.cls == EntityClass::Vehicle &&
+				has_heading_target) {
+			// Carrier-local vehicle positions defer to the second pass, but the
+			// wire euler stays world-absolute and lands now [orig: @0x4607f5].
+			if (remote_motion_mode_ && !force_live_snap) {
+				es.net_smooth_heading = heading_target;
+			} else {
+				es.heading_bam = heading_target;
+			}
 		}
 	}
 
@@ -638,14 +1027,25 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		ClientEntityState *child = state_.find(pending.child_handle);
 		const ClientEntityState *carrier = state_.find(pending.carrier_handle);
 		if (child == nullptr || carrier == nullptr) continue;
-		const int32_t carrier_yaw_bam = static_cast<int32_t>(
-				uint32_t(carrier->yaw_byte) << 24);
+		// Compose against the carrier's LIVE (chased) pose — retail lifts through
+		// the carrier entity's current +4..+0x18 block [orig: @0x4c10d4/@0x4608ce].
 		const WorldPose w = network_transform_local_to_world(
 				network_decompress_fixedpoint(pending.cx),
 				network_decompress_fixedpoint(pending.cy),
 				network_decompress_fixedpoint(pending.cz), carrier->x, carrier->y,
-				carrier->z, uint32_t(carrier_yaw_bam), uint32_t(carrier->pitch_bam),
-				uint32_t(carrier->roll_bam));
+				carrier->z, uint32_t(carrier->heading_bam),
+				uint32_t(carrier->pitch_bam), uint32_t(carrier->roll_bam));
+		// Retain the seat-local offset for the per-tick carrier-follow: the
+		// rider's own mover is bit0-skipped in retail and its rendered pose rides
+		// the carrier attach every frame [orig: bit0 set @0x43C14A]. The row is
+		// live-snapped here (the recompose owns it from the next tick).
+		child->net_seat_local[0] = network_decompress_fixedpoint(pending.cx);
+		child->net_seat_local[1] = network_decompress_fixedpoint(pending.cy);
+		child->net_seat_local[2] = network_decompress_fixedpoint(pending.cz);
+		child->net_seat_local_yaw_byte = pending.local_yaw_byte;
+		child->net_seat_compose_yaw = pending.compose_yaw;
+		child->net_seat_valid = true;
+		child->net_has_compact = true;
 		child->x = w.x;
 		child->y = w.y;
 		child->z = w.z;
@@ -653,8 +1053,12 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// 8-bit ring used by the compact view. Vehicle records keep their
 		// world-absolute wire euler instead (compose_yaw false) [orig: the
 		// untransformed entity+576 store @0x4607f5].
-		if (pending.compose_yaw)
+		if (pending.compose_yaw) {
 			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
+			child->heading_bam = carrier->heading_bam +
+					static_cast<int32_t>(
+							uint32_t(pending.local_yaw_byte) << 24);
+		}
 	}
 
 	refresh_parented_pool_entities();

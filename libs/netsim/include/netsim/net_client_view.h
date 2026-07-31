@@ -38,6 +38,28 @@ public:
 	void tick_lean();
 	void tick_arms_dip();
 
+	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
+	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
+	// The host/SP roles keep the snap fold — their loopback view refreshes at
+	// full rate and the authority never interpolates (D-NET-89).
+	void set_remote_motion_mode(bool enabled) { remote_motion_mode_ = enabled; }
+	bool remote_motion_mode() const { return remote_motion_mode_; }
+
+	// The per-class between-update mover, one call per 62.5 Hz logic tick after
+	// the recv fold (retail order: Client_ProcessNetworkFrame first, entity
+	// movers after). Chases each armed row's live pose/heading toward its staged
+	// wire target with the witnessed per-class math:
+	//  - Player rows: the org2 body-pass chase [orig: Entity_UpdateInfantryPlayerBody
+	//    @ 0x4B40E0, chase @ 0x4B4470..0x4B46C0] — incl. the own-player soft
+	//    position reconciliation (self_handle; bucket 48 moving / 512 still).
+	//  - Infantry rows: the org1 motor fall-through [orig: Entity_UpdateInfantryAI
+	//    @ 0x4b9a8c] + the promoted-heading quarter-step body chase [orig: @ 0x4be8fd].
+	//  - Vehicle rows: the family template [orig: Entity_UpdateWatercraftPhysics
+	//    @ 0x48D480 et al.] — chase leg only; the physics-prediction leg is the
+	//    open D-NET-196 B-facet (family physics, D-NET-161).
+	// No-op unless remote-motion mode is enabled.
+	void tick_remote_motion(uint16_t self_handle);
+
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
 	// attached to it. The decoded view is the client's entity pool, so
 	// Entity_Destroy's effect here is removing the ROW (not flagging it) —
@@ -91,6 +113,12 @@ private:
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	void refresh_parented_pool_entities();
 	void erase_entity_tree(uint16_t root_handle);
+	// Land one decoded compact world sample on a row: live snap in snap mode /
+	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +
+	// interpProgress reset in remote-motion mode (§5.38e stage-only reads).
+	void land_compact_pose(ClientEntityState &es, int32_t wx, int32_t wy,
+	                       int32_t wz, bool has_heading, int32_t heading_bam,
+	                       bool force_live_snap);
 
 	// Effective record classifier for the 0x0A event loop: the items.def table (when
 	// installed) wins, then the class LEARNED from the world spawn stream, then the
@@ -104,6 +132,7 @@ private:
 	EntityClass classify(uint16_t type_id) const;
 
 	ClientState state_;
+	bool remote_motion_mode_ = false;
 	std::function<EntityClass(uint16_t)> item_resolver_; // items.def table (authoritative)
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;

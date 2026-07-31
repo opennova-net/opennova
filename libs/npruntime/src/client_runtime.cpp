@@ -47,13 +47,20 @@ const std::string &empty_runtime_string() {
 
 ClientRuntime::ClientRuntime(std::string player_name)
 		: role_(Role::Joiner),
-		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {}
+		  joiner_(std::make_unique<JoinerConnection>(std::move(player_name))) {
+	// A remote joiner's folds STAGE and its rows chase (net-re §5.38e,
+	// D-NET-196); the HostClient loopback keeps the snap fold (full-rate view;
+	// the authority never interpolates, D-NET-89).
+	view_.set_remote_motion_mode(true);
+}
 
 ClientRuntime::ClientRuntime(std::string player_name,
 		JoinerConnection::MonotonicMilliseconds monotonic_milliseconds)
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(
-		          std::move(player_name), std::move(monotonic_milliseconds))) {}
+		          std::move(player_name), std::move(monotonic_milliseconds))) {
+	view_.set_remote_motion_mode(true);
+}
 
 ClientRuntime::ClientRuntime(netsim::ISessionTransport &host_loopback)
 		: role_(Role::HostClient), loopback_(&host_loopback) {}
@@ -478,6 +485,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// The remote arms dip rides the same body tick as the lean integrator.
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
 	view_.tick_arms_dip();
+
+	// The per-class between-update mover: one step per 62.5 Hz tick after the
+	// recv fold (retail order: net frame first, entity movers after). No-op on
+	// the HostClient role (mode never enabled — the authority never
+	// interpolates, D-NET-89). [net-re §5.38e, D-NET-196]
+	view_.tick_remote_motion(joiner_ != nullptr && joiner_->has_self_handle()
+	                                 ? joiner_->self_handle()
+	                                 : 0xFFFFu);
 
 	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 

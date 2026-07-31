@@ -408,11 +408,11 @@ inline bool emplaced_weapon_controls_for_client(
 
 		// NetClientView has already composed mounted yaw into world heading and
 		// reconstructed an infantry gunner's live entity pitch from the compact
-		// aim target using retail's one-eighth chase.
-		const int32_t parent_heading = static_cast<int32_t>(
-				static_cast<uint32_t>(mount.yaw_byte) << 24);
-		const int32_t occupant_heading = static_cast<int32_t>(
-				static_cast<uint32_t>(occupant.yaw_byte) << 24);
+		// aim target using retail's one-eighth chase. Root headings read the
+		// row's live BAM (chased on a joiner — §5.38e; full euler precision for
+		// vehicles).
+		const int32_t parent_heading = mount.heading_bam;
+		const int32_t occupant_heading = occupant.heading_bam;
 		const int32_t occupant_pitch =
 				occupant.cls == opennova::EntityClass::Player
 				? static_cast<int32_t>(
@@ -514,9 +514,9 @@ inline bool aim_overlay_inputs_for_client(
 
 	// pose_mounted_occupant faces seated slots at carrier+yaw_offset and a
 	// Gunner at carrier-yaw_offset in mission yaw. Engine heading is
-	// (90-mission yaw), so those signs invert here.
-	const int32_t carrier_heading = static_cast<int32_t>(
-			static_cast<uint32_t>(carrier->yaw_byte) << 24);
+	// (90-mission yaw), so those signs invert here. The carrier root heading is
+	// the row's live BAM (chased on a joiner — §5.38e).
+	const int32_t carrier_heading = carrier->heading_bam;
 	const int32_t offset = opennova::world::bam_from_degrees_wrapped(
 			static_cast<double>(seat->yaw_offset));
 	out.body_yaw = out.mount_mode == opennova::anim::MountMode::Gunner
@@ -1162,8 +1162,7 @@ inline bool resolve_client_eweap_attachment_pose(
 			static_cast<float>(parent->z / kFixed16)};
 	carrier.yaw = static_cast<int16_t>(std::lround(
 			opennova::world::mission_yaw_deg_from_bam_heading(
-					static_cast<int32_t>(
-							static_cast<uint32_t>(parent->yaw_byte) << 24))));
+					parent->heading_bam)));
 	carrier.pitch = static_cast<int16_t>(std::lround(
 			static_cast<double>(parent->pitch_bam) *
 				opennova::world::kDegreesPerBam));

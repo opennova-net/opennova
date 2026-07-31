@@ -133,6 +133,57 @@ struct ClientEntityState {
 	// one client pump before presentation runs.
 	std::uint32_t respawn_revision = 0;
 	bool seen_this_frame = false;
+
+	// --- The client-side between-update mover cluster (net-re §5.38e, D-NET-196).
+	// On a JOINER (remote-motion mode), every compact read STAGES the target here
+	// and NetClientView::tick_remote_motion chases the live pose (x/y/z above =
+	// retail entity+4/+8/+0xC; heading_bam below = entity+0x10) one step per
+	// 62.5 Hz tick. On the host/SP roles the fold keeps writing the live pose
+	// directly (full-rate loopback; the authority never interpolates, D-NET-89).
+	// Live heading, BAM32 (retail entity+0x10). Maintained by the fold in snap
+	// mode (yaw_byte << 24 / vehicle euler_z << 16) and by the chase in
+	// remote-motion mode; presentation reads THIS, not yaw_byte.
+	int32_t heading_bam = 0;
+	// Staged wire target; the per-class chase overwrites it with the per-step
+	// vector at staging time, exactly like retail [orig: entity+0x234/238/23C,
+	// step re-store @0x4b9b2e (org1) / @0x4B459F (org2) / watercraft @0x48D480].
+	int32_t net_smooth_target[3] = {};
+	// Recaptured from the live pose at the top of every mover tick
+	// [orig: entity+0x80/84/88 recapture @0x4b9a5f and each family head].
+	int32_t net_saved_live_pose[3] = {};
+	// Staged heading/pitch targets, mutated into per-step deltas at staging
+	// [orig: entity+0x240/+0x244].
+	int32_t net_smooth_heading = 0;
+	int32_t net_smooth_pitch = 0;
+	// org1 only: the PREVIOUS staged heading, promoted on each fold before the
+	// new store — the AI-infantry heading chase runs one record behind the wire
+	// [orig: entity+0x1A8 promote in the mode-2 read @0x4C0320].
+	int32_t net_target_heading_bam = 0;
+	// Chase bookkeeping [orig: entity+0x27C / entity+0x27E].
+	int16_t net_interp_progress = 0;
+	int16_t net_interp_steps = 0;
+	// Vehicle speed register mirror (raw wire halfword; retail vehicleData[177]).
+	// Gates the fast-vehicle snap threshold (>= 293 -> 0x60000) and decays on
+	// starvation [orig: @0x48D480 interp block]. Whether retail decompresses the
+	// store is an open §5.38e question; the compare is implemented on the raw
+	// halfword as read.
+	uint16_t vehicle_speed_reg = 0;
+	// Armed by the first folded compact for this row: the chase never runs
+	// toward a zero-initialized target on rows that only ever saw load-stream
+	// spawns (pool-2/3 statics).
+	bool net_has_compact = false;
+	// Carried rows (carrier_handle set): the latest record's seat-local offset,
+	// re-composed against the carrier's CURRENT chased pose every mover tick —
+	// the row-level translation of retail rendering mounted riders through the
+	// carrier attach each frame (the rider's own mover is bit0-skipped)
+	// [orig: Entity_AttachToVehicle bit0 set @0x43C14A; the D-NET-67 lift]. A
+	// record with carrier 0xFFFF clears it (per-record consumption, D-NET-195).
+	int32_t net_seat_local[3] = {};
+	uint8_t net_seat_local_yaw_byte = 0;
+	// Player/infantry seats compose the carrier yaw; a carrier-local VEHICLE
+	// keeps its world-absolute wire euler [orig: @0x4607f5].
+	bool net_seat_compose_yaw = false;
+	bool net_seat_valid = false;
 };
 
 // The decoded world the client holds after pumping the loopback. Positions are

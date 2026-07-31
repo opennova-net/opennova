@@ -1228,17 +1228,21 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll);
 		} else {
 			// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y)
-			// world units, the SAME remap the AI-pool path uses. Position is
-			// post-compression (lossy), exactly what retail renders for decoded peers.
+			// world units, the SAME remap the AI-pool path uses. On a joiner the
+			// row's live pose is chased between records by tick_remote_motion
+			// (net-re §5.38e, D-NET-196); on the host/SP roles the fold snaps it
+			// at full loopback rate — either way this is exactly what retail
+			// renders for decoded peers (post-compression, lossy).
 			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
 			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
 			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
-			// Rebuild the 32-bit engine BAM from the compact high byte, then convert
-			// engine -> mission yaw (90 - heading), matching the AI-pool present.
-			const int32_t heading_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(es.yaw_byte) << 24);
+			// The row's live engine-BAM heading (chased on the joiner; seeded
+			// from the wire byte/euler elsewhere) -> mission yaw (90 - heading),
+			// matching the AI-pool present. Vehicles keep the wire's full 16-bit
+			// euler precision this way (yaw_byte re-truncated it before).
 			r[PF_YAW_DEG] = static_cast<float>(
-					opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
+					opennova::world::mission_yaw_deg_from_bam_heading(
+							es.heading_bam));
 		}
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
 		if (world_->ai && !joiner_) {
