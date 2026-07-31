@@ -347,25 +347,49 @@ func _make_loadout_menu() -> Node:
 	return menu
 
 
-# A wired host over the stand-in loadout menu (medic/blue), for the ammo cases.
-func _make_ammo_host() -> PlayerInfoMenuHost:
+var _ammo_menu: Node = null  # the stand-in menu behind the current _make_ammo_host
+
+
+# A wired host over the stand-in loadout menu (medic/blue), for the ammo cases —
+# built through the public seams only (set_weapon_database + on_menu_built).
+func _make_ammo_host(wdb: NovaWeaponDatabase = null) -> PlayerInfoMenuHost:
 	var host := PlayerInfoMenuHost.new()
-	host._weapons = _load_weapons()
-	host.on_menu_built(_make_loadout_menu(), "player.mnu", "PLAYER_INFO", null)
+	host.set_weapon_database(wdb if wdb != null else _load_weapons())
+	_ammo_menu = _make_loadout_menu()
+	host.on_menu_built(_ammo_menu, "player.mnu", "PLAYER_INFO", null)
 	return host
 
 
-# Select the named weapon in a parent slot combo through the host's row model and
-# fire the selection handler the way a user pick would.
-func _select_weapon(host: PlayerInfoMenuHost, control: String, weapon_name: String) -> Dictionary:
-	var combo := host._menu.find_child(control, true, false) as NovaMnuCombo
-	var defs: Array = host._slot_rows.get(control, [])
-	for row in defs.size():
-		var w := defs[row] as Dictionary
+func _ammo_control(name: String) -> NovaMnuCombo:
+	return _ammo_menu.find_child(name, true, false) as NovaMnuCombo
+
+
+# Select the named weapon in a parent slot combo and fire the selection handler the
+# way a user pick would. The row model is public: row = position in the filtered
+# slot list + 1 (row 0 is NONE) [orig: populate_weapon_slot_lists @ 0x560430].
+func _select_weapon(wdb: NovaWeaponDatabase, control: String, slot: int,
+		class_mask: int, weapon_name: String) -> Dictionary:
+	var combo := _ammo_control(control)
+	var defs: Array = wdb.get_slot_weapons(slot, class_mask, 2)  # blue
+	for i in defs.size():
+		var w := defs[i] as Dictionary
 		if String(w.get("name", "")).nocasecmp_to(weapon_name) == 0:
-			combo.select(row)  # select() emits item_selected -> the witnessed refill
+			combo.select(i + 1)  # select() emits item_selected -> the witnessed refill
 			return w
 	assert_true(false, "%s offers %s" % [control, weapon_name])
+	return {}
+
+
+# The expected *_AMMO2 sub-weapon, computed from the public table walk the host
+# mirrors [orig: the stricmp walk in populate_ammo_combo_boxes @ 0x55def0].
+func _expected_sub(wdb: NovaWeaponDatabase, parent: Dictionary) -> Dictionary:
+	var parent_round := String(parent.get("round_type", ""))
+	for k in range(1, int(parent.get("loadout_subclasses", 0)) + 1):
+		var cand := wdb.get_weapon(int(parent.get("index", -1)) + k)
+		if cand.is_empty():
+			return {}
+		if String(cand.get("round_type", "")).nocasecmp_to(parent_round) != 0:
+			return cand
 	return {}
 
 
@@ -495,9 +519,10 @@ func test_real_player_mnu_loadout_populates() -> void:
 # --- Ammo combos + weight + icons (D-PLAYERINFO-11) -----------------------------
 
 func test_primary_ammo_rows_follow_selected_weapon() -> void:
-	var host := _make_ammo_host()
-	var w := _select_weapon(host, "PRIMARY", "WPN_M4AUTO")
-	var ammo := host._menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
+	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	var ammo := _ammo_control("PRIMARY_AMMO1")
 	var maxclips := int(w.get("maxclips", 0))
 	assert_true(ammo.visible, "a clip-carrying weapon shows its ammo combo")
 	assert_eq(ammo.get_item_count(), maxclips,
@@ -510,30 +535,31 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 
 
 func test_none_selection_hides_ammo_and_clears_icon() -> void:
-	var host := _make_ammo_host()
-	_select_weapon(host, "PRIMARY", "WPN_M4AUTO")
-	var primary := host._menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
+	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	var primary := _ammo_control("PRIMARY")
 	primary.select(0)  # back to NONE
-	var ammo := host._menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
-	assert_false(ammo.visible, "NONE hides the ammo combo")
-	var icon := host._menu.find_child("PRIMARY_ICON", true, false)
+	assert_false(_ammo_control("PRIMARY_AMMO1").visible, "NONE hides the ammo combo")
+	var icon := _ammo_menu.find_child("PRIMARY_ICON", true, false)
 	var rect := icon.get_node_or_null("LoadoutIcon") as TextureRect
 	assert_not_null(rect, "the host mounts an icon rect into the bare window")
 	assert_null(rect.texture, "NONE clears the icon texture")
 
 
 func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
-	var host := _make_ammo_host()
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
 	# The M203 carbines are rifleman-filtered; switch PLAYERCLASS to Rifleman
 	# (value 8, row 3) so the slot list offers them.
-	(host._menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo).select(3)
-	var w := _select_weapon(host, "PRIMARY", "WPN_M4M203AUTO")
+	_ammo_control("PLAYERCLASS").select(3)
+	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 8, "WPN_M4M203AUTO")
 	# The witnessed walk skips same-round WPN_M4M203 and lands on WPN_M4M203HE
 	# (AMMO_M203_40MM_NADE) within loadout_subclasses = 2.
-	var sub: Dictionary = host._subclass_weapon(w)
+	var sub := _expected_sub(wdb, w)
 	assert_eq(String(sub.get("name", "")), "WPN_M4M203HE",
 		"the sub walk lands on the first DIFFERING round_type entry")
-	var ammo2 := host._menu.find_child("PRIMARY_AMMO2", true, false) as NovaMnuCombo
+	var ammo2 := _ammo_control("PRIMARY_AMMO2")
 	assert_true(ammo2.visible, "a live sub-weapon shows *_AMMO2")
 	assert_eq(ammo2.get_item_count(), int(sub.get("maxclips", 0)),
 		"*_AMMO2 rows come from the SUB-weapon's maxclips")
@@ -543,12 +569,13 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 
 
 func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
-	var host := _make_ammo_host()
-	var expected: Array = host._weapons.get_slot_weapons(
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
+	var expected: Array = wdb.get_slot_weapons(
 			NovaWeaponDatabase.SLOT_GRENADE, 1, 2)  # medic/blue
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
 	for i in mini(expected.size(), 3):
-		var combo := host._menu.find_child("GRENADE_AMMO%d" % (i + 1), true, false) as NovaMnuCombo
+		var combo := _ammo_control("GRENADE_AMMO%d" % (i + 1))
 		var w := expected[i] as Dictionary
 		assert_true(combo.visible, "an owned grenade control shows")
 		assert_eq(combo.get_item_count(), int(w.get("maxclips", 0)) + 1,
@@ -558,24 +585,25 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 		assert_eq(combo.get_selected(), int(w.get("maxclips", 0)),
 			"the untouched default selects the full row")
 	for i in range(expected.size(), 3):
-		var leftover := host._menu.find_child("GRENADE_AMMO%d" % (i + 1), true, false) as NovaMnuCombo
-		assert_false(leftover.visible, "unowned grenade controls hide")
+		assert_false(_ammo_control("GRENADE_AMMO%d" % (i + 1)).visible,
+			"unowned grenade controls hide")
 
 
 func test_weight_label_renders_witnessed_format_and_band() -> void:
-	var host := _make_ammo_host()
-	var w := _select_weapon(host, "PRIMARY", "WPN_M4AUTO")
+	var wdb := _load_weapons()
+	var _host := _make_ammo_host(wdb)
+	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
 	# full-grenade clip-only terms the fill selects by default.
 	var expected := float(w.get("weight", 0.0)) \
 			+ int(w.get("maxclips", 0)) * float(w.get("clip_weight", 0.0))
-	var sub: Dictionary = host._subclass_weapon(w)
+	var sub := _expected_sub(wdb, w)
 	if not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
 		expected += int(sub.get("maxclips", 0)) * float(sub.get("clip_weight", 0.0))
-	for g in host._weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
+	for g in wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
 		expected += int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0))
-	var label := host._menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
+	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
 			.find_child("Label", false, false) as Label
 	var band := "Light"
 	if expected >= 66.6:
@@ -584,20 +612,21 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 		band = "Normal"
 	assert_eq(label.text, "Total Weight %.1f lbs (%s)" % [expected, band],
 		"the witnessed \"%s %.1f %s (%s)\" readout over the native weight math")
-	assert_eq(host._weapons.encumbrance_class(0.0), NovaWeaponDatabase.ENCUMBRANCE_LIGHT)
-	assert_eq(host._weapons.encumbrance_class(33.3), NovaWeaponDatabase.ENCUMBRANCE_NORMAL)
-	assert_eq(host._weapons.encumbrance_class(66.6), NovaWeaponDatabase.ENCUMBRANCE_HEAVY)
+	assert_eq(wdb.encumbrance_class(0.0), NovaWeaponDatabase.ENCUMBRANCE_LIGHT)
+	assert_eq(wdb.encumbrance_class(33.3), NovaWeaponDatabase.ENCUMBRANCE_NORMAL)
+	assert_eq(wdb.encumbrance_class(66.6), NovaWeaponDatabase.ENCUMBRANCE_HEAVY)
 
 
 func test_ammo_selection_recomputes_weight_and_snapshot() -> void:
-	var host := _make_ammo_host()
-	var w := _select_weapon(host, "PRIMARY", "WPN_M4AUTO")
+	var wdb := _load_weapons()
+	var host := _make_ammo_host(wdb)
+	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	assert_eq(host.selected_clips("PRIMARY"), -1,
 		"untouched ammo reports the -1 default [orig: the '-1' kit filler]")
-	var label := host._menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
+	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
 			.find_child("Label", false, false) as Label
 	var before := label.text
-	var ammo := host._menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
+	var ammo := _ammo_control("PRIMARY_AMMO1")
 	ammo.select(0)  # one clip
 	assert_eq(host.selected_clips("PRIMARY"), 1,
 		"the pick records row+1 [orig: @ 0x55f730]")
@@ -648,16 +677,14 @@ end
 	f.close()
 	var wdb := NovaWeaponDatabase.new()
 	assert_eq(wdb.load(path), OK)
-	var host := PlayerInfoMenuHost.new()
-	host._weapons = wdb
-	host.on_menu_built(_make_loadout_menu(), "player.mnu", "PLAYER_INFO", null)
-	var type_combo := host._menu.find_child("PRIMARY_AMMO1_TYPE", true, false) as NovaMnuCombo
+	var host := _make_ammo_host(wdb)
+	var type_combo := _ammo_control("PRIMARY_AMMO1_TYPE")
 
-	_select_weapon(host, "PRIMARY", "WPN_PLAIN")
+	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_PLAIN")
 	assert_true(type_combo.visible, "a clip weapon shows the TYPE combo")
 	assert_false(type_combo.disabled, "a normal weapon leaves the TYPE combo live")
 
-	_select_weapon(host, "PRIMARY", "WPN_LOCKED")
+	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_LOCKED")
 	assert_true(type_combo.disabled,
 		"flags2 NOAMMOTYPES locks the TYPE combo [orig: @ 0x55def0 +188 & 0x40]")
 	assert_eq(type_combo.get_selected(), 0, "the lock resets the type to 0 (FMJ)")
