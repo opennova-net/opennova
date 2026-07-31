@@ -67,8 +67,8 @@ func _detail_panel_node_name() -> StringName:
 
 
 # --- Default build flow (subclasses may override and reuse the helpers below) ---
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_build_list_panel(box)
 
 

@@ -64,7 +64,7 @@ var _copy_button: Button
 var _copy_feedback_timer: Timer
 var _page_list: ItemList
 var _compact_page_picker: OptionButton
-var _page_host: ScrollContainer
+var _page_mount: ScrollContainer
 
 var _pages: Array[NovaDebugPage] = []
 var _active_page: NovaDebugPage = null
@@ -229,7 +229,7 @@ func register_page(page: NovaDebugPage) -> void:
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_pages.append(page)
-	_page_host.add_child(page)
+	_page_mount.add_child(page)
 	_rebuild_page_list()
 
 
@@ -481,16 +481,16 @@ func _build_panel() -> void:
 	_page_list.item_selected.connect(_on_page_row_selected)
 	body.add_child(_page_list)
 
-	_page_host = ScrollContainer.new()
-	_page_host.name = "PageHost"
-	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_mount = ScrollContainer.new()
+	_page_mount.name = "PageMount"
+	_page_mount.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_page_mount.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# SHOW_NEVER is the width firewall: unlike DISABLED, it does not promote a
 	# wide page child's minimum width into the dock's own minimum size.
-	_page_host.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
-	_page_host.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_page_host.follow_focus = true
-	body.add_child(_page_host)
+	_page_mount.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_page_mount.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_page_mount.follow_focus = true
+	body.add_child(_page_mount)
 
 	_copy_feedback_timer = Timer.new()
 	_copy_feedback_timer.name = "CopyFeedbackTimer"
@@ -595,7 +595,7 @@ func _activate_page(page: NovaDebugPage, persist: bool) -> void:
 	if _active_page != null:
 		_active_page.visible = false
 		_active_page.set_capture_active(false)
-	_page_host.scroll_vertical = 0
+	_page_mount.scroll_vertical = 0
 	_active_page = page
 	if page == null:
 		_update_page_header()

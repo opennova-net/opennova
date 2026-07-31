@@ -39,7 +39,7 @@ func test_strings_workspace_mounts_self_contained_view() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
+	var host: Control = workstation.get_node("%ViewportMount")
 	assert_eq(host.get_child_count(), 1, "Strings should own the viewport host while active.")
 	var view: Control = host.get_child(0)
 	assert_eq(view.name, "StringsEditorView", "Strings should mount its self-contained editor view.")
@@ -57,7 +57,7 @@ func test_strings_workspace_exposes_document_actions() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 
-	var actions: BoxContainer = workstation.get_node("%WorkspaceActionsHost")
+	var actions: BoxContainer = workstation.get_node("%WorkspaceActionsMount")
 	assert_not_null(_find_button_by_text(actions, "Open Strings..."), "Strings should expose an Open action.")
 	assert_not_null(_find_button_by_text(actions, "New Strings"), "Strings should expose a New action.")
 
@@ -73,7 +73,7 @@ func test_open_populates_table() -> void:
 	assert_eq(err, OK, "opening the fixture should succeed")
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
+	var host: Control = workstation.get_node("%ViewportMount")
 	var tree: Tree = host.get_child(0).find_child("StringsTree", true, false)
 	assert_not_null(tree, "the table Tree should exist")
 	var root := tree.get_root()
@@ -266,7 +266,7 @@ func test_section_filter_scopes_rows() -> void:
 	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
 	await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
+	var host: Control = workstation.get_node("%ViewportMount")
 	var tree: Tree = host.get_child(0).find_child("StringsTree", true, false)
 
 	assert_eq(tree.get_root().get_child_count(), 6, "the All filter should show every entry")
@@ -289,7 +289,7 @@ func test_detail_panel_content_fills_panel() -> void:
 	for _i in 3:
 		await get_tree().process_frame
 
-	var host: Control = workstation.get_node("%ViewportHost")
+	var host: Control = workstation.get_node("%ViewportMount")
 	var detail: Control = host.get_child(0).find_child("StringsDetailPanel", true, false)
 	assert_not_null(detail, "detail panel should be mounted")
 	assert_gt(detail.size.x, 50.0, "detail panel should have a real width from the split")

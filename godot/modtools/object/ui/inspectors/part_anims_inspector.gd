@@ -45,8 +45,8 @@ var _part_anim_inspector_summary: Label
 var _part_anim_inspector_context: Label
 
 
-func build_main(host: Control) -> void:
-	_build_part_anims_inspector(host)
+func build_main(mount: Control) -> void:
+	_build_part_anims_inspector(mount)
 
 
 func build_detail(box: VBoxContainer) -> void:
@@ -142,8 +142,8 @@ func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = t
 		_rebuild_detail_dock()
 
 
-func _build_part_anims_inspector(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func _build_part_anims_inspector(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	box.name = "PartAnimListPane"
 	var data: NovaObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}

@@ -3,7 +3,7 @@ extends TerrainInspector
 
 ## Tile workflow: load/new/reset a .til layout, pick a brush tile from the atlas,
 ## set transform flags, and edit the selected placed tile. Atlas icons are cached
-## per tilestrip. Code-first; built into the inspector host by the terrain
+## per tilestrip. Code-first; built into the inspector mount by the terrain
 ## workspace.
 
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
@@ -41,8 +41,8 @@ func set_editor(value: TerrainEditor) -> void:
 		terrain_editor.set_tool(TerrainEditor.Tool.TILE_STAMP)
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_root = box
 
 	_add_section_heading(box, "Tile")

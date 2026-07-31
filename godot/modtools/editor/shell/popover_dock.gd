@@ -27,15 +27,15 @@ var _camera_popup: PopoverPanel
 var _camera_popup_close: Button
 var _camera_popup_detach: Button
 var _camera_popup_content: Control
-var _camera_settings_host: Control
+var _camera_settings_mount: Control
 var _environment_toggle_button: Button
 var _environment_popup: PopoverPanel
 var _environment_popup_title: Label
 var _environment_popup_close: Button
 var _environment_popup_detach: Button
 var _environment_popup_content: Control
-var _environment_actions_host: VBoxContainer
-var _environment_inspector_host: Control
+var _environment_actions_mount: VBoxContainer
+var _environment_inspector_mount: Control
 var _settings_toggle_button: Button
 var _settings_popup: PopoverPanel
 var _settings_popup_close: Button
@@ -45,8 +45,8 @@ var _camera_settings_panel: Control
 # content into floating windows. State machines live in the hosts; the cached
 # restore dicts make persisted "open floating" decisions without re-reading
 # the config per toggle (the save handlers keep them current).
-var _camera_panel_host: DetachablePanelHost
-var _environment_panel_host: DetachablePanelHost
+var _camera_panel_mount: DetachablePanelMount
+var _environment_panel_mount: DetachablePanelMount
 var _panel_restore: Dictionary = {}
 
 
@@ -68,20 +68,20 @@ func setup(
 
 func bind_camera_nodes(
 	toggle: Button, popup: PopoverPanel, close: Button, detach: Button,
-	content: Control, settings_host: Control
+	content: Control, settings_mount: Control
 ) -> void:
 	_camera_toggle_button = toggle
 	_camera_popup = popup
 	_camera_popup_close = close
 	_camera_popup_detach = detach
 	_camera_popup_content = content
-	_camera_settings_host = settings_host
+	_camera_settings_mount = settings_mount
 
 
 func bind_environment_nodes(
 	toggle: Button, popup: PopoverPanel, title: Label, close: Button,
-	detach: Button, content: Control, actions_host: VBoxContainer,
-	inspector_host: Control
+	detach: Button, content: Control, actions_mount: VBoxContainer,
+	inspector_mount: Control
 ) -> void:
 	_environment_toggle_button = toggle
 	_environment_popup = popup
@@ -89,8 +89,8 @@ func bind_environment_nodes(
 	_environment_popup_close = close
 	_environment_popup_detach = detach
 	_environment_popup_content = content
-	_environment_actions_host = actions_host
-	_environment_inspector_host = inspector_host
+	_environment_actions_mount = actions_mount
+	_environment_inspector_mount = inspector_mount
 
 
 func bind_settings_nodes(toggle: Button, popup: PopoverPanel, close: Button) -> void:
@@ -111,10 +111,10 @@ func wire_camera() -> void:
 			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
 		if not _camera_popup.detach_requested.is_connected(detach_camera_panel):
 			_camera_popup.detach_requested.connect(detach_camera_panel)
-	if _camera_panel_host == null and _camera_popup_content != null:
-		_camera_panel_host = DetachablePanelHost.new(&"camera", "Camera", Vector2i(344, 320))
-		_camera_panel_host.setup(_camera_popup_content, _shell, _save_camera_panel_state)
-		_camera_panel_host.floating_changed.connect(_on_camera_floating_changed)
+	if _camera_panel_mount == null and _camera_popup_content != null:
+		_camera_panel_mount = DetachablePanelMount.new(&"camera", "Camera", Vector2i(344, 320))
+		_camera_panel_mount.setup(_camera_popup_content, _shell, _save_camera_panel_state)
+		_camera_panel_mount.floating_changed.connect(_on_camera_floating_changed)
 		# Read-only startup apply: remember the preference, never spawn windows
 		# at launch (the floating preference applies on the next open).
 		_panel_restore["camera"] = _resource_library.load_panel_state("camera")
@@ -134,10 +134,10 @@ func wire_environment() -> void:
 			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
 		if not _environment_popup.detach_requested.is_connected(detach_environment_panel):
 			_environment_popup.detach_requested.connect(detach_environment_panel)
-	if _environment_panel_host == null and _environment_popup_content != null:
-		_environment_panel_host = DetachablePanelHost.new(&"environment", "Environment", Vector2i(424, 480))
-		_environment_panel_host.setup(_environment_popup_content, _shell, _save_environment_panel_state)
-		_environment_panel_host.floating_changed.connect(_on_environment_floating_changed)
+	if _environment_panel_mount == null and _environment_popup_content != null:
+		_environment_panel_mount = DetachablePanelMount.new(&"environment", "Environment", Vector2i(424, 480))
+		_environment_panel_mount.setup(_environment_popup_content, _shell, _save_environment_panel_state)
+		_environment_panel_mount.floating_changed.connect(_on_environment_floating_changed)
 		_panel_restore["environment"] = _resource_library.load_panel_state("environment")
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
 		_environment_toggle_button.icon = EditorIconLibrary.resolve(&"environment")
@@ -159,10 +159,10 @@ func wire_settings() -> void:
 
 # Quit-while-floating remembers the preference + rect for the next session.
 func save_floating_states() -> void:
-	if _camera_panel_host != null:
-		_camera_panel_host.save_now()
-	if _environment_panel_host != null:
-		_environment_panel_host.save_now()
+	if _camera_panel_mount != null:
+		_camera_panel_mount.save_now()
+	if _environment_panel_mount != null:
+		_environment_panel_mount.save_now()
 
 
 # The Escape router: closes the topmost visible popover. The native
@@ -183,19 +183,19 @@ func handle_escape() -> bool:
 
 # --- Detachable panels (B6) ---
 
-func camera_panel_host() -> DetachablePanelHost:
-	return _camera_panel_host
+func camera_panel_mount() -> DetachablePanelMount:
+	return _camera_panel_mount
 
 
-func environment_panel_host() -> DetachablePanelHost:
-	return _environment_panel_host
+func environment_panel_mount() -> DetachablePanelMount:
+	return _environment_panel_mount
 
 
 # The env document counts as open whether docked OR floating - the popover
 # hides while the content floats, but its document is still on screen.
 func environment_open() -> bool:
 	return (_environment_popup != null and _environment_popup.visible) \
-			or (_environment_panel_host != null and _environment_panel_host.is_floating())
+			or (_environment_panel_mount != null and _environment_panel_mount.is_floating())
 
 
 func _save_camera_panel_state(docked: bool, rect: Rect2i) -> void:
@@ -218,25 +218,25 @@ func _panel_detach_rect(panel_id: String, popover: PopoverPanel) -> Rect2i:
 	var restore := panel_restore_for(panel_id)
 	if bool(restore.get("has_rect", false)):
 		return restore.get("rect", Rect2i()) as Rect2i
-	return DetachablePanelHost.screen_rect_for(popover)
+	return DetachablePanelMount.screen_rect_for(popover)
 
 
 func detach_camera_panel() -> void:
-	if _camera_panel_host == null or _camera_panel_host.is_floating():
+	if _camera_panel_mount == null or _camera_panel_mount.is_floating():
 		return
 	# Content must exist before it floats (the popover may never have opened).
 	_ensure_camera_content()
-	_camera_panel_host.detach(_panel_detach_rect("camera", _camera_popup))
+	_camera_panel_mount.detach(_panel_detach_rect("camera", _camera_popup))
 	if _camera_popup != null:
 		_camera_popup.close()
 	refresh_camera_state()
 
 
 func detach_environment_panel() -> void:
-	if _environment_panel_host == null or _environment_panel_host.is_floating():
+	if _environment_panel_mount == null or _environment_panel_mount.is_floating():
 		return
 	ensure_environment_content()
-	_environment_panel_host.detach(_panel_detach_rect("environment", _environment_popup))
+	_environment_panel_mount.detach(_panel_detach_rect("environment", _environment_popup))
 	if _environment_popup != null:
 		_environment_popup.close()
 	refresh_environment_state()
@@ -267,17 +267,17 @@ func set_camera_visible(active: bool) -> void:
 		return
 	# A floating panel is not a popover: the toggle raises its window, and the
 	# siblings' mutual-exclusion calls (active=false) must leave it alone.
-	if _camera_panel_host != null and _camera_panel_host.is_floating():
+	if _camera_panel_mount != null and _camera_panel_mount.is_floating():
 		if active:
 			_ensure_camera_content()
-			_camera_panel_host.focus_window()
+			_camera_panel_mount.focus_window()
 		if _camera_toggle_button != null:
 			_camera_toggle_button.set_pressed_no_signal(true)
 		return
 	if active and _get_editor_camera.call() == null:
 		active = false
 	# The remembered floating preference applies on open, never at launch.
-	if active and _camera_panel_host != null \
+	if active and _camera_panel_mount != null \
 			and not bool(panel_restore_for("camera").get("docked", true)):
 		detach_camera_panel()
 		return
@@ -293,12 +293,12 @@ func set_camera_visible(active: bool) -> void:
 
 
 func _ensure_camera_content() -> void:
-	if _camera_settings_host == null:
+	if _camera_settings_mount == null:
 		return
 	if _camera_settings_panel == null:
 		_camera_settings_panel = CameraSettingsPanelScene.instantiate() as Control
 		_camera_settings_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_camera_settings_host.add_child(_camera_settings_panel)
+		_camera_settings_mount.add_child(_camera_settings_panel)
 	sync_camera_editor()
 
 
@@ -310,13 +310,13 @@ func sync_camera_editor() -> void:
 
 func refresh_camera_state() -> void:
 	var has_camera: bool = _get_editor_camera.call() != null
-	var floating := _camera_panel_host != null and _camera_panel_host.is_floating()
+	var floating := _camera_panel_mount != null and _camera_panel_mount.is_floating()
 	# A floating camera panel whose camera disappeared re-docks (mirrors the
 	# docked popover's force-close below). persist=false: a transient
 	# camera-null (editor rebind) must not overwrite the user's floating
 	# preference - the next open with a camera floats again.
 	if floating and not has_camera:
-		_camera_panel_host.redock(false)
+		_camera_panel_mount.redock(false)
 		floating = false
 	if _camera_toggle_button != null:
 		_camera_toggle_button.disabled = not has_camera
@@ -347,15 +347,15 @@ func set_environment_visible(active: bool) -> void:
 		return
 	# A floating panel is not a popover: the toggle raises its window, and the
 	# siblings' mutual-exclusion calls (active=false) must leave it alone.
-	if _environment_panel_host != null and _environment_panel_host.is_floating():
+	if _environment_panel_mount != null and _environment_panel_mount.is_floating():
 		if active:
 			ensure_environment_content()
-			_environment_panel_host.focus_window()
+			_environment_panel_mount.focus_window()
 		if _environment_toggle_button != null:
 			_environment_toggle_button.set_pressed_no_signal(true)
 		return
 	# The remembered floating preference applies on open, never at launch.
-	if active and _environment_panel_host != null \
+	if active and _environment_panel_mount != null \
 			and not bool(panel_restore_for("environment").get("docked", true)):
 		detach_environment_panel()
 		return
@@ -372,13 +372,13 @@ func set_environment_visible(active: bool) -> void:
 
 func reset_environment_content() -> void:
 	_environment_action_bar.rebuild(null)
-	if _environment_actions_host != null:
-		for child in _environment_actions_host.get_children():
-			_environment_actions_host.remove_child(child)
+	if _environment_actions_mount != null:
+		for child in _environment_actions_mount.get_children():
+			_environment_actions_mount.remove_child(child)
 			child.free()
-	if _environment_inspector_host != null:
-		for child in _environment_inspector_host.get_children():
-			_environment_inspector_host.remove_child(child)
+	if _environment_inspector_mount != null:
+		for child in _environment_inspector_mount.get_children():
+			_environment_inspector_mount.remove_child(child)
 			child.free()
 
 
@@ -386,10 +386,10 @@ func ensure_environment_content() -> void:
 	var popup_workspace := _popup_workspace.call() as EditorWorkspace
 	if popup_workspace == null:
 		return
-	if _environment_actions_host != null and _environment_action_bar.buttons().is_empty():
+	if _environment_actions_mount != null and _environment_action_bar.buttons().is_empty():
 		_environment_action_bar.rebuild(popup_workspace)
-	if _environment_inspector_host != null and _environment_inspector_host.get_child_count() == 0:
-		popup_workspace.build_inspector(_environment_inspector_host)
+	if _environment_inspector_mount != null and _environment_inspector_mount.get_child_count() == 0:
+		popup_workspace.build_inspector(_environment_inspector_mount)
 
 
 func refresh_environment_state() -> void:
@@ -397,9 +397,9 @@ func refresh_environment_state() -> void:
 	var title := popup_workspace.get_project_title() if popup_workspace != null else "Environment"
 	if _environment_popup_title != null:
 		_environment_popup_title.text = title
-	if _environment_panel_host != null and _environment_panel_host.is_floating():
+	if _environment_panel_mount != null and _environment_panel_mount.is_floating():
 		# The dirty "*" reaches the floating window through its OS title.
-		_environment_panel_host.set_window_title("Environment — %s" % title)
+		_environment_panel_mount.set_window_title("Environment — %s" % title)
 	_environment_action_bar.refresh_state(popup_workspace)
 
 

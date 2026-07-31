@@ -13,7 +13,7 @@ var _body_row: SplitContainer
 var _center_right_split: SplitContainer
 var _right_split: SplitContainer
 var _browser_toggle_button: Button
-var _browser_pane_host: PanelContainer
+var _browser_pane_mount: PanelContainer
 var _asset_dock: Control
 # func() -> void: rescan of the configured resource root (no status toast).
 var _scan_resource_root: Callable
@@ -33,7 +33,7 @@ func setup(
 	center_right_split: SplitContainer,
 	right_split: SplitContainer,
 	browser_toggle_button: Button,
-	browser_pane_host: PanelContainer,
+	browser_pane_mount: PanelContainer,
 	asset_dock: Control,
 	scan_resource_root: Callable,
 	current_resource_path: Callable,
@@ -45,7 +45,7 @@ func setup(
 	_center_right_split = center_right_split
 	_right_split = right_split
 	_browser_toggle_button = browser_toggle_button
-	_browser_pane_host = browser_pane_host
+	_browser_pane_mount = browser_pane_mount
 	_asset_dock = asset_dock
 	_scan_resource_root = scan_resource_root
 	_current_resource_path = current_resource_path
@@ -106,9 +106,9 @@ func wire_browser_pane() -> void:
 	var state := _resource_library.load_browser_state()
 	if _right_split != null and bool(state["has_split"]):
 		_right_split.split_offset = int(state["split"])
-	if bool(state["visible"]) and _browser_pane_host != null:
+	if bool(state["visible"]) and _browser_pane_mount != null:
 		_ensure_browser_pane()
-		_browser_pane_host.visible = true
+		_browser_pane_mount.visible = true
 		if _browser_toggle_button != null:
 			_browser_toggle_button.set_pressed_no_signal(true)
 		# Refresh now only when no root is configured (nothing will scan later);
@@ -138,15 +138,15 @@ func _ensure_browser_pane() -> void:
 		_current_resource_path,
 		_open_in_workspace
 	)
-	_browser_pane_host.add_child(_browser_pane)
+	_browser_pane_mount.add_child(_browser_pane)
 
 
 func set_browser_pane_visible(active: bool) -> void:
-	if _browser_pane_host == null:
+	if _browser_pane_mount == null:
 		return
 	if active:
 		_ensure_browser_pane()
-	_browser_pane_host.visible = active
+	_browser_pane_mount.visible = active
 	if _browser_toggle_button != null:
 		_browser_toggle_button.set_pressed_no_signal(active)
 	sync_right_split_visibility()
@@ -171,17 +171,17 @@ func sync_right_split_visibility() -> void:
 	if _right_split == null:
 		return
 	_right_split.visible = (_asset_dock != null and _asset_dock.visible) \
-			or (_browser_pane_host != null and _browser_pane_host.visible)
+			or (_browser_pane_mount != null and _browser_pane_mount.visible)
 
 
 func _save_browser_state() -> void:
-	if _browser_pane_host == null or _right_split == null:
+	if _browser_pane_mount == null or _right_split == null:
 		return
-	_resource_library.save_browser_state(_browser_pane_host.visible, _right_split.split_offset)
+	_resource_library.save_browser_state(_browser_pane_mount.visible, _right_split.split_offset)
 
 
 # Keep a visible pane truthful after the root changes or a rescan.
 func refresh_browser_pane() -> void:
 	if _browser_pane != null and is_instance_valid(_browser_pane) \
-			and _browser_pane_host != null and _browser_pane_host.visible:
+			and _browser_pane_mount != null and _browser_pane_mount.visible:
 		_browser_pane.refresh()

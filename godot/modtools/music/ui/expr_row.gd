@@ -224,7 +224,7 @@ class ExprCell extends HBoxContainer:
 		return MusExpr.literal(0)
 
 	# Seed from a MusExpr node dict (the binding's tree shape). Anything this
-	# cell can't host structurally (unary ops, locals, too-deep nesting) opens
+	# cell can't mount structurally (unary ops, locals, too-deep nesting) opens
 	# as type-it text -- still canonical, still compilable.
 	func seed(node) -> void:
 		if typeof(node) != TYPE_DICTIONARY:

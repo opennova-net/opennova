@@ -9,9 +9,9 @@ extends RefCounted
 # workspace convention.
 #
 # Unlike the controller precedent (whose composer is RefCounted and needs a
-# weakref to break the composer <-> section cycle), the host here is a
+# weakref to break the composer <-> section cycle), the mount here is a
 # Control -- a Node, manually managed -- so a plain back-reference cannot
-# cycle: the host owns the sections; the sections point back at the Node.
+# cycle: the mount owns the sections; the sections point back at the Node.
 
 var _lm
 

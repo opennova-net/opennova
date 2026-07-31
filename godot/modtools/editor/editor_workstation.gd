@@ -33,12 +33,12 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _left_lane: PanelContainer = %LeftLane
 @onready var _workspace_bar: PanelContainer = %WorkspaceBar
 @onready var _workspace_rail: BoxContainer = %WorkspaceRail
-@onready var _workspace_actions_host: BoxContainer = %WorkspaceActionsHost
+@onready var _workspace_actions_mount: BoxContainer = %WorkspaceActionsMount
 @onready var _modes_label: Label = %ModesLabel
 @onready var _mode_rail: VBoxContainer = %ModeRail
-@onready var _inspector_host: Control = %InspectorHost
+@onready var _inspector_mount: Control = %InspectorMount
 @onready var _viewport_lane: Control = %ViewportLane
-@onready var _viewport_host: Control = %ViewportHost
+@onready var _viewport_mount: Control = %ViewportMount
 @onready var _document_tab_strip: PanelContainer = %DocumentTabStrip
 @onready var _document_tab_row: HBoxContainer = %DocumentTabRow
 @onready var _camera_toggle_button: Button = %CameraToggleButton
@@ -46,15 +46,15 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _camera_popup_close: Button = %CameraPopupClose
 @onready var _camera_popup_detach: Button = %CameraPopupDetach
 @onready var _camera_popup_content: Control = %CameraPopupContent
-@onready var _camera_settings_host: Control = %CameraSettingsHost
+@onready var _camera_settings_mount: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
 @onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
 @onready var _environment_popup_detach: Button = %EnvironmentPopupDetach
 @onready var _environment_popup_content: Control = %EnvironmentPopupContent
-@onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
-@onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
+@onready var _environment_actions_mount: VBoxContainer = %EnvironmentActionsHost
+@onready var _environment_inspector_mount: Control = %EnvironmentInspectorMount
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
 @onready var _settings_popup: PopoverPanel = %SettingsPopup
 @onready var _settings_popup_close: Button = %SettingsPopupClose
@@ -78,7 +78,7 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _play_in_game_button: Button = %PlayInGameButton
 @onready var _play_current_mission_button: Button = %PlayCurrentMissionButton
 @onready var _stop_game_button: Button = %StopGameButton
-@onready var _browser_pane_host: PanelContainer = %ResourceBrowserPaneHost
+@onready var _browser_pane_mount: PanelContainer = %ResourceBrowserPaneHost
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
 @onready var _status_context_label: Label = %StatusContextLabel
@@ -179,14 +179,14 @@ func _ready() -> void:
 		func() -> void: _refresh_shell_state()
 	)
 	_top_action_bar.setup(
-		_workspace_actions_host,
+		_workspace_actions_mount,
 		Callable(self, "_on_workspace_action_pressed"),
 		func() -> bool: return _any_workspace_busy(),
 		active_workspace_supplier,
 		func() -> Theme: return theme
 	)
 	_environment_action_bar.setup(
-		_environment_actions_host,
+		_environment_actions_mount,
 		Callable(self, "_on_environment_action_pressed"),
 		func() -> bool: return _any_workspace_busy(),
 		func() -> EditorWorkspace: return _popup_workspace(),
@@ -252,12 +252,12 @@ func _ready() -> void:
 	)
 	_popovers.bind_camera_nodes(
 		_camera_toggle_button, _camera_popup, _camera_popup_close,
-		_camera_popup_detach, _camera_popup_content, _camera_settings_host)
+		_camera_popup_detach, _camera_popup_content, _camera_settings_mount)
 	_popovers.bind_environment_nodes(
 		_environment_toggle_button, _environment_popup, _environment_popup_title,
 		_environment_popup_close, _environment_popup_detach,
-		_environment_popup_content, _environment_actions_host,
-		_environment_inspector_host)
+		_environment_popup_content, _environment_actions_mount,
+		_environment_inspector_mount)
 	_popovers.bind_settings_nodes(_settings_toggle_button, _settings_popup, _settings_popup_close)
 	_settings_panel.setup(
 		_resource_library,
@@ -284,7 +284,7 @@ func _ready() -> void:
 		_center_right_split,
 		_right_split,
 		_browser_toggle_button,
-		_browser_pane_host,
+		_browser_pane_mount,
 		_asset_dock,
 		func() -> void: _scan_resource_root(false),
 		_current_resource_path_for_browser,
@@ -324,7 +324,7 @@ func _exit_tree() -> void:
 	_popovers.save_floating_states()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).release_viewport()
-	_clear_viewport_host()
+	_clear_viewport_mount()
 	_mounted_workspace_id = -1
 
 
@@ -411,13 +411,13 @@ func set_editor(value: Node) -> void:
 		(workspace as EditorWorkspace).bind_to_editor(value)
 	_popovers.reset_environment_content()
 	# A floating environment window must not sit empty until its next toggle.
-	var env_host := _popovers.environment_panel_host()
-	if env_host != null and env_host.is_floating():
+	var env_mount := _popovers.environment_panel_mount()
+	if env_mount != null and env_mount.is_floating():
 		_popovers.ensure_environment_content()
 	_popovers.sync_camera_editor()
 	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
-	for child in _inspector_host.get_children():
+	for child in _inspector_mount.get_children():
 		if child.has_method("set_editor"):
 			child.set_editor(value)
 	sync_from_editor_state()
@@ -656,7 +656,7 @@ func _rebuild_workspace_actions(workspace: EditorWorkspace) -> void:
 
 
 func _refresh_workspace_actions_state() -> void:
-	if _workspace_actions_host == null:
+	if _workspace_actions_mount == null:
 		return
 	_top_action_bar.refresh_state(_get_active_workspace())
 
@@ -991,23 +991,23 @@ func _get_active_workspace() -> EditorWorkspace:
 
 
 func _mount_active_workspace_viewport() -> void:
-	if _viewport_host == null:
+	if _viewport_mount == null:
 		return
-	_clear_viewport_host()
+	_clear_viewport_mount()
 	var workspace := _get_active_workspace()
 	if workspace == null:
 		_mounted_workspace_id = -1
 		return
-	workspace.mount_viewport(_viewport_host)
+	workspace.mount_viewport(_viewport_mount)
 	_mounted_workspace_id = _active_workspace_id
 
 
 func _unmount_workspace_viewport(workspace_id: int, workspace: EditorWorkspace) -> void:
-	if _viewport_host == null:
+	if _viewport_mount == null:
 		return
 	if workspace != null:
-		workspace.unmount_viewport(_viewport_host)
-	_clear_viewport_host()
+		workspace.unmount_viewport(_viewport_mount)
+	_clear_viewport_mount()
 	if _mounted_workspace_id == workspace_id:
 		_mounted_workspace_id = -1
 
@@ -1018,11 +1018,11 @@ func _remount_active_workspace_viewport() -> void:
 	_mount_active_workspace_viewport()
 
 
-func _clear_viewport_host() -> void:
-	if _viewport_host == null:
+func _clear_viewport_mount() -> void:
+	if _viewport_mount == null:
 		return
-	for child in _viewport_host.get_children():
-		_viewport_host.remove_child(child)
+	for child in _viewport_mount.get_children():
+		_viewport_mount.remove_child(child)
 
 
 func _any_workspace_busy() -> bool:
@@ -1051,7 +1051,7 @@ func _refresh_workspace_surface() -> void:
 	_rebuild_workspace_actions(workspace)
 	_modes_label.visible = has_workflows
 	_mode_rail.visible = has_workflows
-	# Whole left lane (picker + inspector host) is opt-out: a workspace that lives
+	# Whole left lane (picker + inspector mount) is opt-out: a workspace that lives
 	# entirely in the viewport (e.g. Music's unified screen) hides it to reclaim
 	# the width. BodyRow is an HSplitContainer, so the viewport takes the space.
 	_left_lane.visible = workspace == null or workspace.uses_left_lane()
@@ -1109,11 +1109,11 @@ func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
 	if _inspector_workspace_id == _active_workspace_id:
 		return
 	_inspector_workspace_id = _active_workspace_id
-	for child in _inspector_host.get_children():
+	for child in _inspector_mount.get_children():
 		child.queue_free()
 	if workspace != null:
-		workspace.build_inspector(_inspector_host)
-		if _inspector_host.get_child_count() > 0:
+		workspace.build_inspector(_inspector_mount)
+		if _inspector_mount.get_child_count() > 0:
 			return
 	# Fallback for a workspace with no inspector content: a clean call-to-action
 	# (icon + guidance + its own New/Open + quick-open) instead of a bare line.
@@ -1125,20 +1125,20 @@ func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
 		var def := _def_for_id(_active_workspace_id)
 		if def != null:
 			icon_id = def.icon_id
-	_build_empty_state_panel(_inspector_host, message, icon_id)
+	_build_empty_state_panel(_inspector_mount, message, icon_id)
 
 
 # A centered call-to-action for an empty inspector: the workspace icon, a one-line
 # message, and the workspace's own New/Open actions plus quick-open. The buttons
 # route through the same handlers as the top-bar toolbar, so behavior is identical.
-func _build_empty_state_panel(host: Control, message: String, icon_id: StringName) -> void:
+func _build_empty_state_panel(mount: Control, message: String, icon_id: StringName) -> void:
 	var panel := VBoxContainer.new()
 	panel.name = "EmptyStatePanel"
 	panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	panel.add_theme_constant_override("separation", 14)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	host.add_child(panel)
+	mount.add_child(panel)
 
 	var icon_tex := EditorIconLibrary.resolve(icon_id)
 	if icon_tex != null:
@@ -1540,11 +1540,11 @@ func _set_workflow(workflow_id: int, activate: bool) -> void:
 
 
 func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> void:
-	for child in _inspector_host.get_children():
+	for child in _inspector_mount.get_children():
 		child.queue_free()
 	if workspace != null:
-		workspace.build_workflow_inspector(workflow_id, _inspector_host)
-	if _inspector_host.get_child_count() > 0:
+		workspace.build_workflow_inspector(workflow_id, _inspector_mount)
+	if _inspector_mount.get_child_count() > 0:
 		return
 	var placeholder := Label.new()
 	placeholder.text = "Workflow inspector coming soon"
@@ -1553,7 +1553,7 @@ func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> v
 	placeholder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	placeholder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	placeholder.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_inspector_host.add_child(placeholder)
+	_inspector_mount.add_child(placeholder)
 
 
 ## Transient status message in the status bar's tool cell (the shell's public

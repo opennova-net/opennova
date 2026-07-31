@@ -13,7 +13,7 @@ extends RefCounted
 ##   1 square, 2 sine, 3 triangle, 4 saw, 5 inverse saw, 6 random,
 ##   7 smooth random, 8 half sine, 9 pulse, A vibrate, F heartbeat.
 ##
-## Friendly labels live here (an editor concern) rather than in the host-agnostic
+## Friendly labels live here (an editor concern) rather than in the mount-agnostic
 ## C++ core, which keeps CODE-style names (SET_WAVE_SMOOTH_RANDOM) for debug output.
 ## generator_style_catalog_test.gd parity-checks that every canonical code is named
 ## and pins the consumer-specific control-register matrix.

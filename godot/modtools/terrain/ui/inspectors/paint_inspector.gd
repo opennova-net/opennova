@@ -3,7 +3,7 @@ extends TerrainInspector
 
 ## Paint workflow: three sub-tools (detail layers, vertex color + clone, surface
 ## type) selected by a button row that shows one panel at a time, plus the
-## shared brush controls. Code-first; built into the inspector host by the
+## shared brush controls. Code-first; built into the inspector mount by the
 ## terrain workspace.
 
 
@@ -29,8 +29,8 @@ var _surface_index_spin: SpinBox
 var _surface_current: Label
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_root = box
 	_add_section_heading(box, "Paint")
 

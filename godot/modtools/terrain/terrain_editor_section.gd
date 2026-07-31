@@ -6,7 +6,7 @@ extends RefCounted
 # `_te`. Referenced via preload (no class_name), the workspace convention.
 #
 # Unlike the MissionController precedent (a RefCounted composer that needs a
-# weakref-backed back-ref), the host here is a Node3D: a plain back-reference
+# weakref-backed back-ref), the mount here is a Node3D: a plain back-reference
 # from a RefCounted section to a Node cannot cycle, so `_te` is a direct
 # untyped var.
 

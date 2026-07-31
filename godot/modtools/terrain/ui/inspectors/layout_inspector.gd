@@ -3,7 +3,7 @@ extends TerrainInspector
 
 ## Layout workflow: the quadrant sector board with a passive legend, plus map
 ## size / origin / water / wrap controls. Forces the sector-editing tool while
-## active. Code-first; built into the inspector host by the terrain workspace.
+## active. Code-first; built into the inspector mount by the terrain workspace.
 
 const LEGEND_LAYOUT := [
 	1, -1, 3,
@@ -37,8 +37,8 @@ func set_editor(value: TerrainEditor) -> void:
 		terrain_editor.set_tool(TerrainEditor.Tool.EDIT_SECTORS)
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 	_root = box
 	_add_section_heading(box, "Layout")
 

@@ -51,11 +51,11 @@ var _browser  # ObjectsBrowserInspector
 # form under a TabContainer (Selection | Mission) that lives in the shell's right dock
 # (%AssetDock), keeping the left pane to just the mode tabs + the current mode's list/palette.
 # `_detail_root` is the one owned container reparented between the dock and `_root`: when the
-# workspace forwards a dock host it mounts in the dock; with no host (headless / GUT tests) it
+# workspace forwards a dock mount it mounts in the dock; with no mount (headless / GUT tests) it
 # falls back under `_root`, so the whole tree stays a descendant of `self` and find_child /
 # is_visible_in_tree assertions keep working unchanged.
-var _detail_host: Control       # the %AssetDock PanelContainer, or null (tests / no dock)
-var _detail_host_inner: Control # cached Margin scaffold built once inside the dock
+var _detail_mount: Control       # the %AssetDock PanelContainer, or null (tests / no dock)
+var _detail_mount_inner: Control # cached Margin scaffold built once inside the dock
 var _detail_root: VBoxContainer # owned; holds _detail_tabs; reparented dock <-> _root
 var _detail_tabs: TabContainer
 var _sel_content: VBoxContainer     # Selection tab page content (per-mode editors)
@@ -131,10 +131,10 @@ var _last_mission: NovaMissionData = null
 var _summary_sig: Array = []
 
 
-# `detail_host` is the shell's right dock (%AssetDock), forwarded by the workspace adapter; the
+# `detail_mount` is the shell's right dock (%AssetDock), forwarded by the workspace adapter; the
 # editor panels + the Mission form mount there. It defaults to null so the existing one-arg test
 # calls (`inspector.setup(fake)`) keep building the whole tree under `_root` unchanged.
-func setup(controller, detail_host: Control = null) -> void:
+func setup(controller, detail_mount: Control = null) -> void:
 	_controller = controller
 	# Create the extracted panel sections once, before any build call below.
 	if _scripting == null:
@@ -163,7 +163,7 @@ func setup(controller, detail_host: Control = null) -> void:
 		scroll.add_child(_root)
 		# Build the dock-resident container first, so the editor / Mission builders below can add
 		# straight into the Selection / Mission tab pages.
-		_detail_host = detail_host
+		_detail_mount = detail_mount
 		_ensure_detail_root()
 		_build_mode_tabs()           # LEFT
 		_build_edit_panel()          # DOCK: Selection
@@ -183,14 +183,14 @@ func setup(controller, detail_host: Control = null) -> void:
 		_mission_content.add_child(_box)
 	else:
 		# Already built (a re-setup): just re-point the dock subtree.
-		set_detail_host(detail_host)
+		set_detail_mount(detail_mount)
 	if _controller != null and not _controller.changed.is_connected(_refresh):
 		_controller.changed.connect(_refresh)
 	_refresh()
 
 
 # --- Right-dock plumbing ------------------------------------------------------
-# `_detail_root` is built once and reparented between the dock (real host) and `_root` (no host).
+# `_detail_root` is built once and reparented between the dock (real mount) and `_root` (no mount).
 # Each per-mode editor / Mission panel adds into `_sel_content` or `_mission_content`. The tree
 # stays owned by `self`, so a refresh writes into the same widget references regardless of where
 # the subtree currently lives.
@@ -213,7 +213,7 @@ func _ensure_detail_root() -> void:
 	_sel_content = _add_detail_page("Selection")
 	_mission_content = _add_detail_page("Mission")
 	# Selection is page 0, the default current tab: this is what keeps the edit panel (and its
-	# Delete button) is_visible_in_tree() in the null-host test path.
+	# Delete button) is_visible_in_tree() in the null-mount test path.
 	_detail_tabs.current_tab = 0
 	_attach_detail_root()
 
@@ -235,12 +235,12 @@ func _add_detail_page(title: String) -> VBoxContainer:
 	return content
 
 
-# Parent `_detail_root` under the dock (when a host is set) or under `_root` (no host). Reparents
+# Parent `_detail_root` under the dock (when a mount is set) or under `_root` (no mount). Reparents
 # without freeing, so the live editor widgets keep their state and signal connections.
 func _attach_detail_root() -> void:
 	if _detail_root == null or not is_instance_valid(_detail_root):
 		return
-	var target: Control = _detail_host_box() if (_detail_host != null and is_instance_valid(_detail_host)) else _root
+	var target: Control = _detail_mount_box() if (_detail_mount != null and is_instance_valid(_detail_mount)) else _root
 	if target == null:
 		return
 	var current := _detail_root.get_parent()
@@ -252,13 +252,13 @@ func _attach_detail_root() -> void:
 
 
 # Lazily build a margin scaffold inside the bare %AssetDock PanelContainer and cache it. The dock
-# pages scroll their own content, so the scaffold is just a padded host. The shell owns the dock's
+# pages scroll their own content, so the scaffold is just a padded mount. The shell owns the dock's
 # lifetime (it remove_child + frees the scaffold on switch-away), so we never free it ourselves.
-func _detail_host_box() -> Control:
-	if _detail_host == null or not is_instance_valid(_detail_host):
+func _detail_mount_box() -> Control:
+	if _detail_mount == null or not is_instance_valid(_detail_mount):
 		return null
-	if _detail_host_inner != null and is_instance_valid(_detail_host_inner) and _detail_host_inner.get_parent() == _detail_host:
-		return _detail_host_inner
+	if _detail_mount_inner != null and is_instance_valid(_detail_mount_inner) and _detail_mount_inner.get_parent() == _detail_mount:
+		return _detail_mount_inner
 	var margin := MarginContainer.new()
 	margin.name = "MissionDockMargin"
 	margin.add_theme_constant_override("margin_left", 10)
@@ -267,18 +267,18 @@ func _detail_host_box() -> Control:
 	margin.add_theme_constant_override("margin_bottom", 10)
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_detail_host.add_child(margin)
-	_detail_host_inner = margin
-	return _detail_host_inner
+	_detail_mount.add_child(margin)
+	_detail_mount_inner = margin
+	return _detail_mount_inner
 
 
-# Re-point the dock subtree at a new host (or null to evacuate it back under `_root` before the
-# shell clears the dock on a workspace switch). Idempotent: the same host already mounted is a no-op,
+# Re-point the dock subtree at a new mount (or null to evacuate it back under `_root` before the
+# shell clears the dock on a workspace switch). Idempotent: the same mount already mounted is a no-op,
 # which absorbs the shell re-asserting the dock on every editor-state sync without thrashing focus.
-func set_detail_host(detail_host: Control) -> void:
-	if detail_host == _detail_host and _detail_root != null and is_instance_valid(_detail_root) and _detail_root.get_parent() != null:
+func set_detail_mount(detail_mount: Control) -> void:
+	if detail_mount == _detail_mount and _detail_root != null and is_instance_valid(_detail_root) and _detail_root.get_parent() != null:
 		return
-	_detail_host = detail_host
+	_detail_mount = detail_mount
 	if _detail_root == null:
 		return  # not built yet; setup() attaches on first build
 	_attach_detail_root()

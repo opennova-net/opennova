@@ -60,7 +60,7 @@ func mus_script():
 	return _mus
 
 
-# True for the kinds that take no inputs (return/yield): the host inserts their
+# True for the kinds that take no inputs (return/yield): the mount inserts their
 # canonical lines directly, no editor.
 func is_inputless(kind: String) -> bool:
 	return kind == "return" or kind == "yield"

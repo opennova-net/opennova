@@ -1,6 +1,6 @@
 class_name ParticlePreview
 extends Control
-## SubViewport host for the particle editor. The preview owns one value-only
+## SubViewport mount for the particle editor. The preview owns one value-only
 ## NovaEffectScene rendered through one shared NovaParticleRenderer.
 ## A bottom overlay adds transport controls (play/pause, restart, time scale, a
 ## deterministic fixed-tick timeline) plus a live stats readout. Edits in the

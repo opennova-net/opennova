@@ -24,8 +24,8 @@ func _anims_workspace() -> Dictionary:
 	var ws = ObjectWorkspaceScript.new()
 	ws.set_editor_shell(self)
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK, "Shed fixture opens")
-	var viewport_host: Control = add_child_autofree(Control.new())
-	ws.mount_viewport(viewport_host)
+	var viewport_mount: Control = add_child_autofree(Control.new())
+	ws.mount_viewport(viewport_mount)
 	var preview: ObjectPreview = ws._preview
 	assert_not_null(preview, "mounting the viewport builds the preview")
 	var keys: PackedStringArray = preview.load_animation_set("soldier.adm", _anim_root())
@@ -199,8 +199,8 @@ func test_preview_workflow_no_longer_carries_the_adm_block() -> void:
 	var ws = ObjectWorkspaceScript.new()
 	ws.set_editor_shell(self)
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK)
-	var viewport_host: Control = add_child_autofree(Control.new())
-	ws.mount_viewport(viewport_host)
+	var viewport_mount: Control = add_child_autofree(Control.new())
+	ws.mount_viewport(viewport_mount)
 	var host: Control = add_child_autofree(Control.new())
 	ws.build_workflow_inspector(ObjectWorkspaceScript.Workflow.PREVIEW, host)
 	assert_not_null(host.find_child("PreviewPlayButton", true, false),

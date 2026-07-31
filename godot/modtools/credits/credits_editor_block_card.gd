@@ -24,7 +24,7 @@ signal request_select(card)
 # Text controls
 @onready var _text_panel: Control = %TextPanel
 @onready var _text_edit: LineEdit = %TextEdit
-@onready var _font_ref_host: Control = %FontRefHost
+@onready var _font_ref_mount: Control = %FontRefMount
 @onready var _color_picker_text: ColorPickerButton = %TextColorPicker
 @onready var _align_left: Button = %AlignLeft
 @onready var _align_center: Button = %AlignCenter
@@ -113,7 +113,7 @@ func _ready() -> void:
 	_font_ref.name = "FontRef"
 	_font_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_font_ref.value_changed.connect(_on_font_ref_changed)
-	_font_ref_host.add_child(_font_ref)
+	_font_ref_mount.add_child(_font_ref)
 	_configure_font_ref()
 	_color_picker_text.color_changed.connect(_on_text_color_changed)
 	_color_picker_text.popup_closed.connect(_commit_burst)

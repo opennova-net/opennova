@@ -144,10 +144,10 @@ func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> 
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var host_rect := host.get_global_rect()
+	var mount_rect := host.get_global_rect()
 	assert_lte(pane.get_combined_minimum_size().x, host.size.x,
 			"load summaries and monitor text cannot widen Perf past the dock")
-	assert_lte(pane.history_option.get_global_rect().end.x, host_rect.end.x,
+	assert_lte(pane.history_option.get_global_rect().end.x, mount_rect.end.x,
 			"the retained-load selector clips instead of widening every row")
 	assert_string_contains(pane.history_option.tooltip_text, long_label,
 			"the complete clipped load summary remains available on hover")
@@ -159,9 +159,9 @@ func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> 
 		assert_not_null(name_label, "%s has a stable readable name cell" % key)
 		if name_label == null:
 			continue
-		assert_lte(row.get_global_rect().end.x, host_rect.end.x,
+		assert_lte(row.get_global_rect().end.x, mount_rect.end.x,
 				"%s row remains inside the content column" % key)
-		assert_lte(value.get_global_rect().end.x, host_rect.end.x,
+		assert_lte(value.get_global_rect().end.x, mount_rect.end.x,
 				"%s value is not pushed beyond the dock" % key)
 		assert_gte(value.size.x, 88.0,
 				"%s reserves a readable value lane" % key)

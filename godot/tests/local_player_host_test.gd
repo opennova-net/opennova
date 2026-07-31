@@ -100,13 +100,13 @@ class FakeEffectsHost:
 
 class ActionParticleEffectsHarness:
 	extends PlayerWeaponEffects
-	var effects_host := FakeEffectsHost.new()
+	var effects_mount := FakeEffectsHost.new()
 
 	func _init() -> void:
-		setup(null, effects_host)
+		setup(null, effects_mount)
 
 	func configure_viewmodel_parts(parts: Array) -> void:
-		effects_host.parts = parts
+		effects_mount.parts = parts
 
 	func action_particle_world_position(userpoint: String) -> Vector3:
 		return _action_particle_world_position(userpoint)

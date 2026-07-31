@@ -14,9 +14,9 @@ const PANEL_MARGIN := 10
 const KEY_WIDTH := 104
 
 
-static func make_inspector_box(host: Control) -> VBoxContainer:
+static func make_inspector_box(mount: Control) -> VBoxContainer:
 	# "Box" is addressed by node path from the canvas code; keep the name.
-	return UiBox.make_inspector_box(host, "Box")
+	return UiBox.make_inspector_box(mount, "Box")
 
 
 static func add_heading(parent: Control, text: String) -> Label:

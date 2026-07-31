@@ -3,7 +3,7 @@ extends EditorWorkspace
 
 # EditorWorkspace adapter for the Credits workspace.
 # Owns a CreditsEditorDocument and mounts a CreditsEditor scene into ONED's
-# viewport host.
+# viewport mount.
 
 const CREDITS_EDITOR_SCENE_PATH := "res://modtools/credits/credits_editor.tscn"
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
@@ -47,8 +47,8 @@ func get_status_context() -> String:
 	return "%d entries" % _document.resource.get_entry_count()
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
 	if _editor == null:
 		var scene := load(CREDITS_EDITOR_SCENE_PATH) as PackedScene
@@ -59,7 +59,7 @@ func mount_viewport(host: Control) -> void:
 		_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if _editor.get_parent() == null:
-		host.add_child(_editor)
+		mount.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
 	if _editor.has_method("set_resource_root"):
 		_editor.set_resource_root(_resource_root())
@@ -74,7 +74,7 @@ func mount_viewport(host: Control) -> void:
 	_editor.set_document(_document)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _editor != null and _editor.get_parent() != null:
 		_editor.get_parent().remove_child(_editor)
 
@@ -92,11 +92,11 @@ func release_viewport() -> void:
 		_editor = null
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	if _inspector_root != null and is_instance_valid(_inspector_root):
 		_inspector_root.queue_free()
 	_inspector_root = _make_inspector()
-	host.add_child(_inspector_root)
+	mount.add_child(_inspector_root)
 	_populate_inspector()
 	if not _document.state_changed.is_connected(_populate_inspector):
 		_document.state_changed.connect(_populate_inspector)

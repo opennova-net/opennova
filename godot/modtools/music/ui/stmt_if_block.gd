@@ -35,7 +35,7 @@ var _header: Label = null
 var _cond_chip: Button = null
 var _then_lane: VBoxContainer = null
 var _else_lane: VBoxContainer = null
-var _host = null
+var _mount = null
 # Items shown in a lane's ＋ menu (ADD_ITEMS minus the block kinds).
 var _lane_add_items: Array = []
 
@@ -45,7 +45,7 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	_ctx = ctx
 	_opts = opts
 	ordinal = p_ordinal
-	_host = ctx.get("view")
+	_mount = ctx.get("view")
 	flat = _flat_editable(stmt)
 	_editable = bool(ctx.get("editable", false)) and not bool(opts.get("read_only", false)) and flat
 	set_meta("ordinal", ordinal)
@@ -101,8 +101,8 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton and event.pressed \
 				and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-			if _host != null:
-				_host.notify_selected(ordinal))
+			if _mount != null:
+				_mount.notify_selected(ordinal))
 	return self
 
 

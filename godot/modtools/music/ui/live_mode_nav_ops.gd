@@ -3,8 +3,8 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 # MusicLiveMode's navigation operations (W4-6a): drill-in / back-to-map,
 # the nav location handler that swaps the canvas, breadcrumb trail +
 # status, browser-style back/forward input, and the States sidebar.
-# Verbatim motion from live_mode.gd; state stays on the host, reached
-# through `_lm` (the host's _unhandled_input virtual delegates here).
+# Verbatim motion from live_mode.gd; state stays on the mount, reached
+# through `_lm` (the mount's _unhandled_input virtual delegates here).
 
 
 # Drill into a state: navigate there; the nav announces the move and

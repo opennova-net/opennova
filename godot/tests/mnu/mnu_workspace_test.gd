@@ -379,18 +379,18 @@ func test_workspace_adapter_actions_and_inspector() -> void:
 	await get_tree().process_frame
 	assert_gt(host.get_child_count(), 0, "Adapter mounts the editor in the viewport.")
 
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
-	ws.build_inspector(inspector_host)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
-	assert_gt(inspector_host.get_child_count(), 0, "Adapter mounts the property inspector.")
-	assert_string_contains(_collect_text(inspector_host), "MAIN",
+	assert_gt(inspector_mount.get_child_count(), 0, "Adapter mounts the property inspector.")
+	assert_string_contains(_collect_text(inspector_mount), "MAIN",
 		"Inspector shows the default-selected first screen.")
 
 	var start_id := _first_root_child(ws._document.resource, 1)
 	ws._on_widget_selected(start_id)
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "StartBtn",
+	assert_string_contains(_collect_text(inspector_mount), "StartBtn",
 		"Selecting a widget updates the right-dock inspector.")
 
 
@@ -480,17 +480,17 @@ func test_adapter_release_viewport_tears_down() -> void:
 	var host := Control.new()
 	host.size = Vector2(800, 480)
 	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
 	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 
 	ws.release_viewport()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_eq(host.get_child_count(), 0, "release_viewport frees the editor.")
-	assert_eq(inspector_host.get_child_count(), 0, "release_viewport frees the inspector.")
+	assert_eq(inspector_mount.get_child_count(), 0, "release_viewport frees the inspector.")
 	assert_null(ws._editor, "release_viewport nulls the editor reference.")
 	assert_null(ws._inspector, "release_viewport nulls the inspector reference.")
 
@@ -525,21 +525,21 @@ func test_inspector_resyncs_to_first_screen_after_reload() -> void:
 	var host := Control.new()
 	host.size = Vector2(800, 480)
 	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
 	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 
 	# Push a widget selection, then reload the document.
 	ws._on_widget_selected(_first_root_child(ws._document.resource, 1))
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "StartBtn", "Inspector shows the selection.")
+	assert_string_contains(_collect_text(inspector_mount), "StartBtn", "Inspector shows the selection.")
 
 	assert_eq(ws._document.open_mnu(FIXTURE), OK)
 	await get_tree().process_frame
 	# The editor resets to the first screen on reload and pushes it to the inspector.
-	assert_string_contains(_collect_text(inspector_host), "MAIN",
+	assert_string_contains(_collect_text(inspector_mount), "MAIN",
 		"Inspector resyncs to the first screen after a document reload.")
 
 
@@ -1421,17 +1421,17 @@ func test_adapter_routes_multi_selection_to_inspector() -> void:
 	var host := Control.new()
 	host.size = Vector2(800, 480)
 	add_child_autofree(host)
-	var inspector_host := Control.new()
-	add_child_autofree(inspector_host)
+	var inspector_mount := Control.new()
+	add_child_autofree(inspector_mount)
 	ws.mount_viewport(host)
-	ws.build_inspector(inspector_host)
+	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
 	var doc: NovaMnuDocument = ws._document.resource
 	var a := _first_root_child(doc, 1)
 	var b := _first_root_child(doc, 0)
 	ws._editor.select_widgets(PackedInt32Array([a, b]))
 	await get_tree().process_frame
-	assert_string_contains(_collect_text(inspector_host), "2 widgets selected",
+	assert_string_contains(_collect_text(inspector_mount), "2 widgets selected",
 		"A multi-selection routes to the inspector summary through the adapter.")
 
 

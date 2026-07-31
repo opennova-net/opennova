@@ -48,7 +48,7 @@ var _glyph: Label = null
 var _sentence: Label = null      # read-only rendering only
 var _badges: HBoxContainer = null
 var _box: HBoxContainer = null
-var _host = null                 # MusicSectionProgramView
+var _mount = null                 # MusicSectionProgramView
 # Live value controls (editable rendering), per kind:
 var _track_opt: OptionButton = null
 var _section_opt: OptionButton = null
@@ -75,7 +75,7 @@ func setup(stmt: Dictionary, p_ordinal: int, ctx: Dictionary, opts: Dictionary =
 	kind = String(stmt.get("kind", ""))
 	ordinal = p_ordinal
 	run = int(opts.get("run", 1))
-	_host = ctx.get("view")
+	_mount = ctx.get("view")
 	read_only = bool(opts.get("read_only", false)) or kind in READ_ONLY_KINDS \
 		or not bool(ctx.get("editable", false))
 	set_meta("ordinal", ordinal)
@@ -326,7 +326,7 @@ func _on_expr_applied(text: String, slot: String) -> void:
 
 
 # Dropdown plumbing shared by every picker: opening one pins follow-live (the
-# host must not re-render the row under an open popup), picking commits.
+# mount must not re-render the row under an open popup), picking commits.
 func _wire_picker(ob: OptionButton, on_pick: Callable) -> void:
 	ob.focus_mode = Control.FOCUS_NONE
 	ob.get_popup().about_to_popup.connect(func():
@@ -513,8 +513,8 @@ func _set_drop_mark(on: bool) -> void:
 func _on_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed \
 			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-		if _host != null:
-			_host.notify_selected(ordinal)
+		if _mount != null:
+			_mount.notify_selected(ordinal)
 
 
 func _pretty(text: String, ctx: Dictionary) -> String:
@@ -531,9 +531,9 @@ func _target_label(stmt: Dictionary) -> String:
 
 # "hands it: <input names>" for a call to a state that takes inputs; "" else.
 func _callee_hand_text(stmt: Dictionary) -> String:
-	if kind != "call" or _host == null or not _host.has_method("callee_inputs_text"):
+	if kind != "call" or _mount == null or not _mount.has_method("callee_inputs_text"):
 		return ""
-	return String(_host.callee_inputs_text(String(stmt.get("target_name", ""))))
+	return String(_mount.callee_inputs_text(String(stmt.get("target_name", ""))))
 
 
 func _callee_hand_label(stmt: Dictionary) -> Label:
@@ -562,8 +562,8 @@ func _open_button(target: String) -> Button:
 	open.focus_mode = Control.FOCUS_NONE
 	open.flat = true
 	open.pressed.connect(func():
-		if _host != null:
-			_host.notify_open(StringName(target)))
+		if _mount != null:
+			_mount.notify_open(StringName(target)))
 	return open
 
 

@@ -123,13 +123,13 @@ func _create_preview() -> Control:
 	return _preview
 
 
-func mount_viewport(host: Control) -> void:
-	if host == null:
+func mount_viewport(mount: Control) -> void:
+	if mount == null:
 		return
-	_ensure_mount().mount(host)
+	_ensure_mount().mount(mount)
 
 
-func unmount_viewport(_host: Control) -> void:
+func unmount_viewport(_released: Control) -> void:
 	if _mount != null:
 		_mount.unmount()
 
@@ -202,19 +202,19 @@ func activate_workflow(workflow_id: int) -> void:
 	_active_workflow_id = workflow_id
 
 
-func build_inspector(host: Control) -> void:
+func build_inspector(mount: Control) -> void:
 	var inspector := get_workflow_inspector(Workflow.TREE)
 	if inspector != null:
-		inspector.build_main(host)
+		inspector.build_main(mount)
 
 
-func build_workflow_inspector(workflow_id: int, host: Control) -> void:
+func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	_active_workflow_id = workflow_id
 	var inspector := get_workflow_inspector(workflow_id)
 	if inspector == null:
 		inspector = get_workflow_inspector(Workflow.TREE)
 	if inspector != null:
-		inspector.build_main(host)
+		inspector.build_main(mount)
 
 
 func _build_inspector_defs() -> Array:

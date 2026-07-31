@@ -19,8 +19,8 @@ var _selected_nat := 0
 var _selected_div := 0
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 
 	var heading := Label.new()
 	heading.text = "Characters"

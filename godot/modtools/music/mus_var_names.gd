@@ -22,8 +22,8 @@ extends RefCounted
 const KNOWN := {
 	# menuscript (menumus.bin):
 	# Var00: documented as "Entry point selector (1-3 all go to Main)"
-	# Var02: the MUSICVAR; current menu screen ID (1=main, 5/6=MP, 8=host,
-	#        9=options, 10=player, 11=SP, 0=error). BINARY-CONFIRMED: the host
+	# Var02: the MUSICVAR; current menu screen ID (1=main, 5/6=MP, 8=mount,
+	#        9=options, 10=player, 11=SP, 0=error). BINARY-CONFIRMED: the mount
 	#        writes Var02 from the active menu's MUSICVAR field (the .mnu
 	#        <MUSICVAR> attribute, UIScene+0x14) every screen event.
 	#        Witnessed: Jointops.exe!UI_DispatchScreenEvent @ 0x54E6A0 (store at
@@ -35,7 +35,7 @@ const KNOWN := {
 		2: "MenuScreen",
 		14: "IntroPlayed",
 	},
-	# gamescript (gamemus.bin). The in-game host drives these via
+	# gamescript (gamemus.bin). The in-game shell drives these via
 	# AudioVM_SetVariable(idx, val) @ Jointops.exe!0x671FA0 (g_audiovm_globals[idx]=val):
 	#   - seeded once at mission start: Jointops.exe!Game_StartMission @ 0x524360
 	#     (Var01=dword_A762E0, Var07=100, Var02..06/08..12=0)
@@ -81,7 +81,7 @@ const KNOWN := {
 #   kind "enum"   -> OptionButton; "options" maps the stored int value -> label
 #   kind "int" / no entry -> SpinBox (full int32 range unless min/max given)
 # These are a UI convenience layered over the binary-grounded KNOWN map; the
-# ranges/labels mirror the host-side semantics documented in KNOWN above.
+# ranges/labels mirror the mount-side semantics documented in KNOWN above.
 const META := {
 	"gamescript": {
 		1: {"kind": "bool"},                          # MissionActive: gate flag
@@ -96,7 +96,7 @@ const META := {
 		# MenuScreen (the MUSICVAR); IDs per the KNOWN comment above.
 		2: {"kind": "enum", "options": {
 				0: "Error", 1: "Main", 5: "MP", 6: "MP2",
-				8: "Host", 9: "Options", 10: "Player", 11: "SP"}},
+				8: "Mount", 9: "Options", 10: "Player", 11: "SP"}},
 		14: {"kind": "bool"},                          # IntroPlayed: 0/1
 	},
 }

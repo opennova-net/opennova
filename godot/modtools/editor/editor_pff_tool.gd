@@ -5,7 +5,7 @@ extends RefCounted
 ## contents, and extract files (decoded or raw) to disk. Read-only — it never writes archives.
 ## Launched from a button in the Settings popover, not as a workspace.
 ##
-## Built as a child of the host shell (so it inherits the editor theme), with the capabilities it
+## Built as a child of the mount shell (so it inherits the editor theme), with the capabilities it
 ## can't own injected as Callables in setup(), mirroring EditorResourceBrowser:
 ##   - open_files(title, filters, on_pick, dir)   multi-file picker (choose .pff archives)
 ##   - open_dir(title, on_pick, dir)              output-folder picker (extract destination)
@@ -16,7 +16,7 @@ extends RefCounted
 ## which the shell keeps for the whole session, so closing the dialog just hides it. The .pff
 ## files on disk are only ever read.
 
-var _host: Control
+var _mount: Control
 var _open_files: Callable
 var _open_dir: Callable
 var _show_status: Callable
@@ -50,9 +50,9 @@ var _archives: Array = []
 var _active: int = -1
 
 
-func setup(host: Control, open_files: Callable, open_dir: Callable, show_status: Callable,
+func setup(mount: Control, open_files: Callable, open_dir: Callable, show_status: Callable,
 		on_extracted: Callable = Callable()) -> void:
-	_host = host
+	_mount = mount
 	_open_files = open_files
 	_open_dir = open_dir
 	_show_status = show_status
@@ -78,11 +78,11 @@ func _ensure_dialog() -> void:
 	_dialog.title = "PFF Archive Tool"
 	_dialog.min_size = Vector2i(900, 600)
 	_dialog.exclusive = true
-	if _host != null and _host.theme != null:
-		_dialog.theme = _host.theme
+	if _mount != null and _mount.theme != null:
+		_dialog.theme = _mount.theme
 	_dialog.get_ok_button().text = "Close"
 	_dialog.close_requested.connect(_on_dialog_close_requested)
-	_host.add_child(_dialog)
+	_mount.add_child(_dialog)
 
 	var box := VBoxContainer.new()
 	box.name = "PffToolBox"
@@ -460,9 +460,9 @@ func _perform_extraction(plan: Array, dir: String, archive_count: int) -> void:
 			base += step_total
 			continue
 		while arc.is_extract_running():
-			await _host.get_tree().process_frame
+			await _mount.get_tree().process_frame
 			if not is_instance_valid(_dialog):
-				# Host/dialog torn down mid-run: stop the worker and clear the busy lock. The
+				# Mount/dialog torn down mid-run: stop the worker and clear the busy lock. The
 				# archive's destructor joins the thread, so no work escapes; skip the dead UI.
 				arc.request_extract_cancel()
 				_busy = false

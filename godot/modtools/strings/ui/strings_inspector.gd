@@ -32,7 +32,7 @@ func setup(workspace: StringsEditorWorkspace) -> void:
 func _ready() -> void:
 	var box := InspectorForms.make_inspector_box(self)
 	# make_inspector_box adds a MarginContainer to this bare Control, which does not
-	# lay out its children — stretch that wrapper to fill the inspector host.
+	# lay out its children — stretch that wrapper to fill the inspector mount.
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	InspectorForms.add_section_heading(box, "Find")

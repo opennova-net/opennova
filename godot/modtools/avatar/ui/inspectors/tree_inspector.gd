@@ -13,8 +13,8 @@ var _tree: Tree
 var _issue_label: Label
 
 
-func build_main(host: Control) -> void:
-	var box := _make_inspector_box(host)
+func build_main(mount: Control) -> void:
+	var box := _make_inspector_box(mount)
 
 	var heading := Label.new()
 	heading.text = "Characters"
