@@ -249,6 +249,8 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						vt.family = opennova::world::VehicleFamily::Helicopter;
 					} else if (fam == "cpln") {
 						vt.family = opennova::world::VehicleFamily::Plane;
+					} else if (fam == "cbik") {
+						vt.family = opennova::world::VehicleFamily::Bike;
 					} else {
 						vt.family = opennova::world::VehicleFamily::Ground;
 					}

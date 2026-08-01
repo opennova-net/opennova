@@ -54,6 +54,11 @@ enum class VehicleFamily : uint8_t {
     Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
     Helicopter, // chel/CHel -> Entity_UpdateAircraftPhysics @0x490310
     Plane,      // cpln
+    Bike,       // cbik -> Entity_UpdatePlayerInfantryMovement @0x483FE0 (misnomer:
+                // the cbike-family mover). Shares the ground template; the four
+                // witnessed family deltas gate on this tag inside the core
+                // (gravity 250, vZ up-cap, airborne throttle/integration, yaw
+                // always-applied >>2 in water) [cbik grill 2026-07-31].
 };
 
 struct VehicleTraits {

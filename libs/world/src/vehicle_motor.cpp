@@ -20,8 +20,10 @@ constexpr int32_t kSteerRampStep = 0x16C16C0;
 constexpr int32_t kSteerRampCap = 596523200; // 0x238E38C0
 
 // Gravity on the vertical velocity, 16.16 u/tick per tick [orig: @0x48d69b
-// `slideDecay -= 324`].
+// `slideDecay -= 324`]. The cbik mover uses 250 [orig: @0x4865a6] — remote
+// bikes fell ~30% too fast riding the ground constant.
 constexpr int32_t kGravityStep = 324;
+constexpr int32_t kGravityStepBike = 250;
 
 // Analog steer scale: BAM/tick per axis unit [orig: @0x48b783 `(192426 * analogZ) >> 1`;
 // the same 2^32/360/62 deg/s->BAM/tick constant the turn_rate parse uses].
@@ -288,8 +290,12 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     {
         // Airborne: the command opposes the current motion (a coast brake)
         // [orig: @0x48ba64-0x48ba8a, gated `BYTE2(aiRef0) == 0 && !(Flags & 0x2000)`].
+        // GROUND-FAMILY ONLY: the cbik mover holds throttle off-contact (its
+        // +25/tick jump-latch ramp is input-side; the flip simply does not
+        // exist there) [orig: cbik speed servo @0x4853ac..0x4853eb].
         int32_t cmd = m.cmd_speed;
-        if (!m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
+        if (traits.family != VehicleFamily::Bike &&
+            !m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
                 if (cmd < 0) cmd = -cmd;
             } else if (cmd > 0) {
@@ -308,9 +314,11 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // `rawAccel = (target - speed + 16) >> 5` + the branch tree @0x48bac0-0x48bbe0].
         const int32_t raw_accel = (target_speed - m.speed + 16) >> 5;
         m.speed_accel = raw_accel;
-        if (!m.grounded) {
+        if (!m.grounded && traits.family != VehicleFamily::Bike) {
             // Wheels off the ground: coast clamp at half deceleration
-            // [orig: @0x48bacf `±deceleration >> 1`].
+            // [orig: @0x48bacf `±deceleration >> 1`]. The cbik mover has no
+            // airborne clamp — it skips speed INTEGRATION off-contact instead
+            // (below) [orig: the contact gate @0x485501..0x485534].
             const int32_t d2 = traits.deceleration >> 1;
             if (m.speed_accel > d2) m.speed_accel = d2;
             if (m.speed_accel < -d2) m.speed_accel = -d2;
@@ -332,9 +340,15 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                 }
             }
         }
-        m.speed += m.speed_accel; // [orig: @0x48bbe6 `currentSpeed += speedAccel`]
-        if (target_speed == 0 && std::abs(m.speed) < 48) m.speed = 0; // [orig: @0x48bbf7]
-        if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
+        // The cbik mover integrates speed only in CONTACT [orig: the
+        // `!crashed && !(Flags & 0x2000) && BYTE2(aiRef0)` gate
+        // @0x485501..0x485534]; the ground core integrates unconditionally
+        // [orig: @0x48c302..0x48c32a].
+        if (traits.family != VehicleFamily::Bike || m.grounded) {
+            m.speed += m.speed_accel; // [orig: @0x48bbe6 `currentSpeed += speedAccel`]
+            if (target_speed == 0 && std::abs(m.speed) < 48) m.speed = 0; // [orig: @0x48bbf7]
+            if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
+        }
     }
 
     bool collided = false;
@@ -353,7 +367,15 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             m.slide_z = 0; // level dir frame — the slope vertical term rides the clamp
                            // below (pitch/roll contact solve deferred, D-NET-161)
         }
-        m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
+        if (traits.family == VehicleFamily::Bike) {
+            // Bike-only vertical up-cap; the airborne input latch that can lift
+            // it is input-side, so the client-run form caps unconditionally
+            // [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
+            if (m.slide_z > 0x4000) m.slide_z = 0x4000;
+            m.slide_z -= kGravityStepBike; // [orig: @0x4865a6 `slideDecay -= 250`]
+        } else {
+            m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
+        }
         // The in-water 25% drag + authority drown-drain block remains unmodeled
         // (the water plane is available, but not yet consumed by motor physics;
         // D-NET-161) [orig: @0x48d6a4-0x48d6f8].
@@ -411,8 +433,16 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         }
 
         // Grounded steering applies the wheel yaw rate [orig: @0x48ef60
-        // `Yaw += modelPtr0`, gated on ground contact].
-        if (m.grounded) m.yaw_bam += m.wheel_rate_bam;
+        // `Yaw += modelPtr0`, gated on ground contact]. The cbik mover ALWAYS
+        // applies it, quartered while the airborne/swimming flag is up
+        // [orig: @0x486681..0x486697 `Yaw += modelPtr0 >> 2` under Flags 0x2000].
+        if (traits.family == VehicleFamily::Bike) {
+            m.yaw_bam += (veh.flags & kEntityFlagInAir) != 0
+                    ? (m.wheel_rate_bam >> 2)
+                    : m.wheel_rate_bam;
+        } else if (m.grounded) {
+            m.yaw_bam += m.wheel_rate_bam;
+        }
 
         veh.position.x = static_cast<float>(from_fixed(px));
         veh.position.y = static_cast<float>(from_fixed(py));
