@@ -1345,9 +1345,17 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			if (aim_overlay_inputs_for_client(
 						es, cs, item_seat_specs_, inputs,
 						&collapse_right_hand)) {
-				r[PF_ANIM_STATE] =
-						static_cast<float>(es.anim_state_id);
+				// An armed root-motion channel owns this row's playhead: the
+				// integrated root delta and the visible feet must share ONE
+				// clock or the body slides under its own animation. Unarmed
+				// rows (no source/adm) keep the wire free-run below.
+				const bool rm_armed = es.rm_adm_id >= 0 && es.rm_state >= 0;
+				r[PF_ANIM_STATE] = static_cast<float>(
+						rm_armed ? es.rm_state : es.anim_state_id);
 				r[PF_ANIM_REMOTE_REQUEST] = 1.0f;
+				if (rm_armed)
+					r[PF_ANIM_PHASE_TICKS] =
+							static_cast<float>(es.rm_phase);
 				// A transition state that arrived and was overwritten within
 				// this fold window (a tapped prone roll rides the wire for 1-2
 				// ticks). Presentation dispatches it BEFORE the current state,
@@ -1367,7 +1375,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				// presentation to advance the selected clip locally.
 				// [orig: player write @0x4c0cf2; remote apply @0x4c11a6;
 				//  AnimMap_UpdateEntity consumes entity+0x377 @0x40b74b]
-				if (es.cls == opennova::EntityClass::Player) {
+				if (!rm_armed && es.cls == opennova::EntityClass::Player) {
 					r[PF_ANIM_PHASE_TICKS] =
 							static_cast<float>(es.anim_channel_ratio);
 				}

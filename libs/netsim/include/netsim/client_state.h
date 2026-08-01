@@ -212,6 +212,29 @@ struct ClientEntityState {
 	// Bumped once per folded compact record for this row — the sim's staging
 	// edge detector (a fresh wire sample arrived since it last staged).
 	uint32_t compact_revision = 0;
+	// --- The anim-root-motion dead-reckoning cluster (net-re §5.38e; retail's
+	// remote body runs the SAME AnimMap primary channel and integrates its root
+	// delta — chase early, root late, additive on the same fields [orig: anim
+	// update @0x4B41DF; root integration @0x4B7CB4..0x4B7CEF; org1 twin
+	// @0x4BF684..0x4BF6A2]. The channel state machine mirrors
+	// world::InfantryState's body channel (begin_body_transition /
+	// advance_primary_channel) through the shared IRootMotionSource API.
+	int16_t rm_adm_id = -2;       // -2 unresolved (embedder stamps), -1 none
+	int16_t rm_state = -1;        // playing/target state (the entity+700 mirror)
+	int16_t rm_prev_state = -1;   // blend primary [orig: AnimMap prev channel]
+	int32_t rm_phase = 0;         // target playhead, half-frame ticks
+	int32_t rm_prev_phase = 0;
+	float rm_blend_weight = 1.0f; // += 0.1/tick, or 1/15 when the target state
+	float rm_blend_step = 0.0f;   // carries flag 0x400 [orig: @0x410640]
+	// org2 leg-chain state: the LEGS chase the wire yaw (quarter-step clamp
+	// ±0x3000000, twist ±0x30000000, staggered idle re-plant windows) and the
+	// body heading is their midpoint — the root delta rotates by THIS, not the
+	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. org1 rows
+	// rotate by heading_bam (retail pins body == render heading for org1).
+	int32_t rm_leg_yaw[2] = {};
+	int32_t rm_leg_target[2] = {};
+	int32_t rm_body_heading = 0;
+	bool rm_leg_seeded = false;
 	int32_t net_seat_local[3] = {};
 	uint8_t net_seat_local_yaw_byte = 0;
 	// Player/infantry seats compose the carrier yaw; a carrier-local VEHICLE

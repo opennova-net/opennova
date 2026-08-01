@@ -448,6 +448,42 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 // stale empty magazine and queue a second C2S 0x25.
 // [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180]
 // The pump itself is the phase sequence; each helper carries its witnesses.
+// Stamp each decoded Player/Infantry row's .adm registry id from its wire
+// type (visual item -> anim_def -> register_adm), once per row; -1 = no adm
+// (the row stays chase-only, truthful). Cached per type so late-joining
+// peers and respawns cost one map lookup.
+void NovaSimulation::resolve_client_row_adm_ids() {
+	if (runtime_ == nullptr || infantry_anim_.empty() ||
+			infantry_adm_resource_root_.is_null() ||
+			infantry_adm_item_db_.is_null())
+		return;
+	for (opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		if (es.rm_adm_id != -2) continue;
+		if (es.cls != opennova::EntityClass::Player &&
+				es.cls != opennova::EntityClass::Infantry)
+			continue;
+		if (es.type_id == 0) continue;
+		const auto cached = client_row_adm_by_type_.find(es.type_id);
+		if (cached != client_row_adm_by_type_.end()) {
+			es.rm_adm_id = static_cast<int16_t>(cached->second);
+			continue;
+		}
+		const int visual_item_id = visual_item_id_for_runtime_type(
+				es.type_id, infantry_adm_item_db_);
+		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
+		int adm_id = -1;
+		if (!adm.is_empty()) {
+			if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
+			adm_id = infantry_anim_.register_adm(
+					infantry_adm_resource_root_, adm);
+		}
+		if (adm_id < 0 && !infantry_anim_.empty()) adm_id = 0; // the default set
+		client_row_adm_by_type_[es.type_id] = adm_id;
+		es.rm_adm_id = static_cast<int16_t>(adm_id);
+	}
+}
+
 void NovaSimulation::joiner_pump() {
 	if (!runtime_) {
 		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
@@ -457,6 +493,14 @@ void NovaSimulation::joiner_pump() {
 	// uplink ship, ending where the local (non-authority) world work begins.
 	const uint64_t net_start =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
+	// The row-side root-motion leg (net-re §5.38e): hand the joiner's view the
+	// same per-model .adm registry the authority movers ground on, and resolve
+	// each decoded organic row's adm id once its type is known — the netsim
+	// twin of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn
+	// half [orig: @0x40bb60]).
+	if (!infantry_anim_.empty())
+		runtime_->view().set_root_motion_source(&infantry_anim_);
+	resolve_client_row_adm_ids();
 	joiner_send_hello_once();
 	joiner_deposit_inbound();
 	const JoinerFrameSignals decoded = joiner_run_client_net_frame(net_start);

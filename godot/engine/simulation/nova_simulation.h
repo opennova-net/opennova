@@ -920,6 +920,8 @@ private:
 	// sweep: joiner-local and host-admitted players are attached to the AI pool after
 	// MissionRuntime's initial call. Retain the resolver inputs and advance this
 	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
+	void resolve_client_row_adm_ids();
+	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
 	Ref<NovaResourceRoot> infantry_adm_resource_root_;
 	Ref<NovaItemDatabase> infantry_adm_item_db_;
 	int infantry_adm_resolved_ai_count_ = 0;

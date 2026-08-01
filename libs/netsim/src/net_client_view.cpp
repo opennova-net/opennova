@@ -2,6 +2,7 @@
 
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
 #include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+#include <world/infantry.h>            // IRootMotionSource + the anim flag/state tables
 #include <npwire/ingame_message_id.h>
 #include <io/bam.h>                      // wrapped retail pitch chase
 
@@ -343,8 +344,153 @@ inline int32_t chase_step(int32_t d, int32_t n) {
 
 } // namespace
 
+namespace {
+
+// The org2 leg-chain chase applied to a decoded row: the LEGS chase the wire
+// yaw and the body heading is their midpoint — the root delta rotates by the
+// BODY, so a turning peer's feet lead its torso exactly as on the authority
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4945..0x4b4ac1 — movement
+// re-plant @0x4b49dd/@0x4b49e3; idle windows ((tick-32)&0x3F / tick&0x3F)
+// @0x4b49ad..0x4b49e3; quarter-step clamp ±0x3000000 @0x4b49fb; twist
+// ±0x30000000 vs the yaw @0x4b4a23; midpoint @0x4b4ab5. The authoritative
+// sibling is infantry.cpp's player leg block — same constants, same shape.]
+constexpr int32_t kRowLegChaseClamp = 0x3000000;
+constexpr int32_t kRowLegTwistLimit = 0x30000000;
+constexpr int32_t kRowLegReplantMin = 59652320;
+constexpr int32_t kRowLegReplantSnap = 357913920;
+
+inline int32_t row_abs_bam(int32_t v) { return v < 0 ? -v : v; }
+
+void row_leg_chase(ClientEntityState &es, uint32_t key) {
+	const int32_t yaw = es.heading_bam;
+	if (!es.rm_leg_seeded) {
+		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = yaw;
+		es.rm_leg_target[0] = es.rm_leg_target[1] = yaw;
+		es.rm_body_heading = yaw;
+		es.rm_leg_seeded = true;
+	}
+	if ((world::infantry_anim_flags(es.rm_state) & 0x1u) != 0) {
+		es.rm_leg_target[1] = yaw;
+		es.rm_leg_target[0] = yaw;
+	} else {
+		const int32_t dl = io::bam_sub(yaw, es.rm_leg_yaw[1]);
+		if (row_abs_bam(dl) > kRowLegReplantMin &&
+		    (row_abs_bam(dl) > kRowLegReplantSnap || ((key - 32) & 63u) == 0))
+			es.rm_leg_target[1] = yaw;
+		const int32_t dr = io::bam_sub(yaw, es.rm_leg_yaw[0]);
+		if (row_abs_bam(dr) > kRowLegReplantMin &&
+		    (row_abs_bam(dr) > kRowLegReplantSnap || (key & 63u) == 0))
+			es.rm_leg_target[0] = yaw;
+	}
+	for (int leg = 0; leg < 2; ++leg) {
+		const int32_t ldiff = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
+		int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
+		if (lstep > kRowLegChaseClamp) lstep = kRowLegChaseClamp;
+		if (lstep < -kRowLegChaseClamp) lstep = -kRowLegChaseClamp;
+		es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], lstep);
+		const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], yaw);
+		if (twist > kRowLegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_add(yaw, kRowLegTwistLimit);
+		else if (twist < -kRowLegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_sub(yaw, kRowLegTwistLimit);
+	}
+	es.rm_body_heading = io::bam_add(
+			es.rm_leg_yaw[1],
+			io::bam_sar(io::bam_sub(es.rm_leg_yaw[0], es.rm_leg_yaw[1]), 1));
+}
+
+// The row's AnimMap primary channel + root integration — retail's remote body
+// runs the SAME machinery as the authority [orig: anim update @0x4B41DF;
+// blend init 0.1 / (1/15 on flag 0x400) @0x410640; kJumpLoop forward 1024
+// (dump 4756); Q22 rotation @0x4B41F5..0x4B4255; additive integration LAST
+// @0x4B7CB4..0x4B7CEF, org1 twin @0x4BF684]. The wire state byte drives the
+// channel; the player compact's phase byte seeds a fresh transition
+// [orig: entity+0x377 store @0x4c11a6, consumed @0x40b761]. Deferrals: the
+// airborne/drowning/ladder overrides ride entity+0x24 bits beyond the wire
+// state byte (unreplicated — the chase Z absorbs the error), and the
+// collision resolver retail runs for remote rows @0x4B7CF4 has no netsim
+// terrain seam yet (both recorded in the D-NET-196 residuals).
+void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+                          uint32_t key, bool is_self) {
+	if (es.rm_adm_id < 0) return;
+	// Channel state machine (the begin_body_transition mirror).
+	const int wire_state = es.anim_state_id;
+	if (es.rm_state < 0) {
+		es.rm_state = static_cast<int16_t>(wire_state);
+		es.rm_prev_state = static_cast<int16_t>(wire_state);
+		es.rm_phase = es.cls == EntityClass::Player ? es.anim_channel_ratio : 0;
+		es.rm_prev_phase = es.rm_phase;
+		es.rm_blend_weight = 1.0f;
+		es.rm_blend_step = 0.0f;
+	} else if (wire_state != es.rm_state) {
+		if (es.rm_blend_weight >= 1.0f) {
+			es.rm_prev_state = es.rm_state;
+			es.rm_prev_phase = es.rm_phase;
+		}
+		es.rm_state = static_cast<int16_t>(wire_state);
+		es.rm_phase =
+				es.cls == EntityClass::Player ? es.anim_channel_ratio : 0;
+		es.rm_blend_weight = 0.0f;
+		es.rm_blend_step =
+				(world::infantry_anim_flags(wire_state) & 0x400u) != 0
+						? (1.0f / 15.0f)
+						: 0.1f;
+	}
+	world::RootMotionFrame frame;
+	bool have = false;
+	if (es.rm_blend_weight >= 1.0f) {
+		int32_t phase = es.rm_phase;
+		have = src.advance(es.rm_adm_id, es.rm_state, phase, frame);
+		es.rm_phase = phase;
+	} else {
+		es.rm_blend_weight += es.rm_blend_step;
+		if (es.rm_blend_weight >= 1.0f) {
+			es.rm_blend_weight = 1.0f;
+			es.rm_blend_step = 0.0f;
+		}
+		int32_t pphase = es.rm_prev_phase, tphase = es.rm_phase;
+		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, pphase,
+		                           es.rm_state, tphase, es.rm_blend_weight,
+		                           frame);
+		es.rm_prev_phase = pphase;
+		es.rm_phase = tphase;
+	}
+	if (!have) return;
+	int32_t fwd = frame.dx, lat = frame.dy;
+	if (es.rm_state == world::anim_state::kJumpLoop) fwd = 1024; // [orig: dump 4756]
+	// Rotation heading: org2 = the leg-chased body heading; org1 = the row's
+	// chased heading (retail pins org1 body == render heading).
+	int32_t move_heading = es.heading_bam;
+	if (es.cls == EntityClass::Player) {
+		row_leg_chase(es, key);
+		move_heading = es.rm_body_heading;
+	} else {
+		es.rm_body_heading = move_heading;
+	}
+	// The own player's row is locally predicted world-side; its chase is the
+	// 48/512 soft reconciliation only — no root add (risk-listed; retail's
+	// local player integrates in its OWN motor, not the remote path).
+	if (is_self) return;
+	const double rad = static_cast<double>(move_heading) *
+	                   (3.14159265358979323846 / 2147483648.0);
+	const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
+	const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+	const int32_t wx =
+			static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
+			static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
+	const int32_t wy =
+			static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
+			static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
+	es.x += wx;
+	es.y += wy;
+	es.z += frame.dz;
+}
+
+} // namespace
+
 void NetClientView::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
+	const uint32_t rm_key = ++rm_tick_counter_;
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.net_has_compact) continue;
 		const bool chased_class = es.cls == EntityClass::Player ||
@@ -464,10 +610,17 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 				es.y += es.net_smooth_target[1];
 				es.z += es.net_smooth_target[2];
 			}
-			if (progress < 512) es.net_interp_progress = progress + 1;
-			// progress >= 512 idle-anim force needs g_animStateFlagsTable —
-			// presentation anim already freezes with the record stream; the
-			// held pose is the substantive starved behavior.
+			if (progress < 512) {
+				es.net_interp_progress = progress + 1;
+			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
+			           0u) {
+				// The starved idle force: a movement state parked past the
+				// progress cap walks its root motion forever — retail forces
+				// idle 43 [orig: @0x4B465D, g_animStateFlagsTable bit0 gate].
+				es.anim_state_id = world::anim_state::kIdle;
+			}
+			if (root_motion_ != nullptr)
+				row_root_motion_tick(es, *root_motion_, rm_key, is_self);
 			break;
 		}
 		case EntityClass::Infantry: {
@@ -502,7 +655,13 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 				es.y += es.net_smooth_target[1];
 				es.z += es.net_smooth_target[2];
 			}
-			if (progress < 512) es.net_interp_progress = progress + 1;
+			if (progress < 512) {
+				es.net_interp_progress = progress + 1;
+			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
+			           0u) {
+				// The org1 starved idle force [orig: §5.38a cap 512 -> idle 43].
+				es.anim_state_id = world::anim_state::kIdle;
+			}
 			// Heading: the promoted target chased with the org1 body
 			// quarter-step — the witnessed (d + 2) >> 2 rounding, clamped
 			// [orig: the body chase @0x4be8fd — (target - body + 2) >> 2 then
@@ -519,6 +678,8 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 				if (step < -69273360) step = -69273360;
 				es.heading_bam = io::bam_add(es.heading_bam, step);
 			}
+			if (root_motion_ != nullptr)
+				row_root_motion_tick(es, *root_motion_, rm_key, is_self);
 			break;
 		}
 		case EntityClass::Vehicle: {

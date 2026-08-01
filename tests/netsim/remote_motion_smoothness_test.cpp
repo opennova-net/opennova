@@ -29,6 +29,8 @@
 
 #include "netsim/net_client_view.h"
 
+#include <world/infantry.h> // IRootMotionSource stub for the root-motion legs
+
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
@@ -542,6 +544,151 @@ bool run_infantry_first_record_does_not_swing_to_zero() {
 	return expect(err <= 24000000, "first-record heading holds (no pirouette)");
 }
 
+
+// A deterministic walking clip: forward root delta per tick, looping. The
+// IDA-shaped double convention matches infantry_test's TestSource.
+struct WalkSource final : public opennova::world::IRootMotionSource {
+	int32_t step = 4096; // forward u/tick (16.16)
+	bool has_clip(int, int state) const override {
+		return state == opennova::world::anim_state::kWalkForward ||
+		       state == opennova::world::anim_state::kIdle;
+	}
+	bool advance(int, int state, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		phase = (phase + 1) % 62;
+		out = {};
+		if (state == opennova::world::anim_state::kWalkForward) out.dx = step;
+		return true;
+	}
+	int32_t clip_length_ticks(int, int) const override { return 62; }
+};
+
+// The root-motion dead-reckoning leg (net-re §5.38e; the D-NET-196 B-facet
+// landed): with a walking clip whose root speed EQUALS the true speed, a
+// remote player's row is carried by root motion every tick and the chase only
+// trims — uniform per-tick steps at true speed, equilibrium lag well under
+// the chase-only value, and the presented playhead is the sim channel.
+bool run_player_root_motion_dead_reckons() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0041;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	const int32_t step_fx = 4096; // 3.9 m/s — walk speed, clip-matched
+	std::vector<int32_t> presented;
+	for (int t = 0; t < 32 + 64; ++t) {
+		const int32_t true_x = ax + step_fx * t;
+		nw::FrameUpdate fu = (t % 8 == 0)
+				? player_frame(handle, ax, ay, az, true_x)
+				: header_only_frame();
+		if (t % 8 != 0) { fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az; }
+		if (t % 8 == 0) {
+			fu.records[0].player.anim_state_id =
+					opennova::world::anim_state::kWalkForward;
+			fu.records[0].player.yaw_byte = 0; // engine BAM 0 = +X, the
+			                                   // clip's forward axis
+		}
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		if (t == 0) {
+			// The embedder's adm stamp (resolve_client_row_adm_ids twin).
+			view.state().find(handle)->rm_adm_id = 0;
+		}
+		view.tick_remote_motion(0xFFFF);
+		presented.push_back(view.state().find(handle)->x);
+	}
+	int32_t max_step = 0, min_step = INT32_MAX;
+	for (int t = 32; t < 96; ++t) {
+		const int32_t d = presented[t] - presented[t - 1];
+		max_step = std::max(max_step, d);
+		min_step = std::min(min_step, d);
+	}
+	const ns::ClientEntityState *es = view.state().find(handle);
+	const int32_t lag = (ax + step_fx * 95) - presented.back();
+	std::fprintf(stderr,
+	             "[root-motion] steps [%d..%d] true=%d lag=%d state=%d phase=%d\n",
+	             min_step, max_step, step_fx, lag, int(es->rm_state),
+	             es->rm_phase);
+	bool ok = true;
+	// Root carries every tick: no stalls, steps within trim slack of true.
+	ok &= expect(min_step >= step_fx - 1024 && max_step <= 2 * step_fx + 512,
+	             "root motion carries the row between records (chase trims)");
+	// Equilibrium: the lag parks inside the witnessed position deadband
+	// (0x2AAA — the chase deliberately ignores sub-deadband error; root
+	// motion carries the bulk exactly as §5.38e describes) plus codec slack.
+	ok &= expect(std::abs(lag) <= 0x2AAA + 1024,
+	             "root-carried lag parks inside the chase deadband");
+	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward &&
+	                     es->rm_adm_id == 0,
+	             "the sim channel is armed on the wire state");
+	return ok;
+}
+
+// The starved idle force [orig: @0x4B465D — g_animStateFlagsTable bit0]: a
+// movement state parked past the 512-progress cap must fall to idle 43, or
+// the root motion walks the starved row forever.
+bool run_starved_row_forces_idle() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0042;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	fu.records[0].player.yaw_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(0xFFFF); // snap-arm at the wire pose first
+	const int32_t x0 = view.state().find(handle)->x;
+	for (int t = 0; t < 560; ++t) {
+		nw::FrameUpdate idlefu = header_only_frame();
+		idlefu.anchor_x = ax; idlefu.anchor_y = ay; idlefu.anchor_z = az;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(idlefu));
+		view.tick_remote_motion(0xFFFF);
+	}
+	const ns::ClientEntityState *es = view.state().find(handle);
+	const int32_t walked = std::abs(es->x - x0);
+	std::fprintf(stderr, "[root-starve] state=%d walked=%d (16.16)\n",
+	             int(es->anim_state_id), walked);
+	bool ok = expect(es->anim_state_id == opennova::world::anim_state::kIdle,
+	                 "the starved movement state falls to idle 43");
+	// 512 capped ticks of walking at most — never unbounded treadmill. Allow
+	// the pre-cap walk (progress ramps to 512) plus slack.
+	ok &= expect(walked <= 512 * 4096 + (2 << 16),
+	             "the starved row stops walking after the idle force");
+	return ok;
+}
+
+// The own-player row gets NO root add (its motion is world-side prediction;
+// the row chase is the 48/512 soft reconciliation only).
+bool run_self_row_gets_no_root_add() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0043;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(handle); // arm at the wire pose (self)
+	const int32_t x0 = view.state().find(handle)->x;
+	for (int t = 0; t < 24; ++t) {
+		nw::FrameUpdate same = player_frame(handle, ax, ay, az, ax);
+		same.records[0].player.anim_state_id =
+				opennova::world::anim_state::kWalkForward;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(same));
+		view.tick_remote_motion(handle);
+	}
+	const int32_t moved = std::abs(view.state().find(handle)->x - x0);
+	std::fprintf(stderr, "[root-self] moved=%d\n", moved);
+	return expect(moved <= 512,
+	              "the own-player row never integrates root motion");
+}
+
 } // namespace
 
 int main() {
@@ -558,6 +705,9 @@ int main() {
 	ok &= run_vehicle_starvation_decay_is_signed_untruncated();
 	ok &= run_player_pitch_chases_wire_byte();
 	ok &= run_infantry_first_record_does_not_swing_to_zero();
+	ok &= run_player_root_motion_dead_reckons();
+	ok &= run_starved_row_forces_idle();
+	ok &= run_self_row_gets_no_root_add();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

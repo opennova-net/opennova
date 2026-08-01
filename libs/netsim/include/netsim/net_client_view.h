@@ -11,6 +11,10 @@
 #include "netsim/client_state.h"
 #include "netsim/session_transport.h"
 
+namespace opennova::world {
+class IRootMotionSource;
+} // namespace opennova::world
+
 namespace opennova::netsim {
 
 // The local client's decode pump: drains S2C datagrams off the loopback and folds
@@ -106,6 +110,16 @@ public:
 	// brands every pool-1 type Vehicle, which mis-sizes a no-callback item's
 	// header-only record (e.g. an `ewep` emplacement) and desyncs the rest of the
 	// frame. Unknown falls through to the learned map, then the phase-1 resolver.
+	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
+	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
+	// primary channel each tick and integrate the rotated root delta after the
+	// chase — retail's remote-body dead reckoning [orig: the class movers run
+	// the full body pass; root integration @0x4B7CB4 / @0x4BF684]. Null (the
+	// lib-only embedders) = the truthful chase-only degradation.
+	void set_root_motion_source(world::IRootMotionSource *source) {
+		root_motion_ = source;
+	}
+
 	void set_item_class_resolver(std::function<EntityClass(uint16_t)> resolver);
 
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
@@ -143,6 +157,8 @@ private:
 	EntityClass classify(uint16_t type_id) const;
 
 	ClientState state_;
+	world::IRootMotionSource *root_motion_ = nullptr;
+	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
 	std::function<EntityClass(uint16_t)> item_resolver_; // items.def table (authoritative)
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
