@@ -831,6 +831,66 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	             "watercraft reconciliation wraps ADD then arithmetic-shifts like x86");
 	return ok;
 }
+bool run_platform_roll_is_stable_and_gravity_witnessed() {
+	// Review-pinned invariants: (1) the fit/builder pair is self-consistent
+	// in ROLL (a heeled hull may not flip sign tick-over-tick - the pre-fix
+	// extractor returned -R for a build with roll R, a 62 Hz shimmy); (2) an
+	// out-of-water hull falls at the WATERCRAFT gravity 167/tick [orig:
+	// @0x48EBD9], not the ground 324.
+	Rig r;
+	make_rig(r);
+	r.traits.box_y_lo = -(1 << 16); r.traits.box_y_hi = 1 << 16;
+	r.traits.box_x_lo = -(5 << 15); r.traits.box_x_hi = 5 << 15;
+	r.traits.box_z_lo = -(1 << 15); r.traits.box_z_hi = 1 << 16;
+	r.traits.foot_x_lo = r.traits.box_x_lo; r.traits.foot_x_hi = r.traits.box_x_hi;
+	r.traits.foot_y_lo = r.traits.box_y_lo; r.traits.foot_y_hi = r.traits.box_y_hi;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(10.0f),
+	      0, 0, 0);
+	// Seed a heel and let the solve iterate at the waterline: roll must decay
+	// monotonically-ish toward level, never alternate sign with constant
+	// magnitude.
+	boat->veh.air_roll_bam = 0x08000000; // ~11 deg heel
+	int sign_flips = 0;
+	int32_t prev = boat->veh.air_roll_bam;
+	for (int t = 0; t < 120; ++t) {
+		w::watercraft_client_tick(r.world, *boat, r.traits);
+		const int32_t now = boat->veh.air_roll_bam;
+		if ((now ^ prev) < 0 && std::abs(now) > 0x01000000) ++sign_flips;
+		prev = now;
+	}
+	std::fprintf(stderr, "[platform-roll] final roll=%d flips=%d\n",
+	             boat->veh.air_roll_bam, sign_flips);
+	// A damped decay may cross zero once; the PRE-FIX inverted extractor
+	// alternated every tick (~119 flips here). Pin the absence of sustained
+	// alternation.
+	bool ok = expect(sign_flips <= 2,
+	                 "a heeled hull never flip-flops roll sign (fit/builder consistent)");
+	ok &= expect(std::abs(boat->veh.air_roll_bam) < 0x04000000,
+	             "the heel decays toward level on flat water");
+
+	// Gravity: hoist the hull high above the water, one record, no commands.
+	// After the airborne flag latches, slide_z must step by exactly -167.
+	Rig g;
+	make_rig(g);
+	g.traits.box_y_lo = r.traits.box_y_lo; g.traits.box_y_hi = r.traits.box_y_hi;
+	g.traits.box_x_lo = r.traits.box_x_lo; g.traits.box_x_hi = r.traits.box_x_hi;
+	g.traits.box_z_lo = r.traits.box_z_lo; g.traits.box_z_hi = r.traits.box_z_hi;
+	g.traits.foot_x_lo = g.traits.box_x_lo; g.traits.foot_x_hi = g.traits.box_x_hi;
+	g.traits.foot_y_lo = g.traits.box_y_lo; g.traits.foot_y_hi = g.traits.box_y_hi;
+	w::Entity *fly = g.world.registry.get(g.boat);
+	fly->position.z = 40.0f;
+	stage(*fly, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(40.0f),
+	      0, 0, 0);
+	w::watercraft_client_tick(g.world, *fly, g.traits); // latch not-afloat
+	const int32_t s0 = fly->veh.slide_z;
+	w::watercraft_client_tick(g.world, *fly, g.traits);
+	const int32_t s1 = fly->veh.slide_z;
+	std::fprintf(stderr, "[platform-grav] slide step=%d (want -167)\n", s1 - s0);
+	ok &= expect(s1 - s0 == -167,
+	             "an out-of-water hull falls at the witnessed 167/tick");
+	return ok;
+}
 
 bool run_aircraft_glides_and_holds_altitude() {
 	// The AIR prediction leg (CHel/cpln): a 25 m/s helicopter — far beyond the
@@ -920,6 +980,7 @@ int main() {
 	ok &= run_ground_rudder_wraps_bam_seam();
 	ok &= run_ground_and_bike_local_driver_input_gate();
 	ok &= run_watercraft_local_driver_reconciliation_gate();
+	ok &= run_platform_roll_is_stable_and_gravity_witnessed();
 	ok &= run_aircraft_glides_and_holds_altitude();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();

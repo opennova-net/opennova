@@ -340,9 +340,19 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 				if (wire_frozen) {
 					// The row holds its snapped/followed pose; the registry
 					// entity adopts it below like any un-predicted row so
-					// occlusion/collision see the wreck where it rests.
+					// occlusion/collision see the wreck where it rests. The
+					// platform/motor transients die with the freeze so a
+					// respawned or re-staged hull never inherits stale bob
+					// phase, accumulators, or vertical velocity.
 					m.net_predicted = false;
 					m.net_seen_revision = es.compact_revision;
+					m.slide_z = 0;
+					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
+							m.plat_acc[3] = 0;
+					m.plat_at_rest = false;
+					m.plat_porpoise = false;
+					m.plat_planing = false;
+					m.plat_bob_phase = 0.0f;
 					local->position.x = static_cast<float>(es.x) / 65536.0f;
 					local->position.y = static_cast<float>(es.y) / 65536.0f;
 					local->position.z = static_cast<float>(es.z) / 65536.0f;
