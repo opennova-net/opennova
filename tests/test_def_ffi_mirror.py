@@ -119,6 +119,8 @@ def test_item_air_family_params_present_in_both_mirrors():
     speedpitch trio).
     """
     expected_run = ["slip_slope", "climb_speed", "turn_roll", "speed_pitch", "turn_rate"]
+    platform_run = ["torque", "mass", "lean", "lean_velocity", "pitch",
+                    "pitch_velocity", "bob", "flip", "critical_hp"]
     blender = _load_blender_def_ffi()
     for item_cls in (py_def.DefItemDef, blender.DefItemDef):
         names = [name for name, _ctype in item_cls._fields_]
@@ -126,6 +128,8 @@ def test_item_air_family_params_present_in_both_mirrors():
         assert names[start:start + len(expected_run)] == expected_run
         for field in ("climb_speed", "turn_roll", "speed_pitch"):
             assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
+        start = names.index("torque")
+        assert names[start:start + len(platform_run)] == platform_run
 
 
 def _skip_without_native():

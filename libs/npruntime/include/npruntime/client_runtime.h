@@ -310,6 +310,7 @@ public:
 		return authoritative_loadout_;
 	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
+	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
 
 	const netsim::ClientState &state() const { return view_.state(); }
 	netsim::ClientState &state() { return view_.state(); }
@@ -365,6 +366,11 @@ private:
 	                                     // vestigial/telemetry state, not a send throttle.
 	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] 0 = best (host clamps 0..4)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
+	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the
+	// countdown re-arms from this at every open boundary [orig: cs_dir0.
+	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
+	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
+	uint32_t send_holdoff_ticks_ = 0;
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

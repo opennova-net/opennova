@@ -188,6 +188,51 @@ func test_in_game_back_requests_resume() -> void:
 	_cleanup(dir)
 
 
+func test_ingame_hidden_back_button_resumes() -> void:
+	# game.mnu's ONLY resume affordance is the ESC-hotkeyed, actionless
+	# HIDDEN_BACK button — the retail Command seam the shell wires by name.
+	# The hotkey path activates it exactly like a click (pressed), so pinning
+	# the pressed route pins the ESC-resume behavior.
+	var dir := _make_dir()
+	var game_mnu := """
+<SCREEN>
+	<NAME>MAIN</NAME>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="custom" state="default"></APPEARANCE>
+		<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+		<WINDOW type="window" name="MAIN_WRAPPER">
+			<APPEARANCE type="custom" state="default"></APPEARANCE>
+			<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+			<WINDOW type="button" name="HIDDEN_BACK">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>1</RIGHT><BOTTOM>1</BOTTOM></POSITION>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+"""
+	var f := FileAccess.open(dir.path_join("game.mnu"), FileAccess.WRITE)
+	if f != null:
+		f.store_string(game_mnu)
+		f.close()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_ingame_menu(), "the in-game overlay loads")
+	watch_signals(shell)
+	var back := shell.get_menu().find_child("HIDDEN_BACK", true, false)
+	assert_not_null(back, "the actionless BACK seam exists in the built tree")
+	if back is BaseButton:
+		(back as BaseButton).pressed.emit()
+	assert_signal_emitted(shell, "resume_requested")
+	assert_signal_not_emitted(shell, "exit_to_desktop_requested")
+	DirAccess.remove_absolute(dir.path_join("game.mnu"))
+	_cleanup(dir)
+
+
 func test_start_emits_selected_mission() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)

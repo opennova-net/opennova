@@ -86,6 +86,14 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var return_control_names := PackedStringArray([
 	"QUIT_TO_MENU", "MAIN_MENU", "ABORT", "ABORT_MISSION",
 ])
+# The generic BACK command seam: actionless named buttons the original engine's
+# shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY resume
+# affordance the shipped in-game menu has — there is no visible RESUME button).
+# Routed through the top-level back/quit logic: cross-.mnu back first, then
+# resume (in-game) or exit-to-desktop (main menu).
+@export var back_control_names := PackedStringArray([
+	"HIDDEN_BACK", "RESUME", "RESUME_GAME", "CONTINUE_GAME",
+])
 # List widgets the shell fills with the resource dir's missions (.bms).
 @export var mission_list_names := PackedStringArray([
 	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "MAP_LIST",
@@ -320,6 +328,7 @@ func _wire_named_controls() -> void:
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
 	_connect_named(novaworld_control_names, _on_novaworld_control)
+	_connect_named(back_control_names, _on_quit_requested)
 
 
 func _seed_crosshair_style_controls() -> void:

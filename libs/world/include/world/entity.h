@@ -323,6 +323,9 @@ struct Entity {
     static constexpr uint32_t kMoveOrderDirMask = 0x7;    // 8-way dir F=0..FR=7 (§5.38)
     static constexpr uint32_t kMoveOrderMoving = 0x8;
     static constexpr uint32_t kMoveOrderFreeLook = 0x10;  // [orig: steer-source pick @0x48b4a8]
+    static constexpr uint32_t kMoveOrderJump = 0x20;      // held jump key [orig: g_inputFlags
+                                                          //  0x1000 -> bit 5 @0x4df6fa; the
+                                                          //  jump gate @0x4b7eaf]
     static constexpr uint32_t kMoveOrderLeanLeft = 0x40;  // [orig: lean ramp @0x4b7dbf]
     static constexpr uint32_t kMoveOrderLeanRight = 0x80; // [orig: lean ramp @0x4b7dd6]
     static constexpr uint32_t kMoveOrderProne = 0x100;    // stance bit 8 (see net_stance_bits below)
@@ -617,6 +620,15 @@ struct Entity {
         int32_t air_roll_rate = 0;         // [orig: modelPtr2 +0xAC]
         int32_t ground_cache = INT32_MIN;  // [orig: entity+0x2A4] 8th-tick terrain sample
         uint32_t net_seen_revision = 0;    // last consumed row compact_revision
+        // --- Boat platform-solve state (boat_platform_solve_spec; client subset).
+        int32_t plat_acc[4] = {};          // per-corner drop accumulators [orig: +0x2C4..+0x2D0]
+        float plat_bob_phase = 0.0f;       // heave-bob phase, radians [orig: +0x318 float]
+        bool plat_at_rest = false;         // bob arm latch [orig: byte +0x364]
+        bool plat_porpoise = false;        // bow-dip cycle latch [orig: byte +0x365]
+        bool plat_planing = false;         // planing/bow-up bit [orig: +0x472 bit 1]
+        bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
+        bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
+        int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
     };
     VehicleMotorState veh;
 };

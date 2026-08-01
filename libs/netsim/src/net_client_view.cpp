@@ -346,8 +346,10 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 		if (!chased_class) continue;
 
 		// Carried rows follow the carrier attach every tick instead of chasing;
-		// their own mover is bit0-skipped in retail [orig: bit0 set on attach
-		// @0x43C14A; the rendered seat pose rides the carrier each frame].
+		// retail renders a seat mount through the carrier attach each frame
+		// [orig: the seat attach sets Flags 0x40, not bit0 —
+		// @0x4946D0/@0x494752; bit0 belongs to carried OBJECTS and not-ready
+		// rows, and is what the visible-entity collector skips @0x5C8CF4].
 		if (es.net_seat_valid && es.carrier_handle != 0xFFFFu) {
 			const ClientEntityState *carrier = state_.find(es.carrier_handle);
 			if (carrier != nullptr) {
@@ -367,9 +369,10 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 			}
 			continue;
 		}
-		// The universal mover-skip: wire bit0 (mounted/killed/not-ready) freezes
-		// the row at its staged pose [orig: the Flags&1 early return @0x4b9a03 /
-		// the body-pass twin; the bit rides the wire raw, §5.38e §5].
+		// The universal mover-skip: wire bit0 (carried-object/killed/not-ready
+		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
+		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
+		// the bit rides the wire raw, §5.38e §5].
 		if (es.state_flags_known && (es.state_flags & 0x01u) != 0u) continue;
 		// A dead row holds its death pose until the respawn snap (D-NET-66);
 		// vehicles mark the wreck with the dead-pose bit instead of bit 1.
@@ -1107,12 +1110,13 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		} else if (skip_pos && rec.cls == EntityClass::Vehicle &&
 				has_heading_target) {
 			// Carrier-local vehicle positions defer to the second pass, but the
-			// wire euler stays world-absolute and lands LIVE: the carried row's
-			// own mover is bit0-skipped in retail and the per-tick seat-follow
-			// owns its motion between records, so there is no chase to consume a
-			// staged heading [orig: the untransformed entity+576 store @0x4607f5;
-			// bit0 set on attach @0x43C14A]. Keep the staged slot coherent for a
-			// later carrier-clear record.
+			// wire euler stays world-absolute and lands LIVE: a deck-carried
+			// vehicle is a carried OBJECT (the bit0-flagged attach class
+			// @0x43C14A — distinct from seat mounts' 0x40) whose mover is
+			// bit0-skipped, and the per-tick seat-follow owns its motion between
+			// records, so there is no chase to consume a staged heading
+			// [orig: the untransformed entity+576 store @0x4607f5]. Keep the
+			// staged slot coherent for a later carrier-clear record.
 			es.heading_bam = heading_target;
 			es.net_smooth_heading = heading_target;
 		}
@@ -1134,8 +1138,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 				carrier->z, uint32_t(carrier->heading_bam),
 				uint32_t(carrier->pitch_bam), uint32_t(carrier->roll_bam));
 		// Retain the seat-local offset for the per-tick carrier-follow: the
-		// rider's own mover is bit0-skipped in retail and its rendered pose rides
-		// the carrier attach every frame [orig: bit0 set @0x43C14A]. The row is
+		// rider's rendered pose rides the carrier attach every frame in retail
+		// [orig: the seat attach @0x4946D0/@0x494752]. The row is
 		// live-snapped here (the recompose owns it from the next tick).
 		child->net_seat_local[0] = network_decompress_fixedpoint(pending.cx);
 		child->net_seat_local[1] = network_decompress_fixedpoint(pending.cy);

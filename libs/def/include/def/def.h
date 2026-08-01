@@ -543,6 +543,22 @@ typedef struct DefItemDef {
     int torque;         /* +0x91C raw ("torque") — the collision speed-decay shift count:
                            severity 1/3 decay speed >> (torque+2), severity 2 >> (torque+1)
                            [orig: parse @0x49dcca; consumers @0x47cc13-0x47ccc1] */
+    /* Platform-solve tuning block (itemDef +0x908 / +0x92C..+0x948) — all raw
+       atol, no parse scale, clamped in place by the consumers
+       [orig: ItemDef_ParsePhysicsProperty stores: mass @0x49dc76,
+        lean @0x49ddde, lean_velocity @0x49de1a, pitch @0x49de56,
+        pitch_velocity @0x49de92, bob @0x49dece (the inline-string slot),
+        flip @0x49df82; clamps @0x481ACC..0x481BA3]. Consumers: mass = weight
+       class + collision momentum (+0x908); pitch/pitch_velocity/bob = the boat
+       bow-lift / porpoise machine; lean/lean_velocity = the planing roll-lean
+       machine @0x45AEA0; flip = the ground movers' tip threshold (*0.01). */
+    int mass;
+    int lean;
+    int lean_velocity;
+    int pitch;
+    int pitch_velocity;
+    int bob;
+    int flip;
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */

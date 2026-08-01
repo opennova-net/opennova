@@ -104,9 +104,21 @@ struct GameConfig {
 	std::vector<std::string> spawn_names;
 	std::vector<uint8_t> mission_header_blob;
 	// The per-frame 0x0A byte cap [orig: g_entity_send_budget @0xC8FC50, the
-	// BANDWIDTH server command, clamped 100-1600]. start_host_session applies
-	// it to the netsim global at bring-up.
-	uint32_t entity_send_budget = 600;
+	// BANDWIDTH server command — atol/5 clamped 100-1600 @0x50b884/@0x50b890;
+	// the round-start initializer resets retail to 600 @0x51ca7c].
+	// start_host_session applies it to the netsim global at bring-up.
+	// OpenNova DEFAULTS TO THE CEILING (= "BANDWIDTH 8000"): a deliberate
+	// config-space choice inside retail's own legit range — we always run the
+	// highest rate the engine can produce (divergence-ledger D-NET-197); the
+	// configure_host_session "bandwidth" lever still overrides per session.
+	uint32_t entity_send_budget = 1600;
+	// The send-holdoff period this host dictates to each joiner (H:0x00 mask 8 /
+	// CS field 3) AND runs itself — the per-session-type "tick rate" divider
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0 — SP/loopback 1,
+	// NovaWorld 12 (~5.2 Hz), LAN lanmode 1..4 -> 12/6/4/3]. OpenNova defaults
+	// to 1 = the full 62.5 Hz engine maximum (D-NET-197 PERMANENT); set 12 to
+	// emulate a NovaWorld host's cadence in tests.
+	uint32_t send_holdoff_ticks = 1;
 };
 
 } // namespace opennova::np

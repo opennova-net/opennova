@@ -436,9 +436,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                      traits->family == VehicleFamily::Plane)) {
                 aircraft_client_tick(world, *veh, *traits);
             } else if (veh->veh.net_predicted && veh->health > 0 &&
-                    traits->family == VehicleFamily::Ground) {
+                    (traits->family == VehicleFamily::Ground ||
+                     traits->family == VehicleFamily::Bike)) {
                 // Runs the motor core, whose tail already ticks the movement
                 // sound — skip the separate sound call below for this row.
+                // Bikes ride the same entry; the core branches on the family
+                // tag for the four witnessed cbik deltas (gravity 250, vZ
+                // up-cap, contact-gated integration, always-applied yaw)
+                // [orig: @0x483FE0 vs @0x48AF00; cbik grill 2026-07-31].
                 ground_client_tick(world, *veh, *traits);
                 continue;
             }

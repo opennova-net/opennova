@@ -361,6 +361,11 @@ struct InfantryState {
     bool standing_on_entity = false;
     bool airborne = false;
     bool jump_requested = false;
+    // The HELD jump-key level for the wire mirror: retail's packer writes the
+    // held key into MoveOrder bit 5 every frame BEFORE the motor consumes it
+    // [orig: g_inputFlags 0x1000 -> MoveOrder 0x20 @0x4df6fa-0x4df701], so the
+    // uplink byte carries the level even on ticks the edge latch was consumed.
+    bool jump_held = false;
     // The player body's jump cooldown/edge latch. The original REUSES entity+0x1A8
     // (org1's targetHeading slot) for this on the org2 body: clamp [0,32], >1 counts
     // down, held-at-1 until the jump key releases, jump only from 0; a jump reloads

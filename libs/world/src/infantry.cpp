@@ -2114,10 +2114,14 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     ent->net_anim_phase =
         static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
     if (inf.is_local_player) {
-        // Bits 0-2 dir, 3 moving, 6/7 the lean keys — the MoveOrder LOW byte layout the
-        // uplink's byte 19 carries [orig: the packer @0x4df68f-0x4df741].
+        // Bits 0-2 dir, 3 moving, 5 the HELD jump key, 6/7 the lean keys — the
+        // MoveOrder LOW byte layout the uplink's byte 19 carries [orig: the
+        // packer @0x4df68f-0x4df741; jump bit 5 @0x4df6fa-0x4df701]. A retail
+        // host launches + stamps anim 30/31 from bit 5 [orig: the jump gate
+        // @0x4b7e8c-0x4b7f06], so omitting it made a joiner's jump invisible.
         ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
                                                    (inf.player_moving ? 8 : 0) |
+                                                   (inf.jump_held ? Entity::kMoveOrderJump : 0) |
                                                    (inf.lean_left ? 0x40 : 0) |
                                                    (inf.lean_right ? 0x80 : 0));
         // Local stance mirrors into the MoveOrder bits 8-9 model too (prone bit0/crouch bit1)
@@ -2166,22 +2170,62 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                     : anim_state::kDeathFire;
             death_transition = target;
         }
-    } else if ((logic_tick & 3u) == 0) {
-        // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the REPLICATED
-        // MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving, bits 6-7 = lean
-        // [orig: @0x4b4153/@0x4b415c]) + the stance bits (MoveOrder bits 8-9, fed by
-        // C2S 0x1D [orig: @0x4b4165-0x4b4181; prone suppressed by Flags & 0x10A000 —
-        // swim/parachute unmodeled]), then run the SAME witnessed selection the local
-        // player runs (one function in the original).
-        inf.player_moving = (ent->net_move_input & 0x08u) != 0;
-        inf.player_move_dir_index = ent->net_move_input & 0x07u;
-        inf.lean_left = (ent->net_move_input & 0x40u) != 0;
-        inf.lean_right = (ent->net_move_input & 0x80u) != 0;
-        inf.stance = (ent->net_stance_bits & 0x1u) != 0
-                         ? InfantryState::Stance::kProne
-                         : ((ent->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
-                                                               : InfantryState::Stance::kStand);
-        player_body_select(e);
+    } else {
+        // The replicated JUMP key (MoveOrder bit 5): the retail host derives the
+        // jump launch + anims for a remote player inside the same authority-run
+        // jump block the local body uses — cooldown clamp [0,32], >1 counts
+        // down, parked at 1 while the key is held, release -> 0, launch only
+        // from 0 [orig: maintenance @0x4b7de0-0x4b7e15, park @0x4b7e7a-0x4b7e82,
+        // gate @0x4b7e8c-0x4b7eb5, anim 30 + pending 31 + reload 32
+        // @0x4b7ef2-0x4b7f06]. A wire-snapped peer's MOTION is uplink-owned, so
+        // only the anim/latch leg runs here; without a peer motor there is no
+        // landing edge — the countdown window holds the jump anims and the
+        // selection resumes when it parks (tracked in the D-NET-159/196 record).
+        const bool jump_key =
+            (ent->net_move_input & Entity::kMoveOrderJump) != 0;
+        if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;
+        if (inf.jump_cooldown > 32) inf.jump_cooldown = 32;
+        if (inf.jump_cooldown > 1) {
+            --inf.jump_cooldown;
+        } else if (inf.jump_cooldown == 1 && !jump_key) {
+            inf.jump_cooldown = 0;
+        }
+        if (inf.jump_cooldown == 0 && jump_key &&
+            inf.stance != InfantryState::Stance::kProne) {
+            inf.jump_cooldown = 32;
+            if (root_motion != nullptr &&
+                root_motion->has_clip(inf.adm_id, anim_state::kJumpStart)) {
+                inf.begin_body_transition(anim_state::kJumpStart);
+                inf.anim_pending = anim_state::kJumpLoop;
+            } else if (root_motion != nullptr &&
+                       root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
+                inf.begin_body_transition(anim_state::kJumpLoop);
+            }
+        }
+        const bool jump_episode =
+            (inf.anim_state == anim_state::kJumpStart ||
+             inf.anim_state == anim_state::kJumpLoop) &&
+            inf.jump_cooldown > 1;
+        if ((logic_tick & 3u) == 0 && !jump_episode) {
+            // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the
+            // REPLICATED MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving,
+            // bits 6-7 = lean [orig: @0x4b4153/@0x4b415c]) + the stance bits
+            // (MoveOrder bits 8-9, fed by C2S 0x1D [orig: @0x4b4165-0x4b4181;
+            // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]),
+            // then run the SAME witnessed selection the local player runs (one
+            // function in the original; it skips while airborne @0x4b70b8 — the
+            // jump-episode window above is the wire-snapped analog).
+            inf.player_moving = (ent->net_move_input & 0x08u) != 0;
+            inf.player_move_dir_index = ent->net_move_input & 0x07u;
+            inf.lean_left = (ent->net_move_input & 0x40u) != 0;
+            inf.lean_right = (ent->net_move_input & 0x80u) != 0;
+            inf.stance = (ent->net_stance_bits & 0x1u) != 0
+                             ? InfantryState::Stance::kProne
+                             : ((ent->net_stance_bits & 0x2u) != 0
+                                    ? InfantryState::Stance::kCrouch
+                                    : InfantryState::Stance::kStand);
+            player_body_select(e);
+        }
     }
     // The lean angle runs on the authority for every player body (the wire echoes the
     // lean BITS, each end integrates the angle), and the torso roll rides the same

@@ -7,6 +7,7 @@
 // registers drive local physics between records. Plus the stale-record
 // coast-down (an abandoned boat predicts to a stop).
 
+#include "terrain/height_field.h"
 #include "world/vehicle_motor.h"
 #include "world/angle.h"
 #include "world/geom.h"
@@ -212,6 +213,124 @@ bool run_ground_vehicle_glides() {
 	return ok;
 }
 
+bool run_bike_family_deltas() {
+	// The cbik promotion (D-NET-196; cbik grill 2026-07-31): bikes ride the
+	// ground core with four witnessed family deltas. Pin the two observable
+	// off-contact ones — gravity 250/tick (ground: 324) and yaw STILL applied
+	// while airborne (the ground core freezes it) [orig: @0x4865a6 vs
+	// @0x48d009; yaw @0x486681..0x486697 vs the grounded gate @0x48d0d4].
+	Rig r;
+	make_rig(r);
+	r.traits.family = w::VehicleFamily::Bike;
+	r.traits.player_speed = 20972;
+	r.traits.acceleration = 512;
+	r.traits.deceleration = 512;
+	r.world.env.water_z = 0;
+	w::Entity *veh = r.world.registry.get(r.boat);
+	if (!expect(veh != nullptr, "bike spawned")) return false;
+
+	// Flat terrain at ground 0; the bike flies at z=10 (beyond the 0.5 u
+	// suspension margin), so the vertical pipeline runs off-contact.
+	std::vector<uint16_t> heightmap(64 * 64, 0);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	r.world.terrain = &field;
+
+	// Steer hard right while flying: the live steer chain (servo -> wheel rate)
+	// must keep turning the airborne bike; speed is held by the bike's own
+	// contact-gated integration (off-contact, nothing changes it).
+	const int32_t x0 = w::to_fixed(100.0f);
+	const int32_t y0 = w::to_fixed(200.0f);
+	const int32_t z0 = w::to_fixed(10.0f);
+	const int32_t steer = 0x20000000; // +45 deg
+	stage(*veh, x0, y0, z0, 0, 8192, steer);
+	w::ground_client_tick(r.world, *veh, r.traits); // arm; airborne over the flat
+	auto &m = veh->veh;
+	if (!expect(!m.grounded, "the flying bike is off-contact")) return false;
+	m.speed = 8192; // live speed the steer chain multiplies
+	// Vertical: seed above the up-cap; one tick must clamp to 0x4000 then
+	// subtract exactly the bike gravity 250 (never the ground 324).
+	m.slide_z = 0x5000;
+	const int32_t yaw_before = m.yaw_bam;
+	w::ground_client_tick(r.world, *veh, r.traits);
+	bool ok = expect(m.slide_z == 0x4000 - 250,
+	                 "bike vertical = up-cap 0x4000 then gravity 250");
+	for (int t = 0; t < 8; ++t) w::ground_client_tick(r.world, *veh, r.traits);
+	std::fprintf(stderr, "[bike-air] slide_z pin ok=%d yaw %d -> %d\n", int(ok),
+	             yaw_before, m.yaw_bam);
+	ok &= expect(m.yaw_bam != yaw_before,
+	             "the airborne bike still applies its yaw rate");
+
+	// The ground family on the same airborne rig keeps 324, no cap, frozen yaw.
+	Rig g;
+	make_rig(g);
+	g.traits.family = w::VehicleFamily::Ground;
+	g.traits.player_speed = 20972;
+	g.traits.acceleration = 512;
+	g.traits.deceleration = 512;
+	g.world.env.water_z = 0;
+	g.world.terrain = &field;
+	w::Entity *gveh = g.world.registry.get(g.boat);
+	stage(*gveh, x0, y0, z0, 0, 8192, steer);
+	w::ground_client_tick(g.world, *gveh, g.traits);
+	if (!expect(!gveh->veh.grounded, "the flying buggy is off-contact")) return false;
+	gveh->veh.speed = 8192;
+	gveh->veh.slide_z = 0x5000;
+	const int32_t gyaw = gveh->veh.yaw_bam;
+	w::ground_client_tick(g.world, *gveh, g.traits);
+	ok &= expect(gveh->veh.slide_z == 0x5000 - 324,
+	             "ground vertical keeps 324 and no up-cap");
+	for (int t = 0; t < 8; ++t) w::ground_client_tick(g.world, *gveh, g.traits);
+	ok &= expect(gveh->veh.yaw_bam == gyaw,
+	             "the airborne ground vehicle freezes its yaw");
+	return ok;
+}
+
+
+bool run_platform_solve_settles_at_waterline() {
+	// The platform solve (D-NET-196 residual, water leg): with model boxes
+	// resolved, a stationary boat converges onto its waterline from above AND
+	// below, level, instead of holding a chase-frozen Z
+	// [orig: Entity_ProcessPlatformPhysics @0x481870 §8/§10 — the light-boat
+	// float height 0.65q and the corner-average Z].
+	struct Probe { double start_z; const char *label; };
+	const Probe probes[] = {{12.0, "from above"}, {8.0, "from below"}};
+	bool ok = true;
+	for (const Probe &pr : probes) {
+		Rig r;
+		make_rig(r);
+		// Zodiac-like hull: beam 2.0, length 5.0, keel/deck -0.5..1.0 (16.16).
+		r.traits.box_y_lo = -(1 << 16); r.traits.box_y_hi = 1 << 16;
+		r.traits.box_x_lo = -(5 << 15); r.traits.box_x_hi = 5 << 15;
+		r.traits.box_z_lo = -(1 << 15); r.traits.box_z_hi = 1 << 16;
+		r.traits.foot_x_lo = r.traits.box_x_lo; r.traits.foot_x_hi = r.traits.box_x_hi;
+		r.traits.foot_y_lo = r.traits.box_y_lo; r.traits.foot_y_hi = r.traits.box_y_hi;
+		w::Entity *boat = r.world.registry.get(r.boat);
+		boat->position.z = float(pr.start_z);
+		stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
+		      w::to_fixed(float(pr.start_z)), 0, 0, 0);
+		for (int t = 0; t < 900; ++t)
+			w::watercraft_client_tick(r.world, *boat, r.traits);
+		const double z = double(boat->position.z);
+		const double pitch_deg =
+			double(boat->veh.air_pitch_bam) * (360.0 / 4294967296.0);
+		std::fprintf(stderr, "[platform %s] final z=%.3f pitch=%.2f afloat=%d\n",
+		             pr.label, z, pitch_deg, int(boat->veh.plat_afloat));
+		// The afloat-FLAG latch at equilibrium rides the modelData box-pair
+		// provenance (the spec's own tracked unknown — the v210/draft geometry
+		// vs our collision-AABB box source). The SETTLE and LEVEL contracts
+		// are the pinned behavior; the flag question is in the residual notes.
+		ok &= expect(z > 8.5 && z < 11.5, "the hull settles into the waterline band");
+		ok &= expect(std::abs(pitch_deg) < 15.0, "the settled hull sits near level");
+	}
+	return ok;
+}
+
 bool run_aircraft_glides_and_holds_altitude() {
 	// The AIR prediction leg (CHel/cpln): a 25 m/s helicopter — far beyond the
 	// chase-only sustain — glides via the tilt/aero model, and an abandoned one
@@ -287,6 +406,8 @@ int main() {
 	bool ok = true;
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
+	ok &= run_bike_family_deltas();
+	ok &= run_platform_solve_settles_at_waterline();
 	ok &= run_aircraft_glides_and_holds_altitude();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();

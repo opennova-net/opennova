@@ -220,7 +220,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 12 && vp[0] != 0) {
+			if (vp.size() == 21 && vp[0] != 0) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -234,6 +234,16 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.climb_speed = vp[9];
 				vt.turn_roll = vp[10];
 				vt.speed_pitch = vp[11];
+				// The platform slope thresholds + tuning block (def.h order).
+				vt.max_slope = vp[12];
+				vt.slip_slope = vp[13];
+				vt.mass = vp[14];
+				vt.lean = vp[15];
+				vt.lean_velocity = vp[16];
+				vt.pitch_lift = vp[17];
+				vt.pitch_lift_vel = vp[18];
+				vt.bob = vp[19];
+				vt.flip = vp[20];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
 				// Family from the *_function tag (ai_function, else
 				// move_function — the same precedence as the replication
@@ -249,6 +259,8 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						vt.family = opennova::world::VehicleFamily::Helicopter;
 					} else if (fam == "cpln") {
 						vt.family = opennova::world::VehicleFamily::Plane;
+					} else if (fam == "cbik") {
+						vt.family = opennova::world::VehicleFamily::Bike;
 					} else {
 						vt.family = opennova::world::VehicleFamily::Ground;
 					}
@@ -768,6 +780,48 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
 		// not yet applied (tracked, D-COL-3)].
 		float entity_bound = collision_radius_by_graphic_[key];
+		// Platform probe boxes (boat_platform_solve_spec §3): the union of the
+		// authored per-subobject collision AABBs — exact 16.16 values in the
+		// 3di's own model space, the space the retail modelData boxes
+		// [0x28..0x4C] live in. The box1-vs-footprint provenance (and the
+		// axis-pair naming) is the spec's tracked unknown: both map to this
+		// union here, verified against hull proportions at the solve's bench.
+		if (h.pool() == 1) {
+			opennova::world::VehicleTraits *vt =
+					world_->vehicle_traits.get_mutable(e->item_id);
+			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
+				Ref<NovaObjectData> vdata =
+						p_placer->call("object_data_for", graphic);
+				if (vdata.is_valid()) {
+					const ThreediIRCollision *col =
+							vdata->native_ir().collision;
+					if (col != nullptr && col->objects != nullptr &&
+							col->object_count > 0) {
+						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
+						int32_t hi[3] = {INT32_MIN, INT32_MIN, INT32_MIN};
+						for (size_t o = 0; o < col->object_count; ++o) {
+							const auto &obj = col->objects[o];
+							for (int a = 0; a < 3; ++a) {
+								lo[a] = std::min(lo[a], obj.offset[a] + obj.min[a]);
+								hi[a] = std::max(hi[a], obj.offset[a] + obj.max[a]);
+							}
+						}
+						if (hi[0] > lo[0] && hi[1] > lo[1] && hi[2] > lo[2]) {
+							vt->box_x_lo = lo[0];
+							vt->box_x_hi = hi[0];
+							vt->box_y_lo = lo[1];
+							vt->box_y_hi = hi[1];
+							vt->box_z_lo = lo[2];
+							vt->box_z_hi = hi[2];
+							vt->foot_x_lo = lo[0];
+							vt->foot_x_hi = hi[0];
+							vt->foot_y_lo = lo[1];
+							vt->foot_y_hi = hi[1];
+						}
+					}
+				}
+			}
+		}
 		if (it->second >= 0) {
 			collision_world_.assign_entity(
 					h, it->second, e->registry_spawn_id);

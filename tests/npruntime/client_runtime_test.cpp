@@ -1590,18 +1590,20 @@ bool run_roundtrip() {
 	up.heading = 0x2000; // -> mission yaw 45
 	up.pitch = 0x0100;
 
-	// The host's final connection-settings update can hold the send block shut
-	// for a bounded number of client frames. Drain that authoritative gate
-	// before testing the live uplink producer.
+	// The host's settings update dictates the send-holdoff period. An OpenNova
+	// host dictates the engine-max period 1 (D-NET-197), so the client uplinks
+	// every tick; drain any residual countdown (retail cycle: dec-then-check —
+	// a frame is open when the countdown is <= 1 at its start).
 	for (int frame = 0;
-	     frame < 8 && client.send_holdoff_countdown() != 0; ++frame) {
+	     frame < 8 && client.send_holdoff_countdown() > 1; ++frame) {
 		const auto held = client.Client_ProcessNetworkFrame(tick++);
 		if (!expect(held.empty(),
 		            "settings send-holdoff suppresses the whole deployed send block"))
 			return false;
 	}
-	if (!expect(client.send_holdoff_countdown() == 0,
-	            "settings send-holdoff reaches zero before the uplink frame"))
+	if (!expect(client.send_holdoff_ticks() == 1 &&
+	                    client.send_holdoff_countdown() <= 1,
+	            "the OpenNova host dictates the engine-max period 1"))
 		return false;
 
 	std::size_t staged = 0;
@@ -3193,21 +3195,19 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 							0xA0),
 			});
 	client.receive(settings.data(), settings.size());
+	// Retail cycle: the recv pump decrements BEFORE the send gate, so a
+	// field-3 value of 2 holds exactly ONE frame and opens on the second —
+	// the period is exactly the dictated ticks [orig: PumpFlags 0x10
+	// decrement / 0x200 reload-when-0 @0x629802].
 	const std::vector<std::vector<uint8_t>> first_held =
 			client.Client_ProcessNetworkFrame(2);
 	if (!expect(first_held.empty() &&
 	                    client.send_holdoff_countdown() == 1,
 			"same-packet field-3 holds the reactive ACK + JOIN pair"))
 		return false;
-	const std::vector<std::vector<uint8_t>> second_held =
-			client.Client_ProcessNetworkFrame(3);
-	if (!expect(second_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"admission replies remain queued through the final held frame"))
-		return false;
 
 	const std::vector<std::vector<uint8_t>> released =
-			client.Client_ProcessNetworkFrame(4);
+			client.Client_ProcessNetworkFrame(3);
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
 	if (!expect(released.size() == 2 &&
@@ -3230,7 +3230,9 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 					                    server_hello.sus2),
 			"first open pump preserves the following JOIN packet and sequence"))
 		return false;
-	return true;
+	// The open boundary re-armed the countdown from the stored period.
+	return expect(client.send_holdoff_countdown() == 2,
+			"the open boundary re-arms the dictated field-3 period");
 }
 
 bool run_holdoff_defers_retained_session_reconstruction() {
@@ -3280,15 +3282,10 @@ bool run_holdoff_defers_retained_session_reconstruction() {
 	const std::vector<uint8_t> resend = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
 	client.receive(resend.data(), resend.size());
-	const std::vector<std::vector<uint8_t>> final_held =
-			client.Client_ProcessNetworkFrame(2);
-	if (!expect(final_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"retained reconstruction cannot bypass the final held frame"))
-		return false;
-
+	// Retail cycle: frame 2 decrements 1 -> 0 and OPENS — the retained
+	// reconstruction rides the first open boundary (period = the dictated 2).
 	const std::vector<std::vector<uint8_t>> released =
-			client.Client_ProcessNetworkFrame(3);
+			client.Client_ProcessNetworkFrame(2);
 	ProtocolPacketHeader resent_header;
 	std::vector<ProtocolMessage> resent_messages;
 	if (!expect(released.size() == 2 &&
@@ -3358,21 +3355,35 @@ bool run_settings_send_holdoff_blocks_exact_frame_count() {
 			"field-3 holdoff suppresses every first-frame datagram and decrements once"))
 		return false;
 	++now_ms;
+	// Retail cycle (dec-then-check): the second frame decrements 1 -> 0 and
+	// OPENS — the dictated value IS the period, so field 3 = 2 means every
+	// 2nd tick (a NovaWorld host's 12 = ~5.2 Hz), not value+1.
 	const std::vector<std::vector<uint8_t>> second_frame =
 			client.Client_ProcessNetworkFrame(11);
-	if (!expect(second_frame.empty() && client.send_holdoff_countdown() == 0,
-			"field-3 holdoff suppresses every datagram for exactly its second frame"))
+	const std::vector<uint8_t> second_tags = semantic_tags(second_frame);
+	if (!expect(second_frame.size() == 1 &&
+	                    second_tags ==
+	                            std::vector<uint8_t>(
+						{0x2C, 0x1C, 0x08, 0x3D, 0x2C}),
+			"send block reopens by batching held receive replies with the live RTT"))
+		return false;
+	if (!expect(client.send_holdoff_countdown() == 2,
+			"the open boundary re-arms the stored field-3 period"))
 		return false;
 	++now_ms;
+	// The re-armed period gates the NEXT frame — the uplink stays divided for
+	// the whole session, not just until the first skip (the pre-fix joiner
+	// forgot the period and flooded retail hosts at 12x their expected rate).
 	const std::vector<std::vector<uint8_t>> third_frame =
 			client.Client_ProcessNetworkFrame(12);
-	const std::vector<uint8_t> third_tags = semantic_tags(third_frame);
-	return expect(
-			third_frame.size() == 1 &&
-			        third_tags ==
-			                std::vector<uint8_t>(
-						{0x2C, 0x1C, 0x08, 0x3D, 0x2C}),
-			"send block reopens by batching held receive replies with the live RTT");
+	if (!expect(third_frame.empty() && client.send_holdoff_countdown() == 1,
+			"the re-armed period holds the following frame shut"))
+		return false;
+	++now_ms;
+	const std::vector<std::vector<uint8_t>> fourth_frame =
+			client.Client_ProcessNetworkFrame(13);
+	return expect(!fourth_frame.empty(),
+			"the periodic boundary reopens every dictated interval");
 }
 
 bool run_send_holdoff_defers_due_housekeeping() {
@@ -3418,17 +3429,16 @@ bool run_send_holdoff_defers_due_housekeeping() {
 			"a due 0x4C remains queued while holdoff closes the send pump"))
 		return false;
 	++now_ms;
-	const std::vector<uint8_t> second_held =
-			semantic_tags(client.Client_ProcessNetworkFrame(311));
-	if (!expect(second_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"queued housekeeping cannot leak on the final held frame"))
-		return false;
-	++now_ms;
+	// Retail cycle: the second frame decrements 1 -> 0 and OPENS — the first
+	// open pump flushes the deferred 0x4C before the live RTT (period = the
+	// dictated 2, re-armed at the boundary).
 	const std::vector<uint8_t> released =
-			semantic_tags(client.Client_ProcessNetworkFrame(312));
-	return expect(released == std::vector<uint8_t>({0x4C, 0x2C}),
-			"the first open send pump flushes deferred 0x4C before live RTT");
+			semantic_tags(client.Client_ProcessNetworkFrame(311));
+	if (!expect(released == std::vector<uint8_t>({0x4C, 0x2C}),
+			"the first open send pump flushes deferred 0x4C before live RTT"))
+		return false;
+	return expect(client.send_holdoff_countdown() == 2,
+			"the open boundary re-arms the dictated period");
 }
 
 bool run_start_resets_reusable_runtime_state() {
