@@ -321,10 +321,38 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 			if (traits != nullptr) {
 				es.net_world_mover = true;
 				opennova::world::Entity::VehicleMotorState &m = local->veh;
+				// The witnessed mover freezes: wire bit0 (not-ready/attached),
+				// the dead-pose/wreck bit, and a carried row riding a deck
+				// carrier all stop the prediction motor — the row keeps its
+				// snapped wire pose (wreck eulers included) / its per-tick
+				// seat-follow, and the mirror-back below yields via
+				// net_predicted [orig: the Flags&1 early return @0x4b9a03; the
+				// dead-pose short form's frozen live stores @0x460930..0x460A50;
+				// bit0 set on attach @0x43C14A]. D-NET-66: death stays a snap.
+				const bool wire_frozen =
+						(es.state_flags_known &&
+								(es.state_flags &
+										(0x01u | opennova::netsim::
+												kVehicleFlagDeadPose)) != 0u) ||
+						(es.net_seat_valid && es.carrier_handle != 0xFFFFu);
+				if (wire_frozen) {
+					// The row holds its snapped/followed pose; the registry
+					// entity adopts it below like any un-predicted row so
+					// occlusion/collision see the wreck where it rests.
+					m.net_predicted = false;
+					m.net_seen_revision = es.compact_revision;
+					local->position.x = static_cast<float>(es.x) / 65536.0f;
+					local->position.y = static_cast<float>(es.y) / 65536.0f;
+					local->position.z = static_cast<float>(es.z) / 65536.0f;
+					continue;
+				}
 				if (es.compact_revision != m.net_seen_revision) {
 					m.net_seen_revision = es.compact_revision;
-					// The fold live-snapped the row to the wire sample; that
-					// sample is the staged target [orig: the mode-2 staging].
+					// The fold live-snapped the row to the wire sample (rows
+					// whose first compact landed before this flag flipped stage
+					// their pre-compact pose for one record — self-corrected by
+					// the next fold's live snap); that sample is the staged
+					// target [orig: the mode-2 staging].
 					m.net_smooth_target[0] = es.x;
 					m.net_smooth_target[1] = es.y;
 					m.net_smooth_target[2] = es.z;

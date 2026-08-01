@@ -294,15 +294,15 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
            turn_rate only for clarity — lower_match_key requires a separator after the key. */
         } else if (lower_match_key(lower, ll, "climb_speed", 11)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
-            current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick (speed-family scale) */
+            current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: 293*atol @0x49db4a] */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "turnroll", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-            current.turn_roll = parse_int_n(v, vl); /* raw; air roll-rate cap = token*192426 at use */
+            current.turn_roll = parse_int_n(v, vl); /* raw [orig: @0x49dd2a]; air roll-rate cap = token*192426 at use */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "speedpitch", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-            current.speed_pitch = parse_int_n(v, vl); /* raw; air pitch-rate cap = token*192426 at use */
+            current.speed_pitch = parse_int_n(v, vl); /* raw [orig: @0x49dd66]; air pitch-rate cap = token*192426 at use */
             parsed = 1;
         } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);

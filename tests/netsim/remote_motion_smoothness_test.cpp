@@ -17,10 +17,12 @@
 // SUSTAIN LIMIT (deliberate, witnessed): the vehicle chase alone can follow at
 // most snap_threshold/30 per tick (~12.5 m/s with the speed register >= 293,
 // ~5 m/s without) — beyond that retail's PHYSICS-PREDICTION leg carries the
-// motion and the chase only trims. That leg is the open D-NET-196 B-facet
-// (family physics, D-NET-161); run_vehicle_fast_speed_snaps pins the honest
-// chase-only behavior for a faster mover (periodic one-tick snaps, never a
-// multi-tick hold).
+// motion and the chase only trims. The prediction legs are LANDED for all four
+// families as world-side movers (world/vehicle_motor, exercised by
+// watercraft_client_motor_test); the row-side chase pinned here remains the
+// shipped path for traitless vehicles and lib-only embedders, so
+// run_vehicle_fast_speed_snaps pins its honest chase-only behavior for a
+// faster mover (periodic one-tick snaps, never a multi-tick hold).
 //
 // The control leg (gap=1) pins the full-rate regime; the chase must remain
 // smooth when records arrive every tick.
@@ -216,8 +218,8 @@ bool run_remote_vehicle_glides_between_subrate_records() {
 // A sustained mover FASTER than the chase can follow (the witnessed limit):
 // the pose must track via periodic ONE-TICK snaps — never a multi-tick hold
 // while records keep arriving, and never unbounded lag. This is the honest
-// chase-only behavior for fast vehicles until the prediction leg (D-NET-196
-// B-facet) lands.
+// chase-only behavior on rows without a world-side prediction mover (the
+// prediction legs live in world/vehicle_motor and are pinned separately).
 bool run_vehicle_fast_speed_snaps_not_stalls() {
 	ns::NetClientView view(class_of);
 	view.set_remote_motion_mode(true);
@@ -331,6 +333,215 @@ bool run_respawn_snaps_without_glide() {
 	return expect(es->respawn_revision == 1, "the respawn edge was counted once");
 }
 
+// Pin the org2 bucket ladder's exact per-step math at three distances,
+// INCLUDING the verbatim non-monotonic [0x6000,0x7000) -> 7 rung — a silent
+// "monotonicizing fix" must fail here [orig: the ladder @0x4B44C4..0x4B4581;
+// step = (d + N/2) / N re-store @0x4B459D]. The staged target is read back
+// from the row so codec quantization cancels out of the expectation.
+bool run_org2_bucket_ladder_is_verbatim() {
+	struct Probe { int32_t dist; int32_t bucket; };
+	// Distances FROM the settled pose, chosen mid-rung.
+	const Probe probes[] = {
+			{0x3800, 7},  // [0x3000,0x4000) -> 7
+			{0x5800, 9},  // [0x5000,0x6000) -> 9
+			{0x6800, 7},  // [0x6000,0x7000) -> 7 (the non-monotonic rung)
+	};
+	bool ok = true;
+	uint16_t next_handle = 0x0020;
+	for (const Probe &p : probes) {
+		ns::NetClientView view(class_of);
+		view.set_remote_motion_mode(true);
+		const uint16_t handle = next_handle++;
+		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+		view.apply(nw::s2c::PER_FRAME_UPDATE,
+		           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+		view.tick_remote_motion(0xFFFF); // snap-arm at ax
+		const int32_t x0 = view.state().find(handle)->x;
+		view.apply(nw::s2c::PER_FRAME_UPDATE,
+		           nw::encode_frame_update(
+		                   player_frame(handle, ax, ay, az, x0 + p.dist)));
+		// The staged ABSOLUTE target (post-codec) before the first chase tick.
+		const int32_t target = view.state().find(handle)->net_smooth_target[0];
+		const int32_t d = target - x0;
+		const int32_t expected = (d + (p.bucket >> 1)) / p.bucket;
+		view.tick_remote_motion(0xFFFF);
+		const int32_t stepped = view.state().find(handle)->x - x0;
+		std::fprintf(stderr,
+		             "[org2-ladder] dist=0x%X bucket=%d staged d=%d step=%d expected=%d\n",
+		             unsigned(p.dist), p.bucket, d, stepped, expected);
+		ok &= expect(stepped == expected,
+		             "org2 ladder step is the verbatim (d + N/2) / N of its rung");
+	}
+	return ok;
+}
+
+// The vehicle-family ladder pinned the same way [orig: @0x48D480 —
+// {6,8,10,15,20,25,30}]: 0x9000 sits in [0x8000,0x10000) -> 20.
+bool run_vehicle_bucket_ladder_is_verbatim() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x1030;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(vehicle_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF); // snap-arm
+	const int32_t x0 = view.state().find(handle)->x;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(
+	                   vehicle_frame(handle, ax, ay, az, x0 + 0x9000)));
+	const int32_t target = view.state().find(handle)->net_smooth_target[0];
+	const int32_t d = target - x0;
+	const int32_t expected = (d + 10) / 20;
+	view.tick_remote_motion(0xFFFF);
+	const int32_t stepped = view.state().find(handle)->x - x0;
+	std::fprintf(stderr, "[vehicle-ladder] staged d=%d step=%d expected=%d\n",
+	             d, stepped, expected);
+	return expect(stepped == expected,
+	              "vehicle ladder 0x9000 takes the 20-bucket verbatim step");
+}
+
+// The starvation decay drains the FULL int32 decompressed register — signed,
+// untruncated [orig: (v+64)>>7 on vehicleData[177], a signed 32-bit register;
+// the < 293 compare is signed]. A reversing boat must decay toward zero from
+// below (never wrap positive and flip the 0x60000 snap gate); a fast aircraft
+// register above 0xFFFF must keep its high bits.
+bool run_vehicle_starvation_decay_is_signed_untruncated() {
+	struct Probe { int32_t speed_fx; const char *label; };
+	const Probe probes[] = {
+			{-8192, "reverse"},
+			{131072, "fast (2.0 u/tick)"},
+	};
+	bool ok = true;
+	uint16_t next_handle = 0x1040;
+	for (const Probe &p : probes) {
+		ns::NetClientView view(class_of);
+		view.set_remote_motion_mode(true);
+		const uint16_t handle = next_handle++;
+		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+		view.apply(nw::s2c::PER_FRAME_UPDATE,
+		           nw::encode_frame_update(
+		                   vehicle_frame(handle, ax, ay, az, ax, p.speed_fx)));
+		const int32_t seeded = view.state().find(handle)->vehicle_speed_reg;
+		// Starve: header-only frames until well past the >=128 decay threshold.
+		int32_t prev = seeded;
+		bool monotone_toward_zero = true;
+		for (int t = 0; t < 200; ++t) {
+			nw::FrameUpdate fu = header_only_frame();
+			fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+			view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+			view.tick_remote_motion(0xFFFF);
+			const int32_t reg = view.state().find(handle)->vehicle_speed_reg;
+			if (std::abs(reg) > std::abs(prev) ||
+					(seeded < 0 && reg > 0) || (seeded > 0 && reg < 0))
+				monotone_toward_zero = false;
+			prev = reg;
+		}
+		std::fprintf(stderr, "[starvation %s] seeded=%d final=%d\n",
+		             p.label, seeded, prev);
+		ok &= expect(monotone_toward_zero,
+		             "the starved speed register decays toward zero without "
+		             "sign flips or 16-bit wraps");
+	}
+	return ok;
+}
+
+// The org2 pitch chase (this PR's port of the +0x244 leg): a fresh aim pitch
+// steps the live pitch_bam with the same divisor-12 chase as heading — no
+// zero-order hold at the wire cadence [orig: smoothTargetPitch staged in every
+// branch of @0x4B4470..0x4B46C0; Pitch += step while progress < 12].
+bool run_player_pitch_chases_wire_byte() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x0031;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.pitch_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF); // arm level
+	// Aim up: pitch byte 0x20 (45 deg). Records keep coming at the same spot.
+	const int32_t target = 0x20 << 24;
+	int32_t last = view.state().find(handle)->pitch_bam;
+	bool stepped_smoothly = true;
+	for (int t = 0; t < 40; ++t) {
+		nw::FrameUpdate up = player_frame(handle, ax, ay, az, ax);
+		up.records[0].player.pitch_byte = 0x20;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(up));
+		view.tick_remote_motion(0xFFFF);
+		const int32_t now = view.state().find(handle)->pitch_bam;
+		// Never a whole-target jump in one tick, always monotone toward it.
+		if (std::abs(now - last) > target / 4 || now < last)
+			stepped_smoothly = false;
+		last = now;
+	}
+	std::fprintf(stderr, "[pitch-chase] final pitch_bam=%d target=%d\n",
+	             last, target);
+	bool ok = expect(stepped_smoothly,
+	                 "pitch steps smoothly (no wire-cadence hold, no jump)");
+	ok &= expect(std::abs(last - target) <= target / 16,
+	             "pitch converges onto the wire aim");
+	return ok;
+}
+
+// The org1 first-compact heading seed: the promote publishes the FIRST
+// record's own heading, not the zero-initialized stage — an AI soldier must
+// not pirouette toward BAM 0 on its first record (the fold-side seed in
+// land_compact_pose; retail rows are born with spawn orientation in every
+// heading slot).
+bool run_infantry_first_record_does_not_swing_to_zero() {
+	ns::NetClientView view([](uint16_t type_id) {
+		return type_id == 0x0777 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x0032;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	// Born from the organic spawn stream facing 180 deg, like every AI row.
+	{
+		nw::OrganicSpawnRecord spawn;
+		spawn.slot_id = handle;
+		spawn.has_body = true;
+		spawn.item_type_id = 0x0777;
+		spawn.pos_x = ax;
+		spawn.pos_y = ay;
+		spawn.pos_z = az;
+		spawn.orientation =
+				static_cast<int32_t>(static_cast<uint32_t>(0x80u) << 24);
+		nw::OrganicSpawnBatch batch;
+		batch.entity_count = 1;
+		batch.records.push_back(spawn);
+		view.apply(0x0C, nw::encode_organic_spawn_batch(batch));
+		if (!expect(view.state().find(handle) != nullptr,
+		            "the organic spawn created the row")) return false;
+	}
+	nw::FrameUpdate fu = header_only_frame();
+	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+	nw::FrameUpdateRecord r;
+	r.handle = handle;
+	r.type_id = 0x0777;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.pos_x_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.pos_y_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.pos_z_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.yaw_byte = 0x80; // facing 180 deg — max distance from BAM 0
+	r.infantry.flags_byte = 0;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	const int32_t wire_heading =
+			static_cast<int32_t>(static_cast<uint32_t>(0x80u) << 24);
+	// A record gap's worth of ticks with no further records: the promoted
+	// target must be the record's own heading, so the chase holds it.
+	for (int t = 0; t < 24; ++t) view.tick_remote_motion(0xFFFF);
+	const int32_t heading = view.state().find(handle)->heading_bam;
+	const int32_t err = std::abs(static_cast<int32_t>(
+			static_cast<uint32_t>(heading) - static_cast<uint32_t>(wire_heading)));
+	std::fprintf(stderr, "[org1-first-seed] heading=%d wire=%d err=%d\n",
+	             heading, wire_heading, err);
+	// With the pre-fix zero promote the chase swings ~5.8 deg/tick toward 0;
+	// 24 ticks is > 90 deg of drift. Hold within ~2 deg.
+	return expect(err <= 24000000, "first-record heading holds (no pirouette)");
+}
+
 } // namespace
 
 int main() {
@@ -342,6 +553,11 @@ int main() {
 	ok &= run_player_large_jump_snaps_in_one_tick();
 	ok &= run_player_deadband_ignores_jitter();
 	ok &= run_respawn_snaps_without_glide();
+	ok &= run_org2_bucket_ladder_is_verbatim();
+	ok &= run_vehicle_bucket_ladder_is_verbatim();
+	ok &= run_vehicle_starvation_decay_is_signed_untruncated();
+	ok &= run_player_pitch_chases_wire_byte();
+	ok &= run_infantry_first_record_does_not_swing_to_zero();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

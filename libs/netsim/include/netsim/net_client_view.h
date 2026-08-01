@@ -55,9 +55,11 @@ public:
 	//    position reconciliation (self_handle; bucket 48 moving / 512 still).
 	//  - Infantry rows: the org1 motor fall-through [orig: Entity_UpdateInfantryAI
 	//    @ 0x4b9a8c] + the promoted-heading quarter-step body chase [orig: @ 0x4be8fd].
-	//  - Vehicle rows: the family template [orig: Entity_UpdateWatercraftPhysics
-	//    @ 0x48D480 et al.] — chase leg only; the physics-prediction leg is the
-	//    open D-NET-196 B-facet (family physics, D-NET-161).
+	//  - Vehicle rows: the family chase template [orig: Entity_UpdateWatercraftPhysics
+	//    @ 0x48D480 et al.]. Rows the embedding sim flags net_world_mover are
+	//    instead predicted by the world-side family movers (world/vehicle_motor,
+	//    all four families landed) and skipped here; the row-side chase remains
+	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
 

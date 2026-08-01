@@ -2077,6 +2077,14 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 			"the presented pose keeps advancing between wire records (no ZOH holds)")
 	assert_lt(max_step, maxf(3.0 * mean_step, 0.02),
 			"no hold-then-teleport step (bounded near the mean advance)")
+	# Bound the END-OF-WINDOW lag against the TRUE teleported pose: the chase's
+	# witnessed equilibrium sits ~1 m behind at this speed, and the 2 m snap
+	# threshold is the hard ceiling — a chase creeping at a fraction of true
+	# speed accrues lag past it and must fail here, not just via max_step.
+	var true_end := Vector3(tick_i * step_m, 0.0, 0.0)
+	var lag_end := samples[samples.size() - 1].distance_to(true_end)
+	assert_lt(lag_end, 2.0,
+			"the presented pose tracks within the snap threshold of truth")
 
 	joiner.free()
 	host.free()

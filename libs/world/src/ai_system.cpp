@@ -420,11 +420,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
-            // The joiner-side watercraft prediction (net-re §5.38e B-facet):
-            // chases the staged wire target and predicts between records from
-            // the mirrored speed/steer registers — the client-executed subset
-            // of the cbot family mover [orig: @0x48D480]. Other families keep
-            // the row-side chase until their prediction legs land (D-NET-161).
+            // The joiner-side family prediction (net-re §5.38e B-facet, all
+            // four families landed): each mover chases the staged wire target
+            // and predicts between records from the mirrored speed/steer
+            // registers — the client-executed subset of its family mover
+            // [orig: cbot @0x48D480; CHel/cpln via the @0x45D6F0 thunk;
+            // ground @0x48af00 core]. The embedding sim clears net_predicted
+            // for wire-frozen rows (bit0 / dead-pose / carried), so a wreck
+            // never keeps driving (D-NET-66).
             if (veh->veh.net_predicted && veh->health > 0 &&
                     traits->family == VehicleFamily::Watercraft) {
                 watercraft_client_tick(world, *veh, *traits);

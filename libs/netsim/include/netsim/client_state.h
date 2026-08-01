@@ -27,6 +27,12 @@ struct ClientRoundEvent {
 
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
 // present pass reads THIS, not the authoritative sim directly — so single-player
+// Vehicle compact flags_byte dead-pose/wreck bit — the vehicle-class analog of
+// the organic dead bit 1 (a wreck keeps replicating the short frozen-pose form
+// with this bit set) [orig: the §5.13 short-form select; decoder
+// is_dead_pose = (flags_byte & 4)].
+inline constexpr uint8_t kVehicleFlagDeadPose = 0x04;
+
 // renders exactly the state a networked peer would see.
 struct ClientEntityState {
 	uint16_t handle = 0;                          // (pool<<12)|slot

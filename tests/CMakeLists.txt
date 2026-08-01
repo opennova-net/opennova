@@ -1763,8 +1763,9 @@ add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 
 # The D-NET-196 between-update mover contract: the joiner-side per-class chase
 # (net-re §5.38e) keeps remote entities gliding across the host's subrate 0x0A
-# cadence — smoothness legs, the witnessed snap/deadband/respawn edges, and the
-# honest fast-vehicle sustain limit (prediction leg = the open B-facet).
+# cadence — smoothness legs, the witnessed snap/deadband/respawn edges, exact
+# bucket-ladder pins, and the honest chase-only fast-vehicle sustain limit
+# (the family prediction legs live world-side; watercraft_client_motor_test).
 add_executable(netsim_remote_motion_smoothness_test netsim/remote_motion_smoothness_test.cpp)
 target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_netsim)
 add_test(NAME netsim_remote_motion_smoothness COMMAND netsim_remote_motion_smoothness_test)

@@ -455,12 +455,22 @@ inline bool aim_overlay_inputs_for_client(
 
 	out = opennova::anim::AimOverlayInputs{};
 	out.aim_yaw = entity.heading_bam;
-	out.aim_pitch = static_cast<int32_t>(
-			static_cast<uint32_t>(
-					entity.cls == opennova::EntityClass::Player
-							? entity.pitch_byte
-							: entity.aim_yaw_byte)
-			<< 24);
+	// Free-standing players read the row's live pitch (the org2 body chase
+	// steps it toward the wire byte with divisor 12 on a joiner; snap folds
+	// mirror the byte — §5.38e §3). Mounted players and infantry keep the raw
+	// wire aim byte: their own mover is bit0-skipped and the seat pose owns the
+	// body [orig: the mounted read of entity+0x2D0-desired aim].
+	const bool free_standing_player =
+			entity.cls == opennova::EntityClass::Player &&
+			entity.carrier_handle == 0xFFFFu;
+	out.aim_pitch = free_standing_player
+			? entity.pitch_bam
+			: static_cast<int32_t>(
+					static_cast<uint32_t>(
+							entity.cls == opennova::EntityClass::Player
+									? entity.pitch_byte
+									: entity.aim_yaw_byte)
+					<< 24);
 	out.body_yaw = out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;
