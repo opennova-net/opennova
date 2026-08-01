@@ -225,6 +225,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	tag2c_send_cooldown_ = 0;
 	net_quality_ = 0;
 	send_holdoff_countdown_ = 0;
+	send_holdoff_ticks_ = 0;
 	replay_mode_ = false;
 	view_.state() = netsim::ClientState{};
 	view_.drain_round_events();
@@ -414,8 +415,14 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 				current_tick_ = pr.tick_seed;
 				last_keepalive_tick_ = pr.tick_seed;
 			}
-			if (pr.send_holdoff_set)
+			if (pr.send_holdoff_set) {
+				// Store the dictated period AND reset the countdown [orig:
+				// NapiNPServer_UpdateHoldoffTicks applies cs_dir field 3 +
+				// resets the countdown @0x61e140; HandleCSConfigUpdate
+				// @0x621940 applies any value verbatim on the client].
+				send_holdoff_ticks_ = pr.send_holdoff;
 				send_holdoff_countdown_ = pr.send_holdoff;
+			}
 			for (const WeaponLoadout &grant : pr.loadout_grants) {
 				authoritative_loadout_ = grant;
 				++authoritative_loadout_revision_;
@@ -515,7 +522,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	if (tag2c_send_cooldown_ > 0) --tag2c_send_cooldown_;
 
 	// (2) SEND BLOCK — gated send_holdoff_countdown == 0 (NapiNPConnection+0x648; the original skips the
-	// whole block when set). [orig @0x42c3dd]
+	// whole block when set). [orig @0x42c3dd] The transport recv pump decrements
+	// the countdown once per tick BEFORE this gate [orig: PumpFlags 0x10 via
+	// PumpClientProtocolRecv flags=26 @0x4c4fe0], and the send pump RE-ARMS it
+	// from the stored CS field-3 period when the boundary opened [orig: PumpFlags
+	// 0x200 reload-when-0 @0x629802 via PumpClientProtocolSend flags=738
+	// @0x4c5000] — so the uplink period is exactly send_holdoff_ticks (a
+	// NovaWorld host dictates 12 → ~5.2 Hz; LAN lanmode 2/3/4 → 6/4/3; an
+	// unconfigured connection stays 0 = per-tick). A joiner that forgot the
+	// period after one skip flooded retail hosts at 12x their expected rate.
+	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
 	if (send_holdoff_countdown_ == 0) {
 		// These packets already own the connection's earliest allocated
 		// sequences. Preserve wire/retention fidelity by releasing them unchanged
@@ -595,8 +611,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		// already carried it. Retail places this pump inside the same field-3 gate.
 		for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
 			outbound.push_back(std::move(d));
-	} else {
-		--send_holdoff_countdown_;
+		// Re-arm the countdown from the stored dictated period [orig: the
+		// PumpFlags 0x200 reload-when-0 @0x629802] — the boundary reopens
+		// every send_holdoff_ticks_ ticks (0 = per-tick).
+		send_holdoff_countdown_ = send_holdoff_ticks_;
 	}
 	return outbound;
 }

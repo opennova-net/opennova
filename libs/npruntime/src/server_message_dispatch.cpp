@@ -559,9 +559,16 @@ bool emit_post_handshake_burst(const GameConfig &cfg, NapiNPConnection &conn,
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return false;
 
-	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0},
+	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
+	// [orig: NapiNPServer_UpdateHoldoffTicks @0x4c5f40 sends @0x4c5fc0/@0x4c5fcb;
+	// the golden NovaWorld capture carries 0x0C = 12 here]. OpenNova dictates
+	// the configured period — default 1 = the 62.5 Hz engine maximum
+	// (D-NET-197 PERMANENT; GameConfig::send_holdoff_ticks).
+	const uint8_t holdoff = static_cast<uint8_t>(
+			cfg.send_holdoff_ticks < 255 ? cfg.send_holdoff_ticks : 255);
+	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {0, 0x08, 0, 0, 0, holdoff, 0, 0, 0},
 	                                    PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
-	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0},
+	out.push_back(make_protocol_message(hightag::CS_CONFIG_UPDATE, {1, 0x08, 0, 0, 0, holdoff, 0, 0, 0},
 	                                    PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
 	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
 	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(cfg)));

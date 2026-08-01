@@ -1182,7 +1182,16 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_RESPAWN_REVISION] = static_cast<float>(es.respawn_revision);
 		if (joiner_) {
 			if (es.state_flags_known) {
-				r[PF_HIDDEN] = (es.state_flags & 0x01u) != 0u ? 1.0f : 0.0f;
+				// bit0 = "not independently collected/moved" — the retail
+				// visible-entity collector skips such rows [orig: @0x5C8CF4].
+				// Seat mounts never stream it (they carry 0x40), and retail
+				// draws carrier-ATTACHED children regardless of Flags [orig:
+				// the no-flag-test child draws @0x5D795A/@0x5D79C8] — so a row
+				// riding a live carrier attach stays visible even with bit0.
+				const bool carrier_attached =
+						es.net_seat_valid && es.carrier_handle != 0xFFFFu;
+				r[PF_HIDDEN] = (!carrier_attached &&
+						(es.state_flags & 0x01u) != 0u) ? 1.0f : 0.0f;
 				r[PF_ALIVE] = (es.state_flags & opennova::world::kEntityFlagDead) == 0u ? 1.0f : 0.0f;
 			}
 		}

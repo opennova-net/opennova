@@ -4413,17 +4413,24 @@ physics BELOW the (authority ∥ local-driver)-gated INPUT block keeps integrati
 from replicated speed/steer between records, chase-corrected on each record**. That —
 not the chase alone — is why a remote boat glides.
 
-**5. `entity+0x24` bit0 rides the wire and is the mover-skip everywhere.** Setters:
-`Entity_AttachToVehicle @ 0x43C14A` (mounted riders are moved by the carrier, not the
-mover), `Server_KillPlayerAndNotify @ 0x519E92`, spawn-overlay assignment `@ 0x52A181`,
+**5. `entity+0x24` bit0 rides the wire and is the mover-skip everywhere — and it means
+"not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachToVehicle
+@ 0x43C14A` — the carried-OBJECT attach (a picked-up/deck-carried item), not the seat
+mount; a SEAT mount sets Flags `0x40` instead [orig: the seat attach
+`@ 0x4946D0/@ 0x494752`; the mounted body mode `@ 0x4B41A2`] — plus
+`Server_KillPlayerAndNotify @ 0x519E92`, spawn-overlay assignment `@ 0x52A181`,
 write-side header branches `@ 0x4FF7A1/B8`. The host clears it each tick for
 owner-ready entities (`@ 0x4B99F4..0x4BA000`: owner ptr `+0x354` valid + team match +
 owner`+0x21C ≥ 0x10000`). The compact write emits `entity+36` RAW and the read lands it
 via the `0xFD` mask, so every machine's mover skips the same entities consistently
-(joining/not-ready peers freeze at their staged pose; mounted riders skip). OPEN
-QUESTION for our present pass: `present_snapshot_from_client_view` maps wire bit0 →
-`PF_HIDDEN` on the joiner — for a MOUNTED remote player (bit0 = 1 on the wire) that
-would hide the rider; verify against retail and the rider-render path.
+(joining/not-ready peers freeze at their staged pose; carried objects ride their
+carrier). RESOLVED (2026-07-31, the earlier open question): the only render-path
+consumer of bit0 is the visible-entity collector, which SKIPS bit0 rows
+[orig: `collect_visible_entities_for_terrain @ 0x5C8C60`, the skip `@ 0x5C8CF4`] —
+exactly what mapping bit0 → `PF_HIDDEN` reproduces; mounted players stream `0x40` and
+never bit0, so no rider is hidden by it. Retail draws carrier-ATTACHED children
+regardless of Flags [orig: the no-flag-test child draws `@ 0x5D795A/@ 0x5D79C8`], so
+our present additionally keeps a row visible when it rides a live carrier attach.
 
 **6. Misc.** `flt_7C19E0` = 2147418112.0 — the float→int overflow clamp used by every
 dist computation here, not a tuning constant. Frame order (fold before movers) stands
@@ -5774,13 +5781,60 @@ type-0 empty slot), `netsim_world_stream_extractors` (player wire rules + roundt
 ### 5.47 Server per-frame S2C 0x0A emit — phase counter + sub-block cycle + priority/budget entity loop (2026-07-01)
 
 The authoritative host builds every recipient's `0x0A` in `Server_SendEntityStateToPlayer @0x517ba0`
-(one call per connected player per frame): gate on the recipient's player-slot being active and
+— one call per connected player per OPEN SEND BOUNDARY, not per frame: the per-slot loop in
+`Server_TickUpdate` gates on the connection's `send_holdoff_countdown == 0`
+[orig: `np_conn+0x648` gate `@ 0x51e3d6`], and the countdown machinery (§5.47a below) divides the
+62.5 Hz tick per session type. Then: gate on the recipient's player-slot being active and
 `state(+0x20) == 6` (deployed); set the priority reference `g_priority_ref_{x,y,z}` to the recipient's
 EYE position (`entity.pos + camera_offset`, `entity[1..3] + entity[27..29]`); build the distance-sorted
 priority list `Server_BuildEntityPriorityList @0x50e590`; write the header (`NetPacket_WritePlayerState`)
 then the entity loop (`serialize_entity_states_to_packet`); send via `NapiNPServer_SendFiltered`
-(mask `0xA0`, tag `0x0A`). New/stale recipients (`uptime > 2000` ticks) get `g_entity_send_budget >> 1`
-for that frame — a ramp-up.
+(mask `0xA0`, tag `0x0A`). A NAK/STALL BACKOFF (not a ramp-up, corrected 2026-07-31): the budget is halved
+for one packet iff the recipient NAKed (the resend-list callback flag `playerSlot+89876`, set by
+`sub_4C62A0` from `NapiNP_HandleResendList @ 0x6239FB`, cleared at the halve site `@ 0x517c6a`) or
+has been SILENT > 2000 ms — `CNetPlayer_GetConnectionUptime @ 0x51E650` returns ms since the last
+successful parse from that client (`conn+0x5E8` stamped per parse `@ 0x625d54`; the IDB's
+"since connection was established" comment was wrong). A healthy client gets the full budget every send.
+
+#### 5.47a The send-holdoff divider — the per-session-type "tick rate" (witnessed 2026-07-31)
+
+The logic tick is always 62.5 Hz; what varies per session type is the SEND cadence. Every
+`NapiNPConnection` carries `send_holdoff_countdown` (+0x648): the recv pump decrements it once per
+tick [orig: `CNapiNPConnection_PumpFlags @ 0x629780`, flag 0x10 via `PumpClientProtocolRecv`/server
+twin], the send pump reloads it from the stored per-direction period `cs_dir.send_holdoff_ticks`
+when it hits 0 [orig: flag 0x200 reload `@ 0x629802`], and the countdown gates BOTH the game layer
+(the host 0x0A loop `@ 0x51e3d6`; the client's whole send block `@ 0x42c3dd`) and the transport
+packet build itself [orig: `CNapiNPConnection_PumpEnumeratorAndSend @ 0x6290C0` gate `@ 0x62927b`].
+The period IS the dictated value (a period of 12 = every 12th tick ≈ 5.2 Hz).
+
+The per-session values [orig: `NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0`, switch on transport
+mode]: SP/none = 1 (62.5 Hz); NovaWorld = 12 (~5.2 Hz); LAN non-authority = 6; LAN authority by
+`g_LanMode @ 0x2550BFC` (server-config `lanmode 1..4` [orig: parse `@ 0x550425`, invalid → 2;
+`Config_SetDefaults @ 0x54d23a` → 1]): 1 → 12 (~5.2 Hz, the stock default), 2 → 6 (~10.4 Hz),
+3 → 4 (~15.6 Hz), 4 → 3 (~20.8 Hz — the fastest cadence a retail host can produce). Loopback and
+out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. The host applies the value
+per connection AND dictates it to the peer via the H:0x00 CS-config update, mask 8 / field 3
+[orig: `NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40`, sends `@ 0x4c5fc0/@ 0x4c5fcb`; the client
+applies any value verbatim, `HandleCSConfigUpdate @ 0x621940`]. The protocol template default is 0
+(per-tick) — a client that never receives the update sends every tick.
+
+C2S: the retail joiner's entire send block (0x2C ping, 0x0C uplink, protocol send pump) sits
+behind the same gate `@ 0x42c3dd` with the HOST-dictated period — a NovaWorld joiner uplinks at
+~5.2 Hz. Other knobs: the DELAY command (`g_network_delay_ticks` ≤ 100, S2C 0x1B broadcast
+[orig: `Server_SetNetworkDelay @ 0x50CC08`]); the latent `send_interval_ms` ms-floor (CS field 2,
+default 0, never set by the game) `@ 0x629284`; MTU 1300 (CS field 13, clamp 100..16384
+[orig: `@ 0x4caa53..0x4caa76`]).
+
+Reimpl disposition (D-NET-197/D-NET-198): OpenNova hosts deliberately run the ENGINE MAXIMUM —
+the 0x0A fan at the full 62.5 Hz tick with `entity_send_budget` defaulted to the 1600 ceiling
+(= `BANDWIDTH 8000`) — a config-space divergence inside retail's own mechanism envelope
+(wire-tolerated: the template default is per-tick and the client applies any dictated value
+verbatim; our retail-join bring-up ran a per-tick host against stock clients). The
+`configure_host_session` "bandwidth" lever stays. Our JOINER obeys a retail host's dictated
+field-3 period exactly (stored period + countdown re-arm at every open boundary — the pre-fix
+port forgot the period after one skip and uplinked per-tick into ~5.2 Hz hosts, D-NET-198 FIXED
+2026-07-31). The NAK/stall budget backoff and the DELAY command remain unported (deferred with
+the send-side fidelity follow-ups).
 
 **Header + sub-block cycle** `[orig: NetPacket_WritePlayerState @0x4ff6b0]`. The header is
 `[i32 ref_x][i32 ref_y][i32 ref_z][u8 state_flags][u8 phase_byte]`, where `phase_byte = playerSlot+100566`

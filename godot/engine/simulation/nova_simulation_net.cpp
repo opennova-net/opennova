@@ -327,8 +327,8 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 				// snapped wire pose (wreck eulers included) / its per-tick
 				// seat-follow, and the mirror-back below yields via
 				// net_predicted [orig: the Flags&1 early return @0x4b9a03; the
-				// dead-pose short form's frozen live stores @0x460930..0x460A50;
-				// bit0 set on attach @0x43C14A]. D-NET-66: death stays a snap.
+				// dead-pose short form's frozen live stores @0x460930..0x460A50].
+				// D-NET-66: death stays a snap.
 				const bool wire_frozen =
 						(es.state_flags_known &&
 								(es.state_flags &

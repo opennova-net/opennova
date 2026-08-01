@@ -30,6 +30,7 @@
 
 #include "terrain/height_field.h"
 #include "world/ai.h"
+#include "world/player_input.h"
 #include "world/world.h"
 
 using namespace opennova::world;
@@ -429,6 +430,72 @@ void test_remote_player_body_anim() {
     ent->net_move_input = 0xC0;
     run_ticks(ai, w, t_roll + 8, t_roll + 16);
     CHECK(e->inf.anim_pending == anim_state::kRollRight);
+
+    // The replicated JUMP key (MoveOrder bit 5, D-NET-199): the host derives
+    // the jump anims for a wire peer with the witnessed cooldown/edge latch
+    // [orig: cooldown @0x4b7de0-0x4b7e82; gate + stamps @0x4b7e8c-0x4b7f06].
+    src.clips.insert(anim_state::kJumpStart);
+    src.clips.insert(anim_state::kJumpLoop);
+    int t = t_roll + 16;
+    ent->net_stance_bits = 0; // standing (prone suppresses the jump gate)
+    ent->net_move_input = 0;
+    run_ticks(ai, w, t, t + 8);
+    t += 8;
+    ent->net_move_input = 0x20; // held jump key
+    run_ticks(ai, w, t, t + 2);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
+    CHECK(e->inf.jump_cooldown > 0);
+    // Held key: the countdown parks at 1 — no auto-repeat while held, and the
+    // selection resumes locomotion once the episode window closes.
+    run_ticks(ai, w, t + 2, t + 40);
+    CHECK(e->inf.jump_cooldown == 1);
+    CHECK(ent->net_anim_state != anim_state::kJumpStart);
+    // Release, then press again: a fresh edge launches a second jump.
+    ent->net_move_input = 0;
+    run_ticks(ai, w, t + 40, t + 44);
+    CHECK(e->inf.jump_cooldown == 0);
+    ent->net_move_input = 0x20;
+    run_ticks(ai, w, t + 44, t + 46);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart ||
+          e->inf.anim_state == anim_state::kJumpLoop);
+}
+
+// The uplink side of D-NET-199: the LOCAL player's wire mirror must carry the
+// held-jump level in MoveOrder bit 5 — a retail host launches + animates our
+// jump from exactly this bit [orig: the packer @0x4df6fa-0x4df701].
+void test_local_player_uplink_carries_the_jump_bit() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kJumpStart);
+    src.clips.insert(anim_state::kJumpLoop);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    PlayerBodyInput body;
+    body.jump = true;
+    apply_player_body_input(*e, body);
+    CHECK(e->inf.jump_held);
+    run_ticks(ai, w, 0, 1);
+    CHECK((ent->net_move_input & Entity::kMoveOrderJump) != 0);
+
+    body.jump = false;
+    apply_player_body_input(*e, body);
+    run_ticks(ai, w, 1, 2);
+    CHECK((ent->net_move_input & Entity::kMoveOrderJump) == 0);
 }
 
 // Local-player leg chase + body midpoint — the witnessed org2 model (D-INF-12
@@ -2388,6 +2455,7 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
     test_registry_max_health_drives_wounded_gait();
