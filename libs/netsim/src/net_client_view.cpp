@@ -361,6 +361,21 @@ constexpr int32_t kRowLegReplantSnap = 357913920;
 
 inline int32_t row_abs_bam(int32_t v) { return v < 0 ? -v : v; }
 
+// Disarm the row's root-motion channel: the next free-standing tick re-arms
+// it fresh from the wire state (+ the live phase seed). Used by the mover
+// freezes (dead/bit0/carried — retail applies the anim byte per record
+// regardless of the mover skip [orig: @0x4c1153], so presentation must show
+// the WIRE state while frozen), the respawn edge (the resume must not blend
+// out of the pre-death primary), and type-change/handle-reuse edges.
+void row_channel_disarm(ClientEntityState &es) {
+	es.rm_state = -1;
+	es.rm_prev_state = -1;
+	es.rm_blend_weight = 1.0f;
+	es.rm_blend_step = 0.0f;
+	es.rm_prev_bottom_live = false;
+	es.rm_leg_seeded = false;
+}
+
 void row_leg_chase(ClientEntityState &es, uint32_t key) {
 	const int32_t yaw = es.heading_bam;
 	if (!es.rm_leg_seeded) {
@@ -413,29 +428,48 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           uint32_t key, bool is_self) {
 	if (es.rm_adm_id < 0) return;
-	// Channel state machine (the begin_body_transition mirror).
+	// Channel state machine (the begin_body_transition mirror). The phase
+	// seed is ONE-SHOT per received record [orig: entity+0x377 zeroed after
+	// use @0x40b761]; the bottom-history slot resets on climbs 32..35 and
+	// grenade deaths 176..179 [orig: @0x40B637].
 	const int wire_state = es.anim_state_id;
+	const bool bottom_reset_state =
+			(wire_state >= world::anim_state::kClimbIdle &&
+			 wire_state <= world::anim_state::kClimbIdle + 3) ||
+			(wire_state >= world::anim_state::kDeathGrenadeBase &&
+			 wire_state <= world::anim_state::kDeathGrenadeBase + 3);
 	if (es.rm_state < 0) {
 		es.rm_state = static_cast<int16_t>(wire_state);
 		es.rm_prev_state = static_cast<int16_t>(wire_state);
-		es.rm_phase = es.cls == EntityClass::Player ? es.anim_channel_ratio : 0;
+		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
+				? es.anim_channel_ratio
+				: 0;
+		es.rm_seed_live = false;
 		es.rm_prev_phase = es.rm_phase;
 		es.rm_blend_weight = 1.0f;
 		es.rm_blend_step = 0.0f;
+		es.rm_prev_bottom_live = false;
 	} else if (wire_state != es.rm_state) {
 		if (es.rm_blend_weight >= 1.0f) {
 			es.rm_prev_state = es.rm_state;
 			es.rm_prev_phase = es.rm_phase;
 		}
 		es.rm_state = static_cast<int16_t>(wire_state);
-		es.rm_phase =
-				es.cls == EntityClass::Player ? es.anim_channel_ratio : 0;
+		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
+				? es.anim_channel_ratio
+				: 0;
+		es.rm_seed_live = false;
 		es.rm_blend_weight = 0.0f;
 		es.rm_blend_step =
 				(world::infantry_anim_flags(wire_state) & 0x400u) != 0
 						? (1.0f / 15.0f)
 						: 0.1f;
+		if (bottom_reset_state) es.rm_prev_bottom_live = false;
 	}
+	// The legs keep chasing whatever the clip coverage is — the body heading
+	// is presentation state, not clip state (a clipless wire state must not
+	// freeze the torso mid-twist).
+	if (es.cls == EntityClass::Player) row_leg_chase(es, key);
 	world::RootMotionFrame frame;
 	bool have = false;
 	if (es.rm_blend_weight >= 1.0f) {
@@ -458,18 +492,29 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	if (!have) return;
 	int32_t fwd = frame.dx, lat = frame.dy;
 	if (es.rm_state == world::anim_state::kJumpLoop) fwd = 1024; // [orig: dump 4756]
-	// Rotation heading: org2 = the leg-chased body heading; org1 = the row's
-	// chased heading (retail pins org1 body == render heading).
+	// The witnessed vertical: the capsule-bottom history delta replaces the
+	// raw track dz while the slot is live [orig: the anim_slot[19] overwrite].
+	int32_t dz_eff = frame.dz;
+	if (es.rm_prev_bottom_live)
+		dz_eff = frame.capsule_bottom - es.rm_prev_bottom;
+	es.rm_prev_bottom = frame.capsule_bottom;
+	es.rm_prev_bottom_live = true;
+	// Rotation heading: org2 = the leg-chased body heading (the scoping
+	// witness rotates the org2 body pass by bodyHeading @0x4B41F5..0x4B4255;
+	// the authority sibling currently rotates by e.heading — a tracked
+	// reconcile follow-up, D-NET-196 residuals); org1 = the row's chased
+	// heading (retail pins org1 body == render heading). This tick's
+	// freshly-chased body heading is used (retail consumes the same-tick
+	// value — the leg chase runs earlier in the same body pass).
 	int32_t move_heading = es.heading_bam;
-	if (es.cls == EntityClass::Player) {
-		row_leg_chase(es, key);
-		move_heading = es.rm_body_heading;
-	} else {
-		es.rm_body_heading = move_heading;
-	}
+	if (es.cls == EntityClass::Player) move_heading = es.rm_body_heading;
+	else es.rm_body_heading = move_heading;
 	// The own player's row is locally predicted world-side; its chase is the
 	// 48/512 soft reconciliation only — no root add (risk-listed; retail's
-	// local player integrates in its OWN motor, not the remote path).
+	// local player integrates in its OWN motor, not the remote path). The
+	// velocity term retail adds alongside the root (Position += root + vel)
+	// is a named deferral: rows carry no velocity state — the fall/slide
+	// edges that feed it ride the unported remote-row resolver @0x4B7CF4.
 	if (is_self) return;
 	const double rad = static_cast<double>(move_heading) *
 	                   (3.14159265358979323846 / 2147483648.0);
@@ -483,7 +528,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
 	es.x += wx;
 	es.y += wy;
-	es.z += frame.dz;
+	es.z += dz_eff;
 }
 
 } // namespace
@@ -1078,6 +1123,12 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		                               es.cls == EntityClass::Infantry;
 		const uint8_t prev_anim_state = es.anim_state_id;
 		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
+		if (es.type_id != rec.type_id && es.type_id != 0) {
+			// A handle reused for a different type: the stamped adm and the
+			// playing channel are the OLD body's — re-resolve and re-arm.
+			es.rm_adm_id = -2;
+			row_channel_disarm(es);
+		}
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
 		es.seen_this_frame = true;
@@ -1279,6 +1330,22 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {
 			++es.compact_revision;
+		}
+		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
+		// row (dead/bit0/carried) never root-ticks, so its channel is DISARMED
+		// — presentation falls back to the per-record wire anim byte exactly
+		// as retail applies it [orig: @0x4c1153] (the death/seat clips
+		// dispatch); the respawn edge re-arms fresh so the resume never
+		// blends out of the pre-death primary. A fresh player record also
+		// refreshes the one-shot phase seed.
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			if (rec.cls == EntityClass::Player) es.rm_seed_live = true;
+			const bool row_frozen =
+					(has_state_flags &&
+							(state_flags &
+									(0x01u | world::kEntityFlagDead)) != 0u) ||
+					es.carrier_handle != 0xFFFFu;
+			if (row_frozen || respawned_this_record) row_channel_disarm(es);
 		}
 		// A free-standing record clears any retained seat-local pose — the
 		// relation is cleared before every record (D-NET-195); carrier-local

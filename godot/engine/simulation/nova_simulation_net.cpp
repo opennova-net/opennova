@@ -498,8 +498,8 @@ void NovaSimulation::joiner_pump() {
 	// each decoded organic row's adm id once its type is known — the netsim
 	// twin of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn
 	// half [orig: @0x40bb60]).
-	if (!infantry_anim_.empty())
-		runtime_->view().set_root_motion_source(&infantry_anim_);
+	runtime_->view().set_root_motion_source(
+			infantry_anim_.empty() ? nullptr : &infantry_anim_);
 	resolve_client_row_adm_ids();
 	joiner_send_hello_once();
 	joiner_deposit_inbound();

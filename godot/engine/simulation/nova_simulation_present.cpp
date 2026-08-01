@@ -1345,10 +1345,15 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			if (aim_overlay_inputs_for_client(
 						es, cs, item_seat_specs_, inputs,
 						&collapse_right_hand)) {
-				// An armed root-motion channel owns this row's playhead: the
-				// integrated root delta and the visible feet must share ONE
-				// clock or the body slides under its own animation. Unarmed
-				// rows (no source/adm) keep the wire free-run below.
+				// An armed root-motion channel names this row's playing state
+				// and SEEDS the visual playhead at each transition from the
+				// sim channel (the applier consumes the phase on accept and
+				// free-runs between at the same fixed-tick rate — bounded
+				// drift, re-synced every transition; a continuous re-sync is a
+				// D-NET-196 residual note). Frozen rows (dead/bit0/carried)
+				// are disarmed at the fold and fall back to the per-record
+				// wire byte — the death/seat clips dispatch as retail applies
+				// them [orig: @0x4c1153].
 				const bool rm_armed = es.rm_adm_id >= 0 && es.rm_state >= 0;
 				r[PF_ANIM_STATE] = static_cast<float>(
 						rm_armed ? es.rm_state : es.anim_state_id);
@@ -1360,7 +1365,10 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				// this fold window (a tapped prone roll rides the wire for 1-2
 				// ticks). Presentation dispatches it BEFORE the current state,
 				// replaying retail's per-record apply order [orig: @0x4c1153].
-				if (es.anim_state_pulse >= 0) {
+				// Armed rows own their transitions through the sim channel —
+				// dispatching the free-run pulse as well would race two
+				// arbitration paths on one model.
+				if (!rm_armed && es.anim_state_pulse >= 0) {
 					r[PF_ANIM_STATE_PULSE] =
 							static_cast<float>(es.anim_state_pulse);
 					if (es.cls == opennova::EntityClass::Player) {

@@ -689,6 +689,161 @@ bool run_self_row_gets_no_root_add() {
 	              "the own-player row never integrates root motion");
 }
 
+
+// Rotation pin at a non-trivial heading: facing +Y (engine BAM 0x40000000,
+// yaw byte 0x40), the clip's forward delta must move the row in +Y with X
+// static - a sign-flipped rotation cannot pass this and the +X leg at once.
+bool run_root_rotation_follows_heading() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0044;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	fu.records[0].player.yaw_byte = 0x40; // engine 90 deg = +Y forward
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(0xFFFF); // snap-arm
+	const int32_t x0 = view.state().find(handle)->x;
+	const int32_t y0 = view.state().find(handle)->y;
+	for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *es = view.state().find(handle);
+	std::fprintf(stderr, "[root-rotate] dX=%d dY=%d\n", es->x - x0, es->y - y0);
+	bool ok = expect(es->y - y0 > 12 * 4096,
+	                 "the +Y-facing clip walks the row in +Y");
+	ok &= expect(std::abs(es->x - x0) <= 4096,
+	             "the +Y-facing clip leaves X static");
+	return ok;
+}
+
+// The org1 (Infantry) root path: the AI row dead-reckons by its clip too.
+bool run_infantry_root_motion_dead_reckons() {
+	ns::NetClientView view([](uint16_t type_id) {
+		return type_id == 0x0777 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0045;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = header_only_frame();
+	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+	nw::FrameUpdateRecord r;
+	r.handle = handle;
+	r.type_id = 0x0777;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.pos_x_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.pos_y_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.pos_z_compressed = nw::network_compress_fixedpoint(0);
+	r.infantry.yaw_byte = 0; // +X
+	r.infantry.anim_byte = opennova::world::anim_state::kWalkForward;
+	r.infantry.flags_byte = 0;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(0xFFFF);
+	const int32_t x0 = view.state().find(handle)->x;
+	for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+	const int32_t walked = view.state().find(handle)->x - x0;
+	std::fprintf(stderr, "[root-org1] walked=%d\n", walked);
+	return expect(walked > 12 * 4096,
+	              "an org1 row dead-reckons by its clip too");
+}
+
+// The transition blend: walk -> idle ramps the root delta out over the
+// 10-frame window instead of stopping dead.
+bool run_root_transition_blends() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0046;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	fu.records[0].player.yaw_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(0xFFFF);
+	for (int t = 0; t < 8; ++t) view.tick_remote_motion(0xFFFF); // steady walk
+	// Stage the idle record AT the row's current spot so the chase sits in
+	// its deadband and the measured motion is the pure blend ramp.
+	nw::FrameUpdate idlefu = player_frame(handle, ax, ay, az,
+	                                      view.state().find(handle)->x);
+	idlefu.records[0].player.anim_state_id = opennova::world::anim_state::kIdle;
+	idlefu.records[0].player.yaw_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(idlefu));
+	int32_t prev = view.state().find(handle)->x;
+	int32_t first_step = -1, tenth_step = -1;
+	for (int t = 0; t < 12; ++t) {
+		view.tick_remote_motion(0xFFFF);
+		const int32_t now = view.state().find(handle)->x;
+		if (t == 0) first_step = now - prev;
+		if (t == 10) tenth_step = now - prev;
+		prev = now;
+	}
+	std::fprintf(stderr, "[root-blend] first=%d tenth=%d\n", first_step,
+	             tenth_step);
+	bool ok = expect(first_step > 1024,
+	                 "the first blend tick still carries most of walk's delta");
+	ok &= expect(tenth_step <= 512,
+	             "the walk delta has ramped out by the window's end");
+	return ok;
+}
+
+// The freeze/respawn lifecycle (the review-confirmed critical): a dead
+// record DISARMS the channel - presentation falls back to the wire byte,
+// the corpse stops walking, and the respawn re-arms fresh.
+bool run_dead_row_disarms_and_respawn_rearms() {
+	ns::NetClientView view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0047;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+	fu.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	fu.records[0].player.yaw_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.state().find(handle)->rm_adm_id = 0;
+	view.tick_remote_motion(0xFFFF);
+	for (int t = 0; t < 4; ++t) view.tick_remote_motion(0xFFFF);
+	if (!expect(view.state().find(handle)->rm_state ==
+	                    opennova::world::anim_state::kWalkForward,
+	            "the walking row armed its channel")) return false;
+	nw::FrameUpdate dead = player_frame(handle, ax, ay, az, ax, 0x02);
+	dead.records[0].player.anim_state_id =
+			opennova::world::anim_state::kDeathFire;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
+	const ns::ClientEntityState *es = view.state().find(handle);
+	bool ok = expect(es->rm_state == -1,
+	                 "the dead record disarms the channel (presentation falls "
+	                 "back to the wire death byte)");
+	const int32_t corpse_x = es->x;
+	for (int t = 0; t < 24; ++t) view.tick_remote_motion(0xFFFF);
+	ok &= expect(std::abs(view.state().find(handle)->x - corpse_x) <= 512,
+	             "the corpse never walks by root motion");
+	nw::FrameUpdate alive = player_frame(handle, ax, ay, az, ax + (60 << 16));
+	alive.records[0].player.anim_state_id =
+			opennova::world::anim_state::kWalkForward;
+	alive.records[0].player.yaw_byte = 0;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(alive));
+	view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *re = view.state().find(handle);
+	ok &= expect(re->rm_state == opennova::world::anim_state::kWalkForward &&
+	                     re->rm_blend_weight >= 1.0f,
+	             "the respawned row re-arms fresh (no blend out of the "
+	             "pre-death primary)");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -708,6 +863,10 @@ int main() {
 	ok &= run_player_root_motion_dead_reckons();
 	ok &= run_starved_row_forces_idle();
 	ok &= run_self_row_gets_no_root_add();
+	ok &= run_root_rotation_follows_heading();
+	ok &= run_infantry_root_motion_dead_reckons();
+	ok &= run_root_transition_blends();
+	ok &= run_dead_row_disarms_and_respawn_rearms();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

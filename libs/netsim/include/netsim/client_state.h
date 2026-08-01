@@ -231,6 +231,14 @@ struct ClientEntityState {
 	// body heading is their midpoint — the root delta rotates by THIS, not the
 	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. org1 rows
 	// rotate by heading_bam (retail pins body == render heading for org1).
+	// The witnessed vertical: dz is REPLACED by the capsule-bottom history
+	// delta while the prev-bottom slot is live; climbs 32..35 and grenade
+	// deaths 176..179 reset the slot [orig: the anim_slot[19] overwrite +
+	// resets @0x40B637]. The player compact's phase byte seeds ONE transition
+	// then dies (retail zeroes entity+0x377 after use [orig: @0x40b761]).
+	int32_t rm_prev_bottom = 0;
+	bool rm_prev_bottom_live = false;
+	bool rm_seed_live = false;
 	int32_t rm_leg_yaw[2] = {};
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
