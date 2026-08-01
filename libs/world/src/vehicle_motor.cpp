@@ -555,6 +555,451 @@ static void vehicle_client_chase(Entity &veh) {
     veh.position.z = static_cast<float>(from_fixed(pz));
 }
 
+// The boat platform solve — the client-executed subset of
+// Entity_ProcessPlatformPhysics [orig: @0x481870, sole caller
+// Entity_UpdateWatercraftPhysics @0x48ECE7 — every tick, after integration,
+// before the yaw apply; runs on clients for remote boats]. Port scope
+// (boat_platform_solve_spec + platform_solve_blockers, 2026-07-31): the
+// 7-probe terrain solve, severity speed sheds, position push, the water leg
+// (afloat/draft/heave bob), lever corners + bow-lift/porpoise machine, and
+// the grounded/buoyant/settled solve select with the shared 4-normal plane
+// fit. Cited deferrals: authority collision damage/sound + the Flags 0x10
+// latch upkeep [orig: @0x482336..0x48244D / @0x483494..0x4834C6],
+// entity-entity collision + momentum exchange (no proximity list yet)
+// [orig: @0x462561.. / @0x482459..], the planing roll-lean machine
+// [orig: @0x45AEA0], splash/smoke FX + sounds, and the wreck-tumble path
+// [orig: Entity_ClearSuspensionState @0x4592B0 chain]. Euler extraction uses
+// the standard atan2 decomposition of the fitted rows — the
+// Math_FixedPointMatrixToEulerAngles interior [orig: @0x613310] is a tracked
+// pending witness.
+namespace {
+
+// One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
+// @0x462150, terrain loop @0x462246..0x4624CA]: 4 samples at ±r, gradient
+// force, penetration, slope classing against soft/hard cos22 thresholds.
+struct PlatProbeForce {
+    int32_t fx = 0, fy = 0, fz = 0; // force[i]; fz = push-up (-pen)
+};
+
+int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
+                           int32_t r, int32_t soft, int32_t hard,
+                           PlatProbeForce &out) {
+    if (world.terrain == nullptr) return 0;
+    const GroundClearance clearance{};
+    auto sample = [&](int32_t sx, int32_t sy) {
+        const int32_t p3[3] = {sx, sy, Z};
+        return calc_average_ground_height(*world.terrain, p3, 0, clearance);
+    };
+    const int32_t h_xm = sample(X - r, Y), h_xp = sample(X + r, Y);
+    const int32_t h_ym = sample(X, Y - r), h_yp = sample(X, Y + r);
+    if (h_xm == INT32_MIN) return 0;
+    // Height over the 4-sample average [orig: @0x4622A3]; clear by > r skips
+    // [orig: @0x4622D2].
+    const int32_t rel = Z - (h_yp >> 2) - (h_ym >> 2) - (h_xp >> 2) - (h_xm >> 2);
+    if (h_xm + r < Z && h_xp + r < Z && h_ym + r < Z && h_yp + r < Z) return 0;
+    const int64_t gx = h_xp - h_xm, gy = h_yp - h_ym, gz = -2 * int64_t(r);
+    const double dn = std::sqrt(double(gx) * gx + double(gy) * gy + double(gz) * gz);
+    const int32_t norm = dn >= 2147418112.0 ? INT32_MAX : int32_t(dn);
+    if (norm == 0) return 0;
+    int64_t fx = gx * r / norm, fy = gy * r / norm;
+    int64_t pen = rel + gz * r / norm; // = rel - 2r^2/norm [orig: @0x462360]
+    if (pen >= 0) {
+        // Grazing case [orig: @0x4623AF..0x462424].
+        const int64_t ax = gx ? gz * pen / gx : 0;
+        const int64_t ay = gy ? gz * pen / gy : 0;
+        bool hit = false;
+        if (std::llabs(ax) < std::llabs(fx)) { fx += ax; hit = true; }
+        if (std::llabs(ay) < std::llabs(fy)) { fy += ay; hit = true; }
+        if (!hit) return 0;
+        pen = 0;
+    }
+    const double dm = std::sqrt(double(fx) * fx + double(fy) * fy +
+                                double(pen - rel) * double(pen - rel));
+    const int32_t mag = dm >= 2147418112.0 ? INT32_MAX : int32_t(dm);
+    if (mag == 0) return 0;
+    const int32_t cosr = int32_t((int64_t(rel - pen) << 22) / mag); // [orig: @0x4624A7]
+    out.fz -= int32_t(pen); // push-up [orig: @0x4624AD]
+    int32_t sev = 0;
+    if (cosr < soft) {
+        out.fx -= int32_t(fx); out.fy -= int32_t(fy); sev = 3;
+    } else if (cosr < ((hard + soft) >> 1)) {
+        out.fx -= int32_t(fx >> 2); out.fy -= int32_t(fy >> 2); sev = 2;
+    } else if (cosr < hard) {
+        out.fx -= int32_t(fx >> 3); out.fy -= int32_t(fy >> 3); sev = 1;
+    } // else climbable: vertical only [orig: @0x4624BB..0x462528]
+    return sev;
+}
+
+// The shared 4-normal plane fit [orig: identical in both solvers —
+// Entity_ComputeSuspensionOrientation @0x46CAB7.. / the wheeled twin
+// @0x46BAF9..; verbatim ASYMMETRIC aggregation, blockers §1]: rows from the
+// 4 lever-corner targets; Z = the plain corner average [orig: solvedPos.Z
+// @0x46E099..0x46E0B3]. Outputs pitch/roll BAM via the standard atan2
+// decomposition (the @0x613310 interior = pending witness).
+struct PlatFit {
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
+    int32_t z_avg = 0;
+    double fwd_z = 0.0; // unit forward vertical component (beach term feed)
+};
+
+void plat_fit_corners(const double c[4][3], PlatFit &out) {
+    auto sub = [](const double a[3], const double b[3], double r[3]) {
+        r[0] = a[0] - b[0]; r[1] = a[1] - b[1]; r[2] = a[2] - b[2];
+    };
+    auto normalize = [](double v[3]) {
+        const double n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (n <= 0.0) { v[0] = v[1] = v[2] = 0.0; return; }
+        v[0] /= n; v[1] /= n; v[2] /= n;
+    };
+    auto cross = [](const double a[3], const double b[3], double r[3]) {
+        r[0] = a[1] * b[2] - a[2] * b[1];
+        r[1] = a[2] * b[0] - a[0] * b[2];
+        r[2] = a[0] * b[1] - a[1] * b[0];
+    };
+    // Edge sets, verbatim pairing (set 1 == set 2, real shipped duplication):
+    double a[3], b[3], e3[3], f4[3], n1[3], n3[3], n4[3];
+    sub(c[0], c[3], a); normalize(a);   // c0 - c3
+    sub(c[3], c[2], b); normalize(b);   // c3 - c2
+    sub(c[1], c[2], e3); normalize(e3); // c1 - c2
+    sub(c[0], c[1], f4); normalize(f4); // c0 - c1
+    cross(a, b, n1); normalize(n1);
+    cross(e3, b, n3); normalize(n3);
+    cross(e3, f4, n4); normalize(n4);
+    double up[3], fwd[3], side[3];
+    for (int i = 0; i < 3; ++i) {
+        up[i] = 2.0 * n1[i] + n3[i] + n4[i]; // n1 counted twice (set 1+2)
+        fwd[i] = 2.0 * e3[i] + 2.0 * a[i];   // e4+e3+a+e2
+        side[i] = f4[i] + 3.0 * b[i];        // f4+f3+b+f2
+    }
+    normalize(up); normalize(fwd); normalize(side);
+    out.fwd_z = fwd[2];
+    const double fxy = std::sqrt(fwd[0] * fwd[0] + fwd[1] * fwd[1]);
+    out.pitch_bam = bam_of_atan2(fwd[2], fxy);
+    out.roll_bam = bam_of_atan2(side[2], up[2] <= 0.0 ? 1e-9 : up[2]);
+    out.z_avg = int32_t((c[0][2] + c[1][2] + c[2][2] + c[3][2]) * 0.25);
+}
+
+} // namespace
+
+void watercraft_platform_solve(World &world, Entity &veh,
+                               const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    // No resolved model boxes (lib-only embedders / unresolved graphics):
+    // the level-hull + chase-Z stand-in remains for this row.
+    if (traits.box_z_hi == traits.box_z_lo || traits.box_y_hi == traits.box_y_lo)
+        return;
+
+    const int32_t W = world.env.water_z;
+    int32_t px = to_fixed(veh.position.x);
+    int32_t py = to_fixed(veh.position.y);
+    int32_t pz = to_fixed(veh.position.z);
+
+    // The watercraft mover's own vertical integration runs BEFORE the solve
+    // [orig: Position += slideDecay + the gravity leg `slideDecay -= 324`
+    // @0x48d69b, ahead of the call @0x48ECE7]: an airborne hull falls; the
+    // solve below re-owns Z once water or ground catches it.
+    if ((veh.flags & kEntityFlagInAir) != 0) {
+        m.slide_z -= kGravityStep;
+        pz += m.slide_z;
+    }
+
+    // ---- §3 probe geometry. Probe springs +0x2D4.. are provably zero for
+    // pure boats (blockers §4). q = beam/4.
+    const int32_t q = (traits.box_y_hi - traits.box_y_lo) >> 2;
+    if (q <= 0) return;
+    const int32_t zb = traits.box_z_lo + q;
+    // 4 corner probes + 3 midline probes (model space) [orig: @0x481CB4..].
+    int32_t rm = std::min(((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000,
+                          ((traits.box_y_hi - traits.box_y_lo) >> 1) - 0x1000);
+    if (rm < 0x2000) rm = 0x2000;
+    const int32_t lx = traits.box_x_hi - traits.box_x_lo;
+    const int32_t ymid = traits.box_y_lo + ((traits.box_y_hi - traits.box_y_lo) >> 1);
+    const int32_t zt = traits.box_z_hi - rm;
+    const int32_t probes_model[7][3] = {
+        {traits.foot_x_hi - q, traits.foot_y_hi - q, zb}, // p0 bow-A
+        {traits.foot_x_hi - q, traits.foot_y_lo + q, zb}, // p1 bow-B
+        {traits.foot_x_lo + q, traits.foot_y_lo + q, zb}, // p2 stern-B
+        {traits.foot_x_lo + q, traits.foot_y_hi - q, zb}, // p3 stern-A
+        {traits.box_x_lo + (lx >> 2), ymid, zt},          // p4
+        {traits.box_x_lo + 3 * (lx >> 2), ymid, zt},      // p5
+        {traits.box_x_lo + (lx >> 1), ymid, zt},          // p6
+    };
+    const int32_t radii[7] = {q, q, q, q, rm, rm, rm};
+    const int32_t v210 = -(traits.box_z_lo + q); // corner-0 model-Z, negated (§3)
+    // Half-extents of the lever rectangle (§3 tail).
+    const int32_t hb = (traits.foot_y_hi - q) - (traits.foot_y_lo + q);
+    const int32_t hl = (traits.foot_x_hi - q) - (traits.foot_x_lo + q);
+
+    // World transform: the pose matrix from {Pos, Yaw, Pitch, Roll} — the
+    // boat's live attitude rides air_pitch_bam/air_roll_bam (the shared
+    // attitude fields the sim mirrors to the row).
+    const double cy = std::cos(double(m.yaw_bam) * kBamToRadX87);
+    const double sy = std::sin(double(m.yaw_bam) * kBamToRadX87);
+    const double cp = std::cos(double(m.air_pitch_bam) * kBamToRadX87);
+    const double sp = std::sin(double(m.air_pitch_bam) * kBamToRadX87);
+    const double cr = std::cos(double(m.air_roll_bam) * kBamToRadX87);
+    const double sr = std::sin(double(m.air_roll_bam) * kBamToRadX87);
+    // Row frame consistent with the fit's extraction above (fwd/side/up).
+    const double fwdv[3] = {cy * cp, sy * cp, sp};
+    const double sidev[3] = {cy * sr * sp - sy * cr, sy * sr * sp + cy * cr, -sr * cp};
+    // up = fwd x side (right-handed with the row order used by the fit)
+    const double upv[3] = {fwdv[1] * sidev[2] - fwdv[2] * sidev[1],
+                           fwdv[2] * sidev[0] - fwdv[0] * sidev[2],
+                           fwdv[0] * sidev[1] - fwdv[1] * sidev[0]};
+    int32_t probes[7][3];
+    for (int i = 0; i < 7; ++i) {
+        const double mx = double(probes_model[i][0]);
+        const double my = double(probes_model[i][1]);
+        const double mz = double(probes_model[i][2]);
+        probes[i][0] = px + int32_t(mx * fwdv[0] + my * sidev[0] + mz * upv[0]);
+        probes[i][1] = py + int32_t(mx * fwdv[1] + my * sidev[1] + mz * upv[1]);
+        probes[i][2] = pz + int32_t(mx * fwdv[2] + my * sidev[2] + mz * upv[2]);
+    }
+
+    // ---- §4/§6 first force pass + severity response.
+    const int32_t soft = cos22_of_bam_x87(traits.max_slope);
+    const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
+    PlatProbeForce forces[7];
+    int32_t sev = 0;
+    for (int i = 0; i < 7; ++i)
+        sev = std::max(sev, plat_terrain_probe(world, probes[i][0], probes[i][1],
+                                               probes[i][2], radii[i], soft, hard,
+                                               forces[i]));
+    if (sev == 1) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4821E7]
+    } else if (sev == 2) {
+        m.speed -= m.speed >> ((traits.torque + 1) & 31); // [orig: @0x4822A4]
+    } else if (sev == 3) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31); // [orig: @0x4822C9]
+        // Authority damage/kill + collision sound + momentum exchange + the
+        // dead yaw-kick = cited deferrals (spec §6; the yaw-kick is witnessed
+        // DEAD code). No hit-entity here -> the 0.25 speed cut applies:
+        m.speed = int32_t(m.speed * 0.25); // [orig: flt_7C333C @0x4826EB]
+    }
+
+    // ---- §7 position push + second pass (severity >= 1 only).
+    int32_t zf[7];
+    for (int i = 0; i < 7; ++i) zf[i] = forces[i].fz;
+    if (sev >= 1) {
+        int64_t dX = 0, dY = 0;
+        for (int i = 0; i < 7; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
+        for (int i = 0; i < 7; ++i) { probes[i][0] += int32_t(dX); probes[i][1] += int32_t(dY); }
+        PlatProbeForce forces2[7];
+        int32_t sev2 = 0;
+        for (int i = 0; i < 7; ++i)
+            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0], probes[i][1],
+                                                     probes[i][2], radii[i], soft, hard,
+                                                     forces2[i]));
+        if (sev2 != 0) {
+            int64_t dX2 = 0, dY2 = 0;
+            for (int i = 0; i < 7; ++i) { dX2 += forces2[i].fx; dY2 += forces2[i].fy; }
+            for (int i = 0; i < 7; ++i) zf[i] = (forces2[i].fz + zf[i]) >> 1;
+            dX = (dX2 + dX) >> 1;
+            dY = (dY2 + dY) >> 1;
+        }
+        px += int32_t(dX);
+        py += int32_t(dY); // Z-sum always 0 [orig: @0x482A86..0x482A8C]
+    }
+
+    // ---- §5 bob/lift parameters.
+    const double F = double(q);
+    const int32_t amp = std::min(int32_t(F * 0.0625), 352);
+    int32_t floatH, liftHi, liftLo, planeSpd, pitchThr;
+    if (traits.mass <= 1) { // LIGHT boat [orig: @0x482105]
+        floatH = int32_t(0.65 * F);
+        liftHi = traits.pitch_lift_vel * 100;
+        liftLo = 250;
+        planeSpd = 10000;
+        pitchThr = int32_t(double(traits.pitch_lift) * 0.1 * 4096.0);
+    } else { // HEAVY [orig: @0x48221B]
+        floatH = q;
+        liftHi = int32_t(double(traits.pitch_lift_vel) * F * 0.004);
+        liftLo = liftHi >> 1;
+        planeSpd = 20000;
+        const double arz = std::abs(sidev[2]) * 65536.0;
+        if (arz > double(0x2000)) { // heavily rolled [orig: @0x482259]
+            pitchThr = int32_t(double(traits.pitch_lift) * 0.1 * 409.6);
+            liftHi = 250;
+        } else {
+            pitchThr = int32_t(double(traits.pitch_lift) * 0.1 * 4096.0);
+        }
+    }
+    const int32_t dipExit = int32_t(double(pitchThr) * (1.0 - 0.1 * double(traits.bob)));
+
+    // ---- §8 water leg: per-corner submersion, draft, the afloat flag.
+    int32_t sub_k[4], cz_k[4];
+    for (int k = 0; k < 4; ++k) {
+        cz_k[k] = probes[k][2];
+        sub_k[k] = W + q - cz_k[k];
+    }
+    const int32_t avg = (cz_k[0] + cz_k[1] + cz_k[2] + cz_k[3]) >> 2;
+    int32_t draft = avg;
+    if (m.plat_afloat) draft = int32_t(double(avg) - 0.9 * F); // boat form [orig: flt_7C459C]
+    if (W == 0 || draft + v210 >= W) {
+        m.plat_afloat = false; // [orig: @0x482DB7; emitter release deferred]
+    } else {
+        // Splash FX on entry = cited deferral [orig: @0x482BB9..0x482C9D].
+        m.plat_afloat = true; // [orig: @0x482CA5]
+    }
+    veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+
+    // ---- §9 lever corners around the CURRENT pose + machines.
+    double c[4][3];
+    const double hbd = double(hb), hld = double(hl);
+    const double half[4][2] = {{-0.5, +0.5}, {+0.5, +0.5}, {-0.5, -0.5}, {+0.5, -0.5}};
+    for (int k = 0; k < 4; ++k) {
+        const double sb = half[k][0] * hbd, sf = half[k][1] * hld;
+        c[k][0] = double(px) + sb * sidev[0] + sf * fwdv[0];
+        c[k][1] = double(py) + sb * sidev[1] + sf * fwdv[1];
+        c[k][2] = double(pz) + sb * sidev[2] + sf * fwdv[2];
+    }
+    // Capsize latch (client form; the authority Flags 0x10 upkeep = deferral).
+    if ((veh.flags & kEntityFlagInAir) == 0 && upv[2] < 0.0 && !m.plat_capsized)
+        m.plat_capsized = true; // [orig: @0x483474..0x48348B]
+    // Accumulator ramp [orig: @0x483680..0x4836E6].
+    for (int k = 0; k < 4; ++k)
+        if (zf[k] <= 0 && sub_k[k] <= floatH) m.plat_acc[k] += 250;
+    // Bow lift / planing / porpoise [orig: @0x4836EC..0x483891]. The command
+    // register = the mirrored net_recv_speed (brain+0x220 on a remote boat).
+    const int32_t cmd = m.net_recv_speed;
+    const double fwd_z_now = fwdv[2] * 65536.0;
+    if (m.speed > 0 && liftLo > 0 && liftHi > 0) {
+        if (m.plat_afloat && cmd > 0) {
+            m.plat_acc[0] = m.plat_acc[1] = 0;
+            m.plat_planing = true;
+            if (!m.plat_porpoise) {
+                if (fwd_z_now > double(pitchThr)) {
+                    // dist/293 > (cmd/293)*0.5 -> latch (the per-tick travel
+                    // is our speed here; the saved-pose dist is equivalent
+                    // between integrations).
+                    if (m.speed / 293 > (cmd / 293) / 2) m.plat_porpoise = true;
+                } else {
+                    const int32_t lift = (m.speed >= planeSpd) ? liftHi : liftLo;
+                    c[0][2] += double(lift);
+                    c[1][2] += double(lift); // bow rises
+                }
+            } else {
+                if (fwd_z_now < double(dipExit)) m.plat_porpoise = false;
+                else { c[0][2] -= double(liftHi); c[1][2] -= double(liftHi); }
+            }
+        } else if (cmd <= 0) {
+            m.plat_planing = false;
+        }
+    }
+    // Post-machine adjustments [orig: @0x483893..0x48398C]. The planing
+    // roll-lean machine @0x45AEA0 and the +0x2EF override path = deferrals.
+    if (m.plat_planing) {
+        if (m.plat_afloat && m.speed > 0x2000)
+            m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+    } else if (!m.plat_at_rest) {
+        for (int k = 0; k < 4; ++k) c[k][2] -= 500.0;
+        m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+    }
+
+    // ---- §10 solve select.
+    bool any_ground = false;
+    for (int k = 0; k < 4; ++k) any_ground |= zf[k] > 0;
+    PlatFit fit;
+    if (any_ground) {
+        // A. Grounded: airborne cleared HERE and only here.
+        veh.flags &= ~kEntityFlagInAir; // [orig: @0x483D55]
+        for (int k = 0; k < 4; ++k) {
+            int32_t lift;
+            if (sub_k[k] > floatH) {
+                lift = (zf[k] > sub_k[k]) ? zf[k] : std::abs(sub_k[k] - floatH);
+                m.plat_acc[k] = 0;
+            } else if (zf[k] != 0) {
+                lift = zf[k];
+                m.plat_acc[k] = 0;
+            } else {
+                lift = 250 - m.plat_acc[k];
+            }
+            c[k][2] += double(lift);
+        }
+        m.slide_z = 0; // [orig: @0x483F25]
+        plat_fit_corners(c, fit);
+        pz = fit.z_avg;
+        m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
+    } else {
+        // At-rest bob arm [orig: @0x4839C5..0x483A29].
+        int32_t floatH_eff = floatH;
+        if (m.speed < 100 && m.plat_afloat &&
+            std::abs(fwd_z_now) < 5.0 && std::abs(sidev[2] * 65536.0) < 5.0) {
+            if (!m.plat_at_rest) {
+                m.plat_at_rest = true;
+                m.plat_bob_phase = 4.71f; // 3pi/2 [orig: flt_7C6F84]
+            }
+            m.plat_bob_phase += 0.03488888964056969f; // [orig: flt_7C6EB4]
+            const double f =
+                std::min(1.0, (std::sin(double(m.plat_bob_phase)) + 1.0) * 0.5);
+            const int32_t inc = int32_t(double(amp) * f);
+            for (int k = 0; k < 4; ++k) c[k][2] += double(inc);
+            floatH_eff = floatH - inc;
+        } else {
+            m.plat_at_rest = false;
+        }
+        bool any_deep = false;
+        for (int k = 0; k < 4; ++k) any_deep |= sub_k[k] > floatH_eff;
+        if (any_deep) {
+            // B. Buoyancy push-up.
+            if (m.slide_z < 0) m.slide_z = 0; // [orig: @0x483C15]
+            for (int k = 0; k < 4; ++k) {
+                int32_t lift;
+                if (sub_k[k] >= floatH_eff) {
+                    lift = std::abs(sub_k[k] - floatH_eff);
+                    m.plat_acc[k] = 0;
+                } else {
+                    lift = std::min(0, 250 - m.plat_acc[k]);
+                }
+                c[k][2] += double(lift);
+            }
+            plat_fit_corners(c, fit);
+            pz = fit.z_avg;
+        } else {
+            // C. Settled / airborne.
+            if (m.plat_afloat) {
+                int lowest = 0, second = 1;
+                for (int k = 1; k < 4; ++k)
+                    if (c[k][2] < c[lowest][2]) lowest = k;
+                second = lowest == 0 ? 1 : 0;
+                for (int k = 0; k < 4; ++k)
+                    if (k != lowest && c[k][2] < c[second][2]) second = k;
+                if (cmd <= 0) {
+                    m.plat_acc[lowest] = m.plat_acc[second] = 0;
+                    if (fwd_z_now < 100.0)
+                        m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
+                                m.plat_acc[3] = 0;
+                }
+                for (int k = 0; k < 4; ++k)
+                    c[k][2] += double(std::min(0, 250 - m.plat_acc[k]));
+            } else {
+                veh.flags |= kEntityFlagInAir; // [orig: @0x483B98]
+            }
+            // The wheeled solver's settled/airborne fit: same 4-normal fit;
+            // Z = the average of the ABOVE-ground corners, rise-clamped
+            // +0x2000/tick (blockers §3).
+            plat_fit_corners(c, fit);
+            if (m.plat_afloat) {
+                int32_t new_z = fit.z_avg;
+                if (new_z > pz + 0x2000) new_z = pz + 0x2000;
+                pz = new_z;
+            }
+        }
+    }
+    // Attitude out: pitch/roll always; yaw-from-fit rides byte+0x2EC (never
+    // set for live boats — deferral with the wreck path).
+    m.air_pitch_bam = fit.pitch_bam;
+    m.air_roll_bam = fit.roll_bam;
+    // Airborne tick counter [orig: @0x483FAF/0x483FC8].
+    m.plat_airborne_ticks =
+            (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+
+    veh.position.x = float(from_fixed(px));
+    veh.position.y = float(from_fixed(py));
+    veh.position.z = float(from_fixed(pz));
+}
+
 // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
 // remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.
 // Residual (both this and the air mover): the client-run deck-carrier follow
@@ -740,6 +1185,13 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     veh.position.x = static_cast<float>(from_fixed(px));
     veh.position.y = static_cast<float>(from_fixed(py));
     veh.position.z = static_cast<float>(from_fixed(pz));
+
+    // The platform solve runs every tick after integration, exactly where the
+    // retail caller sits [orig: call @0x48ECE7 — after Position += velocity,
+    // before the yaw apply]. It owns Z + Pitch/Roll + the afloat/airborne
+    // flags from here (the chase-staged Z above is its seed, matching the
+    // template's airborne-only Z-step gate).
+    watercraft_platform_solve(world, veh, traits);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
 }

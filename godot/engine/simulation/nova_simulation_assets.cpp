@@ -220,7 +220,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 19 && vp[0] != 0) {
+			if (vp.size() == 21 && vp[0] != 0) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -234,14 +234,16 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.climb_speed = vp[9];
 				vt.turn_roll = vp[10];
 				vt.speed_pitch = vp[11];
-				// The platform-solve tuning block (raw tokens; def.h order).
-				vt.mass = vp[12];
-				vt.lean = vp[13];
-				vt.lean_velocity = vp[14];
-				vt.pitch_lift = vp[15];
-				vt.pitch_lift_vel = vp[16];
-				vt.bob = vp[17];
-				vt.flip = vp[18];
+				// The platform slope thresholds + tuning block (def.h order).
+				vt.max_slope = vp[12];
+				vt.slip_slope = vp[13];
+				vt.mass = vp[14];
+				vt.lean = vp[15];
+				vt.lean_velocity = vp[16];
+				vt.pitch_lift = vp[17];
+				vt.pitch_lift_vel = vp[18];
+				vt.bob = vp[19];
+				vt.flip = vp[20];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
 				// Family from the *_function tag (ai_function, else
 				// move_function — the same precedence as the replication

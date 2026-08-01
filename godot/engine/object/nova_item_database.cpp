@@ -136,6 +136,8 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.climb_speed = entry.climb_speed;
 	item.turn_roll = entry.turn_roll;
 	item.speed_pitch = entry.speed_pitch;
+	item.max_slope = entry.max_slope;
+	item.slip_slope = entry.slip_slope;
 	item.mass = entry.mass;
 	item.lean = entry.lean;
 	item.lean_velocity = entry.lean_velocity;
@@ -353,6 +355,8 @@ PackedInt32Array NovaItemDatabase::get_vehicle_physics(int id) const {
 	out.push_back(item.climb_speed);
 	out.push_back(item.turn_roll);
 	out.push_back(item.speed_pitch);
+	out.push_back(item.max_slope);
+	out.push_back(item.slip_slope);
 	out.push_back(item.mass);
 	out.push_back(item.lean);
 	out.push_back(item.lean_velocity);

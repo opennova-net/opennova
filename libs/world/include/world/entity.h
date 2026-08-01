@@ -620,6 +620,15 @@ struct Entity {
         int32_t air_roll_rate = 0;         // [orig: modelPtr2 +0xAC]
         int32_t ground_cache = INT32_MIN;  // [orig: entity+0x2A4] 8th-tick terrain sample
         uint32_t net_seen_revision = 0;    // last consumed row compact_revision
+        // --- Boat platform-solve state (boat_platform_solve_spec; client subset).
+        int32_t plat_acc[4] = {};          // per-corner drop accumulators [orig: +0x2C4..+0x2D0]
+        float plat_bob_phase = 0.0f;       // heave-bob phase, radians [orig: +0x318 float]
+        bool plat_at_rest = false;         // bob arm latch [orig: byte +0x364]
+        bool plat_porpoise = false;        // bow-dip cycle latch [orig: byte +0x365]
+        bool plat_planing = false;         // planing/bow-up bit [orig: +0x472 bit 1]
+        bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
+        bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
+        int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
     };
     VehicleMotorState veh;
 };

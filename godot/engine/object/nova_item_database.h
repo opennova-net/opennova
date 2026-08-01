@@ -54,6 +54,8 @@ private:
 		int climb_speed = 0;  // +0x920 (16.16 u/tick vertical clamp — air families)
 		int turn_roll = 0;    // +0x90C raw (air roll-rate cap token)
 		int speed_pitch = 0;
+	int max_slope = 0;  // BAM (deg*11930464) — platform slope-soft
+	int slip_slope = 0; // BAM — platform slope-hard
 	// Platform-solve tuning block (raw def tokens; def.h mass/lean/../flip).
 	int mass = 0;
 	int lean = 0;

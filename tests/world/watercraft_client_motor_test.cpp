@@ -291,6 +291,46 @@ bool run_bike_family_deltas() {
 	return ok;
 }
 
+
+bool run_platform_solve_settles_at_waterline() {
+	// The platform solve (D-NET-196 residual, water leg): with model boxes
+	// resolved, a stationary boat converges onto its waterline from above AND
+	// below, level, instead of holding a chase-frozen Z
+	// [orig: Entity_ProcessPlatformPhysics @0x481870 §8/§10 — the light-boat
+	// float height 0.65q and the corner-average Z].
+	struct Probe { double start_z; const char *label; };
+	const Probe probes[] = {{12.0, "from above"}, {8.0, "from below"}};
+	bool ok = true;
+	for (const Probe &pr : probes) {
+		Rig r;
+		make_rig(r);
+		// Zodiac-like hull: beam 2.0, length 5.0, keel/deck -0.5..1.0 (16.16).
+		r.traits.box_y_lo = -(1 << 16); r.traits.box_y_hi = 1 << 16;
+		r.traits.box_x_lo = -(5 << 15); r.traits.box_x_hi = 5 << 15;
+		r.traits.box_z_lo = -(1 << 15); r.traits.box_z_hi = 1 << 16;
+		r.traits.foot_x_lo = r.traits.box_x_lo; r.traits.foot_x_hi = r.traits.box_x_hi;
+		r.traits.foot_y_lo = r.traits.box_y_lo; r.traits.foot_y_hi = r.traits.box_y_hi;
+		w::Entity *boat = r.world.registry.get(r.boat);
+		boat->position.z = float(pr.start_z);
+		stage(*boat, w::to_fixed(100.0f), w::to_fixed(200.0f),
+		      w::to_fixed(float(pr.start_z)), 0, 0, 0);
+		for (int t = 0; t < 900; ++t)
+			w::watercraft_client_tick(r.world, *boat, r.traits);
+		const double z = double(boat->position.z);
+		const double pitch_deg =
+			double(boat->veh.air_pitch_bam) * (360.0 / 4294967296.0);
+		std::fprintf(stderr, "[platform %s] final z=%.3f pitch=%.2f afloat=%d\n",
+		             pr.label, z, pitch_deg, int(boat->veh.plat_afloat));
+		// The afloat-FLAG latch at equilibrium rides the modelData box-pair
+		// provenance (the spec's own tracked unknown — the v210/draft geometry
+		// vs our collision-AABB box source). The SETTLE and LEVEL contracts
+		// are the pinned behavior; the flag question is in the residual notes.
+		ok &= expect(z > 8.5 && z < 11.5, "the hull settles into the waterline band");
+		ok &= expect(std::abs(pitch_deg) < 15.0, "the settled hull sits near level");
+	}
+	return ok;
+}
+
 bool run_aircraft_glides_and_holds_altitude() {
 	// The AIR prediction leg (CHel/cpln): a 25 m/s helicopter — far beyond the
 	// chase-only sustain — glides via the tilt/aero model, and an abandoned one
@@ -367,6 +407,7 @@ int main() {
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();
+	ok &= run_platform_solve_settles_at_waterline();
 	ok &= run_aircraft_glides_and_holds_altitude();
 	ok &= run_abandoned_boat_coasts_to_rest();
 	ok &= run_steer_follows_received_register();
