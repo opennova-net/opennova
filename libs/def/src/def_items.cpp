@@ -316,6 +316,39 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             current.torque = parse_int_n(v, vl); /* raw shift count [orig: @0x49dcca] */
             parsed = 1;
+        /* The platform-solve tuning block — raw atol like the original parser
+           [orig: mass @0x49dc76, lean @0x49ddde, lean_velocity @0x49de1a,
+            pitch @0x49de56, pitch_velocity @0x49de92, bob @0x49dece,
+            flip @0x49df82]. lean_velocity/pitch_velocity must match before
+           their prefixes. */
+        } else if (lower_match_key(lower, ll, "lean_velocity", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.lean_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "pitch_velocity", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            current.pitch_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "mass", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.mass = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "lean", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.lean = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "pitch", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.pitch = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "bob", 3)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
+            current.bob = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "flip", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.flip = parse_int_n(v, vl);
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "max_slope", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */

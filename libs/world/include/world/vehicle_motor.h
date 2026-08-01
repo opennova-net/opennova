@@ -80,6 +80,22 @@ struct VehicleTraits {
     int32_t climb_speed = 0;   // itemDef+0x920 — air vertical clamp [+cs, -2cs]
     int32_t turn_roll = 0;     // itemDef+0x90C raw — air roll-rate cap (*192426)
     int32_t speed_pitch = 0;   // itemDef+0x910 raw — air pitch-rate cap (*192426)
+    // The platform-solve tuning block (all raw tokens; boat_platform_solve_spec):
+    int32_t mass = 0;          // itemDef+0x908 — weight class (<=1 light) + momentum
+    int32_t lean = 0;          // itemDef+0x92C — planing roll-lean machine @0x45AEA0
+    int32_t lean_velocity = 0; // itemDef+0x930
+    int32_t pitch_lift = 0;    // itemDef+0x934 ("pitch") — bow-lift threshold scale
+    int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
+    int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
+    int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
+    // Platform probe geometry from the model bound boxes (16.16 model space;
+    // modelData [0x28..0x3C] + the [0x40..0x4C] footprint — our source is the
+    // 3di collision AABB; box1-vs-box2 provenance is a tracked spec unknown):
+    int32_t box_z_lo = 0, box_z_hi = 0; // keel/deck Z pair
+    int32_t box_x_lo = 0, box_x_hi = 0; // length pair
+    int32_t box_y_lo = 0, box_y_hi = 0; // beam pair
+    int32_t foot_x_lo = 0, foot_x_hi = 0; // footprint length pair
+    int32_t foot_y_lo = 0, foot_y_hi = 0; // footprint beam pair
     // The VEHICLE item's own authored sound binding. This deliberately does not
     // borrow the mounted NPC's AiProfile: pool-1 vehicles need sound even when no
     // AiEntity body exists for them. Profile slots seed soundloop_1..7, then a
@@ -93,6 +109,10 @@ struct VehicleTraits {
 class VehicleTraitsTable {
 public:
     void set(int32_t item_id, const VehicleTraits &t) { by_item_[item_id] = t; }
+    VehicleTraits *get_mutable(int32_t item_id) {
+        auto it = by_item_.find(item_id);
+        return it == by_item_.end() ? nullptr : &it->second;
+    }
     const VehicleTraits *get(int32_t item_id) const {
         auto it = by_item_.find(item_id);
         return it == by_item_.end() ? nullptr : &it->second;

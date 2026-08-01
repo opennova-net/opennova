@@ -53,7 +53,15 @@ private:
 		int water_speed = 0;  // +0x8EC (16.16 u/tick — the cbot family's max drive speed)
 		int climb_speed = 0;  // +0x920 (16.16 u/tick vertical clamp — air families)
 		int turn_roll = 0;    // +0x90C raw (air roll-rate cap token)
-		int speed_pitch = 0;  // +0x910 raw (air pitch-rate cap token)
+		int speed_pitch = 0;
+	// Platform-solve tuning block (raw def tokens; def.h mass/lean/../flip).
+	int mass = 0;
+	int lean = 0;
+	int lean_velocity = 0;
+	int pitch = 0;
+	int pitch_velocity = 0;
+	int bob = 0;
+	int flip = 0;  // +0x910 raw (air pitch-rate cap token)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
 		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
