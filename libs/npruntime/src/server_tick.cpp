@@ -244,7 +244,8 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 
 } // namespace
 
-void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallback_anchor) {
+void Server_TickUpdate(NapiNPServerCtx &ctx,
+		const PlayerReplicationState &fallback_anchor) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
@@ -518,8 +519,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
+			// The host's type-2 loopback is an in-process presentation seam and
+			// remains full-rate. Type-1 peers receive one fresh 0x0A only when
+			// their configured S2C send boundary opens; queuing all intervening
+			// snapshots would burst stale frames at that boundary.
+			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
 			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor,
-			                            ctx.config.game_type);
+			                            ctx.config.game_type,
+			                            conn.type == 1
+						? kMaxFrameUpdateBodyBytes
+						: 0);
 		}
 	}
 

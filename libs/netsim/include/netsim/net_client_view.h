@@ -63,6 +63,15 @@ public:
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
 
+	// Recompose every carried row after its carrier's mover has completed. The
+	// ordinary library-only tick_remote_motion path calls this as its final
+	// phase. Embedders with a later world-side mover (the joiner vehicle
+	// prediction seam) call it once more after mirroring those final carrier
+	// poses back into ClientState. Keeping this phase explicit prevents pool
+	// iteration order from leaving an earlier child one mover tick behind a
+	// later carrier.
+	void refresh_carried_entities();
+
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
 	// attached to it. The decoded view is the client's entity pool, so
 	// Entity_Destroy's effect here is removing the ROW (not flagging it) —
@@ -114,7 +123,6 @@ private:
 	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
-	void refresh_parented_pool_entities();
 	void erase_entity_tree(uint16_t root_handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +

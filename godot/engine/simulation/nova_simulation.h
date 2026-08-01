@@ -95,7 +95,7 @@ public:
 	// GDScript side via these bound constants so the layout has a single source of truth (C++).
 	// Rotation is emitted as mission-space degrees (pitch, yaw, roll) so the shell builds the basis
 	// through the one placer convention (MissionObjectPlacer.bms_to_godot_basis); position is already
-	// in Godot space (x, z, -y). Pitch/roll are 0 today (yaw-only locomotion) — reserved for parity.
+	// in Godot space (x, z, -y). Infantry remains yaw-only; vehicle rows publish their live attitude.
 	enum PresentField {
 		PF_KIND = 0,   // mission ItemType (3 = Organic), -1 if none
 		PF_INDEX,      // index within its kind's list
@@ -104,10 +104,10 @@ public:
 		PF_POS_X,      // Godot-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
 		PF_POS_Y,
 		PF_POS_Z,
-		PF_PITCH_DEG,  // mission-space rotation, degrees (live: Entity.pitch, or the
-		               // client attachment pose for a mounted entity)
+		PF_PITCH_DEG,  // mission-space rotation, degrees (live Entity, decoded/predicted
+		               // client vehicle, or the client attachment pose)
 		PF_YAW_DEG,
-		PF_ROLL_DEG,   // live: Entity.roll / the client attachment pose
+		PF_ROLL_DEG,   // same pose source as PF_PITCH_DEG
 		PF_PHASE1,     // channel 1 signed dword low16, exact as numeric float
 		PF_ACTIVE1,    // 0 unpublished; otherwise high16+1 (FastRope may suppress)
 		PF_PHASE2,     // channel 2 signed dword low16

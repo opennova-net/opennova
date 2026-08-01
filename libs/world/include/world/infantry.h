@@ -16,6 +16,12 @@ namespace opennova::world {
 // scans exactly 252 entries of g_animStateNameTable @0x8135F0]
 inline constexpr int kInfantryAnimStateCount = 252;
 
+// Foot-above-floor hysteresis shared by the simulated player motor and the
+// authority's reconstruction of a wire-owned remote player's vertical state.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 compares the collision
+// resolver return against 0xF000]
+inline constexpr int32_t kInfantryAirborneGap = 0xF000;
+
 // State id -> .adm key without the "anim_" prefix. [orig: g_animStateNameTable @0x8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
 

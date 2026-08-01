@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -393,7 +394,8 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
-                                                      std::size_t header_bytes) {
+                                                      std::size_t header_bytes,
+                                                      std::size_t hard_frame_limit) {
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
 		if (a != 0xFF) ++a;
@@ -454,9 +456,14 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 	std::vector<GameEntitySnapshot> selected;
 	std::size_t written = header_bytes;
 	for (const Scored &s : scored) {
+		const std::size_t record_bytes = record_wire_size(*s.snap);
+		if (hard_frame_limit != 0 &&
+				(written > hard_frame_limit ||
+				 record_bytes > hard_frame_limit - written))
+			continue;
 		selected.push_back(*s.snap);
 		conn.s2c_entity_age[age_index(*s.snap)] = 0; // [orig: @0x50f168]
-		written += record_wire_size(*s.snap);
+		written += record_bytes;
 		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
 	return selected;
@@ -475,7 +482,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 // ---------------------------------------------------------------------------
 std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
                                                   const PlayerReplicationState &anchor,
-                                                  std::size_t budget_left) {
+                                                  std::size_t budget_left,
+                                                  std::size_t hard_budget_left) {
 	std::vector<RoundEventRecord> out;
 	const world::RoundRing &ring = w.rounds;
 
@@ -589,6 +597,9 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 
 		const std::size_t wire = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
 		                         ((rec.flags & 0x40) ? 2u : 0u);
+		if (hard_budget_left != std::numeric_limits<std::size_t>::max() &&
+				(written > hard_budget_left || wire > hard_budget_left - written))
+			continue;
 		out.push_back(rec);
 		written += wire;
 		if (written >= budget_left) break;
@@ -676,7 +687,8 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor,
-                         uint32_t game_type) {
+                         uint32_t game_type,
+                         std::size_t max_frame_body_bytes) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
 
@@ -703,6 +715,11 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// the full record set; that frame never leaves the process, so retail interop is
 	// unaffected (D-NET-140).
 	const std::size_t header_bytes = frame_header_bytes(flags2, game_type);
+	const std::size_t hard_event_bytes = max_frame_body_bytes == 0
+			? std::numeric_limits<std::size_t>::max()
+			: (max_frame_body_bytes > header_bytes
+					? max_frame_body_bytes - header_bytes
+					: 0);
 	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
 	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
 	// The first grouped-order port handed rounds only the leftovers — a real-world
@@ -712,12 +729,17 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// entities absorb the remainder — same cap, and the retail decode loop is
 	// tag-driven either way. (D-NET-152/154)
 	std::vector<RoundEventRecord> rounds =
-			select_round_events(w, conn, anchor, std::size_t(g_entity_send_budget) - header_bytes);
+			select_round_events(
+					w, conn, anchor,
+					std::size_t(g_entity_send_budget) - header_bytes,
+					hard_event_bytes);
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	const std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(conn, ents, anchor, header_bytes + rounds_bytes);
+			select_frame_entities(
+					conn, ents, anchor, header_bytes + rounds_bytes,
+					max_frame_body_bytes);
 
 	// Per-recipient header state: the deploy-screen hold + the recipient's own stance/mount
 	// tail echo (see FrameHeaderState). The pending player's entity also carries the hidden

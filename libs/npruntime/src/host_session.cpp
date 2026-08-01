@@ -14,6 +14,7 @@
 #include <world/entity.h>
 #include <world/world.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -25,8 +26,6 @@
 namespace opennova::np {
 
 namespace {
-
-constexpr std::size_t kGameSessionMaxPacketBytes = 1300;
 
 uint32_t mint_nonzero_session_value() {
 	uint32_t value = 0;
@@ -58,6 +57,58 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	return startup;
 }
 
+// Split one semantic message into the retail protocol's FIRST/MID/FINAL
+// fragment records when its encoded form cannot fit the installed session
+// packet ceiling. The receiver's reassemble_protocol_payload joins these back
+// into one dispatch, so producer semantics and ordering stay unchanged.
+std::vector<ProtocolMessage> envelope_protocol_message(
+		const ProtocolMessage &message) {
+	std::vector<uint8_t> encoded;
+	if (append_protocol_message(encoded, message) &&
+			PROTOCOL_PACKET_HEADER_SIZE + encoded.size() <=
+					kGameSessionMaxPacketBytes)
+		return {message};
+
+	const std::size_t skip_bytes = message.flags.skip1
+			? 1u
+			: (message.flags.skip2 ? 2u : 0u);
+	const std::size_t max_payload =
+			kGameSessionMaxPacketBytes - PROTOCOL_PACKET_HEADER_SIZE -
+			kProtocolMessageLen16Bytes - skip_bytes;
+	// Preserve dispatch-table and skip metadata; length/fragment state belongs
+	// to each newly emitted physical record.
+	constexpr uint8_t kSemanticFlagMask =
+			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_SKIP1 |
+			PROTOCOL_MSG_FLAG_SKIP2 | 0x01u;
+	const uint8_t base_flags = message.flags.raw & kSemanticFlagMask;
+
+	std::vector<ProtocolMessage> out;
+	for (std::size_t offset = 0; offset < message.payload.size();) {
+		const std::size_t count = std::min(
+				max_payload, message.payload.size() - offset);
+		const bool first = offset == 0;
+		const bool final = offset + count == message.payload.size();
+		uint8_t fragment_flags = 0;
+		if (!final)
+			fragment_flags = first
+					? PROTOCOL_MSG_FLAG_FRAG_CONT
+					: static_cast<uint8_t>(PROTOCOL_MSG_FLAG_FRAG_CONT |
+							PROTOCOL_MSG_FLAG_FRAG_END);
+		else if (!first)
+			fragment_flags = PROTOCOL_MSG_FLAG_FRAG_END;
+		ProtocolMessage fragment = make_protocol_message(
+				message.tag,
+				std::vector<uint8_t>(message.payload.begin() + offset,
+						message.payload.begin() + offset + count),
+				static_cast<uint8_t>(base_flags | PROTOCOL_MSG_FLAG_LEN16 |
+						fragment_flags));
+		fragment.skip_bytes = message.skip_bytes;
+		out.push_back(std::move(fragment));
+		offset += count;
+	}
+	return out;
+}
+
 void send_session_batches(HostOwner &owner, netsim::IDatagramSocket &sock,
 		NapiNPConnection &connection, std::vector<ProtocolMessage> messages) {
 	std::vector<ProtocolMessage> batch;
@@ -72,14 +123,21 @@ void send_session_batches(HostOwner &owner, netsim::IDatagramSocket &sock,
 		encoded_messages.clear();
 	};
 
-	for (ProtocolMessage &message : messages) {
+	std::vector<ProtocolMessage> enveloped;
+	for (const ProtocolMessage &message : messages) {
+		std::vector<ProtocolMessage> pieces = envelope_protocol_message(message);
+		enveloped.insert(enveloped.end(),
+				std::make_move_iterator(pieces.begin()),
+				std::make_move_iterator(pieces.end()));
+	}
+	for (ProtocolMessage &message : enveloped) {
 		std::vector<uint8_t> candidate = encoded_messages;
 		if (!append_protocol_message(candidate, message)) {
 			flush();
 			continue;
 		}
-		if (!batch.empty() &&
-		    PROTOCOL_PACKET_HEADER_SIZE + candidate.size() > kGameSessionMaxPacketBytes) {
+		if (PROTOCOL_PACKET_HEADER_SIZE + candidate.size() >
+				kGameSessionMaxPacketBytes) {
 			flush();
 			candidate.clear();
 			if (!append_protocol_message(candidate, message)) continue;
@@ -88,6 +146,31 @@ void send_session_batches(HostOwner &owner, netsim::IDatagramSocket &sock,
 		encoded_messages = std::move(candidate);
 	}
 	flush();
+}
+
+bool is_established_s2c_datagram(const std::vector<uint8_t> &datagram) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_decode_inbound(
+				datagram.data(), datagram.size(), opcode, body))
+		return false;
+	return opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE ||
+	       opcode == SESSION_OPCODE_SERVER_RESEND_LIST;
+}
+
+void send_or_stage_established_datagram(
+		HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,
+		const std::vector<uint8_t> &datagram) {
+	if (is_established_s2c_datagram(datagram)) {
+		for (const NapiNPConnection &connection :
+				owner.ctx.np_protocol.connection_list) {
+			if (connection.type != 1 || !(connection.peer == peer)) continue;
+			owner.pending_session_datagrams[peer].push_back(datagram);
+			return;
+		}
+	}
+	// Pre-session 0x81/0x82 legs have no established connection send block.
+	sock.send_to(peer, datagram.data(), datagram.size());
 }
 
 } // namespace
@@ -145,6 +228,8 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 		// deliberately owner-only: a same-address replacement may already have created its fresh
 		// connection before this event is dispatched, so dropping again by endpoint would delete it.
 		owner.peers.erase(peer);
+		owner.pending_session_messages.erase(peer);
+		owner.pending_session_datagrams.erase(peer);
 		break;
 	case HostAcceptEvent::Kind::PeerHandshakeAdvanced:
 	default:
@@ -156,7 +241,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
 		HostEventObserverFn event_observer, void *event_observer_context) {
 	const uint32_t now = owner.now_tick;
-	std::map<PeerAddr, std::vector<ProtocolMessage>, PeerAddrLess> deferred_session_replies;
+	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the adapter.
 	uint8_t buf[4096];
@@ -167,39 +252,67 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		HandleResult r = handle_server_datagram(
 				owner.ctx, peer, buf, static_cast<std::size_t>(n), now,
 				/*defer_in_match_replies=*/true);
+		// Same-address replacement reports PeerGoodbye for the OLD occupant after
+		// the protocol layer has already installed the fresh connection and built
+		// its 0x82/0x83 auth result. Retire the old owner's queues/link before
+		// classifying that fresh outbound; doing it afterward would erase the newly
+		// staged sequence-1 settings packet.
+		for (const HostAcceptEvent &ev : r.events) {
+			if (ev.kind != HostAcceptEvent::Kind::PeerGoodbye) continue;
+			pending_session_messages.erase(peer);
+			owner.pending_session_datagrams.erase(peer);
+			dispatch_event(owner, sock, peer, ev);
+			if (event_observer != nullptr)
+				event_observer(event_observer_context, ev);
+		}
 		for (const std::vector<uint8_t> &dg : r.outbound) {
-			sock.send_to(peer, dg.data(), dg.size()); // 0x81/0x82/0x83 handshake replies
+			// 0x81/0x82 remain immediate. The retained settings 0x83 and
+			// established retransmits use the connection's send boundary.
+			send_or_stage_established_datagram(owner, sock, peer, dg);
 		}
 		if (!r.deferred_session_replies.empty()) {
-			auto &pending = deferred_session_replies[peer];
+			auto &pending = pending_session_messages[peer];
 			pending.insert(
 					pending.end(),
 					std::make_move_iterator(r.deferred_session_replies.begin()),
 					std::make_move_iterator(r.deferred_session_replies.end()));
 		}
 		for (const HostAcceptEvent &ev : r.events) {
-			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye)
-				deferred_session_replies.erase(peer);
+			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) continue;
 			dispatch_event(owner, sock, peer, ev);
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
 	}
+	// Advance each established remote's own send clock before any transport
+	// producer runs. Closed peers retain their semantic/burst state; open peers
+	// may build packets during the remainder of this pump.
+	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
+		if (c.type != 1) continue;
+		if (c.s2c_send_holdoff_countdown > 0)
+			--c.s2c_send_holdoff_countdown;
+		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
+	}
 	// Resolve the retail missing-sequence latch only after the receive FIFO is empty. A later
 	// datagram in this same drain may have closed the gap and emptied the ordered queue.
-	for (TickOut &t : flush_server_missing_requests(owner.ctx)) {
+	for (TickOut &t : flush_server_missing_requests(
+			owner.ctx, /*respect_s2c_send_boundary=*/true)) {
 		for (const std::vector<uint8_t> &dg : t.outbound)
-			sock.send_to(t.peer, dg.data(), dg.size());
+			send_or_stage_established_datagram(owner, sock, t.peer, dg);
 	}
 
 	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
-	for (TickOut &t : tick_connections(owner.ctx, /*elapsed_ms=*/16, now)) {
+	for (TickOut &t : tick_connections(
+			owner.ctx, /*elapsed_ms=*/16, now,
+			/*respect_s2c_send_boundary=*/true)) {
 		for (const std::vector<uint8_t> &dg : t.outbound) {
-			sock.send_to(t.peer, dg.data(), dg.size()); // framed 0x83 burst datagrams
+			send_or_stage_established_datagram(owner, sock, t.peer, dg);
 		}
 		for (const HostAcceptEvent &ev : t.events) {
-			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye)
-				deferred_session_replies.erase(t.peer);
+			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
+				pending_session_messages.erase(t.peer);
+				owner.pending_session_datagrams.erase(t.peer);
+			}
 			dispatch_event(owner, sock, t.peer, ev);
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
@@ -211,31 +324,48 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// animation registries use this boundary to preserve the same lifetime.
 	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
 
-	// (3) the authoritative per-frame host loop (single C2S drain + logic tick + 0x0A fan).
+	// (3) Logic and C2S remain full-rate. Server_TickUpdate consults the
+	// already-advanced per-connection boundary only for fresh remote 0x0A.
 	Server_TickUpdate(owner.ctx);
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
-	// The host's own type-2 loopback is skipped (its 0x0A is consumed in-process, step 5).
+	// Drain each remote transport into the ordered pending queue every tick;
+	// only an open boundary frames and sends it. The host's own type-2 loopback
+	// is consumed in-process and skipped here.
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
-		if (c.type != 1 || c.link.transport == nullptr) continue;
+		if (c.type != 1) continue;
 		// A type-1 remote peer's transport is always the UdpSessionTransport admit_peer attached, so the
 		// downcast to reach pop_outbound (an owner-boundary method, not on the base ISessionTransport) is
 		// safe — the host's own type-2 loopback (a LoopbackChannel) is skipped above.
-		auto *udp = static_cast<netsim::UdpSessionTransport *>(c.link.transport);
-		std::vector<ProtocolMessage> messages;
-		auto deferred = deferred_session_replies.find(c.peer);
-		if (deferred != deferred_session_replies.end()) {
-			messages = std::move(deferred->second);
-			deferred_session_replies.erase(deferred);
+		if (c.link.transport != nullptr) {
+			auto *udp = static_cast<netsim::UdpSessionTransport *>(c.link.transport);
+			std::vector<uint8_t> raw;
+			while (udp->pop_outbound(raw)) {
+				if (raw.empty()) continue;
+				const uint8_t tag = raw[0];
+				const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
+				pending_session_messages[c.peer].push_back(
+						make_protocol_message(tag, body));
+			}
 		}
-		std::vector<uint8_t> raw;
-		while (udp->pop_outbound(raw)) {
-			if (raw.empty()) continue;
-			const uint8_t tag = raw[0];
-			const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
-			messages.push_back(make_protocol_message(tag, body));
+		if (!c.s2c_send_boundary_open) continue;
+		// These packets were framed before this boundary and therefore carry
+		// lower sequence numbers than the semantic messages framed below.
+		auto pending_datagrams = owner.pending_session_datagrams.find(c.peer);
+		if (pending_datagrams != owner.pending_session_datagrams.end()) {
+			for (const std::vector<uint8_t> &datagram : pending_datagrams->second)
+				sock.send_to(c.peer, datagram.data(), datagram.size());
+			owner.pending_session_datagrams.erase(pending_datagrams);
+		}
+		std::vector<ProtocolMessage> messages;
+		auto pending = pending_session_messages.find(c.peer);
+		if (pending != pending_session_messages.end()) {
+			messages = std::move(pending->second);
+			pending_session_messages.erase(pending);
 		}
 		send_session_batches(owner, sock, c, std::move(messages));
+		c.s2c_send_holdoff_countdown = c.s2c_send_holdoff_ticks;
+		c.s2c_send_boundary_open = c.s2c_send_holdoff_ticks == 0;
 	}
 
 	// (5) A dedicated host registers no type-2 local client. If its adapter nevertheless supplied a
@@ -251,6 +381,8 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 
 void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
+	owner.pending_session_messages.clear();
+	owner.pending_session_datagrams.clear();
 	// Apply the configured 0x0A byte cap to the netsim global (the retail
 	// BANDWIDTH command's target [orig: g_entity_send_budget @0xC8FC50]).
 	netsim::set_entity_send_budget(

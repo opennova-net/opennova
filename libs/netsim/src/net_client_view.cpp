@@ -192,9 +192,12 @@ void NetClientView::tick_lean() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
-		es.lean_angle -= (es.lean_angle + 8) >> 4;
-		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0) es.lean_angle -= 0x3000000;
-		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0) es.lean_angle += 0x3000000;
+		es.lean_angle = io::bam_sub(es.lean_angle,
+				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
+		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
+		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+			es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
 	}
 }
 
@@ -208,10 +211,12 @@ void NetClientView::tick_arms_dip() {
 			continue;
 		if (es.arms_dip_ticks > 0) {
 			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
-			es.pitch_kick_accum -= 0x2800000;     // [orig: @0x4b5cb7 += 0xFD800000]
+			es.pitch_kick_accum = io::bam_sub(
+					es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
 		}
-		es.pitch_kick_accum -=
-		    io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
+		es.pitch_kick_accum = io::bam_sub(
+				es.pitch_kick_accum,
+				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
 		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
 	}
 }
@@ -332,7 +337,9 @@ inline int32_t dist_16_16(int64_t dx, int64_t dy, int64_t dz) {
 
 // Per-step delta with retail's signed half-add rounding: (d + N/2) / N via
 // idiv truncation [orig: @0x4b9b2e / @0x4B459D / the family movers].
-inline int32_t chase_step(int32_t d, int32_t n) { return (d + (n >> 1)) / n; }
+inline int32_t chase_step(int32_t d, int32_t n) {
+	return io::bam_add(d, n >> 1) / n;
+}
 
 } // namespace
 
@@ -345,30 +352,19 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 		                          es.cls == EntityClass::Vehicle;
 		if (!chased_class) continue;
 
-		// Carried rows follow the carrier attach every tick instead of chasing;
-		// retail renders a seat mount through the carrier attach each frame
+		// Carried rows skip their own chase; the post-mover phase below follows
+		// the carrier attach after all carrier rows have advanced. Retail renders
+		// a seat mount through the carrier attach each frame
 		// [orig: the seat attach sets Flags 0x40, not bit0 —
 		// @0x4946D0/@0x494752; bit0 belongs to carried OBJECTS and not-ready
 		// rows, and is what the visible-entity collector skips @0x5C8CF4].
-		if (es.net_seat_valid && es.carrier_handle != 0xFFFFu) {
-			const ClientEntityState *carrier = state_.find(es.carrier_handle);
-			if (carrier != nullptr) {
-				const WorldPose w = network_transform_local_to_world(
-						es.net_seat_local[0], es.net_seat_local[1],
-						es.net_seat_local[2], carrier->x, carrier->y, carrier->z,
-						uint32_t(carrier->heading_bam), uint32_t(carrier->pitch_bam),
-						uint32_t(carrier->roll_bam));
-				es.x = w.x;
-				es.y = w.y;
-				es.z = w.z;
-				if (es.net_seat_compose_yaw) {
-					es.heading_bam = io::bam_add(carrier->heading_bam,
-							static_cast<int32_t>(
-									uint32_t(es.net_seat_local_yaw_byte) << 24));
-				}
-			}
-			continue;
-		}
+		// A carrier-owned row never falls back to its standalone chase. When a
+		// newer compact sample switches to a carrier that is not present yet,
+		// net_seat_valid is deliberately cleared so no stale local offset can be
+		// reused; carrier_handle still records that the row is blocked on an
+		// attachment. Hold its last world pose until a resolvable carried sample
+		// (or an explicit free-standing sample) arrives.
+		if (es.carrier_handle != 0xFFFFu) continue;
 		// The universal mover-skip: wire bit0 (carried-object/killed/not-ready
 		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
 		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
@@ -553,8 +549,11 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 					es.net_smooth_target[2] = 0;
 					es.net_interp_steps = 0;
 					es.net_smooth_heading =
-							(io::bam_sub(es.net_smooth_heading, es.heading_bam) +
-							 10) / 20;
+							io::bam_add(
+									io::bam_sub(es.net_smooth_heading,
+									            es.heading_bam),
+									10) /
+							20;
 				} else {
 					const int32_t n = vehicle_bucket(dist);
 					es.net_interp_steps = static_cast<int16_t>(n);
@@ -562,8 +561,11 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
 					es.net_smooth_target[2] = chase_step(int32_t(dz), n);
 					es.net_smooth_heading =
-							(io::bam_sub(es.net_smooth_heading, es.heading_bam) +
-							 10) / 20;
+							io::bam_add(
+									io::bam_sub(es.net_smooth_heading,
+									            es.heading_bam),
+									10) /
+							20;
 				}
 			}
 			const int16_t progress = es.net_interp_progress;
@@ -590,6 +592,9 @@ void NetClientView::tick_remote_motion(uint16_t self_handle) {
 			break;
 		}
 	}
+	// Seat mounts and persistent no-callback children are a post-mover phase:
+	// all carrier rows above have reached this tick's live pose first.
+	refresh_carried_entities();
 }
 
 void NetClientView::tick_recoil() {
@@ -639,7 +644,7 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	// 0x0D positions are absolute and parent rows normally precede their BFS
 	// children. Resolve after the complete batch anyway, so record ordering is
 	// not a hidden requirement.
-	refresh_parented_pool_entities();
+	refresh_carried_entities();
 }
 
 void NetClientView::erase_entity_tree(uint16_t root_handle) {
@@ -686,12 +691,44 @@ void NetClientView::apply_team_assign(uint16_t handle, uint8_t team) {
 	state_.upsert(handle).team = team;
 }
 
-void NetClientView::refresh_parented_pool_entities() {
+void NetClientView::refresh_carried_entities() {
 	std::vector<uint16_t> dead_children;
-	// Repeating the parent-before-child composition makes nested attachment
-	// chains order-independent while preserving the promotion depth cap.
+	// Repeating the composition makes mixed seat/persistent-parent chains
+	// independent of pool/vector ordering while preserving the promotion depth
+	// cap. This method runs only after movers, so every lookup observes the
+	// carrier's final live pose for this tick.
 	for (int depth = 0; depth < 8; ++depth) {
 		for (ClientEntityState &child : state_.entities) {
+			// Compact-carried player/infantry/vehicle rows retain the latest
+			// successfully resolved local sample. A missing carrier invalidates
+			// the sample rather than leaving an offset that could attach to a
+			// later handle reuse.
+			if (child.net_seat_valid && child.carrier_handle != 0xFFFFu) {
+				const ClientEntityState *carrier = state_.find(child.carrier_handle);
+				if (carrier == nullptr) {
+					child.net_seat_valid = false;
+				} else {
+					const WorldPose posed = network_transform_local_to_world(
+							child.net_seat_local[0], child.net_seat_local[1],
+							child.net_seat_local[2], carrier->x, carrier->y,
+							carrier->z, static_cast<uint32_t>(carrier->heading_bam),
+							static_cast<uint32_t>(carrier->pitch_bam),
+							static_cast<uint32_t>(carrier->roll_bam));
+					child.x = posed.x;
+					child.y = posed.y;
+					child.z = posed.z;
+					if (child.net_seat_compose_yaw) {
+						child.heading_bam = io::bam_add(
+								carrier->heading_bam,
+								static_cast<int32_t>(
+										static_cast<uint32_t>(
+												child.net_seat_local_yaw_byte)
+										<< 24));
+						child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+					}
+				}
+			}
+
 			if (child.parent_handle == 0xFFFFu) continue;
 			// Only the addeweap/no-callback family rides this persistent
 			// recompose: those children never receive compact motion samples,
@@ -720,47 +757,40 @@ void NetClientView::refresh_parented_pool_entities() {
 				continue;
 			}
 
-			const int32_t parent_yaw_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(parent->yaw_byte) << 24);
+			const int32_t parent_heading_bam = parent->heading_bam;
 			if (!child.parent_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						child.x, child.y, child.z, parent->x, parent->y, parent->z,
-						static_cast<uint32_t>(parent_yaw_bam),
+						static_cast<uint32_t>(parent_heading_bam),
 						static_cast<uint32_t>(parent->pitch_bam),
 						static_cast<uint32_t>(parent->roll_bam));
 				child.parent_local_x = local.x;
 				child.parent_local_y = local.y;
 				child.parent_local_z = local.z;
-				child.parent_local_yaw_byte =
-						static_cast<uint8_t>(child.yaw_byte - parent->yaw_byte);
-				child.parent_local_pitch_bam = static_cast<int32_t>(
-						static_cast<uint32_t>(child.pitch_bam) -
-						static_cast<uint32_t>(parent->pitch_bam));
-				child.parent_local_roll_bam = static_cast<int32_t>(
-						static_cast<uint32_t>(child.roll_bam) -
-						static_cast<uint32_t>(parent->roll_bam));
+				child.parent_local_heading_bam =
+						io::bam_sub(child.heading_bam, parent_heading_bam);
+				child.parent_local_pitch_bam =
+						io::bam_sub(child.pitch_bam, parent->pitch_bam);
+				child.parent_local_roll_bam =
+						io::bam_sub(child.roll_bam, parent->roll_bam);
 				child.parent_pose_valid = true;
 			}
 			const WorldPose posed = network_transform_local_to_world(
 					child.parent_local_x, child.parent_local_y, child.parent_local_z,
 					parent->x, parent->y, parent->z,
-					static_cast<uint32_t>(parent_yaw_bam),
+					static_cast<uint32_t>(parent_heading_bam),
 					static_cast<uint32_t>(parent->pitch_bam),
 					static_cast<uint32_t>(parent->roll_bam));
 			child.x = posed.x;
 			child.y = posed.y;
 			child.z = posed.z;
-			child.yaw_byte = static_cast<uint8_t>(
-					parent->yaw_byte + child.parent_local_yaw_byte);
-			child.heading_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(parent_yaw_bam) +
-					(static_cast<uint32_t>(child.parent_local_yaw_byte) << 24));
-			child.pitch_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(parent->pitch_bam) +
-					static_cast<uint32_t>(child.parent_local_pitch_bam));
-			child.roll_bam = static_cast<int32_t>(
-					static_cast<uint32_t>(parent->roll_bam) +
-					static_cast<uint32_t>(child.parent_local_roll_bam));
+			child.heading_bam = io::bam_add(
+					parent_heading_bam, child.parent_local_heading_bam);
+			child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+			child.pitch_bam = io::bam_add(
+					parent->pitch_bam, child.parent_local_pitch_bam);
+			child.roll_bam = io::bam_add(
+					parent->roll_bam, child.parent_local_roll_bam);
 		}
 	}
 	for (uint16_t handle : dead_children) erase_entity_tree(handle);
@@ -896,6 +926,9 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		es.carrier_handle = 0xFFFFu;
 		es.mount_bone = 0;
 		es.seat_type = 0;
+		// Carrier identity and its resolved local pose form one atomic sample.
+		// The second pass re-arms this only if the final carrier resolves.
+		es.net_seat_valid = false;
 		es.pitch_byte = 0;
 		es.aim_yaw_byte = 0;
 		es.anim_state_id = 0;
@@ -1087,11 +1120,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			++es.compact_revision;
 		}
 		// A free-standing record clears any retained seat-local pose — the
-		// carrier field is consumed per record (D-NET-195); carrier-local
-		// records refresh it in the second pass below.
-		if (!skip_pos) {
-			es.net_seat_valid = false;
-		}
+		// relation is cleared before every record (D-NET-195); carrier-local
+		// records atomically refresh it in the second pass below.
 		// A vehicle wreck's short form re-lands the full frozen orientation;
 		// treat it as the live-snap branch of the read [orig: the conditional
 		// live stores @0x460930..0x460A50].
@@ -1128,7 +1158,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 	for (const PendingCarrierPose &pending : pending_carrier_poses) {
 		ClientEntityState *child = state_.find(pending.child_handle);
 		const ClientEntityState *carrier = state_.find(pending.carrier_handle);
-		if (child == nullptr || carrier == nullptr) continue;
+		// A fold may contain several records for one child. An earlier resolved
+		// carrier must not overwrite a later unresolved switch/dismount.
+		if (child == nullptr || carrier == nullptr ||
+				child->carrier_handle != pending.carrier_handle)
+			continue;
 		// Compose against the carrier's LIVE (chased) pose — retail lifts through
 		// the carrier entity's current +4..+0x18 block [orig: @0x4c10d4/@0x4608ce].
 		const WorldPose w = network_transform_local_to_world(
@@ -1157,13 +1191,14 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		// untransformed entity+576 store @0x4607f5].
 		if (pending.compose_yaw) {
 			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
-			child->heading_bam = carrier->heading_bam +
+			child->heading_bam = io::bam_add(
+					carrier->heading_bam,
 					static_cast<int32_t>(
-							uint32_t(pending.local_yaw_byte) << 24);
+							uint32_t(pending.local_yaw_byte) << 24));
 		}
 	}
 
-	refresh_parented_pool_entities();
+	refresh_carried_entities();
 
 	++state_.frames_applied;
 }

@@ -253,6 +253,12 @@ struct NapiNPConnection {
 	// filter, modeled by netsim::Connection (TransportMode, owned_entity, send_mask). The
 	// transport is NON-OWNING: the binding/test owns the LoopbackChannel / UdpSessionTransport.
 	netsim::Connection link{};
+	// Host-to-this-peer send block. Retail owns the countdown on each
+	// NapiNPConnection (+0x648), so peers admitted on different ticks keep
+	// independent boundaries even though the dictated period is session-wide.
+	uint32_t s2c_send_holdoff_ticks = 0;
+	uint32_t s2c_send_holdoff_countdown = 0;
+	bool s2c_send_boundary_open = true;
 
 	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
 	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the
@@ -317,6 +323,16 @@ struct NapiNPConnection {
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
+
+inline uint32_t clamp_send_holdoff_ticks(uint32_t ticks) {
+	return ticks < 255u ? ticks : 255u;
+}
+
+inline void arm_s2c_send_holdoff(NapiNPConnection &conn, uint32_t ticks) {
+	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(ticks);
+	conn.s2c_send_holdoff_countdown = conn.s2c_send_holdoff_ticks;
+	conn.s2c_send_boundary_open = conn.s2c_send_holdoff_ticks == 0;
+}
 
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A
 // emit fan (it was an inline `conn.burst.spawned` in each). In-match = the §5.2a initial-state burst

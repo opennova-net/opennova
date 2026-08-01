@@ -77,14 +77,78 @@ func _vehicle_peer_mission() -> NovaMissionData:
 	# host presents its authoritative placed row while the joiner presents the
 	# decoded pool-1 wire row; their world poses must remain the same.
 	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101291,
-			Vector3(40, 30, 0), Vector3.ZERO).is_empty())
+			Vector3(40, 30, 0), Vector3(10, 0, 20)).is_empty())
+	# A synthetic cbot with non-zero authored attitude catches first-arm
+	# prediction accidentally replacing the retained spawn Euler with zero. It
+	# sits beside the joiner start so the same real-UDP case can also exercise a
+	# local control-seat body following the final predicted carrier pose.
+	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 105008,
+			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
+	# Break the deploy-marker tie deliberately: the host takes (0, 8), then the
+	# joiner takes (0, 0), within the retail four-unit seat scan of the boat.
 	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
-			Vector3(4, 4, 0), Vector3.ZERO).is_empty())
+			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
+
+
+func _net_watercraft_item_db() -> NovaItemDatabase:
+	# resolve_item_traits sweeps every live entity, so this test database must be
+	# a complete items table rather than a one-row replacement. Otherwise the
+	# second resolve turns the mission's player and Dune Buggy rows Unknown.
+	var base_path := ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")
+	var base_file := FileAccess.open(base_path, FileAccess.READ)
+	assert_not_null(base_file)
+	if base_file == null:
+		return null
+	var base_items := base_file.get_as_text().replace("\r\n", "\n")
+	base_file.close()
+	# The shared compact fixture intentionally omits most vehicle-physics fields.
+	# This real-UDP case needs the Dune Buggy to materialize a VehicleTraits row so
+	# it can prove that move_function cveh wins over ai_function chel.
+	const DBUGGY_CALLBACK_BLOCK := "  ai_function chel\n  render_function cveh\n  move_function cveh\n"
+	const DBUGGY_PHYSICS_BLOCK := DBUGGY_CALLBACK_BLOCK + \
+			"  turn_rate 65\n  turn_rate2 41\n  acceleration 15\n" + \
+			"  deceleration 70\n  player_speed 94\n  physics 1\n  torque 3\n"
+	assert_true(base_items.contains(DBUGGY_CALLBACK_BLOCK))
+	base_items = base_items.replace(DBUGGY_CALLBACK_BLOCK, DBUGGY_PHYSICS_BLOCK)
+	var path := ProjectSettings.globalize_path(
+			"res://.godot/net_watercraft_items.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return null
+	file.store_string(base_items)
+	if not base_items.ends_with("\n"):
+		file.store_string("\n")
+	file.store_string("""begin "Net Watercraft Fixture"
+  id 105008
+  type vehicle
+  graphic StaticCrate1
+  sid netwatercraft
+  ai_function cbot
+  render_function cbot
+  move_function cbot
+  attrib: AIData neutral PlayerControl
+  hp 3000
+  turn_rate 65
+  turn_rate2 41
+  acceleration 15
+  deceleration 70
+  player_speed 94
+  water_speed 94
+  physics 1
+  torque 3
+end
+""")
+	file.close()
+	var result := NovaItemDatabase.new()
+	assert_eq(result.load(path), OK)
+	return result
 
 
 func _install_combat_tables(sim: NovaSimulation) -> void:
@@ -1057,17 +1121,42 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 
 func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> void:
 	var mission := _vehicle_peer_mission()
+	var watercraft_db := _net_watercraft_item_db()
+	assert_not_null(watercraft_db)
+	var vehicle_seats := [{
+		"type_id": 1291,
+		"seats": [{
+			"type": 2,
+			"bone_index": 1,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}, {
+		"type_id": 5008,
+		"seats": [{
+			"type": 2,
+			"bone_index": 1,
+			"position": Vector3.ZERO,
+			"source_name": "ctrlx00",
+		}],
+	}]
 	var host := NovaSimulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
+	host.set_item_seat_specs(vehicle_seats)
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
+	if watercraft_db != null:
+		host.resolve_item_traits(watercraft_db)
 
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "VehicleObserver"))
+	joiner.set_item_seat_specs(vehicle_seats)
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
+	if watercraft_db != null:
+		joiner.resolve_item_traits(watercraft_db)
 	assert_true(_drive_pair_to_match(host, joiner),
 			"vehicle observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
@@ -1111,6 +1200,93 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		var player_pos: Vector3 = joiner.get_local_player_position()
 		assert_gt(joiner_vehicle.distance_to(player_pos), 20.0,
 				"the authored distant vehicle stays distant from the joiner")
+	var host_record := _present_record_for_type(host, 1291)
+	var joiner_record := _present_record_for_type(joiner, 1291)
+	assert_false(host_record.is_empty(), "the host vehicle has a presentation row")
+	assert_false(joiner_record.is_empty(), "the joiner vehicle has a presentation row")
+	if not host_record.is_empty() and not joiner_record.is_empty():
+		var host_snapshot: PackedFloat32Array = host_record["snapshot"]
+		var joiner_snapshot: PackedFloat32Array = joiner_record["snapshot"]
+		var host_base: int = host_record["base"]
+		var joiner_base: int = joiner_record["base"]
+		assert_almost_eq(
+				joiner_snapshot[joiner_base + NovaSimulation.PF_PITCH_DEG],
+				host_snapshot[host_base + NovaSimulation.PF_PITCH_DEG], 0.01,
+				"the joiner publishes the decoded/predicted vehicle pitch")
+		assert_almost_eq(
+				joiner_snapshot[joiner_base + NovaSimulation.PF_ROLL_DEG],
+				host_snapshot[host_base + NovaSimulation.PF_ROLL_DEG], 0.01,
+				"the joiner publishes the decoded/predicted vehicle roll")
+	var family := -1
+	for ai_index in range(host.get_entity_count()):
+		var card: Dictionary = host.get_entity_debug(ai_index)
+		if int(card.get("item_id", 0)) == 1291:
+			family = int(card.get("vehicle_family", -1))
+			break
+	assert_eq(family, 0,
+			"the ai_function chel / move_function cveh Dune Buggy uses Ground physics")
+
+	var host_boat_record := _present_record_for_type(host, 5008)
+	var joiner_boat_record := _present_record_for_type(joiner, 5008)
+	assert_false(host_boat_record.is_empty(),
+			"the authority publishes the synthetic watercraft")
+	assert_false(joiner_boat_record.is_empty(),
+			"the joiner publishes the predicted synthetic watercraft")
+	if not host_boat_record.is_empty() and not joiner_boat_record.is_empty():
+		var host_boat: PackedFloat32Array = host_boat_record["snapshot"]
+		var joiner_boat: PackedFloat32Array = joiner_boat_record["snapshot"]
+		var host_boat_base := int(host_boat_record["base"])
+		var joiner_boat_base := int(joiner_boat_record["base"])
+		assert_ne(host_boat[host_boat_base + NovaSimulation.PF_PITCH_DEG], 0.0,
+				"the authored watercraft pitch is non-zero")
+		assert_ne(host_boat[host_boat_base + NovaSimulation.PF_ROLL_DEG], 0.0,
+				"the authored watercraft roll is non-zero")
+		assert_almost_eq(
+				joiner_boat[joiner_boat_base + NovaSimulation.PF_PITCH_DEG],
+				host_boat[host_boat_base + NovaSimulation.PF_PITCH_DEG], 0.01,
+				"first prediction arms from the retained watercraft pitch")
+		assert_almost_eq(
+				joiner_boat[joiner_boat_base + NovaSimulation.PF_ROLL_DEG],
+				host_boat[host_boat_base + NovaSimulation.PF_ROLL_DEG], 0.01,
+				"first prediction arms from the retained watercraft roll")
+
+	# Joiner L does not predict an attach: wait for the host relationship echo,
+	# then drive the zero-offset control seat. On every frame where the predicted
+	# carrier advances, joiner_pump must run its pose-only carrier follow after the
+	# vehicle mover; the old pre-prediction pose trails by exactly one motor step.
+	assert_true(joiner.local_player_toggle_mount(),
+			"the nearby synthetic watercraft queues a real C2S attach")
+	var mounted_echoed := false
+	for _tick in range(180):
+		joiner.step()
+		host.step()
+		if bool(joiner.get_local_player_view().get("mounted", false)):
+			mounted_echoed = true
+			break
+		OS.delay_msec(2)
+	assert_true(mounted_echoed,
+			"the authority echoes the joiner's synthetic control-seat relationship")
+	if mounted_echoed:
+		joiner.set_player_input(true, false, false, false, false, false, false)
+		var previous_vehicle := _present_position_for_type(joiner, 5008)
+		var moving_frames := 0
+		for _tick in range(180):
+			joiner.step()
+			host.step()
+			var current_vehicle := _present_position_for_type(joiner, 5008)
+			if current_vehicle.is_finite() and previous_vehicle.is_finite() \
+					and current_vehicle.distance_to(previous_vehicle) > 0.00001:
+				moving_frames += 1
+				assert_lt(joiner.get_local_player_position().distance_to(
+						current_vehicle), 0.001,
+						"local L uses the carrier's final same-frame predicted pose")
+			previous_vehicle = current_vehicle
+			if moving_frames >= 8:
+				break
+			OS.delay_msec(2)
+		assert_gte(moving_frames, 8,
+				"the mounted watercraft produced enough predicted moving frames")
+		joiner.set_player_input(false, false, false, false, false, false, false)
 
 	joiner.free()
 	host.free()

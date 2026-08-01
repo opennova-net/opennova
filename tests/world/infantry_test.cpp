@@ -461,6 +461,237 @@ void test_remote_player_body_anim() {
           e->inf.anim_state == anim_state::kJumpLoop);
 }
 
+// A stance-change message can be dispatched before the same frame's extended player
+// uplink.  The authority jump gate reads the reconstructed MoveOrder word directly;
+// it must not wait for the fourth-tick locomotion-selection cadence to observe prone.
+// [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
+void test_remote_player_same_tick_prone_jump_is_rejected() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    // The cached motor stance is deliberately still standing. Both replicated inputs
+    // arrive for tick 1, which is not a fourth-tick body-selection boundary.
+    CHECK(e->inf.stance == InfantryState::Stance::kStand);
+    ent->net_stance_bits = 1;
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending != anim_state::kJumpLoop);
+}
+
+// The cooldown is an edge latch, not a substitute for the retail eligibility mask.
+// An airborne wire peer can have cooldown zero (for example, a ledge fall or a peer
+// first observed after launch); press/release/repress while still airborne must not
+// manufacture jump_start records.  Once grounded, a fresh press may launch normally.
+// [orig: `test Flags,1A002h` @0x4b7ea0; in-air bit 0x2000]
+void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+    e->inf.airborne = true;
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 2, 3);
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 3, 4);
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+
+    e->inf.airborne = false;
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 4, 5);
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 5, 6);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
+}
+
+// Preserve the rest of retail's jump eligibility mask on the authority copy.  These
+// flags are live world state, independent of the remote movement-input byte: dead,
+// in-air/swimming, both water bits, and carried bodies all reject a jump stamp.
+// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4b7ea0-0x4b7ebd]
+void test_remote_player_jump_respects_world_state_flag_gates() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    // 0x10000 is the witnessed second water-state bit; it intentionally remains
+    // unnamed in entity.h until that swimming state is modeled independently.
+    const std::array<uint32_t, 5> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
+        0x10000u, kEntityFlagMounted,
+    };
+    uint32_t tick = 1;
+    for (const uint32_t blocked : blocked_flags) {
+        e->inf.reset_body_animation(anim_state::kIdle);
+        e->inf.jump_cooldown = 0;
+        e->inf.airborne = false;
+        ent->engine_flags = blocked;
+        ent->net_move_input = Entity::kMoveOrderJump;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+        CHECK(e->inf.jump_cooldown == 0);
+        CHECK(e->inf.anim_state != anim_state::kJumpStart);
+        CHECK(e->inf.anim_pending != anim_state::kJumpLoop);
+
+        ent->engine_flags = 0;
+        ent->net_move_input = 0;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+    }
+
+    // With every gate clear, the same replicated press launches normally.
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, tick, tick + 1);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+}
+
+// The remote authority body uses the same +0x1A8 cooldown maintenance order as the
+// local player body: launch writes 32, held input counts down to and parks at 1,
+// release clears 1 to 0, and only the next press can launch again.
+// [orig: clamp/count @0x4b7de0-0x4b7e15; release @0x4b7e78; reload @0x4b7f06]
+void test_remote_player_jump_hold_release_cooldown_matches_retail() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.jump_cooldown == 32);
+
+    run_ticks(ai, w, 2, 33); // 31 held ticks: 32 -> 1
+    CHECK(e->inf.jump_cooldown == 1);
+    run_ticks(ai, w, 33, 41);
+    CHECK(e->inf.jump_cooldown == 1); // held-at-one latch, no auto-repeat
+
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 41, 42);
+    CHECK(e->inf.jump_cooldown == 0);
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 42, 43);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart ||
+          e->inf.anim_state == anim_state::kJumpLoop);
+}
+
+// The simulated local body and authority-side remote body are two projections of the
+// same retail org2 jump block. Keep the exact world-state mask identical on both paths;
+// local collision state must not make water/dead/carried eligibility disappear.
+void test_local_player_jump_respects_world_state_flag_gates() {
+    Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+    const int32_t floor_z = fx(50);
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = floor_z;
+    run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
+
+    const std::array<uint32_t, 5> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
+        0x10000u, kEntityFlagMounted,
+    };
+    uint32_t tick = 2;
+    for (const uint32_t blocked : blocked_flags) {
+        e->inf.reset_body_animation(anim_state::kIdle);
+        e->inf.jump_cooldown = 0;
+        e->inf.airborne = false;
+        e->inf.vel[2] = 0;
+        e->pos[2] = floor_z;
+        ent->engine_flags = blocked;
+        e->inf.jump_requested = true;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+        CHECK(e->inf.jump_cooldown == 0);
+        CHECK(!e->inf.airborne);
+        CHECK(e->inf.anim_state != anim_state::kJumpStart);
+    }
+
+    ent->engine_flags = 0;
+    e->inf.jump_requested = true;
+    run_ticks(ai, w, tick, tick + 1);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.airborne);
+}
+
 // The uplink side of D-NET-199: the LOCAL player's wire mirror must carry the
 // held-jump level in MoveOrder bit 5 — a retail host launches + animates our
 // jump from exactly this bit [orig: the packer @0x4df6fa-0x4df701].
@@ -2455,6 +2686,11 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_remote_player_same_tick_prone_jump_is_rejected();
+    test_remote_player_airborne_jump_press_and_repress_are_rejected();
+    test_remote_player_jump_respects_world_state_flag_gates();
+    test_remote_player_jump_hold_release_cooldown_matches_retail();
+    test_local_player_jump_respects_world_state_flag_gates();
     test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();

@@ -4367,6 +4367,12 @@ conclusive: `envs`→EnvSoundEmitter, `ewep`→TransformAndTurret, `nade`→Gren
 | `cpln` (planes) | `0x45D6F0` — a 5-byte thunk `jmp Entity_UpdateAircraftPhysics` (defined + named in the IDB 2026-07-31) | the AIR variant — ONE mover serves both air families |
 | `cbik` (bikes) | dispatch `@ 0x48EFF0` → `Entity_UpdatePlayerInfantryMovement @ 0x483FE0` (name is a misnomer — it is the cbike-family mover) | vehicle template |
 
+This callback choice is a physics-family decision: OpenNova now resolves it from the
+items.def `move_function` field copied from itemDef+0x158. Replication classification
+may still use `ai_function`; the two are not interchangeable. The shipped Dune Buggy is
+the regression witness (`ai_function chel`, `move_function cveh`) and must run the Ground
+motor, not the aircraft motor.
+
 The §5.38 "simulate-vs-interpolate gate" analysis attributed the org2/player path to
 `Entity_UpdateInfantryAI` — with the corrected table, that function is the **org1**
 callback; players run the body pass. Both share the same top shape (bit0 early-return,
@@ -4413,6 +4419,13 @@ physics BELOW the (authority ∥ local-driver)-gated INPUT block keeps integrati
 from replicated speed/steer between records, chase-corrected on each record**. That —
 not the chase alone — is why a remote boat glides.
 
+The family deltas remain distinct. A Bike applies the wheel yaw rate in contact and
+exactly `rate >> 2` off contact. A boat uses the **previous** platform solve's full-Euler
+basis: pitch tilts thrust into XYZ, roll supplies the capsize/up-axis gate, forward-Z
+feeds the deep-beach stop, and prior `plat_afloat` selects landed drag. Tick order is
+position integration → `Entity_ProcessPlatformPhysics` → yaw; the new solve therefore
+cannot retroactively affect this tick's thrust/drag, and it observes pre-yaw attitude.
+
 **5. `entity+0x24` bit0 rides the wire and is the mover-skip everywhere — and it means
 "not independently collected/moved", NOT "mounted".** Setters: `Entity_AttachToVehicle
 @ 0x43C14A` — the carried-OBJECT attach (a picked-up/deck-carried item), not the seat
@@ -4432,6 +4445,13 @@ never bit0, so no rider is hidden by it. Retail draws carrier-ATTACHED children
 regardless of Flags [orig: the no-flag-test child draws `@ 0x5D795A/@ 0x5D79C8`], so
 our present additionally keeps a row visible when it rides a live carrier attach.
 
+Reimpl order is likewise explicit: compact-carried rows skip their independent chase,
+world movers advance first, then `NetClientView::refresh_carried_entities` recomposes
+riders/children against each carrier's final pose for the tick. Carrier identity and its
+resolved local sample switch atomically, so an unresolved new carrier cannot reuse the
+old offset. Persistent `NoNetworkCallback` children use full BAM heading/pitch/roll
+offsets rather than the lossy yaw byte and follow in the same post-mover phase.
+
 **6. Misc.** `flt_7C19E0` = 2147418112.0 — the float→int overflow clamp used by every
 dist computation here, not a tuning constant. Frame order (fold before movers) stands
 per the §5.38 witness chain (`Game_MainLoop @ 0x52b630` → `Client_ProcessNetworkFrame
@@ -4447,19 +4467,23 @@ on the client view, and the four family prediction legs as world-side movers
 (`world/vehicle_motor` `watercraft/ground/aircraft_client_tick`; the embedding sim
 stages wire samples/registers and mirrors the predicted pose back to the row, and
 clears the prediction for wire-frozen rows — bit0 / the vehicle dead-pose bit 4 /
-carried — so death stays a snap, D-NET-66; carrier composition stays per-record,
-D-NET-195). Deliberate port scopings (all cited in code): the `progress ≥ 512`
+carried — so death stays a snap, D-NET-66). Carrier-local rows and persistent
+no-callback children recompose in a post-world-mover phase with full-BAM offsets;
+per-record carrier changes clear/re-arm the local sample atomically (D-NET-195).
+Boat full-Euler thrust/beach/capsize, prior-`plat_afloat` drag, and the
+integration→platform-solve→yaw order are ported and bench-pinned. Deliberate port
+scopings (all cited in code): the `progress ≥ 512`
 idle-class anim-43 force is NOT ported (presentation anim freezes with the record
-stream — the held pose is the substantive starved behavior); the register-mirror
-`occupant != local-player` gate and the second pilot-not-in-control velocity-damping
-pass `@ 0x49217E..0x4921C7` are deferred until joiner drive input / occupant flags
-replicate; the client-run deck-carrier follow (`@ 0x48D6DA..0x48DACD` /
-`@ 0x4905BC..0x49095B`) is replaced by the row-level seat-follow; the boat beach
-full-stop term reduces to 0 under the level-hull stand-in (`fwd[2] = 0` until the
-`@ 0x481870` platform solve lands). Remaining B-facet: the contact/attitude solves
-(`@ 0x481870` boat / `@ 0x47EF10` air / `@ 0x479600` bike-lean — the four cbik
-family DELTAS are ported into the shared core, 2026-07-31), and the infantry
-anim-root-motion dead-reckoning leg.
+stream — the held pose is the substantive starved behavior). The register-mirror
+`occupant != local-player` gate is ported for Ground/Bike and Watercraft: current
+local steer/input wins, with the cbot-only wrap-average against received speed.
+Aircraft's distinct local-driver input map and the second pilot-not-in-control
+velocity-damping pass `@ 0x49217E..0x4921C7` remain deferred. Remaining B-facet:
+the air contact solve `@ 0x47EF10`, light/bike lean
+`@ 0x479600`, tracked/ground contact-attitude `@ 0x47C1C0`, and infantry
+anim-root-motion dead reckoning. Boat authority damage/Flags upkeep,
+entity-collision/momentum, planing roll lean, wreck tumble, and FX remain deferred;
+the client platform subset is not an authority-physics completion claim.
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 
@@ -5827,15 +5851,24 @@ default 0, never set by the game) `@ 0x629284`; MTU 1300 (CS field 13, clamp 100
 [orig: `@ 0x4caa53..0x4caa76`]).
 
 Reimpl disposition (D-NET-197/D-NET-198): OpenNova hosts deliberately run the ENGINE MAXIMUM —
-the 0x0A fan at the full 62.5 Hz tick with `entity_send_budget` defaulted to the 1600 ceiling
+the configured holdoff defaults to 1 and `entity_send_budget` defaults to the 1600 ceiling
 (= `BANDWIDTH 8000`) — a config-space divergence inside retail's own mechanism envelope
 (wire-tolerated: the template default is per-tick and the client applies any dictated value
-verbatim; our retail-join bring-up ran a per-tick host against stock clients). The
-`configure_host_session` "bandwidth" lever stays. Our JOINER obeys a retail host's dictated
-field-3 period exactly (stored period + countdown re-arm at every open boundary — the pre-fix
-port forgot the period after one skip and uplinked per-tick into ~5.2 Hz hosts, D-NET-198 FIXED
-2026-07-31). The NAK/stall budget backoff and the DELAY command remain unported (deferred with
-the send-side fidelity follow-ups).
+verbatim; our retail-join bring-up ran a per-tick host against stock clients). These are defaults,
+not a bypass: the HOST now obeys any configured S2C period with a per-connection retail
+decrement-before-gate / reload-on-open cycle. Simulation and C2S processing stay full-rate;
+the whole established send block waits for that connection's boundary (initial/retained `0x83`,
+roster/probes, `0x84`, deferred gameplay replies, and fresh remote `0x0A`), while pre-session
+`0x81/0x82` remains immediate. Our JOINER likewise obeys a retail
+host's dictated field-3 period exactly (stored period + countdown re-arm at every boundary;
+D-NET-198 FIXED 2026-07-31). The `configure_host_session` bandwidth lever stays, but 1600 is a
+soft entity-selection budget: a remote 0x0A body is independently hard-capped to 1283 bytes so
+its 4-byte LEN16 message envelope plus 13-byte protocol header fit the installed 1300-byte
+game-session ceiling. Any other semantic message too large for one session packet is split into
+the retail FIRST/MID/FINAL records; the joiner retains reassembly state across ordered packets and
+dispatches only after the FINAL piece, so a sparse 1024-slot `0x5D` sweep loses no entries. The
+in-process type-2 loopback is deliberately outside that UDP envelope.
+The NAK/stall budget backoff and DELAY command remain deferred.
 
 **Header + sub-block cycle** `[orig: NetPacket_WritePlayerState @0x4ff6b0]`. The header is
 `[i32 ref_x][i32 ref_y][i32 ref_z][u8 state_flags][u8 phase_byte]`, where `phase_byte = playerSlot+100566`
@@ -9873,7 +9906,7 @@ clear-per-record artifact):
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
 - **D-NET-50** [HIGH, FIXED] `build_tag_0a_world_reference` shipped a 623-byte verbatim retail blob (`kRetailTag0aPayload`, only bytes 0-11 patched) on a 300 ms gameplay cadence — an ADR-0003 raw-passthrough violation. Replaced with a **field-driven builder**: it constructs a `FrameUpdate` from the host's `PlayerReplicationState` + `config_.replicated_entities` (anchor = subject world position; one tag=1 compact record per replicated entity, positions 16-bit compressed relative to the anchor via the new `network_compress_fixedpoint`, classed by `GameEntitySnapshot.entity_class`) and emits it via the new `encode_frame_update` — the exact inverse of `decode_frame_update`. Ported `network_compress_fixedpoint` (with a documented zero-guard divergence) + added `encode_frame_update` / `encode_weapon_hit_record` (ingame_encode). Validated by encode↔decode round-trips (compressor + whole-frame) and a `game_session` end-to-end assertion that the tick's 0x0A `decode_frame_update`-cleans. Guided/Unknown classes are skipped (no 0x0A compact form). Vehicle-local (mounted) compression + env/timer sub-block rotation are tracked follow-ups. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop / Network_CompressFixedPoint @ 0x4C2780]
 - **D-NET-51** [HIGH, FIXED] `handle_tag_0c_player_input` now uses the shared 5-byte entity sub-header + 43-byte extended (type-10) decoder from §5.10 instead of raw offsets. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
-- **D-NET-196** [HIGH, OPEN — witnessed 2026-07-31; chase legs + ALL FOUR family prediction legs PORTED same day (stage-only fold + tick_remote_motion at the client view, BANDWIDTH lever, world-side family movers with wire-frozen gating — bit0/dead-pose/carried rows never predict; ctest+GUT green, players/NPCs live-A/B-confirmed gliding, vehicle-family live A/B pending); remaining B-facet = the contact/attitude solves (cbik deltas ported) + the infantry root-motion leg] A joiner presents every remote entity as a ZERO-ORDER HOLD of its last decoded `ClientEntityState` row (`NetClientView::apply` overwrites the row per fold; `present_snapshot_from_client_view` renders it wire-direct; nothing moves a row between folds), while a retail host's per-entity 0x0A inclusion is priority/budget-subrated (measured on `retail-vehicle-session`: distant moving vehicles every 20–39 frames, 340–625 ms) — remote entities skip/teleport at the wire cadence ("the boat skips instead of gliding"). Retail's client hides the cadence with the §5.38e per-class between-update movers (the pre-port symptom record; all now ported): compact reads STAGE the interp target (`+0x234/238/23C` pos, `+0x240/+0x244` heading/pitch, `+0x27C = 0` — §5.10/§5.13/§5.14 landing-column corrections this session) and each class's mover chases the live pose one step per 62.5 Hz tick — org1 AI infantry `@ 0x4b9a8c` (buckets {3,4,5,8,16}, snap > 0x20000, deadband < 0x2000, cap 512) + anim root motion; org2 players in `Entity_UpdateInfantryPlayerBody @ 0x4B40E0` (2D-dist buckets 6–18 with the verbatim non-monotonic ladder `@ 0x4B44C4..0x4B4581`, heading/pitch divisor 12, snap/deadband edges, **own-player soft reconciliation bucket 48 moving / 512 still — position only**) + root motion; vehicle families (`cbot`→`Entity_UpdateWatercraftPhysics @ 0x48D480`, `cveh/ctan/ctrn/catv`→`@ 0x48AF00`/`@ 0x46E100`, `CHel`→`@ 0x490310`, `cbik`→`@ 0x483FE0`, `cpln`→`0x45D6F0`) with the shared template (speed-gated snap 0x60000/0x20000, buckets {6,8,10,15,20,25,30}, heading `(d+10)/20` over 20 ticks, starvation ≥128 speed decay) PLUS physics prediction from the mirrored speed/steer drive registers on non-driver machines. Death/respawn stays a SNAP (D-NET-66); carrier composition stays per-record (D-NET-195); `entity+0x24` bit0 rides the wire as the universal mover-skip (§5.38e §5). Port = the stage-only fold + per-class chases on the joiner's client view PLUS the four world-side family prediction movers (sim-staged registers, mirror-back, wire-frozen gating). Pinned by `netsim_remote_motion_smoothness_test` in ctest (glide envelopes, EXACT bucket-ladder pins incl. the non-monotonic org2 rung, signed untruncated starvation decay, the org2 pitch chase, the org1 first-record heading seed) + `watercraft_client_motor_test` (all-family prediction benches) + the coop GUT glide leg (equilibrium lag bounded against truth). [orig: class table @ 0x82ABC0 / NetPacket_SerializePlayerState @ 0x4C09C0 (case-2 staging @ 0x4C0FD7..0x4C0FFC) / NetPacket_SerializeInfantryEntityState @ 0x4C0320 / Entity_SerializeVehicleState @ 0x460560 / Entity_UpdateInfantryAI @ 0x4b9910 / Entity_UpdateInfantryPlayerBody @ 0x4B40E0 / Entity_UpdateWatercraftPhysics @ 0x48D480]
+- **D-NET-196** [HIGH, OPEN — client staging/chases and all four family prediction legs PORTED; vehicle-family live A/B pending] Retail compacts stage targets and class movers hide the subrated 0x0A cadence. The port includes wire-frozen gating, `move_function`-based vehicle physics dispatch (replication classification may still use `ai_function`), local-controller input gates for Ground/Bike and Watercraft (including cbot received-speed reconciliation), Bike quarter-rate off-contact yaw, and the boat's full-Euler prior-attitude thrust/beach/capsize, prior-`plat_afloat` drag, and integration→platform-solve→yaw order. Carrier-local rows and persistent no-callback children recompose after world movers with atomic carrier changes and full-BAM attitude. Pinned by `netsim_remote_motion_smoothness_test`, `watercraft_client_motor_test`, carrier-follow tests, and the coop GUT glide leg. Remaining B-facet: Aircraft local-driver input, infantry anim-root-motion dead reckoning, and air/light/tracked contact-attitude; boat authority damage/collision/FX remain deferred. [orig: class table @ 0x82ABC0 / NetPacket_SerializePlayerState @ 0x4C09C0 / NetPacket_SerializeInfantryEntityState @ 0x4C0320 / Entity_SerializeVehicleState @ 0x460560 / Entity_UpdateInfantryAI @ 0x4b9910 / Entity_UpdateInfantryPlayerBody @0x4B40E0 / Entity_UpdateWatercraftPhysics @0x48D480]
 
 `replication_min.cpp` + `game_session.cpp` (pool-entity spawn/sync — §5.11/§5.12):
 - **D-NET-52** [DOC, FIXED] §5.6 trailer layout previously read `[u16][u32][cstring]`. The retail handler reads `aiProfile1` and `aiProfile2` with `cursor += 2` on a `uint16_t*` — both fields are **4 wire bytes** (the Hex-Rays render shows `uint16_t*` as the value type, but the cursor advance and the destination slot writes are `_DWORD`). Cross-witnessed against 195/437 trailer-carrying 0x0D records in the 2026-06-16b loopback. Update §5.6 + §5.11 (this commit). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x43311e / 0x433131)]
@@ -10520,8 +10553,10 @@ apply; `Entity::net_analog_x/y/z` (entity+0x130..) now ride `PlayerIntent`. Pinn
 unclamped (27542+16)>>5 first step; the +60/tick clamp; reverse −playerSpeed/2;
 turn-in-place holds a standing buggy; the steer chase toward the driver yaw; coast-to-stop;
 the dead gate; the `physics` selector gate) + `netsim_two_peer_fanout`
-(vehicle_drive_authority: a remote driver's 0x08 move input spins the host vehicle to
-speed 861+60·61 in 62 ticks and the streamed 0x0A vehicle record pose goes LIVE).
+(vehicle_drive_authority: a mounted remote driver's carrier-local C2S LOOK at 45°
+survives the seat-owned body carry into the authority steer target, its 0x08 move input
+spins the host vehicle to speed 861+60·61 in 62 ticks, and the streamed 0x0A vehicle
+record pose goes LIVE) plus `vehicle_mount_test` (Driver and Controller LOOK/body split).
 2026-07-16 update (the vehicle pass, world-wac-ai-re §23.3): the **AI-driver leg**
 (`@ 0x48bc12-0x48c034`) and the **no-controller parked stamp** (`@ 0x48c002-0x48c02d`,
 SM state 22 + the 22→16 hand-back) are PORTED — `AiSystem::vehicle_ai_drive` stages a
@@ -10595,6 +10630,19 @@ feeds real data via IRootMotionSource), and the death leg reuses the motor's gen
 torso-forward pick (deathAnim +0x2C0 variants unmodeled). Tests:
 `infantry_test` (remote selection walk/crouch/prone/idle-promote),
 `netsim_two_peer_fanout` (pending-wins byte 14, ratio byte 15).
+
+**D-NET-199 jump parity addendum (PR #403).** The authority-side remote org2
+derivation now evaluates the same launch eligibility as the local body before it
+stamps anim 30/pending 31 and reloads the 32-tick latch: cooldown zero, held MoveOrder
+bit 5, the **current replicated** prone bit clear (not the prior cached animation
+stance), and no airborne/dead/water/carried world state. Since the C2S state byte cannot
+carry Flags 0x2000, the authority derives airborne/landing from each uploaded world pose,
+the active animation's capsule-bottom offset, and the retail 0xF000 clearance hysteresis;
+it updates both entity flag mirrors and the infantry state together. This closes same-tick
+prone+jump, mid-air re-press, landing, and fresh-repress holes while preserving retail's
+held-at-one/release-to-zero cooldown cycle. Remote translation remains client-uplink-owned.
+If a headless harness supplies no valid terrain, it conservatively retains the prior airborne
+state rather than fabricating a landing.
 
 **D-NET-158** [reimpl gap, FIXED 2026-07-03 (ported; verify v32)] **The HUD "Number of
 players" broke on three fronts, all in the 0x46/0x22/0x16/0x04 roster contract** (v31: 14
@@ -10826,11 +10874,13 @@ from replicated input); our read-applied peer model does not re-simulate that pr
 owner's uplinked carrier is mirrored instead — wire-identical in steady state (the client
 reports exactly what it grounds on) but self-corrected a tick later by retail when they
 disagree. Locally simulated entities do run the model-aware ground probe. RESIDUAL:
-read-applied disagreement is not host-corrected. Relationship attach/detach and requester-local
-S2C `0x0A` confirmation are now live, but the production C2S `0x0C` builder still emits
-`carrier_handle=0xFFFF` plus world pose for a mounted local player. Static emplacements hide
-that omission; moving or rotated carriers still need carrier-local mounted uplink encoding.
-Pinned by
+read-applied disagreement is not host-corrected. Relationship attach/detach,
+requester-local S2C `0x0A` confirmation, and the production C2S `0x0C` carrier form are
+now live. `build_player_uplink` selects the mounted parent first, else `ground_target`,
+then emits a resolved carrier handle with full-Euler carrier-local position and relative
+heading; a stale/unresolved relation safely retains the `0xFFFF` world-pose form. Pinned by
+`netsim_build_player_uplink` (real builder→codec→authority-apply round trips for a
+mounted driver after carrier movement/rotation and a non-mounted ground carrier),
 `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo: carrier-pose lift, ground_target
 mirror, flags replace, carrier echo + local pos + local yaw byte, free-standing regression;
 pose_transform_roundtrip: identity-exact + arbitrary-pose round-trip) and the §5.10 codec

@@ -245,13 +245,14 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.bob = vp[19];
 				vt.flip = vp[20];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
-				// Family from the *_function tag (ai_function, else
-				// move_function — the same precedence as the replication
-				// class stamp; §5.38e movers).
+				// The per-frame physics mover is selected exclusively by the
+				// move_function callback resolved into itemDef+0x158. ai_function
+				// selects the event/brain callback and may deliberately differ: the
+				// shipped Dune Buggy is ai_function chel + move_function cveh and
+				// therefore still runs the ground mover. [orig:
+				// EntityDef_LookupPhysicsCallback @0x4a9240; §5.38e movers]
 				{
-					const String fam_tag = ai_fn.is_empty()
-							? p_item_db->get_move_function(def_id)
-							: ai_fn;
+					const String fam_tag = p_item_db->get_move_function(def_id);
 					const String fam = fam_tag.to_lower();
 					if (fam == "cbot") {
 						vt.family = opennova::world::VehicleFamily::Watercraft;

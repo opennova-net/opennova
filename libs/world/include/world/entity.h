@@ -628,6 +628,7 @@ struct Entity {
         bool plat_planing = false;         // planing/bow-up bit [orig: +0x472 bit 1]
         bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
         bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
+        bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
         int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
     };
     VehicleMotorState veh;

@@ -311,6 +311,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		c.type = 1; // server-side view of a remote client
 		c.connection_id = ctx.np_protocol.next_connection_id++;
 		c.self_id_seen = true;
+		arm_s2c_send_holdoff(c, ctx.config.send_holdoff_ticks);
 		ctx.np_protocol.connection_list.push_back(c);
 		conn = &ctx.np_protocol.connection_list.back();
 	}

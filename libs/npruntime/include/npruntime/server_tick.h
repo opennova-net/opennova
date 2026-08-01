@@ -31,6 +31,7 @@ namespace opennova::np {
 // through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. The drain/emit
 // primitives (netsim::drain_connection_c2s / emit_connection_s2c, connection_fan.h) are invoked ONLY
 // from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
-void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallback_anchor = {});
+void Server_TickUpdate(NapiNPServerCtx &ctx,
+		const PlayerReplicationState &fallback_anchor = {});
 
 } // namespace opennova::np

@@ -27,6 +27,7 @@
 #include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
+#include <world/angle.h>
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/player_spawn.h> // spawn_player / spawn_remote_player
@@ -1237,10 +1238,31 @@ bool run_vehicle_drive_authority() {
 
 	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
 		return false;
-	// The driver's replicated input (landed by the 0x0C apply): forward + moving, heading
-	// = the vehicle's own (drive straight).
-	player->net_move_input = 0x08;
-	player->yaw = 0;
+	// Land the remote driver's grounded 0x0C intent through the production read-apply:
+	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at
+	// 0 degrees. The authority motor must consume the player's LOOK, not the seat yaw.
+	const int32_t driver_steer_target = w::bam_heading_from_mission_yaw_deg(45.0);
+	constexpr int32_t carrier_heading = 90 * 11930464;
+	const uint32_t local_heading_bits =
+			static_cast<uint32_t>(driver_steer_target) -
+			static_cast<uint32_t>(carrier_heading);
+	const int32_t driver_wire_look = static_cast<int32_t>(
+			(static_cast<uint32_t>(local_heading_bits) & 0xFFFF0000u) +
+			static_cast<uint32_t>(carrier_heading));
+	ns::PlayerIntent intent;
+	intent.entity_handle = ph.packed;
+	intent.item_type_id = 0x14B9;
+	intent.carrier_handle = vh.packed;
+	intent.heading = static_cast<int16_t>(
+			static_cast<uint16_t>(local_heading_bits >> 16));
+	intent.move_input = 0x08;
+	if (!expect(ns::apply_player_intent(world, intent), "driver intent read-applied"))
+		return false;
+	w::AiEntity *driver_ai = ai.for_handle(ph);
+	if (!expect(driver_ai != nullptr && driver_ai->net_is_remote_peer &&
+	                    driver_ai->heading == driver_wire_look && player->yaw == 45,
+	            "driver wire LOOK differs from the vehicle seat yaw"))
+		return false;
 
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
@@ -1259,15 +1281,35 @@ bool run_vehicle_drive_authority() {
 		if (r.handle == vh.packed) ra = &r;
 	if (!expect(ra != nullptr, "vehicle record present in frame A")) return false;
 
-	// 62 authority ticks: the vehicle motor consumes the driver's input.
+	// First authority tick: pose_if_mounted must preserve the wire LOOK until the
+	// vehicle pass consumes it, and the post-motor seat refresh must not overwrite it.
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = true;
-	for (int i = 0; i < 62; ++i) {
+	ctx.logic_tick = 0;
+	ai.tick(world, ctx);
+	w::Entity *veh = world.registry.get(vh);
+	player = world.registry.get(ph);
+	driver_ai = ai.for_handle(ph);
+	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_steer_target,
+	            "authority motor consumes the remote driver's preserved LOOK"))
+		return false;
+	if (!expect(player != nullptr && driver_ai != nullptr && player->yaw == 45 &&
+	                    driver_ai->heading == driver_wire_look,
+	            "post-motor mounted refresh preserves remote driver LOOK"))
+		return false;
+	const int32_t seat_body_heading = static_cast<int32_t>(
+			static_cast<int64_t>(90 - veh->yaw) * 11930464);
+	if (!expect(driver_ai->inf.body_heading == seat_body_heading,
+	            "remote driver's carried body remains seat-owned"))
+		return false;
+
+	// Complete 62 authority ticks: the vehicle keeps consuming the replicated input.
+	for (int i = 1; i < 62; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
 		ai.tick(world, ctx);
 	}
-	w::Entity *veh = world.registry.get(vh);
+	veh = world.registry.get(vh);
 	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))
 		return false;
 	// 62 ticks from standstill: the unclamped launch step (861) + 61 accel-clamped ticks
@@ -1286,14 +1328,49 @@ bool run_vehicle_drive_authority() {
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fb),
 	            "frame B decodes")) return false;
 	const nw::FrameUpdateRecord *rb = nullptr;
+	const nw::FrameUpdateRecord *rider_b = nullptr;
 	for (const auto &r : fb.records)
 		if (r.handle == vh.packed) rb = &r;
+		else if (r.handle == ph.packed) rider_b = &r;
 	if (!expect(rb != nullptr, "vehicle record present in frame B")) return false;
-	if (!expect(ra->vehicle.pos_x_compressed != rb->vehicle.pos_x_compressed ||
-	                    ra->vehicle.pos_y_compressed != rb->vehicle.pos_y_compressed,
-	            "vehicle record pose is LIVE (host-simulated)"))
+	if (!expect(rider_b != nullptr, "mounted driver record present in frame B"))
+		return false;
+	// The recipient anchor is its mounted player and therefore moves with this
+	// zero-offset seat; the vehicle's compressed local coordinates can remain
+	// unchanged even though its world pose advanced. Pin both the moving anchor
+	// and the reconstructed final vehicle world pose instead.
+	if (!expect(fa.anchor_x != fb.anchor_x || fa.anchor_y != fb.anchor_y,
+	            "mounted recipient anchor follows the live authority vehicle"))
+		return false;
+	if (!expect(
+	                    fb.anchor_x + nw::network_decompress_fixedpoint(
+	                                          rb->vehicle.pos_x_compressed) ==
+	                            codec_recon(w::to_fixed(veh->position.x), fb.anchor_x) &&
+	                    fb.anchor_y + nw::network_decompress_fixedpoint(
+	                                          rb->vehicle.pos_y_compressed) ==
+	                            codec_recon(w::to_fixed(veh->position.y), fb.anchor_y),
+	            "vehicle record reconstructs the final live host pose"))
 		return false;
 	if (!expect(rb->vehicle.health_word == 3000, "live record keeps the health word"))
+		return false;
+	if (!expect(rider_b->player.carrier_handle == vh.packed &&
+	                    rider_b->player.pos_x_compressed == 0 &&
+	                    rider_b->player.pos_y_compressed == 0 &&
+	                    rider_b->player.pos_z_compressed == 0,
+	            "authority emits the driver's zero seat offset against the final carrier pose"))
+		return false;
+
+	// Decode through the real client fold as well: a child-first pool-0 row must
+	// reconstruct at the final same-frame pool-1 carrier, not at its pre-motor pose.
+	ns::NetClientView view(attach_test_class);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
+	const ns::ClientEntityState *decoded_driver = view.state().find(ph.packed);
+	const ns::ClientEntityState *decoded_vehicle = view.state().find(vh.packed);
+	if (!expect(decoded_driver != nullptr && decoded_vehicle != nullptr &&
+	                    decoded_driver->x == decoded_vehicle->x &&
+	                    decoded_driver->y == decoded_vehicle->y &&
+	                    decoded_driver->z == decoded_vehicle->z,
+	            "decoded mounted driver follows the authority vehicle's final same-tick pose"))
 		return false;
 	std::printf("PASS vehicle_drive_authority\n");
 	return true;

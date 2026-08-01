@@ -46,9 +46,10 @@ class World;
 // player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
 // accel/decel token*4. The host's item-traits sweep fills the table from the item db
 // (NovaSimulation::resolve_item_traits); tests stamp it directly.
-// The items.def *_function family tag, the per-class mover selector (the
+// The items.def move_function family tag, the per-class mover selector (the
 // update-callback table keys on it [orig: the [tag,flags,callback] rows
-// @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv/cbik.
+// @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv;
+// Bike covers cbik.
 enum class VehicleFamily : uint8_t {
     Ground = 0,
     Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
@@ -73,7 +74,7 @@ struct VehicleTraits {
     int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
-    VehicleFamily family = VehicleFamily::Ground; // *_function tag (§5.38e movers)
+    VehicleFamily family = VehicleFamily::Ground; // move_function tag (§5.38e movers)
     int32_t water_speed = 0;   // itemDef+0x8EC waterSpeed — the cbot family's max
                                // drive speed (the same slot the ground family
                                // reads as playerSpeed) [orig: @0x48E835]
@@ -166,14 +167,14 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                         const VehicleDriveCmd *ai_cmd = nullptr);
 
 // The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
-// subset of the cbot family function for a REMOTE (non-driven) boat — per-record
-// chase + register mirror + steer/thrust/drag/keel prediction + contact drags +
-// X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480, the path
-// outside the (authority || local driver) input gate]. Z and hull attitude belong
-// to the platform solve (@0x481870, unported — D-NET-161): here Z moves ONLY via
-// the per-record chase, never a one-sided gravity integration that would sink the
-// hull. Consumes the staged VehicleMotorState net_* cluster; the sim runs it once
-// per world tick on a non-authority world for staged pool-1 Watercraft entities.
+// subset of the cbot family function — per-record chase plus local-driver input
+// or remote register mirroring, steer/thrust/drag/keel prediction, contact drags,
+// and X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480].
+// The local driver reconciles longitudinal command with the received register
+// while retaining local steer. Z, pitch/roll, and the
+// afloat/airborne latches come from the platform solve below. Consumes the staged
+// VehicleMotorState net_* cluster; the sim runs it once per world tick on a
+// non-authority world for staged pool-1 Watercraft entities.
 // The boat platform solve — buoyancy, hull attitude, and the airborne/afloat
 // flags, run every tick after integration exactly where the retail caller sits
 // [orig: Entity_ProcessPlatformPhysics @0x481870, called @0x48ECE7; client
@@ -186,9 +187,9 @@ void watercraft_platform_solve(World &world, Entity &veh,
 
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
-// The GROUND-family prediction leg: shared chase + mirrored registers driving
-// tick_vehicle_motor's core with the input block bypassed (§5.38e spec part F).
-// Also the interim stand-in for cbik until the bike mover is witnessed.
+// The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
+// remote registers driving tick_vehicle_motor's core with the input block bypassed;
+// the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
 void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 // The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is

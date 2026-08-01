@@ -317,6 +317,11 @@ public:
 	// Called by the joiner simulation after decoded round events have stamped
 	// remote recoil, preserving retail's receive -> body-decay frame order.
 	void tick_remote_recoil() { view_.tick_recoil(); }
+	// Called by an embedding simulation after its world-side vehicle movers have
+	// mirrored their final poses into the decoded rows. The library-only remote
+	// mover already runs this phase internally; the explicit seam prevents
+	// riders/attachments from observing the previous world-mover tick.
+	void refresh_remote_attachments() { view_.refresh_carried_entities(); }
 	netsim::NetClientView &view() { return view_; }
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 

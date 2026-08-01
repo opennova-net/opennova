@@ -453,6 +453,10 @@ private:
 
 	// SCRK / seq / ack live on the client-side connection node (folded, as on the server side).
 	NapiNPConnection conn_;
+	// Protocol FIRST/MID/FINAL records can span sequenced 0x83 packets. Keep the
+	// retail receive buffer on the connection so only the completed semantic
+	// payload reaches gameplay dispatch.
+	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)

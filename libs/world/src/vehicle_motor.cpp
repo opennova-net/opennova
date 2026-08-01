@@ -4,8 +4,11 @@
 #include <cmath>
 #include <cstdlib>
 
+#include <io/bam.h>
+
 #include "world/ai.h"
 #include "world/angle.h"
+#include "world/collision.h"
 #include "world/geom.h"
 #include "world/vehicle_sound.h"
 #include "world/world.h"
@@ -55,6 +58,20 @@ int32_t cos22_of_bam_x87(int32_t bam) {
 int32_t sin22_of_bam_x87(int32_t bam) {
     return static_cast<int32_t>(
             std::sin(static_cast<double>(bam) * kBamToRadX87) * 4194304.0);
+}
+
+// x86 SHL used by the vehicle angle/rate integrators: keep only the low
+// 32 bits at every step, exactly like the retail register operation.
+int32_t bam_shl_wrap(int32_t value, unsigned shift) {
+    while (shift-- != 0) value = io::bam_dbl(value);
+    return value;
+}
+
+// x86 IMUL low-dword result. The shared BAM helpers cover add/sub/shift/abs;
+// this is the remaining multiply primitive needed by the aircraft rate caps.
+int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
+    return static_cast<int32_t>(static_cast<uint32_t>(lhs) *
+                                static_cast<uint32_t>(rhs));
 }
 
 } // namespace
@@ -119,6 +136,103 @@ Entity *resolve_vehicle_controller(World &world, Entity &veh) {
     return controller;
 }
 
+// Entity_UpdateVehiclePhysics's shared player-input block. The authority stages
+// a remote driver's replicated fields through it; the controlling client stages
+// its current local fields instead of replaying delayed compact drive registers.
+static void stage_player_vehicle_input(Entity &veh, Entity &occ,
+                                       const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    // The above-water gate at the player leg head remains with D-NET-161.
+    const uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
+                                (static_cast<uint32_t>(occ.net_stance_bits) << 8);
+    const int dir = static_cast<int>(move_order & 7u);
+    const bool moving = ((move_order >> 3) & 1u) != 0;
+    const int32_t analog_sum = static_cast<int32_t>(occ.net_analog_x) +
+                               static_cast<int32_t>(occ.net_analog_y) +
+                               static_cast<int32_t>(occ.net_analog_z);
+    const int32_t driver_yaw_bam =
+            bam_heading_from_mission_yaw_deg(static_cast<double>(occ.yaw));
+
+    if (moving) {
+        m.cmd_speed = traits.player_speed;
+    } else {
+        int32_t steer_delta =
+                (kAnalogSteerScale * static_cast<int32_t>(occ.net_analog_z)) >> 1;
+        const int32_t alt =
+                (kAnalogSteerScale * static_cast<int32_t>(occ.net_analog_y)) >> 1;
+        if (std::abs(alt) > std::abs(steer_delta)) steer_delta = alt;
+        m.steer_target_bam -= steer_delta;
+        m.cmd_speed =
+                -(traits.player_speed * static_cast<int32_t>(occ.net_analog_x)) >> 7;
+        // The driver's own analog-yaw write remains D-NET-161; the host cannot
+        // mutate a remote peer's wire-owned yaw, and local look owns the client row.
+    }
+
+    if ((move_order & Entity::kMoveOrderCrouch) != 0) m.cmd_speed >>= 1;
+    if ((move_order & Entity::kMoveOrderProne) != 0) m.cmd_speed >>= 2;
+    if ((move_order & 0x20u) != 0) veh.flags |= 0x80u;
+    else veh.flags &= ~0x80u;
+    if ((move_order & 0x40u) != 0) veh.flags |= 0x20u;
+    else veh.flags &= ~0x20u;
+    if ((move_order & 0x80u) != 0) veh.flags |= 0x8u;
+    else veh.flags &= ~0x8u;
+
+    if (analog_sum == 0) {
+        m.steer_target_bam =
+                (move_order & Entity::kMoveOrderFreeLook) != 0
+                        ? m.yaw_bam
+                        : driver_yaw_bam;
+    }
+
+    if (dir != 0) {
+        if (m.steer_ramp_bam < kSteerRampCap)
+            m.steer_ramp_bam += kSteerRampStep;
+    } else {
+        m.steer_ramp_bam = 0;
+    }
+    switch (dir) {
+        case 1:
+            m.steer_target_bam = io::bam_add(m.yaw_bam, m.steer_ramp_bam);
+            break;
+        case 2:
+            m.steer_target_bam = io::bam_add(m.yaw_bam, m.steer_ramp_bam);
+            m.cmd_speed = 0;
+            break;
+        case 3:
+            m.steer_target_bam = io::bam_add(m.yaw_bam, m.steer_ramp_bam);
+            m.cmd_speed = io::bam_sar(io::bam_sub(0, m.cmd_speed), 1);
+            break;
+        case 4:
+            m.steer_target_bam = m.yaw_bam;
+            m.cmd_speed = io::bam_sar(io::bam_sub(0, m.cmd_speed), 1);
+            break;
+        case 5:
+            m.steer_target_bam = io::bam_sub(m.yaw_bam, m.steer_ramp_bam);
+            m.cmd_speed = io::bam_sar(io::bam_sub(0, m.cmd_speed), 1);
+            break;
+        case 6:
+            m.steer_target_bam = io::bam_sub(m.yaw_bam, m.steer_ramp_bam);
+            m.cmd_speed = 0;
+            break;
+        case 7:
+            m.steer_target_bam = io::bam_sub(m.yaw_bam, m.steer_ramp_bam);
+            break;
+        default:
+            break;
+    }
+}
+
+static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
+                                                const VehicleTraits &traits) {
+    if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
+    Entity *occ = resolve_vehicle_controller(world, veh);
+    if (occ == nullptr || occ->handle != world.cached.local_player ||
+        occ->handle.pool() != 0 || occ->player_class == 0 ||
+        !occ->alive || occ->health <= 0)
+        return nullptr;
+    return occ;
+}
+
 void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                         const VehicleDriveCmd *ai_cmd) {
     if (traits.physics == 0) return; // no vehicle physics selected [orig: @0x48efc7]
@@ -160,85 +274,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             m.steer_ramp_bam = 0;
             veh.flags &= ~0x80u;
         } else if (player_occupant) {
-            // The above-water gate (`occ->Position.Z + CameraOffset.Z > waterHeight`
-            // [orig: the player-leg head @0x48b993]) is unmodeled — no world water
-            // height; divergence noted in D-NET-161.
-            const uint32_t move_order = static_cast<uint32_t>(occ->net_move_input) |
-                                        (static_cast<uint32_t>(occ->net_stance_bits) << 8);
-            const int dir = static_cast<int>(move_order & 7u);
-            const bool moving = ((move_order >> 3) & 1u) != 0;
-            const int32_t analog_sum = static_cast<int32_t>(occ->net_analog_x) +
-                                       static_cast<int32_t>(occ->net_analog_y) +
-                                       static_cast<int32_t>(occ->net_analog_z);
-            const int32_t driver_yaw_bam =
-                    bam_heading_from_mission_yaw_deg(static_cast<double>(occ->yaw));
-
-            if (moving) {
-                m.cmd_speed = traits.player_speed; // [orig: @0x48b3d3 `[136] = playerSpeed`]
-            } else {
-                // The analog leg runs for every non-moving frame (axes 0 -> both terms
-                // vanish) [orig: @0x48b783-0x48b7c6].
-                int32_t steer_delta =
-                        (kAnalogSteerScale * static_cast<int32_t>(occ->net_analog_z)) >> 1;
-                const int32_t alt =
-                        (kAnalogSteerScale * static_cast<int32_t>(occ->net_analog_y)) >> 1;
-                if (std::abs(alt) > std::abs(steer_delta)) steer_delta = alt;
-                m.steer_target_bam -= steer_delta; // [orig: `+528 -= v64`]
-                m.cmd_speed = -(traits.player_speed * static_cast<int32_t>(occ->net_analog_x)) >> 7;
-                // The original also turns the DRIVER entity's own yaw by the analog
-                // delta when free-look is off (@0x48b7ce `v61->Yaw -= v64`); a remote
-                // driver's yaw is wire-owned on our host, so that write is skipped
-                // (D-NET-161 note).
-            }
-
-            // Modifier bits [orig: LABEL_123 @0x48b490-0x48b4d8].
-            if ((move_order & Entity::kMoveOrderCrouch) != 0) m.cmd_speed >>= 1;
-            if ((move_order & Entity::kMoveOrderProne) != 0) m.cmd_speed >>= 2;
-            if ((move_order & 0x20u) != 0) veh.flags |= 0x80u;
-            else veh.flags &= ~0x80u;
-            if ((move_order & 0x40u) != 0) veh.flags |= 0x20u;
-            else veh.flags &= ~0x20u;
-            if ((move_order & 0x80u) != 0) veh.flags |= 0x8u; // [orig: SLOBYTE sign bit]
-            else veh.flags &= ~0x8u;
-
-            // Steer target: the driver's replicated heading (mouse steer), or the
-            // vehicle's own heading under free-look [orig: @0x48b4a8-0x48b4c0].
-            if (analog_sum == 0) {
-                m.steer_target_bam = (move_order & Entity::kMoveOrderFreeLook) != 0 ? m.yaw_bam : driver_yaw_bam;
-            }
-
-            // Key-steer ramp + the 8-way direction cases [orig: @0x48b4e0-0x48b57a;
-            // dir map F=0 FL=1 L=2 BL=3 B=4 BR=5 R=6 FR=7 (§5.38)].
-            if (dir != 0) {
-                if (m.steer_ramp_bam < kSteerRampCap) m.steer_ramp_bam += kSteerRampStep;
-            } else {
-                m.steer_ramp_bam = 0;
-            }
-            switch (dir) {
-                case 1: m.steer_target_bam = m.yaw_bam + m.steer_ramp_bam; break;
-                case 2:
-                    m.steer_target_bam = m.yaw_bam + m.steer_ramp_bam;
-                    m.cmd_speed = 0; // turn in place
-                    break;
-                case 3:
-                    m.steer_target_bam = m.yaw_bam + m.steer_ramp_bam;
-                    m.cmd_speed = (-m.cmd_speed) >> 1; // reverse at half target
-                    break;
-                case 4:
-                    m.steer_target_bam = m.yaw_bam;
-                    m.cmd_speed = (-m.cmd_speed) >> 1;
-                    break;
-                case 5:
-                    m.steer_target_bam = m.yaw_bam - m.steer_ramp_bam;
-                    m.cmd_speed = (-m.cmd_speed) >> 1;
-                    break;
-                case 6:
-                    m.steer_target_bam = m.yaw_bam - m.steer_ramp_bam;
-                    m.cmd_speed = 0;
-                    break;
-                case 7: m.steer_target_bam = m.yaw_bam - m.steer_ramp_bam; break;
-                default: break;
-            }
+            stage_player_vehicle_input(veh, *occ, traits);
         }
         else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
             // An AI controller drives: consume the brain-computed command block
@@ -260,29 +296,38 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
     // [orig: @0x48b990-0x48b9e6].
     {
         const int32_t turn_rate = traits.turn_rate;
-        int32_t min_rate = turn_rate >> 2;
+        int32_t min_rate = io::bam_sar(turn_rate, 2);
         if (traits.turn_rate2 != 0) min_rate = traits.turn_rate2;
         int32_t f = 0x10000;
         if (traits.player_speed != 0) {
-            f = 0x10000 - static_cast<int32_t>((static_cast<int64_t>(m.speed) << 16) /
+            f = 0x10000 - static_cast<int32_t>((static_cast<int64_t>(m.speed) * 0x10000) /
                                                traits.player_speed);
             if (f < 0) f = 0;
         }
-        const int32_t eff = static_cast<int32_t>(
-                                    (static_cast<int64_t>(turn_rate - min_rate) * f + 0x8000) >> 16) +
-                            min_rate;
+        const int32_t eff = io::bam_add(min_rate, static_cast<int32_t>(
+                (static_cast<int64_t>(io::bam_sub(turn_rate, min_rate)) * f +
+                        0x8000) >> 16));
         // Proportional step: 1/64 of the heading error, clamped to the effective rate
         // [orig: @0x48b9e9 `v106 = (target - Yaw + 32) >> 6` + the +-clamp].
-        int32_t delta = (m.steer_target_bam - m.yaw_bam + 32) >> 6;
+        int32_t delta = io::bam_sar(io::bam_add(
+                io::bam_sub(m.steer_target_bam, m.yaw_bam), 32), 6);
         if (delta > eff) delta = eff;
-        if (delta < -eff) delta = -eff;
+        const int32_t neg_eff = io::bam_sub(0, eff);
+        if (delta < neg_eff) delta = neg_eff;
         // Smoothed wheel deflection [orig: @0x48ba17 `aiState += (4 - 32*delta -
         // aiState) >> 3` — entity->aiState is the wheel state on vehicles].
-        m.steer_state += (4 - 32 * delta - m.steer_state) >> 3;
+        const int32_t steer_error = io::bam_sub(
+                io::bam_sub(4, bam_shl_wrap(delta, 5)), m.steer_state);
+        m.steer_state = io::bam_add(
+                m.steer_state, io::bam_sar(steer_error, 3));
         // Yaw rate = -speed * (wheel >> 2) >> 16, applied while grounded
         // [orig: @0x48ba33 modelPtr0 write; the aim/AI lock bytes are unmodeled].
-        m.wheel_rate_bam = static_cast<int32_t>(
-                (static_cast<int64_t>(-m.speed) * (m.steer_state >> 2) + 0x8000) >> 16);
+        if ((veh.flags & kEntityFlagInAir) == 0 || m.plat_afloat) {
+            const int32_t neg_speed = io::bam_sub(0, m.speed);
+            m.wheel_rate_bam = static_cast<int32_t>(
+                    (static_cast<int64_t>(neg_speed) *
+                             io::bam_sar(m.steer_state, 2) + 0x8000) >> 16);
+        }
     }
 
     // ------------------------------------------------------------- speed pipeline
@@ -437,11 +482,15 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // applies it, quartered while the airborne/swimming flag is up
         // [orig: @0x486681..0x486697 `Yaw += modelPtr0 >> 2` under Flags 0x2000].
         if (traits.family == VehicleFamily::Bike) {
-            m.yaw_bam += (veh.flags & kEntityFlagInAir) != 0
-                    ? (m.wheel_rate_bam >> 2)
-                    : m.wheel_rate_bam;
+            // The original's Flags 0x2000 is the suspension solver's current
+            // off-contact result. Our portable contact result is m.grounded;
+            // veh.flags is not maintained by this stand-in and can be stale.
+            const int32_t yaw_step = m.grounded
+                    ? m.wheel_rate_bam
+                    : io::bam_sar(m.wheel_rate_bam, 2);
+            m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
         } else if (m.grounded) {
-            m.yaw_bam += m.wheel_rate_bam;
+            m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
         }
 
         veh.position.x = static_cast<float>(from_fixed(px));
@@ -477,6 +526,58 @@ inline int16_t watercraft_chase_bucket(int32_t dist) {
     if (dist < 0x10000) return 20;
     if (dist < 0x20000) return 25;
     return 30;
+}
+
+struct VehicleEulerBasis {
+    CollisionMatrix q22;
+    double fwd[3] = {};
+    double side[3] = {};
+    double up[3] = {};
+};
+
+// The retail Q22 Rz(yaw)*Ry(-pitch)*Rx(roll) builder shared with collision and
+// bone transforms. Keeping one quantized/sign-correct basis is important:
+// thrust consumes the PREVIOUS solve's pitch/roll, then the platform solver
+// writes the attitude for the following tick.
+VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
+                                      int32_t roll_bam) {
+    VehicleEulerBasis out;
+    const int32_t origin[3] = {};
+    out.q22 = collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin);
+    constexpr double kInvQ22 = 1.0 / 4194304.0;
+    out.fwd[0] = double(out.q22.m[0]) * kInvQ22;
+    out.fwd[1] = double(out.q22.m[4]) * kInvQ22;
+    out.fwd[2] = double(out.q22.m[8]) * kInvQ22;
+    out.side[0] = double(out.q22.m[1]) * kInvQ22;
+    out.side[1] = double(out.q22.m[5]) * kInvQ22;
+    out.side[2] = double(out.q22.m[9]) * kInvQ22;
+    out.up[0] = double(out.q22.m[2]) * kInvQ22;
+    out.up[1] = double(out.q22.m[6]) * kInvQ22;
+    out.up[2] = double(out.q22.m[10]) * kInvQ22;
+    return out;
+}
+
+struct VehicleEulerBasisQ16 {
+    int32_t fwd_x = 0;
+    int32_t fwd_y = 0;
+    int32_t fwd_z = 0;
+    int32_t up_z = 0;
+};
+
+VehicleEulerBasisQ16 vehicle_euler_basis_q16(int32_t yaw_bam,
+                                             int32_t pitch_bam,
+                                             int32_t roll_bam) {
+    const int32_t origin[3] = {};
+    const CollisionMatrix basis = collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin);
+    VehicleEulerBasisQ16 out;
+    // The mover reads the retail-built Q22 matrix columns as Q16 components.
+    out.fwd_x = io::bam_sar(basis.m[0], 6);
+    out.fwd_y = io::bam_sar(basis.m[4], 6);
+    out.fwd_z = io::bam_sar(basis.m[8], 6);
+    out.up_z = io::bam_sar(basis.m[10], 6);
+    return out;
 }
 
 } // namespace
@@ -518,8 +619,8 @@ static void vehicle_client_chase(Entity &veh) {
             m.net_smooth_target[1] = 0;
             m.net_smooth_target[2] = 0;
             m.net_interp_steps = 0;
-            m.net_smooth_heading =
-                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+            m.net_smooth_heading = io::bam_add(
+                    io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         } else {
             const int32_t n = watercraft_chase_bucket(dist);
             m.net_interp_steps = static_cast<int16_t>(n);
@@ -529,13 +630,14 @@ static void vehicle_client_chase(Entity &veh) {
                     (int32_t(dy) + (n >> 1)) / n;
             m.net_smooth_target[2] =
                     (int32_t(dz) + (n >> 1)) / n;
-            m.net_smooth_heading =
-                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+            m.net_smooth_heading = io::bam_add(
+                    io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         }
     }
     {
         const int16_t progress = m.net_interp_progress;
-        if (progress < 20) m.yaw_bam += m.net_smooth_heading;
+        if (progress < 20)
+            m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
         if (progress < m.net_interp_steps) {
             px += m.net_smooth_target[0];
             py += m.net_smooth_target[1];
@@ -708,6 +810,7 @@ void watercraft_platform_solve(World &world, Entity &veh,
     // pure boats (blockers §4). q = beam/4.
     const int32_t q = (traits.box_y_hi - traits.box_y_lo) >> 2;
     if (q <= 0) return;
+    m.plat_solve_valid = true;
     const int32_t zb = traits.box_z_lo + q;
     // 4 corner probes + 3 midline probes (model space) [orig: @0x481CB4..].
     int32_t rm = std::min(((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000,
@@ -734,27 +837,18 @@ void watercraft_platform_solve(World &world, Entity &veh,
     // World transform: the pose matrix from {Pos, Yaw, Pitch, Roll} — the
     // boat's live attitude rides air_pitch_bam/air_roll_bam (the shared
     // attitude fields the sim mirrors to the row).
-    const double cy = std::cos(double(m.yaw_bam) * kBamToRadX87);
-    const double sy = std::sin(double(m.yaw_bam) * kBamToRadX87);
-    const double cp = std::cos(double(m.air_pitch_bam) * kBamToRadX87);
-    const double sp = std::sin(double(m.air_pitch_bam) * kBamToRadX87);
-    const double cr = std::cos(double(m.air_roll_bam) * kBamToRadX87);
-    const double sr = std::sin(double(m.air_roll_bam) * kBamToRadX87);
-    // Row frame consistent with the fit's extraction above (fwd/side/up).
-    const double fwdv[3] = {cy * cp, sy * cp, sp};
-    const double sidev[3] = {cy * sr * sp - sy * cr, sy * sr * sp + cy * cr, -sr * cp};
-    // up = fwd x side (right-handed with the row order used by the fit)
-    const double upv[3] = {fwdv[1] * sidev[2] - fwdv[2] * sidev[1],
-                           fwdv[2] * sidev[0] - fwdv[0] * sidev[2],
-                           fwdv[0] * sidev[1] - fwdv[1] * sidev[0]};
+    const VehicleEulerBasis basis = vehicle_euler_basis(
+            m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+    const double *fwdv = basis.fwd;
+    const double *sidev = basis.side;
+    const double *upv = basis.up;
     int32_t probes[7][3];
     for (int i = 0; i < 7; ++i) {
-        const double mx = double(probes_model[i][0]);
-        const double my = double(probes_model[i][1]);
-        const double mz = double(probes_model[i][2]);
-        probes[i][0] = px + int32_t(mx * fwdv[0] + my * sidev[0] + mz * upv[0]);
-        probes[i][1] = py + int32_t(mx * fwdv[1] + my * sidev[1] + mz * upv[1]);
-        probes[i][2] = pz + int32_t(mx * fwdv[2] + my * sidev[2] + mz * upv[2]);
+        int32_t rotated[3];
+        basis.q22.rotate_point(probes_model[i], rotated);
+        probes[i][0] = px + rotated[0];
+        probes[i][1] = py + rotated[1];
+        probes[i][2] = pz + rotated[2];
     }
 
     // ---- §4/§6 first force pass + severity response.
@@ -1000,6 +1094,83 @@ void watercraft_platform_solve(World &world, Entity &veh,
     veh.position.z = float(from_fixed(pz));
 }
 
+namespace {
+
+bool watercraft_has_platform_geometry(const VehicleTraits &traits) {
+    return traits.box_z_hi != traits.box_z_lo &&
+           ((traits.box_y_hi - traits.box_y_lo) >> 2) > 0;
+}
+
+// Establish only the platform water latch for a newly promoted client hull.
+// The full solve's water decision depends on the four transformed corner
+// heights but not on its later collision/bob mutations, so this gives the first
+// mover tick the state a preceding retail platform frame would have supplied
+// without double-running gravity, accumulators, or the attitude fit.
+void watercraft_seed_platform_latch(World &world, Entity &veh,
+                                    const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    const int32_t q = (traits.box_y_hi - traits.box_y_lo) >> 2;
+    if (q <= 0) return;
+    const int32_t zb = traits.box_z_lo + q;
+    const int32_t corners[4][3] = {
+        {traits.foot_x_hi - q, traits.foot_y_hi - q, zb},
+        {traits.foot_x_hi - q, traits.foot_y_lo + q, zb},
+        {traits.foot_x_lo + q, traits.foot_y_lo + q, zb},
+        {traits.foot_x_lo + q, traits.foot_y_hi - q, zb},
+    };
+    const int32_t pos[3] = {to_fixed(veh.position.x),
+                            to_fixed(veh.position.y),
+                            to_fixed(veh.position.z)};
+    const int32_t origin[3] = {};
+    const CollisionMatrix basis = collision_matrix_from_euler(
+            m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin);
+    int32_t corner_z[4];
+    for (int i = 0; i < 4; ++i) {
+        int32_t rotated[3];
+        basis.rotate_point(corners[i], rotated);
+        corner_z[i] = pos[2] + rotated[2];
+    }
+    const int32_t avg =
+            (corner_z[0] + corner_z[1] + corner_z[2] + corner_z[3]) >> 2;
+    const int32_t v210 = -(traits.box_z_lo + q);
+    // The platform solve's afloat decision is hysteretic: once afloat, the
+    // boat-form draft is 0.9*beam-quarter below the corner average. A promoted
+    // client row has lost that prior latch, so reconstruct the basin it would
+    // already occupy instead of evaluating the dry-entry arm at the waterline.
+    const int32_t afloat_draft =
+            static_cast<int32_t>(double(avg) - 0.9 * double(q));
+    m.plat_afloat = world.env.water_z != 0 &&
+            afloat_draft + v210 < world.env.water_z;
+    m.plat_solve_valid = true;
+    veh.flags = m.plat_afloat ? (veh.flags | 0x8000u)
+                              : (veh.flags & ~0x8000u);
+}
+
+// Some headless embedders do not resolve model boxes, so the platform solver
+// cannot produce its afloat latch. Preserve the old water-plane stand-in only
+// for that explicit fallback; resolved hulls always consume the prior solve.
+void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
+    Entity::VehicleMotorState &m = veh.veh;
+    bool afloat = false;
+    if (world.env.water_z != 0) {
+        if (world.terrain == nullptr) {
+            afloat = true;
+        } else {
+            const int32_t pos[3] = {to_fixed(veh.position.x),
+                                    to_fixed(veh.position.y),
+                                    to_fixed(veh.position.z)};
+            const GroundClearance clearance{};
+            const int32_t ground = calc_average_ground_height(
+                    *world.terrain, pos, 0, clearance);
+            afloat = ground == INT32_MIN || ground < world.env.water_z;
+        }
+    }
+    m.plat_afloat = afloat;
+    veh.flags = afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
+}
+
+} // namespace
+
 // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
 // remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.
 // Residual (both this and the air mover): the client-run deck-carrier follow
@@ -1016,6 +1187,15 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
 
     // ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
     vehicle_client_chase(veh);
+    if (!watercraft_has_platform_geometry(traits)) {
+        watercraft_refresh_fallback_afloat(world, veh);
+    } else if (!m.plat_solve_valid) {
+        // A promoted joiner hull has no earlier local frame, but the mover
+        // consumes the PREVIOUS platform solve's afloat/attitude state. Seed
+        // that state before its first thrust/drag pass instead of treating a
+        // resolved floating hull as landed for one frame.
+        watercraft_seed_platform_latch(world, veh, traits);
+    }
     int32_t px = to_fixed(veh.position.x);
     int32_t py = to_fixed(veh.position.y);
     int32_t pz = to_fixed(veh.position.z);
@@ -1026,11 +1206,19 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     // Deferred witnessed gate: retail mirrors only when occupantEntity !=
     // g_local_player_entity — the local driver's machine runs the input leg
     // instead ([136] = ([136]+[177])>>1 averaging) [orig: @0x48DDD4/@0x490C9E].
-    // Joiner-side vehicle drive input is not wired yet, so every predicted row
-    // is remote-occupied and the gate is vacuously satisfied; add it with the
-    // occupant mirror when the input leg lands (D-NET-196 residuals).
-    m.cmd_speed = m.net_recv_speed;
-    m.steer_target_bam = m.net_recv_steer_bam;
+    // The joiner resolves the local controlling occupant below; other rows
+    // remain remote-occupied and take the verbatim register mirror.
+    if (Entity *local_driver =
+                resolve_local_vehicle_controller(world, veh, traits)) {
+        stage_player_vehicle_input(veh, *local_driver, traits);
+        // Retail reconciles only longitudinal command on the controlling
+        // client; its steer target stays owned by current local LOOK/input.
+        m.cmd_speed = io::bam_sar(
+                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+    } else {
+        m.cmd_speed = m.net_recv_speed;
+        m.steer_target_bam = m.net_recv_steer_bam;
+    }
 
     // ---- 3. Steer/rudder integrator [orig: @0x48E82C..0x48E926].
     {
@@ -1039,26 +1227,36 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         // fraction at 0 so the effective turn rate stays at min_rate — no
         // player_speed fallback exists [orig: the jz to the f=0 arm @0x48E844].
         const int32_t water_spd = traits.water_speed;
-        int32_t min_rate = turn_rate >> 2;
+        int32_t min_rate = io::bam_sar(turn_rate, 2);
         if (traits.turn_rate2 != 0) min_rate = traits.turn_rate2;
         int32_t f = 0;
         if (water_spd != 0) {
             f = 0x10000 - static_cast<int32_t>(
-                    (static_cast<int64_t>(m.speed) << 16) / water_spd);
+                    (static_cast<int64_t>(m.speed) * 0x10000) / water_spd);
         }
         if (f < 0) f = 0;
         // No upper clamp — a reversing hull over-rotates, witnessed absent.
-        const int32_t eff = min_rate + static_cast<int32_t>(
-                (static_cast<int64_t>(turn_rate - min_rate) * f + 0x8000) >> 16);
-        int32_t delta = (m.steer_target_bam - m.yaw_bam + 32) >> 6;
+        const int32_t eff = io::bam_add(min_rate, static_cast<int32_t>(
+                (static_cast<int64_t>(io::bam_sub(turn_rate, min_rate)) * f +
+                        0x8000) >> 16));
+        int32_t delta = io::bam_sar(io::bam_add(
+                io::bam_sub(m.steer_target_bam, m.yaw_bam), 32), 6);
         if (delta > eff) delta = eff;
-        if (delta < -eff) delta = -eff;
-        m.steer_state += (4 - 32 * delta - m.steer_state) >> 3;
-        // Yaw-rate recompute is airborne-gated in retail; without the platform
-        // solve the airborne flag never sets here, so the gate is always open —
-        // the afloat case retail always recomputes too [orig: @0x48E8E3..0x48E920].
-        m.wheel_rate_bam = static_cast<int32_t>(
-                (static_cast<int64_t>(-m.speed) * (m.steer_state >> 2) + 0x8000) >> 16);
+        const int32_t neg_eff = io::bam_sub(0, eff);
+        if (delta < neg_eff) delta = neg_eff;
+        const int32_t steer_error = io::bam_sub(
+                io::bam_sub(4, bam_shl_wrap(delta, 5)), m.steer_state);
+        m.steer_state = io::bam_add(
+                m.steer_state, io::bam_sar(steer_error, 3));
+        // Airborne, non-afloat hulls retain their existing yaw rate; grounded
+        // or floating hulls recompute from the rudder state.
+        // [orig: @0x48E8E3..0x48E920]
+        if ((veh.flags & kEntityFlagInAir) == 0 || m.plat_afloat) {
+            const int32_t neg_speed = io::bam_sub(0, m.speed);
+            m.wheel_rate_bam = static_cast<int32_t>(
+                    (static_cast<int64_t>(neg_speed) *
+                             io::bam_sar(m.steer_state, 2) + 0x8000) >> 16);
+        }
     }
 
     // ---- 4. Thrust [orig: @0x48E926..0x48EA12].
@@ -1066,29 +1264,32 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     {
         const int32_t cmd = m.cmd_speed;
         if (cmd == 0) {
-            if (std::abs(m.vel_x) < 384) m.vel_x = 0;
-            if (std::abs(m.vel_y) < 384) m.vel_y = 0;
+            if (io::bam_abs(m.vel_x) < 384) m.vel_x = 0;
+            if (io::bam_abs(m.vel_y) < 384) m.vel_y = 0;
         } else {
-            const int32_t a = std::abs(cmd);
-            int32_t acc = traits.acceleration + (a >> 8) + (a >> 7);
+            const int32_t a = io::bam_abs(cmd);
+            int32_t acc = io::bam_add(
+                    traits.acceleration,
+                    io::bam_add(io::bam_sar(a, 8), io::bam_sar(a, 7)));
             const int32_t accel = cmd >= 0 ? std::min(acc, cmd)
-                                           : std::max(-acc, cmd);
-            // Forward from the live heading. Retail builds the full euler
-            // matrix from the entity pose (incl. platform pitch/roll); the
-            // platform solve is unported so the hull is level here — the
-            // capsize up[2]>0 gate is trivially open [orig: @0x48E972..0x48E9FF].
-            const int32_t c = cos22_of_bam_x87(m.yaw_bam) >> 6; // 2^22 -> 16.16
-            const int32_t s = sin22_of_bam_x87(m.yaw_bam) >> 6;
-            m.vel_x += static_cast<int32_t>(
-                    (static_cast<int64_t>(accel) * c + 0x8000) >> 16);
-            m.vel_y += static_cast<int32_t>(
-                    (static_cast<int64_t>(accel) * s + 0x8000) >> 16);
-            // Retail's beach gate term is (accel * fwd[2] + 0x8000) >> 16 with
-            // fwd from the full euler matrix incl. the platform solve's
-            // pitch/roll [orig: @0x48E9DC..0x48E9FF]. Under the level-hull
-            // stand-in fwd[2] = 0, so the faithful reduction is 0 — the 30583
-            // beach full-stop never fires until the platform solve lands
-            // (tracked with the @0x481870 stand-in, D-NET-196 residuals).
+                                           : std::max(io::bam_sub(0, acc), cmd);
+            // Retail consumes the full Euler matrix from the PREVIOUS platform
+            // solve. Roll contributes the capsize up[2] gate; pitch tilts the
+            // forward thrust into X/Y/Z. The new solve runs later in this tick,
+            // after position integration [orig: @0x48E972..0x48E9FF].
+            const VehicleEulerBasisQ16 basis = vehicle_euler_basis_q16(
+                    m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+            if (basis.up_z > 0) {
+                m.vel_x += static_cast<int32_t>(
+                        (static_cast<int64_t>(accel) * basis.fwd_x +
+                                0x8000) >> 16);
+                m.vel_y += static_cast<int32_t>(
+                        (static_cast<int64_t>(accel) * basis.fwd_y +
+                                0x8000) >> 16);
+                vertical_thrust = static_cast<int32_t>(
+                        (static_cast<int64_t>(accel) * basis.fwd_z +
+                                0x8000) >> 16);
+            }
         }
     }
 
@@ -1098,7 +1299,7 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         m.vel_y -= m.vel_y >> 6;
         const int32_t vx = m.vel_x, vy = m.vel_y;
         const int32_t vel_heading = bam_of_atan2(double(vy), double(vx));
-        const int32_t slip = m.yaw_bam - vel_heading;
+        const int32_t slip = io::bam_sub(m.yaw_bam, vel_heading);
         const int32_t s22 = sin22_of_bam_x87(slip);
         const int32_t c22 = cos22_of_bam_x87(slip);
         const double dm = std::sqrt(double(vx) * double(vx) +
@@ -1113,7 +1314,7 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         // Keel: bleed 1/32 of the cross-track speed along the beam axis. The
         // beam constant is the raw 0x3FFFFFC0 (+90 deg minus 0x40 under the
         // pi=0x7FFF8000 convention) — port verbatim, do not "fix" it.
-        const int32_t beam = m.yaw_bam + 0x3FFFFFC0;
+        const int32_t beam = io::bam_add(m.yaw_bam, 0x3FFFFFC0);
         const int32_t bs22 = sin22_of_bam_x87(beam);
         const int32_t bc22 = cos22_of_bam_x87(beam);
         m.vel_x += static_cast<int32_t>(
@@ -1126,28 +1327,18 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         }
     }
 
-    // ---- 6. Contact drags [orig: @0x48EBB5..0x48ECA6]. The afloat/land branch
-    // keys on the platform solve's afloat flag; unported, so derive it from the
-    // water plane: in water = terrain under the hull below the water line.
+    // ---- 6. Contact drags [orig: @0x48EBB5..0x48ECA6]. This tick consumes
+    // the prior platform solve's authoritative afloat latch. Re-sampling the
+    // terrain here races the solve and misclassifies beached/airborne hulls.
     {
-        bool afloat = false;
-        int32_t ground_here = INT32_MIN;
-        if (world.terrain != nullptr) {
-            const int32_t pos3[3] = {px, py, pz};
-            const GroundClearance clearance{};
-            ground_here =
-                    calc_average_ground_height(*world.terrain, pos3, 0, clearance);
-        }
-        if (world.env.water_z != 0 && ground_here != INT32_MIN)
-            afloat = ground_here < world.env.water_z;
-        else if (world.env.water_z != 0 && world.terrain == nullptr)
-            afloat = true; // headless/no-terrain world with water: float
-        if (!afloat) {
+        if (!m.plat_afloat) {
             // Landed hull: planar and yaw-rate sheds (the slideDecay gravity
             // leg stays with the unported platform solve; Z is chase-owned).
             m.vel_x -= (m.vel_x + 4) >> 3;
             m.vel_y -= (m.vel_y + 4) >> 3;
-            m.wheel_rate_bam -= (m.wheel_rate_bam + 2) >> 2;
+            m.wheel_rate_bam = io::bam_sub(
+                    m.wheel_rate_bam,
+                    io::bam_sar(io::bam_add(m.wheel_rate_bam, 2), 2));
         }
         // Shore look-ahead: the witnessed single bilinear sample at the NEXT
         // position [orig: Terrain_SampleHeightBilinear(pos + vel)
@@ -1161,7 +1352,9 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
             if (ground != INT32_MIN && ground >= world.env.water_z) {
                 m.vel_x -= (m.vel_x + 4) >> 3;
                 m.vel_y -= (m.vel_y + 4) >> 3;
-                m.wheel_rate_bam -= (m.wheel_rate_bam + 2) >> 2;
+                m.wheel_rate_bam = io::bam_sub(
+                        m.wheel_rate_bam,
+                        io::bam_sar(io::bam_add(m.wheel_rate_bam, 2), 2));
                 if (vertical_thrust > 0 && ground - world.env.water_z > 30583 &&
                         !veh.ground_target.valid()) {
                     m.vel_x = 0;
@@ -1172,15 +1365,16 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         }
     }
 
-    // ---- 7. Integration + yaw application [orig: @0x48ECA8..0x48ECF2]. Z is
-    // chase-only (platform-solve residual, see the header note).
+    // ---- 7. Position integration, platform solve, then yaw application
+    // [orig: @0x48ECA8..0x48ECF2].
     px += m.vel_x;
     py += m.vel_y;
     {
         const int32_t r = m.wheel_rate_bam;
-        m.wheel_rate_bam = r - ((r + 16) >> 5) - (r >> 31); // decay toward zero
+        m.wheel_rate_bam = io::bam_sub(
+                io::bam_sub(r, io::bam_sar(io::bam_add(r, 16), 5)),
+                io::bam_sar(r, 31)); // decay toward zero
     }
-    m.yaw_bam += m.wheel_rate_bam;
 
     veh.position.x = static_cast<float>(from_fixed(px));
     veh.position.y = static_cast<float>(from_fixed(py));
@@ -1190,17 +1384,16 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     // retail caller sits [orig: call @0x48ECE7 — after Position += velocity,
     // before the yaw apply]. It owns Z + Pitch/Roll + the afloat/airborne
     // flags from here (the chase-staged Z above is its seed, matching the
-    // template's airborne-only Z-step gate).
+    // template's airborne-only Z-step gate). Yaw applies only AFTER this call.
     watercraft_platform_solve(world, veh, traits);
+    m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
 }
 
-// The GROUND-family prediction leg (net-re §5.38e B-facet): the client subset of
-// Entity_UpdateVehiclePhysics is structurally the authority drive core minus the
-// input block [spec part F, decompile-level] — run the shared chase, adopt the
-// mirrored registers [orig: [136]=[177]/[132]=[179] @ the family mirror], and
-// drive tick_vehicle_motor's core with the input block bypassed
+// The GROUND-family prediction leg (net-re §5.38e B-facet): run the shared
+// chase, stage local-driver input or remote mirrored registers, then drive
+// tick_vehicle_motor's core with its input block bypassed
 // (player_control=false leaves the registers untouched and skips the occupant
 // resolve; the handbrake/aim-lock/tire-slip legs inherit their existing
 // D-NET-161 deferrals).
@@ -1212,10 +1405,14 @@ void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) 
         m.yaw_seeded = true;
     }
     vehicle_client_chase(veh);
-    // Register mirror — the occupant != local-player gate is deferred with the
-    // input leg (see the watercraft mirror note) [orig: @0x48DDD4 pattern].
-    m.cmd_speed = m.net_recv_speed;
-    m.steer_target_bam = m.net_recv_steer_bam;
+    // Register mirror / local-driver gate (see the watercraft mirror note).
+    if (Entity *local_driver =
+                resolve_local_vehicle_controller(world, veh, traits)) {
+        stage_player_vehicle_input(veh, *local_driver, traits);
+    } else {
+        m.cmd_speed = m.net_recv_speed;
+        m.steer_target_bam = m.net_recv_steer_bam;
+    }
     VehicleTraits core = traits;
     core.player_control = false; // bypass the occupant/input block, keep the core
     tick_vehicle_motor(world, veh, core, nullptr);
@@ -1288,8 +1485,8 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
             m.net_smooth_target[1] = 0;
             m.net_smooth_target[2] = 0;
             m.net_interp_steps = 0;
-            m.net_smooth_heading =
-                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+            m.net_smooth_heading = io::bam_add(
+                    io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         } else {
             int32_t n;
             if (dist < 0x4000) n = 8;
@@ -1302,13 +1499,14 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
             m.net_smooth_target[0] = (int32_t(dx) + (n >> 1)) / n;
             m.net_smooth_target[1] = (int32_t(dy) + (n >> 1)) / n;
             m.net_smooth_target[2] = (int32_t(dz) + (n >> 1)) / n;
-            m.net_smooth_heading =
-                    (m.net_smooth_heading - m.yaw_bam + 10) / 20;
+            m.net_smooth_heading = io::bam_add(
+                    io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
         }
     }
     {
         const int16_t progress = m.net_interp_progress;
-        if (progress < 20) m.yaw_bam += m.net_smooth_heading;
+        if (progress < 20)
+            m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
         if (progress < m.net_interp_steps) {
             px += m.net_smooth_target[0];
             py += m.net_smooth_target[1];
@@ -1341,27 +1539,32 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
 
     // ---- 3. Yaw servo (second order) [orig: @0x491CC8..0x491D27].
     {
-        int32_t step = (m.steer_target_bam - m.yaw_bam + 8) >> 4;
+        int32_t step = io::bam_sar(io::bam_add(
+                io::bam_sub(m.steer_target_bam, m.yaw_bam), 8), 4);
         const int32_t tr = traits.turn_rate;
         if (step > tr) step = tr;
-        if (step < -tr) step = -tr;
-        m.wheel_rate_bam += (step + 4) >> 3;
-        const int32_t astep = step < 0 ? -step : step;
+        const int32_t neg_tr = io::bam_sub(0, tr);
+        if (step < neg_tr) step = neg_tr;
+        m.wheel_rate_bam = io::bam_add(
+                m.wheel_rate_bam, io::bam_sar(io::bam_add(step, 4), 3));
+        const int32_t astep = io::bam_abs(step);
         if (m.wheel_rate_bam > astep) m.wheel_rate_bam = astep;
-        if (m.wheel_rate_bam < -astep) m.wheel_rate_bam = -astep;
+        const int32_t neg_astep = io::bam_sub(0, astep);
+        if (m.wheel_rate_bam < neg_astep) m.wheel_rate_bam = neg_astep;
     }
 
     // ---- 4. Tilt commands + climb servo [orig: @0x491D2D..0x491E2F].
     {
-        const int32_t cap = traits.acceleration << 12;
-        int32_t fwd = m.cmd_speed << 11;
-        int32_t lat = cmd_lat << 11;
+        const int32_t cap = bam_shl_wrap(traits.acceleration, 12);
+        int32_t fwd = bam_shl_wrap(m.cmd_speed, 11);
+        int32_t lat = bam_shl_wrap(cmd_lat, 11);
         if (fwd > cap) fwd = cap;
-        if (fwd < -cap) fwd = -cap;
+        const int32_t neg_cap = io::bam_sub(0, cap);
+        if (fwd < neg_cap) fwd = neg_cap;
         if (lat > cap) lat = cap;
-        if (lat < -cap) lat = -cap;
-        m.air_pitch_rate -= fwd;
-        m.air_roll_rate -= lat;
+        if (lat < neg_cap) lat = neg_cap;
+        m.air_pitch_rate = io::bam_sub(m.air_pitch_rate, fwd);
+        m.air_roll_rate = io::bam_sub(m.air_roll_rate, lat);
         if (to_fixed(veh.bound_radius) >= 0xF0000)
             m.slide_z += (m.net_alt_target - pz + 0x100) >> 9; // heavy 1/512
         else
@@ -1379,7 +1582,7 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         // ---- 5. Airborne aero block [orig: @0x491E35..0x4922BC].
         const int32_t vx = m.vel_x, vy = m.vel_y;
         const int32_t vel_heading = bam_of_atan2(double(vy), double(vx));
-        const int32_t slip = m.yaw_bam - vel_heading;
+        const int32_t slip = io::bam_sub(m.yaw_bam, vel_heading);
         const int32_t s22 = sin22_of_bam_x87(slip);
         const int32_t c22 = cos22_of_bam_x87(slip);
         const double dm = std::sqrt(double(vx) * double(vx) +
@@ -1391,24 +1594,31 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         const int32_t along = static_cast<int32_t>(
                 (static_cast<int64_t>(c22) * mag) >> 22);
         m.speed = along;
-        const int32_t alat = lateral < 0 ? -lateral : lateral;
-        const int32_t aclat = cmd_lat < 0 ? -cmd_lat : cmd_lat;
+        const int32_t alat = io::bam_abs(lateral);
+        const int32_t aclat = io::bam_abs(cmd_lat);
         if (alat > aclat)
-            m.air_roll_rate += 8 * cmd_lat - 8 * lateral;
-        const int32_t aalong = along < 0 ? -along : along;
-        const int32_t acmd = m.cmd_speed < 0 ? -m.cmd_speed : m.cmd_speed;
+            m.air_roll_rate = io::bam_add(
+                    m.air_roll_rate,
+                    io::bam_sub(bam_shl_wrap(cmd_lat, 3),
+                                bam_shl_wrap(lateral, 3)));
+        const int32_t aalong = io::bam_abs(along);
+        const int32_t acmd = io::bam_abs(m.cmd_speed);
         if (aalong > acmd) {
             const int32_t e = along - m.cmd_speed;
-            const int32_t p32 = m.air_pitch_bam + 32 * e;
-            const int32_t ap32 = p32 < 0 ? -p32 : p32;
-            const int32_t ap = m.air_pitch_bam < 0 ? -m.air_pitch_bam
-                                                   : m.air_pitch_bam;
+            const int32_t p32 = io::bam_add(
+                    m.air_pitch_bam, bam_shl_wrap(e, 5));
+            const int32_t ap32 = io::bam_abs(p32);
+            const int32_t ap = io::bam_abs(m.air_pitch_bam);
             if (ap32 < ap) {
-                m.air_pitch_rate += 16 * e;
-                m.air_pitch_bam += 32 * e;
+                m.air_pitch_rate = io::bam_add(
+                        m.air_pitch_rate, bam_shl_wrap(e, 4));
+                m.air_pitch_bam = io::bam_add(
+                        m.air_pitch_bam, bam_shl_wrap(e, 5));
             } else {
-                m.air_pitch_rate += 4 * e;
-                m.air_pitch_bam += 4 * e;
+                m.air_pitch_rate = io::bam_add(
+                        m.air_pitch_rate, bam_shl_wrap(e, 2));
+                m.air_pitch_bam = io::bam_add(
+                        m.air_pitch_bam, bam_shl_wrap(e, 2));
             }
         }
         // Weathervane [orig: @0x491FA8..0x491FD9] (the occupant-analog steer
@@ -1417,9 +1627,10 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         // value, one larger than (abs >> 6) for negative non-multiples of 64.
         {
             const int32_t wv = lateral >> 6;
-            m.yaw_bam += static_cast<int32_t>(
-                    (static_cast<int64_t>(wv < 0 ? -wv : wv) *
-                             (vel_heading - m.yaw_bam) + 0x8000) >> 16);
+            const int32_t yaw_error = io::bam_sub(vel_heading, m.yaw_bam);
+            m.yaw_bam = io::bam_add(m.yaw_bam, static_cast<int32_t>(
+                    (static_cast<int64_t>(io::bam_abs(wv)) * yaw_error +
+                            0x8000) >> 16));
         }
         // Tilt -> acceleration in the yaw frame [orig: @0x492006..0x492152].
         const int32_t a_fwd = -static_cast<int32_t>(
@@ -1453,22 +1664,33 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         // which skips the pass — revisit with the occupant mirror gate below.
         m.slide_z = static_cast<int32_t>((240LL * m.slide_z + 128) >> 8);
         // Attitude self-righting + rate damping [orig: @0x4921CD..0x492246].
-        m.air_pitch_rate -= (m.air_pitch_bam + 0x100) >> 9;
-        m.air_pitch_bam -= (m.air_pitch_bam + 0x100) >> 9;
-        m.air_roll_rate -= (m.air_roll_bam + 0x100) >> 9;
-        m.air_roll_bam -= (m.air_roll_bam + 0x100) >> 9;
-        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) + (m.air_roll_rate >> 31);
-        m.air_pitch_rate -=
-                ((m.air_pitch_rate + 8) >> 4) + (m.air_pitch_rate >> 31);
+        const int32_t pitch_right = io::bam_sar(
+                io::bam_add(m.air_pitch_bam, 0x100), 9);
+        const int32_t roll_right = io::bam_sar(
+                io::bam_add(m.air_roll_bam, 0x100), 9);
+        m.air_pitch_rate = io::bam_sub(m.air_pitch_rate, pitch_right);
+        m.air_pitch_bam = io::bam_sub(m.air_pitch_bam, pitch_right);
+        m.air_roll_rate = io::bam_sub(m.air_roll_rate, roll_right);
+        m.air_roll_bam = io::bam_sub(m.air_roll_bam, roll_right);
+        m.air_roll_rate = io::bam_sub(
+                m.air_roll_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_roll_rate, 8), 4),
+                            io::bam_sar(m.air_roll_rate, 31)));
+        m.air_pitch_rate = io::bam_sub(
+                m.air_pitch_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_pitch_rate, 8), 4),
+                            io::bam_sar(m.air_pitch_rate, 31)));
         if (traits.speed_pitch != 0) {
-            const int32_t pc = traits.speed_pitch * 192426;
+            const int32_t pc = bam_mul_wrap(traits.speed_pitch, 192426);
             if (m.air_pitch_rate > pc) m.air_pitch_rate = pc;
-            if (m.air_pitch_rate < -pc) m.air_pitch_rate = -pc;
+            const int32_t neg_pc = io::bam_sub(0, pc);
+            if (m.air_pitch_rate < neg_pc) m.air_pitch_rate = neg_pc;
         }
         if (traits.turn_roll != 0) {
-            const int32_t rc = traits.turn_roll * 192426;
+            const int32_t rc = bam_mul_wrap(traits.turn_roll, 192426);
             if (m.air_roll_rate > rc) m.air_roll_rate = rc;
-            if (m.air_roll_rate < -rc) m.air_roll_rate = -rc;
+            const int32_t neg_rc = io::bam_sub(0, rc);
+            if (m.air_roll_rate < neg_rc) m.air_roll_rate = neg_rc;
         }
     } else {
         // ---- 6. Grounded shed block [orig: @0x4922C1..0x492378].
@@ -1476,17 +1698,25 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         m.vel_y -= ((m.vel_y + 2) >> 2) + (m.vel_y >> 31);
         m.slide_z -= ((m.slide_z + 8) >> 4) + (m.slide_z >> 31);
         if (m.slide_z < 0) m.slide_z >>= 2;
-        m.wheel_rate_bam -= ((m.wheel_rate_bam + 4) >> 3) + (m.wheel_rate_bam >> 31);
-        m.air_roll_rate -= ((m.air_roll_rate + 4) >> 3) + (m.air_roll_rate >> 31);
-        m.air_pitch_rate -=
-                ((m.air_pitch_rate + 4) >> 3) + (m.air_pitch_rate >> 31);
+        m.wheel_rate_bam = io::bam_sub(
+                m.wheel_rate_bam,
+                io::bam_add(io::bam_sar(io::bam_add(m.wheel_rate_bam, 4), 3),
+                            io::bam_sar(m.wheel_rate_bam, 31)));
+        m.air_roll_rate = io::bam_sub(
+                m.air_roll_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_roll_rate, 4), 3),
+                            io::bam_sar(m.air_roll_rate, 31)));
+        m.air_pitch_rate = io::bam_sub(
+                m.air_pitch_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_pitch_rate, 4), 3),
+                            io::bam_sar(m.air_pitch_rate, 31)));
         m.net_alt_target += (pz - m.net_alt_target) >> 2;
     }
 
     // ---- 7. Common tail [orig: @0x49237E..0x492776].
     if (m.cmd_speed == 0 && cmd_lat == 0) {
-        if (std::abs(m.vel_x) < 384) m.vel_x = 0;
-        if (std::abs(m.vel_y) < 384) m.vel_y = 0;
+        if (io::bam_abs(m.vel_x) < 384) m.vel_x = 0;
+        if (io::bam_abs(m.vel_y) < 384) m.vel_y = 0;
     }
     // Unconditional [orig: @0x4923C0..0x4923E9] — a zero climb_speed def pins
     // the vertical rate to exactly 0 (both bounds collapse), the witnessed
@@ -1495,25 +1725,40 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     if (m.slide_z < -2 * traits.climb_speed)
         m.slide_z = -2 * traits.climb_speed;
     if (!m.net_engine_on) {
-        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) + (m.air_roll_rate >> 31);
-        m.air_pitch_rate -=
-                ((m.air_pitch_rate + 8) >> 4) + (m.air_pitch_rate >> 31);
+        m.air_roll_rate = io::bam_sub(
+                m.air_roll_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_roll_rate, 8), 4),
+                            io::bam_sar(m.air_roll_rate, 31)));
+        m.air_pitch_rate = io::bam_sub(
+                m.air_pitch_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_pitch_rate, 8), 4),
+                            io::bam_sar(m.air_pitch_rate, 31)));
     }
     if (in_water) {
         m.vel_x -= ((m.vel_x + 4) >> 3) + (m.vel_x >> 31);
         m.vel_y -= ((m.vel_y + 4) >> 3) + (m.vel_y >> 31);
         m.slide_z -= ((m.slide_z + 4) >> 3) + (m.slide_z >> 31);
-        m.wheel_rate_bam -= ((m.wheel_rate_bam + 8) >> 4) + (m.wheel_rate_bam >> 31);
-        m.air_roll_rate -= ((m.air_roll_rate + 8) >> 4) + (m.air_roll_rate >> 31);
-        m.air_pitch_rate -=
-                ((m.air_pitch_rate + 8) >> 4) + (m.air_pitch_rate >> 31);
+        m.wheel_rate_bam = io::bam_sub(
+                m.wheel_rate_bam,
+                io::bam_add(io::bam_sar(io::bam_add(m.wheel_rate_bam, 8), 4),
+                            io::bam_sar(m.wheel_rate_bam, 31)));
+        m.air_roll_rate = io::bam_sub(
+                m.air_roll_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_roll_rate, 8), 4),
+                            io::bam_sar(m.air_roll_rate, 31)));
+        m.air_pitch_rate = io::bam_sub(
+                m.air_pitch_rate,
+                io::bam_add(io::bam_sar(io::bam_add(m.air_pitch_rate, 8), 4),
+                            io::bam_sar(m.air_pitch_rate, 31)));
     }
     px += m.vel_x;
     py += m.vel_y;
     pz += m.slide_z;
     {
         const int32_t r = m.wheel_rate_bam;
-        m.wheel_rate_bam = r - ((r + 16) >> 5) - (r >> 31);
+        m.wheel_rate_bam = io::bam_sub(
+                io::bam_sub(r, io::bam_sar(io::bam_add(r, 16), 5)),
+                io::bam_sar(r, 31));
     }
     // Contact stub (the unported 0x47EF10 solve): never sink below the ground.
     if (ground != INT32_MIN && pz < ground) {
@@ -1527,9 +1772,9 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
     if (m.air_pitch_rate < -kAttitudeRateClamp) m.air_pitch_rate = -kAttitudeRateClamp;
     if (m.air_roll_rate > kAttitudeRateClamp) m.air_roll_rate = kAttitudeRateClamp;
     if (m.air_roll_rate < -kAttitudeRateClamp) m.air_roll_rate = -kAttitudeRateClamp;
-    m.air_pitch_bam += m.air_pitch_rate;
-    m.air_roll_bam += m.air_roll_rate;
-    m.yaw_bam += m.wheel_rate_bam;
+    m.air_pitch_bam = io::bam_add(m.air_pitch_bam, m.air_pitch_rate);
+    m.air_roll_bam = io::bam_add(m.air_roll_bam, m.air_roll_rate);
+    m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
 
     veh.position.x = static_cast<float>(from_fixed(px));
     veh.position.y = static_cast<float>(from_fixed(py));

@@ -127,6 +127,7 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	NapiNPConnection node;
 	node.peer = peer;
 	node.type = 1; // server-side: the host's view of a client
+	arm_s2c_send_holdoff(node, ctx.config.send_holdoff_ticks);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
 }
@@ -832,10 +833,12 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return out;
 }
 
-std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
+std::vector<TickOut> flush_server_missing_requests(
+		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != 1 || !conn.seq.missing_request_pending) continue;
+		if (respect_s2c_send_boundary && !conn.s2c_send_boundary_open) continue;
 		conn.seq.missing_request_pending = false;
 		if (conn.seq.queued_inbound.empty()) continue;
 
@@ -853,7 +856,9 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	return out;
 }
 
-std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick) {
+std::vector<TickOut> tick_connections(
+		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
+		bool respect_s2c_send_boundary) {
 	std::vector<TickOut> out;
 	// Pump the JO receive timeout before any spawn/burst work. Collect keys first because the complete
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
@@ -915,6 +920,9 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 								: std::numeric_limits<uint32_t>::max());
 			}
 		}
+		const bool send_boundary_closed =
+				respect_s2c_send_boundary && conn.type == 1 &&
+				!conn.s2c_send_boundary_open;
 		if (conn.burst.spawned) {
 			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
 			// version check must keep running here so EXISTING clients learn about LATER
@@ -922,6 +930,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 			// i.e. once, on each connection's own burst-completion tick — the v30 wire
 			// showed the first joiner never received the grown 47-B 0x16 when the second
 			// spawned (its HUD count stayed at 2).
+			if (send_boundary_closed) continue;
 			TickOut to;
 			to.peer = conn.peer;
 			if (conn.type == 1 &&
@@ -939,6 +948,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 
 		TickOut to;
 		to.peer = conn.peer;
+		if (send_boundary_closed) continue;
 
 		if (ctx.world == nullptr) {
 			// No World means no semantic burst, but reliable settings/handshake records still need

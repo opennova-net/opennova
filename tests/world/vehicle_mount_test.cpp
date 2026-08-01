@@ -209,6 +209,72 @@ void test_usegun_attach_presnaps_local_look() {
     CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
 }
 
+// A remote player's LOOK is still independent in either vehicle-control seat.
+// The authority motor consumes Entity::yaw as the mouse-steer target, while the
+// carried body frame remains owned by the seat. The post-motor refresh must keep
+// that split intact for the outgoing snapshot and the next authority tick.
+void test_remote_player_control_seat_preserves_wire_look() {
+    const SeatType control_types[] = {SeatType::Driver, SeatType::Controller};
+    for (const SeatType control_type : control_types) {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+
+        Entity vehicle;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {10.0f, 20.0f, 30.0f};
+        vehicle.yaw = 0;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        Seat seat;
+        seat.type = control_type;
+        seat.bone_index = 1;
+        seat.seat_local = {1.0f, 2.0f, 3.0f};
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+        Entity player;
+        player.kind = EntityKind::Organic;
+        player.player_class = 8;
+        player.health = 100;
+        player.alive = true;
+        const EntityHandle player_h = w.registry.spawn(0, player);
+        const int ai_index = ai.attach(player_h);
+        AiEntity &body = *ai.at(ai_index);
+        body.inf.active = true;
+        body.net_is_remote_peer = true;
+
+        CHECK(entity_process_vehicle_attach(w, player_h, vehicle_h, 1));
+
+        const int32_t look_heading = bam_heading_from_mission_yaw_deg(45.0);
+        constexpr int32_t look_pitch = 0x06000000;
+        body.heading = look_heading;
+        body.pitch = look_pitch;
+        w.registry.get(player_h)->yaw = 45;
+
+        CHECK(ai.pose_if_mounted(body, w));
+        CHECK(body.heading == look_heading);
+        CHECK(body.pitch == look_pitch);
+        CHECK(w.registry.get(player_h)->yaw == 45);
+        CHECK(body.inf.body_heading == 90 * 11930464);
+
+        Entity *live_vehicle = w.registry.get(vehicle_h);
+        live_vehicle->position = {40.0f, 50.0f, 60.0f};
+        live_vehicle->yaw = 20;
+        CHECK(ai.refresh_mounted_pose(body, w));
+        CHECK(body.heading == look_heading);
+        CHECK(body.pitch == look_pitch);
+        CHECK(w.registry.get(player_h)->yaw == 45);
+        CHECK(body.inf.body_heading == 70 * 11930464);
+        const Entity *mounted = w.registry.get(player_h);
+        CHECK(body.pos[0] == to_fixed(mounted->position.x));
+        CHECK(body.pos[1] == to_fixed(mounted->position.y));
+        CHECK(body.pos[2] == to_fixed(mounted->position.z));
+    }
+}
+
 // A model-aware host supplies the complete live seat-bone frame at the shared
 // World seam. Every attach entry point consumes it immediately, and mounted AI
 // consumes a newly evaluated frame on its next tick. A missing/declining host
@@ -378,6 +444,26 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
         CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
 
+        // A post-carrier refresh reevaluates the seat pose exactly once at the
+        // already-chased LOOK. It must not run the full mounted-body phase again:
+        // doing so would chase aim a second time and clear animation state.
+        provider.clear();
+        body->inf.anim_pending = 77;
+        body->inf.move_mode = 9;
+        body->inf.target_dist = 1234;
+        CHECK(ai.refresh_mounted_pose(*body, w));
+        CHECK(provider.headings.size() == 1);
+        CHECK(provider.pitches.size() == 1);
+        if (provider.headings.size() == 1) {
+            CHECK(provider.headings[0] == kChasedHeading);
+            CHECK(provider.pitches[0] == kChasedPitch);
+        }
+        CHECK(body->heading == kChasedHeading);
+        CHECK(body->pitch == kChasedPitch);
+        CHECK(body->inf.anim_pending == 77);
+        CHECK(body->inf.move_mode == 9);
+        CHECK(body->inf.target_dist == 1234);
+
         provider.clear();
         body->inf.is_local_player = true;
         body->inf.target_heading = 0x03000000;
@@ -393,6 +479,28 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         CHECK(body->pitch == 0x02000000);
         CHECK(std::abs(w.registry.get(occupant_h)->position.x - 3.0f) < 0.0001f);
         CHECK(std::abs(w.registry.get(occupant_h)->position.y - 2.0f) < 0.0001f);
+
+        // Likewise, the local post-prediction pose pass preserves the promoted
+        // LOOK and wire/input state instead of consuming a newer input latch.
+        provider.clear();
+        body->inf.target_heading = 0x09000000;
+        body->inf.look_pitch = 0x07000000;
+        body->inf.jump_requested = true;
+        Entity *mounted_local = w.registry.get(occupant_h);
+        mounted_local->net_move_input = 0x5Au;
+        mounted_local->net_stance_bits = 0x03u;
+        CHECK(ai.refresh_mounted_pose(*body, w));
+        CHECK(provider.headings.size() == 1);
+        CHECK(provider.pitches.size() == 1);
+        if (provider.headings.size() == 1) {
+            CHECK(provider.headings[0] == 0x03000000);
+            CHECK(provider.pitches[0] == 0x02000000);
+        }
+        CHECK(body->heading == 0x03000000);
+        CHECK(body->pitch == 0x02000000);
+        CHECK(body->inf.jump_requested);
+        CHECK(mounted_local->net_move_input == 0x5Au);
+        CHECK(mounted_local->net_stance_bits == 0x03u);
     }
 
     // Null and declining providers both preserve the known static fallback.
@@ -1380,6 +1488,7 @@ void test_vehicle_hull_stops_at_building() {
 
 int main() {
     test_usegun_attach_presnaps_local_look();
+    test_remote_player_control_seat_preserves_wire_look();
     test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();

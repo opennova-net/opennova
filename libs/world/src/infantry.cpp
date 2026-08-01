@@ -48,6 +48,7 @@
 #include <limits>
 
 #include <io/bam.h>
+#include <terrain/height_field.h>
 
 #include "world/ai.h"
 #include "world/angle.h"
@@ -85,13 +86,23 @@ constexpr int32_t kLegReplantSnap = 357913920;
 constexpr int32_t kGravityStep = 416;
 constexpr int32_t kGravityStepPlayer = 208;
 constexpr int32_t kTerminalVelZ = -32768;
-// Foot-above-floor gap (16.16): the collision caller marks airborne only when the
-// returned positive clearance exceeds this value. [orig: org1 @0x4b9910 / org2
-// @0x4b40e0 compare collision return against 0xF000]
-constexpr int32_t kAirborneGap = 0xF000;
 // [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
 // mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
 constexpr int32_t kJumpImpulseVelZ = 0x1600;
+// The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
+// drowning/water (0x8000), and the second witnessed water-state bit (0x10000).
+// Carried (0x40) is tested separately immediately afterward. The reimpl keeps
+// flags in two mirrors plus a typed mounted relation, so collapse those carriers
+// at the one shared local/remote eligibility seam.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b7ea0-0x4b7ebd]
+constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
+bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent) {
+    if (inf.airborne) return true;
+    if (ent == nullptr) return false;
+    const uint32_t flags = ent->flags | ent->engine_flags;
+    return (flags & kPlayerJumpBlockedFlags) != 0 || ent->mounted ||
+           (flags & kEntityFlagMounted) != 0;
+}
 // Slope-pass constants. org1 (NPC): shifted small-angle slopes clamped +-656175520
 // with the fixed 0x22222200 slide threshold [orig: @0x4ba1a8-0x4ba34c]. org2 (player):
 // true atan2 slopes over the probe separations (45056 fore-aft / 11264 lateral, 16.16)
@@ -1484,7 +1495,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         } else {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
         }
-        if (foot_clearance > kAirborneGap) {
+        if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later
@@ -1556,7 +1567,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x4b7e78-0x4b7e82]. Gates [orig: @0x4b7e8c-0x4b7ebd]: cooldown 0, not
         // prone (the var_10AC selection local), !(Flags & 0x1A002) — in-air, dead,
         // and the water pair (unmodeled) — the key held (MoveOrder bit 5), not
-        // carried (0x40, unmodeled). The impulse: 3/4 of the rotated root step into
+        // carried (0x40). The flag carriers are modeled even though the swimming
+        // transition producer remains D-INF-3. The impulse: 3/4 of the rotated root step into
         // the slide velocity, vel_z = 0x1600, in-air set, anim 30 jump_start now
         // with 31 jump_loop queued, cooldown reloaded to 32; the platform-exit
         // sincos leg @0x4b7f0c rides the platform slice (D-COL-5).
@@ -1568,8 +1580,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             } else if (inf.jump_cooldown == 1 && !inf.jump_requested) {
                 inf.jump_cooldown = 0;                          // [orig: @0x4b7e7a-0x4b7e82]
             }
-            if (inf.jump_cooldown == 0 && inf.jump_requested && !inf.airborne &&
-                e.health > 0 && inf.stance != InfantryState::Stance::kProne) {
+            if (inf.jump_cooldown == 0 && inf.jump_requested &&
+                !player_jump_world_state_blocked(inf, tick_entity) && e.health > 0 &&
+                inf.stance != InfantryState::Stance::kProne) {
                 inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
                 inf.vel[1] += (3 * root_wy) >> 2;
                 inf.vel[2] = kJumpImpulseVelZ;    // [orig: @0x4b7ee5]
@@ -2162,6 +2175,11 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0
         // deferred deathAnim / 175 falling-death variant selection is the combat pass).
         // [orig: the @0x4b40e0 death leg; digest: death 175 / deathAnim]
+        // Relationship teardown is independent of animation state. A peer can
+        // already be in a death-class clip when a late/replayed state restores a
+        // mount, and that must not leave the seat claim or compact carrier alive.
+        // [orig: infantry death detach @0x4b9c57..0x4b9c60]
+        if (ent->mounted) entity_detach_from_vehicle(world, e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
             const int death = anim_state::kDeathBulletBase + 4;
             const int target =
@@ -2178,11 +2196,19 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // from 0 [orig: maintenance @0x4b7de0-0x4b7e15, park @0x4b7e7a-0x4b7e82,
         // gate @0x4b7e8c-0x4b7eb5, anim 30 + pending 31 + reload 32
         // @0x4b7ef2-0x4b7f06]. A wire-snapped peer's MOTION is uplink-owned, so
-        // only the anim/latch leg runs here; without a peer motor there is no
-        // landing edge — the countdown window holds the jump anims and the
-        // selection resumes when it parks (tracked in the D-NET-159/196 record).
+        // only the anim/latch leg runs here. The C2S pose apply reconstructs the
+        // terrain-backed airborne/landing state that this gate consumes; where
+        // terrain is unavailable, the countdown window remains the conservative
+        // animation-only fallback (tracked in the D-NET-159/196 record).
         const bool jump_key =
             (ent->net_move_input & Entity::kMoveOrderJump) != 0;
+        // Stance-change (0x1D) and the extended movement uplink (0x0C) can arrive in
+        // the same network pump.  The jump block is per-tick and reads the CURRENT
+        // MoveOrder prone bit; the fourth-tick locomotion selector below is not an
+        // eligibility cache. [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181;
+        // prone gate @0x4b7e99]
+        const bool replicated_prone = (ent->net_stance_bits & 0x1u) != 0;
+        const bool jump_state_blocked = player_jump_world_state_blocked(inf, ent);
         if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;
         if (inf.jump_cooldown > 32) inf.jump_cooldown = 32;
         if (inf.jump_cooldown > 1) {
@@ -2190,9 +2216,17 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         } else if (inf.jump_cooldown == 1 && !jump_key) {
             inf.jump_cooldown = 0;
         }
-        if (inf.jump_cooldown == 0 && jump_key &&
-            inf.stance != InfantryState::Stance::kProne) {
+        if (inf.jump_cooldown == 0 && jump_key && !replicated_prone &&
+            !jump_state_blocked) {
             inf.jump_cooldown = 32;
+            // Only latch the synthesized vertical state when the authority has
+            // terrain and can therefore observe its landing on a later uplink.
+            // Terrain-free harnesses retain the documented cooldown-only residual.
+            if (world.terrain != nullptr && world.terrain->valid()) {
+                inf.airborne = true;
+                ent->flags |= kEntityFlagInAir;
+                ent->engine_flags |= kEntityFlagInAir;
+            }
             if (root_motion != nullptr &&
                 root_motion->has_clip(inf.adm_id, anim_state::kJumpStart)) {
                 inf.begin_body_transition(anim_state::kJumpStart);
@@ -2254,8 +2288,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
     // anim data rate). Root motion output is discarded: the pose is wire-owned.
     if (root_motion != nullptr) {
+        if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
         RootMotionFrame discard;
-        advance_primary_channel(inf, *root_motion, discard);
+        if (advance_primary_channel(inf, *root_motion, discard))
+            inf.prev_capsule_bottom = discard.capsule_bottom;
         // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
         if (death_transition >= 0) {
             inf.begin_body_transition(death_transition);

@@ -3,6 +3,8 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/nova_simulation_internal.h"
 
+#include <cmath>
+
 #include <npwire/ingame_message_id.h>
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/os.hpp>
@@ -347,6 +349,7 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 					continue;
 				}
 				if (es.compact_revision != m.net_seen_revision) {
+					const bool prediction_arming = !m.net_predicted;
 					m.net_seen_revision = es.compact_revision;
 					// The fold live-snapped the row to the wire sample (rows
 					// whose first compact landed before this flag flipped stage
@@ -364,6 +367,15 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 					// air families].
 					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
 					m.net_interp_progress = 0;
+					// Live vehicle compacts omit Euler X/Y. Seed the client mover's
+					// attitude exactly once when prediction arms from the retained
+					// spawn/dead-pose row; re-seeding on every live compact would
+					// erase the platform/aero solve performed between records.
+					if (prediction_arming) {
+						m.air_pitch_bam = es.pitch_bam;
+						m.air_roll_bam = es.roll_bam;
+						m.plat_solve_valid = false;
+					}
 					m.net_predicted = true;
 				}
 				continue; // the world mover owns the registry position now
@@ -390,11 +402,27 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 		es.y = opennova::world::to_fixed(local->position.y);
 		es.z = opennova::world::to_fixed(local->position.z);
 		es.heading_bam = local->veh.yaw_bam;
-		// Aircraft bank/pitch visibly (the air mover integrates attitude);
-		// other families keep their wire/dead-pose values.
-		if (local->veh.air_pitch_bam != 0 || local->veh.air_roll_bam != 0) {
+		// The air and water movers own live attitude. Publish zero too: level is
+		// a real solved pose, not a validity sentinel. Ground/bike contact attitude
+		// remains unported, so those families retain their wire/dead-pose values.
+		const opennova::world::VehicleTraits *traits =
+				world_->vehicle_traits.get(local->item_id);
+		const bool owns_attitude = traits != nullptr &&
+				(traits->family == opennova::world::VehicleFamily::Watercraft ||
+						traits->family == opennova::world::VehicleFamily::Helicopter ||
+						traits->family == opennova::world::VehicleFamily::Plane);
+		if (owns_attitude) {
 			es.pitch_bam = local->veh.air_pitch_bam;
 			es.roll_bam = local->veh.air_roll_bam;
+			// Mounted-pose and bone consumers read Entity pitch/roll, not the
+			// motor registers. Keep the locally promoted carrier coherent before
+			// the post-mover attachment phase below.
+			local->pitch = static_cast<int16_t>(std::lround(
+					double(local->veh.air_pitch_bam) *
+						opennova::world::kDegreesPerBam));
+			local->roll = static_cast<int16_t>(std::lround(
+					double(local->veh.air_roll_bam) *
+						opennova::world::kDegreesPerBam));
 		}
 	}
 }
@@ -436,6 +464,23 @@ void NovaSimulation::joiner_pump() {
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
 	mirror_predicted_vehicles_to_view(); // predicted boat poses -> the presented rows
+	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
+	// seat/deck/object attachment from that final pose in this same frame, then
+	// publish the refreshed rows back to the local registry consumers. This is
+	// the retail second carrier-follow phase; doing it before the world mover
+	// leaves children one tick behind their vehicle.
+	runtime_->refresh_remote_attachments();
+	mirror_client_view_mission_entities();
+	// The local mounted body was seat-posed earlier in AiSystem::tick, before
+	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
+	// final same-frame transform so the camera/view never trails its seat by one
+	// mover tick. Remote riders were recomposed in ClientState just above.
+	if (world_->ai != nullptr && world_->cached.local_player.valid()) {
+		if (opennova::world::AiEntity *local_ai =
+				world_->ai->for_handle(world_->cached.local_player)) {
+			world_->ai->refresh_mounted_pose(*local_ai, *world_);
+		}
+	}
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
@@ -498,7 +543,8 @@ NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame(
 			runtime_->is_deployed() && e != nullptr && ae != nullptr &&
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u;
 	if (can_offer_uplink) {
-		const opennova::PlayerExtendedUplink up = opennova::netsim::build_player_uplink(*e, *ae);
+		const opennova::PlayerExtendedUplink up =
+				opennova::netsim::build_player_uplink(*world_, *e, *ae);
 		outs = runtime_->Client_ProcessNetworkFrame(up, now);
 	} else {
 		outs = runtime_->Client_ProcessNetworkFrame(now);

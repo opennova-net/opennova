@@ -3,8 +3,10 @@
 #include <cmath>      // std::lround
 
 #include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
+#include <terrain/height_field.h>  // TerrainHeightField::valid
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <world/geom.h>        // to_fixed / from_fixed
+#include <world/infantry.h>    // kInfantryAirborneGap / remote body state
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
 #include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
@@ -548,8 +550,10 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// and << 16 = a full 32-bit BAM — a PURE widen, NOT the (90 - yaw) mission framing the
 	// FORWARD snapshot_of applies (the joiner serialized its live entity+0x10, already
 	// engine-framed). [orig: case 4 @0x4c1da6 `movsx eax, ax; shl eax, 10h` / @0x4c1dca.]
-	int32_t heading_bam = static_cast<int32_t>(intent.heading) << 16;
-	const int32_t pitch_bam = static_cast<int32_t>(intent.pitch) << 16;
+	int32_t heading_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(static_cast<uint16_t>(intent.heading)) << 16);
+	const int32_t pitch_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(static_cast<uint16_t>(intent.pitch)) << 16);
 
 	// Grounded branch (D-NET-151): carrier_handle != 0xFFFF means the sender stands ON
 	// another entity (building floor / vehicle deck — any pool) and pos/heading are
@@ -558,7 +562,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// local[3] + carrier[3], pitch passes through) [orig: case 4 resolve @0x4c1d07-0x4c1d26,
 	// Entity_TransformLocalToWorld call @0x4c1de1, heading add @0x43be7e]. An unresolvable
 	// carrier applies the local values RAW — exactly the original's null-carrier leg (no
-	// transform, no rejection); our modeled carrier pose is yaw+pitch (roll unmodeled = 0).
+	// transform, no rejection). The resolved path uses the carrier's complete modeled Euler.
 	int32_t wire_x = intent.pos_x, wire_y = intent.pos_y, wire_z = intent.pos_z;
 	const bool grounded = intent.carrier_handle != 0xFFFFu;
 	if (grounded) {
@@ -571,12 +575,14 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 					world::to_fixed(carrier->position.y),
 					world::to_fixed(carrier->position.z),
 					static_cast<uint32_t>(carrier_yaw_bam),
-					static_cast<uint32_t>(static_cast<int64_t>(carrier->pitch) * 11930464),
-					0u);
+					static_cast<uint32_t>(engine_axis_bam(carrier->pitch)),
+					static_cast<uint32_t>(engine_axis_bam(carrier->roll)));
 			wire_x = w.x;
 			wire_y = w.y;
 			wire_z = w.z;
-			heading_bam += carrier_yaw_bam; // [orig: out[3] = ref[3] + local[3] @0x43be7e]
+			heading_bam = static_cast<int32_t>(static_cast<uint32_t>(heading_bam) +
+			                                      static_cast<uint32_t>(carrier_yaw_bam));
+			// [orig: out[3] = ref[3] + local[3] @0x43be7e]
 		}
 	}
 
@@ -653,18 +659,49 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 			ae->net_smooth_heading = heading_bam;    // +0x240
 			ae->net_smooth_pitch = pitch_bam;        // +0x244
 			ae->net_interp_progress = 0;             // +0x27C reset
+
+			// The 0x0C state byte contains only the entity Flags LOW byte; the
+			// in-air bit (0x2000) is not a hidden high-bit wire field. Reconstruct
+			// that authority state from the pose every uplink, using the same
+			// capsule-bottom clearance and hysteresis as the local player motor.
+			// This makes a held jump from a falling peer fail the retail gate and
+			// makes the next grounded sample produce the real landing edge. Water
+			// transitions remain authority-world state (D-INF-3), not C2S flags.
+			bool clear_airborne = grounded || ent->mounted;
+			bool set_airborne = false;
+			if (!clear_airborne && world.terrain != nullptr && world.terrain->valid()) {
+				world::GroundClearance clearance = world.ai->ground_clearance;
+				clearance.has_physics = ae->has_physics;
+				clearance.use_dead = ent->health <= 0;
+				const int32_t ground = world::calc_average_ground_height(
+						*world.terrain, ae->pos, 0, clearance);
+				if (ground != INT32_MIN) {
+					ae->inf.ground_cache = ground;
+					ae->inf.ground_cache_valid = true;
+					const int64_t foot_clearance = static_cast<int64_t>(wire_z) -
+							static_cast<int64_t>(ae->inf.prev_capsule_bottom) - ground;
+					set_airborne = foot_clearance > world::kInfantryAirborneGap;
+					clear_airborne = foot_clearance <= 0;
+				}
+			}
+			if (set_airborne) {
+				ae->inf.airborne = true;
+				ent->flags |= world::kEntityFlagInAir;
+				ent->engine_flags |= world::kEntityFlagInAir;
+			} else if (clear_airborne) {
+				ae->inf.airborne = false;
+				ent->flags &= ~world::kEntityFlagInAir;
+				ent->engine_flags &= ~world::kEntityFlagInAir;
+			}
 		}
 	}
 	return true;
 }
 
-PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae) {
+PlayerExtendedUplink build_player_uplink(const world::World &world,
+                                         const world::Entity &e,
+                                         const world::AiEntity &ae) {
 	PlayerExtendedUplink up; // wire defaults: carrier_handle 0xFFFF, all counters 0
-	// Relationship attach/detach is live, but this uplink still reports every local player as
-	// free-standing. Retail sends groundEntity/carrier plus carrier-local pose both for standing
-	// platforms [orig: @0x4b3291] and mounted players. Static emplacements mask the difference;
-	// moving/rotated carriers need the D-NET-151 local-frame uplink follow-up.
-	up.carrier_handle = 0xFFFFu;
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
 	// (the exact inverse of apply_player_intent's `intent.heading << 16`). [orig: case 4
@@ -674,6 +711,36 @@ PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::Ai
 	up.pos_z = ae.pos[2];
 	up.heading = static_cast<int16_t>(ae.heading >> 16);
 	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
+	// Retail's op-3 builder uses the mounted parent first, else groundEntity. A
+	// resolved carrier changes both position and heading into its local frame;
+	// pitch passes through unchanged. A stale relationship cannot exist as a raw
+	// pointer in retail, so the handle port safely falls back to FFFF/world pose.
+	// [orig: Player_BuildTag0CInputBody @0x42A550 ->
+	// Entity_TransformWorldToLocal @0x43BB50; heading subtraction @0x43bb7b]
+	world::EntityHandle carrier_handle;
+	if (e.mounted && e.mount_target.valid())
+		carrier_handle = e.mount_target;
+	else if (e.ground_target.valid())
+		carrier_handle = e.ground_target;
+	if (const world::Entity *carrier = world.registry.get(carrier_handle)) {
+		const int32_t carrier_yaw_bam = engine_heading_bam(carrier->yaw);
+		const WorldPose local = network_transform_world_to_local(
+				ae.pos[0], ae.pos[1], ae.pos[2],
+				world::to_fixed(carrier->position.x),
+				world::to_fixed(carrier->position.y),
+				world::to_fixed(carrier->position.z),
+				static_cast<uint32_t>(carrier_yaw_bam),
+				static_cast<uint32_t>(engine_axis_bam(carrier->pitch)),
+				static_cast<uint32_t>(engine_axis_bam(carrier->roll)));
+		up.carrier_handle = carrier_handle.packed;
+		up.pos_x = local.x;
+		up.pos_y = local.y;
+		up.pos_z = local.z;
+		const int32_t local_heading = static_cast<int32_t>(
+				static_cast<uint32_t>(ae.heading) -
+				static_cast<uint32_t>(carrier_yaw_bam));
+		up.heading = static_cast<int16_t>(local_heading >> 16);
+	}
 	// The +0x12C movement-INPUT byte for our own player (the host ingests + echoes it in our
 	// 0x0A record so OTHER clients motor-drive our avatar). Until the local input bitfield is
 	// exported from the motor, carry the last known value (0 = idle). [witness 2026-07-02:

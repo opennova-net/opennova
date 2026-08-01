@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -53,6 +54,7 @@ int entity_send_budget();
 void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor,
-                         uint32_t game_type = 0);
+                         uint32_t game_type = 0,
+                         std::size_t max_frame_body_bytes = 0);
 
 } // namespace opennova::netsim

@@ -131,7 +131,10 @@ struct ClientEntityState {
 	int32_t parent_local_x = 0;
 	int32_t parent_local_y = 0;
 	int32_t parent_local_z = 0;
-	uint8_t parent_local_yaw_byte = 0;
+	// Full wrapped heading delta captured from the absolute 0x0D poses. The
+	// persistent no-callback attachment follows the parent's LIVE heading_bam
+	// between compact records; yaw_byte remains the coarse presentation mirror.
+	int32_t parent_local_heading_bam = 0;
 	int32_t parent_local_pitch_bam = 0;
 	int32_t parent_local_roll_bam = 0;
 	bool parent_pose_valid = false;

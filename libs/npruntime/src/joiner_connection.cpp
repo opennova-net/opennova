@@ -536,6 +536,7 @@ void JoinerConnection::on_server_auth(
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	session_ack_pending_ = false;
+	s2c_reassembly_ = {};
 	// Retail first sends a sequenced settings packet after 0x82. Its receipt drives the header-only
 	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01. This remains active
 	// while the binding holds world_ready_ false so a joiner can discover what it must load.
@@ -562,12 +563,47 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			break;
 		}
 	}
+	// Deframing admits physical records in sequence order, including packets
+	// released from a just-closed gap. Fold FIRST/MID/FINAL pieces here, before
+	// either metadata inspection or gameplay dispatch. The semantic record is
+	// associated with the ACK carried by its final containing packet.
+	std::vector<ProtocolMessage> semantic_messages;
 	std::vector<uint32_t> containing_packet_ack;
+	semantic_messages.reserve(messages.size());
 	containing_packet_ack.reserve(messages.size());
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
-		for (std::size_t i = 0; i < packet.messages.size(); ++i)
+		for (const ProtocolMessage &physical : packet.messages) {
+			std::vector<uint8_t> payload;
+			bool was_fragmented = false;
+			if (!reassemble_protocol_payload(
+						s2c_reassembly_, physical, payload, &was_fragmented))
+				continue;
+			if (!was_fragmented) {
+				semantic_messages.push_back(physical);
+			} else {
+				// Fragment and physical-length bits do not belong to the
+				// reassembled semantic record. Preserve dispatch-table and skip
+				// metadata, then choose the appropriate completed-body length form.
+				constexpr uint8_t kSemanticFlagMask =
+						PROTOCOL_MSG_FLAG_SETTINGS_UPDATE |
+						PROTOCOL_MSG_FLAG_SKIP1 | PROTOCOL_MSG_FLAG_SKIP2 | 0x01u;
+				uint8_t semantic_flags =
+						static_cast<uint8_t>(physical.flags.raw & kSemanticFlagMask);
+				if (!payload.empty()) {
+					semantic_flags = static_cast<uint8_t>(
+							semantic_flags |
+							(payload.size() > 0xFFu ? PROTOCOL_MSG_FLAG_LEN16
+							                          : PROTOCOL_MSG_FLAG_LEN8));
+				}
+				ProtocolMessage semantic = make_protocol_message(
+						physical.tag, std::move(payload), semantic_flags);
+				semantic.skip_bytes = physical.skip_bytes;
+				semantic_messages.push_back(std::move(semantic));
+			}
 			containing_packet_ack.push_back(packet.header.ack_count);
+		}
 	}
+	messages = std::move(semantic_messages);
 	if (containing_packet_ack.size() != messages.size())
 		containing_packet_ack.assign(messages.size(), hdr.ack_count);
 	std::vector<ProtocolMessage> periodic_replies;
@@ -1447,6 +1483,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
 	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
 	conn_.seq = make_jo_game_session_sequencing(next_seq, last_ack);
+	s2c_reassembly_ = {};
 	// frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;

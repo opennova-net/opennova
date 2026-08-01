@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include <npwire/protocol_message.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
 // merges the three formerly-separate reimpl structs (NapiGameSettings §6.4, ServerRules, and the
@@ -18,6 +21,17 @@
 // `game_settings.game_type` copy (ctx+0xCC) that is a snapshot of `g_GameType` in a live session;
 // modeled here as the same `game_type` field (equal by construction on every seeded path).
 namespace opennova::np {
+
+// The bidirectional game-session packet ceiling installed by the witnessed
+// settings update. A large 0x0A uses a LEN16 message envelope (flags, tag,
+// u16 length), so its body must leave room for both that envelope and the
+// thirteen-byte sequenced connection header.
+inline constexpr std::size_t kGameSessionMaxPacketBytes = 1300;
+inline constexpr std::size_t kProtocolMessageLen16Bytes = 4;
+inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
+		kGameSessionMaxPacketBytes - PROTOCOL_PACKET_HEADER_SIZE -
+		kProtocolMessageLen16Bytes;
+static_assert(kMaxFrameUpdateBodyBytes == 1283);
 
 struct GameConfig {
 	// --- §6.4 identity (lobby name + wire server name + join-gate passwords) -----------------------

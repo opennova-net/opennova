@@ -1619,6 +1619,11 @@ bool run_roundtrip() {
 	}
 	if (!expect(staged == 1, "exactly one C2S 0x0C staged via apply_in_match_c2s")) return false;
 
+	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
+	// the remote peer's per-connection send boundary exactly as the owner does
+	// before the authoritative tick.
+	for (np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
 	np::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
 
 	const w::Entity *je = world.registry.get(Hh);

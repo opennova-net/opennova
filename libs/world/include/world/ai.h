@@ -701,6 +701,13 @@ public:
     //  mounted pose @0x4bec23..0x4bed3f, death detach @0x4b9c57..0x4b9c60.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
+    // Repeat only the carrier-owned seat-frame pose after a later carrier mover.
+    // This deliberately does not mirror input, chase gunner aim, select animation,
+    // detach relationships, or mutate any other once-per-body-tick state. Local
+    // player and gunner LOOK mirrors are preserved while the body/collision frame
+    // is recomposed from the carrier's final same-frame transform.
+    bool refresh_mounted_pose(AiEntity &e, World &world);
+
     // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
     // list + node (nearest of the list when node < 0) + the per-leg turn-budget seed.
     // [orig: Entity_SetWaypointByTeam @0x43cdb4; nearest = Entity_FindNearestTriggerByType

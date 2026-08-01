@@ -441,6 +441,13 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["hidden"] = ent ? ent->hidden : false;
 	out["held"] = ent ? ent->held : false;
 	out["disabled"] = ent ? ent->disabled : false;
+	out["vehicle_family"] = -1;
+	if (ent != nullptr) {
+		if (const opennova::world::VehicleTraits *traits =
+					world_->vehicle_traits.get(ent->item_id)) {
+			out["vehicle_family"] = static_cast<int>(traits->family);
+		}
+	}
 	out["body_anim_slot"] = ent ? ent->body_anim_slot : -1;
 	out["character_anim_slot"] = ent ? static_cast<int>(ent->anim_slot) : -1;
 	out["minimap_net_id"] = ent ? static_cast<int>(ent->minimap_net_id) : 0;
@@ -1244,6 +1251,15 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
 			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
 			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
+			// Vehicle euler X/Y live in the same BAM32 entity fields as the
+			// authoritative pose. Spawn/dead-pose records seed them; the joiner
+			// prediction mirror advances air/water attitude between records.
+			if (es.cls == opennova::EntityClass::Vehicle) {
+				r[PF_PITCH_DEG] = static_cast<float>(
+						double(es.pitch_bam) * opennova::world::kDegreesPerBam);
+				r[PF_ROLL_DEG] = static_cast<float>(
+						double(es.roll_bam) * opennova::world::kDegreesPerBam);
+			}
 			// The row's live engine-BAM heading (chased on the joiner; seeded
 			// from the wire byte/euler elsewhere, with sub-byte body effects such
 			// as recoil applied on top) -> mission yaw (90 - heading), matching
