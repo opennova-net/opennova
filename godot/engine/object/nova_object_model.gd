@@ -946,33 +946,6 @@ func _build_material_defs() -> Dictionary:
 	return _materials._build_material_defs()
 
 
-func _legacy_submeshes_from_surfaces(lod_index: int) -> Array:
-	var result := []
-	if object_data == null:
-		return result
-	for surface in object_data.get_lod_surfaces(lod_index):
-		var mesh := ArrayMesh.new()
-		var arrays := []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = surface.get("vertices", PackedVector3Array())
-		arrays[Mesh.ARRAY_NORMAL] = surface.get("normals", PackedVector3Array())
-		arrays[Mesh.ARRAY_TEX_UV] = surface.get("uvs", PackedVector2Array())
-		arrays[Mesh.ARRAY_TEX_UV2] = surface.get("uvs2", PackedVector2Array())
-		var tangents: PackedFloat32Array = surface.get("tangents", PackedFloat32Array())
-		if tangents.size() == arrays[Mesh.ARRAY_VERTEX].size() * 4:
-			arrays[Mesh.ARRAY_TANGENT] = tangents
-		arrays[Mesh.ARRAY_INDEX] = surface.get("indices", PackedInt32Array())
-		if arrays[Mesh.ARRAY_VERTEX].is_empty():
-			continue
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		result.append({
-			"robj_index": int(surface.get("part_index", 0)),
-			"material_index": int(surface.get("material_array_index", surface.get("material_index", 0))),
-			"mesh": mesh,
-		})
-	return result
-
-
 func _get_or_create_robj_node(robj_index: int) -> Node3D:
 	if _robj_nodes.has(robj_index):
 		return _robj_nodes[robj_index]
@@ -992,32 +965,7 @@ func _get_or_create_robj_node(robj_index: int) -> Node3D:
 
 
 func _compute_transformed_mesh_bounds() -> AABB:
-	var bounds := AABB()
-	var has_bounds := false
-	var model_inverse := global_transform.affine_inverse()
-	# Static / rigid submeshes hang under their Robj part nodes; skinned (and rigid-fake-skinned)
-	# submeshes hang under the shared Skeleton3D (see rebuild()). Walk both, so a fully-skinned
-	# model (e.g. an avatar body) still reports real bounds -- get_model_bounds drives consumers
-	# like the menu-portrait framing, which would otherwise see an empty AABB and never frame.
-	var roots: Array = _robj_nodes.values()
-	if _skeleton != null:
-		roots.append(_skeleton)
-	for root_node in roots:
-		var node := root_node as Node3D
-		if node == null:
-			continue
-		for child in node.get_children():
-			if child is MeshInstance3D:
-				var instance := child as MeshInstance3D
-				if instance.mesh == null:
-					continue
-				var mesh_aabb := instance.mesh.get_aabb()
-				if mesh_aabb.size == Vector3.ZERO:
-					continue
-				var local_aabb: AABB = model_inverse * (instance.global_transform * mesh_aabb)
-				bounds = local_aabb if not has_bounds else bounds.merge(local_aabb)
-				has_bounds = true
-	return bounds
+	return _scene_builder.compute_transformed_mesh_bounds()
 
 
 func _apply_runtime_state(delta: float, renderable := true) -> void:
@@ -1096,72 +1044,7 @@ func _apply_robj_transforms() -> bool:
 
 
 func _apply_lights() -> void:
-	# Gameplay deliberately leaves these parsed records inactive: retail never
-	# submits model-authored LGHT. The opt-in editor preview is useful for
-	# authoring/inspection without changing shipped rendering.
-	if not _model_light_preview_enabled or not _has_lights:
-		return
-	if object_data == null:
-		return
-	var lights: Array = object_data.evaluate_lights(
-			_anim_time_ms, _ctrl_values)
-	var dominant := {}
-	var best_intensity := -1.0
-	for light in lights:
-		var info: Dictionary = light
-		var intensity := float(info.get("intensity", 1.0))
-		if intensity > best_intensity:
-			best_intensity = intensity
-			dominant = info
-	var count := 0 if dominant.is_empty() else 1
-	var model_position: Vector3 = dominant.get("position", Vector3.ZERO)
-	var position := global_transform * model_position
-	var color: Color = dominant.get("color", Color.WHITE)
-	var atten_start := float(dominant.get("atten_start", 0.0))
-	var atten_end := float(dominant.get("atten_end", 5.0))
-	var subobject := int(dominant.get("subobject", -1))
-	if _skeleton != null and subobject >= 0 \
-			and subobject < _skeleton.get_bone_count():
-		# LGHT positions are authored in model space. Move through the same
-		# rest-to-live bone transform as user points and muzzle attachments.
-		position = (_skeleton.global_transform
-				* _skeleton.get_bone_global_pose(subobject)
-				* _skeleton.get_bone_global_rest(subobject).affine_inverse()) \
-				* model_position
-	elif subobject >= 0 and _robj_nodes.has(subobject) \
-			and _robj_rest_transforms.has(subobject):
-		var node := _robj_nodes[subobject] as Node3D
-		var rest: Transform3D = _robj_rest_transforms[subobject]
-		position = node.global_transform * (rest.affine_inverse() * model_position)
-	# A static light evaluates to the same values every frame; re-pushing them
-	# re-writes identical uniforms across every material. Push only on change
-	# (retained mode — the skip is invisible); an animated/PANM-carried light
-	# changes the compare key and pushes normally.
-	var intensity := best_intensity if best_intensity > 0.0 else 1.0
-	if _last_light_push_valid \
-			and count == _last_light_count \
-			and position == _last_light_position \
-			and color == _last_light_color \
-			and intensity == _last_light_intensity \
-			and atten_start == _last_light_atten_start \
-			and atten_end == _last_light_atten_end:
-		return
-	_last_light_push_valid = true
-	_last_light_count = count
-	_last_light_position = position
-	_last_light_color = color
-	_last_light_intensity = intensity
-	_last_light_atten_start = atten_start
-	_last_light_atten_end = atten_end
-	for material in _surface_materials:
-		if material == null:
-			continue
-		material.set_shader_parameter("u_local_light_count", count)
-		material.set_shader_parameter("u_local_light_position", position)
-		material.set_shader_parameter("u_local_light_color", Vector3(color.r, color.g, color.b))
-		material.set_shader_parameter("u_local_light_intensity", intensity)
-		material.set_shader_parameter("u_local_light_atten_start", atten_start)
-		material.set_shader_parameter("u_local_light_atten_end", atten_end)
+	_materials.apply_lights()
 
 
 func _material_for_index(material_array_index: int,

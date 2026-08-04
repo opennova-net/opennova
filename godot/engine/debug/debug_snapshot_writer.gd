@@ -282,7 +282,7 @@ static func _enrich_pick(pick: Dictionary, ctx: NovaDebugContext) -> Dictionary:
 	# what the wire actually carried for this entity, before presentation. Keyed
 	# by the packed pool/slot handle the pick already resolved.
 	var wire_handle := int(pick.get("entity_handle", -1))
-	if wire_handle >= 0 and sim.has_method("get_client_entity_debug"):
+	if wire_handle >= 0:
 		_store_card(entry, "client_entity_debug",
 				sim.get_client_entity_debug(wire_handle))
 	if bms_id != 0 and sim.has_method("get_destruction_debug"):

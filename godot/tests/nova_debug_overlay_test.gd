@@ -56,6 +56,9 @@ class FakePoseSim:
 	func has_local_player() -> bool:
 		return _has_player
 
+	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
+		return {}
+
 	func get_local_player_position() -> Vector3:
 		return _position
 
@@ -236,6 +239,9 @@ class FakeEntitySim:
 		snapshot.append_array(_present_row(
 				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
 		return snapshot
+
+	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
+		return {}
 
 	func get_world_entity_debug(net_id: int) -> Dictionary:
 		if net_id != 333:

@@ -42,6 +42,9 @@ class RichCardSim:
 			return {}
 		return {"net_id": 212, "position": Vector3(4, 5, 6), "alive": true}
 
+	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
+		return {}
+
 	func get_destruction_debug(bms_id: int) -> Dictionary:
 		if bms_id != 1484:
 			return {}
