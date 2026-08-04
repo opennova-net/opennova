@@ -62,6 +62,15 @@ static func list(sim: Object) -> Array[Dictionary]:
 				var world_value: Variant = sim.get_world_entity_debug(net_id)
 				if world_value is Dictionary:
 					detail = world_value
+			# A joiner's rows have no AI/registry card; surface the decoded wire
+			# row instead (carrier/bone/heading/compact_revision) — the remote
+			# complement of the F6 snapshot's client_entity_debug card.
+			if joiner and sim.has_method("get_client_entity_debug"):
+				var client_value: Variant = sim.get_client_entity_debug(
+						wire_handle)
+				if client_value is Dictionary \
+						and not (client_value as Dictionary).is_empty():
+					detail["client_entity_debug"] = client_value
 			var position := Vector3(
 					snapshot[base + NovaSimulation.PF_POS_X],
 					snapshot[base + NovaSimulation.PF_POS_Y],
