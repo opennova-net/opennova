@@ -2460,3 +2460,240 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 
 	joiner.free()
 	host.free()
+
+
+func _present_pose_for_type(sim: NovaSimulation, type_id: int) -> Dictionary:
+	var record := _present_record_for_type(sim, type_id)
+	if record.is_empty():
+		return {}
+	var snapshot: PackedFloat32Array = record["snapshot"]
+	var base := int(record["base"])
+	return {
+		"position": Vector3(
+				snapshot[base + NovaSimulation.PF_POS_X],
+				snapshot[base + NovaSimulation.PF_POS_Y],
+				snapshot[base + NovaSimulation.PF_POS_Z]),
+		"yaw": snapshot[base + NovaSimulation.PF_YAW_DEG],
+	}
+
+
+func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
+	# The 00TRg Rebel Base report: AI organics mounted on .50 cals via the BMS
+	# AttachToEmplaced action (case 0x25 -> mount_best) look seated on the host
+	# but SPIN, face the wrong way and FLOAT on a joiner. This drives that exact
+	# path — the host runs the real event runtime; the joiner is retail-faithful
+	# (world from the wire, no local .bms body) — and pins the joiner's presented
+	# gunner row to the host's, frame over frame.
+	var model := NovaObjectData.new()
+	assert_eq(model.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
+	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
+	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
+	var specs := [{
+		"type_id": 1419,
+		"model_data": model,
+		"seats": seat_specs,
+		"primary_weapon": "WPN_EMPLCD50NA",
+	}]
+	var mission := NovaMissionData.new()
+	assert_eq(mission.create_default(), OK)
+	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
+	# would hide any carrier-frame recomposition error on the joiner.
+	assert_false(mission.add_entity(NovaMissionData.KIND_ITEM, 101419,
+			Vector3(2, 12, 0), Vector3(0, 0, 135)).is_empty())
+	var gunner := mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+			Vector3(2, 11, 0), Vector3.ZERO)
+	assert_false(gunner.is_empty())
+	var gunner_ssn := int(gunner.get("bms_id", 0))
+	assert_gt(gunner_ssn, 0)
+	# Deploy markers away from the emplacement so neither player spawns into it.
+	assert_false(mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
+	# The unconditional attach event — the same mechanism 00TRg uses to seat its
+	# rebel gunners at mission start.
+	assert_false(mission.add_event(0, 0, 0).is_empty())
+	assert_false(mission.add_event_action(0,
+			{"action_type": 37, "param1": gunner_ssn}).is_empty())
+
+	var fixture_def_root := NovaResourceRoot.new()
+	assert_eq(fixture_def_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var fixture_item_db := NovaItemDatabase.new()
+	assert_eq(fixture_item_db.load_from_resource_root(
+			fixture_def_root, "items.def"), OK)
+
+	var host := NovaSimulation.new()
+	assert_true(host.enable_host_listen(0))
+	host.set_item_seat_specs(specs)
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	# The live game shell always installs the infantry anim registry; without it
+	# the joiner-side remote-motion movers never arm and the bug cannot show.
+	var host_anim_root := _anim_root()
+	assert_gt(host.set_infantry_anim_map(host_anim_root, "soldier.adm"), 0)
+	host.resolve_infantry_adm_ids(host_anim_root, fixture_item_db)
+	assert_true(host.spawn_local_player(Vector3(20, 0, 0), 120.0, 1))
+
+	# Retail-faithful joiner: the mission body never comes from a local .bms —
+	# only the host's streamed 616-byte header plus the wire world (D-NET-194).
+	var joiner := NovaSimulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "GunnerWatcher"))
+	joiner.set_join_world_ready(false)
+	var header := PackedByteArray()
+	for _tick in range(800):
+		joiner.poll_join_preload()
+		host.step()
+		header = joiner.get_join_mission_header()
+		if header.size() == 616:
+			break
+		OS.delay_msec(2)
+	assert_eq(header.size(), 616,
+			"the joiner received the host's S2C 0x0B mission header")
+	if header.size() != 616:
+		joiner.free()
+		host.free()
+		return
+	var wire_mission := NovaMissionData.new()
+	assert_eq(wire_mission.open_wire_header(header), OK)
+	assert_true(joiner.load_from_mission_data(wire_mission))
+	_install_combat_tables(joiner)
+	var joiner_anim_root := _anim_root()
+	assert_gt(joiner.set_infantry_anim_map(joiner_anim_root, "soldier.adm"), 0)
+	joiner.resolve_infantry_adm_ids(joiner_anim_root, fixture_item_db)
+	# NOTE deliberately NO joiner.set_item_seat_specs here: the live header-only
+	# joiner only gains seat specs when GameWorld's admission-boundary prewarm
+	# resolves the streamed types (game_world.gd) — this test pins what the
+	# present must do for a carrier whose spec has not been installed.
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		joiner.free()
+		host.free()
+		return
+
+	# The event fired on the host's 16th tick, long before admission completed;
+	# confirm the authority world really seated its gunner.
+	var host_ai_index := -1
+	for ai_index in range(host.get_entity_count()):
+		var card: Dictionary = host.get_entity_debug(ai_index)
+		var item_id := int(card.get("item_id", 0))
+		if item_id == 5311 or item_id == 105311:
+			host_ai_index = ai_index
+			break
+	assert_gte(host_ai_index, 0, "the authority exposes the AI gunner entity")
+	var host_mounted := false
+	for _tick in range(400):
+		host.step()
+		joiner.step()
+		if host_ai_index >= 0 and bool(host.get_entity_debug(
+				host_ai_index).get("mounted", false)):
+			host_mounted = true
+			break
+		OS.delay_msec(2)
+	assert_true(host_mounted,
+			"the BMS AttachToEmplaced event seated the AI on the emplacement")
+	if not host_mounted:
+		joiner.free()
+		host.free()
+		return
+
+	# Let the mounted pose ride a few full wire records before judging.
+	for _settle in range(30):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+
+	# Lockstep sampling window. The host's seated gunner is the truth; the
+	# joiner's presented row must sit on it — not orbit it, not hover over it.
+	# The applier exposes the exact ROOT basis the wire walk gives an
+	# aim-capable body node (present_one_wire_row), so the NODE facing is
+	# sampled too — PF_YAW alone stays sane while the aim-overlay body frame
+	# is what actually spins a rendered gunner.
+	var applier := NovaPresentApplier.new()
+	var worst_distance := 0.0
+	var worst_vertical := 0.0
+	var worst_yaw_disagreement := 0.0
+	var worst_joiner_yaw_step := 0.0
+	var worst_joiner_pos_step := 0.0
+	var worst_body_disagreement := 0.0
+	var worst_joiner_body_step := 0.0
+	var previous_joiner_pose := {}
+	var previous_joiner_body := Basis.IDENTITY
+	var have_previous_body := false
+	var sampled := 0
+	for _frame in range(48):
+		host.step()
+		joiner.step()
+		var host_pose := _present_pose_for_type(host, 5311)
+		var joiner_pose := _present_pose_for_type(joiner, 5311)
+		assert_false(host_pose.is_empty(), "host presents its AI gunner row")
+		assert_false(joiner_pose.is_empty(), "joiner presents the AI gunner row")
+		if host_pose.is_empty() or joiner_pose.is_empty():
+			break
+		var host_position: Vector3 = host_pose["position"]
+		var joiner_position: Vector3 = joiner_pose["position"]
+		worst_distance = maxf(worst_distance,
+				host_position.distance_to(joiner_position))
+		worst_vertical = maxf(worst_vertical,
+				absf(host_position.y - joiner_position.y))
+		worst_yaw_disagreement = maxf(worst_yaw_disagreement, absf(wrapf(
+				float(host_pose["yaw"]) - float(joiner_pose["yaw"]),
+				-180.0, 180.0)))
+		var host_record := _present_record_for_type(host, 5311)
+		var joiner_record := _present_record_for_type(joiner, 5311)
+		if not host_record.is_empty() and not joiner_record.is_empty():
+			var host_body: Basis = applier.aim_root_basis(
+					host_record["snapshot"], int(host_record["base"]),
+					Basis.IDENTITY)
+			var joiner_body: Basis = applier.aim_root_basis(
+					joiner_record["snapshot"], int(joiner_record["base"]),
+					Basis.IDENTITY)
+			worst_body_disagreement = maxf(worst_body_disagreement,
+					rad_to_deg(host_body.get_rotation_quaternion().angle_to(
+							joiner_body.get_rotation_quaternion())))
+			if have_previous_body:
+				worst_joiner_body_step = maxf(worst_joiner_body_step,
+						rad_to_deg(joiner_body.get_rotation_quaternion().angle_to(
+								previous_joiner_body.get_rotation_quaternion())))
+			previous_joiner_body = joiner_body
+			have_previous_body = true
+		if not previous_joiner_pose.is_empty():
+			worst_joiner_yaw_step = maxf(worst_joiner_yaw_step, absf(wrapf(
+					float(joiner_pose["yaw"]) - float(previous_joiner_pose["yaw"]),
+					-180.0, 180.0)))
+			worst_joiner_pos_step = maxf(worst_joiner_pos_step,
+					joiner_position.distance_to(
+							previous_joiner_pose["position"]))
+		previous_joiner_pose = joiner_pose
+		sampled += 1
+		OS.delay_msec(2)
+
+	assert_gte(sampled, 32, "the sampling window ran")
+	# Seated truth: the same tolerance the articulated-anchor reconstruction
+	# already meets (0.35), vertical bounded tighter — "floating" is a y error.
+	assert_lt(worst_distance, 0.35,
+			"joiner presents the gunner ON its seat, not displaced from it")
+	assert_lt(worst_vertical, 0.3,
+			"joiner's gunner does not hover above/below the host's seat pose")
+	# A seated gunner holds the gun's facing on both views.
+	assert_lt(worst_yaw_disagreement, 20.0,
+			"joiner's gunner faces the way the host's gunner faces")
+	# The host gunner is static in this window; any wild per-frame yaw motion on
+	# the joiner is the reported spin.
+	assert_lt(worst_joiner_yaw_step, 25.0,
+			"joiner's gunner yaw is stable frame over frame (no spin)")
+	assert_lt(worst_joiner_pos_step, 0.5,
+			"joiner's gunner does not jitter/teleport around the mount")
+	# The NODE facing (the aim-overlay body frame the wire walk sets as the
+	# root basis): both views must agree it is the SEAT frame, and it must not
+	# sweep — this is the reported spin/wrong-facing surface.
+	assert_lt(worst_body_disagreement, 20.0,
+			"joiner's rendered gunner BODY faces the host's seat frame")
+	assert_lt(worst_joiner_body_step, 25.0,
+			"joiner's rendered gunner BODY holds its facing (no spin)")
+
+	joiner.free()
+	host.free()

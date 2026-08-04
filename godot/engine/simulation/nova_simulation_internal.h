@@ -505,17 +505,34 @@ inline bool aim_overlay_inputs_for_client(
 	const opennova::netsim::ClientEntityState *carrier =
 			client_entity_for_handle(state, entity.carrier_handle);
 	if (carrier == nullptr) return true;
+	// A carrier row with no resolved seat table (or none for this bone) is OUR
+	// resolution-timing state, with no retail counterpart: retail composes every
+	// mounted body from the always-loaded itemDef+model, while our model-derived
+	// spec table can lag the stream (the admission prewarm is one-shot; a type
+	// first streamed later never resolves until the next rebuild). Retail never
+	// draws a mounted body free-standing, so degrade TOWARD the seat: hold the
+	// carrier's live root frame (heading/pitch/roll, offset unknown => zero)
+	// instead of letting body_yaw ride the aim — an aim-riding body orbits the
+	// mount with the gunner's scan, which is the reported joiner spin.
 	const opennova::mission::ItemSeatSpec *spec =
 			item_seat_spec_for_type(specs, carrier->type_id);
-	if (spec == nullptr) return true;
 	const opennova::world::Seat *seat = nullptr;
-	for (const opennova::world::Seat &candidate : spec->seats) {
-		if (candidate.bone_index == entity.mount_bone) {
-			seat = &candidate;
-			break;
+	if (spec != nullptr) {
+		for (const opennova::world::Seat &candidate : spec->seats) {
+			if (candidate.bone_index == entity.mount_bone) {
+				seat = &candidate;
+				break;
+			}
 		}
 	}
-	if (seat == nullptr) return true;
+	if (seat == nullptr) {
+		out.body_yaw = carrier->heading_bam;
+		out.body_pitch = carrier->pitch_bam;
+		out.roll = carrier->roll_bam;
+		out.leg_yaw_r = out.body_yaw;
+		out.leg_yaw_l = out.body_yaw;
+		return true;
+	}
 	if (r_collapse_right_hand != nullptr) {
 		// The compact organic class is the decoded form of the relevant Flags
 		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
