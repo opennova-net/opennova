@@ -350,6 +350,11 @@ struct NapiNPConnection {
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
 	bool s2c_send_holdoff_dictated = false;
+	// Host tick of this connection's most recent framed session send — the
+	// per-connection "last send" clock retail's send-interval pump reads.
+	// Zero = not yet armed; the first open boundary arms it without sending.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
+	uint32_t last_session_send_tick = 0;
 
 	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
 	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the

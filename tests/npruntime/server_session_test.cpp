@@ -702,6 +702,95 @@ bool check_requeued_fragment_run_stays_one_capacity_unit() {
 			"the drained packet carries MID then FINAL so reassembly completes");
 }
 
+// D-NET-173, host side: with nothing queued and nothing retained, retail's
+// send pump still mints a header-only sequence once the EMPTY interval
+// (30000 ms) elapses since the connection last framed anything, so a stock
+// client's 120 s connection reap never fires on a quiet host; while reliable
+// records remain retained, the ACTIVE interval (10000 ms) mints the same
+// header-only sequence so the peer's 0x44/0x84 machinery can request the
+// loss. [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
+bool check_host_idle_send_interval_keepalive() {
+	opennova::np::HostOwner owner;
+	opennova::np::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
+	opennova::np::set_transport_mode(owner.ctx, SocketMode::Lan);
+	opennova::np::GameConfig config;
+	opennova::np::create_session(
+			owner.ctx, config, opennova::np::SessionStartup{}, nullptr);
+
+	const opennova::PeerAddr peer{0x0100007Fu, 33116};
+	auto &peer_link = owner.peers[peer];
+	peer_link.transport =
+			std::make_unique<opennova::netsim::UdpSessionTransport>(
+					opennova::netsim::UdpSessionTransport::Role::Host);
+	opennova::np::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.server_scrk =
+			"SERVERIDLEKEEPALIVESCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0";
+	conn.client_ck = 0x10203040u;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = opennova::netsim::TransportMode::Client;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	CaptureDatagramSocket socket;
+	// 30000 ms at the 62 Hz host clock: elapsed_ms = ticks*1000/62, strictly
+	// greater than the interval first 1862 ticks after the clock arms on the
+	// first open boundary (tick 0 is the arm sentinel, so arming lands on
+	// tick 1). Quiet pumps through the threshold send nothing.
+	for (int i = 0; i < 1862; ++i)
+		opennova::np::host_session_pump(owner, socket);
+	if (!expect(socket.sent.empty(),
+	            "a quiet connection sends nothing through 30 s"))
+		return false;
+	opennova::np::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1,
+	            "the elapsed EMPTY interval mints exactly one keepalive"))
+		return false;
+
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	auto &remote = owner.ctx.np_protocol.connection_list.front();
+	if (!expect(
+			opennova::nw_decode_inbound(
+					socket.sent[0].data(), socket.sent[0].size(), opcode,
+					session_body) &&
+					opcode == opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+					opennova::decode_protocol_packet_plaintext(
+							session_body.data(), session_body.size(),
+							remote.server_scrk, header, messages) &&
+					messages.empty(),
+			"the keepalive is the header-only minted sequence"))
+		return false;
+
+	// The mint reset the clock: the next quiet pump stays silent.
+	opennova::np::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1,
+	            "the minted keepalive re-arms the interval"))
+		return false;
+
+	// The ACTIVE leg is tick_connections' preexisting append_active_probe:
+	// with reliable records retained, its 16 ms-per-tick accumulator crosses
+	// 10000 ms on the 626th retained pump and mints the header-only probe
+	// that drives the peer's 0x44/0x84 NACK machinery. The EMPTY leg must
+	// stay out of its way (retained connections are not "empty").
+	remote.seq.retained_outbound[remote.seq.next_outbound_seq] = {
+			opennova::make_protocol_message(0x49, {0x01, 0x00, 0x07, 0x10})};
+	remote.seq.retained_outbound_message_count = 1;
+	for (int i = 0; i < 625; ++i)
+		opennova::np::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1,
+	            "a retained connection stays silent through 10 s"))
+		return false;
+	opennova::np::host_session_pump(owner, socket);
+	return expect(socket.sent.size() == 2,
+	              "the elapsed ACTIVE interval mints the retained-records probe");
+}
+
 bool check_host_admits_exact_retail_message_prefix() {
 	opennova::np::HostOwner owner;
 	opennova::np::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
@@ -2518,6 +2607,7 @@ int main() {
 	ok = check_initial_stream_batches_with_reactive_reply() && ok;
 	ok = check_host_frame_failure_preserves_owner_queue() && ok;
 	ok = check_requeued_fragment_run_stays_one_capacity_unit() && ok;
+	ok = check_host_idle_send_interval_keepalive() && ok;
 	ok = check_host_admits_exact_retail_message_prefix() && ok;
 	ok = check_host_s2c_holdoff_and_frame_envelope() && ok;
 	ok = check_host_s2c_holdoff_is_per_connection() && ok;

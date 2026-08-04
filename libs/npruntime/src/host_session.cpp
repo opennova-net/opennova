@@ -28,6 +28,18 @@ namespace opennova::np {
 
 namespace {
 
+// Retail's per-connection EMPTY send interval, host side (D-NET-173): with
+// NOTHING queued and NOTHING retained, the send pump still mints a packet
+// once this elapses, so a quiet peer (parked at the deploy pick, dead, or
+// idle) never reaches its 120 s connection reap. The ACTIVE retained-records
+// probe (10000 ms) is ported separately in tick_connections; the joiner legs
+// are the same template values in joiner_connection.cpp.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 — empty_interval leg
+//  @0x629041..0x629067; idle_send_interval_ms = 30000 stored by
+//  CNapiNetwork_Init @0x4ca4a0 (@0x4caab5/@0x4cab88); the reaping
+//  timeout_ms = 120000 stored @0x4caa81/@0x4cab54]
+constexpr uint64_t kHostSessionIdleSendIntervalMilliseconds = 30000;
+
 uint32_t mint_nonzero_session_value() {
 	uint32_t value = 0;
 	while (value == 0) value = make_random_session_u32();
@@ -128,6 +140,7 @@ std::vector<ProtocolMessage> send_session_batches(
 					owner.ctx, connection.peer, batch, datagram))
 			return false;
 		sock.send_to(connection.peer, datagram.data(), datagram.size());
+		connection.last_session_send_tick = owner.now_tick;
 		batch.clear();
 		encoded_messages.clear();
 		return true;
@@ -464,6 +477,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 			for (const std::vector<uint8_t> &datagram : pending_datagrams->second)
 				sock.send_to(c.peer, datagram.data(), datagram.size());
 			owner.pending_session_datagrams.erase(pending_datagrams);
+			c.last_session_send_tick = now;
 		}
 		std::vector<ProtocolMessage> messages;
 		auto pending = pending_session_messages.find(c.peer);
@@ -475,6 +489,28 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 				send_session_batches(owner, sock, c, std::move(messages));
 		if (!retry.empty())
 			pending_session_messages[c.peer] = std::move(retry);
+		// The EMPTY send-interval leg (D-NET-173): retail's pump reads the
+		// per-connection last-send clock this boundary just updated, and with
+		// NOTHING queued and NOTHING retained still mints a header-only
+		// sequence once the interval elapses — the keepalive a stock client's
+		// 120 s reap requires. (The ACTIVE retained-records probe is
+		// tick_connections' append_active_probe.) Arm on the first open
+		// boundary. [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
+		if (c.last_session_send_tick == 0) {
+			c.last_session_send_tick = now;
+		} else if (c.seq.retained_outbound_message_count == 0 &&
+				pending_session_messages.find(c.peer) ==
+						pending_session_messages.end()) {
+			const uint64_t elapsed_ms = static_cast<uint64_t>(
+					now - c.last_session_send_tick) * 1000u / 62u;
+			if (elapsed_ms > kHostSessionIdleSendIntervalMilliseconds) {
+				std::vector<uint8_t> keepalive;
+				if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, keepalive)) {
+					sock.send_to(c.peer, keepalive.data(), keepalive.size());
+					c.last_session_send_tick = now;
+				}
+			}
+		}
 		// One OPEN host send boundary can contain preframed settings/resends,
 		// several MTU-split semantic packets, or no payload at all. Retail prunes
 		// finite message nodes after all of them, then increments +0x64C once.
