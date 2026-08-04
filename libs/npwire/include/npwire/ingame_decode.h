@@ -153,6 +153,12 @@ struct PoolSpawnRecord {
 
 struct PoolSpawnBatch {
 	std::vector<PoolSpawnRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 	// True when the loop terminated early via the slot-id sentinel
 	// (0xFFFF or (slot & 0xF000) >= 0x5000) before `entity_count` records
 	// were read — the retail handler returns immediately on this case.
@@ -191,6 +197,12 @@ struct Pool3SyncBatch {
 	uint16_t start_index = 0;
 	int16_t  entity_count = 0;
 	std::vector<Pool3SyncRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 };
 
 // Decode a S2C 0x0D body per the §5.11 field map. Returns true iff the
@@ -248,6 +260,12 @@ struct StaticEntityBatch {
 	uint16_t start_index = 0;
 	int16_t  entity_count = 0;
 	std::vector<StaticEntityRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 };
 
 // Decode a S2C 0x10 body per the §5.9 field map. Same return contract as
@@ -295,6 +313,12 @@ struct OrganicSpawnRecord {
 struct OrganicSpawnBatch {
 	uint16_t entity_count = 0;   // header u16 (no start-index, unlike 0x10/0x20)
 	std::vector<OrganicSpawnRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 	// Set when the slot-id sentinel (0xFFFF or (slot & 0xF000) >= 0x5000) ends
 	// the batch before entity_count records were read.
 	bool sentinel_ended_early = false;

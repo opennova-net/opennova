@@ -1,7 +1,8 @@
-// World-load pages are atomic at the replica fold boundary. The wire decoders
-// intentionally retain partial records for diagnostics, but a joiner must not
-// expose any of those records (or a complete prefix followed by junk) to its
-// decoded world.
+// World-load pages fold like retail's handlers walk them: records apply as
+// they decode, so a malformed page loses only its unread remainder. The
+// half-read record the decoder stages at the failure point is never exposed,
+// a complete prefix (or a complete page with trailing junk) applies, and
+// preexisting replica state is untouched by the failure.
 
 #include "netsim/client_replica_pipeline.h"
 
@@ -36,37 +37,33 @@ bool expect(bool ok, const char *what, const char *page) {
 	return ok;
 }
 
-bool rejects_without_state_change(
+bool applies_complete_prefix(
 		std::uint8_t tag, const std::vector<std::uint8_t> &body,
-		std::initializer_list<std::uint16_t> candidate_handles,
+		std::initializer_list<std::uint16_t> applied_handles,
+		std::initializer_list<std::uint16_t> rejected_handles,
 		const char *page) {
 	ns::ClientReplicaPipeline pipeline;
 	ns::ClientEntityState &sentinel = pipeline.state().upsert(0x4FFEu);
 	sentinel.type_id = 0x7EEFu;
 	sentinel.name = "preexisting";
 	sentinel.x = 0x12345678;
-	const StateStamp before = stamp(pipeline.state());
 
 	pipeline.apply(tag, body);
 
-	const StateStamp after = stamp(pipeline.state());
 	bool ok = true;
-	ok = expect(after.revision == before.revision,
-	            "revision changed after rejected page", page) && ok;
-	ok = expect(after.topology_revision == before.topology_revision,
-	            "topology revision changed after rejected page", page) && ok;
-	ok = expect(after.world_stream_revision == before.world_stream_revision,
-	            "world-stream revision changed after rejected page", page) && ok;
-	ok = expect(after.entity_count == before.entity_count,
-	            "entity count changed after rejected page", page) && ok;
+	for (std::uint16_t handle : applied_handles) {
+		ok = expect(pipeline.state().find(handle) != nullptr,
+		            "a complete record from the malformed page was dropped",
+		            page) && ok;
+	}
+	for (std::uint16_t handle : rejected_handles) {
+		ok = expect(pipeline.state().find(handle) == nullptr,
+		            "the half-read failure record was exposed", page) && ok;
+	}
 	const ns::ClientEntityState *kept = pipeline.state().find(0x4FFEu);
 	ok = expect(kept != nullptr && kept->type_id == 0x7EEFu &&
 	                    kept->name == "preexisting" && kept->x == 0x12345678,
-	            "preexisting state changed after rejected page", page) && ok;
-	for (std::uint16_t handle : candidate_handles) {
-		ok = expect(pipeline.state().find(handle) == nullptr,
-		            "a record from the rejected page was exposed", page) && ok;
-	}
+	            "preexisting state changed after the malformed page", page) && ok;
 	return ok;
 }
 
@@ -99,7 +96,7 @@ nw::OrganicSpawnRecord organic_record(
 	return rec;
 }
 
-bool test_organic_page_is_atomic() {
+bool test_organic_page_applies_complete_prefix() {
 	nw::OrganicSpawnBatch two_records;
 	two_records.records.push_back(organic_record(0x0010u, 0x1410u, "alpha"));
 	two_records.records.push_back(organic_record(0x0011u, 0x1411u, "bravo"));
@@ -119,11 +116,11 @@ bool test_organic_page_is_atomic() {
 	trailing.push_back(0xA5u);
 
 	bool ok = true;
-	ok = rejects_without_state_change(
-			nw::s2c::ENTITY_SPAWN_BATCH, truncated, {0x0010u, 0x0011u},
+	ok = applies_complete_prefix(
+			nw::s2c::ENTITY_SPAWN_BATCH, truncated, {0x0010u}, {0x0011u},
 			"0x0C truncated") && ok;
-	ok = rejects_without_state_change(
-			nw::s2c::ENTITY_SPAWN_BATCH, trailing, {0x0012u},
+	ok = applies_complete_prefix(
+			nw::s2c::ENTITY_SPAWN_BATCH, trailing, {0x0012u}, {},
 			"0x0C trailing") && ok;
 	return ok;
 }
@@ -141,7 +138,7 @@ nw::PoolSpawnRecord pool_spawn_record(
 	return rec;
 }
 
-bool test_pool_spawn_page_is_atomic() {
+bool test_pool_spawn_page_applies_complete_prefix() {
 	nw::PoolSpawnBatch two_records;
 	two_records.records.push_back(pool_spawn_record(0x1010u, 0x2410u, "delta"));
 	two_records.records.push_back(pool_spawn_record(0x1011u, 0x2411u, "echo"));
@@ -158,11 +155,11 @@ bool test_pool_spawn_page_is_atomic() {
 	trailing.push_back(0xA5u);
 
 	bool ok = true;
-	ok = rejects_without_state_change(
-			nw::s2c::POOL_SPAWN, truncated, {0x1010u, 0x1011u},
+	ok = applies_complete_prefix(
+			nw::s2c::POOL_SPAWN, truncated, {0x1010u}, {0x1011u},
 			"0x0D truncated") && ok;
-	ok = rejects_without_state_change(
-			nw::s2c::POOL_SPAWN, trailing, {0x1012u},
+	ok = applies_complete_prefix(
+			nw::s2c::POOL_SPAWN, trailing, {0x1012u}, {},
 			"0x0D trailing") && ok;
 	return ok;
 }
@@ -179,7 +176,7 @@ nw::StaticEntityRecord static_entity_record(std::uint16_t type_id) {
 	return rec;
 }
 
-bool test_static_page_is_atomic() {
+bool test_static_page_applies_complete_prefix() {
 	nw::StaticEntityBatch two_records;
 	two_records.start_index = 0x0010u;
 	two_records.records.push_back(static_entity_record(0x3410u));
@@ -198,11 +195,11 @@ bool test_static_page_is_atomic() {
 	trailing.push_back(0xA5u);
 
 	bool ok = true;
-	ok = rejects_without_state_change(
-			nw::s2c::STATIC_ENTITY_BATCH, truncated, {0x2010u, 0x2011u},
+	ok = applies_complete_prefix(
+			nw::s2c::STATIC_ENTITY_BATCH, truncated, {0x2010u}, {0x2011u},
 			"0x10 truncated") && ok;
-	ok = rejects_without_state_change(
-			nw::s2c::STATIC_ENTITY_BATCH, trailing, {0x2012u},
+	ok = applies_complete_prefix(
+			nw::s2c::STATIC_ENTITY_BATCH, trailing, {0x2012u}, {},
 			"0x10 trailing") && ok;
 	return ok;
 }
@@ -219,7 +216,7 @@ nw::Pool3SyncRecord pool3_record(
 	return rec;
 }
 
-bool test_pool3_page_is_atomic() {
+bool test_pool3_page_applies_complete_prefix() {
 	nw::Pool3SyncBatch two_records;
 	two_records.start_index = 0x0010u;
 	two_records.records.push_back(pool3_record(0x4410u, 0x5010u));
@@ -238,11 +235,11 @@ bool test_pool3_page_is_atomic() {
 	trailing.push_back(0xA5u);
 
 	bool ok = true;
-	ok = rejects_without_state_change(
-			nw::s2c::POOL3_SYNC, truncated, {0x3010u, 0x3011u},
+	ok = applies_complete_prefix(
+			nw::s2c::POOL3_SYNC, truncated, {0x3010u}, {0x3011u},
 			"0x20 truncated") && ok;
-	ok = rejects_without_state_change(
-			nw::s2c::POOL3_SYNC, trailing, {0x3012u},
+	ok = applies_complete_prefix(
+			nw::s2c::POOL3_SYNC, trailing, {0x3012u}, {},
 			"0x20 trailing") && ok;
 	return ok;
 }
@@ -386,10 +383,10 @@ bool test_repeated_load_records_reset_complete_replica_rows() {
 
 int main() {
 	bool ok = true;
-	ok = test_organic_page_is_atomic() && ok;
-	ok = test_pool_spawn_page_is_atomic() && ok;
-	ok = test_static_page_is_atomic() && ok;
-	ok = test_pool3_page_is_atomic() && ok;
+	ok = test_organic_page_applies_complete_prefix() && ok;
+	ok = test_pool_spawn_page_applies_complete_prefix() && ok;
+	ok = test_static_page_applies_complete_prefix() && ok;
+	ok = test_pool3_page_applies_complete_prefix() && ok;
 	ok = test_empty_static_and_pool3_rows_are_tombstones() && ok;
 	ok = test_repeated_load_records_reset_complete_replica_rows() && ok;
 	if (ok) std::printf("client_replica_pipeline_world_page_atomicity: OK\n");

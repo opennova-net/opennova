@@ -92,6 +92,7 @@ using opennova::npwire_detail::Cursor;
 bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
                               PoolSpawnBatch &out) {
 	out.records.clear();
+	out.last_record_partial = false;
 	out.sentinel_ended_early = false;
 	out.entity_count = 0;
 
@@ -109,6 +110,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		rec.spawn_flags = c.u16();
 		rec.slot_id = c.u16();
 		if (!c.ok) {
+			out.last_record_partial = true;
 			out.records.push_back(std::move(rec));
 			return false;
 		}
@@ -122,6 +124,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		rec.item_type_id = c.u16();
 		rec.entity_name = c.cstr();
 		if (!c.ok) {
+			out.last_record_partial = true;
 			out.records.push_back(std::move(rec));
 			return false;
 		}
@@ -182,6 +185,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
 
 		const bool record_ok = c.ok;
+		if (!record_ok) out.last_record_partial = true;
 		out.records.push_back(std::move(rec));
 		if (!record_ok) return false;
 	}
@@ -192,6 +196,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
                               Pool3SyncBatch &out) {
 	out.records.clear();
+	out.last_record_partial = false;
 	out.start_index = 0;
 	out.entity_count = 0;
 
@@ -206,6 +211,7 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		Pool3SyncRecord rec;
 		rec.item_type_id = c.u16();
 		if (!c.ok) {
+			out.last_record_partial = true;
 			out.records.push_back(std::move(rec));
 			return false;
 		}
@@ -229,6 +235,7 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		if (rec.flags_byte & 0x20) rec.score_byte = c.u8();
 
 		const bool record_ok = c.ok;
+		if (!record_ok) out.last_record_partial = true;
 		out.records.push_back(std::move(rec));
 		if (!record_ok) return false;
 	}
@@ -244,6 +251,7 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 bool decode_static_entity_batch(const uint8_t *body, size_t len,
                                 StaticEntityBatch &out) {
 	out.records.clear();
+	out.last_record_partial = false;
 	out.start_index = 0;
 	out.entity_count = 0;
 
@@ -258,6 +266,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		StaticEntityRecord rec;
 		rec.item_type_id = c.u16();
 		if (!c.ok) {
+			out.last_record_partial = true;
 			out.records.push_back(std::move(rec));
 			return false;
 		}
@@ -286,6 +295,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		if (rec.weapon_byte != 0 || (rec.field_flags & 0x0200)) rec.attach_ref = c.u16();
 
 		const bool record_ok = c.ok;
+		if (!record_ok) out.last_record_partial = true;
 		out.records.push_back(std::move(rec));
 		if (!record_ok) return false;
 	}
@@ -369,6 +379,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
                                 OrganicSpawnBatch &out) {
 	out.records.clear();
+	out.last_record_partial = false;
 	out.sentinel_ended_early = false;
 	out.entity_count = 0;
 
@@ -381,7 +392,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 	for (int i = 0; i < int(out.entity_count); ++i) {
 		OrganicSpawnRecord rec;
 		rec.slot_id = c.u16();
-		if (!c.ok) { out.records.push_back(std::move(rec)); return false; }
+		if (!c.ok) { out.last_record_partial = true; out.records.push_back(std::move(rec)); return false; }
 		// Sentinel: retail returns immediately, without storing this record
 		// (@ 0x42e79d / 0x42e7b1). The slot >= pool.capacity guard is pool-state
 		// dependent and not reproducible from the wire alone — the two value
@@ -391,7 +402,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 			return (c.p == c.end);
 		}
 		rec.has_body = (c.u8() != 0);
-		if (!c.ok) { out.records.push_back(std::move(rec)); return false; }
+		if (!c.ok) { out.last_record_partial = true; out.records.push_back(std::move(rec)); return false; }
 		if (!rec.has_body) {
 			// Empty spawn — the record ends after the has_body byte (@ 0x42e813).
 			out.records.push_back(std::move(rec));
@@ -421,6 +432,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		rec.parent_handle = c.u16();
 
 		const bool record_ok = c.ok;
+		if (!record_ok) out.last_record_partial = true;
 		out.records.push_back(std::move(rec));
 		if (!record_ok) return false;
 	}

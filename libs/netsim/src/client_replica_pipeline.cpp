@@ -188,8 +188,14 @@ inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
 void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body) {
 	OrganicSpawnBatch batch;
 	if (!decode_organic_spawn_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x0E family].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
 		++unknown_tags_;
-		return;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
 	}
 	bool changed = false;
 	for (const OrganicSpawnRecord &rec : batch.records) {
@@ -945,8 +951,14 @@ void ClientReplicaPipeline::tick_recoil() {
 void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	if (!decode_pool_spawn_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x00D @ 0x432C40].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
 		++unknown_tags_;
-		return;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
 	}
 	bool changed = false;
 	for (const PoolSpawnRecord &rec : batch.records) {
@@ -1209,8 +1221,14 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body) {
 	StaticEntityBatch batch;
 	if (!decode_static_entity_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: the 0x10 static handler].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
 		++unknown_tags_;
-		return;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
 	}
 	bool changed = false;
 	// The 0x10 record carries no slot id — the entity's slot is start_index + iteration index.
@@ -1278,8 +1296,14 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) {
 	Pool3SyncBatch batch;
 	if (!decode_pool3_sync_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: the 0x20 pool-3 handler].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
 		++unknown_tags_;
-		return;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
 	}
 	bool changed = false;
 	for (std::size_t i = 0; i < batch.records.size(); ++i) {
