@@ -247,6 +247,20 @@ private:
 		int32_t anim_state = -2;
 		int32_t anim_request = -1;
 		int32_t remote_body_tick = 0;
+		// Per-leg input caches for the measured every-frame legs (the 2026-08-04
+		// joiner profile: ~21us/row ungated over a full streamed world). Each
+		// holds the exact PF fields its leg consumes; an invalid cache forces
+		// the first application, and a cold plan rebuild re-applies once by
+		// construction (rows rebuild with invalid caches). The field lists live
+		// beside the legs in nova_present_applier_wire.cpp.
+		static constexpr int kCtrlCacheCount = 18;
+		static constexpr int kAimCacheCount = 30;
+		float ctrl_cache[kCtrlCacheCount];
+		float aim_cache[kAimCacheCount];
+		bool ctrl_cache_valid = false;
+		bool aim_cache_valid = false;
+		int32_t wpn_state = INT32_MIN;
+		int32_t wpn_phase = INT32_MIN;
 	};
 
 	struct RemoteBodyCache {

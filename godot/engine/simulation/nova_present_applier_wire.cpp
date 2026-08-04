@@ -66,6 +66,87 @@ const String &infantry_key_cached(int state) {
 	return *cache.getptr(state);
 }
 
+// The exact PF fields each edge-gated leg consumes. A new field read inside a
+// gated leg MUST join its table, or the gate holds stale node output. Gating
+// is presentation memoization only: identical inputs re-dispatched to the same
+// node produce the same node state, so skipping the redundant dispatch cannot
+// change what renders — it removes the measured per-frame Variant/String/Array
+// churn (2026-08-04 joiner profile: ~21us/row over 876 mostly-static rows).
+// Mirrors of WireRow::kCtrlCacheCount / kAimCacheCount (the struct is class-
+// private); static_asserts in present_one_wire_row pin the mirror.
+constexpr int kCtrlLegFieldCount = 18;
+constexpr int kAimLegFieldCount = 30;
+
+constexpr int kCtrlLegFields[kCtrlLegFieldCount] = {
+	NovaSimulation::PF_EMPLACED_CONTROLS_VALID,
+	NovaSimulation::PF_EWEAP_GUNYAW,
+	NovaSimulation::PF_EWEAP_GUNPITCH,
+	NovaSimulation::PF_VEHICLE_MOTION_VALID,
+	NovaSimulation::PF_VEHICLE_STEERING,
+	NovaSimulation::PF_VEHICLE_SPEED,
+	NovaSimulation::PF_TEX_TEAM_VALID,
+	NovaSimulation::PF_TEX_TEAM,
+	NovaSimulation::PF_ZONE_CTRL_VALID,
+	NovaSimulation::PF_TEAMSWING,
+	NovaSimulation::PF_LFP_CAMPPERCENT_VALID,
+	NovaSimulation::PF_LFP_CAMPPERCENT,
+	NovaSimulation::PF_WORLD_HEAT_GLOW_VALID,
+	NovaSimulation::PF_WORLD_HEAT_GLOW,
+	NovaSimulation::PF_ACTIVE1,
+	NovaSimulation::PF_PHASE1,
+	NovaSimulation::PF_ACTIVE2,
+	NovaSimulation::PF_PHASE2,
+};
+
+// The aim-overlay leg's inputs: the body triple plus all nine overlay-class
+// triples (aim_apply_valid's exact reads).
+struct AimLegFields {
+	int fields[kAimLegFieldCount];
+	AimLegFields() {
+		fields[0] = NovaSimulation::PF_AIM_BODY_PITCH_DEG;
+		fields[1] = NovaSimulation::PF_AIM_BODY_YAW_DEG;
+		fields[2] = NovaSimulation::PF_AIM_BODY_ROLL_DEG;
+		int write = 3;
+		for (int overlay_class = 0; overlay_class < 9; ++overlay_class) {
+			const int offset = NovaSimulation::PF_AIM_ANGLES +
+					overlay_class * NovaSimulation::PF_AIM_CLASS_STRIDE;
+			fields[write++] = offset;
+			fields[write++] = offset + 1;
+			fields[write++] = offset + 2;
+		}
+	}
+};
+
+const int *aim_leg_fields() {
+	static AimLegFields table;
+	return table.fields;
+}
+
+// Compare-and-refresh one leg's input cache. Returns true when every field is
+// bit-identical to the last applied set (skip the leg); otherwise refreshes
+// the cache and returns false (apply). A NaN field never compares equal, so a
+// poisoned row degrades to per-frame application, never to a stale hold.
+bool leg_inputs_unchanged(const float *p, int base, const int *fields,
+		int count, float *cache, bool &cache_valid) {
+	if (cache_valid) {
+		bool same = true;
+		for (int i = 0; i < count; ++i) {
+			if (p[base + fields[i]] != cache[i]) {
+				same = false;
+				break;
+			}
+		}
+		if (same) {
+			return true;
+		}
+	}
+	for (int i = 0; i < count; ++i) {
+		cache[i] = p[base + fields[i]];
+	}
+	cache_valid = true;
+	return false;
+}
+
 } // namespace
 
 int NovaPresentApplier::wire_node_caps(Object *node, int visual_ctrl_caps) {
@@ -242,6 +323,10 @@ void NovaPresentApplier::present_wire_rows(const PackedFloat32Array &snap,
 
 void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 		const PackedFloat32Array &snap, int tick_delta) {
+	static_assert(kCtrlLegFieldCount == WireRow::kCtrlCacheCount,
+			"ctrl leg field table must match the row cache size");
+	static_assert(kAimLegFieldCount == WireRow::kAimCacheCount,
+			"aim leg field table must match the row cache size");
 	const WireDispatchNames &n = wnames();
 	const float *p = snap.ptr();
 	const int base = row.base;
@@ -275,55 +360,86 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 		row.rhc = rhc;
 	}
 	// Aim overlay: apply while valid, clear only on the valid->invalid edge.
+	// The apply itself is input-gated: identical overlay angles re-dispatch
+	// the identical delta set, so only changed inputs build the 9-basis Array.
+	// The clear edge invalidates the cache so a later re-valid always applies.
 	if ((row.caps & WIRE_CAP_AIM) != 0) {
 		const int32_t aim_valid =
 				wfield_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 		if (aim_valid != 0) {
-			aim_apply_valid(node, snap, base, false);
+			if (!leg_inputs_unchanged(p, base, aim_leg_fields(),
+					kAimLegFieldCount, row.aim_cache,
+					row.aim_cache_valid)) {
+				aim_apply_valid(node, snap, base, false);
+			}
 		} else if (row.aim_valid != 0) {
 			node->call(n.set_aim_overlay, Array());
+			row.aim_cache_valid = false;
 		}
 		row.aim_valid = aim_valid;
 	}
-	const bool ctrl_batch = (row.caps & WIRE_CAP_CTRL_BATCH) != 0;
-	if (ctrl_batch) {
-		node->call(n.begin_ctrl_update);
-	}
-	if ((row.caps & WIRE_CAP_CTRL) != 0) {
-		if ((row.caps & WIRE_CAP_PART) != 0) {
+	// The CTRL/PART block is input-gated as one unit: every field all four
+	// semantic writers and both procedural part channels consume sits in
+	// kCtrlLegFields, so an unchanged set means the node's presenter-owned
+	// controls and part phases are already exactly this state (the release
+	// legs included — one release is as absent as a re-released one).
+	const bool ctrl_legs = (row.caps & (WIRE_CAP_CTRL | WIRE_CAP_PART)) != 0;
+	if (ctrl_legs && !leg_inputs_unchanged(p, base, kCtrlLegFields,
+			kCtrlLegFieldCount, row.ctrl_cache, row.ctrl_cache_valid)) {
+		const bool ctrl_batch = (row.caps & WIRE_CAP_CTRL_BATCH) != 0;
+		if (ctrl_batch) {
+			node->call(n.begin_ctrl_update);
+		}
+		if ((row.caps & WIRE_CAP_CTRL) != 0) {
+			if ((row.caps & WIRE_CAP_PART) != 0) {
+				apply_wire_procedural_part(row, node, snap);
+			}
+			// All four semantic CTRL writers through the cached dispatch mode:
+			// compact joiner rows release absent authoritative fields, while direct
+			// host/synthetic rows publish vehicle, zone and attachment heat values.
+			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+			//  BoneCallback_gnrc_World @ 0x4E288B..0x4E28FB;
+			//  parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
+			wire_controls_apply_with_capabilities(node, snap, base,
+					row.visual_ctrl_caps);
+		} else if ((row.caps & WIRE_CAP_PART) != 0) {
 			apply_wire_procedural_part(row, node, snap);
 		}
-		// All four semantic CTRL writers through the cached dispatch mode:
-		// compact joiner rows release absent authoritative fields, while direct
-		// host/synthetic rows publish vehicle, zone and attachment heat values.
-		// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
-		//  BoneCallback_gnrc_World @ 0x4E288B..0x4E28FB;
-		//  parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
-		wire_controls_apply_with_capabilities(node, snap, base,
-				row.visual_ctrl_caps);
-	} else if ((row.caps & WIRE_CAP_PART) != 0) {
-		apply_wire_procedural_part(row, node, snap);
-	}
-	if (ctrl_batch) {
-		node->call(n.end_ctrl_update);
+		if (ctrl_batch) {
+			node->call(n.end_ctrl_update);
+		}
 	}
 	if (respawned_since_present && (row.caps & WIRE_CAP_RESET_REMOTE) != 0) {
 		node->call(n.reset_remote_body_state);
 		row.anim_state = -2; // force the next body-anim dispatch through
 		row.remote_body_tick = 0;
+		// The reset wipes model-side state the gated legs may have applied;
+		// their caches must not claim it is still applied.
+		row.ctrl_cache_valid = false;
+		row.aim_cache_valid = false;
+		row.wpn_state = INT32_MIN;
+		row.wpn_phase = INT32_MIN;
 	}
 	apply_wire_body_anim(row, node, snap, tick_delta);
 	// The upper-body weapon channel: the hold pose this player's held weapon and
 	// scope state select. -1 means no channel this frame, which clears any pose
-	// left over from the weapon it was holding before.
+	// left over from the weapon it was holding before. Dispatch is gated on the
+	// (state, phase) pair — a playing channel advances its phase every tick and
+	// still dispatches per tick; idle -1 rows and render-only frames skip.
 	// [orig: the selection Entity_UpdateInfantryPlayerBody @ 0x4b5dad, which
 	//  retail runs for every player body it draws, not just the local one]
 	if ((row.caps & WIRE_CAP_WPN) != 0) {
 		const int32_t wpn_state =
 				wfield_i(p, base, NovaSimulation::PF_WPN_ANIM_STATE);
-		node->call(n.set_weapon_channel,
-				wpn_state >= 0 ? infantry_key_cached(wpn_state) : String(),
-				wfield_i(p, base, NovaSimulation::PF_WPN_PHASE_TICKS));
+		const int32_t wpn_phase =
+				wfield_i(p, base, NovaSimulation::PF_WPN_PHASE_TICKS);
+		if (wpn_state != row.wpn_state || wpn_phase != row.wpn_phase) {
+			node->call(n.set_weapon_channel,
+					wpn_state >= 0 ? infantry_key_cached(wpn_state) : String(),
+					wpn_phase);
+			row.wpn_state = wpn_state;
+			row.wpn_phase = wpn_phase;
+		}
 	}
 	const bool next_visible =
 			wfield_i(p, base, NovaSimulation::PF_HIDDEN) == 0 &&
