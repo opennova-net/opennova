@@ -109,6 +109,25 @@ def test_weapon_exact_carriers_are_append_only_in_both_mirrors():
         assert ctypes.sizeof(weapon_cls) - fields_end < ctypes.alignment(weapon_cls)
 
 
+def test_weapon_turret_limit_params_present_in_both_mirrors():
+    """The turret articulation trio sits between startrounds and statid.
+
+    Pinned independently of the cross-mirror comparison so BOTH mirrors cannot
+    agree on the same stale layout that omits them (the native side is def.h's
+    targetyawrange/targetpitchmax/targetpitchmin mid-struct insertion
+    [orig: Entity_GetWeaponTurretLimits @0x540e35..0x540e58]).
+    """
+    expected_run = ["startrounds", "targetyawrange", "targetpitchmax",
+                    "targetpitchmin", "statid"]
+    blender = _load_blender_def_ffi()
+    for weapon_cls in (py_def.DefWeaponDef, blender.DefWeaponDef):
+        names = [name for name, _ctype in weapon_cls._fields_]
+        start = names.index("startrounds")
+        assert names[start:start + len(expected_run)] == expected_run
+        for field in ("targetyawrange", "targetpitchmax", "targetpitchmin"):
+            assert getattr(weapon_cls, field).size == ctypes.sizeof(ctypes.c_int)
+
+
 def test_item_air_family_params_present_in_both_mirrors():
     """The three air-family item fields sit between slip_slope and turn_rate.
 

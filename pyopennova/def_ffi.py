@@ -37,6 +37,11 @@ class DefWeaponDef(ctypes.Structure):
         ("rank", ctypes.c_int),
         ("clipsize", ctypes.c_int),
         ("startrounds", ctypes.c_int),
+        # Emplaced turret articulation limits, degrees (mirror def.h:
+        # targetyawrange/targetpitchmax/targetpitchmin, 0 = key absent).
+        ("targetyawrange", ctypes.c_int),
+        ("targetpitchmax", ctypes.c_int),
+        ("targetpitchmin", ctypes.c_int),
         ("statid", ctypes.c_int),
         ("maxclips", ctypes.c_int),
         ("ammobucket", ctypes.c_int),
