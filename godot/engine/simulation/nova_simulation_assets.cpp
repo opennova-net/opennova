@@ -2,8 +2,11 @@
 // item traits/weapons from the item database, collision instances + section
 // matrices from the .3di collision IR, and the mission item seat specs.
 #include "simulation/nova_simulation_internal.h"
+#include "network/item_replication_catalog_adapter.h"
 
 #include <def/def.h> // DEF_ITEM_ATTRIB_* / DEF_ITEM_ATTRIB2_*
+
+#include <array>
 
 using namespace novasim;
 
@@ -29,6 +32,20 @@ int NovaSimulation::set_infantry_anim_map(const Ref<NovaResourceRoot> &p_resourc
 	// default map; otherwise a model-specific ADM could usurp the default slot and
 	// turn a failed load into false success.
 	if (default_adm_id == 0) resolve_new_infantry_adm_ids();
+	// The registry ids just changed meaning: stale row stamps and the
+	// per-type cache would index the rebuilt registry with old ids. Re-arm
+	// every decoded organic row for a fresh resolve + channel.
+	client_row_adm_by_type_.clear();
+	if (runtime_ != nullptr) {
+		for (opennova::netsim::ClientEntityState &es :
+				runtime_->state().entities) {
+			if (es.rm_adm_id != -2) {
+				es.rm_adm_id = -2;
+				es.rm_state = -1;
+				es.rm_leg_seeded = false;
+			}
+		}
+	}
 	apply_root_motion_to_ai();
 	return default_clip_count;
 }
@@ -105,6 +122,13 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
 	item_traits_db_ = p_item_db;
+	if (!item_replication_catalog_ ||
+			item_replication_catalog_db_.ptr() != p_item_db.ptr() ||
+			item_replication_catalog_revision_ != p_item_db->get_revision()) {
+		item_replication_catalog_ = build_item_replication_catalog(p_item_db);
+		item_replication_catalog_db_ = p_item_db;
+		item_replication_catalog_revision_ = p_item_db->get_revision();
+	}
 	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
 	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
 	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
@@ -130,12 +154,15 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
 		e->has_item_def = p_item_db->has_item(def_id);
 		e->item_type = static_cast<uint8_t>(p_item_db->get_item_type(def_id));
+		e->item_attrib2 = p_item_db->get_attrib2(def_id);
 		e->is_ai_capable = p_item_db->is_ai_capable(def_id);
-		// §5.10b replication class from the *_function tag (ai_function, else move_function).
-		const String ai_fn = p_item_db->get_ai_function(def_id);
-		const String tag = ai_fn.is_empty() ? p_item_db->get_move_function(def_id) : ai_fn;
-		e->net_class_code =
-				static_cast<uint8_t>(opennova::class_from_tag(tag.utf8().get_data()));
+		// The same immutable profile supplies the host stamp and client decode
+		// width. Missing/ambiguous definitions fail closed as Unknown.
+		const opennova::netsim::ItemReplicationProfile *replication =
+				item_replication_catalog_->by_definition_id(def_id);
+		e->net_class_code = static_cast<uint8_t>(replication != nullptr
+				? replication->wire_entity_class()
+				: opennova::EntityClass::Unknown);
 		// items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
 		const int hp = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
 		e->health = opennova::world::retail_signed_i16(e->health);
@@ -179,9 +206,10 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		// Entity_InitDeathSounds read — armor +0x190/+0x192, unitType +0x196, kz
 		// +0x198, huskSubPart* +0x100.., debrisScale +0x1BC, soundDeath +0x860,
 		// the particledeath family +0x412..]
+		const Dictionary dt = p_item_db->get_death_traits(def_id);
+		e->item_unit_type = int(dt.get("unit_type", 0));
 		if (world_->item_death_traits.get(e->item_id) == nullptr &&
 		    p_item_db->has_item(def_id)) {
-			const Dictionary dt = p_item_db->get_death_traits(def_id);
 			if (!dt.is_empty()) {
 				opennova::world::ItemDeathTraits t;
 				t.unit_type = int(dt.get("unit_type", 0));
@@ -212,15 +240,19 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				world_->item_death_traits.set(e->item_id, std::move(t));
 			}
 		}
-		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
-		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
-		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
-		// non-zero `physics` selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870;
-		// Entity_UpdateVehiclePhysics @0x48af00 attrib & 0x40 gate @0x48b0e6]
+		// Vehicle mover traits: the pre-scaled items.def block + PlayerControl
+		// attrib (0x40), keyed by item id. Ground-family dispatchers test the
+		// `physics` selector, but CHel/cpln dispatch DIRECTLY to the air mover and
+		// shipped CHel rows legitimately omit that ground selector. [orig:
+		// g_EntityClassPhysicsTable @0x82abc8; ground dispatch @0x48ef90..0x48f060;
+		// Entity_UpdateAircraftPhysics @0x490310]
 		if (e->handle.pool() == 1 &&
 		    world_->vehicle_traits.get(e->item_id) == nullptr) {
 			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			if (vp.size() == 8 && vp[0] != 0) {
+			const String fam = p_item_db->get_move_function(def_id)
+					.to_lower().substr(0, 4);
+			const bool direct_air_mover = fam == "chel" || fam == "cpln";
+			if (vp.size() == 21 && (vp[0] != 0 || direct_air_mover)) {
 				opennova::world::VehicleTraits vt;
 				vt.physics = vp[0];
 				vt.player_speed = vp[1];
@@ -230,7 +262,47 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 				vt.turn_rate2 = vp[5];
 				vt.unit_type = vp[6];
 				vt.torque = vp[7];
+				vt.water_speed = vp[8];
+				vt.climb_speed = vp[9];
+				vt.turn_roll = vp[10];
+				vt.speed_pitch = vp[11];
+				// The platform slope thresholds + tuning block (def.h order).
+				vt.max_slope = vp[12];
+				vt.slip_slope = vp[13];
+				vt.mass = vp[14];
+				vt.lean = vp[15];
+				vt.lean_velocity = vp[16];
+				vt.pitch_lift = vp[17];
+				vt.pitch_lift_vel = vp[18];
+				vt.bob = vp[19];
+				vt.flip = vp[20];
 				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
+				// The per-frame physics mover is selected exclusively by the
+				// move_function callback resolved into itemDef+0x158. ai_function
+				// selects the event/brain callback and may deliberately differ: the
+				// shipped Dune Buggy is ai_function chel + move_function cveh and
+				// therefore still runs the ground mover. [orig:
+				// EntityDef_LookupPhysicsCallback @0x4a9240; §5.38e movers]
+				{
+					// Match on the case-folded fourcc prefix: the retail
+					// callback table keys 4-byte tags and items.def authors
+					// longer tokens onto them (`cbike`, `ctank`, `catv`,
+					// mixed-case `CHel`) — whole-string matching sent the
+					// shipped Motorcycle down the Ground motor. Same rule as
+					// netsim's motion_family_from_tag; the two classifiers
+					// must agree (ADR 0026 §4).
+					if (fam == "cbot") {
+						vt.family = opennova::world::VehicleFamily::Watercraft;
+					} else if (fam == "chel") {
+						vt.family = opennova::world::VehicleFamily::Helicopter;
+					} else if (fam == "cpln") {
+						vt.family = opennova::world::VehicleFamily::Plane;
+					} else if (fam == "cbik") {
+						vt.family = opennova::world::VehicleFamily::Bike;
+					} else {
+						vt.family = opennova::world::VehicleFamily::Ground;
+					}
+				}
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
 				// mounted NPC's AiProfile. Resolve the profile name and the
 				// item-level soundloop overrides once at this portable boundary.
@@ -281,39 +353,14 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
 	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
 
-	// Decode-side twin of the net_class_code stamp above: the full wire-id ->
-	// replication-class table for the LOCAL CLIENT VIEW. The retail client sizes each
-	// inbound 0x0A tag-1 record via its OWN items.def serialize callback [orig:
-	// itemDef+356 dispatch @0x50f2e2 / ItemList_FindIndexByTypeId]; without this table
-	// the view's phase-1 heuristic walks vehicle (15/21 B) and no-callback (0 B)
-	// records at the wrong width and desyncs the rest of the frame — every junk record
-	// after the desync lands anchor-relative, i.e. scattered around the local player.
-	// Same tag rule as the encoder stamp (ai_function, else move_function) so both
-	// sides of the in-process wire agree by construction.
-	auto table = std::make_shared<std::unordered_map<uint16_t, opennova::EntityClass>>();
-	const PackedInt32Array ids = p_item_db->get_item_ids();
-	for (int i = 0; i < ids.size(); ++i) {
-		const int def_id = ids[i];
-		const int wire_id = def_id - opennova::mission::kItemIdOffset;
-		if (wire_id < 0 || wire_id > 0xFFFF) continue;
-		const String ai_fn = p_item_db->get_ai_function(def_id);
-		const String tag = ai_fn.is_empty() ? p_item_db->get_move_function(def_id) : ai_fn;
-		const opennova::EntityClass cls =
-				opennova::class_from_tag(tag.utf8().get_data());
-		if (cls != opennova::EntityClass::Unknown) {
-			(*table)[static_cast<uint16_t>(wire_id)] = cls;
-		}
-	}
-	item_class_table_ = std::move(table);
 	install_item_class_resolver();
 }
 
 void NovaSimulation::install_item_class_resolver() {
-	if (!runtime_ || !item_class_table_) return;
+	if (!runtime_ || !item_replication_catalog_) return;
 	runtime_->view().set_item_class_resolver(
-			[table = item_class_table_](uint16_t type_id) {
-				const auto it = table->find(type_id);
-				return it != table->end() ? it->second : opennova::EntityClass::Unknown;
+			[catalog = item_replication_catalog_](uint16_t type_id) {
+				return catalog->resolve_wire_entity_class(type_id);
 			});
 }
 
@@ -329,6 +376,15 @@ void NovaSimulation::install_charattr_challenge_table() {
 void NovaSimulation::install_character_join_vars() {
 	if (!runtime_ || !join_character_vars_set_) return;
 	runtime_->set_character_join_vars(join_character_vars_);
+}
+
+void NovaSimulation::install_join_integrity_profile() {
+	if (!runtime_) return;
+	if (join_integrity_profile_id_.empty()) {
+		runtime_->clear_integrity_challenge_profile();
+		return;
+	}
+	runtime_->set_integrity_challenge_profile(join_integrity_profile_id_);
 }
 
 // The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
@@ -746,6 +802,48 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
 		// not yet applied (tracked, D-COL-3)].
 		float entity_bound = collision_radius_by_graphic_[key];
+		// Platform probe boxes (vehicle-client-movers-re.md §3 §3): the union of the
+		// authored per-subobject collision AABBs — exact 16.16 values in the
+		// 3di's own model space, the space the retail modelData boxes
+		// [0x28..0x4C] live in. The box1-vs-footprint provenance (and the
+		// axis-pair naming) is the spec's tracked unknown: both map to this
+		// union here, verified against hull proportions at the solve's bench.
+		if (h.pool() == 1) {
+			opennova::world::VehicleTraits *vt =
+					world_->vehicle_traits.get_mutable(e->item_id);
+			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
+				Ref<NovaObjectData> vdata =
+						p_placer->call("object_data_for", graphic);
+				if (vdata.is_valid()) {
+					const ThreediIRCollision *col =
+							vdata->native_ir().collision;
+					if (col != nullptr && col->objects != nullptr &&
+							col->object_count > 0) {
+						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
+						int32_t hi[3] = {INT32_MIN, INT32_MIN, INT32_MIN};
+						for (size_t o = 0; o < col->object_count; ++o) {
+							const auto &obj = col->objects[o];
+							for (int a = 0; a < 3; ++a) {
+								lo[a] = std::min(lo[a], obj.offset[a] + obj.min[a]);
+								hi[a] = std::max(hi[a], obj.offset[a] + obj.max[a]);
+							}
+						}
+						if (hi[0] > lo[0] && hi[1] > lo[1] && hi[2] > lo[2]) {
+							vt->box_x_lo = lo[0];
+							vt->box_x_hi = hi[0];
+							vt->box_y_lo = lo[1];
+							vt->box_y_hi = hi[1];
+							vt->box_z_lo = lo[2];
+							vt->box_z_hi = hi[2];
+							vt->foot_x_lo = lo[0];
+							vt->foot_x_hi = hi[0];
+							vt->foot_y_lo = lo[1];
+							vt->foot_y_hi = hi[1];
+						}
+					}
+				}
+			}
+		}
 		if (it->second >= 0) {
 			collision_world_.assign_entity(
 					h, it->second, e->registry_spawn_id);
@@ -965,6 +1063,11 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		if (entity_bound > 0.0f && e->bound_radius <= 0.0f)
 			e->bound_radius = entity_bound + 0.0625f;  // the +0x1000 16.16 pad
 		const int32_t occ_id = collision_occlusion_by_graphic_[key];
+		// Entity_ClassifyForMinimap's ordinary-Building branch checks the
+		// live graphic model's +0xE0 portal/occlusion pointer. The parsed .3di
+		// and the collision/occlusion resolver are the portable ownership seam
+		// for that otherwise renderer-private fact.
+		e->has_minimap_model_marker = occ_id >= 0;
 		if (occ_id >= 0 && e->kind == opennova::world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
@@ -978,6 +1081,151 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		}
 	}
 	return attached;
+}
+
+void NovaSimulation::stamp_seat_spec_turret_limits() {
+	if (!world_) return;
+	for (opennova::mission::ItemSeatSpec &spec : item_seat_specs_) {
+		if (spec.primary_weapon.empty()) continue;
+		const int index = world_->weapons.index_of(spec.primary_weapon.c_str());
+		const opennova::world::WeaponTableEntry *entry =
+				index >= 0 && index <= 0xFF
+						? world_->weapons.by_index(static_cast<uint8_t>(index))
+						: nullptr;
+		if (entry == nullptr) continue;
+		spec.turret_yaw_range_bam =
+				turret_limit_bam(entry->turret_yaw_range_deg);
+		spec.turret_pitch_max_bam =
+				turret_limit_bam(entry->turret_pitch_max_deg);
+		spec.turret_pitch_min_bam =
+				turret_limit_bam(entry->turret_pitch_min_deg);
+	}
+}
+
+void NovaSimulation::refresh_item_seat_spec(
+		opennova::world::Entity &p_entity) {
+	std::array<opennova::world::EntityHandle, 10> occupants{};
+	for (const opennova::world::Seat &seat : p_entity.seats) {
+		if (seat.retail_slot < occupants.size())
+			occupants[seat.retail_slot] = seat.occupant;
+	}
+
+	// A promoted child (authority or complete-BMS joiner) already owns the exact
+	// stored addeweap slot; keep that identity across definition refreshes even
+	// when sibling types repeat. A stock streamed 0x0D row carries only child type
+	// + parent handle, so it may recover metadata only when that type is unique in
+	// the parent's definition.
+	// Clear first so a later definition refresh cannot leave stale pose/capability
+	// metadata on an existing row.
+	const bool preserve_authored_slot = !wire_header_world_ &&
+			p_entity.emplacement_pose_metadata_resolved &&
+			p_entity.emplacement_slot != 0;
+	const uint8_t authored_slot = p_entity.emplacement_slot;
+	p_entity.emplacement_pose_metadata_resolved = false;
+	p_entity.emplacement_local = {};
+	p_entity.emplacement_yaw_offset = 0;
+	p_entity.emplacement_bone = 0;
+	p_entity.emplacement_kind = 0;
+	p_entity.emplacement_slot = 0;
+	p_entity.emplacement_attachment_flags = 0;
+	p_entity.emplacement_angle_count = 0;
+	p_entity.emplacement_down_limit_bam = 0;
+	p_entity.emplacement_up_limit_bam = 0;
+	p_entity.emplacement_right_limit_bam = 0;
+	p_entity.emplacement_left_limit_bam = 0;
+	if (world_ && p_entity.emplacement_parent.valid() &&
+			p_entity.emplacement_parent_spawn_id != 0) {
+		const opennova::world::Entity *parent =
+				world_->registry.get(p_entity.emplacement_parent);
+		if (parent != nullptr && parent->registry_spawn_id ==
+					p_entity.emplacement_parent_spawn_id) {
+			const opennova::mission::ItemSeatSpec *parent_spec =
+					item_seat_spec_for_type(item_seat_specs_,
+							static_cast<uint16_t>(parent->item_id));
+			const opennova::mission::ItemEmplacementAttachmentSpec *match = nullptr;
+			bool ambiguous = false;
+			if (parent_spec != nullptr) {
+				for (const opennova::mission::ItemEmplacementAttachmentSpec &attachment :
+						parent_spec->emplacement_attachments) {
+					if (attachment.child_type_id != p_entity.item_id) continue;
+					if (preserve_authored_slot &&
+							attachment.stored_slot != authored_slot)
+						continue;
+					if (match != nullptr) {
+						ambiguous = true;
+						break;
+					}
+					match = &attachment;
+				}
+			}
+			if (match != nullptr && !ambiguous) {
+				p_entity.emplacement_local = match->anchor.seat_local;
+				p_entity.emplacement_yaw_offset = match->anchor.yaw_offset;
+				p_entity.emplacement_bone =
+						match->anchor_found ? match->anchor.bone_index : 0;
+				p_entity.emplacement_kind = static_cast<uint8_t>(match->kind);
+				p_entity.emplacement_slot = match->stored_slot;
+				p_entity.emplacement_attachment_flags = match->attachment_flags;
+				p_entity.emplacement_angle_count = match->angle_count;
+				p_entity.emplacement_down_limit_bam = match->down_limit_bam;
+				p_entity.emplacement_up_limit_bam = match->up_limit_bam;
+				p_entity.emplacement_right_limit_bam = match->right_limit_bam;
+				p_entity.emplacement_left_limit_bam = match->left_limit_bam;
+				p_entity.emplacement_pose_metadata_resolved = true;
+			}
+		}
+	}
+
+	const opennova::mission::ItemSeatSpec *spec =
+			item_seat_spec_for_type(item_seat_specs_,
+					static_cast<uint16_t>(p_entity.item_id));
+	// The installed table is authoritative. Clearing a type from a later table
+	// must also clear stale model metadata on an already-streamed exact row.
+	p_entity.emplaced_config_valid = false;
+	p_entity.emplaced_config = 0;
+	p_entity.armory_points.clear();
+	p_entity.primary_weapon.clear();
+	p_entity.seats.clear();
+	if (spec == nullptr) return;
+
+	p_entity.emplaced_config_valid = spec->mount_config_valid;
+	p_entity.emplaced_config = spec->mount_config_valid
+			? spec->mount_config : 0;
+	p_entity.armory_points = spec->armory_points;
+	p_entity.primary_weapon = spec->primary_weapon;
+	// Seat specs are the def-derived trait channel: a spec that declares the
+	// EWeap primary weapon carries items.def's attrib-0x20 nature. A world
+	// running on installed specs without the item database (authored tool and
+	// test worlds) stamps the equivalent trait here so the witnessed def gate
+	// in resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
+	// items.def sweep overwrites this with the authoritative row.
+	if (!p_entity.has_item_def && !spec->primary_weapon.empty()) {
+		p_entity.has_item_def = true;
+		p_entity.item_attrib |= opennova::world::kItemAttribEweap;
+	}
+	p_entity.seats = spec->seats;
+	for (size_t seat_index = 0; seat_index < p_entity.seats.size();
+			++seat_index) {
+		opennova::world::Seat &seat = p_entity.seats[seat_index];
+		seat.occupant = seat.retail_slot < occupants.size()
+				? occupants[seat.retail_slot]
+				: opennova::world::EntityHandle{};
+		if (!seat.occupant.valid() || !world_) continue;
+		opennova::world::Entity *occupant =
+				world_->registry.get(seat.occupant);
+		if (occupant == nullptr || !occupant->mounted ||
+				occupant->mount_target != p_entity.handle)
+			continue;
+		// mount_seat is the dense gameplay-row index, while occupancy survives
+		// table refreshes by retail's fixed mountHandles slot. Keep the occupant
+		// side synchronized when a later model table changes dense ordering.
+		occupant->mount_seat = static_cast<int8_t>(seat_index);
+		occupant->mount_type = seat.type;
+		occupant->mount_bone = seat.bone_index;
+		occupant->mounted_config_valid = p_entity.emplaced_config_valid;
+		occupant->mounted_config = p_entity.emplaced_config_valid
+				? p_entity.emplaced_config : 0;
+	}
 }
 
 void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
@@ -1158,4 +1406,27 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 					const opennova::mission::ItemSeatSpec &b) {
 				return a.type_id < b.type_id;
 			});
+	stamp_seat_spec_turret_limits();
+
+	// The production header-only join resolves model metadata after network rows
+	// can already exist. Refresh live pool-1 rows immediately and preserve any
+	// occupant by retail's fixed mountHandles slot, never by dense vector index.
+	if (world_) {
+		std::vector<opennova::world::EntityHandle> items;
+		world_->registry.for_each([&](const opennova::world::Entity &entity) {
+			if (entity.handle.pool() == 1) items.push_back(entity.handle);
+		});
+		for (const opennova::world::EntityHandle handle : items) {
+			opennova::world::Entity *entity = wire_header_world_
+					? wire_world_materializer_.owned(*world_, handle)
+					: world_->registry.get(handle);
+			if (entity != nullptr)
+				refresh_item_seat_spec(*entity);
+		}
+		// A header-only join may receive its model/seat table after the 0x0D
+		// row. Definitions were installed above; now apply the retained fixed
+		// mountHandles image without creating synthetic seats.
+		if (wire_header_world_ && runtime_ != nullptr)
+			(void)wire_world_materializer_.sync(runtime_->state(), *world_);
+	}
 }

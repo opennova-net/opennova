@@ -8,11 +8,11 @@ extends GutTest
 # expansion instead silently renames every wire ADM index at and after the first diverging
 # weapon.def row.
 #
-# The observable that makes each case falsifiable: HOSTMAP.BMS exists ONLY inside the
-# expansion archive, and its bytes are not a mission. So the join's failure reason says
-# which data set was mounted when the lookup ran:
-#   found (expansion mounted)  -> "join: failed to parse host mission HOSTMAP.BMS"
-#   absent (base mounted)      -> "join: host mission HOSTMAP.BMS is not installed locally"
+# The observable that makes each case falsifiable: the host's referenced TRN/ENV
+# assets exist ONLY inside the expansion archive. HOSTMAP.BMS is deliberately
+# invalid, but a retail-shaped join must never open it:
+#   assets found (expansion mounted) -> the wire-header world loads
+#   assets absent (base mounted)     -> referenced terrain-not-found failure
 # Each case starts from a persisted local expansion that is the WRONG one, and the
 # pre-assertions pin what that local-only mount would have resolved.
 #
@@ -23,10 +23,11 @@ extends GutTest
 
 const HOST_MAP := "HOSTMAP.BMS"
 const NOT_A_MISSION := "this is not a bms"
-const PARSE_FAILURE := "failed to parse host mission"
-const MISSING_FAILURE := "is not installed locally"
+const HOST_TERRAIN := "HOSTTRN"
+const HOST_ENVIRONMENT := "HOSTENV"
+const ASSET_MISSING_FAILURE := "HOSTTRN.trn"
 # The in-process host needs a handful of steps to reach its S2C 0x11 admission marker; the
-# joiner's own driver awaits process_frame, so both are pumped from one loop.
+# joiner's own admission observer is tick-polled, so both are pumped from one loop.
 const PRELOAD_PUMP_FRAMES := 900
 
 var _saved_expansion := ""
@@ -53,14 +54,18 @@ func test_expansion_host_remounts_a_base_mounted_joiner() -> void:
 	var local := NovaResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, ""), OK)
 	assert_eq(local.get_expansion(), "", "the local-only mount is base game")
-	assert_false(local.has_file(HOST_MAP, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY),
-		"the host's mission lives only in the expansion")
+	assert_false(local.has_file(HOST_TERRAIN + ".trn"),
+		"the host's terrain lives only in the expansion")
 	local.clear()
 
-	var reason := await _join_against_host("jox01", dir)
-	# AFTER: the mission resolved, so the root that answered was the expansion one.
-	assert_string_contains(reason, PARSE_FAILURE,
-		"the joiner remounted onto the host's expansion before resolving the host's mission")
+	var world := _make_world()
+	var reason := await _join_against_host("jox01", dir, world, _watch_failures(world))
+	# AFTER: the wire-header world resolved through the expansion-only assets.
+	assert_eq(reason, "", "the host's expansion assets loaded without reopening HOSTMAP.BMS")
+	assert_true(world.is_loaded(),
+		"the joiner remounted onto the host's expansion before resolving host assets")
+	assert_eq(world.get_resource_root().get_expansion(), "jox01")
+	world.unload()
 
 
 func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
@@ -72,12 +77,13 @@ func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
 	var local := NovaResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, "jox01"), OK)
 	assert_eq(local.get_expansion(), "jox01", "the local-only mount is the expansion")
-	assert_true(local.has_file(HOST_MAP, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_true(local.has_file(HOST_TERRAIN + ".trn"))
 	local.clear()
 
 	var reason := await _join_against_host("", dir)
-	assert_string_contains(reason, MISSING_FAILURE,
+	assert_string_contains(reason, ASSET_MISSING_FAILURE,
 		"the joiner remounted down to the base game the host actually runs")
+	assert_string_contains(reason, "not found")
 
 
 func test_uninstalled_host_expansion_aborts_the_join() -> void:
@@ -100,12 +106,15 @@ func test_matching_expansion_leaves_the_mount_alone() -> void:
 
 	var local := NovaResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, "jox01"), OK)
-	assert_true(local.has_file(HOST_MAP, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_true(local.has_file(HOST_TERRAIN + ".trn"))
 	local.clear()
 
-	var reason := await _join_against_host("jox01", dir)
-	assert_string_contains(reason, PARSE_FAILURE,
-		"an agreeing host changes nothing: the join proceeds on the already-correct mount")
+	var world := _make_world()
+	var reason := await _join_against_host("jox01", dir, world, _watch_failures(world))
+	assert_eq(reason, "", "an agreeing host loads through the already-correct mount")
+	assert_true(world.is_loaded())
+	assert_eq(world.get_resource_root().get_expansion(), "jox01")
+	world.unload()
 
 
 func test_injected_shell_root_is_switched_in_place() -> void:
@@ -117,19 +126,20 @@ func test_injected_shell_root_is_switched_in_place() -> void:
 	var shell_root := NovaResourceRoot.new()
 	assert_eq(shell_root.mount_runtime(dir, ""), OK)
 	assert_eq(shell_root.get_expansion(), "", "the shell mounted base game")
-	assert_false(shell_root.has_file(HOST_MAP, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY),
-		"the host's mission lives only in the expansion")
+	assert_false(shell_root.has_file(HOST_TERRAIN + ".trn"),
+		"the host's terrain lives only in the expansion")
 
 	var world := _make_world()
 	world.set_resource_root(shell_root)
 	var reason := await _join_against_host("jox01", dir, world, _watch_failures(world))
-	assert_string_contains(reason, PARSE_FAILURE,
-		"the host's mission resolved, so the join ran on the host's expansion")
+	assert_eq(reason, "", "the host's assets resolved without reopening HOSTMAP.BMS")
+	assert_true(world.is_loaded(), "the join ran on the host's expansion")
 	assert_eq(shell_root.get_expansion(), "jox01",
 		"and it is the SHELL's own root that moved — the switch is in place, not a swap")
-	assert_true(shell_root.has_file(HOST_MAP, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_true(shell_root.has_file(HOST_TERRAIN + ".trn"))
 	assert_eq(NovaResourceDirSettings.get_expansion(), "",
 		"the host owns this session's data set, not the persisted menu choice")
+	world.unload()
 	shell_root.clear()  # release the archive handles before after_each deletes the install
 
 
@@ -175,8 +185,8 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 	var reason := await _join_against_host("revx02", dir, world, _watch_failures(world))
 	assert_false(reason.contains("which is not installed"),
 		"the join must not be refused over an install the authoring mount never claimed to have")
-	assert_string_contains(reason, MISSING_FAILURE,
-		"it fails later, on the host's mission being absent from the authored data — not on the mount")
+	assert_string_contains(reason, ASSET_MISSING_FAILURE,
+		"it fails later on a host-referenced asset — not on expansion policing")
 	assert_false(loose_root.is_runtime_mount(), "and the authoring mount is left untouched")
 	loose_root.clear()
 
@@ -196,8 +206,8 @@ func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 	var world := _make_world()
 	world.set_resource_root(loose_root)
 	var reason := await _join_against_host("jox01", dir, world, _watch_failures(world))
-	assert_string_contains(reason, MISSING_FAILURE,
-		"the authoring mount never gained the expansion archive the host's mission lives in")
+	assert_string_contains(reason, ASSET_MISSING_FAILURE,
+		"the authoring mount never gained the expansion archive containing host assets")
 	assert_false(loose_root.is_runtime_mount(), "and it is still the authoring mount")
 	assert_eq(loose_root.get_expansion(), "")
 	loose_root.clear()
@@ -205,9 +215,9 @@ func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 
 # --- harness -----------------------------------------------------------------------------
 
-# Run a real GameWorld joiner preload against a listen host advertising `host_expansion`,
-# and return the load-failure reason it ends on. Every case ends in a failure by design:
-# HOSTMAP.BMS is never a loadable mission, so the reason is the probe.
+# Run a real GameWorld joiner preload against a listen host advertising `host_expansion`.
+# Return its load-failure reason, or an empty string once the wire-header world loads.
+# HOSTMAP.BMS remains deliberately invalid: success proves the client never opened it.
 func _join_against_host(host_expansion: String, dir: String,
 		world = null, failures: Array = []) -> String:
 	var host := NovaSimulation.new()
@@ -222,6 +232,9 @@ func _join_against_host(host_expansion: String, dir: String,
 	assert_true(host.enable_host_listen(0), "the in-process listen host bound a loopback port")
 	var mission := NovaMissionData.new()
 	assert_eq(mission.create_default(), OK)
+	assert_true(mission.set_header_string("mission_name", "Expansion Probe"))
+	assert_true(mission.set_header_string("terrain", HOST_TERRAIN))
+	assert_true(mission.set_header_string("environment", HOST_ENVIRONMENT))
 	assert_true(host.load_from_mission_data(mission))
 
 	if world == null:
@@ -235,12 +248,12 @@ func _join_against_host(host_expansion: String, dir: String,
 	assert_eq(world.load_mission_as_joiner(target), OK)
 
 	for _i in range(PRELOAD_PUMP_FRAMES):
-		if not failures.is_empty():
+		if not failures.is_empty() or world.is_loaded():
 			break
 		host.step()
 		await get_tree().process_frame
 	host.free()
-	assert_false(failures.is_empty(),
+	assert_true(not failures.is_empty() or world.is_loaded(),
 		"the preload reached a decision within %d frames" % PRELOAD_PUMP_FRAMES)
 	return String(failures[0]) if not failures.is_empty() else ""
 
@@ -271,6 +284,8 @@ func _make_install() -> String:
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "exptag.txt", "bytes": "EXP"},
 		{"name": HOST_MAP, "bytes": NOT_A_MISSION},
+		{"name": HOST_TERRAIN + ".trn", "bytes": "not a trn"},
+		{"name": HOST_ENVIRONMENT + ".env", "bytes": "not an env"},
 	])
 	_dirs.append(dir)
 	return dir

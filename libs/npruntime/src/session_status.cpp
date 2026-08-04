@@ -1,0 +1,189 @@
+#include "npruntime/session_status.h"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <utility>
+
+#include <io/le.h>
+
+namespace opennova::np {
+namespace {
+
+// [orig: ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport @0x530A60
+// -> SessionStatus_SerializeToBuffer @0x5310C0]
+constexpr std::array<const char *, 38> kScoreVarNames = {
+	"FIRE", "HIT", "FRIENDLYKILL", "ENEMYKILL", "SUICIDE",
+	"DEATH", "MEDICHEAL", "MEDICSAVE", "RESPAWN", "FLAGSAVE",
+	"FLAGCAPTURE", "FLAGPICKUP", "ZONEQUANTUM", "DESTROYTARGET",
+	"PSPATTEMPT", "PSPTAKEOVER", "MULTIPLEKILL", "HEADSHOTKILL",
+	"KNIFEKILL", "SKILLKILL", "FLAGCARRIERKILL", "THEMINZONEKILL",
+	"MEINZONEKILL", "THEMINMYZONEKILL", "MEINMYZONEKILL",
+	"THEMINTHEIRZONEKILL", "MEINTHEIRZONEKILL", "ASSISTS",
+	"ENEMYSNIPERKILL", "SNIPERSKILLKILLDISTANCEMIN",
+	"SNIPERSKILLKILLDISTANCEMAX", "INAZONE", "INDZONE", "INZONE",
+	"LFPTAKEOVER", "ALIVE", "ALIVEQUANTUM", "VATTACHKILL",
+};
+
+bool ascii_iequals(std::string_view a, std::string_view b) {
+	if (a.size() != b.size()) return false;
+	for (std::size_t i = 0; i < a.size(); ++i) {
+		if (std::tolower(static_cast<unsigned char>(a[i])) !=
+		    std::tolower(static_cast<unsigned char>(b[i])))
+			return false;
+	}
+	return true;
+}
+
+const char *score_game_type_name(uint32_t game_type) {
+	if (game_type == 0) return "DM";
+	if (game_type == 0x10000u) return "TDM";
+	if ((game_type & 0xFFFDFFFFu) == 0x10020u) return "COOP";
+	switch (game_type) {
+	case 0x10001u: return "TKOTH";
+	case 0x00001u: return "KOTH";
+	case 0x90002u: return "SD";
+	case 0x10002u: return "AD";
+	case 0x10004u: return "CTF";
+	case 0x10008u: return "FB";
+	case 0x10010u: return "AAS";
+	case 0x50010u: return "CAC";
+	default:
+		// Retail normalizes its unknown/nonzero row 0 to the Co-op score row.
+		return "COOP";
+	}
+}
+
+uint8_t session_status_game_type_index(uint32_t game_type) {
+	if (game_type == 0) return 11;
+	if (game_type == 0x10000u) return 1;
+	if ((game_type & 0xFFFDFFFFu) == 0x10020u &&
+	    (game_type & 0x20000u) != 0)
+		return 2;
+	switch (game_type) {
+	case 0x10001u: return 3;
+	case 0x00001u: return 4;
+	case 0x90002u: return 5;
+	case 0x10002u: return 6;
+	case 0x10004u: return 7;
+	case 0x10008u: return 8;
+	case 0x00008u: return 12;
+	case 0x10010u: return 9;
+	case 0x50010u: return 10;
+	default: return 0;
+	}
+}
+
+void append_cstr_limited(
+		std::vector<uint8_t> &out, const std::string &value,
+		std::size_t kept_limit) {
+	const std::size_t n = std::min(value.size(), kept_limit);
+	out.insert(out.end(), value.begin(), value.begin() +
+			static_cast<std::ptrdiff_t>(n));
+	out.push_back(0);
+}
+
+void append_u32(std::vector<uint8_t> &out, uint32_t value) {
+	opennova::io::append_u32_le(out, value);
+}
+
+} // namespace
+
+bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
+	std::array<int32_t, 39> parsed{};
+	const std::string target = score_game_type_name(config.game_type);
+	bool selected = false;
+	bool found_target = false;
+	bool saw_version = false;
+	int version = 0;
+
+	std::istringstream input{std::string(score_ini)};
+	std::string line;
+	while (std::getline(input, line)) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		std::istringstream row(line);
+		std::string directive;
+		if (!(row >> directive) || directive.rfind("//", 0) == 0) continue;
+
+		if (ascii_iequals(directive, "VERSION")) {
+			if (row >> version) saw_version = true;
+			continue;
+		}
+		if (ascii_iequals(directive, "GAMETYPE")) {
+			std::string name;
+			if (row >> std::quoted(name)) {
+				selected = ascii_iequals(name, target);
+				found_target = found_target || selected;
+			} else {
+				selected = false;
+			}
+			continue;
+		}
+		if (!selected || !ascii_iequals(directive, "VAR")) continue;
+
+		std::string name;
+		int64_t value = 0;
+		if (!(row >> std::quoted(name) >> value)) continue;
+		for (std::size_t i = 0; i < kScoreVarNames.size(); ++i) {
+			if (!ascii_iequals(name, kScoreVarNames[i])) continue;
+			parsed[i] = static_cast<int32_t>(static_cast<uint32_t>(value));
+			break;
+		}
+	}
+
+	if (!saw_version || version != 40 || !found_target) return false;
+	config.session_status_stat_values = parsed;
+	return true;
+}
+
+std::vector<uint8_t> serialize_session_status(
+		const GameConfig &config, uint32_t uptime_ms,
+		uint32_t active_players) {
+	std::vector<uint8_t> out;
+	// Napi_CopyString stores at most 31/63 characters in the 32/64-byte report
+	// fields before the serializer walks the resulting C strings.
+	append_cstr_limited(out, config.server_name, 31);
+	append_cstr_limited(out, config.mission_name, 63);
+	out.push_back(static_cast<uint8_t>(config.game_type));
+	out.push_back(session_status_game_type_index(config.game_type));
+	out.push_back(static_cast<uint8_t>(config.max_players));
+	append_u32(out, uptime_ms);
+	for (int32_t value : config.session_status_stat_values)
+		append_u32(out, static_cast<uint32_t>(value));
+
+	std::vector<std::pair<uint8_t, uint32_t>> options;
+	const uint32_t game_type = config.game_type;
+	if ((game_type & 0xFFFDFFFFu) == 0x10020u && active_players > 0) {
+		options.emplace_back(
+				9, std::min<uint32_t>(active_players, 8));
+	}
+	if (game_type == 0 || game_type == 0x10000u) {
+		options.emplace_back(1, config.score_limit);
+	}
+	if (game_type == 0x00001u || game_type == 0x10001u) {
+		options.emplace_back(2, config.time_limit_minutes);
+	}
+	// Every live non-objective session with a nonzero respawn time appends key
+	// 8. Objective Co-op (0x30020) suppresses it; training Co-op (0x10020)
+	// therefore carries both key 9 and key 8 in the retail oracle.
+	if ((game_type & 0x20000u) == 0 && config.respawn_time != 0) {
+		options.emplace_back(8, config.respawn_time);
+	}
+	if (options.size() > 8) options.resize(8);
+
+	out.push_back(static_cast<uint8_t>(options.size()));
+	for (const auto &[key, value] : options) {
+		out.push_back(key);
+		append_u32(out, value);
+	}
+	// Retail loops while pair_index <= pair_count. The zero-initialized report
+	// therefore contributes one unadvertised five-byte sentinel on every send.
+	out.push_back(0);
+	append_u32(out, 0);
+	return out;
+}
+
+} // namespace opennova::np

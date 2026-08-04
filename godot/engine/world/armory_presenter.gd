@@ -103,6 +103,7 @@ func try_open() -> bool:
 	if sim.has_method("get_local_player_class"):
 		_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)
+	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
 	_armory.set_player_class(_player_class)
 	# D-MNU-10 (deliberate divergence, user decision 2026-07-11): the class spin is
 	# LIVE in offline play. Retail enables it only in a network session

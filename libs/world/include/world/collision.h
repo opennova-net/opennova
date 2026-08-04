@@ -557,11 +557,10 @@ struct FixedVec3 {
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
 };
 
-// One decoded remote person (player or non-player infantry) exposed only to
-// visual projectile collision. It is deliberately not an Entity: the wire
-// handle belongs to the server's address space and must never alias a
-// client-local registry handle or participate in movement, AI, explosions, or
-// authoritative damage.
+// One decoded remote pool-0 person (player or non-player infantry) exposed only
+// to visual projectile collision. ClientWorldMaterializer deliberately excludes
+// pool 0, so this proxy must never alias the joiner's separate local-player
+// Entity or participate in movement, AI, explosions, or authoritative damage.
 struct ProjectilePersonProxy {
     uint16_t wire_handle = 0xFFFF;
     FixedVec3 position_q16;

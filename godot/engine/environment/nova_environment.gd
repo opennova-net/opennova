@@ -29,6 +29,7 @@ const DEFAULT_START_HOUR := 12
 	set(value):
 		if environment_data and environment_data.environment_changed.is_connected(_on_environment_changed):
 			environment_data.environment_changed.disconnect(_on_environment_changed)
+		_clear_network_environment_state()
 		environment_data = value
 		if environment_data and not environment_data.environment_changed.is_connected(_on_environment_changed):
 			environment_data.environment_changed.connect(_on_environment_changed)
@@ -78,6 +79,16 @@ var _fog_distance: float = 1000.0
 var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
 var _mission_advance_per_tick: int = int(
 	TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * DEFAULT_MINUTES_PER_DAY))
+# A remote authority's phase-2 state overrides only the values actually carried
+# on the wire. The local .env remains the source for colors, fog type, sky
+# height, and every other unreplicated channel.
+var _network_environment_active := false
+var _network_fog_target := 0.0
+var _network_sky_speed := 0.0
+var _network_quake_ticks := 0
+var _network_rain_current := 0.0
+var _network_overcast_blend := 0.0
+var _network_precipitation_kind := 0
 # TRUE once a NovaWeather node drives this environment: the weather tick then
 # OWNS the current render colors + the smoothed fog distance + the shader
 # globals (its per-frame writeback), and _update_tod refreshes only the
@@ -96,6 +107,18 @@ var _weather_driven := false
 # setters below (guarded so a settled smoother stops bumping). NovaObjectModel caches the last
 # generation it applied and skips its per-material environment push while this is unchanged.
 var _env_generation: int = 0
+
+
+## Fired on every environment-generation bump. NovaObjectModel sleeps its
+## per-frame runtime scheduling while idle; this signal is what wakes every
+## model for exactly one restamp frame when lighting/fog actually changed,
+## replacing 800+ per-model generation polls per frame.
+signal env_generation_changed
+
+
+func _bump_env_generation() -> void:
+	_env_generation += 1
+	env_generation_changed.emit()
 
 
 func _ready() -> void:
@@ -130,11 +153,16 @@ func _process(delta: float) -> void:
 ## to retail's 60-minute minimum [orig: Game_StartMission @ 0x525371;
 ## Environment_SetTodAdvanceRate @ 0x57d170].
 func configure_mission_clock(start_time_q8_8: int, minutes_per_day: int) -> void:
+	_clear_network_environment_state()
 	var raw := start_time_q8_8 & 0xFFFF
 	_mission_time_fixed24 = (raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24
 	var rate := maxi(minutes_per_day, MIN_MINUTES_PER_DAY)
 	_mission_advance_per_tick = int(TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * rate))
 	time_of_day = mission_start_time_hhmm(start_time_q8_8)
+
+
+func get_mission_advance_per_tick() -> int:
+	return _mission_advance_per_tick
 
 
 ## Convert the unsigned Q8.8 BMS mission header clock to the HHMM value used
@@ -151,6 +179,10 @@ static func mission_start_time_hhmm(start_time_q8_8: int) -> float:
 func advance_mission_clock(ticks: int) -> void:
 	if ticks <= 0:
 		return
+	# Net receive writes Env_QuakeTicks, but retail's shared 62 Hz environment
+	# tick still owns the countdown between phase-2 samples.
+	if _network_environment_active and _network_quake_ticks > 0:
+		_network_quake_ticks = maxi(0, _network_quake_ticks - ticks)
 	_mission_time_fixed24 = (
 		_mission_time_fixed24 + ticks * _mission_advance_per_tick
 	) % TOD_DAY_FIXED24
@@ -175,6 +207,51 @@ func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 
 func get_mission_minute_of_day() -> float:
 	return hhmm_to_minute_of_day(time_of_day)
+
+
+## Apply one decoded S2C 0x0A phase-2 sample to the live environment owner.
+## The dictionary is deliberately the wire view: reconstructing native units
+## happens here once, and a later replacement .env clears every remote override.
+func apply_network_environment_sample(sample: Dictionary) -> void:
+	_network_environment_active = true
+	_network_fog_target = float(clampi(int(sample.get("fog_dist", 0)), 0, 0xFFFF))
+	_network_sky_speed = float(clampi(int(sample.get("cloud_scroll", 0)), 0, 0xFF))
+	_network_quake_ticks = clampi(int(sample.get("quake_ticks", 0)), 0, 0xFF)
+	# Retail writes the received rain/overcast bytes into TARGET globals. The
+	# NovaWeather core retains the local currents and writes their 62 Hz chase
+	# back through set_smoothed_scalars().
+	_network_precipitation_kind = clampi(
+		int(sample.get("precipitation_kind", 0)), 0, 0xFF)
+	_mission_time_fixed24 = (
+		clampi(int(sample.get("tod_fixed", 0)), 0, 0xFFFF) << 13
+	) % TOD_DAY_FIXED24
+	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
+
+
+func _clear_network_environment_state() -> void:
+	_network_environment_active = false
+	_network_fog_target = 0.0
+	_network_sky_speed = 0.0
+	_network_quake_ticks = 0
+	_network_rain_current = 0.0
+	_network_overcast_blend = 0.0
+	_network_precipitation_kind = 0
+
+
+func get_network_quake_ticks() -> int:
+	return _network_quake_ticks if _network_environment_active else 0
+
+
+func get_network_rain_current() -> float:
+	return _network_rain_current if _network_environment_active else 0.0
+
+
+func get_overcast_blend() -> float:
+	return _network_overcast_blend if _network_environment_active else 0.0
+
+
+func get_network_precipitation_kind() -> int:
+	return _network_precipitation_kind if _network_environment_active else 0
 
 
 static func minute_of_day_to_hhmm(minute_of_day: float) -> float:
@@ -258,7 +335,7 @@ func _update_tod() -> void:
 	# A TOD recompute can move any object-consumed value (weather-driven, the
 	# moving targets flow through the smoothers instead); the bump keeps
 	# material restamps tracking either way.
-	_env_generation += 1
+	_bump_env_generation()
 	if not _weather_driven:
 		_write_shader_globals()
 
@@ -316,7 +393,7 @@ func _write_shader_globals() -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_sky_ambient())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", _light_dir)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", _fog_color_rt)
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", get_fog_level())
+	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", get_fog_end_distance())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", get_fog_start())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", 1.0)
@@ -357,7 +434,7 @@ func set_nvg_view(active: bool, gain: int) -> void:
 		return
 	_nvg_view_active = active
 	_nvg_gain = clamped_gain
-	_env_generation += 1
+	_bump_env_generation()
 	# NovaWeather owns the full per-frame global write while present. Refresh
 	# only the two affected channels immediately, and let its next tick publish
 	# the same getter-derived values again without disturbing wind/fog state.
@@ -499,7 +576,7 @@ func apply_terrain_uniforms(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_sun_direction", get_light_direction())
 	material.set_shader_parameter("u_tile_overlay_tint", get_tile_overlay_tint())
 	material.set_shader_parameter("u_fog_color", get_fog_color())
-	material.set_shader_parameter("u_fog_end", get_fog_level())
+	material.set_shader_parameter("u_fog_end", get_fog_end_distance())
 	material.set_shader_parameter("u_fog_start", get_fog_start())
 	material.set_shader_parameter("u_fog_type", get_fog_type())
 
@@ -622,25 +699,25 @@ func get_frame_clear_color() -> Vector3:
 func set_fill_light(value: Vector3) -> void:
 	if value != _fill_light:
 		_fill_light = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sun_light(value: Vector3) -> void:
 	if value != _sun_light:
 		_sun_light = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_fog_color_rt(value: Vector3) -> void:
 	if value != _fog_color_rt:
 		_fog_color_rt = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sky_ambient_rt(value: Vector3) -> void:
 	if value != _sky_ambient_rt:
 		_sky_ambient_rt = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_static_colors_rt(ceiling: Vector3, cloud: Vector3, floor_color: Vector3) -> void:
@@ -656,7 +733,7 @@ func set_static_colors_rt(ceiling: Vector3, cloud: Vector3, floor_color: Vector3
 	# indoor-light inputs. Keep the shared material-generation seam honest for
 	# any additional consumers that cache environment values.
 	if changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sky_colors_rt(
@@ -675,7 +752,7 @@ func set_sky_colors_rt(
 	# sampled directly every frame, but the shared skyfog/clear value must wake
 	# that gate when its weather block moves.
 	if skyfog_changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 ## The modulator /64 gain (the iris auto-exposure reaching shaders), written
@@ -684,7 +761,7 @@ func set_sky_colors_rt(
 func set_color_src_gain(value: Vector3) -> void:
 	if value != _color_src_gain:
 		_color_src_gain = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func get_color_src_gain() -> Vector3:
@@ -720,6 +797,8 @@ func get_fog_level() -> float:
 
 
 func get_fog_level_target() -> float:
+	if _network_environment_active:
+		return _network_fog_target
 	# The parsed .env value — the spring target the weather tick chases.
 	return environment_data.get_fog_level() if environment_data else 1000.0
 
@@ -728,7 +807,12 @@ func get_fog_start() -> float:
 	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950].
 	# Consume the smoothed CURRENT end so both bounds stay on the same curve
 	# during the 62 Hz fog spring; overcast remains 0 until weather drives it.
-	return EnvFile.fog_start_for(get_fog_type(), get_fog_level(), 0.0)
+	return EnvFile.fog_start_for(
+			get_fog_type(), get_fog_end_distance(), get_overcast_blend())
+
+
+func get_fog_end_distance() -> float:
+	return get_fog_level() * (1.0 - get_overcast_blend() * 0.5)
 
 
 func get_fog_type() -> int:
@@ -736,6 +820,8 @@ func get_fog_type() -> int:
 
 
 func get_sky_speed() -> float:
+	if _network_environment_active:
+		return _network_sky_speed
 	return environment_data.get_sky_speed() if environment_data else 15.0
 
 
@@ -757,13 +843,17 @@ func get_sky_height_target() -> float:
 ## env #27: the weather tick pushes the smoothed scalar currents back here
 ## (the same writeback seam as the smoothed colors), so every scalar
 ## consumer serves the ramped values.
-func set_smoothed_scalars(fog_distance: float, sky_height: float, sun_dim_pct: float = 0.0) -> void:
+func set_smoothed_scalars(fog_distance: float, sky_height: float,
+		sun_dim_pct: float = 0.0, rain_current: float = 0.0,
+		overcast_blend: float = 0.0) -> void:
 	var fog_changed := _fog_dist_smoothed != fog_distance
 	_fog_dist_smoothed = fog_distance
 	_sky_height_smoothed = sky_height
 	_sun_dim_smoothed = sun_dim_pct
+	_network_rain_current = rain_current
+	_network_overcast_blend = overcast_blend
 	if fog_changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 ## The smoothed Env_SunDimPct channel (0..100; default 0 — nothing writes the
@@ -783,3 +873,9 @@ func get_sky_map2_tex() -> Texture2D:
 
 func get_environment_data() -> EnvFile:
 	return environment_data
+
+
+## Exact retail-native mission clock used by the 0x0A phase-2 projection.
+## Consumers must not reconstruct this value from the display-oriented clock.
+func get_mission_time_fixed24() -> int:
+	return _mission_time_fixed24

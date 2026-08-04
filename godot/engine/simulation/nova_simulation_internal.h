@@ -45,6 +45,7 @@
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
 #include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
+#include <world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
 
 #include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"
@@ -350,6 +351,34 @@ inline uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam)
 	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
 }
 
+// Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
+// (the "360" gun family) — no effective window; 0 tells callers to skip.
+inline int32_t turret_limit_bam(int16_t degrees) {
+	if (degrees <= 0 || degrees >= 180) return 0;
+	return static_cast<int32_t>(
+			opennova::world::bam_from_degrees_wrapped(
+					static_cast<double>(degrees)));
+}
+
+// The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
+// second write wins. Retail runs this every entity update so a phase implied
+// beyond the gun's arc pins AT the arc edge — a "180 tripod" barrel can never
+// present outside its authored traverse. [orig: sub_540CC0 @0x540cc0; caller
+// Entity_UpdateTransformAndTurret @0x441228..0x44128c]
+inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
+		int32_t lower) {
+	bool clamped = false;
+	if (value > upper - 0x1FFFF) {
+		value = upper;
+		clamped = true;
+	}
+	if (value < lower + 0x1FFFF) {
+		value = lower;
+		return true;
+	}
+	return clamped;
+}
+
 inline bool emplaced_weapon_controls_for(
 		const opennova::world::World &world,
 		opennova::world::AiSystem *ai,
@@ -377,9 +406,27 @@ inline bool emplaced_weapon_controls_for(
 	const int32_t parent_pitch =
 			opennova::world::bam_from_degrees_wrapped(
 					static_cast<double>(mount.pitch));
+	int32_t yaw_delta = opennova::io::bam_sub(parent_heading, gunner->heading);
+	int32_t pitch_delta = opennova::io::bam_sub(parent_pitch, gunner->pitch);
+	// Clamp into the weapon's authored turret window (weapon.def
+	// targetyawrange/targetpitchmax/min; zero = not authored, no window).
+	// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+	if (const opennova::world::WeaponTableEntry *entry =
+			mount.primary_weapon_slot_adm != 0xFFu
+					? world.weapons.by_index(mount.primary_weapon_slot_adm)
+					: nullptr) {
+		const int32_t yaw_range = turret_limit_bam(entry->turret_yaw_range_deg);
+		if (yaw_range != 0)
+			emplaced_clamp_turret_bam(yaw_delta, yaw_range, -yaw_range);
+		const int32_t pitch_max = turret_limit_bam(entry->turret_pitch_max_deg);
+		const int32_t pitch_min = turret_limit_bam(entry->turret_pitch_min_deg);
+		if (pitch_max != 0 || pitch_min != 0)
+			emplaced_clamp_turret_bam(pitch_delta, pitch_max, -pitch_min);
+	}
 	out.valid = true;
-	out.gun_yaw = emplaced_control_phase(parent_heading, gunner->heading);
-	out.gun_pitch = emplaced_control_phase(parent_pitch, gunner->pitch);
+	out.gun_yaw = static_cast<uint16_t>(static_cast<uint32_t>(yaw_delta) >> 16);
+	out.gun_pitch =
+			static_cast<uint16_t>(static_cast<uint32_t>(pitch_delta) >> 16);
 	return true;
 }
 
@@ -410,9 +457,11 @@ inline bool emplaced_weapon_controls_for_client(
 				seat->type != opennova::world::SeatType::Gunner)
 			continue;
 
-		// NetClientView has already composed mounted yaw into world heading and
+		// ClientReplicaPipeline has already composed mounted yaw into world heading and
 		// reconstructed an infantry gunner's live entity pitch from the compact
-		// aim target using retail's one-eighth chase.
+		// aim target using retail's one-eighth chase. Root headings read the
+		// row's live BAM (chased on a joiner — §5.38e; full euler precision for
+		// vehicles).
 		const int32_t parent_heading = mount.heading_bam;
 		const int32_t occupant_heading = occupant.heading_bam;
 		const int32_t occupant_pitch =
@@ -420,11 +469,29 @@ inline bool emplaced_weapon_controls_for_client(
 				? static_cast<int32_t>(
 						static_cast<uint32_t>(occupant.pitch_byte) << 24)
 				: occupant.pitch_bam;
+		int32_t yaw_delta =
+				opennova::io::bam_sub(parent_heading, occupant_heading);
+		int32_t pitch_delta =
+				opennova::io::bam_sub(mount.pitch_bam, occupant_pitch);
+		// Clamp into the gun's authored turret window (stamped onto the spec
+		// from the primary weapon's weapon.def rows). A retail joiner never
+		// presents a barrel outside the arc even when the mount's streamed
+		// base heading is stale relative to its gunner: the phase pins at the
+		// arc edge (live 00TRg witness 2026-08-04 — gun 0x100c streamed its
+		// spawn heading 140 deg while its gunner aimed 314 deg; unclamped,
+		// the "180 tripod" model wrapped the barrel visibly wrong).
+		// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+		if (spec->turret_yaw_range_bam != 0)
+			emplaced_clamp_turret_bam(yaw_delta, spec->turret_yaw_range_bam,
+					-spec->turret_yaw_range_bam);
+		if (spec->turret_pitch_max_bam != 0 || spec->turret_pitch_min_bam != 0)
+			emplaced_clamp_turret_bam(pitch_delta, spec->turret_pitch_max_bam,
+					-spec->turret_pitch_min_bam);
 		out.valid = true;
-		out.gun_yaw =
-				emplaced_control_phase(parent_heading, occupant_heading);
-		out.gun_pitch =
-				emplaced_control_phase(mount.pitch_bam, occupant_pitch);
+		out.gun_yaw = static_cast<uint16_t>(
+				static_cast<uint32_t>(yaw_delta) >> 16);
+		out.gun_pitch = static_cast<uint16_t>(
+				static_cast<uint32_t>(pitch_delta) >> 16);
 		return true;
 	}
 	return false;
@@ -453,12 +520,22 @@ inline bool aim_overlay_inputs_for_client(
 
 	out = opennova::anim::AimOverlayInputs{};
 	out.aim_yaw = entity.heading_bam;
-	out.aim_pitch = static_cast<int32_t>(
-			static_cast<uint32_t>(
-					entity.cls == opennova::EntityClass::Player
-							? entity.pitch_byte
-							: entity.aim_yaw_byte)
-			<< 24);
+	// Free-standing players read the row's live pitch (the org2 body chase
+	// steps it toward the wire byte with divisor 12 on a joiner; snap folds
+	// mirror the byte — §5.38e §3). Mounted players and infantry keep the raw
+	// wire aim byte: their own mover is bit0-skipped and the seat pose owns the
+	// body [orig: the mounted read of entity+0x2D0-desired aim].
+	const bool free_standing_player =
+			entity.cls == opennova::EntityClass::Player &&
+			entity.carrier_handle == 0xFFFFu;
+	out.aim_pitch = free_standing_player
+			? entity.pitch_bam
+			: static_cast<int32_t>(
+					static_cast<uint32_t>(
+							entity.cls == opennova::EntityClass::Player
+									? entity.pitch_byte
+									: entity.aim_yaw_byte)
+					<< 24);
 	out.body_yaw = out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;
@@ -492,17 +569,34 @@ inline bool aim_overlay_inputs_for_client(
 	const opennova::netsim::ClientEntityState *carrier =
 			client_entity_for_handle(state, entity.carrier_handle);
 	if (carrier == nullptr) return true;
+	// A carrier row with no resolved seat table (or none for this bone) is OUR
+	// resolution-timing state, with no retail counterpart: retail composes every
+	// mounted body from the always-loaded itemDef+model, while our model-derived
+	// spec table can lag the stream (the admission prewarm is one-shot; a type
+	// first streamed later never resolves until the next rebuild). Retail never
+	// draws a mounted body free-standing, so degrade TOWARD the seat: hold the
+	// carrier's live root frame (heading/pitch/roll, offset unknown => zero)
+	// instead of letting body_yaw ride the aim — an aim-riding body orbits the
+	// mount with the gunner's scan, which is the reported joiner spin.
 	const opennova::mission::ItemSeatSpec *spec =
 			item_seat_spec_for_type(specs, carrier->type_id);
-	if (spec == nullptr) return true;
 	const opennova::world::Seat *seat = nullptr;
-	for (const opennova::world::Seat &candidate : spec->seats) {
-		if (candidate.bone_index == entity.mount_bone) {
-			seat = &candidate;
-			break;
+	if (spec != nullptr) {
+		for (const opennova::world::Seat &candidate : spec->seats) {
+			if (candidate.bone_index == entity.mount_bone) {
+				seat = &candidate;
+				break;
+			}
 		}
 	}
-	if (seat == nullptr) return true;
+	if (seat == nullptr) {
+		out.body_yaw = carrier->heading_bam;
+		out.body_pitch = carrier->pitch_bam;
+		out.roll = carrier->roll_bam;
+		out.leg_yaw_r = out.body_yaw;
+		out.leg_yaw_l = out.body_yaw;
+		return true;
+	}
 	if (r_collapse_right_hand != nullptr) {
 		// The compact organic class is the decoded form of the relevant Flags
 		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
@@ -520,7 +614,8 @@ inline bool aim_overlay_inputs_for_client(
 
 	// pose_mounted_occupant faces seated slots at carrier+yaw_offset and a
 	// Gunner at carrier-yaw_offset in mission yaw. Engine heading is
-	// (90-mission yaw), so those signs invert here.
+	// (90-mission yaw), so those signs invert here. The carrier root heading is
+	// the row's live BAM (chased on a joiner — §5.38e).
 	const int32_t carrier_heading = carrier->heading_bam;
 	const int32_t offset = opennova::world::bam_from_degrees_wrapped(
 			static_cast<double>(seat->yaw_offset));

@@ -1,10 +1,13 @@
 #include "npruntime/server_tick.h"
+#include "npruntime/server_message_dispatch.h" // build_player_list_message
 
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
 #include <npwire/ingame_message_id.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/ai.h>                  // AiEntity / AiSystem::for_handle (the motor store)
@@ -17,6 +20,7 @@
 #include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
 
 #include <algorithm>
+#include <string>
 
 namespace opennova::np {
 
@@ -34,6 +38,269 @@ uint8_t pool0_index_byte(uint16_t handle) {
 void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
 	v.push_back(static_cast<uint8_t>(x & 0xFF));
 	v.push_back(static_cast<uint8_t>(x >> 8));
+}
+
+void put_u32le(std::vector<uint8_t> &v, uint32_t x) {
+	v.push_back(static_cast<uint8_t>(x & 0xFF));
+	v.push_back(static_cast<uint8_t>((x >> 8) & 0xFF));
+	v.push_back(static_cast<uint8_t>((x >> 16) & 0xFF));
+	v.push_back(static_cast<uint8_t>((x >> 24) & 0xFF));
+}
+
+constexpr uint32_t kPuntCharattrSilence = 16;
+constexpr uint32_t kPuntTimeSyncSilence = 24;
+constexpr uint32_t kPuntDeadTooLong = 7;
+constexpr uint32_t kPuntJoinDeployIdle = 35;
+constexpr uint32_t kPuntSilenceLimit = 8;
+constexpr uint32_t kDeadLiveTickLimit = 360;
+constexpr uint32_t kJoinDeployIdleLimitMs = 360000;
+constexpr uint8_t kDescriptionFlags =
+		PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8;
+static_assert(kDescriptionFlags == 0xA0);
+
+// The first description event owns the connection's disconnect slot. Closing
+// the gameplay predicate here prevents later producers from following it with
+// an ordinary frame while HostOwner still has one chance to flush the record.
+bool stage_host_disconnect(
+		NapiNPConnection &conn, const DisconnectEvent &event) {
+	if (conn.host_disconnect_sent || conn.type != 1 ||
+			conn.link.transport == nullptr)
+		return false;
+	conn.link.transport->host_send(
+			hightag::DESCRIPTION_PACKET,
+			connection_description_to_bytes(event),
+			/*reliable=*/true, kDescriptionFlags,
+			/*capacity_exempt=*/true);
+	conn.host_disconnect_sent = true;
+	return true;
+}
+
+// Server_LogCRCMismatchPunt's numeric tN family.
+// [orig: @0x517ED0 -> NapiNPDataTransfer_SendDescription @0x628C80]
+bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
+	DisconnectEvent event;
+	event.ds = 1;
+	event.dc = 2;
+	event.dstr = "t" + std::to_string(mismatch_type);
+	event.dpc = 33;
+	event.ddstr = "LogPuntEvent";
+	if (!stage_host_disconnect(conn, event)) return false;
+	conn.host_disconnect_mismatch_type = mismatch_type;
+	return true;
+}
+
+struct MinimapOverlayEntry {
+	uint16_t handle = 0;
+	uint8_t param = 0;
+	uint8_t color = 0;
+	uint8_t flags = 0;
+	uint8_t source = 0;
+	bool visible = false;
+};
+
+uint8_t minimap_team_color(uint8_t team) {
+	// [orig: Entity_ClassifyForMinimap @0x50FA70 — team 1 -> 0x0A
+	// (Blue), team 2 -> 0x09 (Red), other -> 0x0C (neutral).]
+	if (team == 1) return 0x0A;
+	return team == 2 ? 0x09 : 0x0C;
+}
+
+// The definition/entity half of Entity_ClassifyForMinimap @0x50FA70. The
+// original writes five small outputs and the producer supplies the packed
+// handle. Keeping this pure makes the packet cadence independent from the
+// classification table and, importantly, keeps ordinary Building visibility
+// tied to the resolved model+0xE0 marker instead of guessing by item type.
+MinimapOverlayEntry classify_minimap_overlay(const world::Entity &e) {
+	MinimapOverlayEntry out;
+	out.handle = e.handle.packed;
+	out.flags = ((e.flags | e.engine_flags) & world::kEntityFlagDead) != 0 ? 1 : 0;
+	out.source = e.zone_number; // entity+538 / BMS lfp_group
+	if (!e.has_item_def || (e.item_attrib & world::kItemAttribNoHud) != 0)
+		return out;
+
+	out.color = minimap_team_color(e.team);
+	const bool dead = out.flags != 0;
+
+	// ChangeTeam/capture objects are map markers irrespective of their model.
+	if ((e.item_attrib & world::kItemAttribChangeTeam) != 0) {
+		out.param = 0;
+		out.visible = true;
+		return out;
+	}
+	// ItemDefAttrib2 FARP. VehicleBay's groupFlags-dependent 19..22 selector
+	// remains definition-data-gated; it is deliberately not approximated.
+	if ((e.item_attrib2 & 0x00002000u) != 0) {
+		out.param = 5;
+		out.visible = true;
+		return out;
+	}
+	if (e.item_unit_type == 11 && !dead) {
+		out.param = 9;
+		out.visible = true;
+		return out;
+	}
+	if ((e.item_attrib & world::kItemAttribArmory) != 0) {
+		out.param = 13;
+		out.visible = true;
+		return out;
+	}
+	if (e.item_type == 5) { // Building
+		if (!e.has_minimap_model_marker) return out;
+		out.param = 0;
+		// Retail uses color 0 for an ordinary neutral Building, while Armory
+		// (classified above) retains neutral color 0x0C.
+		if (e.team != 1 && e.team != 2) out.color = 0;
+		out.visible = true;
+		return out;
+	}
+	if (e.item_type == 1 && !dead) { // Vehicle
+		out.param = 10; // ground/other
+		if (e.item_unit_type >= 5 && e.item_unit_type <= 8)
+			out.param = 15;
+		else if (e.item_unit_type == 3 || e.item_unit_type == 4)
+			out.param = 11;
+		else if (e.item_unit_type == 12)
+			out.param = 25;
+		out.visible = true;
+		return out;
+	}
+	// Raw attrib 0x8000 is a witnessed generic live-marker branch but its
+	// token name is not yet recovered.
+	if ((e.item_attrib & 0x00008000u) != 0 && !dead) {
+		out.param = 0;
+		out.visible = true;
+		return out;
+	}
+	if ((e.item_attrib & world::kItemAttribEweap) != 0 && !dead) {
+		// Two shipped emplacement definitions use the alternate icon 12;
+		// all other EWEAPs (including 00TRg's wire id 1902) use icon 4.
+		out.param = (e.item_id == 1869 || e.item_id == 1886) ? 12 : 4;
+		out.color = 8;
+		out.visible = true;
+		return out;
+	}
+	if (e.item_type == 3) { // Person
+		out.param = dead ? 8 : 3;
+		out.visible = true;
+		return out;
+	}
+	if ((e.item_attrib & world::kItemAttribSpawnPoint) != 0) {
+		out.param = 0;
+		out.visible = true;
+	}
+	return out;
+}
+
+bool overlay_entity_enabled(const world::Entity &e) {
+	// Producer-side entity+36 bit 0 is the hidden/disabled gate. Dead is not
+	// excluded here: the classifier has distinct dead Person icon/flag bytes.
+	return e.has_item_def && ((e.flags | e.engine_flags) & 1u) == 0;
+}
+
+void send_minimap_overlay_batches(NapiNPConnection &conn,
+		const std::vector<MinimapOverlayEntry> &entries) {
+	for (size_t first = 0; first < entries.size(); first += 16) {
+		const size_t count = std::min<size_t>(16, entries.size() - first);
+		std::vector<uint8_t> body;
+		body.reserve(1 + count * 6);
+		body.push_back(static_cast<uint8_t>(count));
+		for (size_t i = 0; i < count; ++i) {
+			const MinimapOverlayEntry &entry = entries[first + i];
+			put_u16le(body, entry.handle);
+			body.push_back(entry.param);
+			body.push_back(entry.color);
+			body.push_back(entry.flags);
+			body.push_back(entry.source);
+		}
+		conn.link.transport->host_send(
+				s2c::CAPTURE_ZONE_STATE, std::move(body), /*reliable=*/false);
+	}
+}
+
+// Retail invokes Server_BuildOverlayStateForPlayer every 14 host ticks, then
+// advances a 0..127 phase. The dynamic pool-1 loop visits phase, phase+128, ...
+// rather than sweeping all actors every invocation. This produces 00TRg's five
+// one-entry EWEAP packets close together and repeats them every 1792 ticks.
+void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
+	if (!ctx.is_in_session) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != 1 || !is_in_match(conn) || conn.link.transport == nullptr)
+			continue;
+		if (conn.link.mode == netsim::TransportMode::Loopback) continue;
+
+		SessionReplyState &reply = conn.reply;
+		if (reply.minimap_overlay_cooldown != 0) {
+			--reply.minimap_overlay_cooldown;
+			continue;
+		}
+
+		std::vector<MinimapOverlayEntry> entries;
+		auto append = [&](const world::Entity &e, bool persistent) {
+			MinimapOverlayEntry entry = classify_minimap_overlay(e);
+			if (!entry.visible) return;
+			if (persistent) entry.flags |= 0x10;
+			entries.push_back(entry);
+		};
+
+		if (reply.minimap_initial_scan_pending) {
+			const size_t capacity = world.registry.pool_capacity(2);
+			for (size_t slot = 0; slot < capacity; ++slot) {
+				const world::Entity *e = world.registry.get(
+						world::EntityHandle::make(2, static_cast<int>(slot)));
+				if (e == nullptr || !overlay_entity_enabled(*e) ||
+						(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
+					continue;
+				append(*e, true);
+			}
+			reply.minimap_initial_scan_pending = false;
+		}
+
+		// SpawnPoint rows from both static and actor pools are persistent and
+		// refreshed on every producer invocation.
+		for (const int pool : {2, 1}) {
+			const size_t capacity = world.registry.pool_capacity(pool);
+			for (size_t slot = 0; slot < capacity; ++slot) {
+				const world::Entity *e = world.registry.get(
+						world::EntityHandle::make(pool, static_cast<int>(slot)));
+				if (e == nullptr || !overlay_entity_enabled(*e) ||
+						(e->item_attrib & world::kItemAttribSpawnPoint) == 0)
+					continue;
+				append(*e, true);
+			}
+		}
+
+		uint8_t recipient_team = 0;
+		if (const world::Entity *recipient =
+					world.registry.get(conn.link.owned_entity))
+			recipient_team = recipient->team;
+		const size_t pool1_capacity = world.registry.pool_capacity(1);
+		for (size_t slot = reply.minimap_pool1_phase;
+				slot < pool1_capacity; slot += 128) {
+			const world::Entity *e = world.registry.get(
+					world::EntityHandle::make(1, static_cast<int>(slot)));
+			if (e == nullptr || !overlay_entity_enabled(*e) ||
+					(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
+				continue;
+			// In a live MP session retail suppresses occupied enemy vehicles.
+			if (e->item_type == 1 && e->team != 0 && e->team != recipient_team)
+				continue;
+			// A child EWEAP mounted under a non-Building parent is represented
+			// by that carrier rather than as an independent map blip.
+			if ((e->item_attrib & world::kItemAttribEweap) != 0) {
+				const world::EntityHandle parent = e->emplacement_parent.valid()
+						? e->emplacement_parent : e->mount_target;
+				if (const world::Entity *carrier = world.registry.get(parent);
+						carrier != nullptr && carrier->item_type != 5)
+					continue;
+			}
+			append(*e, false);
+		}
+
+		send_minimap_overlay_batches(conn, entries);
+		reply.minimap_pool1_phase =
+				static_cast<uint8_t>((reply.minimap_pool1_phase + 1u) & 0x7Fu);
+		reply.minimap_overlay_cooldown = 13;
+	}
 }
 
 // Route the deaths the damage pass raised this tick [orig: health<=0 detection in the
@@ -242,9 +509,289 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
+uint16_t next_maintenance_prng16(world::World &world) {
+	// Server_SendEntityHandleAndInputState @0x507B90 lazily consumes the
+	// process-global PRNG_Next16/dword_31BFBB0 stream. World owns that stream
+	// directly so AI, recoil, throwable bounce, and network control cannot fork
+	// their call histories when no AiSystem happens to be installed.
+	return world.next_prng16();
+}
+
+const world::Entity *integrity_player(
+		const NapiNPConnection &conn, const world::World &world) {
+	if (!is_in_match(conn) || conn.link.transport == nullptr)
+		return nullptr;
+	const world::Entity *player = world.registry.get(conn.link.owned_entity);
+	// The integrity slot walk tests only entity+36 bit 0x02. Health and the
+	// reimpl convenience `alive` latch may be stale without suppressing retail.
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x50858A..0x508598]
+	if (player == nullptr ||
+			((player->flags | player->engine_flags) & world::kEntityFlagDead) != 0)
+		return nullptr;
+	return player;
+}
+
+const world::Entity *control_age_player(
+		const NapiNPConnection &conn, const world::World &world) {
+	if (!is_in_match(conn) || conn.link.transport == nullptr)
+		return nullptr;
+	return world.registry.get(conn.link.owned_entity);
+}
+
+bool network_quality_recipient(const NapiNPConnection &conn) {
+	// NapiNPServer_SendFiltered first requires a connected node with a player
+	// context, then its 0x80 arm accepts slot state 6 or 7. It does not exclude
+	// the listen host and does not inspect entity health. `burst.spawned` is this
+	// runtime's shared in-match/live-slot model, including a dead or
+	// respawn-pending player. [orig: @0x4C8874..0x4C8894,
+	// @0x4C893E..0x4C8953]
+	return is_in_match(conn) && conn.link.transport != nullptr;
+}
+
+bool scoreboard_recipient(const NapiNPConnection &conn) {
+	// The 0x16 send walk uses the broader active-player mask 0x20. It does not
+	// reuse either integrity's state-6/entity gate or quality's state-6/7
+	// filter: a player whose slot is already installed may receive the periodic
+	// list while its initial-state stream is still in progress. PlayerAdded is
+	// the point where this runtime has installed that slot and bound its entity.
+	// [orig: Server_BuildAndBroadcastScoreboard send loop @0x50DDC0]
+	return !conn.host_disconnect_sent &&
+			conn.phase >= ConnectionPhase::PlayerAdded &&
+			conn.phase < ConnectionPhase::Goodbye &&
+			conn.link.owned_entity.valid() && conn.link.transport != nullptr;
+}
+
+// Emit the stock host's player maintenance requests. Integrity is a global
+// scoreboard-cadence broadcast and remains active while a live player holds the
+// deployment UI. Network quality owns a separate global countdown. The control
+// quartet has an authoritative slot-state/live-age gate and is never derived
+// from a world-clock epoch.
+// [orig: Server_TickUpdate @0x51D7E0 -> @0x508540; per-player quartet
+// Server_UpdateAllActivePlayerSlots @0x518820]
+void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world) {
+	// Retail advances both global clocks before its is_in_session gates. The
+	// scoreboard counter is increment-before-compare and the family toggle flips
+	// once per crossed boundary even if the recipient walk sends nothing.
+	// [orig: Server_TickUpdate @0x51D8F9..0x51D917;
+	// Server_BroadcastWeaponSlotStateToPlayers @0x50868E]
+	bool integrity_boundary = false;
+	bool entity_integrity_family = false;
+	++ctx.scoreboard_broadcast_timer;
+	if (ctx.scoreboard_broadcast_timer > 0x136u) {
+		ctx.scoreboard_broadcast_timer = 0;
+		integrity_boundary = true;
+		entity_integrity_family = ctx.integrity_entity_family_next;
+		ctx.integrity_entity_family_next = !ctx.integrity_entity_family_next;
+	}
+	bool network_quality_boundary =
+			ctx.network_quality_broadcast_countdown == 0;
+	if (!network_quality_boundary) {
+		--ctx.network_quality_broadcast_countdown;
+		network_quality_boundary =
+				ctx.network_quality_broadcast_countdown == 0;
+	}
+	if (network_quality_boundary)
+		ctx.network_quality_broadcast_countdown =
+				NETWORK_QUALITY_BROADCAST_PERIOD_TICKS;
+	// The process-global clocks above run before retail's session gate, so their
+	// phase survives an interval with no live match. Everything below is a
+	// per-player session maintenance block and must remain silent (and must not
+	// age/reset per-player state) once the session has closed.
+	// [orig: Server_TickUpdate @0x51D8F9..0x51D97E]
+	if (!ctx.is_in_session) return;
+	const ProtocolMessage scoreboard = integrity_boundary
+			? build_player_list_message(
+					ctx.config, ctx.np_protocol.connection_list, &world)
+			: ProtocolMessage{};
+
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		SessionReplyState &reply = conn.reply;
+		const world::Entity *player = integrity_player(conn, world);
+		// The retail boundary rebuilds and broadcasts the transient 0x16 before
+		// entering the integrity family walk. Keep both semantic records on the
+		// same owner boundary and in that order. [orig: @0x51D90D/@0x51D912]
+		if (integrity_boundary && scoreboard_recipient(conn)) {
+			conn.link.transport->host_send(
+					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
+		}
+		if (player != nullptr && integrity_boundary) {
+			if (entity_integrity_family) {
+				conn.link.transport->host_send(
+						s2c::ENTITY_CHECKSUM_REQ, {0xFF, 0x00, 0x00},
+						/*reliable=*/false);
+			} else {
+				// AdmDef_GetEntryByIndex(*(u8 *)(entity+688)), then row =
+				// adm_entry[1] [orig: @0x508540]. An unresolved equipped ADM
+				// skips the request exactly as retail does; no fallback row exists.
+				const world::WeaponTableEntry *adm =
+						world.weapons.by_index(player->equipped_adm_index);
+				if (adm != nullptr && adm->ammo_index >= 0 && adm->ammo_index <= 0xFF) {
+					conn.link.transport->host_send(
+							s2c::LOADOUT_CRC_REQ,
+							{static_cast<uint8_t>(adm->ammo_index), 0x00, 0x00},
+							/*reliable=*/false);
+				}
+			}
+		}
+
+		// Despite its old "spectator flag" label, S2C 0x79 is the low byte
+		// of CNetStats.host_quality. Retail's global countdown starts at zero,
+		// reloads to 0x136, and sends with filter 0x80 (player-slot states 6/7,
+		// including dead or respawn-pending slots; no entity-health gate).
+		// This is one GLOBAL host boundary: a player filtered out at that instant
+		// waits for the next boundary and never receives a per-peer catch-up.
+		if (network_quality_boundary && network_quality_recipient(conn)) {
+			conn.link.transport->host_send(
+					s2c::NETWORK_QUALITY, {ctx.host_network_quality});
+		}
+		// UpdateAllActivePlayerSlots checks the PREVIOUS live-age value. Age is
+		// incremented later in Server_TickUpdate only for a state-6 player entity
+		// whose Flags bit 0 is clear. Pending/hidden pauses rather than resets age;
+		// health and Flags bit 0x02 do not enter either gate. Once age is mature,
+		// the quartet countdown continues through death/deploy presentation state.
+		// [orig: quartet gate @0x5189E4; age increment @0x51D95E..0x51D97E]
+		const world::Entity *age_player = control_age_player(conn, world);
+		const bool control_gate = ctx.is_in_session && is_in_match(conn) &&
+				conn.link.transport != nullptr &&
+				reply.control_live_ticks >= CONTROL_REQUEST_LIVE_GATE_TICKS;
+		// Retail tests both silence counters before touching the quartet
+		// countdown. Character-attribute silence has precedence when both are
+		// over the limit, and the event is not delayed until another request is
+		// due. [orig: gates/calls @0x5189E4]
+		if (control_gate &&
+				reply.charattr_unanswered_count >= kPuntSilenceLimit) {
+			stage_host_punt(conn, kPuntCharattrSilence);
+			continue;
+		}
+		if (control_gate &&
+				reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
+			stage_host_punt(conn, kPuntTimeSyncSilence);
+			continue;
+		}
+		if (control_gate) {
+			bool control_due = reply.control_request_countdown == 0;
+			if (!control_due) {
+				--reply.control_request_countdown;
+				control_due = reply.control_request_countdown == 0;
+			}
+			if (control_due) {
+				reply.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
+
+				++reply.charattr_unanswered_count;
+				++reply.time_sync_unanswered_count;
+				if (reply.control_challenge_seed == 0)
+					reply.control_challenge_seed = next_maintenance_prng16(world);
+				std::vector<uint8_t> challenge;
+				put_u32le(challenge, reply.control_challenge_seed);
+				conn.link.transport->host_send(
+						s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
+
+				// Input_PackStateFlags @0x412550 packs global input modes into bits
+				// 0..5/12/13. Those globals are not modeled; healthy-LAN captures are 0.
+				conn.link.transport->host_send(
+						s2c::INPUT_STATE_FLAGS, {0x00, 0x00}, /*reliable=*/false);
+
+				const uint32_t host_ms =
+						host_milliseconds_for_logic_tick(world.logic_tick);
+				if (reply.time_sync_host_baseline_ms == 0)
+					reply.time_sync_host_baseline_ms = host_ms;
+				if (reply.time_sync_round_host_ms == 0) {
+					++reply.time_sync_sequence;
+					reply.time_sync_round_host_ms = host_ms;
+				}
+				std::vector<uint8_t> time_sync;
+				put_u32le(time_sync, reply.time_sync_sequence);
+				conn.link.transport->host_send(
+						s2c::TIME_SYNC_PING, std::move(time_sync));
+
+				// The dedicated path does not query renderer state or send 0x68.
+				// Non-dedicated hosts must have an explicitly installed viewport seam;
+				// zero height suppresses the request rather than inventing one.
+				if (ctx.connection_mode != ConnectionMode::HostOnly &&
+						ctx.loaded_model_viewport_height != 0) {
+					reply.loaded_model_page_cursor += 50u;
+					if (reply.loaded_model_page_cursor >=
+							ctx.loaded_model_viewport_height)
+						reply.loaded_model_page_cursor = 0;
+					std::vector<uint8_t> model_page;
+					put_u32le(model_page, reply.loaded_model_page_cursor);
+					conn.link.transport->host_send(
+							s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
+							/*reliable=*/false);
+				}
+			}
+		}
+
+		// A remote player held in the join-time state-byte 0x10 deployment
+		// state for strictly more than six minutes receives t35. This is based
+		// on the state-6 entry timestamp, not world ticks or entity damage time,
+		// and remains eligible before the initial burst reaches InMatch.
+		// [orig: Server_TickUpdate @0x51E109, compare 0x57E40]
+		const bool join_deploy_idle_gate = ctx.is_in_session &&
+				!conn.host_disconnect_sent && conn.type == 1 &&
+				conn.phase >= ConnectionPhase::PlayerAdded &&
+				conn.phase < ConnectionPhase::Goodbye &&
+				conn.link.transport != nullptr &&
+				conn.link.owned_entity.valid() &&
+				world.registry.get(conn.link.owned_entity) != nullptr &&
+				conn.link.respawn_pending &&
+				reply.state6_entry_host_ms_valid;
+		if (join_deploy_idle_gate &&
+				static_cast<uint32_t>(ctx.np_protocol.host_run_duration_ms -
+						reply.state6_entry_host_ms) > kJoinDeployIdleLimitMs) {
+			stage_host_punt(conn, kPuntJoinDeployIdle);
+			continue;
+		}
+		// The dead-age arm owns an independent consecutive-tick counter. It does
+		// not derive elapsed time from Entity::death_tick: retail increments the
+		// player-slot dword once per state-6 tick while Flags bit 0x02 is set,
+		// resets it as soon as the bit clears, and compares after the increment.
+		// The remaining retail exclusions (local player, bot/spectator, explicit
+		// anti-cheat bypass) have no remote-player representation in this runtime;
+		// a normal type-1 connection corresponds to all of them being clear.
+		// [orig: counter @0x51E066..0x51E07D; punt @0x51E187..0x51E18E]
+		const bool dead_state6 = ctx.is_in_session &&
+				!conn.host_disconnect_sent && conn.type == 1 &&
+				conn.phase >= ConnectionPhase::PlayerAdded &&
+				conn.phase < ConnectionPhase::Goodbye &&
+				age_player != nullptr &&
+				((age_player->flags | age_player->engine_flags) &
+						world::kEntityFlagDead) != 0;
+		if (dead_state6) {
+			++reply.dead_live_ticks;
+		} else {
+			reply.dead_live_ticks = 0;
+		}
+		if (dead_state6 &&
+				reply.dead_live_ticks > kDeadLiveTickLimit &&
+				!ctx.config.permanent_death) {
+			stage_host_punt(conn, kPuntDeadTooLong);
+			continue;
+		}
+
+		const bool age_eligible = age_player != nullptr &&
+				!conn.link.respawn_pending &&
+				((age_player->flags | age_player->engine_flags) & 1u) == 0;
+		if (age_eligible &&
+				reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
+			++reply.control_live_ticks;
+	}
+}
+
 } // namespace
 
-void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallback_anchor) {
+bool Server_StageHostDisconnect(
+		NapiNPConnection &connection, const DisconnectEvent &event) {
+	return stage_host_disconnect(connection, event);
+}
+
+bool Server_StageHostPunt(
+		NapiNPConnection &connection, uint32_t mismatch_type) {
+	return stage_host_punt(connection, mismatch_type);
+}
+
+void Server_TickUpdate(NapiNPServerCtx &ctx,
+		const PlayerReplicationState &fallback_anchor) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
@@ -268,6 +815,17 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// the host's own 0x0C — but its 0x0A local view is no longer starved).
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn)) continue;
+		if (conn.discard_pre_deploy_uplinks) {
+			// C2S 0x0E is applied synchronously in the receive dispatch, whereas
+			// already-decoded 0x0C records wait on this transport FIFO. At a
+			// successful deploy edge every queued uplink predates the release;
+			// discard it before the normal drain can overwrite the selected pose.
+			if (conn.link.transport != nullptr) {
+				netsim::Datagram stale;
+				while (conn.link.transport->host_recv(stale)) {}
+			}
+			conn.discard_pre_deploy_uplinks = false;
+		}
 		netsim::drain_connection_c2s(world, conn.link);
 	}
 
@@ -306,6 +864,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// @0x51df5a once per second].
 	if (world.logic_tick % 62u == 0) check_win_conditions(ctx, world);
 
+	// Queue per-peer retail maintenance before the ordinary 0x0A fan so the
+	// requests share HostSession's next open S2C boundary.
+	emit_periodic_session_maintenance(ctx, world);
+	emit_minimap_overlay_state(ctx, world);
+
 	// (2d) The AS capture loop at 1 Hz — slice 2 of the §5.61 witness [orig: the
 	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
 	// Server_UpdateCaptureZoneEntities (0x6F + 0x1E 0x3B/0x3C) -> Server_EnforceZoneEntityTeams
@@ -323,21 +886,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	//   0x53 9 B on flips [u16 handle][u8 curTeam][u8 capTeam][u16 progress=0][u16 limit=0]
 	//     [u8 rate=0] [orig: NetPacket_WriteZoneTimerWindow @0x506D00, the drain legs
 	//     @0x53BA36/0x53BA68];
-	//   0x40 minimap-overlay state per conn at 1 Hz [orig: Server_BuildOverlayStateForPlayer
-	//     @0x517FC0 -> Entity_ClassifyForMinimap @0x50FA70 -> the 16-entry flush
-	//     @0x50FE20]: persistent zone entries (icon 0, flags 0x10) + transient vehicle
-	//     blips (icon by unit_type, flags 0x00); player/emplacement/CTF entries deferred
-	//     (D-NET-162).
+	// The independent general 0x40 minimap-overlay producer runs above at its
+	// retail 14-tick cadence. It is intentionally not gated on this AS chain.
 	if (ctx.is_in_session && world.logic_tick % 62u == 0 && !world.zone_chain.empty()) {
 		static world::ZoneCaptureEvents ev; // scratch (single-threaded host tick)
 		world::zone_capture_tick(world, world.zone_chain, ev);
-
-		auto zone_team_color = [](uint8_t team) -> uint8_t {
-			// [orig: Entity_ClassifyForMinimap @0x50FA70 — team 1 -> 0x0a (blue),
-			// team 2 -> 0x09 (red), else 0x0c (neutral/green); §5.19 color table]
-			if (team == 1) return 0x0a;
-			return team == 2 ? 0x09 : 0x0c;
-		};
 
 		// 0x6F bodies + the change gate.
 		std::vector<std::pair<uint16_t, std::vector<uint8_t>>> zone_6f; // (handle, body)
@@ -408,7 +961,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 			for (const auto &zb : zone_6f) {
 				const bool changed = std::find(changed_6f.begin(), changed_6f.end(),
 				                               zb.first) != changed_6f.end();
-				if (changed || deploy_screen) conn.link.transport->host_send(s2c::ZONE_TIMER_VALUE, zb.second);
+				if (changed || deploy_screen)
+					conn.link.transport->host_send(
+							s2c::ZONE_TIMER_VALUE, zb.second,
+							/*reliable=*/false);
 			}
 
 			// 0x1E secure edges (to all in-match) [orig: @0x519839/@0x51988E].
@@ -441,42 +997,6 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				                         f.new_team));
 			}
 
-			// 0x40 minimap overlay: persistent zone entries + transient vehicle blips,
-			// chunked 16 per datagram [orig: the 16-slot staging flush @0x50FE20].
-			std::vector<uint8_t> entries;
-			int count = 0;
-			auto flush_40 = [&]() {
-				if (count == 0) return;
-				std::vector<uint8_t> body;
-				body.push_back(static_cast<uint8_t>(count));
-				body.insert(body.end(), entries.begin(), entries.end());
-				conn.link.transport->host_send(s2c::CAPTURE_ZONE_STATE, body);
-				entries.clear();
-				count = 0;
-			};
-			auto push_40 = [&](uint16_t handle, uint8_t icon, uint8_t color, uint8_t flags) {
-				put_u16le(entries, handle);
-				entries.push_back(icon);
-				entries.push_back(color);
-				entries.push_back(flags);
-				entries.push_back(0); // source byte [orig: entity weaponByte]
-				if (++count == 16) flush_40();
-			};
-			for (const world::EntityHandle zh : world.zone_chain.zones) {
-				if (const world::Entity *z = world.registry.get(zh))
-					push_40(zh.packed, 0, zone_team_color(z->team), 0x10);
-			}
-			world.registry.for_each([&](const world::Entity &e) {
-				if (e.handle.pool() != 1 || !e.alive || e.health <= 0) return;
-				const world::VehicleTraits *vt = world.vehicle_traits.get(e.item_id);
-				if (vt == nullptr) return; // vehicle-class blips only (D-NET-162)
-				uint8_t icon = 10; // ground [orig: @0x50FA70 unitType switch]
-				if (vt->unit_type >= 5 && vt->unit_type <= 8) icon = 15;
-				else if (vt->unit_type == 3 || vt->unit_type == 4) icon = 11;
-				else if (vt->unit_type == 12) icon = 25;
-				push_40(e.handle.packed, icon, zone_team_color(e.team), 0x00);
-			});
-			flush_40();
 		}
 	}
 
@@ -498,7 +1018,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 				dead = e != nullptr && e->health <= 0;
 			}
 			if (conn.link.respawn_pending || dead)
-				conn.link.transport->host_send(s2c::ROSTER_SYNC, kEmptyWaveStatus);
+				conn.link.transport->host_send(
+						s2c::SPAWN_WAVE_STATUS, kEmptyWaveStatus,
+						/*reliable=*/false);
 		}
 	}
 
@@ -518,13 +1040,21 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
+			// The host's type-2 loopback is an in-process presentation seam and
+			// remains full-rate. Type-1 peers receive one fresh 0x0A only when
+			// their configured S2C send boundary opens; queuing all intervening
+			// snapshots would burst stale frames at that boundary.
+			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
 			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor,
-			                            ctx.config.game_type);
+			                            ctx.config.game_type,
+			                            conn.type == 1
+						? kMaxFrameUpdateBodyBytes
+						: 0);
 		}
 	}
 
 	// (4) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
-	// reads it via client_recv / NetClientView::pump; a remote peer's transport outbound_ is popped +
+	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +
 	// framed into a 0x83 SESSION by the owner (frame_in_match_s2c). No socket I/O in libs/.
 }
 

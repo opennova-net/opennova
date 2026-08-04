@@ -19,6 +19,9 @@ divergences in its §8 catalog):
 - `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`
   (`.agents/network.md` is now a redirect to the current architecture owners:
   `libs/npruntime/ROADMAP.md`, ADR 0013, ADR 0019)
+- `.agents/retail-lan-parity.md` — repeatable cfg-driven retail/OpenNova LAN
+  matrix: isolated copies, hook deployment, readiness, capture, semantic gates,
+  shutdown, and failure triage.
 - `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
   in-match networking; `libs/npruntime/ROADMAP.md` is the completed build record
   behind it, not current status
@@ -79,4 +82,3 @@ Every networking report should include:
 - Verdict: matching, divergent, unknown, blocked, or docs-only.
 - Next action: narrow code fix, capture needed, IDA witness needed, test gap, or
   no change.
-

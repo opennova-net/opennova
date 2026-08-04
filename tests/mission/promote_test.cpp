@@ -117,14 +117,21 @@ static void test_emplacement_attachments() {
         gun_child == nullptr || crosshair_child == nullptr)
         return;
     CHECK(plain_child->emplacement_parent == parent_h);
+    CHECK(plain_child->ground_target == parent_h);
+    CHECK(plain_child->emplacement_parent_spawn_id == parent->registry_spawn_id);
+    CHECK(plain_child->emplacement_pose_metadata_resolved);
     CHECK(plain_child->emplacement_kind == 0);
+    CHECK(gun_child->emplacement_pose_metadata_resolved);
     CHECK(gun_child->emplacement_kind == 1);
+    CHECK(gun_child->ground_target == parent_h);
     CHECK(gun_child->emplacement_attachment_flags == 2);
     CHECK(gun_child->emplacement_angle_count == 4);
     CHECK(gun_child->emplacement_down_limit_bam == 70 * 11930464);
     CHECK(gun_child->seats.size() == 1);
     CHECK(gun_child->primary_weapon == "WPN_HELOGUN");
     CHECK(crosshair_child->emplacement_kind == 2);
+    CHECK(crosshair_child->emplacement_pose_metadata_resolved);
+    CHECK(crosshair_child->ground_target == parent_h);
     CHECK(crosshair_child->emplacement_attachment_flags == 1);
     CHECK(plain_child->position.x == 12.f && plain_child->position.y == 20.f &&
           plain_child->position.z == 4.f);
@@ -233,6 +240,43 @@ static void test_emplacement_parent_death_cascades() {
     rider = world->registry.get(rider_h);
     CHECK(rider != nullptr && !rider->mounted);
     CHECK(rider != nullptr && !rider->mount_target.valid());
+}
+
+static void test_unresolved_emplacement_preserves_streamed_pose() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(1, 8);
+
+    Entity parent_seed{};
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.position = {30.f, 40.f, 5.f};
+    const EntityHandle parent_h = world->registry.spawn(1, parent_seed);
+    Entity *parent = world->registry.get(parent_h);
+    CHECK(parent != nullptr);
+    if (parent == nullptr) return;
+
+    // A stock streamed addeweap row gives the child an exact absolute pose and
+    // a carrier identity, but not necessarily a uniquely recoverable authored
+    // userpoint. Until that metadata resolves, the world must retain the wire
+    // pose instead of collapsing the child onto the carrier root.
+    Entity child_seed{};
+    child_seed.kind = EntityKind::Item;
+    child_seed.position = {17.f, 23.f, 9.f};
+    child_seed.yaw = 37;
+    child_seed.pitch = -4;
+    child_seed.roll = 6;
+    child_seed.emplacement_parent = parent_h;
+    child_seed.emplacement_parent_spawn_id = parent->registry_spawn_id;
+    const EntityHandle child_h = world->registry.spawn(1, child_seed);
+    CHECK(child_h.valid());
+
+    world->run_logic_tick();
+    const Entity *child = world->registry.get(child_h);
+    CHECK(child != nullptr);
+    if (child == nullptr) return;
+    CHECK(!child->emplacement_pose_metadata_resolved);
+    CHECK(child->position.x == 17.f && child->position.y == 23.f &&
+          child->position.z == 9.f);
+    CHECK(child->yaw == 37 && child->pitch == -4 && child->roll == 6);
 }
 
 int main() {
@@ -606,6 +650,7 @@ int main() {
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
     test_emplacement_attachments();
     test_emplacement_parent_death_cascades();
+    test_unresolved_emplacement_preserves_streamed_pose();
 
     // ---- organics are routed through the INFANTRY motor with seeded slots ----
     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI @0x4b9910;

@@ -558,15 +558,13 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         eh.material_flags = table_hit.material_flags;
         consider(eh, table_hit.distance_q16);
     };
-    // A visual-only MP client (mp_session && !projectile_authority) holds
-    // load-frozen local copies of the host-simulated pools: the mission promote
-    // spawned pool-0/pool-1 entities that never move on a non-authority world.
-    // Retail has no such ghosts — its client pools ARE the decoded entities
-    // (the 0x0C/0x0D handlers spawn-or-update the client's own slots, §5.23) —
-    // so those local slots are excluded from the projectile walks here and the
-    // wire-keyed projections below serve instead. Pool-2 statics stay local:
-    // both sides load them from the same .bms. The local player L remains the
-    // one live local person (retail's own-player entity plays that role).
+    // A visual-only MP client (mp_session && !projectile_authority) uses decoded
+    // wire projections for pose-bearing projectile contacts. Pools 1-3 are
+    // materialized at their exact streamed native handles, but the pool-1
+    // dynamics pass below samples ClientState's live pose instead of walking a
+    // second native representation. Pool-2 statics come from exact S2C 0x10
+    // materialization. Remote pool-0 organics remain ClientState proxies; the
+    // local player L is the one live native person.
     const bool wire_projected = world.mp_session && !world.projectile_authority;
 
     if (profile_trace) {
@@ -850,10 +848,10 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (!round_broad_phase(p0f, p1f, sc, r)) continue;
         }
         if (profile_trace) trace_profile_.person_survivors++;
-        // Visual-client ghost suppression: local pool-0 slots other than L are
-        // the load-frozen mission organics whose live poses arrive on the wire;
-        // their decoded person proxies (folded into this same ordered walk)
-        // serve instead.
+        // A header-only visual client keeps remote pool-0 organics in ClientState;
+        // their decoded person proxies (folded into this same ordered walk) serve
+        // instead. Suppress any non-local native organic from debug/complete-BMS
+        // construction so it cannot duplicate that proxy.
         if (wire_projected && slot.h != world.cached.local_player) continue;
         if (ignored(slot.h)) continue;
         const Entity *e = world.registry.get(slot.h);

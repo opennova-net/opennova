@@ -20,6 +20,13 @@ static func clear_cache() -> void:
 	_graphics_cache_by_root.clear()
 
 
+## Read-only lifecycle diagnostic: the shell can prove that every process-static
+## renderer registry was emptied without exposing any cache for mutation.
+static func cache_entry_count() -> int:
+	return _mesh_cache.size() + _fd_texture_cache.size() \
+			+ _model_path_cache.size() + _graphics_cache_by_root.size()
+
+
 static func _check_epoch() -> void:
 	var epoch := NovaResourceRoot.cache_epoch()
 	if epoch == _built_epoch:

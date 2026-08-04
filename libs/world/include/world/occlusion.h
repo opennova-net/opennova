@@ -161,6 +161,7 @@ public:
     int32_t add_model(OcclusionModel model);
     const OcclusionModel *model(int32_t id) const;
     void assign_entity(EntityHandle h, int32_t model_id, const EntityDefBits &bits);
+    void remove_entity_instance(EntityHandle h);
     bool has_instance(EntityHandle h) const;
 
     // --- mission-start portal init ---

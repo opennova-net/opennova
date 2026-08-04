@@ -1,0 +1,1832 @@
+#include "netsim/client_replica_pipeline.h"
+
+#include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
+#include <terrain/height_field.h>        // remote-person terrain settle
+#include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+#include <world/infantry.h>            // IRootMotionSource + the anim flag/state tables
+#include <world/world.h>               // exact mission PRNG seed
+#include <npwire/ingame_message_id.h>
+#include <io/bam.h>                      // wrapped retail pitch chase
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
+namespace opennova::netsim {
+
+// ---- ClientState lookup -----------------------------------------------------
+
+ClientEntityState *ClientState::find(uint16_t handle) {
+	// `entities` is intentionally public decoded state. Callers may clear,
+	// reorder, append, or edit it directly, so a separate handle-to-index cache
+	// cannot remain valid without changing that API. Keep lookup derived from
+	// the authoritative vector.
+	for (ClientEntityState &entity : entities) {
+		if (entity.handle == handle) return &entity;
+	}
+	return nullptr;
+}
+
+ClientEntityState &ClientState::upsert(uint16_t handle) {
+	if (ClientEntityState *e = find(handle)) return *e;
+	ClientEntityState e;
+	e.handle = handle;
+	entities.push_back(e);
+	mark_topology_changed();
+	return entities.back();
+}
+
+void ClientState::clear_anim_pulses() {
+	for (ClientEntityState &e : entities) e.anim_state_pulse = -1;
+}
+
+// ---- ClientReplicaPipeline -----------------------------------------------
+
+ClientReplicaPipeline::ClientReplicaPipeline()
+		: resolver_([](uint16_t tid) { return class_for_type_id(tid); }),
+		  prng16_(world::World::kMissionPrng16Seed) {}
+
+ClientReplicaPipeline::ClientReplicaPipeline(std::function<EntityClass(uint16_t)> resolver)
+		: resolver_(std::move(resolver)),
+		  prng16_(world::World::kMissionPrng16Seed) {}
+
+void ClientReplicaPipeline::set_item_class_resolver(ItemClassResolver resolver) {
+	item_resolver_ = std::move(resolver);
+}
+
+EntityClass ClientReplicaPipeline::classify(uint16_t type_id) const {
+	// items.def first — the retail client's own dispatch source [orig: itemDef+356
+	// @0x50f2e2]. It must outrank the 0x0D pool blanket: pool-1 holds no-callback
+	// types too (an `ewep` emplacement), and sizing their header-only records as a
+	// vehicle compact desyncs the whole frame after them.
+	if (item_resolver_) {
+		const ItemClassResolution resolution = item_resolver_(type_id);
+		// A present Unknown is a catalogued unresolved/ambiguous definition. It
+		// is terminal and intentionally reaches npwire's fail-closed width path.
+		if (resolution.has_value()) return *resolution;
+	}
+	const auto it = learned_classes_.find(type_id);
+	if (it != learned_classes_.end()) return it->second;
+	return resolver_(type_id);
+}
+
+void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body) {
+	switch (tag) {
+	case s2c::SESSION_CONFIG: { // field 3 = shared g_GameType
+		SessionConfig config;
+		if (decode_session_config(body.data(), body.size(), config))
+			game_type_ = static_cast<uint32_t>(config.fields[3]);
+		else
+			++unknown_tags_;
+		break;
+	}
+	case s2c::FULL_PLAYER_INFO: { // extra = shared g_GameType
+		FullPlayerInfo info;
+		if (decode_full_player_info(body.data(), body.size(), info))
+			game_type_ = info.extra;
+		else
+			++unknown_tags_;
+		break;
+	}
+	case s2c::PER_FRAME_UPDATE:
+		apply_frame_update(body);
+		break;
+	case s2c::WEAPON_RELOAD: { // reload echo (same four-byte body as c2s::WEAPON_RELOAD_REQUEST)
+		WeaponReload reload;
+		size_t consumed = 0;
+		if (decode_weapon_reload(body.data(), body.size(), reload, consumed) &&
+		    consumed == body.size())
+			pending_weapon_reloads_.push_back(reload);
+		else
+			++unknown_tags_;
+		break;
+	}
+	case s2c::TEAM_ASSIGN: {
+		TeamAssign assign;
+		size_t consumed = 0;
+		if (decode_team_assign(body.data(), body.size(), assign, consumed))
+			apply_team_assign(assign.entity_handle, assign.team);
+		else
+			++unknown_tags_;
+		break;
+	}
+	case s2c::EMPTY_SLOT_SWEEP: {
+		DestroyEntityList destroyed;
+		if (decode_destroy_entity_list(body.data(), body.size(), destroyed)) {
+			for (uint16_t index : destroyed.pool0_indices)
+				destroy_pool0_slot(index);
+		} else {
+			++unknown_tags_;
+		}
+		break;
+	}
+	case s2c::ENTITY_SPAWN_BATCH: // pool-0 organic spawn batch (§5.23)
+		apply_organic_spawn(body);
+		break;
+	case s2c::POOL_SPAWN: // pool-1 entity spawn batch (§5.11)
+		apply_pool_spawn(body);
+		break;
+	case s2c::STATIC_ENTITY_BATCH: // pool-2 (§5.9)
+		apply_static_batch(body);
+		break;
+	case s2c::POOL3_SYNC: // pool-3 marker/waypoint sync batch (§5.12)
+		apply_pool3_batch(body);
+		break;
+	default:
+		// Game-start scalars / world-state-load and other non-entity tags.
+		++unknown_tags_;
+		break;
+	}
+}
+
+std::vector<ClientRoundEvent> ClientReplicaPipeline::drain_round_events() {
+	std::vector<ClientRoundEvent> out;
+	out.swap(pending_round_events_);
+	return out;
+}
+
+std::vector<WeaponReload> ClientReplicaPipeline::drain_weapon_reloads() {
+	std::vector<WeaponReload> out;
+	out.swap(pending_weapon_reloads_);
+	return out;
+}
+
+void ClientReplicaPipeline::pump(ISessionTransport &channel) {
+	Datagram dg;
+	while (channel.client_recv(dg)) apply(dg.tag, dg.body);
+}
+
+namespace {
+// The compact coarse heading the present rebuilds: yaw_byte = top 8 bits of the 32-bit
+// engine BAM (present does `bam = yaw_byte << 24`). [nova_simulation present.]
+inline uint8_t yaw_byte_from_bam(int32_t bam) {
+	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
+}
+
+// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
+// recoil-yaw sign; preserve the complete state because decoded rows share one
+// stream rather than owning one generator each. Other process-global retail
+// consumers remain outside this view's bounded call-history seam.
+inline int32_t prng_next16(uint32_t &state) {
+	const uint32_t rol11 = (state << 11) | (state >> 21);
+	uint32_t next = state + rol11;
+	next = ((next << 4) | (next >> 28)) ^ 1u;
+	state = next;
+	return static_cast<int32_t>(next);
+}
+
+inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
+	const int32_t target = static_cast<int32_t>(
+			static_cast<uint32_t>(target_byte) << 24);
+	const int32_t delta = opennova::io::bam_sub(target, current);
+	const int32_t step = opennova::io::bam_sar(
+			opennova::io::bam_add(delta, 4), 3);
+	return opennova::io::bam_add(current, step);
+}
+} // namespace
+
+void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body) {
+	OrganicSpawnBatch batch;
+	if (!decode_organic_spawn_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x0E family].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
+		++unknown_tags_;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
+	}
+	bool changed = false;
+	for (const OrganicSpawnRecord &rec : batch.records) {
+		if (!rec.has_body) continue;
+		ClientEntityState *existing = state_.find(rec.slot_id);
+		const bool type_changed = existing != nullptr &&
+				existing->type_id != rec.item_type_id;
+		ClientEntityState &es = state_.upsert(rec.slot_id);
+		if (type_changed) state_.mark_topology_changed();
+		es.type_id = rec.item_type_id;
+		es.cls = classify(rec.item_type_id);
+		es.name = rec.entity_name;
+		es.net_id = rec.net_id;
+		es.spawn_tag = s2c::ENTITY_SPAWN_BATCH;
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
+		es.heading_bam = rec.orientation;
+		// Retail rows are born with the spawn orientation in EVERY heading
+		// slot; seed the stage + promote target so the first compact's
+		// unconditional +0x1A8 promote publishes the spawn orientation, not a
+		// zero-initialized stage [orig: the spawn writes behind the @0x4C0320
+		// promote].
+		es.net_smooth_heading = rec.orientation;
+		es.net_target_heading_bam = rec.orientation;
+		es.heading_known = true;
+		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
+		es.roll_bam = 0;
+		es.recoil_pitch = 0;
+		es.team = rec.team;
+		es.team_known = true;
+		changed = true;
+	}
+	if (changed) state_.mark_changed();
+}
+
+// The per-body-tick lean integrator, run once per client frame for every remote
+// organic: the decay first, then the ramp from the latest wire bits — the same
+// locally integrated model retail runs at both ends (only the bits replicate).
+// The order is load-bearing: decay-then-ramp settles at ~±0x30000000 ≈ 67.5°,
+// ramp-then-decay one ramp step short of it (~±0x2D000000).
+// [orig: both legs of the single Entity_UpdateInfantryPlayerBody @0x4b40e0 pass —
+//  decay lean -= (lean+8)>>4 @0x4b5c97, then the on-foot ramp @0x4b7dbf (bit 6 left
+//  −0x3000000/tick) / @0x4b7dd6 (bit 7 right +0x3000000/tick)]
+// The producer's ramp gates (alive/prone, and the seated ±0x1400000 variant) are not
+// applied here: the decoded row carries no honest stance/seat state for them (D-INF-17).
+void ClientReplicaPipeline::tick_lean() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		es.lean_angle = io::bam_sub(es.lean_angle,
+				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
+		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
+		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+			es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
+	}
+}
+
+// The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel
+// runs for authoritative bodies, applied here to wire-decoded peers. The window byte
+// decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
+// [orig: @0x4b5cab..0x4b5ce7]
+void ClientReplicaPipeline::tick_arms_dip() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		if (es.arms_dip_ticks > 0) {
+			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
+			es.pitch_kick_accum = io::bam_sub(
+					es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
+		}
+		es.pitch_kick_accum = io::bam_sub(
+				es.pitch_kick_accum,
+				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
+		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
+	}
+}
+
+void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
+		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
+		bool force_live_snap) {
+	es.net_has_compact = true;
+	if (!remote_motion_mode_ || force_live_snap || es.net_world_mover) {
+		// Live snap: the host/SP roles (full-rate loopback; the authority never
+		// interpolates, D-NET-89), the respawn edge [orig: live snap +
+		// Entity_ResetToSpawnState @0x4C113C], and the vehicle dead-pose form.
+		es.x = wx;
+		es.y = wy;
+		es.z = wz;
+		if (has_heading) es.heading_bam = heading_bam;
+		// Snap-mode players keep the live pitch mirrored from the wire byte so
+		// presentation reads one field in both modes (the joiner's org2 chase
+		// maintains it below).
+		if (has_heading && es.cls == EntityClass::Player) {
+			es.pitch_bam = static_cast<int32_t>(
+					static_cast<uint32_t>(es.pitch_byte) << 24);
+		}
+		if (force_live_snap && remote_motion_mode_) {
+			// Retail stages the target BEFORE the respawn branch snaps the live
+			// pose [orig: LABEL_123 staging precedes the +0x24&2 snap @0x4C1109+]
+			// — the staged target stays at the wire pose, so the next mover tick
+			// sees a zero delta (deadband) instead of gliding anywhere.
+			es.net_smooth_target[0] = wx;
+			es.net_smooth_target[1] = wy;
+			es.net_smooth_target[2] = wz;
+			es.net_smooth_heading = has_heading ? heading_bam : es.heading_bam;
+			es.net_target_heading_bam = es.net_smooth_heading;
+			es.net_interp_steps = 0;
+			es.net_interp_progress = 0;
+		}
+		return;
+	}
+	// STAGE-ONLY (net-re §5.38e): the compact read never writes the live pose of
+	// an alive remote entity — it stages the target cluster and resets the
+	// progress counter; tick_remote_motion moves the live pose.
+	// [orig: case-2 @0x4C0FE4/EA/F0 + @0x4C0FD7/@0x4C0FF6 + @0x4C0FFC;
+	//  infantry mode-2 incl. the targetHeading promote; vehicle mode-2 @0x4607D5+]
+	es.net_smooth_target[0] = wx;
+	es.net_smooth_target[1] = wy;
+	es.net_smooth_target[2] = wz;
+	if (has_heading) {
+		if (es.cls == EntityClass::Infantry) {
+			// org1: the PREVIOUS staged heading becomes the chase target — one
+			// record behind the wire, UNCONDITIONALLY [orig: the +0x1A8
+			// promote in @0x4C0320]. The spawn appliers seed the stage with
+			// the spawn orientation (retail rows are born with it in every
+			// heading slot), so a row's first compact promotes that — no
+			// first-record special case exists in the witness.
+			es.net_target_heading_bam = es.net_smooth_heading;
+		}
+		es.net_smooth_heading = heading_bam;
+		if (es.cls == EntityClass::Player) {
+			es.net_smooth_pitch = static_cast<int32_t>(
+					static_cast<uint32_t>(es.pitch_byte) << 24);
+		}
+	}
+	es.net_interp_progress = 0; // [orig: @0x4C0FFC — bucket +0x27E is NOT reset]
+}
+
+namespace {
+
+// The org1 position-chase bucket [orig: Entity_UpdateInfantryAI ladder
+// @0x4b9b0b-region — {3,4,5,8,16} at 0x2AAA/0x4000/0x5555/0x8000].
+inline int16_t org1_bucket(int32_t dist) {
+	if (dist < 0x2AAA) return 3;
+	if (dist < 0x4000) return 4;
+	if (dist < 0x5555) return 5;
+	if (dist < 0x8000) return 8;
+	return 16;
+}
+
+// The org2 position-chase bucket from the 2D horizontal distance — the ladder
+// is verbatim from the binary INCLUDING the non-monotonic [0x6000,0x7000)->7
+// step [orig: Entity_UpdateInfantryPlayerBody @0x4B44C4..0x4B4581].
+inline int16_t org2_bucket(int32_t dist2d) {
+	if (dist2d < 0x3000) return 6;
+	if (dist2d < 0x4000) return 7;
+	if (dist2d < 0x5000) return 8;
+	if (dist2d < 0x6000) return 9;
+	if (dist2d < 0x7000) return 7;
+	if (dist2d < 0x8000) return 8;
+	if (dist2d < 0xA000) return 10;
+	if (dist2d < 0xC000) return 12;
+	if (dist2d < 0xE000) return 14;
+	if (dist2d < 0x10000) return 16;
+	return 18;
+}
+
+// The vehicle-family bucket [orig: Entity_UpdateWatercraftPhysics
+// @0x48D480 (shared template) — {6,8,10,15,20,25,30}].
+inline int16_t vehicle_bucket(int32_t dist) {
+	if (dist < 0x2AAA) return 6;
+	if (dist < 0x4000) return 8;
+	if (dist < 0x5555) return 10;
+	if (dist < 0x8000) return 15;
+	if (dist < 0x10000) return 20;
+	if (dist < 0x20000) return 25;
+	return 30;
+}
+
+// The AIR-family bucket [orig: Entity_UpdateAircraftPhysics @0x490310
+// interp — deadband 0x2AAA, {8,10,15,20,25,32}].
+inline int16_t vehicle_air_bucket(int32_t dist) {
+	if (dist < 0x4000) return 8;
+	if (dist < 0x5555) return 10;
+	if (dist < 0x8000) return 15;
+	if (dist < 0x10000) return 20;
+	if (dist < 0x20000) return 25;
+	return 32;
+}
+
+// 3D / 2D distance of a 16.16 delta, clamped like retail's float->int path
+// (flt_7C19E0 is the overflow clamp, not tuning).
+inline int32_t dist_16_16(int64_t dx, int64_t dy, int64_t dz) {
+	const double d = std::sqrt(double(dx) * double(dx) +
+	                           double(dy) * double(dy) +
+	                           double(dz) * double(dz));
+	return d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
+}
+
+// Per-step delta with retail's signed half-add rounding: (d + N/2) / N via
+// idiv truncation [orig: @0x4b9b2e / @0x4B459D / the family movers].
+inline int32_t chase_step(int32_t d, int32_t n) {
+	return io::bam_add(d, n >> 1) / n;
+}
+
+} // namespace
+
+namespace {
+
+// The org2 leg-chain chase applied to a decoded row: the LEGS chase the wire
+// yaw and the body heading is their midpoint — the root delta rotates by the
+// BODY, so a turning peer's feet lead its torso exactly as on the authority
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4945..0x4b4ac1 — movement
+// re-plant @0x4b49dd/@0x4b49e3; idle windows ((tick-32)&0x3F / tick&0x3F)
+// @0x4b49ad..0x4b49e3; quarter-step clamp ±0x3000000 @0x4b49fb; twist
+// ±0x30000000 vs the yaw @0x4b4a23; midpoint @0x4b4ab5. The authoritative
+// sibling is infantry.cpp's player leg block — same constants, same shape.]
+constexpr int32_t kRowLegChaseClamp = 0x3000000;
+constexpr int32_t kRowLegTwistLimit = 0x30000000;
+constexpr int32_t kRowLegReplantMin = 59652320;
+constexpr int32_t kRowLegReplantSnap = 357913920;
+
+inline int32_t row_abs_bam(int32_t v) { return io::bam_abs(v); }
+
+// Disarm the row's root-motion channel: the next free-standing tick re-arms
+// it fresh from the wire state (+ the live phase seed). Used by the mover
+// freezes (dead/bit0/carried — retail applies the anim byte per record
+// regardless of the mover skip [orig: @0x4c1153], so presentation must show
+// the WIRE state while frozen), the respawn edge (the resume must not blend
+// out of the pre-death primary), and type-change/handle-reuse edges.
+void row_channel_disarm(ClientEntityState &es) {
+	es.rm_state = -1;
+	es.rm_prev_state = -1;
+	es.rm_blend_weight = 1.0f;
+	es.rm_blend_step = 0.0f;
+	es.rm_prev_bottom_live = false;
+	es.rm_leg_seeded = false;
+}
+
+void row_leg_chase(ClientEntityState &es, uint32_t key) {
+	const int32_t yaw = es.heading_bam;
+	if (!es.rm_leg_seeded) {
+		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = yaw;
+		es.rm_leg_target[0] = es.rm_leg_target[1] = yaw;
+		es.rm_body_heading = yaw;
+		es.rm_leg_seeded = true;
+	}
+	if ((world::infantry_anim_flags(es.rm_state) & 0x1u) != 0) {
+		es.rm_leg_target[1] = yaw;
+		es.rm_leg_target[0] = yaw;
+	} else {
+		const int32_t dl = io::bam_sub(yaw, es.rm_leg_yaw[1]);
+		if (row_abs_bam(dl) > kRowLegReplantMin &&
+		    (row_abs_bam(dl) > kRowLegReplantSnap || ((key - 32) & 63u) == 0))
+			es.rm_leg_target[1] = yaw;
+		const int32_t dr = io::bam_sub(yaw, es.rm_leg_yaw[0]);
+		if (row_abs_bam(dr) > kRowLegReplantMin &&
+		    (row_abs_bam(dr) > kRowLegReplantSnap || (key & 63u) == 0))
+			es.rm_leg_target[0] = yaw;
+	}
+	for (int leg = 0; leg < 2; ++leg) {
+		const int32_t ldiff = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
+		int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
+		if (lstep > kRowLegChaseClamp) lstep = kRowLegChaseClamp;
+		if (lstep < -kRowLegChaseClamp) lstep = -kRowLegChaseClamp;
+		es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], lstep);
+		const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], yaw);
+		if (twist > kRowLegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_add(yaw, kRowLegTwistLimit);
+		else if (twist < -kRowLegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_sub(yaw, kRowLegTwistLimit);
+	}
+	es.rm_body_heading = io::bam_add(
+			es.rm_leg_yaw[1],
+			io::bam_sar(io::bam_sub(es.rm_leg_yaw[0], es.rm_leg_yaw[1]), 1));
+}
+
+// The row's AnimMap primary channel + root integration — retail's remote body
+// runs the SAME machinery as the authority [orig: Entity_UpdateInfantryPlayerBody
+// calls AnimMap_UpdateDualChannels @0x4B41DF; AnimChannel_InitFromParams blend
+// init 0.1 / (1/15 on flag 0x400) @0x410640; Q22 rotation
+// @0x4B41F0..0x4B4255; additive integration LAST @0x4B7CB4..0x4B7CEF;
+// Entity_UpdateInfantryAI twin @0x4BF684..0x4BF6A2]. The kJumpLoop forward override is
+// a retail ADM dump witness (root row 4756), not an IDA code claim. The wire
+// state byte drives the channel; the player compact's phase byte seeds a fresh
+// transition [orig: NetPacket_SerializePlayerState entity+0x377 store
+// @0x4C11A6; AnimMap_UpdateEntity one-shot clear @0x40B7E4]. Deferrals: the
+// airborne/drowning/ladder overrides ride entity+0x24 bits beyond the wire
+// state byte (unreplicated — the chase Z absorbs the error); candidate-model
+// contacts remain a D-NET-196 resolver residual. Caller-owned gravity/vertical
+// velocity is a separate row-state residual [orig: Entity_UpdateInfantryPlayerBody
+// vertical add @0x4B7CE0..0x4B7CEF, then resolver call @0x4B7CF4]. The resolver's bounded
+// terrain-column settle is ported below.
+void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+                          const terrain::TerrainHeightField *terrain,
+                          uint32_t key, bool is_self) {
+	if (es.rm_adm_id < 0) return;
+	// Channel state machine (the begin_body_transition mirror). The phase
+	// seed is ONE-SHOT per received record [orig: AnimMap_UpdateEntity zeroes
+	// entity+0x377 after use @0x40B7E4]; the bottom-history slot resets on EVERY update of climbs
+	// 32..35 and grenade deaths 176..179, before the same-state fast path
+	// [orig: AnimMap_UpdateEntity @0x40B607..0x40B645].
+	const int wire_state = es.anim_state_id;
+	const bool bottom_reset_state =
+			(wire_state >= world::anim_state::kClimbIdle &&
+			 wire_state <= world::anim_state::kClimbIdle + 3) ||
+			(wire_state >= world::anim_state::kDeathGrenadeBase &&
+			 wire_state <= world::anim_state::kDeathGrenadeBase + 3);
+	if (es.rm_state < 0) {
+		es.rm_state = static_cast<int16_t>(wire_state);
+		es.rm_prev_state = static_cast<int16_t>(wire_state);
+		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
+				? es.anim_channel_ratio
+				: 0;
+		es.rm_seed_live = false;
+		es.rm_prev_phase = es.rm_phase;
+		es.rm_blend_weight = 1.0f;
+		es.rm_blend_step = 0.0f;
+		es.rm_prev_bottom_live = false;
+	} else if (wire_state != es.rm_state) {
+		if (es.rm_blend_weight >= 1.0f) {
+			es.rm_prev_state = es.rm_state;
+			es.rm_prev_phase = es.rm_phase;
+		}
+		es.rm_state = static_cast<int16_t>(wire_state);
+		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
+				? es.anim_channel_ratio
+				: 0;
+		es.rm_seed_live = false;
+		es.rm_blend_weight = 0.0f;
+		es.rm_blend_step =
+				(world::infantry_anim_flags(wire_state) & 0x400u) != 0
+						? (1.0f / 15.0f)
+						: 0.1f;
+	}
+	if (bottom_reset_state) es.rm_prev_bottom_live = false;
+	// The legs keep chasing whatever the clip coverage is — the body heading
+	// is presentation state, not clip state (a clipless wire state must not
+	// freeze the torso mid-twist).
+	if (es.cls == EntityClass::Player) row_leg_chase(es, key);
+	world::RootMotionFrame frame;
+	bool have = false;
+	if (es.rm_blend_weight >= 1.0f) {
+		int32_t phase = es.rm_phase;
+		have = src.advance(es.rm_adm_id, es.rm_state, phase, frame);
+		es.rm_phase = phase;
+	} else {
+		es.rm_blend_weight += es.rm_blend_step;
+		if (es.rm_blend_weight >= 1.0f) {
+			es.rm_blend_weight = 1.0f;
+			es.rm_blend_step = 0.0f;
+		}
+		int32_t pphase = es.rm_prev_phase, tphase = es.rm_phase;
+		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, pphase,
+		                           es.rm_state, tphase, es.rm_blend_weight,
+		                           frame);
+		es.rm_prev_phase = pphase;
+		es.rm_phase = tphase;
+	}
+	if (!have) return;
+	int32_t fwd = frame.dx, lat = frame.dy;
+	if (es.rm_state == world::anim_state::kJumpLoop)
+		fwd = 1024; // [data: retail ADM dump root row 4756]
+	// The witnessed vertical: the capsule-bottom history delta replaces the
+	// raw track dz while the slot is live [orig: AnimMap_UpdateEntity reads,
+	// subtracts, and rewrites anim_slot[19] @0x40B88E..0x40B8A0].
+	int32_t dz_eff = frame.dz;
+	if (es.rm_prev_bottom_live)
+		dz_eff = frame.capsule_bottom - es.rm_prev_bottom;
+	es.rm_prev_bottom = frame.capsule_bottom;
+	es.rm_prev_bottom_live = true;
+	// Rotation heading: org2 = the leg-chased body heading loaded from
+	// entity+0x8C [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22 rotate
+	// @0x4B41F0..0x4B4255]; org1 = the row's chased heading (retail pins org1
+	// body == render heading). This tick's
+	// freshly-chased body heading is used (retail consumes the same-tick
+	// value — the leg chase runs earlier in the same body pass).
+	int32_t move_heading = es.heading_bam;
+	if (es.cls == EntityClass::Player) move_heading = es.rm_body_heading;
+	else es.rm_body_heading = move_heading;
+	// The own player's row is locally predicted world-side; its chase is the
+	// 48/512 soft reconciliation only — no root add (risk-listed; retail's
+	// local player integrates in its OWN motor, not the remote path). The
+	// velocity term retail adds alongside the root (Position += root + vel)
+	// is a named, caller-side deferral because rows carry no velocity state
+	// [orig: Entity_UpdateInfantryPlayerBody root+velocity stores
+	// @0x4B7CBF..0x4B7CEF, before resolver call @0x4B7CF4].
+	if (is_self) return;
+	const double rad = static_cast<double>(move_heading) *
+	                   (3.14159265358979323846 / 2147483648.0);
+	const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
+	const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+	const int32_t wx =
+			static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
+			static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
+	const int32_t wy =
+			static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
+			static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
+	es.x += wx;
+	es.y += wy;
+	es.z += dz_eff;
+
+	// Retail quantizes the final origin upward to the 0x1800 grid and probes
+	// exactly 0x20000 downward. Terrain is accepted only inside that segment;
+	// otherwise the segment end is the resolver's bounded fallback. Then only
+	// non-positive signed foot clearance lifts the row. This ports the outdoor
+	// terrain-column subset until decoded rows have candidate slices and the
+	// high indoors flag required by the full model/contact resolver.
+	// [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4 and lift
+	// @0x4B7CFE..0x4B7D0A; Entity_UpdateInfantryAI caller @0x4BF7FA;
+	// Entity_MovementCollisionResolver probe/return @0x4B3D6E..0x4B3DA9;
+	// raycast_entity_collision terrain window @0x413785..0x4137CB, reached by
+	// Entity_RaycastGroundHeightAndObject @0x414320]
+	if (terrain != nullptr && terrain->valid()) {
+		const float world_x = static_cast<float>(es.x) / 65536.0f;
+		const float world_z = -static_cast<float>(es.y) / 65536.0f;
+		const int32_t terrain_ground = static_cast<int32_t>(
+				terrain::height_field_height_world_bilinear(
+						*terrain, world_x, world_z) *
+				65536.0f);
+		const int32_t probe_start = static_cast<int32_t>(
+				(static_cast<uint32_t>(es.z) + 0x17FFu) & ~0x17FFu);
+		int32_t resolved_ground = static_cast<int32_t>(
+				static_cast<uint32_t>(probe_start) - 0x20000u);
+		if (terrain_ground > resolved_ground &&
+		    terrain_ground <= probe_start)
+			resolved_ground = terrain_ground;
+		// Retail's SUBs wrap in 32-bit registers. Route both differences through
+		// the defined modular helper so an extreme fixed-point seam is not C++ UB.
+		const int32_t foot_clearance = io::bam_sub(
+				io::bam_sub(es.z, frame.capsule_bottom), resolved_ground);
+		if (foot_clearance <= 0) es.z = io::bam_sub(es.z, foot_clearance);
+	}
+}
+
+} // namespace
+
+void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
+	if (!remote_motion_mode_) return;
+	const uint32_t rm_key = ++rm_tick_counter_;
+	for (ClientEntityState &es : state_.entities) {
+		if (!es.net_has_compact) continue;
+		const bool chased_class = es.cls == EntityClass::Player ||
+		                          es.cls == EntityClass::Infantry ||
+		                          es.cls == EntityClass::Vehicle;
+		if (!chased_class) continue;
+
+		// Carried rows skip their own chase; the post-mover phase below follows
+		// the carrier attach after all carrier rows have advanced. Retail renders
+		// a seat mount through the carrier attach each frame
+		// [orig: the seat attach sets Flags 0x40, not bit0 —
+		// @0x4946D0/@0x494752; bit0 belongs to carried OBJECTS and not-ready
+		// rows, and is what the visible-entity collector skips @0x5C8CF4].
+		// A carrier-owned row never falls back to its standalone chase. When a
+		// newer compact sample switches to a carrier that is not present yet,
+		// net_seat_valid is deliberately cleared so no stale local offset can be
+		// reused; carrier_handle still records that the row is blocked on an
+		// attachment. Hold its last world pose until a resolvable carried sample
+		// (or an explicit free-standing sample) arrives.
+		if (es.carrier_handle != 0xFFFFu) continue;
+		// The universal mover-skip: wire bit0 (carried-object/killed/not-ready
+		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
+		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
+		// the bit rides the wire raw, §5.38e §5].
+		if (es.state_flags_known && (es.state_flags & 0x01u) != 0u) continue;
+		// A dead row holds its death pose until the respawn snap (D-NET-66);
+		// vehicles mark the wreck with the dead-pose bit instead of bit 1.
+		const uint8_t dead_bit = es.cls == EntityClass::Vehicle
+				? kVehicleFlagDeadPose
+				: static_cast<uint8_t>(world::kEntityFlagDead);
+		if (es.state_flags_known && (es.state_flags & dead_bit) != 0u) continue;
+		// A world-side family mover owns this row's motion (§5.38e B-facet: the
+		// embedding sim stages, predicts, and mirrors back). The freezes above
+		// run first so carried/not-ready/dead rows hold even when flagged.
+		if (es.net_world_mover) continue;
+
+		// Saved-live recapture, every tick [orig: @0x4b9a5f / each family head].
+		es.net_saved_live_pose[0] = es.x;
+		es.net_saved_live_pose[1] = es.y;
+		es.net_saved_live_pose[2] = es.z;
+
+		const bool is_self = es.handle == self_handle;
+		const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
+		const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
+		const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;
+
+		switch (es.cls) {
+		case EntityClass::Player: {
+			// The org2 body-pass chase [orig: Entity_UpdateInfantryPlayerBody
+			// @0x4B4470..0x4B46C0]. Client heading/pitch divisor = 12.
+			constexpr int32_t kOrg2HeadingDiv = 12;
+			if (es.net_interp_progress == 0) {
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > 0x20000) {
+					// Snap: position always; heading/pitch only for a non-self
+					// row.
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					if (!is_self) {
+						es.heading_bam = es.net_smooth_heading;
+						es.pitch_bam = es.net_smooth_pitch;
+					}
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = 0;
+					es.net_smooth_pitch = 0;
+				} else if (dist < 0x2AAA) {
+					// Position deadband — heading/pitch still chase.
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = chase_step(
+							io::bam_sub(es.net_smooth_heading, es.heading_bam),
+							kOrg2HeadingDiv);
+					es.net_smooth_pitch = chase_step(
+							io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
+							kOrg2HeadingDiv);
+				} else {
+					if (is_self) {
+						// The own-player soft reconciliation: 48 moving / 512
+						// still, position only [orig: @0x4B4490/@0x4B449E].
+						es.net_interp_steps =
+								(es.move_input & 0x08u) != 0u ? 48 : 512;
+					} else {
+						es.net_interp_steps =
+								org2_bucket(dist_16_16(dx, dy, 0));
+					}
+					const int32_t n = es.net_interp_steps;
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					int32_t step_z = chase_step(int32_t(dz), n);
+					// Client vertical damping [orig: @0x4B4626/@0x4B4635].
+					const int32_t adz =
+							int32_t(dz < 0 ? -dz : dz);
+					if (adz < 0x5555) step_z >>= 1;
+					if (adz < 0x2AAA) step_z = 0;
+					es.net_smooth_target[2] = step_z;
+					es.net_smooth_heading = chase_step(
+							io::bam_sub(es.net_smooth_heading, es.heading_bam),
+							kOrg2HeadingDiv);
+					es.net_smooth_pitch = chase_step(
+							io::bam_sub(es.net_smooth_pitch, es.pitch_bam),
+							kOrg2HeadingDiv);
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			if (progress < kOrg2HeadingDiv && !is_self) {
+				es.heading_bam = io::bam_add(es.heading_bam, es.net_smooth_heading);
+				es.pitch_bam = io::bam_add(es.pitch_bam, es.net_smooth_pitch);
+			}
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress < 512) {
+				es.net_interp_progress = progress + 1;
+			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
+			           0u) {
+				// The starved idle force: a movement state parked past the
+				// progress cap walks its root motion forever — retail forces
+				// idle 43 [orig: @0x4B465D, g_animStateFlagsTable bit0 gate].
+				es.anim_state_id = world::anim_state::kIdle;
+			}
+			if (root_motion_ != nullptr)
+				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
+				                     rm_key, is_self);
+			break;
+		}
+		case EntityClass::Infantry: {
+			// The org1 motor fall-through [orig: @0x4b9a8c].
+			if (es.net_interp_progress == 0) {
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > 0x20000) {
+					// Snap is position-only for org1.
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+				} else if (dist < 0x2000) {
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+				} else {
+					const int32_t n = org1_bucket(dist);
+					es.net_interp_steps = static_cast<int16_t>(n);
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					es.net_smooth_target[2] = chase_step(int32_t(dz), n);
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress < 512) {
+				es.net_interp_progress = progress + 1;
+			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
+			           0u) {
+				// The org1 starved idle force [orig: §5.38a cap 512 -> idle 43].
+				es.anim_state_id = world::anim_state::kIdle;
+			}
+			// Heading: the promoted target chased with the org1 body
+			// quarter-step — the witnessed (d + 2) >> 2 rounding, clamped
+			// [orig: the body chase @0x4be8fd — (target - body + 2) >> 2 then
+			// ±69273360/tick; the target is one record behind the wire
+			// (§5.38e §1); the sibling world-side port is infantry.cpp's
+			// body-yaw chase].
+			{
+				int32_t step = io::bam_sar(
+						io::bam_add(io::bam_sub(es.net_target_heading_bam,
+						                        es.heading_bam),
+						            2),
+						2);
+				if (step > 69273360) step = 69273360;
+				if (step < -69273360) step = -69273360;
+				es.heading_bam = io::bam_add(es.heading_bam, step);
+			}
+			if (root_motion_ != nullptr)
+				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
+				                     rm_key, is_self);
+			break;
+		}
+		case EntityClass::Vehicle: {
+			// The vehicle-family chase template [orig: Entity_UpdateWatercraftPhysics
+			// @0x48D480 et al.] — runs alone for rows without a world-side
+			// prediction mover (traitless vehicles, lib-only embedders); flagged
+			// rows are predicted world-side and skipped above (§5.38e B-facet).
+			// ONE shape, TWO witnessed constant sets: ground/water snap
+			// 0x60000/0x20000 at reg>=293, deadband 0x2000, buckets
+			// {6,8,10,15,20,25,30}; AIR snap 0xA0000 (0x20000 only when BOTH
+			// received commands < 293), deadband 0x2AAA, buckets
+			// {8,10,15,20,25,32} [orig: @0x48D480 / @0x490310] — selected by
+			// the sim-stamped family so an air row without traits still
+			// chases with its own family's constants.
+			const bool air = es.net_air_family;
+			if (es.net_interp_progress == 0) {
+				const int32_t snap_threshold = air
+						? ((es.vehicle_speed_reg < 293 &&
+						    es.vehicle_lat_reg < 293) ? 0x20000 : 0xA0000)
+						: (es.vehicle_speed_reg >= 293 ? 0x60000 : 0x20000);
+				const int32_t dist = dist_16_16(dx, dy, dz);
+				if (dist > snap_threshold) {
+					es.x = es.net_smooth_target[0];
+					es.y = es.net_smooth_target[1];
+					es.z = es.net_smooth_target[2];
+					es.heading_bam = es.net_smooth_heading;
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading = 0;
+				} else if (dist < (air ? 0x2AAA : 0x2000)) {
+					// Position deadband — heading still steps toward the wire
+					// euler [orig: the v46 < 0x2000 else-arm @0x48D480 zeroes
+					// the target and still computes (d + 10) / 20; the air
+					// deadband is 0x2AAA @0x490310].
+					es.net_smooth_target[0] = 0;
+					es.net_smooth_target[1] = 0;
+					es.net_smooth_target[2] = 0;
+					es.net_interp_steps = 0;
+					es.net_smooth_heading =
+							io::bam_add(
+									io::bam_sub(es.net_smooth_heading,
+									            es.heading_bam),
+									10) /
+							20;
+				} else {
+					const int32_t n = air ? vehicle_air_bucket(dist)
+					                      : vehicle_bucket(dist);
+					es.net_interp_steps = static_cast<int16_t>(n);
+					es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+					es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+					es.net_smooth_target[2] = chase_step(int32_t(dz), n);
+					es.net_smooth_heading =
+							io::bam_add(
+									io::bam_sub(es.net_smooth_heading,
+									            es.heading_bam),
+									10) /
+							20;
+				}
+			}
+			const int16_t progress = es.net_interp_progress;
+			// Heading steps for exactly 20 ticks (the /20 divisor).
+			if (progress < 20)
+				es.heading_bam = io::bam_add(es.heading_bam, es.net_smooth_heading);
+			if (progress < es.net_interp_steps) {
+				es.x += es.net_smooth_target[0];
+				es.y += es.net_smooth_target[1];
+				es.z += es.net_smooth_target[2];
+			}
+			if (progress >= 128) {
+				// Starvation: the speed register decays; progress freezes. The
+				// register is the full int32 decompressed 16.16 value — retail
+				// drains it signed and untruncated [orig: (v+64)>>7 drain
+				// @0x48D480 interp tail; the signed < 293 compare on [177]].
+				es.vehicle_speed_reg -= (es.vehicle_speed_reg + 64) >> 7;
+			} else {
+				es.net_interp_progress = progress + 1;
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	// Seat mounts and persistent no-callback children are a post-mover phase:
+	// all carrier rows above have reached this tick's live pose first.
+	refresh_carried_entities();
+}
+
+void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
+	for (uint16_t h : carrier_repair_requests_)
+		if (h == handle) return;
+	carrier_repair_requests_.push_back(handle);
+}
+
+std::vector<uint16_t> ClientReplicaPipeline::drain_carrier_repair_requests() {
+	std::vector<uint16_t> out;
+	out.swap(carrier_repair_requests_);
+	return out;
+}
+
+void ClientReplicaPipeline::tick_recoil() {
+	for (ClientEntityState &es : state_.entities) {
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
+			continue;
+		const int32_t random16 = prng_next16(prng16_); // unconditional [orig: body updater]
+		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
+		const int32_t half = io::bam_sar(step, 1);
+		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);
+		if (es.recoil_pitch <= 0x300) es.recoil_pitch = 0;
+		es.pitch_bam = io::bam_add(es.pitch_bam, io::bam_sar(step, 3));
+		es.heading_bam = (random16 & 1) == 0
+				? io::bam_add(es.heading_bam, half)
+				: io::bam_sub(es.heading_bam, half);
+	}
+}
+
+void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
+	PoolSpawnBatch batch;
+	if (!decode_pool_spawn_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x00D @ 0x432C40].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
+		++unknown_tags_;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
+	}
+	bool changed = false;
+	for (const PoolSpawnRecord &rec : batch.records) {
+		const world::EntityHandle spawn_handle{rec.slot_id};
+		if (spawn_handle.pool() != 1 ||
+				static_cast<std::size_t>(spawn_handle.slot()) >=
+						world::kRetailActorPoolCapacity)
+			continue;
+		// A 0x0D spawn is pool-1 by construction — learn the type's 0x0A replication
+		// class so the vehicle compact body decodes for it (see classify()).
+		learned_classes_[rec.item_type_id] = EntityClass::Vehicle;
+		ClientEntityState *existing = state_.find(rec.slot_id);
+		const bool type_changed = existing != nullptr &&
+				existing->type_id != rec.item_type_id;
+		uint32_t next_spawn_revision = existing != nullptr
+				? existing->spawn_revision + 1u
+				: 1u;
+		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		ClientEntityState &es = state_.upsert(rec.slot_id);
+		if (type_changed) state_.mark_topology_changed();
+		// Retail clears the complete 0x2B4-byte slot before applying every
+		// 0x0D record. Replace the decoded row too: compact carrier/death/anim
+		// and mover state belongs to the prior lifetime even when type matches.
+		es = ClientEntityState{};
+		es.handle = rec.slot_id;
+		es.type_id = rec.item_type_id;
+		es.cls = classify(rec.item_type_id);
+		es.name = rec.entity_name;
+		// The 0x0D handler memsets the full slot and has no entity+124
+		// net-id field. Preserve retail's resulting zero, not ClientState's
+		// unknown/sentinel default.
+		es.net_id = 0;
+		es.spawn_tag = s2c::POOL_SPAWN;
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.heading_bam = rec.euler_z;
+		// Born with the spawn orientation in every heading slot (see the
+		// organic applier note).
+		es.net_smooth_heading = rec.euler_z;
+		es.net_target_heading_bam = rec.euler_z;
+		es.heading_known = (rec.spawn_flags & 0x0001u) != 0;
+		es.pitch_bam = rec.euler_x;
+		es.roll_bam = rec.euler_y;
+		// Flag-gated values are zero in the decoded record when omitted.
+		// Assign unconditionally: retail's receive slot is zero-initialized, so
+		// omission denotes zero rather than "preserve the previous value".
+		es.team = rec.team_byte;
+		es.team_known = (rec.spawn_flags & 0x0010u) != 0;
+		es.zone_number_rank = rec.zone_number_rank;
+		es.zone_radius = rec.zone_radius;
+		es.spawn_entity_flags = rec.entity_flags;
+		es.spawn_section_mask = static_cast<uint32_t>(rec.section_mask);
+		es.spawn_ammo_count = rec.bone_byte;
+		es.spawn_ref_num = rec.alert_byte;
+		es.spawn_sub_type = rec.action_byte;
+		es.spawn_mount_mask = rec.seat_mask;
+		for (std::size_t slot = 0; slot < rec.mount_handles.size(); ++slot)
+			es.spawn_mount_handles[slot] = rec.mount_handles[slot];
+		es.spawn_mount_handles[8] = rec.mount_handle_8;
+		es.spawn_mount_handles[9] = rec.mount_handle_9;
+		es.spawn_revision = next_spawn_revision;
+		++state_.world_stream_revision;
+		es.parent_handle = rec.parent_handle;
+		es.parent_pose_valid = false;
+		es.state_flags = static_cast<uint8_t>(rec.entity_flags & 0xFFu);
+		es.health_known = false;
+		changed = true;
+	}
+	// 0x0D positions are absolute and parent rows normally precede their BFS
+	// children. Resolve after the complete batch anyway, so record ordering is
+	// not a hidden requirement.
+	refresh_carried_entities();
+	if (changed) state_.mark_changed();
+}
+
+void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
+	std::vector<uint16_t> retired{root_handle};
+	// Promotion caps attachment lineage at eight. Discover descendants before
+	// erasing so nested children cannot retain a dangling parent row.
+	for (int depth = 0; depth < 8; ++depth) {
+		const std::size_t before = retired.size();
+		for (const ClientEntityState &entity : state_.entities) {
+			if (entity.parent_handle == 0xFFFFu) continue;
+			if (std::find(retired.begin(), retired.end(), entity.parent_handle) ==
+					retired.end())
+				continue;
+			if (std::find(retired.begin(), retired.end(), entity.handle) ==
+					retired.end())
+				retired.push_back(entity.handle);
+		}
+		if (retired.size() == before) break;
+	}
+	const std::size_t before = state_.entities.size();
+	state_.entities.erase(
+			std::remove_if(state_.entities.begin(), state_.entities.end(),
+					[&](const ClientEntityState &entity) {
+						return std::find(retired.begin(), retired.end(), entity.handle) !=
+								retired.end();
+					}),
+			state_.entities.end());
+	if (state_.entities.size() != before) state_.mark_topology_changed();
+}
+
+// [orig: NapiNPClientMsg_DestroyEntityList @0x429730 — the body carries RAW pool-0
+//  indices, resolved with Pool_GetEntryUnchecked(0, idx), so the wire handle is
+//  (0 << 12) | idx]
+void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
+	if ((pool0_index & 0xF000u) != 0u) return; // not a pool-0 slot index
+	if (state_.find(pool0_index) == nullptr) return;
+	erase_entity_tree(pool0_index);
+}
+
+// [orig: NapiNPClientMsg_0x050 @0x431910 — the non-authority entity team store @0x4319ee]
+void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
+	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
+	// of the five entity pools (@0x431910 header checks).
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
+	ClientEntityState &entity = state_.upsert(handle);
+	if (entity.team == team && entity.team_known) return;
+	entity.team = team;
+	entity.team_known = true;
+	state_.mark_changed();
+}
+
+void ClientReplicaPipeline::refresh_carried_entities() {
+	std::vector<uint16_t> dead_children;
+	// ClientState intentionally keeps its decoded rows public, so its general
+	// find() contract must remain a derived linear lookup. This refresh owns a
+	// stable vector for its whole eight-depth pass, though: build a disposable
+	// first-row index here instead of rescanning a retail-sized world stream for
+	// every carrier/parent edge. emplace preserves find()'s first-match behavior
+	// if a caller has directly introduced duplicate handles.
+	std::unordered_map<uint16_t, std::size_t> row_by_handle;
+	row_by_handle.reserve(state_.entities.size());
+	for (std::size_t i = 0; i < state_.entities.size(); ++i)
+		row_by_handle.emplace(state_.entities[i].handle, i);
+	auto find_row = [&](uint16_t handle) -> ClientEntityState * {
+		const auto found = row_by_handle.find(handle);
+		return found != row_by_handle.end()
+				? &state_.entities[found->second]
+				: nullptr;
+	};
+
+	// The item catalog and learned class table cannot change during this method.
+	// Resolve the persistent-parent predicate once per row, outside the repeated
+	// pose-composition depths.
+	std::vector<uint8_t> persistent_parent_child(state_.entities.size(), 0);
+	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
+		const ClientEntityState &child = state_.entities[i];
+		if (child.parent_handle == 0xFFFFu ||
+		    classify(child.type_id) != EntityClass::NoNetworkCallback)
+			continue;
+		// A POOL-0 parent on a no-callback child is the occupant/driver
+		// back-reference, never a transform parent (live retail 0x0D witness,
+		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
+		// parent=<its gunner's pool-0 handle>, while the gunner's own record
+		// carries parent=<the gun> — composing both closes a mutual
+		// seat/parent loop that ratchets the pair through the depth passes
+		// (the reported climbing/spinning emplacements). The structural
+		// carrier of a mounted-on-vehicle gun rides the record's separate
+		// target field, deliberately not folded here yet.
+		// [orig: 0x0D store @0x433289 — entity+40 occupantEntity back-ref]
+		if (world::EntityHandle{child.parent_handle}.pool() == 0)
+			continue;
+		persistent_parent_child[i] = 1;
+	}
+	// Repeating the composition makes mixed seat/persistent-parent chains
+	// independent of pool/vector ordering while preserving the promotion depth
+	// cap. This method runs only after movers, so every lookup observes the
+	// carrier's final live pose for this tick.
+	for (int depth = 0; depth < 8; ++depth) {
+		for (std::size_t child_index = 0;
+		     child_index < state_.entities.size(); ++child_index) {
+			ClientEntityState &child = state_.entities[child_index];
+			// Compact-carried player/infantry/vehicle rows retain the latest
+			// successfully resolved local sample. A missing carrier invalidates
+			// the sample rather than leaving an offset that could attach to a
+			// later handle reuse.
+			if (child.net_seat_valid && child.carrier_handle != 0xFFFFu) {
+				const ClientEntityState *carrier = find_row(child.carrier_handle);
+				if (carrier == nullptr) {
+					child.net_seat_valid = false;
+				} else {
+					const WorldPose posed = network_transform_local_to_world(
+							child.net_seat_local[0], child.net_seat_local[1],
+							child.net_seat_local[2], carrier->x, carrier->y,
+							carrier->z, static_cast<uint32_t>(carrier->heading_bam),
+							static_cast<uint32_t>(carrier->pitch_bam),
+							static_cast<uint32_t>(carrier->roll_bam));
+					child.x = posed.x;
+					child.y = posed.y;
+					child.z = posed.z;
+					if (child.net_seat_compose_yaw) {
+						child.heading_bam = io::bam_add(
+								carrier->heading_bam,
+								static_cast<int32_t>(
+										static_cast<uint32_t>(
+												child.net_seat_local_yaw_byte)
+										<< 24));
+						child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+					}
+				}
+			}
+
+			if (!persistent_parent_child[child_index]) continue;
+			// Only the addeweap/no-callback family rides this persistent
+			// recompose: those children never receive compact motion samples,
+			// so the load-time 0x0D parent relation is their only pose source.
+			// A compact-sampled class (player/vehicle/infantry) moves by its
+			// OWN records — its carrier composition happens per record on the
+			// record's own carrier field — and its 0x0D parentHandle is the
+			// occupantEntity/+368 DRIVER back-reference, never a transform
+			// parent [orig: 0x0D store @0x433289; vehicle-compact carrier
+			// compose @0x4608ce]. Recomposing such a row here glued the
+			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
+			// "a vehicle follows the player around" (one per map, whichever
+			// spawn record carried flag 0x0100).
+			ClientEntityState *parent = find_row(child.parent_handle);
+			if (parent == nullptr) continue; // a later batch may still provide it
+			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
+			// verdict. Only interpret flags/health after a real live compact has
+			// supplied the vehicle health word. Scripted removals without a final
+			// compact still need their witnessed destroy-list message mapped.
+			if (parent->health_known && parent->health_word == 0) {
+				if (std::find(dead_children.begin(), dead_children.end(), child.handle) ==
+						dead_children.end())
+					dead_children.push_back(child.handle);
+				continue;
+			}
+
+			const int32_t parent_heading_bam = parent->heading_bam;
+			if (!child.parent_pose_valid) {
+				const WorldPose local = network_transform_world_to_local(
+						child.x, child.y, child.z, parent->x, parent->y, parent->z,
+						static_cast<uint32_t>(parent_heading_bam),
+						static_cast<uint32_t>(parent->pitch_bam),
+						static_cast<uint32_t>(parent->roll_bam));
+				child.parent_local_x = local.x;
+				child.parent_local_y = local.y;
+				child.parent_local_z = local.z;
+				child.parent_local_heading_bam =
+						io::bam_sub(child.heading_bam, parent_heading_bam);
+				child.parent_local_pitch_bam =
+						io::bam_sub(child.pitch_bam, parent->pitch_bam);
+				child.parent_local_roll_bam =
+						io::bam_sub(child.roll_bam, parent->roll_bam);
+				child.parent_pose_valid = true;
+			}
+			const WorldPose posed = network_transform_local_to_world(
+					child.parent_local_x, child.parent_local_y, child.parent_local_z,
+					parent->x, parent->y, parent->z,
+					static_cast<uint32_t>(parent_heading_bam),
+					static_cast<uint32_t>(parent->pitch_bam),
+					static_cast<uint32_t>(parent->roll_bam));
+			child.x = posed.x;
+			child.y = posed.y;
+			child.z = posed.z;
+			child.heading_bam = io::bam_add(
+					parent_heading_bam, child.parent_local_heading_bam);
+			child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+			child.pitch_bam = io::bam_add(
+					parent->pitch_bam, child.parent_local_pitch_bam);
+			child.roll_bam = io::bam_add(
+					parent->roll_bam, child.parent_local_roll_bam);
+		}
+	}
+	for (uint16_t handle : dead_children) erase_entity_tree(handle);
+}
+
+void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body) {
+	StaticEntityBatch batch;
+	if (!decode_static_entity_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: the 0x10 static handler].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
+		++unknown_tags_;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
+	}
+	bool changed = false;
+	// The 0x10 record carries no slot id — the entity's slot is start_index + iteration index.
+	for (size_t i = 0; i < batch.records.size(); ++i) {
+		const StaticEntityRecord &rec = batch.records[i];
+		const std::size_t slot = static_cast<std::size_t>(batch.start_index) + i;
+		if (slot >= world::kRetailActorPoolCapacity) continue;
+		const uint16_t handle = static_cast<uint16_t>(0x2000u | slot);
+		if (rec.is_empty_slot) {
+			const std::size_t before = state_.entities.size();
+			state_.entities.erase(
+					std::remove_if(state_.entities.begin(), state_.entities.end(),
+							[handle](const ClientEntityState &row) {
+								return row.handle == handle;
+							}),
+					state_.entities.end());
+			if (state_.entities.size() != before) {
+				state_.mark_topology_changed();
+				++state_.world_stream_revision;
+				changed = true;
+			}
+			continue;
+		}
+		ClientEntityState *existing = state_.find(handle);
+		const bool type_changed = existing != nullptr &&
+				existing->type_id != rec.item_type_id;
+		uint32_t next_spawn_revision = existing != nullptr
+				? existing->spawn_revision + 1u
+				: 1u;
+		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		ClientEntityState &es = state_.upsert(handle);
+		if (type_changed) state_.mark_topology_changed();
+		// The retail 0x10 handler memsets the selected slot before itemType.
+		es = ClientEntityState{};
+		es.handle = handle;
+		es.type_id = rec.item_type_id;
+		es.cls = classify(rec.item_type_id);
+		// Like 0x0D, the 0x10 handler clears entity+124 and never rewrites it.
+		es.net_id = 0;
+		es.spawn_tag = s2c::STATIC_ENTITY_BATCH;
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+		es.heading_bam = rec.euler_z;
+		es.heading_known = (rec.field_flags & 0x0001u) != 0;
+		es.pitch_bam = rec.euler_x;
+		es.roll_bam = rec.euler_y;
+		es.team = rec.team_byte;
+		es.team_known = (rec.field_flags & 0x0010u) != 0;
+		es.spawn_entity_flags = rec.entity_flags;
+		es.spawn_section_mask = static_cast<uint32_t>(rec.section_mask);
+		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_ref_num = rec.bone_a;
+		es.spawn_sub_type = rec.bone_b;
+		es.spawn_revision = next_spawn_revision;
+		++state_.world_stream_revision;
+		es.zone_number_rank = rec.weapon_byte;
+		es.zone_radius = rec.attach_ref;
+		changed = true;
+	}
+	if (changed) state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) {
+	Pool3SyncBatch batch;
+	if (!decode_pool3_sync_batch(body.data(), body.size(), batch)) {
+		// The retail handler applies records as it walks the page; a
+		// malformed tail loses only the unread remainder [orig: the 0x20 pool-3 handler].
+		// Count the malformed page, drop the half-read record the decoder
+		// staged at the failure point, and apply the complete prefix.
+		++unknown_tags_;
+		if (batch.last_record_partial && !batch.records.empty())
+			batch.records.pop_back();
+		if (batch.records.empty()) return;
+	}
+	bool changed = false;
+	for (std::size_t i = 0; i < batch.records.size(); ++i) {
+		const Pool3SyncRecord &rec = batch.records[i];
+		// Retail indexes pool 3 directly from the 0x20 start index and record
+		// ordinal, then stores netHandle into the already selected entity. The two
+		// fields are deliberately not aliases. [orig: 0x20 handler @0x425C00,
+		// Pool_GetEntryUnchecked(3, startIndex+i), netHandle store at entity+124]
+		const std::size_t slot =
+				static_cast<std::size_t>(batch.start_index) + i;
+		if (slot >= world::kRetailMarkerPoolCapacity) continue;
+		const uint16_t handle = static_cast<uint16_t>(0x3000u | slot);
+		if (rec.is_empty_slot) {
+			const std::size_t before = state_.entities.size();
+			state_.entities.erase(
+					std::remove_if(state_.entities.begin(), state_.entities.end(),
+							[handle](const ClientEntityState &row) {
+								return row.handle == handle;
+							}),
+					state_.entities.end());
+			if (state_.entities.size() != before) {
+				state_.mark_topology_changed();
+				++state_.world_stream_revision;
+				changed = true;
+			}
+			continue;
+		}
+		ClientEntityState *existing = state_.find(handle);
+		const bool type_changed = existing != nullptr &&
+				existing->type_id != rec.item_type_id;
+		uint32_t next_spawn_revision = existing != nullptr
+				? existing->spawn_revision + 1u
+				: 1u;
+		if (next_spawn_revision == 0) next_spawn_revision = 1;
+		ClientEntityState &es = state_.upsert(handle);
+		if (type_changed) state_.mark_topology_changed();
+		// The retail 0x20 handler likewise memsets its complete selected slot.
+		es = ClientEntityState{};
+		es.handle = handle;
+		es.type_id = rec.item_type_id;
+		es.cls = classify(rec.item_type_id);
+		es.net_id = rec.net_handle;
+		es.spawn_tag = s2c::POOL3_SYNC;
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
+		es.heading_bam = static_cast<int32_t>(rec.movement_val);
+		es.heading_known = (rec.flags_byte & 0x01u) != 0;
+		es.pitch_bam = 0; // pool-3 sync carries no entity+20/+24 Euler fields
+		es.roll_bam = 0;
+		es.team = rec.team_byte;
+		es.team_known = (rec.flags_byte & 0x08u) != 0;
+		es.spawn_entity_flags = 0;
+		es.spawn_section_mask = 0;
+		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_ref_num = 0;
+		es.spawn_sub_type = 0;
+		es.spawn_revision = next_spawn_revision;
+		++state_.world_stream_revision;
+		es.zone_number_rank = 0;
+		es.zone_radius = 0;
+		changed = true;
+	}
+	if (changed) state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body) {
+	FrameUpdate fu;
+	// decode_frame_update leaves everything it walked in `fu` even on a short read,
+	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
+	decode_frame_update(body.data(), body.size(),
+	                    [this](uint16_t tid) { return classify(tid); }, fu,
+	                    (game_type_ & 0x20000u) != 0u);
+
+	state_.anchor_x = fu.anchor_x;
+	state_.anchor_y = fu.anchor_y;
+	state_.anchor_z = fu.anchor_z;
+	if (fu.local_tail_present) {
+		state_.local_health = fu.health;
+		++state_.health_updates_applied;
+	}
+	if (fu.objective.present) {
+		state_.objective_won = static_cast<uint32_t>(fu.objective.state[0]);
+		state_.objective_lost = static_cast<uint32_t>(fu.objective.state[1]);
+		state_.objective_show_win = static_cast<uint32_t>(fu.objective.state[2]);
+		state_.objective_show_lose = static_cast<uint32_t>(fu.objective.state[3]);
+		++state_.objective_updates_applied;
+	}
+	if (fu.env.present) {
+		state_.environment.present = true;
+		state_.environment.fog_dist = fu.env.fog_dist;
+		state_.environment.fog_accel = fu.env.fog_accel;
+		state_.environment.tod_fixed = fu.env.tod_fixed;
+		state_.environment.quake_ticks = fu.env.quake_ticks;
+		state_.environment.cloud_scroll = fu.env.cloud_scroll;
+		state_.environment.overcast = fu.env.overcast;
+		state_.environment.rain_pct = fu.env.rain_pct;
+		state_.environment.env_param = fu.env.env_param;
+		++state_.environment.revision;
+	}
+	if (fu.passenger.present) {
+		state_.mounted_ammo.present = true;
+		state_.mounted_ammo.mount_handle = fu.passenger.mount_handle;
+		state_.mounted_ammo.has_mount = fu.passenger.has_mount;
+		state_.mounted_ammo.clip = fu.passenger.clip;
+		state_.mounted_ammo.reserve = fu.passenger.reserve;
+		++state_.mounted_ammo.revision;
+	}
+
+	// Tag 2 carries a fire origin and direction. Lift the compressed origin by
+	// this frame's anchor now, while those transient coordinates are together.
+	for (const RoundEventRecord &rec : fu.round_events) {
+		ClientRoundEvent ev;
+		ev.flags = rec.flags;
+		ev.adm_index = rec.adm_index;
+		ev.subtype = rec.subtype;
+		ev.slot_byte = rec.slot_byte;
+		ev.shooter_handle = rec.shooter_handle;
+		ev.target_handle = rec.target_handle;
+		ev.shot_seq = rec.shot_seq;
+		ev.origin_x = fu.anchor_x + network_decompress_fixedpoint(rec.pos_x_compressed);
+		ev.origin_y = fu.anchor_y + network_decompress_fixedpoint(rec.pos_y_compressed);
+		ev.origin_z = fu.anchor_z + network_decompress_fixedpoint(rec.pos_z_compressed);
+		ev.dir_yaw_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.yaw_bam_high) << 16);
+		ev.dir_pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(rec.pitch_bam_high) << 16);
+		pending_round_events_.push_back(ev);
+	}
+
+	state_.compact_records_applied += static_cast<std::uint32_t>(fu.records.size());
+	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;
+	struct PendingCarrierPose {
+		uint16_t child_handle;
+		uint16_t carrier_handle;
+		uint16_t cx;
+		uint16_t cy;
+		uint16_t cz;
+		uint8_t local_yaw_byte;
+		// Player/infantry compacts carry a carrier-RELATIVE yaw byte; the
+		// vehicle compact's orientation stays world-absolute even when its
+		// position is carrier-local [orig: the read path stores the wire
+		// eulerZ untransformed at entity+576 @0x4607f5 while the position
+		// goes through Entity_TransformLocalToWorld @0x4608ce].
+		bool compose_yaw;
+	};
+	std::vector<PendingCarrierPose> pending_carrier_poses;
+	pending_carrier_poses.reserve(fu.records.size());
+
+	// Fold in TWO sweeps so the witnessed child-before-carrier production
+	// order still resolves: retail resolves a record's carrier against the
+	// POOL, where the carrier exists from its spawn regardless of this
+	// frame's record order — our row analog is created by the carrier's own
+	// record, so a sweep-1 child whose carrier only appears later in the
+	// same frame retries in sweep 2. A carrier absent after BOTH sweeps is
+	// the retail bail: the WHOLE record drops and a C2S 0x0F entity request
+	// is queued — nothing from the record lands [orig: vehicle resolve
+	// @0x46085d, repair bail @0x4608ae..0x4608c1; the player op2 carrier
+	// path @0x4c10d4]. Skipping only the position would half-apply
+	// anim/flags/health from a sample retail never applied.
+	std::vector<uint8_t> record_folded(fu.records.size(), 0u);
+	for (int sweep = 0; sweep < 2; ++sweep)
+	for (size_t rec_i = 0; rec_i < fu.records.size(); ++rec_i) {
+		const FrameUpdateRecord &rec = fu.records[rec_i];
+		if (record_folded[rec_i] != 0u) continue;
+		if (rec.cls == EntityClass::NoNetworkCallback) {
+			record_folded[rec_i] = 1u;
+			continue;
+		}
+		uint16_t record_carrier = 0xFFFFu;
+		if (rec.cls == EntityClass::Player)
+			record_carrier = rec.player.carrier_handle;
+		else if (rec.cls == EntityClass::Vehicle)
+			record_carrier = rec.vehicle.parent_slot_handle;
+		else if (rec.cls == EntityClass::Infantry)
+			record_carrier = rec.infantry.vehicle_slot_handle;
+		if (record_carrier != 0xFFFFu &&
+				state_.find(record_carrier) == nullptr) {
+			if (sweep == 0) continue; // the carrier may appear this frame
+			queue_carrier_repair(record_carrier);
+			record_folded[rec_i] = 1u;
+			continue;
+		}
+		record_folded[rec_i] = 1u;
+		ClientEntityState *existing = state_.find(rec.handle);
+		const bool type_changed = existing != nullptr &&
+				existing->type_id != rec.type_id;
+		ClientEntityState &es = state_.upsert(rec.handle);
+		if (type_changed) state_.mark_topology_changed();
+		// Capture the previous body-anim sample before the per-record clear: if
+		// this record REPLACES it with a different state within one decode fold,
+		// the old value becomes the transition PULSE presentation still has to
+		// dispatch — retail applies each record's anim byte through the receive
+		// arbitration as it decodes [orig: @0x4c1153], and a tapped prone roll
+		// rides the wire for only 1-2 ticks (the byte is `pending ?: current`).
+		// A row's first-ever organic sample never pulses (its default 0 would
+		// read as the anim_reset clip).
+		const bool prev_anim_sampled = es.cls == EntityClass::Player ||
+		                               es.cls == EntityClass::Infantry;
+		const uint8_t prev_anim_state = es.anim_state_id;
+		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
+		if (es.type_id != rec.type_id && es.type_id != 0) {
+			// A handle reused for a different type: the stamped adm and the
+			// playing channel are the OLD body's — re-resolve and re-arm.
+			es.rm_adm_id = -2;
+			row_channel_disarm(es);
+		}
+		es.type_id = rec.type_id;
+		es.cls = rec.cls;
+		es.seen_this_frame = true;
+		// Every compact record is a complete sample of these organic fields. Clear the
+		// normalized row before class-specific assignment so dismounts and class changes
+		// cannot retain a stale carrier/bone selector from an earlier frame.
+		es.carrier_handle = 0xFFFFu;
+		es.mount_bone = 0;
+		es.seat_type = 0;
+		// Carrier identity and its resolved local pose form one atomic sample.
+		// The second pass re-arms this only if the final carrier resolves.
+		es.net_seat_valid = false;
+		es.pitch_byte = 0;
+		es.aim_yaw_byte = 0;
+		es.anim_state_id = 0;
+		es.anim_channel_ratio = 0;
+
+		// Compact player and infantry records carry the authoritative organic
+		// lifecycle bits. Retain the complete byte, while counting only known
+		// dead -> alive edges so an initial alive spawn is not mistaken for a
+		// respawn. This happens per decoded record rather than per render frame:
+		// pump() may fold several queued 0x0A datagrams before Godot presents.
+		bool has_state_flags = false;
+		uint8_t state_flags = 0;
+		if (rec.cls == EntityClass::Player) {
+			has_state_flags = true;
+			state_flags = rec.player.state_flags;
+		} else if (rec.cls == EntityClass::Infantry) {
+			has_state_flags = true;
+			state_flags = rec.infantry.flags_byte;
+		} else if (rec.cls == EntityClass::Vehicle) {
+			// Vehicles carry the wire flags too; their dead marker is the
+			// dead-pose/wreck bit (flags & 4), not the organic bit 1
+			// [orig: the short-form select on flags_byte, §5.13].
+			has_state_flags = true;
+			state_flags = rec.vehicle.flags_byte;
+		}
+		const uint8_t dead_bit = rec.cls == EntityClass::Vehicle
+				? kVehicleFlagDeadPose
+				: static_cast<uint8_t>(world::kEntityFlagDead);
+		bool respawned_this_record = false;
+		if (has_state_flags) {
+			const bool was_known = es.state_flags_known;
+			const bool was_dead = (es.state_flags & dead_bit) != 0u;
+			const bool is_alive = (state_flags & dead_bit) == 0u;
+			es.state_flags = state_flags;
+			es.state_flags_known = true;
+			if (was_known && was_dead && is_alive) {
+				++es.respawn_revision;
+				respawned_this_record = true;
+			}
+		}
+		// The organic wire-dead position skip (LABEL_151). Vehicle wrecks are the
+		// opposite: the dead-pose short form force-live-snaps the frozen pose.
+		const bool wire_dead = has_state_flags &&
+				rec.cls != EntityClass::Vehicle &&
+				(state_flags & dead_bit) != 0u;
+
+		// Reconstruct world position: decompress the compact (per-axis) and add the
+		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
+		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
+		// view's own state [orig: op2 resolves the carrier from g_pool_list and runs
+		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
+		// record and queues a C2S 0x0F entity request — request plumbing an in-process
+		// view does not need, so an unknown carrier just skips the position sample].
+		// Carrier-local samples are queued for a second pass after every record has
+		// updated the view. Production order is pool-0 child before pool-1 carrier.
+		uint16_t cx = 0, cy = 0, cz = 0;
+		bool skip_pos = false;
+		// The record's decoded orientation target (BAM32). Players/infantry carry
+		// the 8-bit yaw high byte; vehicles the 16-bit euler_z high half — the
+		// wire precision each class actually has (§5.38e).
+		int32_t heading_target = 0;
+		bool has_heading_target = false;
+		switch (rec.cls) {
+		case EntityClass::Player:
+			cx = rec.player.pos_x_compressed;
+			cy = rec.player.pos_y_compressed;
+			cz = rec.player.pos_z_compressed;
+			es.carrier_handle = rec.player.carrier_handle;
+			es.mount_bone = rec.player.vehicle_bone;
+			es.seat_type = rec.player.seat_type;
+			es.pitch_byte = rec.player.pitch_byte;
+			es.anim_state_id = rec.player.anim_state_id;
+			es.anim_channel_ratio = rec.player.anim_channel_ratio;
+			es.equipped_adm_index = rec.player.anim_def_index;
+			es.state_flags = rec.player.state_flags;
+			es.move_input = rec.player.move_input_byte;
+			if (rec.player.carrier_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.player.carrier_handle, cx, cy, cz,
+						rec.player.yaw_byte, /*compose_yaw=*/true});
+				skip_pos = true;
+			} else {
+				es.yaw_byte = rec.player.yaw_byte;
+				heading_target = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.player.yaw_byte) << 24);
+				has_heading_target = true;
+			}
+			break;
+		case EntityClass::Vehicle:
+			cx = rec.vehicle.pos_x_compressed;
+			cy = rec.vehicle.pos_y_compressed;
+			cz = rec.vehicle.pos_z_compressed;
+			// The §5.13 compact's own parent field is the CARRIER (deck/ground
+			// entity), consumed per record: a resolving parent composes THIS
+			// record's vehicle-local position against the carrier's live pose,
+			// an absent one takes the anchor-relative leg, and the stored
+			// carrier ref is re-landed (nulled included) from every record
+			// [orig: Entity_SerializeVehicleState read side — resolve
+			// @0x46085d, local->world @0x4608ce, entity+40 (re)store
+			// @0x460802]. The 0x0D spawn's parentHandle is a DIFFERENT slot —
+			// occupantEntity/+368, a driver back-reference with no transform
+			// semantics [orig: store @0x433289] — see
+			// refresh_parented_pool_entities for the class gate that keeps it
+			// out of this row's pose.
+			// The carrier ref is consumed per record like the organic classes
+			// (re-landed nulled included, D-NET-195) so the per-tick seat-follow
+			// can ride a resolving deck carrier between records.
+			es.carrier_handle = rec.vehicle.parent_slot_handle;
+			if (rec.vehicle.parent_slot_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.vehicle.parent_slot_handle, cx, cy, cz,
+						0, /*compose_yaw=*/false});
+				skip_pos = true;
+			}
+			es.yaw_byte = static_cast<uint8_t>(
+					static_cast<uint16_t>(rec.vehicle.euler_z) >> 8);
+			// The vehicle heading target keeps the wire's full 16-bit euler_z —
+			// world-absolute even for carrier-local positions [orig: @0x4607f5].
+			heading_target = static_cast<int32_t>(rec.vehicle.euler_z) * 65536;
+			has_heading_target = true;
+			es.health_word = rec.vehicle.health_word;
+			es.health_known = true;
+			// The raw speed register mirror ([177] source field) — gates the
+			// fast-vehicle snap threshold and decays on starvation (§5.38e §4).
+			if (!rec.vehicle.is_dead_pose) {
+				es.vehicle_speed_reg =
+						network_decompress_fixedpoint(rec.vehicle.weapon_aim_y);
+				es.vehicle_steer_bam = static_cast<int32_t>(
+						rec.vehicle.weapon_heading_bam) * 65536;
+				es.vehicle_lat_reg =
+						network_decompress_fixedpoint(rec.vehicle.weapon_aim_z);
+			}
+			// Live vehicle compacts omit entity+20/+24. Preserve the last full
+			// spawn/dead-pose values until the short dead-pose form carries new
+			// signed high words [orig: @0x460d4c/@0x460d52].
+			if (rec.vehicle.is_dead_pose) {
+				es.pitch_bam = static_cast<int32_t>(rec.vehicle.euler_x) * 65536;
+				es.roll_bam = static_cast<int32_t>(rec.vehicle.euler_y) * 65536;
+			}
+			break;
+		case EntityClass::Infantry:
+			cx = rec.infantry.pos_x_compressed;
+			cy = rec.infantry.pos_y_compressed;
+			cz = rec.infantry.pos_z_compressed;
+			es.carrier_handle = rec.infantry.vehicle_slot_handle;
+			es.mount_bone = rec.infantry.seat_bone_idx;
+			es.pitch_byte = rec.infantry.pitch_byte;
+			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
+			es.anim_state_id = rec.infantry.anim_byte;
+			es.state_flags = rec.infantry.flags_byte;
+			// The compact carries desired aim pitch (entity+0x2D0), not live
+			// entity+0x14. Retail's remote gunner rebuilds the latter locally
+			// with the same wrapped one-eighth chase as authoritative AI.
+			// [orig: chase @0x4bef7b..0x4bef97]
+			if (rec.infantry.vehicle_slot_handle != 0xFFFFu &&
+					rec.infantry.seat_bone_idx != 0) {
+				es.pitch_bam = chase_infantry_pitch(
+						es.pitch_bam, rec.infantry.aim_yaw_byte);
+			}
+			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
+				pending_carrier_poses.push_back(PendingCarrierPose{
+						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
+						rec.infantry.yaw_byte, /*compose_yaw=*/true});
+				skip_pos = true;
+			} else {
+				es.yaw_byte = rec.infantry.yaw_byte;
+				heading_target = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.infantry.yaw_byte) << 24);
+				has_heading_target = true;
+			}
+			break;
+		default:
+			break; // unresolved/guided records are not compact motion samples
+		}
+		// Latch the overwritten body-anim state as this row's transition pulse.
+		// LAST transition wins: in a fold of [41, 48] the 41 is the state being
+		// buried (the 48 latched by the first transition was already presented
+		// last frame, and re-dispatching a presented state is a same-state
+		// no-op at the model). The presenter drains the pulse once per frame.
+		if (prev_anim_sampled &&
+				(rec.cls == EntityClass::Player ||
+						rec.cls == EntityClass::Infantry) &&
+				es.anim_state_id != prev_anim_state) {
+			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
+			es.anim_pulse_ratio = prev_anim_ratio;
+		}
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
+				rec.cls == EntityClass::Vehicle) {
+			es.heading_known = true;
+			++es.compact_revision;
+		}
+		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
+		// row (dead/bit0/carried) never root-ticks, so its channel is DISARMED
+		// — presentation falls back to the per-record wire anim byte exactly
+		// as retail applies it [orig: @0x4c1153] (the death/seat clips
+		// dispatch); the respawn edge re-arms fresh so the resume never
+		// blends out of the pre-death primary. A fresh player record also
+		// refreshes the one-shot phase seed.
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			if (rec.cls == EntityClass::Player) es.rm_seed_live = true;
+			const bool row_frozen =
+					(has_state_flags &&
+							(state_flags &
+									(0x01u | world::kEntityFlagDead)) != 0u) ||
+					es.carrier_handle != 0xFFFFu;
+			if (row_frozen || respawned_this_record) row_channel_disarm(es);
+		}
+		// A free-standing record clears any retained seat-local pose — the
+		// relation is cleared before every record (D-NET-195); carrier-local
+		// records atomically refresh it in the second pass below.
+		// A vehicle wreck's short form re-lands the full frozen orientation;
+		// treat it as the live-snap branch of the read [orig: the conditional
+		// live stores @0x460930..0x460A50].
+		const bool force_live_snap = respawned_this_record ||
+				(rec.cls == EntityClass::Vehicle && rec.vehicle.is_dead_pose);
+		if (!skip_pos && !(remote_motion_mode_ && wire_dead)) {
+			// Retail's client read skips the position path entirely for a
+			// wire-dead record [orig: the case-2 dead branch -> LABEL_151, no
+			// position store]; the snap fold keeps its historical apply
+			// (host/SP loopback rows refresh at full rate).
+			const int32_t wx = fu.anchor_x + network_decompress_fixedpoint(cx);
+			const int32_t wy = fu.anchor_y + network_decompress_fixedpoint(cy);
+			const int32_t wz = fu.anchor_z + network_decompress_fixedpoint(cz);
+			land_compact_pose(es, wx, wy, wz, has_heading_target, heading_target,
+			                  force_live_snap);
+		} else if (skip_pos && rec.cls == EntityClass::Vehicle &&
+				has_heading_target) {
+			// Carrier-local vehicle positions defer to the second pass, but the
+			// wire euler stays world-absolute and lands LIVE: a deck-carried
+			// vehicle is a carried OBJECT (the bit0-flagged attach class
+			// @0x43C14A — distinct from seat mounts' 0x40) whose mover is
+			// bit0-skipped, and the per-tick seat-follow owns its motion between
+			// records, so there is no chase to consume a staged heading
+			// [orig: the untransformed entity+576 store @0x4607f5]. Keep the
+			// staged slot coherent for a later carrier-clear record.
+			es.heading_bam = heading_target;
+			es.net_smooth_heading = heading_target;
+		}
+	}
+
+	// Resolve carrier-local children only after the complete frame has upserted and
+	// updated every carrier. If the carrier is genuinely absent, leave the child's
+	// prior world pose/yaw untouched, matching the retail record-drop path.
+	for (const PendingCarrierPose &pending : pending_carrier_poses) {
+		ClientEntityState *child = state_.find(pending.child_handle);
+		const ClientEntityState *carrier = state_.find(pending.carrier_handle);
+		// A fold may contain several records for one child. An earlier resolved
+		// carrier must not overwrite a later unresolved switch/dismount.
+		if (child == nullptr || carrier == nullptr ||
+				child->carrier_handle != pending.carrier_handle)
+			continue;
+		// Compose against the carrier's LIVE (chased) pose — retail lifts through
+		// the carrier entity's current +4..+0x18 block [orig: @0x4c10d4/@0x4608ce].
+		const WorldPose w = network_transform_local_to_world(
+				network_decompress_fixedpoint(pending.cx),
+				network_decompress_fixedpoint(pending.cy),
+				network_decompress_fixedpoint(pending.cz), carrier->x, carrier->y,
+				carrier->z, uint32_t(carrier->heading_bam),
+				uint32_t(carrier->pitch_bam), uint32_t(carrier->roll_bam));
+		// Retain the seat-local offset for the per-tick carrier-follow: the
+		// rider's rendered pose rides the carrier attach every frame in retail
+		// [orig: the seat attach @0x4946D0/@0x494752]. The row is
+		// live-snapped here (the recompose owns it from the next tick).
+		child->net_seat_local[0] = network_decompress_fixedpoint(pending.cx);
+		child->net_seat_local[1] = network_decompress_fixedpoint(pending.cy);
+		child->net_seat_local[2] = network_decompress_fixedpoint(pending.cz);
+		child->net_seat_local_yaw_byte = pending.local_yaw_byte;
+		child->net_seat_compose_yaw = pending.compose_yaw;
+		child->net_seat_valid = true;
+		child->net_has_compact = true;
+		child->x = w.x;
+		child->y = w.y;
+		child->z = w.z;
+		// World yaw byte = carrier yaw + local yaw; BAM addition holds in the
+		// 8-bit ring used by the compact view. Vehicle records keep their
+		// world-absolute wire euler instead (compose_yaw false) [orig: the
+		// untransformed entity+576 store @0x4607f5].
+		if (pending.compose_yaw) {
+			child->yaw_byte = uint8_t(carrier->yaw_byte + pending.local_yaw_byte);
+			child->heading_bam = io::bam_add(
+					carrier->heading_bam,
+					static_cast<int32_t>(
+							uint32_t(pending.local_yaw_byte) << 24));
+		}
+	}
+
+	refresh_carried_entities();
+
+	++state_.frames_applied;
+	state_.mark_changed();
+}
+
+} // namespace opennova::netsim

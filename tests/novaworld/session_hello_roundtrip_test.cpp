@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 using opennova::ClientAuth;
 using opennova::ClientHello;
@@ -49,18 +50,41 @@ bool has_tlv_field(const std::vector<uint8_t> &bytes, const std::string &wanted)
 	return false;
 }
 
+std::vector<std::string> tlv_field_names(const std::vector<uint8_t> &bytes) {
+	std::vector<std::string> names;
+	size_t pos = 0;
+	while (pos < bytes.size()) {
+		size_t name_end = pos;
+		while (name_end < bytes.size() && bytes[name_end] != 0) ++name_end;
+		if (name_end + 2 >= bytes.size()) return {};
+		const uint16_t value_size = static_cast<uint16_t>(bytes[name_end + 1]) |
+		                            (static_cast<uint16_t>(bytes[name_end + 2]) << 8);
+		const size_t next = name_end + 3 + value_size;
+		if (next > bytes.size()) return {};
+		names.emplace_back(
+				reinterpret_cast<const char *>(bytes.data() + pos), name_end - pos);
+		pos = next;
+	}
+	return names;
+}
+
 int test_client_hello_roundtrip() {
 	ClientHello src;
 	src.nvs  = "OpenNova Godot Client 0.1";
 	src.co   = "OpenNova";
 	src.ap   = "OpennovaGodotClient.exe";
 	src.bdat = "Apr 27 2026 00:00:00";
+	src.de   = 0x10203040u;
 	src.pn   = "NOVAWORLDUDP";
 	src.pv1  = "0.0.0 2/10/2004 EM";
 	src.pv2  = "1";
+	src.pv3  = "third-version";
 	src.ci   = 0xCAFEBABEu;
+	src.pm   = 7;
+	src.pm_present = true;
 	src.eip  = 0x7F000001u;
 	src.epn  = 32768;
+	src.et   = 0x55667788u;
 	for (int i = 0; i < 16; ++i) src.pg[i] = static_cast<uint8_t>(i * 17);
 	src.pg_present = true;
 
@@ -73,12 +97,17 @@ int test_client_hello_roundtrip() {
 	TEST_EXPECT(round.co   == src.co);
 	TEST_EXPECT(round.ap   == src.ap);
 	TEST_EXPECT(round.bdat == src.bdat);
+	TEST_EXPECT(round.de   == src.de);
 	TEST_EXPECT(round.pn   == src.pn);
 	TEST_EXPECT(round.pv1  == src.pv1);
 	TEST_EXPECT(round.pv2  == src.pv2);
+	TEST_EXPECT(round.pv3  == src.pv3);
 	TEST_EXPECT(round.ci   == src.ci);
+	TEST_EXPECT(round.pm   == src.pm);
+	TEST_EXPECT(round.pm_present);
 	TEST_EXPECT(round.eip  == src.eip);
 	TEST_EXPECT(round.epn  == src.epn);
+	TEST_EXPECT(round.et   == src.et);
 	TEST_EXPECT(round.pg_present);
 	TEST_EXPECT(std::memcmp(round.pg.data(), src.pg.data(), 16) == 0);
 	return 0;
@@ -96,6 +125,35 @@ int test_client_hello_minimal() {
 	TEST_EXPECT(round.pn == "NOVAWORLDUDP");
 	TEST_EXPECT(round.nvs.empty());
 	TEST_EXPECT(round.ci == 0);
+	TEST_EXPECT(!has_tlv_field(bytes, "DE"));
+	TEST_EXPECT(!has_tlv_field(bytes, "PV3"));
+	TEST_EXPECT(!has_tlv_field(bytes, "CI"));
+	TEST_EXPECT(!has_tlv_field(bytes, "PM"));
+	TEST_EXPECT(!has_tlv_field(bytes, "EIP"));
+	TEST_EXPECT(!has_tlv_field(bytes, "EPN"));
+	TEST_EXPECT(!has_tlv_field(bytes, "ET"));
+
+	// PM's retail gate is exposure, not value: an exposed empty transport
+	// still writes a zero-valued PM field.
+	src.pm_present = true;
+	bytes = client_hello_to_bytes(src);
+	TEST_EXPECT(has_tlv_field(bytes, "PM"));
+	ClientHello with_zero_pm;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), with_zero_pm));
+	TEST_EXPECT(with_zero_pm.pm_present && with_zero_pm.pm == 0);
+	return 0;
+}
+
+int test_client_hello_tag_names_are_case_insensitive() {
+	ClientHello src;
+	src.pn = "NOVAWORLDUDP";
+	auto bytes = client_hello_to_bytes(src);
+	TEST_EXPECT(bytes.size() >= 2);
+	bytes[0] = 'p';
+	bytes[1] = 'n';
+	ClientHello parsed;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), parsed));
+	TEST_EXPECT(parsed.pn == src.pn);
 	return 0;
 }
 
@@ -204,16 +262,41 @@ int test_server_hello_omitted_metadata_parses_empty() {
 	return 0;
 }
 
+int test_server_hello_game_metadata_has_retail_order() {
+	ServerHello hello;
+	hello.p1 = 0x00010020u;
+	hello.p2 = 0x00000904u;
+	hello.np = 1;
+	hello.mp = 4;
+	hello.sus1 = "live-session-user-string";
+	hello.sus2 = "revx02";
+
+	const auto bytes = server_hello_to_bytes(hello);
+	const std::vector<std::string> expected_names = {
+			"CI", "CO", "AP", "BDAT", "PN", "PG", "PV1", "PV2", "PV3",
+			"HK", "SN", "SF", "P1", "P2", "NP", "MP", "NC", "RIP", "RPN",
+			"SUS1", "SUS2", "EIP", "EPN"};
+	TEST_EXPECT(tlv_field_names(bytes) == expected_names);
+
+	ServerHello parsed;
+	TEST_EXPECT(parse_server_hello(bytes.data(), bytes.size(), parsed));
+	TEST_EXPECT(parsed.p2 == 0x00000904u);
+	TEST_EXPECT(parsed.sus1 == "live-session-user-string");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_client_hello_roundtrip() != 0) return 1;
 	if (test_client_hello_minimal() != 0) return 1;
+	if (test_client_hello_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
+	if (test_server_hello_game_metadata_has_retail_order() != 0) return 1;
 	std::printf("OK: session hello/auth serializer roundtrip and gating\n");
 	return 0;
 }

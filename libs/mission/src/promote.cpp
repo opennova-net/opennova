@@ -52,6 +52,16 @@ void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
     entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
     entity.armory_points = spec->armory_points;
     entity.primary_weapon = spec->primary_weapon;
+    // Seat specs are the def-derived trait channel: a spec that declares the
+    // EWeap primary weapon carries items.def's attrib-0x20 nature. A world
+    // promoted before/without the item database (authored tool and test
+    // worlds) stamps the equivalent trait so the witnessed def gate in
+    // resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
+    // items.def sweep overwrites this with the authoritative row.
+    if (!entity.has_item_def && !spec->primary_weapon.empty()) {
+        entity.has_item_def = true;
+        entity.item_attrib |= kItemAttribEweap;
+    }
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {
@@ -503,6 +513,10 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             child->emplacement_parent = work.carrier;
             child->emplacement_parent_spawn_id =
                     carrier->registry_spawn_id;
+            // NoNetworkCallback addeweap children also carry their host in the
+            // ordinary groundEntity field; retail's shared MountSlot resolver
+            // follows +0x28, not the attachment metadata pointer.
+            child->ground_target = work.carrier;
             child->emplacement_local = attachment.anchor.seat_local;
             child->emplacement_yaw_offset = attachment.anchor.yaw_offset;
             child->emplacement_bone =
@@ -515,6 +529,9 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             child->emplacement_up_limit_bam = attachment.up_limit_bam;
             child->emplacement_right_limit_bam = attachment.right_limit_bam;
             child->emplacement_left_limit_bam = attachment.left_limit_bam;
+            // Promotion is the authority-side source of the exact addeweap
+            // row, including its stored slot even when sibling types repeat.
+            child->emplacement_pose_metadata_resolved = true;
             seed_authored_seats(*child, opts);
             Seat anchor = attachment.anchor;
             anchor.type = SeatType::Gunner;

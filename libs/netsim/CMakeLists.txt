@@ -2,7 +2,10 @@ add_library(opennova_netsim STATIC
     src/loopback_channel.cpp
     src/serializing_sink.cpp
     src/entity_wire_bridge.cpp
-    src/net_client_view.cpp
+    src/item_replication_catalog.cpp
+    src/client_replica_pipeline.cpp
+    src/client_world_materializer.cpp
+    src/replica_history.cpp
     src/connection_fan.cpp
     src/udp_session_transport.cpp
 )
@@ -15,7 +18,9 @@ target_include_directories(opennova_netsim
 # The single deliberate bridge between the runtime world and the wire codec
 # (ADR 0009/0011): the only library that depends on BOTH opennova_world and
 # opennova_novaworld. Keeps libs/world net-agnostic and libs/npwire sim-agnostic.
-target_link_libraries(opennova_netsim PUBLIC opennova_world opennova_npwire)
+target_link_libraries(opennova_netsim
+    PUBLIC opennova_world opennova_npwire
+    PRIVATE opennova_def opennova_terrain_query)
 
 target_compile_features(opennova_netsim PUBLIC cxx_std_17)
 

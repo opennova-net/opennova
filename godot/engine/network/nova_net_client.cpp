@@ -1,14 +1,19 @@
 #include "nova_net_client.h"
 
+#include "network/item_replication_catalog_adapter.h"
 #include "object/nova_item_database.h"
+#include "simulation/client_replica_present_projection.h"
+#include "simulation/nova_simulation.h"
 
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+
+#include <world/angle.h>
+#include <world/entity.h>
 
 #include <algorithm>
 #include <cmath>
@@ -21,12 +26,15 @@ using opennova::ReplayEntity;
 using opennova::ReplayEnvSample;
 using opennova::ReplayEvent;
 using opennova::ReplaySample;
+namespace ns = opennova::netsim;
 
 namespace {
 
 // A tiny ping so the source learns this spectator's address; the data plane is
 // pure captured/wire bytes.
 constexpr uint8_t REGISTER_MAGIC[4] = {'N', 'W', 'R', 'H'};
+constexpr double REPLICA_TICK_SECONDS = 0.016; // retail 62.5 Hz body/mover tick
+constexpr int MAX_REPLICA_CATCHUP_TICKS = 31;
 
 PackedByteArray to_pba(const uint8_t *p, size_t n) {
 	PackedByteArray out;
@@ -45,7 +53,9 @@ inline double fp16(int32_t v) { return double(v) / 65536.0; }
 
 } // namespace
 
-NovaNetClient::NovaNetClient() = default;
+NovaNetClient::NovaNetClient() {
+	replicas_.set_remote_motion_mode(true);
+}
 NovaNetClient::~NovaNetClient() = default;
 
 void NovaNetClient::_bind_methods() {
@@ -65,6 +75,12 @@ void NovaNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample_at", "handle", "frame_f"), &NovaNetClient::sample_at);
 	ClassDB::bind_method(D_METHOD("get_events"), &NovaNetClient::get_events);
 	ClassDB::bind_method(D_METHOD("env_at", "frame_f"), &NovaNetClient::env_at);
+	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaNetClient::get_present_snapshot);
+	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaNetClient::get_present_stride);
+	ClassDB::bind_method(D_METHOD("get_present_layout_revision"), &NovaNetClient::get_present_layout_revision);
+	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaNetClient::has_local_player);
+	ClassDB::bind_method(D_METHOD("get_local_player_wire_handle"), &NovaNetClient::get_local_player_wire_handle);
+	ClassDB::bind_method(D_METHOD("get_logic_tick"), &NovaNetClient::get_logic_tick);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "replay_host"), "set_replay_host", "get_replay_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "replay_port"), "set_replay_port", "get_replay_port");
@@ -88,28 +104,23 @@ void NovaNetClient::set_replay_port(int port) { replay_port_ = port; }
 int NovaNetClient::get_replay_port() const { return replay_port_; }
 
 void NovaNetClient::set_item_database(const Ref<NovaItemDatabase> &db) {
-	class_table_.clear();
-	if (db.is_null()) return;
-	// Snapshot wire type_id -> §5.10b class once, so the per-record class lookup in
-	// the fold is a fast local map hit (no String marshaling per S2C 0x0A record).
-	const PackedInt32Array ids = db->get_item_ids();
-	for (int i = 0; i < ids.size(); ++i) {
-		const int def_id = ids[i];
-		const int wire = def_id - 100000;
-		if (wire < 0 || wire >= 0x10000) continue;
-		const String ai = db->get_ai_function(def_id);
-		EntityClass cls = opennova::class_from_tag(ai.utf8().get_data());
-		if (cls == EntityClass::Unknown) {
-			const String mv = db->get_move_function(def_id);
-			cls = opennova::class_from_tag(mv.utf8().get_data());
-		}
-		if (cls != EntityClass::Unknown) class_table_[uint16_t(wire)] = cls;
-	}
+	replication_catalog_ = build_item_replication_catalog(db);
+	install_class_resolver();
 }
 
-EntityClass NovaNetClient::class_of(uint16_t wire_type) const {
-	const auto it = class_table_.find(wire_type);
-	return it == class_table_.end() ? EntityClass::Unknown : it->second;
+ns::ClientReplicaPipeline::ItemClassResolution
+NovaNetClient::class_of(uint16_t wire_type) const {
+	// With no items.def at all, every compact width is unresolved and must fail
+	// closed. With a catalog, nullopt means only that this id is absent from it,
+	// so spawn learning may supply the witnessed fallback; a present Unknown is
+	// a known ambiguous/unresolved definition and remains terminal.
+	if (!replication_catalog_) return EntityClass::Unknown;
+	return replication_catalog_->resolve_wire_entity_class(wire_type);
+}
+
+void NovaNetClient::install_class_resolver() {
+	replicas_.set_item_class_resolver(
+			[this](uint16_t type_id) { return class_of(type_id); });
 }
 
 void NovaNetClient::connect_to_replay() {
@@ -132,14 +143,22 @@ void NovaNetClient::stop() {
 	socket_.unref();
 	mission_ = String();
 	decoder_ = opennova::CaptureDecoder();
-	messages_.clear();
-	world_ = opennova::ReplayTimeline();
-	// NB: class_table_ is configuration (set via set_item_database), not
+	replicas_ = opennova::netsim::ClientReplicaPipeline();
+	replicas_.set_remote_motion_mode(true);
+	install_class_resolver();
+	history_.reset();
+	// NB: replication_catalog_ is configuration (set via set_item_database), not
 	// per-connection state — do NOT clear it here, or a set_item_database()
 	// before connect_to_replay() (which calls stop()) would be wiped, leaving
 	// S2C 0x0A motion unwalkable.
 	recv_counter_ = 0;
+	logic_tick_ = 0;
+	observed_replica_topology_revision_ = 0;
+	replica_tick_credit_s_ = 0.0;
 	dirty_ = false;
+	since_publish_ = 0.0;
+	present_layout_.clear();
+	++present_layout_revision_;
 	if (state_ != STATE_IDLE) enter_state(STATE_IDLE);
 }
 
@@ -166,7 +185,7 @@ void NovaNetClient::drain_socket() {
 		d.src_port = int(socket_->get_packet_port()); // source port (constant over the hop)
 		d.dst_port = local_port_;
 		d.payload = bytes;
-		for (auto &m : decoder_.push(d)) {
+		for (const auto &m : decoder_.push(d)) {
 			if (m.settings_update) continue;
 			// The mission/map name rides the wire (S2C 0x7B full-player-info).
 			if (mission_.is_empty() && m.dir == 'S' && m.tag == 0x7B) {
@@ -177,39 +196,75 @@ void NovaNetClient::drain_socket() {
 					emit_signal("mission_known", mission_);
 				}
 			}
-			messages_.push_back(std::move(m));
-			dirty_ = true;
+			const uint64_t before_revision = replicas_.revision();
+			const bool history_changed = history_.apply(m, replicas_);
+			if (history_changed || replicas_.revision() != before_revision)
+				dirty_ = true;
+			if (replicas_.topology_revision() !=
+					observed_replica_topology_revision_) {
+				observed_replica_topology_revision_ =
+						replicas_.topology_revision();
+				refresh_present_layout();
+			}
 		}
 	}
 }
 
-void NovaNetClient::rebuild_world() {
-	world_ = opennova::build_replay_timeline(
-	    messages_, [this](uint16_t t) { return class_of(t); });
+void NovaNetClient::advance_replica_ticks(double delta) {
+	if (delta <= 0.0) return;
+	replica_tick_credit_s_ = std::min(
+			replica_tick_credit_s_ + delta,
+			REPLICA_TICK_SECONDS * MAX_REPLICA_CATCHUP_TICKS);
+	const int ticks = std::min(
+			static_cast<int>(replica_tick_credit_s_ / REPLICA_TICK_SECONDS),
+			MAX_REPLICA_CATCHUP_TICKS);
+	if (ticks <= 0) return;
+	replica_tick_credit_s_ -= ticks * REPLICA_TICK_SECONDS;
+	for (int i = 0; i < ticks; ++i) {
+		replicas_.tick_lean();
+		replicas_.tick_arms_dip();
+		replicas_.tick_recoil();
+		replicas_.tick_remote_motion(0xFFFFu);
+		++logic_tick_;
+	}
+	if (!replicas_.state().entities.empty()) dirty_ = true;
+}
+
+void NovaNetClient::refresh_present_layout() {
+	std::vector<std::pair<uint16_t, uint16_t>> next;
+	next.reserve(replicas_.state().entities.size());
+	for (const opennova::netsim::ClientEntityState &entity :
+			replicas_.state().entities)
+		next.emplace_back(entity.handle, entity.type_id);
+	if (next != present_layout_) {
+		present_layout_ = std::move(next);
+		++present_layout_revision_;
+	}
 }
 
 void NovaNetClient::_process(double delta) {
 	if (state_ == STATE_CONNECTING) {
 		drain_socket();
-		if (state_ != STATE_CONNECTING) return; // first datagram arrived this frame
-		connect_elapsed_ += delta;
-		since_register_ += delta;
-		if (since_register_ >= register_resend_s_) {
-			since_register_ = 0.0;
-			send_register();
+		if (state_ == STATE_CONNECTING) {
+			connect_elapsed_ += delta;
+			since_register_ += delta;
+			if (since_register_ >= register_resend_s_) {
+				since_register_ = 0.0;
+				send_register();
+			}
+			if (connect_elapsed_ >= connect_timeout_s_)
+				enter_state(STATE_ERROR, "no data from the replay/server (is it running?)");
+			return;
 		}
-		if (connect_elapsed_ >= connect_timeout_s_)
-			enter_state(STATE_ERROR, "no data from the replay/server (is it running?)");
-		return;
 	}
 	if (state_ != STATE_RECEIVING) return;
 
 	drain_socket();
-	since_rebuild_ += delta;
-	if (dirty_ && since_rebuild_ >= rebuild_interval_s_) {
-		since_rebuild_ = 0.0;
+	advance_replica_ticks(delta);
+	since_publish_ += delta;
+	if (dirty_ && since_publish_ >= publish_interval_s_) {
+		since_publish_ = 0.0;
 		dirty_ = false;
-		rebuild_world();
 		emit_signal("world_updated");
 	}
 }
@@ -222,11 +277,34 @@ void NovaNetClient::enter_state(State next, const String &reason) {
 
 // --- world-model query -------------------------------------------------------
 
-int NovaNetClient::get_entity_count() const { return int(world_.entities.size()); }
+int NovaNetClient::get_present_stride() const {
+	return NovaSimulation::PF_STRIDE;
+}
+
+PackedFloat32Array NovaNetClient::get_present_snapshot() {
+	PackedFloat32Array out;
+	const ns::ClientState &state = replicas_.state();
+	out.resize(static_cast<int64_t>(state.entities.size()) *
+			NovaSimulation::PF_STRIDE);
+	float *write = out.ptrw();
+	const ClientReplicaPresentContext context{};
+	for (std::size_t i = 0; i < state.entities.size(); ++i) {
+		float *row = write + static_cast<int64_t>(i) *
+				NovaSimulation::PF_STRIDE;
+		initialize_client_replica_present_row(row);
+		project_client_replica_present_row(
+				row, state.entities[i], state, context);
+	}
+	replicas_.state().clear_anim_pulses();
+	return out;
+}
+int NovaNetClient::get_entity_count() const {
+	return int(history_.timeline().entities.size());
+}
 
 Array NovaNetClient::get_entities() const {
 	Array out;
-	for (const auto &e : world_.entities) {
+	for (const auto &e : history_.timeline().entities) {
 		Dictionary d;
 		d["handle"] = int(e.handle);
 		d["pool"] = int(e.pool);
@@ -241,17 +319,17 @@ Array NovaNetClient::get_entities() const {
 	return out;
 }
 
-int NovaNetClient::get_latest_frame() const { return world_.last_frame; }
+int NovaNetClient::get_latest_frame() const { return history_.timeline().last_frame; }
 
 Vector2i NovaNetClient::get_frame_range() const {
-	return Vector2i(world_.first_frame, world_.last_frame);
+	return Vector2i(history_.timeline().first_frame, history_.timeline().last_frame);
 }
 
 Dictionary NovaNetClient::sample_at(int handle, double frame_f) const {
 	Dictionary out;
 	out["found"] = false;
 	const ReplayEntity *e = nullptr;
-	for (const auto &ent : world_.entities)
+	for (const auto &ent : history_.timeline().entities)
 		if (ent.handle == uint16_t(handle)) { e = &ent; break; }
 	if (!e || e->track.empty()) return out;
 
@@ -297,7 +375,7 @@ Dictionary NovaNetClient::sample_at(int handle, double frame_f) const {
 
 Array NovaNetClient::get_events() const {
 	Array out;
-	for (const ReplayEvent &e : world_.events) {
+	for (const ReplayEvent &e : history_.timeline().events) {
 		Dictionary d;
 		d["frame"] = e.frame_index;
 		d["kind"] = int(e.kind);
@@ -322,7 +400,7 @@ Array NovaNetClient::get_events() const {
 Dictionary NovaNetClient::env_at(double frame_f) const {
 	Dictionary out;
 	out["found"] = false;
-	const std::vector<ReplayEnvSample> &env = world_.environment;
+	const std::vector<ReplayEnvSample> &env = history_.timeline().environment;
 	if (env.empty()) return out;
 	// Latest snapshot at or before frame_f (the env stream is ascending by
 	// frame_index); hold the first when frame_f precedes it.

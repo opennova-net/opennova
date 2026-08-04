@@ -144,12 +144,20 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 	world::WeaponTable table;
 
-	// The ammo-class registry: id 0 is the empty class — the original's default
-	// ammoclass byte is 0 for defs that never author `ammoclass`, and the pool
-	// arithmetic (seeding, eligibility) runs for them too [orig: AdmDef+0xD8
-	// memset default; pool reads @0x5406e0 take the byte unconditionally].
-	table.ammo_class_names.emplace_back("");
-	table.ammo_class_caps.push_back(0);
+	// Ammo classes share the engine's score-slot registry. Before weapon.def parses,
+	// retail installs slot 0 plus ten built-ins; new `ammoclass_max_carry` names are
+	// appended from slot 11. The numeric ids are observable in S2C 0x0F's fixed
+	// 128-i32 player+88664 image, so a private first-seen registry is not equivalent.
+	// [orig: fixed NameValue8 table @0x830F10; registration/cap parse @0x543873;
+	// retail-ashi5a witness: GRENADEHE=12, .45=15, 5.56=23 under revx02]
+	static constexpr const char *kBuiltinScoreSlots[] = {
+			"", "CLASS_MANA", "CLASS_HP", "CLASS_POWER1", "CLASS_POWER2",
+			"CLASS_POWER3", "CLASS_POWER4", "CLASS_POWER5", "CLASS_POWER6",
+			"CLASS_POWER7", "CLASS_POWER8"};
+	for (const char *name : kBuiltinScoreSlots) {
+		table.ammo_class_names.emplace_back(name);
+		table.ammo_class_caps.push_back(0);
+	}
 	auto ammo_class_register = [&table](const char *name) -> int {
 		if (name == nullptr) name = "";
 		int id = table.ammo_class_id_of(name);
@@ -193,6 +201,9 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		// weapon.def uses an explicit 0 for either key, so 0 == absent here.
 		e.clipsize = static_cast<int16_t>(d.clipsize == 0 ? 1 : d.clipsize);
 		e.startrounds = static_cast<int16_t>(d.startrounds == 0 ? -1 : d.startrounds);
+		e.turret_yaw_range_deg = static_cast<int16_t>(d.targetyawrange);
+		e.turret_pitch_max_deg = static_cast<int16_t>(d.targetpitchmax);
+		e.turret_pitch_min_deg = static_cast<int16_t>(d.targetpitchmin);
 		e.maxclips = static_cast<int16_t>(d.maxclips);
 		for (size_t c = 0; c < d.charfilter_count; ++c)
 			e.charfilter |= charfilter_bit(d.charfilter[c]);

@@ -265,14 +265,18 @@ func test_items_attachment_follows_through_listen_client() -> void:
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
 	var first_mission := NovaMissionData.new()
 	assert_eq(first_mission.create_default(), OK)
-	first_mission.add_entity(3, 0, Vector3(12, 4, -3), Vector3.ZERO)
+	first_mission.add_entity(3, 5311, Vector3(12, 4, -3), Vector3.ZERO)
 	# Use the second pool-0 organic so its wire handle is non-zero; handle zero is
 	# the presentation sentinel even though slot zero is valid in the registry.
-	first_mission.add_entity(3, 0, Vector3(18, 4, -3), Vector3(10, 20, 30))
+	first_mission.add_entity(3, 5311, Vector3(18, 4, -3), Vector3(10, 20, 30))
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.load_from_mission_data(first_mission))
+	var items := NovaItemDatabase.new()
+	assert_eq(items.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	sim.resolve_item_traits(items)
 	sim.step()
 
 	var stride := sim.get_present_stride()
@@ -353,8 +357,9 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	# The cache must still belong to the new presentation epoch.
 	var replacement := NovaMissionData.new()
 	assert_eq(replacement.create_default(), OK)
-	replacement.add_entity(3, 0, Vector3(96, 4, -3), Vector3.ZERO)
+	replacement.add_entity(3, 5311, Vector3(96, 4, -3), Vector3.ZERO)
 	assert_true(sim.load_from_mission_data(replacement))
+	sim.resolve_item_traits(items)
 	sim.step()
 	sim.get_present_snapshot()
 	assert_ne(sim.get_present_layout_revision(), layout_revision,

@@ -168,7 +168,7 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 					and pose_runtime.has_method("has_current_present_effect_snapshot") \
 					and pose_runtime.has_current_present_effect_snapshot() \
 					and pose_runtime.has_method("presented_entity_effect_transform"):
-				# Null here means the identity left THIS tick's client view. Do
+				# Null here means the identity left THIS tick's replica set. Do
 				# not fall back to the one-frame-old Node or the group would emit
 				# once more from stale state before the batched present frees it.
 				return pose_runtime.presented_entity_effect_transform(entity_ref)

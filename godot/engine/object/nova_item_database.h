@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -24,6 +25,23 @@ class NovaResourceRoot;
 class NovaItemDatabase : public RefCounted {
 	GDCLASS(NovaItemDatabase, RefCounted)
 
+public:
+	// Native-only, one-for-one projection of each parsed items.def record needed
+	// to build the immutable wire dispatch catalog. Unlike the public id lookup,
+	// this sequence deliberately preserves duplicate definition ids so the net
+	// layer can classify them as ambiguous and fail closed.
+	struct ReplicationDefinitionRecord {
+		int definition_id = 0;
+		int item_type = 0;
+		uint32_t attrib = 0;
+		uint32_t attrib2 = 0;
+		int physics = 0;
+		String ai_function;
+		String move_function;
+		String render_function;
+		String disk_function;
+	};
+
 private:
 	struct Item {
 		int id = 0;
@@ -39,6 +57,8 @@ private:
 		// renderer doesn't use them. Stored raw so the object DB stays net-agnostic.
 		String ai_function;
 		String move_function;
+		String render_function;
+		String disk_function;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
 		float light_transfer = 0.0f; // ItemDef+0x218 interior daylight fraction
 		float damage_reduc_pp = 0.0f;
@@ -50,6 +70,20 @@ private:
 		int acceleration = 0; // +0x8E0
 		int deceleration = 0; // +0x8E4
 		int player_speed = 0; // +0x8E8 (16.16 u/tick)
+		int water_speed = 0;  // +0x8EC (16.16 u/tick — the cbot family's max drive speed)
+		int climb_speed = 0;  // +0x920 (16.16 u/tick vertical clamp — air families)
+		int turn_roll = 0;    // +0x90C raw (air roll-rate cap token)
+		int speed_pitch = 0;
+	int max_slope = 0;  // BAM (deg*11930464) — platform slope-soft
+	int slip_slope = 0; // BAM — platform slope-hard
+	// Platform-solve tuning block (raw def tokens; def.h mass/lean/../flip).
+	int mass = 0;
+	int lean = 0;
+	int lean_velocity = 0;
+	int pitch = 0;
+	int pitch_velocity = 0;
+	int bob = 0;
+	int flip = 0;  // +0x910 raw (air pitch-rate cap token)
 		int turn_rate = 0;    // +0x924 (BAM/tick)
 		int turn_rate2 = 0;   // +0x928
 		int torque = 0;       // +0x91C raw — collision speed-decay shift [orig: @0x49dcca]
@@ -125,12 +159,16 @@ private:
 		uint8_t husk_sub_part_types[16] = {}; // def+0x101[] debris-type rows
 	};
 	std::unordered_map<int, Item> items;
+	std::vector<ReplicationDefinitionRecord> replication_definition_records;
 	String source_path;
 	String last_error;
+	uint64_t revision = 0; // increments before every load attempt
 
 	// The one DefItemDef -> Item copy (both load paths adopt through it, so new
 	// items.def fields land in one place).
 	static Item item_from_entry(const ::DefItemDef &entry);
+	static ReplicationDefinitionRecord replication_definition_from_entry(
+			const ::DefItemDef &entry);
 
 	// Items in a stable display order (by display name, then id), since the backing
 	// store is unordered. Shared by get_item_ids() / get_items().
@@ -177,6 +215,11 @@ public:
 	String get_source_path() const;
 	String get_last_error() const;
 	int get_count() const;
+	uint64_t get_revision() const { return revision; }
+	const std::vector<ReplicationDefinitionRecord> &
+	get_replication_definition_records() const noexcept {
+		return replication_definition_records;
+	}
 
 	bool has_item(int id) const;
 	// Model basename without extension (e.g. "tank"); empty if unknown/none.
@@ -186,6 +229,8 @@ public:
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
 	String get_move_function(int id) const;
+	String get_render_function(int id) const;
+	String get_disk_function(int id) const;
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
 	int get_hp(int id) const;
 	int get_item_type(int id) const;

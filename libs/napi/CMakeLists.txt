@@ -1,5 +1,6 @@
 add_library(opennova_napi STATIC
     src/envelope.cpp
+    src/literal.cpp
     src/tlv.cpp
     src/session.cpp
 )

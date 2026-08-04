@@ -417,3 +417,72 @@ func _environment_values() -> EnvLightValues:
 			_m._lighting_effect_scale,
 			_m._interior_lerp,
 			_m._interior_daylight)
+
+
+func apply_lights() -> void:
+	# Gameplay deliberately leaves these parsed records inactive: retail never
+	# submits model-authored LGHT. The opt-in editor preview is useful for
+	# authoring/inspection without changing shipped rendering.
+	if not _m._model_light_preview_enabled or not _m._has_lights:
+		return
+	if _m.object_data == null:
+		return
+	var lights: Array = _m.object_data.evaluate_lights(
+			_m._anim_time_ms, _m._ctrl_values)
+	var dominant := {}
+	var best_intensity := -1.0
+	for light in lights:
+		var info: Dictionary = light
+		var intensity := float(info.get("intensity", 1.0))
+		if intensity > best_intensity:
+			best_intensity = intensity
+			dominant = info
+	var count := 0 if dominant.is_empty() else 1
+	var model_position: Vector3 = dominant.get("position", Vector3.ZERO)
+	var position: Vector3 = _m.global_transform * model_position
+	var color: Color = dominant.get("color", Color.WHITE)
+	var atten_start := float(dominant.get("atten_start", 0.0))
+	var atten_end := float(dominant.get("atten_end", 5.0))
+	var subobject := int(dominant.get("subobject", -1))
+	if _m._skeleton != null and subobject >= 0 \
+			and subobject < _m._skeleton.get_bone_count():
+		# LGHT positions are authored in model space. Move through the same
+		# rest-to-live bone transform as user points and muzzle attachments.
+		position = (_m._skeleton.global_transform
+				* _m._skeleton.get_bone_global_pose(subobject)
+				* _m._skeleton.get_bone_global_rest(subobject).affine_inverse()) \
+				* model_position
+	elif subobject >= 0 and _m._robj_nodes.has(subobject) \
+			and _m._robj_rest_transforms.has(subobject):
+		var node := _m._robj_nodes[subobject] as Node3D
+		var rest: Transform3D = _m._robj_rest_transforms[subobject]
+		position = node.global_transform * (rest.affine_inverse() * model_position)
+	# A static light evaluates to the same values every frame; re-pushing them
+	# re-writes identical uniforms across every material. Push only on change
+	# (retained mode — the skip is invisible); an animated/PANM-carried light
+	# changes the compare key and pushes normally.
+	var intensity := best_intensity if best_intensity > 0.0 else 1.0
+	if _m._last_light_push_valid \
+			and count == _m._last_light_count \
+			and position == _m._last_light_position \
+			and color == _m._last_light_color \
+			and intensity == _m._last_light_intensity \
+			and atten_start == _m._last_light_atten_start \
+			and atten_end == _m._last_light_atten_end:
+		return
+	_m._last_light_push_valid = true
+	_m._last_light_count = count
+	_m._last_light_position = position
+	_m._last_light_color = color
+	_m._last_light_intensity = intensity
+	_m._last_light_atten_start = atten_start
+	_m._last_light_atten_end = atten_end
+	for material in _m._surface_materials:
+		if material == null:
+			continue
+		material.set_shader_parameter("u_local_light_count", count)
+		material.set_shader_parameter("u_local_light_position", position)
+		material.set_shader_parameter("u_local_light_color", Vector3(color.r, color.g, color.b))
+		material.set_shader_parameter("u_local_light_intensity", intensity)
+		material.set_shader_parameter("u_local_light_atten_start", atten_start)
+		material.set_shader_parameter("u_local_light_atten_end", atten_end)

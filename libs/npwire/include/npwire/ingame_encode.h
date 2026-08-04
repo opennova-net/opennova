@@ -81,7 +81,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // [orig: serialize_entity_pool_to_packet_0 @ 0x503940]. Header is `[u16 count]`
 // (NO start_index — unlike 0x20), then per record `[u16 spawn_flags][u16 slot_id]
 // [u16 item_type_id][cstr entity_name]` and the flag-gated body (entity_flags,
-// always-pos, vel/section/orient/parent/target, the 0x400 weapon block, the
+// always-pos, vel/section/orient/parent/target, the 0x400 mount-occupancy block, the
 // always bone_byte (+290; team is the 0x0010-gated byte, D-NET-58), the 0x800 AI trailer, alert/action/weapon_type, the health
 // block, difficulty) — see decode_pool_spawn_batch for the exact field order.
 //
@@ -90,11 +90,11 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // so `PoolSpawnRecord::spawn_flags` on the input is ignored and recomputed:
 //   0x0020 entity_flags!=0 · 0x0001/2/4 vel_{x,y,z}!=0 · 0x0008 section_mask!=0
 //   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
-//   0x0400 weapon_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
+//   0x0400 seat_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
 //   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
 //   0x2000 zone_number_rank!=0 (writes zone_number_rank+zone_radius) ELSE 0x8000 zone_radius!=0
 //   0x4000 difficulty_byte!=0.
-// Weapon block (D-NET-56): when 0x0400 is set, `extra_handle_0/1` are ALWAYS
+// Mount-occupancy block (D-NET-56): when 0x0400 is set, `mount_handle_8/9` are ALWAYS
 // written after the per-set-bit handles. The original only sets 0x0400 when the
 // mask is non-zero, so this encoder never emits the (0x400, mask==0) record.
 //
@@ -326,6 +326,11 @@ std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit);
 // place a client's clip refills. The entry-time 0x80 phase bit is transient (§5.58, D-NET-142).
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
+
+// C2S 0x16 -- exact inverse of decode_mounted_weapon_slot_selection; retail's
+// NetPacket_WriteBoolAsInt16 emits canonical 0 or 1 in a two-byte body.
+std::vector<uint8_t> encode_mounted_weapon_slot_selection(
+		const MountedWeaponSlotSelection &selection);
 
 // S2C 0x5D EMPTY-SLOT SWEEP — the inverse of decode_destroy_entity_list: a bare
 // `[u16 pool0Index] × N` run with no count word. Retail's builder walks pool 0

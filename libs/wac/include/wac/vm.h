@@ -30,6 +30,17 @@ struct EventState {
 
 class WacVm {
 public:
+	// Copyable execution state used by the mission-start restore baseline. The
+	// compiled Program remains owned by WacSystem; restore_runtime_state binds
+	// this state back to that owner's current program.
+	struct RuntimeState {
+		std::vector<EventState> events;
+		uint32_t rng_seed = 0x12333333u;
+		int32_t accumulator = 0;
+		int current_event = 0;
+		uint32_t time = 0;
+	};
+
     // Bind a compiled program (sizes the per-event state). Resets temporal state.
     void load(const Program &program);
 
@@ -46,6 +57,8 @@ public:
     // the Ticks builtin count in these units. [orig: dword_C6EAD8 — the run counter
     // WacScript_AdvanceTick advances after each execution @0x4f81d3]
     uint32_t time() const { return time_; }
+	RuntimeState capture_runtime_state() const;
+	void restore_runtime_state(const Program &program, const RuntimeState &state);
 
 private:
     const Program *prog_ = nullptr;

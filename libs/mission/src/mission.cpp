@@ -29,6 +29,7 @@ struct MissionDocument::Impl {
 	std::string source_path;
 	std::string last_error;
 	bool loaded = false;
+	bool header_only = false;
 };
 
 MissionDocument::MissionDocument() : impl_(std::make_unique<Impl>()) {}
@@ -62,6 +63,18 @@ bool MissionDocument::load_bms_bytes(const uint8_t *data, size_t size) {
 	}
 	impl_->loaded = true;
 	sync_counts();
+	return true;
+}
+
+bool MissionDocument::load_bms_header_bytes(const uint8_t *data, size_t size) {
+	clear();
+	std::string error;
+	if (!bms::parse_header_blob(data, size, impl_->file.header, error)) {
+		impl_->last_error = error;
+		return false;
+	}
+	impl_->loaded = true;
+	impl_->header_only = true;
 	return true;
 }
 
@@ -109,6 +122,10 @@ bool MissionDocument::save_bms_file(const std::string &path) {
 		impl_->last_error = "No mission loaded";
 		return false;
 	}
+	if (impl_->header_only) {
+		impl_->last_error = "Wire BMS header is not a complete mission";
+		return false;
+	}
 	if (path.empty()) {
 		impl_->last_error = "No output path provided";
 		return false;
@@ -127,6 +144,10 @@ bool MissionDocument::write_bms_bytes(std::vector<uint8_t> &out) {
 	out.clear();
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";
+		return false;
+	}
+	if (impl_->header_only) {
+		impl_->last_error = "Wire BMS header is not a complete mission";
 		return false;
 	}
 	sync_counts();
@@ -171,6 +192,10 @@ bool MissionDocument::write_mis_text(std::string &out, const std::vector<int32_t
 		impl_->last_error = "No mission loaded";
 		return false;
 	}
+	if (impl_->header_only) {
+		impl_->last_error = "Wire BMS header is not a complete mission";
+		return false;
+	}
 	sync_counts();
 	std::string error;
 	if (!opennova::mission::write_mis_text(impl_->file, out, error, base_heights)) {
@@ -185,6 +210,7 @@ void MissionDocument::clear() {
 	impl_->source_path.clear();
 	impl_->last_error.clear();
 	impl_->loaded = false;
+	impl_->header_only = false;
 }
 
 void MissionDocument::create_default() {
@@ -206,6 +232,10 @@ void MissionDocument::create_default() {
 
 bool MissionDocument::is_loaded() const {
 	return impl_->loaded;
+}
+
+bool MissionDocument::is_header_only() const {
+	return impl_->header_only;
 }
 
 const std::string &MissionDocument::source_path() const {

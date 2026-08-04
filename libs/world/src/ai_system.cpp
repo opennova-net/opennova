@@ -24,6 +24,85 @@ namespace opennova::world {
 
 using namespace detail; // the shared AI helpers, unqualified as before
 
+namespace {
+
+// Apply only the carrier-owned body frame. This is deliberately separate from
+// pose_if_mounted's input, gunner-look, animation, and wire-state work so the
+// authority can repeat the pose after its later pool-1 vehicle motor without
+// advancing any of those once-per-body-tick behaviors twice.
+int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
+                                          Entity &occupant, Entity &vehicle,
+                                          const Seat &seat) {
+    pose_mounted_occupant(world, occupant, vehicle, seat);
+    // Capture the resolved seat orientation before an independent LOOK mirror
+    // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
+    // the generic degree helper rounds differently at non-cardinal headings.
+    const int16_t seat_yaw = occupant.yaw;
+    const int16_t seat_pitch = occupant.pitch;
+    const int16_t seat_roll = occupant.roll;
+    const int32_t resolved_heading = static_cast<int32_t>(
+            static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
+    if (e.inf.active) {
+        // Mirror both the direct seat-frame writes and the carried-infantry leg
+        // chase snap so render and per-section collision consume one coherent
+        // body frame. [orig: seat carry @0x4b654e-0x4b6575; carried body/leg
+        // snap Flags & 0x100060]
+        e.inf.body_heading = resolved_heading;
+        e.inf.leg_yaw[0] = resolved_heading;
+        e.inf.leg_yaw[1] = resolved_heading;
+        e.inf.leg_target[0] = resolved_heading;
+        e.inf.leg_target[1] = resolved_heading;
+        e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
+        e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
+    }
+    // Organics present from AiEntity.pos, not Entity.position.
+    e.pos[0] = to_fixed(occupant.position.x);
+    e.pos[1] = to_fixed(occupant.position.y);
+    e.pos[2] = to_fixed(occupant.position.z);
+    return resolved_heading;
+}
+
+// A read-applied remote player in either vehicle-control seat has the same
+// split pose as the local driver: LOOK remains player/wire-owned because the
+// authority vehicle motor consumes Entity::yaw, while the carried body frame
+// remains seat-owned. Keep NPC drivers on the existing seat-owned path.
+bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
+                                    const Seat &seat) {
+    return e.inf.active && e.net_is_remote_peer &&
+           occupant.handle.pool() == 0 && occupant.player_class != 0 &&
+           is_vehicle_control_seat(seat.type);
+}
+
+} // namespace
+
+bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
+    Entity *occupant = world.registry.get(e.handle);
+    if (occupant == nullptr || !occupant->mounted || occupant->health <= 0) return false;
+    Entity *vehicle = world.registry.get(occupant->mount_target);
+    if (vehicle == nullptr || occupant->mount_seat < 0 ||
+        occupant->mount_seat >= static_cast<int>(vehicle->seats.size()))
+        return false;
+    const Seat &seat = vehicle->seats[occupant->mount_seat];
+    const int32_t saved_look_heading = e.heading;
+    const int32_t saved_look_pitch = e.pitch;
+    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
+            e, world, *occupant, *vehicle, seat);
+
+    if (e.inf.active &&
+        (e.inf.is_local_player || seat.type == SeatType::Gunner ||
+         remote_player_controls_vehicle(e, *occupant, seat))) {
+        // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
+        // that exact value without consulting input latches or advancing aim again.
+        e.heading = saved_look_heading;
+        e.pitch = saved_look_pitch;
+        occupant->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
+                mission_yaw_deg_from_bam_heading(saved_look_heading))));
+    } else {
+        e.heading = seat_heading;
+    }
+    return true;
+}
+
 // ----------------------------------------------------------------------------
 // AiEventQueue. [orig: AIEvent_QueueEntry @0x455da0 / AIEvent_ProcessTimedEntries @0x455df0.]
 // ----------------------------------------------------------------------------
@@ -286,10 +365,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     }
     // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
     // entity==g_local_player branch (line below, no authority guard) motor-sims the
-    // joiner's own player from input, while NPC think/select stays authority-gated, so
-    // local-promote copies of remote entities just hold (idle). The joiner renders every
-    // REMOTE entity's pose from the host's S2C 0x0A (present reads ClientState, not these
-    // local copies), so their idle ticking is harmless. [orig: the client also runs the
+    // joiner's own player from input, while NPC think/select stays authority-gated. A
+    // header-only join keeps remote organics in ClientState rather than this AI array;
+    // any native non-authority rows from an explicit complete-BMS/debug join just hold
+    // idle. REMOTE presentation reads the host's S2C 0x0A ClientState, so that idle tick
+    // cannot overwrite wire pose. [orig: the client also runs the
     // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
@@ -323,15 +403,19 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         }
         if (begin_update(e)) {
             process_infantry_state_machine(e, world, 0);
-            // Motor-driven vehicles (items.def physics selector non-zero) integrate through
-            // tick_vehicle_motor below — the SM stays their decision layer (waypoints,
+            // Family-motor vehicles retire the generic SM kinematic mover. Ground
+            // families integrate through selector-gated tick_vehicle_motor below;
+            // direct-air families own their CHel/cpln callback regardless of selector.
+            // The SM stays their decision layer (waypoints,
             // visited bits, states) but the kinematic locomotion model retires for them
             // [orig: one entity update — the SM never integrates ground vehicles, the
             // physics does; Entity_DispatchPhysics_cveh @0x48efc0].
             const Entity *ent = world.registry.get(e.handle);
             const VehicleTraits *vt =
                     ent != nullptr ? world.vehicle_traits.get(ent->item_id) : nullptr;
-            const bool motor_driven = vt != nullptr && vt->physics != 0;
+            const bool motor_driven = vt != nullptr &&
+                    (vt->physics != 0 ||
+                     vehicle_family_uses_direct_air_mover(vt->family));
             if (locomotion_enabled && !motor_driven) {
                 apply_locomotion(e);   // horizontal: advance pos[0]/pos[1] toward the node
                 apply_ground_clamp(e); // vertical: snap pos[2] onto the terrain (no-op if unwired)
@@ -350,7 +434,12 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         vehicle_pass_handles_.clear();
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
-            if (world.vehicle_traits.get(e.item_id) == nullptr) return;
+            const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
+            // This is the selector-gated ground-family authority port. Direct
+            // CHel/cpln rows own a different callback; never feed them through
+            // tick_vehicle_motor even if an authored def sets physics.
+            if (traits == nullptr || traits->physics == 0 ||
+                vehicle_family_uses_direct_air_mover(traits->family)) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : vehicle_pass_handles_) {
@@ -398,6 +487,14 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                         : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
             }
         }
+        // Pool-0 bodies were seat-posed in the entity loop above, before these
+        // pool-1 motors advanced their carriers. Recompose only their carrier-
+        // owned frame now so the authority snapshot writes a stable seat-local
+        // offset against the vehicle's final same-tick pose. Retail's compact
+        // writer consumes that final pair; leaving the earlier body pose here
+        // makes every remote rider trail by one vehicle motor step.
+        for (int i = 0; i < count(); ++i)
+            refresh_mounted_pose(*at(i), world);
     }
     // A joiner does not integrate its replicated pool-1 vehicle copies here, but
     // retail still executes the per-entity ground callback's presentation leg on
@@ -412,7 +509,11 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != 1) return;
             const VehicleTraits *traits = world.vehicle_traits.get(e.item_id);
-            if (traits == nullptr || traits->physics == 0) return;
+            if (traits == nullptr) return;
+            // Ground/water/bike rows retain their selector gate. CHel/cpln
+            // dispatch directly and therefore remain eligible at physics=0.
+            if (traits->physics == 0 &&
+                !vehicle_family_uses_direct_air_mover(traits->family)) return;
             vehicle_pass_handles_.push_back(e.handle);
         });
         for (const EntityHandle h : vehicle_pass_handles_) {
@@ -420,6 +521,40 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
+            // The joiner-side family prediction (net-re §5.38e B-facet, all
+            // four families landed): each mover chases the staged wire target
+            // and predicts between records from the mirrored speed/steer
+            // registers — the client-executed subset of its family mover
+            // [orig: cbot @0x48D480; CHel/cpln via the @0x45D6F0 thunk;
+            // ground @0x48af00 core]. The embedding sim clears net_predicted
+            // for wire-frozen rows (bit0 / dead-pose / carried), so a wreck
+            // never keeps driving (D-NET-66).
+            if (veh->veh.net_predicted && veh->health > 0 &&
+                    traits->family == VehicleFamily::Watercraft) {
+                watercraft_client_tick(world, *veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    (traits->family == VehicleFamily::Helicopter ||
+                     traits->family == VehicleFamily::Plane)) {
+                aircraft_client_tick(world, *veh, *traits);
+            } else if (veh->veh.net_predicted && veh->health > 0 &&
+                    (traits->family == VehicleFamily::Ground ||
+                     traits->family == VehicleFamily::Bike)) {
+                // Runs the motor core, whose tail already ticks the movement
+                // sound — skip the separate sound call below for this row.
+                // Bikes ride the same entry; the core branches on the family
+                // tag for the four witnessed cbik deltas (gravity 250, vZ
+                // up-cap, contact-gated integration, always-applied yaw)
+                // [orig: @0x483FE0 vs @0x48AF00; cbik grill 2026-07-31].
+                ground_client_tick(world, *veh, *traits);
+                continue;
+            }
+            // The shared aircraft mover has no movement-sound call. In retail,
+            // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
+            // ground/bike/water paths, but neither CHel @0x490310 nor cpln's
+            // thunk calls it. Physicsless air rows are newly eligible above, so
+            // keep them out of the ground-sound presentation tail in every
+            // prediction/death state.
+            if (vehicle_family_uses_direct_air_mover(traits->family)) continue;
             update_ground_vehicle_sound(world, *veh, *traits,
                                         /*wrecked=*/veh->health <= 0,
                                         /*collided=*/false);
@@ -519,35 +654,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     }
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    const auto apply_resolved_seat_frame = [&]() {
-        pose_mounted_occupant(world, *occ, *veh, seat);
-        // Capture the resolved seat orientation before an independent LOOK mirror
-        // overwrites registry yaw. Keep the witnessed integer yaw conversion here:
-        // the generic degree helper rounds differently at non-cardinal headings.
-        const int16_t seat_yaw = occ->yaw;
-        const int16_t seat_pitch = occ->pitch;
-        const int16_t seat_roll = occ->roll;
-        const int32_t resolved_heading = static_cast<int32_t>(
-                static_cast<int64_t>(90 - seat_yaw) * kBamPerDegreeInt);
-        if (e.inf.active) {
-            // Mirror both the direct seat-frame writes and the carried-infantry leg chase
-            // snap so render and per-section collision consume one coherent body frame.
-            // [orig: seat carry @0x4b654e-0x4b6575; carried body/leg snap Flags & 0x100060]
-            e.inf.body_heading = resolved_heading;
-            e.inf.leg_yaw[0] = resolved_heading;
-            e.inf.leg_yaw[1] = resolved_heading;
-            e.inf.leg_target[0] = resolved_heading;
-            e.inf.leg_target[1] = resolved_heading;
-            e.body_pitch = bam_from_degrees_wrapped(static_cast<double>(seat_pitch));
-            e.roll = bam_from_degrees_wrapped(static_cast<double>(seat_roll));
-        }
-        // Organics present from AiEntity.pos, not Entity.position.
-        e.pos[0] = to_fixed(occ->position.x);
-        e.pos[1] = to_fixed(occ->position.y);
-        e.pos[2] = to_fixed(occ->position.z);
-        return resolved_heading;
-    };
-    const int32_t seat_heading = apply_resolved_seat_frame();
+    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
+            e, world, *occ, *veh, seat);
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
         // carry writes bodyHeading/headLook from the seat bone but leaves entity->Yaw
@@ -571,8 +679,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
         e.inf.jump_requested = false;
     }
-    // Remote occupants present in the captured seat frame. The local LOOK override
-    // below remains player-owned and must not rotate the carried body/collision pose.
+    // Occupants present their carried body in the captured seat frame. Independent
+    // player/gunner LOOK restored below must not rotate that body/collision pose.
     e.heading = seat_heading;
     if (e.inf.active && e.inf.is_local_player) {
         // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
@@ -586,6 +694,14 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
         e.heading = e.inf.target_heading;
         e.pitch = e.inf.look_pitch;
+    } else if (remote_player_controls_vehicle(e, *occ, seat)) {
+        // The host read-applies this player's LOOK from C2S before the body tick.
+        // Restore it after seat carry so the later authority vehicle pass consumes
+        // the owner's mouse-steer target, not the carrier yaw.
+        e.heading = saved_look_heading;
+        e.pitch = saved_look_pitch;
+        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
+                mission_yaw_deg_from_bam_heading(saved_look_heading))));
     } else if (e.inf.active && seat.type == SeatType::Gunner) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -622,7 +738,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         if (e.heading != saved_look_heading || e.pitch != saved_look_pitch) {
             const int32_t chased_look_heading = e.heading;
             const int32_t chased_look_pitch = e.pitch;
-            apply_resolved_seat_frame();
+            apply_resolved_mounted_seat_frame(e, world, *occ, *veh, seat);
             e.heading = chased_look_heading;
             e.pitch = chased_look_pitch;
         }

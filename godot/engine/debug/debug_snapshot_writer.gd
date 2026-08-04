@@ -244,6 +244,7 @@ static func _enrich_pick(pick: Dictionary, ctx: NovaDebugContext) -> Dictionary:
 		"stale": false,
 		"entity_debug": {},
 		"world_entity_debug": {},
+		"client_entity_debug": {},
 		"destruction": {},
 		"effect_state": {},
 	}
@@ -277,6 +278,13 @@ static func _enrich_pick(pick: Dictionary, ctx: NovaDebugContext) -> Dictionary:
 			break
 	if net_id > 0 and sim.has_method("get_world_entity_debug"):
 		_store_card(entry, "world_entity_debug", sim.get_world_entity_debug(net_id))
+	# The joiner-side decoded wire row (carrier/bone/heading/compact_revision):
+	# what the wire actually carried for this entity, before presentation. Keyed
+	# by the packed pool/slot handle the pick already resolved.
+	var wire_handle := int(pick.get("entity_handle", -1))
+	if wire_handle >= 0:
+		_store_card(entry, "client_entity_debug",
+				sim.get_client_entity_debug(wire_handle))
 	if bms_id != 0 and sim.has_method("get_destruction_debug"):
 		_store_card(entry, "destruction", sim.get_destruction_debug(bms_id))
 	if bms_id != 0 and sim.has_method("get_present_effect_state_for_bms_id"):
@@ -286,7 +294,8 @@ static func _enrich_pick(pick: Dictionary, ctx: NovaDebugContext) -> Dictionary:
 		_store_card(entry, "effect_state",
 				sim.get_present_effect_state_for_bms_id(bms_id))
 	var stale := true
-	for card_key in ["entity_debug", "world_entity_debug", "destruction", "effect_state"]:
+	for card_key in ["entity_debug", "world_entity_debug", "client_entity_debug",
+			"destruction", "effect_state"]:
 		if not _card_is_empty(entry[card_key]):
 			stale = false
 			break

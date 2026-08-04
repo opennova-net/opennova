@@ -94,7 +94,7 @@ struct PoolSpawnRecord {
 	int32_t pos_y = 0;
 	int32_t pos_z = 0;
 
-	// Always-present unconditional byte after the weapon block. Landing
+	// Always-present unconditional byte after the mount-occupancy block. Landing
 	// entity+290 (u16 zero-ext). Bone/other byte — NOT team (D-NET-58); the
 	// team byte is the 0x0010-gated field at entity+354 below.
 	uint8_t bone_byte = 0;
@@ -116,17 +116,17 @@ struct PoolSpawnRecord {
 	uint16_t parent_handle = 0xFFFF;// 0x0100   resolved → entity+368
 	uint16_t target_handle = 0xFFFF;// 0x0200   resolved → entity+40
 
-	// Weapon block (gated by `spawn_flags & 0x0400`):
-	//   u8 weapon_mask, then 1 × u16 per set bit (0xFFFF skips storage),
-	//   then unconditional u16 extra_handle_0 + u16 extra_handle_1.
-	// `weapon_handles[bit]` is the value read for that bit (0xFFFF if the
-	// bit was clear AND the value wasn't read). `extra_handle_0/1` are
-	// only valid when (spawn_flags & 0x0400).
-	uint8_t weapon_mask = 0;
-	std::array<uint16_t, 8> weapon_handles{
+	// Mount-occupancy block (gated by `spawn_flags & 0x0400`):
+	//   u8 seat_mask, then 1 × u16 per set bit for retail slots 0..7
+	//   (0xFFFF is an empty occupant), followed unconditionally by the
+	//   occupant handles for retail slots 8 and 9.
+	// `mount_handles[slot]` is valid when that slot's mask bit is set;
+	// `mount_handle_8/9` are valid whenever (spawn_flags & 0x0400).
+	uint8_t seat_mask = 0;
+	std::array<uint16_t, 8> mount_handles{
 			{0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}};
-	uint16_t extra_handle_0 = 0xFFFF;
-	uint16_t extra_handle_1 = 0xFFFF;
+	uint16_t mount_handle_8 = 0xFFFF;
+	uint16_t mount_handle_9 = 0xFFFF;
 
 	// AI trailer (gated by `spawn_flags & 0x0800`). D-NET-52 confirms each
 	// of the two pre-cstring fields is a wire u32 (handler advances cursor
@@ -153,6 +153,12 @@ struct PoolSpawnRecord {
 
 struct PoolSpawnBatch {
 	std::vector<PoolSpawnRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 	// True when the loop terminated early via the slot-id sentinel
 	// (0xFFFF or (slot & 0xF000) >= 0x5000) before `entity_count` records
 	// were read — the retail handler returns immediately on this case.
@@ -191,6 +197,12 @@ struct Pool3SyncBatch {
 	uint16_t start_index = 0;
 	int16_t  entity_count = 0;
 	std::vector<Pool3SyncRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 };
 
 // Decode a S2C 0x0D body per the §5.11 field map. Returns true iff the
@@ -248,6 +260,12 @@ struct StaticEntityBatch {
 	uint16_t start_index = 0;
 	int16_t  entity_count = 0;
 	std::vector<StaticEntityRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 };
 
 // Decode a S2C 0x10 body per the §5.9 field map. Same return contract as
@@ -295,6 +313,12 @@ struct OrganicSpawnRecord {
 struct OrganicSpawnBatch {
 	uint16_t entity_count = 0;   // header u16 (no start-index, unlike 0x10/0x20)
 	std::vector<OrganicSpawnRecord> records;
+	// Set when a decode failure left the LAST records entry half-read (the
+	// walk pushes the failing record for diagnostics). A false return with
+	// this clear means every stored record is complete (sentinel/tail
+	// mismatch only) — the retail handler applies records as it walks, so
+	// consumers apply that complete prefix.
+	bool last_record_partial = false;
 	// Set when the slot-id sentinel (0xFFFF or (slot & 0xF000) >= 0x5000) ends
 	// the batch before entity_count records were read.
 	bool sentinel_ended_early = false;
@@ -432,6 +456,17 @@ struct CaptureZoneOverlayBatch {
 // body was consumed exactly.
 bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
                                  CaptureZoneOverlayBatch &out);
+
+// S2C 0x7E mission/server briefing strings: exactly two NUL-terminated raw
+// cp1252 strings. Presentation interprets the embedded retail markup; the wire
+// layer preserves it opaquely. [orig: NapiNPClientMsg_0x07E @0x425E20;
+// NetPacket_WriteBriefingText @0x506620]
+struct ServerConfigStrings {
+	std::string briefing3;
+	std::string briefing2; // [info]/briefing2, with [info]/briefing fallback resolved by host
+};
+bool decode_server_config_strings(const uint8_t *body, size_t len,
+                                  ServerConfigStrings &out);
 
 // ===========================================================================
 // Per-entity compact records — appear inside S2C 0x0A's trailing event loop,
@@ -709,7 +744,7 @@ struct FrameEnv {
 	uint16_t tod_fixed = 0;     // → Env_CurTimeFixed24 (time-of-day, raw << 13) [0x4302AE]
 	uint8_t  quake_ticks = 0;   // → Env_QuakeTicks (screen-shake)        [0x4302CE]
 	uint8_t  cloud_scroll = 0;  // → Env_CloudScrollRateTarget (raw << 10) [0x4302EC]
-	uint8_t  cloud_param2 = 0;  // → dword_26C6884 (raw << 8; 2nd cloud param) [0x430311]
+	uint8_t  rain_pct = 0;      // → Env_RainPctTarget (raw << 8)             [0x430311]
 	uint8_t  overcast = 0;      // → Env_OvercastBlendTarget (raw << 8)   [0x43032D]
 	uint8_t  env_param = 0;     // → dword_2C059D0                        [0x43034C]
 };
@@ -757,15 +792,16 @@ struct FrameObjectiveBlock {
 	int32_t  state[4] = {0, 0, 0, 0}; // → dword_AC86F4/F0/EC/E8
 };
 
-// The 0x0A conditional vehicle-passenger record (`flags2 & 0xF == 8`) — the
-// local player's seat orientation when riding as a passenger (not driver).
-// [orig: NapiNPClientMsg_0x00A @ 0x430459..0x4304DC]
-struct FramePassenger {
-	bool     present = false;
-	uint16_t handle = 0xFFFF;   // seat's vehicle handle; 0xFFFF ⇒ no seat yaw/pitch
-	bool     has_seat = false;  // true when handle != 0xFFFF (yaw/pitch follow)
-	uint16_t seat_yaw = 0;
-	uint16_t seat_pitch = 0;
+// The 0x0A conditional mounted-weapon ammo record (`flags2 & 0xF == 8`). The
+// handle is the recipient's mount target; when present the two words mirror the
+// selected MountSlot's clip/reserve fields at +0x10/+0x12.
+// [orig: writer @0x4FFD9A..0x4FFE7B; reader @0x430459..0x430541]
+struct FrameMountAmmo {
+	bool     present = false;          // true only after the whole conditional record decodes
+	uint16_t mount_handle = 0xFFFF; // recipient mount target; 0xFFFF ⇒ on foot
+	bool     has_mount = false;     // true when clip/reserve follow
+	uint16_t clip = 0;              // selected MountSlot +0x10
+	uint16_t reserve = 0;           // selected MountSlot +0x12
 };
 
 struct FrameUpdate {
@@ -773,7 +809,7 @@ struct FrameUpdate {
 	// record's decompressed position is added to (when unmounted).
 	int32_t anchor_x = 0, anchor_y = 0, anchor_z = 0;
 	uint8_t  flags1 = 0;            // loadprog / death-spectator signals
-	uint8_t  flags2 = 0;            // low 2 bits = sub-block selector, bit 3 = passenger gate
+	uint8_t  flags2 = 0;            // low 2 bits = sub-block selector, bit 3 = phase-8 mounted-ammo gate
 	uint8_t  sub_block = 0;         // flags2 & 3 (0/1/2/3)
 	// 7-byte fixed tail (local-player state) [orig: 0x4303E5..0x430442].
 	uint8_t  state_flag_byte = 0;
@@ -785,7 +821,7 @@ struct FrameUpdate {
 	FrameTimerBlock     timer;      // valid iff sub_block == 1
 	FrameEnv            env;        // valid iff sub_block == 2
 	FrameObjectiveBlock objective;  // valid iff sub_block == 3 (+ objective gate)
-	FramePassenger      passenger;  // valid iff (flags2 & 0xF) == 8
+	FrameMountAmmo      passenger;  // legacy packet-section name; mounted ammo, valid at phase 8
 	std::vector<FrameUpdateRecord> records;      // tag==1 per-entity motion
 	std::vector<RoundEventRecord>  round_events; // tag==2 fired-round events (§5.9.1)
 	// Walk status: `complete` is true iff the event loop hit its terminator (tag
@@ -797,8 +833,8 @@ struct FrameUpdate {
 // Walk a S2C 0x0A body into a FrameUpdate — the single, complete decode of the
 // message (the same walk nw_pp's printer renders). Captures the anchor + header
 // flags, the env sub-block (case 2), the local-player tail, the conditional
-// passenger record, every tag==1 per-entity compact record, AND every tag==2
-// weapon-hit record (§5.9.1). `class_of` maps a wire type_id to its compact
+// phase-8 mounted-ammo record, every tag==1 per-entity compact record, AND every
+// tag==2 fired-round record (§5.9.1). `class_of` maps a wire type_id to its compact
 // dispatch class (built from items.def). Known null callbacks consume only the
 // `[tag][handle][typeId]` header and continue [orig: null-callback branch
 // @ 0x430814..0x43081D]. Returns true (and sets out.complete) iff the event loop
@@ -1147,23 +1183,27 @@ struct WeaponLoadout {
 };
 bool decode_weapon_loadout(const uint8_t *body, size_t len, WeaponLoadout &out);
 
-// S2C 0x6E — team/squad roster sync (§5.31). `[u8 teamCount]` then per team
-// `{ u16 teamEntityHandle, u16 teamSlotIndex, u8 memberCount, u16 teamSlotHandle,
-//   u16 member × memberCount }`. teamEntityHandle == 0xFFFF marks "no team
-// entity" (the handler skips the entity-slot write but still reads every field).
-// [orig: NapiNPClientMsg_HandleSquadRosterSync @ 0x429880]
-struct RosterTeam {
-	uint16_t team_entity_handle = 0xFFFF; // (pool<<12)|slot; 0xFFFF = none
-	uint16_t team_slot_index = 0;         // index into the roster arrays
-	uint8_t  member_count = 0;            // -> entity+550
-	uint16_t team_slot_handle = 0;        // -> entity+548
-	std::vector<uint16_t> members;        // member_count member handles
+// S2C 0x6E — spawn-wave/deploy-screen status (§5.31). `[u8 groupCount]` then
+// per group `{ u16 zoneHandle, u16 zoneIndex, u8 queuedCount,
+// u16 waveCountdown, u16 member × queuedCount }`. zoneHandle == 0xFFFF marks
+// "no zone entity" (the client skips the entity-slot write but still reads the
+// group). The old team/squad-roster names described the destination arrays,
+// not the server-side meaning of the packet.
+// [orig: NetPacket_WriteSpawnWaveStatus @0x507490;
+//        NapiNPClientMsg_HandleSquadRosterSync @0x429880]
+struct SpawnWaveGroup {
+	uint16_t zone_handle = 0xFFFF;        // (pool<<12)|slot; 0xFFFF = none
+	uint16_t zone_index = 0;              // deploy-screen spawn-zone-list index
+	uint8_t queued_count = 0;             // number of queued member handles
+	uint16_t wave_countdown = 0;          // seconds until this wave releases
+	std::vector<uint16_t> members;        // queued_count player/entity handles
 };
-struct RosterSync {
-	uint8_t team_count = 0;
-	std::vector<RosterTeam> teams;
+struct SpawnWaveStatus {
+	uint8_t group_count = 0;
+	std::vector<SpawnWaveGroup> groups;
 };
-bool decode_roster_sync(const uint8_t *body, size_t len, RosterSync &out);
+bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &out);
+
 
 // S2C 0x7B — full player/session info (§5.32). Five NUL-terminated strings, then
 // `[u32 extra]`, then two more NUL-terminated strings. The retail handler caps the
@@ -1185,7 +1225,7 @@ struct FullPlayerInfo {
 	std::string player_name;   // 1 — local/LAN display name (PunkBuster `name`); empty on account joins
 	std::string player_id;     // 2 — NovaWorld player/account ID (0-padded numeric, persistent per player); empty on LAN joins — NOT a clan tag
 	std::string server_name;   // 3 — host/server name (PunkBuster `sv_hostname`)
-	std::string mission_name;  // 4 — mission display title
+	std::string mission_name;  // 4 — MissionText title, or waypoint-family filename fallback
 	std::string map_file;      // 5 — .bms filename (PunkBuster `mapname`)
 	uint32_t    extra = 0;     // u32
 	std::string motd;          // 6 — unwitnessed (empty in every capture); the "MOTD" guess is unconfirmed
@@ -1384,6 +1424,18 @@ struct WeaponReload {
 bool decode_weapon_reload(const uint8_t *body, size_t len,
                           WeaponReload &out, size_t &consumed);
 
+// C2S 0x16 -- the designated-G mounted weapon route selector. Retail's action-6
+// producer writes a bool as a little-endian i16; the authority tests the full
+// word for zero/nonzero. This guarded codec accepts exactly two bytes.
+// [orig: Input_HandleActionBinding_0 @0x4e0492;
+// NapiNPServerMsg_HandleWeaponToggle @0x511a70]
+struct MountedWeaponSlotSelection {
+	bool use_parent_slot = false;
+};
+bool decode_mounted_weapon_slot_selection(
+		const uint8_t *body, size_t len,
+		MountedWeaponSlotSelection &out, size_t &consumed);
+
 // S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
 // `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
 // Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
@@ -1426,10 +1478,13 @@ bool decode_loadout_crc_request(const uint8_t *body, size_t len,
 bool decode_input_state_flags(const uint8_t *body, size_t len,
                               uint16_t &out_flags, size_t &consumed);
 
-// S2C 0x79 — spectator-mode flag `[u8]` (1 B) → dword_82BEE4.
-// [orig: NapiNPClientMsg_0x079 @ 0x429B00]
-bool decode_spectator_flag(const uint8_t *body, size_t len,
-                           uint8_t &out_flag, size_t &consumed);
+// S2C 0x79 — host network-quality scalar `[u8]` (1 B). The client stores it
+// into CNetStats.host_quality (+0x0C), then S2C 0x7D makes the client report
+// that value plus three adjacent metrics in C2S 0x50.
+// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_0x079 @0x429B00]
+bool decode_network_quality(const uint8_t *body, size_t len,
+                            uint8_t &out_quality, size_t &consumed);
+
 
 // S2C 0x2A — chat-history entry `[i32 a][i32 b][i16 c]` (10 B) → Chat_AddToHistory.
 // [orig: NapiNPClientMsg_0x02A @ 0x425BA0]

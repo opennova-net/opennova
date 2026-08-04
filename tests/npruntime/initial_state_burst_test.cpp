@@ -4,8 +4,8 @@
 // decodes / round-trips / byte-matches the golden-witnessed value (incl. the 0x2C/0x08/0x2A/0x66/0x76/
 // 0x1A serializers ported 2026-06-27); (3) the 0x0C organic carries the host player's dcb at
 // entity+0x78 (the §1 wiring, end to end); (4) burst.game_state==9 / spawned at the terminator;
-// (5) the full world-stream pages every pool (0x10/0x0D/0x0C/0x20); only the conditional 0x45 terrain
-// + 0x7E briefing tags stay absent (deferred — no per-player terrain delta / MissionText wired).
+// (5) the full world-stream pages every pool (0x10/0x0D/0x0C/0x20) and conditionally emits the
+// mission-text-backed 0x7E briefing pair; only the conditional 0x45 terrain stays absent here.
 
 #include <npruntime/server_initial_state.h>
 #include <npruntime/server_session.h>
@@ -16,6 +16,7 @@
 #include <netsim/loopback_channel.h>
 
 #include <mission/bms.h>
+#include <mission/mission.h>
 
 #include <npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 
@@ -24,7 +25,10 @@
 #include <world/player_spawn.h>
 #include <world/world.h>
 
+#include <cstddef>
 #include <cstdio>
+#include <iterator>
+#include <string>
 #include <vector>
 
 namespace {
@@ -36,6 +40,23 @@ bool expect(bool cond, const char *msg) {
 	if (cond) return true;
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
+}
+
+uint16_t read_u16_le(const std::vector<uint8_t> &bytes, std::size_t offset) {
+	return static_cast<uint16_t>(bytes[offset]) |
+	       (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+}
+
+uint32_t read_u32_le(const std::vector<uint8_t> &bytes, std::size_t offset) {
+	return static_cast<uint32_t>(bytes[offset]) |
+	       (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+	       (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+	       (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+void write_u16_le(std::vector<uint8_t> &bytes, std::size_t offset, uint16_t value) {
+	bytes[offset] = static_cast<uint8_t>(value & 0xFFu);
+	bytes[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
 }
 
 int main_impl() {
@@ -56,6 +77,21 @@ int main_impl() {
 		world.registry.spawn(3, start);
 	}
 	{
+		// Two 00TRg location markers. Their localized labels are resolved from
+		// MissionText before the runtime context is brought up.
+		w::Entity location;
+		location.kind = w::EntityKind::Marker;
+		location.item_id = 2044;
+		world.registry.spawn(3, location);
+		world.registry.spawn(3, location);
+	}
+	{
+		w::WaypointEntry waypoint;
+		waypoint.node = 12;
+		waypoint.name_id = 0;
+		world.waypoints.entries.push_back(waypoint);
+	}
+	{
 		// A pool-2 building carrying the D-NET-147 wire fields (the golden ASH_I5A values):
 		// entity Flags 0x04020400 (indestructible+Building+Reflective), ammo 0xFF, subType 0xFF.
 		w::Entity bld;
@@ -69,19 +105,66 @@ int main_impl() {
 		world.registry.spawn(2, bld);
 	}
 
-	// A minimal in-memory mission for the 0x0B BMS-header body (no asset gating).
+	// A valid loaded mission whose source loadout chunk has two ignored bytes after
+	// its terminator. The parser sanitizes that chunk to a shorter canonical model,
+	// while retail's 0x0B sender memcpy's the original loaded 0x268-byte header.
+	opennova::mission::MissionDocument authored_mission;
+	authored_mission.create_default();
+	auto &loadout = authored_mission.bms_file().loadout.entries.emplace_back();
+	loadout.name = "WPN_PARITY_TEST";
+	loadout.ammo_primary = "1";
+	loadout.ammo_secondary = "2";
+	loadout.flags = "-1";
+	std::vector<uint8_t> source_mission;
+	if (!expect(authored_mission.write_bms_bytes(source_mission),
+	            "authored BMS fixture serializes")) return 1;
+	constexpr std::size_t kLoadoutLenOffset =
+			offsetof(opennova::bms::Header, weapon_loadout_chunk_len);
+	const uint16_t canonical_loadout_len = read_u16_le(source_mission, kLoadoutLenOffset);
+	const uint8_t trailing[] = {0xAB, 0xCD};
+	source_mission.insert(
+			source_mission.begin() + static_cast<std::ptrdiff_t>(
+					opennova::bms::kHeaderSize + canonical_loadout_len),
+			std::begin(trailing), std::end(trailing));
+	write_u16_le(source_mission, kLoadoutLenOffset,
+	             static_cast<uint16_t>(canonical_loadout_len + sizeof(trailing)));
+	const std::vector<uint8_t> source_header(
+			source_mission.begin(),
+			source_mission.begin() + static_cast<std::ptrdiff_t>(opennova::bms::kHeaderSize));
+
 	opennova::bms::File mission;
-	mission.header.magic[0] = 'B';
-	mission.header.magic[1] = 'M';
-	mission.header.magic[2] = 'S';
-	mission.header.magic[3] = static_cast<char>(opennova::bms::kMinVersion);
+	std::string mission_error;
+	if (!expect(opennova::bms::parse(
+				source_mission.data(), source_mission.size(), mission, mission_error),
+	            "noncanonical source BMS parses")) return 1;
+	std::vector<uint8_t> canonical_header;
+	if (!expect(opennova::bms::encode_header_blob(mission, canonical_header, mission_error),
+	            "parsed BMS has a canonical header projection")) return 1;
+	if (!expect(canonical_header != source_header &&
+	                    read_u16_le(canonical_header, kLoadoutLenOffset) == canonical_loadout_len &&
+	                    read_u16_le(source_header, kLoadoutLenOffset) ==
+	                            canonical_loadout_len + sizeof(trailing),
+	            "fixture distinguishes canonical and loaded header lengths")) return 1;
 
 	ns::LoopbackChannel loopback;
 	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	if (!expect(config.class_allow_mask == 0x03FFu,
+	            "GameConfig defaults to retail's all-ten-classes mask")) return 1;
+	config.class_allow_mask = 0x0155u; // non-default pins config sourcing, not a hard-coded golden
+	config.game_type = 0x00010020u;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
-	                        /*host_key=*/0, &loopback);
+	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
 	ctx.mission = &mission;
+	ctx.mission_text_loaded = true;
+	ctx.mission_briefing3 = "First briefing page";
+	ctx.mission_briefing2 = "Second briefing page";
+	ctx.mission_location_names = {"Weapons Cache", "Rebel Outpost"};
+	const uint32_t advertised_build_flags = ctx.np_protocol.build_flags;
+	ctx.config.server_password = "mutated-after-create";
+	if (!expect(np::build_server_config_flags(ctx) != advertised_build_flags,
+	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
 	// Spawn the host's own pool-0 player (so the burst's 0x0C has it with dcb 2).
 	np::Server_InitNewRoundState(ctx);
@@ -107,13 +190,14 @@ int main_impl() {
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
 	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream streams EVERY pool in
-	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then 0x1A. Then
+	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then the
+	// mission-text 0x7E and 0x1A. Then
 	// the GAME-START BUNDLE 0x42 / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the joiner's
-	// load-gate; matches golden frames 318-319). (0x45 terrain + 0x7E briefing remain deferred.) In THIS
+	// load-gate; matches golden frames 318-319). (0x45 terrain remains absent.) In THIS
 	// minimal World pool-1 is empty (header-only 0x0D page); pool-2 carries one building so the
 	// 0x10 page also pins the D-NET-147 fields.
 	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
-	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x1A,
+	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x7E, 0x1A,
 	                                         0x42, 0x0F, 0x4D, 0x61, 0x3E};
 	std::vector<uint8_t> got_order;
 	for (auto &m : emitted) got_order.push_back(m.tag);
@@ -124,10 +208,10 @@ int main_impl() {
 		return 1;
 	}
 
-	// Only the conditional terrain (0x45) / briefing (0x7E) tags stay absent — deferred, no per-player
-	// terrain delta / MissionText wired. The pool-1 0x0D IS now streamed (full world-stream).
+	// The conditional terrain tag stays absent because this fixture has no .til bytes. The
+	// mission-text-backed 0x7E and pool-1 0x0D are both present.
 	for (auto &m : emitted) {
-		if (m.tag == 0x45 || m.tag == 0x7E) {
+		if (m.tag == 0x45) {
 			std::fprintf(stderr, "FAIL: conditionally-absent tag 0x%02X was emitted\n", m.tag);
 			return 1;
 		}
@@ -139,6 +223,46 @@ int main_impl() {
 			if (m.tag == tag) return &m.body;
 		return nullptr;
 	};
+
+	{
+		// PR #403 retail 00TRg witness: the waypoint gametype serializes the
+		// first blue-route pool-3 marker followed by localized deploy-map labels.
+		const std::vector<uint8_t> *b = body_of(0x0F);
+		opennova::WorldStateLoad state;
+		if (!expect(
+				b != nullptr && b->size() == 572 &&
+				opennova::decode_world_state_load(
+						b->data(), b->size(), state, true),
+				"0x0F waypoint-gametype body fully decodes at the retail width")) {
+			return 1;
+		}
+		if (!expect(
+				state.waypoints.size() == 1 && state.waypoint_count == 1 &&
+						state.waypoints[0].slot_id == 0x300C &&
+						state.waypoints[0].name_id == 0 &&
+						state.waypoints[0].pad == 0,
+				"0x0F carries 00TRg's blue-route waypoint record")) {
+			return 1;
+		}
+		if (!expect(
+				state.team_name_count == 2 &&
+						state.team_names == std::vector<std::string>{
+								"Weapons Cache", "Rebel Outpost"},
+				"0x0F carries MissionText-resolved location labels in spawn order")) {
+			return 1;
+		}
+	}
+
+	{
+		// MissionText [info]/briefing3 then briefing2/briefing fallback, as two
+		// consecutive NUL-terminated strings [orig: NetPacket_WriteBriefingText @0x506620].
+		const std::vector<uint8_t> *b = body_of(0x7E);
+		const std::vector<uint8_t> want = {
+			'F','i','r','s','t',' ','b','r','i','e','f','i','n','g',' ','p','a','g','e',0,
+			'S','e','c','o','n','d',' ','b','r','i','e','f','i','n','g',' ','p','a','g','e',0,
+		};
+		if (!expect(b && *b == want, "0x7E = briefing3\\0 + briefing2-or-briefing\\0")) return 1;
+	}
 
 	// (2)/(3) 0x0C decodes + carries the host player's dcb at entity+0x78.
 	{
@@ -164,11 +288,17 @@ int main_impl() {
 		if (!expect(saw_marker, "0x20 carries the 6002 spawn marker")) return 1;
 	}
 
-	// (2) 0x0B is the real 616-byte BMS header, built from scratch (no fixture).
+	// (2) 0x0B is the exact loaded 616-byte BMS header, not a canonical rewrite.
 	{
 		const std::vector<uint8_t> *b = body_of(0x0B);
 		if (!expect(b && b->size() == opennova::bms::kHeaderSize, "0x0B body is the 616-byte BMS header")) return 1;
 		if (!expect((*b)[0] == 'B' && (*b)[1] == 'M' && (*b)[2] == 'S', "0x0B header magic is 'BMS'")) return 1;
+		if (!expect(*b == source_header, "0x0B byte-matches the loaded BMS header")) return 1;
+		if (!expect(*b != canonical_header,
+		            "0x0B preserves source bytes when canonical encoding differs")) return 1;
+		if (!expect(read_u16_le(*b, kLoadoutLenOffset) ==
+		                    canonical_loadout_len + sizeof(trailing),
+		            "0x0B preserves the loaded weapon-loadout chunk length")) return 1;
 	}
 
 	// Empty scalar bodies are wire-valid for 0x1C/0x11, but 0x10 is a static-entity batch and even
@@ -208,9 +338,17 @@ int main_impl() {
 		// 0x08 = the 51-byte server-config block (10 rule dwords default 0 + 7 bytes + flags dword).
 		const std::vector<uint8_t> *b = body_of(0x08);
 		if (!expect(b && b->size() == 51, "0x08 server-config is 51 bytes")) return 1;
-		bool dwords_zero = true; // default GameConfig -> all 10 rule dwords 0
-		for (int i = 0; i < 40; ++i) dwords_zero = dwords_zero && ((*b)[i] == 0);
-		if (!expect(dwords_zero, "0x08 default rule dwords are 0")) return 1;
+		bool dwords_match = true;
+		for (int i = 0; i < 40; ++i) {
+			const uint8_t expected =
+					(i == 12 ? 0x20 : i == 14 ? 0x01 : 0x00);
+			dwords_match = dwords_match && ((*b)[i] == expected);
+		}
+		if (!expect(dwords_match,
+		            "0x08 rule dwords carry only the 0x00010020 game type")) return 1;
+		if (!expect(read_u32_le(*b, 47) == advertised_build_flags,
+		            "0x08 BuildFlags stays identical to the create-session P2 snapshot"))
+			return 1;
 	}
 	{
 		// 0x2A ×6 — each the const table record {00 04 b0 ab b2 b2 bf bc bd ba} (golden frames 148-158).
@@ -227,9 +365,10 @@ int main_impl() {
 		// 0x66 weapon-restrictions: no restrictions -> single count byte 0 (golden frame 160).
 		const std::vector<uint8_t> *b = body_of(0x66);
 		if (!expect(b && b->size() == 1 && (*b)[0] == 0, "0x66 empty restriction table = {0}")) return 1;
-		// 0x76 server-tick16 = now_tick low 16 (now_tick=1 -> 01 00).
+		// 0x76 is the configured class-allow mask, independent of now_tick.
 		const std::vector<uint8_t> *t = body_of(0x76);
-		if (!expect(t && *t == std::vector<uint8_t>{0x01, 0x00}, "0x76 server-tick16 = now_tick low16")) return 1;
+		if (!expect(t && *t == std::vector<uint8_t>{0x55, 0x01},
+		            "0x76 class-allow mask = configured u16, not now_tick")) return 1;
 		// 0x1A timestamp = now_tick u32 (now_tick=1 -> 01 00 00 00).
 		const std::vector<uint8_t> *ts = body_of(0x1A);
 		if (!expect(ts && *ts == std::vector<uint8_t>{0x01, 0x00, 0x00, 0x00}, "0x1A timestamp = now_tick u32")) return 1;
@@ -370,11 +509,20 @@ int main_impl() {
 		// NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]. Drive to the park, assert nothing
 		// world-stream leaked, then apply the 0x0A advance and drive to the phase 7→8 loadout gate.
 		bool parked_for_spawn_menu = false;
+		bool saw_atomic_player_sync_tail = false;
 		int paced_calls = 0;
 		for (int i = 0; i < 64 && !parked_for_spawn_menu; ++i) {
 			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
 			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			if (!s.messages.empty() && s.messages.front().tag == 0x1C) {
+				std::vector<uint8_t> tags;
+				for (const auto &m : s.messages) tags.push_back(m.tag);
+				if (!expect(tags == std::vector<uint8_t>({0x1C, 0x0B, 0x66, 0x76, 0x11}),
+				            "retail player-sync tail is one atomic five-record boundary"))
+					return 1;
+				saw_atomic_player_sync_tail = true;
+			}
 			for (const auto &m : s.messages) {
 				if (!expect(m.tag != 0x10 && m.tag != 0x0D && m.tag != 0x0C && m.tag != 0x20,
 				            "no world-stream tag before the client's C2S 0x0A (D-NET-150)")) return 1;
@@ -382,6 +530,8 @@ int main_impl() {
 			if (jconn.burst.sync_state == 3) parked_for_spawn_menu = true;
 		}
 		if (!expect(parked_for_spawn_menu, "player-sync tail parks at sync-state 3 (awaiting C2S 0x0A)")) return 1;
+		if (!expect(saw_atomic_player_sync_tail,
+		            "paced remote emitted the witnessed atomic player-sync tail")) return 1;
 		{
 			// Park is stable: further ticks emit nothing until the 0x0A arrives.
 			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
@@ -411,11 +561,15 @@ int main_impl() {
 		// Simulate the C2S 0x2F -> sets loadout_received; drive to completion.
 		jconn.burst.loadout_received = true;
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
+		bool saw_transient_42 = false;
 		bool reached = false;
 		for (int i = 0; i < 16 && !reached; ++i) {
 			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
 			for (const auto &m : s.messages) {
-				if (m.tag == 0x42) saw_42 = true;
+				if (m.tag == 0x42) {
+					saw_42 = true;
+					saw_transient_42 = !m.reliable;
+				}
 				if (m.tag == 0x0F) saw_0f = true;
 				if (m.tag == 0x3E) saw_3e = true;
 			}
@@ -424,6 +578,8 @@ int main_impl() {
 		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
 		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
 		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
+		if (!expect(saw_transient_42,
+		            "phase-8 input flags use retail's one-send transient delivery")) return 1;
 	}
 
 	std::printf("OK\n");

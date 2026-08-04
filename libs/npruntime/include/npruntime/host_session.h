@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <vector>
 
 #include <netsim/connection.h>            // netsim::TransportMode
 #include <netsim/idatagram_socket.h>      // netsim::IDatagramSocket
@@ -23,6 +24,7 @@
 #include <netsim/udp_session_transport.h> // netsim::UdpSessionTransport
 
 #include <npwire/peer_addr.h> // opennova::PeerAddr
+#include <npwire/protocol_message.h>
 
 #include "npruntime/napi_np_connection.h"
 #include "npruntime/napi_np_protocol.h"  // HostAcceptEvent + the server protocol entry points
@@ -52,6 +54,16 @@ struct HostOwner {
 	NapiNPServerCtx ctx;
 	netsim::ISessionTransport *host_loopback = nullptr; // non-owning; the host's own dcb-2 client (Listen)
 	std::map<PeerAddr, PeerLink, PeerAddrLess> peers;
+	// In-match semantic replies collected while the S2C send block is closed.
+	// They retain message order and are framed with transport output on the next
+	// configured boundary.
+	std::map<PeerAddr, std::vector<ProtocolMessage>, PeerAddrLess>
+			pending_session_messages;
+	// Already-framed established-session packets (0x83 initial stream,
+	// retransmits, and 0x84 missing-sequence requests) also wait on the peer's
+	// send boundary. Their sequence numbers and ciphertext are already fixed.
+	std::map<PeerAddr, std::vector<std::vector<uint8_t>>, PeerAddrLess>
+			pending_session_datagrams;
 	uint32_t now_tick = 0;
 	// false (dedicated/headless): HostOnly registers no local-player connection; an adapter-supplied
 	// unused channel may be defensively drained. true (serve-and-play): HostClient registers the
@@ -75,7 +87,8 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 //   (1) recv-drain: recv_from -> handle_server_datagram -> ship replies + react to events
 //   (2) tick_connections: pre-spawn §5.2a bursts (framed 0x83 for remote peers) + surface F3/spawned
 //   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
-//   (4) S2C flush: pop each remote transport's identity [tag][body] -> frame_in_match_s2c (0x83) -> send
+//   (4) S2C flush: on each peer's send boundary, ship retained 0x83/0x84 packets,
+//       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused adapter loopback for HostOnly; preserve the HostClient local view
 // `before_server_tick`, when supplied, runs after tick_connections has completed any
 // player spawns and before their first authoritative logic update / 0x0A fan. The opaque

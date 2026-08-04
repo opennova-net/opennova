@@ -1,6 +1,7 @@
 #pragma once
 
 #include "npruntime/charattr_challenge.h"
+#include "npruntime/integrity_challenge_profile.h"
 #include "npruntime/napi_np_connection.h"
 
 #include <npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
@@ -40,8 +41,9 @@
 //   <- S2C 0x0C organic-spawn (0x83)  : name-match self and retain wire handle H
 //   <- S2C 0x1A                       : send the 0x2F/0x2F/0x0B loadout/status bundle (the
 //                                       binding's kit via set_loadout_kit, else the capture default)
-//   <- initial S2C 0x5A grant pair    : if 0x0F advertises spawn zones, send C2S 0x0E {FFFF}
-//   <- applicable final S2C 0x5A      : initial grant (no zones) or post-pick release [-> InMatch]
+//   <- initial S2C 0x5A grant pair    : open gameplay once H is known; if zones, keep deploy UI pending
+//                                      (headless callers immediately send C2S 0x0E {FFFF} and re-arm hold)
+//   <- ACK-qualified post-pick 0x5A   : reopen the 0x0E-armed gameplay hold; complete deploy UI
 //   frame_c2s_uplink(H, ...)          : per-frame C2S 0x0C player uplink
 //
 // SELF-IDENTIFICATION = NAME-MATCH (D.0, docs/net §5.23): the host streams the joiner's admitted
@@ -55,6 +57,13 @@
 // I/O lives here — the owner pumps bytes.
 namespace opennova::np {
 
+enum class TerrainTilState : uint8_t {
+	Absent = 0,
+	Receiving = 1,
+	Complete = 2,
+	Invalid = 3,
+};
+
 class JoinerConnection {
 public:
 	using MonotonicMilliseconds = std::function<uint64_t()>;
@@ -64,7 +73,7 @@ public:
 		Hello,    // ClientHello sent, awaiting ServerHello
 		Auth,     // ClientAuth sent, awaiting ServerAuth
 		Driving,  // ServerAuth accepted; reactive admission/world/deployment FSM is active
-		InMatch,  // self handle is known and the applicable final deployment release was received
+		InMatch,  // self handle is known and gameplay may run; deploy UI can independently remain pending
 		Error,    // protocol/envelope error or server rejection
 	};
 
@@ -89,14 +98,22 @@ public:
 		// from this receive boundary first, then places these behind the shared send-holdoff gate
 		// so they batch with same-frame housekeeping/gameplay at PumpClientProtocolSend.
 		std::vector<ProtocolMessage> queued_send_messages;
-		std::vector<std::vector<uint8_t>> inbound_0a; // raw S2C 0x0A bodies (for NetClientView)
+		std::vector<std::vector<uint8_t>> inbound_0a; // raw S2C 0x0A bodies (for ClientReplicaPipeline)
 		// Raw S2C world-stream spawn/static bodies the host sends during load, as (tag, body):
 		// 0x0C organics, 0x0D pool-1, 0x10 statics, 0x20 markers.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_world;
-		// Live S2C gameplay bodies consumed by NetClientView (currently the 0x49
-		// reload echo; 0x0A tag-2 rounds remain embedded in inbound_0a).
+		// Validated live S2C gameplay bodies consumed by ClientReplicaPipeline:
+		// reload echoes and entity lifecycle updates. 0x0A tag-2 rounds remain
+		// embedded in inbound_0a.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_gameplay;
-		bool reached_in_match = false;                // true when handle discovery + deployment meet
+		bool reached_in_match = false;                // applicable deployment edge once self H is known
+		// Every successfully decoded S2C 0x5A runs retail's unconditional
+		// dword_81474C clear, independently from whether it is the causal
+		// ACK-qualified deployment/UI release.
+		bool gameplay_release_applied = false;
+		// The headless auto-pick can be queued inside this receive fold. It re-arms
+		// only dword_81474C after an initial 0x5A may already have opened gameplay.
+		bool gameplay_hold_rearmed = false;
 		// S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). The client's whole
 		// network-role clock is anchored to it: retail stores it into BOTH currentTick and
 		// g_lastKeepaliveTick, and the host stamps the same value into the player slot's
@@ -116,11 +133,11 @@ public:
 		// [orig: NapiNPClientMsg_0x050 @0x431910 — byte_A85B48 store @0x4319db]
 		bool self_team_changed = false;
 		uint8_t self_team = 0;
-		// S2C 0x50 leg 2: (handle, team) for every valid assignment in this poll,
-		// including our own — the decoded-view fold [orig: @0x4319ee].
+		// Diagnostic summary of S2C 0x50; entity state is folded only from the
+		// corresponding raw inbound_gameplay record.
 		std::vector<std::pair<uint16_t, uint8_t>> entity_team_assigns;
-		// S2C 0x5D empty-slot sweep: RAW pool-0 slot indices the host says are empty.
-		// [orig: NapiNPClientMsg_DestroyEntityList @0x429730]
+		// Diagnostic summary of S2C 0x5D; entity state is folded only from the
+		// corresponding raw inbound_gameplay record.
 		std::vector<uint16_t> destroyed_pool0_slots;
 		// S2C 0x46 with bit15 (0x8000): the roster slot's BOOKKEEPING is cleared
 		// (active flag, names, team, entity ref). The ENTITY IS NOT DESTROYED on this
@@ -169,11 +186,27 @@ public:
 	// bundles them into 0x43s the same way. [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 ->
 	// CNapiNPConnection_QueueMessage @0x628640]
 	std::vector<uint8_t> frame_inner(uint8_t tag, std::vector<uint8_t> body) {
-		return frame_session({make_protocol_message(tag, std::move(body))});
+		std::vector<uint8_t> datagram =
+				frame_session({make_protocol_message(tag, std::move(body))});
+		if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+		return datagram;
 	}
 	// Flush several queued inner messages through as few sequenced packets as fit under the
 	// negotiated JO packet ceiling. Retail queues semantic records first and frames at the send
 	// boundary; callers use this instead of minting one outer datagram per record.
+	struct FrameMessagesResult {
+		std::vector<std::vector<uint8_t>> datagrams;
+		// The msg_out_max-admitted prefix. Nodes after this prefix were rejected
+		// by capacity and are intentionally not retried.
+		std::size_t admitted_count = 0;
+		// The prefix actually committed to session packets. If framing fails,
+		// [framed_count, admitted_count) remains owned by the caller.
+		std::size_t framed_count = 0;
+		bool frame_failed = false;
+	};
+	FrameMessagesResult frame_messages_detailed(
+			const std::vector<ProtocolMessage> &messages,
+			std::size_t max_packet_body_bytes = 1300);
 	std::vector<std::vector<uint8_t>> frame_messages(
 			const std::vector<ProtocolMessage> &messages,
 			std::size_t max_packet_body_bytes = 1300);
@@ -260,6 +293,15 @@ public:
 	}
 	void clear_charattr_challenge_table() { charattr_challenge_table_ = {}; }
 
+	// Install one exact retail-corpus anti-cheat source profile. Unknown ids
+	// clear any previous profile and return false. With no profile—or when a
+	// profile does not cover the requested in-range record—S2C 0x30/0x31 remain
+	// deliberately unanswered because a guessed reply is grounds for a punt.
+	bool set_integrity_challenge_profile(std::string_view id);
+	void clear_integrity_challenge_profile() {
+		integrity_challenge_profile_ = nullptr;
+	}
+
 	// The C2S 0x3D source is NOT the decoded network-entity registry. Retail freezes a
 	// renderer-side snapshot of loaded, non-foliage .3DI definitions after mission model
 	// loading and pages its stored dwords verbatim in groups of at most fifty. Preserve
@@ -296,10 +338,15 @@ public:
 	std::size_t retained_outbound_depth() const {
 		return static_cast<std::size_t>(conn_.seq.retained_outbound_message_count);
 	}
+	// Finish the current open client send boundary after every packet (including
+	// MTU splits and an optional active-send probe) has been framed.
+	void complete_send_flush() { complete_session_send_flush(conn_.seq); }
+	uint32_t send_flush_counter() const { return conn_.seq.send_flush_counter; }
 
 	// Player-paced deployment (the deploy-map screen). When enabled BEFORE the grants
-	// complete, a pick-required join parks in AwaitDeployPick instead of auto-answering
-	// C2S 0x0E {FF FF}; the binding then sends the player's pick — repeatedly, if the host
+	// complete, a pick-required join leaves the UI in AwaitDeployPick instead of auto-answering
+	// C2S 0x0E {FF FF}; the initial grants still open gameplay, matching retail's independent
+	// dword_81474C hold. The binding then sends the player's pick — repeatedly, if the host
 	// silently drops an invalid/contested one (retail re-picks: Input case 12 has no
 	// re-entry gate, the screen stays up on the still-set 0x0A flags1 bit1, and each list
 	// click queues a fresh 0x0E). Headless callers keep the auto parameter-0 default.
@@ -307,10 +354,19 @@ public:
 	//  @0x55364d -> Input_HandleActionBinding case 12 @0x49b0c5-0x49b17b]
 	void set_player_paced_deployment(bool paced) { player_paced_deployment_ = paced; }
 	// A deployment pick is owed by the player (AwaitDeployPick), or sent and awaiting the
-	// host's release (AwaitDeployRelease). The shell's deploy screen shows while true.
+	// host's release (AwaitDeployRelease). The shell's deploy screen shows while true;
+	// this UI state is independent from in_match() and the runtime's gameplay/uplink gate.
 	bool deployment_pick_pending() const {
 		return post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 		       post_auth_stage_ == PostAuthStage::AwaitDeployRelease;
+	}
+	// Monotonic initial-admission boundary: the host's deployment policy and
+	// BOTH profile-side 0x5A grants have been consumed. This is deliberately
+	// independent from Phase::InMatch (the first grant opens gameplay early)
+	// and from deployment_pick_pending() (the shell routes that UI separately).
+	// Redeploy and terminal session loss do not erase the historical boundary.
+	bool initial_admission_complete() const {
+		return initial_admission_complete_;
 	}
 	// Frame one C2S 0x0E [i16 wire_value] deployment pick (0xFFFF parameter-0 default,
 	// 0xFFFE auto team spawn, else a pool<<12|slot spawn-target handle). Allowed in
@@ -332,6 +388,26 @@ public:
 	void set_world_ready(bool ready) { world_ready_ = ready; }
 	bool world_ready() const { return world_ready_; }
 	bool mission_known() const { return mission_known_; }
+	// The exact S2C 0x0B body copied by retail into g_BmsHeaderBlock. This is
+	// the non-authority joiner's mission identity source; no canonical encode or
+	// local .bms read may replace its bytes. A body is retained only at the
+	// witnessed exact 616-byte width.
+	// [orig: NapiNPClientMsg_0x00B @0x422660]
+	bool has_mission_header() const { return !mission_header_bytes_.empty(); }
+	const std::vector<uint8_t> &mission_header_bytes() const {
+		return mission_header_bytes_;
+	}
+	// Complete `.til` image reconstructed from the load-only paged S2C 0x45
+	// stream. Partial pages remain private so an embedder cannot install an
+	// incomplete terrain override. Header and 12-byte tile records are copied
+	// from the received bodies verbatim.
+	TerrainTilState terrain_til_state() const { return terrain_til_state_; }
+	bool has_terrain_til() const {
+		return terrain_til_state_ == TerrainTilState::Complete;
+	}
+	const std::vector<uint8_t> &terrain_til_bytes() const {
+		return terrain_til_bytes_;
+	}
 	// Retail's safe synchronous-load boundary: the pre-world admission exchange has completed and
 	// S2C 0x11 was ACKed, but C2S 0x0A still waits for the local mission to be installed.
 	bool preload_ready() const { return preload_ready_; }
@@ -360,6 +436,10 @@ public:
 	//  the cs_dir0.timeout_ms reap @0x4ca4a0 (stores @0x4caa81/@0x4cab54); both land in
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
 	bool session_lost() const;
+	// Owner-pump form of session_lost(): once the silence predicate trips,
+	// latch it and enter Phase::Error so no later input or producer can revive
+	// the connection. Explicit host closes have already made that transition.
+	bool poll_session_loss();
 	// Empty while healthy; a player-facing reason once lost — the decoded reason code, class
 	// and strings for an explicit close, the silence window for the reap.
 	std::string session_loss_reason() const;
@@ -382,6 +462,11 @@ public:
 	// delivers 0x04 ahead of the 0x1A submission trigger, and a harness that cares must
 	// feed the 0x04 it expects.
 	uint8_t assigned_team() const { return assigned_team_; }
+	// Retail's host-global class availability word, replaced by every S2C 0x76.
+	// The malformed/short handler value is zero; before the initial-state message,
+	// retain the stock all-ten-classes default used by the local UI.
+	// [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540]
+	uint16_t class_allow_mask() const { return class_allow_mask_; }
 	// This joiner's own roster slot id, latched from S2C 0x04 body byte 17 (retail's
 	// g_local_player_slot_id; the host's mirror is its per-player record slot+20
 	// [orig: NetPacket_WriteSlotAssignment @0x502b30]). The fired-round hit_part word
@@ -437,12 +522,19 @@ private:
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
 	std::vector<uint8_t> frame_session(const std::vector<ProtocolMessage> &messages);
+	std::vector<uint8_t> frame_inner_pending(
+			uint8_t tag, std::vector<uint8_t> body) {
+		return frame_session({make_protocol_message(tag, std::move(body))});
+	}
 	std::vector<uint8_t> frame_retained_session(uint32_t sequence);
 
 	void on_server_hello(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	void retain_terrain_load_page(const std::vector<uint8_t> &body);
+	void reset_terrain_load();
+	void invalidate_terrain_load();
 	void on_host_disconnect(const DisconnectEvent &event);
 	void fail(std::string reason);
 
@@ -453,6 +545,10 @@ private:
 
 	// SCRK / seq / ack live on the client-side connection node (folded, as on the server side).
 	NapiNPConnection conn_;
+	// Protocol FIRST/MID/FINAL records can span sequenced 0x83 packets. Keep the
+	// retail receive buffer on the connection so only the completed semantic
+	// payload reaches gameplay dispatch.
+	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
@@ -467,19 +563,29 @@ private:
 	// [orig: CNapiNetwork_Init @0x4ca4a0 timeout_ms = 120000 @0x4caa81/@0x4cab54]
 	uint64_t last_receive_ms_ = 0;
 	bool receive_clock_armed_ = false;
+	// Once gameplay has opened, retain that fact while death temporarily reuses
+	// Phase::Driving for the deployment-pick exchange. Initial admission also
+	// uses Driving, so phase alone cannot identify a live session for silence reap.
+	bool in_match_session_established_ = false;
+	bool silence_timeout_latched_ = false;
 	PostAuthStage post_auth_stage_ = PostAuthStage::Inactive;
 	uint64_t session_last_send_ms_ = 0;
 	bool session_send_clock_armed_ = false;
 	bool goodbye_sent_ = false; // disconnect() burst emitted; retail clears the keys right after
 	bool session_ack_pending_ = false; // admitted S2C messages with no substantive C2S reply yet
-	bool world_ready_ = true;   // binding-controlled: local advertised mission is installed
+	bool world_ready_ = true;   // binding-controlled: the wire-header world/assets are staged
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
 	// The joiner's server-assigned team, latched from the S2C 0x04 slot-assignment tail byte —
 	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_0x004 @0x425410 ->
 	// byte_A85B48 @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
 	// 0x1A submission trigger in a real admission, so harnesses must feed the 0x04 they expect.
 	uint8_t assigned_team_ = 0;
+	uint16_t class_allow_mask_ = 0x03FFu;
 	uint8_t local_player_slot_ = 0; // S2C 0x04 body byte 17 (see local_player_slot())
+	// Inclusive final roster slot for the S2C 0x46 queue-ack walk, supplied by
+	// the same S2C 0x04 body at byte 18. A value of 4 walks slots 0..4.
+	// [orig: g_max_player_slots read at NapiNPClientMsg_PlayerSync @0x431370]
+	uint8_t max_player_slot_ = 0;
 	// Client net-frame counter echoed as the padding echo's third dword. Retail increments its
 	// global once per client net pump and never resets it for a rejoin.
 	// [orig: @0xA822A4, ++ in NetClient_HandleGameEnd @0x424752]
@@ -491,6 +597,7 @@ private:
 	// Boot-loaded g_CharAttr[16] bytes. Ordered S2C 0x41 property clears
 	// mutate this retained table before every later 0x39 challenge.
 	CharAttrChallengeTable charattr_challenge_table_{};
+	const IntegrityChallengeProfile *integrity_challenge_profile_ = nullptr;
 	// Frozen renderer-definition snapshot for S2C 0x68 -> C2S 0x3D. Configuration
 	// survives start(): bindings may finish loading models before the first net pump.
 	std::vector<uint32_t> loaded_model_challenge_snapshot_;
@@ -501,22 +608,33 @@ private:
 	bool deployment_policy_seen_ = false; // a valid S2C 0x0F supplied gameFlags
 	bool deployment_pick_required_ = false; // S2C 0x0F gameFlags bit0: host has spawn zones
 	uint8_t initial_loadout_grant_count_ = 0; // both profile-side 0x5A grants precede the pick
+	bool initial_admission_complete_ = false;
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
-	bool deployment_reply_seen_ = false; // applicable final S2C 0x5A; pairs with self-handle discovery
+	bool deployment_reply_seen_ = false; // applicable spawn release seen; pairs with self H
 	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
-	// One C2S 0x32 empty-slot sweep request per session, queued from the S2C 0x0F
-	// world-state-load reply burst. [orig: NapiNPClientMsg_0x00F @0x42e647]
-	bool empty_slot_sweep_requested_ = false;
+	// S2C 0x19 supplies dword 0 of the post-world C2S 0x28 request. Retail clears
+	// this scalar on a malformed body and retains the latest valid value.
+	// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]
+	uint32_t spawn_ack_timestamp_ = 0;
+	// The complete six-message S2C 0x0F reply burst is emitted once per session.
+	// [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab]
+	bool world_state_completion_sent_ = false;
 
 	bool has_self_handle_ = false;
 	uint16_t self_handle_ = 0;  // wire handle H, learned via the name-match (pool<<12|slot)
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
 	std::string server_name_;   // authoritative S2C 0x7B field 3
-	std::string mission_name_;  // authoritative S2C 0x7B field 4
+	std::string mission_name_;  // authoritative S2C 0x7B field 4 (title or waypoint filename)
 	std::string map_file_;      // authoritative S2C 0x7B field 5
 	std::string expansion_;     // authoritative S2C 0x7B field 7
+	std::vector<uint8_t> mission_header_bytes_; // exact valid 616-byte S2C 0x0B body
+	TerrainTilState terrain_til_state_ = TerrainTilState::Absent;
+	std::vector<uint8_t> terrain_til_staging_; // header + received tile slots
+	uint32_t terrain_tile_count_ = 0;
+	uint32_t terrain_next_index_ = 0; // canonical retail-writer cursor
+	std::vector<uint8_t> terrain_til_bytes_; // published only when coverage is complete
 
 	std::string last_error_;
 	// The host's explicit close, latched from the first connection-description record and

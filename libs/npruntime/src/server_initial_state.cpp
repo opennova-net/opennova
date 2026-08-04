@@ -4,6 +4,7 @@
 
 #include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -11,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <mission/bms.h>                  // bms::File, bms::encode_header_blob (0x0B body)
+#include <mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
 #include <netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <npwire/ingame_message_id.h>
@@ -58,12 +59,18 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 }
 
 // [orig: CNapiServerConfig_BuildFlags @0x4c4dc0] The trailing flags dword of the 0x08 block.
-uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
+uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
-	if (r.team_choose) flags = 4; // [orig dword_2550A04 & 4 = SET `TeamChoose`]
+	// dword_2550A04 is the live mp-attribute store; game_settings.mp_attributes
+	// is its session snapshot. OpenNova retains an explicit setting override as
+	// well, but either representation of the same live TeamChoose bit must feed
+	// BuildFlags even for a non-team game (fresh retail DM advertises 0x904).
+	if (r.team_choose ||
+	    (r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
+		flags = 4;
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
 	case 1: flags |= 0x400u; break;           // single-player host
 	case 2: flags |= 0x100u; break;           // LAN
@@ -103,7 +110,10 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	put_u32(b, r.destroy_buildings);   // [orig g_destroy_buildings @0x24D2164, SET `destroybuild`]
 	put_u32(b, r.death_messages);      // [orig g_death_messages @0x24D2168, SET `deathmes`]
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
-	put_u32(b, build_server_config_flags(ctx));
+	// P2 advertised the create-session snapshot. Keep the later 0x08 record on
+	// that same immutable contract even if a caller mutates ctx.config while a
+	// paced joiner is still entering the world.
+	put_u32(b, ctx.np_protocol.build_flags);
 	return b; // 51 bytes
 }
 
@@ -120,10 +130,11 @@ std::vector<uint8_t> serialize_weapon_restrictions(const NapiNPServerCtx &ctx) {
 	return b;
 }
 
-// [orig: NetPacket_WriteServerTick16 @0x510350] S2C 0x76: the server tick low 16 bits.
-std::vector<uint8_t> serialize_server_tick16(uint32_t now_tick) {
+// [orig: NetPacket_WriteClassAllowMask @0x510350] S2C 0x76: the configured host-global
+// class-availability word consumed by NapiNPClientMsg_HandleClassAllowMask @0x42d540.
+std::vector<uint8_t> serialize_class_allow_mask(uint16_t class_allow_mask) {
 	std::vector<uint8_t> b;
-	put_u16(b, static_cast<uint16_t>(now_tick & 0xFFFFu));
+	put_u16(b, class_allow_mask);
 	return b;
 }
 
@@ -136,20 +147,32 @@ std::vector<uint8_t> serialize_timestamp(uint32_t now_tick) {
 	return b;
 }
 
+// [orig: NetPacket_WriteBriefingText @0x506620] S2C 0x7E: MissionText
+// [info]/briefing3 followed by [info]/briefing2 (or [info]/briefing fallback),
+// copied byte-for-byte as two NUL-terminated cp1252 strings.
+std::vector<uint8_t> serialize_briefing_text(const NapiNPServerCtx &ctx) {
+	std::vector<uint8_t> b;
+	b.reserve(ctx.mission_briefing3.size() + ctx.mission_briefing2.size() + 2);
+	put_cstr(b, ctx.mission_briefing3);
+	put_cstr(b, ctx.mission_briefing2);
+	return b;
+}
+
 // [orig: Server_SendEntityStateToPlayer @0x517ba0 / NapiNPClientMsg_0x00F @0x42E200; §5.29] S2C 0x0F
 // world-state-load — the game-start deploy unsticker. Carries the joiner's spawn pose, game flags, and
 // the fixed 128-entry team-score block; the client handler clears its dword_81474C load-gate and queues
 // the post-load C2S burst (0x22/0x23/0x28/0x29/0x2D/0x32) that lets it deploy. Without it a retail
 // joiner world-loads but stays undeployed (floods C2S 0x0f) — the observed live "stuck at 7%". Minimal
-// faithful body: waypointCount 0 + teamNameCount 0 (the TDM/DM default; co-op waypoint records + the
-// mission's zone/team names are a tracked follow-up — cosmetic/objective, not deploy-gating). Layout is
-// the §5.29 field map / the WorldStateLoad struct decode_world_state_load consumes.
+// faithful body: the TDM/DM path has waypointCount 0; waypoint Co-op serializes the recipient's
+// blue route plus MissionText-resolved location labels. Layout is the §5.29 field map consumed by
+// decode_world_state_load.
 std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
                                                 uint32_t now_tick) {
 	int32_t px = static_cast<int32_t>(ctx.config.spawn_x);
 	int32_t py = static_cast<int32_t>(ctx.config.spawn_y);
 	int32_t pz = static_cast<int32_t>(ctx.config.spawn_z);
 	int16_t yaw = 0;
+	uint8_t recipient_team = 0;
 	// Prefer the joiner's live spawned pool-0 entity (bound by Server_ProcessPendingPlayerSpawns before
 	// the burst); fall back to the host-advertised spawn from the session config.
 	if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
@@ -161,6 +184,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			// heading (90 - mission_yaw); matches snapshot_of / pose_for_conn (D-NET-86).
 			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 			yaw = static_cast<int16_t>((static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			recipient_team = e->team;
 		}
 	}
 	std::vector<uint8_t> b;
@@ -176,28 +200,52 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			ctx.world != nullptr && world::world_has_spawn_zone(*ctx.world);
 	b.push_back(has_spawn_zones ? 0x01 : 0x00);  // gameFlags bit0 = spawn zones exist
 	                                             // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
-	// The fixed 128-i32 block is the per-slot-type SCORE table (client outTable @0xB75FE8;
-	// readers Entity_GetScoreValueBySlotType / WeaponSlot_*), NOT zone data — zeros are the
-	// fresh-round values and benign for the deploy picker (§5.29 correction, witness 2026-07-03).
-	for (int i = 0; i < 128; ++i) put_u32(b, 0);
-	put_u16(b, 0);                                // pool3Count = 0 (player+354 != 1 path)
+	// The fixed 128-i32 block is the authority player's per-ammo-class pool
+	// table (serverPlayer+88664 -> client g_localAmmoPools @0xB75FE8), retained
+	// when this connection's C2S 0x2F loadout is accepted.
+	for (int32_t value : conn.reply.slot_type_scores)
+		put_u32(b, static_cast<uint32_t>(value));
+	// The waypoint body is present only for the witnessed waypoint gametype and
+	// a blue/team-1 recipient. Promotion retains the first BlueTeam route in
+	// World::waypoints; each entry's node is the corresponding pool-3 marker
+	// index, so its wire handle is 0x3000|node. [orig @0x502e41..0x502edb]
+	const bool waypoint_gametype =
+			(ctx.config.game_type & 0xFFFDFFFFu) == 0x00010020u;
+	std::vector<const world::WaypointEntry *> waypoints;
+	if (waypoint_gametype && recipient_team == 1 && ctx.world != nullptr) {
+		waypoints.reserve(std::min<std::size_t>(
+				ctx.world->waypoints.entries.size(), 128));
+		for (const world::WaypointEntry &entry : ctx.world->waypoints.entries) {
+			if (waypoints.size() >= 128) break;
+			if (entry.node < 0 || entry.node > 0x0FFF) continue;
+			waypoints.push_back(&entry);
+		}
+	}
+	put_u16(b, static_cast<uint16_t>(waypoints.size()));
+	for (const world::WaypointEntry *entry : waypoints) {
+		put_u16(b, static_cast<uint16_t>(0x3000u | entry->node));
+		put_u16(b, static_cast<uint16_t>(entry->name_id));
+		b.push_back(0);
+	}
 	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +
 	// cstrings from g_location_names (64-B stride), registered at BMS spawn of def-type 2044
 	// markers in spawn order (Entity_SpawnFromBMSRecord @0x40f182-0x40f221; the text is the
 	// mission's Locations/LOCATION%03i string, fallback = the key string)]. The client's 0x0F
 	// handler overwrites its LOCAL copies — the deploy-map name labels (golden ASH_I5A: 6
-	// names, "North Sea Village".."Katulus' Mound"). Our registry carries the 2044 markers'
-	// key strings in promotion (= spawn) order; the mission-text resolution is the client's
-	// own local lookup, so key strings are what a retail host with no text table would send.
-	std::vector<std::string> location_names;
-	if (ctx.world != nullptr) {
+	// names, "North Sea Village".."Katulus' Mound"). The host shell supplies resolved
+	// MissionText values; tests/tools without that table fall back to registry marker labels.
+	std::vector<std::string> location_names = ctx.mission_location_names;
+	if (location_names.empty() && ctx.world != nullptr) {
 		ctx.world->registry.for_each([&](const world::Entity &e) {
 			if (e.handle.pool() != 3 || e.item_id != 2044) return;
 			location_names.push_back(e.name);
 		});
 	}
-	put_u16(b, static_cast<uint16_t>(location_names.size()));
-	for (const std::string &n : location_names) {
+	const std::size_t location_count = std::min<std::size_t>(
+			location_names.size(), 0xFFFFu);
+	put_u16(b, static_cast<uint16_t>(location_count));
+	for (std::size_t i = 0; i < location_count; ++i) {
+		const std::string &n = location_names[i];
 		for (char ch : n) b.push_back(static_cast<uint8_t>(ch));
 		b.push_back(0);
 	}
@@ -274,7 +322,31 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	bool is_world_batch = false;
 	bool world_pool_done = true; // false when a world-stream pool was paused mid-pool (budget hit)
 
-	if (b.sync_state == 2) {
+	if (b.sync_state == 2 && b.player_sync_subphase == 16) {
+		// Retail treats subphase 16 as one atomic player-sync tail, even though
+		// it contains five semantic records. The 00TRg oracle carries exactly
+		// [0x1C,0x0B,0x66,0x76,0x11] in one 0x83 boundary after the sixth 0x2A.
+		// Do not let the remote one-message pacing budget split this bundle.
+		step.messages.push_back(InitialStateMessage{s2c::NOOP, {}});
+		if (ctx.mission != nullptr) {
+			std::vector<uint8_t> body;
+			std::string err;
+			if (bms::encode_loaded_header_blob(*ctx.mission, body, err))
+				step.messages.push_back(
+						InitialStateMessage{s2c::BMS_HEADER, std::move(body)});
+			else
+				log_deferred_once(s2c::BMS_HEADER);
+		} else {
+			log_deferred_once(s2c::BMS_HEADER);
+		}
+		step.messages.push_back(InitialStateMessage{
+				s2c::WEAPON_RESTRICTIONS, serialize_weapon_restrictions(ctx)});
+		step.messages.push_back(InitialStateMessage{
+				s2c::CLASS_ALLOW_MASK, serialize_class_allow_mask(ctx.config.class_allow_mask)});
+		step.messages.push_back(
+				InitialStateMessage{s2c::DISCONNECT_UNLOCK, {}});
+		b.player_sync_subphase = 20;
+	} else if (b.sync_state == 2) {
 		// Player-sync track: one tag per subphase (8..20), then -> world-stream.
 		switch (b.player_sync_subphase) {
 		case 8:  tag = s2c::MISSION_MAP_NAMES; action = Action::EmitBody; break;  // NetPacket_WriteServerNameAndMapFile @0x505780
@@ -282,9 +354,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		case 10: case 11: case 12: case 13: case 14: case 15:
 		         tag = s2c::CHAT_HISTORY; action = Action::EmitBody; break;  // NetPacket_CopyTenBytes @0x503900 (×6, table @0x82F1D8)
 		case 16: tag = s2c::NOOP; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x1C empty payload]
-		case 17: tag = s2c::BMS_HEADER; action = Action::EmitBody; break;  // bms::encode_header_blob (§5.4, 616 B)
+		case 17: tag = s2c::BMS_HEADER; action = Action::EmitBody; break;  // exact loaded BMS header (§5.4, 616 B)
 		case 18: tag = s2c::WEAPON_RESTRICTIONS; action = Action::EmitBody; break;  // NetPacket_SerializeWeaponRestrictionTable @0x5102c0
-		case 19: tag = s2c::SERVER_TICK16; action = Action::EmitBody; break;  // NetPacket_WriteServerTick16 @0x510350
+		case 19: tag = s2c::CLASS_ALLOW_MASK; action = Action::EmitBody; break;  // NetPacket_WriteClassAllowMask @0x510350
 		case 20: tag = s2c::DISCONNECT_UNLOCK; action = Action::EmitEmpty; break; // [§5.2a ≥16: 0x11 empty payload, LAST of the §5.5 bundle]
 		default: break;
 		}
@@ -410,7 +482,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 6: break; // 0x7E briefing text — deferred (no MissionText wired)
+		case 6:
+			// The original phase is conditional on a loaded MissionText resource. A
+			// valid table may contain empty strings, so use the explicit loaded bit
+			// rather than treating an empty value as absence.
+			if (ctx.mission_text_loaded) {
+				tag = s2c::SERVER_CONFIG_STRINGS;
+				action = Action::EmitBody;
+			}
+			break;
 		case 7: tag = s2c::WAIT_FOR_GAME_START_ACK; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
 		case 8: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
 			// Without it a retail joiner world-loads but stays undeployed (floods C2S 0x0f, "stuck at 7%").
@@ -420,7 +500,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// spawned), so it is not re-emitted in the bundle. [§5.29 / §5.43 / D-NET-114]
 			std::vector<uint8_t> wsl = serialize_world_state_load(ctx, conn, now_tick);
 			const std::size_t wsl_sz = wsl.size();
-			step.messages.push_back(InitialStateMessage{0x42, {0x00, 0x00}}); // input-state-flags=0x0000 [NetPacket_WriteInputStateFlags @0x505ba0]
+			step.messages.push_back(InitialStateMessage{
+					0x42, {0x00, 0x00}, /*reliable=*/false}); // [Server_OnPlayerJoin send @0x51A81F userParam=1]
 			step.messages.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
 			step.messages.push_back(InitialStateMessage{0x4D, {static_cast<uint8_t>(conn.reply.player_slot)}}); // player-index [NapiNPClientMsg_0x04D @0x4317B0]
 			// The join tick seed is PER PLAYER, re-rolled per connection — the client
@@ -454,7 +535,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		if (tag == s2c::BMS_HEADER) {
 			if (ctx.mission != nullptr) {
 				std::string err;
-				if (!bms::encode_header_blob(*ctx.mission, body, err)) {
+				if (!bms::encode_loaded_header_blob(*ctx.mission, body, err)) {
 					log_deferred_once(tag); // could not build faithfully -> skip rather than invent
 					body.clear();
 					action = Action::SkipSilent;
@@ -471,10 +552,12 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			body.assign(k0x2aRecord.begin(), k0x2aRecord.end());
 		} else if (tag == s2c::WEAPON_RESTRICTIONS) {
 			body = serialize_weapon_restrictions(ctx);
-		} else if (tag == s2c::SERVER_TICK16) {
-			body = serialize_server_tick16(now_tick);
+		} else if (tag == s2c::CLASS_ALLOW_MASK) {
+			body = serialize_class_allow_mask(ctx.config.class_allow_mask);
 		} else if (tag == s2c::WAIT_FOR_GAME_START_ACK) {
 			body = serialize_timestamp(now_tick);
+		} else if (tag == s2c::SERVER_CONFIG_STRINGS) {
+			body = serialize_briefing_text(ctx);
 		}
 		if (action == Action::EmitBody) step.messages.push_back(InitialStateMessage{tag, std::move(body)});
 		break;
@@ -527,6 +610,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 
 } // namespace
 
+uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
+	return build_server_config_flags_impl(ctx);
+}
+
 // [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick) {
@@ -554,6 +641,8 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// client to pace for) via a large budget.
 	// Phase 7→8 loadout gate (golden f316-318): after 0x1A (phase 7) the host WAITS for the client's
 	// C2S 0x2F before the game-start bundle (phase 8); type-2 loopback bypasses it.
+	// Most remote phases produce one record per eligible boundary. The witnessed
+	// player-sync tail (subphase 16) and game-start bundle are atomic exceptions.
 	constexpr std::size_t kPacedMsgsPerTick = 1; // ~1 datagram/host-frame; golden is ~0.4 batch/frame
 	const bool is_remote = (conn.type == 1);
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced

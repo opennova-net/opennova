@@ -65,7 +65,8 @@ Gotchas:
   `libs/novaworld` for matchmaking — sockets and signals here, protocol and
   crypto in `libs/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
-- Two net render paths coexist by design: the NovaNetClient replay/spectate path
-  (`world/net_world_view.gd` / `net_event_view.gd`) and the NovaWorldClient/NovaSimulation
-  listen-server path (`world/wire_present_pass.gd`) — ADR 0009/0011/0013. Don't unify
-  them casually.
+- Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
+  `ClientReplicaPipeline` owns `ClientState`, and `world/wire_present_pass.gd`
+  renders it for live joiners and replay/spectate. `NovaNetClient` may add
+  `ReplicaHistory`; it must not grow another entity reducer or presenter.
+  `NovaWorldClient` is matchmaking/handoff, not a gameplay-replication stack.

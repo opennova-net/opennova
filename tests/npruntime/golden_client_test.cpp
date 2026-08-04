@@ -15,7 +15,7 @@
 //   the decoded body, which IS the runtime's per-frame payload).
 //
 //   (S2C) "decoded ClientState matches" — fold the capture's whole S2C 0x0A stream through
-//   NetClientView and cross-check the first 0x0A's UNCOMPRESSED anchor (read by decode_frame_update)
+//   ClientReplicaPipeline and cross-check the first 0x0A's UNCOMPRESSED anchor (read by decode_frame_update)
 //   against the world-stream's absolute spawn positions (decoded by the organic/pool/static batch
 //   decoders, a DIFFERENT code path) folded into the ClientState. Non-circular: the local player's
 //   spawn from the world stream must coincide with the first-frame anchor.
@@ -29,7 +29,7 @@
 #include <npruntime/client_runtime.h>
 
 #include <netsim/entity_wire_bridge.h> // class_for_type_id
-#include <netsim/net_client_view.h>
+#include <netsim/client_replica_pipeline.h>
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
@@ -269,7 +269,7 @@ int main() {
 	}
 	const std::vector<InGameMessage> msgs = decode_capture_to_messages(caps);
 
-	ns::NetClientView view([](uint16_t tid) { return ns::class_for_type_id(tid); });
+	ns::ClientReplicaPipeline view([](uint16_t tid) { return ns::class_for_type_id(tid); });
 	int s2c_0a = 0;
 	bool anchor_checked = false;
 	double anchor_best = std::numeric_limits<double>::infinity();
@@ -304,7 +304,7 @@ int main() {
 
 	if (s2c_0a > 0) {
 		if (!expect(view.state().frames_applied == static_cast<std::uint32_t>(s2c_0a),
-		            "NetClientView folded every S2C 0x0A (no silent drops)")) return 1;
+		            "ClientReplicaPipeline folded every S2C 0x0A (no silent drops)")) return 1;
 		if (!expect(!view.state().entities.empty(),
 		            "the world-stream + 0x0A populated the ClientState")) return 1;
 		if (anchor_checked) {

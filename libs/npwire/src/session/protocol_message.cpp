@@ -3,6 +3,7 @@
 #include <novacrypto/nwu.h>
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace opennova {
@@ -21,6 +22,25 @@ void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
 	out.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
 	out.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
 	out.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+}
+
+void prune_expired_session_messages(SessionSequencing &seq) {
+	for (auto packet = seq.retained_outbound.begin();
+	     packet != seq.retained_outbound.end();) {
+		auto &messages = packet->second;
+		const size_t before = messages.size();
+		messages.erase(std::remove_if(messages.begin(), messages.end(),
+				[&](const ProtocolMessage &message) {
+					return message.retention_flushes != 0 &&
+							seq.send_flush_counter >=
+									message.retention_deadline_flush;
+				}), messages.end());
+		seq.retained_outbound_message_count -= before - messages.size();
+		if (messages.empty())
+			packet = seq.retained_outbound.erase(packet);
+		else
+			++packet;
+	}
 }
 
 // Witnessed at NapiNPConnection_ParseMessages @ 0x625BC0 body branches
@@ -267,28 +287,59 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                           const std::vector<ProtocolMessage> &messages,
                           std::vector<uint8_t> &body_out) {
-	const bool retain = seq.outbound_message_limit != 0 && !messages.empty();
-	if (retain &&
-	    (seq.retained_outbound_message_count > seq.outbound_message_limit ||
-	     messages.size() > seq.outbound_message_limit -
-	             seq.retained_outbound_message_count)) {
+	const size_t reliable_count = static_cast<size_t>(std::count_if(
+			messages.begin(), messages.end(),
+			[](const ProtocolMessage &message) { return message.reliable; }));
+	const size_t transient_count = messages.size() - reliable_count;
+	const size_t charged_count = static_cast<size_t>(std::count_if(
+			messages.begin(), messages.end(),
+			[](const ProtocolMessage &message) {
+				return !message.capacity_exempt;
+			}));
+	const bool retain = seq.outbound_message_limit != 0 && reliable_count != 0;
+	if (session_outbound_message_prefix_count(seq, charged_count) !=
+			charged_count) {
 		body_out.clear();
 		return false;
 	}
 
 	ProtocolPacketHeader hdr;
 	hdr.session_id = crypto.session_id;
-	hdr.seq_num = seq.next_outbound_seq++; // post-increment: the pre-increment value is stamped
+	hdr.seq_num = seq.next_outbound_seq++; // retail assigns before the inner encode
 	hdr.ack_count = seq.last_inbound_seq;
 	hdr.connection_flags = 0; // always 0 on every witnessed encode site
 	if (!encode_protocol_packet_plaintext(hdr, messages, crypto.out_scrk, body_out)) {
 		return false;
 	}
 	if (retain) {
-		seq.retained_outbound[hdr.seq_num] = messages;
-		seq.retained_outbound_message_count += messages.size();
+		std::vector<ProtocolMessage> reliable_messages;
+		reliable_messages.reserve(reliable_count);
+		for (const ProtocolMessage &message : messages) {
+			if (!message.reliable) continue;
+			ProtocolMessage retained = message;
+			if (retained.retention_flushes != 0) {
+				retained.retention_deadline_flush =
+						seq.send_flush_counter + retained.retention_flushes - 1u;
+			}
+			reliable_messages.push_back(std::move(retained));
+		}
+		seq.retained_outbound[hdr.seq_num] = std::move(reliable_messages);
+		seq.retained_outbound_message_count += reliable_count;
 	}
+	seq.transient_outbound_message_count += transient_count;
 	return true;
+}
+
+size_t session_outbound_message_prefix_count(
+		const SessionSequencing &seq, size_t requested_count) {
+	if (seq.outbound_message_limit == 0) return requested_count;
+	const size_t retained = seq.retained_outbound_message_count;
+	const size_t transient = seq.transient_outbound_message_count;
+	if (retained >= seq.outbound_message_limit ||
+			transient >= seq.outbound_message_limit - retained)
+		return 0;
+	return std::min(requested_count,
+			seq.outbound_message_limit - retained - transient);
 }
 
 bool frame_session_packet_for_sequence(SessionSequencing &seq, const SessionCrypto &crypto,
@@ -321,6 +372,16 @@ void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence) 
 		seq.retained_outbound_message_count -= retained->second.size();
 		retained = seq.retained_outbound.erase(retained);
 	}
+}
+
+void complete_session_send_flush(SessionSequencing &seq) {
+	// Exact retail order: packet construction has already stamped the current
+	// counter; pruning sees that same value, then PumpFlags advances it once.
+	// A lifetime of 1 therefore disappears after its first send. A lifetime of
+	// 310 stamped at C survives through C+308 and is removed at C+309.
+	prune_expired_session_messages(seq);
+	seq.transient_outbound_message_count = 0;
+	++seq.send_flush_counter;
 }
 
 std::vector<uint32_t> build_session_missing_sequence_list(

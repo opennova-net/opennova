@@ -11,10 +11,20 @@ namespace opennova::netsim {
 struct Datagram {
 	uint8_t tag = 0;
 	std::vector<uint8_t> body;
+	// Semantic send-queue metadata only; identity/raw framing does not encode it.
+	bool reliable = true;
+	// Exact inner ProtocolMessage flags selected by a semantic producer. Zero
+	// lets the owner choose LEN8/LEN16 normally. A high-table record such as the
+	// retail connection-description punt carries 0xA0 here so it cannot be
+	// mistaken for ordinary low tag 0x03 while crossing the owner boundary.
+	uint8_t protocol_flags_raw = 0;
+	// Owner-side message-pool exemption. This survives semantic transport queues
+	// but is never represented by identity framing or ProtocolMessage wire bits.
+	bool capacity_exempt = false;
 };
 
 // The byte transport between the authoritative host and one client, abstracted so the
-// in-match net core (the connection-fan primitives / NetClientView / SerializingSink) stays
+// in-match net core (the connection-fan primitives / ClientReplicaPipeline / SerializingSink) stays
 // transport-agnostic. The host's own local client is a LoopbackChannel — the witnessed
 // socketless transport mode 1; a remote LAN/MP peer is a UDP-backed transport of the
 // SAME shape (modes 2/3/4) [orig: CNapiNetwork_SetTransportMode @ 0x4c8750;
@@ -25,8 +35,13 @@ class ISessionTransport {
 public:
 	virtual ~ISessionTransport() = default;
 
-	// host -> client (server replication frames).
-	virtual void host_send(uint8_t tag, std::vector<uint8_t> body) = 0;
+	// host -> client (server replication frames). `reliable=false` mirrors a
+	// retail NapiNPMessage with userParam1=1: it is sent once, then pruned before
+	// a later NACK can reconstruct the packet sequence.
+	virtual void host_send(
+			uint8_t tag, std::vector<uint8_t> body, bool reliable = true,
+			uint8_t protocol_flags_raw = 0,
+			bool capacity_exempt = false) = 0;
 	// client -> host (the C2S 0x0C input uplink).
 	virtual void client_send(uint8_t tag, std::vector<uint8_t> body) = 0;
 

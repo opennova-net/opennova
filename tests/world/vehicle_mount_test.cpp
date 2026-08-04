@@ -12,6 +12,7 @@
 #include "world/entity.h"
 #include "world/player_spawn.h"
 #include "world/vehicle_attach.h"
+#include "world/vehicle_mount.h"
 #include "world/vehicle_motor.h"
 #include "world/world.h"
 
@@ -209,6 +210,72 @@ void test_usegun_attach_presnaps_local_look() {
     CHECK(body.inf.body_heading == (90 - expected_yaw) * 11930464);
 }
 
+// A remote player's LOOK is still independent in either vehicle-control seat.
+// The authority motor consumes Entity::yaw as the mouse-steer target, while the
+// carried body frame remains owned by the seat. The post-motor refresh must keep
+// that split intact for the outgoing snapshot and the next authority tick.
+void test_remote_player_control_seat_preserves_wire_look() {
+    const SeatType control_types[] = {SeatType::Driver, SeatType::Controller};
+    for (const SeatType control_type : control_types) {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 4);
+
+        Entity vehicle;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {10.0f, 20.0f, 30.0f};
+        vehicle.yaw = 0;
+        vehicle.health = 100;
+        vehicle.alive = true;
+        Seat seat;
+        seat.type = control_type;
+        seat.bone_index = 1;
+        seat.seat_local = {1.0f, 2.0f, 3.0f};
+        vehicle.seats.push_back(seat);
+        const EntityHandle vehicle_h = w.registry.spawn(1, vehicle);
+
+        Entity player;
+        player.kind = EntityKind::Organic;
+        player.player_class = 8;
+        player.health = 100;
+        player.alive = true;
+        const EntityHandle player_h = w.registry.spawn(0, player);
+        const int ai_index = ai.attach(player_h);
+        AiEntity &body = *ai.at(ai_index);
+        body.inf.active = true;
+        body.net_is_remote_peer = true;
+
+        CHECK(entity_process_vehicle_attach(w, player_h, vehicle_h, 1));
+
+        const int32_t look_heading = bam_heading_from_mission_yaw_deg(45.0);
+        constexpr int32_t look_pitch = 0x06000000;
+        body.heading = look_heading;
+        body.pitch = look_pitch;
+        w.registry.get(player_h)->yaw = 45;
+
+        CHECK(ai.pose_if_mounted(body, w));
+        CHECK(body.heading == look_heading);
+        CHECK(body.pitch == look_pitch);
+        CHECK(w.registry.get(player_h)->yaw == 45);
+        CHECK(body.inf.body_heading == 90 * 11930464);
+
+        Entity *live_vehicle = w.registry.get(vehicle_h);
+        live_vehicle->position = {40.0f, 50.0f, 60.0f};
+        live_vehicle->yaw = 20;
+        CHECK(ai.refresh_mounted_pose(body, w));
+        CHECK(body.heading == look_heading);
+        CHECK(body.pitch == look_pitch);
+        CHECK(w.registry.get(player_h)->yaw == 45);
+        CHECK(body.inf.body_heading == 70 * 11930464);
+        const Entity *mounted = w.registry.get(player_h);
+        CHECK(body.pos[0] == to_fixed(mounted->position.x));
+        CHECK(body.pos[1] == to_fixed(mounted->position.y));
+        CHECK(body.pos[2] == to_fixed(mounted->position.z));
+    }
+}
+
 // A model-aware host supplies the complete live seat-bone frame at the shared
 // World seam. Every attach entry point consumes it immediately, and mounted AI
 // consumes a newly evaluated frame on its next tick. A missing/declining host
@@ -378,6 +445,26 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         CHECK(body->body_pitch == bam_from_degrees_wrapped(21.0));
         CHECK(body->roll == bam_from_degrees_wrapped(-30.0));
 
+        // A post-carrier refresh reevaluates the seat pose exactly once at the
+        // already-chased LOOK. It must not run the full mounted-body phase again:
+        // doing so would chase aim a second time and clear animation state.
+        provider.clear();
+        body->inf.anim_pending = 77;
+        body->inf.move_mode = 9;
+        body->inf.target_dist = 1234;
+        CHECK(ai.refresh_mounted_pose(*body, w));
+        CHECK(provider.headings.size() == 1);
+        CHECK(provider.pitches.size() == 1);
+        if (provider.headings.size() == 1) {
+            CHECK(provider.headings[0] == kChasedHeading);
+            CHECK(provider.pitches[0] == kChasedPitch);
+        }
+        CHECK(body->heading == kChasedHeading);
+        CHECK(body->pitch == kChasedPitch);
+        CHECK(body->inf.anim_pending == 77);
+        CHECK(body->inf.move_mode == 9);
+        CHECK(body->inf.target_dist == 1234);
+
         provider.clear();
         body->inf.is_local_player = true;
         body->inf.target_heading = 0x03000000;
@@ -393,6 +480,28 @@ void test_live_mounted_pose_provider_and_static_fallback() {
         CHECK(body->pitch == 0x02000000);
         CHECK(std::abs(w.registry.get(occupant_h)->position.x - 3.0f) < 0.0001f);
         CHECK(std::abs(w.registry.get(occupant_h)->position.y - 2.0f) < 0.0001f);
+
+        // Likewise, the local post-prediction pose pass preserves the promoted
+        // LOOK and wire/input state instead of consuming a newer input latch.
+        provider.clear();
+        body->inf.target_heading = 0x09000000;
+        body->inf.look_pitch = 0x07000000;
+        body->inf.jump_requested = true;
+        Entity *mounted_local = w.registry.get(occupant_h);
+        mounted_local->net_move_input = 0x5Au;
+        mounted_local->net_stance_bits = 0x03u;
+        CHECK(ai.refresh_mounted_pose(*body, w));
+        CHECK(provider.headings.size() == 1);
+        CHECK(provider.pitches.size() == 1);
+        if (provider.headings.size() == 1) {
+            CHECK(provider.headings[0] == 0x03000000);
+            CHECK(provider.pitches[0] == 0x02000000);
+        }
+        CHECK(body->heading == 0x03000000);
+        CHECK(body->pitch == 0x02000000);
+        CHECK(body->inf.jump_requested);
+        CHECK(mounted_local->net_move_input == 0x5Au);
+        CHECK(mounted_local->net_stance_bits == 0x03u);
     }
 
     // Null and declining providers both preserve the known static fallback.
@@ -768,6 +877,107 @@ void test_bms_mount_predicates() {
     CHECK(r.player().equipped_adm_index == 7);
     CHECK(!r.player().use_gun_slot_swapped);
     CHECK(!r.w.registry.get(gh)->primary_weapon_owner.valid());
+}
+
+// Retail's shared EWeap slot resolver uses the live MountSlot+0x5e bit 8 to
+// choose between an addeweap child's embedded slot and its groundEntity
+// carrier's vehicle slot. The authored G/C flags are capabilities, not this
+// mutable route bit. [orig: shared helper @0x5460e0; phase-8 writer @0x4ffe18]
+void test_mounted_ammo_slot_route() {
+    World w;
+    w.registry.configure_pool(1, 8);
+
+    // Retail gates on the item definition and the EWeap attrib before ANY
+    // slot resolution — an entity without traits resolves nothing, even on
+    // the unredirected route [orig: @0x5460E0 / writer gate @0x4FFE0B].
+    Entity ungated;
+    ungated.primary_weapon_slot_adm = 3;
+    CHECK(resolve_mounted_ammo_slot(w, ungated) == nullptr);
+
+    // With the witnessed gate satisfied, the unredirected route is the
+    // entity's own embedded MountSlot; the cross-entity route remains closed
+    // until the strict EWeap relationship proof is present.
+    Entity direct_only;
+    direct_only.primary_weapon_slot_adm = 3;
+    direct_only.has_item_def = true;
+    direct_only.item_attrib = kItemAttribEweap;
+    CHECK(resolve_mounted_ammo_slot(w, direct_only) ==
+          &direct_only.primary_weapon_slot);
+    direct_only.primary_weapon_slot.redirect_to_parent_slot = true;
+    CHECK(resolve_mounted_ammo_slot(w, direct_only) == nullptr);
+
+    Entity parent;
+    parent.kind = EntityKind::Item;
+    parent.has_item_def = true;
+    parent.item_type = 1;
+    parent.item_attrib = kItemAttribEweap;
+    parent.primary_weapon_slot.clip = 41;
+    const EntityHandle parent_h = w.registry.spawn(1, parent);
+    const uint64_t parent_spawn_id =
+            w.registry.get(parent_h)->registry_spawn_id;
+
+    Entity child;
+    child.kind = EntityKind::Item;
+    child.has_item_def = true;
+    child.item_type = 2;
+    child.item_attrib = kItemAttribEweap;
+    child.emplacement_attachment_flags = 0x02; // designated G capability
+    child.emplacement_parent = parent_h;
+    child.emplacement_parent_spawn_id = parent_spawn_id;
+    child.ground_target = parent_h;
+    child.primary_weapon_slot.clip = 7;
+    const EntityHandle child_h = w.registry.spawn(1, child);
+    Entity *live_child = w.registry.get(child_h);
+
+    CHECK(resolve_mounted_ammo_slot(w, *live_child) ==
+          &live_child->primary_weapon_slot);
+    live_child->primary_weapon_slot.redirect_to_parent_slot = true;
+    CHECK(resolve_mounted_ammo_slot(w, *live_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
+    const World &const_world = w;
+    const Entity &const_child = *w.registry.get(child_h);
+    CHECK(resolve_mounted_ammo_slot(const_world, const_child) ==
+          &w.registry.get(parent_h)->primary_weapon_slot);
+
+    // The similarly named attachment pointer is not a substitute for retail's
+    // groundEntity relationship.
+    live_child->ground_target = EntityHandle{};
+    CHECK(resolve_mounted_ammo_slot(w, *live_child) == nullptr);
+    live_child->ground_target = parent_h;
+
+    // A packed handle may be reused. The child-side generation captured when
+    // the relationship was authored must reject the replacement lifetime.
+    w.registry.despawn(parent_h);
+    Entity replacement = parent;
+    CHECK(w.registry.spawn_at(parent_h, replacement) == parent_h);
+    CHECK(resolve_mounted_ammo_slot(w, *live_child) == nullptr);
+}
+
+void test_prepare_vehicle_weapon_slot_after_armory_load() {
+    World w;
+    w.weapons.entries.resize(4);
+    WeaponTableEntry &weapon = w.weapons.entries[3];
+    weapon.name = "WPN_LATE_MOUNT";
+    weapon.clipsize = 12;
+    weapon.startrounds = 41;
+    weapon.valid = true;
+
+    Entity mount;
+    mount.primary_weapon = weapon.name;
+    CHECK(vehicle_prepare_weapon_slot(w, mount));
+    CHECK(mount.primary_weapon_slot_adm == 3);
+    CHECK(mount.primary_weapon_slot.clip == 12);
+    CHECK(mount.primary_weapon_slot.reserve == 29);
+
+    // Preparing an already-live slot is idempotent: a later route edge must
+    // never refund cartridges spent since the first armory resolution.
+    mount.primary_weapon_slot.clip = 7;
+    mount.primary_weapon_slot.reserve = 23;
+    mount.primary_weapon_slot.redirect_to_parent_slot = true;
+    CHECK(vehicle_prepare_weapon_slot(w, mount));
+    CHECK(mount.primary_weapon_slot.clip == 7);
+    CHECK(mount.primary_weapon_slot.reserve == 23);
+    CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
 }
 
 // The AI-driver leg: an NPC in the ctrl seat + a staged brain waypoint drives the truck
@@ -1380,6 +1590,7 @@ void test_vehicle_hull_stops_at_building() {
 
 int main() {
     test_usegun_attach_presnaps_local_look();
+    test_remote_player_control_seat_preserves_wire_look();
     test_live_mounted_pose_provider_and_static_fallback();
     test_toggle_nearest_seat();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
@@ -1389,6 +1600,8 @@ int main() {
     test_toggle_dismount_and_swap();
     test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
+    test_mounted_ammo_slot_route();
+    test_prepare_vehicle_weapon_slot_after_armory_load();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();
     test_redirect_and_speed_commands();

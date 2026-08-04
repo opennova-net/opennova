@@ -199,10 +199,10 @@ func _on_host_start() -> void:
 	lan_host_start_requested.emit(_read_host_config())
 
 
-# Read the co-op-minimal host request off the built tree by control name. Unread controls
-# (rules tab, weapon restrictions, server location) still render; co-op forces COOP — the
-# record's game_type default is the witnessed retail Co-op g_GameType
-# (HostSessionConfig.GAME_TYPE_COOP), as is the LAN bind port default.
+# Read the host request off the built tree by control name. Unread controls
+# (rules tab, weapon restrictions, server location) still render. MissionRuntime
+# derives the wire game type from the selected mission; the record's Co-op value
+# remains the fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:
 	var config := HostSessionConfig.new()
 	var server_name := _edit_text("GAME_NAME", "")
@@ -214,6 +214,9 @@ func _read_host_config() -> HostSessionConfig:
 	if config.missions.size() > 0:
 		config.mission = config.missions[0]
 	config.game_type_attr = _spin_attr("GAME_TYPE", "")
+	# The selected mission metadata owns retail g_GameType. The GAME_TYPE widget
+	# filters that mission choice; it is not itself the numeric wire bitfield.
+	config.game_type_auto = true
 	# Retail's game-name field is the expansion currently mounted by the game,
 	# and is empty for the base game. Never substitute a captured expansion id.
 	config.expansion = _root.get_expansion() if _root != null else ""

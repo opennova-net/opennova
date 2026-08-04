@@ -2,6 +2,7 @@
 // Used for mission files (.bms) in Delta Force and related games.
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -775,6 +776,19 @@ struct File {
     std::string get_mission_name() const;
     std::string get_designer() const;
     std::string get_terrain() const;
+
+private:
+    // Parse-time provenance for retail's network-header memcpy. The canonical
+    // projection is an edit guard: direct public-field mutations automatically
+    // make encode_loaded_header_blob() fall back to freshly encoded bytes.
+    // Canonical write() output and value equality deliberately ignore both.
+    std::array<uint8_t, kHeaderSize> loaded_header_blob_{};
+    std::array<uint8_t, kHeaderSize> loaded_header_projection_{};
+    bool has_loaded_header_blob_ = false;
+
+    friend bool parse(const uint8_t* data, size_t size, File& out, std::string& error);
+    friend bool encode_loaded_header_blob(
+        const File& file, std::vector<uint8_t>& out, std::string& error);
 };
 
 // ============================================================================
@@ -784,15 +798,27 @@ struct File {
 // Parse a BMS file from a byte buffer.
 bool parse(const uint8_t* data, size_t size, File& out, std::string& error);
 
+// Parse the exact 0x268-byte header retail copies into S2C 0x0B. This is a
+// metadata-only seam for a joining client: no local BMS body is implied or
+// synthesized, and callers must keep treating the resulting Header as the
+// host's wire view rather than a complete mission file.
+bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::string& error);
+
 // Parse a BMS file from disk.
 bool parse_file(const std::string& path, File& out, std::string& error);
 
 // Write a BMS file to a byte buffer.
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
 
-// Write only the canonical 616-byte BMS header that the retail game-session
-// loader consumes before loading the mission body.
+// Write the canonical 616-byte BMS header used by authored-file output. Chunk
+// lengths are recomputed from the modeled loadout and item-availability data.
 bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error);
+
+// Write the exact 616-byte header captured while parsing a loaded BMS when the
+// current canonical header projection still matches that loaded state. This is
+// the retail S2C 0x0B behavior. Authored or subsequently edited files fall back
+// to encode_header_blob(), so stale loaded bytes can never leak onto the wire.
+bool encode_loaded_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error);
 
 // Write a BMS file to disk.
 bool write_file(const File& file, const std::string& path, std::string& error);

@@ -187,6 +187,11 @@ void OcclusionWorld::assign_entity(EntityHandle h, int32_t model_id, const Entit
     instances_[h.packed] = inst;
 }
 
+void OcclusionWorld::remove_entity_instance(EntityHandle h) {
+    if (!h.valid()) return;
+    instances_.erase(h.packed);
+}
+
 bool OcclusionWorld::has_instance(EntityHandle h) const {
     return instances_.count(h.packed) != 0;
 }

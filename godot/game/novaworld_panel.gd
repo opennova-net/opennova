@@ -367,14 +367,11 @@ func _on_join_pressed() -> void:
 		_client.join(rid)
 
 
-# The NWJoin handshake resolved the host's in-match address. Hand it (with the stashed mission +
-# callsign) up to MainGame, which loads the mission as a co-op JOINER and runs the witnessed in-match
-# join through NovaSimulation (the SAME path the LAN browser / NW_LAN_JOIN env use). The lobby client
-# does not send the in-match ClientHello itself — the joiner runtime owns it.
+# The NWJoin handshake resolved the host's in-match address. Hand it (with the
+# stashed browse-time mission hint + callsign) to MainGame. The in-match runtime
+# authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
+# for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
 func _on_joined_game(host: String, port: int) -> void:
-	if _pending_mission.is_empty():
-		_set_status("Joined %s:%d, but the host's mission is unknown — cannot enter the match." % [host, port])
-		return
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
 	var target := JoinTarget.new()
 	target.host_ip = host

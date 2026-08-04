@@ -22,6 +22,15 @@ struct WeaponTableEntry {
     int16_t clipsize = 1;           // +0x58, engine default 1; -1 = no-clip weapon (knife/medpack)
                                     // [orig: AdmDef_InitEntryDefaults @0x53ff13]
     int16_t startrounds = -1;       // +0x5C, engine default -1 [orig: @0x53ff19]
+    // Emplaced turret articulation limits, degrees. Azimuth is symmetric
+    // +-turret_yaw_range; elevation spans [-turret_pitch_min, +turret_pitch_max].
+    // 0 = not authored (no clamp window). These author the itemDef turret-limit
+    // fallback the per-frame turret clamp reads.
+    // [orig: Entity_GetWeaponTurretLimits fallback @0x540e35..0x540e58;
+    //  clamp consumer Entity_UpdateTransformAndTurret @0x441228..0x44128c]
+    int16_t turret_yaw_range_deg = 0;
+    int16_t turret_pitch_max_deg = 0;
+    int16_t turret_pitch_min_deg = 0;
     int16_t maxclips = 0;           // +0x14C [orig: @0x5440A9]
     uint8_t charfilter = 0;         // +0x7C OR-mask: medic=1 sniper=2 gunner=4 rifleman=8 engineer=0x10
                                     // [orig: @0x543F6E, token table @0x830EB0]
@@ -102,9 +111,9 @@ struct WeaponTableEntry {
     // The resolved ammo-class id for the per-class carried pools. The original resolves
     // the 'ammoclass' name to a byte id at parse (builtins @0x830F10) and keys the pool
     // arrays by it [orig: AdmDef+0xD8; pools g_localAmmoPools @0xB75FE8 / serverPlayer
-    // +88664]. We assign ids by first-appearance registry order at table build — the
-    // arithmetic is identical; only the id VALUES may differ from retail bytes (never
-    // wire-visible; pools are entity-local).
+    // +88664]. The ids share retail's global score-slot namespace: fixed built-ins
+    // occupy 0..10 and weapon.def registrations begin at 11. They are wire-visible
+    // when S2C 0x0F copies the authority player's 128 score-slot values.
     int16_t ammo_class_id = -1;
     // Runtime action descriptors baked from this weapon.def block's ACTION rows.
     // Auto clip durations remain zero until a host with the ADM duration ring rebakes
@@ -124,8 +133,8 @@ struct WeaponTableEntry {
 // [orig: @0x5027c8].
 struct WeaponTable {
     std::vector<WeaponTableEntry> entries;
-    // Ammo-class registry backing WeaponTableEntry::ammo_class_id: names in
-    // first-appearance order, and the per-class carry caps from the top-level
+    // Score-slot registry backing WeaponTableEntry::ammo_class_id: retail's fixed
+    // built-ins followed by first-appearance ammo classes, and the carry caps from
     // `ammoclass_max_carry <class> <n>` weapon.def lines (0 = no cap line; the
     // original defaults the table to 0 and clamps pools against it)
     // [orig: cap table @0x24E7DE0, parse @0x543873; clamp @0x540b26].
@@ -136,7 +145,7 @@ struct WeaponTable {
 
     // Case-insensitive registry lookup; -1 when absent.
     int ammo_class_id_of(const char *name) const {
-        if (name == nullptr || *name == '\0') return -1;
+        if (name == nullptr) return -1;
         for (size_t i = 0; i < ammo_class_names.size(); ++i) {
             const std::string &n = ammo_class_names[i];
             size_t j = 0;

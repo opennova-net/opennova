@@ -45,7 +45,7 @@ target_include_directories(opennova_novaworld_gate
 )
 
 target_link_libraries(opennova_novaworld_gate
-    PUBLIC opennova_io opennova_novacrypto
+    PUBLIC opennova_io opennova_novacrypto opennova_napi
 )
 
 target_compile_features(opennova_novaworld_gate PUBLIC cxx_std_17)

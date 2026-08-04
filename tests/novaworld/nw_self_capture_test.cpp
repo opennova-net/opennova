@@ -161,6 +161,9 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	np::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
+	// The committed fixture pins message coverage, not retail's LAN subrate.
+	// Hold this deterministic script at one send boundary per driven frame.
+	host_cfg.config.send_holdoff_ticks = 1;
 	host_cfg.socket_mode = np::SocketMode::Lan;
 	host_cfg.host_key = 0x0FE0E112u; // deterministic (HostConfig: "deterministic for tests")
 	host_cfg.serve_and_play = false;

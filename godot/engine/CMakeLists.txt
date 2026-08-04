@@ -73,8 +73,10 @@ add_library(${TARGET_NAME} SHARED
     register_types.cpp
     network/nova_world_client.cpp
     network/nova_world_host.cpp
+    network/nova_world_identity.cpp
     network/nwu_lobby_session.cpp
     network/nova_net_client.cpp
+    network/item_replication_catalog_adapter.cpp
     network/nova_udp_pump.cpp
     network/nova_lan_session.cpp
     terrain/nova_terrain.cpp
@@ -129,6 +131,7 @@ add_library(${TARGET_NAME} SHARED
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
+    simulation/client_replica_present_projection.cpp
     simulation/nova_present_applier.cpp
     simulation/nova_present_applier_wire.cpp
     simulation/nova_simulation.cpp
@@ -241,6 +244,10 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_netsim
     opennova_npruntime
 )
+
+if(WIN32)
+    target_link_libraries(${TARGET_NAME} PRIVATE iphlpapi)
+endif()
 
 # The bake worker thread in nova_terrain_build_job.cpp installs
 # _set_se_translator so Windows SEH (access violations, div/0, etc.) surfaces

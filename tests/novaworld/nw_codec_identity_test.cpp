@@ -162,11 +162,11 @@ std::vector<Case> build_corpus() {
 		r.team_byte = 1;
 		r.parent_handle = 0x1033;
 		r.target_handle = 0x2044;
-		r.weapon_mask = 0x05;
-		r.weapon_handles[0] = 0x3001;
-		r.weapon_handles[2] = 0x3002;
-		r.extra_handle_0 = 0x4001;
-		r.extra_handle_1 = 0x4002;
+		r.seat_mask = 0x05;
+		r.mount_handles[0] = 0x3001;
+		r.mount_handles[2] = 0x3002;
+		r.mount_handle_8 = 0x4001;
+		r.mount_handle_9 = 0x4002;
 		r.bone_byte = 2;
 		r.ai_profile_1 = 0x11112222;
 		r.ai_profile_2 = 0x33334444;
@@ -282,7 +282,7 @@ std::vector<Case> build_corpus() {
 		add("round_event_full", encode_round_event_record(r));
 	}
 
-	// §5.9 frame updates: aim sub-block + 3 record classes + hit; env; passenger.
+	// §5.9 frame updates: weapon sub-block + 3 record classes + fired round; env; mounted ammo.
 	{
 		FrameUpdate in;
 		in.anchor_x = 0x00112233; in.anchor_y = int32_t(0xFFAABBCC); in.anchor_z = 0x0044EE55;
@@ -317,9 +317,9 @@ std::vector<Case> build_corpus() {
 		FrameUpdate in;
 		in.flags2 = 0x08;
 		in.mount_handle = 0x1005; in.health = 75;
-		in.passenger.handle = 0x1006;
-		in.passenger.seat_yaw = 0xAA11; in.passenger.seat_pitch = 0xBB22;
-		add("frame_update_passenger", encode_frame_update(in));
+		in.passenger.mount_handle = 0x1006;
+		in.passenger.clip = 0xAA11; in.passenger.reserve = 0xBB22;
+		add("frame_update_mount_ammo", encode_frame_update(in));
 	}
 
 	// §5.37 terrain-tile load — header chunk (56 B) + continuation (28 B).
@@ -459,7 +459,7 @@ const Vector kExpected[] = {
 	{"round_event_full", 20u, 0xd2e48e24792ddda7ull},
 	{"frame_update_aim_records_hit", 119u, 0x349686e3ae154f3dull},
 	{"frame_update_env", 33u, 0x1973cd328c07f6f4ull},
-	{"frame_update_passenger", 39u, 0x85c11fb07e2c99c1ull},
+	{"frame_update_mount_ammo", 39u, 0x85c11fb07e2c99c1ull},
 	{"terrain_load_header_chunk", 56u, 0x6e19dba1c492390dull},
 	{"terrain_load_continuation", 28u, 0x3895c6c422e05dc0ull},
 	{"organic_spawn_empty", 2u, 0x9a691300c548b8fbull},

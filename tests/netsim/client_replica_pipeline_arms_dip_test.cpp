@@ -16,9 +16,9 @@
 //     window is open [orig: @0x4b5cb7 += 0xFD800000, then @0x4b5cc7..0x4b5cd5],
 //   * the ease keeps running once the window closes, so the term returns toward zero.
 //
-// Asset-free and wire-free: it drives NetClientView::tick_arms_dip() directly.
+// Asset-free and wire-free: it drives ClientReplicaPipeline::tick_arms_dip() directly.
 
-#include "netsim/net_client_view.h"
+#include "netsim/client_replica_pipeline.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -34,8 +34,8 @@ bool expect(bool ok, const char *what) {
 }
 
 // A view holding one row of each class, so the person filter can be exercised.
-ns::NetClientView make_view() {
-	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Player; });
+ns::ClientReplicaPipeline make_view() {
+	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
 	ns::ClientEntityState &player = view.state().upsert(0x0001);
 	player.cls = nw::EntityClass::Player;
 	ns::ClientEntityState &infantry = view.state().upsert(0x0002);
@@ -47,7 +47,7 @@ ns::NetClientView make_view() {
 
 
 bool test_window_lasts_forty_ticks() {
-	ns::NetClientView view = make_view();
+	ns::ClientReplicaPipeline view = make_view();
 	view.state().find(0x0001)->arms_dip_ticks = 80;
 
 	for (int tick = 0; tick < 39; ++tick) view.tick_arms_dip();
@@ -68,7 +68,7 @@ bool test_window_lasts_forty_ticks() {
 
 
 bool test_decay_dips_then_recovers() {
-	ns::NetClientView view = make_view();
+	ns::ClientReplicaPipeline view = make_view();
 	view.state().find(0x0001)->arms_dip_ticks = 80;
 
 	// Each open tick subtracts a whole step and then eases by (v+4)>>3, so the term
@@ -96,7 +96,7 @@ bool test_decay_dips_then_recovers() {
 
 
 bool test_only_persons_dip() {
-	ns::NetClientView view = make_view();
+	ns::ClientReplicaPipeline view = make_view();
 	// A stamp on a vehicle row must not integrate — retail's remote branch is gated on
 	// ItemType_Person, for which our decoded rows carry Player/Infantry.
 	view.state().find(0x1003)->arms_dip_ticks = 80;
@@ -115,7 +115,7 @@ bool test_only_persons_dip() {
 
 
 bool test_unstamped_rows_stay_level() {
-	ns::NetClientView view = make_view();
+	ns::ClientReplicaPipeline view = make_view();
 	for (int tick = 0; tick < 50; ++tick) view.tick_arms_dip();
 	// The ease runs unconditionally, but from zero it must stay at zero rather than
 	// drifting on the +4 rounding.
@@ -133,6 +133,6 @@ int main() {
 	ok = test_decay_dips_then_recovers() && ok;
 	ok = test_only_persons_dip() && ok;
 	ok = test_unstamped_rows_stay_level() && ok;
-	if (ok) std::printf("client_view_arms_dip: OK\n");
+	if (ok) std::printf("client_replica_pipeline_arms_dip: OK\n");
 	return ok ? 0 : 1;
 }

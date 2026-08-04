@@ -13,9 +13,9 @@
   "counters": {
     "cpp_binding_console_writes": 0,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 567,
+    "has_method_guards": 566,
     "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 56,
+    "libs_uncited_src_files": 55,
     "oversize_cpp_files": 2,
     "oversize_gd_files": 7,
     "test_private_pokes": 1313
@@ -24,6 +24,7 @@
     "to_drag_data",
     "from_drag_data",
     "selected_weapon",
+    "nova_weather.gd|func get_network_environment_snapshot()",
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()",

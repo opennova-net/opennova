@@ -44,7 +44,7 @@ rebuilds the *runtime* on top of those codecs as one faithful, maintainable core
 - **Keep / build on:** `libs/novacrypto`, `libs/napi`; `libs/novaworld` codecs (`ingame_decode`,
   `ingame_encode`, `protocol_message`, `nw_session_framing`, `session_hello`, `session_keys`,
   `wire_capture`, `replay_timeline`, `serverlog_decode`); the `libs/netsim` seam
-  (`ISessionTransport`, `LoopbackChannel`, `Connection`/`NetSystem`, `NetClientView`/`ClientState`,
+  (`ISessionTransport`, `LoopbackChannel`, `Connection`/`NetSystem`, `ClientReplicaPipeline`/`ClientState`,
   `EntityWireBridge`, `PlayerIntent`) — finish the stubs, don't redesign; `apps/common/pcap_reader`;
   `ClientSession` / `LobbySession`.
 - **Promote (keep proven logic, re-target):** `HostSessionAccept` → `NapiNPProtocol` server
@@ -170,7 +170,7 @@ cursor, every emittable body from real `World`+`bms::File` (ADR 0003, no fixture
 - world-stream track: `0x10 → 0x0D → 0x0C → 0x20 → 0x45 → 0x7E → 0x1A` → game-state 9
 
 The world-stream bodies reuse the proven `entity_wire_bridge` pool extractors (0x0C/0x20) + the empty
-0x10 marker; 0x0B = `bms::encode_header_blob`; 0x1C/0x11 empty. The spawn-gate latches (F3
+0x10 marker; 0x0B = exact loaded header via `bms::encode_loaded_header_blob`; 0x1C/0x11 empty. The spawn-gate latches (F3
 `PeerEnteredWorldStreaming` / `PeerSpawned`) were **re-sourced verbatim** off `conn.burst`; `ctx.world`
 is the path selector (the World-driven burst when wired, else the P2 `game_runtime` GameSessionState
 mirrored onto `conn.burst` — so the P2 unit tests stay value/tick-identical). `game_runtime` is kept
@@ -219,7 +219,7 @@ all `netsim_*` tests stay green).
 owner reframes it onto `conn.link.transport->push_inbound`, the proven path — npruntime has no
 production `PeerC2SInMatch` consumer yet, so an inline apply would be dead code + a P7 double-apply
 trap). The per-frame `0x0A` codec is unchanged: `build_tag_0a_world_reference` already returns
-`encode_frame_update` (the witnessed §5.9 bytes `decode_frame_update`/`NetClientView` round-trip) — the
+`encode_frame_update` (the witnessed §5.9 bytes `decode_frame_update`/`ClientReplicaPipeline` round-trip) — the
 P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. `SerializingSink::send_command`
 stays the structural no-op: the `0x23` entity-command body is unwitnessed and the sink has zero callers
 (faithful-port — never invent bytes; grill `NapiNPServer_SendFiltered` 0x23 then port once a caller exists).
@@ -245,7 +245,7 @@ loopback view (handshake-less, `is_authority`, recv-fold only, `0x0C` suppressed
 > conflated the matchmaking lobby flow with the in-match leg. The IDA witness confirms only HELLO→AUTH→
 > in-match-burst→spawn is the in-match runtime; the lobby legs stay in `ClientSession` (§7.1).
 
-**Seam additions:** `netsim::NetClientView::apply(tag,body)` (the remote-wire fold path; `pump` is the
+**Seam additions:** `netsim::ClientReplicaPipeline::apply(tag,body)` (the remote-wire fold path; `pump` is the
 loopback path — one fold path per role), `netsim::ISessionTransport::deliver_c2s` (uniform C2S
 inbound-inject), `np::apply_in_match_c2s` (the production `PeerC2SInMatch` consumer, D-NET-126), and the
 single `np::is_in_match(conn)` predicate shared by `Server_TickUpdate`'s drain + emit (resolving
@@ -253,7 +253,7 @@ D-NET-121/122 — the host loopback's own per-frame `0x0A`, anchored to its play
 
 Bar met: `npruntime_client_runtime` (always-on) — the full in-process client↔server round-trip
 (handshake → spawn → per-frame `0x0C` → `apply_in_match_c2s` → `Server_TickUpdate` drain/SNAP + `0x0A`
-fan → `NetClientView` fold) + the host-as-client D-NET-121/122 anchor path; `npruntime_golden_client`
+fan → `ClientReplicaPipeline` fold) + the host-as-client D-NET-121/122 anchor path; `npruntime_golden_client`
 (env-gated `NW_GOLDEN_GAMEPLAY`, skip-clean) — the real emission path reproduces the captured retail
 `0x0C` **inner message byte-for-byte** and re-frames the captured 9-message bundle into a **byte-identical
 datagram** (emitted C2S == client-origin), with the S2C `0x0A` fold cross-checked against the
@@ -421,13 +421,17 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 
 - New `ServerRules` (the 0x08 block) + `weapon_restrictions` on `NapiNPServerCtx`; the serializers live
   in `server_initial_state.cpp` (0x2C serverName+mapFile, 0x08 server-config + `build_server_config_flags`
-  @0x4c4dc0, 0x2A const table×6, 0x66 weapon-restrictions, 0x76 server-tick16, 0x1A timestamp).
+  @0x4c4dc0, 0x2A const table×6, 0x66 weapon-restrictions, 0x76 configured class-allow mask,
+  0x1A timestamp).
 - 0x45 terrain-delta + 0x7E briefing are emitted by the original ONLY when present; both `return 0` and
   the orig skips otherwise, so they are faithfully ABSENT on the headless host (not deferrals).
 - IDB hygiene: `WriteTypeNameAndBaseName → NetPacket_WriteServerNameAndMapFile`; `byte_24D1FC4 →
   g_server_name_str`; `baseName → g_map_file_name` (the wire proved serverName+mapFile, not type/base).
-- Tests: `npruntime_initial_state_burst` (full order + per-body byte assertions), `npruntime_golden_lan_join`
-  (retail 0x2A byte-parity + 0x2C/0x08/0x66/0x76 structure-parity). 22/22 net ctest + GDExtension green.
+- Tests: `npruntime_initial_state_burst` (full order + per-body byte assertions, including a
+  non-default configured 0x76), `npruntime_golden_lan_join` (retail 0x2A/0x76 byte-parity +
+  0x2C/0x08/0x66 structure-parity), and `npruntime_client_runtime` (retail-host 0x76 receive plus
+  malformed-body semantics). `JoinerConnection` retains that received u16 for the Godot armory
+  policy seam; focused GUT coverage includes a real-UDP non-default host→joiner transfer.
 
 ## Test harness (built up across phases)
 

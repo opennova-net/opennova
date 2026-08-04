@@ -2,22 +2,21 @@ extends RefCounted
 
 # THE joiner present pass: renders a co-op JOINER's remote entities WIRE-DIRECT.
 #
-# A non-authority client does not own the host's entities, so it cannot resolve them
-# through the local MissionEntityRegistry the way the host listen-server's
-# MissionPresentPass does (the wire handles live in the HOST's handle space). Instead it
-# renders every replicated entity straight from the decoded wire stream — the faithful
-# original-client model (the real client builds all dynamic entities from the S2C 0x0C
-# spawn + 0x0A motion stream, never from a local .bms placement; docs/net §5.23/§5.25/§5.38b).
+# A production joiner has no authored placed-node identity table. Its native sim
+# separately materializes streamed pools 1-3 at the HOST's exact packed handles for
+# world-side gameplay, while remote pool-0 organics remain decoded client state. Visual
+# pose still belongs to that decoded stream, so this pass renders every remote row from
+# the load batches plus live S2C 0x0A instead of resolving a local .bms placement
+# (docs/net §5.23/§5.25/§5.38b).
 #
-# It is the wire analog of MissionObjectPlacer + MissionPresentPass and the ClientState
-# sibling of NetWorldView (which does the same over the older NovaNetClient model): it
-# keeps one NovaObjectModel per wire handle, resolved by the wire type id, and updates
-# each one's transform + visibility every tick from NovaSimulation.get_present_snapshot()
-# (the SAME flat PF_* buffer the host present reads — the joiner just keys on PF_TYPE_ID /
-# PF_WIRE_HANDLE instead of the registry-resolved PF_BMS_ID/KIND/INDEX).
+# It is the wire analog of MissionObjectPlacer + MissionPresentPass and the sole
+# presenter for a decoded ClientState, whether the source is a live
+# NovaSimulation joiner or a NovaNetClient spectator. It keeps one
+# NovaObjectModel per wire handle, resolved by the wire type id, and updates each
+# transform + visibility from the source's shared PF_* snapshot contract.
 #
 # The joiner's OWN player (wire handle H) is already self-filtered out of the snapshot in
-# present_snapshot_from_client_view (its row carries PF_TYPE_ID 0), so it is never built
+# present_snapshot_from_client_replicas (its row carries PF_TYPE_ID 0), so it is never built
 # here — it is drawn by LocalPlayerPresenter as the smooth, motor-driven local avatar L. That
 # is the live §5.38b two-handle (L = local sim, H = wire identity) reconciliation.
 #
@@ -39,14 +38,31 @@ var _env_node              # optional NovaEnvironment node for model lighting gl
 var _defer_index           # MissionEntityRegistry (host only): rows resolving to a PLACED node are
                            # left to MissionPresentPass; null on the joiner (render every wire row)
 var _synthetic_origin_only := false
+var _camera: Camera3D
+var _camera_framed := false
 var _nodes := {}           # wire_handle -> Node3D
 var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same failed type each tick)
-var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0 }
+var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0, "pending": 0 }
 var _node_spawned_callback := Callable()
-# The native wire walk: plan validity + the per-row hot path live on the applier
-# (one instance per pass; the mission pass facade owns its own separately).
+# The native wire walk owns the plan keys/row validity and per-row hot path (one
+# instance per pass; the mission pass facade owns its own separately). This
+# facade additionally owns cold-plan completeness while materialization drains.
 var _applier := NovaPresentApplier.new()
 const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # MissionRuntime.MAX_CATCHUP_TICKS
+# Building one streamed model can synchronously load/assemble enough Godot
+# resources to take a substantial part of a frame — a platform resource-assembly
+# cost with no retail counterpart (retail materializes its world stream under
+# the loading/DEATH hold). Cap this facade at a small batch per presentation
+# call so a large cold topology cannot occupy the SceneTree thread until the
+# host's reliable window and timeout expire. Four preserves atomic
+# materialization for ordinary tiny dynamic cohorts while yielding hundreds-row
+# streamed mission loads promptly. NetSessionDrive holds the join-admission
+# edge until pending_spawn_count() drains to zero, so this pacing stays behind
+# the hold and the revealed world is fully materialized, like retail's.
+const DEFAULT_COLD_SPAWN_BUDGET := 4
+var _cold_spawn_budget := DEFAULT_COLD_SPAWN_BUDGET
+var _pending_spawn_count := 0
+var _diagnostic_trace_path := ""
 # Remote primary-channel blends are fixed-tick state, while this pass also runs
 # on zero-tick render frames and once after a multi-tick catch-up batch. Consume
 # the sim clock once per presented snapshot so every row advances by the exact
@@ -80,11 +96,10 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 			return -1
 
 
-# defer_index: the MissionEntityRegistry — any wire row that resolves to a placed node is
-# rendered by MissionPresentPass instead, so this pass only draws the un-placed rows. On the
-# HOST that means admitted joiners; on the JOINER (which places the mission minus organics and
-# stamps rows with the local defer identity for pools 1-3) it means players, streamed AI, and
-# anything without a placed node.
+# defer_index: the MissionEntityRegistry — any wire row that resolves to an authored placed
+# node is rendered by MissionPresentPass instead. On the HOST that leaves admitted joiners.
+# A production header-only JOINER passes no defer index and draws every remote row; an
+# explicit complete-BMS/debug join can still defer its authored nodes.
 func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 		options: Dictionary = {}) -> void:
 	_sim = sim
@@ -93,12 +108,25 @@ func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
 	_env_node = env_node
 	_defer_index = defer_index
 	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
+	_cold_spawn_budget = maxi(1, int(options.get(
+			"cold_spawn_budget", DEFAULT_COLD_SPAWN_BUDGET)))
+	_pending_spawn_count = 0
+	_diagnostic_trace_path = OS.get_environment("OPENNOVA_TRACE_WIRE_BUILDS")
+	_camera = options.get("camera", null) as Camera3D
+	_camera_framed = false
 	_last_present_logic_tick = -1
 	_applier.setup_wire(_rebuild_held_weapon)
 
 
 func get_stats() -> Dictionary:
 	return _stats.duplicate()
+
+
+## Cold rows the budget deferred on the last presented frame. NetSessionDrive
+## holds the join-admission edge until this drains to zero so the reveal never
+## races the budgeted materialization.
+func pending_spawn_count() -> int:
+	return _pending_spawn_count
 
 
 func get_stats_record() -> WirePresentStats:
@@ -146,8 +174,11 @@ func reset_runtime_state() -> void:
 	_nodes.clear()
 	_unresolved.clear()
 	_applier.reset_wire_runtime_state()
+	_pending_spawn_count = 0
 	_last_present_logic_tick = -1
+	_camera_framed = false
 	_stats.live = 0
+	_stats.pending = 0
 
 
 func teardown() -> void:
@@ -202,15 +233,19 @@ func present_snapshot(
 	var local_handle := int(_sim.get_local_player_wire_handle()) \
 			if bool(_sim.has_local_player()) else -1
 	var index_generation := _current_index_generation()
-	if _applier.wire_plan_is_current(snap.size(), stride, layout_revision,
+	if _pending_spawn_count == 0 and _applier.wire_plan_is_current(
+			snap.size(), stride, layout_revision,
 			index_generation, local_handle):
 		_applier.present_wire_rows(snap, stride, tick_delta)
+		_frame_spectator_camera()
 		return
 	_applier.begin_wire_plan(layout_revision, stride, snap.size(),
 			index_generation, local_handle)
 	var count: int = snap.size() / stride
 	var live := {}
 	var spawned_rows: Array = []  # [node, runtime_kind, visual_item_id] per spawn
+	var spawn_attempts := 0
+	var pending_spawns := 0
 	for i in range(count):
 		var base := i * stride
 		var type_id := int(snap[base + NovaSimulation.PF_TYPE_ID])
@@ -255,10 +290,19 @@ func present_snapshot(
 			node = null
 		var spawned_now := false
 		if node == null or not is_instance_valid(node):
+			# Continue the cheap scan after exhausting the budget: later live nodes
+			# still need this frame's transform, and mismatched/retired nodes still
+			# need prompt teardown. The omitted rows force another cold plan below.
+			if spawn_attempts >= _cold_spawn_budget:
+				pending_spawns += 1
+				continue
+			spawn_attempts += 1
+			_trace_cold_build("begin", handle, type_id, visual_item_id)
 			# build_player_animated_model maps the player runtime type (0x14B9) to its visual
 			# item and passes other organics through to build_animated_model — the SAME chain
 			# the host uses for the local avatar and placed NPCs.
 			node = _placer.build_player_animated_model(type_id, _container, _env_node)
+			_trace_cold_build("end", handle, type_id, visual_item_id)
 			if node == null:
 				_unresolved[handle] = type_id
 				_stats.unresolved += 1
@@ -280,6 +324,8 @@ func present_snapshot(
 		if spawned_now:
 			spawned_rows.append([node, runtime_kind, visual_item_id])
 	_applier.present_wire_rows(snap, stride, tick_delta)
+	_pending_spawn_count = pending_spawns
+	_stats.pending = pending_spawns
 	# Spawn registration runs after the production transform is applied, exactly
 	# as the inline cold walk ordered it.
 	if _node_spawned_callback.is_valid():
@@ -293,6 +339,44 @@ func present_snapshot(
 	for handle_v in _unresolved.keys():
 		if not live.has(int(handle_v)):
 			_unresolved.erase(handle_v)
+	_frame_spectator_camera()
+
+
+func _trace_cold_build(stage: String, handle: int, type_id: int, visual_item_id: int) -> void:
+	if _diagnostic_trace_path.is_empty():
+		return
+	var mode := FileAccess.READ_WRITE if FileAccess.file_exists(_diagnostic_trace_path) \
+			else FileAccess.WRITE_READ
+	var file := FileAccess.open(_diagnostic_trace_path, mode)
+	if file == null:
+		return
+	file.seek_end()
+	file.store_line("%d %s handle=0x%04x type=0x%04x visual=%d nodes=%d pending_prev=%d" % [
+		Time.get_ticks_msec(), stage, handle, type_id, visual_item_id,
+		_nodes.size(), _pending_spawn_count])
+	file.flush()
+
+
+## Spectator-only one-shot overview. Live presenters omit the camera option and
+## never enter this path.
+func _frame_spectator_camera() -> void:
+	if (_camera == null or _camera_framed or _nodes.is_empty()
+			or _pending_spawn_count > 0):
+		return
+	var centroid := Vector3.ZERO
+	var count := 0
+	for node_v in _nodes.values():
+		var node := node_v as Node3D
+		if node == null or not is_instance_valid(node):
+			continue
+		centroid += node.global_position
+		count += 1
+	if count == 0:
+		return
+	_camera_framed = true
+	centroid /= count
+	_camera.global_position = centroid + Vector3(0.0, 90.0, 110.0)
+	_camera.look_at(centroid, Vector3.UP)
 
 
 func _consume_present_logic_tick_delta() -> int:

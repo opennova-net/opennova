@@ -15,15 +15,22 @@ bool UdpSessionTransport::unframe(const std::vector<uint8_t> &raw, Datagram &out
 	if (raw.empty()) return false;
 	out.tag = raw[0];
 	out.body.assign(raw.begin() + 1, raw.end());
+	out.reliable = true;
+	out.protocol_flags_raw = 0;
+	out.capacity_exempt = false;
 	return true;
 }
 
-void UdpSessionTransport::host_send(uint8_t tag, std::vector<uint8_t> body) {
-	outbound_.push_back(frame(tag, std::move(body)));
+void UdpSessionTransport::host_send(
+		uint8_t tag, std::vector<uint8_t> body, bool reliable,
+		uint8_t protocol_flags_raw, bool capacity_exempt) {
+	outbound_.push_back(
+			Datagram{tag, std::move(body), reliable, protocol_flags_raw,
+					capacity_exempt});
 }
 
 void UdpSessionTransport::client_send(uint8_t tag, std::vector<uint8_t> body) {
-	outbound_.push_back(frame(tag, std::move(body)));
+	outbound_.push_back(Datagram{tag, std::move(body)});
 }
 
 bool UdpSessionTransport::pop_inbound(Datagram &out) {
@@ -49,7 +56,15 @@ void UdpSessionTransport::deliver_c2s(uint8_t tag, std::vector<uint8_t> body) {
 
 bool UdpSessionTransport::pop_outbound(std::vector<uint8_t> &raw) {
 	if (outbound_.empty()) return false;
-	raw = std::move(outbound_.front());
+	Datagram datagram = std::move(outbound_.front());
+	outbound_.pop_front();
+	raw = frame(datagram.tag, std::move(datagram.body));
+	return true;
+}
+
+bool UdpSessionTransport::pop_outbound(Datagram &datagram) {
+	if (outbound_.empty()) return false;
+	datagram = std::move(outbound_.front());
 	outbound_.pop_front();
 	return true;
 }

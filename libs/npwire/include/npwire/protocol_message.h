@@ -158,6 +158,26 @@ struct ProtocolMessage {
 	// the cursor still advances. We retain them for byte-exact re-encode.
 	// Empty when neither skip bit is set.
 	std::vector<uint8_t> skip_bytes;
+	// Owner-side delivery metadata; this bit is never encoded in the inner
+	// message record. Retail retains reliable message nodes rather than whole
+	// mixed-reliability packets, so a NACK replay can omit an unreliable record
+	// that shared the original physical packet.
+	bool reliable = true;
+	// Owner-side queue-capacity metadata; never encoded on the wire. Retail's
+	// internal message flag 0x10 bypasses msg_out_max for the connection
+	// description even though its encoded flag byte is the unrelated 0xA0.
+	// [orig: NapiNPDataTransfer_SendDescription @0x628C80 ->
+	//  NapiNPMessage_Create capacity gate @0x628031]
+	bool capacity_exempt = false;
+	// Finite owner-side retention in OPEN SEND BOUNDARIES. Zero means retain
+	// until ACK; one is retail's one-send lifetime (normally represented by
+	// reliable=false); values above one remain individually replayable until
+	// their deadline boundary. Never encoded on the wire.
+	// [orig: NapiNPMessage+0x3C user_param1; BuildOutgoingPackets @0x6285A0]
+	uint32_t retention_flushes = 0;
+	// Absolute send_flush_counter deadline, assigned to the retained COPY on
+	// first packet inclusion. Meaningful only when retention_flushes != 0.
+	uint32_t retention_deadline_flush = 0;
 };
 
 // Fragment reassembly state for one protocol session. The retail protocol
@@ -245,9 +265,19 @@ struct SessionSequencing {
 	// the sender's current ACK in the session header.
 	std::map<uint32_t, std::vector<ProtocolMessage>> retained_outbound;
 	size_t retained_outbound_message_count = 0;
+	// Unreliable nodes successfully framed earlier in the current OPEN logical
+	// send boundary. Retail's msg_out_max is an admission bound over every node
+	// built in that boundary, even though userParam=1 nodes are not retained for
+	// a later resend. complete_session_send_flush clears this count once all MTU
+	// packets for the boundary have been built.
+	size_t transient_outbound_message_count = 0;
 	// Zero keeps retention disabled for protocol users that have not opted into the 0x44/0x84 flow.
 	// Joint Operations game-session connections set this to retail's cs_dir0.msg_out_max (1200).
 	size_t outbound_message_limit = 0;
+	// Retail connection+0x64C. One open logical send boundary builds every
+	// packet with the current value, prunes sent nodes, then increments once.
+	// Held frames do not advance it.
+	uint32_t send_flush_counter = 0;
 };
 
 // Joint Operations overrides the generic NAPI template's outbound-message pool to 0x4B0 records
@@ -255,6 +285,12 @@ struct SessionSequencing {
 // the default for protocol-only callers that do not own the 0x44/0x84 recovery pump.
 // [orig: CNapiNetwork_Init @0x4CAB20/@0x4CABF0]
 constexpr size_t JO_SESSION_OUTBOUND_MESSAGE_MAX = 0x4B0;
+
+// Return the prefix of `requested_count` nodes that retail's per-connection
+// msg_out_max can admit in the current logical send boundary. A zero limit
+// keeps the generic protocol helper unbounded.
+size_t session_outbound_message_prefix_count(
+		const SessionSequencing &seq, size_t requested_count);
 
 // Retail's 0x44/0x84 NACK carries at most sixteen requested packet sequences. Its outer-NWU-
 // decrypted body is `[peer_local_key:u32le][requested_seq:u32le...]`; there is no count field.
@@ -313,8 +349,9 @@ struct SessionCrypto {
 
 // Frame `messages` into a ProtocolPacketHeader + SCRK-encrypted inner body (NO outer NWU envelope — the
 // caller applies nw_encode_outbound). Stamps session_id, seq_num =
-// seq.next_outbound_seq++, ack_count = seq.last_inbound_seq, connection_flags = 0. Returns false only if
-// the inner encode fails.
+// seq.next_outbound_seq++, ack_count = seq.last_inbound_seq, connection_flags = 0. Returns false if
+// this whole packet exceeds the current message-node capacity or the inner encode fails; owners that
+// queue several nodes must select session_outbound_message_prefix_count before packetization.
 // [orig: CNapiNPConnection_SendSessionPacket @ 0x61edd0] fills the same 13-byte header after the opcode:
 //   [0] remote_key (session_keys.remote_key @ conn+0x150) -> session_id
 //   [4] packet_seq  (out_packet_seq @ conn+0x7ac, ++'d per packet in BuildOutgoingPackets @ 0x628430)
@@ -335,6 +372,14 @@ bool frame_session_packet_for_sequence(SessionSequencing &seq, const SessionCryp
 // Retire reliable records whose assigned packet sequence is covered by an ACK from a packet that
 // crossed the contiguous receive gate.
 void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence);
+
+// Complete one OPEN logical send boundary: prune each finite retained message
+// whose deadline has been reached at the current counter, clear the boundary's
+// transient-node count, then increment the counter once. Call after all packets
+// for the boundary have been framed.
+// [orig: PumpEnumeratorAndSend @0x6290C0 -> BuildOutgoingPackets @0x6292B4 ->
+// PrunePacketQueue @0x6292BB; PumpFlags increment @0x6297D5]
+void complete_session_send_flush(SessionSequencing &seq);
 
 // Inverse: validate the receiver-local session_id, SCRK-decrypt `body`, then apply the owner's receive
 // policy. With `ordered_recovery_enabled`, exactly the next sequence dispatches; stale/duplicate

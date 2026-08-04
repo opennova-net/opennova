@@ -1,10 +1,11 @@
 #include "nova_world_client.h"
 
+#include "nova_world_identity.h"
+
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -296,24 +297,13 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 }
 
 // Verify "Cookie" var-list (NW-S5) — the identity set the 892B
-// ClientRequestVerifyResult carries (capture frame 10166). NWUID is filled by
-// ClientSession from the ServerSessionInit. CD-key fields are empty (retail
-// sent them empty and still validated); the hardware fingerprints + NWHWI are
-// best-effort telemetry the lobby verify does not gate on. Built once in libs,
-// reused for BOTH the UDP verify var-list and the HTTP login cookies (the .204
-// capture shows the same identity set in both places). TimeZoneBias is the only
-// OS-sourced field — read it here and pass it in.
+// ClientRequestVerifyResult carries (capture frame 10166). This binding owns
+// the locale/hardware snapshot; libs owns only the witnessed field order.
+// NWUID is filled later from ServerSessionInit, and the same snapshot seeds the
+// HTTP-login cookies. Empty CD-key fields match the successful retail capture.
 std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_verify_cookie_vars() {
-	opennova::LobbyIdentityParams idp;
-	idp.client_index = lobby_.client_index();
-	idp.client_key = lobby_.client_key();
-	{
-		Dictionary tz = Time::get_singleton()->get_time_zone_from_system();
-		if (tz.has(String("bias"))) {
-			int64_t bias = tz[String("bias")];
-			idp.tz_bias = std::to_string(bias);
-		}
-	}
+	const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
+			lobby_.client_index(), lobby_.client_key());
 	identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	return identity_vars_;
 }

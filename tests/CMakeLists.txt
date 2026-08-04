@@ -1145,6 +1145,12 @@ target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
 add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
+# The joiner-side watercraft prediction (D-NET-196 B-facet): fast-boat glide
+# beyond the chase-only sustain limit, coast-down, and the steer chain.
+add_executable(watercraft_client_motor_test world/watercraft_client_motor_test.cpp)
+target_link_libraries(watercraft_client_motor_test PRIVATE opennova_world)
+add_test(NAME watercraft_client_motor COMMAND watercraft_client_motor_test)
+
 # The USE-ITEM mount chain (Entity_ToggleVehicleMount @0x436950 + the nearest-seat scan
 # @0x435d50 + the deck best-seat @0x4351f0), the BMS Player mount triggers (subs 38-41),
 # the vehicle AI-driver/parked leg (@0x48bc12-0x48c034), and the player deploy group
@@ -1175,6 +1181,14 @@ foreach(test registry_oracle behavior corpus)
     target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
     add_test(NAME wac_${test} COMMAND wac_${test}_test)
 endforeach()
+
+# WAC weather actions are authoritative network sources: exercise the compiled
+# script through the real per-connection 0x0A phase-2 projection.
+add_executable(wac_environment_wire_test wac/wac_environment_wire_test.cpp)
+target_link_libraries(wac_environment_wire_test PRIVATE opennova_wac opennova_netsim)
+target_include_directories(wac_environment_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_environment_wire_test PRIVATE cxx_std_17)
+add_test(NAME wac_environment_wire COMMAND wac_environment_wire_test)
 
 # Cross-system: BMS event runtime + WAC share one world/var store (libs/mission
 # event_runtime + opennova_wac). MisvarChange(V#) and WAC eq(V#) see the same var.
@@ -1271,6 +1285,11 @@ add_executable(envelope_test napi/envelope_test.cpp)
 target_link_libraries(envelope_test PRIVATE opennova_napi opennova_novacrypto)
 target_include_directories(envelope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME envelope COMMAND envelope_test)
+
+add_executable(napi_literal_test napi/literal_test.cpp)
+target_link_libraries(napi_literal_test PRIVATE opennova_napi)
+target_include_directories(napi_literal_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME napi_literal COMMAND napi_literal_test)
 
 add_executable(tlv_test napi/tlv_test.cpp)
 target_link_libraries(tlv_test PRIVATE opennova_napi)
@@ -1749,11 +1768,43 @@ add_executable(netsim_loopback_channel_test netsim/loopback_channel_test.cpp)
 target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_netsim)
 add_test(NAME netsim_loopback_channel COMMAND netsim_loopback_channel_test)
 
+add_executable(netsim_item_replication_catalog_test
+    netsim/item_replication_catalog_test.cpp)
+target_link_libraries(netsim_item_replication_catalog_test
+    PRIVATE opennova_netsim opennova_def)
+add_test(NAME netsim_item_replication_catalog
+    COMMAND netsim_item_replication_catalog_test)
+
+# Replay/spectate history is an optional journal over the same client replica
+# reducer live play uses. This pins Player Person, AI Person, and Vehicle rows
+# through one ordered fold rather than parallel replay entity decoding.
+add_executable(netsim_replica_history_test netsim/replica_history_test.cpp)
+target_link_libraries(netsim_replica_history_test PRIVATE opennova_netsim)
+add_test(NAME netsim_replica_history COMMAND netsim_replica_history_test)
+
 # The ADR 0011 §4 loopback identity guard: World entity -> encode -> loopback ->
 # decode -> ClientState, field-identical to what the host's encoder + codec produced.
 add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
 target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_netsim)
 add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
+
+# A header-only retail join has no local BMS body to promote. The decoded
+# 0x10/0x0D/0x20 stream must create exact pool/slot world rows for native
+# collision, deploy, and vehicle-seat consumers.
+add_executable(netsim_client_world_materializer_test
+    netsim/client_world_materializer_test.cpp)
+target_link_libraries(netsim_client_world_materializer_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_world_materializer
+    COMMAND netsim_client_world_materializer_test)
+
+# The D-NET-196 between-update mover contract: the joiner-side per-class chase
+# (net-re §5.38e) keeps remote entities gliding across the host's subrate 0x0A
+# cadence — smoothness legs, the witnessed snap/deadband/respawn edges, exact
+# bucket-ladder pins, and the honest chase-only fast-vehicle sustain limit
+# (the family prediction legs live world-side; watercraft_client_motor_test).
+add_executable(netsim_remote_motion_smoothness_test netsim/remote_motion_smoothness_test.cpp)
+target_link_libraries(netsim_remote_motion_smoothness_test PRIVATE opennova_netsim)
+add_test(NAME netsim_remote_motion_smoothness COMMAND netsim_remote_motion_smoothness_test)
 
 # The co-op-LAN fan-out guard: one World snapshot fanned to a connection table (loopback
 # self + a socket-free UdpSessionTransport joiner), per-connection anchoring, and the
@@ -1766,44 +1817,65 @@ add_executable(netsim_build_player_uplink_test netsim/build_player_uplink_test.c
 target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_netsim)
 add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test)
 
-# The §5.10b decode-dispatch guard: the client view's items.def class resolver sizes
+# The §5.10b decode-dispatch guard: the replica pipeline's items.def class resolver sizes
 # 0x0A tag-1 records (header-only no-callback vs vehicle/infantry compacts) and
 # outranks the 0x0D pool-blanket learner — a mis-sized record desyncs the frame and
 # scatters every later record around the recipient anchor.
-add_executable(netsim_client_view_arms_dip_test netsim/client_view_arms_dip_test.cpp)
-target_link_libraries(netsim_client_view_arms_dip_test PRIVATE opennova_netsim)
-add_test(NAME netsim_client_view_arms_dip COMMAND netsim_client_view_arms_dip_test)
+add_executable(netsim_client_replica_pipeline_arms_dip_test
+    netsim/client_replica_pipeline_arms_dip_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_arms_dip_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_arms_dip
+    COMMAND netsim_client_replica_pipeline_arms_dip_test)
 
-add_executable(netsim_client_view_recoil_test netsim/client_view_recoil_test.cpp)
-target_link_libraries(netsim_client_view_recoil_test PRIVATE opennova_netsim)
-add_test(NAME netsim_client_view_recoil COMMAND netsim_client_view_recoil_test)
+add_executable(netsim_client_replica_pipeline_world_page_atomicity_test
+    netsim/client_replica_pipeline_world_page_atomicity_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_world_page_atomicity_test
+    PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_world_page_atomicity
+    COMMAND netsim_client_replica_pipeline_world_page_atomicity_test)
 
-add_executable(netsim_client_view_class_resolver_test netsim/client_view_class_resolver_test.cpp)
-target_link_libraries(netsim_client_view_class_resolver_test PRIVATE opennova_netsim)
-add_test(NAME netsim_client_view_class_resolver COMMAND netsim_client_view_class_resolver_test)
+add_executable(netsim_client_replica_pipeline_recoil_test
+    netsim/client_replica_pipeline_recoil_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_recoil
+    COMMAND netsim_client_replica_pipeline_recoil_test)
 
-add_executable(netsim_client_view_anim_pulse_test netsim/client_view_anim_pulse_test.cpp)
-target_link_libraries(netsim_client_view_anim_pulse_test PRIVATE opennova_netsim)
-add_test(NAME netsim_client_view_anim_pulse COMMAND netsim_client_view_anim_pulse_test)
+add_executable(netsim_client_replica_pipeline_occupant_backref_test
+    netsim/client_replica_pipeline_occupant_backref_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_occupant_backref_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_occupant_backref
+    COMMAND netsim_client_replica_pipeline_occupant_backref_test)
+
+add_executable(netsim_client_replica_pipeline_class_resolver_test
+    netsim/client_replica_pipeline_class_resolver_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_class_resolver_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_class_resolver
+    COMMAND netsim_client_replica_pipeline_class_resolver_test)
+
+add_executable(netsim_client_replica_pipeline_anim_pulse_test
+    netsim/client_replica_pipeline_anim_pulse_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE opennova_netsim)
+add_test(NAME netsim_client_replica_pipeline_anim_pulse
+    COMMAND netsim_client_replica_pipeline_anim_pulse_test)
 
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
 
 # The non-COOP follower repro: replays the retail vehicle-session golden through
-# NetClientView and pins every organic-parented pool-1 spawn (§5.11 spawnFlags
+# ClientReplicaPipeline and pins every organic-parented pool-1 spawn (§5.11 spawnFlags
 # 0x0100) to its own §5.10b compact wire positions. Env-gated: needs the
 # gitignored golden (NW_GOLDEN_VEHICLE_SESSION, DEFAULT below) and an items.def
 # class table (NW_ITEMS_DEF); skips clean when either is absent.
-add_executable(netsim_client_view_capture_parent_follow_test
-    netsim/client_view_capture_parent_follow_test.cpp)
-target_link_libraries(netsim_client_view_capture_parent_follow_test
+add_executable(netsim_client_replica_pipeline_capture_parent_follow_test
+    netsim/client_replica_pipeline_capture_parent_follow_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_capture_parent_follow_test
     PRIVATE opennova_netsim opennova_npwire opennova_def opennova_scr
     opennova_app_common opennova_pcapio)
-target_compile_definitions(netsim_client_view_capture_parent_follow_test PRIVATE
+target_compile_definitions(netsim_client_replica_pipeline_capture_parent_follow_test PRIVATE
     DEFAULT_VEHICLE_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-vehicle-session.pcapng")
-add_test(NAME netsim_client_view_capture_parent_follow
-    COMMAND netsim_client_view_capture_parent_follow_test)
+add_test(NAME netsim_client_replica_pipeline_capture_parent_follow
+    COMMAND netsim_client_replica_pipeline_capture_parent_follow_test)
 
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop). Server-first (the plan's P0..P8).
@@ -1837,7 +1909,7 @@ add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 # ammo-clip resolution, and charfilter/teamfilter masks, against the committed fixture; §5.57.
 add_executable(npruntime_weapon_table_test npruntime/weapon_table_test.cpp)
 target_link_libraries(npruntime_weapon_table_test
-    PRIVATE opennova_npruntime opennova_world opennova_def)
+    PRIVATE opennova_npruntime opennova_world opennova_def opennova_vfs)
 target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
 
@@ -1894,6 +1966,14 @@ target_link_libraries(npruntime_handshake_server_test
 target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
+# App-layer readiness gate used by the automated retail interop harness: send
+# the shared retail 0x41 probe over a real loopback socket, accept only a valid
+# game-server 0x81, and retain a bounded no-responder timeout.
+add_executable(npruntime_lan_probe_client_test npruntime/lan_probe_client_test.cpp)
+target_link_libraries(npruntime_lan_probe_client_test
+    PRIVATE opennova_lan_probe_client opennova_npruntime opennova_app_common)
+add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test)
+
 # Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent
 # (no committed derived oracle); DEFAULT path points at the gitignored .scratch golden.
 add_executable(npruntime_golden_lan_join_session_test npruntime/golden_lan_join_session_test.cpp)
@@ -1931,6 +2011,24 @@ target_link_libraries(npruntime_client_runtime_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
+# The headless host must publish its mission-selected ENV/BMS values, eagerly
+# run the layered WAC program, and finish retail's environment prewarm before
+# opening a session, through the same real phase-2 projection as the Godot host.
+add_executable(npruntime_nw_server_environment_test
+    npruntime/nw_server_environment_test.cpp)
+target_link_libraries(npruntime_nw_server_environment_test
+    PRIVATE opennova_nw_server_startup opennova_netsim)
+target_include_directories(npruntime_nw_server_environment_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_nw_server_environment
+    COMMAND npruntime_nw_server_environment_test)
+
+# D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and
+# reassembles the paged S2C 0x45 terrain-tile stream for wire-driven loading.
+add_executable(npruntime_join_wire_assets_test npruntime/join_wire_assets_test.cpp)
+target_link_libraries(npruntime_join_wire_assets_test PRIVATE opennova_npruntime)
+add_test(NAME npruntime_join_wire_assets COMMAND npruntime_join_wire_assets_test)
+
 # Retail in-match loss recovery: future 0x43/0x83 packets trigger direction-specific 0x84/0x44
 # missing-sequence lists, and each endpoint reconstructs retained reliable records under the old
 # sequence with its current ACK. [orig: SendMissingSeqList @0x623560; HandleResendList @0x623800]
@@ -1960,7 +2058,7 @@ add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshak
 # P5 Level-3 golden — drive the REAL client emission path (np::JoinerConnection::frame_c2s_uplink via
 # client_runtime) seeded from the gameplay capture and assert the emitted C2S 0x0C datagram is
 # byte-identical to the captured client datagram (emitted C2S == client-origin); plus fold the
-# capture's S2C 0x0A through NetClientView and cross-check decompressed positions against the
+# capture's S2C 0x0A through ClientReplicaPipeline and cross-check decompressed positions against the
 # world-stream absolute spawn positions (an independent in-pcap oracle, not the same decoder). Default
 # resolves the gitignored golden under .scratch/golden; env-gated NW_GOLDEN_GAMEPLAY; skip-if-absent.
 add_executable(npruntime_golden_client_test npruntime/golden_client_test.cpp)

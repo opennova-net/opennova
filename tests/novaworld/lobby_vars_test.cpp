@@ -108,6 +108,12 @@ int main() {
 		p.client_index = 0x11112222u;
 		p.client_key = 0x33334444u;
 		p.tz_bias = "-480";
+		p.country = "Canada";
+		p.language = "French";
+		p.my_installed_exp_bits = "5";
+		p.nwpssk = "ENVIRONMENTNWPSSKTOKEN";
+		p.nwusid = "ENVIRONMENTUSID";
+		p.nwhwi = "Fixture GPU$256$8192$1280x720$1920x1080";
 		const auto vars = nw::make_lobby_identity_vars(p);
 		expect(vars.size() == 10, "identity set has 10 vars");
 		const char *names[] = {"CountryName", "Language",     "TimeZoneBias", "MyInstalledExpBits",
@@ -118,23 +124,48 @@ int main() {
 			if (vars[i].first != names[i]) order_ok = false;
 		}
 		expect(order_ok, "identity set names + order match the NW-S5 list");
-		expect(vars[0].second == "United States", "CountryName default");
-		expect(vars[1].second == "English", "Language default");
+		expect(vars[0].second == p.country, "CountryName passes through");
+		expect(vars[1].second == p.language, "Language passes through");
 		expect(vars[2].second == "-480", "TimeZoneBias passes through");
-		expect(vars[3].second == "0", "MyInstalledExpBits default");
+		expect(vars[3].second == p.my_installed_exp_bits, "MyInstalledExpBits passes through");
 		expect(vars[4].second.empty() && vars[5].second.empty() && vars[6].second.empty(),
 		       "NWUID / NWCDKIID / NWCDKIIDEXP1 are empty");
-		expect(vars[7].second == nw::az_fingerprint(p.client_index ^ 0x5053534Bu, 23),
-		       "NWPSSK = az_fingerprint(ci ^ 0x5053534B, 23)");
-		expect(vars[8].second == nw::az_fingerprint(p.client_key ^ 0x55534944u, 16),
-		       "NWUSID = az_fingerprint(ck ^ 0x55534944, 16)");
+		expect(vars[7].second == p.nwpssk, "NWPSSK passes through from the client environment");
+		expect(vars[8].second == p.nwusid, "NWUSID passes through from the client environment");
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
+
+		// Non-binding callers retain the deterministic fallback when stable machine tokens are absent.
+		p.nwpssk.clear();
+		p.nwusid.clear();
+		const auto fallback = nw::make_lobby_identity_vars(p);
+		expect(fallback[7].second == nw::az_fingerprint(p.client_index ^ 0x5053534Bu, 23),
+		       "NWPSSK fallback remains deterministic");
+		expect(fallback[8].second == nw::az_fingerprint(p.client_key ^ 0x55534944u, 16),
+		       "NWUSID fallback remains deterministic");
 		// az_fingerprint is deterministic and length-exact.
 		expect(nw::az_fingerprint(123, 23).size() == 23, "az_fingerprint length 23");
 		expect(nw::az_fingerprint(123, 16) == nw::az_fingerprint(123, 16), "az_fingerprint deterministic");
 	}
 
-	// 4. parse_host_port — good / no-colon / empty-port / non-numeric-port.
+	// 4. Retail's stable volume/MAC identity transforms, pinned independently
+	// from the binding that gathers the platform inputs.
+	{
+		nw::RetailMachineInputs in;
+		in.volume_serial = 0x12345678u;
+		in.maximum_component_length = 255;
+		in.filesystem_flags = 0xA5A5A5A5u;
+		in.volume_name = "SYSTEM";
+		in.filesystem_name = "NTFS";
+		in.ethernet_address = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+		in.has_ethernet_address = true;
+		const nw::LobbyMachineTokens tokens = nw::make_retail_machine_tokens(in);
+		expect(tokens.nwpssk == "ELHCDHDCSNDFDJMOGMJROAE",
+		       "NWPSSK matches CDKey_GenerateHardwareFingerprint transform");
+		expect(tokens.nwusid == "NEBBDDFFHHJJLLQR",
+		       "NWUSID matches generate_hardware_fingerprint transform");
+	}
+
+	// 5. parse_host_port — good / no-colon / empty-port / non-numeric-port.
 	{
 		std::string host;
 		uint16_t port = 0;

@@ -96,6 +96,14 @@ func set_player_class(player_class: int) -> void:
 	_player_class = player_class
 
 
+## Host class policy received in S2C 0x76. Keep the complete wire u16: retail's
+## resolver indexes the class-id bits directly (5..9), while malformed 0x76 sets 0.
+## [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540;
+## Armory_ResolveSelectedClass @0x5642f0]
+func set_class_allow_mask(mask: int) -> void:
+	_class_allow_mask = mask & 0xFFFF
+
+
 ## The current canonical parent tuples; each slot pre-selects its row on populate.
 ## The per-class loadout-buffer MEMORY (remembered ammo counts, save-on-class-flip)
 ## stands deferred; initial selection reads the active authoritative tuple buffer

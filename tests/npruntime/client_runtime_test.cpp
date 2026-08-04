@@ -1,7 +1,7 @@
 // P5 — np::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
-//      + the production apply_in_match_c2s consumer + the NetClientView S2C fold:
+//      + the production apply_in_match_c2s consumer + the ClientReplicaPipeline S2C fold:
 //        handshake (0x41/0x42) via ClientRuntime.start()/receive()/Client_ProcessNetworkFrame()
 //        -> the spawn-gate burst (driven from the per-frame client role) -> PeerSpawned
 //        -> the owner binds the joiner connection's transport + streams a NAMED organic-spawn
@@ -11,7 +11,7 @@
 //           -> Server_TickUpdate drains+SNAPs the entity + fans an S2C 0x0A
 //        -> the owner reframes that 0x0A as a 0x83 -> ClientRuntime folds it into ClientState.
 //      Asserts the peer SNAPs to the uplink AND the client's ClientState reflects the server's 0x0A
-//      (exactly one SNAP per 0x0C). This is the P5 e2e bar and the FIRST coverage of NetClientView
+//      (exactly one SNAP per 0x0C). This is the P5 e2e bar and the FIRST coverage of ClientReplicaPipeline
 //      fold + the production PeerC2SInMatch consumer (joiner_connection_test does neither).
 //
 //  (B) Host-as-client (D-NET-121/122) — the SP listen-server host's OWN loopback view: Server_TickUpdate
@@ -37,6 +37,7 @@
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
@@ -50,6 +51,7 @@
 #include <world/world.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <array>
@@ -384,6 +386,54 @@ bool run_tick_seed_anchors_the_client_clock() {
 			"the round-end disarm form is a witnessed seed of zero");
 }
 
+// Retail S2C 0x76 replaces the client-global class availability word. It is
+// not a clock: a short body explicitly clears the word to zero.
+// [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540]
+bool run_class_allow_mask_follows_retail_host() {
+	const std::string client_scrk = "CLIENT-CLASS-MASK-SCRK";
+	const std::string server_scrk = "SERVER-CLASS-MASK-SCRK";
+	np::JoinerConnection joiner("ClassMask");
+	joiner.seed_in_match(0x52637485u, 1u, client_scrk, server_scrk,
+	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	if (!expect(joiner.class_allow_mask() == 0x03FFu,
+	            "joiner starts with retail's all-ten-classes default")) {
+		return false;
+	}
+
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> configured = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x76, {0x55, 0x01})});
+	(void)joiner.handle_datagram(configured.data(), configured.size());
+	if (!expect(joiner.class_allow_mask() == 0x0155u,
+	            "S2C 0x76 installs the retail host's configured u16 mask")) {
+		return false;
+	}
+
+	const std::vector<uint8_t> short_body = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x76, {0xAA})});
+	(void)joiner.handle_datagram(short_body.data(), short_body.size());
+	if (!expect(joiner.class_allow_mask() == 0u,
+	            "a short S2C 0x76 clears the class mask like retail")) {
+		return false;
+	}
+
+	// The embedding runtime must expose the same receive-side state to its UI
+	// adapter, not merely consume it inside JoinerConnection.
+	np::ClientRuntime client("ClassMaskRuntime");
+	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing runtime_server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> runtime_mask = frame_server_session(
+			runtime_server_tx, server_scrk, 1u,
+			{make_protocol_message(0x76, {0xAA, 0x02})});
+	client.receive(runtime_mask.data(), runtime_mask.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	return expect(client.class_allow_mask() == 0x02AAu,
+	              "ClientRuntime exposes the retail host's received class mask");
+}
+
 // The capture-default C2S 0x2F body, re-derived independently of the production encoder:
 // [u8 team][u8 class 8][u32 slot] + the golden seven ADM rows ("-1" ammo/flags -> 0xFF) + 0xFF.
 // [wire: retail-lan-host-join-session f317-318; orig: NetPacket_SendLoadoutSubmit @0x42cdc0]
@@ -405,6 +455,7 @@ bool run_retail_post_auth_prelude() {
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
 	np::JoinerConnection joiner("RetailPrelude");
+	joiner.set_player_paced_deployment(true);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -825,9 +876,9 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// The first 0x5A grants the submitted loadout but cannot decide deployment
-	// before 0x0F supplies gameFlags. Split the grant and policy across packets
-	// to pin both retail's same-packet ordering and OpenNova's later-0x0F order.
+	// Every retail 0x5A apply clears dword_81474C immediately. Split the first
+	// grant from both the second grant and 0x0F policy to prove that gameplay
+	// release is independent from the later deploy-UI decision.
 	const std::vector<uint8_t> first_grant_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
@@ -835,29 +886,63 @@ bool run_retail_post_auth_prelude() {
 	const np::JoinerConnection::PollResult first_grant_result =
 			joiner.handle_datagram(
 					first_grant_datagram.data(), first_grant_datagram.size());
-	if (!expect(first_grant_result.outbound.empty() && !joiner.in_match(),
-			"loadout grant waits while the deployment policy is unknown")) {
+	if (!expect(first_grant_result.outbound.empty() &&
+				first_grant_result.gameplay_release_applied &&
+				first_grant_result.reached_in_match && joiner.in_match() &&
+				!joiner.deployment_pick_pending() &&
+				!joiner.initial_admission_complete(),
+			"the first loadout grant opens gameplay without completing deploy UI readiness")) {
 		return false;
 	}
 
+	// Retail's world-state handler carries two witnessed clocks into its completion
+	// burst: S2C 0x19 supplies the first C2S 0x28 dword, while S2C 0x0F's
+	// session tick supplies the second. The rest of the burst is fixed and ordered
+	// (NapiNPClientMsg_0x00F @0x42e5bd..0x42e6ab).
+	constexpr uint32_t kSpawnAckTimestamp = 0x10203040u;
+	constexpr uint32_t kWorldStateTick = 0x50607080u;
 	std::vector<uint8_t> zoned_world_state(23, 0);
+	zoned_world_state[0] = 0x80;
+	zoned_world_state[1] = 0x70;
+	zoned_world_state[2] = 0x60;
+	zoned_world_state[3] = 0x50;
 	zoned_world_state[22] = 0x01;
 	const std::vector<uint8_t> deployment_policy_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(0x0F, std::move(zoned_world_state))});
+			{
+					make_protocol_message(0x19, {0x40, 0x30, 0x20, 0x10}),
+					make_protocol_message(0x0F, std::move(zoned_world_state)),
+			});
 	const np::JoinerConnection::PollResult granted_loadout_result =
 			joiner.handle_datagram(
 					deployment_policy_datagram.data(),
 					deployment_policy_datagram.size());
+	const std::vector<uint8_t> expected_loadout_request = {
+			0x40, 0x30, 0x20, 0x10,
+			0x80, 0x70, 0x60, 0x50,
+			0x00, 0x00,
+	};
+	const auto &completion = granted_loadout_result.queued_send_messages;
 	if (!expect(granted_loadout_result.outbound.empty() &&
-				!joiner.in_match(),
-			"spawn-zone policy still waits for the second profile-side grant")) {
+				completion.size() == 6 &&
+				completion[0].tag == 0x28 &&
+				completion[0].payload == expected_loadout_request &&
+				completion[1].tag == 0x29 &&
+				completion[1].payload == std::vector<uint8_t>({0x00, 0x00}) &&
+				completion[2].tag == 0x2D && completion[2].payload.empty() &&
+				completion[3].tag == 0x32 && completion[3].payload.empty() &&
+				completion[4].tag == 0x22 &&
+				completion[4].payload == std::vector<uint8_t>({0x00, 0xF7, 0x5C}) &&
+				completion[5].tag == 0x23 && completion[5].payload.empty() &&
+				joiner.in_match() && !joiner.deployment_pick_pending() &&
+				!joiner.initial_admission_complete(),
+			"world-state completion preserves the first-grant gameplay release "
+			"without making the deploy UI ready before both grants")) {
 		return false;
 	}
 
-	// The second initial grant completes the pair and emits exactly one deploy
-	// pick. Record its server sequence so the duplicate-retransmit case below
-	// can rebuild that old message with a newer ACK.
+	// The second initial grant completes the pair and makes the player-paced UI
+	// pick-ready without inventing an automatic 0x0E.
 	server_seq.last_inbound_seq = 13;
 	const uint32_t second_grant_sequence = server_seq.next_outbound_seq;
 	const std::vector<uint8_t> split_second_grant_datagram =
@@ -870,16 +955,21 @@ bool run_retail_post_auth_prelude() {
 			joiner.handle_datagram(
 					split_second_grant_datagram.data(),
 					split_second_grant_datagram.size());
-	if (!expect(split_second_grant_result.outbound.size() == 1 &&
-				decode_client_session(
-						split_second_grant_result.outbound[0],
-						client_auth.scrk, client_header, client_messages) &&
-				client_messages.size() == 1 &&
-				client_messages[0].tag == 0x0E &&
-				client_messages[0].payload ==
-						std::vector<uint8_t>({0xFF, 0xFF}) &&
-				!joiner.in_match(),
-			"granted loadout emits one retail deploy pick without entering the match")) {
+	if (!expect(split_second_grant_result.outbound.empty() &&
+				split_second_grant_result.gameplay_release_applied &&
+				joiner.in_match() && joiner.deployment_pick_pending() &&
+				joiner.initial_admission_complete(),
+			"the second grant makes the deploy UI ready without auto-selecting a row")) {
+		return false;
+	}
+	const std::vector<uint8_t> player_pick =
+			joiner.frame_deployment_pick(0xFFFFu);
+	if (!expect(decode_client_session(
+				player_pick, client_auth.scrk, client_header, client_messages) &&
+				client_messages.size() == 1 && client_messages[0].tag == 0x0E &&
+				client_messages[0].payload == std::vector<uint8_t>({0xFF, 0xFF}) &&
+				joiner.in_match() && joiner.deployment_pick_pending(),
+			"the player's row selection re-arms only the gameplay hold")) {
 		return false;
 	}
 
@@ -904,9 +994,10 @@ bool run_retail_post_auth_prelude() {
 					retransmitted_second_grant.data(),
 					retransmitted_second_grant.size());
 	if (!expect(retransmitted_grant_result.outbound.empty() &&
+				!retransmitted_grant_result.gameplay_release_applied &&
 				!retransmitted_grant_result.reached_in_match &&
-				!joiner.in_match(),
-			"ACK-updated retransmit of an initial grant cannot release the player")) {
+				joiner.in_match() && joiner.deployment_pick_pending(),
+			"ACK-updated retransmit cannot complete the pending deploy UI")) {
 		return false;
 	}
 
@@ -1456,11 +1547,11 @@ bool run_roundtrip() {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 	if (!expect(client.mission_known(), "joiner learned mission metadata from S2C 0x7B")) return false;
 	if (!expect(client.server_name() == host_config.server_name &&
-	                    client.mission_name() == host_config.mission_name &&
+	                    client.mission_name() == host_config.mission_file &&
 	                    client.map_file() == host_config.mission_file &&
 	                    client.game_type() == host_config.game_type &&
 	                    client.expansion() == host_config.expansion,
-	            "S2C 0x7B retained authoritative server/mission/gametype/expansion")) return false;
+	            "S2C 0x7B retained retail LAN server/map/gametype/expansion fields")) return false;
 	if (!expect(saw_join_00 && join_00_shape_ok &&
 	                    saw_join_01 && join_01_shape_ok &&
 	                    saw_join_02 && join_02_shape_ok,
@@ -1590,18 +1681,20 @@ bool run_roundtrip() {
 	up.heading = 0x2000; // -> mission yaw 45
 	up.pitch = 0x0100;
 
-	// The host's final connection-settings update can hold the send block shut
-	// for a bounded number of client frames. Drain that authoritative gate
-	// before testing the live uplink producer.
+	// The host's settings update dictates the send-holdoff period. An OpenNova
+	// host dictates the engine-max period 1 (D-NET-197), so the client uplinks
+	// every tick; drain any residual countdown (retail cycle: dec-then-check —
+	// a frame is open when the countdown is <= 1 at its start).
 	for (int frame = 0;
-	     frame < 8 && client.send_holdoff_countdown() != 0; ++frame) {
+	     frame < 8 && client.send_holdoff_countdown() > 1; ++frame) {
 		const auto held = client.Client_ProcessNetworkFrame(tick++);
 		if (!expect(held.empty(),
 		            "settings send-holdoff suppresses the whole deployed send block"))
 			return false;
 	}
-	if (!expect(client.send_holdoff_countdown() == 0,
-	            "settings send-holdoff reaches zero before the uplink frame"))
+	if (!expect(client.send_holdoff_ticks() == 1 &&
+	                    client.send_holdoff_countdown() <= 1,
+	            "the OpenNova host dictates the engine-max period 1"))
 		return false;
 
 	std::size_t staged = 0;
@@ -1617,6 +1710,11 @@ bool run_roundtrip() {
 	}
 	if (!expect(staged == 1, "exactly one C2S 0x0C staged via apply_in_match_c2s")) return false;
 
+	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
+	// the remote peer's per-connection send boundary exactly as the owner does
+	// before the authoritative tick.
+	for (np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
 	np::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
 
 	const w::Entity *je = world.registry.get(Hh);
@@ -1736,11 +1834,13 @@ bool run_roundtrip() {
 // Two modes pin the deployment seam:
 //   headless (player_paced=false): the auto parameter-0 pick {FF FF}, exactly once —
 //     today's ctest/nw_replay behavior, unchanged.
-//   player-paced (player_paced=true): NO auto pick; the join parks pick-pending
-//     (the shell's DEATH deploy screen), an INVALID pick is silently dropped by the
-//     host and the screen-side state stays pick-pending for the re-pick (net-re
-//     §5.61 — retail's input case 12 has no re-entry gate), then the default pick
-//     releases. Both picks reach the wire.
+//   player-paced (player_paced=true): NO auto pick; the shell's DEATH deploy screen
+//     stays pick-pending while the initial 0x5A grants clear retail's separate uplink
+//     hold, so 0x0C gameplay and 0x4C quality traffic flow before any 0x0E. A player
+//     pick re-arms only that hold; an INVALID pick is silently dropped and the screen
+//     remains pending for a re-pick, then a selected non-default zone's ACK-qualified
+//     0x5A releases it. Both picks reach the wire, and a staged older 0x0C cannot
+//     overwrite the selected pose on the next authority tick.
 bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	const PeerAddr peer{0x0100007Fu, 30001}; // 127.0.0.1:30001
 	const std::string kName = "ZonesJoiner";
@@ -1751,6 +1851,10 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	host_config.server_name = "Zones Host";
 	host_config.mission_name = "Zones Test Mission";
 	host_config.mission_file = "ZONES_TEST.BMS";
+	// Exercise the player-paced input action while the dictated send boundary is
+	// closed. Input case 12 changes the gameplay dword immediately; only framing
+	// the resulting 0x0E waits for the next period-four boundary.
+	if (player_paced) host_config.send_holdoff_ticks = 4;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
@@ -1770,6 +1874,7 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 		start.position = {50.0f, 60.0f, 1.0f};
 		world.registry.spawn(3, start);
 	}
+	w::EntityHandle zone_h{};
 	{
 		// The deploy-selectable spawn zone: an alive pool-2 def-attrib-0x40000 entity
 		// flips world_has_spawn_zone -> 0x0F bit0 = 1 AND the join-time pending hold.
@@ -1780,8 +1885,9 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 		zone.is_spawn_point = true;
 		zone.alive = true;
 		zone.team = 1;
-		world.registry.spawn(2, zone);
+		zone_h = world.registry.spawn(2, zone);
 	}
+	if (!expect(zone_h.valid(), "zones: selectable non-default spawn zone spawned")) return false;
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "zones: host player spawned")) return false;
 
@@ -1808,6 +1914,10 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	bool deploy_pick_shape_ok = false;
 	bool pending_at_pick_time = false;
 	int deploy_pick_count = 0;
+	int gameplay_uplink_count = 0;
+	int net_quality_count = 0;
+	bool stage_in_match_c2s = false;
+	std::size_t staged_in_match_c2s = 0;
 	std::vector<std::vector<uint8_t>> deploy_picks;
 	std::vector<std::vector<uint8_t>> submitted_loadouts;
 	auto note_event = [&](const np::HostAcceptEvent &e) {
@@ -1833,6 +1943,10 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 					break;
 				}
 				for (const ProtocolMessage &message : messages) {
+					if (message.tag == 0x0C && !message.payload.empty())
+						++gameplay_uplink_count;
+					if (message.tag == 0x4C)
+						++net_quality_count;
 					if (message.tag == 0x2F) {
 						submitted_loadouts.push_back(message.payload);
 						continue;
@@ -1853,7 +1967,14 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 			}
 		}
 		np::HandleResult r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), tick++);
-		for (const np::HostAcceptEvent &e : r.events) note_event(e);
+		for (const np::HostAcceptEvent &e : r.events) {
+			note_event(e);
+			if (stage_in_match_c2s) {
+				const std::size_t staged = np::apply_in_match_c2s(ctx, e);
+				staged_in_match_c2s += staged;
+				if (staged != 0) stage_in_match_c2s = false;
+			}
+		}
 		for (const std::vector<uint8_t> &o : r.outbound) client.receive(o.data(), o.size());
 	};
 
@@ -1876,9 +1997,14 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 
 	// The owner's PeerSpawned reaction ships the joiner's NAMED organic record (the burst
 	// streamed pool 0 before this entity existed) — same leg run_roundtrip pins.
+	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
 	w::EntityHandle Hh{};
-	for (np::NapiNPConnection &c : ctx.np_protocol.connection_list)
-		if (c.peer == peer) Hh = c.link.owned_entity;
+	for (np::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (!(c.peer == peer)) continue;
+		c.link.transport = &udp_host;
+		c.link.mode = ns::TransportMode::Client;
+		Hh = c.link.owned_entity;
+	}
 	if (!expect(Hh.valid(), "zones: owned_entity bound by the spawn pipeline")) return false;
 	const w::Entity *je0 = world.registry.get(Hh);
 	{
@@ -1907,33 +2033,115 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 		}
 	};
 	if (player_paced) {
-		// The join parks at the player's pick; nothing is auto-sent.
+		// The deploy UI is pending, but retail's initial loadout grants have already
+		// cleared the independent gameplay hold. Nothing auto-selects a spawn row.
 		drive_frames(60, [&] { return client.deployment_pick_pending(); });
 		if (!expect(client.deployment_pick_pending(),
-				"zones-paced: join parked awaiting the player's deployment pick")) return false;
-		if (!expect(deploy_pick_count == 0 && !client.in_match(),
-				"zones-paced: no auto pick was sent")) return false;
+				"zones-paced: deploy UI awaits the player's deployment pick")) return false;
+		if (!expect(deploy_pick_count == 0 && client.in_match() && client.deployed(),
+				"zones-paced: initial grants enter gameplay without auto-sending 0x0E")) return false;
+		if (!expect(client.authoritative_spawn_released() &&
+					client.authoritative_spawn_release_revision() == 1,
+				"zones-paced: the initial release independently arms authoritative health"))
+			return false;
+		const uint64_t spawn_release_before_pick =
+				client.authoritative_spawn_release_revision();
+
+		PlayerExtendedUplink pre_pick_uplink;
+		pre_pick_uplink.carrier_handle = 0xFFFFu;
+		pre_pick_uplink.pos_x = w::to_fixed(51.0);
+		pre_pick_uplink.pos_y = w::to_fixed(61.0);
+		pre_pick_uplink.pos_z = w::to_fixed(1.0);
+		const int uplinks_before_pick = gameplay_uplink_count;
+		const int quality_before_pick = net_quality_count;
+		stage_in_match_c2s = true;
+		for (int frame = 0; frame < 311; ++frame) {
+			for (std::vector<uint8_t> &d :
+					client.Client_ProcessNetworkFrame(pre_pick_uplink, tick))
+				pump_host(std::move(d));
+		}
+		if (!expect(gameplay_uplink_count > uplinks_before_pick &&
+					net_quality_count > quality_before_pick &&
+					deploy_pick_count == 0 && client.deployment_pick_pending(),
+				"zones-paced: pre-pick gameplay uplinks and net-quality reports reach the wire"))
+			return false;
+
+		// Leave one real pre-pick C2S 0x0C staged at the production owner seam. The
+		// host may receive this datagram and the following pick in one socket pump;
+		// the older pose must be applied before, never after, the selected deploy
+		// pose. This is the ordering exercised by NovaSimulation's two-peer UDP path.
+		stage_in_match_c2s = false;
+		if (!expect(staged_in_match_c2s != 0,
+				"zones-paced: one pre-pick uplink is staged ahead of the deployment request"))
+			return false;
+
 		// An INVALID pick: the host silently drops it (the resolve-miss break) and the
-		// player stays pick-pending for a re-pick [orig: @0x519c88 / net-re §5.61].
-		client.queue_deployment_pick(0x2FFE); // pool-2 slot 0xFFE: resolves no entity
-		drive_frames(20, [&] { return client.in_match(); });
-		if (!expect(deploy_pick_count == 1 && !client.in_match() &&
-					client.deployment_pick_pending(),
-				"zones-paced: invalid pick silently dropped, still pick-pending")) return false;
+		// player stays pick-pending for a re-pick. Sending 0x0E itself re-arms the
+		// uplink hold before the host has a chance to answer.
+		for (int frame = 0;
+		     frame < 4 && client.send_holdoff_countdown() <= 1; ++frame) {
+			for (std::vector<uint8_t> &d :
+					client.Client_ProcessNetworkFrame(pre_pick_uplink, tick))
+				pump_host(std::move(d));
+		}
+		if (!expect(client.send_holdoff_countdown() > 1,
+				"zones-paced: deployment pick starts inside a held send interval"))
+			return false;
+		const int uplinks_before_invalid_pick = gameplay_uplink_count;
+		if (!expect(client.queue_deployment_pick(0x2FFE),
+				"zones-paced: pending deployment UI accepts an invalid-location pick"))
+			return false; // pool-2 slot 0xFFE resolves no entity on the host
+		if (!expect(!client.gameplay_gate_open() && !client.is_deployed() &&
+					client.authoritative_spawn_released() &&
+					client.authoritative_spawn_release_revision() ==
+							spawn_release_before_pick,
+				"zones-paced: accepted input action immediately closes only the gameplay gate"))
+			return false;
+		const std::vector<std::vector<uint8_t>> held_pick_frame =
+				client.Client_ProcessNetworkFrame(pre_pick_uplink, tick);
+		if (!expect(held_pick_frame.empty() && deploy_pick_count == 0,
+				"zones-paced: held boundary defers the queued 0x0E without delaying its gate"))
+			return false;
+		drive_frames(8, [&] { return deploy_pick_count == 1; });
+		if (!expect(deploy_pick_count == 1 && client.in_match() &&
+					!client.deployed() && client.authoritative_spawn_released() &&
+					client.authoritative_spawn_release_revision() ==
+							spawn_release_before_pick &&
+					client.deployment_pick_pending() &&
+					gameplay_uplink_count == uplinks_before_invalid_pick,
+				"zones-paced: 0x0E re-arms only gameplay while health, session, and UI stay active"))
+			return false;
 		bool still_pending_host_side = false;
 		for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
 			if (conn.peer == peer) still_pending_host_side = conn.link.respawn_pending;
 		if (!expect(still_pending_host_side,
 				"zones-paced: host still holds respawn-pending after the invalid pick")) return false;
-		// The re-pick: the Default Spawn row (parameter-0 0xFFFF) releases.
-		client.queue_deployment_pick(0xFFFF);
-		drive_frames(60, [&] { return client.in_match(); });
+		// The re-pick: select the displaced pool-2 zone, not the parameter-0
+		// default marker. The selected x=10 pose must survive the older staged
+		// x=51 uplink above.
+		if (!expect(client.queue_deployment_pick(zone_h.packed),
+				"zones-paced: pending deployment UI accepts a valid re-pick"))
+			return false;
+		drive_frames(60, [&] { return client.deployed(); });
 		if (!expect(deploy_pick_count == 2 &&
 					deploy_picks[0] == std::vector<uint8_t>({0xFE, 0x2F}) &&
-					deploy_picks[1] == std::vector<uint8_t>({0xFF, 0xFF}),
+					deploy_picks[1] == std::vector<uint8_t>({
+							static_cast<uint8_t>(zone_h.packed & 0xFFu),
+							static_cast<uint8_t>((zone_h.packed >> 8) & 0xFFu)}),
 				"zones-paced: both player picks reached the wire in order")) return false;
+		const w::Entity *selected = world.registry.get(Hh);
+		if (!expect(selected != nullptr && std::abs(selected->position.x - 10.0f) < 0.01f,
+				"zones-paced: host applies the selected non-default pose before its next tick"))
+			return false;
+		np::Server_TickUpdate(ctx);
+		selected = world.registry.get(Hh);
+		if (!expect(selected != nullptr && std::abs(selected->position.x - 10.0f) < 0.01f,
+				"zones-paced: an older queued uplink cannot overwrite the selected deploy pose"))
+			return false;
 	} else {
-		drive_frames(60, [&] { return client.in_match(); });
+		drive_frames(60, [&] {
+			return client.deployed() && !client.deployment_pick_pending();
+		});
 		if (!expect(saw_deploy_pick && deploy_pick_shape_ok,
 				"zones: joiner sent the parameter-0 deploy pick 0x0E {FF FF}")) return false;
 		if (!expect(deploy_pick_count == 1,
@@ -1947,6 +2155,10 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 			"zones: pre-spawn 0x04 and the later co-op entity share team 1"))
 		return false;
 	if (!expect(client.deployed(), "zones: client deployed after the post-pick release")) return false;
+	if (player_paced && !expect(client.authoritative_spawn_released() &&
+			client.authoritative_spawn_release_revision() == 1,
+			"zones-paced: post-pick gameplay release does not invent a spawn-health edge"))
+		return false;
 	bool pending_cleared = false;
 	bool entity_unhidden = false;
 	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1981,6 +2193,74 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	drive_frames(10, [&] { return submitted_loadouts.size() >= 3; });
 	return expect(submitted_loadouts.size() == 3 && submitted_loadouts[2] == expected_second,
 			"zones: armory re-submission rode the wire with the equipped combo");
+}
+
+bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
+	const std::string client_scrk = "CLIENT-RELOAD-ORDER-SCRK";
+	const std::string server_scrk = "SERVER-RELOAD-ORDER-SCRK";
+	constexpr uint16_t kSelfHandle = 0x0002;
+	constexpr uint16_t kRemoteHandle = 0x0007;
+	constexpr uint16_t kNonPersonHandle = 0x1003;
+
+	np::ClientRuntime client("ReloadOrder");
+	client.seed_session(
+			0x10203040u, 1u, client_scrk, server_scrk,
+			1, 0, kSelfHandle, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/true);
+	client.view().set_item_class_resolver([](uint16_t type_id) {
+		if (type_id == 0x14B9u) return EntityClass::Player;
+		return EntityClass::Unknown;
+	});
+
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> spawn = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(
+					0x0C,
+					make_organic_spawn(
+							kRemoteHandle, "RemoteReload",
+							0x10000, 0x20000, 0x30000, 0, 2, 9))});
+	client.receive(spawn.data(), spawn.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	netsim::ClientEntityState &non_person =
+			client.state().upsert(kNonPersonHandle);
+	non_person.cls = EntityClass::Vehicle;
+
+	const WeaponReload reload{kRemoteHandle, 0x00C5};
+	const WeaponReload non_person_reload{kNonPersonHandle, 0x00C6};
+	const std::vector<uint8_t> reload_echo = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{
+					make_protocol_message(0x49, encode_weapon_reload(reload)),
+					make_protocol_message(
+							0x49, encode_weapon_reload(non_person_reload)),
+			});
+	client.receive(reload_echo.data(), reload_echo.size());
+	(void)client.Client_ProcessNetworkFrame(2);
+
+	const netsim::ClientEntityState *remote = client.state().find(kRemoteHandle);
+	if (!expect(remote != nullptr && remote->cls == EntityClass::Player,
+			"reload order: the addressed remote Person row exists"))
+		return false;
+	if (!expect(remote->arms_dip_ticks == 78,
+			"reload order: S2C 0x49 stamps 80 before the same frame's two decrements"))
+		return false;
+	if (!expect(remote->pitch_kick_accum == -0x02300000,
+			"reload order: the same frame applies the first retail arms-dip step"))
+		return false;
+	if (!expect(non_person.arms_dip_ticks == 0 &&
+				non_person.pitch_kick_accum == 0,
+			"reload order: the runtime does not invent the unmodeled non-Person refill"))
+		return false;
+
+	const std::vector<WeaponReload> notifications =
+			client.drain_reload_notifications();
+	return expect(notifications.size() == 2 &&
+					notifications[0].entity_handle == kRemoteHandle &&
+					notifications[0].reload_param == reload.reload_param &&
+					notifications[1].entity_handle == kNonPersonHandle &&
+					notifications[1].reload_param == non_person_reload.reload_param,
+			"reload order: the runtime preserves the notification for simulation consumers");
 }
 
 bool run_host_client_discards_authority_owned_reload_echoes() {
@@ -2331,7 +2611,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	cfg.serve_and_play = true;
 	np::start_host_session(owner, cfg);
 
-	// Match NovaSimulation's startup order: construct/install the client view after host bring-up,
+	// Match NovaSimulation's startup order: construct/install the replica pipeline after host bring-up,
 	// then fold the queued initial stream and first whole-world compact frame together.
 	np::Server_TickUpdate(owner.ctx);
 	np::ClientRuntime host_view(host_loop);
@@ -2431,12 +2711,16 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = ns::TransportMode::Client;
 	conn.reply.roster_pushed = true;
+	conn.reply.roster_completed_tick = 0;
 	conn.burst.sync_state = 4;
 	conn.burst.world_stream_phase = 8;
 	conn.burst.loadout_received = true;
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	owner.ctx.np_protocol.next_connection_id = np::kFirstJoinerDcb + 1;
+	// The fixture starts on the boundary after its already-pushed roster. Initial
+	// world records intentionally cannot share the roster's send tick.
+	owner.now_tick = 1;
 
 	HostPumpHookProbe hook{&owner, &world, &ai, peer};
 	FirstLogicTickProbe logic_probe;
@@ -2709,10 +2993,23 @@ bool run_periodic_request_quartet_is_answered() {
 	if (!expect(r.outbound.empty() && r.queued_send_messages.size() == 3,
 			"periodic replies remain semantic until the client send boundary"))
 		return false;
+	const auto queued_reliability = [&](uint8_t tag) {
+		for (const ProtocolMessage &message : r.queued_send_messages) {
+			if (message.tag == tag) return message.reliable;
+		}
+		return false;
+	};
+	if (!expect(queued_reliability(0x1C) && queued_reliability(0x08) &&
+				!queued_reliability(0x3D),
+			"quartet replies retain 0x1C/0x08 but send loaded-model 0x3D once"))
+		return false;
 	const std::vector<std::vector<uint8_t>> framed_replies =
 			joiner.frame_messages(r.queued_send_messages);
 	if (!expect(framed_replies.size() == 1,
 			"periodic replies from one receive boundary batch into one session packet"))
+		return false;
+	if (!expect(joiner.retained_outbound_depth() == 2,
+			"mixed quartet reply retains only reliable C2S 0x1C/0x08 siblings"))
 		return false;
 
 	// Collect every inner message the joiner replied with across its datagrams.
@@ -2916,6 +3213,9 @@ bool run_reverse_rtt_probe_is_echoed() {
 	if (!expect(result.outbound.empty() && result.queued_send_messages.size() == 1,
 			"S2C 0x57 flag=1 queues one C2S response"))
 		return false;
+	if (!expect(!result.queued_send_messages[0].reliable,
+			"reactive C2S 0x2C uses retail's one-send queue parameter"))
+		return false;
 	const std::vector<std::vector<uint8_t>> framed =
 			joiner.frame_messages(result.queued_send_messages);
 	ProtocolPacketHeader header;
@@ -2927,7 +3227,32 @@ bool run_reverse_rtt_probe_is_echoed() {
 	return expect(messages.size() == 1 && messages[0].tag == 0x2C &&
 	                    messages[0].payload ==
 	                            std::vector<uint8_t>({0x44, 0x33, 0x22, 0x11, 0x00}),
-			"reverse RTT response echoes the timestamp and clears the flag");
+			"reverse RTT response echoes the timestamp and clears the flag") &&
+			expect(joiner.retained_outbound_depth() == 0,
+					"reactive C2S 0x2C is absent from NACK retention");
+}
+
+bool run_direct_uplink_framing_is_transient() {
+	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
+	np::JoinerConnection joiner("DirectUplink");
+	joiner.seed_in_match(
+			0x31415926u, 1u, client_scrk, "SERVER-DIRECT-UPLINK-SCRK",
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	PlayerExtendedUplink uplink;
+	uplink.pos_x = 0x00100000u;
+	uplink.pos_y = 0x00200000u;
+	uplink.pos_z = 0x00300000u;
+	const std::vector<uint8_t> datagram = joiner.frame_c2s_uplink(
+			0x0002, w::kPlayerInfantryTypeId, uplink);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(decode_client_session(datagram, client_scrk, header, messages) &&
+	                    messages.size() == 1 && messages[0].tag == 0x0C,
+	            "public direct-uplink seam still emits the retail C2S 0x0C wire"))
+		return false;
+	return expect(joiner.retained_outbound_depth() == 0 &&
+	                      joiner.send_flush_counter() == 1,
+	            "public direct-uplink C2S 0x0C is one-send and completes one boundary");
 }
 
 bool run_network_spawn_does_not_mutate_loaded_model_snapshot() {
@@ -2996,26 +3321,40 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 			0x30405060u, 1u, client_scrk, server_scrk,
 			10, 0, 0x0002, w::kPlayerInfantryTypeId,
 			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.initial_admission_complete(),
+			"a seeded in-match replay starts beyond initial admission"))
+		return false;
 
-	// Death re-enters AwaitDeployPick during the receive fold. Fill the same
-	// receive boundary with enough 0x43 requests to make their C2S 0x08 replies
-	// split across the 1300-byte send ceiling.
+	// Death first re-enters AwaitDeployPick, matching the UI state that can
+	// accept input case 12. Then fill the pick's receive boundary with enough
+	// 0x43 requests to make their C2S 0x08 replies split across the 1300-byte
+	// send ceiling.
 	FrameUpdate death;
 	death.mount_handle = 0xFFFF;
 	death.health = 0;
-	std::vector<ProtocolMessage> inbound = {
-			make_protocol_message(0x0A, encode_frame_update(death)),
-	};
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	(void)client.Client_ProcessNetworkFrame(0);
+	if (!expect(client.deployment_pick_pending() &&
+				client.initial_admission_complete(),
+			"redeployment keeps the initial-admission boundary monotonic"))
+		return false;
+
+	std::vector<ProtocolMessage> inbound;
 	for (uint32_t i = 0; i < 180; ++i) {
 		inbound.push_back(make_protocol_message(
 				0x43,
 				{static_cast<uint8_t>(i), static_cast<uint8_t>(i >> 8), 0, 0}));
 	}
-	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> challenge_burst =
 			frame_server_session(server_tx, server_scrk, 1u, inbound);
 	client.receive(challenge_burst.data(), challenge_burst.size());
-	client.queue_deployment_pick(0xFFFF);
+	if (!expect(client.queue_deployment_pick(0xFFFF),
+			"split deployment fixture accepts the queued pick"))
+		return false;
 	const std::vector<std::vector<uint8_t>> outbound =
 			client.Client_ProcessNetworkFrame(1);
 	if (!expect(outbound.size() >= 2 && !client.deployed(),
@@ -3049,11 +3388,64 @@ bool run_split_batch_keeps_deployment_pick_ack_causal() {
 	server_tx.last_inbound_seq = first_sequence;
 	const std::vector<uint8_t> release = frame_server_session(
 			server_tx, server_scrk, 1u,
-			{make_protocol_message(0x5A, {})});
+			{make_protocol_message(0x5A, {0x08, 0xFF})});
 	client.receive(release.data(), release.size());
 	(void)client.Client_ProcessNetworkFrame(2);
 	return expect(client.deployed(),
 			"0x5A covering the pick's actual packet releases redeployment");
+}
+
+bool run_unrelated_loadout_cannot_revive_dead_client() {
+	const std::string client_scrk = "CLIENT-DEAD-LOADOUT-SCRK";
+	const std::string server_scrk = "SERVER-DEAD-LOADOUT-SCRK";
+	np::ClientRuntime client("DeadLoadout", [] { return uint64_t{3000}; });
+	client.seed_session(
+			0x40506070u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	FrameUpdate death;
+	death.mount_handle = 0xFFFF;
+	death.health = 0;
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.gameplay_gate_open() &&
+				!client.authoritative_spawn_released() && !client.deployed() &&
+				client.deployment_pick_pending(),
+			"death closes only authoritative spawn and re-enters the picker"))
+		return false;
+
+	// WeaponLoadout_ApplyFromBuffer still performs its unconditional
+	// dword_81474C clear. That literal edge must remain incapable of reopening
+	// authoritative spawn or accepting the stale positive tail beside it.
+	FrameUpdate stale_positive;
+	stale_positive.mount_handle = 0xFFFF;
+	stale_positive.health = 100;
+	const std::vector<uint8_t> unrelated_grant = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{
+					make_protocol_message(0x5A, {0x08, 0xFF}),
+					make_protocol_message(
+							0x0A, encode_frame_update(stale_positive)),
+			});
+	client.receive(unrelated_grant.data(), unrelated_grant.size());
+	(void)client.Client_ProcessNetworkFrame(2);
+	if (!expect(client.gameplay_gate_open() &&
+				!client.authoritative_spawn_released() && !client.deployed() &&
+				client.state().local_health == 100 &&
+				client.deployment_release_revision() == 0 &&
+				client.authoritative_spawn_release_revision() == 0,
+			"unrelated valid 0x5A clears dword without reviving dead gameplay"))
+		return false;
+
+	ClientFiredRound shot;
+	shot.shooter_handle = 0x0002;
+	return expect(!client.queue_fired_round(shot),
+			"the effective send predicate rejects dead gameplay after the unrelated grant");
 }
 
 bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
@@ -3094,8 +3486,14 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	                            std::vector<uint8_t>({0x44, 0x33, 0x22, 0x11, 0x01}),
 			"outbound RTT uses monotonic milliseconds rather than simulation tick"))
 		return false;
+	if (!expect(client.retained_outbound_depth() == 2,
+			"first mixed C2S packet retains loadout/attach but prunes RTT"))
+		return false;
 
-	now_ms = 0x55667788u;
+	// Consecutive live frames remain inside the 120-second receive-silence
+	// window; a billion-millisecond clock jump would correctly reap the session
+	// before this second producer can run.
+	now_ms = 0x11223345u;
 	if (!expect(client.queue_vehicle_detach(0x1007),
 			"a deployed joiner can queue C2S 0x27 detach"))
 		return false;
@@ -3110,14 +3508,71 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	                            std::vector<uint8_t>({0x02, 0x00, 0x07, 0x10, 0x00, 0x00}) &&
 	                    messages[1].tag == 0x2C &&
 	                    messages[1].payload ==
-	                            std::vector<uint8_t>({0x88, 0x77, 0x66, 0x55, 0x01}),
+	                            std::vector<uint8_t>({0x45, 0x33, 0x22, 0x11, 0x01}),
 			"C2S 0x27 batches with a fresh RTT ping on the immediately consecutive "
 			"deployed frame (the retail 62 counter is not a send gate)"))
 		return false;
-	return true;
+	if (!expect(client.retained_outbound_depth() == 3,
+			"second mixed packet retains detach but prunes its fresh RTT"))
+		return false;
+
+	PlayerExtendedUplink uplink;
+	uplink.carrier_handle = 0xFFFF;
+	const std::vector<std::vector<uint8_t>> uplink_frame =
+			client.Client_ProcessNetworkFrame(uplink, 1001u);
+	if (!expect(uplink_frame.size() == 1 &&
+	                    decode_client_session(
+	                            uplink_frame[0], client_scrk, header, messages) &&
+	                    messages.size() == 2 && messages[0].tag == 0x2C &&
+	                    messages[1].tag == 0x0C,
+			"live pose frame carries transient RTT and transient entity uplink"))
+		return false;
+	return expect(client.retained_outbound_depth() == 3,
+	              "C2S 0x2C/0x0C first-send records do not grow NACK retention");
 }
 
-bool run_same_packet_holdoff_defers_admission_replies() {
+bool run_mounted_slot_select_and_reload_producers() {
+	const std::string client_scrk = "CLIENT-MOUNTED-SLOT-SCRK";
+	const std::string server_scrk = "SERVER-MOUNTED-SLOT-SCRK";
+	np::ClientRuntime client("MountedSlot", [] { return uint64_t{0x10203040}; });
+	client.seed_session(
+			0x55667788u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_mounted_weapon_slot_selection(true),
+			"a deployed joiner can queue the action-6 parent-slot selector"))
+		return false;
+	WeaponReload mounted_reload;
+	mounted_reload.entity_handle = 0x1007;
+	mounted_reload.reload_param = 0xBEEF;
+	if (!expect(client.queue_reload_request(mounted_reload),
+			"a deployed joiner can address a mounted EWeap reload"))
+		return false;
+
+	const std::vector<std::vector<uint8_t>> frame =
+			client.Client_ProcessNetworkFrame(1);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(frame.size() == 1 &&
+			decode_client_session(frame[0], client_scrk, header, messages) &&
+			messages.size() == 3,
+			"mounted selector, reload, and RTT share one client frame"))
+		return false;
+	if (!expect(messages[0].tag == c2s::MOUNTED_WEAPON_SLOT_SELECT &&
+			messages[0].payload == std::vector<uint8_t>({1, 0}),
+			"action-6 parent selection is exact C2S 0x16 bool-as-i16"))
+		return false;
+	if (!expect(messages[1].tag == c2s::WEAPON_RELOAD_REQUEST &&
+			messages[1].payload ==
+					std::vector<uint8_t>({0x07, 0x10, 0xEF, 0xBE}),
+			"mounted reload preserves the addressed EWeap handle and combo"))
+		return false;
+	return expect(messages[2].tag == c2s::RTT_CONSUMED &&
+			client.retained_outbound_depth() == 2,
+			"both mounted gameplay messages are reliable while RTT is transient");
+}
+
+bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	constexpr uint32_t kServerKey = 0x31415926u;
 	constexpr uint32_t kConnectionId = 7;
 	const std::string server_scrk = "SERVER-HOLDOFF-ADMISSION-SCRK";
@@ -3170,8 +3625,9 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 
 	// One admitted S2C session packet both completes the initial settings leg
 	// (which reactively builds the ACK + JOIN pair) and installs a direction-1
-	// field-3 holdoff. The gate is evaluated after the receive pump, so neither
-	// reply may escape this same frame.
+	// field-3 period. HandleCSConfigUpdate stores that period without loading
+	// the active counter: the earlier join-response reset left the first
+	// post-handshake boundary open, and only this open send reloads the period.
 	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> settings = frame_server_session(
 			server_tx, server_scrk, client_auth.ck,
@@ -3193,21 +3649,8 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 							0xA0),
 			});
 	client.receive(settings.data(), settings.size());
-	const std::vector<std::vector<uint8_t>> first_held =
-			client.Client_ProcessNetworkFrame(2);
-	if (!expect(first_held.empty() &&
-	                    client.send_holdoff_countdown() == 1,
-			"same-packet field-3 holds the reactive ACK + JOIN pair"))
-		return false;
-	const std::vector<std::vector<uint8_t>> second_held =
-			client.Client_ProcessNetworkFrame(3);
-	if (!expect(second_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"admission replies remain queued through the final held frame"))
-		return false;
-
 	const std::vector<std::vector<uint8_t>> released =
-			client.Client_ProcessNetworkFrame(4);
+			client.Client_ProcessNetworkFrame(2);
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
 	if (!expect(released.size() == 2 &&
@@ -3217,7 +3660,7 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 	                    matches_client_header(
 			                    header, kServerKey, 1, 1) &&
 	                    messages.empty(),
-			"first open pump preserves the admission ACK packet"))
+			"the immediately open post-handshake boundary preserves the admission ACK packet"))
 		return false;
 	if (!expect(decode_client_session(
 				released[1], client_auth.scrk, header, messages) &&
@@ -3228,12 +3671,24 @@ bool run_same_packet_holdoff_defers_admission_replies() {
 	                    messages[0].payload ==
 			                    retail_expansion_join_request(
 					                    server_hello.sus2),
-			"first open pump preserves the following JOIN packet and sequence"))
+			"the immediately open boundary preserves the following JOIN packet and sequence"))
 		return false;
-	return true;
+	if (!expect(client.send_holdoff_countdown() == 2,
+			"the first open boundary re-arms the dictated field-3 period"))
+		return false;
+
+	// Decrement-before-gate gives a period N exactly N-1 held frames between
+	// open sends. For N=2, frame 3 is the sole held frame and frame 4 opens.
+	if (!expect(client.Client_ProcessNetworkFrame(3).empty() &&
+	                    client.send_holdoff_countdown() == 1,
+			"period two holds exactly one frame after the first open boundary"))
+		return false;
+	(void)client.Client_ProcessNetworkFrame(4);
+	return expect(client.send_holdoff_countdown() == 2,
+			"the next boundary opens after exactly N-1 held frames");
 }
 
-bool run_holdoff_defers_retained_session_reconstruction() {
+bool run_holdoff_defers_transient_header_reconstruction() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-RETAINED-SCRK";
 	uint64_t now_ms = 0x10203040u;
@@ -3255,7 +3710,10 @@ bool run_holdoff_defers_retained_session_reconstruction() {
 	                    original_header.seq_num == 1 &&
 	                    original_messages.size() == 1 &&
 	                    original_messages[0].tag == 0x2C,
-			"holdoff-retained seeds one retained C2S packet"))
+			"holdoff fixture sends one transient C2S RTT packet"))
+		return false;
+	if (!expect(client.retained_outbound_depth() == 0,
+			"C2S RTT is pruned after its first physical send"))
 		return false;
 
 	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
@@ -3267,26 +3725,28 @@ bool run_holdoff_defers_retained_session_reconstruction() {
 					 0x02, 0x00, 0x00, 0x00},
 					0xA0)});
 	client.receive(hold.data(), hold.size());
-	if (!expect(client.Client_ProcessNetworkFrame(1).empty() &&
-	                    client.send_holdoff_countdown() == 1,
-			"field-3 closes the pump before the resend request"))
+	const std::vector<std::vector<uint8_t>> first_open =
+			client.Client_ProcessNetworkFrame(1);
+	if (!expect(!first_open.empty() &&
+	                    client.send_holdoff_ticks() == 2 &&
+	                    client.send_holdoff_countdown() == 2,
+			"initial field-3 update preserves the open boundary then rearms period two"))
 		return false;
 
 	std::vector<uint8_t> resend_body;
 	if (!expect(encode_session_resend_list(
 				1u, {original_header.seq_num}, resend_body),
-			"holdoff-retained builds ServerResendList"))
+			"holdoff fixture builds ServerResendList"))
 		return false;
 	const std::vector<uint8_t> resend = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
 	client.receive(resend.data(), resend.size());
-	const std::vector<std::vector<uint8_t>> final_held =
-			client.Client_ProcessNetworkFrame(2);
-	if (!expect(final_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"retained reconstruction cannot bypass the final held frame"))
+	if (!expect(client.Client_ProcessNetworkFrame(2).empty() &&
+	                    client.send_holdoff_countdown() == 1,
+			"period two holds the retained reconstruction for exactly one frame"))
 		return false;
-
+	// The next frame decrements 1 -> 0 and opens. Retail still reconstructs the
+	// requested sequence header, but the transient 0x2C node is already gone.
 	const std::vector<std::vector<uint8_t>> released =
 			client.Client_ProcessNetworkFrame(3);
 	ProtocolPacketHeader resent_header;
@@ -3297,21 +3757,63 @@ bool run_holdoff_defers_retained_session_reconstruction() {
 			                    resent_header, resent_messages) &&
 	                    resent_header.seq_num == original_header.seq_num &&
 	                    resent_header.ack_count == 1 &&
-	                    resent_messages.size() == 1 &&
-	                    resent_messages[0].tag == 0x2C &&
-	                    resent_messages[0].payload ==
-			                    original_messages[0].payload,
-			"first open pump sends the exact retained sequence with current ACK"))
+	                    resent_messages.empty(),
+			"NACK replay rebuilds the old sequence without transient RTT"))
 		return false;
 	ProtocolPacketHeader live_header;
 	std::vector<ProtocolMessage> live_messages;
 	return expect(decode_client_session(
 				released[1], client_scrk,
 				live_header, live_messages) &&
-	                      live_header.seq_num == 2 &&
+	                      live_header.seq_num == 3 &&
 	                      live_messages.size() == 1 &&
 	                      live_messages[0].tag == 0x2C,
-			"retained reconstruction stays ordered before the fresh live send");
+			"header-only reconstruction stays ordered before the fresh live send");
+}
+
+bool run_settings_update_preserves_active_holdoff_countdown() {
+	const std::string client_scrk = "CLIENT-HOLDOFF-UPDATE-SCRK";
+	const std::string server_scrk = "SERVER-HOLDOFF-UPDATE-SCRK";
+	np::ClientRuntime client("HoldoffUpdate");
+	client.seed_session(
+			0x61728394u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	auto settings_update = [&](uint32_t period) {
+		return frame_server_session(
+				server_tx, server_scrk, 1u,
+				{make_protocol_message(
+						0x00,
+						{0x01, 0x08, 0x00, 0x00, 0x00,
+						 static_cast<uint8_t>(period), 0x00, 0x00, 0x00},
+						0xA0)});
+	};
+
+	const std::vector<uint8_t> initial = settings_update(3);
+	client.receive(initial.data(), initial.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.send_holdoff_ticks() == 3 &&
+	                    client.send_holdoff_countdown() == 3,
+			"initial CS update keeps the open boundary and rearms period three"))
+		return false;
+
+	// A later CS update changes only the stored field. The active three-tick
+	// cycle still decrements 3 -> 2 instead of being overwritten with five.
+	const std::vector<uint8_t> replacement = settings_update(5);
+	client.receive(replacement.data(), replacement.size());
+	if (!expect(client.Client_ProcessNetworkFrame(2).empty() &&
+	                    client.send_holdoff_ticks() == 5 &&
+	                    client.send_holdoff_countdown() == 2,
+			"later CS update preserves the active countdown while replacing the period"))
+		return false;
+	if (!expect(client.Client_ProcessNetworkFrame(3).empty() &&
+	                    client.send_holdoff_countdown() == 1,
+			"the original cycle still holds exactly N-1 frames"))
+		return false;
+	(void)client.Client_ProcessNetworkFrame(4);
+	return expect(client.send_holdoff_countdown() == 5,
+			"the replacement period applies when the unchanged cycle next opens");
 }
 
 bool run_settings_send_holdoff_blocks_exact_frame_count() {
@@ -3354,25 +3856,34 @@ bool run_settings_send_holdoff_blocks_exact_frame_count() {
 	};
 	const std::vector<std::vector<uint8_t>> first_frame =
 			client.Client_ProcessNetworkFrame(10);
-	if (!expect(first_frame.empty() && client.send_holdoff_countdown() == 1,
-			"field-3 holdoff suppresses every first-frame datagram and decrements once"))
+	const std::vector<uint8_t> first_tags = semantic_tags(first_frame);
+	if (!expect(first_frame.size() == 1 &&
+	                    first_tags ==
+	                            std::vector<uint8_t>(
+						{0x2C, 0x1C, 0x08, 0x3D, 0x2C}),
+			"the first boundary stays open and batches receive replies with the live RTT"))
+		return false;
+	if (!expect(client.send_holdoff_countdown() == 2,
+			"the immediate boundary re-arms the stored field-3 period"))
 		return false;
 	++now_ms;
+	// The re-armed period gates exactly N-1 subsequent frames. For N=2 the
+	// next frame is held, then the following frame opens and reloads.
 	const std::vector<std::vector<uint8_t>> second_frame =
 			client.Client_ProcessNetworkFrame(11);
-	if (!expect(second_frame.empty() && client.send_holdoff_countdown() == 0,
-			"field-3 holdoff suppresses every datagram for exactly its second frame"))
+	if (!expect(second_frame.empty() && client.send_holdoff_countdown() == 1,
+			"period two holds exactly one frame after the immediate boundary"))
 		return false;
 	++now_ms;
 	const std::vector<std::vector<uint8_t>> third_frame =
 			client.Client_ProcessNetworkFrame(12);
-	const std::vector<uint8_t> third_tags = semantic_tags(third_frame);
-	return expect(
-			third_frame.size() == 1 &&
-			        third_tags ==
-			                std::vector<uint8_t>(
-						{0x2C, 0x1C, 0x08, 0x3D, 0x2C}),
-			"send block reopens by batching held receive replies with the live RTT");
+	if (!expect(!third_frame.empty() && client.send_holdoff_countdown() == 2,
+			"the periodic boundary reopens every dictated interval"))
+		return false;
+	++now_ms;
+	return expect(client.Client_ProcessNetworkFrame(13).empty() &&
+	                      client.send_holdoff_countdown() == 1,
+			"the reloaded period continues to hold exactly N-1 frames");
 }
 
 bool run_send_holdoff_defers_due_housekeeping() {
@@ -3411,24 +3922,61 @@ bool run_send_holdoff_defers_due_housekeeping() {
 					       0x02, 0x00, 0x00, 0x00}, 0xA0)});
 	client.receive(hold.data(), hold.size());
 
-	const std::vector<uint8_t> first_held =
+	const std::vector<uint8_t> first_open =
 			semantic_tags(client.Client_ProcessNetworkFrame(310));
-	if (!expect(first_held.empty() &&
-	                    client.send_holdoff_countdown() == 1,
-			"a due 0x4C remains queued while holdoff closes the send pump"))
+	if (!expect(first_open == std::vector<uint8_t>({0x4C, 0x2C}) &&
+	                    client.send_holdoff_countdown() == 2 &&
+	                    client.retained_outbound_depth() == 1 &&
+	                    client.send_flush_counter() == 311,
+			"the initial open boundary flushes due 0x4C before the live RTT"))
 		return false;
 	++now_ms;
-	const std::vector<uint8_t> second_held =
+	const std::vector<uint8_t> held =
 			semantic_tags(client.Client_ProcessNetworkFrame(311));
-	if (!expect(second_held.empty() &&
-	                    client.send_holdoff_countdown() == 0,
-			"queued housekeeping cannot leak on the final held frame"))
+	if (!expect(held.empty() && client.send_holdoff_countdown() == 1 &&
+	                    client.send_flush_counter() == 311,
+			"period two holds exactly one frame without aging finite retention"))
 		return false;
 	++now_ms;
-	const std::vector<uint8_t> released =
-			semantic_tags(client.Client_ProcessNetworkFrame(312));
-	return expect(released == std::vector<uint8_t>({0x4C, 0x2C}),
-			"the first open send pump flushes deferred 0x4C before live RTT");
+	(void)client.Client_ProcessNetworkFrame(312);
+	return expect(client.send_holdoff_countdown() == 2 &&
+	                      client.send_flush_counter() == 312,
+			"the next housekeeping boundary opens, ages once, and rearms");
+}
+
+bool run_finite_quality_retention_expires_on_flush_310() {
+	const std::string client_scrk = "CLIENT-QUALITY-TTL-SCRK";
+	const std::string server_scrk = "SERVER-QUALITY-TTL-SCRK";
+	np::ClientRuntime client("QualityTtl", [] { return uint64_t{9000}; });
+	client.seed_session(
+			0x66778899u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+
+	for (uint32_t frame = 0; frame < 310; ++frame)
+		(void)client.Client_ProcessNetworkFrame(frame);
+	if (!expect(client.send_flush_counter() == 310 &&
+	                    client.retained_outbound_depth() == 0,
+	            "quality TTL fixture reaches producer boundary with no retained node"))
+		return false;
+	(void)client.Client_ProcessNetworkFrame(310); // 0x4C first inclusion at C=310
+	if (!expect(client.send_flush_counter() == 311 &&
+	                    client.retained_outbound_depth() == 1,
+	            "C2S 0x4C is retained after its first send at counter C"))
+		return false;
+
+	// Boundaries C+1 through C+308 retain the node. The following boundary is
+	// C+309 and removes it before incrementing, exactly as retail does.
+	for (uint32_t frame = 311; frame <= 618; ++frame)
+		(void)client.Client_ProcessNetworkFrame(frame);
+	if (!expect(client.send_flush_counter() == 619 &&
+	                    client.retained_outbound_depth() == 1,
+	            "C2S 0x4C survives through finite boundary C+308"))
+		return false;
+	(void)client.Client_ProcessNetworkFrame(619);
+	return expect(client.send_flush_counter() == 620 &&
+	                      client.retained_outbound_depth() == 0,
+	            "C2S 0x4C expires individually at finite boundary C+309");
 }
 
 bool run_start_resets_reusable_runtime_state() {
@@ -3468,8 +4016,8 @@ bool run_start_resets_reusable_runtime_state() {
 	(void)client.Client_ProcessNetworkFrame(10);
 	if (!expect(client.authoritative_loadout_revision() == 1 &&
 	                    client.zone_states().count(0x3001u) == 1 &&
-	                    client.send_holdoff_countdown() == 3,
-			"reuse fixture populates authoritative and cadence state"))
+	                    client.send_holdoff_countdown() == 4,
+			"reuse fixture preserves the initial open boundary then rearms cadence state"))
 		return false;
 
 	client.view().state().anchor_x = 0x12345678;
@@ -3575,12 +4123,12 @@ bool run_joiner_correlates_handshake_echoes() {
 
 // --- Round-5 hardening ---------------------------------------------------------------------
 
-// The 0x04 team latch must be falsifiable: every value in the old pin chain was the same
-// hardcoded 2 (test helper default, joiner default, host fallback), so deleting the latch kept
-// the suite green. Read the wire team byte back through frame_loadout_resubmit — the same
-// assigned_team_ source the 0x1A pair uses — across the zero-init, a team-3 latch, and a
-// short-body 0x04 that must NOT take the latch.
-// [orig: NapiNPClientMsg_0x004 @0x425410 -> byte_A85B48 @0x425499 (24-byte tail read)]
+// Both witnessed writers of byte_A85B48 must be falsifiable. S2C 0x04 installs
+// the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
+// this player's live slot state. Read the result through frame_loadout_resubmit
+// — the same assigned_team_ source the 0x1A pair uses.
+// [orig: NapiNPClientMsg_0x004 @0x425410 -> byte_A85B48 @0x425499;
+// NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> byte_A85B48 @0x425A32]
 bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-LATCH-SCRK";
@@ -3615,12 +4163,21 @@ bool run_team_latch_is_falsifiable() {
 		return false;
 	}
 
+	const std::vector<uint8_t> live_state = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x75, {0x00, 0x01})});
+	(void)joiner.handle_datagram(live_state.data(), live_state.size());
+	if (!expect(resubmit_team(team) && team == 0x01,
+			"0x75 byte 1 refreshes the same 0x2F team latch")) {
+		return false;
+	}
+
 	std::vector<uint8_t> short_body(20, 0);
 	short_body[19] = 0x04; // a would-be team in a body too short for the tail read
 	const std::vector<uint8_t> short_assign = frame_server_session(server_tx, server_scrk, 1u,
 			{make_protocol_message(0x04, std::move(short_body))});
 	(void)joiner.handle_datagram(short_assign.data(), short_assign.size());
-	return expect(resubmit_team(team) && team == 0x03,
+	return expect(resubmit_team(team) && team == 0x01,
 			"a short (<24 B) 0x04 body does not take the latch");
 }
 
@@ -3629,6 +4186,64 @@ bool run_team_latch_is_falsifiable() {
 // FSM (the pre-fix builder returned nothing below 8 bytes, silently wedging the join at
 // AwaitPaddingProbe). [orig: NetPacket_WritePositionWithPadding @0x42A360; server consumer
 // NapiNPServerMsg_0x002 @0x512fd0 reads dwords 0 and 2]
+// S2C 0x46 bit 0x4000 is a client-driven roster cursor, not a passive marker.
+// Retail requests slot+1 with the fixed 0x5CF7 mask until it has processed the
+// inclusive max-slot byte from S2C 0x04. Empty/removal rows advance the same
+// cursor; the reply for the maximum slot terminates it.
+// [orig: NapiNPClientMsg_PlayerSync @0x431370 tail; golden retail-to-retail
+//  frames 190/193/196/198/200 walk slots 0..4]
+bool run_player_sync_ack_walks_inclusive_roster_capacity() {
+	const std::string client_scrk = "CLIENT-PLAYER-SYNC-WALK-SCRK";
+	const std::string server_scrk = "SERVER-PLAYER-SYNC-WALK-SCRK";
+	np::JoinerConnection joiner("RosterWalk");
+	joiner.seed_in_match(0x10293847u, 1u, client_scrk, server_scrk,
+	                     1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+
+	std::vector<uint8_t> slot_config = retail_slot_assignment();
+	slot_config[18] = 4; // inclusive maximum roster slot: walk 0,1,2,3,4
+	const std::vector<uint8_t> config_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x04, std::move(slot_config))});
+	(void)joiner.handle_datagram(config_datagram.data(), config_datagram.size());
+
+	auto apply_sync = [&](std::vector<uint8_t> body) {
+		const std::vector<uint8_t> datagram = frame_server_session(
+				server_tx, server_scrk, 1u,
+				{make_protocol_message(0x46, std::move(body))});
+		return joiner.handle_datagram(datagram.data(), datagram.size());
+	};
+	const np::JoinerConnection::PollResult slot_zero = apply_sync({
+			0x00, 0x05, 0x40, // slot 0, name|team|queue-ack
+			0x34, 'H', 0x00, 0x01,
+	});
+	if (!expect(slot_zero.queued_send_messages.size() == 1 &&
+				slot_zero.queued_send_messages[0].tag == 0x22 &&
+				slot_zero.queued_send_messages[0].payload ==
+						std::vector<uint8_t>({0x01, 0xF7, 0x5C}),
+			"player-sync ack advances the roster request from slot 0 to slot 1")) {
+		return false;
+	}
+
+	const np::JoinerConnection::PollResult empty_slot_one = apply_sync({
+			0x01, 0x00, 0xC0, // removal|queue-ack
+	});
+	if (!expect(empty_slot_one.cleared_player_slots == std::vector<uint8_t>({0x01}) &&
+				empty_slot_one.queued_send_messages.size() == 1 &&
+				empty_slot_one.queued_send_messages[0].payload ==
+						std::vector<uint8_t>({0x02, 0xF7, 0x5C}),
+			"an empty player-sync row still advances the roster cursor")) {
+		return false;
+	}
+
+	const np::JoinerConnection::PollResult max_slot = apply_sync({
+			0x04, 0x05, 0x40, // maximum slot, name|team|queue-ack
+			0x40, 'T', 0x00, 0x02,
+	});
+	return expect(max_slot.queued_send_messages.empty(),
+			"the inclusive maximum roster slot terminates the ack walk");
+}
+
 bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_body) {
 	constexpr uint32_t kServerKey = 0x66778899u;
 	np::JoinerConnection joiner("PadClamp");
@@ -3804,6 +4419,85 @@ bool run_joiner_goodbye_tears_down_host() {
 	return expect(client.disconnect().empty(), "goodbye: the burst is one-shot");
 }
 
+bool run_joiner_admits_exact_retail_message_prefix() {
+	const std::string client_scrk = "CLIENT-MSG-OUT-MAX-SCRK";
+	const std::string server_scrk = "SERVER-MSG-OUT-MAX-SCRK";
+	np::JoinerConnection reliable_joiner("ReliablePrefix");
+	reliable_joiner.seed_in_match(
+			0x12345678u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+
+	std::vector<ProtocolMessage> retained(
+			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1,
+			make_protocol_message(0x60, {}));
+	if (!expect(!reliable_joiner.frame_messages(retained).empty() &&
+	                    reliable_joiner.retained_outbound_depth() ==
+	                            JO_SESSION_OUTBOUND_MESSAGE_MAX - 1,
+			"joiner fixture retains 1,199 reliable nodes across MTU packets"))
+		return false;
+	reliable_joiner.complete_send_flush();
+
+	const std::vector<std::vector<uint8_t>> capped =
+			reliable_joiner.frame_messages({
+					make_protocol_message(0x61, {0xA1}),
+					make_protocol_message(0x62, {0xB2}),
+			});
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(capped.size() == 1 &&
+	                    decode_client_session(
+	                            capped[0], client_scrk, header, messages) &&
+	                    messages.size() == 1 && messages[0].tag == 0x61 &&
+	                    reliable_joiner.retained_outbound_depth() ==
+	                            JO_SESSION_OUTBOUND_MESSAGE_MAX,
+			"at 1,199 retained nodes retail admits the first queued node and drops the tail"))
+		return false;
+
+	np::JoinerConnection failing_joiner("FailedSuffix");
+	failing_joiner.seed_in_match(
+			0xAABBCCDDu, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	ProtocolMessage invalid = make_protocol_message(
+			0x64, std::vector<uint8_t>(0x10000u, 0xCC), 0x20);
+	const np::JoinerConnection::FrameMessagesResult failed =
+			failing_joiner.frame_messages_detailed({
+					make_protocol_message(0x65, {0x01}),
+					std::move(invalid),
+					make_protocol_message(0x66, {0x02}),
+			});
+	if (!expect(failed.frame_failed && failed.admitted_count == 3 &&
+	                    failed.framed_count == 1 &&
+	                    failed.datagrams.size() == 1,
+			"joiner batching reports the exact unframed owner-queue suffix"))
+		return false;
+
+	// Transient/userParam=1 nodes do not enter the resend map, but every node
+	// already framed in this OPEN boundary still occupies msg_out_max. A single
+	// semantic queue spanning multiple MTU packets therefore admits exactly the
+	// same first 1,200 nodes as retail's per-node Create loop.
+	np::JoinerConnection transient_joiner("TransientPrefix");
+	transient_joiner.seed_in_match(
+			0x87654321u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	ProtocolMessage transient = make_protocol_message(0x63, {});
+	transient.reliable = false;
+	std::vector<ProtocolMessage> transient_nodes(
+			JO_SESSION_OUTBOUND_MESSAGE_MAX + 1, transient);
+	const std::vector<std::vector<uint8_t>> transient_datagrams =
+			transient_joiner.frame_messages(transient_nodes);
+	std::size_t admitted = 0;
+	for (const std::vector<uint8_t> &datagram : transient_datagrams) {
+		messages.clear();
+		if (!decode_client_session(
+					datagram, client_scrk, header, messages))
+			return expect(false, "decode MTU-split transient prefix");
+		admitted += messages.size();
+	}
+	return expect(admitted == JO_SESSION_OUTBOUND_MESSAGE_MAX &&
+	                      transient_joiner.retained_outbound_depth() == 0,
+			"MTU-split transient queue admits exactly the first 1,200 nodes");
+}
+
 int main() {
 	const bool ok = run_charattr_challenge_table_matches_retail() &&
 	                run_seeded_objective_layout_hint() &&
@@ -3814,6 +4508,7 @@ int main() {
 	                run_roundtrip() &&
 	                run_roundtrip_with_spawn_zones(/*player_paced=*/false) &&
 	                run_roundtrip_with_spawn_zones(/*player_paced=*/true) &&
+	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
@@ -3825,20 +4520,28 @@ int main() {
 	                run_host_pump_hook_observes_remote_before_first_tick() &&
 	                run_periodic_request_quartet_is_answered() &&
 	                run_reverse_rtt_probe_is_echoed() &&
+	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
+	                run_unrelated_loadout_cannot_revive_dead_client() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
-	                run_same_packet_holdoff_defers_admission_replies() &&
-	                run_holdoff_defers_retained_session_reconstruction() &&
+	                run_mounted_slot_select_and_reload_producers() &&
+	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
+	                run_holdoff_defers_transient_header_reconstruction() &&
+	                run_settings_update_preserves_active_holdoff_countdown() &&
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&
+	                run_finite_quality_retention_expires_on_flush_310() &&
 	                run_start_resets_reusable_runtime_state() &&
 	                run_joiner_correlates_handshake_echoes() &&
 	                run_tick_seed_anchors_the_client_clock() &&
+	                run_class_allow_mask_follows_retail_host() &&
 	                run_team_latch_is_falsifiable() &&
+	                run_player_sync_ack_walks_inclusive_roster_capacity() &&
 	                run_padding_echo_retail_clamp(/*requested_len=*/0, /*expected_body=*/12) &&
 	                run_padding_echo_retail_clamp(/*requested_len=*/300, /*expected_body=*/300) &&
 	                run_padding_echo_retail_clamp(/*requested_len=*/2000, /*expected_body=*/512) &&
+	                run_joiner_admits_exact_retail_message_prefix() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

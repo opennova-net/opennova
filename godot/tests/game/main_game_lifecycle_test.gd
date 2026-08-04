@@ -7,6 +7,7 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
+const VegAssetsScript := preload("res://engine/terrain/veg_assets.gd")
 # Witnessed retail placement (fixtures/minimal/README.md): strings plus the
 # mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
 # localres; environment, terrain, and terrain art in resource.
@@ -388,6 +389,101 @@ func test_rejected_replay_boot_falls_through_to_the_menu_front_end() -> void:
 			"no kill feed exists for a session that never started")
 
 
+func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var resource_root: NovaResourceRoot = _shell.current_resource_root()
+	assert_not_null(resource_root)
+	var texture: Texture2D = resource_root.load_texture("mnml_c.tga")
+	assert_not_null(texture, "the packed runtime root owns a decoded ImageTexture")
+	var cursor_texture: Texture2D = null
+	var menu: NovaMnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
+	for node in menu.find_children("*", "NovaMnuScreen", true, false):
+		var screen := node as NovaMnuScreen
+		if screen.get_cursor_texture() != null:
+			cursor_texture = screen.get_cursor_texture()
+			break
+	assert_not_null(cursor_texture,
+			"the retail-shaped main menu installs its decoded custom cursor")
+	var weak_cursor: WeakRef = weakref(cursor_texture)
+	cursor_texture = null
+	var water: NovaWater = _shell.get_node("World/NovaWater")
+	var water_material: ShaderMaterial = water.water_material
+	var water_color_texture: Texture2D = water_material.get_shader_parameter(
+			"u_noise_color")
+	var water_normal_texture: Texture2D = water_material.get_shader_parameter(
+			"u_noise_normal")
+	var weak_water_color: WeakRef = weakref(water_color_texture)
+	var weak_water_normal: WeakRef = weakref(water_normal_texture)
+	water_color_texture = null
+	water_normal_texture = null
+	assert_not_null(weak_water_color.get_ref(),
+			"the retained water graph owns its live color ImageTexture")
+	assert_not_null(weak_water_normal.get_ref(),
+			"the retained water graph owns its live normal ImageTexture")
+	VegAssetsScript.list_graphics(resource_root, true)
+	var weak_texture: WeakRef = weakref(texture)
+	texture = null
+	assert_not_null(weak_texture.get_ref(),
+			"the runtime root retains the decoded texture")
+	assert_gt(VegAssetsScript.cache_entry_count(), 0,
+			"the process-static vegetation registry is populated before exit")
+
+	_shell.queue_free()
+	_shell = null
+	await get_tree().process_frame
+
+	assert_true(resource_root.get_root_dir().is_empty(),
+			"MainGame exit clears the mounted root before extension deinitialization")
+	assert_eq(VegAssetsScript.cache_entry_count(), 0,
+			"MainGame exit clears the process-static renderer resource cache")
+	assert_null(weak_texture.get_ref(),
+			"the cached ImageTexture dies while RenderingServer is still alive")
+	assert_null(weak_cursor.get_ref(),
+			"the process-global menu cursor dies before RenderingServer shutdown")
+	assert_null(weak_water_color.get_ref(),
+			"the water color ImageTexture dies before RenderingServer shutdown")
+	assert_null(weak_water_normal.get_ref(),
+			"the water normal ImageTexture dies before RenderingServer shutdown")
+
+
+func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var cursor_texture: Texture2D = null
+	var menu: NovaMnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
+	for node in menu.find_children("*", "NovaMnuScreen", true, false):
+		var screen := node as NovaMnuScreen
+		if screen.get_cursor_texture() != null:
+			cursor_texture = screen.get_cursor_texture()
+			break
+	assert_not_null(cursor_texture)
+	var weak_cursor: WeakRef = weakref(cursor_texture)
+	cursor_texture = null
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 9
+	target.server_name = "shutdown barrier probe"
+	var weak_target: WeakRef = weakref(target)
+	_shell.join_lan_server(target)
+	assert_true(_shell.is_world_loading(),
+			"the bound JoinTarget enters the two-frame loading-screen barrier")
+	target = null
+
+	_shell.prepare_runtime_shutdown()
+	for _frame in range(4):
+		await get_tree().process_frame
+
+	assert_null(weak_target.get_ref(),
+			"shutdown leaves the loading screen alive long enough for the outer "
+			+ "load coroutine to release its bound JoinTarget")
+	_shell.release_runtime_resources_for_shutdown()
+	assert_null(weak_cursor.get_ref(),
+			"the cooperative shutdown path drops its global custom cursor before exit")
+
+
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 	# The picker's accept leg (apply_picked_resource_dir, the ADR-0018 seam
 	# behind _on_dir_selected): an editor-managed run must never write its
@@ -520,16 +616,29 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		return
 	var world = _shell.get_node("World")
 
-	# The host's world contents are irrelevant to this shell boundary; its
-	# authoritative session record names the packed mnml.bms installed in the
-	# lifecycle fixture, which is what the joiner must load locally.
+	# The advertised filename is deliberately absent from the client install.
+	# Retail joins from the exact S2C 0x0B header + streamed world/0x45 terrain
+	# overlay; reopening an advertised local .bms is the D-NET-194 regression.
 	var mission := NovaMissionData.new()
-	assert_eq(mission.create_default(), OK)
+	assert_eq(mission.open_file(ProjectSettings.globalize_path(
+			FIXTURE_DIR.path_join("mnml.bms"))), OK)
+	var advertised_file := "wire_only_mnml.bms"
+	var client_root: NovaResourceRoot = _shell.current_resource_root()
+	assert_not_null(client_root, "the menu boot mounted the client resource session")
+	if client_root == null:
+		return
+	assert_false(client_root.has_file(advertised_file),
+			"the join proof cannot accidentally fall back to a local mission body")
+	var host_body_records := 0
+	for kind in range(4):
+		host_body_records += mission.get_entity_count(kind)
+	assert_gt(host_body_records, 0,
+			"the host fixture includes authored pools that must reach the wire-only join")
 	var host := NovaSimulation.new()
 	host.configure_host_session({
 		"server_name": "Loading Hold Host",
 		"mission_name": "Minimal",
-		"mission_file": "mnml.bms",
+		"mission_file": advertised_file,
 		"gametype": 0x30020,
 		"max_players": 4,
 		# The lifecycle fixture ships base archives only. Say so on the wire: an unset field
@@ -539,6 +648,8 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		"expansion": "",
 	})
 	assert_true(host.enable_host_listen(0))
+	var streamed_til := _til_bytes_for_cell(4)
+	host.set_terrain_til_data(streamed_til)
 	assert_true(host.load_from_mission_data(mission))
 
 	var observed := {"local_load": false, "held": false}
@@ -561,13 +672,94 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
 			break
 
-	assert_true(bool(observed["local_load"]), "the joiner completed its local mission load")
+	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
 	assert_false(_shell.is_world_loading(),
 			"the loading screen releases after the authoritative join edge")
 	assert_true(world.visible, "the admitted world is revealed")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
+	assert_eq(world.get_sim().get_join_terrain_til_state(),
+			NovaSimulation.JOIN_TERRAIN_TIL_COMPLETE)
+	assert_eq(world.get_sim().get_join_terrain_til(), streamed_til,
+			"the structurally complete wire image remains byte-exact")
+	assert_eq(world.get_loaded_mission_file(), advertised_file)
+	var tile_info := world.get_node("NovaTerrain").tile_info_override as NovaTerrainTileInfo
+	assert_not_null(tile_info, "the host's paged S2C 0x45 rebuilt the mission TIL")
+	if tile_info != null:
+		assert_true(tile_info.blocks_foliage(72.0, 8.0, 2.0),
+				"the streamed host tile override, not a local sidecar, reached terrain")
+	var wire_stats: WirePresentStats = world.get_runtime().get_wire_present_stats()
+	assert_gt(wire_stats.live, 0,
+			"host-only pools reach native materialization and wire presentation from the load/live stream")
+	assert_gt(wire_stats.spawned + wire_stats.unresolved, 0,
+			"the renderer attempted every streamed row even when this minimal fixture lacks its .3di")
+	host.free()
+
+
+func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("NovaTerrain")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var boot_clear: Color = world.get_current_frame_clear_color()
+
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_file(ProjectSettings.globalize_path(
+			FIXTURE_DIR.path_join("mnml.bms"))), OK)
+	var advertised_file := "wire_truncated_til.bms"
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Truncated TIL Host",
+		"mission_name": "Minimal",
+		"mission_file": advertised_file,
+		"gametype": 0x30020,
+		"max_players": 4,
+		"expansion": "",
+	})
+	assert_true(host.enable_host_listen(0))
+	# Advertise two records but provide one. The host emits the canonical first
+	# page [0,1), then has no second page; admission must see Receiving, never
+	# reinterpret it as the valid no-0x45 Absent case.
+	var truncated_til := _til_bytes_for_cell(4)
+	truncated_til.encode_u32(4, 2)
+	host.set_terrain_til_data(truncated_til)
+	assert_true(host.load_from_mission_data(mission))
+
+	var failures: Array[String] = []
+	var revealed := false
+	var observed_receiving := false
+	world.load_failed.connect(func(reason: String) -> void:
+		failures.append(reason)
+	)
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = host.get_host_listen_port()
+	target.server_name = "browse-time hint"
+	_shell.join_lan_server(target)
+	for _frame in range(1200):
+		host.step()
+		await get_tree().process_frame
+		revealed = revealed or world.visible
+		var join_sim: NovaSimulation = world.get_sim()
+		if join_sim != null and join_sim.is_joiner():
+			observed_receiving = observed_receiving or \
+					join_sim.get_join_terrain_til_state() == \
+					NovaSimulation.JOIN_TERRAIN_TIL_RECEIVING
+		if not failures.is_empty() and not _shell.is_world_loading():
+			break
+
+	assert_eq(failures.size(), 1,
+			"one fail-closed edge owns the incomplete terrain stream")
+	assert_true(observed_receiving,
+			"the admitted join exposed a begun but incomplete 0x45 stream")
+	if not failures.is_empty():
+		assert_string_contains(failures[0], "streamed mission assets")
+	assert_false(revealed,
+			"a Receiving terrain stream cannot reveal the admitted world")
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 	host.free()
 
 
@@ -860,6 +1052,17 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"the mission sky clear is restored to the boot/menu frame clear")
 	assert_null(world.get_node_or_null("MissionObjects"),
 			"no mission presentation subtree remains")
+
+
+func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(28)
+	bytes.encode_u32(0, 0x74696c30)
+	bytes.encode_u32(4, 1)
+	bytes.encode_u32(16, cell_x * (16 << 16))
+	bytes.encode_u32(20, 0)
+	bytes[24] = 1
+	return bytes
 
 
 # PFF3: 20-byte header, 36-byte entries with 16-byte names, then payloads.

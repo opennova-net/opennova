@@ -18,14 +18,10 @@ namespace opennova::netsim {
 // representations meet — keeping libs/world net-agnostic and libs/novaworld
 // sim-agnostic (ADR 0009/0011).
 
-// Map a wire type_id to its §5.10b replication class. Phase 1 uses a minimal table
-// (the player infantry template vs everything-else-is-infantry); Phase 3 replaces
-// it with an items.def *_function class-tag resolver [orig: ItemDef+356]. From a bare
-// type_id it CANNOT see vehicle classes (that knowledge is items.def-side), so
-// decoders that must agree with entity_class_of for pool-1 vehicles layer a learned
-// table over it — NetClientView records type->Vehicle from the 0x0D pool-1 spawn
-// batch (see NetClientView::classify). The host's chosen compact encoder and the
-// client's chosen compact decoder must agree or the record chain desyncs.
+// Bare wire ids carry no codec discriminator. This recognizes only the one
+// built-in player-Person type whose callback is independently witnessed and
+// returns Unknown for every other id. Production decode must use an
+// ItemReplicationCatalog; Unknown is a fail-closed stop, never "organic Person".
 EntityClass class_for_type_id(uint16_t type_id);
 
 // The §5.10b replication class a live World entity replicates as. EntityClass::Unknown
@@ -58,7 +54,7 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // pool_for_kind already assigns (Organic->0, Item->1, Building->2, Marker->3).
 //
 // Each extractor reads only the fields the libs/world Entity models; the wire fields a
-// freshly-promoted static/spawn does not carry (ammo, weapon block, AI trailer, ...) stay
+// freshly-promoted static/spawn does not carry (ammo, mount-occupancy block, AI trailer, ...) stay
 // zero — faithful for a load-time spawn record, and the flag word each encoder derives
 // (encode_*_batch) gates them out. The orientation field is the engine-frame heading BAM
 // (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
@@ -112,12 +108,16 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 // live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
 // Position is the live engine-frame AiEntity.pos[] (i32 16.16 — the exact store the host
 // writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
-// `intent.heading << 16`). On-foot only (carrier_handle = 0xFFFF; the mounted vehicle-local
-// transform is deferred). The anti-cheat weapon/fire counters are left 0 — the §5.38a
+// `intent.heading << 16`). A live mount_target wins over ground_target; when the selected
+// carrier resolves in `world`, the handle plus carrier-local position/heading are emitted.
+// Otherwise the existing FFFF/world-pose form is retained. The anti-cheat weapon/fire
+// counters are left 0 — the §5.38a
 // receive path has NO counter gate, so the host read-apply ignores them. The 5-byte
 // sub-header (handle = the host-assigned wire handle H, item_type_id = e.item_id, sub_op =
 // 0x0A) is built by the caller. [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
-PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae);
+PlayerExtendedUplink build_player_uplink(const world::World &world,
+                                         const world::Entity &e,
+                                         const world::AiEntity &ae);
 
 } // namespace opennova::netsim

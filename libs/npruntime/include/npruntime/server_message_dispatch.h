@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,6 +34,24 @@ class World;
 // builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
 namespace opennova::np {
 
+using MissionMetadataBlob = std::array<uint8_t, 180>;
+
+// Build the session-owned S2C 0x64 raw content. The two random regions and
+// nonzero session id are minted once by create_session; callers then retain the
+// returned block for every chunk request. [orig: sub_51E880 @0x51E880 +
+// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
+MissionMetadataBlob build_mission_metadata_blob(
+		const GameConfig &config, bool is_mp_session_peer);
+
+// Build the second, pending-player-spawn boundary of a retail join. The C2S
+// 0x02 handler deliberately does not return these records: retail processes an
+// intervening client frame before CNapiServer_ProcessPendingPlayerSpawns emits
+// 0x03(reset), settings x2, 0x05, 0x04 and the 0x7B replay. The host tick calls
+// this only after the player's live entity/team exists.
+std::vector<ProtocolMessage> build_spawn_pump_metadata(
+		const GameConfig &config, NapiNPConnection &conn,
+		const std::vector<NapiNPConnection> &roster, world::World *world);
+
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into
 // `conn.reply`; gates the spawn-confirm replies on `conn.burst` (the faithful spawn authority). A
@@ -53,7 +72,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
-                                                      uint32_t session_seed = 0);
+                                                      uint32_t session_seed = 0,
+                                                      uint32_t session_uptime_ms = 0,
+	                                                  const MissionMetadataBlob *mission_metadata_blob = nullptr);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the

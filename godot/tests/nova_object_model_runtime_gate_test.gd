@@ -282,3 +282,109 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 	model.advance_runtime_frame(0.0)
 	assert_false(skeleton.get_bone_pose_position(0).is_equal_approx(poison),
 			"the next visible frame applies the pending pose")
+
+
+# --- Event-driven runtime scheduling: models self-park while idle -----------
+# A joiner streams the whole mission (800+ live NovaObjectModels); the fix
+# stops idle models from paying a per-frame _process. Every mutator that can
+# create per-frame work re-arms processing, and one runtime frame with no
+# live work parks the model again. Placed mission/wire models always carry the
+# shared PANM clock (mission_object_placer sets it on every model path);
+# clockless playing models are the OED-preview carve-out and stay awake so
+# their private age keeps accumulating. The staggered environment-restamp
+# wake is live-verified (it depends on the wall frame counter); these tests
+# pin the park/re-arm contract itself.
+
+func _clocked_spy_model() -> GateSpyModel:
+	var model := _spy_model()
+	model.set_panm_clock({"time_ms": 0})
+	model.reset_observations()
+	return model
+
+
+func test_idle_clocked_model_parks_after_one_runtime_frame() -> void:
+	var model := _clocked_spy_model()  # static house: no live per-frame work
+	model.set_process(true)
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(),
+			"a shared-clock model with no live per-frame work parks itself")
+
+
+func test_clockless_playing_model_stays_awake() -> void:
+	# The OED-preview carve-out: no shared clock + playing means the private
+	# age accumulates per frame, so the model must keep processing.
+	var model := _spy_model()
+	model.set_process(true)
+	model.advance_runtime_frame(0.016)
+	assert_true(model.is_processing(),
+			"a clockless playing model keeps its private preview clock running")
+
+
+func test_mutators_rearm_processing_and_park_when_drained() -> void:
+	var model := _clocked_spy_model()
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(), "baseline: parked while idle")
+
+	model.set_ctrl_value("VEHICLE_SPECIAL1", 1024)
+	assert_true(model.is_processing(), "a CTRL write re-arms the runtime frame")
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(),
+			"an inline-applied CTRL write leaves no pending work: parked again")
+
+	model.play_part_anim(1, 1, 1.0)
+	assert_true(model.is_processing(), "a commanded part anim re-arms")
+	model.advance_runtime_frame(0.016)
+	assert_true(model.is_processing(),
+			"a live part-anim sweep is per-frame work: stays awake")
+
+
+func test_visibility_edge_rearms_for_one_restamp_frame() -> void:
+	var model := _clocked_spy_model()
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(), "baseline: parked while idle")
+	model.visible = false
+	assert_true(model.is_processing(),
+			"a visibility edge re-arms the env-restamp check")
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(), "a hidden idle model parks again")
+	model.visible = true
+	assert_true(model.is_processing(),
+			"re-shown models re-check the env generation missed while hidden")
+	model.advance_runtime_frame(0.016)
+	assert_false(model.is_processing(), "and park once the restamp is done")
+
+
+# --- Camera-submission gate: retail computes per SUBMITTED model ------------
+# [orig: Terrain_RenderSectorModels @0x5c5d30]. set_on_screen is the public
+# seam the bounds notifier's screen_entered/exited signals drive; headless
+# contexts never fire the notifier, so the flag defaults on and these tests
+# exercise the gate through the same seam.
+
+func test_model_carries_a_submission_notifier_sized_to_its_bounds() -> void:
+	var model := _clocked_spy_model()
+	var notifier := model.get_node_or_null("ScreenNotifier")
+	assert_not_null(notifier, "a built model carries its submission notifier")
+	assert_gt((notifier as VisibleOnScreenNotifier3D).aabb.size.length(), 0.0,
+			"the notifier AABB covers the mesh bounds")
+
+
+func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
+	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
+	model.set_panm_clock({"time_ms": 0})
+	model.reset_observations()
+	model.set_on_screen(false)
+	model.play_part_anim(1, 1, 1.0)
+
+	model.advance_runtime_frame(0.5)
+	assert_eq(model.env_applies, 0, "an off-camera model pushes no environment state")
+	assert_eq(model.robj_applies, 0, "no PANM evaluation while off camera")
+	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
+			"the commanded part anim still advanced while off camera")
+
+	model.set_on_screen(true)
+	assert_true(model.is_processing(),
+			"re-entering the screen wakes the model for the catch-up frame")
+	model.advance_runtime_frame(0.5)
+	assert_eq(model.robj_applies, 1,
+			"the submitted frame re-derives transforms from the absolute clock")
+	assert_eq(model.env_applies, 1, "and catches up the environment restamp")

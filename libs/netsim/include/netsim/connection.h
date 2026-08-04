@@ -54,7 +54,7 @@ struct Connection {
 	// counter [orig: playerSlot+100566, ++ before every 0x0A in Server_SendEntityStateToPlayer
 	// @0x517be8]. NetPacket_WritePlayerState @0x4ff6b0 writes it as the frame's `flags2` byte and
 	// `phase & 3` selects the header sub-block (0 weapon / 1 server-status / 2 env / 3 gametype),
-	// while `phase & 0xF == 8` gates the passenger block. emit_connection_s2c advances it per send.
+	// while `phase & 0xF == 8` gates the mounted-weapon ammo block. emit_connection_s2c advances it.
 	uint8_t s2c_phase = 0;
 
 	// Per-connection entity AGE bytes for the 0x0A priority loop — the reimpl of the original's

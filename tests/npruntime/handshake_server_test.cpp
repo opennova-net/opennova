@@ -16,8 +16,11 @@
 
 #include <npruntime/napi_np_protocol.h>
 #include <npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
+#include <npruntime/integrity_challenge_profile.h>
 #include <npruntime/lan_discovery.h>
+#include <npruntime/server_message_dispatch.h>
 #include <npruntime/server_spawn.h>
+#include <npruntime/server_tick.h>
 #include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <def/def.h>
@@ -29,8 +32,10 @@
 #include "host_test_setup.h"
 
 #include <netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
+#include <netsim/udp_session_transport.h>
 
 #include <npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_hello.h>
@@ -41,6 +46,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -96,6 +102,26 @@ bool test_emplacement_is_released(
 
 uint16_t le16(const uint8_t *p) {
 	return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+}
+
+uint32_t le32(const uint8_t *p) {
+	return static_cast<uint32_t>(p[0]) |
+	       (static_cast<uint32_t>(p[1]) << 8) |
+	       (static_cast<uint32_t>(p[2]) << 16) |
+	       (static_cast<uint32_t>(p[3]) << 24);
+}
+
+std::vector<uint8_t> indexed_crc_reply(uint8_t index, uint32_t crc,
+		std::initializer_list<uint8_t> trailing = {}) {
+	std::vector<uint8_t> body = {
+			index,
+			static_cast<uint8_t>(crc),
+			static_cast<uint8_t>(crc >> 8),
+			static_cast<uint8_t>(crc >> 16),
+			static_cast<uint8_t>(crc >> 24),
+	};
+	body.insert(body.end(), trailing.begin(), trailing.end());
+	return body;
 }
 
 // Craft an inbound NW-UDP datagram (opcode + plaintext body) the way a joiner would:
@@ -301,6 +327,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	np::GameConfig config;
 	config.server_name = "Configured LAN Host";
 	config.game_type = 0x00010020u;
+	config.team_choose = true;
 	config.max_players = 11;
 	config.expansion = "jox99";
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,
@@ -356,6 +383,10 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	                              first_opcode, first_body) &&
 	                    parse_server_hello(first_body.data(), first_body.size(), foreign),
 	            "test can decode the discovered 0x81")) return false;
+	if (!expect(foreign.p2 == 0x00000904u,
+	            "0x81 P2 carries the live retail BuildFlags value")) return false;
+	if (!expect(foreign.sus1.empty(),
+	            "LAN 0x81 omits SUS1 when no NovaWorld session user string exists")) return false;
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
@@ -400,6 +431,18 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	            "empty dedicated host returns a parseable 0x81")) return false;
 	if (!expect(empty.current_players == 0 && empty.gametype == 0 && empty.expansion.empty(),
 	            "omitted NP/P1/SUS2 fields parse as live zero/empty values")) return false;
+	uint8_t empty_opcode = 0;
+	std::vector<uint8_t> empty_body;
+	ServerHello empty_hello;
+	if (!expect(
+				nw_decode_inbound(
+						empty_reply.outbound[0].data(), empty_reply.outbound[0].size(),
+						empty_opcode, empty_body) &&
+						empty_opcode == SESSION_OPCODE_SERVER_HELLO &&
+						parse_server_hello(empty_body.data(), empty_body.size(), empty_hello) &&
+						empty_hello.p2 == 0x00000904u,
+				"Deathmatch LAN 0x81 still carries TeamChoose from live mp_attributes"))
+		return false;
 	if (!expect(np::connection_count(dedicated) == 0,
 	            "dedicated-host discovery remains stateless")) return false;
 	return true;
@@ -409,6 +452,238 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 // World-path spawn/F3 flow is covered by joiner_connection_test / two_endpoint_socket_test). Asserts the
 // handshake / server-info / mission-metadata / loadout / roster / spawn-confirm reactive replies a retail
 // joiner expects.
+// The PR #403 retail->retail 00TRg witness pins both metadata files consumed
+// before the joiner chooses its faction/loadout. For this stock-Co-op selector,
+// 0x60 names the map file (not MissionText's display title) and carries the
+// configured loading-screen text; the cross-mode selector is pinned separately.
+// 0x64 is the original 180-byte CNapiGameSession block: two per-session random
+// 32-byte regions around the live cap/game-type/mpattrib fields and three fixed
+// 32-byte strings. Re-requests must return the same per-session block.
+bool run_mission_transfers_match_retail_lan_contract() {
+	netsim::LoopbackChannel loopback;
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.server_name = "Untitled ";
+	config.mission_name = "Training: Grenade Launcher";
+	config.mission_file = "00TRg.bms";
+	config.custom_text = "Put your message here.";
+	config.game_type = 0x00010020u;
+	config.mp_attributes = 0x00003A06u;
+	config.max_players = 4;
+	config.expansion = "revx02";
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient,
+	                        np::SocketMode::Lan, kHostKey, &loopback, config);
+
+	const PeerAddr peer{0x0100007Fu, 30064};
+	const std::string client_scrk =
+			"MISSIONMETADATASCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+	std::string server_scrk;
+	uint32_t server_sk = 0;
+	uint32_t seq = 1;
+	if (!handshake(ctx, peer, client_scrk, 0x40306400u, server_scrk,
+	               &server_sk, &seq)) {
+		return false;
+	}
+
+	auto request = [&](uint8_t tag, uint32_t now,
+	                   ProtocolMessage &out) -> bool {
+		const std::vector<uint8_t> dg = craft_session(
+				client_scrk, server_sk, seq++, {make_protocol_message(tag, {})});
+		const auto result = np::handle_server_datagram(
+				ctx, peer, dg.data(), dg.size(), now);
+		if (result.outbound.empty()) return false;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_s2c(result.outbound.back(), server_scrk, header, messages))
+			return false;
+		const ProtocolMessage *found = find_reply(
+				messages, tag == 0x33 ? uint8_t(0x60) : uint8_t(0x64));
+		if (found == nullptr) return false;
+		out = *found;
+		return true;
+	};
+
+	ProtocolMessage info_message;
+	if (!expect(request(0x33, 110, info_message),
+	            "0x33 returns the retail server-info transfer")) return false;
+	FileTransferChunk info;
+	if (!expect(decode_file_transfer_chunk(
+	                    info_message.payload.data(), info_message.payload.size(), info) &&
+	                    info.transfer_id == 1 && info.chunk_offset == 0 && info.is_final(),
+	            "0x60 is one complete transfer")) return false;
+	std::vector<uint8_t> expected_info;
+	auto append_u32 = [&](uint32_t value) {
+		for (unsigned shift = 0; shift < 32; shift += 8)
+			expected_info.push_back(static_cast<uint8_t>(value >> shift));
+	};
+	auto append_kv = [&](const char *name, const uint8_t *bytes, std::size_t size) {
+		expected_info.insert(expected_info.end(), name,
+		                     name + std::char_traits<char>::length(name));
+		expected_info.push_back(0);
+		append_u32(static_cast<uint32_t>(size));
+		expected_info.insert(expected_info.end(), bytes, bytes + size);
+	};
+	auto append_string_kv = [&](const char *name, const std::string &value) {
+		append_kv(name, reinterpret_cast<const uint8_t *>(value.c_str()),
+		          value.size() + 1);
+	};
+	append_string_kv("SERVERNAME", config.server_name);
+	append_string_kv("MISSIONNAME", config.mission_file);
+	const uint8_t game_type[] = {0x20, 0x00, 0x01, 0x00};
+	append_kv("GAMETYPE", game_type, sizeof(game_type));
+	append_string_kv("CUSTOMTEXT", config.custom_text);
+	append_string_kv("MISSIONFILENAME", config.mission_file);
+	const uint8_t fanfare[] = {0, 0};
+	append_kv("EXP_FANFARE", fanfare, sizeof(fanfare));
+	if (!expect(info.total_size == expected_info.size() &&
+	                    std::equal(expected_info.begin(), expected_info.end(), info.chunk_data),
+	            "0x60 bytes match the retail 00TRg VarList")) return false;
+
+	ProtocolMessage first_metadata;
+	ProtocolMessage repeated_metadata;
+	if (!expect(request(0x37, 120, first_metadata) &&
+	                    request(0x37, 121, repeated_metadata) &&
+	                    first_metadata.payload == repeated_metadata.payload,
+	            "0x64 re-request returns one stable per-session block")) return false;
+	FileTransferChunk metadata;
+	if (!expect(decode_file_transfer_chunk(
+	                    first_metadata.payload.data(), first_metadata.payload.size(), metadata) &&
+	                    metadata.transfer_id == 1 && metadata.total_size == 180 &&
+	                    metadata.chunk_offset == 0 && metadata.chunk_size == 180 &&
+	                    metadata.is_final(),
+	            "0x64 wraps the exact 180-byte mission block")) return false;
+	const uint8_t *blob = metadata.chunk_data;
+	const auto fixed_string = [&](std::size_t offset) {
+		return std::string(reinterpret_cast<const char *>(blob + offset));
+	};
+	const bool prefix_nonzero = std::any_of(
+			blob, blob + 32, [](uint8_t b) { return b != 0; });
+	const bool suffix_nonzero = std::any_of(
+			blob + 148, blob + 180, [](uint8_t b) { return b != 0; });
+	if (!expect(prefix_nonzero && le32(blob + 32) != 0 && suffix_nonzero,
+	            "0x64 carries generated per-session seed/id/token fields")) return false;
+	return expect(
+			le32(blob + 36) == config.max_players &&
+			le32(blob + 40) == config.game_type &&
+			le32(blob + 44) == config.mp_attributes && le32(blob + 48) == 1 &&
+			fixed_string(52) == config.server_name &&
+			fixed_string(84) == config.mission_file &&
+			fixed_string(116) == config.mission_file,
+			"0x64 live fields and strings match the retail LAN session");
+}
+
+bool decode_tag60_mission_strings(const ProtocolMessage &message,
+		std::string &mission_name, std::string &mission_filename) {
+	FileTransferChunk transfer;
+	if (!decode_file_transfer_chunk(
+			message.payload.data(), message.payload.size(), transfer) ||
+			!transfer.is_final())
+		return false;
+	const uint8_t *cursor = transfer.chunk_data;
+	const uint8_t *end = cursor + transfer.chunk_size;
+	while (cursor < end) {
+		const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
+		if (name_end == end) return false;
+		const std::string key(
+				reinterpret_cast<const char *>(cursor),
+				reinterpret_cast<const char *>(name_end));
+		cursor = name_end + 1;
+		if (static_cast<std::size_t>(end - cursor) < 4u) return false;
+		const uint32_t value_size = le32(cursor);
+		cursor += 4;
+		if (value_size > static_cast<std::size_t>(end - cursor)) return false;
+		if ((key == "MISSIONNAME" || key == "MISSIONFILENAME") &&
+				(value_size == 0 || cursor[value_size - 1] != 0))
+			return false;
+		if (key == "MISSIONNAME") {
+			mission_name.assign(
+					reinterpret_cast<const char *>(cursor),
+					value_size == 0 ? 0u : value_size - 1u);
+		} else if (key == "MISSIONFILENAME") {
+			mission_filename.assign(
+					reinterpret_cast<const char *>(cursor),
+					value_size == 0 ? 0u : value_size - 1u);
+		}
+		cursor += value_size;
+	}
+	return !mission_name.empty() && !mission_filename.empty();
+}
+
+bool run_tag60_mission_name_selects_by_game_type() {
+	struct Case {
+		uint32_t game_type;
+		const char *title;
+		const char *file;
+		const char *expected_mission_name;
+		const char *description;
+	};
+	const Case cases[] = {
+			{0x00010020u, "Stock Co-op Display Title", "COOP_FILE.BMS",
+					"COOP_FILE.BMS",
+					"stock Co-op 0x60 uses the active mission filename"},
+			{0x00030020u, "Objective Co-op Display Title", "OBJECTIVE_FILE.BMS",
+					"Objective Co-op Display Title",
+					"objective waypoint variant 0x60 uses MissionText title"},
+			{0x00010000u, "Retail TDM Display Title", "TDM_FILE.BMS",
+					"Retail TDM Display Title",
+					"TDM 0x60 uses MissionText title"},
+	};
+
+	uint16_t port = 30120;
+	uint32_t client_key = 0x60000001u;
+	for (const Case &test_case : cases) {
+		netsim::LoopbackChannel loopback;
+		np::NapiNPServerCtx ctx;
+		np::GameConfig config;
+		config.server_name = "Tag60 Selector Host";
+		config.mission_name = test_case.title;
+		config.mission_file = test_case.file;
+		config.game_type = test_case.game_type;
+		config.max_players = 4;
+		np::test::bring_up_host(ctx, np::ConnectionMode::HostClient,
+				np::SocketMode::Lan, kHostKey, &loopback, config);
+
+		const PeerAddr peer{0x0100007Fu, port++};
+		const std::string client_scrk =
+				"TAG60SELECTORSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567";
+		std::string server_scrk;
+		uint32_t server_sk = 0;
+		uint32_t sequence = 1;
+		if (!handshake(ctx, peer, client_scrk, client_key++, server_scrk,
+				&server_sk, &sequence))
+			return false;
+
+		const std::vector<uint8_t> request = craft_session(
+				client_scrk, server_sk, sequence,
+				{make_protocol_message(0x33, {})});
+		const auto result = np::handle_server_datagram(
+				ctx, peer, request.data(), request.size(), 130);
+		if (!expect(!result.outbound.empty(),
+				"0x33 selector request returns a server-info transfer"))
+			return false;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_s2c(result.outbound.back(), server_scrk, header, messages))
+			return expect(false, "decode selector 0x60 response");
+		const ProtocolMessage *info = find_reply(messages, 0x60);
+		if (!expect(info != nullptr, "selector response contains S2C 0x60"))
+			return false;
+		std::string mission_name;
+		std::string mission_filename;
+		if (!expect(decode_tag60_mission_strings(
+					*info, mission_name, mission_filename),
+				"selector response contains both mission string fields"))
+			return false;
+		if (!expect(mission_name == test_case.expected_mission_name,
+				test_case.description))
+			return false;
+		if (!expect(mission_filename == test_case.file,
+				"MISSIONFILENAME remains the exact active map file"))
+			return false;
+	}
+	return true;
+}
+
 bool run_reactive_replies() {
 	np::NapiNPServerCtx ctx;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
@@ -434,8 +709,8 @@ bool run_reactive_replies() {
 		return decode_s2c(r.outbound.back(), server_scrk, hdr, out);
 	};
 
-	// The helper completed the admission exchange, so a later C2S 0x02 is a no-op
-	// (roster_pushed is already set). Verify it doesn't crash or double-emit.
+	// The helper completed the admission exchange, so a later C2S 0x02 is a no-op.
+	// Verify it doesn't crash or double-emit admission metadata.
 	{
 		std::vector<ProtocolMessage> msgs;
 		send_session({make_protocol_message(0x02, std::vector<uint8_t>(8, 0))}, 100, msgs);
@@ -447,11 +722,14 @@ bool run_reactive_replies() {
 		if (!expect(send_session({make_protocol_message(0x33, {})}, 110, msgs) &&
 		            reply_has_tag(msgs, 0x60), "0x33 -> 0x60 server-info")) return false;
 	}
-	// 0x37 -> 0x64 mission metadata chunk. [orig: NapiNPServerMsg_0x037 @0x5152E0]
+	// 0x37 -> 0x64 mission metadata chunk only. Retail's handler calls the
+	// circular-buffer sender and does not emit a fresh player-slot state.
+	// [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
 	{
 		std::vector<ProtocolMessage> msgs;
 		if (!expect(send_session({make_protocol_message(0x37, {})}, 120, msgs) &&
-		            reply_has_tag(msgs, 0x64), "0x37 -> 0x64 mission metadata")) return false;
+		            reply_has_tag(msgs, 0x64) && !reply_has_tag(msgs, 0x75),
+		            "0x37 -> 0x64 only, without an invented 0x75")) return false;
 	}
 	// 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig: NapiNPServerMsg_0x02F
 	// @0x515790 -> Server_SendWeaponSlotListToPlayer @0x502550]: reply set = the request's adm
@@ -517,7 +795,20 @@ bool run_reactive_replies() {
 		for (const auto &m : msgs)
 			if (m.tag == 0x57)
 				body_ok = m.payload == std::vector<uint8_t>{0x44, 0x33, 0x22, 0x11, 0x00};
-		if (!expect(body_ok, "0x57 pong body = echoed timestamp + 0 byte")) return false;
+		// Delivery policy is sender-owned metadata and is intentionally absent from the wire
+		// encoding, so verify one-send behavior against the host's retained queue instead of
+		// the decoded message (which necessarily carries ProtocolMessage's default policy).
+		bool pong_retained = false;
+		for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+			if (!(connection.peer == peer)) continue;
+			for (const auto &[packet_sequence, retained] : connection.seq.retained_outbound) {
+				(void)packet_sequence;
+				for (const ProtocolMessage &message : retained)
+					if (message.tag == 0x57) pong_retained = true;
+			}
+		}
+		if (!expect(body_ok && !pong_retained,
+		            "0x57 pong is one-send with echoed timestamp + 0 byte")) return false;
 		// echo_flag = 0 -> no 0x57 reply (RTT compute only).
 		std::vector<ProtocolMessage> msgs0;
 		const bool got0 = send_session({make_protocol_message(0x2C, {0x44, 0x33, 0x22, 0x11, 0x00})}, 180, msgs0);
@@ -963,14 +1254,40 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 					!echo_result.outbound.empty() &&
 							np::connection_count(ctx) == 1 &&
 							ctx.np_protocol.connection_list.front().self_id_seen &&
-							ctx.np_protocol.connection_list.front().reply.roster_pushed,
+							ctx.np_protocol.connection_list.front().reply.admission_metadata_pushed &&
+							!ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
+							!ctx.np_protocol.connection_list.front().reply.roster_pushed,
 					"valid 0x02 echo completes admission and emits post-handshake metadata")) {
 			return false;
 		}
 		np::tick_connections(ctx, 16, 103);
 		if (!expect(
-					ctx.np_protocol.connection_list.front().link.owned_entity.valid(),
-					"completed 0x00->0x01->0x02 admission can spawn the player entity")) {
+					ctx.np_protocol.connection_list.front().link.owned_entity.valid() &&
+							ctx.np_protocol.connection_list.front().reply.spawn_metadata_pushed &&
+							!ctx.np_protocol.connection_list.front().reply.roster_pushed,
+					"next tick spawns the player and emits only spawn metadata")) {
+			return false;
+		}
+		const std::vector<np::TickOut> pre_metadata_tick =
+				np::tick_connections(ctx, 16, 104);
+		if (!expect(
+					pre_metadata_tick.empty() &&
+					!ctx.np_protocol.connection_list.front().reply.roster_pushed,
+					"following tick waits for the mission-metadata boundary")) {
+			return false;
+		}
+		np::NapiNPConnection &connection =
+				ctx.np_protocol.connection_list.front();
+		const std::vector<ProtocolMessage> join_tail =
+				np::dispatch_session_replies(
+						ctx.config, connection,
+						{make_protocol_message(0x37, {})}, 105,
+						ctx.np_protocol.connection_list, &w);
+		if (!expect(
+					connection.reply.roster_pushed &&
+					join_tail.size() == 2 && join_tail[0].tag == 0x64 &&
+					join_tail[1].tag == 0x16,
+					"0x37 publishes mission metadata and the first roster together")) {
 			return false;
 		}
 	}
@@ -1134,29 +1451,12 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	const PeerAddr second_peer{0x0100007Fu, 31211};
 	std::string first_server_scrk;
 	std::string second_server_scrk;
-	std::vector<ProtocolMessage> first_burst;
-	std::vector<ProtocolMessage> second_burst;
 	if (!handshake(
 				ctx, first_peer, client_scrk, 0x10101010u,
-				first_server_scrk, nullptr, nullptr, true, &first_burst) ||
+				first_server_scrk) ||
 	    !handshake(
 				ctx, second_peer, client_scrk, 0x20202020u,
-				second_server_scrk, nullptr, nullptr, true, &second_burst)) {
-		return false;
-	}
-
-	const ProtocolMessage *first_slot = find_reply(first_burst, 0x04);
-	const ProtocolMessage *second_slot = find_reply(second_burst, 0x04);
-	if (!expect(
-				first_slot != nullptr && first_slot->payload.size() >= 19 &&
-						first_slot->payload[17] == 1,
-				"first remote 0x04 reserves slot 1 beside the listen host")) {
-		return false;
-	}
-	if (!expect(
-				second_slot != nullptr && second_slot->payload.size() >= 19 &&
-						second_slot->payload[17] == 2,
-				"second admission before either spawn reserves distinct slot 2")) {
+				second_server_scrk)) {
 		return false;
 	}
 	bool first_reserved = false;
@@ -1174,9 +1474,32 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 		return false;
 	}
 
+	const std::vector<np::TickOut> spawn_out =
+			np::tick_connections(ctx, 16, 6);
+	auto slot_message_for = [&](const PeerAddr &peer, std::string_view server_scrk,
+	                            ProtocolMessage &slot) {
+		for (const np::TickOut &tick : spawn_out) {
+			if (!(tick.peer == peer)) continue;
+			for (const std::vector<uint8_t> &datagram : tick.outbound) {
+				ProtocolPacketHeader header;
+				std::vector<ProtocolMessage> messages;
+				if (!decode_s2c(datagram, server_scrk, header, messages)) continue;
+				if (const ProtocolMessage *found = find_reply(messages, 0x04)) {
+					slot = *found;
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	ProtocolMessage first_slot;
+	ProtocolMessage second_slot;
 	if (!expect(
-				np::Server_ProcessPendingPlayerSpawns(ctx, world) == 2,
-				"both admitted remotes spawn on the next host pass")) {
+				slot_message_for(first_peer, first_server_scrk, first_slot) &&
+						first_slot.payload.size() >= 19 && first_slot.payload[17] == 1 &&
+				slot_message_for(second_peer, second_server_scrk, second_slot) &&
+						second_slot.payload.size() >= 19 && second_slot.payload[17] == 2,
+				"spawn-pump 0x04 publishes the two distinct reserved slots")) {
 		return false;
 	}
 	uint8_t first_spawned_slot = 0xFF;
@@ -1209,20 +1532,18 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	}
 	const PeerAddr replacement_peer{0x0100007Fu, 31212};
 	std::string replacement_server_scrk;
-	std::vector<ProtocolMessage> replacement_burst;
 	if (!handshake(
 				ctx, replacement_peer, client_scrk, 0x30303030u,
-				replacement_server_scrk, nullptr, nullptr, true,
-				&replacement_burst)) {
+				replacement_server_scrk)) {
 		return false;
 	}
-	const ProtocolMessage *replacement_slot =
-			find_reply(replacement_burst, 0x04);
+	const np::NapiNPConnection *replacement = nullptr;
+	for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == replacement_peer) replacement = &connection;
 	if (!expect(
-				replacement_slot != nullptr &&
-						replacement_slot->payload.size() >= 19 &&
-						replacement_slot->payload[17] == 1,
-				"replacement admission reuses the released slot 1")) {
+				replacement != nullptr && replacement->reply.player_slot_reserved &&
+						replacement->reply.player_slot == 1,
+				"replacement admission reserves the released slot 1")) {
 		return false;
 	}
 	if (!expect(
@@ -1232,20 +1553,276 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 	}
 	const PeerAddr second_replacement_peer{0x0100007Fu, 31213};
 	std::string second_replacement_server_scrk;
-	std::vector<ProtocolMessage> second_replacement_burst;
 	if (!handshake(
 				ctx, second_replacement_peer, client_scrk, 0x40404040u,
-				second_replacement_server_scrk, nullptr, nullptr, true,
-				&second_replacement_burst)) {
+				second_replacement_server_scrk)) {
 		return false;
 	}
-	const ProtocolMessage *second_replacement_slot =
-			find_reply(second_replacement_burst, 0x04);
+	const np::NapiNPConnection *second_replacement = nullptr;
+	for (const np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == second_replacement_peer)
+			second_replacement = &connection;
 	return expect(
-			second_replacement_slot != nullptr &&
-					second_replacement_slot->payload.size() >= 19 &&
-					second_replacement_slot->payload[17] == 1,
+			second_replacement != nullptr &&
+					second_replacement->reply.player_slot_reserved &&
+					second_replacement->reply.player_slot == 1,
 			"a later admission reuses the pre-spawn reservation after teardown");
+}
+
+// Retail does not coalesce the C2S 0x02 handler and the pending-player spawn
+// pump. The first S2C datagram completes admission; only a later host pump
+// replays the connection settings and writes 0x04, after client-side join
+// initialization has finished. The first mission-metadata response then shares
+// its send boundary with the live-slot reply and initial roster. 00TRg
+// retail->retail frames 13/15/20 pin these as three distinct boundaries:
+//
+//   admission:  settings x2, 0x01, 0x7A, 0x7B, 0x03(restrictions)
+//   spawn pump: 0x03(reset), settings x2, 0x05, 0x04, 0x7B
+//   join tail:  0x75, 0x64, 0x16
+//
+// Coalescing 0x04 into admission looks harmless in a tag histogram but retail
+// subsequently resets its selected team to side B and submits the wrong 0x2F
+// kit. This regression therefore treats UDP boundaries as protocol semantics.
+bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
+	world::World world;
+	world::AiSystem ai;
+	world.ai = &ai;
+	world.registry.configure_pool(0, 16);
+
+	netsim::LoopbackChannel loopback;
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.game_type = 0x00010020u;
+	config.max_players = 4;
+	config.expansion = "revx02";
+	np::test::bring_up_host(
+			ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+			kHostKey, &loopback, config);
+	ctx.world = &world;
+	if (!expect(np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+	            "listen host exists before the retail join sequence")) {
+		return false;
+	}
+
+	const PeerAddr peer{0x0100007Fu, 31209};
+	const std::string client_scrk =
+			"BOUNDARYTESTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ01234567";
+	std::string server_scrk;
+	std::vector<ProtocolMessage> admission;
+	if (!handshake(
+				ctx, peer, client_scrk, 0x40302010u, server_scrk,
+				nullptr, nullptr, true, &admission)) {
+		return false;
+	}
+	const auto is_settings = [](const ProtocolMessage &m) {
+		return m.flags.settings_update && m.tag == hightag::CS_CONFIG_UPDATE;
+	};
+	if (!expect(
+			admission.size() == 6 && is_settings(admission[0]) &&
+			is_settings(admission[1]) && admission[2].tag == 0x01 &&
+			admission[3].tag == 0x7A && admission[4].tag == 0x7B &&
+			admission[5].tag == 0x03 && admission[5].payload.size() == 5 &&
+			!reply_has_tag(admission, 0x04) && !reply_has_tag(admission, 0x05) &&
+			!reply_has_tag(admission, 0x16),
+			"C2S 0x02 reply contains only witnessed admission metadata")) {
+		return false;
+	}
+
+	auto messages_for_peer = [&](const std::vector<np::TickOut> &outs,
+	                             std::vector<ProtocolMessage> &messages) {
+		for (const np::TickOut &tick : outs) {
+			if (!(tick.peer == peer)) continue;
+			for (const std::vector<uint8_t> &datagram : tick.outbound) {
+				ProtocolPacketHeader header;
+				std::vector<ProtocolMessage> decoded;
+				if (!decode_s2c(datagram, server_scrk, header, decoded)) continue;
+				messages.insert(messages.end(), decoded.begin(), decoded.end());
+			}
+		}
+		return !messages.empty();
+	};
+
+	std::vector<ProtocolMessage> spawn_pump;
+	if (!expect(
+			messages_for_peer(np::tick_connections(ctx, 16, 6), spawn_pump) &&
+			spawn_pump.size() == 6 && spawn_pump[0].tag == 0x03 &&
+			spawn_pump[0].payload == std::vector<uint8_t>{0x00} &&
+			is_settings(spawn_pump[1]) && is_settings(spawn_pump[2]) &&
+			spawn_pump[3].tag == 0x05 && spawn_pump[3].payload == std::vector<uint8_t>{0x01} &&
+			spawn_pump[4].tag == 0x04 && spawn_pump[4].payload.size() == 24 &&
+			spawn_pump[4].payload[17] == 1 && spawn_pump[4].payload[18] == 4 &&
+			spawn_pump[4].payload[23] == 1 && spawn_pump[5].tag == 0x7B &&
+			!reply_has_tag(spawn_pump, 0x16),
+			"next host tick emits the witnessed spawn-pump replay with team 1")) {
+		return false;
+	}
+
+	np::NapiNPConnection *remote = nullptr;
+	for (np::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == peer) remote = &connection;
+	if (!expect(remote != nullptr, "spawn-pump fixture retains the remote connection"))
+		return false;
+	std::vector<ProtocolMessage> premature_roster;
+	if (!expect(
+			!messages_for_peer(np::tick_connections(ctx, 16, 7), premature_roster) &&
+			premature_roster.empty(),
+			"the post-spawn tick does not emit an early standalone roster")) {
+		return false;
+	}
+
+	const std::vector<ProtocolMessage> join_tail = np::dispatch_session_replies(
+			ctx.config, *remote,
+			{make_protocol_message(0x47, {}), make_protocol_message(0x37, {})},
+			7, ctx.np_protocol.connection_list, &world);
+	const ProtocolMessage *team_state = find_reply(join_tail, 0x75);
+	if (!expect(
+			team_state != nullptr &&
+			team_state->payload == std::vector<uint8_t>({0x00, 0x01}),
+			"0x75 serializes the live team-1 slot instead of a team-2 fixture")) {
+		return false;
+	}
+
+	if (!expect(
+			join_tail.size() == 3 && join_tail[0].tag == 0x75 &&
+			join_tail[1].tag == 0x64 && join_tail[2].tag == 0x16,
+			"the first 0x37 boundary is exactly 0x75 + 0x64 + 0x16")) {
+		return false;
+	}
+
+	std::vector<ProtocolMessage> same_tick_stream;
+	if (!expect(
+			!messages_for_peer(np::tick_connections(ctx, 16, 7), same_tick_stream) &&
+			same_tick_stream.empty(),
+			"world streaming waits until after the roster send boundary")) {
+		return false;
+	}
+	std::vector<ProtocolMessage> next_tick_stream;
+	return expect(
+			messages_for_peer(np::tick_connections(ctx, 16, 8), next_tick_stream) &&
+			!next_tick_stream.empty() && !reply_has_tag(next_tick_stream, 0x16),
+			"world streaming begins on the following tick without another roster");
+}
+
+// The PR #403 retail-to-retail LAN witness sends the joining client's ClientAuth.NA
+// in FULL_PLAYER_INFO field 1 and the map filename in both mission fields:
+//
+//   RetailJoin403\0\0Untitled \000TRg.bms\000TRg.bms\0...
+//
+// This message is recipient-scoped. Advertising the host player's callsign here
+// makes the retail joiner build the wrong local identity before its loadout submit.
+bool run_full_player_info_is_recipient_scoped_lan_metadata() {
+	world::World world;
+	world.registry.configure_pool(0, 8);
+
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.player_name = "RetailHost403";
+	config.server_name = "Untitled ";
+	config.mission_name = "Training: Grenade Launcher";
+	config.mission_file = "00TRg.bms";
+	config.game_type = 0x00010020u;
+	config.expansion = "revx02";
+	np::test::bring_up_host(
+			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+			kHostKey, nullptr, config);
+	ctx.world = &world;
+
+	const PeerAddr peer{0x0100007Fu, 31212};
+	const std::string client_scrk =
+			"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	std::string server_scrk;
+	std::vector<ProtocolMessage> burst;
+	if (!handshake(
+				ctx, peer, client_scrk, 0x40340340u,
+				server_scrk, nullptr, nullptr, true, &burst)) {
+		return false;
+	}
+
+	const ProtocolMessage *message = find_reply(burst, 0x7B);
+	FullPlayerInfo info;
+	if (!expect(
+				message != nullptr &&
+				decode_full_player_info(
+						message->payload.data(), message->payload.size(), info),
+				"post-handshake burst carries a decodable S2C 0x7B")) {
+		return false;
+	}
+	return expect(
+			info.player_name == "TestJoiner" && info.player_id.empty() &&
+					info.server_name == config.server_name &&
+					info.mission_name == config.mission_file &&
+					info.map_file == config.mission_file &&
+					info.extra == config.game_type && info.game_name == config.expansion,
+			"S2C 0x7B matches the recipient-scoped retail LAN witness");
+}
+
+// Retail does not always duplicate the map filename into FULL_PLAYER_INFO field
+// 4. NapiNPMsg_0x7B_BuildPayload @0x507822 selects the active filename for the
+// waypoint family (the objective bit is ignored), and the resolved MissionText
+// title for Deathmatch/TDM. Field 5 remains the map filename on both arms.
+bool run_full_player_info_selects_retail_mission_title_branch() {
+	struct MissionIdentityCase {
+		uint32_t game_type;
+		const char *mission_title;
+		const char *expected_mission;
+		uint16_t port;
+		const char *message;
+	};
+	const std::array<MissionIdentityCase, 3> cases = {{
+			{0x00000000u, "DM - Awan Atoll", "DM - Awan Atoll", 31213,
+			 "Deathmatch 0x7B advertises the mission title and exact map filename"},
+			{0x00010000u, "TDM - Awan Atoll", "TDM - Awan Atoll", 31214,
+			 "TDM 0x7B advertises the mission title and exact map filename"},
+			{0x00030020u, "COOP - Awan Atoll", "TDH_I3A.bms", 31215,
+			 "objective waypoint 0x7B advertises the filename in both mission fields"},
+	}};
+
+	for (const MissionIdentityCase &test_case : cases) {
+		world::World world;
+		world.registry.configure_pool(0, 8);
+
+		np::NapiNPServerCtx ctx;
+		np::GameConfig config;
+		config.player_name = "RetailHost403";
+		config.server_name = "Untitled ";
+		config.mission_name = test_case.mission_title;
+		config.mission_file = "TDH_I3A.bms";
+		config.game_type = test_case.game_type;
+		config.expansion = "revx02";
+		np::test::bring_up_host(
+				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+				kHostKey, nullptr, config);
+		ctx.world = &world;
+
+		const PeerAddr peer{0x0100007Fu, test_case.port};
+		const std::string client_scrk =
+				"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+		std::string server_scrk;
+		std::vector<ProtocolMessage> burst;
+		if (!handshake(
+					ctx, peer, client_scrk, 0x40340340u,
+					server_scrk, nullptr, nullptr, true, &burst)) {
+			return false;
+		}
+
+		const ProtocolMessage *message = find_reply(burst, 0x7B);
+		FullPlayerInfo info;
+		if (!expect(
+					message != nullptr &&
+					decode_full_player_info(
+							message->payload.data(), message->payload.size(), info),
+					"mission-identity branch emits a decodable S2C 0x7B")) {
+			return false;
+		}
+		if (!expect(
+					info.mission_name == test_case.expected_mission &&
+					info.map_file == config.mission_file &&
+					info.extra == test_case.game_type,
+					test_case.message)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 // A retransmitted 0x42 ClientAuth for an already-joined connection must re-send
@@ -1463,6 +2040,30 @@ bool run_loadout_resolve_with_armory() {
 		                    lo.slots[0].ammo_secondary == 0xFF &&
 		                    lo.slots[0].ammo_alt == 2,
 		            "explicit request -> clips plus the accepted damage-class byte")) return false;
+		const world::WeaponTableEntry *m4 = world.weapons.by_index(9);
+		const np::NapiNPConnection *connection = nullptr;
+		for (const np::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
+			if (candidate.peer == peer) connection = &candidate;
+		const int pool_id = m4 != nullptr ? m4->ammo_class_id : -1;
+		// The accepted count seeds the carried pool, then the rebuilt slot draws
+		// its initial clip before S2C 0x0F copies player+88664. Thus an explicit
+		// four-clip M4 request retains three magazines (90), not all four (120).
+		int32_t expected_pool = m4 != nullptr
+				? 4 * m4->clipsize - m4->clipsize * m4->ammo_class_count
+				: 0;
+		if (m4 != nullptr && pool_id >= 0 &&
+		    pool_id < static_cast<int>(world.weapons.ammo_class_caps.size())) {
+			expected_pool = std::min(
+					expected_pool,
+					world.weapons.ammo_class_caps[static_cast<size_t>(pool_id)]);
+		}
+		if (!expect(
+				connection != nullptr && pool_id >= 0 && pool_id < 128 &&
+						connection->reply.slot_type_scores[static_cast<size_t>(pool_id)] ==
+								expected_pool,
+				"accepted 0x2F retains the authority ammo pool for S2C 0x0F")) {
+			return false;
+		}
 	}
 
 	const int m4_auto = world.weapons.index_of("WPN_M4AUTO");
@@ -1659,6 +2260,21 @@ bool run_loadout_envelope_gates() {
 		if (!expect(joiner_entity()->player_class == 0,
 		            "class 0 stamps entity+660 zero")) return false;
 	}
+
+	// (7) A valid requested class whose host-policy bit is clear is remapped to the first
+	// allowed Soldier Class in retail's 5..9 scan. Both the S2C 0x5A grant header and the owned
+	// Person carry that effective class [orig: @0x5158d6..@0x515915, stamp @0x515ab0].
+	{
+		ctx.config.class_allow_mask = 1u << 6;
+		const std::vector<uint8_t> body =
+				submit({0x01, 0x08, 0xC3, 0x00, 0x00, 0x00, 9, 0xFF, 0xFF, 0xFF, 0xFF}, 260);
+		WeaponLoadout lo;
+		if (!expect(decode_weapon_loadout(body.data(), body.size(), lo) &&
+		                    lo.avatar_class == 6,
+		            "a denied class is remapped in the S2C 0x5A grant")) return false;
+		if (!expect(joiner_entity()->player_class == 6,
+		            "the same remapped class stamps the owned Person")) return false;
+	}
 	return true;
 }
 
@@ -1720,10 +2336,272 @@ bool run_character_join_vars_parsed() {
 	return true;
 }
 
+// Host-side validation of the two integrity reply families is profile-scoped:
+// only CRC sources covered by the explicitly selected retail resource corpus
+// may disconnect a peer. The mismatch record is the exact high-table 0x103
+// connection description consumed by an unmodified retail client.
+bool run_integrity_replies_validate_registered_profile() {
+	struct Observation {
+		bool replies_empty = false;
+		bool disconnect_latched = false;
+		bool staged = false;
+		bool extra_staged = false;
+		bool parsed = false;
+		netsim::Datagram datagram;
+		DisconnectEvent event;
+	};
+
+	auto observe = [](std::string_view profile_id, uint8_t tag,
+			std::vector<uint8_t> body, uint32_t weapon_salt = 0,
+			uint32_t ammo_salt = 0, bool append_ping = false) {
+		np::GameConfig config;
+		config.integrity_profile = std::string(profile_id);
+		netsim::UdpSessionTransport transport(
+				netsim::UdpSessionTransport::Role::Host);
+		std::vector<np::NapiNPConnection> roster(1);
+		np::NapiNPConnection &conn = roster.front();
+		conn.type = 1;
+		conn.phase = np::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = netsim::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.reply.integrity_weapon_crc_salt = weapon_salt;
+		conn.reply.integrity_ammo_crc_salt = ammo_salt;
+
+		std::vector<ProtocolMessage> messages;
+		messages.push_back(make_protocol_message(tag, std::move(body)));
+		if (append_ping)
+			messages.push_back(make_protocol_message(c2s::PING, {}));
+		Observation result;
+		result.replies_empty = np::dispatch_session_replies(
+				config, conn, messages,
+				100, roster, nullptr).empty();
+		if (append_ping) {
+			result.replies_empty = result.replies_empty &&
+					np::dispatch_session_replies(
+							config, conn,
+							{make_protocol_message(c2s::PING, {})},
+							101, roster, nullptr).empty();
+		}
+		result.disconnect_latched = conn.host_disconnect_sent;
+		result.staged = transport.pop_outbound(result.datagram);
+		netsim::Datagram extra;
+		result.extra_staged = transport.pop_outbound(extra);
+		if (result.staged) {
+			result.parsed = parse_disconnect_event(
+					result.datagram.body.data(), result.datagram.body.size(),
+					result.event);
+		}
+		return result;
+	};
+
+	auto expect_silent = [](const Observation &result, const char *message) {
+		return expect(result.replies_empty && !result.disconnect_latched &&
+					!result.staged && !result.extra_staged,
+				message);
+	};
+	auto expect_crc_punt = [](const Observation &result,
+			std::string_view detail, const char *message) {
+		return expect(result.replies_empty && result.disconnect_latched &&
+					result.staged && !result.extra_staged &&
+					result.datagram.tag == hightag::DESCRIPTION_PACKET &&
+					result.datagram.reliable &&
+					result.datagram.protocol_flags_raw == 0xA0 && result.parsed &&
+					result.event.ds == 1 && result.event.dc == 2 &&
+					result.event.dp1 == 0 && result.event.dp2 == 0 &&
+					result.event.dstr.empty() && result.event.dpc == 46 &&
+					result.event.ddstr == detail,
+				message);
+	};
+
+	constexpr uint32_t kWeaponTableCrc = 0x024F56F2u;
+	constexpr uint32_t kAmmoRow18Crc = 0x2D087374u;
+	constexpr uint32_t kWeaponSalt = 0x11223344u;
+	constexpr uint32_t kAmmoSalt = 0x55667788u;
+	const std::string_view profile = np::kRetailRevx02IntegrityProfileId;
+
+	if (!expect(!np::weapon_integrity_reply_matches(
+					0xFF, /*source_crc=*/42, /*salt=*/0,
+					/*received_crc=*/41),
+			"a profile source CRC of 42 does not bypass a non-42 C2S 0x20 mismatch"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0xFF, 42), kWeaponSalt),
+			"C2S 0x20 id 0xFF bypasses on received checksum 42 regardless of profile CRC and salt"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0xFF, kWeaponTableCrc ^ kWeaponSalt,
+							{0xDE, 0xAD}),
+					kWeaponSalt),
+			"C2S 0x20 accepts the salted whole-table CRC and ignores trailing bytes"))
+		return false;
+	if (!expect_crc_punt(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0xFF, 0), 0, 0,
+					/*append_ping=*/true),
+			"PUNT WCRC",
+			"a wrong C2S 0x20 stages exact WCRC and suppresses later batch replies"))
+		return false;
+	if (!expect_crc_punt(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY, {0xFF}),
+			"PUNT WCRC",
+			"a short C2S 0x20 zero-fills its missing checksum before validation"))
+		return false;
+	if (!expect_silent(
+			observe({}, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0xFF, 0)),
+			"C2S 0x20 is ignored when no integrity profile is selected"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0x07, 0)),
+			"C2S 0x20 cannot validate an individual ADM row absent from the profile"))
+		return false;
+
+	if (!expect_silent(
+			observe(profile, c2s::CHECKSUM_REPLY,
+					indexed_crc_reply(0x18, kAmmoRow18Crc ^ kAmmoSalt,
+							{0xCA, 0xFE, 0xBA, 0xBE}),
+					0, kAmmoSalt),
+			"C2S 0x21 accepts a salted covered ammo CRC and ignores trailing bytes"))
+		return false;
+	if (!expect_crc_punt(
+			observe(profile, c2s::CHECKSUM_REPLY,
+					indexed_crc_reply(0x18, 0)),
+			"PUNT ACRC",
+			"a wrong C2S 0x21 stages the exact retail ACRC description"))
+		return false;
+	if (!expect_crc_punt(
+			observe(profile, c2s::CHECKSUM_REPLY, {}),
+			"PUNT ACRC",
+			"an empty C2S 0x21 leniently reads index zero and checksum zero"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::CHECKSUM_REPLY,
+					indexed_crc_reply(0xFF, 0)),
+			"C2S 0x21 ignores a negative signed row index"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::CHECKSUM_REPLY,
+					indexed_crc_reply(0x66, 0)),
+			"C2S 0x21 ignores a positive row index at the table capacity"))
+		return false;
+	return expect_silent(
+			observe({}, c2s::CHECKSUM_REPLY,
+					indexed_crc_reply(0x18, 0)),
+			"C2S 0x21 is ignored when no integrity profile is selected");
+}
+
+// A retail client drops a 0x16 row until that slot has been introduced by 0x46. The
+// retail host repairs the scoreboard at its 311-tick broadcast boundary: in the PR
+// #403 oracle the joining client learns slot 1 via 0x46, then receives a two-row 0x16.
+// Drive that public reply/tick sequence so a premature one-shot list cannot leave the
+// HUD's "Number of players" pinned at one.
+bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
+	np::NapiNPServerCtx ctx;
+	np::GameConfig config;
+	config.max_players = 4;
+	config.player_name = "OpenNovaHost403";
+	np::test::bring_up_host(
+			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+			kHostKey, nullptr, config);
+
+	world::World world;
+	world.registry.configure_pool(0, 4);
+	world::Entity host_entity;
+	host_entity.kind = world::EntityKind::Organic;
+	host_entity.item_id = 0x14B9;
+	host_entity.team = 1;
+	const world::EntityHandle host_handle = world.registry.spawn(0, host_entity);
+	world::Entity joiner_entity = host_entity;
+	const world::EntityHandle joiner_handle = world.registry.spawn(0, joiner_entity);
+	if (!expect(host_handle.packed == 0x0000 && joiner_handle.packed == 0x0001,
+	            "scoreboard fixture owns retail slots 0 and 1")) return false;
+	ctx.world = &world;
+
+	np::NapiNPConnection host;
+	host.type = 2;
+	host.phase = np::ConnectionPhase::PlayerAdded;
+	host.burst.spawned = true;
+	host.link.owned_entity = host_handle;
+	host.reply.player_slot = 0;
+	host.reply.player_name = "OpenNovaHost403";
+	host.reply.roster_counted = true;
+	ctx.np_protocol.connection_list.push_back(std::move(host));
+
+	const PeerAddr peer{0x0100007Fu, 32786};
+	netsim::UdpSessionTransport transport(
+			netsim::UdpSessionTransport::Role::Host);
+	np::NapiNPConnection joiner;
+	joiner.peer = peer;
+	joiner.type = 1;
+	joiner.phase = np::ConnectionPhase::PlayerAdded;
+	joiner.admission_stage = np::GameAdmissionStage::Complete;
+	joiner.burst.spawned = true;
+	joiner.link.owned_entity = joiner_handle;
+	joiner.link.mode = netsim::TransportMode::Client;
+	joiner.link.transport = &transport;
+	joiner.reply.player_slot = 1;
+	joiner.reply.player_name = "RetailJoin403";
+	joiner.reply.roster_pushed = true;
+	joiner.reply.roster_counted = true;
+	joiner.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
+	joiner.server_scrk =
+			"PERIODICSCOREBOARDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+	joiner.client_ck = 0x40340340u;
+	ctx.np_protocol.connection_list.push_back(std::move(joiner));
+
+	// The global mission counter—not a per-connection epoch—owns the repair.
+	// Counter 309 advances to 310 without a list; the next call crosses 311.
+	ctx.scoreboard_broadcast_timer = 309;
+	np::Server_TickUpdate(ctx);
+	netsim::Datagram staged;
+	bool premature_list = false;
+	while (transport.pop_outbound(staged))
+		premature_list = premature_list || staged.tag == 0x16;
+	if (!expect(!premature_list, "no scoreboard broadcast before boundary 311"))
+		return false;
+
+	np::NapiNPConnection &remote = ctx.np_protocol.connection_list.back();
+	const std::vector<ProtocolMessage> sync = np::dispatch_session_replies(
+			ctx.config, remote,
+			{make_protocol_message(0x22, {0x01, 0xF7, 0x5C})},
+			310, ctx.np_protocol.connection_list, &world);
+	PlayerSync sync_row;
+	bool learned_slot_one = false;
+	for (const ProtocolMessage &message : sync) {
+		if (message.tag != 0x46) continue;
+		learned_slot_one = decode_player_sync(
+				message.payload.data(), message.payload.size(), sync_row) &&
+				sync_row.slot_id == 1 && (sync_row.field_bitmask & 0x4000u) != 0;
+	}
+	if (!expect(learned_slot_one, "retail slot walk learns slot 1 before the list repair"))
+		return false;
+
+	np::Server_TickUpdate(ctx);
+	PlayerList list;
+	bool saw_repaired_list = false;
+	while (transport.pop_outbound(staged)) {
+		if (staged.tag != 0x16 ||
+		    !decode_player_list(staged.body.data(), staged.body.size(), list))
+			continue;
+		saw_repaired_list = list.players.size() == 2 &&
+				list.players[0].slot_id == 0 && list.players[1].slot_id == 1 &&
+				list.in_game_count == 2 && list.spectator_count == 0;
+	}
+	return expect(
+			saw_repaired_list,
+			"tick 311 re-broadcasts the two-row list after retail learns slot 1");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
+	ok = run_mission_transfers_match_retail_lan_contract() && ok;
+	ok = run_tag60_mission_name_selects_by_game_type() && ok;
 	ok = run_reactive_replies() && ok;
 	ok = run_loadout_resolve_with_armory() && ok;
 	ok = run_loadout_envelope_gates() && ok;
@@ -1737,8 +2615,13 @@ int main() {
 	ok = run_lan_discovery_metadata_is_live_and_stateless() && ok;
 	ok = run_listen_host_lifecycle() && ok;
 	ok = run_post_handshake_slot_is_reserved_until_spawn() && ok;
+	ok = run_admission_spawn_and_roster_keep_retail_packet_boundaries() && ok;
+	ok = run_full_player_info_is_recipient_scoped_lan_metadata() && ok;
+	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;
+	ok = run_integrity_replies_validate_registered_profile() && ok;
+	ok = run_periodic_scoreboard_repairs_pre_sync_dropped_row() && ok;
 	return ok ? 0 : 1;
 }

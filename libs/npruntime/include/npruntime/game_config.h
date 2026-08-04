@@ -1,8 +1,13 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include <npwire/protocol_message.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
 // merges the three formerly-separate reimpl structs (NapiGameSettings §6.4, ServerRules, and the
@@ -18,6 +23,28 @@
 // `game_settings.game_type` copy (ctx+0xCC) that is a snapshot of `g_GameType` in a live session;
 // modeled here as the same `game_type` field (equal by construction on every seeded path).
 namespace opennova::np {
+
+// The bidirectional game-session packet ceiling installed by the witnessed
+// settings update. A large 0x0A uses a LEN16 message envelope (flags, tag,
+// u16 length), so its body must leave room for both that envelope and the
+// thirteen-byte sequenced connection header.
+inline constexpr std::size_t kGameSessionMaxPacketBytes = 1300;
+inline constexpr std::size_t kProtocolMessageLen16Bytes = 4;
+inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
+		kGameSessionMaxPacketBytes - PROTOCOL_PACKET_HEADER_SIZE -
+		kProtocolMessageLen16Bytes;
+static_assert(kMaxFrameUpdateBodyBytes == 1283);
+
+// The session family that selects retail's default send divider. `Automatic`
+// is resolved from the installed transport by create_session: socketless is
+// SinglePlayer and a socketed session is LAN unless its caller explicitly
+// identifies the NovaWorld channel.
+enum class GameSessionChannel : uint8_t {
+	Automatic = 0,
+	SinglePlayer,
+	Lan,
+	NovaWorld,
+};
 
 struct GameConfig {
 	// --- §6.4 identity (lobby name + wire server name + join-gate passwords) -----------------------
@@ -48,6 +75,12 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribNoFriendlyTag = 0x400;
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
 	uint32_t mp_attributes = 14854;             // [orig game_settings +0xD0]
+	// The host-global class availability word sent to every joining client as
+	// S2C 0x76. Retail derives its ten low bits from the per-class host settings
+	// and the selected mission-list entry; all classes enabled is the stock
+	// default. [orig: g_hostClassAllowMask @0x24D59FC;
+	// NetPacket_WriteClassAllowMask @0x510350]
+	uint16_t class_allow_mask = 0x03FFu;
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.
 	bool fat_bullets = false;                   // [orig g_FatBullets @0x24D21A0]
@@ -74,6 +107,15 @@ struct GameConfig {
 	                                  //   read x3 by GameEvent_PlayerDeath @0x516dd0
 	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
 
+	// S2C 0x58's 39 signed STROVER_STATVAR point values. Retail initializes the
+	// per-game-type table, then overlays score.ini VERSION 40 before answering
+	// the client's C2S 0x2D world-load request. The Godot resource adapter feeds
+	// the mounted score.ini through load_session_score_config; a headless caller
+	// may seed the structural values directly. [orig: GameType_CreateDefaultSettings
+	// @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport
+	// @0x530A60 copies row+300..+452]
+	std::array<int32_t, 39> session_status_stat_values{};
+
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
 	// sources): the trailing flags dword of the 0x08 block. (`MaxScore`->`g_kill_limit @0x24D2138`
 	// (§6.9 name-swap) is NOT in the 0x08 wire block — omitted until a cfg-persistence pass needs it.)
@@ -94,8 +136,15 @@ struct GameConfig {
 	// faithful world-stream burst sources those from World + bms::File.
 	std::string mission_name = "AS - Dormant Volcano Isle"; // [orig title: MissionText "info"/"title" / dword_24D1FA4]
 	std::string mission_file = "ASH_I5A.BMS";               // [orig g_map_file_name @0x24D1F3E]
+	std::string custom_text = "Put your message here.";     // [orig g_sessionvar_custom_text @0x522123]
 	std::string expansion = "jox01";                        // [orig g_ExpansionName @0xB4C584] (0x7B)
-	std::string player_name = "DevUser";                    // [orig player_data+128] (0x7B name / roster)
+	// Optional exact retail resource corpus used to validate the host's inbound
+	// C2S 0x20/0x21 integrity replies. Empty (or an unknown id at the adapter
+	// boundary) disables validation: a host must never compare against guessed
+	// table bytes. This is deliberately independent of `expansion`, because two
+	// installs with the same expansion name can carry different patched data.
+	std::string integrity_profile;
+	std::string player_name = "DevUser";                    // host identity/roster name; remote 0x7B uses recipient ClientAuth.NA
 	std::string pcid;                                       // [orig entity+592] PCID (0x7A body / 0x7B field 2);
 	                                                        // empty on a dev host -> the 0x7A body is a single NUL
 	uint32_t spawn_x = 0xfe56f854u;
@@ -103,6 +152,47 @@ struct GameConfig {
 	uint32_t spawn_z = 0x003a5e6au;
 	std::vector<std::string> spawn_names;
 	std::vector<uint8_t> mission_header_blob;
+	// The per-frame 0x0A byte cap [orig: g_entity_send_budget @0xC8FC50, the
+	// BANDWIDTH server command — atol/5 clamped 100-1600 @0x50b884/@0x50b890;
+	// the round-start initializer resets retail to 600 @0x51ca7c].
+	// start_host_session applies it to the netsim global at bring-up.
+	// The retail round-start default is 600 bytes. The configure_host_session
+	// "bandwidth" lever remains an explicit per-session override.
+	uint32_t entity_send_budget = 600;
+	// The send-holdoff period this host dictates to each joiner (H:0x00 mask 8 /
+	// CS field 3) AND runs itself — the per-session-type "tick rate" divider
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0 — SP/loopback 1,
+	// NovaWorld 12 (~5.2 Hz), LAN authority g_LanMode 1..4 -> 12/6/4/3].
+	// `send_holdoff_ticks` is an explicit override; absent means select the
+	// witnessed value from session_channel and lan_mode. Retail's invalid
+	// lanmode fallback is mode 2 (period 6). Loopback connections themselves
+	// remain per-tick and do not consume this remote-peer setting.
+	GameSessionChannel session_channel = GameSessionChannel::Automatic;
+	uint32_t lan_mode = 1;
+	std::optional<uint32_t> send_holdoff_ticks;
+
+	uint32_t effective_send_holdoff_ticks(
+			GameSessionChannel automatic_fallback = GameSessionChannel::SinglePlayer) const {
+		if (send_holdoff_ticks.has_value()) return *send_holdoff_ticks;
+		GameSessionChannel channel = session_channel;
+		if (channel == GameSessionChannel::Automatic) channel = automatic_fallback;
+		switch (channel) {
+		case GameSessionChannel::NovaWorld:
+			return 12;
+		case GameSessionChannel::Lan:
+			switch (lan_mode) {
+			case 1: return 12;
+			case 2: return 6;
+			case 3: return 4;
+			case 4: return 3;
+			default: return 6;
+			}
+		case GameSessionChannel::Automatic:
+		case GameSessionChannel::SinglePlayer:
+		default:
+			return 1;
+		}
+	}
 };
 
 } // namespace opennova::np

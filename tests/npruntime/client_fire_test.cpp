@@ -24,6 +24,8 @@
 #include <netsim/udp_session_transport.h>
 
 #include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_keys.h>
@@ -118,6 +120,141 @@ int dispatch_fire(np::NapiNPConnection &conn, std::vector<np::NapiNPConnection> 
 	std::vector<ProtocolMessage> replies =
 			np::dispatch_session_replies(np::GameConfig{}, conn, msgs, 100, roster, &world);
 	return int(replies.size());
+}
+
+void dispatch_gameplay(uint8_t tag, const std::vector<uint8_t> &body,
+		np::NapiNPConnection &conn,
+		std::vector<np::NapiNPConnection> &roster, w::World &world) {
+	std::vector<ProtocolMessage> msgs;
+	msgs.push_back(make_protocol_message(tag, body));
+	(void)np::dispatch_session_replies(
+			np::GameConfig{}, conn, msgs, 100, roster, &world);
+}
+
+bool check_mounted_slot_select_fire_and_reload() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle shooter =
+			w::spawn_remote_player(world, player_spawn(0xFFF1));
+	if (!expect(shooter.valid(), "mounted-route shooter spawned")) return false;
+
+	world.weapons.entries.resize(7);
+	w::WeaponTableEntry &child_weapon = world.weapons.entries[5];
+	child_weapon.name = "WPN_CHILD";
+	child_weapon.category = 3;
+	child_weapon.rank = 2;
+	child_weapon.clipsize = 4;
+	child_weapon.startrounds = 4;
+	child_weapon.valid = true;
+	w::WeaponTableEntry &parent_weapon = world.weapons.entries[6];
+	parent_weapon.name = "WPN_PARENT";
+	parent_weapon.category = 4;
+	parent_weapon.rank = 3;
+	parent_weapon.clipsize = 9;
+	parent_weapon.startrounds = 9;
+	parent_weapon.valid = true;
+
+	w::Entity parent;
+	parent.kind = w::EntityKind::Item;
+	parent.has_item_def = true;
+	parent.item_type = 1;
+	parent.item_attrib = w::kItemAttribEweap;
+	parent.primary_weapon = parent_weapon.name;
+	const w::EntityHandle parent_h = world.registry.spawn(1, parent);
+	w::Entity *live_parent = world.registry.get(parent_h);
+
+	w::Entity child;
+	child.kind = w::EntityKind::Item;
+	child.has_item_def = true;
+	child.item_type = 2;
+	child.item_attrib = w::kItemAttribEweap;
+	child.emplacement_attachment_flags = 0x02;
+	child.emplacement_parent = parent_h;
+	child.emplacement_parent_spawn_id = live_parent->registry_spawn_id;
+	child.ground_target = parent_h;
+	child.primary_weapon = child_weapon.name;
+	const w::EntityHandle child_h = world.registry.spawn(1, child);
+	w::Entity *live_child = world.registry.get(child_h);
+	w::Entity *player = world.registry.get(shooter);
+	player->mounted = true;
+	player->mount_target = child_h;
+	player->mount_type = w::SeatType::Gunner;
+	player->use_gun_slot_swapped = true;
+	player->equipped_adm_index = 5;
+
+	std::vector<np::NapiNPConnection> roster;
+	roster.push_back(make_conn(
+			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+
+	MountedWeaponSlotSelection select_parent;
+	select_parent.use_parent_slot = true;
+	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+			encode_mounted_weapon_slot_selection(select_parent),
+			roster[0], roster, world);
+	if (!expect(live_child->primary_weapon_slot.redirect_to_parent_slot &&
+			player->equipped_adm_index == 6,
+			"C2S 0x16 nonzero selects the validated groundEntity vehicle slot"))
+		return false;
+
+	// The authoritative C2S 0x06 must spend the selected world MountSlot, not
+	// the connection's personal combo map. The request ADM follows EquippedSlot.
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0, 0,
+					0xFFFF, 1, 0, 0));
+	if (!expect(live_parent->primary_weapon_slot.clip == 8 &&
+			live_child->primary_weapon_slot.clip == 4 &&
+			roster[0].weapon_slots.empty(),
+			"mounted parent-route fire spends only the parent world slot"))
+		return false;
+
+	WeaponReload reload;
+	reload.entity_handle = child_h.packed;
+	reload.reload_param = 0xBEEF; // ignored for EWeap entities in retail
+	dispatch_gameplay(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload),
+			roster[0], roster, world);
+	if (!expect(live_parent->primary_weapon_slot.clip == 9,
+			"mounted reload refills the selected parent world slot"))
+		return false;
+
+	MountedWeaponSlotSelection select_child;
+	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+			encode_mounted_weapon_slot_selection(select_child),
+			roster[0], roster, world);
+	if (!expect(!live_child->primary_weapon_slot.redirect_to_parent_slot &&
+			player->equipped_adm_index == 5,
+			"C2S 0x16 zero selects the child's embedded MountSlot"))
+		return false;
+	dispatch_fire(roster[0], roster, world,
+			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0,
+					0xFFFF, 2, 0, 0));
+	if (!expect(live_child->primary_weapon_slot.clip == 3 &&
+			live_parent->primary_weapon_slot.clip == 9,
+			"mounted child-route fire spends only the child world slot"))
+		return false;
+	dispatch_gameplay(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload),
+			roster[0], roster, world);
+	if (!expect(live_child->primary_weapon_slot.clip == 4,
+			"mounted reload refills the selected child world slot"))
+		return false;
+
+	// Malformed bodies and failed parent validation are consume-and-ignore: no
+	// route or EquippedSlot mutation.
+	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT, {1},
+			roster[0], roster, world);
+	if (!expect(!live_child->primary_weapon_slot.redirect_to_parent_slot &&
+			player->equipped_adm_index == 5,
+			"short C2S 0x16 body cannot mutate route state"))
+		return false;
+	live_child->ground_target = w::EntityHandle{};
+	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+			encode_mounted_weapon_slot_selection(select_parent),
+			roster[0], roster, world);
+	return expect(!live_child->primary_weapon_slot.redirect_to_parent_slot &&
+			player->equipped_adm_index == 5,
+			"invalid groundEntity parent cannot select or partially mutate the route");
 }
 
 // Exercise the actual 0x43 session receive boundary, not the message dispatcher in isolation.
@@ -220,6 +357,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 } // namespace
 
 int main() {
+	if (!check_mounted_slot_select_fire_and_reload()) return 1;
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
 
 	w::World world;

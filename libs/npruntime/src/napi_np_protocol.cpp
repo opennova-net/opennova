@@ -127,6 +127,14 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	NapiNPConnection node;
 	node.peer = peer;
 	node.type = 1; // server-side: the host's view of a client
+	// Store the session period for bookkeeping but do NOT arm the countdown:
+	// the witnessed apply point is the admission dictation (H:0x00 mask 8 /
+	// CS field 3 [orig: NapiNPServer_UpdateHoldoffTicks @0x4c5f40]) with the
+	// boundary reset @0x61e140 — pre-dictation sequenced sends (the first
+	// 0x83 after 0x82) are not period-gated, and an armed-at-creation
+	// countdown delayed them up to period-1 pumps versus the golden timing.
+	node.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(
+			ctx.config.effective_send_holdoff_ticks());
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
 }
@@ -330,18 +338,27 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 	return pose_from_session(ctx, conn.reply);
 }
 
-// Ship one burst step's messages for `conn`: a remote (type 1) gets one framed 0x83 SESSION datagram
-// (SCRK + seq); the host's own loopback (type 2, no SCRK) gets each [tag][body] pushed straight into
-// its in-process transport — the §5.2a step-4 socketless S2C delivery (what emit_connection_s2c does
-// for the loopback's per-frame 0x0A). [orig: NapiNPServer_SendToConn @0x4c4f20 / mode-1 in-process]
+// Queue one burst step's semantic messages for `conn`. A production remote and
+// the host's own loopback both retain [tag][body] records in their transport;
+// HostSession frames/batches the remote queue on its send boundary, while the
+// loopback stays socketless. Protocol-only fixtures without an owner retain the
+// legacy preframed fallback below. [orig: NapiNPServer_SendToConn @0x4c4f20 /
+// mode-1 in-process]
 void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage> &msgs,
                          std::vector<std::vector<uint8_t>> &outbound) {
 	if (msgs.empty()) return;
-	if (conn.type == 2) {
-		if (conn.link.transport != nullptr)
-			for (InitialStateMessage &m : msgs) conn.link.transport->host_send(m.tag, std::move(m.body));
+	// Keep production initial-state records semantic until HostSession's send
+	// boundary. They can then batch behind already-queued reactive replies
+	// (golden: 0x46 then 0x2C); the packet builder still enforces its byte cap.
+	if (conn.link.transport != nullptr) {
+		for (InitialStateMessage &m : msgs)
+			conn.link.transport->host_send(
+					m.tag, std::move(m.body), m.reliable);
 		return;
 	}
+	// Protocol-only tests may drive tick_connections without a HostOwner. Keep
+	// their remote framed fallback; a loopback without a transport has no sink.
+	if (conn.type == 2) return;
 	// Frame EACH drained burst message as its OWN 0x83 SESSION datagram — do NOT coalesce the whole
 	// burst into one packet. The original emits a separate NapiNPServer_SendFiltered per tag; coalescing
 	// the 616 B 0x0B BMS header plus the 0x0C pool-0 batch into one datagram would exceed the UDP MTU and
@@ -349,7 +366,10 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 	// are byte-budget paged with their witnessed per-stream policies by the shared chunker
 	// (np::slice_batch_pages via emit_paged_pool, ADR 0013), so this loop frames one page per datagram.
 	for (InitialStateMessage &m : msgs) {
-		std::vector<ProtocolMessage> reply{make_protocol_message(m.tag, std::move(m.body))};
+		ProtocolMessage message = make_protocol_message(
+				m.tag, std::move(m.body));
+		message.reliable = m.reliable;
+		std::vector<ProtocolMessage> reply{std::move(message)};
 		std::vector<uint8_t> dg = frame_session_replies(conn, reply);
 		if (!dg.empty()) outbound.push_back(std::move(dg));
 	}
@@ -422,12 +442,15 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// a peer; only a validated 0x42 creates the connection node.
 	reply.sn = ctx.config.server_name;
 	reply.p1 = ctx.config.game_type;
-	// P2 and SUS1 are live host configuration/session values in retail. This runtime does not yet
-	// model either producer, so let the faithful encoder omit them instead of replaying the
-	// ServerHello struct's capture-oriented sample defaults as if they belonged to every host.
-	reply.p2 = 0;
+	// Retail advertises the same session BuildFlags value here and in the
+	// trailing dword of S2C 0x08. create_session snapshots that live semantic
+	// value after installing GameConfig; never substitute a captured constant.
+	reply.p2 = ctx.np_protocol.build_flags;
 	reply.np = occupied_player_count(ctx);
 	reply.mp = ctx.np_protocol.max_players;
+	// Fresh retail LAN captures omit SUS1. It is an optional session-user
+	// string (for example, a NovaWorld-provided GSID), not session_seed_id.
+	// No such source exists on a LAN host, so preserve retail's absent field.
 	reply.sus1.clear();
 	reply.sus2 = ctx.config.expansion;
 	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
@@ -536,6 +559,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.client_ck = auth.ck;
 	conn.client_ci = auth.ci;
 	conn.receive_inactive_ms = 0;
+	conn.c2s_reassembly = {};
 	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
 	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
 	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
@@ -640,6 +664,44 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (admission.admitted)
 		acknowledge_session_packets(conn.seq, admission.max_ack_count);
 
+	// Deframing admits physical records in contiguous sequence order, including
+	// packets released while closing a gap. Fold this connection's witnessed
+	// FIRST/MID/FINAL stream before every metadata and gameplay consumer below;
+	// a partial record is not itself a semantic C2S message.
+	std::vector<ProtocolMessage> semantic_messages;
+	semantic_messages.reserve(messages.size());
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		for (const ProtocolMessage &physical : packet.messages) {
+			std::vector<uint8_t> payload;
+			bool was_fragmented = false;
+			if (!reassemble_protocol_payload(
+						conn.c2s_reassembly, physical, payload, &was_fragmented)) {
+				continue;
+			}
+			if (!was_fragmented) {
+				semantic_messages.push_back(physical);
+				continue;
+			}
+			// Fragment and physical-length bits are transport metadata. Preserve
+			// the dispatch table and skip mode, then describe the completed body.
+			constexpr uint8_t kSemanticFlagMask =
+					PROTOCOL_MSG_FLAG_SETTINGS_UPDATE |
+					PROTOCOL_MSG_FLAG_SKIP1 | PROTOCOL_MSG_FLAG_SKIP2 | 0x01u;
+			uint8_t semantic_flags = static_cast<uint8_t>(
+					physical.flags.raw & kSemanticFlagMask);
+			if (!payload.empty()) {
+				semantic_flags = static_cast<uint8_t>(semantic_flags |
+						(payload.size() > 0xFFu ? PROTOCOL_MSG_FLAG_LEN16
+						                          : PROTOCOL_MSG_FLAG_LEN8));
+			}
+			ProtocolMessage semantic = make_protocol_message(
+					physical.tag, std::move(payload), semantic_flags);
+			semantic.skip_bytes = physical.skip_bytes;
+			semantic_messages.push_back(std::move(semantic));
+		}
+	}
+	messages = std::move(semantic_messages);
+
 	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
 	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
 	// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host MUST stamp it
@@ -674,7 +736,9 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
 			                         ctx.np_protocol.connection_list, ctx.world,
-			                         ctx.np_protocol.session_seed_id);
+			                         ctx.np_protocol.session_seed_id,
+			                         ctx.np_protocol.host_run_duration_ms,
+			                         &ctx.mission_metadata_blob);
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
 		// The retail reject overlay is not modeled. Still release the pending node immediately:
 		// an out-of-order or malformed admission must not retain capacity or become an entity.
@@ -810,6 +874,18 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return out; // bad envelope — drop quietly
 	}
 
+	// Once the host has staged its terminal connection-description record, the
+	// resident node exists only long enough to receive the matching teardown
+	// acknowledgement. Drop every other leg before it can refresh activity,
+	// mutate sequencing/reassembly, surface gameplay, enqueue a deferred reply,
+	// or replay retained packets. The 0x46 handler below still validates the
+	// receiver-local key, so a delayed goodbye for an older endpoint occupant
+	// cannot tear down this node.
+	if (opcode != SESSION_OPCODE_CLIENT_GOODBYE) {
+		const NapiNPConnection *conn = find_connection(ctx, peer);
+		if (conn != nullptr && conn->host_disconnect_sent) return out;
+	}
+
 	switch (opcode) {
 	case SESSION_OPCODE_CLIENT_HELLO:
 		handle_client_hello(ctx, peer, body, out);
@@ -832,10 +908,12 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return out;
 }
 
-std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
+std::vector<TickOut> flush_server_missing_requests(
+		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != 1 || !conn.seq.missing_request_pending) continue;
+		if (respect_s2c_send_boundary && !conn.s2c_send_boundary_open) continue;
 		conn.seq.missing_request_pending = false;
 		if (conn.seq.queued_inbound.empty()) continue;
 
@@ -853,7 +931,9 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	return out;
 }
 
-std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick) {
+std::vector<TickOut> tick_connections(
+		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
+		bool respect_s2c_send_boundary) {
 	std::vector<TickOut> out;
 	// Pump the JO receive timeout before any spawn/burst work. Collect keys first because the complete
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
@@ -915,6 +995,9 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 								: std::numeric_limits<uint32_t>::max());
 			}
 		}
+		const bool send_boundary_closed =
+				respect_s2c_send_boundary && conn.type == 1 &&
+				!conn.s2c_send_boundary_open;
 		if (conn.burst.spawned) {
 			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
 			// version check must keep running here so EXISTING clients learn about LATER
@@ -922,6 +1005,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 			// i.e. once, on each connection's own burst-completion tick — the v30 wire
 			// showed the first joiner never received the grown 47-B 0x16 when the second
 			// spawned (its HUD count stayed at 2).
+			if (send_boundary_closed) continue;
 			TickOut to;
 			to.peer = conn.peer;
 			if (conn.type == 1 &&
@@ -939,7 +1023,37 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 
 		TickOut to;
 		to.peer = conn.peer;
+		if (send_boundary_closed) continue;
 
+		// Retail's C2S 0x02 handler, pending-player spawn pump, and first
+		// roster publish occupy distinct send boundaries. In particular 0x04
+		// must arrive after the client has processed one intervening frame;
+		// otherwise its join initialization resets the assigned team and it
+		// submits the opposite faction's 0x2F kit. The production host calls
+		// tick_connections in the same pump that handled C2S 0x02, so the
+		// captured admission tick is an explicit lower bound as well as the
+		// packet latches below.
+		const bool staged_join_ready =
+				conn.type == 1 &&
+				conn.admission_stage == GameAdmissionStage::Complete &&
+				conn.reply.admission_metadata_pushed &&
+				ctx.world != nullptr &&
+				conn.phase >= ConnectionPhase::PlayerAdded &&
+				now_tick != conn.reply.admission_completed_tick;
+		if (staged_join_ready && !conn.reply.spawn_metadata_pushed) {
+			std::vector<ProtocolMessage> spawn_metadata =
+					build_spawn_pump_metadata(
+							ctx.config, conn,
+							ctx.np_protocol.connection_list, ctx.world);
+			std::vector<uint8_t> datagram =
+					frame_session_replies(conn, spawn_metadata);
+			if (!datagram.empty()) {
+				to.outbound.push_back(std::move(datagram));
+				conn.reply.spawn_metadata_pushed = true;
+			}
+			if (!to.outbound.empty()) out.push_back(std::move(to));
+			continue;
+		}
 		if (ctx.world == nullptr) {
 			// No World means no semantic burst, but reliable settings/handshake records still need
 			// the transport-level probe that induces the peer's missing-sequence request.
@@ -949,17 +1063,18 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		}
 		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
 		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
-		// Golden ordering: the post-handshake burst (case 0x02 → 0x16 player-list) PRECEDES the
+		// Golden ordering: admission, spawn metadata, then the 0x16 player-list PRECEDE the
 		// §5.2a world-stream. Without this gate, the burst fires in the same pump as the C2S 0x42
 		// join — before the post-handshake round-trip (C2S 0x01→S2C 0x02→C2S 0x02→burst) has
 		// completed, so the retail client receives the world-stream before it has reached join-FSM
-		// state 6 verification. roster_pushed is set by dispatch case 0x02; the host's own loopback
+		// state 6 verification. roster_pushed is set by the first C2S 0x37 reply; the host's own loopback
 		// (type 2) bypasses the gate. Remote peers have no timeout shortcut: the bundled client now
 		// drives this captured exchange, and bypassing it marks malformed/out-of-order joins as players.
 		const bool roster_ready =
 				conn.type != 1 ||
 				(conn.admission_stage == GameAdmissionStage::Complete &&
-				 conn.reply.roster_pushed);
+				 conn.reply.roster_pushed &&
+				 now_tick != conn.reply.roster_completed_tick);
 		if (conn.phase >= ConnectionPhase::PlayerAdded && roster_ready) {
 			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
 			ship_burst_messages(conn, step.messages, to.outbound);

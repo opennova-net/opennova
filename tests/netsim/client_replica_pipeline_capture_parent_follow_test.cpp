@@ -11,7 +11,7 @@
 // stays 0xFFFF for this vehicle throughout the capture. The organic parent is a
 // back-reference, not a transform parent.
 //
-// The regression this pins: NetClientView latched the spawn-time parent and
+// The regression this pins: ClientReplicaPipeline latched the spawn-time parent and
 // refresh_parented_pool_entities() rigid-recomposed the vehicle onto the
 // PLAYER's row after every applied frame — gluing the buggy to the player for
 // the whole session (the live symptom on non-COOP retail hosts; COOP world
@@ -24,7 +24,7 @@
 // §5.10b class table); skips clean when either is absent.
 
 #include <netsim/connection_fan.h>
-#include <netsim/net_client_view.h>
+#include <netsim/client_replica_pipeline.h>
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_id.h>
@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -151,10 +152,12 @@ int main() {
 	}
 	const std::vector<InGameMessage> msgs = decode_capture_to_messages(caps);
 
-	ns::NetClientView view;
-	view.set_item_class_resolver([&item_classes](uint16_t t) {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver([&item_classes](uint16_t t)
+			-> ns::ClientReplicaPipeline::ItemClassResolution {
 		const auto it = item_classes.find(t);
-		return it != item_classes.end() ? it->second : EntityClass::Unknown;
+		if (it == item_classes.end()) return std::nullopt;
+		return it->second;
 	});
 
 	// The oracle's classifier mirrors the view's precedence: items table first,
@@ -247,9 +250,14 @@ int main() {
 	            view.frames_applied(), view.state().entities.size(),
 	            view.game_type(), s2c_frames);
 
+	if ((view.game_type() & 0x20000u) != 0u) {
+		std::printf("[skip] capture is an objective/COOP session; the "
+		            "organic-parented vehicle oracle applies only to "
+		            "non-objective sessions\n");
+		return 0;
+	}
+
 	bool ok = true;
-	ok &= expect((view.game_type() & 0x20000u) == 0u,
-	             "capture is a non-objective (non-COOP) session");
 	if (tracked.empty()) {
 		std::printf("[skip] capture carries no organic-parented pool-1 spawns "
 		            "— nothing to pin\n");

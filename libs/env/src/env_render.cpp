@@ -148,6 +148,26 @@ void EnvScalarChannels::tick() {
 	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
 }
 
+void EnvScalarChannels::snap_currents_to_targets() {
+	fog_dist_fp = fog_dist_target_fp;
+	fog_step_fp = 0x00FF0000;
+	fog_max_fp = 1000 << 16;
+	sun_dim_fp = sun_dim_target_fp;
+	sky_height_fp = sky_height_target_fp;
+	rain_pct_fp = rain_pct_target_fp;
+	rain_step_fp = 0x1000;
+	overcast_fp = overcast_target_fp;
+	overcast_step_fp = 0x1000;
+}
+
+void EnvScalarChannels::apply_network_sample(uint16_t fog_dist,
+		uint16_t fog_accel, uint8_t rain_pct, uint8_t overcast) {
+	fog_dist_target_fp = static_cast<int32_t>(fog_dist) << 16;
+	fog_step_fp = static_cast<int32_t>(fog_accel) << 8;
+	rain_pct_target_fp = static_cast<int32_t>(rain_pct) << 8;
+	overcast_target_fp = static_cast<int32_t>(overcast) << 8;
+}
+
 void ColorChannelState::snap_to(uint32_t packed) {
 	b_fp = static_cast<int32_t>(packed & 0xFF) << 20;
 	g_fp = static_cast<int32_t>((packed >> 8) & 0xFF) << 20;

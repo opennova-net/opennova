@@ -4,8 +4,12 @@
 
 namespace opennova::netsim {
 
-void LoopbackChannel::host_send(uint8_t tag, std::vector<uint8_t> body) {
-	s2c_.push_back(Datagram{tag, std::move(body)});
+void LoopbackChannel::host_send(
+		uint8_t tag, std::vector<uint8_t> body, bool reliable,
+		uint8_t protocol_flags_raw, bool capacity_exempt) {
+	s2c_.push_back(
+			Datagram{tag, std::move(body), reliable, protocol_flags_raw,
+					capacity_exempt});
 }
 
 void LoopbackChannel::client_send(uint8_t tag, std::vector<uint8_t> body) {

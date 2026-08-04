@@ -108,6 +108,84 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 			_world_driven_weather_state(fresh, fresh_env))
 
 
+func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
+	var fixture := _world_driven_weather_fixture()
+	var env := fixture[0] as NovaEnvironment
+	var weather := fixture[1] as NovaWeather
+	env.configure_mission_clock(0x0540, 60)
+	var expected := NovaEnvironment.new()
+	expected.configure_mission_clock(0x0540, 60)
+	expected.advance_mission_clock(NovaWeather.MISSION_START_PREWARM_TICKS)
+
+	weather.prewarm_mission_start()
+
+	assert_almost_eq(env.time_of_day, expected.time_of_day, 0.000001)
+	expected.free()
+
+
+func test_network_environment_sample_roundtrips_exact_retail_units_through_live_owner() -> void:
+	var fixture := _world_driven_weather_fixture()
+	var env := fixture[0] as NovaEnvironment
+	var weather := fixture[1] as NovaWeather
+	var wire_sample := {
+		"fog_dist": 380,
+		"fog_accel": 0xFF00,
+		"tod_fixed": 0x3088,
+		"quake_ticks": 17,
+		"cloud_scroll": 15,
+		"rain_pct": 0x56,
+		"overcast": 0x78,
+		"precipitation_kind": 0x9A,
+	}
+
+	weather.apply_network_environment_sample(wire_sample)
+	var native: Dictionary = weather.get_network_environment_snapshot()
+	assert_eq(int(native.get("fog_target_q16", -1)), 380 << 16)
+	assert_eq(int(native.get("fog_current_q16", -1)), 1000 << 16,
+			"the client preserves its fog current when the network target changes")
+	assert_eq(int(native.get("fog_accel_clamp", -1)), 0x00FF0000)
+	assert_eq(int(native.get("tod_fixed24", -1)), 0x3088 << 13)
+	assert_eq(int(native.get("quake_ticks", -1)), 17)
+	assert_eq(int(native.get("cloud_scroll_rate_target", -1)), 15 << 10)
+	assert_eq(int(native.get("rain_pct_current_q16", -1)), 0)
+	assert_eq(int(native.get("overcast_blend_q16", -1)), 0)
+	assert_eq(int(native.get("precipitation_kind", -1)), 0x9A)
+	assert_eq(env.get_mission_time_fixed24(), 0x3088 << 13,
+			"the received clock, not the local authored clock, owns TOD targets")
+	assert_eq(env.get_fog_level_target(), 380.0,
+			"the received fog target reaches the live render owner")
+	assert_eq(env.get_sky_speed(), 15.0,
+			"the received cloud target drives the live cloud-scroll owner")
+	assert_eq(env.get_overcast_blend(), 0.0,
+			"the received overcast byte is a target, not an immediate current snap")
+
+	weather.tick_fixed()
+	native = weather.get_network_environment_snapshot()
+	assert_eq(int(native.get("fog_current_q16", -1)), 0x03D4A000)
+	assert_eq(int(native.get("rain_pct_current_q16", -1)), 0x000002B0)
+	assert_eq(int(native.get("overcast_blend_q16", -1)), 0x000003C0)
+	assert_almost_eq(env.get_network_rain_current(), 0x02B0 / 65536.0, 0.000001)
+	assert_almost_eq(env.get_overcast_blend(), 0x03C0 / 65536.0, 0.000001,
+			"fog/celestial consumers see the locally smoothed overcast current")
+
+	env.advance_mission_clock(1)
+	assert_eq(env.get_network_quake_ticks(), 16,
+			"joiner quake duration counts down once per 62 Hz environment tick")
+	env.advance_mission_clock(100)
+	assert_eq(env.get_network_quake_ticks(), 0)
+	weather.apply_network_environment_sample(wire_sample)
+	assert_eq(env.get_network_quake_ticks(), 17,
+			"a later authoritative phase-2 sample replaces the local countdown")
+
+	# Applying the same wire state is still safe, but a discrete replacement ENV
+	# must clear the remote-owner overrides so the next mission starts from its
+	# own authored fog/cloud values.
+	env.environment_data = _loaded_env()
+	assert_eq(env.get_fog_level_target(), 1000.0)
+	assert_eq(env.get_sky_speed(), 15.0)
+	assert_eq(env.get_overcast_blend(), 0.0)
+
+
 func _sky_fallback_state_after_one_second(hz: int) -> Array:
 	var mount := Node3D.new()
 	add_child_autofree(mount)

@@ -47,6 +47,8 @@
 #include "simulation/infantry_root_motion.h"
 
 #include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
+#include "netsim/item_replication_catalog.h" // canonical items.def replication traits
+#include "netsim/client_world_materializer.h" // header-only joiner pools 1..3
 #include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
 
 #include <npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
@@ -89,13 +91,20 @@ class NovaSimulation : public Node3D,
 	GDCLASS(NovaSimulation, Node3D)
 
 public:
+	enum JoinTerrainTilState {
+		JOIN_TERRAIN_TIL_ABSENT = 0,
+		JOIN_TERRAIN_TIL_RECEIVING = 1,
+		JOIN_TERRAIN_TIL_COMPLETE = 2,
+		JOIN_TERRAIN_TIL_INVALID = 3,
+	};
+
 	// Field layout of one entity record in get_present_snapshot()'s flat float buffer. ONE batched
 	// PackedFloat32Array call replaces the per-entity scalar getters in the per-tick present loop
 	// (the scalar getters box a Variant each; see feedback_dispatcher_callable_perf). Mirrored on the
 	// GDScript side via these bound constants so the layout has a single source of truth (C++).
 	// Rotation is emitted as mission-space degrees (pitch, yaw, roll) so the shell builds the basis
 	// through the one placer convention (MissionObjectPlacer.bms_to_godot_basis); position is already
-	// in Godot space (x, z, -y). Pitch/roll are 0 today (yaw-only locomotion) — reserved for parity.
+	// in Godot space (x, z, -y). Infantry remains yaw-only; vehicle rows publish their live attitude.
 	enum PresentField {
 		PF_KIND = 0,   // mission ItemType (3 = Organic), -1 if none
 		PF_INDEX,      // index within its kind's list
@@ -104,10 +113,10 @@ public:
 		PF_POS_X,      // Godot-space position (mission (x,y,z) 16.16 -> (x, z, -y) units)
 		PF_POS_Y,
 		PF_POS_Z,
-		PF_PITCH_DEG,  // mission-space rotation, degrees (live: Entity.pitch, or the
-		               // client attachment pose for a mounted entity)
+		PF_PITCH_DEG,  // mission-space rotation, degrees (live Entity, decoded/predicted
+		               // client vehicle, or the client attachment pose)
 		PF_YAW_DEG,
-		PF_ROLL_DEG,   // live: Entity.roll / the client attachment pose
+		PF_ROLL_DEG,   // same pose source as PF_PITCH_DEG
 		PF_PHASE1,     // channel 1 signed dword low16, exact as numeric float
 		PF_ACTIVE1,    // 0 unpublished; otherwise high16+1 (FastRope may suppress)
 		PF_PHASE2,     // channel 2 signed dword low16
@@ -354,10 +363,12 @@ private:
 	// finish_load() re-applies it onto the fresh WacSystem each (re)load.
 	Ref<NovaWacProgram> wac_program_;
 	opennova::world::World::Snapshot baseline_; // runtime-start state, for restart/teardown
+	opennova::wac::WacSystem::RuntimeState wac_baseline_;
 	opennova::mission::PromoteResult promo_;
 	bool loaded_ = false;
 	bool playing_ = false;
 	bool have_baseline_ = false;
+	bool have_wac_baseline_ = false;
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
 	// by default, so an explicit non-network fixture uses the direct AI-pool present. When
@@ -447,8 +458,18 @@ private:
 	// root) before load; copied into ctx_.terrain_til_data at bring-up so the initial-state burst streams
 	// the S2C 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
 	std::vector<uint8_t> terrain_til_data_;
+	// MissionText briefing values parsed from the mounted <mission>.bin (or the
+	// medmssn.bin fallback) before load. These remain the RTXT's original cp1252
+	// bytes so the S2C 0x7E payload is byte-exact for localized text.
+	bool mission_text_loaded_ = false;
+	std::string mission_briefing3_;
+	std::string mission_briefing2_;
+	// Numeric suffix -> original cp1252 MissionText [Locations] value.
+	// bringup_host_runtime resolves these against type-2044 BMS markers in
+	// spawn order for the S2C 0x0F deploy-map label block.
+	std::unordered_map<int32_t, std::string> mission_location_texts_;
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
-	PackedFloat32Array present_snapshot_from_client_view() const;
+	PackedFloat32Array present_snapshot_from_client_replicas() const;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
 	// finish_load; the runtime_ member is declared in the P7 block below). joiner_pump drives the
@@ -459,19 +480,48 @@ private:
 	bool joiner_ = false;
 	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
 	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
+	// A true S2C 0x0B mission carries only the 616-byte BMS header. Retail
+	// allocates pools 1..3 while consuming 0x0D/0x10/0x20; this bridge gives
+	// local world consumers the same exact packed rows. Full-BMS joiners never
+	// enter this path and keep ordinary promotion untouched.
+	bool wire_header_world_ = false;
+	bool wire_world_static_initialized_ = false;
+	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};
+	uint64_t wire_world_stream_revision_seen_ = ~uint64_t{0};
+	opennova::netsim::ClientWorldMaterializer wire_world_materializer_;
+	void materialize_client_replica_world_entities();
+	opennova::world::Entity *client_replica_world_entity(
+			opennova::world::EntityHandle p_handle);
+	// Fold the latest complete phase-8 mounted-ammo sample into the exact
+	// MountSlot selected by retail's live route bit. Missing wire rows remain
+	// pending until materialization; invalid classes are consumed and ignored.
+	void apply_join_mounted_ammo_update();
 	// Retail authenticates with one packed Avatars.def selection for each side.
 	// GameWorld resolves the active profile before enable_join; retain it here
 	// because a direct-loaded join rebuilds ClientRuntime in finish_load.
 	opennova::np::CharacterJoinVars join_character_vars_{};
 	bool join_character_vars_set_ = false;
-	// ClientRuntime raises a monotonic edge only for an ACK-qualified deployment
-	// release. The simulation remembers it separately from 0x0A health so a stale
-	// positive tail cannot revive a dead L.
+	// Explicit resource-corpus identity for the retail anti-cheat 0x30/0x31
+	// sources. Empty keeps safe silence. Retained across direct-load runtime
+	// rebuilds just like the character and charattr profile data.
+	std::string join_integrity_profile_id_;
+	// ClientRuntime raises a monotonic edge for each gameplay/deployment release.
+	// The simulation uses it to snap L to the host-selected post-pick pose; health
+	// remains separately gated by authoritative_spawn_released(), so C2S 0x0E
+	// cannot kill L and a stale positive tail cannot revive a genuinely dead L.
 	uint64_t joiner_deployment_release_revision_seen_ = 0;
 	// S2C 0x50 re-latched OUR OWN team (the second byte_A85B48 writer). The join-time
 	// team arrives through spawn_from_self, so only later edges are applied here.
 	// [orig: NapiNPClientMsg_0x050 @0x431910 — the latch @0x4319db]
 	uint64_t joiner_self_team_revision_seen_ = 0;
+	// The live environment owner consumes each decoded phase-2 edge once. The
+	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
+	// reset this cursor with their other receive-side cursors.
+	uint32_t joiner_environment_revision_seen_ = 0;
+	// Same receive-once cursor for the conditional flags2&0x0f==8 mounted-ammo
+	// record. Keeping this separate from the render-facing environment consumer
+	// prevents a stale net sample from refilling a locally firing gun each tick.
+	uint32_t joiner_mounted_ammo_revision_seen_ = 0;
 	bool joiner_redeploy_release_pending_ = false;
 	uint32_t joiner_redeploy_health_updates_at_release_ = 0;
 	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
@@ -759,7 +809,8 @@ private:
 	// Project the requester-local decoded 0x0A mount relationship onto L only
 	// after the host confirms C2S 0x26/0x27.
 	void sync_joiner_authoritative_mount();
-	void mirror_client_view_mission_entities();
+	void mirror_client_replica_mission_entities();
+	void mirror_predicted_vehicles_to_view();
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
 	// load [orig: Entity_BuildSpawnZoneList @0x43EAE0].
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
@@ -829,23 +880,26 @@ private:
 	bool joiner_diagnostic_sampled_ = false;
 	int joiner_flat_seconds_ = 0;
 	bool joiner_freeze_suspected_ = false;
-	// wire-id -> §5.10b replication class, built from items.def in resolve_item_traits.
-	// The DECODE-side twin of the per-entity net_class_code stamp: the runtime's client
-	// view sizes each inbound 0x0A tag-1 record by class, exactly as the retail client
-	// dispatches via its own items.def serialize callback [orig: itemDef+356 @0x50f2e2].
-	// Shared into the view's classifier lambda; survives per-load runtime rebuilds.
-	std::shared_ptr<const std::unordered_map<uint16_t, opennova::EntityClass>> item_class_table_;
+	// One immutable items.def catalog supplies both the authoritative entity stamp
+	// and the decoded-client record-width resolver. The callback codec, physical
+	// motion family, and allocation inputs remain independent traits.
+	std::shared_ptr<const opennova::netsim::ItemReplicationCatalog>
+			item_replication_catalog_;
+	Ref<NovaItemDatabase> item_replication_catalog_db_;
+	uint64_t item_replication_catalog_revision_ = 0;
 	// Mission-scoped source for the authoritative half of the same contract.
 	// World::restore rewinds registry entities to the pre-trait promotion baseline,
-	// so restart reapplies this database before rebuilding the decoded client view.
+	// so restart reapplies this database before rebuilding decoded client replicas.
 	Ref<NovaItemDatabase> item_traits_db_;
-	// Install item_class_table_ on runtime_'s view (no-op until both exist). Called from
+	// Install the catalog resolver on runtime_'s view (no-op until both exist). Called from
 	// resolve_item_traits, finish_load (per-load runtime rebuild), and enable_join.
 	void install_item_class_resolver();
 	// Install or clear the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_challenge_table();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
+	// Install or clear the explicitly selected retail integrity corpus profile.
+	void install_join_integrity_profile();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
@@ -919,6 +973,8 @@ private:
 	// sweep: joiner-local and host-admitted players are attached to the AI pool after
 	// MissionRuntime's initial call. Retain the resolver inputs and advance this
 	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
+	void resolve_client_row_adm_ids();
+	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
 	Ref<NovaResourceRoot> infantry_adm_resource_root_;
 	Ref<NovaItemDatabase> infantry_adm_item_db_;
 	int infantry_adm_resolved_ai_count_ = 0;
@@ -930,9 +986,26 @@ private:
 	// Model resources paired with the persistent seat table. Kept across
 	// reset_world because set_item_seat_specs runs before mission promotion.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
+	void refresh_item_seat_spec(opennova::world::Entity &p_entity);
+	// Resolve each spec's turret clamp window from its primary weapon's
+	// weapon.def rows. Called from BOTH install orders (specs-then-table and
+	// table-then-specs); all-zero = not authored, no clamp.
+	void stamp_seat_spec_turret_limits();
 	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
+	void set_network_environment(int64_t p_fog_target_q16,
+	                             int64_t p_fog_current_q16,
+	                             int64_t p_fog_accel_clamp,
+	                             int64_t p_tod_fixed24,
+	                             int64_t p_tod_advance_per_tick,
+	                             int64_t p_quake_ticks,
+	                             int64_t p_cloud_scroll_rate_target,
+	                             int64_t p_rain_pct_current_q16,
+	                             int64_t p_overcast_blend_q16,
+	                             int64_t p_precipitation_kind);
+	void advance_network_environment_tick();
+	void initialize_network_environment_mission_start();
 	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
 	// pre-mission pass, capture the restore baseline. Marks the sim loaded.
 	void finish_load(const opennova::bms::File &file);
@@ -986,6 +1059,12 @@ public:
 	// shell owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
 	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
+	// Feed the raw RTXT mission string table before load. Native lookup avoids a
+	// UTF-8 round-trip and resolves briefing2's retail briefing fallback.
+	void set_mission_text_data(const PackedByteArray &p_rtxt_bytes);
+	// Overlay the active game-type scoring row from retail's loose VERSION 40
+	// score.ini. Returns false for absent, malformed, or unsupported data.
+	bool set_score_config_data(const PackedByteArray &p_score_ini_bytes);
 
 	// --- co-op LAN host (Increment C) ------------------------------------
 	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`
@@ -1011,13 +1090,16 @@ public:
 	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
 	// game ClientAuth.NA and is the key the host echoes into our organic-spawn record so
 	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
-	// the mission (the next load arms the joiner frame path). Implies the client view;
+	// the mission (the next load arms the joiner frame path). Implies client replicas;
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);
+	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
+	// Empty clears it; an unknown id also clears it and returns false.
+	bool set_join_integrity_profile(const String &p_profile_id);
 	// Load the process-scoped anti-cheat CHARACTER table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.
@@ -1027,10 +1109,10 @@ public:
 	// destructor calls this too, so explicit calls are only needed when the socket must close
 	// before the sim is freed.
 	void leave_net_session();
-	// Retail connects before loading the local map: drive only the socket/session
+	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed
 	// (S2C 0x7B identifies the mission earlier), then resume the same connection
-	// after the caller has loaded it. No World tick or gameplay uplink runs here.
+	// after the caller has constructed it. No World tick or gameplay uplink runs here.
 	void set_join_world_ready(bool p_ready);
 	// Freeze the renderer's unique loaded, non-foliage .3DI definition count
 	// into the joiner's C2S 0x3D paging seam. GameWorld calls this once after
@@ -1046,6 +1128,16 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	String get_join_mission_file() const;
+	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
+	// revision. Empty means no new authoritative sample.
+	Dictionary take_join_environment_update();
+	// Exact pre-world payloads retained by the joiner from retail's initial
+	// state stream. The mission header is exactly 616 bytes when available. TIL
+	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
+	// valid omitted 0x45 from a partial or malformed stream.
+	PackedByteArray get_join_mission_header() const;
+	int64_t get_join_terrain_til_state() const;
+	PackedByteArray get_join_terrain_til() const;
 	String get_join_expansion() const;
 	int64_t get_join_game_type() const;
 	String get_join_error() const;
@@ -1063,6 +1155,9 @@ public:
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
+	// Monotonic initial-admission boundary: policy + both initial loadout grants
+	// have landed. Deploy-pick state is intentionally exposed separately.
+	bool is_join_initial_admission_complete() const;
 	// The per-second joiner trace is deliberately opt-in for release play. Set
 	// OPENNOVA_NET_DIAGNOSTICS=1 to emit it. The snapshot remains available so
 	// tests/debug UI can distinguish a real ordered gap from ordinary idle traffic.
@@ -1086,6 +1181,9 @@ public:
 	// The joiner's server-assigned team — the S2C 0x04 tail-byte latch the deploy
 	// screen colors/filters by [orig: byte_A85B48]. 0 when not joining.
 	int get_join_assigned_team() const;
+	// The class-availability policy for the active session. A joiner reads the
+	// retail host's S2C 0x76; an authority exposes its configured writer source.
+	int get_class_allow_mask() const;
 	// The JoinerConnection phase as an int (JoinerConnection::Phase), -1 when not joining.
 	int get_joiner_phase() const;
 	// The learned wire handle H, 0 until in-match (debug / test).
@@ -1327,6 +1425,12 @@ public:
 	// resolve through the registry) and install on success. False (program not
 	// installed) when compilation has errors; inspect via get_wac_program().
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
+	// Retail executes the freshly installed WAC once before the 255-tick
+	// environment settle. Host/standalone authority only; idempotent per load.
+	bool run_mission_start_wac();
+	// Replace the early post-BMS restore point with the fully settled play-start
+	// state, including WAC temporal/RNG state.
+	void seal_mission_start_baseline();
 	// { loaded, paused, runs, event_count, code_size } for transport/debug UI.
 	Dictionary get_wac_state() const;
 	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
@@ -1472,7 +1576,16 @@ public:
 	// World-registry probe seams by SSN (pool-1 vehicles carry no AI brain and are
 	// invisible to the AI-index seams): entity card + mission-space teleport.
 	Dictionary get_world_entity_debug(int p_net_id) const;
+	// The decoded joiner-side client row for one wire handle — the ClientState
+	// twin of get_world_entity_debug (which reads the materialized registry):
+	// exactly what the wire carried and the fold retained, before presentation.
+	// Empty when not a joiner or the handle has no row.
+	Dictionary get_client_entity_debug(int p_handle) const;
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
+	// Exact-slot parity probe: set the authoritative MountSlot words on a
+	// world entity so a real UDP phase-8 sample can prove receiver application.
+	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip,
+	                                         int p_reserve);
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
@@ -1827,3 +1940,4 @@ VARIANT_ENUM_CAST(godot::NovaSimulation::PresentField);
 VARIANT_ENUM_CAST(godot::NovaSimulation::EffectStateField);
 VARIANT_ENUM_CAST(godot::NovaSimulation::SeatCode);
 VARIANT_ENUM_CAST(godot::NovaSimulation::MountCommand);
+VARIANT_ENUM_CAST(godot::NovaSimulation::JoinTerrainTilState);

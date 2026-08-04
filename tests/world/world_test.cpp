@@ -16,6 +16,20 @@ static int failures = 0;
 
 int main() {
     World w;
+    // The network environment starts unauthored, with retail's native clear-
+    // weather reset values.  Values remain in engine units until the 0x0A
+    // encoder projects them onto the narrower phase-2 fields.
+    CHECK(!w.network_env.valid);
+    CHECK(w.network_env.fog_target_q16 == 0);
+    CHECK(w.network_env.fog_accel_clamp == 0x00FF0000u);
+    CHECK(w.network_env.tod_fixed24 == 0);
+    CHECK(w.network_env.quake_ticks == 0);
+    CHECK(w.network_env.cloud_scroll_rate_target == 0);
+    CHECK(w.network_env.rain_pct_current_q16 == 0);
+    CHECK(w.network_env.overcast_blend_q16 == 0);
+    CHECK(w.network_env.precipitation_kind == 0);
+    CHECK(w.network_env.generation == 0);
+
     w.registry.configure_pool(0, 16); // actor pool
     w.registry.configure_pool(1, 16); // actor pool
     w.registry.configure_pool(4, 8);  // static pool (not searched by find_by_net_id)
@@ -207,6 +221,16 @@ int main() {
     w.cached.local_health = 100;
     w.cached.humans = 1;
     w.wac_values.accuracy_spread = 3;
+    w.network_env.valid = true;
+    w.network_env.fog_target_q16 = 380 << 16;
+    w.network_env.fog_accel_clamp = 0x00123456u;
+    w.network_env.tod_fixed24 = 0x01234567u;
+    w.network_env.quake_ticks = 17;
+    w.network_env.cloud_scroll_rate_target = 15u << 10;
+    w.network_env.rain_pct_current_q16 = 0x00008000u;
+    w.network_env.overcast_blend_q16 = 0x00004000u;
+    w.network_env.precipitation_kind = 0x89ABCDEFu;
+    w.network_env.generation = 9;
     World::Snapshot snap = w.snapshot();
     const EntityHandle post_snapshot = w.registry.spawn(0, blast_target);
     CHECK(post_snapshot.valid());
@@ -247,9 +271,20 @@ int main() {
     w.cached.local_health = 77;
     w.cached.humans = 2;
     w.wac_values.accuracy_spread = 9;
+    w.network_env = EnvNetworkState{};
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
     CHECK(w.wac_values.accuracy_spread == 3);
+    CHECK(w.network_env.valid);
+    CHECK(w.network_env.fog_target_q16 == (380 << 16));
+    CHECK(w.network_env.fog_accel_clamp == 0x00123456u);
+    CHECK(w.network_env.tod_fixed24 == 0x01234567u);
+    CHECK(w.network_env.quake_ticks == 17);
+    CHECK(w.network_env.cloud_scroll_rate_target == (15u << 10));
+    CHECK(w.network_env.rain_pct_current_q16 == 0x00008000u);
+    CHECK(w.network_env.overcast_blend_q16 == 0x00004000u);
+    CHECK(w.network_env.precipitation_kind == 0x89ABCDEFu);
+    CHECK(w.network_env.generation == 9);
     CHECK(w.round_sim.active_count == 0);
     CHECK(!w.round_sim.rounds[0].active);
     CHECK(w.round_sim.deaths.empty());

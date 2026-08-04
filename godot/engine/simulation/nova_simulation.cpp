@@ -82,6 +82,11 @@ NovaSimulation::~NovaSimulation() {
 }
 
 void NovaSimulation::reset_world() {
+	wire_header_world_ = false;
+	wire_world_static_initialized_ = false;
+	wire_world_topology_revision_seen_ = ~uint64_t{0};
+	wire_world_stream_revision_seen_ = ~uint64_t{0};
+	wire_world_materializer_.clear();
 	invalidate_present_effect_pose_cache();
 	pending_weapon_events_.clear();
 	weapon_anim_tick_ = 0;
@@ -133,6 +138,7 @@ void NovaSimulation::reset_world() {
 	loaded_ = false;
 	playing_ = false;
 	have_baseline_ = false;
+	have_wac_baseline_ = false;
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
 	last_occlusion_build_us_ = 0;
@@ -170,6 +176,47 @@ void NovaSimulation::reset_world() {
 	apply_terrain_to_ai(); // re-point the fresh ai_ at the persisted terrain field (if any)
 	apply_root_motion_to_ai(); // ...and at the persisted infantry clip set (if any)
 	apply_collision_to_ai();
+}
+
+void NovaSimulation::set_network_environment(
+		int64_t p_fog_target_q16,
+		int64_t p_fog_current_q16,
+		int64_t p_fog_accel_clamp,
+		int64_t p_tod_fixed24,
+		int64_t p_tod_advance_per_tick,
+		int64_t p_quake_ticks,
+		int64_t p_cloud_scroll_rate_target,
+		int64_t p_rain_pct_current_q16,
+		int64_t p_overcast_blend_q16,
+		int64_t p_precipitation_kind) {
+	const auto u32 = [](int64_t value) -> uint32_t {
+		return value <= 0 ? 0u
+		                  : (value >= 0xFFFFFFFFll ? 0xFFFFFFFFu
+		                                           : static_cast<uint32_t>(value));
+	};
+	opennova::world::EnvNetworkSample sample;
+	sample.fog_target_q16 = static_cast<int32_t>(std::min<uint32_t>(
+			u32(p_fog_target_q16), static_cast<uint32_t>(INT32_MAX)));
+	sample.fog_current_q16 = static_cast<int32_t>(std::min<uint32_t>(
+			u32(p_fog_current_q16), static_cast<uint32_t>(INT32_MAX)));
+	sample.fog_accel_clamp = u32(p_fog_accel_clamp);
+	sample.tod_fixed24 = u32(p_tod_fixed24);
+	sample.tod_advance_per_tick = u32(p_tod_advance_per_tick);
+	sample.quake_ticks = u32(p_quake_ticks);
+	sample.cloud_scroll_rate_target = u32(p_cloud_scroll_rate_target);
+	sample.rain_pct_current_q16 = u32(p_rain_pct_current_q16);
+	sample.overcast_blend_q16 = u32(p_overcast_blend_q16);
+	sample.precipitation_kind = u32(p_precipitation_kind);
+	world_->network_env.publish_complete(sample);
+}
+
+void NovaSimulation::advance_network_environment_tick() {
+	world_->network_env.advance_tick();
+}
+
+void NovaSimulation::initialize_network_environment_mission_start() {
+	if (!loaded_ || joiner_ || world_ == nullptr) return;
+	world_->network_env.initialize_mission_start();
 }
 
 // Re-point the (possibly just-rebuilt) AI system at our owned terrain field. The field's raw
@@ -352,9 +399,12 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		// the historical fresh-runtime reset.
 		if (!joiner_started_ || !runtime_) {
 			runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+			joiner_environment_revision_seen_ = 0;
+			joiner_mounted_ammo_revision_seen_ = 0;
 			joiner_started_ = false;
 			install_charattr_challenge_table();
 			install_character_join_vars();
+			install_join_integrity_profile();
 		}
 		runtime_->set_world_ready(true);
 		// The shell owns the deploy-map screen: a pick-required join parks at the
@@ -393,13 +443,15 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
 	have_baseline_ = true;
+	wac_baseline_ = wac_->capture_runtime_state();
+	have_wac_baseline_ = true;
 	loaded_ = true;
 }
 
 void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File &file) {
 	std::vector<uint8_t> header_blob;
 	std::string error;
-	if (opennova::bms::encode_header_blob(file, header_blob, error)) {
+	if (opennova::bms::encode_loaded_header_blob(file, header_blob, error)) {
 		host_session_config_.mission_header_blob = std::move(header_blob);
 	} else {
 		host_session_config_.mission_header_blob.clear();
@@ -419,6 +471,10 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	reset_world();
+	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
+	// still load a complete BMS, whose authored promotion is already canonical.
+	// Only the production 616-byte S2C header needs wire-time materialization.
+	wire_header_world_ = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included).
 	const opennova::bms::File &file = p_mission->native_document().bms_file();
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
@@ -516,6 +572,19 @@ void NovaSimulation::restart() {
 	weapon_switch_deferred_action_ = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	if (have_wac_baseline_ && wac_) {
+		wac_->restore_runtime_state(wac_baseline_);
+	}
+	if (wire_header_world_) {
+		// ClientState survives Stop/Start, while the body-empty baseline removes
+		// its registry carriers. Force one exact rematerialization fold; retain the
+		// already-built portal tables because their handles remain identical and
+		// the occlusion models' weld records are intentionally one-shot mutable.
+		wire_world_materializer_.clear();
+		wire_world_topology_revision_seen_ = ~uint64_t{0};
+		wire_world_stream_revision_seen_ = ~uint64_t{0};
+		deploy_zone_registry_built_ = false;
+	}
 	// The baseline is captured during finish_load, before MissionRuntime supplies
 	// items.def. Restore those authoritative callback/health traits first; the
 	// encoder and the client classifier must agree on every 0x0A record width.
@@ -530,7 +599,7 @@ void NovaSimulation::restart() {
 		host_loop_.clear();
 		runtime_ = std::make_unique<opennova::np::ClientRuntime>(host_loop_);
 		install_item_class_resolver();
-		opennova::netsim::NetClientView &view = runtime_->view();
+		opennova::netsim::ClientReplicaPipeline &view = runtime_->view();
 		view.apply(0x10, opennova::encode_static_entity_batch(
 				opennova::netsim::build_pool2_static_batch(*world_)));
 		view.apply(0x0D, opennova::encode_pool_spawn_batch(
@@ -616,6 +685,21 @@ bool NovaSimulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	}
 	wac_->set_program(wac_program_->native_program());
 	return true;
+}
+
+bool NovaSimulation::run_mission_start_wac() {
+	if (!loaded_ || joiner_ || world_ == nullptr || wac_ == nullptr) return false;
+	return wac_->execute_initial(*world_);
+}
+
+void NovaSimulation::seal_mission_start_baseline() {
+	if (!loaded_ || joiner_ || world_ == nullptr || ai_ == nullptr || wac_ == nullptr)
+		return;
+	baseline_ = world_->snapshot();
+	ai_->capture_spawn_baseline();
+	wac_baseline_ = wac_->capture_runtime_state();
+	have_baseline_ = true;
+	have_wac_baseline_ = true;
 }
 
 Dictionary NovaSimulation::get_wac_state() const {
@@ -798,9 +882,36 @@ Dictionary NovaSimulation::get_world_entity_debug(int p_net_id) const {
 	out["alive"] = ent->alive;
 	out["hidden"] = ent->hidden;
 	out["health"] = ent->health;
+	out["has_item_def"] = ent->has_item_def;
+	out["handle"] = static_cast<int>(h.packed);
+	out["item_type"] = static_cast<int>(ent->item_type);
+	out["item_unit_type"] = ent->item_unit_type;
+	out["item_attrib"] = static_cast<int64_t>(ent->item_attrib);
+	out["item_attrib2"] = static_cast<int64_t>(ent->item_attrib2);
+	out["vehicle_family"] = -1;
+	if (const opennova::world::VehicleTraits *traits =
+			world_->vehicle_traits.get(ent->item_id)) {
+		out["vehicle_family"] = static_cast<int>(traits->family);
+	}
+	out["has_minimap_model_marker"] = ent->has_minimap_model_marker;
+	out["is_capture_trigger"] = ent->is_capture_trigger;
+	out["is_spawn_point"] = ent->is_spawn_point;
+	out["zone_number"] = static_cast<int>(ent->zone_number);
+	out["zone_radius"] = static_cast<int>(ent->zone_radius);
+	out["zone_control"] = ent->zone_control;
+	int zone_chain_index = -1;
+	for (size_t i = 0; i < world_->zone_chain.zones.size(); ++i) {
+		if (world_->zone_chain.zones[i] == h) {
+			zone_chain_index = static_cast<int>(i);
+			break;
+		}
+	}
+	out["zone_chain_index"] = zone_chain_index;
 	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
 	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
 	out["yaw"] = static_cast<int>(ent->yaw);
+	out["primary_weapon_clip"] = ent->primary_weapon_slot.clip;
+	out["primary_weapon_reserve"] = ent->primary_weapon_slot.reserve;
 	out["seat_count"] = static_cast<int>(ent->seats.size());
 	Array seats;
 	for (const opennova::world::Seat &s : ent->seats) {
@@ -859,6 +970,21 @@ void NovaSimulation::debug_set_world_entity_position(int p_net_id,
 			ae->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
 		}
 	}
+}
+
+Error NovaSimulation::debug_set_world_entity_weapon_ammo(
+		int p_net_id, int p_clip, int p_reserve) {
+	if (!world_ || p_net_id <= 0 || p_net_id > 0xFFFF)
+		return ERR_INVALID_PARAMETER;
+	const opennova::world::EntityHandle h =
+			world_->registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
+	opennova::world::Entity *ent = world_->registry.get(h);
+	if (ent == nullptr) return ERR_DOES_NOT_EXIST;
+	ent->primary_weapon_slot.clip =
+			opennova::world::retail_signed_i16(p_clip);
+	ent->primary_weapon_slot.reserve =
+			opennova::world::retail_signed_i16(p_reserve);
+	return OK;
 }
 
 int NovaSimulation::get_mission_variable(int index) const {

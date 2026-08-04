@@ -9,7 +9,9 @@ func _init() -> void:
 	var out_dir := OS.get_environment("NOVA_PROBE_OUT")
 	if out_dir.is_empty():
 		out_dir = "user://"
-	var dir := ResourceDirSettings.get_resource_dir()
+	# Match the game runtime: an editor/automation supplied --resource-dir is
+	# process-local and takes precedence over the persisted preference.
+	var dir := NovaLaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
 	var root := NovaResourceRoot.new()
 	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
 	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())

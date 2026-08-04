@@ -537,9 +537,9 @@ void test_network_oneshot_authority_and_session_gate() {
         r.world.mp_session = true;
         r.world.projectile_authority = false;
         r.world.one_shot_kill = true;
-        // A visual client's only live LOCAL person is its own player L; other
-        // local pool-0 slots are load-frozen ghosts excluded from the
-        // projectile walks (their live poses arrive as wire proxies).
+        // A visual client's only native live pool-0 person is its own player L;
+        // any synthetic non-local native rows are excluded from projectile walks
+        // because remote pool-0 poses arrive as wire proxies.
         r.world.cached.local_player = r.target;
         Entity *target = r.world.registry.get(r.target);
         CHECK(target != nullptr);
@@ -822,8 +822,8 @@ CollisionModel proxy_face_quad_model(uint8_t material) {
 }
 
 // Moving decoded pool-1 movers collide through their wire-keyed authored
-// geometry at the DECODED pose, while a visual client's load-frozen local
-// pool-1 ghost stops serving projectile collision.
+// geometry at the DECODED pose, while a synthetic duplicate native row does
+// not serve projectile collision on a visual client.
 void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     World world;
     world.registry.configure_pool(0, 8);
@@ -838,8 +838,8 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     const EntityHandle sh = world.registry.spawn(0, shooter);
     world.cached.local_player = sh;
 
-    // The load-frozen local ghost: the same vehicle the wire also carries, at
-    // its authored spawn X=5 — the pose the host long since moved it away from.
+    // A synthetic duplicate native row: the same vehicle the wire also carries,
+    // at authored spawn X=5 rather than the host's current pose.
     Entity ghost;
     ghost.kind = EntityKind::Item;
     ghost.has_item_def = true;
@@ -1123,8 +1123,8 @@ void test_visual_infantry_proxy_joins_person_walk() {
     const EntityHandle local_l = world.registry.spawn(0, local);
     world.cached.local_player = local_l;
 
-    // The load-frozen local mission AI at its authored spawn on the lane. On a
-    // visual client this ghost no longer stops rounds; its live decoded proxy
+    // A synthetic non-local native AI at its authored spawn on the lane. On a
+    // visual client it does not stop rounds; the live decoded pool-0 proxy
     // (the host moved it to X=9) serves instead.
     Entity frozen_ai;
     frozen_ai.kind = EntityKind::Organic;
@@ -1168,8 +1168,8 @@ void test_person_walk_orders_local_player_by_its_server_handle() {
         world.mp_session = true;
         world.projectile_authority = false;
 
-        // Load-frozen mission organics at local slots 0..3. A visual client
-        // never collides them (their decoded proxies serve instead), but they
+        // Synthetic non-local native organics at slots 0..3. A visual client
+        // never collides them (decoded pool-0 proxies serve instead), but they
         // push L to a local slot whose packed value outruns the proxy handle.
         for (int i = 0; i < 4; ++i) {
             Entity ghost;

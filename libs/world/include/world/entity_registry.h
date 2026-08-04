@@ -33,6 +33,16 @@ struct Route {
     std::vector<Vec3> markers;
 };
 
+// Stable identity for one allocation lifetime of a packed pool/slot handle.
+// Handles are intentionally reused; the registry spawn serial prevents an old
+// owner from reading or despawning a later entity that occupies the same slot.
+struct EntityLifetime {
+    EntityHandle handle{};
+    uint64_t registry_spawn_id = 0;
+
+    bool valid() const { return handle.valid() && registry_spawn_id != 0; }
+};
+
 class EntityRegistry {
 public:
     // [orig: g_pool_list @0xA892E0 — pools 0..3 are "actor" pools searched by
@@ -44,9 +54,17 @@ public:
 
     EntityHandle spawn(int pool, const Entity &seed); // kInvalid if pool full
     EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed); // first free >= first_slot
+    // Allocate exactly the packed pool/slot identity supplied by the wire.
+    // Unlike spawn_from, this never falls through to a later free slot. Retail
+    // load handlers select Pool_GetEntryUnchecked(pool, slot) and memset that
+    // row in place (pool 1 @0x432C40, pool 2 @0x433400, pool 3 @0x425C00).
+    EntityHandle spawn_at(EntityHandle h, const Entity &seed);
     void despawn(EntityHandle h);
+    bool despawn(EntityLifetime lifetime);
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;
+    Entity *get(EntityLifetime lifetime);
+    const Entity *get(EntityLifetime lifetime) const;
 
     // Restore authored/runtime-visible registry state without rewinding the
     // host-only lifetime serial. Collision and skeletal caches use that serial

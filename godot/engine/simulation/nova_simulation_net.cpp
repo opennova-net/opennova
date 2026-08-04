@@ -3,9 +3,15 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/nova_simulation_internal.h"
 
+#include <cmath>
+#include <cstring>
+
+#include <npruntime/session_status.h>
 #include <npwire/ingame_message_id.h>
+#include <rtxt/rtxt.h>
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace novasim;
@@ -38,6 +44,30 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	ctx_.world = world_.get();
 	ctx_.mission = &mission_file_;
 	ctx_.terrain_til_data = terrain_til_data_; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
+	ctx_.mission_text_loaded = mission_text_loaded_;
+	ctx_.mission_briefing3 = mission_briefing3_;
+	ctx_.mission_briefing2 = mission_briefing2_;
+	ctx_.mission_location_names.clear();
+	int32_t location_index = 1;
+	for (const opennova::bms::Entity &marker : mission_file_.markers) {
+		if (marker.type_id != 2044) continue;
+		// Retail assigns LOCATION001.. in type-2044 marker spawn order. The
+		// BMS ttool_index is zero for both 00TRg markers and is not the text key.
+		const auto found = mission_location_texts_.find(location_index);
+		std::string label;
+		if (found != mission_location_texts_.end()) {
+			label = found->second;
+		} else {
+			const std::string suffix = std::to_string(location_index);
+			label = "LOCATION";
+			if (suffix.size() < 3) label.append(3 - suffix.size(), '0');
+			label += suffix;
+		}
+		// Retail stores the resolved text in a 64-byte location-name slot.
+		if (label.size() > 63) label.resize(63);
+		ctx_.mission_location_names.push_back(std::move(label));
+		++location_index;
+	}
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
 	// separate net ISystem (retired P8).
 
@@ -72,7 +102,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	host_cfg.serve_and_play = serve_and_play;
 	np::start_host_session(host_owner_, host_cfg);
 	if (serve_and_play) {
-		// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
+		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
 		runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
 		// Phase-3 0x0A objective width is gated by the same g_GameType
@@ -95,7 +125,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1), is_host=1/is_client=0; HostDialog
 		// read @0x555940, dispatch @0x556d00, mode switch @0x4c49f0]. start_host_session now selects
 		// that exact HostOnly row, passes no type-2 loopback to create_session, and creates no local
-		// player. There is therefore no local client view: runtime_ stays null, and host_pump's fold
+		// player. There is therefore no local replica pipeline: runtime_ stays null, and host_pump's fold
 		// plus the present snapshot both guard on it (D-NET-131 fixed 2026-07-24).
 		runtime_.reset();
 	}
@@ -222,6 +252,18 @@ void NovaSimulation::drain_host_client_gameplay_requests() {
 
 void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
+	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
+	// and wraps against the current renderer viewport height [orig:
+	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
+	// @ 0x511375, wrap @ 0x511391]. Refresh the portable runtime seam on
+	// every frame so resizing is observable; the retail parity runbook pins this
+	// root viewport to 1920x1080. A missing/non-drawable viewport leaves the seam
+	// explicitly unset, and npruntime suppresses 0x68 instead of guessing.
+	Viewport *viewport = get_viewport();
+	const double viewport_height = viewport != nullptr
+			? viewport->get_visible_rect().size.y : 0.0;
+	ctx_.loaded_model_viewport_height = viewport_height > 0.0
+			? static_cast<uint32_t>(viewport_height) : 0u;
 	const uint32_t now = host_owner_.now_tick;
 	drain_host_client_gameplay_requests();
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
@@ -263,7 +305,9 @@ void NovaSimulation::sync_joiner_authoritative_mount() {
 
 	const bool wire_mounted =
 			self->carrier_handle != opennova::world::EntityHandle::kInvalid &&
-			self->mount_bone != 0;
+			self->mount_bone != 0 &&
+			client_replica_world_entity(opennova::world::EntityHandle{
+					self->carrier_handle}) != nullptr;
 	bool changed = false;
 	if (!wire_mounted) {
 		if (local->mounted)
@@ -272,47 +316,316 @@ void NovaSimulation::sync_joiner_authoritative_mount() {
 	} else if (!local->mounted ||
 			local->mount_target.packed != self->carrier_handle ||
 			local->mount_bone != self->mount_bone) {
-		// Mission entities retain the same packed pool/slot identity in the
-		// joiner's locally promoted world and the host's streamed world. The
+		// Wire-materialized mission entities retain the host's exact packed
+		// pool/slot identity in the joiner's native world. The
 		// server has already validated this exact carrier+bone pair.
 		changed = opennova::world::entity_process_vehicle_attach(
 				*world_, local->handle,
 				opennova::world::EntityHandle{self->carrier_handle},
 				self->mount_bone);
 	}
-	if (!changed) return;
-	player_view_.binoculars_requested = false;
-	binocular_yaw_offset_deg_ = 0.0f;
-	binocular_pitch_offset_deg_ = 0.0f;
-	refresh_local_player_view_effects();
-	sync_local_mounted_input_heading();
+
+	// A designated-G EWeap uses the compact player's seat_type as an
+	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the validated
+	// groundEntity vehicle slot. Apply this even when the carrier+bone relation
+	// is unchanged; action 6 commonly changes only this byte.
+	// [orig: client player compact apply @0x4c1353 route legs]
+	bool route_changed = false;
+	if (wire_mounted && (self->seat_type == 1u || self->seat_type == 2u)) {
+		opennova::world::Entity *mount = client_replica_world_entity(
+				opennova::world::EntityHandle{self->carrier_handle});
+		if (mount != nullptr) {
+			// Retail does not blindly trust the authority byte: both route legs first
+			// require Entity_IsMountableGun (non-type-1 EWeap) and the authored G
+			// capability. Only the type-2 leg adds the groundEntity parent check.
+			// [orig: compact apply @0x4c1353; Entity_IsMountableGun @0x434240]
+			bool route_valid = mount->has_item_def && mount->item_type != 1u &&
+					(mount->item_attrib &
+							opennova::world::kItemAttribEweap) != 0u &&
+					(mount->emplacement_attachment_flags & 0x02u) != 0u &&
+					opennova::world::vehicle_prepare_weapon_slot(*world_, *mount);
+			uint8_t equipped_adm = mount->primary_weapon_slot_adm;
+			if (route_valid && self->seat_type == 2u && mount->ground_target.valid() &&
+					mount->emplacement_parent == mount->ground_target &&
+					mount->emplacement_parent_spawn_id != 0) {
+				opennova::world::Entity *parent =
+						client_replica_world_entity(mount->ground_target);
+				route_valid = parent != nullptr &&
+						parent->registry_spawn_id ==
+								mount->emplacement_parent_spawn_id &&
+						parent->has_item_def && parent->item_type == 1u &&
+						(parent->item_attrib &
+								opennova::world::kItemAttribEweap) != 0u &&
+						opennova::world::vehicle_prepare_weapon_slot(
+								*world_, *parent);
+				if (route_valid)
+					equipped_adm = parent->primary_weapon_slot_adm;
+			} else if (self->seat_type == 2u) {
+				route_valid = false;
+			}
+			if (route_valid) {
+				const bool select_parent = self->seat_type == 2u;
+				route_changed =
+						mount->primary_weapon_slot.redirect_to_parent_slot !=
+								select_parent ||
+						local->equipped_adm_index != equipped_adm;
+				mount->primary_weapon_slot.redirect_to_parent_slot =
+						select_parent;
+				local->equipped_adm_index = equipped_adm;
+			}
+		}
+	}
+	if (!changed && !route_changed) return;
+	if (changed) {
+		player_view_.binoculars_requested = false;
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+		refresh_local_player_view_effects();
+		sync_local_mounted_input_heading();
+	}
 	sync_local_usegun_weapon_transition();
 }
 
+opennova::world::Entity *NovaSimulation::client_replica_world_entity(
+		opennova::world::EntityHandle p_handle) {
+	if (!world_ || !p_handle.valid()) return nullptr;
+	if (wire_header_world_)
+		return wire_world_materializer_.owned(*world_, p_handle);
+	opennova::world::Entity *entity = world_->registry.get(p_handle);
+	return entity != nullptr &&
+			entity->spawn_origin != opennova::world::kSpawnOriginNone
+			? entity
+			: nullptr;
+}
+
+void NovaSimulation::apply_join_mounted_ammo_update() {
+	if (!joiner_ || !world_ || runtime_ == nullptr) return;
+	const opennova::netsim::ClientMountedAmmoState &ammo =
+			runtime_->state().mounted_ammo;
+	if (!ammo.present ||
+			ammo.revision == joiner_mounted_ammo_revision_seen_)
+		return;
+
+	// The on-foot sentinel is a complete phase-8 observation, but it has no
+	// MountSlot to mutate. Consume it so repeated render frames cannot replay it.
+	if (!ammo.has_mount ||
+			ammo.mount_handle == opennova::world::EntityHandle::kInvalid) {
+		joiner_mounted_ammo_revision_seen_ = ammo.revision;
+		return;
+	}
+
+	const opennova::world::EntityHandle handle{ammo.mount_handle};
+	opennova::world::Entity *mount = wire_header_world_
+			? wire_world_materializer_.owned(*world_, handle)
+			: world_->registry.get(handle);
+	// A streamed row can arrive in a later initial-state page. Unlike an invalid
+	// item class, absence is not a verdict: retain this revision and retry after
+	// the materializer has populated the exact packed slot.
+	if (mount == nullptr) return;
+
+	opennova::world::WeaponSlotState *slot =
+			opennova::world::resolve_mounted_ammo_slot(*world_, *mount);
+	if (slot != nullptr) {
+		// Retail stores both words in signed 16-bit MountSlot fields. Preserve the
+		// 0xffff sentinel as -1 rather than widening it to 65535.
+		slot->clip = opennova::world::retail_signed_i16(ammo.clip);
+		slot->reserve = opennova::world::retail_signed_i16(ammo.reserve);
+	}
+	// A live row with the wrong ItemDef/type/route is the retail
+	// consume-and-ignore branch. Do not let one malformed class block later
+	// phase-8 revisions forever.
+	joiner_mounted_ammo_revision_seen_ = ammo.revision;
+}
+
 // Mirror the decoded wire positions of mission entities (pools 1-3) back onto
-// the joiner's locally promoted registry rows. The local sim is NOT authoritative
+// the joiner's exact-handle materialized registry rows. The local sim is NOT authoritative
 // for any of them — this write-back exists so position CONSUMERS of the local
 // world stay truthful on a joiner: the occlusion frame evaluates entity
 // visibility from registry positions (a driven-off vehicle must occlude at its
 // live position, not its spawn point), and the collision tick tables pick up the
-// same fix. Type-guarded on the same promote-order identity the mount reconcile
-// above relies on; synthetic children (spawn_origin sentinel) are skipped.
-// Orientation is deliberately NOT mirrored (nothing position-critical consumes
-// it locally; the render pose rides the present rows).
-void NovaSimulation::mirror_client_view_mission_entities() {
+// same fix. Type-guarded against the row materialized at that exact streamed
+// identity; synthetic children (spawn_origin sentinel) are skipped except
+// for rows deliberately materialized from a true wire-header mission. Those rows
+// also mirror orientation/team because collision and seat consumers observe them.
+void NovaSimulation::mirror_client_replica_mission_entities() {
 	if (!joiner_ || !world_ || runtime_ == nullptr) return;
-	for (const opennova::netsim::ClientEntityState &es :
+	for (opennova::netsim::ClientEntityState &es :
 			runtime_->state().entities) {
 		const opennova::world::EntityHandle h{es.handle};
 		const int pool = h.pool();
 		if (pool < 1 || pool > 3) continue;
-		opennova::world::Entity *local = world_->registry.get(h);
-		if (local == nullptr || local->spawn_origin == 0xFFFFFFFFu ||
+		opennova::world::Entity *local = client_replica_world_entity(h);
+		if (local == nullptr ||
 				static_cast<uint16_t>(local->item_id) != es.type_id)
 			continue;
+		// Pools 1..3 are live client rows, not just presentation records. Keep
+		// every world-side collision/seat consumer on the same full wire pose.
+		const opennova::world::Entity *attachment_parent =
+				local->emplacement_parent.valid()
+				? world_->registry.get(local->emplacement_parent)
+				: nullptr;
+		const bool unresolved_persistent_attachment =
+				es.parent_pose_valid && es.parent_handle != 0xFFFFu &&
+				!local->emplacement_pose_metadata_resolved &&
+				local->emplacement_parent.packed == es.parent_handle &&
+				attachment_parent != nullptr &&
+				attachment_parent->registry_spawn_id ==
+						local->emplacement_parent_spawn_id;
+		// A 0x0D zero heading is omitted on the wire after retail memset, so
+		// heading_known remains false. Persistent parent recomposition still owns
+		// an exact heading_bam; mirror it for unresolved children whose rigid wire
+		// pose is the world-consumer source of truth.
+		if (es.heading_known || unresolved_persistent_attachment)
+			local->yaw = static_cast<int16_t>(std::lround(
+					opennova::world::mission_yaw_deg_from_bam_heading(
+							es.heading_bam)));
+		local->pitch = static_cast<int16_t>(std::lround(
+				double(es.pitch_bam) * opennova::world::kDegreesPerBam));
+		local->roll = static_cast<int16_t>(std::lround(
+				double(es.roll_bam) * opennova::world::kDegreesPerBam));
+		if (es.team_known) local->team = es.team;
+		// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
+		// vehicle's motion is owned by the WORLD-side client mover — stage the
+		// latest wire sample + registers on a fresh compact and let
+		// watercraft_client_tick chase + predict; the row is mirrored BACK
+		// after the tick (mirror_predicted_vehicles_to_view).
+		if (pool == 1 && es.cls == opennova::EntityClass::Vehicle) {
+			const opennova::world::VehicleTraits *traits =
+					world_->vehicle_traits.get(local->item_id);
+			if (traits != nullptr) {
+				es.net_world_mover = true;
+				// The row-side fallback chase selects its constant set by
+				// family; only the sim resolves families (client_state.h note).
+				es.net_air_family = traits->family ==
+								opennova::world::VehicleFamily::Helicopter ||
+						traits->family == opennova::world::VehicleFamily::Plane;
+				opennova::world::Entity::VehicleMotorState &m = local->veh;
+				// The witnessed mover freezes: wire bit0 (not-ready/attached),
+				// the dead-pose/wreck bit, and a carried row riding a deck
+				// carrier all stop the prediction motor — the row keeps its
+				// snapped wire pose (wreck eulers included) / its per-tick
+				// seat-follow, and the mirror-back below yields via
+				// net_predicted [orig: the Flags&1 early return @0x4b9a03; the
+				// dead-pose short form's frozen live stores @0x460930..0x460A50].
+				// D-NET-66: death stays a snap.
+				const bool wire_frozen =
+						(es.state_flags_known &&
+								(es.state_flags &
+										(0x01u | opennova::netsim::
+												kVehicleFlagDeadPose)) != 0u) ||
+						(es.net_seat_valid && es.carrier_handle != 0xFFFFu);
+				if (wire_frozen) {
+					// The row holds its snapped/followed pose; the registry
+					// entity adopts it below like any un-predicted row so
+					// occlusion/collision see the wreck where it rests. The
+					// platform/motor transients die with the freeze so a
+					// respawned or re-staged hull never inherits stale bob
+					// phase, accumulators, or vertical velocity.
+					m.net_predicted = false;
+					m.net_seen_revision = es.compact_revision;
+					m.slide_z = 0;
+					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
+							m.plat_acc[3] = 0;
+					m.plat_at_rest = false;
+					m.plat_porpoise = false;
+					m.plat_planing = false;
+					m.plat_bob_phase = 0.0f;
+					local->position.x = static_cast<float>(es.x) / 65536.0f;
+					local->position.y = static_cast<float>(es.y) / 65536.0f;
+					local->position.z = static_cast<float>(es.z) / 65536.0f;
+					continue;
+				}
+				if (es.compact_revision != m.net_seen_revision) {
+					const bool prediction_arming = !m.net_predicted;
+					m.net_seen_revision = es.compact_revision;
+					// The fold live-snapped the row to the wire sample (rows
+					// whose first compact landed before this flag flipped stage
+					// their pre-compact pose for one record — self-corrected by
+					// the next fold's live snap); that sample is the staged
+					// target [orig: the mode-2 staging].
+					m.net_smooth_target[0] = es.x;
+					m.net_smooth_target[1] = es.y;
+					m.net_smooth_target[2] = es.z;
+					m.net_smooth_heading = es.heading_bam;
+					m.net_recv_speed = es.vehicle_speed_reg;
+					m.net_recv_steer_bam = es.vehicle_steer_bam;
+					m.net_recv_lat = es.vehicle_lat_reg;
+					// The replicated engine/collective bit [orig: Flags 0x80,
+					// air families].
+					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
+					m.net_interp_progress = 0;
+					// Live vehicle compacts omit Euler X/Y. Seed the client mover's
+					// attitude exactly once when prediction arms from the retained
+					// spawn/dead-pose row; re-seeding on every live compact would
+					// erase the platform/aero solve performed between records.
+					if (prediction_arming) {
+						m.air_pitch_bam = es.pitch_bam;
+						m.air_roll_bam = es.roll_bam;
+						m.plat_solve_valid = false;
+						// Promotion seam (no retail equivalent — retail's contact
+						// solve runs from entity existence, so Flags 0x2000 is
+						// always current): seed an arming Air-family row airborne
+						// so its first predicted tick runs the aero block, not
+						// the grounded sheds. The tick-tail solve reproduces the
+						// true state one tick later either way.
+						if (traits->family ==
+										opennova::world::VehicleFamily::
+												Helicopter ||
+								traits->family ==
+										opennova::world::VehicleFamily::Plane)
+							local->flags |= opennova::world::kEntityFlagInAir;
+					}
+					m.net_predicted = true;
+				}
+				continue; // the world mover owns the registry position now
+			}
+		}
 		local->position.x = static_cast<float>(es.x) / 65536.0f;
 		local->position.y = static_cast<float>(es.y) / 65536.0f;
 		local->position.z = static_cast<float>(es.z) / 65536.0f;
+	}
+}
+
+// The world->view half of the watercraft prediction: after the tick, the
+// predicted registry pose becomes the presented row pose (present reads the
+// client replicas, ADR 0011). Heading gains the mover's full BAM precision.
+void NovaSimulation::mirror_predicted_vehicles_to_view() {
+	if (!joiner_ || !world_ || runtime_ == nullptr) return;
+	for (opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		if (!es.net_world_mover) continue;
+		const opennova::world::EntityHandle h{es.handle};
+		opennova::world::Entity *local = client_replica_world_entity(h);
+		if (local == nullptr || !local->veh.net_predicted) continue;
+		es.x = opennova::world::to_fixed(local->position.x);
+		es.y = opennova::world::to_fixed(local->position.y);
+		es.z = opennova::world::to_fixed(local->position.z);
+		es.heading_bam = local->veh.yaw_bam;
+		local->yaw = static_cast<int16_t>(std::lround(
+				opennova::world::mission_yaw_deg_from_bam_heading(
+						local->veh.yaw_bam)));
+		// The air and water movers own live attitude. Publish zero too: level is
+		// a real solved pose, not a validity sentinel. Ground/bike contact attitude
+		// remains unported, so those families retain their wire/dead-pose values.
+		const opennova::world::VehicleTraits *traits =
+				world_->vehicle_traits.get(local->item_id);
+		const bool owns_attitude = traits != nullptr &&
+				(traits->family == opennova::world::VehicleFamily::Watercraft ||
+						traits->family == opennova::world::VehicleFamily::Helicopter ||
+						traits->family == opennova::world::VehicleFamily::Plane);
+		if (owns_attitude) {
+			es.pitch_bam = local->veh.air_pitch_bam;
+			es.roll_bam = local->veh.air_roll_bam;
+			// Mounted-pose and bone consumers read Entity pitch/roll, not the
+			// motor registers. Keep the exact-handle materialized carrier coherent before
+			// the post-mover attachment phase below.
+			local->pitch = static_cast<int16_t>(std::lround(
+					double(local->veh.air_pitch_bam) *
+						opennova::world::kDegreesPerBam));
+			local->roll = static_cast<int16_t>(std::lround(
+					double(local->veh.air_roll_bam) *
+						opennova::world::kDegreesPerBam));
+		}
 	}
 }
 
@@ -327,6 +640,155 @@ void NovaSimulation::mirror_client_view_mission_entities() {
 // stale empty magazine and queue a second C2S 0x25.
 // [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180]
 // The pump itself is the phase sequence; each helper carries its witnesses.
+// Stamp each decoded Player/Infantry row's .adm registry id from its wire
+// type (visual item -> anim_def -> register_adm), once per row; -1 = no adm
+// (the row stays chase-only, truthful). Cached per type so late-joining
+// peers and respawns cost one map lookup.
+void NovaSimulation::resolve_client_row_adm_ids() {
+	if (runtime_ == nullptr || infantry_anim_.empty() ||
+			infantry_adm_resource_root_.is_null() ||
+			infantry_adm_item_db_.is_null())
+		return;
+	for (opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		if (es.rm_adm_id != -2) continue;
+		if (es.cls != opennova::EntityClass::Player &&
+				es.cls != opennova::EntityClass::Infantry)
+			continue;
+		if (es.type_id == 0) continue;
+		const auto cached = client_row_adm_by_type_.find(es.type_id);
+		if (cached != client_row_adm_by_type_.end()) {
+			es.rm_adm_id = static_cast<int16_t>(cached->second);
+			continue;
+		}
+		const int visual_item_id = visual_item_id_for_runtime_type(
+				es.type_id, infantry_adm_item_db_);
+		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
+		int adm_id = -1;
+		if (!adm.is_empty()) {
+			if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
+			adm_id = infantry_anim_.register_adm(
+					infantry_adm_resource_root_, adm);
+		}
+		if (adm_id < 0 && !infantry_anim_.empty()) adm_id = 0; // the default set
+		client_row_adm_by_type_[es.type_id] = adm_id;
+		es.rm_adm_id = static_cast<int16_t>(adm_id);
+	}
+}
+
+void NovaSimulation::materialize_client_replica_world_entities() {
+	if (!joiner_ || !wire_header_world_ || !world_ || runtime_ == nullptr)
+		return;
+
+	const opennova::netsim::ClientState &state = runtime_->state();
+	if (wire_world_topology_revision_seen_ == state.topology_revision &&
+			wire_world_stream_revision_seen_ == state.world_stream_revision)
+		return;
+	const opennova::netsim::ClientWorldSyncResult sync =
+			wire_world_materializer_.sync(state, *world_);
+	wire_world_topology_revision_seen_ = state.topology_revision;
+	wire_world_stream_revision_seen_ = state.world_stream_revision;
+	if (sync.changed()) {
+		for (const opennova::world::EntityLifetime lifetime : sync.retired) {
+			if (!lifetime.valid()) continue;
+			const auto cached =
+					collision_resolution_attempted_.find(lifetime.handle.packed);
+			// A later allocation at the same packed handle may already have had
+			// its caches rebuilt. The retired lifetime cannot erase those.
+			if (cached != collision_resolution_attempted_.end() &&
+					cached->second != lifetime.registry_spawn_id)
+				continue;
+			const opennova::world::EntityHandle handle = lifetime.handle;
+			collision_world_.remove_entity_instance(handle);
+			occlusion_world_.remove_entity_instance(handle);
+			collision_skeletal_sources_.erase(handle.packed);
+			collision_resolution_attempted_.erase(handle.packed);
+		}
+
+		// Zone/deploy lookup is a registry-derived cache. Any streamed topology
+		// change can add/remove an eligible zone and must invalidate it before UI
+		// or a C2S 0x0E pick consults the world.
+		deploy_zone_registry_built_ = false;
+		if (item_traits_db_.is_valid())
+			resolve_item_traits(item_traits_db_);
+
+		auto refresh_seats = [&](
+				const std::vector<opennova::world::EntityLifetime> &rows) {
+			for (const opennova::world::EntityLifetime lifetime : rows) {
+				if (lifetime.handle.pool() != 1) continue;
+				if (opennova::world::Entity *entity =
+						world_->registry.get(lifetime))
+					refresh_item_seat_spec(*entity);
+			}
+		};
+		refresh_seats(sync.spawned);
+		refresh_seats(sync.updated);
+		// The wire materializer deliberately does not fabricate seat
+		// definitions. Item/model resolution above installs them, then this
+		// idempotent fold projects the retained 0x0D mountHandles image by each
+		// seat's fixed retail_slot.
+		(void)wire_world_materializer_.sync(state, *world_);
+
+		if (collision_item_db_.is_valid() && collision_placer_.is_valid())
+			resolve_collision_instances(
+					collision_item_db_, collision_placer_.ptr());
+	}
+
+	// The witnessed initial-state order is pool2 -> pool1 -> pool0 -> pool3.
+	// Pool 0 is therefore the first safe fence for the one-shot static-table and
+	// portal-weld pass; running it for each pool2 page would weld an incomplete
+	// world and mutate shared occlusion records repeatedly.
+	if (!wire_world_static_initialized_) {
+		bool saw_pool0 = false;
+		for (const opennova::netsim::ClientEntityState &row : state.entities) {
+			if (opennova::world::EntityHandle{row.handle}.pool() == 0) {
+				saw_pool0 = true;
+				break;
+			}
+		}
+		if (saw_pool0) {
+			occlusion_init_mission();
+			wire_world_static_initialized_ = true;
+		}
+	}
+}
+
+Dictionary NovaSimulation::get_client_entity_debug(int p_handle) const {
+	Dictionary out;
+	if (runtime_ == nullptr || p_handle < 0 || p_handle > 0xFFFF) return out;
+	for (const opennova::netsim::ClientEntityState &es :
+			runtime_->state().entities) {
+		if (es.handle != static_cast<uint16_t>(p_handle)) continue;
+		out["handle"] = static_cast<int>(es.handle);
+		out["type_id"] = static_cast<int>(es.type_id);
+		out["cls"] = static_cast<int>(es.cls);
+		out["net_id"] = static_cast<int>(es.net_id);
+		out["name"] = String(es.name.c_str());
+		out["carrier_handle"] = static_cast<int>(es.carrier_handle);
+		out["mount_bone"] = static_cast<int>(es.mount_bone);
+		out["seat_type"] = static_cast<int>(es.seat_type);
+		out["net_seat_valid"] = es.net_seat_valid;
+		out["heading_bam"] = es.heading_bam;
+		out["heading_deg"] =
+				opennova::world::mission_yaw_deg_from_bam_heading(es.heading_bam);
+		out["heading_known"] = es.heading_known;
+		out["pitch_bam"] = es.pitch_bam;
+		out["yaw_byte"] = static_cast<int>(es.yaw_byte);
+		out["mission_position"] = Vector3(
+				static_cast<float>(es.x) / 65536.0f,
+				static_cast<float>(es.y) / 65536.0f,
+				static_cast<float>(es.z) / 65536.0f);
+		out["anim_state_id"] = static_cast<int>(es.anim_state_id);
+		out["state_flags"] = static_cast<int>(es.state_flags);
+		out["state_flags_known"] = es.state_flags_known;
+		out["team"] = static_cast<int>(es.team);
+		out["compact_revision"] = static_cast<int64_t>(es.compact_revision);
+		out["spawn_revision"] = static_cast<int64_t>(es.spawn_revision);
+		return out;
+	}
+	return out;
+}
+
 void NovaSimulation::joiner_pump() {
 	if (!runtime_) {
 		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;
@@ -336,13 +798,29 @@ void NovaSimulation::joiner_pump() {
 	// uplink ship, ending where the local (non-authority) world work begins.
 	const uint64_t net_start =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
+	// The row-side root-motion leg (net-re §5.38e): hand the joiner's view the
+	// same per-model .adm registry the authority movers ground on, and resolve
+	// each decoded organic row's adm id once its type is known — the netsim
+	// twin of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn
+	// half [orig: @0x40bb60]).
+	runtime_->view().set_root_motion_source(
+			infantry_anim_.empty() ? nullptr : &infantry_anim_);
+	// The same joiner terrain backs the post-root 2u person ground probe.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B7CF4;
+	// Entity_UpdateInfantryAI @0x4BF7FA; Entity_MovementCollisionResolver tail
+	// @0x4B3D6E..0x4B3DA9]
+	runtime_->view().set_remote_motion_terrain(
+			world_ != nullptr ? world_->terrain : nullptr);
+	resolve_client_row_adm_ids();
 	joiner_send_hello_once();
 	joiner_deposit_inbound();
 	const JoinerFrameSignals decoded = joiner_run_client_net_frame(net_start);
+	materialize_client_replica_world_entities();
 	joiner_spawn_and_arm_local_player();
 	if (decoded.health) joiner_apply_authoritative_health();
 	sync_joiner_authoritative_mount();
-	mirror_client_view_mission_entities();
+	apply_join_mounted_ammo_update();
+	mirror_client_replica_mission_entities();
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
@@ -352,6 +830,24 @@ void NovaSimulation::joiner_pump() {
 
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	mirror_predicted_vehicles_to_view(); // predicted boat poses -> the presented rows
+	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
+	// seat/deck/object attachment from that final pose in this same frame, then
+	// publish the refreshed rows back to the local registry consumers. This is
+	// the retail second carrier-follow phase; doing it before the world mover
+	// leaves children one tick behind their vehicle.
+	runtime_->refresh_remote_attachments();
+	mirror_client_replica_mission_entities();
+	// The local mounted body was seat-posed earlier in AiSystem::tick, before
+	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
+	// final same-frame transform so the camera/view never trails its seat by one
+	// mover tick. Remote riders were recomposed in ClientState just above.
+	if (world_->ai != nullptr && world_->cached.local_player.valid()) {
+		if (opennova::world::AiEntity *local_ai =
+				world_->ai->for_handle(world_->cached.local_player)) {
+			world_->ai->refresh_mounted_pose(*local_ai, *world_);
+		}
+	}
 	sync_local_mounted_input_heading();
 	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
@@ -412,9 +908,11 @@ NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame(
 	// a later positive authoritative health tail.
 	const bool can_offer_uplink =
 			runtime_->is_deployed() && e != nullptr && ae != nullptr &&
-			e->alive && e->health > 0 && (e->flags & 2u) == 0u;
+			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
+			!joiner_redeploy_release_pending_;
 	if (can_offer_uplink) {
-		const opennova::PlayerExtendedUplink up = opennova::netsim::build_player_uplink(*e, *ae);
+		const opennova::PlayerExtendedUplink up =
+				opennova::netsim::build_player_uplink(*world_, *e, *ae);
 		outs = runtime_->Client_ProcessNetworkFrame(up, now);
 	} else {
 		outs = runtime_->Client_ProcessNetworkFrame(now);
@@ -639,9 +1137,10 @@ void NovaSimulation::joiner_apply_authoritative_health() {
 		AiEntity *local_ai =
 				world_->ai ? world_->ai->for_handle(local_h) : nullptr;
 		if (local != nullptr && local_ai != nullptr) {
-			// ClientRuntime latches deployment closed on any decoded zero tail,
-			// even if a later packet in this recv pump carries stale positive HP.
-			const int16_t health = runtime_->deployed()
+			// ClientRuntime latches authoritative spawn closed on a decoded zero
+			// tail, even if a later packet in this recv pump carries stale positive
+			// HP. The independent C2S 0x0E gameplay hold never forces health to zero.
+			const int16_t health = runtime_->authoritative_spawn_released()
 					? runtime_->state().local_health : 0;
 			if (health <= 0) {
 				local->health = health;
@@ -966,24 +1465,9 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		++weapon_reload_received_serial_;
 		weapon_reload_received_entity_ = reload.entity_handle;
 		weapon_reload_received_param_ = reload.reload_param;
-		// The REMOTE branch. Retail's 0x49 handler splits on the addressed entity's
-		// item type: a remote PERSON gets the arms-dip stamp and nothing else — it
-		// returns before the ammo refill, so the peer never enters the 65/66 reload
-		// pose on a pure client. Our rows carry an EntityClass rather than an ItemDef
-		// type, so Player/Infantry stands in for ItemType_Person (3); the same
-		// analogue tick_lean already uses. Retail's NON-person remote branch (the real
-		// refill on a vehicle/emplaced weapon) is deliberately not ported here.
-		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42c0a0 — type test @0x42c105,
-		//  stamp entity+0x371 = 80 @0x42c10b, early return @0x42c113]
-		if (!runtime_->has_self_handle() ||
-				reload.entity_handle != runtime_->self_handle()) {
-			opennova::netsim::ClientEntityState *peer =
-					runtime_->state().find(reload.entity_handle);
-			if (peer != nullptr &&
-					(peer->cls == opennova::EntityClass::Player ||
-							peer->cls == opennova::EntityClass::Infantry))
-				peer->arms_dip_ticks = 80;
-		}
+		// ClientRuntime already applied the remote-Person receive-handler stamp
+		// before that frame's body tick. This drain retains diagnostics plus the
+		// self-only WeaponSlot_ReloadAmmo branch below.
 		if (!local_inventory_valid_ || !runtime_->has_self_handle() ||
 				reload.entity_handle != runtime_->self_handle())
 			continue;
@@ -1052,6 +1536,90 @@ void NovaSimulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
 	terrain_til_data_.assign(p_til_bytes.ptr(), p_til_bytes.ptr() + p_til_bytes.size());
 }
 
+void NovaSimulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
+	mission_text_loaded_ = false;
+	mission_briefing3_.clear();
+	mission_briefing2_.clear();
+	mission_location_texts_.clear();
+	if (p_rtxt_bytes.is_empty()) return;
+
+	opennova::rtxt::File table;
+	std::string error;
+	if (!opennova::rtxt::parse(p_rtxt_bytes.ptr(),
+	                           static_cast<std::size_t>(p_rtxt_bytes.size()),
+	                           table, error)) {
+		UtilityFunctions::push_warning(String("NovaSimulation: mission text RTXT rejected: ") +
+		                               String::utf8(error.c_str()));
+		return;
+	}
+
+	// Preserve the table's raw cp1252 bytes. Retail uses an empty briefing2 as
+	// the signal to fall back to briefing [orig: @0x506649..0x506660].
+	if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing3"))
+		mission_briefing3_ = e->text;
+	if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing2"))
+		mission_briefing2_ = e->text;
+	if (mission_briefing2_.empty()) {
+		if (const opennova::rtxt::Entry *e = table.find_in_section("info", "briefing"))
+			mission_briefing2_ = e->text;
+	}
+
+	// The world-state writer resolves type-2044 markers by their one-based spawn
+	// order against [Locations]/LOCATION%03i. Preserve raw cp1252 bytes
+	// just like the briefing path; only the ASCII key is interpreted here.
+	for (std::size_t section_index = 0;
+	     section_index < table.sections.size(); ++section_index) {
+		const std::string &section_name = table.sections[section_index].name;
+		if (section_name.size() != 9) continue;
+		bool is_locations = true;
+		constexpr char kLocations[] = "locations";
+		for (std::size_t i = 0; i < 9; ++i) {
+			char folded = section_name[i];
+			if (folded >= 'A' && folded <= 'Z') folded = char(folded - 'A' + 'a');
+			if (folded != kLocations[i]) {
+				is_locations = false;
+				break;
+			}
+		}
+		if (!is_locations) continue;
+
+		for (const opennova::rtxt::Entry *entry :
+		     table.get_section_entries(static_cast<uint32_t>(section_index))) {
+			if (entry == nullptr || entry->key.size() <= 8) continue;
+			constexpr char kPrefix[] = "location";
+			bool valid = true;
+			for (std::size_t i = 0; i < 8; ++i) {
+				char folded = entry->key[i];
+				if (folded >= 'A' && folded <= 'Z') folded = char(folded - 'A' + 'a');
+				if (folded != kPrefix[i]) {
+					valid = false;
+					break;
+				}
+			}
+			int32_t index = 0;
+			for (std::size_t i = 8; valid && i < entry->key.size(); ++i) {
+				const char digit = entry->key[i];
+				if (digit < '0' || digit > '9' || index > 214748364) {
+					valid = false;
+					break;
+				}
+				index = index * 10 + (digit - '0');
+			}
+			if (valid) mission_location_texts_.emplace(index, entry->text);
+		}
+		break;
+	}
+	mission_text_loaded_ = true;
+}
+
+bool NovaSimulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes) {
+	if (p_score_ini_bytes.is_empty()) return false;
+	const std::string text(
+			reinterpret_cast<const char *>(p_score_ini_bytes.ptr()),
+			static_cast<std::size_t>(p_score_ini_bytes.size()));
+	return opennova::np::load_session_score_config(host_session_config_, text);
+}
+
 bool NovaSimulation::enable_host_listen(int p_port) {
 	listen_server_ = true;
 	if (pump_.is_null()) pump_.instantiate();
@@ -1093,14 +1661,68 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 	apply_dictionary_string(p_options, "server_name", config.server_name);
 	apply_dictionary_string(p_options, "mission_name", config.mission_name);
 	apply_dictionary_string(p_options, "mission_file", config.mission_file);
+	apply_dictionary_string(p_options, "custom_text", config.custom_text);
 	apply_dictionary_string(p_options, "player_name", config.player_name);
 	apply_dictionary_string(p_options, "expansion", config.expansion);
+	if (p_options.has("integrity_profile")) {
+		const String requested = String(p_options["integrity_profile"]).strip_edges();
+		const std::string id(requested.utf8().get_data());
+		if (id.empty() ||
+				opennova::np::find_integrity_challenge_profile(id) != nullptr) {
+			config.integrity_profile = id;
+		} else {
+			UtilityFunctions::push_error(
+					String("Unknown authority integrity profile: ") + requested);
+			config.integrity_profile.clear();
+		}
+	}
 	if (p_options.has("gametype")) {
 		config.game_type = dictionary_u32(p_options, "gametype", config.game_type);
 	} else if (p_options.has("game_type")) {
 		config.game_type = dictionary_u32(p_options, "game_type", config.game_type);
 	}
 	config.mp_attributes = dictionary_u32(p_options, "mpattrib", config.mp_attributes);
+	config.class_allow_mask = static_cast<uint16_t>(dictionary_u32(
+			p_options, "class_allow_mask", config.class_allow_mask) & 0xFFFFu);
+	config.respawn_time = dictionary_u32(p_options, "respawn_time", config.respawn_time);
+	config.time_limit_minutes = dictionary_u32(
+			p_options, "time_limit_minutes", config.time_limit_minutes);
+	config.replay_enabled = dictionary_u32(
+			p_options, "replay_enabled", config.replay_enabled);
+	config.max_team_lives = dictionary_u32(
+			p_options, "max_team_lives", config.max_team_lives);
+	config.score_limit = dictionary_u32(p_options, "score_limit", config.score_limit);
+	config.respawn_timeout = dictionary_u32(
+			p_options, "respawn_timeout", config.respawn_timeout);
+	config.start_delay = dictionary_u32(p_options, "start_delay", config.start_delay);
+	config.destroy_buildings = dictionary_u32(
+			p_options, "destroy_buildings", config.destroy_buildings);
+	config.death_messages = dictionary_u32(
+			p_options, "death_messages", config.death_messages);
+	// The witnessed BANDWIDTH server command (100-1600, clamped at apply):
+	// lowers the per-frame 0x0A byte cap so entity records rotate across frames
+	// [orig: g_entity_send_budget @0xC8FC50].
+	config.entity_send_budget =
+			dictionary_u32(p_options, "bandwidth", config.entity_send_budget);
+	// Retail selects its default send divider from the session family, then
+	// from g_LanMode for an authority LAN host. Explicit test/tool overrides
+	// remain available through send_holdoff_ticks.
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0]
+	if (p_options.has("channel")) {
+		const String channel = String(p_options["channel"]);
+		config.session_channel = channel.nocasecmp_to("NovaWorld") == 0
+				? opennova::np::GameSessionChannel::NovaWorld
+				: opennova::np::GameSessionChannel::Lan;
+	}
+	config.lan_mode = dictionary_u32(p_options, "lan_mode", config.lan_mode);
+	if (p_options.has("send_holdoff_ticks")) {
+		const Variant holdoff = p_options["send_holdoff_ticks"];
+		if (holdoff.get_type() == Variant::NIL)
+			config.send_holdoff_ticks.reset();
+		else
+			config.send_holdoff_ticks =
+					dictionary_u32(p_options, "send_holdoff_ticks", 1);
+	}
 	if (p_options.has("fat_bullets"))
 		config.fat_bullets = static_cast<bool>(p_options["fat_bullets"]);
 	if (p_options.has("one_shot_kill"))
@@ -1153,8 +1775,19 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	out["mission_file"] = String(session.mission_file.c_str());
 	out["player_name"] = String(session.player_name.c_str());
 	out["expansion"] = String(session.expansion.c_str());
+	out["integrity_profile"] = String(session.integrity_profile.c_str());
 	out["gametype"] = static_cast<int64_t>(session.game_type);
 	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
+	out["class_allow_mask"] = static_cast<int64_t>(session.class_allow_mask);
+	out["respawn_time"] = static_cast<int64_t>(session.respawn_time);
+	out["time_limit_minutes"] = static_cast<int64_t>(session.time_limit_minutes);
+	out["replay_enabled"] = static_cast<int64_t>(session.replay_enabled);
+	out["max_team_lives"] = static_cast<int64_t>(session.max_team_lives);
+	out["score_limit"] = static_cast<int64_t>(session.score_limit);
+	out["respawn_timeout"] = static_cast<int64_t>(session.respawn_timeout);
+	out["start_delay"] = static_cast<int64_t>(session.start_delay);
+	out["destroy_buildings"] = static_cast<int64_t>(session.destroy_buildings);
+	out["death_messages"] = static_cast<int64_t>(session.death_messages);
 	// UI host-config values held on the sim (not in GameConfig): the lobby player
 	// cap and the serve-and-play/dedicated selector, for the F3 Net tab.
 	out["max_players"] = static_cast<int64_t>(host_max_players_);
@@ -1199,6 +1832,23 @@ void NovaSimulation::set_join_character_profile(const Dictionary &p_profile) {
 	install_character_join_vars();
 }
 
+bool NovaSimulation::set_join_integrity_profile(const String &p_profile_id) {
+	const std::string id = std::string(p_profile_id.strip_edges().utf8().get_data());
+	if (id.empty()) {
+		join_integrity_profile_id_.clear();
+		install_join_integrity_profile();
+		return true;
+	}
+	if (opennova::np::find_integrity_challenge_profile(id) == nullptr) {
+		join_integrity_profile_id_.clear();
+		install_join_integrity_profile();
+		return false;
+	}
+	join_integrity_profile_id_ = id;
+	install_join_integrity_profile();
+	return true;
+}
+
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
 bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
@@ -1217,6 +1867,7 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
 	install_charattr_challenge_table();
 	install_character_join_vars();
+	install_join_integrity_profile();
 	install_item_class_resolver();
 	joiner_ = true;
 	if (world_) {
@@ -1226,6 +1877,8 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 	joiner_started_ = false;
 	joiner_local_spawned_ = false;
 	joiner_deployment_release_revision_seen_ = 0;
+	joiner_environment_revision_seen_ = 0;
+	joiner_mounted_ammo_revision_seen_ = 0;
 	joiner_redeploy_release_pending_ = false;
 	joiner_redeploy_health_updates_at_release_ = 0;
 	joiner_self_wire_handle_ = 0;
@@ -1342,6 +1995,39 @@ String NovaSimulation::get_join_mission_file() const {
 	return (joiner_ && runtime_) ? String::utf8(runtime_->map_file().c_str()) : String();
 }
 
+PackedByteArray NovaSimulation::get_join_mission_header() const {
+	PackedByteArray out;
+	if (!joiner_ || !runtime_ || !runtime_->has_mission_header()) return out;
+	const std::vector<uint8_t> &bytes = runtime_->mission_header_bytes();
+	out.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) std::memcpy(out.ptrw(), bytes.data(), bytes.size());
+	return out;
+}
+
+int64_t NovaSimulation::get_join_terrain_til_state() const {
+	if (!joiner_ || !runtime_) return JOIN_TERRAIN_TIL_ABSENT;
+	switch (runtime_->terrain_til_state()) {
+	case opennova::np::TerrainTilState::Absent:
+		return JOIN_TERRAIN_TIL_ABSENT;
+	case opennova::np::TerrainTilState::Receiving:
+		return JOIN_TERRAIN_TIL_RECEIVING;
+	case opennova::np::TerrainTilState::Complete:
+		return JOIN_TERRAIN_TIL_COMPLETE;
+	case opennova::np::TerrainTilState::Invalid:
+		return JOIN_TERRAIN_TIL_INVALID;
+	}
+	return JOIN_TERRAIN_TIL_INVALID;
+}
+
+PackedByteArray NovaSimulation::get_join_terrain_til() const {
+	PackedByteArray out;
+	if (!joiner_ || !runtime_ || !runtime_->has_terrain_til()) return out;
+	const std::vector<uint8_t> &bytes = runtime_->terrain_til_bytes();
+	out.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) std::memcpy(out.ptrw(), bytes.data(), bytes.size());
+	return out;
+}
+
 String NovaSimulation::get_join_expansion() const {
 	return (joiner_ && runtime_) ? String::utf8(runtime_->expansion().c_str()) : String();
 }
@@ -1375,6 +2061,10 @@ bool NovaSimulation::is_joined_in_match() const {
 	return joiner_ && runtime_ && runtime_->in_match();
 }
 
+bool NovaSimulation::is_join_initial_admission_complete() const {
+	return joiner_ && runtime_ && runtime_->initial_admission_complete();
+}
+
 bool NovaSimulation::is_joiner_network_diagnostics_enabled() const {
 	return environment_flag_enabled(kJoinerNetDiagnosticsEnv);
 }
@@ -1405,6 +2095,12 @@ bool NovaSimulation::is_join_deploy_pick_pending() const {
 
 int NovaSimulation::get_join_assigned_team() const {
 	return joiner_ && runtime_ ? runtime_->assigned_team() : 0;
+}
+
+int NovaSimulation::get_class_allow_mask() const {
+	if (joiner_ && runtime_) return runtime_->class_allow_mask();
+	if (ctx_.is_authority != 0) return ctx_.config.class_allow_mask;
+	return host_session_config_.class_allow_mask;
 }
 
 const opennova::world::SpawnZoneRegistry &NovaSimulation::deploy_zone_registry() {
@@ -1470,8 +2166,7 @@ bool NovaSimulation::send_deployment_pick(int p_param) {
 		const size_t idx = static_cast<size_t>(p_param - 1);
 		if (idx < reg.entries.size()) wire = reg.entries[idx].packed;
 	}
-	runtime_->queue_deployment_pick(wire);
-	return true;
+	return runtime_->queue_deployment_pick(wire);
 }
 
 int NovaSimulation::get_joiner_phase() const {
@@ -1480,6 +2175,27 @@ int NovaSimulation::get_joiner_phase() const {
 
 int NovaSimulation::get_joiner_self_handle() const {
 	return joiner_ ? static_cast<int>(joiner_self_wire_handle_) : 0;
+}
+
+Dictionary NovaSimulation::take_join_environment_update() {
+	Dictionary out;
+	if (!joiner_ || runtime_ == nullptr) return out;
+	const opennova::netsim::ClientEnvironmentState &environment =
+			runtime_->state().environment;
+	if (!environment.present ||
+			environment.revision == joiner_environment_revision_seen_)
+		return out;
+	joiner_environment_revision_seen_ = environment.revision;
+	out["revision"] = static_cast<int64_t>(environment.revision);
+	out["fog_dist"] = static_cast<int64_t>(environment.fog_dist);
+	out["fog_accel"] = static_cast<int64_t>(environment.fog_accel);
+	out["tod_fixed"] = static_cast<int64_t>(environment.tod_fixed);
+	out["quake_ticks"] = static_cast<int64_t>(environment.quake_ticks);
+	out["cloud_scroll"] = static_cast<int64_t>(environment.cloud_scroll);
+	out["rain_pct"] = static_cast<int64_t>(environment.rain_pct);
+	out["overcast"] = static_cast<int64_t>(environment.overcast);
+	out["precipitation_kind"] = static_cast<int64_t>(environment.env_param);
+	return out;
 }
 
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of

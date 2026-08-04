@@ -125,6 +125,24 @@ func test_open_refuses_when_no_pick_is_owed() -> void:
 	assert_false(presenter.is_open())
 
 
+# Retail enters the active session and resumes uplinks after its initial 0x5A grants,
+# before the player chooses a spawn row. The deploy UI is driven by the independent
+	# authoritative pending bit and must survive that in-match edge.
+func test_in_match_does_not_close_a_still_pending_deploy_screen() -> void:
+	var sim := FakeSim.new()
+	sim.in_match = true
+	sim.pick_pending = true
+	var presenter = _open_presenter(sim)
+	watch_signals(presenter)
+
+	assert_true(presenter.open(), "the pending deploy UI opens in an active session")
+	await get_tree().process_frame
+
+	assert_true(presenter.is_open(), "in-match gameplay does not dismiss a pending deploy UI")
+	assert_signal_emit_count(presenter, "closed", 0,
+			"only authority clearing deployment-pending closes a healthy screen")
+
+
 func test_refresh_preserves_selected_spawn_identity_across_live_zone_changes() -> void:
 	var sim := FakeSim.new()
 	sim.zones = [

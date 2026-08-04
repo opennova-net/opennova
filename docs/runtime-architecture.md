@@ -60,13 +60,16 @@ the surviving core of
 [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md). That step has
 grown into a fixed sequence of per-system passes, each owning one drain of the
 sim, and each installed only where its role applies: a host or single-player
-session runs the full ladder, and a joiner runs
-`MissionPresentPass` over its locally placed mission (everything except organics — placed pools
-1-3 share the host's pool/slot handle space because promote order mirrors
-`Mission_LoadBMSFile @0x40f4e0` on both sides, so streamed rows carry the local defer identity
-and drive the placed nodes) plus the decode-driven passes (`WirePresentPass` for players,
-streamed AI, and anything without a placed node, and the fire/throwable presentation of decoded
-S2C events). Adding a system means adding a pass to that sequence, not a second present loop.
+session runs the full ladder. A production joiner instead starts from the exact
+616-byte S2C `0x0B` header, with no authored mission-body nodes. Its decoded
+`0x10`/`0x0D`/`0x20` load stream materializes native pools 2/1/3 at the host's
+exact packed handles for deploy, mount, collision, and other world-side consumers;
+remote pool-0 organics remain decoded client state. `WirePresentPass` renders every
+remote row from that state because no local placed-node identity exists, while
+`MissionPresentPass` remains responsible for authored nodes on hosts, single-player,
+and explicit complete-BMS/debug joins. The decoded fire/throwable passes follow the
+same sequence. Adding a system means adding a pass to that sequence, not a second
+present loop.
 The single-tick `MissionRuntime.tick()` survives as the deterministic primitive
 for runtime debug/MCP controls and tests; it runs the identical pass sequence
 with `n = 1`.
@@ -83,10 +86,13 @@ do for a joined client. The in-match runtime behind that seam is `libs/npruntime
 ([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
 [net/novaworld-net-re.md](net/novaworld-net-re.md).
 
-Two net *render* paths coexist deliberately: the `NovaNetClient` replay/spectate views
-(`net_world_view.gd` / `net_event_view.gd`) and the `NovaWorldClient`/`NovaSimulation` listen-server
-path (`wire_present_pass.gd`). Converging them is a tracked decision, not an oversight (see
-`godot/engine/CLAUDE.md` and `TODO.md`).
+Decoded entities now have one client-state path
+([ADR 0026](adr/0026-one-client-replica-pipeline.md)). Live `ClientRuntime` and
+replay/spectate `NovaNetClient` both reduce S2C messages through
+`ClientReplicaPipeline`; replay optionally journals that result through
+`ReplicaHistory`. Both expose the same `PF_*` projection to
+`wire_present_pass.gd`. `NovaWorldClient` remains the matchmaking/handoff
+client and does not own a second gameplay entity model.
 
 ## Layers
 

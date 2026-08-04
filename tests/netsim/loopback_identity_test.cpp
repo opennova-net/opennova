@@ -5,7 +5,7 @@
 // static entity:
 //
 //   World entity -> EntityWireBridge::snapshot_of -> build_tag_0a_world_reference
-//     (encode) -> LoopbackChannel -> NetClientView::pump (decode) -> ClientState
+//     (encode) -> LoopbackChannel -> ClientReplicaPipeline::pump (decode) -> ClientState
 //
 // and asserts the client's decoded view is field-identical to what the host's
 // encoder + the lossy position codec produced (a pipeline identity, not equality to
@@ -15,14 +15,16 @@
 #include "netsim/connection_fan.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/loopback_channel.h"
-#include "netsim/net_client_view.h"
+#include "netsim/client_replica_pipeline.h"
 #include "netsim/serializing_sink.h"
 
 #include "conn_fan_test_util.h"
 
+#include <io/bam.h>
 #include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <terrain/height_field.h>
 #include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
 #include <world/geom.h>
@@ -45,6 +47,27 @@ bool expect(bool cond, const char *msg) {
 	std::fprintf(stderr, "FAIL: %s\n", msg);
 	return false;
 }
+
+constexpr int32_t fx(double units) {
+	return static_cast<int32_t>(units * 65536.0);
+}
+
+// Minimal valid flat field for the authority-side pose/ground classifier. The
+// heap-backed atlas avoids putting the 512x512 retail-shaped fixture on stack.
+struct FlatTerrain {
+	static constexpr int kDim = 512;
+	std::vector<uint16_t> heightmap;
+	std::vector<int> sector_grid;
+	nw::terrain::TerrainHeightField field;
+
+	FlatTerrain() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+		field.heightmap = heightmap.data();
+		field.dim = kDim;
+		field.layout.sector_grid = sector_grid.data();
+		field.layout.origin_x = 0;
+		field.layout.origin_y = 0;
+	}
+};
 
 bool run_client_state_handle_lookup_contract() {
 	ns::ClientState state;
@@ -96,7 +119,7 @@ bool run_client_state_handle_lookup_contract() {
 // mutate. Flag omission denotes zero in retail, so a later zero-valued record
 // must clear a previously witnessed non-zero value rather than preserve it.
 bool run_world_stream_team_and_zone_fields_survive_client_fold() {
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 
 	nw::PoolSpawnRecord pool1;
 	pool1.slot_id = 0x1007;
@@ -115,10 +138,13 @@ bool run_world_stream_team_and_zone_fields_survive_client_fold() {
 	            "pool-1 retains team and packed zone block")) return false;
 
 	const std::size_t row_count = view.state().entities.size();
-	view.apply_team_assign(0x1007, 1);
+	nw::TeamAssign team_assign;
+	team_assign.entity_handle = 0x1007;
+	team_assign.team = 1;
+	view.apply(nw::s2c::TEAM_ASSIGN, nw::encode_team_assign(team_assign));
 	decoded = view.state().find(0x1007);
 	if (!expect(view.state().entities.size() == row_count && decoded != nullptr &&
-	                    decoded->team == 1 &&
+	                    decoded->team == 1 && decoded->team_known &&
 	                    decoded->zone_number_rank == 0x22 &&
 	                    decoded->zone_radius == 70,
 	            "S2C 0x50 mutates the same pool-1 row without disturbing zone state"))
@@ -174,10 +200,25 @@ bool run_world_stream_team_and_zone_fields_survive_client_fold() {
 	if (!expect(decoded != nullptr && decoded->team == 0,
 	            "pool-3 applies omitted team as zero")) return false;
 
-	view.apply_team_assign(0x1007, 0);
+	team_assign.team = 0;
+	view.apply(nw::s2c::TEAM_ASSIGN, nw::encode_team_assign(team_assign));
 	decoded = view.state().find(0x1007);
-	if (!expect(decoded != nullptr && decoded->team == 0,
+	if (!expect(decoded != nullptr && decoded->team == 0 && decoded->team_known,
 	            "S2C 0x50 applies a zero team to the existing row")) return false;
+
+	team_assign.entity_handle = 0x0007;
+	team_assign.team = 2;
+	view.apply(nw::s2c::TEAM_ASSIGN, nw::encode_team_assign(team_assign));
+	if (!expect(view.state().find(0x0007) != nullptr,
+			"raw S2C 0x50 can create the addressed client row")) return false;
+	const uint64_t topology_before_sweep = view.topology_revision();
+	nw::DestroyEntityList sweep;
+	sweep.pool0_indices.push_back(7);
+	view.apply(nw::s2c::EMPTY_SLOT_SWEEP,
+			nw::encode_destroy_entity_list(sweep));
+	if (!expect(view.state().find(0x0007) == nullptr &&
+				view.topology_revision() > topology_before_sweep,
+			"raw S2C 0x5D retires the pool-0 row through the pipeline")) return false;
 	return true;
 }
 
@@ -190,12 +231,15 @@ int32_t codec_recon(int32_t wire, int32_t anchor) {
 }
 
 bool run() {
-	// --- a World with one static AI-infantry entity in pool 0 ---
+	// --- a World with one static AI-controlled Person entity in pool 0 ---
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::Entity seed;
-	seed.kind = w::EntityKind::Organic; // -> EntityClass::Infantry
+	seed.kind = w::EntityKind::Organic;
 	seed.item_id = 0x2000;              // non-player template
+	// This fixture has no items.def loader, so declare the witnessed wire codec
+	// explicitly. EntityKind must never be used to guess compact record width.
+	seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	seed.position = {10.0f, 20.0f, -5.0f};
 	seed.yaw = 0x0140;
 	seed.team = 1;
@@ -226,7 +270,10 @@ bool run() {
 	ns::test::emit_all(world, conns, anchor);
 	if (!expect(channel.s2c_pending() == 1, "one 0x0A frame on the loopback")) return false;
 
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		return type_id == 0x2000 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
 	view.pump(channel);
 	if (!expect(view.frames_applied() == 1 && view.unknown_tags() == 0,
 	            "client applied exactly one frame, no unknown tags")) return false;
@@ -239,7 +286,8 @@ bool run() {
 	if (!expect(es.handle == static_cast<uint16_t>(
 	                    (h.pool() << 12) | (h.slot() & 0x0FFF)),
 	            "handle round-trips")) return false;
-	if (!expect(es.cls == nw::EntityClass::Infantry, "decoded as infantry")) return false;
+	if (!expect(es.cls == nw::EntityClass::Infantry,
+	            "decoded with the organic-Person wire codec")) return false;
 	if (!expect(es.type_id == 0x2000, "type id round-trips")) return false;
 
 	// Anchor stored verbatim.
@@ -276,7 +324,36 @@ bool run() {
 	return true;
 }
 
-// The present pass consumes the client view, never the authoritative world (ADR 0011).
+
+// Retail drops the WHOLE record when its carrier cannot be resolved and queues
+// the C2S 0x0F self-heal [orig: resolve @0x46085d, bail @0x4608ae..0x4608c1;
+// player op2 @0x4c10d4] — nothing from the sample may land, and the repair
+// queue drains once.
+bool run_unresolved_carrier_record_drops_whole() {
+	nw::FrameUpdate fu;
+	fu.flags2 = 0;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 100;
+	nw::FrameUpdateRecord player;
+	player.handle = 0x0003;
+	player.type_id = 0x14B9;
+	player.cls = nw::EntityClass::Player;
+	player.player.carrier_handle = 0x2001; // never present in any frame
+	player.player.anim_state_id = 62;
+	fu.records.push_back(player);
+	ns::ClientReplicaPipeline view([](uint16_t) {
+		return nw::EntityClass::Player;
+	});
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	if (!expect(view.state().find(0x0003) == nullptr,
+	            "an unresolvable-carrier record applies NOTHING")) return false;
+	const std::vector<uint16_t> repairs = view.drain_carrier_repair_requests();
+	if (!expect(repairs.size() == 1 && repairs[0] == 0x2001,
+	            "the dropped record queues one 0x0F repair for its carrier")) return false;
+	return expect(view.drain_carrier_repair_requests().empty(),
+	              "the repair queue drains once");
+}
+// The present pass consumes decoded replica state, never the authoritative world (ADR 0011).
 // Keep the already-witnessed compact pose/mount bytes alive across that public fold so a
 // remote organic can select the same mounted overlay as the sender. The normalized fields
 // deliberately retain the raw wire values: carrier_handle is the class-specific parent,
@@ -311,7 +388,21 @@ bool run_compact_pose_fields_survive_client_fold() {
 	infantry.infantry.anim_byte = 47;
 	mounted.records.push_back(infantry);
 
-	ns::NetClientView view([](uint16_t type_id) {
+	// The carriers must exist for the mounted records to land at all: retail
+	// DROPS a record whose carrier cannot be resolved (the C2S 0x0F bail —
+	// pinned by run_unresolved_carrier_record_drops_whole). Their own records
+	// in the same frame satisfy the child records through the second fold
+	// sweep, the witnessed child-before-carrier production order.
+	for (const uint16_t carrier_handle : {uint16_t(0x1007), uint16_t(0x1008)}) {
+		nw::FrameUpdateRecord carrier;
+		carrier.handle = carrier_handle;
+		carrier.type_id = 0x1500;
+		carrier.cls = nw::EntityClass::Vehicle;
+		mounted.records.push_back(carrier);
+	}
+
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		if (type_id == 0x1500) return nw::EntityClass::Vehicle;
 		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
 	});
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
@@ -386,7 +477,7 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	right.player.move_input_byte = 0x80; // lean RIGHT held
 	frame.records.push_back(right);
 
-	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Player; });
+	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *l = view.state().find(0x0001);
 	const ns::ClientEntityState *r = view.state().find(0x0002);
@@ -458,7 +549,7 @@ nw::FrameUpdate compact_lifecycle_frame(uint8_t player_flags,
 // alone would lose two complete respawns folded below by one pump().
 bool run_compact_lifecycle_survives_multi_frame_pump() {
 	ns::LoopbackChannel channel;
-	ns::NetClientView view([](uint16_t type_id) {
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
 		return type_id == 0x14B9 ? nw::EntityClass::Player :
 				nw::EntityClass::Infantry;
 	});
@@ -546,7 +637,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	auto classify = [](uint16_t type_id) {
 		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
 	};
-	ns::NetClientView view(classify);
+	ns::ClientReplicaPipeline view(classify);
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	const ns::ClientEntityState *decoded = view.state().find(0x0002);
 	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
@@ -554,8 +645,10 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	                    decoded->yaw_byte == 0x10,
 	            "child-first record lifts through later same-frame carrier")) return false;
 
-	// Change the local pose/yaw but name a carrier that never appears. The client
-	// keeps the last resolved world pose instead of treating local coordinates as world.
+	// Change the local pose/yaw but name a carrier that never appears. Retail
+	// drops the WHOLE record and queues the 0x0F repair — nothing lands: not
+	// the pose, not the yaw, and not the new carrier ref [orig: resolve
+	// @0x46085d, bail @0x4608ae..0x4608c1].
 	nw::FrameUpdate missing;
 	missing.flags2 = 0;
 	missing.mount_handle = 0xFFFF;
@@ -570,9 +663,188 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 	decoded = view.state().find(0x0002);
 	if (!expect(decoded != nullptr && decoded->x == (1 << 16) &&
 	                    decoded->y == (2 << 16) && decoded->z == (3 << 16) &&
-	                    decoded->yaw_byte == 0x10,
-	            "missing carrier drops the local pose sample")) return false;
+	                    decoded->yaw_byte == 0x10 &&
+	                    decoded->carrier_handle == 0x1007 &&
+	                    decoded->net_seat_valid,
+	            "missing carrier drops the WHOLE record — the resolved seat survives")) return false;
+	{
+		const std::vector<uint16_t> repairs = view.drain_carrier_repair_requests();
+		if (!expect(repairs.size() == 1 && repairs[0] == 0x1008,
+		            "the dropped record queued the 0x0F repair for its carrier")) return false;
+	}
+
+	// An unresolved switch remains attachment-owned: clearing seat validity
+	// prevents stale local-offset reuse, but must not let the generic mover
+	// chase the compact row's staged local coordinates as world coordinates.
+	ns::ClientEntityState *blocked = view.state().find(0x0002);
+	blocked->net_smooth_target[0] = 9 << 16;
+	blocked->net_smooth_target[1] = 8 << 16;
+	blocked->net_smooth_target[2] = 7 << 16;
+	blocked->net_interp_progress = 0;
+	blocked->net_interp_steps = 0;
+	const int32_t held_x = blocked->x;
+	const int32_t held_y = blocked->y;
+	const int32_t held_z = blocked->z;
+	const int32_t held_heading = blocked->heading_bam;
+	view.set_remote_motion_mode(true);
+	view.tick_remote_motion(0xFFFF);
+	blocked = view.state().find(0x0002);
+	if (!expect(blocked != nullptr && blocked->x == held_x &&
+	                    blocked->y == held_y && blocked->z == held_z &&
+	                    blocked->heading_bam == held_heading &&
+	                    blocked->carrier_handle == 0x1007 &&
+	                    blocked->net_seat_valid,
+	            "the dropped carrier switch leaves the resolved seat riding through the mover"))
+		return false;
 	return true;
+}
+
+// Pool-0 riders precede pool-1 vehicles in ClientState. The rider recompose is
+// therefore a distinct post-mover phase: it must observe the carrier pose that
+// was advanced later in the same tick, including sub-byte BAM heading.
+bool run_carried_child_follows_later_carrier_same_mover_tick() {
+	auto classify = [](uint16_t type_id) {
+		return type_id == 0x1004 ? nw::EntityClass::Vehicle
+		                         : nw::EntityClass::Infantry;
+	};
+	ns::ClientReplicaPipeline view(classify);
+	view.set_remote_motion_mode(true);
+
+	nw::FrameUpdate frame;
+	frame.flags2 = 0;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+	nw::FrameUpdateRecord child;
+	child.handle = 0x0002;
+	child.type_id = 0x2000;
+	child.cls = nw::EntityClass::Infantry;
+	child.infantry.vehicle_slot_handle = 0x1007;
+	child.infantry.seat_bone_idx = 3;
+	child.infantry.pos_x_compressed =
+			nw::network_compress_fixedpoint(1 << 16);
+	child.infantry.yaw_byte = 0x10;
+	frame.records.push_back(child); // child intentionally precedes its mover
+
+	nw::FrameUpdateRecord carrier;
+	carrier.handle = 0x1007;
+	carrier.type_id = 0x1004;
+	carrier.cls = nw::EntityClass::Vehicle;
+	carrier.vehicle.parent_slot_handle = 0xFFFF;
+	carrier.vehicle.pos_x_compressed =
+			nw::network_compress_fixedpoint(1 << 16);
+	carrier.vehicle.euler_z = 0x2000;
+	carrier.vehicle.health_word = 3000;
+	frame.records.push_back(carrier);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
+
+	const int32_t before_carrier_x = view.state().find(0x1007)->x;
+	view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *moved_carrier = view.state().find(0x1007);
+	const ns::ClientEntityState *moved_child = view.state().find(0x0002);
+	if (!expect(moved_carrier != nullptr && moved_child != nullptr &&
+	                    moved_carrier->x != before_carrier_x,
+	            "later carrier advances during the mover tick")) return false;
+	const nw::WorldPose expected = nw::network_transform_local_to_world(
+			nw::network_decompress_fixedpoint(child.infantry.pos_x_compressed),
+			0, 0, moved_carrier->x, moved_carrier->y, moved_carrier->z,
+			static_cast<uint32_t>(moved_carrier->heading_bam),
+			static_cast<uint32_t>(moved_carrier->pitch_bam),
+			static_cast<uint32_t>(moved_carrier->roll_bam));
+	const int32_t expected_heading = opennova::io::bam_add(
+			moved_carrier->heading_bam,
+			static_cast<int32_t>(uint32_t{0x10} << 24));
+	return expect(moved_child->x == expected.x && moved_child->y == expected.y &&
+	                      moved_child->z == expected.z &&
+	                      moved_child->heading_bam == expected_heading,
+	              "child-first rider follows the carrier's final same-tick pose");
+}
+
+// A NoNetworkCallback attachment has no compact mover of its own. Its 0x0D
+// parent relation must therefore follow every chased parent tick using the
+// parent's full live BAM, not the stale coarse yaw_byte from the last record.
+bool run_no_callback_child_follows_live_parent_heading() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver([](uint16_t type_id) {
+		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+		if (type_id == 0x0666) return nw::EntityClass::NoNetworkCallback;
+		return nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+
+	nw::PoolSpawnBatch spawn;
+	nw::PoolSpawnRecord parent;
+	parent.slot_id = 0x1007;
+	parent.item_type_id = 0x1004;
+	spawn.records.push_back(parent);
+	nw::PoolSpawnRecord child;
+	child.slot_id = 0x1008;
+	child.item_type_id = 0x0666;
+	child.parent_handle = 0x1007;
+	child.pos_x = 1 << 16;
+	child.euler_z = 0x10000000;
+	spawn.records.push_back(child);
+	view.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(spawn));
+
+	nw::FrameUpdate frame;
+	frame.flags2 = 0;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+	nw::FrameUpdateRecord compact;
+	compact.handle = 0x1007;
+	compact.type_id = 0x1004;
+	compact.cls = nw::EntityClass::Vehicle;
+	compact.vehicle.parent_slot_handle = 0xFFFF;
+	compact.vehicle.pos_x_compressed =
+			nw::network_compress_fixedpoint(1 << 16);
+	compact.vehicle.euler_z = 0x2000;
+	compact.vehicle.health_word = 3000;
+	frame.records.push_back(compact);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
+	view.tick_remote_motion(0xFFFF);
+
+	const ns::ClientEntityState *moved_parent = view.state().find(0x1007);
+	const ns::ClientEntityState *moved_child = view.state().find(0x1008);
+	if (!expect(moved_parent != nullptr && moved_child != nullptr &&
+	                    (static_cast<uint32_t>(moved_parent->heading_bam) &
+	                     0x00FFFFFFu) != 0,
+	            "parent chase retains sub-byte live BAM heading")) return false;
+	return expect(
+			moved_child->heading_bam == opennova::io::bam_add(
+					moved_parent->heading_bam, 0x10000000),
+			"NoNetworkCallback child follows the parent's full live heading");
+}
+
+// A retail-sized world stream can leave thousands of decoded rows in the host's
+// loopback ClientState. Attachment refresh deliberately repeats pose composition
+// eight times so child-before-parent chains settle, but catalog classification is
+// invariant within that refresh. Re-running the resolver for every row on every
+// depth turns the per-tick pass into avoidable depth * entity-count work (and the
+// old implementation also paired it with a linear handle scan for every child).
+bool run_attachment_refresh_indexes_large_client_state_once() {
+	ns::ClientReplicaPipeline view;
+	std::size_t resolver_calls = 0;
+	view.set_item_class_resolver([&](uint16_t) {
+		++resolver_calls;
+		return nw::EntityClass::NoNetworkCallback;
+	});
+
+	constexpr uint16_t kRows = 4096;
+	view.state().entities.reserve(kRows);
+	for (uint16_t handle = 0; handle < kRows; ++handle) {
+		ns::ClientEntityState row;
+		row.handle = handle;
+		row.type_id = 0x0666;
+		row.parent_handle = handle == 0
+				? 0xFFFFu
+				: static_cast<uint16_t>(handle - 1);
+		row.x = static_cast<int32_t>(handle) << 16;
+		view.state().entities.push_back(std::move(row));
+	}
+
+	view.refresh_carried_entities();
+	return expect(
+			resolver_calls == static_cast<std::size_t>(kRows - 1),
+			"large attachment refresh classifies each parented row once");
 }
 
 // Vehicle live compacts omit pitch/roll; a remote seated body still needs the
@@ -589,7 +861,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	vehicle.euler_y = static_cast<int32_t>(0xD1234567u);
 	spawn.records.push_back(vehicle);
 
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.apply(0x0D, nw::encode_pool_spawn_batch(spawn));
 	const ns::ClientEntityState *carrier = view.state().find(0x1007);
 	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x23456789 &&
@@ -634,7 +906,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 // the load-time 0x0D record and the client keeps the child attached locally.
 // Prove that production 0x0D -> ClientState relationship drives later parent
 // motion, and that the parent's replicated death retires the child rather than
-// leaving its spawn pose in the presented client view forever.
+// leaving its spawn pose in the presented replica state forever.
 bool run_parented_pool_spawn_follows_and_retires() {
 	w::World world;
 	world.registry.configure_pool(1, 8);
@@ -661,10 +933,13 @@ bool run_parented_pool_spawn_follows_and_retires() {
 	child_seed.emplacement_parent_spawn_id =
 			world.registry.get(parent_h)->registry_spawn_id;
 	child_seed.emplacement_local = {2.0f, 0.0f, 0.0f};
+	// This fixture constructs the authority-side authored row directly rather
+	// than through mission promotion, so its exact attachment slot is known.
+	child_seed.emplacement_pose_metadata_resolved = true;
 	const w::EntityHandle child_h = world.registry.spawn(1, child_seed);
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
 		if (type_id == 0x0666) return nw::EntityClass::NoNetworkCallback;
@@ -732,6 +1007,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	w::Entity soldier;
 	soldier.kind = w::EntityKind::Organic;
 	soldier.item_id = 0x2000;
+	soldier.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	soldier.position = {0.0f, 0.0f, 0.0f};
 	soldier.yaw = 90; // engine heading 0: makes the witnessed target-heading clamp literal.
 	const w::EntityHandle ih = world.registry.spawn(0, soldier);
@@ -803,7 +1079,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 
 	// Seed the carrier through its existing pool-1 spawn before applying the local
 	// infantry sample, matching a real client that has completed load sync.
-	ns::NetClientView view(classify);
+	ns::ClientReplicaPipeline view(classify);
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	const ns::ClientEntityState *decoded_carrier = view.state().find(vh.packed);
 	if (!expect(decoded_carrier != nullptr && decoded_carrier->pitch_bam == 178956960 &&
@@ -834,7 +1110,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	return true;
 }
 
-bool run_header_only_records_are_ignored_by_client_view() {
+bool run_header_only_records_are_ignored_by_replica_pipeline() {
 	nw::FrameUpdate fu;
 	fu.flags2 = 0x02;
 	fu.env.fog_dist = 0x1111;
@@ -851,7 +1127,7 @@ bool run_header_only_records_are_ignored_by_client_view() {
 
 	ns::LoopbackChannel channel;
 	channel.host_send(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
-	ns::NetClientView view([](uint16_t t) {
+	ns::ClientReplicaPipeline view([](uint16_t t) {
 		return t == 0x0465 ? nw::class_from_tag("bldg") : nw::EntityClass::Unknown;
 	});
 	view.pump(channel);
@@ -876,6 +1152,25 @@ std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32
 	up.pos_z = z;
 	up.heading = heading;
 	up.pitch = pitch;
+	std::vector<uint8_t> body = nw::encode_entity_packet_sub_header(hdr);
+	const std::vector<uint8_t> tail = nw::encode_player_extended_uplink(up);
+	body.insert(body.end(), tail.begin(), tail.end());
+	return body;
+}
+
+// Production local-player source: build the exact uplink from the split Entity /
+// AiEntity stores, then wrap it in the real 0x0C entity sub-packet.
+std::vector<uint8_t> make_built_0c_uplink(
+		const w::World &world, uint16_t handle,
+		const w::Entity &local_entity, const w::AiEntity &local_ai,
+		nw::PlayerExtendedUplink *built = nullptr) {
+	nw::EntityPacketSubHeader hdr;
+	hdr.handle = handle;
+	hdr.item_type_id = 0x14B9;
+	hdr.sub_op = 0x0A;
+	const nw::PlayerExtendedUplink up =
+			ns::build_player_uplink(world, local_entity, local_ai);
+	if (built != nullptr) *built = up;
 	std::vector<uint8_t> body = nw::encode_entity_packet_sub_header(hdr);
 	const std::vector<uint8_t> tail = nw::encode_player_extended_uplink(up);
 	body.insert(body.end(), tail.begin(), tail.end());
@@ -937,8 +1232,10 @@ bool run_apply_player_intent_stages_remote_peer() {
 	const w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "peer has an AiEntity")) return false;
 	if (!expect(ae->net_is_remote_peer, "peer marked net-snapped")) return false;
-	const int32_t heading_bam = static_cast<int32_t>(wheading) << 16;
-	const int32_t pitch_bam = static_cast<int32_t>(wpitch) << 16;
+	const int32_t heading_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(static_cast<uint16_t>(wheading)) << 16);
+	const int32_t pitch_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(static_cast<uint16_t>(wpitch)) << 16);
 	if (!expect(ae->pos[0] == wx && ae->pos[1] == wy && ae->pos[2] == wz,
 	            "AiEntity live pos = wire pose")) return false;
 	if (!expect(ae->heading == heading_bam && ae->pitch == pitch_bam,
@@ -950,6 +1247,96 @@ bool run_apply_player_intent_stages_remote_peer() {
 	            "smooth heading/pitch staged (+0x240/244)")) return false;
 	if (!expect(ae->net_interp_progress == 0, "interp progress reset (+0x27C)")) return false;
 	return true;
+}
+
+// A player's in-air bit is above the one-byte 0x0C state field, so the host must
+// reconstruct it from the uplinked pose instead of trusting an impossible wire
+// flag. Exercise the complete local builder -> codec -> authority apply -> body
+// tick path, including landing and a new grounded press.
+bool run_wire_pose_drives_remote_airborne_jump_gate() {
+	FlatTerrain terrain;
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.terrain = &terrain.field;
+	w::AiSystem ai;
+	world.ai = &ai;
+	ai.terrain = &terrain.field;
+	world.add_system(&ai);
+
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	peer.net_class_code = static_cast<uint8_t>(nw::EntityClass::Player);
+	peer.player_class = 8;
+	peer.health = 150;
+	peer.health_max = 150;
+	peer.alive = true;
+	peer.engine_flags = w::kEntityFlagPlayer;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	if (!expect(ph.valid(), "airborne peer spawned")) return false;
+	ai.attach(ph);
+	w::AiEntity *host_ai = ai.for_handle(ph);
+	if (!expect(host_ai != nullptr, "airborne peer has authority body")) return false;
+	host_ai->inf.active = true;
+
+	ns::LoopbackChannel channel;
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ph, 0});
+	w::Entity local_entity;
+	local_entity.item_id = 0x14B9;
+	w::AiEntity local_ai;
+	local_ai.pos[0] = fx(10.0);
+	local_ai.pos[1] = fx(10.0);
+	local_ai.pos[2] = fx(2.0); // > 0xF000 above a zero-height floor
+	local_entity.net_move_input = w::Entity::kMoveOrderJump;
+	// Deliberately seed the local high bit. build_player_uplink can serialize
+	// only the low state byte; the authority result below must be pose-derived.
+	local_entity.flags = w::kEntityFlagInAir;
+	local_ai.inf.airborne = true;
+
+	auto send_local_pose = [&](nw::PlayerExtendedUplink *built = nullptr) {
+		channel.client_send(
+				0x0C, make_built_0c_uplink(
+						world, ph.packed, local_entity, local_ai, built));
+		ns::test::drain_all(world, conns, /*is_authority=*/true);
+		return channel.c2s_pending() == 0;
+	};
+
+	nw::PlayerExtendedUplink first_uplink;
+	if (!expect(send_local_pose(&first_uplink), "airborne local uplink drained")) return false;
+	if (!expect(first_uplink.state_flags_byte == 0,
+	            "the in-air high bit is not represented by the 0x0C state byte")) return false;
+	w::Entity *host_peer = world.registry.get(ph);
+	if (!expect(host_peer != nullptr && host_ai->inf.airborne &&
+	                    (host_peer->flags & w::kEntityFlagInAir) != 0 &&
+	                    (host_peer->engine_flags & w::kEntityFlagInAir) != 0,
+	            "authority derives both airborne mirrors from the uplink pose")) return false;
+	world.run_logic_tick(/*is_authority=*/true);
+	if (!expect(host_ai->inf.jump_cooldown == 0,
+	            "held jump while pose-derived airborne does not relaunch")) return false;
+
+	// A grounded release clears the same derived state. The small-positive band
+	// remains hysteretic in production; exact floor contact is the landing edge.
+	local_entity.flags = 0;
+	local_entity.net_move_input = 0;
+	local_ai.inf.airborne = false;
+	local_ai.pos[2] = 0;
+	if (!expect(send_local_pose(), "landing local uplink drained")) return false;
+	if (!expect(!host_ai->inf.airborne &&
+	                    (host_peer->flags & w::kEntityFlagInAir) == 0 &&
+	                    (host_peer->engine_flags & w::kEntityFlagInAir) == 0,
+	            "grounded pose clears both authority airborne mirrors")) return false;
+	world.run_logic_tick(/*is_authority=*/true);
+
+	// A new press at the same grounded pose reaches the authority body gate and
+	// stamps the normal 32-tick jump latch plus the derived launch state.
+	local_entity.net_move_input = w::Entity::kMoveOrderJump;
+	if (!expect(send_local_pose(), "grounded repress local uplink drained")) return false;
+	world.run_logic_tick(/*is_authority=*/true);
+	return expect(host_ai->inf.jump_cooldown == 32 && host_ai->inf.airborne &&
+	                      (host_peer->flags & w::kEntityFlagInAir) != 0 &&
+	                      (host_peer->engine_flags & w::kEntityFlagInAir) != 0,
+	              "fresh grounded press launches once through the authority body tick");
 }
 
 // Parity-critical negative: the host NEVER read-applies its OWN player (§5.38 / ADR-0012).
@@ -984,6 +1371,89 @@ bool run_apply_rejects_own_player() {
 	if (!expect(ae != nullptr && !ae->net_is_remote_peer,
 	            "own player not marked net-snapped")) return false;
 	return true;
+}
+
+// A wire-owned player's death still executes the retail relationship edge. The
+// real seat claim must release before the same tick's player compact is built.
+bool run_remote_mounted_player_death_detaches_compact() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	world.add_system(&ai);
+
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	peer.net_class_code = static_cast<uint8_t>(nw::EntityClass::Player);
+	peer.player_class = 8;
+	peer.health = 150;
+	peer.health_max = 150;
+	peer.alive = true;
+	peer.engine_flags = w::kEntityFlagPlayer;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	if (!expect(ph.valid(), "mounted remote player spawned")) return false;
+	ai.attach(ph);
+	w::AiEntity *peer_ai = ai.for_handle(ph);
+	if (!expect(peer_ai != nullptr, "mounted remote player body attached")) return false;
+	peer_ai->inf.active = true;
+	peer_ai->net_is_remote_peer = true;
+
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 0x1004;
+	vehicle.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+	vehicle.health = 3000;
+	vehicle.health_max = 3000;
+	vehicle.alive = true;
+	w::Seat driver;
+	driver.type = w::SeatType::Driver;
+	driver.retail_slot = 8;
+	driver.bone_index = 3;
+	vehicle.seats.push_back(driver);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	if (!expect(vh.valid(), "death-test carrier spawned")) return false;
+	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 3),
+	            "remote player occupies the actual driver seat")) return false;
+
+	w::Entity *host_peer = world.registry.get(ph);
+	w::Entity *host_vehicle = world.registry.get(vh);
+	if (!expect(host_peer != nullptr && host_vehicle != nullptr && host_peer->mounted &&
+	                    host_vehicle->seats[0].occupant == ph,
+	            "mounted relationship exists before the death edge")) return false;
+	// Relationship teardown cannot depend on entering a death clip this tick:
+	// a late/replayed mount relation may coexist with an already-death-class body.
+	peer_ai->inf.anim_state = w::anim_state::kDeathFire;
+	host_peer->health = 0;
+	host_peer->alive = false;
+	world.run_logic_tick(/*is_authority=*/true);
+	if (!expect(!host_peer->mounted && !host_peer->mount_target.valid() &&
+	                    host_peer->mount_bone == 0 &&
+	                    !host_vehicle->seats[0].occupant.valid(),
+	            "remote death releases occupant and vehicle relationship stores")) return false;
+
+	ns::LoopbackChannel channel;
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(channel.client_recv(dg), "post-death compact frame dequeued")) return false;
+	auto classify = [](uint16_t type_id) {
+		if (type_id == 0x14B9) return nw::EntityClass::Player;
+		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+		return nw::EntityClass::Unknown;
+	};
+	nw::FrameUpdate frame;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), classify, frame),
+	            "post-death compact frame decodes")) return false;
+	const nw::FrameUpdateRecord *wire_peer = nullptr;
+	for (const nw::FrameUpdateRecord &record : frame.records)
+		if (record.handle == ph.packed) wire_peer = &record;
+	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == 0xFFFFu &&
+	                      wire_peer->player.vehicle_bone == 0,
+	              "same-tick dead player compact carries detached FFFF/zero relationship");
 }
 
 // The infantry motor SKIPS a net-snapped remote peer entirely — its pose is host-snapped,
@@ -1027,15 +1497,21 @@ int main() {
 	                run_world_stream_team_and_zone_fields_survive_client_fold() &&
 	                run() &&
 	                run_compact_pose_fields_survive_client_fold() &&
+	                run_unresolved_carrier_record_drops_whole() &&
 	                run_compact_lifecycle_survives_multi_frame_pump() &&
 	                run_carrier_local_pose_lifts_after_later_carrier_record() &&
+	                run_carried_child_follows_later_carrier_same_mover_tick() &&
+	                run_no_callback_child_follows_live_parent_heading() &&
+	                run_attachment_refresh_indexes_large_client_state_once() &&
 	                run_carrier_pitch_roll_persists_across_live_records() &&
 	                run_parented_pool_spawn_follows_and_retires() &&
 	                run_mounted_infantry_pose_fields_round_trip() &&
 	                run_remote_lean_integrator_decays_before_ramping() &&
-	                run_header_only_records_are_ignored_by_client_view() &&
+	                run_header_only_records_are_ignored_by_replica_pipeline() &&
 	                run_apply_player_intent_stages_remote_peer() &&
+	                run_wire_pose_drives_remote_airborne_jump_gate() &&
 	                run_apply_rejects_own_player() &&
+	                run_remote_mounted_player_death_detaches_compact() &&
 	                run_motor_skips_net_peer();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

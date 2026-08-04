@@ -12,6 +12,8 @@ class TransportRuntimeStub:
 	extends Node
 	var ticks := 0
 	var _playing := false
+	func get_sim() -> Object:
+		return null
 	func is_playing() -> bool:
 		return _playing
 	func play() -> void:
@@ -26,12 +28,16 @@ class TransportRuntimeStub:
 class ProfilingRuntimeStub:
 	extends Node
 	var requests: Array[bool] = []
+	func get_sim() -> Object:
+		return null
 	func set_runtime_profiling_enabled(enabled: bool) -> void:
 		requests.append(enabled)
 
 
 class FxRuntimeStub:
 	extends Node
+	func get_sim() -> Object:
+		return null
 	func entity_position_for_ssn(ssn: int) -> Variant:
 		return Vector3(4, 5, 6) if ssn == 17 else null
 
@@ -41,6 +47,8 @@ class ItemPoseRuntimeStub:
 	var has_snapshot := true
 	var pose: Variant = Transform3D(Basis.IDENTITY, Vector3(7, 8, 9))
 	var refs: Array = []
+	func get_sim() -> Object:
+		return null
 	func has_current_present_effect_snapshot() -> bool:
 		return has_snapshot
 	func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
@@ -146,6 +154,9 @@ class FirstOpenArmorySimProxy:
 
 	func get_local_player_class() -> int:
 		return inner.get_local_player_class()
+
+	func get_class_allow_mask() -> int:
+		return inner.get_class_allow_mask()
 
 	func get_local_player_weapon_name() -> String:
 		return inner.get_local_player_weapon_name()
@@ -728,6 +739,31 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 		SubViewport.UPDATE_DISABLED)
 
 
+func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> void:
+	var fixture_path := ProjectSettings.globalize_path(
+			"res://../fixtures/minimal/resources/mnml.bms")
+	var full_bytes := FileAccess.get_file_as_bytes(fixture_path)
+	assert_gt(full_bytes.size(), 616)
+	var full_mission := NovaMissionData.new()
+	assert_eq(full_mission.open_file(fixture_path), OK)
+
+	var wire_mission := NovaMissionData.new()
+	assert_eq(wire_mission.open_wire_header(full_bytes.slice(0, 616)), OK)
+	assert_true(wire_mission.is_loaded())
+	assert_true(wire_mission.is_wire_header_only())
+	assert_eq(wire_mission.get_mission_name(), full_mission.get_mission_name())
+	assert_eq(wire_mission.get_terrain_ref(), full_mission.get_terrain_ref())
+	assert_eq(wire_mission.get_environment_ref(), full_mission.get_environment_ref())
+	for kind in range(4):
+		assert_eq(wire_mission.get_entity_count(kind), 0,
+				"S2C 0x0B supplies metadata, never locally-authored body records")
+
+	assert_ne(wire_mission.open_wire_header(full_bytes.slice(0, 615)), OK)
+	assert_false(wire_mission.is_loaded(),
+			"an inexact wire header cannot leave the previous host metadata live")
+	assert_false(wire_mission.is_wire_header_only())
+
+
 func test_net_map_missing_environment_does_not_commit_partial_render_state() -> void:
 	var root_dir := _stage_minimal_fixture("net_missing_env")
 	var mission_path := root_dir.path_join("mnml.bms")
@@ -1047,15 +1083,16 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	if audio == null:
 		return
 	var env := world.get_node("NovaEnvironment") as NovaEnvironment
-	assert_almost_eq(env.time_of_day, 515.0, 0.001,
-		"the BMS start time, not the environment node's noon default, initializes the shared clock")
+	var expected_clock := NovaEnvironment.new()
+	expected_clock.configure_mission_clock(0x0540, 60)
+	expected_clock.advance_mission_clock(NovaWeather.MISSION_START_PREWARM_TICKS)
+	assert_almost_eq(env.time_of_day, expected_clock.time_of_day, 0.000001,
+		"the BMS start time plus retail's 255-tick prewarm initializes the shared clock")
 
 	# 0.128 seconds advances eight 62.5 Hz simulation ticks but only seven
 	# recovered 62 Hz weather/TOD ticks. Those clocks must remain distinct.
 	world.tick(Vector3.ZERO, Transform3D(), 0.128)
 	var advanced := env.time_of_day
-	var expected_clock := NovaEnvironment.new()
-	expected_clock.configure_mission_clock(0x0540, 60)
 	expected_clock.advance_mission_clock(7)
 	assert_almost_eq(advanced, expected_clock.time_of_day, 0.000001,
 			"the mission clock advances on the separate 62 Hz weather cadence")
@@ -1136,7 +1173,8 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 
 	var expected_seven := NovaEnvironment.new()
 	expected_seven.configure_mission_clock(0x0540, 60)
-	expected_seven.advance_mission_clock(7)
+	expected_seven.advance_mission_clock(
+			NovaWeather.MISSION_START_PREWARM_TICKS + 7)
 	assert_almost_eq(float(slow[1]), expected_seven.time_of_day, 0.000001,
 			"0.128 seconds contains seven weather/TOD ticks")
 	expected_seven.free()
@@ -1145,7 +1183,8 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
 	var expected_eight := NovaEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)
-	expected_eight.advance_mission_clock(8)
+	expected_eight.advance_mission_clock(
+			NovaWeather.MISSION_START_PREWARM_TICKS + 8)
 	assert_eq(int(boundary[0]), 8,
 			"the extra weather quantum is shorter than one simulation tick")
 	assert_almost_eq(float(boundary[1]), expected_eight.time_of_day, 0.000001,
@@ -1326,28 +1365,20 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	assert_false(world.cancel_join_preload(), "no preload in flight is a no-op")
 	assert_eq(world.load_mission_as_joiner(
 			_join_target("127.0.0.1", silent_port, "", "EscTester")), OK)
-	await get_tree().process_frame  # the deferred preload driver starts
+	await get_tree().process_frame  # the preload process step starts
 	assert_true(world.cancel_join_preload(), "an in-flight preload aborts")
 	assert_eq(failures.size(), 1)
 	if failures.size() == 1:
 		assert_string_contains(failures[0], "aborted")
 	assert_false(world.is_loaded())
-	await get_tree().process_frame  # the canceled driver loop unwinds quietly
+	await get_tree().process_frame  # the disabled process step stays quiet
 	assert_eq(failures.size(), 1, "the canceled driver does not double-report")
 	blocker.close()
 
 
-func test_escape_aborts_the_joiner_admission_wait() -> void:
-	# ESC during the SECOND interruptible joiner wait: an explicit-mission joiner
-	# loads its map locally and then parks in the post-load admission watchdog
-	# until the (here: silent) host drives the join forward. cancel_join_admission
-	# tells that armed wait to abort; the watchdog reports through the ordinary
-	# load-failure leg exactly once, on its next process_frame resume.
-	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+func test_freeing_world_during_joiner_preload_leaves_no_suspended_owner_method() -> void:
+	var blocker := NovaUdpPump.new()  # bound but silent: keeps the preload pending
 	assert_eq(blocker.bind_listen(0), OK)
-	var silent_port := blocker.local_port()
-	assert_gt(silent_port, 0)
-
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1356,14 +1387,83 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
+
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", blocker.local_port(), "", "FreeTester")), OK)
+	await get_tree().process_frame  # the preload process step starts
+	world.unload()
+	world.free()
+	world = null
+	blocker.close()
+	await get_tree().process_frame
+	assert_engine_error_count(0,
+			"tearing down a pending preload leaves no suspended owner method")
+
+
+func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
 
+	world.report_join_wire_asset_failure("first failure")
+	world.report_join_wire_asset_failure("duplicate observer failure")
+	assert_eq(failures, ["first failure"],
+			"the frame observer and admission watchdog share one failure edge")
+
+	world.unload()
+	world.report_join_wire_asset_failure("next session failure")
+	assert_eq(failures, ["first failure", "next session failure"],
+			"unload rearms the latch for the next join")
+
+
+func test_escape_aborts_the_joiner_admission_wait() -> void:
+	# ESC during the SECOND interruptible joiner wait: a real host drives the
+	# wire-header preload through local world load, then this test stops pumping it
+	# before admission so cancel_join_admission owns the remaining wait.
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Abort Admission Host",
+		"mission_name": mission.get_mission_name(),
+		"mission_file": "mnml.bms",
+		"expansion": "",
+		"gametype": 0x30020,
+		"max_players": 4,
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+
 	assert_false(world.cancel_join_admission(), "no armed admission wait is a no-op")
 	assert_eq(world.load_mission_as_joiner(
-			_join_target("127.0.0.1", silent_port, "mnml")), OK)
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]),
+			"the real wire-header preload reached the admission wait")
 	assert_true(world.cancel_join_admission(), "an armed admission wait accepts the abort")
-	await get_tree().process_frame  # the watchdog resumes and observes the abort
+	# GameWorld is externally ticked by MainGame in production. This bare-world
+	# fixture drives the same frame observer once so it consumes the abort.
+	world.tick(Vector3.ZERO)
+	await get_tree().process_frame
 	assert_eq(failures.size(), 1)
 	if failures.size() == 1:
 		assert_string_contains(failures[0], "aborted")
@@ -1371,10 +1471,12 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
 	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
 	world.unload()
-	blocker.close()
+	host.free()
 
 
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
+	var blocker := NovaUdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1384,12 +1486,17 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
 
-	assert_eq(world.load_mission_as_joiner(
-			_join_target("127.0.0.1", 9, "missing.bms")), ERR_FILE_NOT_FOUND)
+	assert_eq(world.load_mission_as_joiner(_join_target(
+			"127.0.0.1", blocker.local_port(), "missing.bms")), OK,
+			"a browse-time mission hint is never opened locally")
+	await get_tree().process_frame
+	assert_true(world.cancel_join_preload())
+	await get_tree().process_frame
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	assert_gt(int(world.get_mission_stats().get("markers", 0)), 0,
 		"a rejected join request cannot make a later ordinary mission wire-only")
 	world.unload()
+	blocker.close()
 
 
 func test_environment_load_failure_finishes_its_perf_timeline() -> void:
@@ -1702,12 +1809,42 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := NovaSimulation.new()
+	host.configure_host_session({
+		"server_name": "Basename Host",
+		"mission_name": mission.get_mission_name(),
+		"mission_file": "mnml",
+		"expansion": "",
+		"gametype": 0x30020,
+		"max_players": 4,
+	})
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
 
-	var err := world.load_mission_as_joiner(_join_target("127.0.0.1", 9, "mnml"))
-	assert_eq(err, OK, "A NovaWorld host-row basename resolves to its .bms resource.")
+	var err := world.load_mission_as_joiner(_join_target(
+			"127.0.0.1", host.get_host_listen_port(), "stale_browse_hint"))
+	assert_eq(err, OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if world.is_loaded():
+			break
+	assert_true(world.is_loaded(),
+			"the host's S2C 0x7B basename reached the wire-driven load")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
-		"The normalized filename reaches the active mission/text-table seam.")
+		"the authoritative basename is normalized for mission/text-table naming")
 	world.unload()
+	host.free()
+	# The admission watchdog used to be a coroutine owned by NetSessionDrive.
+	# Freeing its sole GameWorld owner while it awaited process_frame made Godot
+	# resume a method whose class instance was already gone on the next frame.
+	world.free()
+	world = null
+	await get_tree().process_frame
+	assert_engine_error_count(0,
+			"tearing down a successfully wire-loaded world leaves no suspended owner method")
 
 
 func test_skeleton_debug_builds_and_frees_the_view() -> void:
@@ -1870,6 +2007,8 @@ class AnchorRuntimeStub:
 
 class SimlessRuntimeStub:
 	extends Node
+	func get_sim() -> Object:
+		return null
 	func is_playing() -> bool:
 		return false
 
@@ -1881,12 +2020,15 @@ class JoinerSignalSimStub:
 	var loss_reason := ""
 	var in_match := true
 	var deploy_pending := false
+	var initial_admission_complete := true
 	func is_joiner() -> bool:
 		return true
 	func is_joined_in_match() -> bool:
 		return in_match
 	func is_join_deploy_pick_pending() -> bool:
 		return deploy_pending
+	func is_join_initial_admission_complete() -> bool:
+		return initial_admission_complete
 	func get_session_loss_reason() -> String:
 		return loss_reason
 
@@ -2874,6 +3016,47 @@ func test_tick_emits_session_lost_once_for_an_in_match_loss() -> void:
 	world.tick(Vector3.ZERO)
 	world.tick(Vector3.ZERO)
 	assert_eq(reasons.size(), 1, "a latched loss reason emits exactly once per session")
+
+	_detach_runtime(world)
+
+
+func test_tick_holds_split_grant_join_until_the_deploy_policy_is_complete() -> void:
+	# Retail can apply the first S2C 0x5A before the S2C 0x0F deployment
+	# policy and second grant. That first grant opens the independent gameplay
+	# gate (`in_match`) but cannot release the loading presentation: a zoned
+	# mission still owes the player its DEATH-screen pick.
+	var world := _make_world()
+	add_child_autofree(world)
+	var runtime := JoinerSignalRuntimeStub.new()
+	var sim := JoinerSignalSimStub.new()
+	sim.in_match = true
+	sim.deploy_pending = false
+	sim.initial_admission_complete = false
+	runtime.sim = sim
+	add_child_autofree(runtime)
+	_install_runtime(world, runtime)
+	var edges := {"ready": 0, "deploy": 0}
+	world.join_admission_ready.connect(
+			func() -> void: edges["ready"] = int(edges["ready"]) + 1)
+	world.join_deploy_pick_required.connect(
+			func() -> void: edges["deploy"] = int(edges["deploy"]) + 1)
+
+	world.tick(Vector3.ZERO)  # first 0x5A: gameplay gate only
+	world.tick(Vector3.ZERO)  # 0x0F: policy known, grant pair still incomplete
+	assert_eq(int(edges["ready"]), 0,
+			"an early gameplay release cannot reveal the world before initial admission")
+	assert_eq(int(edges["deploy"]), 0,
+			"the deploy screen waits for the complete policy/grant boundary")
+
+	sim.initial_admission_complete = true
+	sim.deploy_pending = true
+	world.tick(Vector3.ZERO)  # second 0x5A: the player-paced pick is now ready
+	assert_eq(int(edges["deploy"]), 1,
+			"the complete zoned admission replaces loading with the deploy picker")
+	assert_eq(int(edges["ready"]), 0,
+			"a deploy-required boundary is not also an admitted-world edge")
+	world.tick(Vector3.ZERO)
+	assert_eq(int(edges["deploy"]), 1, "the held deploy state emits one edge")
 
 	_detach_runtime(world)
 

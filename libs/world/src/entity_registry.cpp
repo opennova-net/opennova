@@ -43,6 +43,23 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
     return EntityHandle{}; // pool full (faithful: spawn fails on a full fixed pool)
 }
 
+EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
+    if (!h.valid()) return EntityHandle{};
+    const int pool = h.pool();
+    const int slot = h.slot();
+    if (pool < 0 || pool >= kPoolCount || slot < 0) return EntityHandle{};
+    Pool &p = pools_[pool];
+    if (static_cast<size_t>(slot) >= p.slots.size() || p.used[slot])
+        return EntityHandle{};
+    p.slots[slot] = seed;
+    p.slots[slot].handle = h;
+    p.slots[slot].registry_spawn_id = next_spawn_id_++;
+    if (next_spawn_id_ == 0) next_spawn_id_ = 1;
+    p.used[slot] = 1;
+    ++p.live;
+    return h;
+}
+
 void EntityRegistry::despawn(EntityHandle h) {
     if (!h.valid()) return;
     int pool = h.pool();
@@ -54,6 +71,12 @@ void EntityRegistry::despawn(EntityHandle h) {
         p.used[slot] = 0;
         --p.live;
     }
+}
+
+bool EntityRegistry::despawn(EntityLifetime lifetime) {
+    if (get(lifetime) == nullptr) return false;
+    despawn(lifetime.handle);
+    return true;
 }
 
 Entity *EntityRegistry::get(EntityHandle h) {
@@ -70,6 +93,19 @@ Entity *EntityRegistry::get(EntityHandle h) {
 
 const Entity *EntityRegistry::get(EntityHandle h) const {
     return const_cast<EntityRegistry *>(this)->get(h);
+}
+
+Entity *EntityRegistry::get(EntityLifetime lifetime) {
+    if (!lifetime.valid()) return nullptr;
+    Entity *entity = get(lifetime.handle);
+    if (entity == nullptr ||
+            entity->registry_spawn_id != lifetime.registry_spawn_id)
+        return nullptr;
+    return entity;
+}
+
+const Entity *EntityRegistry::get(EntityLifetime lifetime) const {
+    return const_cast<EntityRegistry *>(this)->get(lifetime);
 }
 
 void EntityRegistry::restore_from(const EntityRegistry &snapshot) {

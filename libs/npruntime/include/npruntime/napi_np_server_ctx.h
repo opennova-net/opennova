@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -17,7 +18,7 @@ namespace opennova::world {
 class World;
 }
 // The loaded mission, read by the P3 initial-state burst for the S2C 0x0B BMS-header body
-// (bms::encode_header_blob). Forward-declared (NOT included) so bms.h stays out of this light header.
+// (bms::encode_loaded_header_blob). Forward-declared (NOT included) so bms.h stays out of this light header.
 namespace opennova::bms {
 struct File;
 }
@@ -70,7 +71,7 @@ struct NapiNPProtocol {
 	uint32_t host_running = 0;          // [orig +0x538] 1 once StartServer succeeds; Hello rejects 0
 	uint32_t host_start_tick = 0;       // [orig +0x53C] GetTickCount at StartServer (uptime base)
 	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
-	uint32_t host_run_duration_ms = 0;  // [orig +0x544] stop - start, frozen post-stop
+	uint32_t host_run_duration_ms = 0;  // [orig +0x544] live elapsed ms; frozen at stop
 
 	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. NapiNPConnection_Create
 	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
@@ -124,6 +125,36 @@ struct NapiNPServerCtx {
 	uint32_t send_target_player = 0; // [orig +0x119C]
 	uint32_t send_target_state = 0;  // [orig +0x11A0]
 
+	// [orig: g_scoreboard_broadcast_timer @0xC8D80C] One global mission
+	// counter shared by the 0x16 scoreboard and 0x30/0x31 integrity broadcast.
+	// Server_TickUpdate increments first; a value >0x136 fires and resets to 0,
+	// so a fresh mission reaches its first boundary after 311 calls. Mission
+	// start resets it through create_session; round init does not.
+	uint32_t scoreboard_broadcast_timer = 0;
+	// [orig: dword_24C10C0] The process-global family toggle. Executable initial
+	// storage is zero: false selects 0x31, true selects 0x30, then every boundary
+	// XORs it even when no player is eligible. Neither session nor round init
+	// resets it, so keep it as NapiNPServerCtx-lifetime state.
+	bool integrity_entity_family_next = false;
+
+	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
+	// max(frame-rate pressure, mean ping, packet loss) over a five-sample window.
+	// A local healthy LAN resolves to 1; the host adapter may replace it when
+	// equivalent live telemetry is available.
+	uint8_t host_network_quality = 1;
+	// [orig: g_network_quality_broadcast_timer] One global explicit countdown,
+	// reset to zero by Server_InitNewRoundState @0x51CA9E. Server_TickUpdate
+	// decrements a positive value, emits when it reaches/is zero, then reloads
+	// 0x136. This state must not be derived from World::logic_tick: round reset
+	// intentionally makes the next server boundary due immediately.
+	uint32_t network_quality_broadcast_countdown = 0;
+
+	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer
+	// viewport height. Zero means no renderer seam was installed and suppresses
+	// that request instead of fabricating a screen size. NovaSimulation refreshes
+	// this from its root viewport before every host pump (the parity matrix is
+	// explicitly 1920x1080); focused tests set it directly.
+	uint32_t loaded_model_viewport_height = 0;
 	// --- reimpl-owned, NOT in the original singleton ---
 	// The authoritative simulation. Non-owning. The in-match replication seam (the per-connection
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
@@ -145,7 +176,7 @@ struct NapiNPServerCtx {
 	// (change-gated broadcast; D-NET-162 note). Keyed by the zone's packed handle.
 	std::unordered_map<uint16_t, std::vector<uint8_t>> zone_6f_cache;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
-	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
+	// (bms::encode_loaded_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;
 
 	// The mission's raw terrain-tile (.til) file bytes: `[u32 'til0'][u32 count][u32 res0][u32 res1]`
@@ -155,6 +186,26 @@ struct NapiNPServerCtx {
 	// header]. Owning copy set by the host at mission load (Godot-free: the caller resolves the .til via
 	// libs/til). EMPTY => 0x45 is faithfully skipped (serialize_terrain_tiles returns 0 with no tile data).
 	std::vector<uint8_t> terrain_til_data;
+
+	// The current mission text table's raw cp1252 briefing strings. The Godot/resource
+	// adapter resolves [info]/briefing3 and [info]/briefing2 (falling back to
+	// [info]/briefing) before host bring-up. When loaded, phase 6 serializes these as
+	// two consecutive C strings for S2C 0x7E. The explicit loaded bit distinguishes a
+	// valid pair of empty strings from a missing/unparseable mission text resource.
+	// [orig: NetPacket_WriteBriefingText @0x506620]
+	bool mission_text_loaded = false;
+	std::string mission_briefing3;
+	std::string mission_briefing2;
+	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
+	// marker, in marker spawn order. The S2C 0x0F writer copies these onto
+	// the joining client's deploy map.
+	std::vector<std::string> mission_location_names;
+
+	// The 180-byte mission/session block streamed by S2C 0x64. Retail builds it
+	// once at mission start, including two random 32-byte regions and a nonzero
+	// session id, then serves that same block to every joiner/re-request.
+	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
+	std::array<uint8_t, 180> mission_metadata_blob{};
 
 	// Spawn gate (§5.2). spawn_success_gate <- dword_24C1928 (drop the loading screen; cleared later by
 	// the per-frame 0x0A flags1 & 0x01, §5.2a step 4). The load-progress counter dword_A82370

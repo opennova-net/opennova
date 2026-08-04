@@ -53,41 +53,31 @@ using Key = std::pair<char, uint8_t>; // (dir, low-byte tag)
 // messages) and not required of our capture.
 constexpr int kNoiseFloor = 1;
 
-// Tags retail emits that our server knowingly does not yet — each carries its
-// tracked D-NET reference so the diff names the deferral by ID (populated
-// 2026-07-05 from the attested v35 baseline: game-server retail_join_v35_game
-// vs the retail gameplay golden). Kept here (not silently skipped) so the
-// deferral is reviewable and a NEW gap fails the diff. Nearly all belong to
-// D-NET-163 — the dev golden-harness host (`nw_server`, ADR 0013, never
-// shipped) is a minimal in-match harness, and a join-scope capture never
-// exercises the periodic anti-cheat challenges, the gameplay-event traffic
-// (kills/scores/sounds), or the low-frequency session/roster control tags that
-// a full retail<->retail session carries. Format: {dir, tag} -> "D-NET-nnn".
-const std::map<Key, const char *> kDeferredGaps = {
-    // Periodic integrity / anti-cheat challenge-response pairs (harness drives none).
-    {{'C', 0x08}, "D-NET-163"}, // time-sync-reply (no S2C 0x43 ping to answer)
-    {{'S', 0x43}, "D-NET-163"}, // time-sync-ping
-    {{'C', 0x1c}, "D-NET-163"}, // charattr-crc-reply (no S2C 0x39 challenge)
-    {{'S', 0x39}, "D-NET-163"}, // charattr-crc-challenge
-    {{'C', 0x20}, "D-NET-163"}, // entity-checksum-reply (no S2C 0x30 request)
-    {{'S', 0x30}, "D-NET-163"}, // entity-checksum-req
-    {{'C', 0x21}, "D-NET-163"}, // loadout-checksum-reply (no S2C 0x31 request)
-    {{'S', 0x31}, "D-NET-163"}, // loadout-crc-req
-    {{'C', 0x3d}, "D-NET-163"}, // loaded-model page (no S2C 0x68 request)
-    {{'S', 0x68}, "D-NET-163"}, // loaded-model page request
-    // Gameplay-event traffic a join-only capture never produces (no kills/scores).
-    {{'S', 0x26}, "D-NET-163"}, // kill-sync
-    {{'S', 0x4e}, "D-NET-163"}, // kill-by-slot
-    {{'S', 0x34}, "D-NET-163"}, // play-sound
-    {{'S', 0x81}, "D-NET-163"}, // score-delta-sound
-    // Low-frequency session / roster / control tags the harness does not model.
-    {{'S', 0x4c}, "D-NET-163"}, // target-assignment
-    {{'S', 0x50}, "D-NET-163"}, // team-assign (Server_AssignPlayerTeam MATCHING, not driven here)
-    {{'S', 0x58}, "D-NET-163"}, // session-status
-    {{'S', 0x59}, "D-NET-163"}, // deployed-item
-    {{'S', 0x5d}, "D-NET-163"}, // destroy-list (0x5D _DestroyEntityList @ 0x429730)
-    {{'S', 0x79}, "D-NET-163"}, // spectator-flag
-    {{'S', 0x7e}, "D-NET-163"}, // server-config-strings
+// Event/state-conditioned messages cannot be required from a passive join
+// capture: absence says only that the corresponding death, expiry, deploy,
+// target, sound, team-change, or placeable event did not happen in that run.
+// Keep this list separate from implementation deferrals. The steady-state
+// session/control channels are deliberately NOT here: run 12 proves the full
+// integrity trio plus 0x58/0x5D/0x79/0x7E, so losing one is a hard GAP.
+// Each conditional wire path still needs its own deterministic regression or
+// an induced retail witness; this coverage test must never manufacture events.
+const std::map<Key, const char *> kStateConditionedGaps = {
+    {{'C', 0x0f}, "entity-self-repair"},  // missing/inconsistent entity query
+	{{'S', 0x12}, "entity-expiry"},       // Server_RemoveEntityAndNotify
+	{{'S', 0x13}, "entity-death"},        // damage/death routing; unit-pinned by round sim
+	{{'S', 0x18}, "entity-self-repair"},  // full entity reply to C2S 0x0F
+    {{'S', 0x1e}, "game-event"},         // objective / kill-feed event
+    {{'S', 0x26}, "entity-kill"},        // non-player entity kill record
+	{{'S', 0x34}, "sound-trigger"},      // mission/gameplay sound
+	{{'S', 0x49}, "weapon-reload"},      // player reload request/relay
+	// 0x4C and 0x4E are NOT event-conditioned: they answer the C2S 0x23/0x28
+	// join-burst requests on every join (§5.33), and the host now ports both
+	// replies — losing either is a hard GAP.
+    {{'S', 0x50}, "team-change"},        // team assign/change, not plain join
+    {{'S', 0x52}, "player-death-stats"}, // two kill-stat reports per player death
+    {{'S', 0x59}, "deployed-item"},      // placeable creation/update
+    {{'S', 0x6e}, "dead-or-deploying"},  // spawn-wave status; unit-pinned at 1 Hz
+    {{'S', 0x81}, "score-delta"},        // positive score feedback
 };
 
 // Tags our server emits that retail does not in this golden — opennova<->opennova
@@ -96,7 +86,10 @@ const std::map<Key, const char *> kDeferredGaps = {
 const std::map<Key, const char *> kAllowedSpurious = {
     // Our host emits the 0x18 repair record where this retail reference session
     // did not; the extra repair-path emission is the tracked residual.
-    {{'S', 0x18}, "D-NET-133"}, // full-entity-spawn (repair-path residual)
+	{{'S', 0x18}, "D-NET-133"}, // full-entity-spawn (repair-path residual)
+	// Run 05 contained a real reload that the shorter retail golden did not.
+	// The request/relay path is pinned independently by npruntime_reload_relay.
+	{{'S', 0x49}, "weapon-reload"},
 };
 
 std::map<Key, long> histogram(const std::vector<net::PcapDatagram> &pkts) {
@@ -168,8 +161,8 @@ int main() {
 		const long gc = gold.count(k) ? gold.at(k) : 0;
 		char status[48] = "OK";
 		if (oc == 0 && gc >= kNoiseFloor) {
-			if (auto it = kDeferredGaps.find(k); it != kDeferredGaps.end()) {
-				std::snprintf(status, sizeof(status), "GAP(deferred %s)", it->second);
+			if (auto it = kStateConditionedGaps.find(k); it != kStateConditionedGaps.end()) {
+				std::snprintf(status, sizeof(status), "absent(state:%s)", it->second);
 			} else {
 				std::snprintf(status, sizeof(status), "GAP");
 				++gaps;
@@ -194,14 +187,13 @@ int main() {
 		            oc, gc, status);
 	}
 
-	std::printf("\nGAPS (retail emits, we don't, non-deferred): %d\n", gaps);
+	std::printf("\nGAPS (retail steady-state emits, we don't): %d\n", gaps);
 	std::printf("SPURIOUS (we emit S2C, retail doesn't, not allowed): %d\n", spurious);
 
 	if (gaps > 0 || spurious > 0) {
 		std::printf("FAIL: coverage diverges from golden — see GAP/SPURIOUS rows "
-		            "above. Implement the gap (and clear it from the worklist), or, "
-		            "if intentionally deferred, add it to kDeferredGaps with a "
-		            "D-NET reference.\n");
+		            "above. A scenario-only tag belongs in kStateConditionedGaps "
+		            "only with a separate event witness/regression.\n");
 		return 1;
 	}
 	std::printf("OK\n");

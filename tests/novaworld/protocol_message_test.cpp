@@ -590,6 +590,127 @@ bool check_session_retransmit_retention_and_current_ack() {
 		            invalid_body.empty(),
 	            "encode failure consumes the assigned sequence but leaves no phantom retained record"))
 		return false;
+
+	// Retail queues reliable message nodes, not whole session datagrams. An
+	// unreliable record can share the first physical packet, but must be absent
+	// when that packet sequence is reconstructed after a NACK.
+	opennova::ProtocolMessage unreliable =
+			opennova::make_protocol_message(0x42, {0x00, 0x00});
+	unreliable.reliable = false;
+	opennova::SessionSequencing mixed_tx{30, 0};
+	mixed_tx.outbound_message_limit = 16;
+	std::vector<uint8_t> mixed_original;
+	if (!expect(opennova::frame_session_packet(
+			mixed_tx, crypto, {original_messages[0], unreliable}, mixed_original) &&
+		            mixed_tx.retained_outbound_message_count == 1,
+	            "mixed packet retains only its reliable message node"))
+		return false;
+	std::vector<opennova::ProtocolMessage> mixed_first_messages;
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			mixed_original.data(), mixed_original.size(), scrk,
+			resent_header, mixed_first_messages) &&
+		            mixed_first_messages.size() == 2 &&
+		            mixed_first_messages[0].tag == original_messages[0].tag &&
+		            mixed_first_messages[1].tag == unreliable.tag,
+	            "unreliable record remains present on the first physical send"))
+		return false;
+	std::vector<uint8_t> mixed_resent;
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			mixed_tx, crypto, 30, mixed_resent),
+	            "mixed packet sequence can be reconstructed"))
+		return false;
+	resent_messages.clear();
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			mixed_resent.data(), mixed_resent.size(), scrk,
+			resent_header, resent_messages) &&
+		            resent_messages.size() == 1 &&
+		            resent_messages[0].tag == original_messages[0].tag,
+			"NACK retransmit omits the unreliable record from the original packet"))
+		return false;
+
+	// userParam=310 is a finite, per-message lifetime measured in OPEN send
+	// boundaries. Every packet in one MTU-split flush shares counter C; pruning
+	// sees C, then the owner increments once. A record stamped at C survives
+	// through C+308 and is removed at C+309, without removing an indefinitely
+	// retained sibling assigned to the same sequence.
+	opennova::ProtocolMessage finite =
+			opennova::make_protocol_message(0x4C, {0x01});
+	finite.retention_flushes = 310;
+	opennova::SessionSequencing finite_tx{50, 0};
+	finite_tx.outbound_message_limit = 16;
+	std::vector<uint8_t> finite_original;
+	if (!expect(opennova::frame_session_packet(
+			finite_tx, crypto, {original_messages[0], finite}, finite_original) &&
+		            finite_tx.retained_outbound_message_count == 2 &&
+		            finite_tx.retained_outbound.at(50)[1].retention_deadline_flush == 309,
+	            "finite node stamps deadline C+310-1 beside a reliable sibling"))
+		return false;
+	opennova::complete_session_send_flush(finite_tx); // prune C, then C -> C+1
+	for (uint32_t i = 0; i < 308; ++i)
+		opennova::complete_session_send_flush(finite_tx);
+	if (!expect(finite_tx.send_flush_counter == 309 &&
+	                    finite_tx.retained_outbound_message_count == 2,
+	            "userParam 310 survives through send-flush counter C+308"))
+		return false;
+	std::vector<uint8_t> finite_before_expiry;
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			finite_tx, crypto, 50, finite_before_expiry),
+	            "finite mixed sequence reconstructs before its deadline"))
+		return false;
+	resent_messages.clear();
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			finite_before_expiry.data(), finite_before_expiry.size(), scrk,
+			resent_header, resent_messages) && resent_messages.size() == 2,
+	            "pre-expiry replay still includes the finite node"))
+		return false;
+	opennova::complete_session_send_flush(finite_tx); // prune C+309, then increment
+	if (!expect(finite_tx.send_flush_counter == 310 &&
+	                    finite_tx.retained_outbound_message_count == 1,
+	            "userParam 310 expires exactly at send-flush counter C+309"))
+		return false;
+	std::vector<uint8_t> finite_after_expiry;
+	if (!expect(opennova::frame_session_packet_for_sequence(
+			finite_tx, crypto, 50, finite_after_expiry),
+	            "mixed sequence remains reconstructable after one node expires"))
+		return false;
+	resent_messages.clear();
+	if (!expect(opennova::decode_protocol_packet_plaintext(
+			finite_after_expiry.data(), finite_after_expiry.size(), scrk,
+			resent_header, resent_messages) && resent_messages.size() == 1 &&
+		            resent_messages[0].tag == original_messages[0].tag,
+	            "post-expiry replay preserves only the indefinitely retained sibling"))
+		return false;
+
+	opennova::SessionSequencing cap_tx{40, 0};
+	cap_tx.outbound_message_limit = 2;
+	if (!expect(opennova::frame_session_packet(
+			cap_tx, crypto, original_messages, original) &&
+		            cap_tx.retained_outbound_message_count == 1,
+	            "capacity fixture retains one reliable node"))
+		return false;
+	if (!expect(!opennova::frame_session_packet(
+			cap_tx, crypto, {original_messages[0], unreliable}, original) &&
+		            cap_tx.next_outbound_seq == 41 &&
+		            cap_tx.retained_outbound_message_count == 1,
+	            "msg_out_max counts transient nodes before first-send pruning"))
+		return false;
+	if (!expect(opennova::frame_session_packet(
+			cap_tx, crypto, {unreliable}, original) &&
+		            cap_tx.next_outbound_seq == 42 &&
+		            cap_tx.retained_outbound_message_count == 1,
+	            "one transient node can send at the last slot"))
+		return false;
+	if (!expect(!opennova::frame_session_packet(
+			cap_tx, crypto, {unreliable}, original) &&
+		            cap_tx.next_outbound_seq == 42,
+	            "an earlier transient packet still occupies its node through the shared boundary"))
+		return false;
+	opennova::complete_session_send_flush(cap_tx);
+	if (!expect(opennova::frame_session_packet(
+			cap_tx, crypto, {unreliable}, original) &&
+		            cap_tx.next_outbound_seq == 43,
+	            "boundary completion prunes transient node capacity"))
+		return false;
 	return true;
 }
 

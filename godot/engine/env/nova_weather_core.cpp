@@ -44,10 +44,17 @@ void NovaWeatherCore::_bind_methods() {
 			&NovaWeatherCore::tick);
 	ClassDB::bind_method(D_METHOD("tick_cloud_scroll", "sky_speed"), &NovaWeatherCore::tick_cloud_scroll);
 	ClassDB::bind_method(D_METHOD("set_scalar_targets", "fog_distance", "sky_height"), &NovaWeatherCore::set_scalar_targets);
+	ClassDB::bind_method(D_METHOD("snap_scalar_currents_to_targets"),
+			&NovaWeatherCore::snap_scalar_currents_to_targets);
+	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "fog_dist", "fog_accel", "rain_pct", "overcast"),
+			&NovaWeatherCore::apply_network_environment_sample);
 	ClassDB::bind_method(D_METHOD("get_fog_distance"), &NovaWeatherCore::get_fog_distance);
 	ClassDB::bind_method(D_METHOD("get_sky_height"), &NovaWeatherCore::get_sky_height);
 	ClassDB::bind_method(D_METHOD("get_sun_dim_pct"), &NovaWeatherCore::get_sun_dim_pct);
 	ClassDB::bind_method(D_METHOD("get_rain_pct"), &NovaWeatherCore::get_rain_pct);
+	ClassDB::bind_method(D_METHOD("get_fog_accel_clamp_fixed"), &NovaWeatherCore::get_fog_accel_clamp_fixed);
+	ClassDB::bind_method(D_METHOD("get_rain_pct_fixed"), &NovaWeatherCore::get_rain_pct_fixed);
+	ClassDB::bind_method(D_METHOD("get_overcast_blend_fixed"), &NovaWeatherCore::get_overcast_blend_fixed);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset1);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &NovaWeatherCore::get_cloud_uv_rate_per_second);
@@ -434,11 +441,23 @@ Vector4 NovaWeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float 
 }
 
 void NovaWeatherCore::set_scalar_targets(float p_fog_distance, float p_sky_height) {
-	// Targets only — the currents always ramp, exactly like the witnessed
-	// mission-start snap [orig: Environment_SnapStateToTargets @ 0x57d1e0:
+	// Target refresh [orig: Environment_SnapStateToTargets @0x57d1e0:
 	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed].
 	scalar_channels.fog_dist_target_fp = static_cast<int32_t>(p_fog_distance * 65536.0f);
 	scalar_channels.sky_height_target_fp = static_cast<int32_t>(p_sky_height * 65536.0f);
+}
+
+void NovaWeatherCore::snap_scalar_currents_to_targets() {
+	scalar_channels.snap_currents_to_targets();
+}
+
+void NovaWeatherCore::apply_network_environment_sample(int p_fog_dist,
+		int p_fog_accel, int p_rain_pct, int p_overcast) {
+	scalar_channels.apply_network_sample(
+			static_cast<uint16_t>(std::clamp(p_fog_dist, 0, 0xFFFF)),
+			static_cast<uint16_t>(std::clamp(p_fog_accel, 0, 0xFFFF)),
+			static_cast<uint8_t>(std::clamp(p_rain_pct, 0, 0xFF)),
+			static_cast<uint8_t>(std::clamp(p_overcast, 0, 0xFF)));
 }
 
 float NovaWeatherCore::get_fog_distance() const {
@@ -455,4 +474,16 @@ float NovaWeatherCore::get_sun_dim_pct() const {
 
 float NovaWeatherCore::get_rain_pct() const {
 	return static_cast<float>(scalar_channels.rain_pct_fp) / 65536.0f;
+}
+
+int NovaWeatherCore::get_fog_accel_clamp_fixed() const {
+	return scalar_channels.fog_step_fp;
+}
+
+int NovaWeatherCore::get_rain_pct_fixed() const {
+	return scalar_channels.rain_pct_fp;
+}
+
+int NovaWeatherCore::get_overcast_blend_fixed() const {
+	return scalar_channels.overcast_fp;
 }

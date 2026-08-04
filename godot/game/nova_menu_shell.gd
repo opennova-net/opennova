@@ -86,6 +86,16 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var return_control_names := PackedStringArray([
 	"QUIT_TO_MENU", "MAIN_MENU", "ABORT", "ABORT_MISSION",
 ])
+# The generic BACK command seam: the actionless named button the original
+# engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY
+# resume affordance the shipped in-game menu has — there is no visible RESUME
+# button). Witnessed names only: an invented alias could double-dispatch
+# against a shipped or modded button of the same name that carries a real
+# action. Routed through the top-level back/quit logic: cross-.mnu back first,
+# then resume (in-game) or exit-to-desktop (main menu).
+@export var back_control_names := PackedStringArray([
+	"HIDDEN_BACK",
+])
 # List widgets the shell fills with the resource dir's missions (.bms).
 @export var mission_list_names := PackedStringArray([
 	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "MAP_LIST",
@@ -266,6 +276,17 @@ func hide_menu() -> void:
 	visible = false
 
 
+## Process-exit-only release for the retail menu cursor. NovaMnuScreen keeps the
+## decoded texture for later screen visits and Input keeps a second process-wide
+## reference after applying it; both must drop before RenderingServer exits.
+func release_runtime_renderer_resources() -> void:
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	if _menu == null:
+		return
+	for node in _menu.find_children("*", "NovaMnuScreen", true, false):
+		(node as NovaMnuScreen).set_cursor_texture(null)
+
+
 # Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
 # behind it), so the top-level back/quit resumes play instead of exiting.
 func open_ingame_menu() -> bool:
@@ -320,6 +341,7 @@ func _wire_named_controls() -> void:
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
 	_connect_named(novaworld_control_names, _on_novaworld_control)
+	_connect_named(back_control_names, _on_quit_requested)
 
 
 func _seed_crosshair_style_controls() -> void:

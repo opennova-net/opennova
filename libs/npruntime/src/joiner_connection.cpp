@@ -1,5 +1,6 @@
 #include "npruntime/joiner_connection.h"
 
+#include <mission/bms.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -251,6 +253,11 @@ JoinerConnection::JoinerConnection(std::string player_name,
 	conn_.player_name = player_name_;
 }
 
+bool JoinerConnection::set_integrity_challenge_profile(std::string_view id) {
+	integrity_challenge_profile_ = find_integrity_challenge_profile(id);
+	return integrity_challenge_profile_ != nullptr;
+}
+
 std::vector<uint8_t> JoinerConnection::start() {
 	conn_.client_scrk = make_dev_scrk();
 	// Fresh per-connection numeric key, like the per-connection key material
@@ -273,23 +280,29 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_send_clock_armed_ = false;
 	session_ack_pending_ = false;
 	pending_spawn_menu_request_ = false;
-	empty_slot_sweep_requested_ = false;
+	spawn_ack_timestamp_ = 0;
+	world_state_completion_sent_ = false;
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
 	player_list_seen_ = false;
 	deployment_policy_seen_ = false;
 	deployment_pick_required_ = false;
 	initial_loadout_grant_count_ = 0;
+	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
 	deployment_reply_seen_ = false;
 	has_self_handle_ = false;
 	self_handle_ = 0;
+	max_player_slot_ = 0;
 	spawn_ = SelfSpawn{};
 	assigned_team_ = 0; // re-latched from the fresh session's S2C 0x04 (the kit seam persists);
 	                    // zero like retail's byte_A85B48 until the assignment arrives
+	class_allow_mask_ = 0x03FFu; // replaced by the fresh session's S2C 0x76
 	current_player_class_ = 0;
 	mission_known_ = false;
+	mission_header_bytes_.clear();
+	reset_terrain_load();
 	server_name_.clear();
 	mission_name_.clear();
 	map_file_.clear();
@@ -298,6 +311,8 @@ std::vector<uint8_t> JoinerConnection::start() {
 	game_type_ = 0;
 	last_error_.clear();
 	host_disconnect_reason_.clear();
+	in_match_session_established_ = false;
+	silence_timeout_latched_ = false;
 	phase_ = Phase::Hello;
 	// Arm the receive clock at connect: the reap window is measured from the moment
 	// this connection started expecting traffic, not from the first reply.
@@ -384,6 +399,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
+	if (poll_session_loss() || phase_ == Phase::Error) return {};
 	// Joiner C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK
 	// (ServerAuth.sk, the peer's local_key). Shared seq/ack framing (ADR 0013).
 	std::vector<uint8_t> body;
@@ -397,32 +413,57 @@ std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolM
 	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body));
 }
 
-std::vector<std::vector<uint8_t>> JoinerConnection::frame_messages(
+JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 		const std::vector<ProtocolMessage> &messages,
 		std::size_t max_packet_body_bytes) {
-	std::vector<std::vector<uint8_t>> out;
-	if (messages.empty() || max_packet_body_bytes <= PROTOCOL_PACKET_HEADER_SIZE) return out;
+	FrameMessagesResult result;
+	if (poll_session_loss() || phase_ == Phase::Error) return result;
+	result.admitted_count = session_outbound_message_prefix_count(
+			conn_.seq, messages.size());
+	if (result.admitted_count == 0) return result;
+	if (max_packet_body_bytes <= PROTOCOL_PACKET_HEADER_SIZE) {
+		result.frame_failed = true;
+		return result;
+	}
 	std::vector<ProtocolMessage> packet;
 	std::size_t packet_bytes = PROTOCOL_PACKET_HEADER_SIZE;
 	auto flush = [&] {
-		if (packet.empty()) return;
+		if (packet.empty()) return true;
 		std::vector<uint8_t> datagram = frame_session(packet);
-		if (!datagram.empty()) out.push_back(std::move(datagram));
+		if (datagram.empty()) return false;
+		result.framed_count += packet.size();
+		result.datagrams.push_back(std::move(datagram));
 		packet.clear();
 		packet_bytes = PROTOCOL_PACKET_HEADER_SIZE;
+		return true;
 	};
-	for (const ProtocolMessage &message : messages) {
+	for (std::size_t i = 0; i < result.admitted_count; ++i) {
+		const ProtocolMessage &message = messages[i];
 		std::vector<uint8_t> encoded;
-		if (!encode_protocol_messages({message}, encoded)) continue;
-		if (!packet.empty() && packet_bytes + encoded.size() > max_packet_body_bytes)
-			flush();
+		if (!encode_protocol_messages({message}, encoded)) {
+			(void)flush();
+			result.frame_failed = true;
+			return result;
+		}
+		if (!packet.empty() &&
+				packet_bytes + encoded.size() > max_packet_body_bytes &&
+				!flush()) {
+			result.frame_failed = true;
+			return result;
+		}
 		// A single oversized semantic record is left intact. Fragmentation belongs at the
 		// ProtocolMessage producer seam; splitting its payload here would change its flags.
 		packet.push_back(message);
 		packet_bytes += encoded.size();
 	}
-	flush();
-	return out;
+	if (!flush()) result.frame_failed = true;
+	return result;
+}
+
+std::vector<std::vector<uint8_t>> JoinerConnection::frame_messages(
+		const std::vector<ProtocolMessage> &messages,
+		std::size_t max_packet_body_bytes) {
+	return frame_messages_detailed(messages, max_packet_body_bytes).datagrams;
 }
 
 ProtocolMessage JoinerConnection::make_loaded_model_page_reply(
@@ -440,7 +481,13 @@ ProtocolMessage JoinerConnection::make_loaded_model_page_reply(
 						static_cast<uint8_t>((index >> shift) & 0xFFu));
 		}
 	}
-	return make_protocol_message(c2s::LOADED_MODEL_PAGE_REPLY, std::move(page));
+	ProtocolMessage reply =
+			make_protocol_message(c2s::LOADED_MODEL_PAGE_REPLY, std::move(page));
+	// Retail queues this producer with userParam=1, so the page is present on
+	// its first physical send but is removed before NACK replay.
+	// [orig: NapiNPClientMsg_0x068 @0x42DAA0, queue @0x42DAE5]
+	reply.reliable = false;
+	return reply;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence) {
@@ -457,6 +504,7 @@ std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence)
 
 JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
 	PollResult out;
+	if (poll_session_loss() || phase_ == Phase::Error) return out;
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	if (!nw_decode_inbound(raw, len, opcode, body)) {
@@ -536,10 +584,92 @@ void JoinerConnection::on_server_auth(
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	session_ack_pending_ = false;
+	s2c_reassembly_ = {};
 	// Retail first sends a sequenced settings packet after 0x82. Its receipt drives the header-only
 	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01. This remains active
 	// while the binding holds world_ready_ false so a joiner can discover what it must load.
 	post_auth_stage_ = PostAuthStage::AwaitServerSettings;
+}
+
+void JoinerConnection::reset_terrain_load() {
+	terrain_til_state_ = TerrainTilState::Absent;
+	terrain_til_staging_.clear();
+	terrain_tile_count_ = 0;
+	terrain_next_index_ = 0;
+	terrain_til_bytes_.clear();
+}
+
+void JoinerConnection::invalidate_terrain_load() {
+	terrain_til_state_ = TerrainTilState::Invalid;
+	terrain_til_staging_.clear();
+	terrain_tile_count_ = 0;
+	terrain_next_index_ = 0;
+	terrain_til_bytes_.clear();
+}
+
+void JoinerConnection::retain_terrain_load_page(
+		const std::vector<uint8_t> &body) {
+	if (terrain_til_state_ == TerrainTilState::Invalid) return;
+	if (terrain_til_state_ == TerrainTilState::Complete) {
+		invalidate_terrain_load();
+		return;
+	}
+	TerrainLoadBatch batch;
+	if (!decode_terrain_load_batch(body.data(), body.size(), batch)) {
+		invalidate_terrain_load();
+		return;
+	}
+
+	// The canonical retail writer advances a signed 16-bit cursor. Enforcing its
+	// exact contiguous output shape rejects gaps/overlaps that retail's trusting
+	// reader would otherwise overwrite, without changing valid-host behavior.
+	// [orig: serialize_terrain_tiles @0x6080F0]
+	constexpr uint32_t kMaxTileCount =
+			static_cast<uint32_t>(std::numeric_limits<int16_t>::max());
+	if (batch.has_header) {
+		if (terrain_til_state_ != TerrainTilState::Absent ||
+				batch.tile_count == 0 || batch.tile_count > kMaxTileCount ||
+				batch.start_index != 0 || batch.end_index == 0 ||
+				batch.end_index > batch.tile_count) {
+			invalidate_terrain_load();
+			return;
+		}
+
+		terrain_til_staging_.assign(
+				16u + 12u * static_cast<std::size_t>(batch.tile_count), 0u);
+		// Preserve all 16 header bytes exactly as sent. In particular hdr2/hdr3
+		// are opaque file bytes; reconstructing them from decoded integers would
+		// introduce an unnecessary normalization seam.
+		std::copy(body.begin() + 4, body.begin() + 20,
+				terrain_til_staging_.begin());
+		terrain_tile_count_ = batch.tile_count;
+		terrain_next_index_ = 0;
+		terrain_til_bytes_.clear();
+	} else {
+		if (terrain_til_state_ != TerrainTilState::Receiving ||
+				batch.start_index != terrain_next_index_ ||
+				batch.end_index <= batch.start_index ||
+				batch.end_index > terrain_tile_count_) {
+			invalidate_terrain_load();
+			return;
+		}
+	}
+
+	const std::size_t source_offset = batch.has_header ? 20u : 4u;
+	const std::size_t record_count =
+			static_cast<std::size_t>(batch.end_index - batch.start_index);
+	std::copy(body.begin() + static_cast<std::ptrdiff_t>(source_offset),
+			body.begin() + static_cast<std::ptrdiff_t>(
+					source_offset + 12u * record_count),
+			terrain_til_staging_.begin() + static_cast<std::ptrdiff_t>(
+					16u + 12u * batch.start_index));
+	terrain_next_index_ = batch.end_index;
+	if (terrain_next_index_ == terrain_tile_count_) {
+		terrain_til_bytes_ = terrain_til_staging_;
+		terrain_til_state_ = TerrainTilState::Complete;
+	} else {
+		terrain_til_state_ = TerrainTilState::Receiving;
+	}
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
@@ -562,12 +692,47 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			break;
 		}
 	}
+	// Deframing admits physical records in sequence order, including packets
+	// released from a just-closed gap. Fold FIRST/MID/FINAL pieces here, before
+	// either metadata inspection or gameplay dispatch. The semantic record is
+	// associated with the ACK carried by its final containing packet.
+	std::vector<ProtocolMessage> semantic_messages;
 	std::vector<uint32_t> containing_packet_ack;
+	semantic_messages.reserve(messages.size());
 	containing_packet_ack.reserve(messages.size());
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
-		for (std::size_t i = 0; i < packet.messages.size(); ++i)
+		for (const ProtocolMessage &physical : packet.messages) {
+			std::vector<uint8_t> payload;
+			bool was_fragmented = false;
+			if (!reassemble_protocol_payload(
+						s2c_reassembly_, physical, payload, &was_fragmented))
+				continue;
+			if (!was_fragmented) {
+				semantic_messages.push_back(physical);
+			} else {
+				// Fragment and physical-length bits do not belong to the
+				// reassembled semantic record. Preserve dispatch-table and skip
+				// metadata, then choose the appropriate completed-body length form.
+				constexpr uint8_t kSemanticFlagMask =
+						PROTOCOL_MSG_FLAG_SETTINGS_UPDATE |
+						PROTOCOL_MSG_FLAG_SKIP1 | PROTOCOL_MSG_FLAG_SKIP2 | 0x01u;
+				uint8_t semantic_flags =
+						static_cast<uint8_t>(physical.flags.raw & kSemanticFlagMask);
+				if (!payload.empty()) {
+					semantic_flags = static_cast<uint8_t>(
+							semantic_flags |
+							(payload.size() > 0xFFu ? PROTOCOL_MSG_FLAG_LEN16
+							                          : PROTOCOL_MSG_FLAG_LEN8));
+				}
+				ProtocolMessage semantic = make_protocol_message(
+						physical.tag, std::move(payload), semantic_flags);
+				semantic.skip_bytes = physical.skip_bytes;
+				semantic_messages.push_back(std::move(semantic));
+			}
 			containing_packet_ack.push_back(packet.header.ack_count);
+		}
 	}
+	messages = std::move(semantic_messages);
 	if (containing_packet_ack.size() != messages.size())
 		containing_packet_ack.assign(messages.size(), hdr.ack_count);
 	std::vector<ProtocolMessage> periodic_replies;
@@ -596,12 +761,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			deployment_pick_required_ = (m.payload[22] & 0x01u) != 0;
 		}
 	}
-	auto release_deployment = [&] {
+	auto release_deployment = [&](bool deployment_complete) {
+		const bool release_edge = !deployment_reply_seen_;
 		deployment_reply_seen_ = true;
-		if (has_self_handle_ && phase_ != Phase::InMatch) {
-			phase_ = Phase::InMatch;
+		if (deployment_complete)
 			post_auth_stage_ = PostAuthStage::Complete;
-			out.reached_in_match = true;
+		if (has_self_handle_) {
+			const bool entered_in_match = phase_ != Phase::InMatch;
+			phase_ = Phase::InMatch;
+			in_match_session_established_ = true;
+			// Multiple release conditions can fold into one datagram. Preserve an
+			// earlier name-match/release edge instead of overwriting it with a later
+			// idempotent UI-completion call.
+			out.reached_in_match =
+					out.reached_in_match || entered_in_match || release_edge;
 		}
 	};
 	auto enter_initial_sync_tail = [&] {
@@ -627,7 +800,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// good on OUR side: the preload re-mounts the resource root onto this expansion and
 		// ABORTS the join when it is not installed, rather than entering the world with a
 		// different ADM index space than the host (D-NET-178).
-		out.outbound.push_back(frame_inner(
+		out.outbound.push_back(frame_inner_pending(
 				0x00, build_join_request(advertised_expansion_)));
 		post_auth_stage_ = PostAuthStage::AwaitJoinAck;
 	}
@@ -643,6 +816,22 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			DisconnectEvent event;
 			if (parse_disconnect_event(
 					m.payload.data(), m.payload.size(), event)) {
+				// An active retail client records the description, marks its NP
+				// connection pending-disconnect, and drives the ordinary teardown:
+				// four identical keyed ClientGoodbye datagrams for the JO template.
+				// Queue them before fail() makes this runtime terminal so a retail
+				// host can release the player immediately instead of waiting for its
+				// 120-second receive timeout.
+				// [orig: HandleDescriptionPacket @0x621D53..0x621D6B ->
+				// TeardownActiveConnection @0x6253C0]
+				// Teardown owns this receive result. Admission ACK/JOIN traffic and
+				// metadata discovered earlier in the same physical packet must not
+				// precede or survive the terminal goodbye burst.
+				out = PollResult{};
+				std::vector<std::vector<uint8_t>> goodbye = disconnect();
+				out.outbound.insert(out.outbound.end(),
+						std::make_move_iterator(goodbye.begin()),
+						std::make_move_iterator(goodbye.end()));
 				on_host_disconnect(event);
 				return; // the session is closed; nothing later in this packet applies
 			}
@@ -653,10 +842,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
 		// ensures a 0x39 before a same-packet 0x5A still sees the prior class.
+		bool valid_weapon_loadout = false;
 		if (m.tag == s2c::WEAPON_LOADOUT) {
 			WeaponLoadout loadout;
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
+				valid_weapon_loadout = true;
+				// The handler's tail clears dword_81474C for every valid apply,
+				// including a loadout echo unrelated to deploy-UI completion.
+				out.gameplay_release_applied = true;
 				current_player_class_ = loadout.avatar_class;
 			}
 		}
@@ -665,7 +859,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// Golden retail frames 9-11: acknowledge S2C 0x00 with a header-only sequence, then post
 			// the one-byte zero form body. An empty 0x01 is not accepted by the retail host FSM.
 			out.outbound.push_back(frame_session({}));
-			out.outbound.push_back(frame_inner(0x01, {0x00}));
+			out.outbound.push_back(frame_inner_pending(0x01, {0x00}));
 			post_auth_stage_ = PostAuthStage::AwaitPaddingProbe;
 		} else if (m.tag == s2c::JOIN_PADDING_PROBE &&
 		           post_auth_stage_ == PostAuthStage::AwaitPaddingProbe) {
@@ -676,7 +870,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// The retail builder always produces at least the three-dword prefix, so the echo
 				// always ships and the stage always advances — a small or zero padding_len must not
 				// wedge the FSM here.
-				out.outbound.push_back(frame_inner(
+				out.outbound.push_back(frame_inner_pending(
 						0x02, build_join_padding_echo(probe, net_frame_counter_)));
 				post_auth_stage_ = PostAuthStage::AwaitGameStart;
 			}
@@ -684,7 +878,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		           post_auth_stage_ == PostAuthStage::AwaitGameStart &&
 		           !m.payload.empty() && m.payload[0] != 0) {
 			// Golden frame 17: the game-start flag completes verification with ONE grouped C2S
-			// packet. This exchange runs before local mission loading; 0x48 echoes ServerAuth.MI.
+			// packet. This exchange runs before wire-header world construction; 0x48 echoes ServerAuth.MI.
 			out.outbound.push_back(frame_session({
 					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
 					make_protocol_message(c2s::SET_PLAYER_VALUE, std::vector<uint8_t>(4, 0)),
@@ -701,13 +895,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				if (!chunk.is_final()) {
 					const uint32_t next_offset = static_cast<uint32_t>(
 							uint64_t(chunk.chunk_offset) + chunk.chunk_size);
-					out.outbound.push_back(frame_inner(
+					out.outbound.push_back(frame_inner_pending(
 							0x33, le32_pair(chunk.transfer_id, next_offset)));
 				} else {
 					// Golden frames 19-20 are separate packets: state re-broadcast, then the
 					// initial eight-zero mission-data request.
-					out.outbound.push_back(frame_inner(0x47, {}));
-					out.outbound.push_back(frame_inner(
+					out.outbound.push_back(frame_inner_pending(0x47, {}));
+					out.outbound.push_back(frame_inner_pending(
 							0x37, std::vector<uint8_t>(8, 0)));
 					post_auth_stage_ = PostAuthStage::AwaitMissionData;
 				}
@@ -720,7 +914,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				if (!chunk.is_final()) {
 					const uint32_t next_offset = static_cast<uint32_t>(
 							uint64_t(chunk.chunk_offset) + chunk.chunk_size);
-					out.outbound.push_back(frame_inner(
+					out.outbound.push_back(frame_inner_pending(
 							0x37, le32_pair(chunk.transfer_id, next_offset)));
 				} else {
 					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
@@ -751,6 +945,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					enter_initial_sync_tail();
 				}
 			}
+		} else if (m.tag == s2c::BMS_HEADER) {
+			// Retail memcpy's the received 0x268-byte block verbatim. Retain the
+			// exact body rather than parsing/re-encoding it: ignored/padding bytes
+			// remain authoritative inputs to the later terrain/environment load.
+			// Short or long bodies are not a complete header and cannot replace a
+			// previously accepted one.
+			// [orig: NapiNPClientMsg_0x00B @0x422660]
+			if (m.payload.size() == opennova::bms::kHeaderSize)
+				mission_header_bytes_ = m.payload;
 		} else if (m.tag == s2c::SESSION_CONFIG) {
 			// Our initial-state burst carries the same g_GameType in the fixed
 			// session-config block before any live frame. Retail keeps this equal
@@ -758,6 +961,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			SessionConfig config;
 			if (decode_session_config(m.payload.data(), m.payload.size(), config))
 				game_type_ = static_cast<uint32_t>(config.fields[3]);
+		} else if (m.tag == s2c::CLASS_ALLOW_MASK) {
+			// Retail's handler reads exactly one little-endian word and clears the
+			// global to zero when the packet is too short.
+			// [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540]
+			class_allow_mask_ = m.payload.size() >= 2
+					? static_cast<uint16_t>(m.payload[0]) |
+						  (static_cast<uint16_t>(m.payload[1]) << 8)
+					: 0u;
 		} else if (m.tag == s2c::FULL_PLAYER_INFO) {
 			// The retail post-auth source of truth for the session the joiner is about to load.
 			FullPlayerInfo info;
@@ -769,9 +980,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				expansion_ = std::move(info.game_name);
 				mission_known_ = true;
 			}
+		} else if (m.tag == s2c::TERRAIN_LOAD) {
+			retain_terrain_load_page(m.payload);
 		} else if (m.tag == s2c::ENTITY_SPAWN_BATCH) {
 			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
-			// batch to the NetClientView (below) so every other organic upserts too.
+			// batch to the ClientReplicaPipeline (below) so every other organic upserts too.
 			OrganicSpawnBatch batch;
 			if (decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch)) {
 				for (const OrganicSpawnRecord &rec : batch.records) {
@@ -802,11 +1015,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					spawn_.item_type_id = rec.item_type_id;
 					spawn_.anim_slot = rec.anim_slot;
 					spawn_.net_id = rec.net_id;
-					// Retail learns H during the world stream but does not deploy/uplink yet.
-					// Only the post-0x0E 0x5A releases that separate boundary.
+					// Retail learns H independently of the uplink hold and deploy-screen
+					// stage. An initial 0x5A may already have opened gameplay while a
+					// spawn-zone pick remains pending; preserve that UI stage here.
 					if (deployment_reply_seen_ && phase_ != Phase::InMatch) {
 						phase_ = Phase::InMatch;
-						post_auth_stage_ = PostAuthStage::Complete;
+						in_match_session_established_ = true;
 						out.reached_in_match = true;
 					}
 				}
@@ -814,7 +1028,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
 			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
-			// pool-3 markers. Surface raw for the caller's NetClientView to upsert.
+			// pool-3 markers. Surface raw for the caller's ClientReplicaPipeline to upsert.
 			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
@@ -831,8 +1045,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// read as SLOT 0 — the host's own — see nova_simulation's hit_part builder.
 			if (m.payload.size() >= 24) {
 				local_player_slot_ = m.payload[17];
+				max_player_slot_ = m.payload[18];
 				assigned_team_ = m.payload[23];
 			}
+		} else if (m.tag == s2c::SPECTATOR_FLAGS) {
+			// Despite the historical catalog name, byte 1 is the live player-slot
+			// team. Retail overwrites the same byte_A85B48 latch installed by
+			// 0x04, and its subsequent 0x2F copies this value verbatim.
+			// [orig: sub_510890 @0x510890 writes playerSlot+416;
+			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
+			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {
 			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48
 			// team latch (the S2C 0x04 tail is the first). The host emits it for any
@@ -851,6 +1073,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					assign_consumed) &&
 			    world::EntityHandle{assign.entity_handle}.valid() &&
 			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				// Retail's header gates: not the 0xFFFF sentinel, and the pool
 				// nibble must address one of the five entity pools.
 				out.entity_team_assigns.emplace_back(
@@ -897,6 +1120,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			DestroyEntityList destroy_list;
 			if (decode_destroy_entity_list(
 					m.payload.data(), m.payload.size(), destroy_list)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				for (uint16_t index : destroy_list.pool0_indices)
 					out.destroyed_pool0_slots.push_back(index);
 			}
@@ -910,19 +1134,61 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// per-entity removal channel).
 			// [orig: NapiNPClientMsg_PlayerSync @0x431370 @0x431411..0x43144c]
 			PlayerSync sync;
-			if (decode_player_sync(m.payload.data(), m.payload.size(), sync) &&
-			    sync.removal) {
-				out.cleared_player_slots.push_back(sync.slot_id);
+			if (decode_player_sync(m.payload.data(), m.payload.size(), sync)) {
+				if (sync.removal)
+					out.cleared_player_slots.push_back(sync.slot_id);
+				// Bit 0x4000 is the ACK-driven roster cursor. Retail advances
+				// through EMPTY rows too and treats the 0x04 capacity byte as an
+				// inclusive final slot: max=4 requests 0,1,2,3,4, then stops.
+				// Every continuation uses the fixed 0x5CF7 field mask.
+				// [orig: NapiNPClientMsg_PlayerSync @0x431370 tail;
+				//  golden retail-to-retail f190/193/196/198/200]
+				if (sync.queue_ack && sync.slot_id < max_player_slot_) {
+					periodic_replies.push_back(make_protocol_message(
+							c2s::PLAYER_SYNC_REQUEST,
+							{static_cast<uint8_t>(sync.slot_id + 1), 0xF7, 0x5C}));
+				}
 			}
-		} else if (m.tag == s2c::WORLD_STATE_LOAD && !empty_slot_sweep_requested_) {
-			// The world-state-load reply burst (§5.29). Retail queues C2S
-			// 0x28/0x29/0x2D/0x32 here; the 0x32 leg is what makes the host answer
-			// S2C 0x5D with its empty pool-0 slots, so a joiner that never asks can
-			// never clear a stale entity. The other three burst members remain unsent
-			// (D-NET-176 residual).
-			// [orig: NapiNPClientMsg_0x00F @0x42e647]
-			empty_slot_sweep_requested_ = true;
-			periodic_replies.push_back(make_protocol_message(c2s::EMPTY_SLOT_SWEEP_REQUEST, {}));
+		} else if (m.tag == s2c::SPAWN_ACK_TIMESTAMP) {
+			// This is not merely an acknowledgement: retail carries the scalar into
+			// dword 0 of its later C2S 0x28 world-completion loadout request. A body
+			// of any size other than four clears the retained value.
+			// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]
+			spawn_ack_timestamp_ = 0;
+			if (m.payload.size() == sizeof(uint32_t)) {
+				std::size_t consumed = 0;
+				decode_u32_scalar(m.payload.data(), m.payload.size(),
+						spawn_ack_timestamp_, consumed);
+			}
+		} else if (m.tag == s2c::WORLD_STATE_LOAD && !world_state_completion_sent_) {
+			// Retail's exact post-world completion burst. C2S 0x28 is
+			// [S19 timestamp][S0F session tick][u16 0]; the remaining bodies and
+			// order are fixed. Besides requesting the 0x5D empty-slot sweep, the
+			// 0x22/0x23 legs make the host return the full player rows used to bind
+			// the newly admitted local player.
+			// [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab; queues exact order
+			//  0x28,0x29,0x2D,0x32,0x22,0x23]
+			uint32_t world_state_tick = 0;
+			std::size_t consumed = 0;
+			decode_u32_scalar(m.payload.data(), m.payload.size(),
+					world_state_tick, consumed);
+			std::vector<uint8_t> loadout_request =
+					le32_pair(spawn_ack_timestamp_, world_state_tick);
+			loadout_request.push_back(0);
+			loadout_request.push_back(0);
+
+			periodic_replies.push_back(make_protocol_message(
+					c2s::LOADOUT_REQUEST, std::move(loadout_request)));
+			periodic_replies.push_back(make_protocol_message(
+					c2s::TEAM_SPAWN_ACK, {0x00, 0x00}));
+			periodic_replies.push_back(make_protocol_message(c2s::BURST_MEMBER_2D, {}));
+			periodic_replies.push_back(make_protocol_message(
+					c2s::EMPTY_SLOT_SWEEP_REQUEST, {}));
+			periodic_replies.push_back(make_protocol_message(
+					c2s::PLAYER_SYNC_REQUEST, {0x00, 0xF7, 0x5C}));
+			periodic_replies.push_back(make_protocol_message(
+					c2s::VISIBLE_PLAYERS_REQUEST, {}));
+			world_state_completion_sent_ = true;
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
 		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
 			// The world-stream terminator releases retail's loadout/status submission: the SAME
@@ -953,8 +1219,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    consumed == m.payload.size() && sample.echo_flag != 0) {
 				std::vector<uint8_t> pong = le32_value(sample.timestamp);
 				pong.push_back(0);
-				periodic_replies.push_back(
-						make_protocol_message(c2s::RTT_CONSUMED, std::move(pong)));
+				ProtocolMessage reply =
+						make_protocol_message(c2s::RTT_CONSUMED, std::move(pong));
+				// The reactive pong uses the same one-send queue parameter as the
+				// per-frame RTT producer: userParam=1, not retained reliability.
+				// [orig: NapiNPClientMsg_0x057_RTT @0x432210, queue @0x43226D]
+				reply.reliable = false;
+				periodic_replies.push_back(std::move(reply));
 			}
 		} else if (m.tag == s2c::CHARATTR_PROPERTY_CLEAR) {
 			// Session-option mutation of the boot charattr table. A short body
@@ -1011,17 +1282,42 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  @0x42afb0 — the 42 arm @0x42afcc, AnimDef_ComputeChecksum @0x541ef0,
 			//  WeaponSlotDef_ComputeSanitizedChecksum @0x53f8f0]
 			//
-			// DELIBERATELY NOT ANSWERED until that image exists. A value we cannot compute
-			// can only ever MISMATCH, and a mismatch is the one thing this challenge
-			// punishes: the host recomputes the checksum itself and disconnects on a
-			// difference [orig: handle_anti_cheat_crc_check @0x502050 — the compare and its
-			// "PUNT ACRC" arm], while a challenge that is never answered is not punished at
-			// all (the strike counter it would otherwise clear lives on the 0x1C path).
-			// Witnessed live 2026-07-26 against a stock retail co-op host: a single C2S
-			// 0x20 carrying the nothing-loaded placeholder drew an immediate punt
-			// (DC=2, DPC=46, "PUNT ACRC") on a client that had been joining cleanly for
-			// weeks while silent. Silence is the SAFE divergence here (D-NET-181).
-			(void)m;
+			// The default remains deliberately silent: a guessed value can only mismatch,
+			// and the host punts on a difference [orig:
+			// handle_anti_cheat_crc_check @0x502050, "PUNT ACRC"]. A named profile may
+			// answer only sources independently reproduced from that exact retail corpus.
+			// Uncovered individual ADM rows remain silent. This preserves the 2026-07-26
+			// live safety witness while allowing the revx02 table CRC proved on 2026-08-01
+			// (D-NET-181; net-re section 5.65).
+			EntityChecksumRequest request;
+			std::size_t consumed = 0;
+			if (integrity_challenge_profile_ != nullptr &&
+			    decode_entity_checksum_request(m.payload.data(), m.payload.size(),
+					request, consumed) &&
+			    consumed == m.payload.size()) {
+				uint32_t source_crc = 0;
+				bool source_witnessed = false;
+				if (request.entity_id == 0xFFu) {
+					// The nonzero-challenge branch is a literal retail
+					// short-circuit and never reads the ADM table.
+					source_crc = request.checksum != 0
+							? 42u
+							: integrity_challenge_profile_->weapon_slot_table_crc;
+					source_witnessed = true;
+				} else {
+					source_witnessed = integrity_challenge_profile_->
+							find_animation_definition_crc(
+									request.entity_id, source_crc);
+				}
+				if (source_witnessed) {
+					std::vector<uint8_t> body{request.entity_id};
+					const std::vector<uint8_t> value = le32_value(
+							static_cast<uint32_t>(request.checksum) ^ source_crc);
+					body.insert(body.end(), value.begin(), value.end());
+					periodic_replies.push_back(make_protocol_message(
+							c2s::ENTITY_CHECKSUM_REPLY, std::move(body)));
+				}
+			}
 		} else if (m.tag == s2c::LOADOUT_CRC_REQ) {
 			// Anti-cheat AMMO-DEFINITION CRC challenge. The reply is one 9-byte C2S 0x21:
 			// [u8 echoed index][u32 crc][u32 echoed key]. Retail CRCs the indexed 276-byte
@@ -1036,18 +1332,42 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  out-of-range arm @0x42b114, the key echo @0x42b14d]
 			LoadoutCrcRequest crc_request;
 			std::size_t crc_consumed = 0;
-			decode_loadout_crc_request(m.payload.data(), m.payload.size(),
-					crc_request, crc_consumed);
-			// DELIBERATELY NOT ANSWERED, for the same reason as 0x30 above. The host
-			// recomputes this one itself — `handle_anti_cheat_crc_check @0x502050` zeroes
-			// the six volatile dwords of ITS `g_ammoDefTable[276 * index]`, runs
-			// `CRC_ComputeCustomTable(record, 276) @0x53c820`, XORs the per-player key at
-			// `playerCtx + 89924` and compares. A placeholder can only ever mismatch, and
-			// the mismatch arm disconnects ("PUNT WCRC" was the live 2026-07-26 result of
-			// sending one). Answering honestly requires building retail's 276-byte ammo
-			// record image from our parsed ammo.def, which we do not model yet
-			// (D-NET-181) — until then silence, which the host does not punish.
-			(void)crc_request;
+			// As above, no profile means silence and an uncovered in-range record stays
+			// silent. A selected profile may answer only CRCs reproduced from retail's
+			// sanitized 276-byte record image. The independently witnessed table count also
+			// permits retail's exact out-of-range zero arm; neither case invents a CRC
+			// (D-NET-181; net-re section 5.65).
+			if (integrity_challenge_profile_ != nullptr &&
+			    decode_loadout_crc_request(m.payload.data(), m.payload.size(),
+					crc_request, crc_consumed) &&
+			    crc_consumed == m.payload.size()) {
+				uint32_t reply_crc = 0;
+				bool source_witnessed = false;
+				if (crc_request.ammo_index >=
+				    integrity_challenge_profile_->ammo_definition_count) {
+					// Retail writes literal zero here, not xor_key ^ 0.
+					source_witnessed = true;
+				} else {
+					uint32_t source_crc = 0;
+					source_witnessed = integrity_challenge_profile_->
+							find_ammo_definition_crc(
+									crc_request.ammo_index, source_crc);
+					if (source_witnessed) {
+						reply_crc = static_cast<uint32_t>(crc_request.xor_key) ^
+								source_crc;
+					}
+				}
+				if (source_witnessed) {
+					std::vector<uint8_t> body{crc_request.ammo_index};
+					const std::vector<uint8_t> crc_bytes = le32_value(reply_crc);
+					const std::vector<uint8_t> key_bytes =
+							le32_value(crc_request.xor_key);
+					body.insert(body.end(), crc_bytes.begin(), crc_bytes.end());
+					body.insert(body.end(), key_bytes.begin(), key_bytes.end());
+					periodic_replies.push_back(make_protocol_message(
+							c2s::CHECKSUM_REPLY, std::move(body)));
+				}
+			}
 		} else if (m.tag == s2c::LOADED_MODEL_PAGE_REQUEST) {
 			// Loaded-model index-page request. The reply is C2S 0x3D, whose body the host
 			// never parses (its handler ignores data/dataLen and only stores a global
@@ -1107,24 +1427,25 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			decode_tick_seed(m.payload.data(), m.payload.size(), out.tick_seed);
 			out.tick_seed_set = true;
 		} else if (m.tag == s2c::PER_FRAME_UPDATE) {
-			// Per-frame world snapshot — surface for the caller's NetClientView.
+			// Per-frame world snapshot — surface for the caller's ClientReplicaPipeline.
 			out.inbound_0a.push_back(m.payload);
-		} else if (m.tag == s2c::WEAPON_LOADOUT &&
+		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
-			// Retail grants both submitted profile-side loadouts before it can
-			// process the deployment pick. Persist the count across packet
-			// boundaries; waiting for both also prevents a lost/retransmitted
-			// second grant from being mistaken for the post-pick release.
+			// Every valid retail 0x5A apply clears dword_81474C immediately,
+			// independently from the deploy screen becoming pick-ready. Retain
+			// the pair count only for that later UI/pick transition.
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
 			if (initial_loadout_grant_count_ < 2)
 				++initial_loadout_grant_count_;
-		} else if (m.tag == s2c::WEAPON_LOADOUT &&
+			release_deployment(/*deployment_complete=*/false);
+		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployRelease) {
 			// A split second grant may arrive after we have queued the deploy
 			// pick. Only a packet that cumulatively ACKs the C2S 0x0E can be its
 			// causal post-pick release.
 			if (deployment_pick_sent_ &&
 			    packet_ack >= deployment_pick_sequence_) {
-				release_deployment();
+				release_deployment(/*deployment_complete=*/true);
 			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
@@ -1158,7 +1479,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				pending_spawn_menu_request_ = true;
 			}
 			if (pending_spawn_menu_request_ && world_ready_) {
-				out.outbound.push_back(frame_inner(0x0A, {}));
+				out.outbound.push_back(frame_inner_pending(0x0A, {}));
 				pending_spawn_menu_request_ = false;
 				post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
 			}
@@ -1170,28 +1491,33 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	if (admission.admitted && initial_loadout_grant_count_ >= 2 &&
 	    deployment_policy_seen_ &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
+		initial_admission_complete_ = true;
 		if (deployment_pick_required_) {
 			if (player_paced_deployment_) {
-				// The binding shows the deploy-map screen and sends the player's
-				// pick via frame_deployment_pick; the host keeps this player
-				// hidden/respawn-pending meanwhile (0x0A flags1 bit1, §5.61).
+				// The binding shows the deploy-map screen and sends the player's pick
+				// via frame_deployment_pick. Retail's initial 0x5A grants have already
+				// cleared the independent dword_81474C uplink hold, even though the host
+				// keeps this player hidden/respawn-pending (0x0A flags1 bit1, §5.61).
 				post_auth_stage_ = PostAuthStage::AwaitDeployPick;
+				release_deployment(/*deployment_complete=*/false);
 			} else {
 				// Headless auto-answer: retail's parameter-0 deploy-map pick is the
 				// signed handle 0xFFFF (the DEATH list's Default Spawn row 0).
 				deployment_pick_sequence_ = conn_.seq.next_outbound_seq;
 				std::vector<uint8_t> deploy_pick =
-						frame_inner(0x0E, {0xFF, 0xFF});
+						frame_inner_pending(0x0E, {0xFF, 0xFF});
 				if (!deploy_pick.empty()) {
 					out.outbound.push_back(std::move(deploy_pick));
 					deployment_pick_sent_ = true;
+					deployment_reply_seen_ = false;
+					out.gameplay_hold_rearmed = true;
 					post_auth_stage_ = PostAuthStage::AwaitDeployRelease;
 				}
 			}
 		} else {
 			// No spawn-zone/deploy screen exists; the initial grant is also
 			// the final deployment reply.
-			release_deployment();
+			release_deployment(/*deployment_complete=*/true);
 		}
 	}
 	// If none of the handlers produced a substantive reply, carry this packet's ACK to the send
@@ -1220,6 +1546,7 @@ void JoinerConnection::on_server_resend_list(
 
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
+	if (poll_session_loss() || phase_ == Phase::Error) return out;
 	// [orig: NetClient_HandleGameEnd @0x424752 increments @0xA822A4 once per client net pump]
 	++net_frame_counter_;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
@@ -1292,7 +1619,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	// load hold, release its empty C2S 0x0A world-stream request as soon as the binding reports that
 	// the advertised mission has been installed.
 	if (pending_spawn_menu_request_ && world_ready_) {
-		out.push_back(frame_inner(0x0A, {}));
+		// Remains inside ClientRuntime's surrounding logical send boundary.
+		out.push_back(frame_session({make_protocol_message(0x0A, {})}));
 		pending_spawn_menu_request_ = false;
 		post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
 	}
@@ -1333,7 +1661,9 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 std::vector<uint8_t> JoinerConnection::frame_loadout_resubmit() {
 	ProtocolMessage message;
 	if (!prepare_loadout_resubmit(message)) return {};
-	return frame_session({std::move(message)});
+	std::vector<uint8_t> datagram = frame_session({std::move(message)});
+	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+	return datagram;
 }
 
 bool JoinerConnection::prepare_loadout_resubmit(
@@ -1370,7 +1700,9 @@ bool JoinerConnection::prepare_loadout_resubmit(
 std::vector<uint8_t> JoinerConnection::frame_deployment_pick(uint16_t wire_value) {
 	ProtocolMessage message;
 	if (!prepare_deployment_pick(wire_value, message)) return {};
-	return frame_session({std::move(message)});
+	std::vector<uint8_t> datagram = frame_session({std::move(message)});
+	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+	return datagram;
 }
 
 bool JoinerConnection::prepare_deployment_pick(
@@ -1394,6 +1726,10 @@ bool JoinerConnection::prepare_deployment_pick(
 			0x0E, {static_cast<uint8_t>(wire_value & 0xFFu),
 			       static_cast<uint8_t>((wire_value >> 8) & 0xFFu)});
 	deployment_pick_sent_ = true;
+	// Input case 12 re-arms dword_81474C without leaving the established
+	// in-session phase. ClientRuntime closes its separate gameplay gate when the
+	// input action is accepted; the ACK-qualified S2C 0x5A above opens it again.
+	deployment_reply_seen_ = false;
 	post_auth_stage_ = PostAuthStage::AwaitDeployRelease;
 	return true;
 }
@@ -1417,9 +1753,11 @@ bool JoinerConnection::begin_redeployment() {
 
 std::vector<uint8_t> JoinerConnection::frame_stance_change(uint16_t action_id) {
 	if (phase_ != Phase::InMatch) return {};
-	return frame_session({make_protocol_message(
+	std::vector<uint8_t> datagram = frame_session({make_protocol_message(
 			0x1D, {static_cast<uint8_t>(action_id & 0xFFu),
-	               static_cast<uint8_t>((action_id >> 8) & 0xFFu)})});
+		               static_cast<uint8_t>((action_id >> 8) & 0xFFu)})});
+	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+	return datagram;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint16_t type,
@@ -1431,7 +1769,14 @@ std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint1
 	std::vector<uint8_t> payload = encode_entity_packet_sub_header(sub);
 	std::vector<uint8_t> ext = encode_player_extended_uplink(body);
 	payload.insert(payload.end(), ext.begin(), ext.end());
-	return frame_session({make_protocol_message(c2s::ENTITY_UPLINK, std::move(payload))});
+	ProtocolMessage uplink =
+			make_protocol_message(c2s::ENTITY_UPLINK, std::move(payload));
+	// Keep the public replay/golden seam aligned with ClientRuntime's live
+	// producer: both retail call sites pass userParam=1.
+	uplink.reliable = false;
+	std::vector<uint8_t> datagram = frame_session({std::move(uplink)});
+	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
+	return datagram;
 }
 
 void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
@@ -1447,14 +1792,19 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
 	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
 	conn_.seq = make_jo_game_session_sequencing(next_seq, last_ack);
+	s2c_reassembly_ = {};
 	// frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
 	game_type_ = game_type;
+	mission_header_bytes_.clear();
+	reset_terrain_load();
+	class_allow_mask_ = 0x03FFu;
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	post_auth_stage_ = PostAuthStage::Complete;
+	initial_admission_complete_ = true;
 	// A seeded session is mid-stream: anchor the send clock so the empty-interval
 	// keepalive has a valid reference even if this connection never frames anything.
 	session_last_send_ms_ = monotonic_milliseconds_();
@@ -1465,6 +1815,8 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
 	phase_ = Phase::InMatch;
+	in_match_session_established_ = true;
+	silence_timeout_latched_ = false;
 }
 
 uint64_t JoinerConnection::milliseconds_since_last_receive() const {
@@ -1476,11 +1828,13 @@ uint64_t JoinerConnection::milliseconds_since_last_receive() const {
 // The host closed the session on its own terms (docs/net/novaworld-net-re.md §5.64 — the punt
 // families and the captured bytes). Retail's receiver stores the event only when its
 // slot is still empty, so the FIRST record wins and a repeat cannot restate the cause, then it
-// leaves the active state — which tears the connection down. Phase::Error is our terminal state:
-// pump() stops producing keepalives, the deployment sub-state clears so a parked deploy screen
-// stops taking clicks, and the owner's next session-loss read carries the decoded reason.
+// leaves the active state. The receive path queues the ordinary four-packet keyed goodbye burst
+// before Phase::Error becomes terminal; pump() then stops producing keepalives, the deployment
+// sub-state clears so a parked deploy screen stops taking clicks, and the owner's next session-loss
+// read carries the decoded reason.
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 — the store gate @0x621d3c, the
-//  terminal transition @0x621d53..0x621d6b -> CNapiNPConnection_TeardownActiveConnection @0x6253c0]
+//  pending-disconnect transition @0x621d53..0x621d6b ->
+//  CNapiNPConnection_TeardownActiveConnection @0x6253c0]
 void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 	if (!host_disconnect_reason_.empty()) return;
 	// The client's exit-reason switch keys on DPC and only runs for the DC == 2 family; both
@@ -1498,11 +1852,24 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 //  @0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @0x4c63d0, which clears the
 //  session strings and maps the disconnect code onto g_mission_exit_reason]
 bool JoinerConnection::session_lost() const {
-	// An explicit close is terminal at any stage; the silence reap is the in-match fallback
-	// for a host that vanishes without sending one.
-	if (!host_disconnect_reason_.empty()) return true;
-	if (phase_ != Phase::InMatch || !receive_clock_armed_) return false;
-	return milliseconds_since_last_receive() >= JO_GAME_SESSION_TIMEOUT_MS;
+	// An explicit close is terminal at any stage; the silence reap is the
+	// established-session fallback for a host that vanishes without sending one.
+	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
+	if (!in_match_session_established_ || !receive_clock_armed_ ||
+	    (phase_ != Phase::Driving && phase_ != Phase::InMatch)) {
+		return false;
+	}
+	return milliseconds_since_last_receive() > JO_GAME_SESSION_TIMEOUT_MS;
+}
+
+bool JoinerConnection::poll_session_loss() {
+	if (!session_lost()) return false;
+	if (phase_ != Phase::Error) {
+		const std::string reason = session_loss_reason();
+		silence_timeout_latched_ = true;
+		fail(reason);
+	}
+	return true;
 }
 
 std::string JoinerConnection::session_loss_reason() const {
@@ -1510,7 +1877,7 @@ std::string JoinerConnection::session_loss_reason() const {
 	if (!session_lost()) return {};
 	// Retail maps THIRTEEN distinct disconnect codes onto distinct exit reasons
 	// (@0x4c63d0); this is the one cause with no code on the wire at all — silence
-	// past the reap window (D-NET-177 residual).
+	// past the reap window (D-NET-177).
 	return "lost connection to the host (no traffic for " +
 	       std::to_string(JO_GAME_SESSION_TIMEOUT_MS / 1000u) + " seconds)";
 }

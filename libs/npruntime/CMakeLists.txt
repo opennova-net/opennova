@@ -2,7 +2,9 @@ add_library(opennova_npruntime STATIC
     src/server_session.cpp
     src/napi_np_protocol.cpp
     src/server_message_dispatch.cpp
+    src/session_status.cpp
     src/charattr_challenge.cpp
+    src/integrity_challenge_profile.cpp
     src/joiner_connection.cpp
     src/server_spawn.cpp
     src/server_initial_state.cpp
@@ -28,7 +30,7 @@ target_include_directories(opennova_npruntime
 # POD structs) directly (direct-dependency hygiene). No cycle: novaworld does not depend on npruntime.
 # opennova_world is transitive via opennova_netsim; it and mission_format are named explicitly because
 # P3's spawn pipeline + initial-state burst use world::spawn_player / select_player_spawn and
-# bms::encode_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
+# bms::encode_loaded_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
 # opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
 # (D-NET-141); def is a leaf C library — no cycle.
 # opennova_io: header-only strutil (ascii iequals) for the ammo effects-table bake.

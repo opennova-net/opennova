@@ -104,6 +104,38 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 	assert_eq(int(sim.get_wac_state()["runs"]), 0, "restart resets the completed-runs counter")
 
 
+func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
+	var sim := NovaSimulation.new()
+	autofree(sim)
+	sim.build_demo_mission()
+	assert_true(sim.compile_and_set_wac(PackedStringArray([
+		"if never() then inc(v2) endif\n",
+	])))
+	var logic_tick_before := sim.get_logic_tick()
+	assert_true(sim.run_mission_start_wac(), "the authority executes startup WAC immediately")
+	assert_false(sim.run_mission_start_wac(), "startup execution is idempotent per program")
+	assert_eq(sim.get_mission_variable(2), 1)
+	assert_eq(int(sim.get_wac_state()["runs"]), 1)
+	assert_eq(sim.get_logic_tick(), logic_tick_before,
+		"eager WAC consumes no world logic tick")
+	sim.seal_mission_start_baseline()
+
+	for _i in range(61):
+		sim.step()
+	assert_eq(int(sim.get_wac_state()["runs"]), 1)
+	sim.step()
+	assert_eq(int(sim.get_wac_state()["runs"]), 2, "the next WAC run remains tick 62")
+	assert_eq(sim.get_mission_variable(2), 1, "the startup edge does not refire")
+
+	sim.restart()
+	assert_eq(int(sim.get_wac_state()["runs"]), 1, "restart restores the sealed post-eager VM")
+	assert_eq(sim.get_mission_variable(2), 1)
+	for _i in range(62):
+		sim.step()
+	assert_eq(int(sim.get_wac_state()["runs"]), 2)
+	assert_eq(sim.get_mission_variable(2), 1)
+
+
 func test_set_wac_program_survives_a_reload() -> void:
 	var sim := NovaSimulation.new()
 	autofree(sim)

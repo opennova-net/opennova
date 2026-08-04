@@ -12,7 +12,7 @@ const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://engine/world/local_player_presenter.gd")
-
+const RuntimeShutdownScript := preload("res://game/runtime_shutdown_coordinator.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
@@ -102,6 +102,7 @@ var _round_ended := false
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
+var _runtime_shutdown := RuntimeShutdownScript.new()
 
 
 func _init() -> void:
@@ -111,10 +112,11 @@ func _init() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_EXIT_TREE:
-		_render_stats.stop()
+	if _runtime_shutdown.handle_notification(what): _render_stats.stop()
 
 
+func prepare_runtime_shutdown() -> void: _runtime_shutdown.prepare()
+func release_runtime_resources_for_shutdown() -> void: _runtime_shutdown.release_resources()
 ## True from the menu-to-loading handoff until the world reports success or
 ## failure. This is the public shell-level observation seam for load lifecycle
 ## tests and rendered probes (ADR 0018).
@@ -162,8 +164,8 @@ func abort_net_session(reason: String) -> void:
 		return
 	_abort_to_menu("net session entry failed", reason)
 
-
 func _ready() -> void:
+	_runtime_shutdown.install_quit_policy(self, get_tree())
 	if _world == null or _camera == null or _menu_shell == null:
 		return
 	var debug_adapter := get_game_debug_adapter()
@@ -779,8 +781,7 @@ func start_loose_mission(bms_name: String) -> void:
 
 
 ## Graceful cross-process stop seam used by an editor-managed runtime peer.
-func request_quit() -> void:
-	get_tree().quit()
+func request_quit() -> void: _runtime_shutdown.request_quit()
 
 
 ## Public delegate for "join this server" — kept on the shell so lifecycle tests
@@ -881,7 +882,7 @@ func _show_loading_screen(load_info: Dictionary) -> void:
 
 # The joiner's 0x7B session record resolved mid-load: refresh the screen's
 # session text and sidecar background the way retail's connect stream fills
-# the same buffers before its local load [orig: parse_server_session_variables
+# the same buffers before its wire-header world load [orig: parse_server_session_variables
 # @ 0x5202f0 -> the loading-screen title/mission bufs @ 0x51f533/0x51f53a].
 func _on_join_session_identified(info: Dictionary) -> void:
 	if _loading_screen != null and _world_load_pending:
@@ -910,7 +911,7 @@ func _on_world_loaded() -> void:
 	# then reveals the world + HUD at the tail
 	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final
 	# call @ 0x525d45]. For SP/host this fires at true load completion. For a
-	# joiner this is only LOCAL-load completion; keep pumping the hidden runtime
+	# joiner this is only wire-header world construction completion; keep pumping the hidden runtime
 	# under the loading presentation until the separate authoritative edge.
 	# The SP start-mission arrow splash (newarow1.tga +
 	# START_MISSION), gated !is_multiplayer_session && g_loadscreen_has_custom_bg
@@ -1001,7 +1002,7 @@ func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
 	# ignored in the main menu (EXIT quits). During a load, BOTH joiner waits are
 	# interruptible legs — the pre-load connect/session wait and the post-load
-	# admission tail, which awaits process_frame every iteration. Aborting either
+	# admission tail, which is polled once per world tick. Aborting either
 	# is the reachable analog of the original's per-asset ESC/disconnect abort
 	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]. The
 	# SP/host map load remains a single synchronous call the SceneTree cannot
@@ -1087,8 +1088,7 @@ func _teardown_world_to_menu() -> void:
 	_request_resource_dir()
 
 
-func _on_exit_to_desktop() -> void:
-	get_tree().quit()
+func _on_exit_to_desktop() -> void: request_quit()
 
 
 # CanvasLayer contents toggle: hide/show the HUD's CanvasItem children (the FPS
@@ -1123,6 +1123,7 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if _runtime_shutdown.process_frame(): return
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
