@@ -7,7 +7,7 @@ from __future__ import annotations
 bl_info = {
     "name": "OpenNova ASE & Anim Exporter",
     "author": "Taylor Finnell",
-    "version": (0, 0, 3),
+    "version": (0, 0, 5),
     "blender": (2, 80, 0),
     "location": "File > Export",
     "description": "Export Novalogic ASE models and ADM/BAD skeletal animations.",

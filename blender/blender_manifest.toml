@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "opennova_blender"
-version = "0.0.4"
+version = "0.0.5"
 name = "OpenNova Blender ASE & Anim Exporter"
 tagline = "Export Novalogic ASE models and ADM/BAD animations"
 maintainer = "Taylor Finnell <noreply@anthropic.com>"
