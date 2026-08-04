@@ -18,6 +18,9 @@ func rebuild() -> void:
 	for child in _m.get_children():
 		_m.remove_child(child)
 		child.queue_free()
+	# The submission notifier died in the sweep above; _set_model_bounds
+	# recreates it against the rebuilt bounds (even equal ones).
+	_m._screen_notifier = null
 	_m._robj_nodes.clear()
 	_m._robj_rest_transforms.clear()
 	_m._skeleton = null

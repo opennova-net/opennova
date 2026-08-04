@@ -352,3 +352,39 @@ func test_visibility_edge_rearms_for_one_restamp_frame() -> void:
 			"re-shown models re-check the env generation missed while hidden")
 	model.advance_runtime_frame(0.016)
 	assert_false(model.is_processing(), "and park once the restamp is done")
+
+
+# --- Camera-submission gate: retail computes per SUBMITTED model ------------
+# [orig: Terrain_RenderSectorModels @0x5c5d30]. set_on_screen is the public
+# seam the bounds notifier's screen_entered/exited signals drive; headless
+# contexts never fire the notifier, so the flag defaults on and these tests
+# exercise the gate through the same seam.
+
+func test_model_carries_a_submission_notifier_sized_to_its_bounds() -> void:
+	var model := _clocked_spy_model()
+	var notifier := model.get_node_or_null("ScreenNotifier")
+	assert_not_null(notifier, "a built model carries its submission notifier")
+	assert_gt((notifier as VisibleOnScreenNotifier3D).aabb.size.length(), 0.0,
+			"the notifier AABB covers the mesh bounds")
+
+
+func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
+	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
+	model.set_panm_clock({"time_ms": 0})
+	model.reset_observations()
+	model.set_on_screen(false)
+	model.play_part_anim(1, 1, 1.0)
+
+	model.advance_runtime_frame(0.5)
+	assert_eq(model.env_applies, 0, "an off-camera model pushes no environment state")
+	assert_eq(model.robj_applies, 0, "no PANM evaluation while off camera")
+	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
+			"the commanded part anim still advanced while off camera")
+
+	model.set_on_screen(true)
+	assert_true(model.is_processing(),
+			"re-entering the screen wakes the model for the catch-up frame")
+	model.advance_runtime_frame(0.5)
+	assert_eq(model.robj_applies, 1,
+			"the submitted frame re-derives transforms from the absolute clock")
+	assert_eq(model.env_applies, 1, "and catches up the environment restamp")

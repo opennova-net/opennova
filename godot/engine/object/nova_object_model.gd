@@ -123,6 +123,13 @@ var _shadow_receiver_material: ShaderMaterial
 # This model's fixed slot in the staggered environment-restamp window (see
 # _on_env_generation_changed).
 var _env_stagger_slot := 0
+# Camera-submission gate: retail evaluates poses/PANM/material generators per
+# SUBMITTED model [orig: Terrain_RenderSectorModels @0x5c5d30], so render-
+# derived work waits while no camera can see the model's bounds. Defaults ON:
+# only a live rendering context (the bounds notifier below) ever turns it
+# off, so headless tests and cameraless owners behave exactly as before.
+var _on_screen := true
+var _screen_notifier: VisibleOnScreenNotifier3D
 
 # NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
 # for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
@@ -874,15 +881,17 @@ func advance_runtime_frame(delta: float) -> void:
 		return
 	# Retail evaluates material constants / PANM transforms / light state per
 	# SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the batch
-	# computes constants for the models it draws]. is_visible_in_tree() is only
-	# the retained owner's hierarchy-visibility gate: it skips explicitly hidden
-	# props/buildings, but it does not prove camera/frustum submission. Exact
-	# noise-call cadence therefore remains a renderer-scheduling gap (D-3DI-2),
-	# not something this SceneTree callback can reconstruct. Time-ACCUMULATING
-	# state (commanded part anims, an internally-timed skeletal clip, the private
-	# preview clock) still advances inside _apply_runtime_state — a door
-	# commanded open while hidden is open when next seen.
-	var renderable := is_visible_in_tree()
+	# computes constants for the models it draws]. is_visible_in_tree() is the
+	# retained owner's hierarchy-visibility gate (explicitly hidden props /
+	# buildings) and _on_screen is the camera-frustum term from the bounds
+	# notifier — together the closest SceneTree approximation of retail's
+	# submission set. Exact noise-call cadence still remains a renderer-
+	# scheduling gap (D-3DI-2). Time-ACCUMULATING state (commanded part anims,
+	# an internally-timed skeletal clip, the private preview clock) still
+	# advances inside _apply_runtime_state — a door commanded open while hidden
+	# is open when next seen, and an unseen clip re-derives its pose from the
+	# absolute clock on the next submitted frame.
+	var renderable := is_visible_in_tree() and _on_screen
 	if not _needs_runtime_frame_work():
 		# Keep the private preview clock continuous even while the model has no
 		# time-driven consumer. A later OED edit can make a material/PANM track
@@ -1237,7 +1246,44 @@ func _environment_values() -> EnvLightValues:
 	return _materials._environment_values()
 
 
+## The camera-submission input for the render-derived gate. Public so the
+## bounds notifier's signals and deterministic owners/tests share one seam.
+## Re-entering the screen wakes the model: pose/PANM dirt latched while off
+## camera re-derives from the absolute clocks, and the environment restamp
+## catches up against the generation it skipped.
+func set_on_screen(value: bool) -> void:
+	if _on_screen == value:
+		return
+	_on_screen = value
+	if value:
+		_wake_runtime_frame()
+
+
+# Keep the submission notifier matching the model's current mesh bounds. An
+# empty-bounds model draws nothing: it carries no notifier and stays flagged
+# on-screen so a later real rebuild starts from the safe default. Runs before
+# the equal-bounds early-out because rebuild() frees the previous notifier
+# with the other children even when the new bounds are identical.
+func _sync_screen_notifier(bounds: AABB) -> void:
+	if bounds.size == Vector3.ZERO:
+		if _screen_notifier != null:
+			_screen_notifier.queue_free()
+			_screen_notifier = null
+		_on_screen = true
+		return
+	if _screen_notifier == null:
+		_screen_notifier = VisibleOnScreenNotifier3D.new()
+		_screen_notifier.name = "ScreenNotifier"
+		_screen_notifier.screen_entered.connect(set_on_screen.bind(true))
+		_screen_notifier.screen_exited.connect(set_on_screen.bind(false))
+		add_child(_screen_notifier)
+	# Grow past the rest bounds: a playing pose can sweep limbs slightly
+	# outside the mesh-rest AABB and the culling must stay conservative.
+	_screen_notifier.aabb = bounds.grow(1.0)
+
+
 func _set_model_bounds(bounds: AABB) -> void:
+	_sync_screen_notifier(bounds)
 	if _aabb_equal_approx(_model_bounds, bounds):
 		return
 	_model_bounds = bounds
