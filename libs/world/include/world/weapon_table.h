@@ -22,6 +22,15 @@ struct WeaponTableEntry {
     int16_t clipsize = 1;           // +0x58, engine default 1; -1 = no-clip weapon (knife/medpack)
                                     // [orig: AdmDef_InitEntryDefaults @0x53ff13]
     int16_t startrounds = -1;       // +0x5C, engine default -1 [orig: @0x53ff19]
+    // Emplaced turret articulation limits, degrees. Azimuth is symmetric
+    // +-turret_yaw_range; elevation spans [-turret_pitch_min, +turret_pitch_max].
+    // 0 = not authored (no clamp window). These author the itemDef turret-limit
+    // fallback the per-frame turret clamp reads.
+    // [orig: Entity_GetWeaponTurretLimits fallback @0x540e35..0x540e58;
+    //  clamp consumer Entity_UpdateTransformAndTurret @0x441228..0x44128c]
+    int16_t turret_yaw_range_deg = 0;
+    int16_t turret_pitch_max_deg = 0;
+    int16_t turret_pitch_min_deg = 0;
     int16_t maxclips = 0;           // +0x14C [orig: @0x5440A9]
     uint8_t charfilter = 0;         // +0x7C OR-mask: medic=1 sniper=2 gunner=4 rifleman=8 engineer=0x10
                                     // [orig: @0x543F6E, token table @0x830EB0]

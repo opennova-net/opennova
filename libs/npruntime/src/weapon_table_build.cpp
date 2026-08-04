@@ -201,6 +201,9 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		// weapon.def uses an explicit 0 for either key, so 0 == absent here.
 		e.clipsize = static_cast<int16_t>(d.clipsize == 0 ? 1 : d.clipsize);
 		e.startrounds = static_cast<int16_t>(d.startrounds == 0 ? -1 : d.startrounds);
+		e.turret_yaw_range_deg = static_cast<int16_t>(d.targetyawrange);
+		e.turret_pitch_max_deg = static_cast<int16_t>(d.targetpitchmax);
+		e.turret_pitch_min_deg = static_cast<int16_t>(d.targetpitchmin);
 		e.maxclips = static_cast<int16_t>(d.maxclips);
 		for (size_t c = 0; c < d.charfilter_count; ++c)
 			e.charfilter |= charfilter_bit(d.charfilter[c]);

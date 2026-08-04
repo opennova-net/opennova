@@ -1248,6 +1248,9 @@ Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_
 		return ERR_CANT_OPEN;
 	world_->weapons = opennova::np::build_weapon_table(file);
 	def_free_weapons(&file);
+	// The seat table may have been installed before this feed (either install
+	// order is production-legal); refresh its turret clamp windows now.
+	stamp_seat_spec_turret_limits();
 
 	// The host's own player spawns in finish_load, BEFORE this feed — re-stamp its equipped
 	// default now that WPN_M4AUTO resolves by name [orig: PlayerClass_InitEntity @0x4B1116].

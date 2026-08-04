@@ -93,6 +93,21 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.startrounds = parse_int_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "targetyawrange", 14)) {
+                /* Emplaced turret azimuth half-arc, degrees (the "180 tripod"
+                   authors 90). Seeds the itemDef turret-limit fallback
+                   [orig: Entity_GetWeaponTurretLimits @0x540e35]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.targetyawrange = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "targetpitchmax", 14)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.targetpitchmax = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "targetpitchmin", 14)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+                cw.targetpitchmin = parse_int_n(v, vl);
+                parsed = 1;
             } else if (lower_match_key(lower, ll, "classrounds", 11)) {
                 /* classrounds <class> <n> — the class token resolves through the
                    char-class VALUE table (medic=1 sniper=2 gunner=3 rifleman=5

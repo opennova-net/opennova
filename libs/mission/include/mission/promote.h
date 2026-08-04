@@ -62,6 +62,15 @@ struct ItemSeatSpec {
     std::vector<world::Vec3> armory_points;
     std::string primary_weapon;
     std::vector<ItemEmplacementAttachmentSpec> emplacement_attachments;
+    // Turret articulation limits in BAM, resolved from the primary weapon's
+    // weapon.def rows (targetyawrange/targetpitchmax/targetpitchmin) once the
+    // embedder's weapon table is loaded — the clamp window the emplaced-controls
+    // derivation applies. All-zero = unresolved/not authored (no clamp).
+    // [orig: Entity_GetWeaponTurretLimits fallback @0x540e35..0x540e58;
+    //  clamp @0x441228..0x44128c via sub_540CC0 @0x540cc0]
+    int32_t turret_yaw_range_bam = 0;
+    int32_t turret_pitch_max_bam = 0;
+    int32_t turret_pitch_min_bam = 0;
 };
 
 struct PromoteOptions {

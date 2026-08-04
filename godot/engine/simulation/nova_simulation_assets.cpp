@@ -1083,6 +1083,25 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 	return attached;
 }
 
+void NovaSimulation::stamp_seat_spec_turret_limits() {
+	if (!world_) return;
+	for (opennova::mission::ItemSeatSpec &spec : item_seat_specs_) {
+		if (spec.primary_weapon.empty()) continue;
+		const int index = world_->weapons.index_of(spec.primary_weapon.c_str());
+		const opennova::world::WeaponTableEntry *entry =
+				index >= 0 && index <= 0xFF
+						? world_->weapons.by_index(static_cast<uint8_t>(index))
+						: nullptr;
+		if (entry == nullptr) continue;
+		spec.turret_yaw_range_bam =
+				turret_limit_bam(entry->turret_yaw_range_deg);
+		spec.turret_pitch_max_bam =
+				turret_limit_bam(entry->turret_pitch_max_deg);
+		spec.turret_pitch_min_bam =
+				turret_limit_bam(entry->turret_pitch_min_deg);
+	}
+}
+
 void NovaSimulation::refresh_item_seat_spec(
 		opennova::world::Entity &p_entity) {
 	std::array<opennova::world::EntityHandle, 10> occupants{};
@@ -1387,6 +1406,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 					const opennova::mission::ItemSeatSpec &b) {
 				return a.type_id < b.type_id;
 			});
+	stamp_seat_spec_turret_limits();
 
 	// The production header-only join resolves model metadata after network rows
 	// can already exist. Refresh live pool-1 rows immediately and preserve any

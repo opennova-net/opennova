@@ -224,6 +224,15 @@ typedef struct DefWeaponDef {
     int rank;
     int clipsize;
     int startrounds;
+    /* Emplaced turret articulation limits, degrees ('targetyawrange' /
+       'targetpitchmax' / 'targetpitchmin'). Azimuth is symmetric
+       +-targetyawrange; elevation spans [-targetpitchmin, +targetpitchmax].
+       0 = key absent. [orig: consumed through the itemDef turret-limit
+       fallback Entity_GetWeaponTurretLimits @0x540e35..0x540e58 (+324
+       azimuth, +316/+320 elevation); clamp @0x441228..0x44128c] */
+    int targetyawrange;
+    int targetpitchmax;
+    int targetpitchmin;
     /* Loadout/armory keys (docs/net/novaworld-net-re.md §5.57); absent key = 0/empty.
        charfilter/teamfilter hold the raw file tokens; the packed masks the original
        producer builds land in charfilter_mask/teamfilter_mask below. */

@@ -351,6 +351,34 @@ inline uint16_t emplaced_control_phase(int32_t parent_bam, int32_t occupant_bam)
 	return static_cast<uint16_t>(static_cast<uint32_t>(delta) >> 16);
 }
 
+// Degrees -> BAM clamp bound. A half-arc of 180 or more is the full circle
+// (the "360" gun family) — no effective window; 0 tells callers to skip.
+inline int32_t turret_limit_bam(int16_t degrees) {
+	if (degrees <= 0 || degrees >= 180) return 0;
+	return static_cast<int32_t>(
+			opennova::world::bam_from_degrees_wrapped(
+					static_cast<double>(degrees)));
+}
+
+// The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
+// second write wins. Retail runs this every entity update so a phase implied
+// beyond the gun's arc pins AT the arc edge — a "180 tripod" barrel can never
+// present outside its authored traverse. [orig: sub_540CC0 @0x540cc0; caller
+// Entity_UpdateTransformAndTurret @0x441228..0x44128c]
+inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
+		int32_t lower) {
+	bool clamped = false;
+	if (value > upper - 0x1FFFF) {
+		value = upper;
+		clamped = true;
+	}
+	if (value < lower + 0x1FFFF) {
+		value = lower;
+		return true;
+	}
+	return clamped;
+}
+
 inline bool emplaced_weapon_controls_for(
 		const opennova::world::World &world,
 		opennova::world::AiSystem *ai,
@@ -378,9 +406,27 @@ inline bool emplaced_weapon_controls_for(
 	const int32_t parent_pitch =
 			opennova::world::bam_from_degrees_wrapped(
 					static_cast<double>(mount.pitch));
+	int32_t yaw_delta = opennova::io::bam_sub(parent_heading, gunner->heading);
+	int32_t pitch_delta = opennova::io::bam_sub(parent_pitch, gunner->pitch);
+	// Clamp into the weapon's authored turret window (weapon.def
+	// targetyawrange/targetpitchmax/min; zero = not authored, no window).
+	// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+	if (const opennova::world::WeaponTableEntry *entry =
+			mount.primary_weapon_slot_adm != 0xFFu
+					? world.weapons.by_index(mount.primary_weapon_slot_adm)
+					: nullptr) {
+		const int32_t yaw_range = turret_limit_bam(entry->turret_yaw_range_deg);
+		if (yaw_range != 0)
+			emplaced_clamp_turret_bam(yaw_delta, yaw_range, -yaw_range);
+		const int32_t pitch_max = turret_limit_bam(entry->turret_pitch_max_deg);
+		const int32_t pitch_min = turret_limit_bam(entry->turret_pitch_min_deg);
+		if (pitch_max != 0 || pitch_min != 0)
+			emplaced_clamp_turret_bam(pitch_delta, pitch_max, -pitch_min);
+	}
 	out.valid = true;
-	out.gun_yaw = emplaced_control_phase(parent_heading, gunner->heading);
-	out.gun_pitch = emplaced_control_phase(parent_pitch, gunner->pitch);
+	out.gun_yaw = static_cast<uint16_t>(static_cast<uint32_t>(yaw_delta) >> 16);
+	out.gun_pitch =
+			static_cast<uint16_t>(static_cast<uint32_t>(pitch_delta) >> 16);
 	return true;
 }
 
@@ -423,11 +469,29 @@ inline bool emplaced_weapon_controls_for_client(
 				? static_cast<int32_t>(
 						static_cast<uint32_t>(occupant.pitch_byte) << 24)
 				: occupant.pitch_bam;
+		int32_t yaw_delta =
+				opennova::io::bam_sub(parent_heading, occupant_heading);
+		int32_t pitch_delta =
+				opennova::io::bam_sub(mount.pitch_bam, occupant_pitch);
+		// Clamp into the gun's authored turret window (stamped onto the spec
+		// from the primary weapon's weapon.def rows). A retail joiner never
+		// presents a barrel outside the arc even when the mount's streamed
+		// base heading is stale relative to its gunner: the phase pins at the
+		// arc edge (live 00TRg witness 2026-08-04 — gun 0x100c streamed its
+		// spawn heading 140 deg while its gunner aimed 314 deg; unclamped,
+		// the "180 tripod" model wrapped the barrel visibly wrong).
+		// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+		if (spec->turret_yaw_range_bam != 0)
+			emplaced_clamp_turret_bam(yaw_delta, spec->turret_yaw_range_bam,
+					-spec->turret_yaw_range_bam);
+		if (spec->turret_pitch_max_bam != 0 || spec->turret_pitch_min_bam != 0)
+			emplaced_clamp_turret_bam(pitch_delta, spec->turret_pitch_max_bam,
+					-spec->turret_pitch_min_bam);
 		out.valid = true;
-		out.gun_yaw =
-				emplaced_control_phase(parent_heading, occupant_heading);
-		out.gun_pitch =
-				emplaced_control_phase(mount.pitch_bam, occupant_pitch);
+		out.gun_yaw = static_cast<uint16_t>(
+				static_cast<uint32_t>(yaw_delta) >> 16);
+		out.gun_pitch = static_cast<uint16_t>(
+				static_cast<uint32_t>(pitch_delta) >> 16);
 		return true;
 	}
 	return false;

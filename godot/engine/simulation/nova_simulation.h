@@ -987,6 +987,10 @@ private:
 	// reset_world because set_item_seat_specs runs before mission promotion.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
 	void refresh_item_seat_spec(opennova::world::Entity &p_entity);
+	// Resolve each spec's turret clamp window from its primary weapon's
+	// weapon.def rows. Called from BOTH install orders (specs-then-table and
+	// table-then-specs); all-zero = not authored, no clamp.
+	void stamp_seat_spec_turret_limits();
 	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
