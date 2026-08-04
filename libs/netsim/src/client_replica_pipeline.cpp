@@ -1111,9 +1111,22 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 	std::vector<uint8_t> persistent_parent_child(state_.entities.size(), 0);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
-		if (child.parent_handle != 0xFFFFu &&
-		    classify(child.type_id) == EntityClass::NoNetworkCallback)
-			persistent_parent_child[i] = 1;
+		if (child.parent_handle == 0xFFFFu ||
+		    classify(child.type_id) != EntityClass::NoNetworkCallback)
+			continue;
+		// A POOL-0 parent on a no-callback child is the occupant/driver
+		// back-reference, never a transform parent (live retail 0x0D witness,
+		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
+		// parent=<its gunner's pool-0 handle>, while the gunner's own record
+		// carries parent=<the gun> — composing both closes a mutual
+		// seat/parent loop that ratchets the pair through the depth passes
+		// (the reported climbing/spinning emplacements). The structural
+		// carrier of a mounted-on-vehicle gun rides the record's separate
+		// target field, deliberately not folded here yet.
+		// [orig: 0x0D store @0x433289 — entity+40 occupantEntity back-ref]
+		if (world::EntityHandle{child.parent_handle}.pool() == 0)
+			continue;
+		persistent_parent_child[i] = 1;
 	}
 	// Repeating the composition makes mixed seat/persistent-parent chains
 	// independent of pool/vector ordering while preserving the promotion depth
