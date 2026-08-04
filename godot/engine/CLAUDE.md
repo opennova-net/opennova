@@ -6,8 +6,8 @@ shell (`godot/game/`) and ONED's authoring/preview surfaces (`godot/modtools/`):
 - **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `libs/` to
   Godot. Thin wrappers only — format/runtime logic belongs in `libs/`. Register new
   classes in `register_types.cpp`.
-- **The shared GDScript engine layer** (~36k LOC across ~150 scripts) both shells run on:
-  - `world/` — THE runtime, and by far the largest slice (~15k LOC): `game_world.gd` (the
+- **The shared GDScript engine layer** (~38.5k LOC across ~150 scripts) both shells run on:
+  - `world/` — THE runtime, and by far the largest slice (~16.4k LOC): `game_world.gd` (the
     GameWorld scene), `mission_runtime.gd`, `mission_present_pass.gd`,
     `local_player_presenter.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
@@ -51,8 +51,10 @@ Gotchas:
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot
   editor — GDExtension registration does not hot-reload, and GDScript referencing an
   unregistered class fails to parse (GUT then silently drops those test scripts).
-- A stale `build/Debug/opennova.dll` can shadow the freshly built DLL; delete it if the
-  editor keeps loading old native code.
+- The `build/Debug/opennova.dll`-shadows-Release trap is the PYTHON FFI loader's, not this
+  layer's: the editor loads only `godot/bin/libopennova.*` (root CLAUDE.md has the note).
+  A stale EDITOR means a stale `godot/bin` DLL — rebuild via `scripts/build_godot.sh` and
+  fully restart.
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `NovaResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s

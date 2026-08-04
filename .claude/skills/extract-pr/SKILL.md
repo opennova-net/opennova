@@ -43,8 +43,9 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
 - Push, then `gh pr create` with the context in the PR description (what the
   slice does, what it deliberately excludes, what depends on it). Never post PR
   comments. Do not merge — the maintainer merges.
-- CI gate: `test`, `godot-tests`, and `build-gdextension-windows/macos` must be
-  green. A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
+- CI gate: `test`, `godot-tests`, `build-gdextension-windows`, and
+  `validate-deliverables` must be green (macOS builds exist only in tag-time
+  `release.yml`, not PR CI). A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
   block or report on it.
 
 ## 5. Advance the train
