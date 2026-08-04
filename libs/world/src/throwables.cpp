@@ -92,8 +92,7 @@ uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
 
 namespace {
 // One step of the engine rotate-LCG [orig: rol4(s + rol11(s), 4) ^ 1 — the
-// PRNG_Next16 @ 0x6130a0 generator; world-local streams, the ai.cpp/destruction
-// precedent (stream identity with retail is not reproducible)].
+// independent dword_31BFBB8 shrapnel-fan generator].
 inline uint32_t throwable_prng_step(uint32_t &s) {
     const uint32_t rol11 = (s << 11) | (s >> 21);
     uint32_t r = s + rol11;
@@ -102,11 +101,6 @@ inline uint32_t throwable_prng_step(uint32_t &s) {
     return r;
 }
 } // namespace
-
-// [orig: PRNG_Next16 @ 0x6130a0 on dword_31BFBB0 — the bounce spin kicks.]
-int32_t ThrowableSim::prng16() {
-    return static_cast<int32_t>(throwable_prng_step(prng16_state) & 0xFFFFu);
-}
 
 // [orig: the inline fan stream on dword_31BFBB8 @ 0x4eb92e — same generator.]
 uint16_t ThrowableSim::fan_prng() {
@@ -425,8 +419,8 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                                     // the ballistic terrain default); the
                                     // surface-map override remains D-WPN-15
                 const int32_t kick_yaw =
-                        (world.throwables.prng16() % 10) - 5; // [orig: %10-5]
-                const int32_t kick_pitch = world.throwables.prng16() % 10;
+                        (world.next_prng16() % 10) - 5; // [orig: %10-5]
+                const int32_t kick_pitch = world.next_prng16() % 10;
                 r.spin_yaw += 11930464 * kick_yaw;
                 r.spin_pitch += 11930464 * kick_pitch - 59652320;
             } else {

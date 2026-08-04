@@ -9,6 +9,7 @@ class FakeSim:
 	var in_zone := true
 	var multiplayer := false
 	var player_class := 8
+	var class_allow_mask := 0x3FF
 	var weapon := ""
 	var entity_team := 2
 	var applies: Array = []
@@ -27,6 +28,9 @@ class FakeSim:
 
 	func get_local_player_class() -> int:
 		return player_class
+
+	func get_class_allow_mask() -> int:
+		return class_allow_mask
 
 	func get_local_player_weapon_name() -> String:
 		return weapon
@@ -105,6 +109,9 @@ class ArmoryZoneSimProxy:
 
 	func get_local_player_class() -> int:
 		return inner.get_local_player_class()
+
+	func get_class_allow_mask() -> int:
+		return inner.get_class_allow_mask()
 
 	func get_local_player_weapon_name() -> String:
 		return inner.get_local_player_weapon_name()
@@ -422,3 +429,32 @@ func test_multiplayer_open_is_live() -> void:
 
 	assert_true(presenter.try_open(), "the MP armory opens over live play")
 	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
+
+
+func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
+	var sim := FakeSim.new()
+	sim.multiplayer = true
+	sim.player_class = 8
+	sim.class_allow_mask = 1 << 9 # rifleman disallowed; engineer is the next allowed class
+	var world := FakeWorld.new()
+	world.root = _make_root()
+	world.weapons = _make_weapons()
+	world.sim = sim
+	add_child_autofree(world)
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
+
+	assert_true(presenter.try_open(), "the MP armory opens with a session class policy")
+	var menu := overlay.get_node_or_null("ArmoryMenu")
+	assert_not_null(menu)
+	if menu == null:
+		return
+	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
+	assert_not_null(spin)
+	if spin != null:
+		assert_eq(spin.get_value_index(), 4,
+				"S2C 0x76 policy advances disallowed rifleman to allowed engineer")

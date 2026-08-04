@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+#include <npwire/ingame_message_id.h>
 
 #include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
 
@@ -53,9 +54,12 @@ opennova::world::WeaponSlotState *NovaSimulation::active_local_weapon_slot() {
 	if (local_usegun_slot_active_ && world_ && local_usegun_mount_.valid()) {
 		opennova::world::Entity *mount =
 				world_->registry.get(local_usegun_mount_);
-		if (mount != nullptr &&
-				mount->primary_weapon_slot_adm == local_usegun_weapon_adm_)
-			return &mount->primary_weapon_slot;
+		if (mount != nullptr) {
+			if (opennova::world::WeaponSlotState *slot =
+					opennova::world::resolve_mounted_ammo_slot(
+							*world_, *mount))
+				return slot;
+		}
 	}
 	return &weapon_slot_;
 }
@@ -65,9 +69,12 @@ NovaSimulation::active_local_weapon_slot() const {
 	if (local_usegun_slot_active_ && world_ && local_usegun_mount_.valid()) {
 		const opennova::world::Entity *mount =
 				world_->registry.get(local_usegun_mount_);
-		if (mount != nullptr &&
-				mount->primary_weapon_slot_adm == local_usegun_weapon_adm_)
-			return &mount->primary_weapon_slot;
+		if (mount != nullptr) {
+			if (const opennova::world::WeaponSlotState *slot =
+					opennova::world::resolve_mounted_ammo_slot(
+							*world_, *mount))
+				return slot;
+		}
 	}
 	return &weapon_slot_;
 }
@@ -140,9 +147,23 @@ void NovaSimulation::commit_local_usegun_weapon_switch() {
 	if (select_parent) {
 		opennova::world::Entity *mount =
 				world_->registry.get(local_usegun_pending_mount_);
-		if (mount == nullptr ||
-				mount->primary_weapon_slot_adm !=
-						local_usegun_pending_weapon_adm_) {
+		opennova::world::WeaponSlotState *resolved_slot = mount != nullptr
+				? opennova::world::resolve_mounted_ammo_slot(*world_, *mount)
+				: nullptr;
+		uint8_t resolved_adm = mount != nullptr
+				? mount->primary_weapon_slot_adm : 0xFF;
+		if (mount != nullptr && resolved_slot != nullptr &&
+				resolved_slot != &mount->primary_weapon_slot) {
+			opennova::world::Entity *carrier =
+					world_->registry.get(mount->ground_target);
+			if (carrier == nullptr ||
+					resolved_slot != &carrier->primary_weapon_slot)
+				resolved_slot = nullptr;
+			else
+				resolved_adm = carrier->primary_weapon_slot_adm;
+		}
+		if (resolved_slot == nullptr ||
+				resolved_adm != local_usegun_pending_weapon_adm_) {
 			select_parent = false;
 		} else {
 			local_usegun_slot_active_ = true;
@@ -150,7 +171,7 @@ void NovaSimulation::commit_local_usegun_weapon_switch() {
 			local_usegun_weapon_adm_ =
 					local_usegun_pending_weapon_adm_;
 			next_adm = local_usegun_weapon_adm_;
-			next_slot = &mount->primary_weapon_slot;
+			next_slot = resolved_slot;
 		}
 	}
 	if (!select_parent) {
@@ -201,9 +222,25 @@ void NovaSimulation::sync_local_usegun_weapon_transition() {
 					player->mount_type == opennova::world::SeatType::Gunner
 			? world_->registry.get(player->mount_target)
 			: nullptr;
-	const bool on_usegun =
-			mounted_parent != nullptr && player->use_gun_slot_swapped &&
-			mounted_parent->primary_weapon_slot_adm != 0xFF;
+	opennova::world::WeaponSlotState *mounted_slot = mounted_parent != nullptr
+			? opennova::world::resolve_mounted_ammo_slot(
+					*world_, *mounted_parent)
+			: nullptr;
+	uint8_t mounted_adm = mounted_parent != nullptr
+			? mounted_parent->primary_weapon_slot_adm : 0xFF;
+	if (mounted_parent != nullptr && mounted_slot != nullptr &&
+			mounted_slot != &mounted_parent->primary_weapon_slot) {
+		opennova::world::Entity *carrier =
+				world_->registry.get(mounted_parent->ground_target);
+		if (carrier == nullptr ||
+				mounted_slot != &carrier->primary_weapon_slot)
+			mounted_slot = nullptr;
+		else
+			mounted_adm = carrier->primary_weapon_slot_adm;
+	}
+	const bool on_usegun = mounted_parent != nullptr &&
+			player->use_gun_slot_swapped && mounted_slot != nullptr &&
+			mounted_adm != 0xFF;
 	const auto same_category = [&](uint8_t p_from, uint8_t p_to) {
 		const opennova::world::WeaponTableEntry *from =
 				world_->weapons.by_index(p_from);
@@ -212,8 +249,8 @@ void NovaSimulation::sync_local_usegun_weapon_transition() {
 		return from != nullptr && to != nullptr &&
 				from->category == to->category;
 	};
-	const auto stage_parent = [&](opennova::world::Entity &p_mount) {
-		const uint8_t target_adm = p_mount.primary_weapon_slot_adm;
+	const auto stage_parent = [&](opennova::world::Entity &p_mount,
+			uint8_t target_adm) {
 		if (!local_usegun_slot_active_)
 			local_usegun_saved_adm_ =
 					player->pre_use_gun_equipped_adm_index;
@@ -247,20 +284,18 @@ void NovaSimulation::sync_local_usegun_weapon_transition() {
 	if (on_usegun) {
 		const bool active_matches = local_usegun_slot_active_ &&
 				local_usegun_mount_ == mounted_parent->handle &&
-				local_usegun_weapon_adm_ ==
-						mounted_parent->primary_weapon_slot_adm;
+				local_usegun_weapon_adm_ == mounted_adm;
 		const bool pending_matches =
 				(local_usegun_switch_ == LocalUseGunSwitch::kAttach ||
 				 local_usegun_switch_ == LocalUseGunSwitch::kSwap) &&
 				local_usegun_pending_mount_ == mounted_parent->handle &&
-				local_usegun_pending_weapon_adm_ ==
-						mounted_parent->primary_weapon_slot_adm;
+				local_usegun_pending_weapon_adm_ == mounted_adm;
 		if (local_usegun_switch_ == LocalUseGunSwitch::kNone) {
-			if (!active_matches) stage_parent(*mounted_parent);
+			if (!active_matches) stage_parent(*mounted_parent, mounted_adm);
 		} else if (!pending_matches) {
 			// A later attach overwrites g_pendingWeaponSlot without changing the
 			// outgoing slot. This includes direct old-gun -> new-gun swaps.
-			stage_parent(*mounted_parent);
+			stage_parent(*mounted_parent, mounted_adm);
 		}
 		return;
 	}
@@ -2040,10 +2075,64 @@ void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire
 }
 
 bool NovaSimulation::request_local_player_scope_toggle() {
-	// [orig: input case 6 @ 0x4e0420 gates currentAction not in {RELOAD, SWITCHFROM};
-	//  Player_ToggleWeaponScope @ 0x4df0c0 gates def Flags & 3, flips g_scopeEngaged
-	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
+	// Action 6 first toggles the selected MountSlot on a designated-G carried
+	// EWeap. This branch precedes ordinary scope FSM gates and waits for the
+	// authoritative compact seat_type 1/2 echo before mutating local route state.
+	// [orig: Input_HandleActionBinding_0 @0x4e0420, case 6 @0x4e0492]
 	if (!weapon_active_) return false;
+	opennova::world::Entity *player = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player) : nullptr;
+	opennova::world::Entity *mount = player != nullptr && player->mounted &&
+			player->use_gun_slot_swapped && player->mount_target.valid()
+			? world_->registry.get(player->mount_target) : nullptr;
+	if (mount != nullptr && mount->has_item_def && mount->item_type != 1u &&
+			(mount->item_attrib & opennova::world::kItemAttribEweap) != 0u &&
+			(mount->emplacement_attachment_flags & 0x02u) != 0u &&
+			opennova::world::vehicle_prepare_weapon_slot(*world_, *mount)) {
+		const bool use_parent_slot =
+				!mount->primary_weapon_slot.redirect_to_parent_slot;
+		opennova::world::Entity *parent = nullptr;
+		bool route_valid = !use_parent_slot;
+		if (use_parent_slot && mount->ground_target.valid() &&
+				mount->emplacement_parent == mount->ground_target &&
+				mount->emplacement_parent_spawn_id != 0) {
+			parent = world_->registry.get(mount->ground_target);
+			route_valid = parent != nullptr &&
+					parent->registry_spawn_id ==
+							mount->emplacement_parent_spawn_id &&
+					parent->has_item_def && parent->item_type == 1u &&
+					(parent->item_attrib &
+							opennova::world::kItemAttribEweap) != 0u &&
+					opennova::world::vehicle_prepare_weapon_slot(
+							*world_, *parent);
+		}
+		if (route_valid) {
+			opennova::MountedWeaponSlotSelection selection;
+			selection.use_parent_slot = use_parent_slot;
+			if (joiner_ && runtime_)
+				return runtime_->queue_mounted_weapon_slot_selection(
+						use_parent_slot);
+			if (host_owner_.serve_and_play) {
+				host_loop_.client_send(
+						opennova::c2s::MOUNTED_WEAPON_SLOT_SELECT,
+						opennova::encode_mounted_weapon_slot_selection(selection));
+				return true;
+			}
+			// Standalone/tool worlds have no wire authority loop. Apply the same
+			// validated transition directly.
+			mount->primary_weapon_slot.redirect_to_parent_slot =
+					use_parent_slot;
+			player->equipped_adm_index = use_parent_slot
+					? parent->primary_weapon_slot_adm
+					: mount->primary_weapon_slot_adm;
+			sync_local_usegun_weapon_transition();
+			return true;
+		}
+	}
+
+	// Ordinary scope: currentAction not in {RELOAD, SWITCHFROM}, then the
+	// Player_ToggleWeaponScope view/definition gates.
+	// [orig: Player_ToggleWeaponScope @0x4df0c0]
 	opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(
@@ -2649,18 +2738,35 @@ void NovaSimulation::tick_local_player_weapon() {
 			reload.reload_param = static_cast<uint16_t>(
 					local_inventory_.equipped_combo);
 			have_wire_reload = true;
-		} else if (borrowed_usegun_slot && !joiner_ &&
-				local_usegun_mount_.valid()) {
-			// parentSlot==3 addresses the PARENT entity, not the actor, and
-			// recomputes the combo from the mounted Def. The authority's local
-			// parent handle is already the canonical wire handle. A joiner has
-			// no proven local-parent -> host-H map yet, so that half remains
-			// explicitly deferred in D-WPN-8.
+		} else if (borrowed_usegun_slot && local_usegun_mount_.valid()) {
+			// parentSlot==3 addresses the ENTITY THAT OWNS the selected slot,
+			// not the actor. Wire-header materialization preserves the host's
+			// packed handles, so this path is identical for host and joiner.
 			// [orig: WeaponAction_Reload @0x543108..0x543157]
+			opennova::world::Entity *mount =
+					world_->registry.get(local_usegun_mount_);
+			opennova::world::WeaponSlotState *mounted_slot = mount != nullptr
+					? opennova::world::resolve_mounted_ammo_slot(
+							*world_, *mount)
+					: nullptr;
+			opennova::world::Entity *slot_owner = mount;
+			uint8_t mounted_adm = mount != nullptr
+					? mount->primary_weapon_slot_adm : 0xFF;
+			if (mount != nullptr && mounted_slot != nullptr &&
+					mounted_slot != &mount->primary_weapon_slot) {
+				slot_owner = world_->registry.get(mount->ground_target);
+				if (slot_owner == nullptr || mounted_slot !=
+						&slot_owner->primary_weapon_slot) {
+					mounted_slot = nullptr;
+				} else {
+					mounted_adm = slot_owner->primary_weapon_slot_adm;
+				}
+			}
 			const opennova::world::WeaponTableEntry *mounted_def =
-					world_->weapons.by_index(local_usegun_weapon_adm_);
-			if (mounted_def != nullptr) {
-				reload.entity_handle = local_usegun_mount_.packed;
+					world_->weapons.by_index(mounted_adm);
+			if (mounted_slot != nullptr && slot_owner != nullptr &&
+					mounted_def != nullptr) {
+				reload.entity_handle = slot_owner->handle.packed;
 				reload.reload_param = static_cast<uint16_t>(
 						static_cast<uint16_t>(mounted_def->category) * 65u +
 						static_cast<uint16_t>(mounted_def->rank));

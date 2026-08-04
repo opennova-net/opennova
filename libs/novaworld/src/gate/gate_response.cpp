@@ -1,5 +1,7 @@
 #include <novaworld/gate_response.h>
 
+#include <napi/literal.h>
+
 #include <cctype>
 #include <cstdlib>
 #include <string>
@@ -89,25 +91,6 @@ bool parse_ipv4(std::string_view s, std::array<uint8_t, 4> &out) {
 	return true;
 }
 
-// Match NapiUtil_ParseNumberLiteral-style parsing: accept optional
-// leading sign, decimal digits. Returns false on empty or malformed.
-bool parse_int(std::string_view s, int &out) {
-	if (s.empty()) return false;
-	size_t i = 0;
-	int sign = 1;
-	if (s[0] == '-') { sign = -1; ++i; }
-	else if (s[0] == '+') { ++i; }
-	if (i >= s.size()) return false;
-	long long acc = 0;
-	for (; i < s.size(); ++i) {
-		if (s[i] < '0' || s[i] > '9') return false;
-		acc = acc * 10 + (s[i] - '0');
-		if (acc > 2147483647LL) return false;
-	}
-	out = static_cast<int>(sign * acc);
-	return true;
-}
-
 // Loose atoi matching the original's atol() semantics (stops at the first
 // non-digit, ignores trailing garbage).
 int atoi_loose(std::string_view s) {
@@ -124,25 +107,6 @@ int atoi_loose(std::string_view s) {
 		acc = acc * 10 + (s[i] - '0');
 	}
 	return static_cast<int>(sign * acc);
-}
-
-uint32_t atou32_loose(std::string_view s) {
-	int sign = 1;
-	size_t i = 0;
-	while (i < s.size() && is_ws(s[i])) ++i;
-	if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
-		if (s[i] == '-') sign = -1;
-		++i;
-	}
-	uint64_t acc = 0;
-	for (; i < s.size(); ++i) {
-		if (s[i] < '0' || s[i] > '9') break;
-		acc = acc * 10u + static_cast<uint64_t>(s[i] - '0');
-	}
-	if (sign < 0) {
-		return static_cast<uint32_t>(-static_cast<int64_t>(acc));
-	}
-	return static_cast<uint32_t>(acc);
 }
 
 } // namespace
@@ -183,13 +147,15 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		if (ieq(key, "POSTIPADDRESS")) {
 			parse_ipv4(value, out.post_ip);
 		} else if (ieq(key, "POSTIPPORT")) {
-			out.post_port = atou32_loose(value);
+			uint32_t parsed = 0;
+			if (napi_parse_literal_value(value, parsed)) out.post_port = parsed;
 		} else if (ieq(key, "LOBBYNAME")) {
 			out.lobby_name = std::string(value);
 		} else if (ieq(key, "METIPADDRESS")) {
 			out.met_ip = std::string(value);
 		} else if (ieq(key, "METIPPORT")) {
-			out.met_port = atou32_loose(value);
+			uint32_t parsed = 0;
+			if (napi_parse_literal_value(value, parsed)) out.met_port = parsed;
 		} else if (ieq(key, "METLABEL")) {
 			out.met_label = std::string(value);
 		} else if (ieq(key, "METPING")) {
@@ -207,7 +173,8 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "REFLECTEDIPADDRESS")) {
 			parse_ipv4(value, out.reflected_ip);
 		} else if (ieq(key, "REFLECTEDPORTNUMBER")) {
-			out.reflected_port = atou32_loose(value);
+			uint32_t parsed = 0;
+			if (napi_parse_literal_value(value, parsed)) out.reflected_port = parsed;
 		} else if (ieq(key, "USEJUNCTION")) {
 			out.use_junction = atoi_loose(value);
 		} else if (ieq(key, "CLEARJUNCTION")) {

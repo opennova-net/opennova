@@ -2,6 +2,8 @@
 
 #include <novacrypto/crc32.h>
 
+#include <cstring>
+
 namespace opennova {
 
 namespace {
@@ -19,6 +21,37 @@ inline void write_le32(uint8_t *p, uint32_t v) {
 	p[1] = static_cast<uint8_t>((v >> 8) & 0xFFu);
 	p[2] = static_cast<uint8_t>((v >> 16) & 0xFFu);
 	p[3] = static_cast<uint8_t>((v >> 24) & 0xFFu);
+}
+
+// Decode one of retail's two header layouts without mutating the packet. The
+// extended layout keeps its scatter carrier (or direct CRC for a short body)
+// at +4; the ordinary layout keeps it at +0.
+// [orig: NapiNP_UnpackPacket @0x62ca20]
+bool decode_with_header(const uint8_t *packet, size_t packet_len,
+		size_t header_size, uint8_t *out, size_t out_cap,
+		size_t *out_size) {
+	if (header_size < HEADER_SIZE || header_size >= packet_len) return false;
+	const size_t payload_len = packet_len - header_size;
+	if (payload_len == 0 || payload_len > out_cap) return false;
+	const size_t crc_offset = header_size == HEADER_SIZE ? 0 : HEADER_SIZE;
+	if (crc_offset + sizeof(uint32_t) > header_size) return false;
+
+	std::memcpy(out, packet + header_size, payload_len);
+	const uint32_t carrier = read_le32(packet + crc_offset);
+	uint32_t expected_crc = carrier;
+	if (payload_len >= SCATTER_THRESHOLD) {
+		expected_crc = 0;
+		for (size_t i = 0; i < SCATTER_THRESHOLD; ++i) {
+			const uint8_t byte = out[i];
+			expected_crc |= static_cast<uint32_t>(byte & 1u) << i;
+			out[i] = static_cast<uint8_t>(
+					(byte & 0xFEu) | static_cast<uint8_t>((carrier >> i) & 1u));
+		}
+	}
+
+	if (crc32_napi(out, payload_len) != expected_crc) return false;
+	*out_size = payload_len;
+	return true;
 }
 
 } // namespace
@@ -65,47 +98,31 @@ int napi_envelope_decode(const uint8_t *packet, size_t packet_len,
 	if (!packet || !out || !out_size || packet_len < HEADER_SIZE) {
 		return -1;
 	}
-	const size_t payload_len = packet_len - HEADER_SIZE;
-	if (payload_len == 0 || payload_len > out_cap) {
-		return -1;
+
+	const uint32_t first_dword = read_le32(packet);
+	if (first_dword != 0u) {
+		return decode_with_header(packet, packet_len, HEADER_SIZE,
+				out, out_cap, out_size) ? 0 : -1;
 	}
 
-	// Reject variable-size-header mode explicitly. This port emits only
-	// the 4-byte mode; variable-size inputs are out of scope for B.2.1
-	// (see notes/net_verification_log.md; decoder living elsewhere may
-	// accept both).
-	if (read_le32(packet) == 0u) {
-		return -1;
+	// A zero first dword selects the extended form. Retail reads the unsigned
+	// header size from +9. Only a value greater than the ordinary four-byte
+	// header enters the extended-attempt/fallback arm; smaller values reject.
+	// The fallback is required because zero is also a legitimate scatter
+	// carrier when the first 32 original payload bytes all had clear low bits.
+	// [orig: NapiNP_UnpackPacket @0x62ca29..0x62cd43]
+	if (packet_len <= 9) return -1;
+	const size_t variable_header_size = packet[9];
+	if (variable_header_size <= HEADER_SIZE) return -1;
+	// Retail assumes a well-formed packet here. Keep the structural port
+	// bounded: +9 and the +4 CRC dword must both belong to the header.
+	if (variable_header_size >= 10 && variable_header_size < packet_len &&
+			decode_with_header(packet, packet_len, variable_header_size,
+					out, out_cap, out_size)) {
+		return 0;
 	}
-
-	// Copy payload to out[]. We don't mutate the input packet.
-	for (size_t i = 0; i < payload_len; ++i) {
-		out[i] = packet[HEADER_SIZE + i];
-	}
-
-	const uint32_t header = read_le32(packet);
-	uint32_t expected_crc;
-	if (payload_len >= SCATTER_THRESHOLD) {
-		// Unwind the scatter: restore original low bit from the header and
-		// collect the CRC bits that were living in the low bits of the
-		// output bytes.
-		expected_crc = 0;
-		for (size_t i = 0; i < SCATTER_THRESHOLD; ++i) {
-			const uint8_t b = out[i];
-			expected_crc |= static_cast<uint32_t>(b & 1u) << i;
-			out[i] = static_cast<uint8_t>((b & 0xFEu) | static_cast<uint8_t>((header >> i) & 1u));
-		}
-	} else {
-		expected_crc = header;
-	}
-
-	const uint32_t actual_crc = crc32_napi(out, payload_len);
-	if (actual_crc != expected_crc) {
-		return -1;
-	}
-
-	*out_size = payload_len;
-	return 0;
+	return decode_with_header(packet, packet_len, HEADER_SIZE,
+			out, out_cap, out_size) ? 0 : -1;
 }
 
 } // namespace opennova

@@ -71,9 +71,11 @@ Dictionary param_spec_to_dictionary(const opennova::mission::MissionParamSpec &s
 void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &NovaMissionData::open_file);
 	ClassDB::bind_method(D_METHOD("create_default"), &NovaMissionData::create_default);
+	ClassDB::bind_method(D_METHOD("open_wire_header", "header_bytes"), &NovaMissionData::open_wire_header);
 	ClassDB::bind_method(D_METHOD("open_from_resource_root", "resource_root", "name", "lookup_policy"),
 			&NovaMissionData::open_from_resource_root, DEFVAL(NovaResourceRoot::LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaMissionData::is_loaded);
+	ClassDB::bind_method(D_METHOD("is_wire_header_only"), &NovaMissionData::is_wire_header_only);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &NovaMissionData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaMissionData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &NovaMissionData::get_mission_name);
@@ -234,6 +236,23 @@ Error NovaMissionData::create_default() {
 	return OK;
 }
 
+Error NovaMissionData::open_wire_header(const PackedByteArray &p_header_bytes) {
+	source_path = String();
+	last_error = String();
+	mis_base_heights = PackedInt32Array();
+	if (!document.load_bms_header_bytes(
+			p_header_bytes.ptr(), static_cast<size_t>(p_header_bytes.size()))) {
+		last_error = String(document.last_error().c_str());
+		modified = false;
+		clear_history();
+		return ERR_PARSE_ERROR;
+	}
+	modified = false;
+	clear_history();
+	mark_clean();
+	return OK;
+}
+
 Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root,
 		const String &p_name, int p_lookup_policy) {
 	last_error = String();
@@ -275,6 +294,10 @@ Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_re
 
 bool NovaMissionData::is_loaded() const {
 	return document.is_loaded();
+}
+
+bool NovaMissionData::is_wire_header_only() const {
+	return document.is_header_only();
 }
 
 String NovaMissionData::get_source_path() const {

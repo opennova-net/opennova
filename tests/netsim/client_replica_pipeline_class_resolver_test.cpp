@@ -14,8 +14,8 @@
 //   1. A view carrying the items.def table walks a mixed frame — a header-only
 //      no-callback record (bldg/ewep form) followed by vehicle + infantry compacts —
 //      and decodes every position exactly (pipeline identity vs the lossy codec).
-//   2. The phase-1 default view (no table) mis-sizes that same frame — the witnessed
-//      failure this guard exists to prevent.
+//   2. A default view with no catalog fails closed at the first unknown codec and
+//      does not invent rows from a guessed record width.
 //   3. The items.def table OUTRANKS the 0x0D pool-blanket learning: a pool-1
 //      no-callback type (an `ewep` emplacement) that arrived via 0x0D must still
 //      decode header-only.
@@ -24,13 +24,15 @@
 //   5. Objective masks likewise commit only after the complete off-wire-gated
 //      16-byte phase-3 body decodes.
 
-#include "netsim/net_client_view.h"
+#include "netsim/client_replica_pipeline.h"
 
 #include <npwire/ingame_decode.h> // FrameUpdate / EntityClass / network_decompress_fixedpoint
 #include <npwire/ingame_encode.h> // encode_frame_update / encode_pool_spawn_batch / compress
+#include <npwire/ingame_message_id.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -115,7 +117,7 @@ int32_t expected_coord(int32_t anchor, int32_t world_fixed) {
 
 bool run_items_table_sizes_mixed_frame() {
 	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&items_table_classify);
 	view.apply(0x0A, build_mixed_frame(ax, ay, az));
 
@@ -144,27 +146,20 @@ bool run_items_table_sizes_mixed_frame() {
 	return true;
 }
 
-bool run_default_view_desyncs_on_no_callback_record() {
+bool run_default_view_fails_closed_on_unknown_codec() {
 	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
-	ns::NetClientView view; // phase-1 heuristic only: every non-player type = Infantry
+	ns::ClientReplicaPipeline view; // no catalog: the first non-built-in type is unresolved
 	view.apply(0x0A, build_mixed_frame(ax, ay, az));
 
-	// The heuristic walks the header-only record as a 14-B infantry body, eating the
-	// vehicle record's header — everything after is junk. The guard: the vehicle must
-	// NOT have decoded to its true position (if it ever does, the desync is gone and
-	// this test should be rethought, not deleted).
-	const ns::ClientEntityState *veh = view.state().find(kVehicleHandle);
-	const bool vehicle_correct = veh != nullptr &&
-			veh->x == expected_coord(ax, 50 << 16) &&
-			veh->y == expected_coord(ay, -20 << 16) &&
-			veh->z == expected_coord(az, 3 << 16);
-	return expect(!vehicle_correct,
-	              "phase-1 view mis-sizes the no-callback record (witnessed desync)");
+	return expect(view.state().find(kNoCallbackHandle) == nullptr &&
+	                      view.state().find(kVehicleHandle) == nullptr &&
+	                      view.state().find(kInfantryHandle) == nullptr,
+	              "unknown codec stops the frame without guessed-width rows");
 }
 
 bool run_items_table_outranks_pool_blanket() {
 	const int32_t ax = 100 << 16, ay = 0, az = -5 << 16;
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&items_table_classify);
 
 	// A load-time 0x0D pool-1 spawn for the no-callback type: the blanket learner
@@ -219,8 +214,64 @@ bool run_items_table_outranks_pool_blanket() {
 	return true;
 }
 
+bool run_catalog_presence_outranks_learned_pool_class() {
+	constexpr uint16_t ambiguous_type = 0x0444;
+	constexpr uint16_t fallback_type = 0x0555;
+	constexpr uint16_t ambiguous_handle = 0x1004;
+	constexpr uint16_t fallback_handle = 0x1005;
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver([ambiguous_type](uint16_t type_id)
+				-> ns::ClientReplicaPipeline::ItemClassResolution {
+		if (type_id == ambiguous_type) return nw::EntityClass::Unknown;
+		return std::nullopt;
+	});
+
+	nw::PoolSpawnBatch spawns;
+	nw::PoolSpawnRecord ambiguous;
+	ambiguous.slot_id = ambiguous_handle;
+	ambiguous.item_type_id = ambiguous_type;
+	spawns.records.push_back(ambiguous);
+	nw::PoolSpawnRecord fallback = ambiguous;
+	fallback.slot_id = fallback_handle;
+	fallback.item_type_id = fallback_type;
+	spawns.records.push_back(fallback);
+	view.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(spawns));
+
+	const ns::ClientEntityState *ambiguous_spawn =
+			view.state().find(ambiguous_handle);
+	const ns::ClientEntityState *fallback_spawn = view.state().find(fallback_handle);
+	if (!expect(ambiguous_spawn != nullptr &&
+				ambiguous_spawn->cls == nw::EntityClass::Unknown,
+			"present Unknown catalog entry is canonical at spawn")) return false;
+	if (!expect(fallback_spawn != nullptr &&
+				fallback_spawn->cls == nw::EntityClass::Vehicle,
+			"absent catalog entry falls through to learned pool class")) return false;
+
+	nw::FrameUpdate frame;
+	frame.mount_handle = 0xFFFF;
+	nw::FrameUpdateRecord unresolved;
+	unresolved.handle = ambiguous_handle;
+	unresolved.type_id = ambiguous_type;
+	unresolved.cls = nw::EntityClass::Vehicle;
+	unresolved.vehicle.parent_slot_handle = 0xFFFF;
+	unresolved.vehicle.health_word = 1;
+	frame.records.push_back(unresolved);
+	nw::FrameUpdateRecord later = unresolved;
+	later.handle = fallback_handle;
+	later.type_id = fallback_type;
+	frame.records.push_back(later);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
+
+	ambiguous_spawn = view.state().find(ambiguous_handle);
+	fallback_spawn = view.state().find(fallback_handle);
+	return expect(ambiguous_spawn != nullptr && fallback_spawn != nullptr &&
+				ambiguous_spawn->compact_revision == 0 &&
+				fallback_spawn->compact_revision == 0,
+			"present Unknown stops compact decoding before guessed-width records");
+}
+
 bool run_recipient_health_requires_a_decoded_tail() {
-	ns::NetClientView view([](uint16_t) { return nw::EntityClass::Unknown; });
+	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Unknown; });
 
 	// Establish a known valid sample first.
 	nw::FrameUpdate baseline;
@@ -263,7 +314,7 @@ bool run_recipient_health_requires_a_decoded_tail() {
 }
 
 bool run_objectives_require_a_complete_phase3_block() {
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	// Replay/bare-view folds learn the off-wire width hint from either session
 	// message before the first objective frame.
 	std::vector<uint8_t> session_config(51, 0);
@@ -324,15 +375,73 @@ bool run_objectives_require_a_complete_phase3_block() {
 	              "truncated phase-3 block preserves authoritative objective masks");
 }
 
+bool run_mounted_ammo_requires_a_complete_phase8_record() {
+	nw::FrameUpdate mounted;
+	mounted.flags2 = 8;
+	mounted.mount_handle = 0x1234;
+	mounted.passenger.present = true;
+	mounted.passenger.has_mount = true;
+	mounted.passenger.mount_handle = 0x1234;
+	mounted.passenger.clip = 0xFFFE;
+	mounted.passenger.reserve = 19;
+	const std::vector<uint8_t> full = nw::encode_frame_update(mounted);
+	if (!expect(full.size() >= 7, "phase-8 mounted fixture has record plus EOB"))
+		return false;
+	const std::size_t mount_offset = full.size() - 7; // u16 handle + u16 clip + u16 reserve + EOB
+	for (const std::size_t cut : {mount_offset + 1, mount_offset + 2,
+	                              mount_offset + 4}) {
+		std::vector<uint8_t> short_record(full.begin(), full.begin() + cut);
+		nw::FrameUpdate decoded;
+		if (!expect(!nw::decode_frame_update(
+		                    short_record.data(), short_record.size(),
+		                    [](uint16_t) { return nw::EntityClass::Unknown; }, decoded) &&
+		                    !decoded.passenger.present,
+		            "truncated phase-8 handle/clip/reserve is not publishable"))
+			return false;
+	}
+
+	ns::ClientReplicaPipeline view;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, full);
+	const ns::ClientMountedAmmoState &established = view.state().mounted_ammo;
+	if (!expect(established.present && established.has_mount &&
+	                    established.mount_handle == 0x1234 &&
+	                    established.clip == 0xFFFE && established.reserve == 19 &&
+	                    established.revision == 1,
+	            "complete phase-8 record folds into recipient mounted-ammo state"))
+		return false;
+
+	std::vector<uint8_t> truncated(full.begin(), full.begin() + mount_offset + 4);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, truncated);
+	if (!expect(view.state().mounted_ammo.revision == 1 &&
+	                    view.state().mounted_ammo.clip == 0xFFFE &&
+	                    view.state().mounted_ammo.reserve == 19,
+	            "truncated phase-8 record preserves the last complete snapshot"))
+		return false;
+
+	nw::FrameUpdate on_foot;
+	on_foot.flags2 = 8;
+	on_foot.mount_handle = 0xFFFF;
+	on_foot.passenger.present = true;
+	on_foot.passenger.mount_handle = 0xFFFF;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(on_foot));
+	return expect(view.state().mounted_ammo.present &&
+	                      !view.state().mounted_ammo.has_mount &&
+	                      view.state().mounted_ammo.mount_handle == 0xFFFF &&
+	                      view.state().mounted_ammo.revision == 2,
+	              "complete on-foot phase-8 sentinel advances the snapshot");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok &= run_items_table_sizes_mixed_frame();
-	ok &= run_default_view_desyncs_on_no_callback_record();
+	ok &= run_default_view_fails_closed_on_unknown_codec();
 	ok &= run_items_table_outranks_pool_blanket();
+	ok &= run_catalog_presence_outranks_learned_pool_class();
 	ok &= run_recipient_health_requires_a_decoded_tail();
 	ok &= run_objectives_require_a_complete_phase3_block();
-	if (ok) std::printf("client_view_class_resolver: OK\n");
+	ok &= run_mounted_ammo_requires_a_complete_phase8_record();
+	if (ok) std::printf("client_replica_pipeline_class_resolver: OK\n");
 	return ok ? 0 : 1;
 }

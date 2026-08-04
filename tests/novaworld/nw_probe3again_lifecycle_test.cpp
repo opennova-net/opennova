@@ -7,7 +7,7 @@
 // request trio 0x68/0x43/0x39 -> C2S 0x3D/0x08/0x1C), the deployed-item channel
 // (0x59), the multi-client death/leave lifecycle (0x26+0x13 deaths, 0x5D clean
 // despawn), AND the honest CONFIRMED NEGATIVES (no guided 0x0C sub_ops, AI static
-// so mid-game 0x20 is the load batch only, Co-op roster teams==0).
+// so mid-game 0x20 is the load batch only, Co-op spawn-wave groups==0).
 //
 // The distinguishing assertion cross-checks the wire against the host /PROFILE
 // .sph value-oracle (decode_server_log): the .sph DEATH/DISCONNECT events and the
@@ -58,7 +58,7 @@ int n_26 = 0, n_13 = 0;                   // death paths
 int n_16 = 0, n_46 = 0, n_6e = 0;         // lifecycle/identity
 int guided_sub_ops = 0;                   // C2S 0x0C with sub_op != 0x0A (guided)
 int total_c0c = 0;                        // C2S 0x0C total
-size_t max_roster_teams = 0;              // largest teamCount seen on 0x6E
+size_t max_wave_groups = 0;               // largest spawn-wave groupCount on 0x6E
 std::set<int> adm_set;                    // distinct weapon adm indices (0x06)
 std::set<uint16_t> shooter_set;           // distinct shooter handles (0x06)
 std::set<std::string> names_7b;           // distinct player names (0x7B)
@@ -79,10 +79,10 @@ void collect(char dir, int tag, const std::vector<uint8_t> &a) {
 		case 0x46: n_46++; break;
 		case 0x6E: {
 			n_6e++;
-			RosterSync rs;
-			if (decode_roster_sync(a.data(), a.size(), rs) &&
-			    rs.teams.size() > max_roster_teams)
-				max_roster_teams = rs.teams.size();
+			SpawnWaveStatus status;
+			if (decode_spawn_wave_status(a.data(), a.size(), status) &&
+			    status.groups.size() > max_wave_groups)
+				max_wave_groups = status.groups.size();
 			break;
 		}
 		case 0x7B: {
@@ -161,8 +161,8 @@ int main() {
 	            "0x39=%d/0x1C=%d\n", n_s57, n_c2c, n_s68, n_c3d, n_s43, n_c08,
 	            n_s39, n_c1c);
 	std::printf("lifecycle: deaths 0x26=%d 0x13=%d | despawn 0x5D=%d | players(0x7B)=%zu "
-	            "0x16=%d 0x46=%d 0x6E=%d (max teams=%zu)\n", n_26, n_13, n_5d,
-	            names_7b.size(), n_16, n_46, n_6e, max_roster_teams);
+	            "0x16=%d 0x46=%d 0x6E=%d (max wave groups=%zu)\n", n_26, n_13, n_5d,
+	            names_7b.size(), n_16, n_46, n_6e, max_wave_groups);
 	std::printf("weapons: 0x06=%d fires, %zu distinct adm, %zu shooters | 0x59 deployed=%d\n",
 	            n_06, adm_set.size(), shooter_set.size(), n_59);
 	std::printf("negatives: C2S 0x0C=%d (guided sub_ops=%d) | S2C 0x20=%d batches\n",
@@ -195,7 +195,7 @@ int main() {
 	      "NO guided traffic: every C2S 0x0C sub_op is 0x0A (D-NET-64 still open)");
 	check(n_s20 <= 4,
 	      "mid-game S2C 0x20 is the load batch only — AI static (D-NET-55 still open)");
-	check(max_roster_teams == 0, "Co-op roster 0x6E teams==0 (single team vs AI)");
+	check(max_wave_groups == 0, "Co-op 0x6E has no queued spawn-wave groups");
 
 	// === .sph value-oracle cross-check =======================================
 	std::string sph_path;

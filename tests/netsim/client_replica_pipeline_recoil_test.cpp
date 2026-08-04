@@ -5,7 +5,7 @@
 // the next wire sample without becoming an invented wire field.
 // [orig: RoundData_SpawnRound @0x4EC0D0; remote body update]
 
-#include "netsim/net_client_view.h"
+#include "netsim/client_replica_pipeline.h"
 
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
@@ -45,7 +45,7 @@ bool expect(bool condition, const char *message) {
 } // namespace
 
 int main() {
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	ns::ClientEntityState &player = view.state().upsert(1);
 	player.cls = nw::EntityClass::Player;
 	player.recoil_pitch = 1 << 18;
@@ -65,11 +65,11 @@ int main() {
 	            "remote player loses half of the eighth-step") && ok;
 	ok = expect(view.state().find(1)->pitch_bam == 4196,
 	            "remote player pitch receives one eighth of that step") && ok;
-	ok = expect(view.state().find(1)->heading_bam == -16284,
-	            "first client PRNG draw selects the negative yaw half-step") && ok;
+	ok = expect(view.state().find(1)->heading_bam == 16484,
+	            "mission-seeded first draw selects the positive yaw half-step") && ok;
 	ok = expect(view.state().find(2)->recoil_pitch == 0,
 	            "remote infantry snaps a signed remainder <= 0x300") && ok;
-	ok = expect(view.state().find(2)->heading_bam == 152,
+	ok = expect(view.state().find(2)->heading_bam == 248,
 	            "zero-floor recoil still receives its PRNG-selected yaw half-step") && ok;
 	ok = expect(view.state().find(0x1001)->recoil_pitch == (1 << 18),
 	            "non-person decoded rows do not consume recoil") && ok;
@@ -79,11 +79,10 @@ int main() {
 	            "remote recoil eventually reaches the retail snap floor") && ok;
 
 	// PRNG_Next16 is one client-global stream and is consumed once for every
-	// person body, even when its accumulator is zero. From the BSS-zero seed the
-	// first five results are odd and the sixth is even, so only the sixth body
-	// below takes the positive yaw leg. These are retail-oracle literals, not a
-	// reimplementation of the generator in the test.
-	ns::NetClientView order_view;
+	// person body, even when its accumulator is zero. The sixth draw from the
+	// exact Game_StartMission seed is even, selecting the positive yaw leg below.
+	// These are retail-oracle literals, not a reimplementation in the test.
+	ns::ClientReplicaPipeline order_view;
 	for (uint16_t handle = 1; handle <= 6; ++handle) {
 		ns::ClientEntityState &row = order_view.state().upsert(handle);
 		row.cls = nw::EntityClass::Player;
@@ -99,7 +98,7 @@ int main() {
 	// The local sub-byte heading must never become an invented wire field. A
 	// compact update overwrites it from the real coarse yaw while retaining the
 	// byte exactly for codec identity.
-	ns::NetClientView wire_view;
+	ns::ClientReplicaPipeline wire_view;
 	wire_view.set_item_class_resolver(&classify);
 	wire_view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(7, 0x40));
 	ns::ClientEntityState *wire_player = wire_view.state().find(7);
@@ -107,14 +106,14 @@ int main() {
 	            "compact yaw seeds the persistent full heading") && ok;
 	if (wire_player != nullptr) {
 		wire_player->recoil_pitch = 1 << 18;
-		wire_view.tick_recoil(); // default first draw is odd: -0x4000
-		ok = expect(wire_player->heading_bam == 0x3FFFC000 &&
+		wire_view.tick_recoil(); // mission-seeded first draw is even: +0x4000
+		ok = expect(wire_player->heading_bam == 0x40004000 &&
 		                    wire_player->yaw_byte == 0x40,
 		            "recoil changes full heading without mutating the wire byte") && ok;
 		wire_view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(7, 0x40));
 		ok = expect(wire_player->heading_bam == 0x40000000,
 		            "the next compact yaw re-seeds full heading") && ok;
 	}
-	if (ok) std::printf("client_view_recoil: OK\n");
+	if (ok) std::printf("client_replica_pipeline_recoil: OK\n");
 	return ok ? 0 : 1;
 }

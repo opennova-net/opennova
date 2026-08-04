@@ -360,9 +360,10 @@ int main(void) {
         return 1;
     }
 
-    /* §5.10b class-tag directives. The buggy uses ai_function chel (the engine's
-       AI-helicopter family — buggies inherit aircraft-like driving in retail).
-       render_function/move_function = cveh. No disk_function on the buggy. */
+    /* §5.10b class-tag directives. The buggy uses ai_function chel for its
+       event/brain callback, while render_function/move_function = cveh. The
+       distinct move tag keeps its per-frame physics on the retail ground mover.
+       No disk_function on the buggy. */
     if (strcmp(buggy->ai_function, "chel") != 0) {
         fprintf(stderr, "FAIL: buggy ai_function mismatch: expected 'chel', got '%s'\n",
                 buggy->ai_function);

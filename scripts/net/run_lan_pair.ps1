@@ -4,7 +4,7 @@
 # first; JoinDelayMs is deliberately bounded so this remains a quick bring-up aid.
 #
 # Usage:
-#   pwsh -File scripts\net\run_lan_pair.ps1 -Mission ASH_I5A.BMS
+#   pwsh -File scripts\net\run_lan_pair.ps1 -Mission 01TR.bms -GameType 65568 -Resolution 1920x1080
 
 [CmdletBinding()]
 param(
@@ -15,19 +15,55 @@ param(
     [ValidateRange(1, 65535)] [int] $Port = 32768,
     [ValidateRange(0, 10000)] [int] $JoinDelayMs = 1500,
     [string] $JoinMissionOverride = "",
+    [string] $HostHookConfig = "",
+    [string] $JoinHookConfig = "",
+    [string] $IntegrityProfile = "",
+    [string] $HostResourceDir = "",
+    [string] $JoinResourceDir = "",
+    [string] $Expansion = "",
+    [string] $GameType = "auto",
+    [string] $Resolution = "",
+    [switch] $Windowed,
     [switch] $Wait
 )
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\lib.ps1"
+
+$normalizedResolution = ""
+if (-not [string]::IsNullOrWhiteSpace($Resolution)) {
+    $normalizedResolution = ConvertTo-OpenNovaResolution -Value $Resolution
+}
 
 $hostScript = Join-Path $PSScriptRoot "host_opennova.ps1"
 $joinScript = Join-Path $PSScriptRoot "join_opennova.ps1"
 
-$hostProcess = & $hostScript `
-    -Mission $Mission `
-    -Name $HostName `
-    -Port $Port `
-    -PassThru
+$hostArgs = @{
+    Mission = $Mission
+    Name = $HostName
+    Port = $Port
+    PassThru = $true
+}
+if (-not [string]::IsNullOrWhiteSpace($HostHookConfig)) {
+    $hostArgs["HookConfig"] = $HostHookConfig
+}
+if (-not [string]::IsNullOrWhiteSpace($HostResourceDir)) {
+    $hostArgs["ResourceDir"] = $HostResourceDir
+}
+if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
+    $hostArgs["Expansion"] = $Expansion
+}
+if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
+    $hostArgs["IntegrityProfile"] = $IntegrityProfile
+}
+if ($PSBoundParameters.ContainsKey("GameType")) {
+    $hostArgs["GameType"] = $GameType
+}
+if ($normalizedResolution) {
+    $hostArgs["Resolution"] = $normalizedResolution
+}
+if ($Windowed) { $hostArgs["Windowed"] = $true }
+$hostProcess = & $hostScript @hostArgs
 
 if ($JoinDelayMs -gt 0) {
     Write-Host "Waiting ${JoinDelayMs}ms before starting the joiner..."
@@ -48,10 +84,27 @@ $joinArgs = @{
 if ($PSBoundParameters.ContainsKey("JoinMissionOverride")) {
     $joinArgs["MissionOverride"] = $JoinMissionOverride
 }
+if (-not [string]::IsNullOrWhiteSpace($JoinHookConfig)) {
+    $joinArgs["HookConfig"] = $JoinHookConfig
+}
+if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
+    $joinArgs["IntegrityProfile"] = $IntegrityProfile
+}
+if (-not [string]::IsNullOrWhiteSpace($JoinResourceDir)) {
+    $joinArgs["ResourceDir"] = $JoinResourceDir
+}
+if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
+    $joinArgs["Expansion"] = $Expansion
+}
+if ($normalizedResolution) {
+    $joinArgs["Resolution"] = $normalizedResolution
+}
+if ($Windowed) { $joinArgs["Windowed"] = $true }
 $joinProcess = & $joinScript @joinArgs
 
 Write-Host "OPENNOVA_PAIR_HOST_PID=$($hostProcess.Id)"
 Write-Host "OPENNOVA_PAIR_JOIN_PID=$($joinProcess.Id)"
+Write-Host "OPENNOVA_PAIR_RESOLUTION=$(if ($normalizedResolution) { $normalizedResolution } else { 'per-role/project-default' })"
 
 if ($Wait) {
     foreach ($process in @($hostProcess, $joinProcess)) {

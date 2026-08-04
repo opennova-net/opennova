@@ -282,7 +282,7 @@ func _refresh_entity_detail(force_editor_values := false) -> void:
 		name if not name.is_empty() else "unnamed",
 		identity,
 	])
-	lines.append("client view: %s  edits: %s" % [
+	lines.append("client replica: %s  edits: %s" % [
 		"presented" if bool(row.get("presented", false)) else "not presented",
 		"available" if bool(row.get("editable", false)) else "read only",
 	])

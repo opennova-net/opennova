@@ -165,8 +165,9 @@ bool run_team_assign_relatches_self_and_resubmits() {
 	assign.team = 3;
 	assign.net_id = 0x1234;
 	assign.anim_slot = 1;
+	const std::vector<uint8_t> assign_payload = encode_team_assign(assign);
 	const std::vector<uint8_t> dg = frame_server_session(
-			server_tx, {make_protocol_message(0x50, encode_team_assign(assign))});
+			server_tx, {make_protocol_message(0x50, assign_payload)});
 	const np::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(dg.data(), dg.size());
 
@@ -180,6 +181,11 @@ bool run_team_assign_relatches_self_and_resubmits() {
 				poll.entity_team_assigns[0].first == kSelf &&
 				poll.entity_team_assigns[0].second == 3,
 			"0x50-self: the decoded-view fold also names the entity"))
+		return false;
+	if (!expect(poll.inbound_gameplay.size() == 1 &&
+				poll.inbound_gameplay[0].first == 0x50 &&
+				poll.inbound_gameplay[0].second == assign_payload,
+			"0x50-self: the validated raw record reaches the replica pipeline"))
 		return false;
 
 	int submits = 0;
@@ -440,6 +446,29 @@ bool run_team_assign_folds_remote_row() {
 
 // The joiner requests the sweep from its S2C 0x0F reply burst, and the 0x5D reply
 // retires the decoded row (the permanent-ghost fix).
+bool run_empty_slot_sweep_surfaces_raw_gameplay() {
+	np::JoinerConnection joiner("SweepPollJoiner", [] { return uint64_t(0); });
+	joiner.seed_in_match(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                     1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+
+	DestroyEntityList sweep;
+	sweep.pool0_indices = {0x0003, 0x0007};
+	const std::vector<uint8_t> sweep_payload = encode_destroy_entity_list(sweep);
+	const std::vector<uint8_t> dg = frame_server_session(
+			server_tx, {make_protocol_message(0x5D, sweep_payload)});
+	const np::JoinerConnection::PollResult poll =
+			joiner.handle_datagram(dg.data(), dg.size());
+
+	if (!expect(poll.destroyed_pool0_slots == sweep.pool0_indices,
+			"0x5D-poll: decoded slot diagnostics remain available"))
+		return false;
+	return expect(poll.inbound_gameplay.size() == 1 &&
+				poll.inbound_gameplay[0].first == 0x5D &&
+				poll.inbound_gameplay[0].second == sweep_payload,
+			"0x5D-poll: the validated raw record reaches the replica pipeline");
+}
+
 bool run_empty_slot_sweep_retires_the_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGhost = 0x0003;
@@ -670,14 +699,80 @@ bool run_in_match_session_loss() {
 			"loss: inbound traffic re-armed the reap window"))
 		return false;
 
-	// Crossing it: lost, with a player-facing reason.
+	// Retail compares elapsed strictly greater-than the configured timeout.
 	now_ms += 1;
 	(void)client.Client_ProcessNetworkFrame(4);
-	if (!expect(client.session_lost(),
-			"loss: 120000 ms of silence trips the witnessed reap window"))
+	if (!expect(!client.session_lost(),
+			"loss: exactly 120000 ms of silence remains inside the reap window"))
 		return false;
+	now_ms += 1;
+	const std::vector<std::vector<uint8_t>> timeout_frame =
+			client.Client_ProcessNetworkFrame(5);
+	if (!expect(timeout_frame.empty() && client.session_lost(),
+			"loss: 120001 ms of silence trips the reap without new traffic"))
+		return false;
+	if (!expect(client.phase() == np::JoinerConnection::Phase::Error &&
+				!client.in_match(),
+			"loss: the silence reap enters the terminal connection phase"))
+		return false;
+	ClientFiredRound fire;
+	fire.shooter_handle = 0x0005;
+	if (!expect(!client.queue_fired_round(fire),
+			"loss: a timed-out runtime rejects newly queued gameplay"))
+		return false;
+	// Stay beyond a complete 0x34 interval: terminal silence must not be a
+	// one-frame queue clear followed by a freshly produced keepalive.
+	for (uint32_t tick = 6; tick < 29770; ++tick) {
+		if (!expect(client.Client_ProcessNetworkFrame(tick).empty(),
+				"loss: the timed-out runtime remains silent indefinitely"))
+			return false;
+	}
 	return expect(!client.session_loss_reason().empty(),
 			"loss: a lost session reports a reason for the shell to surface");
+}
+
+// Death temporarily returns an already-established joiner to Phase::Driving
+// while the deploy screen owns the next pick/release exchange. That phase reuse
+// must not disable the transport's 120-second silence reap: a host crash while
+// the player is dead still exits the session instead of stranding the screen.
+bool run_redeployment_session_loss() {
+	uint64_t now_ms = 1000;
+	np::JoinerConnection joiner(
+			"RedeployTimeoutJoiner", [&now_ms] { return now_ms; });
+	joiner.seed_in_match(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                    1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	if (!expect(joiner.begin_redeployment() &&
+	                    joiner.phase() == np::JoinerConnection::Phase::Driving,
+			"loss: death enters the established redeployment drive"))
+		return false;
+
+	now_ms += np::JO_GAME_SESSION_TIMEOUT_MS;
+	if (!expect(!joiner.session_lost(),
+			"loss: redeployment remains healthy exactly at the timeout boundary"))
+		return false;
+	++now_ms;
+	if (!expect(joiner.session_lost() &&
+	                      !joiner.session_loss_reason().empty(),
+			"loss: host silence reaps an established joiner after the redeploy timeout"))
+		return false;
+	const uint64_t terminal_silence = joiner.milliseconds_since_last_receive();
+	if (!expect(joiner.frame_inner(0x34, {0, 0, 0, 0}).empty() &&
+				joiner.phase() == np::JoinerConnection::Phase::Error,
+			"loss: direct session framing latches timeout before producing traffic"))
+		return false;
+	if (!expect(joiner.pump(0).empty(),
+			"loss: the direct joiner pump remains silent after the timeout"))
+		return false;
+
+	SessionSequencing late_server_tx = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> late = frame_server_session(
+			late_server_tx, {make_protocol_message(0x03, {0, 0, 0, 0})});
+	const np::JoinerConnection::PollResult late_result =
+			joiner.handle_datagram(late.data(), late.size());
+	return expect(late_result.outbound.empty() && joiner.session_lost() &&
+				joiner.phase() == np::JoinerConnection::Phase::Error &&
+				joiner.milliseconds_since_last_receive() == terminal_silence,
+			"loss: a late valid datagram cannot refresh or revive a timed-out joiner");
 }
 
 // A HOST-role runtime has no session to lose (there is no peer reaping it).
@@ -696,10 +791,12 @@ int main() {
 	if (!run_team_assign_folds_remote_row()) return 1;
 	if (!run_team_assign_reselects_the_new_sides_profile()) return 1;
 	if (!run_team_assign_default_kit_stays_byte_identical()) return 1;
+	if (!run_empty_slot_sweep_surfaces_raw_gameplay()) return 1;
 	if (!run_empty_slot_sweep_retires_the_row()) return 1;
 	if (!run_player_sync_removal_keeps_the_entity()) return 1;
 	if (!run_host_answers_the_sweep_request()) return 1;
 	if (!run_in_match_session_loss()) return 1;
+	if (!run_redeployment_session_loss()) return 1;
 	if (!run_host_client_never_reports_loss()) return 1;
 	std::printf("OK\n");
 	return 0;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
 #include <npwire/ingame_message_id.h>
 #include <world/geom.h>              // to_fixed
+#include <world/vehicle_mount.h>
 
 #include "netsim/entity_wire_bridge.h" // health_classification_byte (the field-17 pack)
 
@@ -38,6 +40,10 @@ struct FrameHeaderState {
 	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
 	// learned it died. A decrease also fires the brief damage flash [orig: @0x43059a].
 	int16_t tail_health = 150;
+	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
+	// derived once before budgeting so the conditional header width and bytes agree.
+	FrameEnv env{};
+	FrameMountAmmo mount_ammo{};
 };
 
 // The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor, the phase-selected header
@@ -93,12 +99,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
 		fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
 		break;
-	default:
+	case 2:
+		// Retail-native World state is quantized only at this wire boundary.
+		fu.env = hdr.env;
+		break;
+	default: // case 3
 		// Sub-block 3 (gametype): four objective i32s only when the shared
 		// g_GameType bit 0x20000 is set (Co-op 0x30020 is the captured case).
 		// The masks are the authoritative World::subgoals state consumed by
 		// the objective HUD on each recipient.
-		// Sub-block 2 (env) is deferred and never selected here.
 		fu.objective.present = (game_type & 0x20000u) != 0u;
 		fu.objective.state[0] = static_cast<int32_t>(subgoals.won);
 		fu.objective.state[1] = static_cast<int32_t>(subgoals.lost);
@@ -120,6 +129,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// one channel its own health rides.
 	fu.health = hdr.tail_health;
 	fu.state_word = 0;
+	fu.passenger = hdr.mount_ammo;
 
 	for (const GameEntitySnapshot &e : entities) {
 		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
@@ -155,10 +165,11 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// [orig: NetPacket_SerializePlayerState @0x4C09C0 case 1]. vehicle_bone = the raw
 			// attach bone (entity+0x157, mounted only @0x4c0a1a) — the client resolves ITS
 			// seat from it (Entity_TryAttachOrDetach @0x436610; bone 0 or no carrier =
-			// detach). seat_type stays 0 for our vehicle targets — 1/2 mark a mountable
-			// carried GUN (carrier itemDef.type != 1 && attrib 0x20 + the +0x326/+0x312 bits
-			// @0x4c0a39), which needs gun-carrier def modeling: deferred, D-NET-157.
+			// detach). A designated-G carried EWeap overloads seat_type as the live
+			// MountSlot route echo: 1 = child slot, 2 = groundEntity vehicle slot
+			// [orig: ItemDef type/attrib and +0x326/+0x312 gates @0x4c0a39].
 			rec.player.vehicle_bone = e.veh_bone;
+			rec.player.seat_type = e.mounted_weapon_seat_type;
 			if (player_carrier != 0xFFFFu && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
@@ -247,8 +258,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// unwitnessed decode-era guess (D-NET-63 correction).
 			rec.vehicle.health_word = static_cast<uint16_t>(
 					e.health > 0 ? (e.health < 0xFFFF ? e.health : 0xFFFF) : 0);
-			// Weapon-aim tail fields (entity+160 / vehicleData 132/135/136) stay 0 —
-			// turret state is unmodeled.
+			// entity+160 (weapon X) remains zero until turret aim is modeled.
+			// Live prediction registers: fixed-point forward/lateral commands use
+			// the retail 16-bit codec; steering is the rounded BAM32 high word.
+			// [orig: @0x460dc2..0x460e10; net-re section 5.13]
+			rec.vehicle.weapon_aim_y =
+					network_compress_fixedpoint(e.vehicle_forward_speed_reg);
+			rec.vehicle.weapon_aim_z =
+					network_compress_fixedpoint(e.vehicle_lateral_speed_reg);
+			rec.vehicle.weapon_heading_bam = static_cast<int16_t>(
+					(static_cast<uint32_t>(e.vehicle_steer_target_bam) +
+					 0x00008000u) >> 16);
 			break;
 		case EntityClass::Infantry: {
 			// Existing 14-byte infantry record, with the exact witnessed field
@@ -344,7 +364,21 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 // via the BANDWIDTH server command (100-1600). The new/stale-recipient halving
 // (budget >>= 1 iff slot+89876 congestion flag or connection uptime > 2000
 // [orig: @0x517c62]) is deferred — no congestion-callback model yet.
-constexpr int kEntitySendBudget = 600;
+int g_entity_send_budget = 600;
+
+} // namespace
+
+void set_entity_send_budget(int bytes) {
+	// The witnessed BANDWIDTH server-command clamp [orig: 100-1600 onto
+	// g_entity_send_budget @0xC8FC50].
+	if (bytes < 100) bytes = 100;
+	if (bytes > 1600) bytes = 1600;
+	g_entity_send_budget = bytes;
+}
+
+int entity_send_budget() { return g_entity_send_budget; }
+
+namespace {
 
 // Age-array index for one entity: pool-0 ages [0..255], pool-1 [256..511], slot & 0xFF
 // [orig: idx = handle & 0xFFF, +256 if pool 1, @0x50f15c].
@@ -379,7 +413,8 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
-                                                      std::size_t header_bytes) {
+                                                      std::size_t header_bytes,
+                                                      std::size_t hard_frame_limit) {
 	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
 	for (uint8_t &a : conn.s2c_entity_age) {
 		if (a != 0xFF) ++a;
@@ -440,10 +475,15 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 	std::vector<GameEntitySnapshot> selected;
 	std::size_t written = header_bytes;
 	for (const Scored &s : scored) {
+		const std::size_t record_bytes = record_wire_size(*s.snap);
+		if (hard_frame_limit != 0 &&
+				(written > hard_frame_limit ||
+				 record_bytes > hard_frame_limit - written))
+			continue;
 		selected.push_back(*s.snap);
 		conn.s2c_entity_age[age_index(*s.snap)] = 0; // [orig: @0x50f168]
-		written += record_wire_size(*s.snap);
-		if (written >= std::size_t(kEntitySendBudget)) break; // [orig: @0x50f34b]
+		written += record_bytes;
+		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
 	return selected;
 }
@@ -461,7 +501,8 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 // ---------------------------------------------------------------------------
 std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
                                                   const PlayerReplicationState &anchor,
-                                                  std::size_t budget_left) {
+                                                  std::size_t budget_left,
+                                                  std::size_t hard_budget_left) {
 	std::vector<RoundEventRecord> out;
 	const world::RoundRing &ring = w.rounds;
 
@@ -575,6 +616,9 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 
 		const std::size_t wire = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
 		                         ((rec.flags & 0x40) ? 2u : 0u);
+		if (hard_budget_left != std::numeric_limits<std::size_t>::max() &&
+				(written > hard_budget_left || wire > hard_budget_left - written))
+			continue;
 		out.push_back(rec);
 		written += wire;
 		if (written >= budget_left) break;
@@ -587,15 +631,20 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
 // 2 flag bytes + the phase sub-block (0 weapon 11 B / 1 timer 6 B / 2 env 11 B /
 // 3 gametype 0/16 B, selected by the off-wire objective gate) + the 7-B local tail +
-// the 1-B event-loop terminator. The passenger
-// block ((flags2 & 0xF) == 8) never fires on the {1,0,3} safe cycle.
-std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type) {
+// the conditional phase-8 mount record (2 B on foot / 6 B mounted) + the 1-B
+// event-loop terminator.
+std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
+                               const FrameHeaderState &hdr) {
+	std::size_t bytes = 0;
 	switch (flags2 & 0x03) {
-	case 0: return 12 + 2 + 11 + 7 + 1;
-	case 1: return 12 + 2 + 6 + 7 + 1;
-	case 2: return 12 + 2 + 11 + 7 + 1;
-	default: return 12 + 2 + (((game_type & 0x20000u) != 0u) ? 16 : 0) + 7 + 1;
+	case 0: bytes = 12 + 2 + 11 + 7 + 1; break;
+	case 1: bytes = 12 + 2 + 6 + 7 + 1; break;
+	case 2: bytes = 12 + 2 + 11 + 7 + 1; break;
+	default: bytes = 12 + 2 + (((game_type & 0x20000u) != 0u) ? 16 : 0) + 7 + 1; break;
 	}
+	if ((flags2 & 0x0Fu) == 8u)
+		bytes += hdr.mount_ammo.mount_handle == 0xFFFFu ? 2u : 6u;
+	return bytes;
 }
 
 } // namespace
@@ -662,23 +711,58 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor,
-                         uint32_t game_type) {
+                         uint32_t game_type,
+                         std::size_t max_frame_body_bytes) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
 
 	// Advance the per-connection 0x0A sub-block phase and select this frame's header sub-block
 	// [orig: ++playerSlot+100566 then NetPacket_WritePlayerState writes it as flags2, phase&3 =
 	// sub-block]. The original free-runs an 8-bit counter, so phase&3 cycles all four sub-blocks
-	// (0 weapon / 1 server-status / 2 env / 3 gametype) evenly and phase&0xF==8 emits the passenger
-	// block every 16th frame. We cycle a SAFE 3-value subset {1,0,3} for now — env (2) is DEFERRED
-	// because our host does not yet author world.env, so sending it would OVERWRITE the client's
-	// correct mission-loaded sky (fog/time-of-day); the passenger block needs vehicle-mount modeling.
-	// Both slot back into the free counter once those land. First send is phase 1 (server-status), so
-	// the load-bearing fall-damage tolerance reaches the client on frame 1 (matches the original, which
-	// increments to 1 before its first write @0x517be8).
-	static constexpr uint8_t kSafeSubCycle[3] = {1, 0, 3}; // -> sub 1(status) / 0(weapon) / 3(gametype)
-	const uint8_t flags2 = kSafeSubCycle[conn.s2c_phase % 3u];
-	++conn.s2c_phase;
+	// (0 weapon / 1 server-status / 2 env / 3 gametype) evenly and phase&0xF==8 emits the mounted-
+	// weapon ammo block every 16th frame. First send is phase 1 (server-status), so the load-bearing
+	// fall-damage tolerance reaches the client on frame 1 (matches the original preincrement @0x517be8).
+	const uint8_t flags2 = ++conn.s2c_phase;
+
+	// Derive every variable-width header field before the shared packet budget is
+	// divided. Retail keeps these environment values in native fixed-point globals
+	// and quantizes only while writing the frame.
+	FrameHeaderState hs;
+	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
+	const world::EnvNetworkState &env = w.network_env;
+	hs.env.present = true;
+	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);
+	const uint32_t fog_accel = std::min<uint32_t>(env.fog_accel_clamp, 0x00FF0000u);
+	hs.env.fog_accel = static_cast<uint16_t>((fog_accel + 0xFFu) >> 8);
+	hs.env.tod_fixed = static_cast<uint16_t>((env.tod_fixed24 + 0x1000u) >> 13);
+	hs.env.quake_ticks = static_cast<uint8_t>(std::min<uint32_t>(env.quake_ticks, 0xFFu));
+	hs.env.cloud_scroll = static_cast<uint8_t>(
+			std::min<uint32_t>(env.cloud_scroll_rate_target >> 10, 0xFFu));
+	hs.env.rain_pct = static_cast<uint8_t>(
+			std::min<uint32_t>(env.rain_pct_current_q16 >> 8, 0xFFu));
+	hs.env.overcast = static_cast<uint8_t>(
+			std::min<uint32_t>(env.overcast_blend_q16 >> 8, 0xFFu));
+	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
+	hs.mount_ammo.present = (flags2 & 0x0Fu) == 8u;
+	if (conn.owned_entity.valid()) {
+		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
+			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
+			if (own->mounted && own->mount_target.valid()) {
+				hs.tail_mount_handle = own->mount_target.packed;
+				hs.mount_ammo.mount_handle = own->mount_target.packed;
+				hs.mount_ammo.has_mount = true;
+				if (const world::Entity *mount = w.registry.get(own->mount_target)) {
+					if (const world::WeaponSlotState *slot =
+							world::resolve_mounted_ammo_slot(w, *mount)) {
+						hs.mount_ammo.clip = static_cast<uint16_t>(slot->clip);
+						hs.mount_ammo.reserve = static_cast<uint16_t>(slot->reserve);
+					}
+				}
+			}
+			hs.tail_health = static_cast<int16_t>(
+					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
+		}
+	}
 
 	// Priority + aging + byte-budget selection of this frame's tag-1 records [orig:
 	// Server_BuildEntityPriorityList @ 0x50e590 + the serialize_entity_states_to_packet
@@ -688,7 +772,12 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// view RENDERS FROM the loopback 0x0A fold (ADR 0011), so the loopback connection gets
 	// the full record set; that frame never leaves the process, so retail interop is
 	// unaffected (D-NET-140).
-	const std::size_t header_bytes = frame_header_bytes(flags2, game_type);
+	const std::size_t header_bytes = frame_header_bytes(flags2, game_type, hs);
+	const std::size_t hard_event_bytes = max_frame_body_bytes == 0
+			? std::numeric_limits<std::size_t>::max()
+			: (max_frame_body_bytes > header_bytes
+					? max_frame_body_bytes - header_bytes
+					: 0);
 	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
 	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
 	// The first grouped-order port handed rounds only the leftovers — a real-world
@@ -698,32 +787,22 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// entities absorb the remainder — same cap, and the retail decode loop is
 	// tag-driven either way. (D-NET-152/154)
 	std::vector<RoundEventRecord> rounds =
-			select_round_events(w, conn, anchor, std::size_t(kEntitySendBudget) - header_bytes);
+			select_round_events(
+					w, conn, anchor,
+					std::size_t(g_entity_send_budget) - header_bytes,
+					hard_event_bytes);
 	std::size_t rounds_bytes = 0;
 	for (const RoundEventRecord &r : rounds)
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	const std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(conn, ents, anchor, header_bytes + rounds_bytes);
+			select_frame_entities(
+					conn, ents, anchor, header_bytes + rounds_bytes,
+					max_frame_body_bytes);
 
-	// Per-recipient header state: the deploy-screen hold + the recipient's own stance/mount
-	// tail echo (see FrameHeaderState). The pending player's entity also carries the hidden
-	// bit0 the record byte13 replicates — set/cleared with respawn_pending by the join/0x0E
-	// sites [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0 while pending].
-	FrameHeaderState hs;
-	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00; // bit1 hold [orig: @0x4ff7bd] (D-NET-156)
-	if (conn.owned_entity.valid()) {
-		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
-			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
-			if (own->mounted && own->mount_target.valid())
-				hs.tail_mount_handle = own->mount_target.packed;
-			// Live health; the i16 wire field clamps the (never-seen) overflow.
-			hs.tail_health = static_cast<int16_t>(
-					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
-		}
-	}
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE,
 	                          build_0a_frame(anchor, selected, flags2, hs, game_type, w.subgoals,
-	                                         std::move(rounds)));
+	                                         std::move(rounds)),
+	                          /*reliable=*/false);
 }
 
 } // namespace opennova::netsim

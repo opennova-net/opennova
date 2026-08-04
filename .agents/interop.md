@@ -48,14 +48,19 @@ Godot direct-launch variables:
 - Godot/OpenNova listen host and joiner through `NW_LAN_*` env hooks.
 - NovaWorld host registration for a Godot listen host.
 - Retail launch with stock files through the launcher after hosts redirection.
+- Debug-only, version-gated retail LAN hosting and joining from colocated
+  `onhook.cfg` role files, including owned process-local PCAPs. See
+  `.agents/retail-lan-parity.md`.
 - API polling through `/api/server-info`, `/api/hosts`, `/api/lobbies`, and
   `/api/unknowns`.
 - Packet decode with `nw_pp` and replay/spectator streaming with `nw_replay`.
 
-Retail menu navigation, credentials, choosing host/join rows, and deterministic
-in-match control still require a human operator or a future external UI driver.
-Do not jump directly to an injected DLL. Keep any future retail driver opt-in,
-research-only, version-gated, and separate from the public launcher.
+Direct LAN host/join no longer requires menu navigation: the debug hook's
+cfg-driven driver uses the witnessed stock transitions and fails closed to a
+visible MainMenu when discovery cannot complete. NovaWorld credentials and
+deterministic in-match control still require a human operator or a future
+external UI driver. Hook automation remains opt-in, research-only, debug-only,
+and version-gated; it is separate from the public launcher.
 
 ## Capture Policy
 
@@ -121,25 +126,30 @@ For a retail client that joins an OpenNova host but floats or sees no map
 entities, do not start with a broad refactor. First capture the full handshake
 and inspect exact S2C order around:
 
-`0x10`, live `0x0C`, live `0x20`, `0x45`, `0x7E`, `0x1A`, and `0x0F`.
+`0x0B`, `0x10`, `0x0D`, `0x0C`, `0x20`, `0x45`, `0x7E`, `0x1A`, and `0x0F`.
 
 Then verify in order:
 
-- Mission identity and local `.bms` availability.
+- The exact 616-byte S2C `0x0B` mission header and availability of the shared
+  terrain/environment/model assets it names. The advertised `.bms` is
+  intentionally allowed to be absent on a joiner.
 - Terrain/load `0x45` pages for the chosen mission.
 - Spawn position in `0x0F` against the mission start marker and terrain height.
-- Spawn-marker `0x20` records, preserving original pool indices.
+- Every `0x10`/`0x0D`/`0x0C`/`0x20` load row, preserving its original packed
+  pool/slot handle (and keeping pool-3 `netHandle` separate from that slot).
 - Joiner self-ID/DCB: the self `0x0C` is sent before deploy with the retail
   ack value and local-player flags.
 
-Do not reintroduce full static pool streaming as a blanket fix. Retail clients
-load static mission data locally; the host stream should be the required dynamic
-state and spawn markers.
+Do not blanket-suppress or manufacture static rows. A retail joiner never opens
+the mission body: every entity that retail allocated into pools 0-3 arrives in
+the paged load stream, while terrain/environment/tile resources come from the
+exact header, shipped assets, and optional `0x45`. Match retail's allocation and
+paging rather than assuming either "all statics" or "no statics."
 
 ## Paths Not To Confuse
 
-- `NovaNetClient` / `NetWorldView` is replay/spectator receive plumbing, not the
-  canonical co-op gameplay client.
+- `NovaNetClient` is replay/spectator receive plumbing over the canonical
+  `ClientReplicaPipeline`, not a second gameplay client stack (ADR 0026).
 - `ClientSession` is the NOVAWORLDUDP lobby verifier/proto-switch client, not
   in-match replication.
 - `UdpSessionTransport` is an internal identity-frame conduit. NWU session

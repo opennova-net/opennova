@@ -13,6 +13,16 @@ static_assert(NovaSimulation::SEAT_ARMORY_POINT == static_cast<int>(opennova::wo
 static_assert(NovaSimulation::SEAT_DRIVER == static_cast<int>(opennova::world::SeatType::Driver));
 
 void NovaSimulation::_bind_methods() {
+	ClassDB::bind_method(
+			D_METHOD("set_network_environment", "fog_target_q16", "fog_current_q16",
+			         "fog_accel_clamp",
+			         "tod_fixed24", "tod_advance_per_tick", "quake_ticks", "cloud_scroll_rate_target",
+			         "rain_pct_current_q16", "overcast_blend_q16", "precipitation_kind"),
+			&NovaSimulation::set_network_environment);
+	ClassDB::bind_method(D_METHOD("advance_network_environment_tick"),
+			&NovaSimulation::advance_network_environment_tick);
+	ClassDB::bind_method(D_METHOD("initialize_network_environment_mission_start"),
+			&NovaSimulation::initialize_network_environment_mission_start);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &NovaSimulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &NovaSimulation::load_mission_file);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &NovaSimulation::build_demo_mission);
@@ -23,6 +33,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &NovaSimulation::set_terrain_til_data);
+	ClassDB::bind_method(D_METHOD("set_mission_text_data", "rtxt_bytes"), &NovaSimulation::set_mission_text_data);
+	ClassDB::bind_method(D_METHOD("set_score_config_data", "score_ini_bytes"), &NovaSimulation::set_score_config_data);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("enable_host_listen", "port"), &NovaSimulation::enable_host_listen);
 	ClassDB::bind_method(D_METHOD("is_host_listening"), &NovaSimulation::is_host_listening);
@@ -35,6 +47,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joiner"), &NovaSimulation::is_joiner);
 	ClassDB::bind_method(D_METHOD("set_join_character_profile", "profile"),
 	                     &NovaSimulation::set_join_character_profile);
+	ClassDB::bind_method(D_METHOD("set_join_integrity_profile", "profile_id"),
+	                     &NovaSimulation::set_join_integrity_profile);
 	ClassDB::bind_method(D_METHOD("load_charattr_challenge", "resource_root"),
 	                     &NovaSimulation::load_charattr_challenge);
 	ClassDB::bind_method(D_METHOD("leave_net_session"), &NovaSimulation::leave_net_session);
@@ -48,6 +62,12 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &NovaSimulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &NovaSimulation::get_join_mission_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &NovaSimulation::get_join_mission_file);
+	ClassDB::bind_method(D_METHOD("take_join_environment_update"),
+	                     &NovaSimulation::take_join_environment_update);
+	ClassDB::bind_method(D_METHOD("get_join_mission_header"), &NovaSimulation::get_join_mission_header);
+	ClassDB::bind_method(D_METHOD("get_join_terrain_til_state"),
+	                     &NovaSimulation::get_join_terrain_til_state);
+	ClassDB::bind_method(D_METHOD("get_join_terrain_til"), &NovaSimulation::get_join_terrain_til);
 	ClassDB::bind_method(D_METHOD("get_join_expansion"), &NovaSimulation::get_join_expansion);
 	ClassDB::bind_method(D_METHOD("get_join_game_type"), &NovaSimulation::get_join_game_type);
 	ClassDB::bind_method(D_METHOD("get_join_error"), &NovaSimulation::get_join_error);
@@ -55,6 +75,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_session_loss_reason);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &NovaSimulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &NovaSimulation::is_joined_in_match);
+	ClassDB::bind_method(D_METHOD("is_join_initial_admission_complete"),
+	                     &NovaSimulation::is_join_initial_admission_complete);
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &NovaSimulation::is_joiner_network_diagnostics_enabled);
 	ClassDB::bind_method(D_METHOD("get_joiner_network_diagnostics"),
@@ -67,6 +89,8 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::send_deployment_pick);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &NovaSimulation::get_join_assigned_team);
+	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),
+	                     &NovaSimulation::get_class_allow_mask);
 	ClassDB::bind_method(D_METHOD("get_joiner_phase"), &NovaSimulation::get_joiner_phase);
 	ClassDB::bind_method(D_METHOD("get_joiner_self_handle"), &NovaSimulation::get_joiner_self_handle);
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
@@ -139,6 +163,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
+	ClassDB::bind_method(D_METHOD("run_mission_start_wac"), &NovaSimulation::run_mission_start_wac);
+	ClassDB::bind_method(D_METHOD("seal_mission_start_baseline"),
+			&NovaSimulation::seal_mission_start_baseline);
 	ClassDB::bind_method(D_METHOD("get_wac_state"), &NovaSimulation::get_wac_state);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &NovaSimulation::get_runtime_perf_counters);
 	ClassDB::bind_method(D_METHOD("set_runtime_profiling_enabled", "enabled"),
@@ -183,6 +210,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &NovaSimulation::debug_set_entity_position);
 	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &NovaSimulation::get_world_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &NovaSimulation::debug_set_world_entity_position);
+	ClassDB::bind_method(D_METHOD("debug_set_world_entity_weapon_ammo", "net_id", "clip", "reserve"),
+	                     &NovaSimulation::debug_set_world_entity_weapon_ammo);
 	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
 	                     &NovaSimulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("set_ai_muzzle_world", "net_id", "godot_pos"), &NovaSimulation::set_ai_muzzle_world);
@@ -391,6 +420,11 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(MOUNT_COMMAND_PASSENGER_ONLY);
 	BIND_ENUM_CONSTANT(MOUNT_COMMAND_SKIP_CONTROLLER);
 	BIND_ENUM_CONSTANT(MOUNT_COMMAND_ANY_SEAT);
+
+	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_ABSENT);
+	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_RECEIVING);
+	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_COMPLETE);
+	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_INVALID);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");

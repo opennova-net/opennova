@@ -302,11 +302,11 @@ int test_pool_spawn_roundtrip_full() {
 	r.team_byte = 1;                 // -> 0x0010 (D-NET-58: gate-0x10 byte @ +354 is team)
 	r.parent_handle = 0x1033;        // -> 0x0100
 	r.target_handle = 0x2044;        // -> 0x0200
-	r.weapon_mask = 0x05;            // bits 0 + 2 -> 0x0400
-	r.weapon_handles[0] = 0x3001;
-	r.weapon_handles[2] = 0x3002;
-	r.extra_handle_0 = 0x4001;
-	r.extra_handle_1 = 0x4002;
+	r.seat_mask = 0x05;              // retail slots 0 + 2 -> 0x0400
+	r.mount_handles[0] = 0x3001;
+	r.mount_handles[2] = 0x3002;
+	r.mount_handle_8 = 0x4001;
+	r.mount_handle_9 = 0x4002;
 	r.bone_byte = 2;                 // unconditional +290 (D-NET-58)
 	r.ai_profile_1 = 0x11112222;     // -> 0x0800
 	r.ai_profile_2 = 0x33334444;
@@ -336,12 +336,12 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.team_byte == 1);
 	EXPECT(d.parent_handle == 0x1033);
 	EXPECT(d.target_handle == 0x2044);
-	EXPECT(d.weapon_mask == 0x05);
-	EXPECT(d.weapon_handles[0] == 0x3001);
-	EXPECT(d.weapon_handles[2] == 0x3002);
-	EXPECT(d.weapon_handles[1] == 0xFFFF); // bit clear -> untouched default
-	EXPECT(d.extra_handle_0 == 0x4001);
-	EXPECT(d.extra_handle_1 == 0x4002);
+	EXPECT(d.seat_mask == 0x05);
+	EXPECT(d.mount_handles[0] == 0x3001);
+	EXPECT(d.mount_handles[2] == 0x3002);
+	EXPECT(d.mount_handles[1] == 0xFFFF); // bit clear -> untouched default
+	EXPECT(d.mount_handle_8 == 0x4001);
+	EXPECT(d.mount_handle_9 == 0x4002);
 	EXPECT(d.bone_byte == 2);
 	EXPECT(d.ai_profile_1 == 0x11112222);
 	EXPECT(d.ai_profile_2 == 0x33334444);
@@ -403,29 +403,29 @@ int test_decode_weapon_block_mask_zero_dnet56() {
 	// D-NET-56 regression: a hand-built 0x0D body with 0x0400 set and mask==0.
 	// The encoder never produces this (it only sets 0x0400 when mask != 0), so
 	// the wire is laid out by hand. The handler reads the mask byte, then ALWAYS
-	// consumes extra_handle_0/1 (LABEL_110 @ 0x4330b1). Pre-fix the decoder would
+	// consumes mount_handle_8/9 (LABEL_110 @ 0x4330b1). Pre-fix the decoder would
 	// skip the 4 extra bytes and desync (leftover != 0 -> return false).
 	const uint8_t body[] = {
 		0x01, 0x00,             // count = 1
-		0x00, 0x04,             // spawn_flags = 0x0400 (weapon block only)
+		0x00, 0x04,             // spawn_flags = 0x0400 (mount-occupancy block only)
 		0x01, 0x00,             // slot_id = 0x0001 (not a sentinel)
 		0x10, 0x00,             // item_type_id = 0x0010
 		0x00,                   // entity_name = "" (NUL)
 		0x01, 0x00, 0x00, 0x00, // pos_x = 1
 		0x02, 0x00, 0x00, 0x00, // pos_y = 2
 		0x03, 0x00, 0x00, 0x00, // pos_z = 3
-		0x00,                   // weapon_mask = 0  (the latent path)
-		0xAA, 0xAA,             // extra_handle_0  (must be consumed)
-		0xBB, 0xBB,             // extra_handle_1  (must be consumed)
+		0x00,                   // seat_mask = 0  (the latent path)
+		0xAA, 0xAA,             // mount_handle_8  (must be consumed)
+		0xBB, 0xBB,             // mount_handle_9  (must be consumed)
 		0x05,                   // bone_byte = 5 (+290 unconditional)
 	};
 	PoolSpawnBatch out;
 	const bool ok = decode_pool_spawn_batch(body, sizeof(body), out);
 	EXPECT(ok); // consumed EXACTLY — the fix reads the extras even with mask==0
 	EXPECT(out.records.size() == 1);
-	EXPECT(out.records[0].weapon_mask == 0);
-	EXPECT(out.records[0].extra_handle_0 == 0xAAAA);
-	EXPECT(out.records[0].extra_handle_1 == 0xBBBB);
+	EXPECT(out.records[0].seat_mask == 0);
+	EXPECT(out.records[0].mount_handle_8 == 0xAAAA);
+	EXPECT(out.records[0].mount_handle_9 == 0xBBBB);
 	EXPECT(out.records[0].bone_byte == 0x05);
 	EXPECT(out.records[0].pos_z == 3);
 	std::printf("PASS decode_weapon_block_mask_zero (D-NET-56)\n");
@@ -650,8 +650,8 @@ int test_compress_fixedpoint_roundtrip() {
 }
 
 // encode_frame_update <-> decode_frame_update: the §5.9 0x0A whole-message pair the
-// field-driven builder relies on. Covers the aim sub-block + all three compact
-// classes + a weapon-hit, the env sub-block, and the conditional passenger record.
+// field-driven builder relies on. Covers the weapon sub-block + all three compact
+// classes + a fired-round event, the env sub-block, and the conditional mounted-ammo record.
 int test_frame_update_roundtrip() {
 	auto class_of = [](uint16_t t) -> EntityClass {
 		if (t == 100) return EntityClass::Player;
@@ -719,19 +719,19 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.records.empty());
 	}
 
-	// (c) passenger record (flags2=0x08 -> aim sub-block + passenger gate) with seat.
+	// (c) mounted-ammo record (flags2=0x08 -> weapon sub-block + mount gate).
 	{
 		FrameUpdate in;
 		in.flags2 = 0x08;
 		in.mount_handle = 0x1005; in.health = 75;
-		in.passenger.handle = 0x1006;
-		in.passenger.seat_yaw = 0xAA11; in.passenger.seat_pitch = 0xBB22;
+		in.passenger.mount_handle = 0x1006;
+		in.passenger.clip = 0xAA11; in.passenger.reserve = 0xBB22;
 		std::vector<uint8_t> wire = encode_frame_update(in);
 		FrameUpdate out;
 		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out));
 		EXPECT(out.complete && out.consumed == wire.size());
-		EXPECT(out.passenger.present && out.passenger.handle == 0x1006);
-		EXPECT(out.passenger.has_seat && out.passenger.seat_yaw == 0xAA11 && out.passenger.seat_pitch == 0xBB22);
+		EXPECT(out.passenger.present && out.passenger.mount_handle == 0x1006);
+		EXPECT(out.passenger.has_mount && out.passenger.clip == 0xAA11 && out.passenger.reserve == 0xBB22);
 	}
 
 	// (d) objective-gametype phase 3 carries a wire-invisible 16-byte block.

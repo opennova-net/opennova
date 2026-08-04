@@ -23,6 +23,8 @@
 // CLI:
 //   nw_pp <capture-path>                # pcapng/pcap/hexcap all accepted
 //   nw_pp <capture-path> 0x0d 0x20      # filter to listed S2C tags
+//   nw_pp <capture-path> --sequencing   # packet-level seq/ACK timeline
+//   nw_pp <capture-path> --parity-events # stable packet/event verifier stream
 //   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
 #include <def/def.h>
@@ -93,6 +95,213 @@ bool is_pcap_path(const std::string &p) {
 }
 
 bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
+
+void print_session_packet(const CapturedSessionPacket &packet) {
+	std::printf(
+			"PACKET frame=%d dir=%c session=%d sid=0x%08x seq=%u ack=%u "
+			"flags=0x%02x records=%zu tags=",
+			packet.frame_index, packet.dir, packet.session,
+			static_cast<unsigned>(packet.header.session_id),
+			static_cast<unsigned>(packet.header.seq_num),
+			static_cast<unsigned>(packet.header.ack_count),
+			static_cast<unsigned>(packet.header.connection_flags), packet.tags.size());
+	if (packet.tags.empty()) {
+		std::printf("-");
+	} else {
+		for (size_t i = 0; i < packet.tags.size(); ++i) {
+			if (i != 0) std::printf(",");
+			std::printf("0x%03x", static_cast<unsigned>(packet.tags[i]));
+		}
+	}
+	std::printf("\n");
+}
+
+// --parity-events is the stable, line-oriented contract consumed by the LAN
+// parity verifier.  Keep it deliberately simpler than the human pretty
+// printer: one packet line preserves grouping/replay evidence, one event line
+// preserves semantic order, and state/entity lines expose decoded 0x0C/0x0A
+// gameplay fields. Every other event is a byte-for-byte witness. The two
+// high-volume gameplay bodies retain their exact length without turning an
+// hour-long capture into a giant text intermediary.
+constexpr bool parity_body_is_material(char dir, uint16_t full_tag) {
+	// Compare the full 9-bit dispatch identity: high-table/control messages may
+	// share these low bytes but are not gameplay frames.
+	return !((dir == 'C' && full_tag == 0x00C) ||
+			(dir == 'S' && full_tag == 0x00A));
+}
+
+constexpr bool parity_body_contract_holds() {
+	for (uint16_t full_tag = 0; full_tag <= 0x1FF; ++full_tag) {
+		if (parity_body_is_material('C', full_tag) != (full_tag != 0x00C))
+			return false;
+		if (parity_body_is_material('S', full_tag) != (full_tag != 0x00A))
+			return false;
+	}
+	return true;
+}
+
+// The parity stream is the byte witness for every message other than the two
+// high-rate gameplay records, whose dedicated structured lines carry the
+// comparison contract. Keep representative initial-stream tags pinned here so
+// adding a new semantic comparison cannot silently hide their payload bytes.
+static_assert(parity_body_contract_holds());
+static_assert(parity_body_is_material('S', 0x75));
+static_assert(parity_body_is_material('S', 0x60));
+static_assert(parity_body_is_material('S', 0x2A));
+static_assert(parity_body_is_material('C', 0x47));
+static_assert(parity_body_is_material('C', 0x0A));
+static_assert(parity_body_is_material('S', 0x10A));
+static_assert(parity_body_is_material('C', 0x10C));
+static_assert(!parity_body_is_material('C', 0x0C));
+static_assert(!parity_body_is_material('S', 0x0A));
+
+std::string compact_hex(const std::vector<uint8_t> &bytes) {
+	static constexpr char kHex[] = "0123456789abcdef";
+	std::string out;
+	out.resize(bytes.size() * 2);
+	for (size_t i = 0; i < bytes.size(); ++i) {
+		out[i * 2] = kHex[bytes[i] >> 4];
+		out[i * 2 + 1] = kHex[bytes[i] & 0x0F];
+	}
+	return out;
+}
+
+void print_parity_handshake(int frame_index, uint64_t ts_nanos, int src_port,
+                            int dst_port, const std::vector<uint8_t> &raw) {
+	std::vector<uint8_t> stripped(raw.size());
+	size_t stripped_len = 0;
+	if (napi_envelope_decode(raw.data(), raw.size(), stripped.data(), stripped.size(),
+	                         &stripped_len) != 0)
+		return;
+	stripped.resize(stripped_len);
+	if (stripped.empty()) return;
+	const uint8_t opcode = stripped[0];
+	const bool client = opcode == SESSION_OPCODE_CLIENT_HELLO ||
+	                    opcode == SESSION_OPCODE_CLIENT_AUTH;
+	const bool server = opcode == SESSION_OPCODE_SERVER_HELLO ||
+	                    opcode == SESSION_OPCODE_SERVER_AUTH;
+	if (!client && !server) return;
+	std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
+	if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
+	bool decoded = false;
+	switch (opcode) {
+		case SESSION_OPCODE_CLIENT_HELLO: {
+			ClientHello value;
+			decoded = parse_client_hello(body.data(), body.size(), value);
+			break;
+		}
+		case SESSION_OPCODE_CLIENT_AUTH: {
+			ClientAuth value;
+			decoded = parse_client_auth(body.data(), body.size(), value);
+			break;
+		}
+		case SESSION_OPCODE_SERVER_HELLO: {
+			ServerHello value;
+			decoded = parse_server_hello(body.data(), body.size(), value);
+			break;
+		}
+		case SESSION_OPCODE_SERVER_AUTH: {
+			ServerAuth value;
+			decoded = parse_server_auth(body.data(), body.size(), value);
+			break;
+		}
+	}
+	const char direction = client ? 'C' : 'S';
+	const int session = client ? src_port : dst_port;
+	const std::string body_hex = compact_hex(body);
+	std::printf(
+			"PARITY_HANDSHAKE frame=%d ts_ns=%llu dir=%c session=%d "
+			"opcode=0x%02x decode=%u len=%zu body=%s\n",
+			frame_index, static_cast<unsigned long long>(ts_nanos), direction,
+			session, unsigned(opcode), decoded ? 1u : 0u, body.size(),
+			body_hex.c_str());
+}
+
+const char *parity_datagram_class_name(CaptureDatagramClass datagram_class) {
+	switch (datagram_class) {
+	case CaptureDatagramClass::Invalid:
+		return "invalid";
+	case CaptureDatagramClass::Unknown:
+		return "unknown";
+	case CaptureDatagramClass::ClientHello:
+		return "client_hello";
+	case CaptureDatagramClass::ClientAuth:
+		return "client_auth";
+	case CaptureDatagramClass::ServerHello:
+		return "server_hello";
+	case CaptureDatagramClass::ServerAuth:
+		return "server_auth";
+	case CaptureDatagramClass::ClientProtocol:
+		return "client_protocol";
+	case CaptureDatagramClass::ServerProtocol:
+		return "server_protocol";
+	}
+	return "invalid";
+}
+
+void print_parity_datagram(const CapturedDatagramResult &datagram,
+                           uint64_t ts_nanos) {
+	std::printf(
+			"PARITY_DATAGRAM frame=%d ts_ns=%llu src=%d dst=%d len=%zu outer=%u "
+			"opcode=",
+			datagram.frame_index, static_cast<unsigned long long>(ts_nanos),
+			datagram.src_port, datagram.dst_port, datagram.payload_length,
+			datagram.outer_decoded ? 1u : 0u);
+	if (datagram.outer_decoded)
+		std::printf("0x%02x", static_cast<unsigned>(datagram.opcode));
+	else
+		std::printf("--");
+	std::printf(" class=%s decode=%u\n",
+	            parity_datagram_class_name(datagram.datagram_class),
+	            datagram.decoded ? 1u : 0u);
+}
+
+void print_parity_packet(const CapturedSessionPacket &packet, uint64_t ts_nanos) {
+	std::printf(
+			"PARITY_PACKET frame=%d ts_ns=%llu dir=%c session=%d sid=0x%08x "
+			"seq=%u ack=%u flags=0x%02x records=%zu tags=",
+			packet.frame_index, static_cast<unsigned long long>(ts_nanos), packet.dir,
+			packet.session, static_cast<unsigned>(packet.header.session_id),
+			static_cast<unsigned>(packet.header.seq_num),
+			static_cast<unsigned>(packet.header.ack_count),
+			static_cast<unsigned>(packet.header.connection_flags), packet.records.size());
+	if (packet.tags.empty()) {
+		std::printf("-");
+	} else {
+		for (size_t i = 0; i < packet.tags.size(); ++i) {
+			if (i != 0) std::printf(",");
+			std::printf("0x%03x", static_cast<unsigned>(packet.tags[i]));
+		}
+	}
+	std::printf(" wire=");
+	if (packet.records.empty()) {
+		std::printf("-");
+	} else {
+		for (size_t i = 0; i < packet.records.size(); ++i) {
+			if (i != 0) std::printf(",");
+			const CapturedProtocolRecord &record = packet.records[i];
+			const std::string skip = record.skip_bytes.empty()
+					? std::string("-") : compact_hex(record.skip_bytes);
+			std::printf("0x%03x:0x%02x:%u:%s",
+			            static_cast<unsigned>(record.full_tag),
+			            static_cast<unsigned>(record.raw_flags),
+			            static_cast<unsigned>(record.encoded_length), skip.c_str());
+		}
+	}
+	std::printf("\n");
+}
+
+void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
+	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
+	const std::string body = parity_body_is_material(message.dir, message.tag)
+			? compact_hex(message.payload) : std::string("-");
+	std::printf(
+			"PARITY_EVENT frame=%d ts_ns=%llu dir=%c session=%d tag=0x%02x "
+			"settings=%u len=%zu body=%s\n",
+			message.frame_index, static_cast<unsigned long long>(ts_nanos), message.dir,
+			message.session, static_cast<unsigned>(tag),
+			message.settings_update ? 1u : 0u, message.payload.size(), body.c_str());
+}
 
 // pcap/pcapng reading is shared with the test suite: apps/common/pcap_reader.h
 // The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
@@ -278,10 +487,10 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	if (r.spawn_flags & 0x0200)
 		std::printf(" target=%s", handle_str(r.target_handle).c_str());
 	if (r.spawn_flags & 0x0400) {
-		std::printf(" weapMask=0x%02x", r.weapon_mask);
-		if (r.weapon_mask) {
+		std::printf(" seatMask=0x%02x", r.seat_mask);
+		if (r.seat_mask) {
 			int wcount = 0;
-			for (int b = 0; b < 8; ++b) if (r.weapon_mask & (1u << b)) wcount++;
+			for (int b = 0; b < 8; ++b) if (r.seat_mask & (1u << b)) wcount++;
 			std::printf(" weapons=%d+2extra", wcount);
 		}
 	}
@@ -581,6 +790,30 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 	}
 }
 
+std::string briefing_sample(const std::string &s) {
+	std::string out;
+	const size_t n = std::min<size_t>(s.size(), 96);
+	for (size_t i = 0; i < n; ++i) {
+		const unsigned char c = static_cast<unsigned char>(s[i]);
+		if (c == '\r') out += "\\r";
+		else if (c == '\n') out += "\\n";
+		else if (c >= 0x20 && c < 0x7f) out.push_back(static_cast<char>(c));
+		else out += '?';
+	}
+	if (s.size() > n) out += "...";
+	return out;
+}
+
+void print_tag_7e(const std::vector<uint8_t> &body) {
+	ServerConfigStrings strings;
+	const bool clean = decode_server_config_strings(body.data(), body.size(), strings);
+	std::printf("        [0x7e] briefing3=%zuB briefing2=%zuB (body %zu B%s)\n",
+	            strings.briefing3.size(), strings.briefing2.size(), body.size(),
+	            clean ? "" : ", DECODE INCOMPLETE");
+	std::printf("            first=\"%s\"\n", briefing_sample(strings.briefing3).c_str());
+	std::printf("            second=\"%s\"\n", briefing_sample(strings.briefing2).c_str());
+}
+
 void print_player_compact_record(const PlayerCompactRecord &r) {
 	// carrier != none => pos is CARRIER-LOCAL compressed + yaw is carrier-relative
 	// (mount if bone/seat set, else the standing-on ground entity; D-NET-151).
@@ -765,7 +998,7 @@ void print_round_event_record(const RoundEventRecord &r) {
 // Print a S2C 0x0A frame update. Thin renderer over the single libs walker
 // (decode_frame_update) — the byte layout lives there, this just formats the
 // resulting FrameUpdate (header anchor + flags, env snapshot, local-player tail,
-// passenger record, per-entity compact records, weapon-hit records). On a short
+// mounted-ammo record, per-entity compact records, fired-round records). On a short
 // read decode_frame_update fills what it walked and flags it; we print that plus
 // the halt point.
 void print_tag_0a(const std::vector<uint8_t> &body) {
@@ -805,10 +1038,10 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            int(fu.timer.timer_seconds));
 	if (fu.env.present)
 		std::printf("            env: fogDist=0x%04x fogAccel=0x%04x todFixed=0x%04x "
-		            "quake=%u clouds=(0x%02x,0x%02x) overcast=0x%02x param=0x%02x\n",
+		            "quake=%u cloud=0x%02x rain=0x%02x overcast=0x%02x param=0x%02x\n",
 		            unsigned(fu.env.fog_dist), unsigned(fu.env.fog_accel),
 		            unsigned(fu.env.tod_fixed), unsigned(fu.env.quake_ticks),
-		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.cloud_param2),
+		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.rain_pct),
 		            unsigned(fu.env.overcast), unsigned(fu.env.env_param));
 	if (fu.objective.present)
 		std::printf("            objective: %d %d %d %d\n",
@@ -820,12 +1053,12 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	            int(fu.health), unsigned(uint16_t(fu.state_word)));
 
 	if (fu.passenger.present) {
-		if (fu.passenger.has_seat)
-			std::printf("            passenger: hdl=%s seat_yaw=0x%04x seat_pitch=0x%04x\n",
-			            handle_str(fu.passenger.handle).c_str(),
-			            unsigned(fu.passenger.seat_yaw), unsigned(fu.passenger.seat_pitch));
+		if (fu.passenger.has_mount)
+			std::printf("            mounted-ammo: hdl=%s clip=%u reserve=%u\n",
+			            handle_str(fu.passenger.mount_handle).c_str(),
+			            unsigned(fu.passenger.clip), unsigned(fu.passenger.reserve));
 		else
-			std::printf("            passenger: hdl=ffff (no seat yaw/pitch)\n");
+			std::printf("            mounted-ammo: hdl=ffff (on foot)\n");
 	}
 
 	for (size_t i = 0; i < fu.records.size(); ++i) {
@@ -850,6 +1083,179 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            g_item_class.empty()
 		                    ? " — likely an unclassifiable trailer record; pass --items <ITEMS.def>"
 		                    : "");
+}
+
+// Decoded state contract paired with --parity-events.  These lines expose the
+// two continuous gameplay surfaces that tag/count parity alone cannot validate:
+// the client's player-state uplink (C2S 0x0C) and the host's per-frame world
+// update (S2C 0x0A).  Session ids, packet numbers, and timestamps remain
+// available for correlation, while the verifier aggregates handles/positions
+// only within one capture before comparing stable shapes, classes, types, and
+// observed value diversity across independent sessions.
+void print_parity_entity(const InGameMessage &message, uint64_t ts_nanos,
+                         const FrameUpdateRecord &record) {
+	char cls = '?';
+	uint32_t x = 0, y = 0, z = 0;
+	int32_t orient_a = 0, orient_b = 0;
+	uint32_t state_a = 0, state_b = 0, vital = 0;
+	switch (record.cls) {
+		case EntityClass::Player:
+			cls = 'P';
+			x = record.player.pos_x_compressed;
+			y = record.player.pos_y_compressed;
+			z = record.player.pos_z_compressed;
+			orient_a = record.player.yaw_byte;
+			orient_b = record.player.pitch_byte;
+			state_a = record.player.state_flags;
+			state_b = (uint32_t(record.player.anim_state_id) << 8) |
+			          uint32_t(record.player.anim_def_index);
+			vital = record.player.health_class_byte;
+			break;
+		case EntityClass::Vehicle:
+			cls = 'V';
+			x = record.vehicle.pos_x_compressed;
+			y = record.vehicle.pos_y_compressed;
+			z = record.vehicle.pos_z_compressed;
+			orient_a = record.vehicle.euler_z;
+			orient_b = record.vehicle.is_dead_pose
+					? record.vehicle.euler_y : record.vehicle.weapon_heading_bam;
+			state_a = record.vehicle.flags_byte;
+			state_b = record.vehicle.is_dead_pose ? 1u : 0u;
+			vital = record.vehicle.health_word;
+			break;
+		case EntityClass::Infantry:
+			cls = 'I';
+			x = record.infantry.pos_x_compressed;
+			y = record.infantry.pos_y_compressed;
+			z = record.infantry.pos_z_compressed;
+			orient_a = record.infantry.yaw_byte;
+			orient_b = record.infantry.pitch_byte;
+			state_a = record.infantry.flags_byte;
+			state_b = record.infantry.anim_byte;
+			break;
+		case EntityClass::NoNetworkCallback:
+			cls = 'N';
+			break;
+		default:
+			break;
+	}
+	std::printf(
+			"PARITY_ENTITY frame=%d ts_ns=%llu session=%d class=%c handle=%u "
+			"type=%u pos=%u,%u,%u orient=%d,%d state=%u,%u vital=%u\n",
+			message.frame_index, static_cast<unsigned long long>(ts_nanos),
+			message.session, cls, unsigned(record.handle), unsigned(record.type_id),
+			unsigned(x), unsigned(y), unsigned(z), int(orient_a), int(orient_b),
+			unsigned(state_a), unsigned(state_b), unsigned(vital));
+}
+
+void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
+	// Settings-update/high-table records share the low dispatch byte but are not
+	// ordinary gameplay 0x0A/0x0C messages and must never satisfy parity state.
+	if (message.settings_update) return;
+	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
+	if (message.dir == 'S' && tag == 0x7B) {
+		FullPlayerInfo info;
+		if (decode_full_player_info(message.payload.data(), message.payload.size(), info))
+			g_game_type = info.extra;
+		return;
+	}
+
+	if (message.dir == 'C' && tag == 0x0C) {
+		EntityPacketSubHeader header;
+		PlayerExtendedUplink uplink;
+		size_t header_bytes = 0, body_bytes = 0;
+		const bool have_header = decode_entity_packet_sub_header(
+				message.payload.data(), message.payload.size(), header, header_bytes);
+		bool clean = false;
+		if (have_header && header.sub_op == ENTITY_SUB_OP_EXTENDED) {
+			const uint8_t *body = message.payload.data() + header_bytes;
+			const size_t body_len = message.payload.size() - header_bytes;
+			clean = decode_player_extended_uplink(body, body_len, uplink, body_bytes) &&
+			        body_bytes == body_len;
+		}
+		unsigned priority_nonzero = 0;
+		if (uplink.priority_handle_0 || uplink.priority_score_0) ++priority_nonzero;
+		if (uplink.priority_handle_1 || uplink.priority_score_1) ++priority_nonzero;
+		if (uplink.priority_handle_2 || uplink.priority_score_2) ++priority_nonzero;
+		if (uplink.priority_handle_3 || uplink.priority_score_3) ++priority_nonzero;
+		std::printf(
+				"PARITY_STATE frame=%d ts_ns=%llu dir=C session=%d tag=0x0c "
+				"kind=uplink decode=%u len=%zu handle=%u type=%u sub=%u carrier=%u "
+				"pos=%d,%d,%d orient=%d,%d move=%u state=%u analog=%u,%u,%u "
+				"adm=%u priority_nonzero=%u priority=%u:%u,%u:%u,%u:%u,%u:%u\n",
+				message.frame_index, static_cast<unsigned long long>(ts_nanos),
+				message.session, clean ? 1u : 0u, message.payload.size(),
+				unsigned(header.handle), unsigned(header.item_type_id),
+				unsigned(header.sub_op), unsigned(uplink.carrier_handle),
+				uplink.pos_x, uplink.pos_y, uplink.pos_z, int(uplink.heading),
+				int(uplink.pitch), unsigned(uplink.move_input_byte),
+				unsigned(uplink.state_flags_byte), unsigned(uplink.analog_x),
+				unsigned(uplink.analog_y), unsigned(uplink.analog_z),
+				unsigned(uplink.equipped_adm_index), priority_nonzero,
+				unsigned(uplink.priority_handle_0), unsigned(uplink.priority_score_0),
+				unsigned(uplink.priority_handle_1), unsigned(uplink.priority_score_1),
+				unsigned(uplink.priority_handle_2), unsigned(uplink.priority_score_2),
+				unsigned(uplink.priority_handle_3), unsigned(uplink.priority_score_3));
+		return;
+	}
+
+	if (message.dir != 'S' || tag != 0x0A) return;
+	auto class_of = [](uint16_t type) -> EntityClass {
+		auto found = g_item_class.find(type);
+		if (found != g_item_class.end()) return found->second;
+		if (type == 0x14B9) return EntityClass::Player;
+		return EntityClass::Unknown;
+	};
+	FrameUpdate frame;
+	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(),
+	                                       class_of, frame, gt_is_objective());
+	unsigned players = 0, vehicles = 0, infantry = 0, no_callback = 0;
+	for (const FrameUpdateRecord &record : frame.records) {
+		switch (record.cls) {
+			case EntityClass::Player: ++players; break;
+			case EntityClass::Vehicle: ++vehicles; break;
+			case EntityClass::Infantry: ++infantry; break;
+			case EntityClass::NoNetworkCallback: ++no_callback; break;
+			default: break;
+		}
+	}
+	std::printf(
+			"PARITY_STATE frame=%d ts_ns=%llu dir=S session=%d tag=0x0a "
+			"kind=frame decode=%u len=%zu sub=%u flags=%u,%u anchor=%d,%d,%d "
+			"local=%u local_state=%u,%d,%d records=%zu players=%u vehicles=%u "
+			"infantry=%u none=%u rounds=%zu local_mount=%u "
+			"weapon=%u,%u,%u,%u,%u,%u,%u,%u,%d "
+			"timer=%u,%u,%u,%u,%u,%d "
+			"env=%u,%u,%u,%u,%u,%u,%u,%u,%u "
+			"objective=%u,%d,%d,%d,%d mount=%u,%u,%u,%u,%u\n",
+			message.frame_index, static_cast<unsigned long long>(ts_nanos),
+			message.session, clean ? 1u : 0u, message.payload.size(),
+			unsigned(frame.sub_block), unsigned(frame.flags1), unsigned(frame.flags2),
+			frame.anchor_x, frame.anchor_y, frame.anchor_z,
+			frame.local_tail_present ? 1u : 0u, unsigned(frame.state_flag_byte),
+			int(frame.health), int(frame.state_word), frame.records.size(), players,
+			vehicles, infantry, no_callback, frame.round_events.size(),
+			unsigned(frame.mount_handle),
+			frame.weapon.present ? 1u : 0u, unsigned(frame.weapon.preround_timer),
+			unsigned(frame.weapon.slot_state360), unsigned(frame.weapon.slot_state368),
+			unsigned(frame.weapon.slot_state364), unsigned(frame.weapon.slot_state356),
+			unsigned(frame.weapon.slot_state460), unsigned(frame.weapon.reload_seconds),
+			frame.weapon.uniform_team_mask,
+			frame.timer.present ? 1u : 0u, unsigned(frame.timer.state0),
+			unsigned(frame.timer.state1), unsigned(frame.timer.state2),
+			unsigned(frame.timer.state3), int(frame.timer.timer_seconds),
+			frame.env.present ? 1u : 0u, unsigned(frame.env.fog_dist),
+			unsigned(frame.env.fog_accel), unsigned(frame.env.tod_fixed),
+			unsigned(frame.env.quake_ticks), unsigned(frame.env.cloud_scroll),
+			unsigned(frame.env.rain_pct), unsigned(frame.env.overcast),
+			unsigned(frame.env.env_param),
+			frame.objective.present ? 1u : 0u, frame.objective.state[0],
+			frame.objective.state[1], frame.objective.state[2], frame.objective.state[3],
+			frame.passenger.present ? 1u : 0u, unsigned(frame.passenger.mount_handle),
+			frame.passenger.has_mount ? 1u : 0u, unsigned(frame.passenger.clip),
+			unsigned(frame.passenger.reserve));
+	for (const FrameUpdateRecord &record : frame.records)
+		print_parity_entity(message, ts_nanos, record);
 }
 
 // S2C 0x1E game event — kill feed + objectives + zone control.
@@ -937,18 +1343,19 @@ void print_tag_5a(const std::vector<uint8_t> &body) {
 		            unsigned(s.ammo_secondary), unsigned(s.ammo_alt));
 }
 
-// S2C 0x6E team/squad roster sync.
+// S2C 0x6E spawn-wave/deploy-screen status.
 void print_tag_6e(const std::vector<uint8_t> &body) {
-	RosterSync rs;
-	const bool clean = decode_roster_sync(body.data(), body.size(), rs);
-	std::printf("        [0x6E] roster teams=%u%s\n",
-	            unsigned(rs.team_count), clean ? "" : " (DECODE INCOMPLETE)");
-	for (const auto &t : rs.teams) {
-		std::printf("            team ent=%s slotIdx=%u members=%u slotHdl=%s:",
-		            handle_str(t.team_entity_handle).c_str(),
-		            unsigned(t.team_slot_index), unsigned(t.member_count),
-		            handle_str(t.team_slot_handle).c_str());
-		for (uint16_t m : t.members) std::printf(" %s", handle_str(m).c_str());
+	SpawnWaveStatus status;
+	const bool clean = decode_spawn_wave_status(body.data(), body.size(), status);
+	std::printf("        [0x6E] spawn-wave groups=%u%s\n",
+	            unsigned(status.group_count), clean ? "" : " (DECODE INCOMPLETE)");
+	for (const auto &group : status.groups) {
+		std::printf("            zone=%s zoneIdx=%u queued=%u countdown=%u members:",
+		            handle_str(group.zone_handle).c_str(),
+		            unsigned(group.zone_index), unsigned(group.queued_count),
+		            unsigned(group.wave_countdown));
+		for (uint16_t member : group.members)
+			std::printf(" %s", handle_str(member).c_str());
 		std::printf("\n");
 	}
 }
@@ -989,6 +1396,10 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
 	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
 	            clean ? "" : " (DECODE INCOMPLETE)");
+	for (std::size_t i = 0; i < ws.team_scores.size(); ++i) {
+		if (ws.team_scores[i] != 0)
+			std::printf("            score[%zu]=%d\n", i, ws.team_scores[i]);
+	}
 	for (const auto &w : ws.waypoints)
 		std::printf("            waypoint slot=%s nameId=%u (STRWPNAME%03u) pad=%u\n",
 		            handle_str(uint16_t((3u << 12) | (w.slot_id & 0x0FFF))).c_str(),
@@ -1210,14 +1621,26 @@ void print_tag_42(const std::vector<uint8_t> &body) {
 	std::printf("        [0x42] input-state-flags=0x%04x\n", unsigned(flags));
 }
 
-// S2C 0x79 spectator-mode flag.
+// S2C 0x79 host network-quality scalar.
 void print_tag_79(const std::vector<uint8_t> &body) {
-	uint8_t flag = 0; size_t used = 0;
-	if (!decode_spectator_flag(body.data(), body.size(), flag, used)) {
-		std::printf("        [0x79] spectator-flag decode failed (need 1 B got %zu)\n", body.size());
+	uint8_t quality = 0; size_t used = 0;
+	if (!decode_network_quality(body.data(), body.size(), quality, used)) {
+		std::printf("        [0x79] network-quality decode failed (need 1 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x79] spectator-flag=%u\n", unsigned(flag));
+	std::printf("        [0x79] network-quality=%u\n", unsigned(quality));
+}
+
+// S2C 0x75 live player-slot state. The second byte is not another spectator
+// flag: retail copies it directly into the team/loadout selector byte_A85B48.
+void print_tag_75(const std::vector<uint8_t> &body) {
+	if (body.size() < 2) {
+		std::printf("        [0x75] player-slot-state decode failed (need 2 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x75] player-slot-state spectator=%u team=%u\n",
+	            unsigned(body[0] & 1u), unsigned(body[1]));
 }
 
 // S2C 0x2A chat-history entry.
@@ -1404,6 +1827,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::POOL3_SYNC) print_tag_20(payload);
 	else if (dir == 'S' && tag == s2c::STATIC_ENTITY_BATCH) print_tag_10(payload);
 	else if (dir == 'S' && tag == s2c::CAPTURE_ZONE_STATE) print_tag_40(payload);
+	else if (dir == 'S' && tag == s2c::SERVER_CONFIG_STRINGS) print_tag_7e(payload);
 	else if (dir == 'S' && tag == s2c::PLAYER_LIST) print_tag_16(payload);
 	else if (dir == 'S' && tag == s2c::FULL_ENTITY_SPAWN) print_tag_18(payload);
 	else if (dir == 'S' && tag == s2c::PLAYER_SYNC) print_tag_46(payload);
@@ -1412,7 +1836,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::KILL_BY_SLOT) print_tag_4e(payload);
 	else if (dir == 'S' && tag == s2c::WORLD_STATE_LOAD) print_tag_0f(payload);
 	else if (dir == 'S' && tag == s2c::WEAPON_LOADOUT) print_tag_5a(payload);
-	else if (dir == 'S' && tag == s2c::ROSTER_SYNC) print_tag_6e(payload);
+	else if (dir == 'S' && tag == s2c::SPAWN_WAVE_STATUS) print_tag_6e(payload);
 	else if (dir == 'S' && tag == s2c::FULL_PLAYER_INFO) print_tag_7b(payload);
 	else if (dir == 'S' && (tag == s2c::FILE_TRANSFER_CHUNK || tag == s2c::MISSION_DATA_CHUNK))
 		print_tag_file_xfer(tag, payload);
@@ -1426,7 +1850,8 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::ENTITY_CHECKSUM_REQ) print_tag_30(payload);
 	else if (dir == 'S' && tag == s2c::LOADOUT_CRC_REQ) print_tag_31(payload);
 	else if (dir == 'S' && tag == s2c::INPUT_STATE_FLAGS) print_tag_42(payload);
-	else if (dir == 'S' && tag == s2c::SPECTATOR_FLAG) print_tag_79(payload);
+	else if (dir == 'S' && tag == s2c::NETWORK_QUALITY) print_tag_79(payload);
+	else if (dir == 'S' && tag == s2c::SPECTATOR_FLAGS) print_tag_75(payload);
 	else if (dir == 'S' && tag == s2c::CHAT_HISTORY) print_tag_2a(payload);
 	else if (dir == 'S' && tag == s2c::DEPLOYED_ITEM) print_tag_59(payload);
 	else if (dir == 'S' && tag == s2c::TERRAIN_LOAD) print_tag_45(payload);
@@ -1592,6 +2017,8 @@ int main(int argc, char *argv[]) {
 	bool handshake_mode = false;
 	bool histogram_mode = false;
 	bool coverage_mode = false;
+	bool sequencing_mode = false;
+	bool parity_events_mode = false;
 	long max_frames = 0; // 0 = unlimited
 	long skip_frames = 0;
 	for (int i = 1; i < argc; ++i) {
@@ -1603,6 +2030,12 @@ int main(int argc, char *argv[]) {
 		} else if (std::strcmp(a, "--coverage") == 0) {
 			coverage_mode = true;
 			histogram_mode = true; // coverage joins the histogram tally with the catalog
+		} else if (std::strcmp(a, "--sequencing") == 0) {
+			sequencing_mode = true;
+			stream_mode = true;
+		} else if (std::strcmp(a, "--parity-events") == 0) {
+			parity_events_mode = true;
+			stream_mode = true;
 		} else if (std::strcmp(a, "--stream") == 0) {
 			stream_mode = true;
 		} else if (std::strcmp(a, "--handshake") == 0) {
@@ -1626,13 +2059,22 @@ int main(int argc, char *argv[]) {
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
-		             "[--histogram] [--max-frames N] [--skip N] [0xNN ...]\n"
+		             "[--histogram] [--sequencing] [--parity-events] "
+		             "[--max-frames N] [--skip N] "
+		             "[0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
 		             "       --histogram emits one machine-readable 'HIST <dir> "
 		             "0x<tag> count=.. bytes=.. name=..' line per (dir,tag) + a "
 		             "TOTAL line (for scripts/net/diff_vs_golden.ps1 + CI)\n"
 		             "       --coverage ranks the DECODE BACKLOG: tags present in "
 		             "the capture with no structured decoder yet, by volume\n"
+		             "       --sequencing emits one machine-readable 'PACKET "
+		             "frame=.. dir=.. session=.. sid=.. seq=.. ack=.. flags=.. "
+		             "records=.. tags=..' line per decrypted 0x43/0x83 datagram\n"
+		             "       --parity-events emits stable PARITY_DATAGRAM, PARITY_PACKET, and "
+		             "PARITY_EVENT/STATE/ENTITY lines with capture timestamps, "
+		             "ordered raw/LEN/SKIP/fragment record framing, semantic order, "
+		             "decoded gameplay state, and full non-gameplay bodies\n"
 		             "       --stream decodes lazily (flat memory) for multi-GB "
 		             "captures; --skip N starts after N datagrams; --max-frames N "
 		             "stops after N (implies --stream)\n"
@@ -1664,17 +2106,39 @@ int main(int argc, char *argv[]) {
 	// the pcap reader differs; the per-message print is identical to the batch path.
 	if (stream_mode && is_pcap_path(path)) {
 		opennova::CaptureDecoder decoder;
+		std::map<int, uint64_t> frame_timestamps;
 		long seen = 0, printed_through = 0;
 		bool stopped_early = false;
 		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
 			++seen;
 			if (skip_frames > 0 && seen <= skip_frames) return true;
+			frame_timestamps[pk.frame_index] = pk.ts_nanos;
+			if (parity_events_mode)
+				print_parity_handshake(pk.frame_index, pk.ts_nanos, pk.srcport,
+				                       pk.dstport, pk.payload);
 			opennova::CaptureDatagram cd;
 			cd.frame_index = pk.frame_index;
 			cd.src_port = pk.srcport;
 			cd.dst_port = pk.dstport;
 			cd.payload = pk.payload; // copy: reference only valid during the callback
-			for (const auto &m : decoder.push(cd)) {
+			CaptureDecodeResult decoded = decoder.push_detailed(cd);
+			if (parity_events_mode) {
+				for (const CapturedDatagramResult &datagram : decoded.datagrams)
+					print_parity_datagram(datagram, pk.ts_nanos);
+				for (const CapturedSessionPacket &packet : decoded.session_packets)
+					print_parity_packet(packet, frame_timestamps[packet.frame_index]);
+			} else if (sequencing_mode) {
+				for (const CapturedSessionPacket &packet : decoded.session_packets)
+					print_session_packet(packet);
+			}
+			for (const auto &m : decoded.messages) {
+				if (parity_events_mode) {
+					const uint64_t ts_nanos = frame_timestamps[m.frame_index];
+					print_parity_event(m, ts_nanos);
+					print_parity_semantics(m, ts_nanos);
+					continue;
+				}
+				if (sequencing_mode) continue;
 				if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
 				if (histogram_mode) { hist_tally(m.dir, m.tag, m.payload.size()); continue; }
 				const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
@@ -1703,6 +2167,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	std::vector<Datagram> dgrams;
+	std::map<int, uint64_t> frame_timestamps;
 	if (is_pcap_path(path)) {
 		std::vector<net::PcapDatagram> pkts;
 		if (!net::read_pcap_udp_file(path, pkts)) {
@@ -1710,6 +2175,7 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 		for (auto &pk : pkts) {
+			frame_timestamps[pk.frame_index] = pk.ts_nanos;
 			Datagram d;
 			d.srcport = pk.srcport;
 			d.dstport = pk.dstport;
@@ -1749,7 +2215,24 @@ int main(int argc, char *argv[]) {
 	caps.reserve(dgrams.size());
 	for (auto &d : dgrams) caps.push_back({d.frame, d.srcport, d.dstport, std::move(d.bytes)});
 
-	for (const auto &m : decode_capture_to_messages(caps)) {
+	CaptureDecodeResult decoded = decode_capture(caps);
+	if (parity_events_mode) {
+		for (const CapturedDatagramResult &datagram : decoded.datagrams)
+			print_parity_datagram(datagram, frame_timestamps[datagram.frame_index]);
+		for (const CapturedSessionPacket &packet : decoded.session_packets)
+			print_parity_packet(packet, frame_timestamps[packet.frame_index]);
+	} else if (sequencing_mode) {
+		for (const CapturedSessionPacket &packet : decoded.session_packets)
+			print_session_packet(packet);
+	}
+	for (const auto &m : decoded.messages) {
+		if (parity_events_mode) {
+			const uint64_t ts_nanos = frame_timestamps[m.frame_index];
+			print_parity_event(m, ts_nanos);
+			print_parity_semantics(m, ts_nanos);
+			continue;
+		}
+		if (sequencing_mode) continue;
 		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
 		if (histogram_mode) { hist_tally(m.dir, m.tag, m.payload.size()); continue; }
 		const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);

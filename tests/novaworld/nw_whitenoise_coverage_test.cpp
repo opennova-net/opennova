@@ -87,7 +87,7 @@ bool consume_s2c(int tag, const std::vector<uint8_t> &b, bool wp_hint) {
 	case 0x40: { CaptureZoneOverlayBatch o; return decode_capture_zone_overlay(p, n, o); }
 	case 0x4E: { BatchKillBatch o;        return decode_batch_kill(p, n, o); }
 	case 0x5A: { WeaponLoadout o;         return decode_weapon_loadout(p, n, o); }
-	case 0x6E: { RosterSync o;            return decode_roster_sync(p, n, o); }
+	case 0x6E: { SpawnWaveStatus o;       return decode_spawn_wave_status(p, n, o); }
 	case 0x7B: { FullPlayerInfo o;        return decode_full_player_info(p, n, o); }
 	case 0x0F: { WorldStateLoad o;        return decode_world_state_load(p, n, o, wp_hint); }
 	case 0x60:
@@ -100,8 +100,9 @@ bool consume_s2c(int tag, const std::vector<uint8_t> &b, bool wp_hint) {
 	case 0x13: { EntityDeathRecord o;     return decode_entity_death(p, n, o, used) && used == n; }
 	case 0x30: { EntityChecksumRequest o; return decode_entity_checksum_request(p, n, o, used) && used == n; }
 	case 0x42: { uint16_t o;              return decode_input_state_flags(p, n, o, used) && used == n; }
-	case 0x79: { uint8_t o;               return decode_spectator_flag(p, n, o, used) && used == n; }
+	case 0x79: { uint8_t o;               return decode_network_quality(p, n, o, used) && used == n; }
 	case 0x2A: { ChatHistoryEntry o;      return decode_chat_history_entry(p, n, o, used) && used == n; }
+	case 0x7E: { ServerConfigStrings o;   return decode_server_config_strings(p, n, o); }
 	case 0x57: { RttSample o;             return decode_rtt_sample(p, n, o, used) && used == n; }
 	case 0x68:
 	case 0x43:

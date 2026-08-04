@@ -49,6 +49,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &NovaItemDatabase::get_ai_function);
 	ClassDB::bind_method(D_METHOD("get_hp", "id"), &NovaItemDatabase::get_hp);
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &NovaItemDatabase::get_move_function);
+	ClassDB::bind_method(D_METHOD("get_render_function", "id"), &NovaItemDatabase::get_render_function);
+	ClassDB::bind_method(D_METHOD("get_disk_function", "id"), &NovaItemDatabase::get_disk_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &NovaItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &NovaItemDatabase::is_ai_capable);
@@ -88,9 +90,11 @@ void NovaItemDatabase::_bind_methods() {
 }
 
 Error NovaItemDatabase::load(const String &path) {
+	++revision;
 	source_path = path;
 	last_error = String();
 	items.clear();
+	replication_definition_records.clear();
 
 	PackedByteArray bytes;
 	if (!read_nova_payload_file(path, bytes)) {
@@ -104,7 +108,10 @@ Error NovaItemDatabase::load(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 
+	replication_definition_records.reserve(file.count);
 	for (size_t i = 0; i < file.count; ++i) {
+		replication_definition_records.push_back(
+				replication_definition_from_entry(file.entries[i]));
 		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
@@ -124,6 +131,8 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.sound_profile = String(entry.sound_profile);
 	item.ai_function = String(entry.ai_function);
 	item.move_function = String(entry.move_function);
+	item.render_function = String(entry.render_function);
+	item.disk_function = String(entry.disk_function);
 	item.hp = entry.hp;
 	item.light_transfer = entry.light_transfer;
 	item.damage_reduc_pp = entry.damage_reduc_pp;
@@ -132,6 +141,19 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.acceleration = entry.acceleration;
 	item.deceleration = entry.deceleration;
 	item.player_speed = entry.player_speed;
+	item.water_speed = entry.water_speed;
+	item.climb_speed = entry.climb_speed;
+	item.turn_roll = entry.turn_roll;
+	item.speed_pitch = entry.speed_pitch;
+	item.max_slope = entry.max_slope;
+	item.slip_slope = entry.slip_slope;
+	item.mass = entry.mass;
+	item.lean = entry.lean;
+	item.lean_velocity = entry.lean_velocity;
+	item.pitch = entry.pitch;
+	item.pitch_velocity = entry.pitch_velocity;
+	item.bob = entry.bob;
+	item.flip = entry.flip;
 	item.turn_rate = entry.turn_rate;
 	item.turn_rate2 = entry.turn_rate2;
 	item.torque = entry.torque;
@@ -196,9 +218,27 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	return item;
 }
 
+NovaItemDatabase::ReplicationDefinitionRecord
+NovaItemDatabase::replication_definition_from_entry(
+		const ::DefItemDef &entry) {
+	ReplicationDefinitionRecord record;
+	record.definition_id = entry.id;
+	record.item_type = entry.type;
+	record.attrib = static_cast<uint32_t>(entry.attrib);
+	record.attrib2 = static_cast<uint32_t>(entry.attrib2);
+	record.physics = entry.physics;
+	record.ai_function = String(entry.ai_function);
+	record.move_function = String(entry.move_function);
+	record.render_function = String(entry.render_function);
+	record.disk_function = String(entry.disk_function);
+	return record;
+}
+
 Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name) {
+	++revision;
 	last_error = String();
 	items.clear();
+	replication_definition_records.clear();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
 		return ERR_INVALID_PARAMETER;
@@ -220,7 +260,10 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		return ERR_CANT_OPEN;
 	}
 
+	replication_definition_records.reserve(file.count);
 	for (size_t i = 0; i < file.count; ++i) {
+		replication_definition_records.push_back(
+				replication_definition_from_entry(file.entries[i]));
 		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
@@ -267,6 +310,16 @@ String NovaItemDatabase::get_ai_function(int id) const {
 String NovaItemDatabase::get_move_function(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.move_function;
+}
+
+String NovaItemDatabase::get_render_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.render_function;
+}
+
+String NovaItemDatabase::get_disk_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.disk_function;
 }
 
 int NovaItemDatabase::get_hp(int id) const {
@@ -338,6 +391,19 @@ PackedInt32Array NovaItemDatabase::get_vehicle_physics(int id) const {
 	out.push_back(item.turn_rate2);
 	out.push_back(item.unit_type);
 	out.push_back(item.torque);
+	out.push_back(item.water_speed);
+	out.push_back(item.climb_speed);
+	out.push_back(item.turn_roll);
+	out.push_back(item.speed_pitch);
+	out.push_back(item.max_slope);
+	out.push_back(item.slip_slope);
+	out.push_back(item.mass);
+	out.push_back(item.lean);
+	out.push_back(item.lean_velocity);
+	out.push_back(item.pitch);
+	out.push_back(item.pitch_velocity);
+	out.push_back(item.bob);
+	out.push_back(item.flip);
 	return out;
 }
 

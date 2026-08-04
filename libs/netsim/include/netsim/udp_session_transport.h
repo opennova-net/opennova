@@ -39,7 +39,10 @@ public:
 	explicit UdpSessionTransport(Role role) : role_(role) {}
 
 	// --- ISessionTransport: the netsim core uses ONLY these four ---
-	void host_send(uint8_t tag, std::vector<uint8_t> body) override;   // -> outbound (S2C)
+	void host_send(uint8_t tag, std::vector<uint8_t> body,
+			bool reliable = true,
+			uint8_t protocol_flags_raw = 0,
+			bool capacity_exempt = false) override; // -> outbound (S2C)
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override; // -> outbound (C2S)
 	bool host_recv(Datagram &out) override;   // <- inbound (C2S, host endpoint)
 	bool client_recv(Datagram &out) override; // <- inbound (S2C, client endpoint)
@@ -48,8 +51,13 @@ public:
 	// --- owner byte boundary (the PacketPeerUDP pump / the harness) ---
 	// Stage a raw datagram that arrived on the wire; reframed into the inbound FIFO.
 	void push_inbound(const std::vector<uint8_t> &raw);
-	// Pop one raw datagram to ship on the wire; false when nothing is queued.
+	// Pop one identity-framed datagram. This compatibility seam cannot preserve
+	// semantic delivery/flag metadata; production HostOwner uses the overload
+	// below before it builds the real ProtocolMessage.
 	bool pop_outbound(std::vector<uint8_t> &raw);
+	// HostOwner uses the semantic form so per-message reliability survives until
+	// the ProtocolMessage retention queue is built.
+	bool pop_outbound(Datagram &datagram);
 
 	bool has_outbound() const { return !outbound_.empty(); }
 	std::size_t outbound_pending() const { return outbound_.size(); }
@@ -64,7 +72,7 @@ private:
 	bool pop_inbound(Datagram &out);
 
 	Role role_;
-	std::deque<std::vector<uint8_t>> outbound_; // raw bytes to ship over the wire
+	std::deque<Datagram> outbound_;              // semantic messages awaiting owner framing
 	std::deque<Datagram> inbound_;              // datagrams parsed from received raw bytes
 };
 

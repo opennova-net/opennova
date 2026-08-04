@@ -10,6 +10,7 @@
 #include <npruntime/napi_np_server_ctx.h>
 
 #include <npwire/nw_session_framing.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_keys.h>
 
@@ -471,6 +472,59 @@ bool check_multi_sequence_resend_request_reconstructs_each() {
 	return true;
 }
 
+// C2S uses the same connection-local FIRST/MID/FINAL assembly as S2C. A
+// physical FIRST record is not a gameplay message: only the completed payload
+// at FINAL may cross the host's public in-match event seam.
+bool check_c2s_fragments_dispatch_once_after_final() {
+	np::NapiNPServerCtx ctx;
+	seed_host(ctx);
+	SessionSequencing client_tx{1, 0};
+
+	const std::vector<uint8_t> first_payload = {0x05, 0x00, 0xB9, 0x14};
+	const std::vector<uint8_t> final_payload = {0x0A, 0xDE, 0xAD, 0xBE, 0xEF};
+	std::vector<uint8_t> first;
+	std::vector<uint8_t> final;
+	if (!expect(frame_test_session_datagram(
+			client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+			SESSION_OPCODE_PROTOCOL_MESSAGE,
+			{make_protocol_message(c2s::ENTITY_UPLINK, first_payload,
+					static_cast<uint8_t>(PROTOCOL_MSG_FLAG_LEN16 |
+							PROTOCOL_MSG_FLAG_FRAG_CONT))},
+			first) &&
+	                    frame_test_session_datagram(
+			client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+			SESSION_OPCODE_PROTOCOL_MESSAGE,
+			{make_protocol_message(c2s::ENTITY_UPLINK, final_payload,
+					static_cast<uint8_t>(PROTOCOL_MSG_FLAG_LEN16 |
+							PROTOCOL_MSG_FLAG_FRAG_END))},
+			final),
+			"frame C2S FIRST and FINAL records"))
+		return false;
+
+	const np::HandleResult first_result = np::handle_server_datagram(
+			ctx, kPeer, first.data(), first.size(), 20);
+	if (!expect(first_result.events.empty() && first_result.outbound.empty(),
+			"host does not dispatch or reply to an incomplete C2S FIRST record"))
+		return false;
+
+	const np::HandleResult final_result = np::handle_server_datagram(
+			ctx, kPeer, final.data(), final.size(), 21);
+	if (!expect(final_result.events.size() == 1 &&
+	                    final_result.events[0].kind ==
+						np::HostAcceptEvent::Kind::PeerC2SInMatch &&
+	                    final_result.events[0].in_match_c2s.size() == 1,
+			"host dispatches exactly one semantic C2S message at FINAL"))
+		return false;
+	const ProtocolMessage &message =
+			final_result.events[0].in_match_c2s.front();
+	std::vector<uint8_t> expected = first_payload;
+	expected.insert(expected.end(), final_payload.begin(), final_payload.end());
+	return expect(message.tag == c2s::ENTITY_UPLINK &&
+	                      message.payload == expected &&
+	                      !message.flags.frag_cont && !message.flags.frag_end,
+			"host dispatches the complete reassembled C2S payload without physical fragment flags");
+}
+
 } // namespace
 
 int main() {
@@ -480,5 +534,6 @@ int main() {
 	ok = check_s2c_loss_requests_0x44_and_host_reconstructs() && ok;
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
+	ok = check_c2s_fragments_dispatch_once_after_final() && ok;
 	return ok ? 0 : 1;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -46,16 +47,36 @@ NapiMessage make_host_request(const HostRegistration &cfg, const std::string &se
 // [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860]
 NapiMessage make_host_update(const HostRegistration &cfg);
 
-// Deterministic [A-Z] string of `len` chars from a seed. Retail's NWPSSK/NWUSID are machine
-// hardware fingerprints (CDKey_GenerateHardwareFingerprint @ 0x4a4a00); the lobby verify is NOT
-// gated on them (the .204 capture validates with empty CD-key fields), so a stable plausible value
-// suffices for parity. Deliberately not a real hardware fingerprint.
-// [orig: NovaWorldClient::az_fingerprint]
+// Deterministic [A-Z] fallback for callers without platform machine inputs.
+// The Godot binding supplies the retail transform below on Windows.
 std::string az_fingerprint(uint32_t seed, int len);
 
-// Inputs for the NW-S5 identity "Cookie" set. The binding sets client_index/client_key (the ci/ck it
-// generated at start) and tz_bias (read from the OS via Godot Time); the rest default to the
-// witnessed literals.
+// Inputs consumed by retail's two stable-machine token encoders. Platform
+// discovery (GetVolumeInformation/GetAdaptersInfo in the original) stays in
+// the binding; these byte transforms are portable and testable.
+// [orig: CDKey_GenerateHardwareFingerprint @ 0x4a4a00 /
+// generate_hardware_fingerprint @ 0x4a4d00]
+struct RetailMachineInputs {
+	uint32_t volume_serial = 0;
+	uint32_t maximum_component_length = 0;
+	uint32_t filesystem_flags = 0;
+	std::string volume_name;
+	std::string filesystem_name;
+	std::array<uint8_t, 6> ethernet_address{};
+	bool has_ethernet_address = false;
+};
+
+struct LobbyMachineTokens {
+	std::string nwpssk;
+	std::string nwusid;
+};
+
+LobbyMachineTokens make_retail_machine_tokens(const RetailMachineInputs &in);
+
+// Inputs for the NW-S5 identity "Cookie" set. Environment collection belongs to the binding;
+// this portable builder only preserves the witnessed names/order and values it is given. The
+// client_index/client_key fallback exists for non-Godot callers, but bindings should supply the
+// stable machine-derived NWPSSK/NWUSID explicitly.
 struct LobbyIdentityParams {
 	uint32_t client_index = 0;
 	uint32_t client_key = 0;
@@ -63,6 +84,8 @@ struct LobbyIdentityParams {
 	std::string country = "United States";
 	std::string language = "English";
 	std::string my_installed_exp_bits = "0";
+	std::string nwpssk;
+	std::string nwusid;
 	std::string nwhwi = "OpenNova$0$2048$1920x1080$1920x1080";
 };
 

@@ -58,6 +58,19 @@ bool vehicle_release_primary_occupant(World &world, Entity &vehicle, EntityHandl
 // personal equipped AdmDef for detach. Returns true once the parent weapon resolves.
 // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73]
 bool vehicle_bind_use_gun_slot(World &world, Entity &occupant, Entity &vehicle);
+// Resolve an entity's authored primary_weapon into its embedded MountSlot and
+// seed clip/reserve when the weapon table becomes available. Entity promotion
+// can precede armory loading, so callers use this at the first live slot edge.
+bool vehicle_prepare_weapon_slot(World &world, Entity &vehicle);
+// Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
+// vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
+// own slot until redirect_to_parent_slot is set, then follows the exact
+// groundEntity relationship to a live type-1 EWeap carrier. Invalid/stale
+// routes return null rather than falling back to attachment metadata.
+// [orig: shared helper @0x5460e0; NetPacket_WritePlayerState @0x4ffe18]
+WeaponSlotState *resolve_mounted_ammo_slot(World &world, Entity &mount);
+const WeaponSlotState *resolve_mounted_ammo_slot(
+        const World &world, const Entity &mount);
 // Clear parent ownership; restore a player's personal EquippedSlot and clear an
 // NPC's, matching the post-restore retail player-classifier branch.
 // [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,

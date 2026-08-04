@@ -17,6 +17,7 @@ extends Node3D
 
 const WEATHER_TICK_HZ := 62.0
 const MAX_CATCHUP_TICKS := 31
+const MISSION_START_PREWARM_TICKS := 255
 
 # Declared before wind_strength: the export's default assignment runs the
 # setter during init, which needs the core.
@@ -93,6 +94,17 @@ func prepare_autonomous() -> void:
 	_reset_for_environment(false)
 
 
+## Retail settles the newly initialized environment through 255 complete
+## weather ticks before gameplay/network publication [orig: sub_57F1E0
+## @0x57f878..0x57f880]. TOD targets are recomputed before every tick.
+func prewarm_mission_start() -> void:
+	if not _cached_env:
+		return
+	for _tick in range(MISSION_START_PREWARM_TICKS):
+		_cached_env.advance_mission_clock(1)
+		_tick_weather(1)
+
+
 func _reset_for_environment(world_tick_driven: bool) -> void:
 	# GameWorld retains this node across missions, but retail's environment
 	# start re-seeds the PRNG and clears every transient weather channel. A new
@@ -100,6 +112,13 @@ func _reset_for_environment(world_tick_driven: bool) -> void:
 	# color/modulator blocks, scalar springs, and cloud-scroll accumulators.
 	_core = NovaWeatherCore.new()
 	_core.set_wind_intensity(_configured_wind_intensity)
+	if _cached_env and _cached_env.is_loaded():
+		_core.set_scalar_targets(
+				_cached_env.get_fog_level_target(),
+				_cached_env.get_sky_height_target())
+		# Local mission initialization snaps scalar currents after authored
+		# targets are installed. Network receive deliberately never calls this.
+		_core.snap_scalar_currents_to_targets()
 	iris_samples = PackedInt32Array()
 	_world_tick_driven = world_tick_driven
 	_tick_credit = 0.0
@@ -112,6 +131,42 @@ func _reset_for_environment(world_tick_driven: bool) -> void:
 ## curtime + advance like Environment_UpdateWeatherTick.
 func tick_fixed() -> void:
 	_tick_weather(1)
+
+
+## The host-facing exact native sample. NovaWeather owns the live scalar
+## currents; NovaEnvironment owns the authored targets and mission clock.
+func get_network_environment_snapshot() -> Dictionary:
+	var env := _cached_env
+	if not env or not env.is_loaded():
+		return {}
+	return {
+		"fog_target_q16": int(roundf(float(env.get_fog_level_target()) * 65536.0)),
+		"fog_current_q16": int(roundf(_core.get_fog_distance() * 65536.0)),
+		"fog_accel_clamp": _core.get_fog_accel_clamp_fixed(),
+		"tod_fixed24": env.get_mission_time_fixed24(),
+		"tod_advance_per_tick": env.get_mission_advance_per_tick(),
+		"quake_ticks": env.get_network_quake_ticks(),
+		"cloud_scroll_rate_target": int(roundf(float(env.get_sky_speed()) * 1024.0)),
+		"rain_pct_current_q16": _core.get_rain_pct_fixed(),
+		"overcast_blend_q16": _core.get_overcast_blend_fixed(),
+		"precipitation_kind": env.get_network_precipitation_kind(),
+	}
+
+
+## Project one received phase-2 sample into both owners. The environment takes
+## TOD/fog/cloud metadata; the native core reconstructs the exact scalar targets
+## and fog acceleration units while retaining the local smoothed currents.
+func apply_network_environment_sample(sample: Dictionary) -> void:
+	if not _cached_env:
+		return
+	_cached_env.apply_network_environment_sample(sample)
+	_core.apply_network_environment_sample(
+			int(sample.get("fog_dist", 0)),
+			int(sample.get("fog_accel", 0)),
+			int(sample.get("rain_pct", 0)),
+			int(sample.get("overcast", 0)))
+	# Publish immediately even when this render frame contains no 62 Hz quantum.
+	_tick_weather(0)
 
 
 func _tick_weather(tick_count: int) -> void:
@@ -237,7 +292,10 @@ func _write_weather_state(env: Node) -> void:
 	# env seam so every consumer (dome, water, object/terrain fog, the frame
 	# clear) serves the ramp.
 	if env.has_method("set_smoothed_scalars"):
-		env.set_smoothed_scalars(_core.get_fog_distance(), _core.get_sky_height(), _core.get_sun_dim_pct())
+		env.set_smoothed_scalars(
+				_core.get_fog_distance(), _core.get_sky_height(),
+				_core.get_sun_dim_pct(), _core.get_rain_pct(),
+				float(_core.get_overcast_blend_fixed()) / 65536.0)
 	_write_shader_globals(env)
 
 
@@ -385,7 +443,7 @@ func _write_shader_globals(env: Node) -> void:
 	# (sun by day, moon by night), not the always-solar sky highlight vector.
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870]
 	_publish_light_direction(env.get_light_direction())
-	var fog_end: float = float(env.get_fog_level())
+	var fog_end: float = float(env.get_fog_end_distance())
 	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", fog_start)

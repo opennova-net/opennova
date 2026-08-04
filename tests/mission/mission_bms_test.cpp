@@ -948,11 +948,75 @@ int main() {
 		             static_cast<uint16_t>(original_loadout_len + sizeof(trailing)));
 		opennova::bms::File parsed_trailing;
 		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), parsed_trailing, err));
+		const std::vector<uint8_t> source_header(
+				bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(opennova::bms::kHeaderSize));
+		const uint16_t canonical_loadout_len = parsed_trailing.header.weapon_loadout_chunk_len;
+		std::vector<uint8_t> canonical_header;
+		TEST_EXPECT(opennova::bms::encode_header_blob(parsed_trailing, canonical_header, err));
+		TEST_EXPECT(read_u16_le(canonical_header,
+		                        offsetof(opennova::bms::Header, weapon_loadout_chunk_len)) ==
+		            canonical_loadout_len);
+		TEST_EXPECT(canonical_loadout_len != original_loadout_len + sizeof(trailing));
+		std::vector<uint8_t> loaded_header;
+		TEST_EXPECT(opennova::bms::encode_loaded_header_blob(parsed_trailing, loaded_header, err));
+		TEST_EXPECT(loaded_header == source_header);
+		TEST_EXPECT(read_u16_le(loaded_header,
+		                        offsetof(opennova::bms::Header, weapon_loadout_chunk_len)) ==
+		            original_loadout_len + sizeof(trailing));
 		std::vector<uint8_t> canonical;
 		TEST_EXPECT(opennova::bms::write(parsed_trailing, canonical, err));
+		TEST_EXPECT(std::equal(canonical_header.begin(), canonical_header.end(), canonical.begin()));
 		opennova::bms::File reparsed_trailing;
 		TEST_EXPECT(opennova::bms::parse(canonical.data(), canonical.size(), reparsed_trailing, err));
 		TEST_EXPECT(opennova::bms::equal(parsed_trailing, reparsed_trailing));
+
+		// Parsed-header provenance is usable only while the current canonical header
+		// projection still matches the load-time snapshot. A direct edit must force
+		// the network encoder onto fresh canonical bytes rather than stale source bytes.
+		parsed_trailing.header.mission_name[0] ^= 0x01;
+		std::vector<uint8_t> edited_canonical_header;
+		TEST_EXPECT(opennova::bms::encode_header_blob(
+				parsed_trailing, edited_canonical_header, err));
+		std::vector<uint8_t> edited_loaded_header;
+		TEST_EXPECT(opennova::bms::encode_loaded_header_blob(
+				parsed_trailing, edited_loaded_header, err));
+		TEST_EXPECT(edited_loaded_header == edited_canonical_header);
+		TEST_EXPECT(edited_loaded_header != source_header);
+	}
+
+	// --- Wire join: retail sends only the exact 0x268-byte BMS header in S2C 0x0B.
+	// A client must be able to build the read-only mission metadata view from that
+	// header without opening (or even having) the host's complete .bms locally. ---
+	{
+		const std::vector<uint8_t> wire_header(
+				original.begin(),
+				original.begin() + static_cast<std::ptrdiff_t>(opennova::bms::kHeaderSize));
+		opennova::mission::MissionDocument wire_document;
+		TEST_EXPECT(wire_document.load_bms_header_bytes(
+				wire_header.data(), wire_header.size()));
+		TEST_EXPECT(wire_document.is_loaded());
+		TEST_EXPECT(wire_document.is_header_only());
+		TEST_EXPECT(wire_document.info().mission_name == document.info().mission_name);
+		TEST_EXPECT(wire_document.info().terrain == document.info().terrain);
+		TEST_EXPECT(wire_document.info().environment == document.info().environment);
+		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Item) == 0);
+		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Building) == 0);
+		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Marker) == 0);
+		TEST_EXPECT(wire_document.entity_count(opennova::mission::EntityKind::Organic) == 0);
+
+		// A wire-header view is intentionally not a synthesizable authoring document:
+		// writing it would silently turn the host's non-empty map into an empty BMS.
+		std::vector<uint8_t> incomplete_write;
+		TEST_EXPECT(!wire_document.write_bms_bytes(incomplete_write));
+
+		TEST_EXPECT(!wire_document.load_bms_header_bytes(
+				wire_header.data(), wire_header.size() - 1));
+		TEST_EXPECT(!wire_document.is_loaded());
+		TEST_EXPECT(!wire_document.is_header_only());
+		std::vector<uint8_t> oversized_header = wire_header;
+		oversized_header.push_back(0);
+		TEST_EXPECT(!wire_document.load_bms_header_bytes(
+				oversized_header.data(), oversized_header.size()));
 	}
 
 	return 0;

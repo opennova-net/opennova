@@ -1471,8 +1471,9 @@ int main() {
         CHECK((0x8011u & 0xFFFFu) % 62 == 49);    // the %62 jitter the engagement adds
 
         // PRNG_Next16 is the same algorithm over a separate stream (dword_31BFBB0).
-        sys.prng16 = 1;
-        CHECK(static_cast<uint32_t>(sys.prng_step16()) == 0x8011u);
+        World prng_world;
+        prng_world.prng16_state = 1;
+        CHECK(prng_world.next_prng16() == 0x8011u);
         CHECK(sys.prng_a == 0x8011u);             // stepping 16 did NOT touch stream a (independent)
     }
 
@@ -1601,7 +1602,7 @@ int main() {
     {
         World w;
         AiSystem sys;
-        sys.prng16 = 1;
+        w.prng16_state = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.relmat_id = 0x1234;

@@ -16,8 +16,10 @@
 #include <npruntime/ammo_table_build.h>
 
 #include <def/def.h>
+#include <vfs/vfs.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "common/test_paths.h"
@@ -34,6 +36,50 @@ static int failures = 0;
 	} while (0)
 
 int main(void) {
+	// Optional retail-install oracle. This is deliberately environment-gated so
+	// the ordinary hermetic test stays fast while protocol work can inspect the
+	// exact expansion-scoped ADM indices and ammo classes used by a capture.
+	if (const char *live_root = std::getenv("NW_LIVE_WEAPON_ROOT");
+	    live_root != nullptr && *live_root != '\0') {
+		const char *live_expansion = std::getenv("NW_LIVE_WEAPON_EXPANSION");
+		opennova::Vfs vfs;
+		if (!vfs.mount_game(live_root,
+		                    live_expansion != nullptr ? live_expansion : std::string(),
+		                    opennova::VfsMountMode::Packed)) {
+			std::fprintf(stderr, "FAIL: live weapon mount: %s\n", vfs.last_error().c_str());
+			return 1;
+		}
+		std::vector<uint8_t> bytes;
+		if (!vfs.read_file("weapon.def", bytes) || bytes.empty()) {
+			std::fprintf(stderr, "FAIL: mounted weapon.def is unavailable\n");
+			return 1;
+		}
+		DefWeaponsFile live_file{};
+		if (def_parse_weapons_memory(bytes.data(), bytes.size(), &live_file) != 0) {
+			std::fprintf(stderr, "FAIL: mounted weapon.def does not parse\n");
+			return 1;
+		}
+		const world::WeaponTable live = np::build_weapon_table(live_file);
+		std::printf("LIVE weapon.def bytes=%zu entries=%zu expansion=%s\n", bytes.size(),
+		            live.entries.size(), vfs.mounted_expansion().c_str());
+		for (size_t i = 0; i < live.ammo_class_names.size(); ++i)
+			std::printf("LIVE ammo-class local=%zu cap=%d name=%s\n", i,
+			            live.ammo_class_caps[i], live.ammo_class_names[i].c_str());
+		for (const int index : {1, 3, 16, 83, 84, 85, 88, 93, 97}) {
+			const world::WeaponTableEntry *entry =
+					live.by_index(static_cast<uint8_t>(index));
+			if (entry == nullptr) continue;
+			std::printf(
+					"LIVE adm=%d name=%s combo=%u:%u class=%s local=%d units=%d "
+					"clip=%d start=%d maxclips=%d bucket=%d weapon-class=%d\n",
+					index, entry->name.c_str(), entry->category, entry->rank,
+					entry->ammo_class.c_str(), entry->ammo_class_id,
+					entry->ammo_class_count, entry->clipsize, entry->startrounds,
+					entry->maxclips, entry->ammo_bucket, entry->weapon_class_slot);
+		}
+		def_free_weapons(&live_file);
+	}
+
 	const char *repo_root = test_paths_repo_root(__FILE__);
 	char path[4096];
 	std::snprintf(path, sizeof(path), "%s/fixtures/def/weapon.def", repo_root);
@@ -57,6 +103,19 @@ int main(void) {
 	CHECK(table.index_of("wpn_m4auto") == 9); // by-name lookups are case-insensitive (stricmp)
 	CHECK(table.index_of("WPN_NOPE") == -1);
 	CHECK(table.by_index(static_cast<uint8_t>(table.entries.size())) == nullptr);
+	// Slot types 0..10 exist before weapon.def parses. Ammo classes are registered
+	// into that SAME retail score-type namespace, so their ids are visible in the
+	// fixed 128-i32 S2C 0x0F image (retail-ashi5a: .45=15, 5.56=22 in this
+	// fixture; revx02 inserts AK47GP and therefore carries 5.56 at 23).
+	CHECK(table.ammo_class_id_of("") == 0);
+	CHECK(table.ammo_class_id_of("CLASS_MANA") == 1);
+	CHECK(table.ammo_class_id_of("CLASS_HP") == 2);
+	CHECK(table.ammo_class_id_of("CLASS_POWER1") == 3);
+	CHECK(table.ammo_class_id_of("CLASS_POWER8") == 10);
+	CHECK(table.ammo_class_id_of("CLASS_RGRENADE") == 11);
+	CHECK(table.ammo_class_id_of("CLASS_GRENADEHE") == 12);
+	CHECK(table.ammo_class_id_of("CLASS_45cal") == 15);
+	CHECK(table.ammo_class_id_of("CLASS_556MM") == 22);
 
 	// --- field mapping (fixture truth).
 	const world::WeaponTableEntry *m4 = table.by_index(9);
@@ -72,7 +131,7 @@ int main(void) {
 	CHECK(m4->charfilter == (0x08u | 0x01u | 0x10u)); // rifleman|medic|engineer
 	CHECK(m4->teamfilter == 0x02u);                   // blue
 	CHECK(m4->loadout_subclasses == 1 && m4->loadout_selectable == 1);
-	CHECK(m4->ammo_class == "CLASS_556MM");
+	CHECK(m4->ammo_class == "CLASS_556MM" && m4->ammo_class_id == 22);
 	CHECK(m4->has_first_person_model_reference);
 	const int32_t expected_m4_error[6] = {1081, 13107, 16384, 1081, 2097, 3080};
 	for (int row = 0; row < 6; ++row) CHECK(m4->error_fp16[row] == expected_m4_error[row]);

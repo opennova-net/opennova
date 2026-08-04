@@ -103,6 +103,8 @@ struct ReplayEvent {
 
 // One environment snapshot from the S2C 0x0A header sub-block (case 2).
 struct ReplayEnvSample {
+	uint8_t rain_pct = 0;
+	uint8_t env_param = 0;
 	int frame_index = 0;
 	uint16_t fog_dist = 0, fog_accel = 0, tod_fixed = 0;
 	uint8_t  quake_ticks = 0, cloud_scroll = 0, overcast = 0;

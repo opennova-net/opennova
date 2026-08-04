@@ -4,7 +4,7 @@ extends Node3D
 # weapon-fire tracers, hit bursts, kill marks, and capture-zone rings. The 3D
 # analog of the markers the old standalone 2D replay viewer drew on its canvas;
 # everything here is decoded from the wire (NovaNetClient.get_events()) — this only
-# renders it. A sibling of NetWorldView (which renders the entity models): this
+# renders it. A sibling of WirePresentPass (which renders the entity models): this
 # draws "what is happening" over them.
 #
 # All markers are drawn into one ImmediateMesh rebuilt every frame (the canvas's

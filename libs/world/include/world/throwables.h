@@ -187,14 +187,9 @@ public:
     // set @ 0x405f16]: set -> same-team actors also trip claymores/mines.
     bool team_trigger_claymore = false;
 
-    // The witnessed PRNG shapes, world-local streams (the destruction-port
-    // precedent: stream identity with retail is not reproducible, the
-    // generator is). [orig: PRNG_Next16 @ 0x6130a0 stream dword_31BFBB0 for
-    // the bounce spin kicks; the rol4(s + rol11(s)) ^ 1 inline stream
-    // dword_31BFBB8 for the shrapnel fan.]
-    uint32_t prng16_state = 0x2B0749C1u;
+    // The inline shrapnel-fan stream is independent dword_31BFBB8. Grenade
+    // bounce spin calls World's shared PRNG_Next16/dword_31BFBB0 owner.
     uint32_t fan_prng_state = 0x2B0749C1u;
-    int32_t prng16();
     uint16_t fan_prng();
 
     // One 62 Hz think pass over the placed devices [orig: Entity_UpdatePool1Slot
@@ -223,7 +218,6 @@ public:
     void reset() noexcept {
         devices.clear();
         events.clear();
-        prng16_state = 0x2B0749C1u;
         fan_prng_state = 0x2B0749C1u;
     }
 

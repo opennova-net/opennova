@@ -46,8 +46,32 @@ class World;
 // player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
 // accel/decel token*4. The host's item-traits sweep fills the table from the item db
 // (NovaSimulation::resolve_item_traits); tests stamp it directly.
+// The items.def move_function family tag, the per-class mover selector (the
+// update-callback table keys on it [orig: the [tag,flags,callback] rows
+// @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv;
+// Bike covers cbik.
+enum class VehicleFamily : uint8_t {
+    Ground = 0,
+    Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
+    Helicopter, // chel/CHel -> Entity_UpdateAircraftPhysics @0x490310
+    Plane,      // cpln
+    Bike,       // cbik -> Entity_UpdatePlayerInfantryMovement @0x483FE0 (misnomer:
+                // the cbike-family mover). Shares the ground template; the four
+                // witnessed family deltas gate on this tag inside the core
+                // (gravity 250, vZ up-cap, airborne throttle/integration, yaw
+                // always-applied >>2 in water) [cbik grill 2026-07-31].
+};
+
+// CHel/cpln occupy direct rows in g_EntityClassPhysicsTable. Unlike the
+// cveh/cbot/etc. dispatcher thunks, their family mover does not test the
+// items.def ground `physics` selector before running.
+constexpr bool vehicle_family_uses_direct_air_mover(VehicleFamily family) {
+    return family == VehicleFamily::Helicopter ||
+           family == VehicleFamily::Plane;
+}
+
 struct VehicleTraits {
-    int32_t physics = 0;       // itemDef+0x8DC selector; 0 = never runs the vehicle motor
+    int32_t physics = 0;       // itemDef+0x8DC ground-dispatch selector; direct air ignores it
     int32_t player_speed = 0;  // itemDef+0x8E8
     int32_t acceleration = 0;  // itemDef+0x8E0
     int32_t deceleration = 0;  // itemDef+0x8E4
@@ -58,6 +82,32 @@ struct VehicleTraits {
     int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
+    VehicleFamily family = VehicleFamily::Ground; // move_function tag (§5.38e movers)
+    int32_t water_speed = 0;   // itemDef+0x8EC waterSpeed — the cbot family's max
+                               // drive speed (the same slot the ground family
+                               // reads as playerSpeed) [orig: @0x48E835]
+    int32_t climb_speed = 0;   // itemDef+0x920 — air vertical clamp [+cs, -2cs]
+    int32_t turn_roll = 0;     // itemDef+0x90C raw — air roll-rate cap (*192426)
+    int32_t speed_pitch = 0;   // itemDef+0x910 raw — air pitch-rate cap (*192426)
+    int32_t max_slope = 0;     // itemDef+0x8F4 BAM (deg token * 11930464) — the
+                               // platform slope-soft threshold (cos22 at use)
+    int32_t slip_slope = 0;    // itemDef+0x8F8 BAM — the slope-hard threshold
+    // The platform-solve tuning block (all raw tokens; vehicle-client-movers-re.md §3):
+    int32_t mass = 0;          // itemDef+0x908 — weight class (<=1 light) + momentum
+    int32_t lean = 0;          // itemDef+0x92C — planing roll-lean machine @0x45AEA0
+    int32_t lean_velocity = 0; // itemDef+0x930
+    int32_t pitch_lift = 0;    // itemDef+0x934 ("pitch") — bow-lift threshold scale
+    int32_t pitch_lift_vel = 0;// itemDef+0x938 ("pitch_velocity") — lift amount scale
+    int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
+    int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
+    // Platform probe geometry from the model bound boxes (16.16 model space;
+    // modelData [0x28..0x3C] + the [0x40..0x4C] footprint — our source is the
+    // 3di collision AABB; box1-vs-box2 provenance is a tracked spec unknown):
+    int32_t box_z_lo = 0, box_z_hi = 0; // keel/deck Z pair
+    int32_t box_x_lo = 0, box_x_hi = 0; // length pair
+    int32_t box_y_lo = 0, box_y_hi = 0; // beam pair
+    int32_t foot_x_lo = 0, foot_x_hi = 0; // footprint length pair
+    int32_t foot_y_lo = 0, foot_y_hi = 0; // footprint beam pair
     // The VEHICLE item's own authored sound binding. This deliberately does not
     // borrow the mounted NPC's AiProfile: pool-1 vehicles need sound even when no
     // AiEntity body exists for them. Profile slots seed soundloop_1..7, then a
@@ -71,6 +121,10 @@ struct VehicleTraits {
 class VehicleTraitsTable {
 public:
     void set(int32_t item_id, const VehicleTraits &t) { by_item_[item_id] = t; }
+    VehicleTraits *get_mutable(int32_t item_id) {
+        auto it = by_item_.find(item_id);
+        return it == by_item_.end() ? nullptr : &it->second;
+    }
     const VehicleTraits *get(int32_t item_id) const {
         auto it = by_item_.find(item_id);
         return it == by_item_.end() ? nullptr : &it->second;
@@ -119,6 +173,39 @@ VehicleCtrlRegisters vehicle_ctrl_registers(
 // block-level cites inline]
 void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                         const VehicleDriveCmd *ai_cmd = nullptr);
+
+// The JOINER-side watercraft mover (net-re §5.38e, D-NET-196): the client-executed
+// subset of the cbot family function — per-record chase plus local-driver input
+// or remote register mirroring, steer/thrust/drag/keel prediction, contact drags,
+// and X/Y/yaw integration [orig: Entity_UpdateWatercraftPhysics @0x48D480].
+// The local driver reconciles longitudinal command with the received register
+// while retaining local steer. Z, pitch/roll, and the
+// afloat/airborne latches come from the platform solve below. Consumes the staged
+// VehicleMotorState net_* cluster; the sim runs it once per world tick on a
+// non-authority world for staged pool-1 Watercraft entities.
+// The boat platform solve — buoyancy, hull attitude, and the airborne/afloat
+// flags, run every tick after integration exactly where the retail caller sits
+// [orig: Entity_ProcessPlatformPhysics @0x481870, called @0x48ECE7; client
+// subset — the authority damage/latch legs, entity-entity collision, the
+// planing lean machine @0x45AEA0, and the wreck-tumble path are cited
+// deferrals]. Writes veh.veh.air_pitch_bam/air_roll_bam (the shared attitude
+// fields the sim mirrors to the presented row) and position Z.
+void watercraft_platform_solve(World &world, Entity &veh,
+                               const VehicleTraits &traits);
+
+void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
+
+// The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
+// remote registers driving tick_vehicle_motor's core with the input block bypassed;
+// the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
+void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
+
+// The AIR-family prediction leg (CHel + cpln — one mover, the plane callback is
+// a thunk): the client subset of Entity_UpdateAircraftPhysics @0x490310 —
+// three-register mirror, tilt-command attitude model, altitude-hold servo on the
+// record-seeded target Z (no gravity constant), airborne aero / grounded sheds,
+// and the terrain-clamp stand-in for the unported 0x47EF10 contact solve.
+void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 } // namespace opennova::world
 

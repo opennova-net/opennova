@@ -78,16 +78,17 @@ int spring_step(int current, int target, int step_clamp, int max_abs);
 // 100). The per-channel step/max clamps are COMMAND-driven (the weather
 // command setter @ 0x57f1e0 computes |target-cur|/ticks; net apply 0x00A) —
 // they default effectively-unclamped here and tighten when the weather
-// command wiring lands. The mission-start snap refreshes TARGETS ONLY
-// [orig: Environment_SnapStateToTargets @ 0x57d1e0] — the smoothed currents
-// always RAMP in from their previous values, exactly like the cloud-scroll
-// rate.
+	// command wiring lands. Environment_SnapStateToTargets @0x57d1e0 refreshes
+	// targets; the later mission-start initializer @0x57f1e0 copies those targets
+	// into currents. Network target updates do not perform that local-start snap.
 struct EnvScalarChannels {
 	static constexpr int32_t kUnclamped = 0x40000000;
 
 	int32_t fog_dist_fp = 1024 << 16; // [orig defaults: Environment_InitDefaults @ 0x57c010]
 	int32_t fog_dist_target_fp = 1024 << 16;
-	int32_t fog_step_fp = kUnclamped;
+	// Environment_InitDefaults seeds the fog acceleration clamp to 255.0;
+	// phase-2 projects this native 16.16 value as unsigned 8.8.
+	int32_t fog_step_fp = 0x00FF0000;
 	int32_t fog_max_fp = kUnclamped;
 
 	int32_t sun_dim_fp = 0;
@@ -112,6 +113,19 @@ struct EnvScalarChannels {
 	// (fog -> sun-dim -> [FOV: camera-side] -> sky height -> [cloud scroll:
 	// CloudScrollState] -> rain -> overcast).
 	void tick();
+	// The local mission-start initializer's scalar current <- target copy plus
+	// recovered default clamps (fog 0x00FF0000/max 1000, rain/overcast 0x1000).
+	// This is intentionally separate from apply_network_sample(), whose retail
+	// client path preserves currents and lets them chase newly received targets.
+	void snap_currents_to_targets();
+
+	// Apply the complete scalar subset carried by an S2C 0x0A phase-2 sample.
+	// The sample is already narrowed by the authority: fog distance is an
+	// integer, while fog acceleration/rain/overcast are unsigned 8.8. The host
+	// serializes its rain/overcast CURRENTS, but the retail receiver writes those
+	// bytes into its TARGET globals; the local currents keep chasing at 62 Hz.
+	void apply_network_sample(uint16_t fog_dist, uint16_t fog_accel,
+	                          uint8_t rain_pct, uint8_t overcast);
 };
 
 // Per-channel 12.20 color smoothing toward a packed 0x00RRGGBB target with

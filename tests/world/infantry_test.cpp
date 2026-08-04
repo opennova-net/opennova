@@ -30,6 +30,7 @@
 
 #include "terrain/height_field.h"
 #include "world/ai.h"
+#include "world/player_input.h"
 #include "world/world.h"
 
 using namespace opennova::world;
@@ -429,6 +430,303 @@ void test_remote_player_body_anim() {
     ent->net_move_input = 0xC0;
     run_ticks(ai, w, t_roll + 8, t_roll + 16);
     CHECK(e->inf.anim_pending == anim_state::kRollRight);
+
+    // The replicated JUMP key (MoveOrder bit 5, D-NET-199): the host derives
+    // the jump anims for a wire peer with the witnessed cooldown/edge latch
+    // [orig: cooldown @0x4b7de0-0x4b7e82; gate + stamps @0x4b7e8c-0x4b7f06].
+    src.clips.insert(anim_state::kJumpStart);
+    src.clips.insert(anim_state::kJumpLoop);
+    int t = t_roll + 16;
+    ent->net_stance_bits = 0; // standing (prone suppresses the jump gate)
+    ent->net_move_input = 0;
+    run_ticks(ai, w, t, t + 8);
+    t += 8;
+    ent->net_move_input = 0x20; // held jump key
+    run_ticks(ai, w, t, t + 2);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
+    CHECK(e->inf.jump_cooldown > 0);
+    // Held key: the countdown parks at 1 — no auto-repeat while held, and the
+    // selection resumes locomotion once the episode window closes.
+    run_ticks(ai, w, t + 2, t + 40);
+    CHECK(e->inf.jump_cooldown == 1);
+    CHECK(ent->net_anim_state != anim_state::kJumpStart);
+    // Release, then press again: a fresh edge launches a second jump.
+    ent->net_move_input = 0;
+    run_ticks(ai, w, t + 40, t + 44);
+    CHECK(e->inf.jump_cooldown == 0);
+    ent->net_move_input = 0x20;
+    run_ticks(ai, w, t + 44, t + 46);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart ||
+          e->inf.anim_state == anim_state::kJumpLoop);
+}
+
+// A stance-change message can be dispatched before the same frame's extended player
+// uplink.  The authority jump gate reads the reconstructed MoveOrder word directly;
+// it must not wait for the fourth-tick locomotion-selection cadence to observe prone.
+// [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
+void test_remote_player_same_tick_prone_jump_is_rejected() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    // The cached motor stance is deliberately still standing. Both replicated inputs
+    // arrive for tick 1, which is not a fourth-tick body-selection boundary.
+    CHECK(e->inf.stance == InfantryState::Stance::kStand);
+    ent->net_stance_bits = 1;
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending != anim_state::kJumpLoop);
+}
+
+// The cooldown is an edge latch, not a substitute for the retail eligibility mask.
+// An airborne wire peer can have cooldown zero (for example, a ledge fall or a peer
+// first observed after launch); press/release/repress while still airborne must not
+// manufacture jump_start records.  Once grounded, a fresh press may launch normally.
+// [orig: `test Flags,1A002h` @0x4b7ea0; in-air bit 0x2000]
+void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+    e->inf.airborne = true;
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 2, 3);
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 3, 4);
+    CHECK(e->inf.jump_cooldown == 0);
+    CHECK(e->inf.anim_state != anim_state::kJumpStart);
+
+    e->inf.airborne = false;
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 4, 5);
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 5, 6);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+    CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
+}
+
+// Preserve the rest of retail's jump eligibility mask on the authority copy.  These
+// flags are live world state, independent of the remote movement-input byte: dead,
+// in-air/swimming, both water bits, and carried bodies all reject a jump stamp.
+// [orig: `test Flags,1A002h` + carried `test al,40h` @0x4b7ea0-0x4b7ebd]
+void test_remote_player_jump_respects_world_state_flag_gates() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    // 0x10000 is the witnessed second water-state bit; it intentionally remains
+    // unnamed in entity.h until that swimming state is modeled independently.
+    const std::array<uint32_t, 5> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
+        0x10000u, kEntityFlagMounted,
+    };
+    uint32_t tick = 1;
+    for (const uint32_t blocked : blocked_flags) {
+        e->inf.reset_body_animation(anim_state::kIdle);
+        e->inf.jump_cooldown = 0;
+        e->inf.airborne = false;
+        ent->engine_flags = blocked;
+        ent->net_move_input = Entity::kMoveOrderJump;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+        CHECK(e->inf.jump_cooldown == 0);
+        CHECK(e->inf.anim_state != anim_state::kJumpStart);
+        CHECK(e->inf.anim_pending != anim_state::kJumpLoop);
+
+        ent->engine_flags = 0;
+        ent->net_move_input = 0;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+    }
+
+    // With every gate clear, the same replicated press launches normally.
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, tick, tick + 1);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart);
+}
+
+// The remote authority body uses the same +0x1A8 cooldown maintenance order as the
+// local player body: launch writes 32, held input counts down to and parks at 1,
+// release clears 1 to 0, and only the next press can launch again.
+// [orig: clamp/count @0x4b7de0-0x4b7e15; release @0x4b7e78; reload @0x4b7f06]
+void test_remote_player_jump_hold_release_cooldown_matches_retail() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.jump_cooldown == 32);
+
+    run_ticks(ai, w, 2, 33); // 31 held ticks: 32 -> 1
+    CHECK(e->inf.jump_cooldown == 1);
+    run_ticks(ai, w, 33, 41);
+    CHECK(e->inf.jump_cooldown == 1); // held-at-one latch, no auto-repeat
+
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 41, 42);
+    CHECK(e->inf.jump_cooldown == 0);
+
+    ent->net_move_input = Entity::kMoveOrderJump;
+    run_ticks(ai, w, 42, 43);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.anim_state == anim_state::kJumpStart ||
+          e->inf.anim_state == anim_state::kJumpLoop);
+}
+
+// The simulated local body and authority-side remote body are two projections of the
+// same retail org2 jump block. Keep the exact world-state mask identical on both paths;
+// local collision state must not make water/dead/carried eligibility disappear.
+void test_local_player_jump_respects_world_state_flag_gates() {
+    Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+    const int32_t floor_z = fx(50);
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kJumpStart, anim_state::kJumpLoop};
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->pos[0] = fx(100);
+    e->pos[1] = fx(100);
+    e->pos[2] = floor_z;
+    run_ticks(ai, w, 0, 2); // seed the terrain cache and settle
+
+    const std::array<uint32_t, 5> blocked_flags = {
+        kEntityFlagDead, kEntityFlagInAir, kEntityFlagDrowning,
+        0x10000u, kEntityFlagMounted,
+    };
+    uint32_t tick = 2;
+    for (const uint32_t blocked : blocked_flags) {
+        e->inf.reset_body_animation(anim_state::kIdle);
+        e->inf.jump_cooldown = 0;
+        e->inf.airborne = false;
+        e->inf.vel[2] = 0;
+        e->pos[2] = floor_z;
+        ent->engine_flags = blocked;
+        e->inf.jump_requested = true;
+        run_ticks(ai, w, tick, tick + 1);
+        ++tick;
+        CHECK(e->inf.jump_cooldown == 0);
+        CHECK(!e->inf.airborne);
+        CHECK(e->inf.anim_state != anim_state::kJumpStart);
+    }
+
+    ent->engine_flags = 0;
+    e->inf.jump_requested = true;
+    run_ticks(ai, w, tick, tick + 1);
+    CHECK(e->inf.jump_cooldown == 32);
+    CHECK(e->inf.airborne);
+}
+
+// The uplink side of D-NET-199: the LOCAL player's wire mirror must carry the
+// held-jump level in MoveOrder bit 5 — a retail host launches + animates our
+// jump from exactly this bit [orig: the packer @0x4df6fa-0x4df701].
+void test_local_player_uplink_carries_the_jump_bit() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kJumpStart);
+    src.clips.insert(anim_state::kJumpLoop);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    PlayerBodyInput body;
+    body.jump = true;
+    apply_player_body_input(*e, body);
+    CHECK(e->inf.jump_held);
+    run_ticks(ai, w, 0, 1);
+    CHECK((ent->net_move_input & Entity::kMoveOrderJump) != 0);
+
+    body.jump = false;
+    apply_player_body_input(*e, body);
+    run_ticks(ai, w, 1, 2);
+    CHECK((ent->net_move_input & Entity::kMoveOrderJump) == 0);
 }
 
 // Local-player leg chase + body midpoint — the witnessed org2 model (D-INF-12
@@ -474,6 +772,33 @@ void test_player_body_chase_crosses_the_bam_seam() {
     // the body midpoint crossed with the legs.
     CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.leg_yaw[0], target)) <= 1);
     CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.body_heading, target)) <= 1);
+}
+
+// The player root step rotates by this tick's leg-midpoint BODY heading, not
+// the instant mouse/render yaw and not the previous tick's body. Starting the
+// feet at 0 and aiming +90 degrees makes the distinction exact: the leg twist
+// clamp places the body at +22.5 degrees before the root add.
+// [orig: Entity_UpdateInfantryPlayerBody body midpoint @0x4B4AA9..0x4B4ABB;
+// body-heading load entity+0x8C @0x4B41E4; Q22 root rotation
+// @0x4B41F0..0x4B4255; additive integration @0x4B7CB4..0x4B7CEF]
+void test_player_root_uses_same_tick_body_heading() {
+    World w;
+    AiSystem ai;
+    BlendProbeSource src;
+    src.frames[anim_state::kIdle].dx = 0x4000;
+    ai.root_motion = &src;
+
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->inf.target_heading = 0x40000000;
+
+    run_ticks(ai, w, 1, 2); // avoid the fourth-tick animation selector
+
+    CHECK(e->heading == 0x40000000);
+    CHECK(e->inf.body_heading == 0x10000000);
+    CHECK(e->pos[0] == 15136);
+    CHECK(e->pos[1] == 6269);
 }
 
 void test_player_body_chase_and_legs() {
@@ -2215,7 +2540,11 @@ int main() {
         CHECK(e->inf.airborne);
         CHECK(e->inf.vel[2] == 0x1600);       // the raw impulse; gravity bites next tick
         CHECK(e->inf.jump_cooldown == 32);    // reloaded [orig: @0x4b7f06]
-        CHECK(e->inf.anim_state == anim_state::kJumpLoop); // stamped at the jump (no 30 clip)
+        // STRAIGHT stamps — the witnessed org2 jump block has no clip
+        // availability check, so the clip-less fixture still stamps 30 with
+        // 31 pending [orig: @0x4b7ef2/@0x4b7efc].
+        CHECK(e->inf.anim_state == anim_state::kJumpStart);
+        CHECK(e->inf.anim_pending == anim_state::kJumpLoop);
         // Third 15-tick blend sample: trunc(0x4000 * 0.2000000179f) = 3276;
         // the jump carries three quarters of that current root step.
         CHECK(e->inf.vel[0] == 2457);
@@ -2388,11 +2717,18 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_remote_player_same_tick_prone_jump_is_rejected();
+    test_remote_player_airborne_jump_press_and_repress_are_rejected();
+    test_remote_player_jump_respects_world_state_flag_gates();
+    test_remote_player_jump_hold_release_cooldown_matches_retail();
+    test_local_player_jump_respects_world_state_flag_gates();
+    test_local_player_uplink_carries_the_jump_bit();
     test_recoil_and_weapon_weight_kernels();
     test_hurt_volume_updates_registry_health();
     test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
+    test_player_root_uses_same_tick_body_heading();
     test_npc_ledge_fall_keeps_clip();
     test_dead_player_ledge_fall_edge_is_suppressed();
     test_player_idle_skip_throttle_no_bounce();

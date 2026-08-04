@@ -19,6 +19,11 @@ func test_fresh_client_has_empty_world() -> void:
 	assert_eq(c.get_entities().size(), 0)
 	assert_eq(c.get_state(), NovaNetClient.STATE_IDLE)
 	assert_eq(c.get_mission(), "", "mission name empty until read off the wire")
+	assert_eq(c.get_present_stride(), NovaSimulation.PF_STRIDE)
+	assert_eq(c.get_present_snapshot().size(), 0,
+		"spectate exposes the shared wire-present snapshot shape")
+	assert_false(c.has_local_player(),
+		"a spectator never self-filters a locally controlled Person")
 
 
 func test_get_events_empty_on_fresh_client() -> void:

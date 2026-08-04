@@ -394,6 +394,23 @@ void test_charge_stick_surface_gate() {
     CHECK(!throwable_surface_accepts_stick(FixedVec3{0, 0, -65536}));
 }
 
+// Retail's grenade-bounce spin and the host's retained S2C 0x39 seed both call
+// PRNG_Next16 over the one process-global dword_31BFBB0. A network control draw
+// must therefore advance the exact stream consumed by the next bounce kick.
+void test_control_and_bounce_share_prng16_stream() {
+    Rig rig(0);
+    CHECK(rig.w.prng16_state == World::kMissionPrng16Seed);
+    rig.w.prng16_state = 1;
+
+    CHECK(rig.w.next_prng16() == 0x8011u); // control 0x39
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 0}, 0, 0);
+    CHECK(slot >= 0);
+    rig.tick(1);
+
+    CHECK(rig.w.round_sim.rounds[size_t(slot)].bounce_count == 1);
+    CHECK(rig.w.prng16_state == 0x4190B11Du); // bounce yaw + pitch draws
+}
+
 // The grenade motor: gravity arc, terrain bounce (velZ * -0.2 + spin kicks),
 // and the fuse queuing the kill zone at expiry [orig: @ 0x443F50 + the 0x1000
 // expiry head].
@@ -964,6 +981,7 @@ int main() {
     test_tracer_item_binding_fallbacks();
     test_zero_water_is_dry_below_altitude_zero();
     test_charge_stick_surface_gate();
+    test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
     test_grenade_fuse_tick_boundaries();
     test_ballistic_expiry_is_silent();

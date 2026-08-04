@@ -139,10 +139,10 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
 		if (rec.spawn_flags & 0x0200) rec.target_handle = c.u16();
 
-		// Weapon block (0x0400). The retail handler reads the mask byte, then —
-		// non-zero mask — one u16 per set bit (0xFFFF on a set bit skips storage
-		// but still consumes the wire u16). It then ALWAYS consumes
-		// extra_handle_0 + extra_handle_1: the mask==0 path `goto LABEL_110`
+		// Mount-occupancy block (0x0400). The retail handler reads the seat-mask
+		// byte, then — for a non-zero mask — one occupant handle per set bit
+		// for retail slots 0..7. It then ALWAYS consumes slots 8 and 9: the
+		// mask==0 path `goto LABEL_110`
 		// (@ 0x4330b1) reads both before falling through to the teamByte read.
 		// D-NET-56: an earlier reading put the extras inside `if (mask)`, which
 		// under-read by 4 B on the (0x400 set, mask==0) path. Retail servers
@@ -151,15 +151,15 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		// exercise it — but the client handler reads it, so the port must too.
 		// [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
 		if (rec.spawn_flags & 0x0400) {
-			rec.weapon_mask = c.u8();
-			if (rec.weapon_mask) {
+			rec.seat_mask = c.u8();
+			if (rec.seat_mask) {
 				for (int b = 0; b < 8; ++b) {
-					if (rec.weapon_mask & (1u << b))
-						rec.weapon_handles[b] = c.u16();
+					if (rec.seat_mask & (1u << b))
+						rec.mount_handles[b] = c.u16();
 				}
 			}
-			rec.extra_handle_0 = c.u16();
-			rec.extra_handle_1 = c.u16();
+			rec.mount_handle_8 = c.u16();
+			rec.mount_handle_9 = c.u16();
 		}
 
 		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
@@ -342,6 +342,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	out.field_bitmask = c.u16();
 	if (!c.ok) return false;
 	const uint16_t m = out.field_bitmask;
+	out.queue_ack = (m & 0x4000) != 0;   // no body byte; applies to live AND removal rows
 	if (m & 0x8000) {
 		out.removal = true;
 		return (c.p == c.end);
@@ -359,7 +360,6 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	if (m & 0x0080) out.field_0080 = c.u8();
 	if (m & 0x0400) out.quality = c.u8();
 	if (m & 0x0800) out.entity_ref = c.u32();
-	out.queue_ack = (m & 0x4000) != 0;   // no body byte
 	return (c.p == c.end);
 }
 
@@ -488,6 +488,17 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 		if (!record_ok) return false;
 	}
 	return (c.p == c.end);
+}
+
+// S2C 0x7E: two mission-briefing C strings, with no count or trailing fields.
+// [orig: NapiNPClientMsg_0x07E @0x425E20]
+bool decode_server_config_strings(const uint8_t *body, size_t len,
+                                  ServerConfigStrings &out) {
+	out = ServerConfigStrings{};
+	Cursor c{body, body + len, true};
+	out.briefing3 = c.cstr();
+	out.briefing2 = c.cstr();
+	return c.ok && c.p == c.end;
 }
 
 // ===========================================================================
@@ -810,7 +821,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		out.env.tod_fixed    = c.u16();
 		out.env.quake_ticks  = c.u8();
 		out.env.cloud_scroll = c.u8();
-		out.env.cloud_param2 = c.u8();
+		out.env.rain_pct = c.u8();
 		out.env.overcast     = c.u8();
 		out.env.env_param    = c.u8();
 		break;
@@ -840,16 +851,22 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	if (!c.ok) return finish(false);
 	out.local_tail_present = true;
 
-	// Conditional vehicle-passenger record (sub-block 0 + flags2 bit 3 set).
+	// Conditional phase-8 mounted-ammo record (sub-block 0 + flags2 bit 3 set).
 	if ((out.flags2 & 0x0F) == 8) {
-		out.passenger.present = true;
-		out.passenger.handle = c.u16();
+		const uint16_t mount_handle = c.u16();
 		if (!c.ok) return finish(false);
-		if (out.passenger.handle != 0xFFFF) {
-			out.passenger.has_seat = true;
-			out.passenger.seat_yaw = c.u16();
-			out.passenger.seat_pitch = c.u16();
+		if (mount_handle != 0xFFFF) {
+			const uint16_t clip = c.u16();
+			const uint16_t reserve = c.u16();
+			if (!c.ok) return finish(false);
+			out.passenger.has_mount = true;
+			out.passenger.clip = clip;
+			out.passenger.reserve = reserve;
 		}
+		out.passenger.mount_handle = mount_handle;
+		// `present` means the complete conditional record was consumed. A short
+		// handle/clip/reserve must never overwrite the last authoritative slot.
+		out.passenger.present = true;
 	}
 
 	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = round event.
@@ -1073,25 +1090,27 @@ bool decode_weapon_loadout(const uint8_t *body, size_t len, WeaponLoadout &out) 
 	return (c.p == c.end);
 }
 
-// S2C 0x6E team/squad roster sync. [orig: NapiNPClientMsg_HandleSquadRosterSync @ 0x429880]
-bool decode_roster_sync(const uint8_t *body, size_t len, RosterSync &out) {
-	out = RosterSync{};
+// S2C 0x6E spawn-wave/deploy-screen status.
+// [orig: NetPacket_WriteSpawnWaveStatus @0x507490;
+//        NapiNPClientMsg_HandleSquadRosterSync @0x429880]
+bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &out) {
+	out = SpawnWaveStatus{};
 	Cursor c{body, body + len, true};
-	out.team_count = c.u8();
+	out.group_count = c.u8();
 	if (!c.ok) return false;
-	out.teams.reserve(out.team_count);
-	for (unsigned i = 0; i < out.team_count; ++i) {
-		RosterTeam t;
-		t.team_entity_handle = c.u16();
-		t.team_slot_index    = c.u16();
-		t.member_count       = c.u8();
-		t.team_slot_handle   = c.u16();
-		if (!c.ok) { out.teams.push_back(std::move(t)); return false; }
-		t.members.reserve(t.member_count);
-		for (unsigned m = 0; m < t.member_count; ++m)
-			t.members.push_back(c.u16());
+	out.groups.reserve(out.group_count);
+	for (unsigned i = 0; i < out.group_count; ++i) {
+		SpawnWaveGroup group;
+		group.zone_handle    = c.u16();
+		group.zone_index     = c.u16();
+		group.queued_count   = c.u8();
+		group.wave_countdown = c.u16();
+		if (!c.ok) { out.groups.push_back(std::move(group)); return false; }
+		group.members.reserve(group.queued_count);
+		for (unsigned m = 0; m < group.queued_count; ++m)
+			group.members.push_back(c.u16());
 		const bool record_ok = c.ok;
-		out.teams.push_back(std::move(t));
+		out.groups.push_back(std::move(group));
 		if (!record_ok) return false;
 	}
 	return (c.p == c.end);
@@ -1306,6 +1325,19 @@ bool decode_weapon_reload(const uint8_t *body, size_t len,
 	return consumed == 4;
 }
 
+bool decode_mounted_weapon_slot_selection(
+		const uint8_t *body, size_t len,
+		MountedWeaponSlotSelection &out, size_t &consumed) {
+	out = MountedWeaponSlotSelection{};
+	consumed = 0;
+	if (body == nullptr || len != 2) return false;
+	const uint16_t value = static_cast<uint16_t>(body[0]) |
+			(static_cast<uint16_t>(body[1]) << 8);
+	out.use_parent_slot = value != 0;
+	consumed = 2;
+	return true;
+}
+
 // S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
 // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
 bool decode_entity_death(const uint8_t *body, size_t len,
@@ -1356,12 +1388,13 @@ bool decode_input_state_flags(const uint8_t *body, size_t len,
 	return consumed == 2;
 }
 
-// S2C 0x79 spectator-mode flag — [u8] (1 B). [orig: NapiNPClientMsg_0x079 @ 0x429B00]
-bool decode_spectator_flag(const uint8_t *body, size_t len,
-                           uint8_t &out_flag, size_t &consumed) {
+// S2C 0x79 host network-quality scalar — [u8] (1 B).
+// [orig: Server_TickUpdate @0x51E1B2..0x51E202 / NapiNPClientMsg_0x079 @0x429B00]
+bool decode_network_quality(const uint8_t *body, size_t len,
+                            uint8_t &out_quality, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out_flag = c.u8();
+	out_quality = c.u8();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 1;

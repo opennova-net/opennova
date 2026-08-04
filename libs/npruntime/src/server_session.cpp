@@ -1,4 +1,6 @@
 #include "npruntime/server_session.h"
+#include "npruntime/server_initial_state.h"
+#include "npruntime/server_message_dispatch.h"
 
 #include "npruntime/server_spawn.h" // Server_InitNewRoundState (§5.2a step 1)
 
@@ -38,9 +40,32 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                     const SessionStartup &startup, netsim::ISessionTransport *local_client) {
 	ctx.config = config;
+	// Game_StartMission runs Nbstat_StartupInit once per mission, clearing the
+	// shared scoreboard/integrity counter but deliberately leaving the separate
+	// process-global 0x30/0x31 family toggle untouched.
+	// [orig: Game_StartMission @0x526108 -> Nbstat_StartupInit @0x4FDE30;
+	// timer store @0x4FDE41]
+	ctx.scoreboard_broadcast_timer = 0;
+	// Resolve the session-selected retail default once at session creation so
+	// every later connection, settings record, and countdown reads the same
+	// concrete period. A caller-supplied override wins verbatim.
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4c4ab0]
+	const GameSessionChannel transport_fallback =
+			ctx.socket_state == SocketMode::Socketless
+					? GameSessionChannel::SinglePlayer
+					: GameSessionChannel::Lan;
+	ctx.config.send_holdoff_ticks =
+			config.effective_send_holdoff_ticks(transport_fallback);
+	ctx.mission_metadata_blob = build_mission_metadata_blob(
+			ctx.config, ctx.is_mp_session_peer != 0);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	ctx.np_protocol.max_players = config.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
+	// The original snapshots both advertised flag words while building the
+	// session config. P2 and the S2C 0x08 tail are the same BuildFlags value;
+	// computing it once here prevents those two wire legs from drifting.
+	ctx.np_protocol.server_flags = config.game_type;
+	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 
 	if (ctx.is_authority) {
 		start_server(ctx, startup);

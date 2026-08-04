@@ -27,10 +27,9 @@ int AiSystem::index_of(const AiEntity &e) const {
     return static_cast<int>(&e - entities_.data());
 }
 
-// [orig: inline LCG on dword_31BFBB8] / [orig: PRNG_Next16 @0x6130a0 on dword_31BFBB0]. Both are
-// the same rotate-LCG over different global state; the low 16 bits feed the %62 fire-delay jitter.
+// [orig: inline LCG on dword_31BFBB8]. PRNG_Next16's separate but shared
+// dword_31BFBB0 stream is owned by World; the low 16 bits feed both jitters.
 int32_t AiSystem::prng_step_a() { return static_cast<int32_t>(prng_step(prng_a)); }
-int32_t AiSystem::prng_step16() { return static_cast<int32_t>(prng_step(prng16)); }
 
 // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3)/still(4)
 // AIEvent by horizontal speed. Channel 0, entity index, timer 0 (the orig stores fldz to var_C).
@@ -315,7 +314,7 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
             b.f[AiBrain::kFireDelay] += static_cast<int32_t>(static_cast<uint16_t>(prng_step_a()) % 62);
     } else {
         // [orig: branch B — always jitter; PRNG_Next16 on dword_31BFBB0]
-        b.f[AiBrain::kFireDelay] += static_cast<int32_t>(static_cast<uint16_t>(prng_step16()) % 62);
+        b.f[AiBrain::kFireDelay] += static_cast<int32_t>(world.next_prng16() % 62);
     }
     b.set_pend(kAiGroundCombat); // [orig: ai_comp[5] = 17]
 

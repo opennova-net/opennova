@@ -6,7 +6,8 @@
 //   The promoted np handshake legs, fed the golden's real C2S 0x42 ClientAuth and seed-injected with
 //   the golden's host_key / server SK / server SCRK, reproduce every WIRE-SIGNIFICANT field the legs
 //   control on the S2C replies:
-//     0x81 ServerHello : HK == golden host_key (the R1 host-key advertise), PN/PG echoed.
+//     0x81 ServerHello : HK == golden host_key (the R1 host-key advertise), PN/PG echoed,
+//                        P2 == the golden's live BuildFlags value.
 //     0x82 ServerAuth  : CI/CK echoed from ClientAuth, CR==1, SK/SCRK == seed-injected, NA echoed.
 //   These are exactly the fields handle_client_hello / handle_client_join own.
 //
@@ -165,6 +166,7 @@ int main() {
 	if (!expect(oh.hk == gh.hk, "0x81 advertises the golden host_key (R1 host-key stamp)")) return 1;
 	if (!expect(oh.pn == gh.pn, "0x81 PN echoes the client PN")) return 1;
 	if (!expect(oh.pg == gh.pg, "0x81 PG echoes the client PG")) return 1;
+	if (!expect(oh.p2 == gh.p2, "0x81 P2 matches the retail BuildFlags value")) return 1;
 
 	// --- 0x82 leg: replay the REAL golden ClientAuth datagram through handle_client_join. ---
 	auto r82 = np::handle_server_datagram(ctx, peer, raw42.data(), raw42.size(), 2);
@@ -185,7 +187,7 @@ int main() {
 	if (!expect(oa.na == ga.na, "0x82 NA echoes ClientAuth.na")) return 1;
 
 	// --- Record the full-datagram divergence (deferred to a libs/novaworld builder grill). ---
-	std::printf("[golden] handshake-leg field parity OK (0x81 HK/PN/PG; 0x82 CI/CK/CR/SK/SCRK/NA).\n");
+	std::printf("[golden] handshake-leg field parity OK (0x81 HK/PN/PG/P2; 0x82 CI/CK/CR/SK/SCRK/NA).\n");
 	std::printf("[golden] full-datagram byte diff (DEFERRED — libs/novaworld builder field-set):\n");
 	std::printf("         0x81: golden=%zuB ours=%zuB first_diff=%d (retail CI=%u game_server=%d; ours CI=%u)\n",
 	            g81.size(), o81.size(), first_diff(g81, o81), gh.ci, gh.is_game_server, oh.ci);

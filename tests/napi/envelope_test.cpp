@@ -108,16 +108,92 @@ bool check_tamper_detection() {
 	return true;
 }
 
-// Variable-size-header mode must be rejected (first dword == 0).
-bool check_variable_header_rejected() {
-	uint8_t envelope[16] = {0}; // first dword is 0 -> variable mode -> reject
-	envelope[9] = 0x08;
-	uint8_t decoded[16];
-	size_t dec_size = 0;
-	const int rc = opennova::napi_envelope_decode(envelope, sizeof(envelope),
-			decoded, sizeof(decoded), &dec_size);
-	if (!expect(rc != 0, "variable-size-header mode rejected by 4-byte-only decoder")) return false;
+void write_le32(uint8_t *p, uint32_t value) {
+	p[0] = static_cast<uint8_t>(value);
+	p[1] = static_cast<uint8_t>(value >> 8);
+	p[2] = static_cast<uint8_t>(value >> 16);
+	p[3] = static_cast<uint8_t>(value >> 24);
+}
+
+std::vector<uint8_t> make_variable_envelope(const std::vector<uint8_t> &src,
+		size_t header_size) {
+	std::vector<uint8_t> envelope(header_size + src.size(), 0);
+	envelope[9] = static_cast<uint8_t>(header_size);
+	std::memcpy(envelope.data() + header_size, src.data(), src.size());
+	const uint32_t crc = opennova::crc32_napi(src.data(), src.size());
+	if (src.size() < 32) {
+		write_le32(envelope.data() + 4, crc);
+		return envelope;
+	}
+	uint32_t carrier = 0;
+	for (size_t i = 0; i < 32; ++i) {
+		uint8_t &byte = envelope[header_size + i];
+		carrier |= static_cast<uint32_t>(byte & 1u) << i;
+		byte = static_cast<uint8_t>((byte & 0xFEu) | ((crc >> i) & 1u));
+	}
+	write_le32(envelope.data() + 4, carrier);
+	return envelope;
+}
+
+bool check_variable_header_decode() {
+	for (size_t payload_size : {size_t(8), size_t(48)}) {
+		std::vector<uint8_t> src(payload_size);
+		for (size_t i = 0; i < src.size(); ++i)
+			src[i] = static_cast<uint8_t>(0x31u + i * 9u);
+		const std::vector<uint8_t> envelope = make_variable_envelope(src, 12);
+		std::vector<uint8_t> decoded(src.size());
+		size_t dec_size = 0;
+		if (!expect(opennova::napi_envelope_decode(envelope.data(), envelope.size(),
+				decoded.data(), decoded.size(), &dec_size) == 0,
+				"variable-size-header envelope decodes")) return false;
+		if (!expect(dec_size == src.size() && decoded == src,
+				"variable-size-header payload restored")) return false;
+	}
 	return true;
+}
+
+// A normal scatter carrier can legitimately be zero. Retail first attempts the
+// extended interpretation and then falls back to the four-byte layout.
+bool check_zero_carrier_fallback() {
+	std::vector<uint8_t> src(48);
+	for (size_t i = 0; i < src.size(); ++i)
+		src[i] = static_cast<uint8_t>((i * 6u + 2u) & 0xFEu);
+	std::vector<uint8_t> envelope(src.size() + 4);
+	size_t env_size = 0;
+	if (!expect(opennova::napi_envelope_encode(src.data(), src.size(),
+			envelope.data(), envelope.size(), &env_size) == 0,
+			"zero-carrier envelope encodes")) return false;
+	if (!expect(envelope[0] == 0 && envelope[1] == 0 &&
+			envelope[2] == 0 && envelope[3] == 0,
+			"test payload produces zero scatter carrier")) return false;
+	std::vector<uint8_t> decoded(src.size());
+	size_t dec_size = 0;
+	if (!expect(opennova::napi_envelope_decode(envelope.data(), env_size,
+			decoded.data(), decoded.size(), &dec_size) == 0,
+			"zero scatter carrier takes four-byte fallback")) return false;
+	return expect(dec_size == src.size() && decoded == src,
+			"zero-carrier fallback restores payload");
+}
+
+// Retail does not take the normal-header fallback unless the candidate
+// extended header size at +9 is greater than four.
+bool check_zero_carrier_small_header_size_rejected() {
+	std::vector<uint8_t> src(48, 2u);
+	std::vector<uint8_t> envelope(src.size() + 4);
+	size_t env_size = 0;
+	if (!expect(opennova::napi_envelope_encode(src.data(), src.size(),
+			envelope.data(), envelope.size(), &env_size) == 0,
+			"small-header candidate encodes with zero carrier")) return false;
+	// Scatter owns the low bit of this payload byte, so the encoded candidate
+	// may be 2 or 3. Its high seven bits are the invariant that keeps it below
+	// retail's >4 extended-header gate.
+	if (!expect(envelope[9] < 4,
+			"normal payload supplies an extended header candidate below four")) return false;
+	std::vector<uint8_t> decoded(src.size());
+	size_t dec_size = 0;
+	return expect(opennova::napi_envelope_decode(envelope.data(), env_size,
+			decoded.data(), decoded.size(), &dec_size) != 0,
+			"zero carrier with candidate header size below four rejects");
 }
 
 // Small payloads: the 4-byte header is literally the CRC of the payload.
@@ -146,7 +222,9 @@ int main() {
 	if (!check_threshold_roundtrip()) return 1;
 	if (!check_scatter_only_touches_low_bits()) return 1;
 	if (!check_tamper_detection()) return 1;
-	if (!check_variable_header_rejected()) return 1;
+	if (!check_variable_header_decode()) return 1;
+	if (!check_zero_carrier_fallback()) return 1;
+	if (!check_zero_carrier_small_header_size_rejected()) return 1;
 	if (!check_small_header_equals_crc()) return 1;
 	std::printf("OK: LSB-scatter CRC envelope roundtrips + CRC detection\n");
 	return 0;

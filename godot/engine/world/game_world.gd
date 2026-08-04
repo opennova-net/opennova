@@ -21,11 +21,11 @@ extends Node3D
 const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 const NovaSunShadowScript := preload("res://engine/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const PanmClockScript := preload("res://engine/world/panm_clock.gd")
-const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
-const NetWorldView := preload("res://engine/world/net_world_view.gd")
+const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
 const NovaDebugViewStatus := preload(
 		"res://engine/debug/nova_debug_view_status.gd")
@@ -37,12 +37,12 @@ const MAX_WEATHER_CATCHUP_TICKS := 31
 signal world_loaded()
 signal load_failed(reason: String)
 ## A joiner's authoritative session record (post-auth S2C 0x7B) resolved during
-## the pre-load wait: server/mission names + the local mission file about to
-## load. The shell refreshes its loading screen from this — retail's connect
-## stream fills the same session vars before its local load
+## the pre-load wait: server/mission names + the exact wire-header world about
+## to be constructed. The shell refreshes its loading screen from this — retail's
+## connect stream fills the same session vars before its header-backed load
 ## [orig: parse_server_session_variables @ 0x5202f0].
 signal join_session_identified(info: Dictionary)
-## A joiner crossed the authoritative admission edge. Local terrain/mission load
+## A joiner crossed the authoritative admission edge. Wire-header world load
 ## completion is intentionally separate: the shell keeps the loading presentation
 ## raised until this edge (or until the host requests a deployment-zone pick).
 signal join_admission_ready()
@@ -96,6 +96,10 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _mission_tile_info: NovaTerrainTileInfo
 var _mission_til_bytes := PackedByteArray()
+var _join_wire_assets_pending := false
+var _join_wire_til_applied := false
+var _join_wire_assets_failed := false
+var _join_wire_asset_failure_emitted := false
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
 # The BMS argument that completed the active mission load. This is runtime
@@ -129,7 +133,7 @@ var _occlusion: OcclusionFramePass
 var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
-var _net_view       # NetWorldView: spawns + drives models from the decoded world
+var _net_view       # WirePresentPass: the shared live/spectator replica presenter
 var _net_event_view # NetEventView: draws the decoded event stream over the world
 # A host-injected resource root (main_game hands its boot mount over; tests
 # hand fixture roots). When set, the load_*
@@ -140,7 +144,7 @@ var _injected_root: NovaResourceRoot = null
 var _foliage_hidden := false
 var _playable := true
 # The net-session drive: typed request staging, the joiner preload/admission
-# coroutines, the ESC aborts, and NovaWorld gate registration (see
+# state machines, the ESC aborts, and NovaWorld gate registration (see
 # net_session_drive.gd). The session signals live on THIS node — the shell
 # contract pins them here — and the drive emits them through its world reference.
 var _net_drive: NetSessionDrive
@@ -203,10 +207,10 @@ func _resolve_root(dir: String) -> NovaResourceRoot:
 
 
 func _init() -> void:
-	# The drive's preload/admission waits are coroutines that await process_frame,
-	# so it must be in the tree before load_mission_as_joiner runs: constructed
-	# here, it enters the tree with the world itself, and every load_* entry runs
-	# on an in-tree world. The drive holds this world for its public load surface
+	# The drive's preload wait is stepped by its own synchronous _process, so it
+	# must be in the tree before load_mission_as_joiner runs: constructed here, it
+	# enters the tree with the world itself, and every load_* entry runs on an
+	# in-tree world. The drive holds this world for its public load surface
 	# + signal emission; the three Callables lend it the private internals the
 	# preload path needs without widening GameWorld's API.
 	_net_drive = NetSessionDrive.new()
@@ -378,8 +382,8 @@ func load_mission_as_host(config: HostSessionConfig) -> int:
 
 
 ## Load as a LAN co-op JOINER (a non-authority client): the typed dial target is
-## staged and driven by NetSessionDrive (authenticate before the local load; S2C
-## 0x7B supplies the mission). Returns the same codes as load_mission.
+## staged and driven by NetSessionDrive (authenticate before the wire-header world
+## load; S2C 0x7B supplies the mission identity). Returns the same codes as load_mission.
 func load_mission_as_joiner(target: JoinTarget) -> int:
 	return _net_drive.load_as_joiner(target)
 
@@ -426,7 +430,7 @@ func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String =
 ## replay tool today, a real server later), and entities come from the LIVE WIRE
 ## stream — not the .bms placements, not the AI sim. The map name rides the wire
 ## (S2C 0x7B), so when the client learns it we load that mission's terrain +
-## environment; meanwhile NetWorldView renders the decoded .3di models each frame.
+## environment; meanwhile WirePresentPass renders the canonical client replicas.
 ## Only the resource dir + the endpoint are needed.
 ## opts: { dir, loose (bool), replay_host, replay_port, items (optional items.def
 ## path override), camera (Camera3D for the spectator overview) }.
@@ -456,8 +460,9 @@ func load_net_session(opts: Dictionary) -> int:
 	if item_err != OK:
 		push_warning("net session: items.def not loaded (%s) — entities won't resolve" % item_db.get_last_error())
 
-	var resolver = NovaModelResolver.new()
-	resolver.setup(resource_root, item_db)
+	# Spectate uses the same item/model projector as live replication. The
+	# MissionObjectPlacer resolves both authored ids and compact wire ids.
+	_placer = MissionObjectPlacer.new(resource_root, item_db)
 
 	# The in-match spectator client (replay vs real differ only by the endpoint).
 	_net_client = NovaNetClient.new()
@@ -466,16 +471,19 @@ func load_net_session(opts: Dictionary) -> int:
 	_net_client.replay_host = String(opts.get("replay_host", "127.0.0.1"))
 	_net_client.replay_port = int(opts.get("replay_port", 42000))
 	_net_client.mission_known.connect(_on_net_mission)
+	# The replica reducer/body mover must run before this node's present pass in
+	# the same render frame. Lower process priorities run first in Godot.
+	_net_client.set_process_priority(get_process_priority() - 1)
 	add_child(_net_client)
 
 	var container := Node3D.new()
 	container.name = NET_CONTAINER_NAME
 	add_child(container)
 
-	_net_view = NetWorldView.new()
-	_net_view.name = "NetWorldView"
-	_net_view.setup(_net_client, resolver, container, _env, opts.get("camera", null))
-	add_child(_net_view)
+	_net_view = WirePresentPass.new()
+	_net_view.setup(_net_client, _placer, container, _env, null, {
+		"camera": opts.get("camera", null),
+	})
 
 	# Draw the decoded event stream (fire / hits / kills / capture zones) over the
 	# rendered world — the 3D replacement for the standalone viewer's 2D markers.
@@ -536,7 +544,13 @@ func _on_net_mission(mission_name: String) -> void:
 # entry (load_mission_data) converge here: resolve the header's terrain +
 # environment from `resource_root`, apply the mission's env overrides, build the
 # world, place objects, start the runtime + audio.
-func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource_root: NovaResourceRoot) -> int:
+func _load_mission_internal(mission: NovaMissionData, bms_name: String,
+		resource_root: NovaResourceRoot) -> int:
+	var wire_header_join := mission.is_wire_header_only()
+	_join_wire_assets_pending = wire_header_join
+	_join_wire_til_applied = false
+	_join_wire_assets_failed = false
+	_join_wire_asset_failure_emitted = false
 	var trn := mission.get_terrain_ref() + ".trn"
 	if not resource_root.has_file(trn):
 		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, resource_root.get_root_dir()])
@@ -557,7 +571,9 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	# by terrain must remain present-but-excluded in the same generation.
 	# [orig: sub_5B5710 @0x524A6F]
 	NovaObjectData.reset_network_challenge_model_registry()
-	_load_mission_tile_info(bms_name, resource_root)
+	_load_mission_tile_info(
+			bms_name, resource_root, PackedByteArray(),
+			mission.is_wire_header_only())
 	# Progress values are anchor points from the witnessed schedule (2..100);
 	# our pipeline has fewer stages than the original's ~30 call sites, so each
 	# boundary reports the nearest witnessed value
@@ -571,6 +587,16 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 		timeline.finish()
 		return ERR_CANT_OPEN
 	_apply_mission_environment_overrides(mission)
+	# Initialize the exact mission clock and the reset weather owner before the
+	# runtime is constructed. The authority publishes this T0 sample after setup
+	# but before play, so its first network tick cannot observe stale/default data.
+	var mission_info: Dictionary = mission.get_info()
+	if _env != null:
+		_env.configure_mission_clock(
+				int(mission_info.get("start_time", 0)),
+				int(mission_info.get(
+						"minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
+	_prepare_world_driven_weather()
 	timeline.end_span()
 	load_progress.emit(6)
 	timeline.span("terrain")
@@ -602,15 +628,14 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	# (including collision/husk definitions); late network spawns must not change
 	# this page. [orig: sub_5B3A80 @0x5871CF from Game_StartMission @0x525A6E]
 	var challenge_sim: NovaSimulation = _runtime.get_sim()
-	if challenge_sim != null and challenge_sim.is_joiner():
-		_prewarm_loaded_model_challenge_definitions()
-	if challenge_sim != null:
+	if challenge_sim != null and not wire_header_join:
+		if challenge_sim.is_joiner():
+			_prewarm_loaded_model_challenge_definitions()
 		challenge_sim.finalize_loaded_model_challenge_snapshot()
 	load_progress.emit(70)
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
-	_prepare_world_driven_weather()
 	load_progress.emit(90)
 	timeline.span("effects")
 	_start_effect_world()
@@ -662,16 +687,12 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
 	var options := { "environment_node": _env }
-	# A joiner places the mission like any other client of it — the retail client
-	# loads and renders its local .bms through the normal pipeline, applying net
-	# state on top — MINUS the organics: players and streamed AI have no stable
-	# .bms identity on the wire and render wire-direct. Placed pools 1-3 share the
-	# host's pool/slot handle space (promote order mirrors Mission_LoadBMSFile
-	# @0x40f4e0 on both sides), so the wire present pass defers their rows onto
-	# these placed nodes by identity, restoring MultiMesh batching, occlusion,
-	# and registry resolution to the joiner.
-	if _net_drive.is_join_pending():
-		options["skip_kinds"] = [NovaMissionData.KIND_ORGANIC]
+	# A wire-header join deliberately has no authored body records. The load stream
+	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
+	# pool-0 organics arrive in 0x0C and every live pose advances through 0x0A.
+	# MissionRuntime presents those decoded rows directly instead of deferring them
+	# onto nonexistent local BMS placements (D-NET-194). Explicit-mission/debug
+	# joins still use their complete document.
 	if timeline != null:
 		options["timeline"] = timeline
 	# Pulse the load-progress screen from inside the model-load loop at the
@@ -704,8 +725,14 @@ func get_net_client():
 	return _net_client
 
 
-func get_sim() -> NovaSimulation:
-	return _runtime.get_sim() if _runtime != null else null
+func get_sim() -> Object:
+	# Runtime test/tool seams stay duck typed on _runtime (harness stubs install
+	# doubles through game_world_test's _install_runtime seam); every stub honors
+	# the runtime contract's get_sim(). Production MissionRuntime returns the
+	# native NovaSimulation child.
+	if _runtime == null:
+		return null
+	return _runtime.get_sim()
 
 
 ## The mounted world's shared weapon.def database. ArmoryPresenter consumes this on
@@ -738,6 +765,10 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_loaded = false
+	_join_wire_assets_pending = false
+	_join_wire_til_applied = false
+	_join_wire_assets_failed = false
+	_join_wire_asset_failure_emitted = false
 	_stop_water_render_stats()
 	# Net-session teardown: the preload sim/root, the notification latches, the
 	# typed request staging, and the NovaWorld gate registration.
@@ -760,7 +791,7 @@ func unload() -> void:
 	if _net_event_view != null:
 		_net_event_view.queue_free()
 	if _net_view != null:
-		_net_view.queue_free()
+		_net_view.teardown()
 	if _net_client != null:
 		_net_client.stop()
 		_net_client.queue_free()
@@ -806,6 +837,14 @@ func unload() -> void:
 	_viewmodel_weapon_override = ""
 	_viewmodel_weapon_cleared = false
 	_mission_stats = {}
+
+
+## Process-exit-only release for renderer resources intentionally retained by
+## unload() so world-to-menu and mission-to-mission transitions stay warm.
+func release_runtime_renderer_resources() -> void:
+	var runtime_water := _water as NovaWater
+	if runtime_water != null:
+		runtime_water.release_runtime_renderer_resources()
 
 
 func _load_environment(env_path: String) -> bool:
@@ -898,6 +937,74 @@ func _prepare_autonomous_weather() -> void:
 		_set_weather_world_tick_driven(false)
 
 
+func _push_network_environment() -> void:
+	var sim := get_sim() as NovaSimulation
+	if sim == null or sim.is_joiner():
+		return
+	var weather := get_node_or_null("NovaWeather") as NovaWeather
+	if weather == null:
+		return
+	var sample: Dictionary = weather.get_network_environment_snapshot()
+	if sample.is_empty():
+		return
+	# Every source is live mission/runtime state in retail-native units. There is
+	# no mission-name, map, or game-type case table in this path.
+	sim.set_network_environment(
+		int(sample.get("fog_target_q16", 0)),
+		int(sample.get("fog_current_q16", 0)),
+		int(sample.get("fog_accel_clamp", 0)),
+		int(sample.get("tod_fixed24", 0)),
+		int(sample.get("tod_advance_per_tick", 0)),
+		int(sample.get("quake_ticks", 0)),
+		int(sample.get("cloud_scroll_rate_target", 0)),
+		int(sample.get("rain_pct_current_q16", 0)),
+		int(sample.get("overcast_blend_q16", 0)),
+		int(sample.get("precipitation_kind", 0)),
+	)
+
+
+func _run_mission_start_environment_boundary() -> void:
+	var sim := get_sim() as NovaSimulation
+	var is_authority: bool = sim != null and not sim.is_joiner()
+	# This first publication seeds native retail units at the authored T0. It is
+	# local state only; no host pump or phase-2 packet runs inside this boundary.
+	if is_authority:
+		_push_network_environment()
+		sim.run_mission_start_wac()
+		sim.initialize_network_environment_mission_start()
+
+	# WacScript_InitAndLoad's direct execution precedes 255 complete weather
+	# updates. Joiners settle their local render owner but never run authority WAC.
+	var weather := get_node_or_null("NovaWeather") as NovaWeather
+	if weather != null:
+		weather.prewarm_mission_start()
+	if is_authority:
+		for _tick in range(NovaWeather.MISSION_START_PREWARM_TICKS):
+			sim.advance_network_environment_tick()
+		# Non-scripted values adopt the settled resource sample; WAC-owned channels
+		# survive through EnvNetworkState's ownership masks.
+		_push_network_environment()
+		sim.seal_mission_start_baseline()
+
+
+func _apply_join_network_environment_update() -> void:
+	var sim := get_sim() as NovaSimulation
+	if sim == null or not sim.is_joiner():
+		return
+	# NovaSimulation owns the receive-revision cursor. Repeated render frames
+	# return empty and cannot reapply one authoritative edge.
+	var sample: Dictionary = sim.take_join_environment_update()
+	if sample.is_empty():
+		return
+	var weather := get_node_or_null("NovaWeather") as NovaWeather
+	if weather != null:
+		weather.apply_network_environment_sample(sample)
+	else:
+		var env := _env as NovaEnvironment
+		if env != null:
+			env.apply_network_environment_sample(sample)
+
+
 func _advance_world_driven_weather(delta: float) -> void:
 	_weather_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
 	var tick_count := int(floor(_weather_tick_credit + 1.0e-9))
@@ -909,10 +1016,14 @@ func _advance_world_driven_weather(delta: float) -> void:
 		tick_count = MAX_WEATHER_CATCHUP_TICKS
 		_weather_tick_credit = 0.0
 	var weather := get_node_or_null("NovaWeather")
+	var sim := get_sim() as NovaSimulation
 	for _tick in range(tick_count):
 		_env.advance_mission_clock(1)
 		if weather != null and weather.has_method("tick_fixed"):
 			weather.tick_fixed()
+		if sim != null and not sim.is_joiner():
+			sim.advance_network_environment_tick()
+		_push_network_environment()
 
 
 # Retail loads <mission>.til into one shared g_TerrainTileArray used by
@@ -922,9 +1033,24 @@ func _advance_world_driven_weather(delta: float) -> void:
 # [orig: Terrain_LoadFoliageFile @ 0x60a740, policy force @ 0x60a74e;
 # Terrain_GetSurfaceTypeAtPosition @ 0x606510;
 # Foliage_PathBlockedByPlacedTile @ 0x606490]
-func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
+func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot,
+		wire_til_bytes: PackedByteArray = PackedByteArray(),
+		wire_is_authoritative := false) -> void:
 	_clear_mission_tile_info()
 	if resource_root == null:
+		return
+	# A joining retail client consumes the host's paged S2C 0x45 bytes. An empty
+	# payload means the host emitted no terrain overlay; it must not fall back to
+	# a same-named local .til and accidentally render a different custom map.
+	if wire_is_authoritative:
+		if wire_til_bytes.is_empty():
+			return
+		var wire_tile_info := NovaTerrainTileInfo.new()
+		if wire_tile_info.load_from_bytes(wire_til_bytes) != OK:
+			push_warning("GameWorld: failed to parse host S2C 0x45 terrain tile stream.")
+			return
+		_mission_tile_info = wire_tile_info
+		_mission_til_bytes = wire_til_bytes
 		return
 	var mission_name := bms_name.get_file()
 	if mission_name.is_empty():
@@ -943,6 +1069,102 @@ func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) 
 		return
 	_mission_tile_info = tile_info
 	_mission_til_bytes = til_bytes
+
+
+func _apply_join_wire_til_if_ready() -> bool:
+	if not _join_wire_assets_pending:
+		return not _join_wire_assets_failed
+	var sim: NovaSimulation = _runtime.get_sim() if _runtime != null else null
+	if sim == null or not sim.is_joiner():
+		return true
+	var til_state := sim.get_join_terrain_til_state()
+	if til_state == NovaSimulation.JOIN_TERRAIN_TIL_INVALID:
+		_join_wire_assets_failed = true
+		return false
+	if til_state not in [
+			NovaSimulation.JOIN_TERRAIN_TIL_ABSENT,
+			NovaSimulation.JOIN_TERRAIN_TIL_RECEIVING,
+			NovaSimulation.JOIN_TERRAIN_TIL_COMPLETE]:
+		_join_wire_assets_failed = true
+		return false
+	# Check Invalid before this latch: an extra semantic 0x45 after a completed
+	# stream must not be hidden by an already-applied terrain override.
+	if _join_wire_til_applied:
+		return true
+	if til_state in [NovaSimulation.JOIN_TERRAIN_TIL_ABSENT,
+			NovaSimulation.JOIN_TERRAIN_TIL_RECEIVING]:
+		return true
+	var til_bytes := sim.get_join_terrain_til()
+	if til_bytes.is_empty():
+		_join_wire_assets_failed = true
+		return false
+	var tile_info := NovaTerrainTileInfo.new()
+	if tile_info.load_from_bytes(til_bytes) != OK:
+		_join_wire_assets_failed = true
+		return false
+	_mission_tile_info = tile_info
+	_mission_til_bytes = til_bytes
+	_join_wire_til_applied = true
+	# S2C 0x45 arrives only after the client releases the world-ready gate, so
+	# terrain already exists. Both setters invalidate/rebuild their derived data;
+	# the loading screen remains raised until settle_join_wire_assets below.
+	if _terrain != null:
+		_terrain.tile_info_override = tile_info
+	if _dispatcher != null:
+		_dispatcher.tile_info = tile_info
+	return true
+
+
+## Complete the wire-only part of a retail join once the protocol reaches its
+## deployment/admission boundary. NetSessionDrive calls this before revealing
+## the world (or deploy map), guaranteeing the optional 0x45 overlay and the
+## renderer-backed C2S 0x3D snapshot reflect the completed initial stream.
+func settle_join_wire_assets() -> bool:
+	if _join_wire_assets_failed:
+		return false
+	if not _join_wire_assets_pending:
+		return true
+	if not _apply_join_wire_til_if_ready():
+		return false
+	var sim: NovaSimulation = _runtime.get_sim() if _runtime != null else null
+	if sim == null or not sim.is_joiner():
+		_join_wire_assets_failed = true
+		return false
+	var til_state := sim.get_join_terrain_til_state()
+	if til_state == NovaSimulation.JOIN_TERRAIN_TIL_RECEIVING \
+			or til_state == NovaSimulation.JOIN_TERRAIN_TIL_INVALID \
+			or (til_state == NovaSimulation.JOIN_TERRAIN_TIL_COMPLETE \
+					and not _join_wire_til_applied) \
+			or til_state not in [
+				NovaSimulation.JOIN_TERRAIN_TIL_ABSENT,
+				NovaSimulation.JOIN_TERRAIN_TIL_COMPLETE]:
+		_join_wire_assets_failed = true
+		return false
+	_prewarm_loaded_model_challenge_definitions()
+	sim.finalize_loaded_model_challenge_snapshot()
+	_join_wire_assets_pending = false
+	return true
+
+
+## The revealed world must never race the budgeted cold wire materialization:
+## NetSessionDrive holds the join-admission edge until the wire presenter's
+## deferred-spawn queue drains behind the loading/DEATH hold. Trivially true
+## with no runtime, a harness stub runtime, or no wire presenter.
+func is_join_wire_present_drained() -> bool:
+	var runtime := _runtime as MissionRuntime
+	return runtime == null or runtime.join_wire_present_pending() == 0
+
+
+## Fail the streamed-asset leg once per join. Both the per-frame runtime driver
+## and the frame-polled admission observer can observe the same protocol edge;
+## routing them through one latch prevents duplicate load_failed emissions.
+func report_join_wire_asset_failure(reason: String) -> void:
+	_join_wire_assets_failed = true
+	_join_wire_assets_pending = false
+	if _join_wire_asset_failure_emitted:
+		return
+	_join_wire_asset_failure_emitted = true
+	load_failed.emit(reason)
 
 
 func _clear_mission_tile_info() -> void:
@@ -1166,8 +1388,13 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		else:
 			runtime_ticks = 1 if bool(_runtime.tick()) else 0
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+		if _join_wire_assets_pending and not _apply_join_wire_til_if_ready():
+			report_join_wire_asset_failure(
+					"join: host sent an incomplete or invalid S2C 0x45 terrain stream")
+			return
 		# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
 		_net_drive.observe_tick(_runtime)
+		_apply_join_network_environment_update()
 	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation above
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
@@ -1356,8 +1583,42 @@ func build_local_player_avatar() -> Node3D:
 func _prewarm_loaded_model_challenge_definitions() -> void:
 	if _placer == null:
 		return
-	var visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
-	var avatar_graphic := String(_placer.graphic_for(visual_item_id))
+	# By the deployment/admission boundary the complete initial world stream has
+	# populated the joiner's replica snapshot. (S2C 0x11 itself comes earlier and
+	# releases the client's C2S 0x0A world request.) Resolve each unique wire type
+	# now so the C2S 0x3D loaded-model page freezes before the first visible frame.
+	var challenge_sim: NovaSimulation = _runtime.get_sim() if _runtime != null else null
+	if challenge_sim != null:
+		var stride := int(challenge_sim.get_present_stride())
+		var snapshot: PackedFloat32Array = challenge_sim.get_present_snapshot()
+		var warmed_types := {}
+		if stride >= NovaSimulation.PF_STRIDE:
+			for row in range(int(snapshot.size() / stride)):
+				var runtime_type_id := int(
+						snapshot[row * stride + NovaSimulation.PF_TYPE_ID])
+				if runtime_type_id == 0 or warmed_types.has(runtime_type_id):
+					continue
+				warmed_types[runtime_type_id] = true
+				var visual_item_id := int(
+						_placer.resolve_player_visual_item_id(runtime_type_id))
+				var wire_graphic := String(_placer.graphic_for(visual_item_id))
+				if not wire_graphic.is_empty():
+					_placer.object_data_for(wire_graphic)
+		# The header-only join learned its entity types from the stream after
+		# MissionRuntime's ordinary mission-body setup. Resolve the model-derived
+		# seat/emplacement table and world collision/trait consumers now, before
+		# admission and before the loaded-model challenge page freezes.
+		if _loaded_mission != null and _loaded_mission.is_wire_header_only():
+			var item_db: NovaItemDatabase = _placer.get_item_db()
+			if item_db != null:
+				challenge_sim.set_item_seat_specs(
+						ItemSeatSpecs.build_item_seat_specs_for_type_ids(
+								warmed_types.keys(), _resource_root, item_db))
+				challenge_sim.resolve_item_traits(item_db)
+				challenge_sim.resolve_collision_instances(item_db, _placer)
+				challenge_sim.occlusion_init_mission()
+	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
+	var avatar_graphic := String(_placer.graphic_for(player_visual_item_id))
 	if not avatar_graphic.is_empty():
 		_placer.object_data_for(avatar_graphic)
 
@@ -1923,6 +2184,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	_run_mission_start_environment_boundary()
 	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or
 	# submitted: in a net session the original's spawn kit is a page of this file,
@@ -2043,12 +2305,14 @@ func _on_runtime_simulation_restarted() -> void:
 		_local_player_weapon_tick_consumer.call(
 				drain_local_player_weapon_events())
 	if _effect_world == null:
+		_push_network_environment()
 		return
 	_effect_world.reset_runtime_state()
 	# Persistent item effects belong to the restored entity set, not the scene
 	# that was just discarded. Re-register their admission and owner identities;
 	# restore emits fresh controller-start lifecycle events for occupied baselines.
 	_item_fx.reattach()
+	_push_network_environment()
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
@@ -2056,11 +2320,6 @@ func _on_runtime_simulation_restarted() -> void:
 # voices. Reuses the placer's item database for the item_id -> soundloop_1..4 lookup.
 func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var item_db = _placer.get_item_db() if _placer != null else null
-	var mission_info: Dictionary = mission.get_info()
-	if _env != null:
-		_env.configure_mission_clock(
-			int(mission_info.get("start_time", 0)),
-			int(mission_info.get("minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
 	# Sound occlusion runs LOS through the sim's collision world + terrain
 	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix
@@ -2300,6 +2559,8 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 
 func _process(_delta: float) -> void:
 	_sample_panm_clock()
+	if _net_view != null:
+		_net_view.present()
 	if not _loaded or not is_visible_in_tree():
 		_restore_idle_frame_clear_color()
 		return

@@ -132,6 +132,9 @@ int main() {
 	np::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
+	// This test isolates the per-frame UDP round trip. Retail LAN cadence is
+	// covered separately; keep every scripted client frame on an open boundary.
+	host_cfg.config.send_holdoff_ticks = 1;
 	host_cfg.socket_mode = np::SocketMode::Lan;
 	host_cfg.serve_and_play = false;
 	np::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs

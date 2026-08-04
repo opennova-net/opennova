@@ -13,9 +13,14 @@
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
+#include "environment_startup.h" // mission-selected ENV/BMS -> World::network_env
+#include "wac_startup.h"         // resource-root WAC layers + retail startup order
 
+#include <mission/event_runtime.h> // BmsEventSystem
 #include <mission/mission.h> // MissionDocument
 #include <mission/promote.h> // promote_mission
+
+#include <wac/wac_system.h>
 
 #include <world/ai.h>
 #include <world/world.h>
@@ -26,6 +31,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <io/log.h>
@@ -77,11 +83,57 @@ int main() {
 		return 1;
 	}
 	world::World world;
+	const mission::MissionInfo mission_info = doc.info();
+	std::filesystem::path explicit_env_path;
+	if (const char *env_path = std::getenv("NW_ENV");
+	    env_path != nullptr && *env_path != '\0') {
+		explicit_env_path = env_path;
+	}
+	if (mission_info.environment.empty() && explicit_env_path.empty()) {
+		std::fprintf(stderr,
+		             "nw-server: mission '%s' has no environment reference; "
+		             "set NW_ENV=<path-to .env>\n",
+		             mission_path);
+		return 1;
+	}
+	const std::filesystem::path resolved_env =
+			nw_server::resolve_environment_path(
+					mission_path, mission_info.environment, explicit_env_path);
+	std::string env_error;
+	if (!nw_server::publish_initial_environment_file(
+			resolved_env, doc.bms_file().header, world.network_env, env_error)) {
+		std::fprintf(stderr,
+		             "nw-server: %s; set NW_ENV=<path-to %s.env> when the "
+		             "resource is not beside the mission\n",
+		             env_error.c_str(), mission_info.environment.c_str());
+		return 1;
+	}
 	world::AiSystem ai;
 	world.ai = &ai; // Server_BuildPlayerInfoAndAdd requires an AiSystem to spawn a player
 	const mission::PromoteResult pr = mission::promote_mission(doc.bms_file(), world, ai);
 	std::fprintf(stderr, "nw-server: promoted '%s' (%d entities, %d brains, %d nav nodes)\n",
 	             mission_path, pr.spawned, pr.brains, pr.nav_nodes);
+
+	std::filesystem::path explicit_resource_root;
+	if (const char *root = std::getenv("NW_RESOURCE_ROOT");
+	    root != nullptr && *root != '\0') {
+		explicit_resource_root = root;
+	}
+	const std::filesystem::path resource_root =
+			nw_server::resolve_resource_root(mission_path, explicit_resource_root);
+	wac::WacSystem wac;
+	mission::BmsEventSystem bms;
+	bool wac_loaded = false;
+	std::string startup_error;
+	if (!nw_server::initialize_mission_startup(
+			resource_root, std::filesystem::path(mission_path).stem().string(),
+			doc.bms_file(), world, wac, bms, ai, wac_loaded, startup_error)) {
+		std::fprintf(stderr, "nw-server: %s\n", startup_error.c_str());
+		return 1;
+	}
+	std::fprintf(stderr, "nw-server: WAC %s from '%s'\n",
+			wac_loaded ? "loaded" : "absent (BMS-only)",
+			resource_root.string().c_str());
 
 	// --- Open the UDP socket. ---
 	if (net::startup() != 0) {
@@ -107,6 +159,13 @@ int main() {
 	host_cfg.config.max_players = 16;
 	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
 	host_cfg.serve_and_play = false;            // headless dedicated host: no local-player registration
+	if (!world.network_env.valid) {
+		std::fprintf(stderr,
+		             "nw-server: refusing to launch without an authoritative "
+		             "environment sample\n");
+		net::shutdown();
+		return 1;
+	}
 	np::start_host_session(owner, host_cfg);
 
 	std::signal(SIGINT, on_signal);
@@ -119,6 +178,7 @@ int main() {
 	constexpr int64_t kPeriodNs = 1000000000LL / 62; // ~16.129 ms per engine tick (the original cadence)
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
+		world.network_env.advance_tick();
 		np::host_session_pump(owner, dgram);
 		std::this_thread::sleep_until(
 				baseline + std::chrono::nanoseconds(static_cast<int64_t>(frame + 1) * kPeriodNs));

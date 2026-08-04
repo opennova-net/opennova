@@ -48,6 +48,7 @@
 #include <limits>
 
 #include <io/bam.h>
+#include <terrain/height_field.h>
 
 #include "world/ai.h"
 #include "world/angle.h"
@@ -85,13 +86,23 @@ constexpr int32_t kLegReplantSnap = 357913920;
 constexpr int32_t kGravityStep = 416;
 constexpr int32_t kGravityStepPlayer = 208;
 constexpr int32_t kTerminalVelZ = -32768;
-// Foot-above-floor gap (16.16): the collision caller marks airborne only when the
-// returned positive clearance exceeds this value. [orig: org1 @0x4b9910 / org2
-// @0x4b40e0 compare collision return against 0xF000]
-constexpr int32_t kAirborneGap = 0xF000;
 // [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
 // mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
 constexpr int32_t kJumpImpulseVelZ = 0x1600;
+// The org2 jump gate's exact entity Flags mask: in-air (0x2000), dead (0x2),
+// drowning/water (0x8000), and the second witnessed water-state bit (0x10000).
+// Carried (0x40) is tested separately immediately afterward. The reimpl keeps
+// flags in two mirrors plus a typed mounted relation, so collapse those carriers
+// at the one shared local/remote eligibility seam.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b7ea0-0x4b7ebd]
+constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
+bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent) {
+    if (inf.airborne) return true;
+    if (ent == nullptr) return false;
+    const uint32_t flags = ent->flags | ent->engine_flags;
+    return (flags & kPlayerJumpBlockedFlags) != 0 || ent->mounted ||
+           (flags & kEntityFlagMounted) != 0;
+}
 // Slope-pass constants. org1 (NPC): shifted small-angle slopes clamped +-656175520
 // with the fixed 0x22222200 slide threshold [orig: @0x4ba1a8-0x4ba34c]. org2 (player):
 // true atan2 slopes over the probe separations (45056 fore-aft / 11264 lateral, 16.16)
@@ -981,7 +992,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // following frame. The recoil PRNG draw is unconditional, including R=0.
     // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
     Entity *tick_entity = world.registry.get(e.handle);
-    infantry_recoil_tick(e.inf, e.heading, e.pitch, prng_step16());
+    infantry_recoil_tick(e.inf, e.heading, e.pitch, world.next_prng16());
     InfantryWeightSpreadInputs weight_inputs;
     const uint32_t tick_flags = tick_entity != nullptr
             ? (tick_entity->flags | tick_entity->engine_flags)
@@ -1419,8 +1430,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // the skeletal FK slid the feet — the "idle skating" this overturns. capsule bottom/top and
         // vel are MOVEMENT data only; the visual is the skeleton, which never reads them.
         // [orig: Entity_UpdateInfantryAI @0x4b9910 integrates root delta for all states; overturns D-INF-8]
-        if (inf.anim_state == anim_state::kJumpLoop) fwd = 1024; // [orig: dump 4756]
-        int32_t move_heading = e.heading;
+        if (inf.anim_state == anim_state::kJumpLoop) fwd = 1024; // [data: retail ADM dump root row 4756]
+        // Org2 consumes the same-tick leg-midpoint body heading at entity+0x8C,
+        // while org1 keeps body/render heading unified in e.heading.
+        // [orig: Entity_UpdateInfantryPlayerBody loads entity+0x8C @0x4B41E4,
+        // then performs the Q22 root rotation @0x4B41F0..0x4B4255]
+        const int32_t move_heading = inf.is_local_player ? inf.body_heading : e.heading;
         const double rad =
             static_cast<double>(move_heading) * (3.14159265358979323846 / 2147483648.0);
         const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
@@ -1484,7 +1499,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         } else {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
         }
-        if (foot_clearance > kAirborneGap) {
+        if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later
@@ -1556,7 +1571,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x4b7e78-0x4b7e82]. Gates [orig: @0x4b7e8c-0x4b7ebd]: cooldown 0, not
         // prone (the var_10AC selection local), !(Flags & 0x1A002) — in-air, dead,
         // and the water pair (unmodeled) — the key held (MoveOrder bit 5), not
-        // carried (0x40, unmodeled). The impulse: 3/4 of the rotated root step into
+        // carried (0x40). The flag carriers are modeled even though the swimming
+        // transition producer remains D-INF-3. The impulse: 3/4 of the rotated root step into
         // the slide velocity, vel_z = 0x1600, in-air set, anim 30 jump_start now
         // with 31 jump_loop queued, cooldown reloaded to 32; the platform-exit
         // sincos leg @0x4b7f0c rides the platform slice (D-COL-5).
@@ -1568,21 +1584,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             } else if (inf.jump_cooldown == 1 && !inf.jump_requested) {
                 inf.jump_cooldown = 0;                          // [orig: @0x4b7e7a-0x4b7e82]
             }
-            if (inf.jump_cooldown == 0 && inf.jump_requested && !inf.airborne &&
-                e.health > 0 && inf.stance != InfantryState::Stance::kProne) {
+            if (inf.jump_cooldown == 0 && inf.jump_requested &&
+                !player_jump_world_state_blocked(inf, tick_entity) && e.health > 0 &&
+                inf.stance != InfantryState::Stance::kProne) {
                 inf.vel[0] += (3 * root_wx) >> 2; // [orig: @0x4b7ec3-0x4b7ed5]
                 inf.vel[1] += (3 * root_wy) >> 2;
                 inf.vel[2] = kJumpImpulseVelZ;    // [orig: @0x4b7ee5]
                 inf.airborne = true;              // Flags |= 0x2000 [orig: @0x4b7edb]
                 inf.jump_cooldown = 32;           // [orig: @0x4b7f06]
-                if (root_motion != nullptr &&
-                    root_motion->has_clip(inf.adm_id, anim_state::kJumpStart)) {
-                    inf.begin_body_transition(anim_state::kJumpStart); // [orig: @0x4b7ef2]
-                    inf.anim_pending = anim_state::kJumpLoop;  // [orig: @0x4b7efc]
-                } else if (root_motion != nullptr &&
-                           root_motion->has_clip(inf.adm_id, anim_state::kJumpLoop)) {
-                    inf.begin_body_transition(anim_state::kJumpLoop);
-                }
+                // STRAIGHT stamps — the org2 jump block has NO clip
+                // availability check (world-wac-ai-re jump witness: "anim 30
+                // jump_start NOW + 31 jump_loop PENDING, no availability
+                // check") [orig: @0x4b7ef2 / @0x4b7efc].
+                inf.begin_body_transition(anim_state::kJumpStart);
+                inf.anim_pending = anim_state::kJumpLoop;
             }
             inf.jump_requested = false;
         }
@@ -2114,10 +2129,14 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     ent->net_anim_phase =
         static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
     if (inf.is_local_player) {
-        // Bits 0-2 dir, 3 moving, 6/7 the lean keys — the MoveOrder LOW byte layout the
-        // uplink's byte 19 carries [orig: the packer @0x4df68f-0x4df741].
+        // Bits 0-2 dir, 3 moving, 5 the HELD jump key, 6/7 the lean keys — the
+        // MoveOrder LOW byte layout the uplink's byte 19 carries [orig: the
+        // packer @0x4df68f-0x4df741; jump bit 5 @0x4df6fa-0x4df701]. A retail
+        // host launches + stamps anim 30/31 from bit 5 [orig: the jump gate
+        // @0x4b7e8c-0x4b7f06], so omitting it made a joiner's jump invisible.
         ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
                                                    (inf.player_moving ? 8 : 0) |
+                                                   (inf.jump_held ? Entity::kMoveOrderJump : 0) |
                                                    (inf.lean_left ? 0x40 : 0) |
                                                    (inf.lean_right ? 0x80 : 0));
         // Local stance mirrors into the MoveOrder bits 8-9 model too (prone bit0/crouch bit1)
@@ -2158,6 +2177,11 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0
         // deferred deathAnim / 175 falling-death variant selection is the combat pass).
         // [orig: the @0x4b40e0 death leg; digest: death 175 / deathAnim]
+        // Relationship teardown is independent of animation state. A peer can
+        // already be in a death-class clip when a late/replayed state restores a
+        // mount, and that must not leave the seat claim or compact carrier alive.
+        // [orig: infantry death detach @0x4b9c57..0x4b9c60]
+        if (ent->mounted) entity_detach_from_vehicle(world, e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
             const int death = anim_state::kDeathBulletBase + 4;
             const int target =
@@ -2166,22 +2190,74 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
                     : anim_state::kDeathFire;
             death_transition = target;
         }
-    } else if ((logic_tick & 3u) == 0) {
-        // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the REPLICATED
-        // MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving, bits 6-7 = lean
-        // [orig: @0x4b4153/@0x4b415c]) + the stance bits (MoveOrder bits 8-9, fed by
-        // C2S 0x1D [orig: @0x4b4165-0x4b4181; prone suppressed by Flags & 0x10A000 —
-        // swim/parachute unmodeled]), then run the SAME witnessed selection the local
-        // player runs (one function in the original).
-        inf.player_moving = (ent->net_move_input & 0x08u) != 0;
-        inf.player_move_dir_index = ent->net_move_input & 0x07u;
-        inf.lean_left = (ent->net_move_input & 0x40u) != 0;
-        inf.lean_right = (ent->net_move_input & 0x80u) != 0;
-        inf.stance = (ent->net_stance_bits & 0x1u) != 0
-                         ? InfantryState::Stance::kProne
-                         : ((ent->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
-                                                               : InfantryState::Stance::kStand);
-        player_body_select(e);
+    } else {
+        // The replicated JUMP key (MoveOrder bit 5): the retail host derives the
+        // jump launch + anims for a remote player inside the same authority-run
+        // jump block the local body uses — cooldown clamp [0,32], >1 counts
+        // down, parked at 1 while the key is held, release -> 0, launch only
+        // from 0 [orig: maintenance @0x4b7de0-0x4b7e15, park @0x4b7e7a-0x4b7e82,
+        // gate @0x4b7e8c-0x4b7eb5, anim 30 + pending 31 + reload 32
+        // @0x4b7ef2-0x4b7f06]. A wire-snapped peer's MOTION is uplink-owned, so
+        // only the anim/latch leg runs here. The C2S pose apply reconstructs the
+        // terrain-backed airborne/landing state that this gate consumes; where
+        // terrain is unavailable, the countdown window remains the conservative
+        // animation-only fallback (tracked in the D-NET-159/196 record).
+        const bool jump_key =
+            (ent->net_move_input & Entity::kMoveOrderJump) != 0;
+        // Stance-change (0x1D) and the extended movement uplink (0x0C) can arrive in
+        // the same network pump.  The jump block is per-tick and reads the CURRENT
+        // MoveOrder prone bit; the fourth-tick locomotion selector below is not an
+        // eligibility cache. [orig: MoveOrder&0x100 -> var_10AC @0x4b4165-0x4b4181;
+        // prone gate @0x4b7e99]
+        const bool replicated_prone = (ent->net_stance_bits & 0x1u) != 0;
+        const bool jump_state_blocked = player_jump_world_state_blocked(inf, ent);
+        if (inf.jump_cooldown < 0) inf.jump_cooldown = 0;
+        if (inf.jump_cooldown > 32) inf.jump_cooldown = 32;
+        if (inf.jump_cooldown > 1) {
+            --inf.jump_cooldown;
+        } else if (inf.jump_cooldown == 1 && !jump_key) {
+            inf.jump_cooldown = 0;
+        }
+        if (inf.jump_cooldown == 0 && jump_key && !replicated_prone &&
+            !jump_state_blocked) {
+            inf.jump_cooldown = 32;
+            // Only latch the synthesized vertical state when the authority has
+            // terrain and can therefore observe its landing on a later uplink.
+            // Terrain-free harnesses retain the documented cooldown-only residual.
+            if (world.terrain != nullptr && world.terrain->valid()) {
+                inf.airborne = true;
+                ent->flags |= kEntityFlagInAir;
+                ent->engine_flags |= kEntityFlagInAir;
+            }
+            // STRAIGHT stamps, same as the local block — no availability
+            // check in the witnessed org2 jump stamps [orig: @0x4b7ef2/@0x4b7efc].
+            inf.begin_body_transition(anim_state::kJumpStart);
+            inf.anim_pending = anim_state::kJumpLoop;
+        }
+        const bool jump_episode =
+            (inf.anim_state == anim_state::kJumpStart ||
+             inf.anim_state == anim_state::kJumpLoop) &&
+            inf.jump_cooldown > 1;
+        if ((logic_tick & 3u) == 0 && !jump_episode) {
+            // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the
+            // REPLICATED MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving,
+            // bits 6-7 = lean [orig: @0x4b4153/@0x4b415c]) + the stance bits
+            // (MoveOrder bits 8-9, fed by C2S 0x1D [orig: @0x4b4165-0x4b4181;
+            // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]),
+            // then run the SAME witnessed selection the local player runs (one
+            // function in the original; it skips while airborne @0x4b70b8 — the
+            // jump-episode window above is the wire-snapped analog).
+            inf.player_moving = (ent->net_move_input & 0x08u) != 0;
+            inf.player_move_dir_index = ent->net_move_input & 0x07u;
+            inf.lean_left = (ent->net_move_input & 0x40u) != 0;
+            inf.lean_right = (ent->net_move_input & 0x80u) != 0;
+            inf.stance = (ent->net_stance_bits & 0x1u) != 0
+                             ? InfantryState::Stance::kProne
+                             : ((ent->net_stance_bits & 0x2u) != 0
+                                    ? InfantryState::Stance::kCrouch
+                                    : InfantryState::Stance::kStand);
+            player_body_select(e);
+        }
     }
     // The lean angle runs on the authority for every player body (the wire echoes the
     // lean BITS, each end integrates the angle), and the torso roll rides the same
@@ -2210,8 +2286,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
     // anim data rate). Root motion output is discarded: the pose is wire-owned.
     if (root_motion != nullptr) {
+        if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
         RootMotionFrame discard;
-        advance_primary_channel(inf, *root_motion, discard);
+        if (advance_primary_channel(inf, *root_motion, discard))
+            inf.prev_capsule_bottom = discard.capsule_bottom;
         // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
         if (death_transition >= 0) {
             inf.begin_body_transition(death_transition);

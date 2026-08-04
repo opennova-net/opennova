@@ -8,13 +8,13 @@
 // decodes [orig: @0x4c1153], so a one-sample pulse still starts the locked roll
 // clip and the follow-up state queues behind it. Our snapshot seam coalesces
 // several folded 0x0A datagrams into one presented byte, which silently dropped
-// the pulse. NetClientView therefore latches the state a record OVERWRITES as
+// the pulse. ClientReplicaPipeline therefore latches the state a record OVERWRITES as
 // `anim_state_pulse` (LAST transition wins: in a fold of [41, 48] the buried 41
 // is the pulse; the 48 latched by the first transition was already presented
 // and re-dispatching a presented state is a same-state no-op at the model), and
 // presentation dispatches the pulse before the current state.
 
-#include <netsim/net_client_view.h>
+#include <netsim/client_replica_pipeline.h>
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
@@ -67,7 +67,7 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio) {
 } // namespace
 
 int main() {
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
 
 	bool ok = true;

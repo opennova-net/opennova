@@ -3,41 +3,47 @@
 // [orig: ItemDef+356].
 #include "npwire/entity_class.h"
 
-#include <cstring>
+#include <io/strutil.h>
 
 namespace opennova {
 
-// §5.10b class dispatch — exact 4-char match (the table is case-sensitive).
-// Direct witnesses: plyr→Player; org0/org1→Infantry; cveh/CHel/cbot/cpln/ctrn→
-// Vehicle; rokt/stng/hlfr/jvln/arty→Guided. Known null callbacks map to a
-// zero-body tag==1 header; unwitnessed tags default Unknown.
+namespace {
+
+bool tag_is(const char *tag, std::string_view key) {
+	return strutil::iequals(tag, key);
+}
+
+} // namespace
+
+// §5.10b class dispatch — case-INSENSITIVE match: the shipped items.def
+// authors the same classes in both cases (`CHel` beside `chel`, `ENVS`/`GNRC`
+// beside lowercase 4-char tags) and retail resolves them onto one class row
+// each (envs→EnvSoundEmitter per the §5.10b census), so exact-case matching
+// would fail-closed on witnessed null-callback items. Direct witnesses:
+// plyr→Player; org0/org1→Infantry; cveh/CHel/cbot/cpln/ctrn→Vehicle;
+// rokt/stng/hlfr/jvln/arty→Guided. Known null callbacks map to a zero-body
+// tag==1 header; unwitnessed tags default Unknown.
 EntityClass class_from_tag(const char *tag) {
 	if (!tag || tag[0] == '\0') return EntityClass::Unknown;
-	if (std::strcmp(tag, "plyr") == 0) return EntityClass::Player;
-	if (std::strcmp(tag, "org0") == 0 || std::strcmp(tag, "org1") == 0)
+	if (tag_is(tag, "plyr")) return EntityClass::Player;
+	if (tag_is(tag, "org0") || tag_is(tag, "org1"))
 		return EntityClass::Infantry;
-	if (std::strcmp(tag, "cveh") == 0 || std::strcmp(tag, "chel") == 0 ||
-	    std::strcmp(tag, "CHel") == 0 || std::strcmp(tag, "cbot") == 0 ||
-	    std::strcmp(tag, "cpln") == 0 || std::strcmp(tag, "ctrn") == 0)
+	if (tag_is(tag, "cveh") || tag_is(tag, "chel") ||
+	    tag_is(tag, "cbot") || tag_is(tag, "cpln") || tag_is(tag, "ctrn"))
 		return EntityClass::Vehicle;
-	if (std::strcmp(tag, "rokt") == 0 || std::strcmp(tag, "stng") == 0 ||
-	    std::strcmp(tag, "hlfr") == 0 || std::strcmp(tag, "jvln") == 0 ||
-	    std::strcmp(tag, "arty") == 0 || std::strcmp(tag, "arti") == 0)
+	if (tag_is(tag, "rokt") || tag_is(tag, "stng") || tag_is(tag, "hlfr") ||
+	    tag_is(tag, "jvln") || tag_is(tag, "arty") || tag_is(tag, "arti"))
 		return EntityClass::Guided;
-	if (std::strcmp(tag, "null") == 0 || std::strcmp(tag, "brrl") == 0 ||
-	    std::strcmp(tag, "envs") == 0 || std::strcmp(tag, "ewep") == 0 ||
-	    std::strcmp(tag, "ele0") == 0 || std::strcmp(tag, "gnrc") == 0 ||
-	    std::strcmp(tag, "gnrl") == 0 || std::strcmp(tag, "gnl2") == 0 ||
-	    std::strcmp(tag, "flag") == 0 || std::strcmp(tag, "squib") == 0 ||
-	    std::strcmp(tag, "nade") == 0 || std::strcmp(tag, "schl") == 0 ||
-	    std::strcmp(tag, "clym") == 0 || std::strcmp(tag, "vmne") == 0 ||
-	    std::strcmp(tag, "lndm") == 0 || std::strcmp(tag, "bldg") == 0 ||
-	    std::strcmp(tag, "bld2") == 0 || std::strcmp(tag, "cran") == 0 ||
-	    std::strcmp(tag, "door") == 0 || std::strcmp(tag, "target") == 0 ||
-	    std::strcmp(tag, "emit") == 0 || std::strcmp(tag, "towr") == 0 ||
-	    std::strcmp(tag, "tree") == 0 || std::strcmp(tag, "palm") == 0 ||
-	    std::strcmp(tag, "psec") == 0 || std::strcmp(tag, "pwrp") == 0 ||
-	    std::strcmp(tag, "aflr") == 0 || std::strcmp(tag, "gflr") == 0)
+	if (tag_is(tag, "null") || tag_is(tag, "brrl") || tag_is(tag, "envs") ||
+	    tag_is(tag, "ewep") || tag_is(tag, "ele0") || tag_is(tag, "gnrc") ||
+	    tag_is(tag, "gnrl") || tag_is(tag, "gnl2") ||
+	    tag_is(tag, "flag") || tag_is(tag, "squib") || tag_is(tag, "nade") ||
+	    tag_is(tag, "schl") || tag_is(tag, "clym") || tag_is(tag, "vmne") ||
+	    tag_is(tag, "lndm") || tag_is(tag, "bldg") || tag_is(tag, "bld2") ||
+	    tag_is(tag, "cran") || tag_is(tag, "door") || tag_is(tag, "target") ||
+	    tag_is(tag, "emit") || tag_is(tag, "towr") || tag_is(tag, "tree") ||
+	    tag_is(tag, "palm") || tag_is(tag, "psec") || tag_is(tag, "pwrp") ||
+	    tag_is(tag, "aflr") || tag_is(tag, "gflr"))
 		return EntityClass::NoNetworkCallback;
 	return EntityClass::Unknown;
 }

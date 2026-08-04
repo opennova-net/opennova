@@ -7,6 +7,7 @@
 #ifndef OPENNOVA_WORLD_ENTITY_H
 #define OPENNOVA_WORLD_ENTITY_H
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -38,6 +39,10 @@ enum class EntityKind : uint8_t {
 
 // Live entity pools 0..4 [orig: the g_pool_list walk bound @0x431910].
 inline constexpr int kEntityPoolCount = 5;
+// Fixed g_pool_list capacities used by mission promotion and the retail load
+// handlers' packed-index validation (pools 0..2 @1024, marker pool 3 @4096).
+inline constexpr std::size_t kRetailActorPoolCapacity = 1024;
+inline constexpr std::size_t kRetailMarkerPoolCapacity = 4096;
 
 // Packed addressable handle: (pool_index << 12) | (slot_index & 0xFFF).
 // [orig: return value of EntityPool_FindByNetId @0x4f0a20; 0xFFFF == not found.]
@@ -136,7 +141,11 @@ enum class DeathMotionMode : uint8_t {
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
+inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
+inline constexpr uint32_t kItemAttribSpawnPoint = 0x40000u;
+inline constexpr uint32_t kItemAttribArmory = 0x80000u;
 inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — gates the 0x0D AI-trailer
+inline constexpr uint32_t kItemAttribNoHud = 0x20000000u;
 inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
 
 // The retail entity Flags dword bits (Entity::engine_flags + the organic
@@ -193,6 +202,12 @@ struct Entity {
     int32_t item_id = 0;      // items.def type id
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
     uint8_t item_type = 0;    // raw ItemDef+0x5C type (1 vehicle, 3 person)
+    // Whether the live graphic model carries the +0xE0 portal/occlusion pointer
+    // used by Entity_ClassifyForMinimap for ordinary Building entries. Kept as
+    // a resolved entity trait because libs/world deliberately does not own .3di
+    // assets. Armory/zone/etc. classifiers do not require it.
+    bool has_minimap_model_marker = false;
+    int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
     // The §5.10b wire replication class, resolved from the item's items.def *_function class
@@ -262,6 +277,7 @@ struct Entity {
     // The kItemAttrib* constants below name the bits world/netsim code reads
     // (same dword on ai.h's def_attrib profile mirror).
     uint32_t item_attrib = 0;
+    uint32_t item_attrib2 = 0; // raw ItemDefAttrib2 dword (ItemDef+88)
     // Signed impact/KZ armor classes and vehicle occupant-reduction factors
     // from ItemDef +0x190/+0x192 and +0x188/+0x18C.
     int32_t armor_impact = 0; // signed i16 retail storage carried sign-extended
@@ -323,6 +339,9 @@ struct Entity {
     static constexpr uint32_t kMoveOrderDirMask = 0x7;    // 8-way dir F=0..FR=7 (§5.38)
     static constexpr uint32_t kMoveOrderMoving = 0x8;
     static constexpr uint32_t kMoveOrderFreeLook = 0x10;  // [orig: steer-source pick @0x48b4a8]
+    static constexpr uint32_t kMoveOrderJump = 0x20;      // held jump key [orig: g_inputFlags
+                                                          //  0x1000 -> bit 5 @0x4df6fa; the
+                                                          //  jump gate @0x4b7eaf]
     static constexpr uint32_t kMoveOrderLeanLeft = 0x40;  // [orig: lean ramp @0x4b7dbf]
     static constexpr uint32_t kMoveOrderLeanRight = 0x80; // [orig: lean ramp @0x4b7dd6]
     static constexpr uint32_t kMoveOrderProne = 0x100;    // stance bit 8 (see net_stance_bits below)
@@ -484,6 +503,10 @@ struct Entity {
     int32_t emplacement_up_limit_bam = 0;
     int32_t emplacement_right_limit_bam = 0;
     int32_t emplacement_left_limit_bam = 0;
+    // True only when the authored attachment row behind the parent/type pair
+    // was identified exactly. A streamed 0x0D child still has an exact absolute
+    // wire pose when this is false; parent/root fallback must not overwrite it.
+    bool emplacement_pose_metadata_resolved = false;
     // The emplacement's embedded MountSlot (parent+0x2B4). A UseGun occupant borrows
     // this slot: the AI update only queues nextAction=FIRE, then the later global
     // weapon-action pump owns cadence/ammo and attributes the round to slot.owner.
@@ -581,6 +604,7 @@ struct Entity {
         int32_t speed = 0;            // currentSpeed, 16.16 u/tick [orig: entity+0x29C]
         int32_t speed_accel = 0;      // per-tick speed delta [orig: entity+0x2A0 speedAccel]
         int32_t cmd_speed = 0;        // commanded/target speed [orig: vehicleData+544]
+        int32_t cmd_lateral_speed = 0; // commanded lateral speed [orig: vehicleData+540]
         int32_t steer_target_bam = 0; // steering target heading [orig: vehicleData+528]
         int32_t steer_ramp_bam = 0;   // key-steer ramp offset [orig: vehicleData+548]
         int32_t steer_state = 0;      // smoothed wheel deflection [orig: entity->aiState reuse]
@@ -595,6 +619,44 @@ struct Entity {
                                       // vehicles spawn RESTING (contact resolved at init),
                                       // so the default is grounded — the first motor tick
                                       // re-derives it from the terrain clamp
+
+        // --- Joiner-side vehicle prediction (net-re §5.38e, D-NET-196). The
+        // wire record apply stages these and the family client mover chases +
+        // predicts between records [orig: the @0x48D480 interp block + register
+        // mirror; brain[177]/[179] = net-received speed/steer]. Only meaningful
+        // when net_predicted (the joiner staged this vehicle).
+        bool net_predicted = false;
+        int32_t net_smooth_target[3] = {}; // staged wire target -> per-step vector
+        int32_t net_smooth_heading = 0;    // staged heading -> per-step delta
+        int16_t net_interp_progress = 0;   // [orig: +0x27C]
+        int16_t net_interp_steps = 0;      // [orig: +0x27E]
+        int32_t net_recv_speed = 0;        // [orig: brain[177]] 16.16, stale-decays
+        int32_t net_recv_steer_bam = 0;    // [orig: brain[179]]
+        int32_t net_recv_lat = 0;          // [orig: brain[178]] air lateral cmd, stale-decays
+        int32_t net_alt_target = 0;        // [orig: brain[131]] absolute target Z, never decays
+        bool net_engine_on = false;        // replicated Flags 0x80 (air engine/collective)
+        int32_t air_pitch_bam = 0;         // live attitude the air mover integrates
+        int32_t air_roll_bam = 0;
+        int32_t air_pitch_rate = 0;        // [orig: modelPtr1 +0xA8]
+        int32_t air_roll_rate = 0;         // [orig: modelPtr2 +0xAC]
+        int32_t ground_cache = INT32_MIN;  // [orig: entity+0x2A4] 8th-tick terrain sample
+        // [orig: brain[11] +0x2C] Z offset subtracted before EVERY aircraft
+        // ground sample (@0x4903AD, @0x4909D0). Its value producer is
+        // untraced (record §13 — "port as an opaque def/brain offset"), so
+        // the register defaults 0 until the producer is witnessed; the
+        // subtraction mechanism itself is structural.
+        int32_t air_probe_z_off = 0;
+        uint32_t net_seen_revision = 0;    // last consumed row compact_revision
+        // --- Boat platform-solve state (vehicle-client-movers-re.md §3; client subset).
+        int32_t plat_acc[4] = {};          // per-corner drop accumulators [orig: +0x2C4..+0x2D0]
+        float plat_bob_phase = 0.0f;       // heave-bob phase, radians [orig: +0x318 float]
+        bool plat_at_rest = false;         // bob arm latch [orig: byte +0x364]
+        bool plat_porpoise = false;        // bow-dip cycle latch [orig: byte +0x365]
+        bool plat_planing = false;         // planing/bow-up bit [orig: +0x472 bit 1]
+        bool plat_capsized = false;        // capsize latch [orig: byte +0x2F0]
+        bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
+        bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
+        int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
     };
     VehicleMotorState veh;
 };

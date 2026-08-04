@@ -1,10 +1,31 @@
 #pragma once
 
 #include <npwire/replication_model.h> // PlayerReplicationState (opennova::)
+#include <npwire/session_hello.h> // DisconnectEvent
 
 #include "npruntime/napi_np_server_ctx.h" // NapiNPServerCtx
 
 namespace opennova::np {
+
+// Retail's maintenance clocks, expressed in original 62 Hz server ticks and
+// exposed for protocol regression tests/capture tooling. Integrity shares one
+// explicit global scoreboard counter: `++timer > 0x136`, reset zero => 311
+// ticks. Its independently persistent family toggle starts with 0x31.
+// [orig: Server_TickUpdate @0x51D7E0 -> @0x508540]
+inline constexpr uint32_t INTEGRITY_REQUEST_PERIOD_TICKS = 0x136u + 1u;
+// One explicit global countdown: reset 0 emits at the next boundary, reload
+// 0x136 emits again after exactly 310 further Server_TickUpdate calls.
+inline constexpr uint32_t NETWORK_QUALITY_BROADCAST_PERIOD_TICKS = 0x136u;
+inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS = 30u * 62u;
+inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS = 12u * 62u;
+
+// Stage retail's high-table H:0x03 LogPuntEvent record for one remote. The
+// first event wins and immediately closes that connection's gameplay gate;
+// HostOwner still flushes the reliable description on its next open boundary.
+bool Server_StageHostDisconnect(
+		NapiNPConnection &connection, const DisconnectEvent &event);
+bool Server_StageHostPunt(
+		NapiNPConnection &connection, uint32_t mismatch_type);
 
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table
@@ -31,6 +52,7 @@ namespace opennova::np {
 // through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. The drain/emit
 // primitives (netsim::drain_connection_c2s / emit_connection_s2c, connection_fan.h) are invoked ONLY
 // from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
-void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallback_anchor = {});
+void Server_TickUpdate(NapiNPServerCtx &ctx,
+		const PlayerReplicationState &fallback_anchor = {});
 
 } // namespace opennova::np

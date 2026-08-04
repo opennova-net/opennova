@@ -7,6 +7,7 @@
     "libs/napi/*",
     "libs/npwire/*",
     "apps/nw_server/*",
+    "apps/nw_lan_probe/*",
     "apps/nw_replay/*",
     "apps/nw_pp/*",
     "apps/novaworld_server/*",
@@ -155,11 +156,18 @@
     "godot/tests/nova_debug_overlay_test.gd",
     "godot/tests/nova_debug_session_test.gd",
     "godot/tests/env_render_cadence_test.gd",
-    "godot/engine/world/*"
+    "godot/engine/world/*",
+    "godot/engine/env/*",
+    "godot/engine/environment/*",
+    "libs/env/*",
+    "tests/env/*",
+    "tests/mission/*"
   ],
   "line_allow": [
     "godot/game/novaworld_panel.gd|Host a Game",
     "godot/game/novaworld_panel.gd|host your own",
+    "godot/engine/world/game_world.gd|parse host S2C 0x45",
+    "godot/engine/world/game_world.gd|host sent an incomplete",
     "godot/engine/debug/pages/debug_net_page.gd|Host \u2014 listening",
     "godot/engine/debug/nova_debug_session.gd|session host",
     "godot/engine/debug/nova_debug_control_def.gd|authority",

@@ -16,10 +16,10 @@ namespace opennova {
 // path (see gate_response.cpp):
 //
 //   POSTIPADDRESS        -> post_ip (dotted-quad -> 4 bytes)        REQUIRED
-//   POSTIPPORT           -> post_port (decimal uint32)             REQUIRED
+//   POSTIPPORT           -> post_port (NAPI unsigned literal)      REQUIRED
 //   LOBBYNAME            -> lobby_name (string)
 //   METIPADDRESS         -> met_ip (stored as string; used as-is by client)
-//   METIPPORT            -> met_port (decimal uint32)
+//   METIPPORT            -> met_port (NAPI unsigned literal)
 //   METLABEL             -> met_label (string)
 //   METPING              -> met_ping (decimal int)
 //   METEXT               -> met_ext (decimal int)
@@ -28,7 +28,7 @@ namespace opennova {
 //   UDPCODE1             -> udp_code1 (string, int as text)
 //   UDPCODE2             -> udp_code2 (string, int as text)
 //   REFLECTEDIPADDRESS   -> reflected_ip (dotted-quad -> 4 bytes)
-//   REFLECTEDPORTNUMBER  -> reflected_port (decimal uint32)
+//   REFLECTEDPORTNUMBER  -> reflected_port (NAPI unsigned literal)
 //   USEJUNCTION          -> use_junction (decimal int; relay/junction flag)
 //   CLEARJUNCTION        -> clear_junction (decimal int)
 //   GLSVSSREQUEST        -> glsvss_request (string; briefing-server request)

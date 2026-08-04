@@ -941,6 +941,9 @@ bool is_bms(const uint8_t* data, size_t size) {
 }
 
 bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
+    // A failed attempt to reuse a File must not leave the previous source
+    // header eligible for later network emission.
+    out.has_loaded_header_blob_ = false;
     if (!is_bms(data, size)) {
         error = "Not a BMS file (invalid magic)";
         return false;
@@ -1108,7 +1111,35 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
         return false;
     }
 
+    // Retail retains the exact loaded 0x268-byte header and memcpy's it into
+    // S2C 0x0B. Keep those bytes beside a canonical projection of the parsed
+    // model so later edits can be detected without trusting every mutator to
+    // remember an explicit provenance invalidation call.
+    std::vector<uint8_t> canonical_header;
+    if (!encode_header_blob(out, canonical_header, error)) {
+        return false;
+    }
+    std::memcpy(out.loaded_header_blob_.data(), data, kHeaderSize);
+    std::memcpy(out.loaded_header_projection_.data(), canonical_header.data(), kHeaderSize);
+    out.has_loaded_header_blob_ = true;
+
     return true;
+}
+
+bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::string& error) {
+    out = {};
+    if (data == nullptr) {
+        error = "No BMS header bytes provided";
+        return false;
+    }
+    if (size != kHeaderSize) {
+        error = "BMS header blob must be exactly " + std::to_string(kHeaderSize) +
+                " bytes (got " + std::to_string(size) + ")";
+        return false;
+    }
+
+    Reader r(data, size);
+    return parse_header(r, out, error);
 }
 
 bool parse_file(const std::string& path, File& out, std::string& error) {
@@ -1150,6 +1181,27 @@ bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string
     if (out.size() != kHeaderSize) {
         error = "Encoded BMS header size mismatch";
         return false;
+    }
+    return true;
+}
+
+// The host's S2C 0x0B is retail's memcpy of the LOADED 616-byte header
+// [orig: NetPacket_WriteBMSHeader @ 0x502ca0 from g_BmsHeaderBlock @ 0xA761D0]
+// — the loaded bytes ARE the witnessed wire source, so serving them is the
+// port, not an ADR-0003 raw-passthrough (that rule governs files our writers
+// author from scratch). The projection compare keeps the semantic honest: any
+// parse-state edit since load falls back to the canonical from-scratch
+// encoding, so an edited mission never ships stale loaded bytes.
+bool encode_loaded_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error) {
+    std::vector<uint8_t> canonical_header;
+    if (!encode_header_blob(file, canonical_header, error)) {
+        return false;
+    }
+    if (file.has_loaded_header_blob_ &&
+        std::memcmp(canonical_header.data(), file.loaded_header_projection_.data(), kHeaderSize) == 0) {
+        out.assign(file.loaded_header_blob_.begin(), file.loaded_header_blob_.end());
+    } else {
+        out = std::move(canonical_header);
     }
     return true;
 }

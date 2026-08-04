@@ -82,6 +82,7 @@ void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body) {
     // prone (0x100) before crouch (0x200). [orig: 0x4b59ce / 0x4b5b13]
     inf.stance = body.stance;
     if (body.jump) inf.jump_requested = true;
+    inf.jump_held = body.jump; // the level bit the wire mirror reads (0x20)
     inf.player_moving = body.moving;
     inf.player_move_dir_index = body.move_dir_index;
     // Lean inputs (MoveOrder bits 6/7): consumed by the lean-angle ramp and the prone

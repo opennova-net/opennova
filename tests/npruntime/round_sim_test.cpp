@@ -24,7 +24,7 @@
 
 #include <netsim/connection.h>
 #include <netsim/loopback_channel.h>
-#include <netsim/net_client_view.h>
+#include <netsim/client_replica_pipeline.h>
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
@@ -462,7 +462,7 @@ int main() {
 	ns::UdpSessionTransport udp_b(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport client_b_in(ns::UdpSessionTransport::Role::Client);
-	ns::NetClientView client_b_view;
+	ns::ClientReplicaPipeline client_b_view;
 
 	np::NapiNPServerCtx ctx;
 	ctx.world = &world;

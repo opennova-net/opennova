@@ -166,6 +166,54 @@ bool run_pool1_spawn_non_ai() {
 	return true;
 }
 
+bool run_pool1_spawn_mount_handles() {
+	w::World world;
+	world.registry.configure_pool(1, 8);
+	w::Entity carrier;
+	carrier.kind = w::EntityKind::Item;
+	carrier.item_id = 0x050E;
+	carrier.has_item_def = true;
+	carrier.name = "occupied carrier";
+	auto add_seat = [&](uint8_t retail_slot, w::EntityHandle occupant) {
+		w::Seat seat;
+		seat.type = retail_slot == 8
+				? w::SeatType::Driver
+				: (retail_slot == 9 ? w::SeatType::Gunner
+				                    : w::SeatType::Passenger);
+		seat.retail_slot = retail_slot;
+		seat.occupant = occupant;
+		carrier.seats.push_back(seat);
+	};
+	// Deliberately sparse and out of dense-vector order. The wire is keyed by
+	// retail mountHandles slot, and an offered-but-empty passenger seat still
+	// contributes its itemDef mask bit.
+	add_seat(9, w::EntityHandle::make(0, 9));
+	add_seat(7, w::EntityHandle::make(0, 7));
+	add_seat(3, w::EntityHandle{});
+	add_seat(8, w::EntityHandle::make(0, 8));
+	add_seat(0, w::EntityHandle::make(0, 1));
+	if (!expect(world.registry.spawn(1, carrier).valid(),
+			"occupied pool-1 carrier spawned"))
+		return false;
+
+	const nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
+	const std::vector<uint8_t> wire = nw::encode_pool_spawn_batch(batch);
+	nw::PoolSpawnBatch decoded;
+	if (!expect(nw::decode_pool_spawn_batch(
+				wire.data(), wire.size(), decoded) && decoded.records.size() == 1,
+			"occupied 0x0D record round-trips"))
+		return false;
+	const nw::PoolSpawnRecord &row = decoded.records.front();
+	return expect((row.spawn_flags & 0x0400u) != 0 &&
+				row.seat_mask == 0x89u &&
+				row.mount_handles[0] == 0x0001u &&
+				row.mount_handles[3] == 0xFFFFu &&
+				row.mount_handles[7] == 0x0007u &&
+				row.mount_handle_8 == 0x0008u &&
+				row.mount_handle_9 == 0x0009u,
+			"host 0x0D preserves sparse occupied mountHandles by retail slot");
+}
+
 bool run_pool2_static() {
 	w::World world = make_four_pool_world();
 	nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
@@ -446,6 +494,7 @@ int main() {
 	ok = run_pool0_organic() && ok;
 	ok = run_pool1_spawn_ai_capable() && ok;
 	ok = run_pool1_spawn_non_ai() && ok;
+	ok = run_pool1_spawn_mount_handles() && ok;
 	ok = run_pool2_static() && ok;
 	ok = run_pool2_static_slot_alignment() && ok;
 	ok = run_pool3_marker() && ok;

@@ -84,12 +84,111 @@ end
 	return result
 
 
+func _physicsless_air_item_db() -> NovaItemDatabase:
+	var path := ProjectSettings.globalize_path(
+			"res://.godot/physicsless_air_items.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return null
+	file.store_string("""begin "CHel without ground selector A"
+  id 105008
+  type vehicle
+  graphic StaticCrate1
+  sid chel_without_physics_a
+  ai_function chel
+  render_function chel
+  move_function chel
+  attrib: AIData neutral PlayerControl
+  hp 3000
+  climb_speed 25
+  turn_roll 30
+  speed_pitch 20
+end
+
+begin "CHel without ground selector B"
+  id 105009
+  type vehicle
+  graphic StaticCrate1
+  sid chel_without_physics_b
+  ai_function CHel
+  render_function CHel
+  move_function CHelScout
+  attrib: AIData neutral PlayerControl
+  hp 3000
+  climb_speed 20
+end
+
+begin "Ground control without selector"
+  id 105010
+  type vehicle
+  graphic StaticCrate1
+  sid cveh_without_physics
+  ai_function cveh
+  render_function cveh
+  move_function cveh
+  attrib: AIData neutral PlayerControl
+  hp 3000
+end
+
+begin "cpln without ground selector"
+  id 105011
+  type vehicle
+  graphic StaticCrate1
+  sid cpln_without_physics
+  ai_function cpln
+  render_function cpln
+  move_function cpln
+  attrib: AIData neutral PlayerControl
+  hp 3000
+  climb_speed 30
+  turn_roll 25
+  speed_pitch 15
+end
+""")
+	file.close()
+	var result := NovaItemDatabase.new()
+	assert_eq(result.load(path), OK)
+	assert_eq(int(result.get_vehicle_physics(105008)[0]), 0,
+			"the parsed chel witness really omits the ground physics selector")
+	assert_eq(int(result.get_vehicle_physics(105009)[0]), 0)
+	assert_eq(int(result.get_vehicle_physics(105010)[0]), 0)
+	assert_eq(int(result.get_vehicle_physics(105011)[0]), 0)
+	return result
+
+
 func test_host_projectile_options_roundtrip() -> void:
 	var sim := NovaSimulation.new()
 	sim.configure_host_session({"fat_bullets": true, "one_shot_kill": true})
 	var options: Dictionary = sim.get_host_session_config()
 	assert_true(bool(options.get("fat_bullets", false)))
 	assert_true(bool(options.get("one_shot_kill", false)))
+	sim.free()
+
+
+func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
+	var sim := NovaSimulation.new()
+	assert_eq(sim.get_class_allow_mask(), 0x03FF,
+			"a fresh host exposes retail's all-ten-classes default")
+	sim.configure_host_session({"class_allow_mask": 0x0155})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_eq(int(options.get("class_allow_mask", -1)), 0x0155,
+			"the configured writer source survives the Godot session adapter")
+	assert_eq(sim.get_class_allow_mask(), 0x0155,
+			"the armory-facing seam exposes the same configured host mask")
+	sim.free()
+
+
+func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
+	var sim := NovaSimulation.new()
+	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "x")), "",
+			"a host never infers integrity bytes from its expansion name")
+	sim.configure_host_session({
+		"integrity_profile": " retail-revx02-024f56f2-2d087374 ",
+	})
+	assert_eq(String(sim.get_host_session_config().get("integrity_profile", "")),
+			"retail-revx02-024f56f2-2d087374",
+			"the independently witnessed corpus is an explicit host-session input")
 	sim.free()
 
 func test_demo_mission_promotes() -> void:
@@ -517,6 +616,56 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 			"the snapshot carries the live currentSpeed magnitude")
 	assert_lte(speed, 0x10000,
 			"the retail speed publisher saturates at its fixed-point endpoint")
+	sim.free()
+
+
+func test_physicsless_air_definitions_install_direct_traits_without_enabling_ground() -> void:
+	var item_db := _physicsless_air_item_db()
+	assert_not_null(item_db)
+	if item_db == null:
+		return
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var air_a := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105008,
+			Vector3(0, 0, 4), Vector3.ZERO)
+	var air_b := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105009,
+			Vector3(5, 0, 4), Vector3.ZERO)
+	var ground := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105010,
+			Vector3(10, 0, 0), Vector3.ZERO)
+	var plane := md.add_entity(
+			NovaMissionData.KIND_ITEM, 105011,
+			Vector3(15, 0, 4), Vector3.ZERO)
+	assert_false(air_a.is_empty())
+	assert_false(air_b.is_empty())
+	assert_false(ground.is_empty())
+	assert_false(plane.is_empty())
+
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	var air_a_card: Dictionary = sim.get_world_entity_debug(int(air_a["bms_id"]))
+	var air_b_card: Dictionary = sim.get_world_entity_debug(int(air_b["bms_id"]))
+	var ground_card: Dictionary = sim.get_world_entity_debug(int(ground["bms_id"]))
+	var plane_card: Dictionary = sim.get_world_entity_debug(int(plane["bms_id"]))
+	assert_eq(int(air_a_card.get("item_id", -1)), 5008,
+			"the public pool-1 probe resolves the first parsed definition")
+	assert_eq(int(air_b_card.get("item_id", -1)), 5009,
+			"the public pool-1 probe resolves the second parsed definition")
+	assert_eq(int(ground_card.get("item_id", -1)), 5010,
+			"the public pool-1 probe resolves the ground control")
+	assert_eq(int(plane_card.get("item_id", -1)), 5011,
+			"the public pool-1 probe resolves the parsed cpln definition")
+	assert_eq(int(air_a_card.get("vehicle_family", -2)), 2,
+			"plain chel installs the Helicopter prediction family without physics")
+	assert_eq(int(air_b_card.get("vehicle_family", -2)), 2,
+			"case-folded fourcc chel installs the same air prediction family")
+	assert_eq(int(ground_card.get("vehicle_family", -2)), -1,
+			"zero remains the no-motor selector for the ground cveh family")
+	assert_eq(int(plane_card.get("vehicle_family", -2)), 3,
+			"physicsless cpln installs the Plane prediction family")
 	sim.free()
 
 

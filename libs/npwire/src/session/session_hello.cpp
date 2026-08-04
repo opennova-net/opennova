@@ -1,5 +1,6 @@
 #include <npwire/session_hello.h>
 
+#include <cctype>
 #include <cstring>
 #include <napi/tlv.h>
 
@@ -188,19 +189,26 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 			// Tolerant: if we've parsed at least a few fields, accept partial.
 			break;
 		}
-		if (name == "NVS") out.nvs = strip_nul(value, size);
-		else if (name == "CO") out.co = strip_nul(value, size);
-		else if (name == "AP") out.ap = strip_nul(value, size);
-		else if (name == "BDAT") out.bdat = strip_nul(value, size);
-		else if (name == "PN") out.pn = strip_nul(value, size);
-		else if (name == "PG" && size == 16) {
+		if (str_case_equal(name, "NVS")) out.nvs = strip_nul(value, size);
+		else if (str_case_equal(name, "CO")) out.co = strip_nul(value, size);
+		else if (str_case_equal(name, "AP")) out.ap = strip_nul(value, size);
+		else if (str_case_equal(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (str_case_equal(name, "DE")) out.de = read_u32_le(value, size);
+		else if (str_case_equal(name, "PN")) out.pn = strip_nul(value, size);
+		else if (str_case_equal(name, "PG") && size == 16) {
 			std::memcpy(out.pg.data(), value, 16);
 			out.pg_present = true;
-		} else if (name == "PV1") out.pv1 = strip_nul(value, size);
-		else if (name == "PV2") out.pv2 = strip_nul(value, size);
-		else if (name == "CI") out.ci = read_u32_le(value, size);
-		else if (name == "EIP") out.eip = read_u32_le(value, size);
-		else if (name == "EPN") out.epn = read_u32_le(value, size);
+		} else if (str_case_equal(name, "PV1")) out.pv1 = strip_nul(value, size);
+		else if (str_case_equal(name, "PV2")) out.pv2 = strip_nul(value, size);
+		else if (str_case_equal(name, "PV3")) out.pv3 = strip_nul(value, size);
+		else if (str_case_equal(name, "CI")) out.ci = read_u32_le(value, size);
+		else if (str_case_equal(name, "PM")) {
+			out.pm = read_u32_le(value, size);
+			out.pm_present = true;
+		}
+		else if (str_case_equal(name, "EIP")) out.eip = read_u32_le(value, size);
+		else if (str_case_equal(name, "EPN")) out.epn = read_u32_le(value, size);
+		else if (str_case_equal(name, "ET")) out.et = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
@@ -215,15 +223,19 @@ std::vector<uint8_t> client_hello_to_bytes(const ClientHello &msg) {
 	if (!msg.co.empty())   append_string_field(buf, "CO",   msg.co);
 	if (!msg.ap.empty())   append_string_field(buf, "AP",   msg.ap);
 	if (!msg.bdat.empty()) append_string_field(buf, "BDAT", msg.bdat);
-	append_string_field(buf, "PN", msg.pn);
+	if (msg.de != 0) append_u32_field(buf, "DE", msg.de);
+	if (!msg.pn.empty()) append_string_field(buf, "PN", msg.pn);
 	if (msg.pg_present) {
 		append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
 	}
 	if (!msg.pv1.empty()) append_string_field(buf, "PV1", msg.pv1);
 	if (!msg.pv2.empty()) append_string_field(buf, "PV2", msg.pv2);
-	append_u32_field(buf, "CI",  msg.ci);
-	append_u32_field(buf, "EIP", msg.eip);
-	append_u32_field(buf, "EPN", msg.epn);
+	if (!msg.pv3.empty()) append_string_field(buf, "PV3", msg.pv3);
+	if (msg.ci != 0) append_u32_field(buf, "CI", msg.ci);
+	if (msg.pm_present || msg.pm != 0) append_u32_field(buf, "PM", msg.pm);
+	if (msg.eip != 0) append_u32_field(buf, "EIP", msg.eip);
+	if (msg.epn != 0) append_u32_field(buf, "EPN", msg.epn);
+	if (msg.et != 0) append_u32_field(buf, "ET", msg.et);
 	return buf;
 }
 
@@ -324,6 +336,20 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 // of the TLV stream; every TLV is written unconditionally (DSTR/DDSTR ship their NUL even when
 // empty), and the receiver (Nwu_HandleDisconnect @0x623ce0) walks them case-insensitively with
 // zero defaults, validating only the leading key dword.
+std::vector<uint8_t> connection_description_to_bytes(
+		const DisconnectEvent &event) {
+	std::vector<uint8_t> buf;
+	buf.reserve(80);
+	append_u32_field(buf, "DS", event.ds);
+	append_u32_field(buf, "DC", event.dc);
+	append_u32_field(buf, "DP1", event.dp1);
+	append_u32_field(buf, "DP2", event.dp2);
+	append_string_field(buf, "DSTR", event.dstr);
+	append_u32_field(buf, "DPC", event.dpc);
+	append_string_field(buf, "DDSTR", event.ddstr);
+	return buf;
+}
+
 std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key) {
 	std::vector<uint8_t> buf;
 	buf.reserve(64);

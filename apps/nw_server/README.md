@@ -15,3 +15,11 @@ not a third product
 - The runtime it drives: [`libs/npruntime/ROADMAP.md`](../../libs/npruntime/ROADMAP.md)
   (build plan + live status).
 - The capture/diff loop it exists for: [`scripts/net/README.md`](../../scripts/net/README.md).
+
+Launch with `NW_MISSION` pointing at a loose `.bms`. The mission's directory is
+the default resource root for its `.env` and the retail WAC layers
+`game.wac`, `server.wac`, and `<mission>.wac`. Use `NW_ENV` to override only the
+environment file, or `NW_RESOURCE_ROOT` when the shared WAC layers were exported
+to a different directory. A present WAC layer that cannot be read or compiled
+aborts before the UDP socket opens; having no WAC layers is a valid BMS-only
+mission.

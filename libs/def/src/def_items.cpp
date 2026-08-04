@@ -292,6 +292,18 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         /* Vehicle physics-property block, scaled at parse exactly like the original loader
            [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
            turn_rate only for clarity — lower_match_key requires a separator after the key. */
+        } else if (lower_match_key(lower, ll, "climb_speed", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.climb_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: 293*atol @0x49db4a] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "turnroll", 8)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            current.turn_roll = parse_int_n(v, vl); /* raw [orig: @0x49dd2a]; air roll-rate cap = token*192426 at use */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "speedpitch", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.speed_pitch = parse_int_n(v, vl); /* raw [orig: @0x49dd66]; air pitch-rate cap = token*192426 at use */
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */
@@ -303,6 +315,39 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "torque", 6)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             current.torque = parse_int_n(v, vl); /* raw shift count [orig: @0x49dcca] */
+            parsed = 1;
+        /* The platform-solve tuning block — raw atol like the original parser
+           [orig: mass @0x49dc76, lean @0x49ddde, lean_velocity @0x49de1a,
+            pitch @0x49de56, pitch_velocity @0x49de92, bob @0x49dece,
+            flip @0x49df82]. lean_velocity/pitch_velocity must match before
+           their prefixes. */
+        } else if (lower_match_key(lower, ll, "lean_velocity", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.lean_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "pitch_velocity", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            current.pitch_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "mass", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.mass = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "lean", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.lean = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "pitch", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.pitch = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "bob", 3)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
+            current.bob = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "flip", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.flip = parse_int_n(v, vl);
             parsed = 1;
         } else if (lower_match_key(lower, ll, "max_slope", 9)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);

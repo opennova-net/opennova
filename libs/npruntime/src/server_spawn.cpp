@@ -120,12 +120,15 @@ uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
+	// The stock round initializer clears the global S2C 0x79 countdown. Its next
+	// Server_TickUpdate boundary therefore emits immediately and reloads 0x136.
+	// [orig: Server_InitNewRoundState @0x51CA9E]
+	ctx.network_quality_broadcast_countdown = 0;
 	// Fresh round: the per-connection §5.2a burst cursor (conn.burst) is the host-side spawn/load clock
 	// — there is no host-global load-progress counter (the client's dword_A82370 walk is client state,
 	// not host bookkeeping; D-NET-132). The spawn-success gate is dropped later by the per-frame 0x0A
 	// flags1 & 0x01 (§5.2a step 4), not here — the original clears the loading-*timeout* gate at this
 	// step, not the spawn gate.
-	(void)ctx;
 }
 
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
@@ -257,6 +260,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	}
 
 	conn.phase = ConnectionPhase::PlayerAdded;
+	if (!is_host_own) {
+		conn.reply.state6_entry_host_ms =
+				ctx.np_protocol.host_run_duration_ms;
+		conn.reply.state6_entry_host_ms_valid = true;
+	}
 	conn.reply.player_slot_reserved = false;
 	return h;
 }
@@ -311,6 +319,13 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 		c.type = 1; // server-side view of a remote client
 		c.connection_id = ctx.np_protocol.next_connection_id++;
 		c.self_id_seen = true;
+		// Period stored only; the countdown arms at the admission dictation
+		// (see find_or_create_connection).
+		c.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(
+				ctx.config.effective_send_holdoff_ticks());
+		// This no-handshake test/adaptor seam synthesizes an already-admitted
+		// peer, so model the dictation reset that its skipped admission would own.
+		reset_s2c_send_holdoff_counter(c);
 		ctx.np_protocol.connection_list.push_back(c);
 		conn = &ctx.np_protocol.connection_list.back();
 	}

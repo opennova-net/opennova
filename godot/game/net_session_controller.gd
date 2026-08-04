@@ -63,26 +63,34 @@ func maybe_launch_replay_from_env() -> bool:
 # NW_LAN_HOST=<mission.bms> boots straight in as a co-op host;
 # NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host. The normal path
 # learns the mission from S2C 0x7B after authentication; NW_LAN_MISSION is only
-# an explicit legacy/debug override for isolating the already-loaded joiner
-# runtime. Two instances on localhost = the bidirectional co-op demo.
+# a debug/display expectation and never a local load override (D-NET-194).
+# Two instances on localhost = the bidirectional co-op demo.
 func maybe_launch_lan_from_env() -> bool:
 	var lan_mission := OS.get_environment("NW_LAN_HOST")
 	if not lan_mission.is_empty():
 		# game_type = the numeric session g_GameType the host config chooses at host start
-		# [orig: g_GameType = session gametype setting @0x4a6657]. This LAN slice is Co-op;
-		# retail derives 0x30020 from ATTRIB_COOP (the record's default). NW_LAN_GAMETYPE
-		# remains an explicit diagnostic override rather than inheriting the ASH_I5A
-		# capture's 0x10010.
+		# [orig: g_GameType = session gametype setting @0x4a6657]. An absent override
+		# means the hook's `auto`: derive it from the loaded mission. That distinction
+		# matters for 00TRg, whose zero mode resolves to retail's 0x10020 training Co-op.
 		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
 		var lan_port := OS.get_environment("NW_LAN_PORT")
+		var lan_mode := OS.get_environment("NW_LAN_MODE")
+		var lan_max_players := OS.get_environment("NW_LAN_MAX_PLAYERS")
 		var demo_config := HostSessionConfig.new()
 		demo_config.mission = lan_mission
-		demo_config.server_name = "DEMOHOST"
-		demo_config.max_players = 4
+		# NW_LAN_NAME is the host player's callsign, matching LanHostCallsign in
+		# onhook.cfg. Retail's default GameName is the localized `Untitled ` value.
+		demo_config.server_name = "Untitled "
+		demo_config.max_players = resolve_lan_max_players_override(lan_max_players, 4)
 		if not lan_port.is_empty():
 			demo_config.bind_port = int(lan_port)
-		if not lan_gametype.is_empty():
+		demo_config.game_type_auto = lan_gametype.strip_edges().is_empty()
+		if not demo_config.game_type_auto:
 			demo_config.game_type = int(lan_gametype)
+		demo_config.integrity_profile = OS.get_environment(
+				"NW_LAN_INTEGRITY_PROFILE").strip_edges()
+		demo_config.lan_mode = resolve_lan_mode_override(
+			lan_mode, demo_config.lan_mode)
 		_on_lan_host_start_requested(demo_config)
 		return true
 	var lan_join := OS.get_environment("NW_LAN_JOIN")
@@ -94,9 +102,33 @@ func maybe_launch_lan_from_env() -> bool:
 		if jp.size() > 1:
 			demo_target.port = int(jp[1])
 		demo_target.mission = OS.get_environment("NW_LAN_MISSION")
+		demo_target.integrity_profile = OS.get_environment(
+				"NW_LAN_INTEGRITY_PROFILE").strip_edges()
 		join_lan_server(demo_target)
 		return true
 	return false
+
+
+## Parse the optional env-host LAN rate selector without letting a malformed
+## development override silently change the retail default. Values 1..4 map to
+## the witnessed holdoffs 12/6/4/3; blank, non-numeric, and out-of-range values
+## preserve the supplied fallback.
+static func resolve_lan_mode_override(value: String, fallback: int) -> int:
+	var normalized := value.strip_edges()
+	if not normalized.is_valid_int():
+		return fallback
+	var mode := int(normalized)
+	return mode if mode >= 1 and mode <= 4 else fallback
+
+
+## The retail hook accepts 1..64 for direct listen-host capacity. Keep a bad
+## automation value from silently changing the typed request's fallback.
+static func resolve_lan_max_players_override(value: String, fallback: int) -> int:
+	var normalized := value.strip_edges()
+	if not normalized.is_valid_int():
+		return fallback
+	var max_players := int(normalized)
+	return max_players if max_players >= 1 and max_players <= 64 else fallback
 
 
 # --- LAN co-op (mp.mnu) --------------------------------------------------------
@@ -136,10 +168,10 @@ func join_lan_server(target: JoinTarget) -> void:
 	if target == null:
 		return
 	# Joiner: the retail client obtains the full session-variable set from the
-	# connect stream before local mission load [orig: parse_server_session_variables
+	# connect stream before wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
 	# them with the authoritative post-auth record before starting MissionRuntime.
-	# Retail also holds the screen through the post-load connection/game-start
+	# Retail also holds the screen through the post-world-load connection/game-start
 	# waits [orig: NapiClient_WaitForDisconnect @ 0x42cb20 then
 	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime
 	# while hidden and reports the authoritative admission/deploy edge separately

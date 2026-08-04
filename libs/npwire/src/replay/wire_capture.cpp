@@ -60,15 +60,32 @@ struct Session {
 // above.
 void process_datagram(const CaptureDatagram &d,
                       std::unordered_map<int, Session> &sessions,
-                      std::vector<InGameMessage> &out);
+                      CaptureDecodeResult &out);
 
-void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
-             DirState &st, int frame, int session, std::vector<InGameMessage> &out) {
-	if (scrk.empty()) return;
+bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
+             DirState &st, int frame, int session, CaptureDecodeResult &out) {
+	if (scrk.empty()) return false;
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> msgs;
 	if (!decode_protocol_packet_plaintext(body.data(), body.size(), scrk, hdr, msgs))
-		return;
+		return false;
+	CapturedSessionPacket packet;
+	packet.frame_index = frame;
+	packet.dir = dir;
+	packet.session = session;
+	packet.header = hdr;
+	packet.tags.reserve(msgs.size());
+	packet.records.reserve(msgs.size());
+	for (const ProtocolMessage &pm : msgs) {
+		packet.tags.push_back(pm.full_tag);
+		CapturedProtocolRecord record;
+		record.full_tag = pm.full_tag;
+		record.raw_flags = pm.flags.raw;
+		record.encoded_length = pm.length;
+		record.skip_bytes = pm.skip_bytes;
+		packet.records.push_back(std::move(record));
+	}
+	out.session_packets.push_back(std::move(packet));
 	for (const auto &pm : msgs) {
 		if (!st.have_pending) {
 			st.pending_tag = uint16_t(pm.full_tag);
@@ -85,42 +102,92 @@ void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 		m.settings_update = st.pending_settings;
 		m.session = session;
 		m.payload = std::move(assembled);
-		out.push_back(std::move(m));
+		out.messages.push_back(std::move(m));
 		st.have_pending = false;
+	}
+	return true;
+}
+
+CaptureDatagramClass classify_opcode(uint8_t opcode) {
+	switch (opcode) {
+	case SESSION_OPCODE_CLIENT_HELLO:
+		return CaptureDatagramClass::ClientHello;
+	case SESSION_OPCODE_CLIENT_AUTH:
+		return CaptureDatagramClass::ClientAuth;
+	case SESSION_OPCODE_PROTOCOL_MESSAGE:
+		return CaptureDatagramClass::ClientProtocol;
+	case SESSION_OPCODE_SERVER_HELLO:
+		return CaptureDatagramClass::ServerHello;
+	case SESSION_OPCODE_SERVER_AUTH:
+		return CaptureDatagramClass::ServerAuth;
+	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
+		return CaptureDatagramClass::ServerProtocol;
+	default:
+		return CaptureDatagramClass::Unknown;
 	}
 }
 
 void process_datagram(const CaptureDatagram &d,
                       std::unordered_map<int, Session> &sessions,
-                      std::vector<InGameMessage> &out) {
+                      CaptureDecodeResult &out) {
+	CapturedDatagramResult result;
+	result.frame_index = d.frame_index;
+	result.src_port = d.src_port;
+	result.dst_port = d.dst_port;
+	result.payload_length = d.payload.size();
+
 	uint8_t op = 0;
 	std::vector<uint8_t> body;
-	if (!decode_outer(d.payload, op, body)) return;
-	const bool is_server = (op == SESSION_OPCODE_SERVER_AUTH ||
-	                        op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+	if (!decode_outer(d.payload, op, body)) {
+		out.datagrams.push_back(result);
+		return;
+	}
+	result.outer_decoded = true;
+	result.opcode = op;
+	result.datagram_class = classify_opcode(op);
+
+	const bool is_server = result.datagram_class == CaptureDatagramClass::ServerHello ||
+	                       result.datagram_class == CaptureDatagramClass::ServerAuth ||
+	                       result.datagram_class == CaptureDatagramClass::ServerProtocol;
 	const bool have_ports = (d.src_port != 0 && d.dst_port != 0);
 	const int session_key = !have_ports ? 0 : (is_server ? d.dst_port : d.src_port);
-	Session &s = sessions[session_key];
 	switch (op) {
+	case SESSION_OPCODE_CLIENT_HELLO: {
+		ClientHello hello;
+		result.decoded = parse_client_hello(body.data(), body.size(), hello);
+		break;
+	}
 	case SESSION_OPCODE_CLIENT_AUTH: {
 		ClientAuth a;
-		if (parse_client_auth(body.data(), body.size(), a)) s.client_scrk = a.scrk;
+		result.decoded = parse_client_auth(body.data(), body.size(), a);
+		if (result.decoded) sessions[session_key].client_scrk = a.scrk;
+		break;
+	}
+	case SESSION_OPCODE_SERVER_HELLO: {
+		ServerHello hello;
+		result.decoded = parse_server_hello(body.data(), body.size(), hello);
 		break;
 	}
 	case SESSION_OPCODE_SERVER_AUTH: {
 		ServerAuth a;
-		if (parse_server_auth(body.data(), body.size(), a)) s.server_scrk = a.scrk;
+		result.decoded = parse_server_auth(body.data(), body.size(), a);
+		if (result.decoded) sessions[session_key].server_scrk = a.scrk;
 		break;
 	}
 	case SESSION_OPCODE_PROTOCOL_MESSAGE:
-		process(body, s.client_scrk, 'C', s.cstate, d.frame_index, session_key, out);
+		result.decoded = process(body, sessions[session_key].client_scrk, 'C',
+		                         sessions[session_key].cstate, d.frame_index,
+		                         session_key, out);
 		break;
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-		process(body, s.server_scrk, 'S', s.sstate, d.frame_index, session_key, out);
+		result.decoded = process(body, sessions[session_key].server_scrk, 'S',
+		                         sessions[session_key].sstate, d.frame_index,
+		                         session_key, out);
 		break;
 	default:
 		break;
 	}
+	out.datagrams.push_back(std::move(result));
 }
 
 } // namespace
@@ -135,17 +202,25 @@ CaptureDecoder::CaptureDecoder(CaptureDecoder &&) noexcept = default;
 CaptureDecoder &CaptureDecoder::operator=(CaptureDecoder &&) noexcept = default;
 
 std::vector<InGameMessage> CaptureDecoder::push(const CaptureDatagram &datagram) {
-	std::vector<InGameMessage> out;
+	return push_detailed(datagram).messages;
+}
+
+CaptureDecodeResult CaptureDecoder::push_detailed(const CaptureDatagram &datagram) {
+	CaptureDecodeResult out;
 	process_datagram(datagram, impl_->sessions, out);
+	return out;
+}
+
+CaptureDecodeResult decode_capture(const std::vector<CaptureDatagram> &datagrams) {
+	CaptureDecodeResult out;
+	std::unordered_map<int, Session> sessions;
+	for (const auto &d : datagrams) process_datagram(d, sessions, out);
 	return out;
 }
 
 std::vector<InGameMessage>
 decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams) {
-	std::vector<InGameMessage> out;
-	std::unordered_map<int, Session> sessions;
-	for (const auto &d : datagrams) process_datagram(d, sessions, out);
-	return out;
+	return decode_capture(datagrams).messages;
 }
 
 } // namespace opennova

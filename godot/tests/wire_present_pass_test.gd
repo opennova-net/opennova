@@ -572,6 +572,150 @@ func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> v
 	assert_eq(placer.attempts, [166, 167, 168])
 
 
+func test_cold_materialization_is_bounded_and_converges_while_live_rows_update() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{"type_id": 166, "handle": 0x1004, "x": 4.0},
+		{"type_id": 167, "handle": 0x1005, "x": 5.0},
+		{"type_id": 168, "handle": 0x1006, "x": 6.0},
+		{"type_id": 169, "handle": 0x1007, "x": 7.0},
+		{"type_id": 170, "handle": 0x1008, "x": 8.0},
+		{"type_id": 171, "handle": 0x1009, "kind": 1, "index": 0, "bms_id": 11},
+	]
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var placed := Node3D.new()
+	add_child_autofree(placed)
+	var index := CountingDeferIndex.new()
+	index.by_bms_id = {11: placed}
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var observer := SpawnObserver.new()
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, index, {
+		"cold_spawn_budget": 2,
+		"camera": camera,
+	})
+	presenter.set_node_spawned_callback(Callable(observer, "on_spawned"))
+
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167],
+			"one presentation call cannot build beyond its cold-spawn budget")
+	assert_eq(presenter.entity_count(), 2)
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 3)
+	assert_eq(observer.calls.size(), 2)
+	assert_eq(index.resolve_calls, 1)
+	assert_eq(camera.position, Vector3.ZERO,
+			"one-shot spectator framing waits for the complete cold cohort")
+	assert_eq(observer.calls[0].position, Vector3(4, 0, 0),
+			"each callback still runs after its first transform is applied")
+
+	var first := presenter.resolve_wire_handle(0x1004)
+	sim.entities[0]["x"] = 40.0
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167, 168, 169])
+	assert_eq(presenter.entity_count(), 4)
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 1)
+	assert_almost_eq(first.position.x, 40.0, 0.001,
+			"already-live rows keep updating while later cold rows drain")
+	assert_eq(observer.calls.size(), 4)
+	assert_eq(index.resolve_calls, 2)
+	assert_eq(camera.position, Vector3.ZERO)
+
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167, 168, 169, 170])
+	assert_eq(presenter.entity_count(), 5)
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 0)
+	assert_eq(observer.calls.size(), 5,
+			"every materialized row is registered exactly once across batches")
+	assert_eq(index.resolve_calls, 3)
+	assert_almost_eq(camera.position.x, 13.2, 0.001,
+			"the converged spectator frame uses every materialized wire row")
+
+	sim.entities[4]["x"] = 80.0
+	presenter.present()
+	assert_eq(placer.attempts.size(), 5,
+			"the converged topology returns to the native stable-plan fast path")
+	assert_eq(observer.calls.size(), 5)
+	assert_eq(index.resolve_calls, 3,
+			"the converged topology returns to the native stable-plan fast path")
+	assert_almost_eq(
+			presenter.resolve_wire_handle(0x1008).position.x, 80.0, 0.001)
+
+
+func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacements() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{"type_id": 166, "handle": 0x1004, "x": 4.0},
+		{"type_id": 167, "handle": 0x1005, "x": 5.0},
+		{"type_id": 168, "handle": 0x1006, "x": 6.0},
+	]
+	var placer := SelectiveFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var observer := SpawnObserver.new()
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, null, {
+		"cold_spawn_budget": 1,
+	})
+	presenter.set_node_spawned_callback(Callable(observer, "on_spawned"))
+	presenter.present()
+	var retired := presenter.resolve_wire_handle(0x1004)
+	assert_not_null(retired)
+
+	# The pending topology changes before it converges: the one materialized slot
+	# changes identity, another pending slot disappears, and a new slot arrives.
+	sim.entities = [
+		{"type_id": 267, "handle": 0x1005, "x": 55.0},
+		{"type_id": 266, "handle": 0x1004, "x": 44.0},
+		{"type_id": 269, "handle": 0x1007, "x": 77.0},
+	]
+	sim.layout_revision += 1
+	presenter.present()
+	assert_eq(placer.attempts, [166, 267])
+	assert_null(presenter.resolve_wire_handle(0x1004),
+			"a now-mismatched live node is retired even after this frame spends its budget")
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 2)
+
+	presenter.present()
+	presenter.present()
+	assert_eq(placer.attempts, [166, 267, 266, 269])
+	assert_ne(presenter.resolve_wire_handle(0x1004), retired)
+	assert_eq(presenter.entity_count(), 3)
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 0)
+	assert_eq(observer.calls.size(), 4,
+			"the retired incarnation and each replacement register only once")
+
+
+func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> void:
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{"type_id": 166, "handle": 0x1004},
+		{"type_id": 167, "handle": 0x1005},
+	]
+	var placer := SelectiveFakePlacer.new()
+	placer.failed_types[166] = true
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, null, {
+		"cold_spawn_budget": 1,
+	})
+
+	presenter.present()
+	assert_eq(placer.attempts, [166])
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 1)
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167],
+			"a cached unresolved row does not consume every later batch")
+	assert_eq(presenter.entity_count(), 1)
+	assert_eq(int(presenter.get_stats().get("pending", -1)), 0)
+	presenter.present()
+	assert_eq(placer.attempts, [166, 167],
+			"a stable unresolved type is not retried once the plan converges")
+
+
 func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
 	var sim := FakeSim.new()
 	sim.entities = [{"type_id": 166, "handle": 0x1004}]

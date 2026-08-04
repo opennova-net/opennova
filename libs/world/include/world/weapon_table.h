@@ -102,9 +102,9 @@ struct WeaponTableEntry {
     // The resolved ammo-class id for the per-class carried pools. The original resolves
     // the 'ammoclass' name to a byte id at parse (builtins @0x830F10) and keys the pool
     // arrays by it [orig: AdmDef+0xD8; pools g_localAmmoPools @0xB75FE8 / serverPlayer
-    // +88664]. We assign ids by first-appearance registry order at table build — the
-    // arithmetic is identical; only the id VALUES may differ from retail bytes (never
-    // wire-visible; pools are entity-local).
+    // +88664]. The ids share retail's global score-slot namespace: fixed built-ins
+    // occupy 0..10 and weapon.def registrations begin at 11. They are wire-visible
+    // when S2C 0x0F copies the authority player's 128 score-slot values.
     int16_t ammo_class_id = -1;
     // Runtime action descriptors baked from this weapon.def block's ACTION rows.
     // Auto clip durations remain zero until a host with the ADM duration ring rebakes
@@ -124,8 +124,8 @@ struct WeaponTableEntry {
 // [orig: @0x5027c8].
 struct WeaponTable {
     std::vector<WeaponTableEntry> entries;
-    // Ammo-class registry backing WeaponTableEntry::ammo_class_id: names in
-    // first-appearance order, and the per-class carry caps from the top-level
+    // Score-slot registry backing WeaponTableEntry::ammo_class_id: retail's fixed
+    // built-ins followed by first-appearance ammo classes, and the carry caps from
     // `ammoclass_max_carry <class> <n>` weapon.def lines (0 = no cap line; the
     // original defaults the table to 0 and clamps pools against it)
     // [orig: cap table @0x24E7DE0, parse @0x543873; clamp @0x540b26].
@@ -136,7 +136,7 @@ struct WeaponTable {
 
     // Case-insensitive registry lookup; -1 when absent.
     int ammo_class_id_of(const char *name) const {
-        if (name == nullptr || *name == '\0') return -1;
+        if (name == nullptr) return -1;
         for (size_t i = 0; i < ammo_class_names.size(); ++i) {
             const std::string &n = ammo_class_names[i];
             size_t j = 0;

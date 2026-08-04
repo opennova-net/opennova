@@ -32,10 +32,8 @@ static func model_name_for_graphic(graphic: String) -> String:
 
 
 static func build_item_seat_specs(mission, resource_root, item_db, include_raw := false) -> Array:
-	var specs: Array = []
 	if mission == null or resource_root == null or item_db == null:
-		return specs
-	var seen_types: Dictionary = {}
+		return []
 	var pending: Array = []
 	for raw in mission.get_all_entities():
 		var entity: Dictionary = raw
@@ -44,6 +42,34 @@ static func build_item_seat_specs(mission, resource_root, item_db, include_raw :
 		if item_id == 0 or type_id == 0:
 			continue
 		pending.append({"item_id": item_id, "type_id": type_id})
+	return _build_item_seat_specs_from_pending(
+			pending, resource_root, item_db, include_raw)
+
+
+# A retail join has only the host's streamed type ids, not its local BMS body.
+# Resolve the same model/userpoint metadata from those types once the initial
+# world stream is complete so vehicle seats and emplacements remain usable.
+static func build_item_seat_specs_for_type_ids(
+		type_ids, resource_root, item_db, include_raw := false) -> Array:
+	if resource_root == null or item_db == null:
+		return []
+	var pending: Array = []
+	for raw_type_id in type_ids:
+		var type_id := int(raw_type_id)
+		if type_id <= 0:
+			continue
+		pending.append({
+			"item_id": type_id + ITEM_ID_OFFSET,
+			"type_id": type_id,
+		})
+	return _build_item_seat_specs_from_pending(
+			pending, resource_root, item_db, include_raw)
+
+
+static func _build_item_seat_specs_from_pending(
+		pending: Array, resource_root, item_db, include_raw: bool) -> Array:
+	var specs: Array = []
+	var seen_types: Dictionary = {}
 	while not pending.is_empty():
 		var next: Dictionary = pending.pop_front()
 		var item_id := int(next.get("item_id", 0))

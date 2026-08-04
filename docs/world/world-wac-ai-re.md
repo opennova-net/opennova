@@ -4842,7 +4842,7 @@ and current heading without extending the retail wire. A player compact already
 carries live entity Pitch; because the port splits Entity from AiEntity, the
 world-to-wire player lift restores that live AiEntity value before witnessed
 compact-byte rounding. An infantry compact instead carries the desired aim-pitch
-target. NetClientView reconstructs the mounted NPC's live Pitch once per decoded
+target. ClientReplicaPipeline reconstructs the mounted NPC's live Pitch once per decoded
 frame with retail's wrapped one-eighth chase before deriving the semantic phase.
 
 Those same EWEAP controls also pose the parent PANM consumed by the mounted carry.

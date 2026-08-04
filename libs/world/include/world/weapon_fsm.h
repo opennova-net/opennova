@@ -213,6 +213,12 @@ struct WeaponSlotState {
     // tick's input stage (the deferred dispatch runs before the pump).
     // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
     bool refire_queued = false;
+    // Retail MountSlot+0x5E bit 8: when this slot belongs to an attached
+    // designated-G EWeap, route ammo/FSM state through groundEntity's vehicle
+    // slot. This is live selection state, separate from the authored G/C
+    // capability flags on the attachment definition.
+    // [orig: shared EWeap slot helper @0x5460e0; writer gate @0x4ffe18]
+    bool redirect_to_parent_slot = false;
     // The heat window's expiry tick. Each shot pushes it further out; the level is
     // derived from what is left of it (weapon_slot_accumulated_heat). 0 = cold.
     // [orig: MountSlot+0x14; stamp @ 0x542fa0/@ 0x542fb4, clear @ 0x54125f]

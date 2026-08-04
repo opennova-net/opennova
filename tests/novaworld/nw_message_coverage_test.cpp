@@ -91,7 +91,7 @@ int check_S_0A_frame_update() {
 	LE w;
 	w.u32(0); w.u32(0); w.u32(0);       // anchor x/y/z
 	w.u8(0);                            // flags1
-	w.u8(0);                            // flags2 -> sub_block 0, no passenger
+	w.u8(0);                            // flags2 -> sub_block 0, no mounted-ammo tail
 	w.zeros(6);                         // weapon: preround + slot-state bytes
 	w.u8(0xFF);                         // weapon reload_seconds (belt-fed special)
 	w.u32(0);                           // uniform_team_mask i32
@@ -177,6 +177,23 @@ int check_S_40_capture_zone() {
 	EXPECT(out.entries.size() == 1);
 	EXPECT(out.entries[0].handle == 0x1002);
 	cover('S', 0x40);
+	return 0;
+}
+
+// S2C 0x7E — two raw mission-briefing C strings. Embedded CR/LF and markup
+// stay opaque; the decoder owns only the exact framing.
+int check_S_7E_server_config_strings() {
+	const std::vector<uint8_t> wire = {
+		0,
+		'G','o','a','l','s',':','\r','\n','<','c','F','F','>','T','e','x','t',0,
+	};
+	ServerConfigStrings out;
+	EXPECT(decode_server_config_strings(wire.data(), wire.size(), out));
+	EXPECT(out.briefing3.empty());
+	EXPECT(out.briefing2 == "Goals:\r\n<cFF>Text");
+	// Missing the second terminator is not a complete retail body.
+	EXPECT(!decode_server_config_strings(wire.data(), wire.size() - 1, out));
+	cover('S', 0x7E);
 	return 0;
 }
 
@@ -370,21 +387,22 @@ int check_S_5A_weapon_loadout() {
 	return 0;
 }
 
-// S2C 0x6E — roster: one team with one member.
-int check_S_6E_roster() {
+// S2C 0x6E — spawn-wave status: one zone group with one queued member.
+int check_S_6E_spawn_wave_status() {
 	LE w;
-	w.u8(1);          // team_count
-	w.u16(0x1000);    // team_entity_handle
-	w.u16(0);         // team_slot_index
-	w.u8(1);          // member_count
-	w.u16(0x2000);    // team_slot_handle
+	w.u8(1);          // group_count
+	w.u16(0x1000);    // zone_handle
+	w.u16(2);         // zone_index
+	w.u8(1);          // queued_count
+	w.u16(9);         // wave_countdown
 	w.u16(0x0004);    // member handle
 	EXPECT(w.b.size() == 10);
-	RosterSync out;
-	EXPECT(decode_roster_sync(w.b.data(), w.b.size(), out));
-	EXPECT(out.teams.size() == 1);
-	EXPECT(out.teams[0].members.size() == 1);
-	EXPECT(out.teams[0].members[0] == 0x0004);
+	SpawnWaveStatus out;
+	EXPECT(decode_spawn_wave_status(w.b.data(), w.b.size(), out));
+	EXPECT(out.groups.size() == 1);
+	EXPECT(out.groups[0].zone_index == 2 && out.groups[0].wave_countdown == 9);
+	EXPECT(out.groups[0].members.size() == 1);
+	EXPECT(out.groups[0].members[0] == 0x0004);
 	cover('S', 0x6E);
 	return 0;
 }
@@ -663,13 +681,13 @@ int check_S_42_input_flags() {
 	return 0;
 }
 
-// S2C 0x79 — spectator-mode flag: [u8] (1 B).
-int check_S_79_spectator_flag() {
+// S2C 0x79 — host CNetQuality scalar: [u8] (1 B).
+int check_S_79_network_quality() {
 	LE w;
 	w.u8(1);
 	uint8_t flag = 0;
 	size_t consumed = 0;
-	EXPECT(decode_spectator_flag(w.b.data(), w.b.size(), flag, consumed));
+	EXPECT(decode_network_quality(w.b.data(), w.b.size(), flag, consumed));
 	EXPECT(consumed == 1);
 	EXPECT(flag == 1);
 	cover('S', 0x79);
@@ -909,6 +927,49 @@ int check_chat_pair() {
 	return 0;
 }
 
+// C2S 0x16 -- action-6 selector for a designated-G attached EWeap. The body is
+// the retail bool-as-i16 writer: zero selects the child's embedded MountSlot;
+// any nonzero word selects the groundEntity carrier's vehicle slot.
+// [orig: producer @0x4e0492; handler NapiNPServerMsg_HandleWeaponToggle @0x511a70]
+int check_C_16_mounted_weapon_slot_select() {
+	MountedWeaponSlotSelection parent_in;
+	parent_in.use_parent_slot = true;
+	const std::vector<uint8_t> parent_wire =
+			encode_mounted_weapon_slot_selection(parent_in);
+	EXPECT(parent_wire == std::vector<uint8_t>({1, 0}));
+	MountedWeaponSlotSelection parent_out;
+	size_t consumed = 0;
+	EXPECT(decode_mounted_weapon_slot_selection(
+			parent_wire.data(), parent_wire.size(), parent_out, consumed));
+	EXPECT(consumed == 2 && parent_out.use_parent_slot);
+
+	const uint8_t nonzero[2] = {2, 0};
+	MountedWeaponSlotSelection nonzero_out;
+	EXPECT(decode_mounted_weapon_slot_selection(
+			nonzero, sizeof(nonzero), nonzero_out, consumed));
+	EXPECT(consumed == 2 && nonzero_out.use_parent_slot);
+
+	const uint8_t child_wire[2] = {0, 0};
+	MountedWeaponSlotSelection child_out;
+	child_out.use_parent_slot = true;
+	EXPECT(decode_mounted_weapon_slot_selection(
+			child_wire, sizeof(child_wire), child_out, consumed));
+	EXPECT(consumed == 2 && !child_out.use_parent_slot);
+
+	for (const std::vector<uint8_t> malformed : {
+			std::vector<uint8_t>{}, std::vector<uint8_t>{1},
+			std::vector<uint8_t>{1, 0, 0}}) {
+		MountedWeaponSlotSelection rejected;
+		rejected.use_parent_slot = true;
+		consumed = 7;
+		EXPECT(!decode_mounted_weapon_slot_selection(
+				malformed.data(), malformed.size(), rejected, consumed));
+		EXPECT(consumed == 0 && !rejected.use_parent_slot);
+	}
+	cover('C', 0x16);
+	return 0;
+}
+
 // S2C 0x04 — session slot config (§5.53): fixed 24 B.
 int check_S_04_session_slot_config() {
 	LE w;
@@ -1075,6 +1136,7 @@ int main() {
 	if (check_S_20_pool3_sync()) return 1;
 	if (check_S_0C_organic()) return 1;
 	if (check_S_40_capture_zone()) return 1;
+	if (check_S_7E_server_config_strings()) return 1;
 	if (check_S_1E_game_event()) return 1;
 	if (check_S_61_tick_seed()) return 1;
 	if (check_S_26_kill()) return 1;
@@ -1086,7 +1148,7 @@ int main() {
 	if (check_C_06_fired_round()) return 1;
 	if (check_C_21_checksum_reply()) return 1;
 	if (check_S_5A_weapon_loadout()) return 1;
-	if (check_S_6E_roster()) return 1;
+	if (check_S_6E_spawn_wave_status()) return 1;
 	if (check_S_7B_full_player_info()) return 1;
 	if (check_S_0F_world_state()) return 1;
 	if (check_S_60_64_file_transfer()) return 1;
@@ -1104,7 +1166,7 @@ int main() {
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;
 	if (check_S_42_input_flags()) return 1;
-	if (check_S_79_spectator_flag()) return 1;
+	if (check_S_79_network_quality()) return 1;
 	if (check_S_2A_chat_history()) return 1;
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
@@ -1115,6 +1177,7 @@ int main() {
 	if (check_S_34_play_sound()) return 1;
 	if (check_S_2C_mission_map_names()) return 1;
 	if (check_chat_pair()) return 1;
+	if (check_C_16_mounted_weapon_slot_select()) return 1;
 	if (check_S_04_session_slot_config()) return 1;
 	if (check_S_08_session_config()) return 1;
 	if (check_S_02_join_padding_probe()) return 1;

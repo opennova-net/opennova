@@ -45,8 +45,8 @@ private:
 	opennova::env::CloudScrollState cloud_scroll;
 	// The smoothed scalar channels (env #27): fog distance + sky height (+
 	// sun-dim/rain/overcast state, consumers pending) — targets refreshed by
-	// the host per tick, currents always ramping [orig: the weather tick's
-	// scalar tail @ 0x57edd7..0x57ef92; targets-only snap @ 0x57d1e0].
+	// the host per tick. Local mission start snaps targets into currents at the
+	// later @0x57f1e0 initializer; network target updates retain live currents.
 	opennova::env::EnvScalarChannels scalar_channels;
 	// OpenNova authoring extension: an ARMED wind timer whose expiry decays
 	// the oscillator intensity (x31 >> 5 per tick) back to zero. Unarmed
@@ -171,11 +171,20 @@ public:
 
 	// env #27: refresh the scalar spring targets (world units); currents ramp.
 	void set_scalar_targets(float p_fog_distance, float p_sky_height);
+	// Local mission-start scalar current <- target copy [orig: sub_57F1E0].
+	void snap_scalar_currents_to_targets();
+	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
+	// are the narrowed wire units; libs/env owns the exact reconstruction.
+	void apply_network_environment_sample(int p_fog_dist, int p_fog_accel,
+			int p_rain_pct, int p_overcast);
 	// The smoothed scalar currents (world units / percent).
 	float get_fog_distance() const;
 	float get_sky_height() const;
 	float get_sun_dim_pct() const;
 	float get_rain_pct() const;
+	int get_fog_accel_clamp_fixed() const;
+	int get_rain_pct_fixed() const;
+	int get_overcast_blend_fixed() const;
 
 	// The witnessed water UV transform (scale, bias, offset_u, offset_v):
 	// scale/bias from the fog-distance INT part, offsets from the layer-1

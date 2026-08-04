@@ -124,6 +124,46 @@ runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is 
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
 
+**Entity**:
+An addressable object in a running world. A Person and a Vehicle are both Entities, but neither term implies who controls it.
+_Avoid_: actor, object (when identity on the wire or in the world is meant)
+
+**Person**:
+A physical humanoid body. A Person may be controlled by the local human, a remote human, or AI; "Person" never means "NPC" by itself.
+_Avoid_: infantry, player entity, soldier (when the physical body is meant)
+
+**Player**:
+A human participant in a match. A Player controls a Person and may control a separate Vehicle through a seat relationship.
+_Avoid_: infantry, avatar, client (when the human participant is meant)
+
+**Vehicle**:
+A carrier Entity with its own physical state. Its driver, controller, gunner, or passenger remains a separate Person.
+_Avoid_: player vehicle, mounted player (when the carrier Entity is meant)
+
+**Soldier Class**:
+The Player's selected loadout role, such as medic, sniper, gunner, rifleman, or engineer.
+_Avoid_: player class, replication class, character identity
+
+**Controller Kind**:
+Whether an Entity's decisions come from the local human, a remote human, AI, or no controller.
+_Avoid_: local-player flag, remote flag, infantry type
+
+**Infantry**:
+The historical reverse-engineering label for the AI/organic Person compact on the in-match wire. It is a codec name, not a physical kind or controller kind; use Person in domain prose.
+_Avoid_: infantry (for every on-foot person), infantry player
+
+**Wire Compact Codec**:
+The fixed record body selected while walking an S2C `0x0A` update: Player-Person, Organic-Person, or Vehicle. It says how to decode bytes, not what controls the Entity or how it moves.
+_Avoid_: entity class, player class, object type
+
+**Motion Family**:
+The physical mover used by an Entity: Person, ground/light/water/air Vehicle, guided, or static. It is independent of wire codec and controller kind.
+_Avoid_: net class, item type
+
+**Storage Pool**:
+The runtime allocation family encoded in a wire handle's high nibble. It is independent of BMS kind, item type, controller, and compact codec; when retail allocation is unwitnessed, say unresolved.
+_Avoid_: infer the pool from the entity kind
+
 **Presenter**:
 A runtime node that owns one presentation surface and projects sim or menu state onto
 it: `LocalPlayerPresenter` (FP camera/input/viewmodel — every peer runs one for its own

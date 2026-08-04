@@ -28,6 +28,26 @@ void WacVm::load(const Program &program) {
     time_ = 0;
 }
 
+WacVm::RuntimeState WacVm::capture_runtime_state() const {
+    RuntimeState state;
+    state.events = events_;
+    state.rng_seed = rng_seed_;
+    state.accumulator = acc_;
+    state.current_event = cur_event_;
+    state.time = time_;
+    return state;
+}
+
+void WacVm::restore_runtime_state(const Program &program,
+                                  const RuntimeState &state) {
+    prog_ = &program;
+    events_ = state.events;
+    rng_seed_ = state.rng_seed;
+    acc_ = state.accumulator;
+    cur_event_ = state.current_event;
+    time_ = state.time;
+}
+
 uint32_t WacVm::next_rand() {
     // [orig: WacScript_ExecuteBytecode DORND @ 0x4f5a83..0x4f5a91 — rol 9,
     //  then the SIGNED carry: sar edx,1Fh; and edx,1ABB09h; add. Same idiom
@@ -190,12 +210,52 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
 
     // ---- environment ----
     if (ieq(n, "fogtype")) { w.env.fog_type = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "fogdist")) { w.env.fog_dist = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "rain")) { w.env.rain = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "snow")) { w.env.snow = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "overcast")) { w.env.overcast = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "skyspeed")) { w.env.sky_speed = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "TOD")) { w.env.time_of_day = A(0); ++w.env.generation; return 0; }
+    if (ieq(n, "fogdist")) {
+        w.env.fog_dist = A(0);
+        ++w.env.generation;
+        w.network_env.command_fog_distance(A(0));
+        return 0;
+    }
+    if (ieq(n, "movefog")) {
+        w.env.fog_dist = A(0);
+        ++w.env.generation;
+        w.network_env.command_move_fog(A(0), A(1));
+        return 0;
+    }
+    if (ieq(n, "rain")) {
+        w.env.rain = A(0);
+        ++w.env.generation;
+        w.network_env.command_precipitation(A(0), A(1), world::PrecipitationKind::Rain);
+        return 0;
+    }
+    if (ieq(n, "snow")) {
+        w.env.snow = A(0);
+        ++w.env.generation;
+        w.network_env.command_precipitation(A(0), A(1), world::PrecipitationKind::Snow);
+        return 0;
+    }
+    if (ieq(n, "overcast")) {
+        w.env.overcast = A(0);
+        ++w.env.generation;
+        w.network_env.command_overcast(A(0), A(1));
+        return 0;
+    }
+    if (ieq(n, "skyspeed")) {
+        w.env.sky_speed = A(0);
+        ++w.env.generation;
+        w.network_env.command_sky_speed(A(0));
+        return 0;
+    }
+    if (ieq(n, "quake")) {
+        w.network_env.command_quake(A(0));
+        return 0;
+    }
+    if (ieq(n, "TOD")) {
+        w.env.time_of_day = A(0);
+        ++w.env.generation;
+        w.network_env.command_time_of_day_minutes(A(0));
+        return 0;
+    }
     if (ieq(n, "sun")) { w.env.sun_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
     if (ieq(n, "sky")) { w.env.sky_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
     if (ieq(n, "fog") || ieq(n, "fogcolor")) { w.env.fog_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }

@@ -116,6 +116,44 @@ int main() {
 		if (!expect(ch.sky_height_fp == (200 << 16), "sky height overshoot-snaps onto the target")) return 1;
 		if (!expect(ch.rain_pct_fp == 0 && ch.sun_dim_fp == 0 && ch.overcast_fp == 0,
 					"untargeted channels hold their defaults")) return 1;
+
+		// S2C 0x0A phase 2 carries fog distance as an integer, the fog
+		// acceleration clamp as unsigned 8.8, and the host's two weather currents
+		// as unsigned 8.8 bytes. Retail's receiver installs the weather bytes as
+		// local targets; it does not snap the local currents.
+		ch.apply_network_sample(380, 0xFF00, 0x56, 0x78);
+		if (!expect(ch.fog_dist_target_fp == (380 << 16),
+					"network fog distance becomes the native 16.16 target")) return 1;
+		if (!expect(ch.fog_step_fp == 0x00FF0000,
+					"network fog acceleration restores unsigned 8.8 to 16.16")) return 1;
+		if (!expect(ch.rain_pct_fp == 0 &&
+					ch.rain_pct_target_fp == 0x00005600,
+					"network rain byte updates only the retail target")) return 1;
+		if (!expect(ch.overcast_fp == 0 &&
+					ch.overcast_target_fp == 0x00007800,
+					"network overcast byte updates only the retail target")) return 1;
+		ch.tick();
+		if (!expect(ch.rain_pct_fp == 0x000002B0,
+					"rain current chases the received target on the next 62 Hz tick")) return 1;
+		if (!expect(ch.overcast_fp == 0x000003C0,
+					"overcast current chases the received target on the next 62 Hz tick")) return 1;
+
+		EnvScalarChannels startup;
+		startup.fog_dist_target_fp = 733 << 16;
+		startup.sky_height_target_fp = 211 << 16;
+		startup.rain_pct_target_fp = 0x00004000;
+		startup.overcast_target_fp = 0x00002000;
+		startup.snap_currents_to_targets();
+		if (!expect(startup.fog_dist_fp == (733 << 16) &&
+					startup.sky_height_fp == (211 << 16) &&
+					startup.rain_pct_fp == 0x00004000 &&
+					startup.overcast_fp == 0x00002000,
+					"local mission start snaps every scalar current to its target")) return 1;
+		if (!expect(startup.fog_step_fp == 0x00FF0000 &&
+					startup.fog_max_fp == (1000 << 16) &&
+					startup.rain_step_fp == 0x1000 &&
+					startup.overcast_step_fp == 0x1000,
+					"local mission start restores the recovered post-WAC clamps")) return 1;
 	}
 
 	// --- Star field (env #33) [orig: Star_GenerateInstanceTable @ 0x5ac850;

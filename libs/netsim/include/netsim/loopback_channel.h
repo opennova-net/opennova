@@ -17,7 +17,10 @@ namespace opennova::netsim {
 // socket-backed ISessionTransport of the same shape (Phase 2); MP is a transport swap.
 class LoopbackChannel : public ISessionTransport {
 public:
-	void host_send(uint8_t tag, std::vector<uint8_t> body) override;
+	void host_send(
+			uint8_t tag, std::vector<uint8_t> body, bool reliable = true,
+			uint8_t protocol_flags_raw = 0,
+			bool capacity_exempt = false) override;
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override;
 	bool host_recv(Datagram &out) override;   // pulls a C2S datagram (host side)
 	bool client_recv(Datagram &out) override; // pulls an S2C datagram (client side)

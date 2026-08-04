@@ -596,12 +596,11 @@ public:
                                            // the APPLY now writes world.relations — D-AI-3)
     std::vector<int32_t> target_set_calls; // recorded Entity_SetAITarget net-ids (@0x45d760)
     uint32_t prng_a = 0;    // [orig: dword_31BFBB8] engagement fire-delay jitter stream
-    uint32_t prng16 = 0;    // [orig: dword_31BFBB0] PRNG_Next16 stream
     uint16_t fire_shot_seq = 0; // per-shot sequence word [orig: word_B7C670]
 
-    // The shared 32-bit rotate LCG: s = rotl(s + rotl(s,11), 4) ^ 1; returns the new state.
+    // dword_31BFBB8 owns this independent rotate LCG. PRNG_Next16's shared
+    // dword_31BFBB0 owner lives on World so non-AI consumers cannot fork it.
     int32_t prng_step_a();  // [orig: inline LCG on dword_31BFBB8]
-    int32_t prng_step16();  // [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0]
 
     int index_of(const AiEntity &e) const; // AI index (= AIEvent entity_index)
 
@@ -700,6 +699,13 @@ public:
     // [orig: Entity_UpdateInfantryAI parent/health gate @0x4b9960..0x4b9983,
     //  mounted pose @0x4bec23..0x4bed3f, death detach @0x4b9c57..0x4b9c60.]
     bool pose_if_mounted(AiEntity &e, World &world);
+
+    // Repeat only the carrier-owned seat-frame pose after a later carrier mover.
+    // This deliberately does not mirror input, chase gunner aim, select animation,
+    // detach relationships, or mutate any other once-per-body-tick state. Local
+    // player and gunner LOOK mirrors are preserved while the body/collision frame
+    // is recomposed from the carrier's final same-frame transform.
+    bool refresh_mounted_pose(AiEntity &e, World &world);
 
     // The brain half of a waypoint REDIRECT (RedirectGroupTo/RedirectSingleTo): mode 1 +
     // list + node (nearest of the list when node < 0) + the per-leg turn-budget seed.

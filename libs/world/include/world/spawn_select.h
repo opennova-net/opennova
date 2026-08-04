@@ -80,8 +80,8 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
 // "SpawnPoint" entity). Gates the join-time respawn-pending flag — the deploy screen only
 // holds when the mission has zones to pick [orig: Server_OnPlayerJoin @0x51a6f2
 // `|= 0x10 iff SpawnZoneList_GetCount() > 0`; same count gates the 0x0F game_flags bit0
-// @0x502da7; the client builds its own picker list from local BMS, pools 2+1, the same
-// def gate — Entity_BuildSpawnZoneList @0x43EAE0].
+// @0x502da7; the client builds its own picker list from the exact S2C 0x10/0x0D
+// pool-2 + pool-1 rows, with the same def gate — Entity_BuildSpawnZoneList @0x43EAE0].
 bool world_has_spawn_zone(const World &world);
 
 // The deploy/spawn-zone REGISTRY — the sorted zone list whose INDICES are the

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -20,6 +21,14 @@ namespace opennova::np {
 // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2a/§5.2b]
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
+
+// Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
+// time-sync validator compares only unsigned deltas, so a nonzero logical base
+// preserves its clock contract without introducing wall-time into native tests.
+inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
+	return static_cast<uint32_t>(
+			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) / 62ull);
+}
 
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at
 // 0x4B0 records.
@@ -177,6 +186,10 @@ struct WeaponSlotState {
 // reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
 struct SessionReplyState {
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
+	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
+	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
+	// retail ammo-class ids; unused classes remain zero.
+	std::array<int32_t, 128> slot_type_scores{};
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
 	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
@@ -187,8 +200,17 @@ struct SessionReplyState {
 	// forever at the pick — the rubber-band]. (D-NET-156 tail)
 	std::vector<uint8_t> last_loadout_reply;
 	bool mission_status_received = false; // 0x0B mission-file status report seen
-	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
-	                                      // the working host pushes it before the joiner ever sends 0x0A
+	// Retail's join completion is three packet boundaries, not one semantic
+	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
+	// pump replays settings + 0x04; the first 0x37 response then carries 0x64 +
+	// the initial 0x16 beside any queued 0x75. Keeping independent latches
+	// prevents a serializer refactor from moving 0x04 or 0x16 earlier (the retail
+	// client resets its team between the first two packets).
+	bool admission_metadata_pushed = false;
+	bool spawn_metadata_pushed = false;
+	uint32_t admission_completed_tick = 0;
+	bool roster_pushed = false;
+	uint32_t roster_completed_tick = 0;
 	// Roster versioning (D-NET-155): roster_counted marks this connection's spawn as
 	// tallied into NapiNPProtocol.roster_generation; roster_seen_gen is the last roster
 	// version 0x16-pushed to this client — stale => re-push (covers the own-spawn grow,
@@ -197,6 +219,59 @@ struct SessionReplyState {
 	// later joiner arrived — the v29 stuck HUD count).
 	bool roster_counted = false;
 	uint32_t roster_seen_gen = 0;
+	// Retail's 0x30/0x31 integrity family rides the global scoreboard countdown,
+	// so it has no per-connection epoch/serial. Network quality retains its own
+	// independently witnessed global clock.
+	// Per-player maintenance state [orig: Server_UpdateAllActivePlayerSlots
+	// @0x518820]. Eligible active player slots (including the listen host) accrue
+	// the 1,860-tick age after the quartet check; hidden/deploy-pending pauses
+	// (never resets) that age. Thus
+	// the first quartet is observed on call 1,861. Once mature, its 744-tick
+	// countdown continues through death/deploy presentation state.
+	uint32_t control_live_ticks = 0;
+	uint32_t control_request_countdown = 0;
+	uint32_t charattr_unanswered_count = 0;
+	uint32_t time_sync_unanswered_count = 0;
+	// Consecutive state-6 ticks whose owned entity carries Flags bit 0x02.
+	// Retail increments before comparing, resets immediately on a live frame,
+	// and emits the t7 punt on tick 361 when permanent death is disabled.
+	uint32_t dead_live_ticks = 0;
+	uint32_t control_challenge_seed = 0;
+	// Per-player XOR salts used by the two definition-integrity reply handlers.
+	// They are zero in the currently witnessed session setup, but belong to the
+	// player slot rather than the selected resource profile. [orig: player-slot
+	// dwords +89920 (C2S 0x20) and +89924 (C2S 0x21)]
+	uint32_t integrity_weapon_crc_salt = 0;
+	uint32_t integrity_ammo_crc_salt = 0;
+	// Host GetTickCount value when retail installs this player in slot state 6.
+	// Validity is explicit because zero is a legitimate mission-start timestamp.
+	// The join-time respawn-pending AFK punt compares unsigned elapsed ms against
+	// 360000 and requires strictly greater-than, not greater-or-equal.
+	uint32_t state6_entry_host_ms = 0;
+	bool state6_entry_host_ms_valid = false;
+	// S2C 0x43 time-sync state [orig: producer @0x507CA0; validator
+	// @0x502210; player-slot dwords 22486..22492]. The producer fixes one host
+	// baseline, opens a round with its own host timestamp and increments the
+	// sequence. A first matching reply fixes client baseline/previous time; a
+	// later matching reply closes the round only when both client deltas fit
+	// within 103% of the corresponding host deltas. This yields 1,1,2,2...
+	uint32_t time_sync_host_baseline_ms = 0;
+	uint32_t time_sync_round_host_ms = 0;
+	uint32_t time_sync_current_host_ms = 0;
+	uint32_t time_sync_client_baseline_ms = 0;
+	uint32_t time_sync_previous_client_ms = 0;
+	uint32_t time_sync_latest_client_ms = 0;
+	uint32_t time_sync_sequence = 0;
+	// Retail advances by 50 and wraps against the live viewport height before
+	// emitting S2C 0x68, so zero-initial state first sends 50 for a tall viewport.
+	uint32_t loaded_model_page_cursor = 0;
+	// General minimap-overlay producer state [orig:
+	// Server_UpdateAllActivePlayerSlots @0x5188CB..0x5188FB]. A newly spawned
+	// client gets one complete persistent pool-2 scan. Thereafter retail calls
+	// the producer every 14 ticks and advances one of 128 pool-1 residue classes.
+	bool minimap_initial_scan_pending = true;
+	uint8_t minimap_overlay_cooldown = 0;
+	uint8_t minimap_pool1_phase = 0;
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
@@ -253,6 +328,28 @@ struct NapiNPConnection {
 	// filter, modeled by netsim::Connection (TransportMode, owned_entity, send_mask). The
 	// transport is NON-OWNING: the binding/test owns the LoopbackChannel / UdpSessionTransport.
 	netsim::Connection link{};
+	// A successful C2S 0x0E is dispatched during the socket receive pump, while
+	// older C2S 0x0C events from that pump are staged for Server_TickUpdate.
+	// Consume those pre-release uplinks before the next authority drain so they
+	// cannot overwrite the host-selected deploy pose. The client cannot produce
+	// a post-release uplink until it receives the release at the following send
+	// boundary, so everything already staged at this edge is older than the pick.
+	bool discard_pre_deploy_uplinks = false;
+	// First host-side connection-description event wins. Staging a punt closes
+	// the gameplay predicate immediately while leaving the owner node resident
+	// long enough to frame and flush its reliable H:0x03 record.
+	bool host_disconnect_sent = false;
+	uint32_t host_disconnect_mismatch_type = 0;
+	// Host-to-this-peer send block. Retail owns the countdown on each
+	// NapiNPConnection (+0x648), so peers admitted on different ticks keep
+	// independent boundaries even though the dictated period is session-wide.
+	uint32_t s2c_send_holdoff_ticks = 0;
+	uint32_t s2c_send_holdoff_countdown = 0;
+	bool s2c_send_boundary_open = true;
+	// The configured period is known when the node is allocated, but +0x648 is
+	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
+	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
+	bool s2c_send_holdoff_dictated = false;
 
 	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
 	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the
@@ -272,6 +369,9 @@ struct NapiNPConnection {
 	uint32_t server_sk = 0;        // our ServerAuth.SK
 	SessionSequencing seq = make_jo_game_session_sequencing();
 	                               // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
+	// connection. Only a completed semantic message may reach host dispatch.
+	ProtocolReassemblyState c2s_reassembly{};
 	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
 	                                     // framed S2C packet, ticked by tick_connections
 	uint32_t receive_inactive_ms = 0;     // elapsed since the last cryptographically receiver-valid
@@ -318,6 +418,26 @@ struct NapiNPConnection {
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
 
+inline uint32_t clamp_send_holdoff_ticks(uint32_t ticks) {
+	return ticks < 255u ? ticks : 255u;
+}
+
+inline void arm_s2c_send_holdoff(NapiNPConnection &conn, uint32_t ticks) {
+	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(ticks);
+	conn.s2c_send_holdoff_countdown = conn.s2c_send_holdoff_ticks;
+	conn.s2c_send_boundary_open = conn.s2c_send_holdoff_ticks == 0;
+	conn.s2c_send_holdoff_dictated = true;
+}
+
+// Retail opens the first established boundary immediately after dictating CS
+// field 3; only the completed send boundary reloads the stored period.
+// [orig: CNapiNPConnection_ResetSendHoldoffCounter @0x61e140]
+inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
+	conn.s2c_send_holdoff_countdown = 0;
+	conn.s2c_send_boundary_open = true;
+	conn.s2c_send_holdoff_dictated = true;
+}
+
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A
 // emit fan (it was an inline `conn.burst.spawned` in each). In-match = the §5.2a initial-state burst
 // has completed (game_state 9 -> burst.spawned). BOTH a remote joiner AND the host's OWN type-2
@@ -328,6 +448,8 @@ struct NapiNPConnection {
 // binds conn.link.owned_entity to the host player when it spawns. [orig: the per-frame replicate fan
 // is is_in_session-gated inside Server_TickUpdate; the per-connection in-match selector is the burst
 // completion]
-inline bool is_in_match(const NapiNPConnection &conn) { return conn.burst.spawned; }
+inline bool is_in_match(const NapiNPConnection &conn) {
+	return conn.burst.spawned && !conn.host_disconnect_sent;
+}
 
 } // namespace opennova::np

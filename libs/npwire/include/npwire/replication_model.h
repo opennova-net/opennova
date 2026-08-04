@@ -105,10 +105,22 @@ struct GameEntitySnapshot {
 	// entity+0x157 attachBoneId — the RAW wire seat bone this player mounted by; the mounted
 	// player record's byte 0 [orig: @0x4c0a1a reads +0x157 when mounted]. 0 when unmounted.
 	uint8_t veh_bone = 0;
+	// Mounted designated-G EWeap route echo: 1 = the attached child's embedded
+	// MountSlot, 2 = its groundEntity vehicle slot, 0 = every other carrier.
+	// [orig: NetPacket_SerializePlayerState @0x4c0a39]
+	uint8_t mounted_weapon_seat_type = 0;
 	// entity+0x24 (Flags) low byte, written UNMASKED to the player compact record's state byte
 	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
 	// compact record's flags byte [orig: @0x460d22].
 	uint8_t state_flags = 0;
+	// VehicleData write-source registers for the live 21-byte Vehicle compact.
+	// These remain full-width in the transport-neutral snapshot; fanout applies
+	// retail fixed-point compression / rounded BAM-high packing.
+	// [orig: Entity_SerializeVehicleState @0x460dc2..0x460e10 reads
+	// vehicleData[136]/[135]/[132]; net-re section 5.13]
+	int32_t vehicle_forward_speed_reg = 0;
+	int32_t vehicle_lateral_speed_reg = 0;
+	int32_t vehicle_steer_target_bam = 0;
 	// The RIDDEN vehicle (entity+0x16C) when mounted, else 0xFFFF. The player record's carrier
 	// select prefers this over ground_handle [orig: op1 @0x4c0a08 — mount wins].
 	uint16_t mount_handle = 0xFFFF;

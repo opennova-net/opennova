@@ -17,7 +17,7 @@
 #include "netsim/connection_fan.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/loopback_channel.h"
-#include "netsim/net_client_view.h"
+#include "netsim/client_replica_pipeline.h"
 #include "netsim/session_transport.h"
 #include "netsim/udp_session_transport.h"
 
@@ -27,6 +27,7 @@
 #include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
+#include <world/angle.h>
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/player_spawn.h> // spawn_player / spawn_remote_player
@@ -160,7 +161,7 @@ bool run_fanout_and_per_connection_anchor() {
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 
-	ns::NetClientView self_view, join_view;
+	ns::ClientReplicaPipeline self_view, join_view;
 	self_view.pump(self_ch);
 	join_view.pump(udp_join);
 	if (!expect(self_view.frames_applied() == 1 && join_view.frames_applied() == 1,
@@ -371,7 +372,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
-	ns::NetClientView join_view;
+	ns::ClientReplicaPipeline join_view;
 	join_view.pump(udp_join);
 	if (!expect(join_view.frames_applied() == 1, "join view applied retail-slot frame"))
 		return false;
@@ -386,11 +387,8 @@ bool run_retail_player_slots_start_after_bms_organics() {
 }
 
 // (f) The per-connection S2C 0x0A sub-block PHASE CYCLE — a faithful port of the original's
-//     per-player-slot send counter [orig: ++playerSlot+100566 @0x517be8; NetPacket_WritePlayerState
-//     writes it as flags2 and phase&3 selects the header sub-block @0x4ff6b0]. We cycle the SAFE
-//     subset {1 server-status, 0 weapon, 3 gametype}; env (2) is deferred (host does not author
-//     world.env). First send is phase 1 so the load-bearing fall-damage tolerance reaches the client
-//     on frame 1.
+//     preincrementing byte counter [orig: ++playerSlot+100566 @0x517be8]. All four low-bit
+//     sub-blocks occur, low nibble 8 carries mounted ammo, and the byte wraps naturally.
 bool run_0a_subblock_phase_cycle() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -409,9 +407,19 @@ bool run_0a_subblock_phase_cycle() {
 	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
 	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
 
-	// Two full cycles: status(1) -> weapon(0) -> gametype(3), repeating.
-	const uint8_t want_flags2[6] = {1, 0, 3, 1, 0, 3};
-	for (int i = 0; i < 6; ++i) {
+	// Nontrivial engine-native values prove phase 2 is data-driven rather than a fixed map table.
+	world.network_env.valid = true;
+	world.network_env.fog_target_q16 = 0x01230000u;
+	world.network_env.fog_accel_clamp = 0x00123456u;
+	world.network_env.tod_fixed24 = (0x1234u << 13) - 0x1000u;
+	world.network_env.quake_ticks = 0x012Cu;
+	world.network_env.cloud_scroll_rate_target = 0x0002ABCDu;
+	world.network_env.rain_pct_current_q16 = 0x000056FFu;
+	world.network_env.overcast_blend_q16 = 0x000078AAu;
+	world.network_env.precipitation_kind = 0x1234569Au;
+
+	// One full low-nibble cycle. Retail pre-increments, so the first flags2 is 1.
+	for (int i = 1; i <= 16; ++i) {
 		ns::test::emit_all(world, conns, fallback);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
@@ -419,19 +427,51 @@ bool run_0a_subblock_phase_cycle() {
 		nw::FrameUpdate fu;
 		if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
 		            "0x0A frame decodes as a well-formed frame")) return false;
-		if (!expect(fu.flags2 == want_flags2[i], "flags2 cycles {1,0,3}")) return false;
-		if ((want_flags2[i] & 3u) == 1) {
+		if (!expect(fu.flags2 == static_cast<uint8_t>(i), "flags2 free-runs from 1 through 16"))
+			return false;
+		if ((i & 3u) == 1) {
 			if (!expect(fu.timer.present && fu.timer.state1 == 13,
 			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
-		} else if ((want_flags2[i] & 3u) == 0) {
+		} else if ((i & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
 			if (!expect(fu.weapon.uniform_team_mask == 0x8,
 			            "phase 0 uniform team mask = 8 (golden steady value)")) return false;
+		} else if ((i & 3u) == 2) {
+			if (!expect(fu.env.present, "phase 2 = environment sub-block present")) return false;
+			if (!expect(fu.env.fog_dist == 0x0123u && fu.env.fog_accel == 0x1235u &&
+			                    fu.env.tod_fixed == 0x1234u && fu.env.quake_ticks == 0xFFu &&
+			                    fu.env.cloud_scroll == 0xAAu && fu.env.rain_pct == 0x56u &&
+			                    fu.env.overcast == 0x78u && fu.env.env_param == 0x9Au,
+			            "phase 2 quantizes every live environment channel in retail units"))
+				return false;
+			ns::LoopbackChannel fold_ch;
+			fold_ch.host_send(dg.tag, dg.body, false);
+			ns::ClientReplicaPipeline fold;
+			fold.pump(fold_ch);
+			if (!expect(fold.state().environment.rain_pct == 0x56u &&
+			                    fold.state().environment.env_param == 0x9Au,
+			            "client fold preserves the final two phase-2 channels")) return false;
 		}
-		// phase 3 (gametype) = 0 bytes for a non-objective gametype: nothing to assert.
+		if ((i & 0x0Fu) == 8u) {
+			if (!expect(fu.passenger.present && fu.passenger.mount_handle == 0xFFFFu &&
+			                    !fu.passenger.has_mount,
+			            "phase 8 carries the on-foot FFFF mount sentinel")) return false;
+		}
 	}
 	// The connection's phase counter advanced once per send.
-	if (!expect(conns[0].s2c_phase == 6, "phase counter advanced once per send")) return false;
+	if (!expect(conns[0].s2c_phase == 16, "phase counter advanced once per send")) return false;
+
+	// The retail byte wraps naturally: 0xFF pre-increments to 0 and selects phase 0.
+	conns[0].s2c_phase = 0xFFu;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram wrap_dg;
+	if (!expect(ch.client_recv(wrap_dg), "wrapped 0x0A frame dequeued")) return false;
+	nw::FrameUpdate wrap_fu;
+	if (!expect(nw::decode_frame_update(wrap_dg.body.data(), wrap_dg.body.size(),
+	                    ns::class_for_type_id, wrap_fu),
+	            "wrapped 0x0A frame decodes")) return false;
+	if (!expect(wrap_fu.flags2 == 0 && wrap_fu.weapon.present && conns[0].s2c_phase == 0,
+	            "flags2 wraps from 255 to 0 without remapping")) return false;
 
 	// Co-op's shared g_GameType (0x30020) turns phase 3 into a 16-byte
 	// objective block. The gate is not encoded in flags2, so both fan and view
@@ -440,7 +480,7 @@ bool run_0a_subblock_phase_cycle() {
 	world.subgoals.lost = 0x00000204u;
 	world.subgoals.show_win = 0x00000408u;
 	world.subgoals.show_lose = 0x00000810u;
-	conns[0].s2c_phase = 2; // next safe-cycle entry is phase 3
+	conns[0].s2c_phase = 2; // next retail counter value is phase 3
 	ns::test::emit_all(world, conns, fallback, 0x30020u);
 	ns::Datagram objective_dg;
 	if (!expect(ch.client_recv(objective_dg), "objective 0x0A frame dequeued")) return false;
@@ -652,9 +692,9 @@ bool run_0a_vehicle_budget_round_robin() {
 	if (!expect(vehicle_pos_ok, "vehicle record position reconstructs against the anchor"))
 		return false;
 
-	// NetClientView LEARNS the vehicle class from the 0x0D pool-1 spawn batch and then decodes
+	// ClientReplicaPipeline LEARNS the vehicle class from the 0x0D pool-1 spawn batch and then decodes
 	// the vehicle compact bodies with its DEFAULT resolver (which alone cannot know them).
-	ns::NetClientView view;
+	ns::ClientReplicaPipeline view;
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	ns::test::emit_all(world, conns, fallback);
 	view.pump(ch);
@@ -849,11 +889,16 @@ bool run_0x26_attach_mounted_echo() {
 		w::Entity veh;
 		veh.kind = w::EntityKind::Item;
 		veh.item_id = 0x1004;
+		veh.has_item_def = true;
+		veh.item_type = 1;
+		veh.item_attrib |= w::kItemAttribEweap;
 		veh.position = {12.0f, 20.0f, 3.0f};
 		veh.yaw = 0;
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		veh.primary_weapon_slot.clip = 7;
+		veh.primary_weapon_slot.reserve = 19;
 		w::Seat drv;
 		drv.type = w::SeatType::Driver;
 		drv.bone_index = 1;
@@ -885,6 +930,7 @@ bool run_0x26_attach_mounted_echo() {
 	nw::FrameUpdate fu;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
 	            "0x0A frame decodes")) return false;
+	const std::size_t phase1_body_size = dg.body.size();
 	if (!expect(fu.mount_handle == vh.packed, "tail mount handle names the recipient's carrier"))
 		return false;
 	const nw::FrameUpdateRecord *rec = nullptr;
@@ -896,6 +942,22 @@ bool run_0x26_attach_mounted_echo() {
 	if (!expect(rec->player.carrier_handle == vh.packed, "mounted record carrier = the vehicle"))
 		return false;
 	if (!expect((rec->player.state_flags & 0x40u) != 0, "record byte13 carries mounted 0x40"))
+		return false;
+
+	// The free-running byte's low nibble 8 carries the recipient mount target
+	// followed by that target MountSlot's +0x10/+0x12 clip/reserve words.
+	conns[0].s2c_phase = 7;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "phase-8 mounted 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "phase-8 mounted 0x0A decodes")) return false;
+	if (!expect(dg.body.size() == phase1_body_size + 11u,
+	            "phase-8 width adds 5-byte phase-0 delta plus 6-byte mounted-ammo record"))
+		return false;
+	if (!expect(fu.flags2 == 8 && fu.passenger.present && fu.passenger.has_mount &&
+	                    fu.passenger.mount_handle == vh.packed &&
+	                    fu.passenger.clip == 7 && fu.passenger.reserve == 19,
+	            "phase 8 mirrors the selected mounted weapon clip/reserve words"))
 		return false;
 
 	// Detach: seat freed, mount fields cleared, record back to free-standing.
@@ -917,6 +979,73 @@ bool run_0x26_attach_mounted_echo() {
 	            "post-detach record is free-standing")) return false;
 	std::printf("PASS 0x26_attach_mounted_echo\n");
 	return true;
+}
+
+bool run_mounted_g_slot_route_echo() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle ph =
+			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
+	w::Entity *player = world.registry.get(ph);
+	if (!expect(player != nullptr, "route-echo player spawned")) return false;
+
+	w::Entity parent;
+	parent.kind = w::EntityKind::Item;
+	parent.has_item_def = true;
+	parent.item_type = 1;
+	parent.item_attrib = w::kItemAttribEweap;
+	const w::EntityHandle parent_h = world.registry.spawn(1, parent);
+	const w::Entity *live_parent = world.registry.get(parent_h);
+	w::Entity child;
+	child.kind = w::EntityKind::Item;
+	child.has_item_def = true;
+	child.item_type = 2;
+	child.item_attrib = w::kItemAttribEweap;
+	child.emplacement_attachment_flags = 0x02;
+	child.emplacement_parent = parent_h;
+	child.emplacement_parent_spawn_id = live_parent->registry_spawn_id;
+	child.ground_target = parent_h;
+	const w::EntityHandle child_h = world.registry.spawn(1, child);
+	w::Entity *live_child = world.registry.get(child_h);
+
+	player->mounted = true;
+	player->mount_target = child_h;
+	player->mount_bone = 1;
+	player->mount_type = w::SeatType::Gunner;
+	player->use_gun_slot_swapped = true;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
+	nw::PlayerReplicationState fallback;
+
+	const auto emitted_seat_type = [&]() -> int {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return -1;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(
+				dg.body.data(), dg.body.size(), attach_test_class, fu))
+			return -1;
+		for (const auto &record : fu.records)
+			if (record.handle == ph.packed)
+				return record.player.seat_type;
+		return -1;
+	};
+	const int child_seat_type = emitted_seat_type();
+	if (child_seat_type != 1)
+		std::printf("mounted route child decoded seat_type=%d\n", child_seat_type);
+	if (!expect(child_seat_type == 1,
+			"compact player seat_type 1 echoes the child MountSlot route"))
+		return false;
+	live_child->primary_weapon_slot.redirect_to_parent_slot = true;
+	const int parent_seat_type = emitted_seat_type();
+	if (parent_seat_type != 2)
+		std::printf("mounted route parent decoded seat_type=%d\n", parent_seat_type);
+	return expect(parent_seat_type == 2,
+			"compact player seat_type 2 echoes the groundEntity vehicle-slot route");
 }
 
 // (j) D-NET-151 — the grounded-on-entity replication loop. A joiner standing ON another
@@ -1237,10 +1366,31 @@ bool run_vehicle_drive_authority() {
 
 	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
 		return false;
-	// The driver's replicated input (landed by the 0x0C apply): forward + moving, heading
-	// = the vehicle's own (drive straight).
-	player->net_move_input = 0x08;
-	player->yaw = 0;
+	// Land the remote driver's grounded 0x0C intent through the production read-apply:
+	// forward + moving, with an independent 45-degree LOOK while the vehicle starts at
+	// 0 degrees. The authority motor must consume the player's LOOK, not the seat yaw.
+	const int32_t driver_steer_target = w::bam_heading_from_mission_yaw_deg(45.0);
+	constexpr int32_t carrier_heading = 90 * 11930464;
+	const uint32_t local_heading_bits =
+			static_cast<uint32_t>(driver_steer_target) -
+			static_cast<uint32_t>(carrier_heading);
+	const int32_t driver_wire_look = static_cast<int32_t>(
+			(static_cast<uint32_t>(local_heading_bits) & 0xFFFF0000u) +
+			static_cast<uint32_t>(carrier_heading));
+	ns::PlayerIntent intent;
+	intent.entity_handle = ph.packed;
+	intent.item_type_id = 0x14B9;
+	intent.carrier_handle = vh.packed;
+	intent.heading = static_cast<int16_t>(
+			static_cast<uint16_t>(local_heading_bits >> 16));
+	intent.move_input = 0x08;
+	if (!expect(ns::apply_player_intent(world, intent), "driver intent read-applied"))
+		return false;
+	w::AiEntity *driver_ai = ai.for_handle(ph);
+	if (!expect(driver_ai != nullptr && driver_ai->net_is_remote_peer &&
+	                    driver_ai->heading == driver_wire_look && player->yaw == 45,
+	            "driver wire LOOK differs from the vehicle seat yaw"))
+		return false;
 
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
@@ -1259,24 +1409,54 @@ bool run_vehicle_drive_authority() {
 		if (r.handle == vh.packed) ra = &r;
 	if (!expect(ra != nullptr, "vehicle record present in frame A")) return false;
 
-	// 62 authority ticks: the vehicle motor consumes the driver's input.
+	// First authority tick: pose_if_mounted must preserve the wire LOOK until the
+	// vehicle pass consumes it, and the post-motor seat refresh must not overwrite it.
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = true;
-	for (int i = 0; i < 62; ++i) {
+	ctx.logic_tick = 0;
+	ai.tick(world, ctx);
+	w::Entity *veh = world.registry.get(vh);
+	player = world.registry.get(ph);
+	driver_ai = ai.for_handle(ph);
+	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_steer_target,
+	            "authority motor consumes the remote driver's preserved LOOK"))
+		return false;
+	if (!expect(player != nullptr && driver_ai != nullptr && player->yaw == 45 &&
+	                    driver_ai->heading == driver_wire_look,
+	            "post-motor mounted refresh preserves remote driver LOOK"))
+		return false;
+	const int32_t seat_body_heading = static_cast<int32_t>(
+			static_cast<int64_t>(90 - veh->yaw) * 11930464);
+	if (!expect(driver_ai->inf.body_heading == seat_body_heading,
+	            "remote driver's carried body remains seat-owned"))
+		return false;
+
+	// Complete 62 authority ticks: the vehicle keeps consuming the replicated input.
+	for (int i = 1; i < 62; ++i) {
 		ctx.logic_tick = static_cast<uint32_t>(i);
 		ai.tick(world, ctx);
 	}
-	w::Entity *veh = world.registry.get(vh);
+	veh = world.registry.get(vh);
 	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))
 		return false;
 	// 62 ticks from standstill: the unclamped launch step (861) + 61 accel-clamped ticks
 	// (+60) — deterministic [orig: the @0x48bb46 branch tree + ±itemDef->acceleration].
 	if (!expect(veh->veh.speed == 861 + 60 * 61, "speed ramp matches the clamp math"))
 		return false;
+	if (!expect(veh->veh.cmd_speed == 94 * 293,
+	            "live forward command remains the items.def player-speed register"))
+		return false;
 	const float moved = std::fabs(veh->position.x - 12.0f) + std::fabs(veh->position.y - 20.0f);
 	if (!expect(moved > 0.5f, "vehicle moved under the driver's replicated input"))
 		return false;
+	// Exercise all three live vehicleData command registers at the production
+	// world -> snapshot -> fanout boundary. Ground drive naturally authored the
+	// longitudinal register above; the lateral register is normally zero for a
+	// ground family, so stamp an independently worked air-style value here. The
+	// non-aligned heading also pins the writer's witnessed rounded i16 BAM width.
+	veh->veh.cmd_lateral_speed = 12345;
+	veh->veh.steer_target_bam = static_cast<int32_t>(0x1234ABCDu);
 
 	// Frame B: the streamed record carries the LIVE pose (compressed coords changed while
 	// the recipient anchor held still).
@@ -1286,14 +1466,64 @@ bool run_vehicle_drive_authority() {
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fb),
 	            "frame B decodes")) return false;
 	const nw::FrameUpdateRecord *rb = nullptr;
+	const nw::FrameUpdateRecord *rider_b = nullptr;
 	for (const auto &r : fb.records)
 		if (r.handle == vh.packed) rb = &r;
+		else if (r.handle == ph.packed) rider_b = &r;
 	if (!expect(rb != nullptr, "vehicle record present in frame B")) return false;
-	if (!expect(ra->vehicle.pos_x_compressed != rb->vehicle.pos_x_compressed ||
-	                    ra->vehicle.pos_y_compressed != rb->vehicle.pos_y_compressed,
-	            "vehicle record pose is LIVE (host-simulated)"))
+	if (!expect(rider_b != nullptr, "mounted driver record present in frame B"))
+		return false;
+	// The recipient anchor is its mounted player and therefore moves with this
+	// zero-offset seat; the vehicle's compressed local coordinates can remain
+	// unchanged even though its world pose advanced. Pin both the moving anchor
+	// and the reconstructed final vehicle world pose instead.
+	if (!expect(fa.anchor_x != fb.anchor_x || fa.anchor_y != fb.anchor_y,
+	            "mounted recipient anchor follows the live authority vehicle"))
+		return false;
+	if (!expect(
+	                    fb.anchor_x + nw::network_decompress_fixedpoint(
+	                                          rb->vehicle.pos_x_compressed) ==
+	                            codec_recon(w::to_fixed(veh->position.x), fb.anchor_x) &&
+	                    fb.anchor_y + nw::network_decompress_fixedpoint(
+	                                          rb->vehicle.pos_y_compressed) ==
+	                            codec_recon(w::to_fixed(veh->position.y), fb.anchor_y),
+	            "vehicle record reconstructs the final live host pose"))
 		return false;
 	if (!expect(rb->vehicle.health_word == 3000, "live record keeps the health word"))
+		return false;
+	if (!expect(rb->vehicle.weapon_aim_y == 0x35D0,
+	            "vehicle forward command uses the 16-bit fixed-point wire register"))
+		return false;
+	if (!expect(rb->vehicle.weapon_aim_z == 0x1820,
+	            "vehicle lateral command uses the 16-bit fixed-point wire register"))
+		return false;
+	if (!expect(static_cast<uint16_t>(rb->vehicle.weapon_heading_bam) == 0x1235,
+	            "vehicle steer target uses the rounded high i16 BAM register"))
+		return false;
+	if (!expect(rider_b->player.carrier_handle == vh.packed &&
+	                    rider_b->player.pos_x_compressed == 0 &&
+	                    rider_b->player.pos_y_compressed == 0 &&
+	                    rider_b->player.pos_z_compressed == 0,
+	            "authority emits the driver's zero seat offset against the final carrier pose"))
+		return false;
+
+	// Decode through the real client fold as well: a child-first pool-0 row must
+	// reconstruct at the final same-frame pool-1 carrier, not at its pre-motor pose.
+	ns::ClientReplicaPipeline view(attach_test_class);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
+	const ns::ClientEntityState *decoded_driver = view.state().find(ph.packed);
+	const ns::ClientEntityState *decoded_vehicle = view.state().find(vh.packed);
+	if (!expect(decoded_driver != nullptr && decoded_vehicle != nullptr &&
+	                    decoded_driver->x == decoded_vehicle->x &&
+	                    decoded_driver->y == decoded_vehicle->y &&
+	                    decoded_driver->z == decoded_vehicle->z,
+	            "decoded mounted driver follows the authority vehicle's final same-tick pose"))
+		return false;
+	if (!expect(decoded_vehicle->vehicle_speed_reg == 27552 &&
+	                    decoded_vehicle->vehicle_lat_reg == 12352 &&
+	                    decoded_vehicle->vehicle_steer_bam ==
+	                            static_cast<int32_t>(0x12350000u),
+	            "client fold receives the host's quantized forward/lateral/steer registers"))
 		return false;
 	std::printf("PASS vehicle_drive_authority\n");
 	return true;
@@ -1306,6 +1536,7 @@ int main() {
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
+	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
 	                run_round_event_fanout();

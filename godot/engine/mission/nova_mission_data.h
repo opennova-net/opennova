@@ -125,12 +125,17 @@ public:
 	// post-state: loaded document, source_path cleared, modified flag cleared, history reset.
 	// Always returns OK.
 	Error create_default();
+	// Build the client-side mission metadata view from the exact 616-byte BMS
+	// header carried by retail S2C 0x0B. This never opens a local .bms and the
+	// resulting document deliberately has no authored body records.
+	Error open_wire_header(const PackedByteArray &p_header_bytes);
 	// Load a .bms/.mis by flat name through the mounted resource root (VFS), so missions packed in
 	// PFF archives load at runtime. p_lookup_policy uses NovaResourceRoot::LookupPolicy ordinals;
 	// its default preserves the mounted session policy for every existing caller.
 	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name,
 			int p_lookup_policy = 0);
 	bool is_loaded() const;
+	bool is_wire_header_only() const;
 	String get_source_path() const;
 	String get_last_error() const;
 

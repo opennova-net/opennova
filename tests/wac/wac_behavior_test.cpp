@@ -49,6 +49,42 @@ static void test_execution_cadence() {
     CHECK(sys.runs() == 1);
 }
 
+// Mission startup executes the VM directly once, without consuming the normal
+// 62-tick divider. Capturing/restoring that temporal state prevents initial
+// edge predicates from firing a second time after Stop/Play.
+static void test_initial_execution_and_runtime_state() {
+    World w = make_world();
+    WacSystem sys;
+    CompileEnv env;
+    sys.set_program(compile_source("if never() then inc(v1) endif\n", env));
+    w.add_system(&sys);
+    w.load_systems();
+
+    CHECK(sys.execute_initial(w));
+    CHECK(!sys.execute_initial(w));
+    CHECK(w.vars.get_mission(1) == 1);
+    CHECK(sys.runs() == 1);
+    CHECK(sys.vm().time() == 1);
+    const WacSystem::RuntimeState startup = sys.capture_runtime_state();
+
+    for (int i = 0; i < WacSystem::kTicksPerExecution - 1; ++i)
+        w.run_logic_tick(/*is_authority=*/true);
+    CHECK(sys.runs() == 1);
+    w.run_logic_tick(/*is_authority=*/true);
+    CHECK(sys.runs() == 2);
+    CHECK(w.vars.get_mission(1) == 1); // the initial edge remains active
+
+    w.load_systems();
+    CHECK(sys.runs() == 0);
+    sys.restore_runtime_state(startup);
+    CHECK(sys.runs() == 1);
+    CHECK(sys.vm().time() == 1);
+    for (int i = 0; i < WacSystem::kTicksPerExecution; ++i)
+        w.run_logic_tick(/*is_authority=*/true);
+    CHECK(sys.runs() == 2);
+    CHECK(w.vars.get_mission(1) == 1);
+}
+
 static void test_var_math() {
     World w = make_world();
     WacSystem sys;
@@ -361,6 +397,7 @@ static void test_04tr_outcome_block_blue_priority() {
 
 int main() {
     test_execution_cadence();
+	test_initial_execution_and_runtime_state();
     test_var_math();
     test_ssn_kill();
     test_temporal_past();

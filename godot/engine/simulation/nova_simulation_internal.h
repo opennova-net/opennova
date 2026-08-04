@@ -45,6 +45,7 @@
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
 #include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
+#include <world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
 
 #include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"
@@ -410,9 +411,11 @@ inline bool emplaced_weapon_controls_for_client(
 				seat->type != opennova::world::SeatType::Gunner)
 			continue;
 
-		// NetClientView has already composed mounted yaw into world heading and
+		// ClientReplicaPipeline has already composed mounted yaw into world heading and
 		// reconstructed an infantry gunner's live entity pitch from the compact
-		// aim target using retail's one-eighth chase.
+		// aim target using retail's one-eighth chase. Root headings read the
+		// row's live BAM (chased on a joiner — §5.38e; full euler precision for
+		// vehicles).
 		const int32_t parent_heading = mount.heading_bam;
 		const int32_t occupant_heading = occupant.heading_bam;
 		const int32_t occupant_pitch =
@@ -453,12 +456,22 @@ inline bool aim_overlay_inputs_for_client(
 
 	out = opennova::anim::AimOverlayInputs{};
 	out.aim_yaw = entity.heading_bam;
-	out.aim_pitch = static_cast<int32_t>(
-			static_cast<uint32_t>(
-					entity.cls == opennova::EntityClass::Player
-							? entity.pitch_byte
-							: entity.aim_yaw_byte)
-			<< 24);
+	// Free-standing players read the row's live pitch (the org2 body chase
+	// steps it toward the wire byte with divisor 12 on a joiner; snap folds
+	// mirror the byte — §5.38e §3). Mounted players and infantry keep the raw
+	// wire aim byte: their own mover is bit0-skipped and the seat pose owns the
+	// body [orig: the mounted read of entity+0x2D0-desired aim].
+	const bool free_standing_player =
+			entity.cls == opennova::EntityClass::Player &&
+			entity.carrier_handle == 0xFFFFu;
+	out.aim_pitch = free_standing_player
+			? entity.pitch_bam
+			: static_cast<int32_t>(
+					static_cast<uint32_t>(
+							entity.cls == opennova::EntityClass::Player
+									? entity.pitch_byte
+									: entity.aim_yaw_byte)
+					<< 24);
 	out.body_yaw = out.aim_yaw;
 	out.leg_yaw_r = out.body_yaw;
 	out.leg_yaw_l = out.body_yaw;
@@ -520,7 +533,8 @@ inline bool aim_overlay_inputs_for_client(
 
 	// pose_mounted_occupant faces seated slots at carrier+yaw_offset and a
 	// Gunner at carrier-yaw_offset in mission yaw. Engine heading is
-	// (90-mission yaw), so those signs invert here.
+	// (90-mission yaw), so those signs invert here. The carrier root heading is
+	// the row's live BAM (chased on a joiner — §5.38e).
 	const int32_t carrier_heading = carrier->heading_bam;
 	const int32_t offset = opennova::world::bam_from_degrees_wrapped(
 			static_cast<double>(seat->yaw_offset));

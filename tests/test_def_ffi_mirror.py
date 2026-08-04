@@ -109,6 +109,29 @@ def test_weapon_exact_carriers_are_append_only_in_both_mirrors():
         assert ctypes.sizeof(weapon_cls) - fields_end < ctypes.alignment(weapon_cls)
 
 
+def test_item_air_family_params_present_in_both_mirrors():
+    """The three air-family item fields sit between slip_slope and turn_rate.
+
+    Pinned independently of the cross-mirror comparison so BOTH mirrors cannot
+    agree on the same stale layout that omits them (the weapon-tail pin's
+    sibling for the DefItemDef mid-struct insertion; the native side is
+    def.h's climb_speed [orig: 293*atol store @0x49db4a] / turnroll /
+    speedpitch trio).
+    """
+    expected_run = ["slip_slope", "climb_speed", "turn_roll", "speed_pitch", "turn_rate"]
+    platform_run = ["torque", "mass", "lean", "lean_velocity", "pitch",
+                    "pitch_velocity", "bob", "flip", "critical_hp"]
+    blender = _load_blender_def_ffi()
+    for item_cls in (py_def.DefItemDef, blender.DefItemDef):
+        names = [name for name, _ctype in item_cls._fields_]
+        start = names.index("slip_slope")
+        assert names[start:start + len(expected_run)] == expected_run
+        for field in ("climb_speed", "turn_roll", "speed_pitch"):
+            assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
+        start = names.index("torque")
+        assert names[start:start + len(platform_run)] == platform_run
+
+
 def _skip_without_native():
     try:
         py_def._bind()

@@ -107,10 +107,12 @@ func _process(delta: float) -> void:
 	if sim.has_method("is_session_lost") and bool(sim.is_session_lost()):
 		teardown()
 		return
-	# The screen's lifetime is the server-driven hold: it closes when the deployment
-	# release lands (in-match) — one 0x0A frame with flags1 bit1 clear in retail
+	# The screen's lifetime is the server-driven deployment-pending bit, independent
+	# from the active-session/gameplay state. Retail's initial 0x5A grants resume
+	# uplinks before the player picks, while flags1 bit1 keeps this screen visible;
+	# only the host clearing that bit closes it.
 	# [orig: the §5.61 hold chain — g_deploy_screen_active follows the bit every frame].
-	if bool(sim.is_joined_in_match()) or not bool(sim.is_join_deploy_pick_pending()):
+	if not bool(sim.is_join_deploy_pick_pending()):
 		close()
 		return
 	# Periodic content refresh: zone security/ownership can change while picking

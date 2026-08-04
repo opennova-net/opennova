@@ -48,6 +48,7 @@ class PuntedJoinerSim:
 	var loss_reason := ""
 	var pick_pending := true
 	var in_match := false
+	var initial_admission_complete := true
 	var picks: Array[int] = []
 	var zones: Array[Dictionary] = []
 
@@ -59,6 +60,9 @@ class PuntedJoinerSim:
 
 	func is_join_deploy_pick_pending() -> bool:
 		return pick_pending
+
+	func is_join_initial_admission_complete() -> bool:
+		return initial_admission_complete
 
 	func is_session_lost() -> bool:
 		return not loss_reason.is_empty()
@@ -188,9 +192,12 @@ func test_world_raises_the_hosts_close_once_from_the_deploy_wait() -> void:
 	_install_runtime(world, runtime)
 	var reasons: Array = []
 	var deploy_edges := [0]
+	var admission_edges := [0]
 	world.session_lost.connect(func(reason: String) -> void: reasons.append(reason))
 	world.join_deploy_pick_required.connect(
 			func() -> void: deploy_edges[0] = int(deploy_edges[0]) + 1)
+	world.join_admission_ready.connect(
+			func() -> void: admission_edges[0] = int(admission_edges[0]) + 1)
 
 	world.tick(Vector3.ZERO)
 	assert_eq(int(deploy_edges[0]), 1, "the owed pick opens the deploy screen once")
@@ -202,6 +209,8 @@ func test_world_raises_the_hosts_close_once_from_the_deploy_wait() -> void:
 			"the host's close reaches the shell carrying the decoded reason verbatim")
 	assert_eq(int(deploy_edges[0]), 1,
 			"a closed session never re-opens the deploy screen")
+	assert_eq(int(admission_edges[0]), 0,
+			"a terminal close cannot turn the monotonic admission latch into a ready edge")
 
 	world.tick(Vector3.ZERO)
 	world.tick(Vector3.ZERO)

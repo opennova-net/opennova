@@ -1,7 +1,8 @@
 // NovaSimulation — presentation reads: entity/pose getters, the present-effect
-// pose cache, the packed present snapshots (AI pool + client view), HUD views,
+// pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
+#include "simulation/client_replica_present_projection.h"
 
 #include <cstring>
 
@@ -441,6 +442,13 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["hidden"] = ent ? ent->hidden : false;
 	out["held"] = ent ? ent->held : false;
 	out["disabled"] = ent ? ent->disabled : false;
+	out["vehicle_family"] = -1;
+	if (ent != nullptr) {
+		if (const opennova::world::VehicleTraits *traits =
+					world_->vehicle_traits.get(ent->item_id)) {
+			out["vehicle_family"] = static_cast<int>(traits->family);
+		}
+	}
 	out["body_anim_slot"] = ent ? ent->body_anim_slot : -1;
 	out["character_anim_slot"] = ent ? static_cast<int>(ent->anim_slot) : -1;
 	out["minimap_net_id"] = ent ? static_cast<int>(ent->minimap_net_id) : 0;
@@ -710,7 +718,7 @@ void NovaSimulation::ensure_present_effect_pose_cache() const {
 
 bool NovaSimulation::cache_present_effect_pose(
 		const opennova::netsim::ClientEntityState &p_entity_state) const {
-	// Match present_snapshot_from_client_view's joiner self-filter: the host's
+	// Match present_snapshot_from_client_replicas' joiner self-filter: the host's
 	// wire echo H is not drawn and therefore cannot own a presented effect.
 	// Packed handle zero is a valid pool-0 identity, so presence rides the
 	// runtime's explicit validity seam, never a zero sentinel.
@@ -984,7 +992,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 	// getters (get_entity_*) read the AI pool for tooling.
 	PackedFloat32Array out;
 	if (runtime_) {
-		out = present_snapshot_from_client_view();
+		out = present_snapshot_from_client_replicas();
 	}
 	last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
 	std::vector<PresentRowIdentity> next_layout;
@@ -1007,7 +1015,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		last_present_snapshot_us_ = perf_now_us() - start_us;
 	return out;
 }
-PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
+PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const {
 	PackedFloat32Array out;
 	if (!world_ || !runtime_) return out;
 	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
@@ -1023,27 +1031,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
+	const ClientReplicaPresentContext replica_present_context{
+			&item_seat_specs_, &world_->weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
 		const opennova::netsim::ClientEntityState &es = cs.entities[i];
-		r[PF_KIND] = -1.0f; r[PF_INDEX] = -1.0f; r[PF_BMS_ID] = 0.0f; r[PF_NET_ID] = 0.0f;
-		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
-		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
-		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = -1.0f;
-		r[PF_ANIM_SOURCE_STATE] = -1.0f;
-		r[PF_ANIM_SOURCE_PHASE_TICKS] = -1.0f;
-		r[PF_ANIM_BLEND_WEIGHT] = 1.0f;
-		r[PF_ANIM_REMOTE_REQUEST] = 0.0f;
-		r[PF_ANIM_STATE_PULSE] = -1.0f; r[PF_ANIM_PULSE_TICKS] = -1.0f;
-		r[PF_WPN_ANIM_STATE] = -1.0f; r[PF_WPN_PHASE_TICKS] = -1.0f;
-		r[PF_HIDDEN] = 0.0f; r[PF_LOCAL_VIEW_SUPPRESSED] = 0.0f;
-		r[PF_ALIVE] = 1.0f; r[PF_RESPAWN_REVISION] = 0.0f;
-		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
-		for (int field = PF_AIM_OVERLAY_VALID; field < PF_STRIDE; ++field)
-			r[field] = 0.0f;
+		initialize_client_replica_present_row(r);
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
 		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
@@ -1053,26 +1048,21 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				es.handle == runtime_->self_handle()) {
 			continue;
 		}
-		// Wire identity for the render pass. The joiner has no authoritative registry for
-		// the host's entities, so it renders from the wire type id + handle, not a node.
-		r[PF_TYPE_ID] = static_cast<float>(es.type_id);
-		r[PF_WIRE_HANDLE] = static_cast<float>(es.handle);
+		// The canonical decoded-client projection owns wire identity, pose,
+		// lifecycle, and remote Person appearance for every role. The remainder
+		// of this method is role/world enrichment only.
+		project_client_replica_present_row(
+				r, es, cs, replica_present_context);
 
-		// On the HOST listen server, kind/index/bms_id/net_id resolve from the registry
-		// entity behind the decoded handle (host == authoritative client, so the placed-node
-		// mapping still resolves through MissionEntityRegistry exactly as the AI-pool path
-		// does). A joiner resolves the DEFER IDENTITY the same way for mission pools 1-3:
-		// its locally promoted world shares the host's pool/slot handle space for .bms
-		// entities — promote order mirrors Mission_LoadBMSFile @0x40f4e0 on both sides, the
-		// same identity assumption sync_joiner_authoritative_mount already relies on — so a
-		// streamed vehicle/building/marker row maps onto its locally PLACED node and renders
-		// batched + occludable through MissionPresentPass instead of wire-direct. The fill is
-		// type-guarded (a drifted slot must never adopt a wrong node), skips synthetic
-		// children (spawn_origin sentinel), and fills ONLY the identity: hidden/alive/anim
-		// state keep coming from the wire bytes below, because the joiner's local sim is not
-		// authoritative for any of them. Pool-0 organics (players + streamed AI) stay
-		// wire-rendered — their body-anim path is remote-request-shaped, which the mission
-		// pass does not model.
+		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored
+		// registry entity behind the decoded handle, so MissionEntityRegistry can defer
+		// that row to MissionPresentPass. A production header-only joiner instead presents
+		// every streamed row wire-direct: pools 1-3 have exact-handle native gameplay rows,
+		// but those rows carry the spawn-origin sentinel and therefore no authored-node
+		// identity. The guarded fill below exists only for an explicit complete-BMS/debug
+		// join, where authored promotion supplied a matching type at the same handle.
+		// Hidden/alive/animation state still comes from the wire. Remote pool-0 organics
+		// remain wire-rendered through their remote-request-shaped body path.
 		const opennova::world::EntityHandle h{es.handle};
 		const opennova::world::Entity *ent = (!joiner_) ? world_->registry.get(h) : nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
@@ -1148,7 +1138,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		// LFP only when the client-side shared timer-list entry exists.
 		// Values come from the decoded client row for BOTH authority and joiner:
 		// this preserves the exact 0x0D/0x10/0x20 bytes and later S2C 0x50 team
-		// mutations instead of reaching around the client view.
+		// mutations instead of reaching around the replica pipeline.
 		// [orig: render_sector_entity @0x5C424F..0x5C425F;
 		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB]
 		const bool zone_ctrl = es.zone_number_rank != 0;
@@ -1171,33 +1161,22 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 				r[PF_LFP_CAMPPERCENT] = static_cast<float>(camp_percent);
 			}
 		}
-		// A joiner cannot resolve host wire handles through its local registry.
-		// Organic lifecycle therefore comes straight from the raw compact byte:
-		// bit 0 hides, bit 1 is dead/undeployed. The revision survives multiple
-		// decoded frames between render passes and gives presentation a stable
-		// signal to reset one-shot/body-channel state on respawn.
-		// Both roles fold compact lifecycle records. Preserve the epoch on the
-		// host too: WirePresentPass renders admitted remote players that have no
-		// placed mission node.
-		r[PF_RESPAWN_REVISION] = static_cast<float>(es.respawn_revision);
-		if (joiner_) {
-			if (es.state_flags_known) {
-				r[PF_HIDDEN] = (es.state_flags & 0x01u) != 0u ? 1.0f : 0.0f;
-				r[PF_ALIVE] = (es.state_flags & opennova::world::kEntityFlagDead) == 0u ? 1.0f : 0.0f;
-			}
-		}
+		// Wire lifecycle — PF_RESPAWN_REVISION, the bit0 hide with its
+		// carrier-attach exemption, and the class-dependent dead bit (vehicle
+		// wrecks are flags&4, not the organic bit 1) — is written by
+		// project_client_replica_present_row for every role; the authoritative
+		// registry block above overrides hidden/alive on the host. Do not
+		// re-derive it here: a pre-ADR-0026 copy of this logic once drifted by
+		// testing vehicles against the organic dead bit.
 		EmplacedWeaponControls emplaced;
 		if (ent != nullptr) {
 			if (emplaced_weapon_controls_for(
 						*world_, ai_.get(), *ent, emplaced))
 				write_present_emplaced_controls(r, emplaced);
-		} else if (joiner_ &&
-				emplaced_weapon_controls_for_client(
-						es, cs, item_seat_specs_, emplaced)) {
-			write_present_emplaced_controls(r, emplaced);
 		}
 		const bool authoritative_attachment_pose =
 				ent != nullptr && ent->emplacement_parent.valid() &&
+				ent->emplacement_pose_metadata_resolved &&
 				ent->emplacement_parent.packed == es.parent_handle;
 		opennova::world::MountedPose client_attachment_pose;
 		const uint32_t attachment_time_ms = panm_time_override_ms_ >= 0
@@ -1225,19 +1204,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_PITCH_DEG] = static_cast<float>(client_attachment_pose.pitch);
 			r[PF_YAW_DEG] = static_cast<float>(client_attachment_pose.yaw);
 			r[PF_ROLL_DEG] = static_cast<float>(client_attachment_pose.roll);
-		} else {
-			// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y)
-			// world units, the SAME remap the AI-pool path uses. Position is
-			// post-compression (lossy), exactly what retail renders for decoded peers.
-			r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
-			r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
-			r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
-			// The decoded body keeps a full client-side heading: each wire sample
-			// re-seeds its high byte, then sub-byte body effects such as recoil apply.
-			const int32_t heading_bam = es.heading_bam;
-			r[PF_YAW_DEG] = static_cast<float>(
-					opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
 		}
+		// No unattached else: the projection already wrote the decoded wire
+		// pose — the chased/snapped position, the vehicle BAM32 euler X/Y, and
+		// the full-16-bit-precision heading (net-re §5.38e, D-NET-196). The
+		// two attachment branches above and the host's authoritative registry
+		// pitch/roll (the `ent` block) override it where a better source
+		// exists; re-deriving the wire pose here would re-clobber the host's
+		// live vehicle attitude with the stale spawn/dead-pose eulers.
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
 		if (world_->ai && !joiner_) {
 			const AiEntity *ae = world_->ai->for_handle(h);
@@ -1305,96 +1279,6 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 								(ent->flags & 2u) != 0, inputs,
 								ae->inf.wpn_state);
 					}
-				}
-			}
-		}
-		if (joiner_) {
-			opennova::anim::AimOverlayInputs inputs;
-			bool collapse_right_hand = false;
-			if (aim_overlay_inputs_for_client(
-						es, cs, item_seat_specs_, inputs,
-						&collapse_right_hand)) {
-				r[PF_ANIM_STATE] =
-						static_cast<float>(es.anim_state_id);
-				r[PF_ANIM_REMOTE_REQUEST] = 1.0f;
-				// A transition state that arrived and was overwritten within
-				// this fold window (a tapped prone roll rides the wire for 1-2
-				// ticks). Presentation dispatches it BEFORE the current state,
-				// replaying retail's per-record apply order [orig: @0x4c1153].
-				if (es.anim_state_pulse >= 0) {
-					r[PF_ANIM_STATE_PULSE] =
-							static_cast<float>(es.anim_state_pulse);
-					if (es.cls == opennova::EntityClass::Player) {
-						r[PF_ANIM_PULSE_TICKS] =
-								static_cast<float>(es.anim_pulse_ratio);
-					}
-				}
-				// The player compact's byte 15 is the authority's elapsed
-				// half-frame ticks in the current body loop. Retail applies it
-				// to remote players as the anim-channel phase seed. Infantry
-				// compacts carry only the state byte, so their -1 sentinel tells
-				// presentation to advance the selected clip locally.
-				// [orig: player write @0x4c0cf2; remote apply @0x4c11a6;
-				//  AnimMap_UpdateEntity consumes entity+0x377 @0x40b74b]
-				if (es.cls == opennova::EntityClass::Player) {
-					r[PF_ANIM_PHASE_TICKS] =
-							static_cast<float>(es.anim_channel_ratio);
-				}
-				r[PF_RIGHT_HAND_COLLAPSED] =
-						collapse_right_hand ? 1.0f : 0.0f;
-				// The peer's upper-body weapon pose, re-derived here exactly as
-				// every retail observer re-derives it: the hold kind from the ADM
-				// table by the peer's own equipped index (wire off-16), and the
-				// scoped/binocular conditions from its own Flags byte (wire off-13,
-				// which the remote read-mask 0xFD preserves). Nothing about this
-				// crosses the wire — there is no scope message and no scoped anim
-				// id — so a joiner that ignores these two bytes shows every peer
-				// holding a rifle at rest whatever they are actually carrying.
-				// [orig: kind read @0x4b5dba, scope test @0x4b5deb; the selection
-				//  has no ownership gate — only the local Flags refresh does,
-				//  @0x4b5d77]
-				// The peer's hold state is derived once, OUTSIDE the channel-visibility
-				// gate below: the upper-body pose is gated, but the held weapon's attach
-				// FRAME is selected from the same state whenever the weapon is drawn, so
-				// gating this would silently hand every knife and grenade the wrong frame.
-				int wpn_hold_state = -1;
-				if (es.cls == opennova::EntityClass::Player) {
-					int hold_kind = 0;
-					if (world_) {
-						if (const opennova::world::WeaponTableEntry *held =
-									world_->weapons.by_index(
-											es.equipped_adm_index))
-							hold_kind = held->special_hold;
-					}
-					wpn_hold_state = opennova::world::infantry_weapon_hold_state(
-							hold_kind, es.anim_state_id,
-							(es.state_flags & opennova::world::kEntityFlagScopeRaised) != 0,
-							(es.state_flags & opennova::world::kEntityFlagBinoculars) != 0,
-							/*reloading=*/false);
-				}
-				if (es.cls == opennova::EntityClass::Player && !collapse_right_hand &&
-						(opennova::world::infantry_anim_flags(es.anim_state_id) &
-						 0x40u) != 0) {
-					r[PF_WPN_ANIM_STATE] = static_cast<float>(wpn_hold_state);
-					// -1 = presentation free-runs the secondary clip. The playhead
-					// is not replicated (the compact carries only the PRIMARY
-					// ratio), and retail's client advances it locally; this is the
-					// same wire-state/local-phase split the primary clip already
-					// uses for rows whose phase arrives as -1.
-					r[PF_WPN_PHASE_TICKS] = -1.0f;
-				}
-				opennova::anim::AimOverlayAngles
-						angles[opennova::anim::kOverlayClassCount];
-				opennova::anim::compute_aim_overlay_angles(inputs, angles);
-				write_present_overlay(r, angles);
-				// The peer's third-person gun, from the equipped ADM index its own
-				// compact record carries. Infantry rows are not players and carry
-				// no index. The dead bit is the record's state byte 0x02.
-				if (es.cls == opennova::EntityClass::Player) {
-					write_present_held_weapon(
-							r, es.equipped_adm_index,
-							(es.state_flags & opennova::world::kEntityFlagDead) != 0, inputs,
-							wpn_hold_state);
 				}
 			}
 		}

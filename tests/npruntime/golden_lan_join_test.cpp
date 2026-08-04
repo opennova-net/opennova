@@ -10,12 +10,11 @@
 //   order is asserted field-for-field by npruntime_initial_state_burst.)
 //
 // BYTE-PARITY (added 2026-06-27, §5.2a serializers ported):
-//   The config-independent 0x2A table record is asserted byte-equal to the retail capture's 0x2A
-//   bodies (our port reproduces retail exactly). The host-config-dependent serializers (0x2C/0x08/
-//   0x66/0x76) are asserted STRUCTURE-equal (the layout our serializer emits — string count / fixed
-//   size / count-prefix), since their VALUES are the capture host's config (server name, rules, tick)
-//   and our host's differ. World-stream bodies are built from our own World (not the capture's
-//   mission), so those stay order-only.
+//   The config-independent 0x2A table record and retail-default 0x76 class mask are asserted
+//   byte-equal to the capture. The host-config-dependent 0x2C/0x08/0x66 serializers are asserted
+//   STRUCTURE-equal (string count / fixed size / count-prefix), since their values are the capture
+//   host's server name and rules and our host's differ. A separate non-default 0x76 regression pins
+//   configured sourcing. World-stream bodies are built from our own World, so those stay order-only.
 
 #include <npwire/wire_capture.h>
 
@@ -159,13 +158,14 @@ int main() {
 	if (const InGameMessage *m = first_msg(0x66))
 		ok = expect(!m->payload.empty() && m->payload.size() == 1u + 2u * m->payload[0],
 		            "§5.2a: retail 0x66 is count + 2*count pairs (== our serializer shape)") && ok;
-	// 0x76: server tick16 — 2 bytes.
+	// 0x76: class-allow mask — captured default/all-ten-classes word, little-endian.
 	if (const InGameMessage *m = first_msg(0x76))
-		ok = expect(m->payload.size() == 2, "§5.2a: retail 0x76 server-tick16 is 2 bytes (== our serializer)") && ok;
+		ok = expect(m->payload == std::vector<uint8_t>({0xff, 0x03}),
+		            "§5.2a: retail 0x76 class-allow mask is exactly 0x03ff") && ok;
 	if (!ok) return 1;
 
-	std::printf("[golden] §5.2a serializer parity: 0x2A byte-exact (%d records); 0x2C/0x08/0x66/0x76"
-	            " structure-exact. World-stream bodies stay order-only (built from our World).\n", n2a);
+	std::printf("[golden] §5.2a serializer parity: 0x2A byte-exact (%d records), 0x76 byte-exact; "
+	            "0x2C/0x08/0x66 structure-exact. World-stream bodies stay order-only (built from our World).\n", n2a);
 
 	std::printf("OK\n");
 	return 0;

@@ -184,10 +184,23 @@ class DefItemDef(ctypes.Structure):
         ("slip_speed", ctypes.c_int),
         ("max_slope", ctypes.c_int),
         ("slip_slope", ctypes.c_int),
+        # Air-family params (climb clamp + attitude-rate cap tokens; mirror def.h).
+        ("climb_speed", ctypes.c_int),
+        ("turn_roll", ctypes.c_int),
+        ("speed_pitch", ctypes.c_int),
         ("turn_rate", ctypes.c_int),
         ("turn_rate2", ctypes.c_int),
         # Collision speed-decay shift count ('torque', raw; mirror def.h).
         ("torque", ctypes.c_int),
+        # Platform-solve tuning block (mirror def.h: mass + lean/lean_velocity/
+        # pitch/pitch_velocity/bob/flip, raw tokens).
+        ("mass", ctypes.c_int),
+        ("lean", ctypes.c_int),
+        ("lean_velocity", ctypes.c_int),
+        ("pitch", ctypes.c_int),
+        ("pitch_velocity", ctypes.c_int),
+        ("bob", ctypes.c_int),
+        ("flip", ctypes.c_int),
         ("critical_hp", ctypes.c_int),
         ("critical_drain", ctypes.c_int),
         ("unit_type", ctypes.c_int),

@@ -30,14 +30,19 @@ struct ClientHello {
 	std::string co;   // Company (e.g. "NovaLogic Inc, Calabasas CA U.S.A.")
 	std::string ap;   // Application (e.g. "JOINTOPS.EXE")
 	std::string bdat; // Build date (e.g. "Jul 21 2009 18:54:41")
+	uint32_t de = 0;  // session_info[54], emitted only when nonzero
 	std::string pn;   // Protocol name (e.g. "NOVAWORLDUDP")
 	std::array<uint8_t, 16> pg{};  // Protocol GUID
 	bool pg_present = false;
 	std::string pv1;  // Protocol Version 1 (e.g. "0.0.0 2/10/2004 EM")
 	std::string pv2;  // Protocol Version 2 (e.g. "1")
+	std::string pv3;  // Optional third version string
 	uint32_t ci = 0;  // Client/Connection Index
+	uint32_t pm = 0;  // transport player count
+	bool pm_present = false; // transport_info[37] == 0; permits an exposed zero count
 	uint32_t eip = 0; // External IP (as uint32, big-endian wire form per inet)
 	uint32_t epn = 0; // External Port Number
+	uint32_t et = 0;  // optional extra parameter
 };
 
 // Server-identity name defaults — ONE home for the three name-bearing wire
@@ -86,7 +91,7 @@ struct ServerHello {
 	bool is_game_server = false;
 	uint32_t sf = 0;          // server flags; retail observed = 0
 	uint32_t p1 = 0;          // gametype; supplied by the live host configuration
-	uint32_t p2 = 0;          // game-config; omitted until its live producer is modeled
+	uint32_t p2 = 0;          // game-config; live CNapiServerConfig_BuildFlags snapshot
 	uint32_t np = 0;          // current player count; supplied by the live host
 	uint32_t mp = 0;          // max players; supplied by the live host
 	std::string sus1;         // unique session id (retail format: GSID-NN-XXXXXXXX-timestamp-hash)
@@ -210,6 +215,13 @@ struct DisconnectEvent {
 	uint32_t dpc = 0;   // reason code; the client's exit-reason switch reads THIS [orig: @0x4c6569]
 	std::string ddstr;  // event tag (retail keeps the first 32 bytes)
 };
+
+// Serialize the seven-field connection-description body in retail's exact
+// DS/DC/DP1/DP2/DSTR/DPC/DDSTR order. Unlike C2S 0x46 ClientGoodBye this is an
+// INNER H:0x03 payload and therefore has no leading session-key dword.
+// [orig: NapiNPDataTransfer_SendDescription @0x628c80]
+std::vector<uint8_t> connection_description_to_bytes(
+		const DisconnectEvent &event);
 
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
 // names are skipped by their length and field order is not assumed, matching the retail walk.

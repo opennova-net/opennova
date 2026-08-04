@@ -2,8 +2,8 @@
 
 #include "npruntime/joiner_connection.h"
 
-#include <netsim/net_client_view.h>     // NetClientView / ClientState
-#include <netsim/session_transport.h>   // ISessionTransport
+#include <netsim/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
+#include <netsim/session_transport.h>        // ISessionTransport
 
 #include <npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
@@ -18,7 +18,7 @@
 
 // P5 — the headless, socket-free CLIENT runtime. The faithful reimpl of the per-frame client net
 // role [orig: Client_ProcessNetworkFrame @0x42c180] composed with the connect-leg state machine
-// (np::JoinerConnection) and the S2C->ClientState fold (netsim::NetClientView). The original runs
+// (np::JoinerConnection) and the S2C->ClientState fold (netsim::ClientReplicaPipeline). The original runs
 // the SAME per-frame function on every machine (it is NOT authority-gated); only the 0x0C uplink
 // inside it is gated !is_authority. So this runtime has two roles, mirroring that:
 //
@@ -36,10 +36,10 @@
 //   - Joiner traffic is whole NWU-framed datagrams (0x41/0x42/0x43/0x81/0x82/0x83). The owner ships
 //     start()/Client_ProcessNetworkFrame() return values over the socket and feeds received
 //     datagrams to receive(). JoinerConnection does the NWU+SCRK decode and surfaces the inner
-//     {tag,body} bodies, which we fold via NetClientView::apply (NOT through a transport).
+//     {tag,body} bodies, which we fold via ClientReplicaPipeline::apply (NOT through a transport).
 //   - HostClient inbound is the inner {tag,body} the host's Server_TickUpdate host_send()s onto the
 //     in-process LoopbackChannel (the ADR-0011 §3 SP crypto bypass — no 0x83 framing on the
-//     loopback), folded via NetClientView::pump(transport).
+//     loopback), folded via ClientReplicaPipeline::pump(transport).
 //
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
@@ -85,16 +85,33 @@ public:
 		return joiner_->frame_stance_change(action_id);
 	}
 
-	// The uplink gate: true once admitted+spawned, cleared on a death sample. Every C2S
-	// gameplay send (0x0C uplink, 0x06 fire, 0x2C ping) rides it.
-	bool is_deployed() const { return deployed_; }
-	// Monotonic receive-side deployment release edge. It advances only when
-	// JoinerConnection accepts the ACK-qualified 0x5A that completes either the
-	// initial deployment or a later re-deployment. Consumers use the revision,
+	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
+	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
+	// and the independent authoritative spawn/health latch to be released.
+	bool is_deployed() const {
+		return deployed_ && authoritative_spawn_released_;
+	}
+	// The literal dword_81474C state. Every valid S2C 0x5A opens it, including
+	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
+	bool gameplay_gate_open() const { return deployed_; }
+	// Monotonic receive-side deployment-release edge. It advances when initial
+	// establishment becomes applicable (even if deploy UI remains pending), and
+	// again on an ACK-qualified post-pick release. Unrelated valid 0x5A grants
+	// still open gameplay_gate_open(), but do not invent a pose/respawn edge.
+	// Consumers use the revision,
 	// rather than positive health alone, to distinguish a real respawn from a
 	// stale 0x0A tail.
 	uint64_t deployment_release_revision() const {
 		return deployment_release_revision_;
+	}
+	// The independent authoritative spawn/health latch. Death closes it; an
+	// applicable 0x5A reopens it. Input case 12 never changes it, so a player-paced
+	// pick cannot manufacture a local death while its gameplay hold is armed.
+	bool authoritative_spawn_released() const {
+		return authoritative_spawn_released_;
+	}
+	uint64_t authoritative_spawn_release_revision() const {
+		return authoritative_spawn_release_revision_;
 	}
 
 	// The inbound ordered frontier (our echoed ack_count) and our outbound sequence.
@@ -120,6 +137,11 @@ public:
 	std::size_t retained_outbound_depth() const {
 		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->retained_outbound_depth()
 		                                                     : 0;
+	}
+	uint32_t send_flush_counter() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->send_flush_counter()
+				: 0;
 	}
 
 	// The per-frame client net role [orig: Client_ProcessNetworkFrame @0x42c180], in witnessed order:
@@ -148,6 +170,10 @@ public:
 	// remains unchanged until the host's S2C 0x49 echo appears in the reload drain.
 	bool queue_fired_round(const ClientFiredRound &round);
 	bool queue_reload_request(const WeaponReload &reload);
+	// Action 6 on a designated-G mounted EWeap selects the child's embedded
+	// MountSlot or its groundEntity vehicle slot. Authority confirms via the
+	// ordinary compact player echo; this only queues the reliable C2S 0x16.
+	bool queue_mounted_weapon_slot_selection(bool use_parent_slot);
 	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
 	std::vector<netsim::ClientRoundEvent> drain_round_events();
@@ -162,13 +188,19 @@ public:
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
 	                  uint32_t tick_seed = 0, bool replay_mode = true);
 
-	// The "deployed" predicate gating the 0x0C uplink. It defaults true on reaching InMatch;
-	// a complete recipient-local 0x0A tail with health <= 0 closes it before the same frame's send.
-	// Positive health does not reopen it: death re-enters JoinerConnection's deployment-pick FSM,
-	// and only the ACK-qualified post-pick 0x5A release returns to InMatch and reopens the gate.
-	// set_deployed remains an explicit simulation/test override.
-	void set_deployed(bool v) { deployed_ = v; }
-	bool deployed() const { return deployed_; }
+	// The two-latch effective predicate gating the 0x0C uplink. Every valid 0x5A
+	// opens the literal gameplay gate even while a spawn-zone deploy screen remains
+	// pending; queuing C2S 0x0E closes only that gate. A complete recipient-local
+	// 0x0A tail with health <= 0 closes only the authoritative spawn latch.
+	// Positive health does not reopen it: death re-enters JoinerConnection's
+	// deployment-pick FSM, and only the applicable post-pick release reopens spawn.
+	// set_deployed remains an explicit simulation/test override and moves both
+	// latches together; production transitions keep their independent semantics.
+	void set_deployed(bool v) {
+		deployed_ = v;
+		authoritative_spawn_released_ = v;
+	}
+	bool deployed() const { return is_deployed(); }
 
 	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
 	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills
@@ -184,6 +216,13 @@ public:
 	}
 	void clear_charattr_challenge_table() {
 		if (joiner_) joiner_->clear_charattr_challenge_table();
+	}
+	bool set_integrity_challenge_profile(std::string_view id) {
+		return joiner_ != nullptr &&
+		       joiner_->set_integrity_challenge_profile(id);
+	}
+	void clear_integrity_challenge_profile() {
+		if (joiner_) joiner_->clear_integrity_challenge_profile();
 	}
 	void set_loaded_model_challenge_snapshot(std::vector<uint32_t> values) {
 		if (joiner_)
@@ -202,9 +241,17 @@ public:
 	bool deployment_pick_pending() const {
 		return joiner_ && joiner_->deployment_pick_pending();
 	}
+	bool initial_admission_complete() const {
+		return joiner_ && joiner_->initial_admission_complete();
+	}
 	// The joiner's server-assigned team (the S2C 0x04 latch) — the deploy screen's
 	// row filter and color source [orig: byte_A85B48].
 	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
+	// Host policy learned from S2C 0x76. HostClient/offline views use the stock
+	// all-ten-classes default; NovaSimulation exposes its configured host value.
+	uint16_t class_allow_mask() const {
+		return joiner_ ? joiner_->class_allow_mask() : 0x03FFu;
+	}
 	// This client's own roster slot id (S2C 0x04 byte 17). Bits 9.. of every fired
 	// round's hit_part word [orig: @0x50bda5]; 0 attributes our shots to the host.
 	uint8_t local_player_slot() const { return joiner_ ? joiner_->local_player_slot() : 0; }
@@ -232,12 +279,16 @@ public:
 		return joiner_ ? joiner_->session_loss_reason() : std::string();
 	}
 	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
-	// Queue the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a spawn-target
-	// handle); the next frame emits it. Re-picks while awaiting the release are allowed.
-	void queue_deployment_pick(uint16_t wire_value) {
-		if (!joiner_) return;
+	// Accept the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a
+	// spawn-target handle). Input case 12 closes retail's gameplay dword now;
+	// framing waits for the next open send boundary. Re-picks while awaiting the
+	// release are allowed. False means the deployment UI/state cannot accept a pick.
+	bool queue_deployment_pick(uint16_t wire_value) {
+		if (!joiner_ || !joiner_->deployment_pick_pending()) return false;
 		pending_deployment_pick_ = wire_value;
 		pending_deployment_pick_set_ = true;
+		deployed_ = false;
+		return true;
 	}
 
 	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
@@ -247,6 +298,23 @@ public:
 	}
 	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
 	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
+	bool has_mission_header() const {
+		return joiner_ && joiner_->has_mission_header();
+	}
+	const std::vector<uint8_t> &mission_header_bytes() const {
+		static const std::vector<uint8_t> empty;
+		return joiner_ ? joiner_->mission_header_bytes() : empty;
+	}
+	bool has_terrain_til() const {
+		return joiner_ && joiner_->has_terrain_til();
+	}
+	TerrainTilState terrain_til_state() const {
+		return joiner_ ? joiner_->terrain_til_state() : TerrainTilState::Absent;
+	}
+	const std::vector<uint8_t> &terrain_til_bytes() const {
+		static const std::vector<uint8_t> empty;
+		return joiner_ ? joiner_->terrain_til_bytes() : empty;
+	}
 	// The terminal pre-world sync marker was received and its ACK reached the send boundary.
 	bool preload_ready() const { return joiner_ && joiner_->preload_ready(); }
 	// Admission-stage name for diagnostics (the shell's post-load join watchdog).
@@ -310,19 +378,26 @@ public:
 		return authoritative_loadout_;
 	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
+	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
 
 	const netsim::ClientState &state() const { return view_.state(); }
 	netsim::ClientState &state() { return view_.state(); }
 	// Called by the joiner simulation after decoded round events have stamped
 	// remote recoil, preserving retail's receive -> body-decay frame order.
 	void tick_remote_recoil() { view_.tick_recoil(); }
-	netsim::NetClientView &view() { return view_; }
+	// Called by an embedding simulation after its world-side vehicle movers have
+	// mirrored their final poses into the decoded rows. The library-only remote
+	// mover already runs this phase internally; the explicit seam prevents
+	// riders/attachments from observing the previous world-mover tick.
+	void refresh_remote_attachments() { view_.refresh_carried_entities(); }
+	netsim::ClientReplicaPipeline &view() { return view_; }
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 
 private:
 	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
 	// frame.
 	std::vector<std::vector<uint8_t>> run_frame(const PlayerExtendedUplink *uplink, uint32_t now_tick);
+	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
 	void apply_zone_timer_value(const ZoneTimerValue &value);
 	void apply_zone_timer_window(const ZoneTimerWindow &window);
@@ -330,7 +405,7 @@ private:
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only
-	netsim::NetClientView view_;
+	netsim::ClientReplicaPipeline view_;
 	netsim::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
 	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
@@ -343,11 +418,17 @@ private:
 	// send pump. Keep them across held frames, then batch them at the first open boundary beside
 	// one-shots/gameplay.
 	std::deque<ProtocolMessage> pre_send_queue_;
+	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
+	// notifications for the embedding simulation after applying the remote-Person
+	// handler side effect before this frame's body tick.
+	std::vector<WeaponReload> pending_reload_notifications_;
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
 	bool deployed_ = false;
 	uint64_t deployment_release_revision_ = 0;
+	bool authoritative_spawn_released_ = false;
+	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
 	bool pending_loadout_resubmit_ = false;     // one-shot: armory-ACCEPT 0x2F re-send
@@ -365,6 +446,11 @@ private:
 	                                     // vestigial/telemetry state, not a send throttle.
 	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] 0 = best (host clamps 0..4)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
+	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the
+	// countdown re-arms from this at every open boundary [orig: cs_dir0.
+	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
+	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
+	uint32_t send_holdoff_ticks_ = 0;
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

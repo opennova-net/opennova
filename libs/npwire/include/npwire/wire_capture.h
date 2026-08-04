@@ -13,9 +13,12 @@
 // See docs/net/novaworld-net-re.md §3 (outer stack) and §4 (tag dispatch).
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <npwire/protocol_message.h>
 
 namespace opennova {
 
@@ -30,6 +33,36 @@ struct CaptureDatagram {
 	std::vector<uint8_t> payload;
 };
 
+// Stable classification for every UDP datagram presented to CaptureDecoder.
+// This is deliberately broader than CapturedSessionPacket: malformed NAPI
+// envelopes, unknown session opcodes, and protocol packets that cannot be
+// decrypted must remain visible to parity tooling instead of disappearing
+// from the decoded-message projection.
+enum class CaptureDatagramClass : uint8_t {
+	Invalid,
+	Unknown,
+	ClientHello,
+	ClientAuth,
+	ServerHello,
+	ServerAuth,
+	ClientProtocol,
+	ServerProtocol,
+};
+
+struct CapturedDatagramResult {
+	int frame_index = 0;
+	int src_port = 0;
+	int dst_port = 0;
+	size_t payload_length = 0;
+	bool outer_decoded = false;
+	uint8_t opcode = 0; // meaningful only when outer_decoded is true
+	CaptureDatagramClass datagram_class = CaptureDatagramClass::Invalid;
+	// Opcode-specific acceptance. For hello/auth this means its body parsed;
+	// for 0x43/0x83 it means an SCRK was present and the protocol packet
+	// decrypted/decoded successfully. Invalid/unknown datagrams stay false.
+	bool decoded = false;
+};
+
 // One fully-decoded in-game protocol message: the reassembled inner body a
 // per-tag decoder (ingame_decode.h) consumes, tagged with its direction and the
 // capture frame the message STARTED on (the first fragment, matching nw_pp).
@@ -41,6 +74,43 @@ struct InGameMessage {
 	int session = 0;              // per-session id = the client-side UDP port (the
 	                              // distinct-participant key); 0 = single/unknown session
 	std::vector<uint8_t> payload; // reassembled inner body
+};
+
+// Physical framing for one decoded inner record before fragment reassembly.
+// This is deliberately captured at the shared parser seam so parity tooling
+// can compare retail's ordered LEN/SKIP/fragment choices without maintaining a
+// second wire parser beside npwire.
+struct CapturedProtocolRecord {
+	uint16_t full_tag = 0;
+	uint8_t raw_flags = 0;
+	uint32_t encoded_length = 0;
+	std::vector<uint8_t> skip_bytes;
+};
+
+// One successfully decrypted 0x43/0x83 session datagram. Unlike
+// InGameMessage, this record is packet-shaped: it exists for header-only
+// packets and for fragments that do not yet complete a semantic message. That
+// makes it the stable sequence/ACK surface used by capture-diff tooling.
+struct CapturedSessionPacket {
+	int frame_index = 0;
+	char dir = '?';
+	int session = 0;
+	ProtocolPacketHeader header{};
+	// Full 9-bit protocol tags in their encoded packet order. Fragment records
+	// remain separate here; semantic reassembly only affects `messages` below.
+	std::vector<uint16_t> tags;
+	// The matching physical records in the same order as `tags`.
+	std::vector<CapturedProtocolRecord> records;
+};
+
+// Detailed output from one streaming push or one whole-capture decode.
+struct CaptureDecodeResult {
+	std::vector<InGameMessage> messages;
+	std::vector<CapturedSessionPacket> session_packets;
+	// Exactly one entry per CaptureDatagram processed, including malformed and
+	// unsupported input. Batch decode preserves input order; a streaming push
+	// therefore returns exactly one entry here.
+	std::vector<CapturedDatagramResult> datagrams;
 };
 
 // Resumable form of the outer-decode pipeline for a LIVE feed: push datagrams as
@@ -67,6 +137,12 @@ public:
 	// that completed on this datagram (0 or more, in order).
 	std::vector<InGameMessage> push(const CaptureDatagram &datagram);
 
+	// Detailed form used by semantic diagnostics. It returns the same completed
+	// messages as push(), plus one packet-header record when the datagram was a
+	// decryptable 0x43/0x83 session packet and exactly one datagram-result record
+	// describing whether the raw input was accepted.
+	CaptureDecodeResult push_detailed(const CaptureDatagram &datagram);
+
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
@@ -79,5 +155,9 @@ private:
 // without them yields no protocol messages — the same limitation nw_pp has).
 std::vector<InGameMessage>
 decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams);
+
+// Decode both semantic messages and packet-level sequence/ACK metadata in one
+// pass. `decode_capture_to_messages` is the compatibility projection of this.
+CaptureDecodeResult decode_capture(const std::vector<CaptureDatagram> &datagrams);
 
 } // namespace opennova

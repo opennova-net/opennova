@@ -1,5 +1,7 @@
 #include "nova_world_host.h"
 
+#include "nova_world_identity.h"
+
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -25,13 +27,14 @@ NovaWorldHost::~NovaWorldHost() = default;
 
 // The host's role-specific halves of the shared NwuLobbySession driver. The
 // gate auth codes and the CU set are stashed/built by the driver itself; the
-// host only supplies its minimal verify identity — the OpenNova gate is
-// permissive (verify is not credential-gated, NW-S5), and NWUID is echoed from
-// the ServerSessionInit by ClientSession so the request stays well-formed.
+// host supplies the same client-environment verify identity as the join path;
+// role does not change the NW-S5 Cookie contract. NWUID is echoed from the
+// ServerSessionInit by ClientSession.
 NwuLobbySession::Hooks NovaWorldHost::make_lobby_hooks() {
 	NwuLobbySession::Hooks hooks;
-	hooks.verify_cookie_vars = []() {
-		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+	hooks.verify_cookie_vars = [this]() {
+		return opennova::make_lobby_identity_vars(collect_lobby_identity_params(
+				lobby_.client_index(), lobby_.client_key()));
 	};
 	hooks.on_session_state = [this]() { sync_session_state(); };
 	hooks.on_fatal = [this](const String &message) { enter_state(STATE_ERROR, message); };

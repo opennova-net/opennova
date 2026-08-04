@@ -91,8 +91,8 @@ struct PromoteOptions {
     // already authored near the target; this mirrors EntityCommands::mount_best's proximity guard.
     float command_mount_radius = 20.0f;
 
-    size_t actor_pool_capacity = 1024;
-    size_t marker_pool_capacity = 4096;
+    size_t actor_pool_capacity = world::kRetailActorPoolCapacity;
+    size_t marker_pool_capacity = world::kRetailMarkerPoolCapacity;
 };
 
 struct PromoteResult {

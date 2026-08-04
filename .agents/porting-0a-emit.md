@@ -5,7 +5,7 @@ fully-witnessed chain; our job is to port that chain into `libs/netsim` **struct
 a broadcast. This doc is the runbook + current state so you can continue without re-deriving.
 
 Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F flood context), and
-**§5.47 (the server emit path — the port spec)**. Divergences: D-NET-134.
+**§5.47 (the server emit path — the port spec)**. Closure: D-NET-134 (FIXED 2026-08-03).
 
 ## The original chain (the port target)
 
@@ -41,8 +41,8 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | sub-block 1 (server-status, C6EAE4 fall-dmg) | DONE | load-bearing; first send is phase 1 |
 | sub-block 0 (weapon) | DONE (golden steady: slots 0, uniformMask 8) | recipient weapon-slot model pending |
 | sub-block 3 (gametype) | DONE (0 B for non-objective) | objective-gametype body pending |
-| **sub-block 2 (env)** | **DEFERRED — D-NET-134** | host doesn't author `world.env`; would clobber client sky |
-| passenger tail (`phase & 0xF == 8`) | deferred | needs vehicle-mount modeling |
+| **sub-block 2 (env)** | **DEFERRED at this snapshot — D-NET-134** | fixed 2026-08-03 with the live environment owner |
+| phase-8 mounted-ammo tail (`phase & 0xF == 8`) | deferred at this snapshot | fixed 2026-08-03 with selected-`MountSlot` modeling |
 | entity loop: priority + aging + 600-B budget | DONE (D-NET-134 step 2) | `select_frame_entities`, `connection_fan.cpp`; round-robin is EMERGENT from aging (no cursor) |
 | replication classes from items.def | DONE (load-bearing) | `resolve_item_traits` (NovaSimulation) stamps `Entity::net_class_code` via `class_from_tag`; pool alone NEVER selects a record (ewep desync, v13) |
 | field-17 health byte (packed tier\|class) | DONE (D-NET-138 FIXED) | `health_classification_byte` [orig: @0x4AD4E0]; killed the 0x0F flood (v11: 0 C 0x0F) |
@@ -53,7 +53,7 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | C2S 0x25 → S2C 0x49 reload relay | DONE (D-NET-142) | dispatch case 0x25 stages the relayed 0x49 on EVERY in-match transport incl. the requester [orig: @0x514DF0 → SendFiltered @0x4C87E0]; host-side clip bookkeeping deferred |
 | off-14/15/16 anim bytes (LIVE states + ratio + adm index) | DONE (D-NET-143 → D-NET-159) | off-14/15 = the motor mirror (`AiSystem::mirror_wire_anim`, pending-wins); the AUTHORITY selection runs for net-snapped peers from the replicated input (`remote_player_body_anim` [orig: @0x4B40E0]); stance rides C2S 0x1D → `Entity::net_stance_bits` + the tail echo; off-16 = `Entity::equipped_adm_index` (category<11-gated [orig: @0x4C20A3]). Deferred inside D-NET-159: run/jog promotion (ADM gait class), prone lean, real .adm channel rate for data-less hosts, deathAnim variants |
 | joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
-| **grounded-on-entity carrier replication** | DONE (D-NET-151; v27 user-confirmed) | the player record's carrier = mount-else-`groundEntity` [orig: @0x4c0a08] with CARRIER-LOCAL pos + local yaw byte; the uplink apply lifts local→world via the 22-bit pose transforms [orig: @0x4c1de1/@0x43BD00] and mirrors the carrier into `Entity::ground_target`; flags bits 2-4 are a REPLACE, not an xor [orig: @0x4c1e4d]. `apply_player_intent` + `build_0a_frame` + `NetClientView`; pinned by `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo, pose_transform_roundtrip) |
+| **grounded-on-entity carrier replication** | DONE (D-NET-151; v27 user-confirmed) | the player record's carrier = mount-else-`groundEntity` [orig: @0x4c0a08] with CARRIER-LOCAL pos + local yaw byte; the uplink apply lifts local→world via the 22-bit pose transforms [orig: @0x4c1de1/@0x43BD00] and mirrors the carrier into `Entity::ground_target`; flags bits 2-4 are a REPLACE, not an xor [orig: @0x4c1e4d]. `apply_player_intent` + `build_0a_frame` + `ClientReplicaPipeline`; pinned by `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo, pose_transform_roundtrip) |
 | **C2S 0x06 fire → tag-2 round-event echo** | DONE (D-NET-152; **live-verified v28 + the v30 positive witness** — 95/95 0x06 armory-resolved, no reload wedge; v30: 25 tag-2 round-events on the wire with two observers, every fire echoed exactly once; rounds select FIRST in the frame budget since D-NET-154) | dispatch case 0x06 (anti-spoof + armory clip authority + `world::RoundRing` append [orig: @0x513310 → Server_ClientFiredRound @0x50baa0 → the adm fire action → RoundData_AddRound @0x4fdb40]); 0x25 refills the clip [orig: WeaponSlot_ReloadAmmo @0x541720]; netsim `select_round_events` = per-connection watermark + own-shooter skip + line-of-fire scoring [orig: @0x4ffee0] feeding `build_0a_frame`'s tag-2 records [orig: NetPacket_SerializeRoundEvent @0x504820]. Pinned by `npruntime_client_fire_test` + `netsim_two_peer_fanout` (round_event_fanout). Deferred: round SPAWN + damage (RoundData_SpawnRound @0x4ec0d0), fire-rate stamp (adm[276] unparsed), ammo pools, cease-fire |
 | deploy gate / eye-pos ref / budget ramp | partial | the deploy-screen HOLD + release are DONE (D-NET-156: `Connection::respawn_pending` → flags1 bit1 + hidden bit; 0x0E dead-or-pending gate; the 0x5A+0x61+0x1E release bundle — D-NET-156 tail); eye-pos anchor + budget ramp still not ported |
 | victim death cycle (tail health + dead bit) | DONE (D-NET-160; verify v34) | the 0x0A tail carries the recipient's LIVE health (`FrameHeaderState::tail_health` [orig: @0x4305df]); `route_round_deaths` sets the entity dead bit (flags\|=2 → record byte13 0x02 [orig: @0x4c1005]; the 1→0 edge = the client spawn hook [orig: @0x4c1109]), lifted by the deploy/respawn reset |
@@ -184,8 +184,10 @@ target) in net-re D-NET-146.
   (1) **Deploy screen (D-NET-156)**: the picker is HELD by the 0x0A header `flags1` bit1
   (`slot+89912 & 0x10`, set at join iff `SpawnZoneList_GetCount() > 0` @0x51a6f2, cleared on
   deploy @0x517791) re-asserted EVERY frame (`g_deploy_screen_active = flags1 & 2` @0x42ff82) —
-  our hardcoded `flags1 = 0x00` was the whole defect; the picker ROWS are client-local
-  (`Entity_BuildSpawnZoneList @0x43EAE0` from local BMS). Ported: `Connection::respawn_pending`
+  our hardcoded `flags1 = 0x00` was the whole defect; the picker ROWS are client-side
+  (`Entity_BuildSpawnZoneList @0x43EAE0` over pools 2+1). **Later D-NET-194
+  correction:** a network join fills those pools from S2C `0x10`/`0x0D`, never a
+  local BMS body. Ported: `Connection::respawn_pending`
   → per-connection flags1 + the entity hidden bit0 (byte13 0x01) + the 0x0E dead-or-pending
   gate/clear + 0x6E 1 Hz empty-group to pending/dead + optional parity (0x0F location names ←
   def-2044 markers, 0x0D zone byte/radius, live 0x04 slot bytes).
@@ -319,7 +321,7 @@ FULL-AS-GAME gap list, in rough order:
 the 62-tick channel-rate stand-in on anim-data-less hosts); the D-NET-157 seat gaps (gun
 seatType byte via carrier +0x326/+0x312, the weapon-busy gate, ctrl-seat def attribs);
 the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
-4th 0x5A byte, observed 0); the env sub-block (D-NET-134); the passenger tail; a weapon.def feed
+4th 0x5A byte, observed 0); a weapon.def feed
 for table-less hosts (headless `nw_server`). NOTE the armory truth is the HOST'S RESOLVED
 weapon.def (VFS view — a live JO:CA root resolves 126 weapons; the committed fixture is a
 94-weapon extract), so live index anchors belong to wire gates, not unit tests (§5.57 "Index
@@ -339,9 +341,9 @@ numbering").
 
 ## Rules
 
-- Port the witnessed original; cite `[orig: Name @ 0xADDR]` at the port site. Don't invent field values —
-  where our world lacks a source (env, weapon slots), DEFER with a tracked D-NET divergence rather than
-  sending guessed bytes that regress the client (env sub-block would darken the sky).
+- Port the witnessed original; cite `[orig: Name @ 0xADDR]` at the port site. Where our world lacks a
+  source, defer with a tracked D-NET divergence rather than guessing bytes. D-NET-134 is closed: phase 2
+  uses the live mission/runtime environment owner and quantizes only at the wire boundary.
 - Never carry raw capture bytes through the encoder (ADR 0003).
 - After a `libs/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
   kill the running Godot instance first) before a live test.

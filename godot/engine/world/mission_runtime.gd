@@ -96,7 +96,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_setup_error = OK
 	# A remote join may already own the live socket + NP session while it waits
 	# for S2C 0x7B to identify the mission. Keep that exact connection across the
-	# local map load instead of reconnecting after discovery. Standalone host/SP and
+	# wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
 	# isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
 	_sim = options.get("simulation", null)
 	if _sim == null:
@@ -138,6 +138,16 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			_sim.load_charattr_challenge(options["resource_root"])
 		if needs_join_connection and options.has("join_character_profile"):
 			_sim.set_join_character_profile(options["join_character_profile"])
+		if needs_join_connection and not join_target.integrity_profile.is_empty() and not \
+				_sim.set_join_integrity_profile(join_target.integrity_profile):
+			push_warning("MissionRuntime: unknown join integrity profile '%s'." % \
+					join_target.integrity_profile)
+			_setup_error = ERR_INVALID_PARAMETER
+			_sim.free()
+			_sim = null
+			_has_trace_stats_sampling = false
+			_has_native_present_effect_pose_lookup = false
+			return 0
 		if needs_join_connection and not _sim.enable_join(
 				join_target.host_ip, join_target.port, join_target.player_name):
 			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
@@ -149,6 +159,12 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# serve-and-play vs DEDICATED and the lobby player cap ride to_session_options()
 		# (net-re §5.2b, host_session_pump step 5).
 		var session_options := host_session.to_session_options()
+		if host_session.game_type_auto:
+			var mission_mode := 0
+			var mission_data := mission as NovaMissionData
+			if mission_data != null:
+				mission_mode = int(mission_data.get_game_mode())
+			session_options["gametype"] = HostSessionConfig.game_type_for_mission_mode(mission_mode)
 		var mission_name := String(options.get("mission_name", "")).strip_edges()
 		if mission_name.is_empty() and mission != null and mission.has_method("get_mission_name"):
 			mission_name = String(mission.get_mission_name()).strip_edges()
@@ -164,6 +180,16 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			if Array(session_options.get("spawn_names", [])).is_empty():
 				session_options["spawn_names"] = [mission_name]
 		_sim.configure_host_session(session_options)
+		# Retail builds the active game-type score table, then overlays the loose
+		# VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
+		# caller is explicitly loose-first even in a packed runtime: retail opens
+		# score.ini from the game directory rather than resolving it from a PFF.
+		var session_resource_root: NovaResourceRoot = options.get("resource_root")
+		if session_resource_root != null:
+			var score_ini_bytes := session_resource_root.read_file(
+					"score.ini", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+			if not score_ini_bytes.is_empty() and not _sim.set_score_config_data(score_ini_bytes):
+				push_warning("MissionRuntime: rejected score.ini; session status uses zero score values.")
 		if not _sim.enable_host_listen(host_session.bind_port):
 			# A requested LAN host that cannot own its UDP endpoint is not a host.
 			# Never degrade into the visually-identical socketless SP/listen path:
@@ -184,6 +210,20 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# load to joiners (net-re §5.37). Harmless for SP/joiner (only the host bring-up reads it).
 	if options.has("terrain_til"):
 		_sim.set_terrain_til_data(options["terrain_til"])
+	# Feed the per-mission RTXT table retail's NetPacket_WriteBriefingText reads
+	# for world-stream phase 6 (S2C 0x7E). Preserve the original fallback:
+	# medmssn.bin is used only when <mission>.bin does not exist; a present but
+	# malformed table is passed through and rejected without fallback.
+	var mission_text_bytes := PackedByteArray()
+	var mission_root: NovaResourceRoot = options.get("resource_root")
+	if mission_root != null:
+		var mission_text_base := _mission_file.get_file().get_basename()
+		var mission_text_name := mission_text_base + ".bin"
+		if not mission_text_base.is_empty() and mission_root.has_file(mission_text_name):
+			mission_text_bytes = mission_root.read_file(mission_text_name)
+		else:
+			mission_text_bytes = mission_root.read_file("medmssn.bin")
+	_sim.set_mission_text_data(mission_text_bytes)
 	if mission == null or not _sim.load_from_mission_data(mission):
 		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
@@ -230,24 +270,33 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
-	# The registry present drives placed mission nodes on EVERY role. A joiner places the
-	# mission too (minus organics), and its snapshot rows carry the local defer identity for
-	# pools 1-3, so this pass drives its placed vehicles/buildings exactly as on the host —
-	# the wire pass below defers those rows and renders only what has no placed node.
+	# The registry present drives whichever authored mission nodes actually exist. A
+	# production joiner owns only the 616-byte wire header, so its index is empty: the
+	# native sim separately materializes streamed pools 1-3 at exact packed handles for
+	# world-side consumers, while the wire pass below renders their decoded live state.
+	# Complete-BMS/debug joins still retain authored nodes and the ordinary defer identity.
 	_present = MissionPresentPass.new()
 	_present.setup(_sim, _index, options.get("present_options", {}))
-	# Co-op needs remote PLAYERS rendered WIRE-DIRECT: a dynamically-spawned player (an admitted
-	# joiner on the host, or — on the joiner — the host + everyone) has no .bms placement, so
-	# MissionPresentPass can't resolve it. Both net roles keep MissionPresentPass for their
-	# placed entities and add this pass for the spawned players/organics, deferring any row
-	# that resolves to a placed node (via _index) so nothing double-renders.
+	# Co-op renders decoded remote rows WIRE-DIRECT. On a host that principally covers
+	# dynamically admitted players; on a header-only joiner it covers every remote row,
+	# because none has an authored placed node. Complete-BMS/debug roles still defer any
+	# row resolved by _index so MissionPresentPass and WirePresentPass never double-render.
 	var full_wire_present := is_joiner or _sim.is_host_listening()
 	var sp_attachment_present := (
 			not full_wire_present and options.get("placer") != null)
 	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
+		# A retail network join has no local BMS identity table. Pools 1-3 are
+		# materialized separately into the native World at their exact wire handles,
+		# but presentation remains wire-direct because there are no authored nodes to
+		# drive. Passing the empty index here would incorrectly hide valid decoded
+		# buildings/items. Complete/debug missions retain placed-node defer.
+		var wire_defer_index = _index
+		var mission_data := mission as NovaMissionData
+		if mission_data != null and mission_data.is_wire_header_only():
+			wire_defer_index = null
 		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
-			_index, {
+			wire_defer_index, {
 				"synthetic_origin_only": sp_attachment_present,
 			})
 		simulation_restarted.connect(
@@ -316,7 +365,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# Stamp each entity's items.def wire traits: AI-capability (0x0D AI-trailer gate, D-NET-97),
 	# the §5.10b replication class (0x0A serialize dispatch — an ewep emplacement must not ride
 	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
-	# Also installs the same class table on the local client view's 0x0A DECODE (the retail
+	# Also installs the same class table on the local replica pipeline's 0x0A DECODE (the retail
 	# client sizes records from its own items.def), so both sides of the in-process wire agree —
 	# a mis-sized record desyncs the frame and scatters entities around the player.
 	if options.get("item_db") != null:
@@ -636,6 +685,12 @@ func get_fire_present_stats() -> Dictionary:
 func get_wire_present_stats() -> WirePresentStats:
 	return _wire_present.get_stats_record() \
 			if _wire_present != null else WirePresentStats.new()
+
+
+## Cold wire rows the presentation budget still owes. Zero when there is no
+## wire presenter; NetSessionDrive keys the join-admission edge on this drain.
+func join_wire_present_pending() -> int:
+	return _wire_present.pending_spawn_count() if _wire_present != null else 0
 
 
 ## Load-time warm hook: compile the fire-presentation pipelines (the tracer

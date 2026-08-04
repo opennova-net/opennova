@@ -265,6 +265,10 @@ public:
 
 	bool load_bms_file(const std::string &path);
 	bool load_bms_bytes(const uint8_t *data, size_t size);
+	// Load only the exact header carried by retail S2C 0x0B. The resulting
+	// document is a read-only metadata view for a network join and intentionally
+	// contains no locally-authored entities, events, or other BMS body sections.
+	bool load_bms_header_bytes(const uint8_t *data, size_t size);
 	bool load_mis_file(const std::string &path);
 	bool load_mis_text(const std::string &text);
 	bool save_bms_file(const std::string &path);
@@ -283,6 +287,7 @@ public:
 	void create_default();
 
 	bool is_loaded() const;
+	bool is_header_only() const;
 	const std::string &source_path() const;
 	const std::string &last_error() const;
 

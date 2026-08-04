@@ -428,7 +428,7 @@ int main() {
 	check(g_n16 > 0, "S2C 0x16 player-list present");
 	check(g_n46 > 0, "S2C 0x46 player-sync present");
 	check(g_n5a > 0, "S2C 0x5A weapon-loadout present");
-	check(g_n6e > 0, "S2C 0x6E roster-sync present");
+	check(g_n6e > 0, "S2C 0x6E spawn-wave status present");
 	check(g_n40 > 0, "S2C 0x40 capture-zone present");
 	check(g_n1e > 0, "S2C 0x1E game-event present");
 	check(g_n26 > 0, "S2C 0x26 kill-sync present");

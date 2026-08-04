@@ -87,6 +87,43 @@ func set_world_rendering_enabled(value: bool) -> void:
 	_sync_render_activity()
 
 
+## Irreversibly drop the retained water renderer graph during process exit.
+## Normal GameWorld.unload() deliberately keeps this graph warm for the next
+## mission; SceneTree teardown is too late because GDScript-owned ImageTextures
+## can otherwise outlive RenderingServer/GDExtension deinitialization.
+func release_runtime_renderer_resources() -> void:
+	set_process(false)
+	_world_rendering_enabled = false
+	_has_drawable_surface = false
+	if reflection_viewport != null:
+		reflection_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	if reflection_camera != null:
+		reflection_camera.current = false
+	if water_material != null:
+		water_material.set_shader_parameter("u_has_reflection", false)
+		water_material.set_shader_parameter("u_reflection", null)
+		water_material.set_shader_parameter("u_noise_color", null)
+		water_material.set_shader_parameter("u_noise_normal", null)
+	if mesh_instance != null:
+		var mesh := mesh_instance.mesh as ArrayMesh
+		if mesh != null:
+			mesh.clear_surfaces()
+		mesh_instance.mesh = null
+		mesh_instance.free()
+		mesh_instance = null
+	if reflection_viewport != null:
+		reflection_viewport.free()
+		reflection_viewport = null
+		reflection_camera = null
+	_noise_color_tex = null
+	_noise_normal_tex = null
+	_noise_color_img = null
+	_noise_normal_img = null
+	water_material = null
+	_cached_cam = null
+	built = false
+
+
 ## Env_WaterHeightFixed == 0 is retail's no-water sentinel. Signed nonzero
 ## heights remain valid for terrain below the world origin.
 func is_water_active() -> bool:
@@ -530,9 +567,8 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	# Above water the pass fog end is the smoothed fog distance attenuated by the
 	# overcast blend: fogDist * (1 - overcast/2) [orig: Environment_GetFogEndDistance
 	# @ 0x57e435 — (0x10000 - (Env_OvercastBlend >> 1)) * Env_FogDistCurrent >> 16].
-	# The overcast channel is state-live but unconsumed (env #27 residual) — 0 until
-	# the overcast systems land, like every other overcast feed.
-	var overcast := 0.0
+	var overcast: float = (_cached_env.get_overcast_blend()
+			if _cached_env != null else 0.0)
 	var pass_fog_end := fog_end * (1.0 - overcast * 0.5)
 	if underwater and env_data:
 		pass_fog_end = env_data.get_fog_end_underwater()

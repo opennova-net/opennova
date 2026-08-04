@@ -235,16 +235,16 @@ func _process(_delta: float) -> void:
 		var tint: Vector3 = _tint_for(env, body["tint"])
 		_set_body_shader_parameter(body, "u_anchor_camera_world", cam_pos)
 		_set_body_shader_parameter(body, "u_tint", tint)
+		var overcast: float = env.get_overcast_blend()
 		if key == "sun":
-			# Overcast (#16) stays 0 until the overcast systems land; the
-			# SunDim channel is live end-to-end (env #27 — spring-smoothed in
+			# Overcast and SunDim are live end-to-end (env #27 — spring-smoothed in
 			# the weather core; target 0 in stock data).
 			var sun_dim: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
-			_set_body_shader_parameter(body, "u_opacity", EnvFile.celestial_sun_alpha(0.0, sun_dim))
+			_set_body_shader_parameter(body, "u_opacity", EnvFile.celestial_sun_alpha(overcast, sun_dim))
 		elif key == "moon":
 			# The moon fades with the fog distance [orig: @ 0x5acc40].
 			_set_body_shader_parameter(body, "u_opacity",
-					EnvFile.celestial_moon_alpha(env.get_fog_level(), 0.0))
+					EnvFile.celestial_moon_alpha(env.get_fog_level(), overcast))
 		elif key == "glare":
 			# env #14 (closed): two jittered terrain rays per frame feed the
 			# witnessed 8-sample window + dead-band hysteresis; glow alpha =
@@ -260,7 +260,7 @@ func _process(_delta: float) -> void:
 			# EACH pass camera, so the mirror view no longer inherits the main
 			# camera's glare angle (or its CPU visibility rejection).
 			var peak_glow := EnvFile.glare_glow_alpha(
-					1.0, _glare_occlusion.get_brightness(), 0.0, sun_dim_glow)
+					1.0, _glare_occlusion.get_brightness(), overcast, sun_dim_glow)
 			model.visible = peak_glow > 0.0
 			_set_body_shader_parameter(body, "u_glare_direction", sun_dir)
 			_set_body_shader_parameter(body, "u_opacity", peak_glow)

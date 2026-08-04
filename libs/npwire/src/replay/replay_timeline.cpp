@@ -476,6 +476,8 @@ ReplayTimeline build_replay_timeline(
 				es.quake_ticks = fu.env.quake_ticks;
 				es.cloud_scroll = fu.env.cloud_scroll;
 				es.overcast = fu.env.overcast;
+				es.rain_pct = fu.env.rain_pct;
+				es.env_param = fu.env.env_param;
 				b.tl.environment.push_back(es);
 			}
 			// Round events (0x0A tag==2): fire ORIGIN world pos = decompress + anchor

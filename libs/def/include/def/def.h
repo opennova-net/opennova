@@ -534,11 +534,31 @@ typedef struct DefItemDef {
     int slip_speed;     /* +0x8F0 = token*4 [orig: @0x49dafd] */
     int max_slope;      /* +0x8F4 = deg token * 11930464 [orig: @0x49d91e] */
     int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
+    int climb_speed;    /* +0x920 = km/h token * 293, 16.16 u/tick vertical clamp
+                           [orig: 293*atol store @0x49db4a] ["climb_speed"] */
+    int turn_roll;      /* +0x90C raw token ("turnroll") — air roll-rate cap, *192426 at use */
+    int speed_pitch;    /* +0x910 raw token ("speedpitch") — air pitch-rate cap, *192426 at use */
     int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
     int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
     int torque;         /* +0x91C raw ("torque") — the collision speed-decay shift count:
                            severity 1/3 decay speed >> (torque+2), severity 2 >> (torque+1)
                            [orig: parse @0x49dcca; consumers @0x47cc13-0x47ccc1] */
+    /* Platform-solve tuning block (itemDef +0x908 / +0x92C..+0x948) — all raw
+       atol, no parse scale, clamped in place by the consumers
+       [orig: ItemDef_ParsePhysicsProperty stores: mass @0x49dc76,
+        lean @0x49ddde, lean_velocity @0x49de1a, pitch @0x49de56,
+        pitch_velocity @0x49de92, bob @0x49dece (the inline-string slot),
+        flip @0x49df82; clamps @0x481ACC..0x481BA3]. Consumers: mass = weight
+       class + collision momentum (+0x908); pitch/pitch_velocity/bob = the boat
+       bow-lift / porpoise machine; lean/lean_velocity = the planing roll-lean
+       machine @0x45AEA0; flip = the ground movers' tip threshold (*0.01). */
+    int mass;
+    int lean;
+    int lean_velocity;
+    int pitch;
+    int pitch_velocity;
+    int bob;
+    int flip;
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */

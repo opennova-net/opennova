@@ -5,15 +5,24 @@
 # not a linkable target here. This executable links ONLY opennova_* static libs (all strictly
 # Godot-agnostic, libs/CLAUDE.md) + apps/common, which makes it structurally incapable of pulling in
 # godot-cpp. There is no toggle to set — keep the link list opennova_*-only and that invariant holds.
-add_executable(opennova_nw_server
-    main.cpp
+add_library(opennova_nw_server_startup STATIC
+    environment_startup.cpp
+    wac_startup.cpp
 )
+target_include_directories(opennova_nw_server_startup
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova_nw_server_startup
+    PUBLIC opennova_env opennova_mission opennova_wac opennova_world)
+target_compile_features(opennova_nw_server_startup PUBLIC cxx_std_17)
+
+add_executable(opennova_nw_server main.cpp)
 
 target_link_libraries(opennova_nw_server
     PRIVATE
         opennova_npruntime   # the in-match runtime (Server_TickUpdate / handle_server_datagram /
                              # frame_in_match_s2c); PUBLIC-pulls netsim / novaworld / world transitively
         opennova_mission     # MissionDocument + promote_mission (load + build the authoritative World)
+        opennova_nw_server_startup # mission-selected ENV/BMS/WAC -> authoritative phase-2 owner
         opennova_app_common  # net_sockets (real UDP); PUBLIC-links ws2_32 on WIN32
 )
 

@@ -109,6 +109,11 @@ add_subdirectory(libs/npruntime)
 # servers and the loopback tests.
 add_subdirectory(apps/common)
 
+# nw_lan_probe -- a bounded app-layer readiness probe for the retail-compatible
+# 0x41/0x81 LAN discovery endpoint. Protocol bytes stay in npruntime; this app
+# owns only the real UDP socket and retry/deadline policy.
+add_subdirectory(apps/nw_lan_probe)
+
 # Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
 add_subdirectory(apps/novaworld_server)
 

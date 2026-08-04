@@ -114,7 +114,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.team_byte)                 f |= 0x0010; // entity+354 team [orig: 0x503bb2] (D-NET-58)
 		if (rec.parent_handle != 0xFFFF)   f |= 0x0100; // entity+368  [orig: 0x503bd1]
 		if (rec.target_handle != 0xFFFF)   f |= 0x0200; // entity+40   [orig: 0x503c27]
-		if (rec.weapon_mask)               f |= 0x0400; // itemDef+604 [orig: 0x503c83]
+		if (rec.seat_mask)                 f |= 0x0400; // itemDef+604 [orig: 0x503c83]
 		if (!rec.ai_name.empty() || rec.ai_profile_1 || rec.ai_profile_2)
 		                                   f |= 0x0800; // aiSlot      [orig: 0x503d53]
 		if (rec.alert_byte)                f |= 0x0040; // entity+533  [orig: 0x503e3c]
@@ -142,16 +142,16 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (f & 0x0100) w.u16(rec.parent_handle);
 		if (f & 0x0200) w.u16(rec.target_handle);
 
-		// Weapon block. Once 0x0400 is set the original walks bits 0..7 writing
-		// one u16 per set bit, then ALWAYS writes extra_handle_0 + extra_handle_1
-		// (D-NET-56). The encoder only sets 0x0400 when weapon_mask != 0.
+		// Mount-occupancy block. Once 0x0400 is set the original walks retail
+		// slots 0..7, then ALWAYS writes slot 8 + slot 9 (D-NET-56). The
+		// encoder only sets 0x0400 when seat_mask != 0.
 		if (f & 0x0400) {
-			w.u8(rec.weapon_mask);
+			w.u8(rec.seat_mask);
 			for (int b = 0; b < 8; ++b)
-				if (rec.weapon_mask & (1u << b))
-					w.u16(rec.weapon_handles[size_t(b)]); // [orig: 0x432f47.. mirror]
-			w.u16(rec.extra_handle_0);  // entity+416 [orig: 0x503d0c]
-			w.u16(rec.extra_handle_1);  // entity+418 [orig: 0x503d24]
+				if (rec.seat_mask & (1u << b))
+					w.u16(rec.mount_handles[size_t(b)]); // [orig: 0x432f47.. mirror]
+			w.u16(rec.mount_handle_8);  // entity+416 [orig: 0x503d0c]
+			w.u16(rec.mount_handle_9);  // entity+418 [orig: 0x503d24]
 		}
 
 		w.u8(rec.bone_byte);            // ALWAYS, entity+290 bone/other byte [orig: 0x503d38] (D-NET-58)
@@ -485,9 +485,9 @@ std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 
 // Build a complete S2C 0x0A frame from a FrameUpdate — the inverse of the
 // decode_frame_update walk (§5.9). [orig: NapiNPClientMsg_0x00A @ 0x42FEC0].
-// 12-B anchor, flags1/flags2, the flags2&3 sub-block (aim/timer/env/objective),
-// the 7-B tail, the conditional passenger record, then the event loop (tag=1
-// per-entity compact via the §5.10b class dispatch, tag=2 weapon-hit) and the
+// 12-B anchor, flags1/flags2, the flags2&3 sub-block (weapon/timer/env/objective),
+// the 7-B tail, the conditional phase-8 mounted-ammo record, then the event loop
+// (tag=1 per-entity compact via the §5.10b class dispatch, tag=2 fired-round) and the
 // tag=0 terminator. Known null-callback classes deliberately emit a header-only
 // tag=1 record; Guided/Unknown records are skipped because they have no fixed
 // 0x0A compact width.
@@ -518,7 +518,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 		break;
 	case 2: // env (11 B)
 		w.u16(fu.env.fog_dist); w.u16(fu.env.fog_accel); w.u16(fu.env.tod_fixed);
-		w.u8(fu.env.quake_ticks); w.u8(fu.env.cloud_scroll); w.u8(fu.env.cloud_param2);
+		w.u8(fu.env.quake_ticks); w.u8(fu.env.cloud_scroll); w.u8(fu.env.rain_pct);
 		w.u8(fu.env.overcast); w.u8(fu.env.env_param);
 		break;
 	default: // sub-block 3: 16 B only when the off-wire objective-gametype gate is active
@@ -537,12 +537,12 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	w.u16(uint16_t(fu.health));
 	w.u16(uint16_t(fu.state_word));
 
-	// Conditional passenger record.
+	// Conditional mounted-weapon ammo record.
 	if ((fu.flags2 & 0x0F) == 8) {
-		w.u16(fu.passenger.handle);
-		if (fu.passenger.handle != 0xFFFF) {
-			w.u16(fu.passenger.seat_yaw);
-			w.u16(fu.passenger.seat_pitch);
+		w.u16(fu.passenger.mount_handle);
+		if (fu.passenger.mount_handle != 0xFFFF) {
+			w.u16(fu.passenger.clip);
+			w.u16(fu.passenger.reserve);
 		}
 	}
 
@@ -816,6 +816,14 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
 	Writer w{out};
 	w.u16(reload.entity_handle);
 	w.u16(reload.reload_param);
+	return out;
+}
+
+std::vector<uint8_t> encode_mounted_weapon_slot_selection(
+		const MountedWeaponSlotSelection &selection) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(selection.use_parent_slot ? 1u : 0u);
 	return out;
 }
 

@@ -147,6 +147,21 @@ bool check_retail_loose_numeric_and_ipv4_edges() {
 	return true;
 }
 
+bool check_retail_port_literal_radixes() {
+	const std::string body =
+			"VAR POSTIPPORT 0x1DADh\n"
+			"VAR METIPPORT 016655\n"
+			"VAR REFLECTEDPORTNUMBER %1110110101101\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r),
+			"multi-radix retail port response parses")) return false;
+	if (!expect(r.post_port == 7597u, "POSTIPPORT accepts C-style hex")) return false;
+	if (!expect(r.met_port == 7597u, "METIPPORT accepts leading-zero octal")) return false;
+	if (!expect(r.reflected_port == 7597u,
+			"REFLECTEDPORTNUMBER accepts percent binary")) return false;
+	return true;
+}
+
 bool check_empty_returns_false() {
 	opennova::GateResponse r;
 	if (!expect(!opennova::gate_response_parse("", r), "empty response returns false")) return false;
@@ -163,6 +178,7 @@ int main() {
 	if (!check_case_insensitive_keys()) return 1;
 	if (!check_quoted_response()) return 1;
 	if (!check_retail_loose_numeric_and_ipv4_edges()) return 1;
+	if (!check_retail_port_literal_radixes()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
 	if (!check_empty_returns_false()) return 1;
 	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");

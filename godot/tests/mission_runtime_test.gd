@@ -111,6 +111,28 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 			"target itemDef+0x86c phrase_set reaches the production seat spec")
 
 
+func test_wire_type_ids_build_the_same_late_vehicle_metadata() -> void:
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/3dp/B50Cal"))
+	var specs := ItemSeatSpecs.build_item_seat_specs_for_type_ids(
+			[1419, 1419, 0], root, item_db)
+	assert_eq(specs.size(), 1, "streamed type ids are deduplicated")
+	if specs.size() != 1:
+		return
+	var spec: Dictionary = specs[0]
+	assert_eq(int(spec.get("item_id", 0)), 101419,
+			"the wire type maps back into the items.def id space")
+	assert_eq(int(spec.get("type_id", 0)), 1419)
+	assert_eq((spec.get("seats", []) as Array).size(), 1,
+			"the late join path resolves the model's UseGun seat")
+	assert_true(bool(spec.get("mount_config_valid", false)))
+	assert_eq(int(spec.get("mount_config", -1)), 4)
+
+
 func test_emplacement_specs_resolve_userpoints_and_keep_missing_anchor_fallback() -> void:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(

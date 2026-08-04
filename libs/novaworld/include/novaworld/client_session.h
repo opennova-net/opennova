@@ -97,17 +97,20 @@ public:
 
 		// Verify-request "Cookie" var-list (NW-S5, witnessed byte-for-byte in the
 		// genuine .204 capture, fixtures/novaworld/nw204_lobby.hexcap frame 10166).
-		// CNapiGameSession_SendVerifyRequest @ 0x4d3620 serializes session+388 as a
-		// "Cookie" var-list, filled by CNapiSession_ReadLocaleInfo @ 0x4ce390 from
-		// the browser form fields CNapiGameSession_OnNovaWorldConnected @ 0x4d1570
-		// set. Each (name, value) becomes a ClientVar{VarFNum="0",VarName,VarValue}
+		// CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0 first has
+		// CNapiSession_ReadLocaleInfo @ 0x4ce390 clear session+388 and enumerate
+		// every cookie for the browser's current host, then SendVerifyRequest
+		// @ 0x4d3620 serializes that list as "Cookie". The gate response seeds
+		// locale/expansion fields; OnNovaWorldConnected @ 0x4d1570 adds NWUID and
+		// the machine fields. Each (name, value) becomes a ClientVar{VarFNum="0",
+		// VarName,VarValue}
 		// child of a ClientVarList(VarList="Cookie") inside the
 		// ClientRequestVerifyResult. The retail set (in order) is CountryName,
 		// Language, TimeZoneBias, MyInstalledExpBits, NWUID, NWCDKIID, NWCDKIIDEXP1,
 		// NWPSSK, NWUSID, NWHWI — and on the wire NWCDKIID/NWCDKIIDEXP1 are EMPTY
 		// yet the live server still returns Success=1, so the lobby verify is NOT
-		// credential-gated. Empty here -> a bare ClientRequestVerifyResult (the
-		// OpenNova server is permissive). The entry named "NWUID" with an empty
+		// credential-gated. Empty here still emits an empty Cookie parent. The
+		// entry named "NWUID" with an empty
 		// value is filled at runtime from the ServerSessionInit's NWUID (echo).
 		std::vector<std::pair<std::string, std::string>> verify_cookie_vars;
 
