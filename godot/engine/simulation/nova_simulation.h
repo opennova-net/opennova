@@ -1572,6 +1572,11 @@ public:
 	// World-registry probe seams by SSN (pool-1 vehicles carry no AI brain and are
 	// invisible to the AI-index seams): entity card + mission-space teleport.
 	Dictionary get_world_entity_debug(int p_net_id) const;
+	// The decoded joiner-side client row for one wire handle — the ClientState
+	// twin of get_world_entity_debug (which reads the materialized registry):
+	// exactly what the wire carried and the fold retained, before presentation.
+	// Empty when not a joiner or the handle has no row.
+	Dictionary get_client_entity_debug(int p_handle) const;
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
 	// Exact-slot parity probe: set the authoritative MountSlot words on a
 	// world entity so a real UDP phase-8 sample can prove receiver application.
