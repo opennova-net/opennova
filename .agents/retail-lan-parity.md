@@ -241,8 +241,14 @@ OpenNova resolution=`1920x1080`, and retail arguments `/w /many /exp revx02`.
 
 ```powershell
 cmake --build build --config Release --target nw_pp opennova_nw_lan_probe
-cmake --build build-godot --config Debug
+cmake --build build-godot --config RelWithDebInfo
 ```
+
+Build the GDExtension as RelWithDebInfo (the `scripts/build_godot.sh` Dev
+flavor), never `--config Debug`: the Visual Studio generator ignores
+`CMAKE_BUILD_TYPE`, and an MSVC Debug (/Od /RTC1) extension costs 5-10x on
+native sim work — wire parity is unaffected but every live frame-time or
+smoothness observation made on it is invalid.
 
 Set `GODOT_BIN` to the Godot 4.6.1 console executable when the launcher cannot
 find it through the checkout's `.godot-bin` convention.

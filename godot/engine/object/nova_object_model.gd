@@ -120,6 +120,9 @@ var _interior_section_daylight := 0.0
 #  Terrain_CollectAndRenderTileModels @0x60D250]
 var _shadow_caster_layers := 0
 var _shadow_receiver_material: ShaderMaterial
+# This model's fixed slot in the staggered environment-restamp window (see
+# _on_env_generation_changed).
+var _env_stagger_slot := 0
 
 # NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
 # for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
@@ -214,10 +217,11 @@ func _init() -> void:
 	_body_anim = NovaObjectBodyAnim.new(self)
 	_materials = NovaObjectMaterials.new(self)
 	_scene_builder = NovaObjectSceneBuilder.new(self)
+	_env_stagger_slot = int((get_instance_id() >> 3) % ENV_RESTAMP_SPREAD_FRAMES)
 
 
 func _ready() -> void:
-	set_process(true)
+	_wake_runtime_frame()
 	if object_data != null:
 		rebuild()
 
@@ -244,6 +248,7 @@ func set_model_light_preview_enabled(enabled: bool) -> void:
 		return
 	_model_light_preview_enabled = enabled
 	_last_light_push_valid = false
+	_wake_runtime_frame()
 	if enabled:
 		_apply_lights()
 		return
@@ -297,11 +302,18 @@ func _apply_shadow_casting_below(root: Node) -> void:
 
 
 func set_environment_node(value: Node) -> void:
+	if _environment_node != null 			and _environment_node.has_signal("env_generation_changed") 			and _environment_node.is_connected(
+					"env_generation_changed", _on_env_generation_changed):
+		_environment_node.disconnect(
+				"env_generation_changed", _on_env_generation_changed)
 	_environment_node = value
 	_env_has_generation = value != null and value.has_method("get_env_generation")
 	_last_env_gen = -1
 	_last_env_values = null
 	_last_section_env_values = null
+	if value != null and value.has_signal("env_generation_changed"):
+		value.connect("env_generation_changed", _on_env_generation_changed)
+	_wake_runtime_frame()
 	_apply_environment_to_materials()
 
 
@@ -391,16 +403,19 @@ func is_playing() -> bool:
 
 func set_playing(value: bool) -> void:
 	_is_playing = value
+	_wake_runtime_frame()
 
 
 func set_panm_clock(value) -> void:
 	_panm_clock = value
+	_wake_runtime_frame()
 	if _panm_clock != null:
 		_anim_time_ms = int(_panm_clock.get("time_ms")) & 0xffffffff
 	_apply_runtime_state(0.0)
 
 
 func reset_animation_time() -> void:
+	_wake_runtime_frame()
 	_anim_time_ms = 0
 	_anim_time = 0.0
 	_anim_external_phase = false
@@ -417,6 +432,7 @@ func reset_animation_time() -> void:
 # test-subclass override dispatch.
 
 func set_skeletal_anim(skeletal) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_skeletal_anim(skeletal)
 
 
@@ -445,29 +461,35 @@ func _resolve_muzzle_userpoint() -> void:
 
 
 func play_body_clip(key: String) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_clip(key)
 
 
 func play_body_clip_variant(key: String, variant: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_clip_variant(key, variant)
 
 
 func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_clip_variant_at_time(key, variant, seconds)
 
 
 func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_clip_at(key, phase_ticks)
 
 
 func play_body_blend_at(source_key: String, source_phase_ticks: int,
 		target_key: String, target_phase_ticks: int,
 		weight: float) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_blend_at(source_key, source_phase_ticks,
 			target_key, target_phase_ticks, weight)
 
 
 func play_body_clip_seeded(key: String, phase_ticks: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_clip_seeded(key, phase_ticks)
 
 
@@ -477,10 +499,12 @@ func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
 
 func apply_remote_body_state(state_id: int, key: String, flags: int,
 		phase_ticks: int = -1) -> bool:
+	_wake_runtime_frame()
 	return _body_anim.apply_remote_body_state(state_id, key, flags, phase_ticks)
 
 
 func reset_remote_body_state() -> void:
+	_wake_runtime_frame()
 	_body_anim.reset_remote_body_state()
 
 
@@ -498,6 +522,7 @@ func _clear_remote_body_pending() -> void:
 
 
 func advance_remote_body_blend_tick(state_id: int) -> bool:
+	_wake_runtime_frame()
 	return _body_anim.advance_remote_body_blend_tick(state_id)
 
 
@@ -510,6 +535,7 @@ func _promote_remote_body_pending_if_due() -> bool:
 
 
 func stop_body_clip() -> void:
+	_wake_runtime_frame()
 	_body_anim.stop_body_clip()
 
 
@@ -518,10 +544,12 @@ func get_active_body_clip() -> String:
 
 
 func play_body_anim(slot: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_anim(slot)
 
 
 func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_body_anim_at(slot, phase_ticks)
 
 
@@ -530,6 +558,7 @@ func get_animation_time_ms() -> int:
 
 
 func set_animation_time(seconds: float) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_animation_time(seconds)
 
 
@@ -563,6 +592,7 @@ func _ctrl_dword(value: int) -> int:
 
 
 func _finish_ctrl_change(_register: String, apply_now: bool) -> void:
+	_wake_runtime_frame()
 	_bounds_dirty = true
 	if apply_now:
 		if _ctrl_batch_depth > 0:
@@ -654,22 +684,27 @@ func get_ctrl_values() -> Dictionary:
 # PLAYPARTANIM and its fixed VEHICLE_SPECIAL1/2 CTRL publication live in the
 # body-animation helper. These delegates retain the NovaEntityVisual surface.
 func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	_wake_runtime_frame()
 	_body_anim.play_part_anim(channel, play_type, time_s)
 
 
 func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	_wake_runtime_frame()
 	_body_anim.restart_part_anim(channel, play_type, time_s)
 
 
 func set_part_phase(channel: int, phase: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_part_phase(channel, phase)
 
 
 func clear_part_phase(channel: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.clear_part_phase(channel)
 
 
 func clear_part_anims() -> void:
+	_wake_runtime_frame()
 	_body_anim.clear_part_anims()
 
 
@@ -712,14 +747,17 @@ var _wpn_phase_ticks := 0
 
 
 func set_weapon_channel(key: String, phase_ticks: int) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_weapon_channel(key, phase_ticks)
 
 
 func set_aim_overlay(deltas: Array) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_aim_overlay(deltas)
 
 
 func set_right_hand_collapsed(collapsed: bool) -> void:
+	_wake_runtime_frame()
 	_body_anim.set_right_hand_collapsed(collapsed)
 
 
@@ -728,6 +766,7 @@ func advance_body_animation(delta: float, write_pose := true) -> void:
 
 
 func rebuild() -> void:
+	_wake_runtime_frame()
 	_scene_builder.rebuild()
 
 
@@ -749,6 +788,7 @@ func refresh_render_order() -> void:
 
 
 func _on_object_changed() -> void:
+	_wake_runtime_frame()
 	var update_mask := _last_object_update_mask()
 	if update_mask == OED_UPDATE_PANM or update_mask == OED_UPDATE_LGHT or update_mask == (OED_UPDATE_PANM | OED_UPDATE_LGHT):
 		# get_last_oed_update_mask() reports only the final mask of a deferred-flush window,
@@ -774,12 +814,63 @@ func _process(delta: float) -> void:
 	advance_runtime_frame(delta)
 
 
+## Event-driven scheduling for the per-frame runtime advance. A joiner streams
+## the whole mission as wire rows (800+ NovaObjectModels live at once); polling
+## every model every frame is the measured frame-time floor, while retail only
+## computes runtime constants for models the batch actually draws
+## [orig: Terrain_RenderSectorModels @0x5c5d30]. So models self-park: every
+## mutation that can create per-frame work calls _wake_runtime_frame(), and
+## advance_runtime_frame parks the model again the first frame nothing is live.
+## The environment restamp is wake-driven too (env_generation_changed +
+## visibility change), replacing the per-model generation poll.
+func _wake_runtime_frame() -> void:
+	set_process(true)
+
+
+func _sleep_runtime_frame_if_idle() -> void:
+	if _needs_runtime_frame_work():
+		return
+	# The private preview clock accumulates wall time per frame while playing
+	# (OED preview owners; mission/wire models ride the shared PANM clock).
+	if _panm_clock == null and _is_playing:
+		return
+	set_process(false)
+
+
+# A live mission environment bumps its generation every tick (TOD drift plus
+# the weather smoothers chasing it), so waking every parked model per bump
+# restamps ~900 models' materials per frame — the measured frame-time floor.
+# Spread the restamps instead: each parked model takes one wake per window,
+# and global lighting moves well under 1/255 per frame at mission TOD rates,
+# so the stagger is invisible. After the FINAL bump of a burst a model holds
+# values at most one window stale; any later bump resumes it, and awake
+# models keep restamping every frame through the normal path.
+const ENV_RESTAMP_SPREAD_FRAMES := 16
+
+
+func _on_env_generation_changed() -> void:
+	if (Engine.get_process_frames() + _env_stagger_slot) \
+			% ENV_RESTAMP_SPREAD_FRAMES != 0:
+		return
+	# One restamp frame; the model parks itself again if nothing else is live.
+	_wake_runtime_frame()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		# Becoming visible must re-check the env generation missed while
+		# hidden (hidden models skip the restamp by design).
+		_wake_runtime_frame()
+
+
 ## Advance the model's render-time state once. This is the public equivalent
 ## of the engine process callback for deterministic owners and tests: clocks
 ## continue while hidden, while render-derived work waits until the model can
 ## be submitted again.
 func advance_runtime_frame(delta: float) -> void:
 	if object_data == null or not object_data.has_document():
+		# Nothing to advance and nothing to classify; set_object_data re-arms.
+		set_process(false)
 		return
 	# Retail evaluates material constants / PANM transforms / light state per
 	# SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30 — the batch
@@ -800,12 +891,14 @@ func advance_runtime_frame(delta: float) -> void:
 		if _panm_clock == null and _is_playing:
 			_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0xffffffff
 		# Lighting/fog is the one retained-state input that can change without a
-		# model mutator. Its generation gate makes this an integer comparison in
-		# the steady state while avoiding all other per-model runtime work.
+		# model mutator; env_generation_changed / visibility wakes route it
+		# here, and the generation gate keeps the re-check an int comparison.
 		if renderable:
 			_apply_environment_to_materials()
+		_sleep_runtime_frame_if_idle()
 		return
 	_apply_runtime_state(delta, renderable)
+	_sleep_runtime_frame_if_idle()
 
 
 func _needs_runtime_frame_work() -> bool:

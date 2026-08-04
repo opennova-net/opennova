@@ -109,6 +109,18 @@ var _weather_driven := false
 var _env_generation: int = 0
 
 
+## Fired on every environment-generation bump. NovaObjectModel sleeps its
+## per-frame runtime scheduling while idle; this signal is what wakes every
+## model for exactly one restamp frame when lighting/fog actually changed,
+## replacing 800+ per-model generation polls per frame.
+signal env_generation_changed
+
+
+func _bump_env_generation() -> void:
+	_env_generation += 1
+	env_generation_changed.emit()
+
+
 func _ready() -> void:
 	set_process_priority(-20)
 	_ensure_loaded()
@@ -323,7 +335,7 @@ func _update_tod() -> void:
 	# A TOD recompute can move any object-consumed value (weather-driven, the
 	# moving targets flow through the smoothers instead); the bump keeps
 	# material restamps tracking either way.
-	_env_generation += 1
+	_bump_env_generation()
 	if not _weather_driven:
 		_write_shader_globals()
 
@@ -422,7 +434,7 @@ func set_nvg_view(active: bool, gain: int) -> void:
 		return
 	_nvg_view_active = active
 	_nvg_gain = clamped_gain
-	_env_generation += 1
+	_bump_env_generation()
 	# NovaWeather owns the full per-frame global write while present. Refresh
 	# only the two affected channels immediately, and let its next tick publish
 	# the same getter-derived values again without disturbing wind/fog state.
@@ -687,25 +699,25 @@ func get_frame_clear_color() -> Vector3:
 func set_fill_light(value: Vector3) -> void:
 	if value != _fill_light:
 		_fill_light = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sun_light(value: Vector3) -> void:
 	if value != _sun_light:
 		_sun_light = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_fog_color_rt(value: Vector3) -> void:
 	if value != _fog_color_rt:
 		_fog_color_rt = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sky_ambient_rt(value: Vector3) -> void:
 	if value != _sky_ambient_rt:
 		_sky_ambient_rt = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_static_colors_rt(ceiling: Vector3, cloud: Vector3, floor_color: Vector3) -> void:
@@ -721,7 +733,7 @@ func set_static_colors_rt(ceiling: Vector3, cloud: Vector3, floor_color: Vector3
 	# indoor-light inputs. Keep the shared material-generation seam honest for
 	# any additional consumers that cache environment values.
 	if changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func set_sky_colors_rt(
@@ -740,7 +752,7 @@ func set_sky_colors_rt(
 	# sampled directly every frame, but the shared skyfog/clear value must wake
 	# that gate when its weather block moves.
 	if skyfog_changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 ## The modulator /64 gain (the iris auto-exposure reaching shaders), written
@@ -749,7 +761,7 @@ func set_sky_colors_rt(
 func set_color_src_gain(value: Vector3) -> void:
 	if value != _color_src_gain:
 		_color_src_gain = value
-		_env_generation += 1
+		_bump_env_generation()
 
 
 func get_color_src_gain() -> Vector3:
@@ -841,7 +853,7 @@ func set_smoothed_scalars(fog_distance: float, sky_height: float,
 	_network_rain_current = rain_current
 	_network_overcast_blend = overcast_blend
 	if fog_changed:
-		_env_generation += 1
+		_bump_env_generation()
 
 
 ## The smoothed Env_SunDimPct channel (0..100; default 0 — nothing writes the
