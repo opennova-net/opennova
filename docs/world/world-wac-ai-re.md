@@ -424,6 +424,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
     is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
+  - (No D-INF-7 was ever minted — the list keeps session ids, so the numbering jumps
+    6 → 8, like the documented D-MUS-1/4/8 gaps.)
   - **D-INF-8** idle root-motion integration — **OVERTURNED 2026-06-21**. The refuted
     session reading gated the root-delta position integration on the `g_animStateFlagsTable`
     bit0 flag, holding idle bodies rigid — which slid the FEET under the swaying skeletal FK
