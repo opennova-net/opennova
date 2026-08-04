@@ -11,13 +11,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE_SOURCES = {
-    "asset-importer": "onimport-v0.1.4.exe",
-    "blender-ase-exporter": "opennova_blender-v0.0.4.zip",
-    "max-ase-exporter": "opennova_max-v0.1.4.mzp",
-    "modding-editor": "opennova-modtools-windows-v0.0.9.zip",
-    "game-runtime": "opennova-runtime-windows-v0.0.9.zip",
-    "modding-editor-macos": "opennova-modtools-macos-v0.0.9.zip",
-    "game-runtime-macos": "opennova-runtime-macos-v0.0.9.zip",
+    "asset-importer": "onimport-v0.1.5.exe",
+    "blender-ase-exporter": "opennova_blender-v0.0.5.zip",
+    "max-ase-exporter": "opennova_max-v0.1.5.mzp",
+    "modding-editor": "opennova-modtools-windows-v0.0.10.zip",
+    "game-runtime": "opennova-runtime-windows-v0.0.10.zip",
+    "modding-editor-macos": "opennova-modtools-macos-v0.0.10.zip",
+    "game-runtime-macos": "opennova-runtime-macos-v0.0.10.zip",
 }
 
 
@@ -49,9 +49,9 @@ def _workflow_job(workflow: str, job_name: str) -> str:
 
 
 def _write_deliverable_fixtures(dist: Path) -> None:
-    (dist / "onimport-v0.1.4.exe").write_bytes(b"MZ importer")
+    (dist / "onimport-v0.1.5.exe").write_bytes(b"MZ importer")
     _write_zip(
-        dist / "opennova_blender-v0.0.4.zip",
+        dist / "opennova_blender-v0.0.5.zip",
         [
             "./blender_manifest.toml",
             "./__init__.py",
@@ -60,36 +60,36 @@ def _write_deliverable_fixtures(dist: Path) -> None:
         ],
     )
     _write_zip(
-        dist / "opennova_max-v0.1.4.mzp",
+        dist / "opennova_max-v0.1.5.mzp",
         [
             "mzp.run",
             "install.ms",
             "install.ds",
             "install.py",
-            "OpenNovaMax-0.1.4.bundle/PackageContents.xml",
-            "OpenNovaMax-0.1.4.bundle/Contents/macroscripts/OpenNovaExport.mcr",
-            "OpenNovaMax-0.1.4.bundle/Contents/startup/opennova_max_startup.ms",
-            "OpenNovaMax-0.1.4.bundle/Contents/startup/opennova_max_startup.py",
-            "OpenNovaMax-0.1.4.bundle/Contents/python/opennova_max/__init__.py",
-            "OpenNovaMax-0.1.4.bundle/Contents/python/pyopennova/lib/windows-x64/opennova.dll",
+            "OpenNovaMax-0.1.5.bundle/PackageContents.xml",
+            "OpenNovaMax-0.1.5.bundle/Contents/macroscripts/OpenNovaExport.mcr",
+            "OpenNovaMax-0.1.5.bundle/Contents/startup/opennova_max_startup.ms",
+            "OpenNovaMax-0.1.5.bundle/Contents/startup/opennova_max_startup.py",
+            "OpenNovaMax-0.1.5.bundle/Contents/python/opennova_max/__init__.py",
+            "OpenNovaMax-0.1.5.bundle/Contents/python/pyopennova/lib/windows-x64/opennova.dll",
         ],
     )
     _write_zip(
-        dist / "opennova-modtools-windows-v0.0.9.zip",
+        dist / "opennova-modtools-windows-v0.0.10.zip",
         [
             "opennova-modtools.exe",
             "libopennova.windows.template_release.x86_64.dll",
         ],
     )
     _write_zip(
-        dist / "opennova-runtime-windows-v0.0.9.zip",
+        dist / "opennova-runtime-windows-v0.0.10.zip",
         [
             "opennova.exe",
             "libopennova.windows.template_release.x86_64.dll",
         ],
     )
     _write_zip(
-        dist / "opennova-modtools-macos-v0.0.9.zip",
+        dist / "opennova-modtools-macos-v0.0.10.zip",
         [
             "opennova-modtools.app/Contents/Info.plist",
             "opennova-modtools.app/Contents/MacOS/OpenNova",
@@ -97,7 +97,7 @@ def _write_deliverable_fixtures(dist: Path) -> None:
         ],
     )
     _write_zip(
-        dist / "opennova-runtime-macos-v0.0.9.zip",
+        dist / "opennova-runtime-macos-v0.0.10.zip",
         [
             "opennova.app/Contents/Info.plist",
             "opennova.app/Contents/MacOS/OpenNova",
@@ -125,24 +125,24 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
         dist_dir=dist,
         stage_dir=stage,
         release_body=body,
-        release_version="v0.0.9",
+        release_version="v0.0.10",
     )
 
     public_names = sorted(path.name for path in stage.iterdir())
     assert public_names == [
-        "opennova-3ds-max-ase-exporter-windows-v0.0.9.mzp",
-        "opennova-asset-importer-windows-v0.0.9.exe",
-        "opennova-blender-ase-exporter-v0.0.9.zip",
-        "opennova-game-runtime-macos-v0.0.9.zip",
-        "opennova-game-runtime-windows-v0.0.9.zip",
-        "opennova-modding-editor-macos-v0.0.9.zip",
-        "opennova-modding-editor-windows-v0.0.9.zip",
+        "opennova-3ds-max-ase-exporter-windows-v0.0.10.mzp",
+        "opennova-asset-importer-windows-v0.0.10.exe",
+        "opennova-blender-ase-exporter-v0.0.10.zip",
+        "opennova-game-runtime-macos-v0.0.10.zip",
+        "opennova-game-runtime-windows-v0.0.10.zip",
+        "opennova-modding-editor-macos-v0.0.10.zip",
+        "opennova-modding-editor-windows-v0.0.10.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names
 
     text = body.read_text(encoding="utf-8")
     assert "## Release Assets" in text
-    assert "opennova-blender-ase-exporter-v0.0.9.zip" in text
+    assert "opennova-blender-ase-exporter-v0.0.10.zip" in text
     assert "Install:" in text
     assert "Use:" in text
     assert "Blender" in text
@@ -166,19 +166,19 @@ def test_release_validator_selects_manifest_deliverables_in_manifest_order(
         dist_dir=dist,
         stage_dir=stage,
         release_body=body,
-        release_version="v0.0.9",
+        release_version="v0.0.10",
         deliverable_ids=["game-runtime", "modding-editor"],
     )
 
     assert [item.id for item in result.items] == ["modding-editor", "game-runtime"]
     assert {path.name for path in stage.iterdir()} == {
-        "opennova-modding-editor-windows-v0.0.9.zip",
-        "opennova-game-runtime-windows-v0.0.9.zip",
+        "opennova-modding-editor-windows-v0.0.10.zip",
+        "opennova-game-runtime-windows-v0.0.10.zip",
     }
     body_text = body.read_text(encoding="utf-8")
-    assert "opennova-modding-editor-windows-v0.0.9.zip" in body_text
-    assert "opennova-game-runtime-windows-v0.0.9.zip" in body_text
-    assert "opennova-asset-importer-windows-v0.0.9.exe" not in body_text
+    assert "opennova-modding-editor-windows-v0.0.10.zip" in body_text
+    assert "opennova-game-runtime-windows-v0.0.10.zip" in body_text
+    assert "opennova-asset-importer-windows-v0.0.10.exe" not in body_text
     assert "macos" not in body_text.lower()
 
 
@@ -203,7 +203,7 @@ def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
             "--release-body",
             str(body),
             "--release-version",
-            "v0.0.9",
+            "v0.0.10",
             "--only-id",
             "modding-editor",
             "--only-id",
@@ -213,8 +213,8 @@ def test_release_validator_cli_accepts_repeated_only_id(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert {path.name for path in stage.iterdir()} == {
-        "opennova-modding-editor-windows-v0.0.9.zip",
-        "opennova-game-runtime-windows-v0.0.9.zip",
+        "opennova-modding-editor-windows-v0.0.10.zip",
+        "opennova-game-runtime-windows-v0.0.10.zip",
     }
 
 
@@ -245,7 +245,7 @@ def test_release_validator_rejects_invalid_selection(
             dist_dir=dist,
             stage_dir=dist / "release-assets",
             release_body=tmp_path / "release-body.md",
-            release_version="0.0.9",
+            release_version="0.0.10",
             deliverable_ids=deliverable_ids,
         )
 
@@ -262,7 +262,7 @@ def test_release_validator_rejects_unselected_dist_files(tmp_path: Path) -> None
             dist_dir=dist,
             stage_dir=dist / "release-assets",
             release_body=tmp_path / "release-body.md",
-            release_version="0.0.9",
+            release_version="0.0.10",
             deliverable_ids=["modding-editor", "game-runtime"],
         )
 
@@ -272,7 +272,7 @@ def test_release_validator_rejects_missing_archive_entry(tmp_path: Path) -> None
     dist = tmp_path / "dist"
     dist.mkdir()
     _write_deliverable_fixtures(dist)
-    _write_zip(dist / "opennova_blender-v0.0.4.zip", ["blender_manifest.toml"])
+    _write_zip(dist / "opennova_blender-v0.0.5.zip", ["blender_manifest.toml"])
 
     with pytest.raises(validator.DeliverableValidationError, match="lib/windows-x64/opennova.dll"):
         validator.validate_release_deliverables(
@@ -280,7 +280,7 @@ def test_release_validator_rejects_missing_archive_entry(tmp_path: Path) -> None
             dist_dir=dist,
             stage_dir=dist / "release-assets",
             release_body=tmp_path / "release-body.md",
-            release_version="0.0.9",
+            release_version="0.0.10",
         )
 
 
@@ -297,7 +297,7 @@ def test_release_validator_rejects_unexpected_dist_files(tmp_path: Path) -> None
             dist_dir=dist,
             stage_dir=dist / "release-assets",
             release_body=tmp_path / "release-body.md",
-            release_version="0.0.9",
+            release_version="0.0.10",
         )
 
 
