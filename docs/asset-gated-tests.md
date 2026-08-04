@@ -18,7 +18,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 
 | Env var | Gates | Data | CI-able? |
 |---|---|---|---|
-| `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `jo_env_sweep` | retail JO install dir (packed `.pff`) | never (copyright, ~1.5 GB) |
+| `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install` | retail JO install dir (packed `.pff`) | never (copyright, ~1.5 GB) |
 | `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
 | `OPENNOVA_JO_ASSETS` (+ opt `OPENNOVA_PARITY_WEAPON`) | ctest `occlusion_armry`; pytest `test_anim_dcc_parity.py`, `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
 | `NW_INGAME_HEXCAP` | ctest `nw_ingame_histogram`, `nw_ingame_pool_records` | focused in-match hexcap dump | possible: policy allows a small *sanitized* `.hexcap` via LFS (user-gated follow-up) |

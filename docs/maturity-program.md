@@ -81,6 +81,9 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| The joiner-side between-update movers | (#403) | **Banked `has_method_guards` 567 → 566 and `libs_uncited_src_files` 56 → 55** (the final review's typed-seam conversions + netsim citations). Recorded here after the fact — the slice banked the decrements in `maturity_baseline.json` without a dashboard row |
+| MNU parity + menu editor deepening | (#387) | **Banked `has_method_guards` 568 → 567 and `libs_uncited_src_files` 57 → 56.** Recorded here after the fact — no dashboard row landed with the slice |
+| MP wire present-pass hot walk native | (#389) | **Banked `has_method_guards` 579 → 568** (the GDScript walk's duck-type guards retired with the native port). Recorded here after the fact — no dashboard row landed with the slice |
 | Standalone game debug runtime | (#376) | **Banked `test_private_pokes` 1353 → 1313 in `maturity_baseline.json`; recorded here after the fact** — the PIE→standalone replacement touched 63 paths under godot/tests (37 rewritten, 8 deleted, 18 added, incl. sidecars/scenes — probe scenes and debug-page tests moved onto the new session/MCP seams), and the slice landed the decrement without a dashboard row (the same gap the #377 row below records) |
 | Retail control-register catalog completion | (#377) | **Banked three counters in one slice:** `has_method_guards` 585 → 579, `libs_uncited_src_files` 61 → 57, and `test_private_pokes` 1363 → 1353. Recorded here after the fact — the slice banked the decrements in `maturity_baseline.json` without a dashboard row |
 | Infantry death-transition fidelity | (this PR) | **`has_method_guards` baseline 578 → 585, with each +1 remaining a real dynamic seam:** three preserve legacy/test skeletal providers while the new two-channel pose calls are optional, one preserves avatar fallback nodes without skeletal animation methods, one preserves revisionless/clockless presentation sources, and two classify heterogeneous wire-visual nodes for the new blend/tick methods. The three newly bound `NovaSimulation` local-player getters are deliberately unguarded after W4-2; this adjustment records capabilities that cannot be proven from the receivers rather than restoring typed-receiver defensive guards. |
@@ -118,7 +121,7 @@ Landed slices (hash per slice, newest first):
 | ENG-2 env port (PR #206 train) | 28cc9474 … (7 slices) | the five environment GDScript files are scene plumbing over `libs/env`: weather core (slices 1-2), sky dome + cloud scroll (3-4), water surface (5-6, full witnessed render: per-frame noise textures + UV + lit-color pipeline), celestial placement + glare occlusion (7). Re-grills caught the shared RNG-seed transcription (env #25, fixed in libs/env + libs/wac), the scroll model (#26), the water look/precedence (#28/#31), celestial placement inventions (#32), and CLOSED env #14; minted #27/#29/#30/#33 as tracked deferrals. Honored-matrix re-attested; vectors 204/204 with per-slice witnessed re-dumps |
 | Wave-2 boundary: STD-3 flip + GOV-4 sync | (this slice) | CI lint step now `--enforce` ×3 (ratchet, dict-contract, link-graph) + `fetch-depth: 0` so the diff lint stops self-skipping on PRs; dict-contract lint repaired to class-level declarations only (its Wave-1 soft run flagged 36 function-locals — a lint bug, not code debt; the 4 surviving range hits are pre-existing contracts moved by F5); ledger scoreboard now GENERATED (`scripts/lint/ledger_check.py`, hard-fail like the ratchet) — mechanical recount corrected the hand-kept total 64 → **66 open** (Net rows were undercounted 21→23, Credits 2→1, Tiles 1→0, Fonts 3→1); ratchet baseline tightened `libs_uncited_src_files` 87 → **65** (earned by the PAR-train citations); D-FOLIAGE-1's raw `\|` escaped (it broke GFM rendering + parsers) |
 | GOV-4 Wave-1 close-out | 50fce423 (rode the trunk) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88 at close — see the boundary slice's recount); ledger synced continuously (the trunk-era hand count said 66 → 62; the mechanical recount at the boundary says 66 — the drift is why the scoreboard is now generated); stale-doc touches rode each slice (vfs record, menu-re, world-wac-ai-re, env records) |
-| NET-4 C-ABI guard | ae221e7d + 729f01c7 + 17f06457 | `abi_export_identity` ctest (104-export baseline, forbidden net families); its macOS leg immediately caught + fixed the dylib leak (hidden visibility + 38 phantom MISSION_EXPORTs stripped) — the flat C ABI is now provably identical on every platform. (2026-07-29 audit note: #344 removed the macOS legs from regular CI and release.yml tests ubuntu+windows only, so the macOS enforcement this row credits is currently LAPSED - no workflow compiles or tests macOS between release tags) |
+| NET-4 C-ABI guard | ae221e7d + 729f01c7 + 17f06457 | `abi_export_identity` ctest (106-export baseline since 2026-07-05, forbidden net families); its macOS leg immediately caught + fixed the dylib leak (hidden visibility + 38 phantom MISSION_EXPORTs stripped) — the flat C ABI is now provably identical on every platform. (2026-07-29 audit note: #344 removed the macOS legs from regular CI and release.yml tests ubuntu+windows only, so the macOS enforcement this row credits is currently LAPSED - no workflow compiles or tests macOS between release tags) |
 | PAR burn-down (trunk train) | 8778a0b4 … 2ed9a4fb | eight rows closed: D-EVT-2/-4 + cats 5/6 + D-EVT-5 mint, D-PLAYERINFO-2, D-NET-20, env #21, env #19 (tint consumers; dead-bake correction), D-VFS-2 (fixed boot table + the editor-index decision), D-CTRL-2 (witnessed visibility flags), D-INF-4 (witnessed direction-table generator); PAR-R7 VFS/PFF audit landed (D-VFS-1..9) |
 | ENG-6 R8 boot-resource research | 1139190e | docs/required-resources.md (fatal set, ordered boot sequence, D-BOOT catalog); the Wave-2 manifest leg stays open |
 | ONED F5 mission_controller decomposition | 9c4a1ea3 | 4,033 → 1,646-line composer + seven `_ops` sections; weakref `_c` leak fix (65e9e33d); the master-red `nova_mission_data_test` literal repaired (7055d0d5) |
@@ -208,7 +211,7 @@ what confuses.
   the rename-everywhere rule).
 - **NET-4** (S, rides NET-2's ADR) net libs are formally OUTSIDE the C ABI
   (C++-linked only) — **guard landed 2026-07-05**: the `abi_export_identity`
-  ctest (`scripts/lint/abi_exports_check.py`, 104-export committed baseline,
+  ctest (`scripts/lint/abi_exports_check.py`, 106-export committed baseline,
   never-bypassable forbidden-family check) runs wherever `BUILD_SHARED_LIB=ON`
   builds run ctest (scripts/build.sh + the CI build-and-test job).
 
@@ -420,13 +423,15 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
   closed D-EVT-2/-4, cats 5/6 of D-EVT-3, and minted-closed D-EVT-5, leaving
   D-EVT-1 and the cat-1/2 matrix family witnessed-ready-deferred on the
   TriggerRelations / deploy-POI ports).
-- **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
-  port lands.
+- **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11 (closed 2026-07-30, #388),
+  D-SND-2, and D-HUD after its RE port lands.
 - **PAR-R1..R7** (S/M each; **R7 landed 2026-07-05** — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), D-VFS-1..9) the UNAUDITED-system audits (engine-research /
   grill-ida): terrain, foliage, tiles, fonts, credits, importer pipeline, VFS/PFF mount
   stack — each lands an RE record **with a D-catalog**.
-- **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair,
-  D-NET-49 (in-match PG), the in-world avatar binding (D-PLAYERINFO-1), and the full `.mis`
+- **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair
+  (radar resolved 2026-07-18 — JO:CA ships no in-HUD radar element, D-HUD-2 closed),
+  D-NET-49 (in-match PG; closed pre-2026-08-01, ledger reconciled in #403), the in-world
+  avatar binding (D-PLAYERINFO-1), and the full `.mis`
   grammar grill (`dfx2med.exe`, D-MIS-1/-3).
 
 ### REN — render visual parity (materials, draw order, shaders, lighting)
