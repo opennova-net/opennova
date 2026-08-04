@@ -140,8 +140,37 @@ std::vector<ProtocolMessage> send_session_batches(
 	bool ordinary_tail_rejected = false;
 	for (std::size_t semantic_index = 0;
 	     semantic_index < messages.size(); ++semantic_index) {
-		const ProtocolMessage &message = messages[semantic_index];
-		std::vector<ProtocolMessage> pieces = envelope_protocol_message(message);
+		// A pre-enveloped FIRST/MID/FINAL run re-queued by an earlier failed
+		// flush arrives as separate queue entries (possibly headless when its
+		// leading pieces already shipped). Its consecutive fragment-flagged
+		// pieces are ONE capacity unit through the closing FINAL, or a
+		// partially admitted group strands the receiver's reassembly buffer.
+		std::size_t unit_end = semantic_index;
+		const bool fragment_unit =
+				messages[semantic_index].flags.frag_cont ||
+				messages[semantic_index].flags.frag_end;
+		if (fragment_unit) {
+			while (unit_end + 1 < messages.size()) {
+				const ProtocolMessageFlags &piece_flags =
+						messages[unit_end].flags;
+				if (piece_flags.frag_end && !piece_flags.frag_cont)
+					break; // the closing FINAL
+				const ProtocolMessageFlags &next_flags =
+						messages[unit_end + 1].flags;
+				if (!next_flags.frag_cont && !next_flags.frag_end)
+					break; // run ends unclosed
+				++unit_end;
+			}
+		}
+		std::vector<ProtocolMessage> pieces;
+		for (std::size_t piece_index = semantic_index;
+				piece_index <= unit_end; ++piece_index) {
+			std::vector<ProtocolMessage> sub =
+					envelope_protocol_message(messages[piece_index]);
+			pieces.insert(pieces.end(),
+					std::make_move_iterator(sub.begin()),
+					std::make_move_iterator(sub.end()));
+		}
 		const std::size_t charged_nodes = static_cast<std::size_t>(std::count_if(
 				pieces.begin(), pieces.end(),
 				[](const ProtocolMessage &piece) {
@@ -149,21 +178,31 @@ std::vector<ProtocolMessage> send_session_batches(
 				}));
 		// FIRST/MID/FINAL is one semantic unit.  Admitting a capacity prefix of
 		// its physical records can strand the receiver's reassembly buffer, so
-		// retry that message as a whole.  A one-record message still follows
-		// retail QueueMessage/Create prefix rejection: it and the later tail are
-		// dropped when no node remains. Capacity-exempt records remain admissible
-		// after that rejected tail, matching retail's internal flag-0x10 bypass.
+		// retry that unit as a whole — including a re-queued orphan run whose
+		// earlier pieces already shipped (retail's queue never holds a
+		// half-shipped group, so its one-record drop rule cannot apply there).
+		// An ordinary one-record message still follows retail
+		// QueueMessage/Create prefix rejection: it and the later tail are
+		// dropped when no node remains. Capacity-exempt records remain
+		// admissible after that rejected tail, matching retail's internal
+		// flag-0x10 bypass.
 		if (charged_nodes != 0 &&
 				(ordinary_tail_rejected || charged_nodes > available_nodes)) {
-			if (!ordinary_tail_rejected && pieces.size() > 1)
-				capacity_retry.push_back(std::move(messages[semantic_index]));
+			if (!ordinary_tail_rejected &&
+					(pieces.size() > 1 || fragment_unit)) {
+				for (std::size_t piece_index = semantic_index;
+						piece_index <= unit_end; ++piece_index)
+					capacity_retry.push_back(std::move(messages[piece_index]));
+			}
 			ordinary_tail_rejected = true;
+			semantic_index = unit_end;
 			continue;
 		}
 		available_nodes -= charged_nodes;
 		enveloped.insert(enveloped.end(),
 				std::make_move_iterator(pieces.begin()),
 				std::make_move_iterator(pieces.end()));
+		semantic_index = unit_end;
 	}
 	auto append_capacity_retry = [&](std::vector<ProtocolMessage> retry) {
 		retry.insert(retry.end(),

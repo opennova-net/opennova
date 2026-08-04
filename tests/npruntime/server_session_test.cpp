@@ -608,6 +608,100 @@ bool check_host_frame_failure_preserves_owner_queue() {
 	              "the next valid host boundary drains the preserved queue once");
 }
 
+// A FIRST/MID/FINAL run re-queued by a failed flush arrives as separate
+// pending entries (headless once its leading pieces shipped). The capacity
+// gate must treat the run as ONE unit: admitting a prefix — or dropping the
+// closing FINAL under the one-record rejection rule — permanently strands the
+// receiver's reassembly buffer on the ordered reliable channel.
+bool check_requeued_fragment_run_stays_one_capacity_unit() {
+	opennova::np::HostOwner owner;
+	opennova::np::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
+	opennova::np::set_transport_mode(owner.ctx, SocketMode::Lan);
+	opennova::np::GameConfig config;
+	opennova::np::create_session(
+			owner.ctx, config, opennova::np::SessionStartup{}, nullptr);
+
+	const opennova::PeerAddr peer{0x0100007Fu, 33115};
+	auto &peer_link = owner.peers[peer];
+	peer_link.transport =
+			std::make_unique<opennova::netsim::UdpSessionTransport>(
+					opennova::netsim::UdpSessionTransport::Role::Host);
+	opennova::np::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = opennova::np::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.server_scrk =
+			"SERVERFRAGRUNSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
+	conn.client_ck = 0x10203040u;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = opennova::netsim::TransportMode::Client;
+	conn.seq = opennova::np::make_jo_game_session_sequencing(2, 0);
+	conn.seq.retained_outbound[1] = std::vector<opennova::ProtocolMessage>(
+			opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX - 1,
+			opennova::make_protocol_message(0x60, {}));
+	conn.seq.retained_outbound_message_count =
+			opennova::JO_SESSION_OUTBOUND_MESSAGE_MAX - 1;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	// The headless orphan run: a MID (FRAG_CONT|FRAG_END) and its closing
+	// FINAL (FRAG_END), exactly what a failed mid-boundary flush re-queues
+	// after the FIRST already shipped.
+	owner.pending_session_messages[peer] = {
+			opennova::make_protocol_message(
+					0x63, {0x11, 0x22},
+					opennova::PROTOCOL_MSG_FLAG_FRAG_CONT |
+							opennova::PROTOCOL_MSG_FLAG_FRAG_END |
+							opennova::PROTOCOL_MSG_FLAG_LEN8),
+			opennova::make_protocol_message(
+					0x63, {0x33, 0x44},
+					opennova::PROTOCOL_MSG_FLAG_FRAG_END |
+							opennova::PROTOCOL_MSG_FLAG_LEN8),
+	};
+
+	CaptureDatagramSocket socket;
+	opennova::np::host_session_pump(owner, socket);
+	auto pending = owner.pending_session_messages.find(peer);
+	if (!expect(socket.sent.empty() &&
+	                    pending != owner.pending_session_messages.end() &&
+	                    pending->second.size() == 2 &&
+	                    pending->second[0].flags.frag_cont &&
+	                    pending->second[0].flags.frag_end &&
+	                    pending->second[1].flags.frag_end &&
+	                    !pending->second[1].flags.frag_cont,
+	            "one free node cannot split the orphan MID/FINAL run — both "
+	            "pieces stay queued in order"))
+		return false;
+
+	auto &remote = owner.ctx.np_protocol.connection_list.front();
+	remote.seq.retained_outbound[1].clear();
+	remote.seq.retained_outbound_message_count = 0;
+	opennova::np::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1 &&
+	                    owner.pending_session_messages.find(peer) ==
+	                            owner.pending_session_messages.end(),
+	            "the freed boundary drains the whole orphan run at once"))
+		return false;
+
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	return expect(
+			opennova::nw_decode_inbound(
+					socket.sent[0].data(), socket.sent[0].size(), opcode,
+					session_body) &&
+					opcode == opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+					opennova::decode_protocol_packet_plaintext(
+							session_body.data(), session_body.size(),
+							remote.server_scrk, header, messages) &&
+					messages.size() == 2 && messages[0].tag == 0x63 &&
+					messages[0].flags.frag_cont && messages[0].flags.frag_end &&
+					messages[1].tag == 0x63 && messages[1].flags.frag_end &&
+					!messages[1].flags.frag_cont,
+			"the drained packet carries MID then FINAL so reassembly completes");
+}
+
 bool check_host_admits_exact_retail_message_prefix() {
 	opennova::np::HostOwner owner;
 	opennova::np::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
@@ -2423,6 +2517,7 @@ int main() {
 	ok = check_host_pump_batches_one_send_boundary() && ok;
 	ok = check_initial_stream_batches_with_reactive_reply() && ok;
 	ok = check_host_frame_failure_preserves_owner_queue() && ok;
+	ok = check_requeued_fragment_run_stays_one_capacity_unit() && ok;
 	ok = check_host_admits_exact_retail_message_prefix() && ok;
 	ok = check_host_s2c_holdoff_and_frame_envelope() && ok;
 	ok = check_host_s2c_holdoff_is_per_connection() && ok;
