@@ -117,17 +117,17 @@ fits — pinned losslessly on retail data by
 
 ## Divergences (D-RTXT-N)
 
-| # | Finding | Status |
+| ID | Finding | Status |
 |---|---|---|
-| 1 | Our writer emitted section row[+0] as a *name offset relative to the names blob*; engine needs *first-key offset relative to meta+4* | **fixed** (`rtxt.cpp write()`) |
-| 2 | Editor allowed entries interleaved across sections; engine requires contiguous per-section runs | **fixed**: model invariant (`add_entry` / `set_entry_section_index` insert into the section's run); ungrouped *files* load faithfully, validate as errors, and are repairable via `normalize_grouping()` |
-| 3 | Runtime lookup was flat-key only with empty-string misses; original is section-scoped with an override table and `??section:key??` miss marker | **fixed** as supersets: `File::find_in_section`, `RtxtStringFile.get_string_in_section`, `NovaStrings.register_table/set_override_table/lookup`; legacy flat APIs kept (they match `0x75D450`) |
-| 4 | We require the RTXT magic on parse; the engine never checks it | **intentional**: 98/98 retail files carry it and resource-kind sniffing depends on it |
-| 5 | Editor flagged duplicate keys globally; same key in different sections is legitimate retail data (8 shipped files), and even in-section duplicates ship (5 sections; engine first-match-wins) | **fixed**: per-section scoping, later in-section duplicate = warning |
-| 6 | Header +8 was written as the full meta size; retail stores meta size − 4 (excl. count dword) | **fixed** |
-| 7 | Text blob was written unaligned; retail zero-pads to a 4-aligned meta offset | **fixed** |
-| 8 | `String::utf8()` mangled cp1252 text on display/edit | **fixed**: cp1252 fallback both directions in the Godot wrapper |
-| 9 | Flat lookup map was last-wins on duplicate keys; engine's forward walk is first-wins | **fixed** (`build_lookup` emplace) |
+| D-RTXT-1 | Our writer emitted section row[+0] as a *name offset relative to the names blob*; engine needs *first-key offset relative to meta+4* | **fixed** (`rtxt.cpp write()`) |
+| D-RTXT-2 | Editor allowed entries interleaved across sections; engine requires contiguous per-section runs | **fixed**: model invariant (`add_entry` / `set_entry_section_index` insert into the section's run); ungrouped *files* load faithfully, validate as errors, and are repairable via `normalize_grouping()` |
+| D-RTXT-3 | Runtime lookup was flat-key only with empty-string misses; original is section-scoped with an override table and `??section:key??` miss marker | **fixed** as supersets: `File::find_in_section`, `RtxtStringFile.get_string_in_section`, `NovaStrings.register_table/set_override_table/lookup`; legacy flat APIs kept (they match `0x75D450`) |
+| D-RTXT-4 | We require the RTXT magic on parse; the engine never checks it | **intentional**: 98/98 retail files carry it and resource-kind sniffing depends on it |
+| D-RTXT-5 | Editor flagged duplicate keys globally; same key in different sections is legitimate retail data (8 shipped files), and even in-section duplicates ship (5 sections; engine first-match-wins) | **fixed**: per-section scoping, later in-section duplicate = warning |
+| D-RTXT-6 | Header +8 was written as the full meta size; retail stores meta size − 4 (excl. count dword) | **fixed** |
+| D-RTXT-7 | Text blob was written unaligned; retail zero-pads to a 4-aligned meta offset | **fixed** |
+| D-RTXT-8 | `String::utf8()` mangled cp1252 text on display/edit | **fixed**: cp1252 fallback both directions in the Godot wrapper (pinned end to end by `godot/tests/strings_encoding_test.gd`) |
+| D-RTXT-9 | Flat lookup map was last-wins on duplicate keys; engine's forward walk is first-wins | **fixed** (`build_lookup` emplace) |
 
 ## Verdict
 

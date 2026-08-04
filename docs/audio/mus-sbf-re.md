@@ -260,7 +260,9 @@ The original catalog file (`notes/audio/sbf-mus-format.md`, untracked) was
 lost; this list is regenerated from the surviving code markers and their
 regression tests (`tests/mus/mus_vm_fixes_test.cpp`). IDs keep their original
 numbers; gaps (D-MUS-1/4/8) were resolved fixes whose notes did not survive —
-their behavior is locked by the golden event-stream test either way.
+their behavior is locked by the golden event-stream test either way. A later
+session's provisional D-NEW-1/2/3 ids map to D-MUS-12/6/11 (kept as "a.k.a."
+breadcrumbs below and beside the code markers in `mus_vm.cpp`).
 
 | ID | Status | Summary |
 | --- | --- | --- |
@@ -271,6 +273,8 @@ their behavior is locked by the golden event-stream test either way.
 | D-MUS-7 | intentional mirror | `op_callvl (0x0A call form)` resolved-name table is uninitialised BSS in Jointops, so the opcode is dead; reimpl mirrors the dead-stub (push 0). MDEdit scripts use opcode `0x40 method` instead (`mus_vm.cpp:681`) |
 | D-MUS-9 | fixed | `FIsClear` true/false semantics |
 | D-MUS-10 | fixed | `GGRnd` behavior |
+| D-MUS-11 | intentional mirror (a.k.a. D-NEW-3) | `play (0x3C)` / `playw (0x3D)` both call the SAME `AudioVM_StartSound(idx)` and halt identically — the original makes no play-vs-wait behavioral distinction; the only real difference is the operand width (1B vs 2B, so `0x3D` reaches sound indices > 255) [orig: `AudioVM_Op_Play @ 0x672CB0`, `AudioVM_Op_PlayWait @ 0x672C90`]. The `wait` arg on the reimpl `on_play_sound` hook is a convenience, not a witnessed semantic (`mus_vm.cpp:651`) |
+| D-MUS-12 | intentional mirror (a.k.a. D-NEW-1) | the per-tick instruction budget (32, `dword_3246B24`) is a SOFT floor: the dispatch loop keeps executing past it until the data stack drains to base or a handler sets the halt latch [orig: `AudioVM_DispatchLoop @ 0x672720`]. The reimpl mirrors the drain rule and adds a safety ceiling on the extension the original lacks (a malformed never-draining loop hangs retail; ours errors out) (`mus_vm.cpp:967`) |
 
 ## RE tooling (not in repo)
 

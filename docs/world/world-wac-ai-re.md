@@ -424,6 +424,15 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
     is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
+  - **D-INF-8** idle root-motion integration — **OVERTURNED 2026-06-21**. The refuted
+    session reading gated the root-delta position integration on the `g_animStateFlagsTable`
+    bit0 flag, holding idle bodies rigid — which slid the FEET under the swaying skeletal FK
+    ("idle skating"). Witness: that flag gates the anim COMMIT rules (`@0x4bd85c`) and the idle
+    LOOK-AT scan (`@0x4be95f`), NOT position integration; `Entity_UpdateInfantryAI @0x4b9910`
+    integrates the root delta for ALL states, and idle clips author a small mean-~0 root
+    velocity (the bored weight-shift) that keeps the feet planted by swaying the centre of
+    mass under the skeleton. The reimpl integrates unconditionally; the overturn note lives
+    beside the code (`libs/world/src/infantry.cpp`, the `overturns D-INF-8` marker).
   - **D-INF-9** player horizontal-slide decay. The player shares the NPC's slide-velocity damp, but
     the original splits it by the grounded flag: a GROUNDED player decays `inf.vel[0]/[1]` by
     `(63·v)>>6` with NO deadzone [orig: `Entity_UpdateInfantryPlayerBody @0x4b7949` — `shl 6 / sub /
