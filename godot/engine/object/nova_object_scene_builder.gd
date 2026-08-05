@@ -190,6 +190,31 @@ func _legacy_submeshes_from_surfaces(lod_index: int) -> Array:
 	return result
 
 
+# Keep the submission notifier matching the model's current mesh bounds. An
+# empty-bounds model draws nothing: it carries no notifier and stays flagged
+# on-screen so a later real rebuild starts from the safe default. Runs before
+# the equal-bounds early-out because rebuild() frees the previous notifier
+# with the other children even when the new bounds are identical.
+func sync_screen_notifier(bounds: AABB) -> void:
+	if bounds.size == Vector3.ZERO:
+		if _m._screen_notifier != null:
+			_m._screen_notifier.queue_free()
+			_m._screen_notifier = null
+		# Route through the public seam: the safe default must also clear any
+		# off-screen claim left in the shared submission registry.
+		_m.set_on_screen(true)
+		return
+	if _m._screen_notifier == null:
+		_m._screen_notifier = VisibleOnScreenNotifier3D.new()
+		_m._screen_notifier.name = "ScreenNotifier"
+		_m._screen_notifier.screen_entered.connect(_m.set_on_screen.bind(true))
+		_m._screen_notifier.screen_exited.connect(_m.set_on_screen.bind(false))
+		_m.add_child(_m._screen_notifier)
+	# Grow past the rest bounds: a playing pose can sweep limbs slightly
+	# outside the mesh-rest AABB and the culling must stay conservative.
+	_m._screen_notifier.aabb = bounds.grow(1.0)
+
+
 func compute_transformed_mesh_bounds() -> AABB:
 	var bounds := AABB()
 	var has_bounds := false

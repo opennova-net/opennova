@@ -1178,33 +1178,8 @@ func _publish_submission_state() -> void:
 		_submission_registry[get_instance_id()] = true
 
 
-# Keep the submission notifier matching the model's current mesh bounds. An
-# empty-bounds model draws nothing: it carries no notifier and stays flagged
-# on-screen so a later real rebuild starts from the safe default. Runs before
-# the equal-bounds early-out because rebuild() frees the previous notifier
-# with the other children even when the new bounds are identical.
-func _sync_screen_notifier(bounds: AABB) -> void:
-	if bounds.size == Vector3.ZERO:
-		if _screen_notifier != null:
-			_screen_notifier.queue_free()
-			_screen_notifier = null
-		# Route through the public seam: the safe default must also clear any
-		# off-screen claim left in the shared submission registry.
-		set_on_screen(true)
-		return
-	if _screen_notifier == null:
-		_screen_notifier = VisibleOnScreenNotifier3D.new()
-		_screen_notifier.name = "ScreenNotifier"
-		_screen_notifier.screen_entered.connect(set_on_screen.bind(true))
-		_screen_notifier.screen_exited.connect(set_on_screen.bind(false))
-		add_child(_screen_notifier)
-	# Grow past the rest bounds: a playing pose can sweep limbs slightly
-	# outside the mesh-rest AABB and the culling must stay conservative.
-	_screen_notifier.aabb = bounds.grow(1.0)
-
-
 func _set_model_bounds(bounds: AABB) -> void:
-	_sync_screen_notifier(bounds)
+	_scene_builder.sync_screen_notifier(bounds)
 	if _aabb_equal_approx(_model_bounds, bounds):
 		return
 	_model_bounds = bounds
