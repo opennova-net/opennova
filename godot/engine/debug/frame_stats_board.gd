@@ -87,6 +87,16 @@ enum {
 	RENDER_ROOT_GPU,
 	RENDER_WATER_CPU,
 	RENDER_WATER_GPU,
+	# Per-pass render counts (RenderingServer per-viewport render info for the
+	# previous frame). VALUE slots: what each pass actually submitted, so pass
+	# cost attribution (main view vs shadow maps vs the water mirror) is read
+	# off the board instead of guessed.
+	RENDER_MAIN_OBJECTS,   # VALUE: root viewport visible-pass objects
+	RENDER_MAIN_DRAWS,     # VALUE: root viewport visible-pass draw calls
+	RENDER_SHADOW_OBJECTS, # VALUE: root viewport shadow-pass objects
+	RENDER_SHADOW_DRAWS,   # VALUE: root viewport shadow-pass draw calls
+	RENDER_WATER_OBJECTS,  # VALUE: water mirror visible-pass objects
+	RENDER_WATER_DRAWS,    # VALUE: water mirror visible-pass draw calls
 	SLOT_COUNT,
 }
 
