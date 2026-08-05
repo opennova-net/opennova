@@ -524,7 +524,7 @@ func _update_player_camera() -> void:
 	var angles := _aim_angles_deg()
 	# The live recoil accumulator is doubled only by retail's first-person camera.
 	# Third-person orbit, projectile aim, and the HUD anchor retain the base look
-	# pitch. [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	# pitch. [orig: Camera_ComputeThirdPersonView @0x437fc7]
 	if not _third_person and _view != null:
 		angles.y += _view.fp_pitch_recoil_deg
 	var yr := deg_to_rad(angles.x)

@@ -705,7 +705,7 @@ func test_camera_state_rides_the_sim_view() -> void:
 
 	# The camera consumes retail's already-doubled recoil pitch only in first
 	# person. It must not mutate the sim aim or leak into the 3P orbit.
-	# [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	# [orig: Camera_ComputeThirdPersonView @0x437fc7]
 	world.view.fp_pitch_recoil_deg = 8.0
 	presenter.after_world_tick()
 	var fp_forward := -camera.global_basis.z

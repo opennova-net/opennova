@@ -233,7 +233,7 @@ enum class SingleTriggerType : int32_t {
 // Mission variable trigger subtypes.
 // [orig: EventTrigger_EvaluateCondition cat 4 @0x453620 — dword_C6B240[param1] <op> param2]
 // Engine compares: 1:==, 2:<, 3:>, 4:<=, 5:>=. Values 3/4 were previously swapped (inherited from the C#
-// reference); corrected here so the name matches what the engine evaluates. See notes/mission/param-semantics.md R6.
+// reference); corrected here so the name matches what the engine evaluates. See docs/mission/bms-event-runtime-re.md (the absorbed param-semantics notes, R6).
 enum class MissionVariableTriggerType : int32_t {
     MissionVariableIsEqual = 1,             // ==
     MissionVariableIsLessThan = 2,          // <
@@ -647,15 +647,19 @@ struct Event {
     int32_t action_index;
     int32_t reset_after;               // Upper 10 bits of raw 32-bit value (value << 22)
     int32_t delay;                     // Upper 10 bits of raw 32-bit value (value << 22)
-    uint8_t unknown5;                  // [orig:] runtime ACTIVE/has-fired flag; 0 on disk; ResetEvent clears it
+    uint8_t unknown5;                  // [orig: fired-latch — gate @0x454c59 / set @0x454c7a / re-arm clear
+                                       //  @0x454d46 in EventTrigger_UpdateEntry; reset-event action 0x22 clears it
+                                       //  @0x454974; read as the event-fired condition @0x453a70] runtime
+                                       //  ACTIVE/has-fired flag; 0 on disk
     uint8_t trigger_count;
     uint8_t action_count;
-    uint8_t unknown6;                  // [orig:] never read by evaluator/scheduler => reserved
+    uint8_t unknown6;                  // [orig: raw-fread with the 24B record @0x453f87; no reader anywhere in
+                                       //  the event system => pad/reserved]
 };
 
 // [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
 // Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
-// notes/mission/param-semantics.md. *IsWithinArea (sub 10): param2 = area-trigger ARRAY INDEX, param1 = tested
+// docs/mission/bms-event-runtime-re.md (absorbed param-semantics notes). *IsWithinArea (sub 10): param2 = area-trigger ARRAY INDEX, param1 = tested
 // group/entity. Single distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
 struct Trigger {
     int32_t condition_flags;
@@ -665,7 +669,8 @@ struct Trigger {
     int32_t param2;
     int32_t param3;
     int32_t param4;
-    int32_t unknown7;                  // [orig:] never read by evaluator => reserved
+    int32_t unknown7;                  // [orig: evaluator reads +12..+24 only (EventTrigger_EvaluateCondition
+                                       //  @0x453620); no +28 access in the trigger path => pad/reserved]
 
     // [orig: condition fold sub_454050 @0x454050] Each trigger's result is negated by ITS bit0; the combine
     // operator (or/xor/else and) is taken from the PREVIOUS trigger, i.e. these bits control how the NEXT

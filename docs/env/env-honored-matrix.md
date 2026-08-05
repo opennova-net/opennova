@@ -66,7 +66,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `sun` | day light color + sun body tint (`NovaEnvironment`, `NovaCelestial`) | HONORED | Selected vs moon by day phase [orig: @ 0x57d870]. |
 | `moon` | night light color + moon body tint | HONORED | |
 | `ground` | fill/ambient light → shader globals | HONORED | |
-| `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_ApplyFogAndAmbient @ 0x57f17c]. |
+| `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_UpdateWeatherTick @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
 | `skyfog` | `get_frame_clear_color()` (horizon-blended, undoubled) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` stays the doubled render color | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; Clear halving @ 0x67715d] | **Closed 2026-07-05** (env-tod-re.md #21): blend ported libs/env-first, byte-exact; GameWorld clears with it (above/below-water choice witnessed). Editor preview adoption rides ENV-1; sentinel-mirror bleed still deliberately not replicated. |
 | `skybase` | `NovaSky` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |

@@ -160,7 +160,8 @@ inline opennova::anim::AimOverlayInputs aim_overlay_inputs_for(
 	in.pitch_kick_accum = entity.inf.pitch_kick_accum;
 	// The body overlay consumes the undoubled recoil accumulator. The camera is
 	// the separate consumer that adds 2*R. [orig: entity+0x380 read
-	// @0x4b1bce; Player_UpdateFirstPersonCamera @0x437fdb]
+	// @0x4b1bce; the FP person leg pitch = entPitch + 2*(+0x380) in
+	// Camera_ComputeThirdPersonView @0x437fc0..0x437fc7]
 	in.pitch_blend = entity.inf.recoil_pitch;
 	in.lean = entity.inf.lean_angle;
 	in.roll = entity.roll;

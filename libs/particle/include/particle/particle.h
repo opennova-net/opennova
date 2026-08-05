@@ -94,7 +94,7 @@ std::string format_move_bits(std::uint32_t bits);
 // `dword_5BC2E8` = 29; stride 264 B, u32 bitmask at name-4). JO equivalent
 // @ 0x846A18. Bits are powers of two in table order. Engine semantics: the
 // parser matches each token and ORs the bit; the writer emits space-separated
-// names in table order via FlagTable_BuildString @ 0x428fe0 (JO sub_5DF9C0
+// names in table order via FlagTable_BuildString @ 0x428fe0 (JO FlagTable_BuildString @ 0x5df9c0, ex sub_5DF9C0
 // @ 0x5df9c0).
 //
 // Bit values MUST match the engine exactly: HAZE (idx 9), BELOWH20 (idx 27),

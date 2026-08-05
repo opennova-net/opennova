@@ -69,7 +69,7 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 
 // world->source sector remap, then BILINEAR sample. This is the renderer-accurate
 // column height the AI grounds on. [orig: NovaTerrainData::get_height_world_bilinear /
-// Terrain_SampleHeightBilinear @0x5C6770.] World units.
+// Terrain_SampleHeightBilinear @0x6067B0.] World units.
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z);
 
 } // namespace opennova::terrain
