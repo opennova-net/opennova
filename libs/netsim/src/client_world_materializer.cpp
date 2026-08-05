@@ -170,30 +170,42 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 				handle, claimed.registry_spawn_id});
 	}
 
-	// The 0x0D parent is a relationship pointer. Resolve it only after every
-	// row in this fold has had a chance to occupy its exact slot.
+	// The 0x0D parent and target are TWO relationship pointers: parent is the
+	// occupant/driver back-ref for an occupied mount (+368), target is the
+	// structural carrier the child rides (groundEntity/+40) — an occupied boat
+	// gun's target is the DRIVING hull. Resolve both only after every row in
+	// this fold has had a chance to occupy its exact slot.
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity store
+	//  @0x433289, target → groundEntity stores @0x432d47/@0x4332d7; both
+	//  resolved via the pool<<12|slot walk with 0xFFFF / pool<5 / capacity
+	//  guards]
 	for (const auto &[packed, row] : current) {
 		world::Entity *child = owned(world, world::EntityHandle{packed});
 		if (child == nullptr) continue;
 		child->emplacement_parent = world::EntityHandle{};
 		child->emplacement_parent_spawn_id = 0;
 		child->ground_target = world::EntityHandle{};
-		if (row->parent_handle == 0xFFFFu) {
-			continue;
+		if (row->parent_handle != 0xFFFFu) {
+			const world::EntityHandle parent_handle{row->parent_handle};
+			const world::Entity *parent = parent_handle.pool() >= 1 &&
+					parent_handle.pool() <= 3
+					? owned(world, parent_handle)
+					: world.registry.get(parent_handle);
+			if (parent != nullptr) {
+				child->emplacement_parent = parent->handle;
+				child->emplacement_parent_spawn_id = parent->registry_spawn_id;
+			}
 		}
-		const world::EntityHandle parent_handle{row->parent_handle};
-		const world::Entity *parent = parent_handle.pool() >= 1 &&
-				parent_handle.pool() <= 3
-				? owned(world, parent_handle)
-				: world.registry.get(parent_handle);
-		if (parent == nullptr) continue;
-		child->emplacement_parent = parent->handle;
-		child->emplacement_parent_spawn_id = parent->registry_spawn_id;
-		// For retail NoNetworkCallback attachment rows this relationship is
-		// simultaneously the child's groundEntity (+0x28), which the mounted
-		// weapon-slot selector follows. `owned` above makes the assignment
-		// generation-safe; a same-handle foreign replacement leaves it clear.
-		child->ground_target = parent->handle;
+		if (row->target_handle != 0xFFFFu) {
+			const world::EntityHandle target_handle{row->target_handle};
+			const world::Entity *target = target_handle.pool() >= 1 &&
+					target_handle.pool() <= 3
+					? owned(world, target_handle)
+					: world.registry.get(target_handle);
+			// `owned` makes the assignment generation-safe; a same-handle
+			// foreign replacement leaves it clear.
+			if (target != nullptr) child->ground_target = target->handle;
+		}
 	}
 
 	// Model resolution owns which seats exist and their dense gameplay order.

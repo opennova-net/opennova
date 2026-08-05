@@ -270,17 +270,28 @@ bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 			"a later wire generation can claim the now-empty exact slot");
 }
 
-bool wire_parent_mirrors_ground_target_without_aliasing_reuse() {
+bool wire_target_authors_ground_separately_from_parent() {
 	ns::ClientReplicaPipeline pipeline;
-	nw::PoolSpawnRecord parent;
-	parent.slot_id = 0x1002;
-	parent.item_type_id = 5008;
-	nw::PoolSpawnRecord child;
-	child.slot_id = 0x1003;
-	child.item_type_id = 5009;
-	child.parent_handle = parent.slot_id;
+	nw::PoolSpawnRecord hull;
+	hull.slot_id = 0x1002;
+	hull.item_type_id = 5008;
+	nw::PoolSpawnRecord occupant_ref;
+	occupant_ref.slot_id = 0x1004;
+	occupant_ref.item_type_id = 5010;
+	nw::PoolSpawnRecord gun;
+	gun.slot_id = 0x1003;
+	gun.item_type_id = 5009;
+	// The 0x0D parent and target are two relationships: parent is the
+	// occupant/driver BACK-REF for an occupied mount, the separate flag-0x0200
+	// target field authors retail groundEntity (+40) — the DRIVING hull a boat
+	// gun rides. The materializer must never let the parent author the
+	// structural carrier. [orig: NapiNPClientMsg_0x00D @0x432C40 — parent →
+	// occupantEntity (+368) store @0x433289; target → groundEntity stores
+	// @0x432d47/@0x4332d7]
+	gun.parent_handle = occupant_ref.slot_id;
+	gun.target_handle = hull.slot_id;
 	nw::PoolSpawnBatch batch;
-	batch.records = {parent, child};
+	batch.records = {hull, occupant_ref, gun};
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
@@ -288,37 +299,38 @@ bool wire_parent_mirrors_ground_target_without_aliasing_reuse() {
 	ns::ClientWorldMaterializer materializer;
 	const ns::ClientWorldSyncResult first =
 			materializer.sync(pipeline.state(), world);
-	const w::EntityHandle parent_h{parent.slot_id};
-	const w::EntityHandle child_h{child.slot_id};
-	const w::Entity *live_parent = materializer.owned(world, parent_h);
-	const w::Entity *live_child = materializer.owned(world, child_h);
-	if (!expect(first.spawned.size() == 2 && live_parent != nullptr &&
-			live_child != nullptr && live_child->emplacement_parent == parent_h &&
-			live_child->ground_target == parent_h &&
-			live_child->emplacement_parent_spawn_id ==
-					live_parent->registry_spawn_id,
-			"the 0x0D NoNetworkCallback parent relation also authors retail groundEntity"))
+	const w::EntityHandle hull_h{hull.slot_id};
+	const w::EntityHandle occupant_h{occupant_ref.slot_id};
+	const w::EntityHandle gun_h{gun.slot_id};
+	const w::Entity *live_occupant = materializer.owned(world, occupant_h);
+	const w::Entity *live_gun = materializer.owned(world, gun_h);
+	if (!expect(first.spawned.size() == 3 && live_occupant != nullptr &&
+			live_gun != nullptr && live_gun->emplacement_parent == occupant_h &&
+			live_gun->ground_target == hull_h &&
+			live_gun->emplacement_parent_spawn_id ==
+					live_occupant->registry_spawn_id,
+			"the 0x0D target authors retail groundEntity; the parent stays a back-ref"))
 		return false;
 
-	// Losing the materializer-owned parent lifetime must clear both child-side
-	// pointers; an unrelated replacement at the same packed handle cannot be
-	// adopted by the next fold.
-	world.registry.despawn(parent_h);
-	if (!expect(world.registry.get(parent_h) == nullptr,
-			"the materialized parent lifetime can be retired"))
+	// Losing the materializer-owned TARGET lifetime must clear the structural
+	// carrier; an unrelated replacement at the same packed handle cannot be
+	// adopted by the next fold. The parent relation is independent and
+	// survives.
+	world.registry.despawn(hull_h);
+	if (!expect(world.registry.get(hull_h) == nullptr,
+			"the materialized target lifetime can be retired"))
 		return false;
 	w::Entity foreign;
-	foreign.item_id = parent.item_type_id;
-	if (!expect(world.registry.spawn_at(parent_h, foreign) == parent_h,
-			"a foreign parent replacement can reuse the packed handle"))
+	foreign.item_id = hull.item_type_id;
+	if (!expect(world.registry.spawn_at(hull_h, foreign) == hull_h,
+			"a foreign target replacement can reuse the packed handle"))
 		return false;
 	materializer.sync(pipeline.state(), world);
-	live_child = materializer.owned(world, child_h);
-	return expect(live_child != nullptr &&
-			!live_child->emplacement_parent.valid() &&
-			!live_child->ground_target.valid() &&
-			live_child->emplacement_parent_spawn_id == 0,
-			"a foreign replacement lifetime cannot inherit the wire child relation");
+	live_gun = materializer.owned(world, gun_h);
+	return expect(live_gun != nullptr &&
+			!live_gun->ground_target.valid() &&
+			live_gun->emplacement_parent == occupant_h,
+			"a foreign replacement lifetime cannot inherit the wire target relation");
 }
 
 bool decoded_world_stream_materializes_exact_rows() {
@@ -593,7 +605,7 @@ int main() {
 	if (!malformed_load_indices_do_not_alias_low_slots()) return 1;
 	if (!external_same_type_reuse_is_never_mutated_or_retired()) return 1;
 	if (!preoccupied_exact_slot_requires_a_fresh_wire_generation()) return 1;
-	if (!wire_parent_mirrors_ground_target_without_aliasing_reuse()) return 1;
+	if (!wire_target_authors_ground_separately_from_parent()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	std::puts("client_world_materializer_test: PASS");
 	return 0;
