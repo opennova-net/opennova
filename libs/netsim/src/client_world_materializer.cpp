@@ -30,10 +30,8 @@ bool retail_mount_handle_resolves(
 	const world::EntityHandle handle{packed};
 	if (handle.pool() < 0 || handle.pool() >= world::kEntityPoolCount)
 		return false;
-	const std::size_t retail_capacity = handle.pool() == 3
-			? world::kRetailMarkerPoolCapacity
-			: world::kRetailActorPoolCapacity;
-	if (static_cast<std::size_t>(handle.slot()) >= retail_capacity)
+	if (static_cast<std::size_t>(handle.slot()) >=
+			world::retail_pool_capacity(handle.pool()))
 		return false;
 	// Retail validates that the fixed pool row can be computed, not that an
 	// entity is currently live there. The configured registry capacity is our

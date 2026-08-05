@@ -73,6 +73,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `presnap_vehicle_attach_heading` (both attach entry points) | `Entity_RequestVehicleAttach` | 0x4364a0 | §23.1 (pre-relationship snap; UseGun yaw = veh.Yaw − stored offset); ctest `vehicle_mount` | **matching for UseGun; matching-core with §9.2.5 for moving generic seats** |
 | `NovaSimulation::sync_local_mounted_input_heading` | no separate retail seam (one input-owned entity Yaw) | n/a | §23.1/§26.5; asset-backed B50 GUT | **matching adapter** |
 | live UseGun root-position feedback (host parent pose → sim occupant) | `Entity_AttachToBoneAndUpdateTransform` | 0x5463d0 (player call 0x4b63c7; AI call 0x4bec23) | §23.5/§26.5a; asset-gated 00TRc E50triB GUT | **matching for UseGun root position** (joiner C2S 0x26/0x27 + requester-local 0x0A relationship confirmation landed; generic seats and the full matrix basis remain open) |
+| joiner S2C 0x13/0x26 death fold (`ClientReplicaPipeline::apply_entity_death` → `destruction_notify_item_damage(…, 4)`) | `NapiNPClientMsg_EntityDeath` / `Entity_KillBySlotId` | 0x42eb50 / 0x42bce0 | §24.3 client fold; ctest `npruntime_entity_lifecycle_net` + `destruction` net-kill case | **matching** for destructible victims (D-NET-208; organic 0x13 death-anim + local-player camera legs deferred) |
 | `EntityCommands::local_player_attached_to_ssn` | `Entity_IsLocalPlayerSeatedOnSsn` (renamed) | 0x4f10d0 | §23.2; ctest `vehicle_mount` | **matching** |
 | `EntityCommands::local_player_standing_on_ssn` | `Entity_IsLocalPlayerStandingOnSsn` (renamed) | 0x4f1260 | §23.2 | **matching** (persistence nuance D-AI-11 h) |
 | `EntityCommands::local_player_driving_ssn` | `Entity_IsLocalPlayerDrivingSsn` (renamed) | 0x4f1150 | §23.2 | **matching** |
@@ -3256,10 +3257,14 @@ the cveh SM tick; our earlier bring-up event is removed).
    plays (slot 7, or 8 `SSNightDead` on `Bms_AttribFlags & 0x100000` =
    the mission **EnableNVG** attribute, the formerly-unidentified author). The
    org2 player edge's composite-name variant stays open (D-SND-14).
-3. The S2C 0x13 client consumer (`NapiNPClientMsg_EntityDeath @ 0x42ebd0` region)
-   also writes `+0x2C0` — the wire carries the death-anim selection to remote
-   clients; walk it when MP corpse parity lands (its IDB gloss "clear ammo/weapon
-   field" is wrong).
+3. ~~The S2C 0x13 client consumer (`NapiNPClientMsg_EntityDeath @ 0x42ebd0`
+   region) also writes `+0x2C0`~~ WALKED 2026-08-05 (§24.3 client fold,
+   D-NET-208): `@ 0x42eb50` stores the body's i16 killerSource into
+   `deathAnimStateId` (+0x2C0) @ 0x42ebdf and zeroes the +0x1BA word — so
+   the wire's second field doubles as the remote death-anim selection for
+   organics; the destructible fold consumes the handle + cb(4) legs, the
+   organic death-anim consumption still rides MP corpse parity (its IDB
+   gloss "clear ammo/weapon field" remains wrong).
 4. ~~`Entity_InitDeathSounds @ 0x4939b0`, `Entity_SpawnDeathPieces @ 0x493400`,
    the `@ 0x815410` table rows, and `Entity_ProcessFallingDeathPhysics @ 0x461d30`
    internals~~ CLOSED by §24's destruction port. The specialized unitType-3
@@ -4278,6 +4283,33 @@ Port status: the event carries the entity position and blast center only.
 around that origin. It does not enumerate CFAC faces, sample triangle
 centroids at the retail stride, or select foliage versus wood by face
 material (D-ITEM-16).
+
+**The client fold (witnessed + ported 2026-08-05, D-NET-208).** The "a
+non-authority client destroys on phase 4" leg above is DRIVEN by two S2C
+routes, both ending in the same class death callback with reason 4:
+S2C `0x13` `[u16 handle][i16 killerSource]` — the health<=0 detection's
+non-player broadcast (`Entity_CheckAndProcessDeath @ 0x51b550`, msg 19, mask
+0x90) → `NapiNPClientMsg_EntityDeath @ 0x42eb50` (Health=0 @ 0x42ebd6,
+`deathAnimStateId` @ 0x42ebdf, cb(entity, 4, 0) @ 0x42ebf5); and S2C `0x26`
+`[u16 victimSlot][u16 attacker]` — the destructible callback's own authority
+(re)send (`Server_SendEntityStatePacket @ 0x509d70`) →
+`NapiNPClientMsg_0x026 @ 0x42ec30` → `Entity_KillBySlotId @ 0x42bce0`
+(alive-gated on Flags&2, Health=0 @ 0x42bd33, cb(entity, 4, flags)
+@ 0x42bd6a). The client then runs the WHOLE chain locally from its own
+pools: `Entity_UpdateAllEntities @ 0x4c2100` drains `DeathPiece_TickAll`
+@ 0x4c221c and `Projectile_ProcessExplosionQueue` @ 0x4c223f
+UNCONDITIONALLY on every peer, so the death chain's kz blasts detonate and
+the pieces fly on a pure client too. Ported: JoinerConnection surfaces both
+tags, `ClientReplicaPipeline::apply_entity_death` folds them (row Health=0 +
+a once-drained record), `NovaSimulation::apply_joiner_gameplay_events` runs
+`destruction_notify_item_damage(world, twin, 4)` on the materialized world
+row, `World::run_logic_tick` runs the explosion/dead-settle/piece drains
+under the MP visual-client predicate, and `mission_runtime.gd` builds the
+destruction present pass for joiners. Named deferrals: the pool-0 organic
+0x13 leg (presentation stays on the compact dead bit), the 0x13
+local-player camera-lerp/scope leg, vehicle (is_ai_capable) victims (their
+death rides the rows-21/23 state machine, §19.6), and the 0x26 itemType-1
+flags-bit0 strip (our fold passes no flags).
 
 ### 24.4 The unitType death dispatch + death pieces
 

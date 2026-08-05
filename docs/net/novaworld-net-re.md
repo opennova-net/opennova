@@ -314,7 +314,7 @@ sweep; blank = not yet characterized.
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
-| 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]` → Health=0 + death cb (§5.35) |
+| 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]`, gated `!is_authority`: handle gates (≠0xFFFF, pool<5, slot < that pool's capacity) → Health=0 @0x42ebd6, deathAnimStateId=killerSource @0x42ebdf, **deathCallback(entity, 4, 0)** @0x42ebf5 — for a destructible that cb IS the local husk/explosion chain (@0x440210); local-player leg = camera lerp + scope drop. Sender: `Entity_CheckAndProcessDeath @0x51b550` (msg 19, mask 0x90) for every non-player death. Ported: JoinerConnection surfaces it, `ClientReplicaPipeline::apply_entity_death` folds it, the sim runs `destruction_notify_item_damage(…, 4)` on the world twin (D-NET-208) (§5.35) |
 | 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast [u8 senderSlot][u8 channel][cstr formatted] → Chat_DispatchToChannel; the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
@@ -332,7 +332,7 @@ sweep; blank = not yet characterized.
 | 0x23 | 0x4F81E0 | `_0x023` | part of the 0x0F reply ecosystem |
 | 0x24 | 0x429E70 | `_0x024` | (sits near the flat-table tail) |
 | 0x25 | 0x422800 | `_0x025` | game reset, empty payload. Client side: input reset, clears camera/HUD state dwords, `dword_24C1928=1` + companion `dword_24C195C=1`, increments round counter `dword_24C116C`. Server side: round counter only. Retail does **not** use S2C 0x25 in the spawn flow (§5.2) |
-| 0x26 | 0x42EC30 | `_0x026` | entity kill-sync (killer/victim slots); fires on kill events |
+| 0x26 | 0x42EC30 | `_0x026` | entity kill-sync `[u16 victimSlot][u16 attacker]` (short 2nd field → 0), gated `!is_authority` → `Entity_KillBySlotId @0x42BCE0`: same handle/capacity gates, alive gates (+0x1C model ptr, Flags&2 clear), Health=0 @0x42bd33, attacker into the hit record, **deathCallback(entity, 4, flags)** @0x42bd6a (bit0 stripped for itemType-1 defs @0x42bd5b) — the destructible deathCallback's own authority resend rides this tag (`Server_SendEntityStatePacket @0x509d70` via @0x440210). Ported beside 0x13 through the same `apply_entity_death` fold (D-NET-208) |
 | 0x27 | 0x425AA0 | `_0x027` | |
 | 0x28 | 0x425B40 | `_0x028` | |
 | 0x29 | 0x427D00 | `_CharMinimapUpdate` | per-entity character/minimap update: [u8 pool0Idx][u8 team→+354][u8 flags7→+692][u16 packedCharId→NetId+0x15C] + CharacterEntity rebind (§5.59); renamed from `handle_entity_minimap_update` |

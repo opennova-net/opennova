@@ -115,20 +115,20 @@ bool malformed_load_indices_do_not_alias_low_slots() {
 
 	pool1.item_type_id = 5009;
 	pool1_batch.records.clear();
-	pool1.slot_id = 0x1400; // pool 1, slot 1024: just beyond capacity
+	pool1.slot_id = 0x14B0; // pool 1, slot 1200: just beyond retail capacity
 	pool1_batch.records.push_back(pool1);
 	pool1.slot_id = 0x2001; // wrong pool nibble for a 0x0D record
 	pool1_batch.records.push_back(pool1);
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(pool1_batch));
 
 	pool2.item_type_id = 0x0601;
-	pool2_batch.start_index = 1024;
+	pool2_batch.start_index = 1200; // one past retail pool-2 capacity
 	pool2_batch.records.clear();
 	pool2_batch.records.push_back(pool2);
 	pipeline.apply(0x10, nw::encode_static_entity_batch(pool2_batch));
 
 	pool3.item_type_id = 6003;
-	pool3_batch.start_index = 4096;
+	pool3_batch.start_index = 768; // one past retail pool-3 capacity
 	pool3_batch.records.clear();
 	pool3_batch.records.push_back(pool3);
 	pipeline.apply(0x20, nw::encode_pool3_sync_batch(pool3_batch));
@@ -379,12 +379,12 @@ bool decoded_world_stream_materializes_exact_rows() {
 	vehicle.mount_handles[0] = 0x0001u;
 	vehicle.mount_handles[1] = 0xFFFFu;
 	vehicle.mount_handles[2] = 0x5000u; // invalid pool nibble
-	vehicle.mount_handles[3] = 0x1400u; // pool 1, one past retail capacity
+	vehicle.mount_handles[3] = 0x14B0u; // pool 1, one past retail capacity (1200)
 	vehicle.mount_handles[7] = 0x0007u;
 	// Retail copies tail slots 8/9 raw; unlike passenger slots 0..7, their
 	// receive path does not structurally resolve these values.
 	vehicle.mount_handle_8 = 0x5000u;
-	vehicle.mount_handle_9 = 0x1400u;
+	vehicle.mount_handle_9 = 0x14B0u;
 	nw::PoolSpawnBatch vehicles;
 	vehicles.records.push_back(vehicle);
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(vehicles));
@@ -406,11 +406,8 @@ bool decoded_world_stream_materializes_exact_rows() {
 	pipeline.apply(0x20, nw::encode_pool3_sync_batch(markers));
 
 	w::World world;
-	world.registry.configure_pool(0, w::kRetailActorPoolCapacity);
-	world.registry.configure_pool(1, w::kRetailActorPoolCapacity);
-	world.registry.configure_pool(2, w::kRetailActorPoolCapacity);
-	world.registry.configure_pool(3, w::kRetailMarkerPoolCapacity);
-	world.registry.configure_pool(4, w::kRetailActorPoolCapacity);
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;
 	const ns::ClientWorldSyncResult first =
 			materializer.sync(pipeline.state(), world);
@@ -455,10 +452,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 				boat_state->spawn_mount_handles[0] == 0x0001u &&
 				boat_state->spawn_mount_handles[1] == 0xFFFFu &&
 				boat_state->spawn_mount_handles[2] == 0x5000u &&
-				boat_state->spawn_mount_handles[3] == 0x1400u &&
+				boat_state->spawn_mount_handles[3] == 0x14B0u &&
 				boat_state->spawn_mount_handles[7] == 0x0007u &&
 				boat_state->spawn_mount_handles[8] == 0x5000u &&
-				boat_state->spawn_mount_handles[9] == 0x1400u &&
+				boat_state->spawn_mount_handles[9] == 0x14B0u &&
 				boat->seats.empty(),
 			"the decoded 0x0D row retains fixed mountHandles without inventing seat definitions"))
 		return false;
@@ -479,7 +476,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			materializer.sync(pipeline.state(), world);
 	if (!expect(!seat_fold.changed() && boat->seats.size() == 6 &&
 				boat->seats[0].retail_slot == 9 &&
-				boat->seats[0].occupant == w::EntityHandle{0x1400u} &&
+				boat->seats[0].occupant == w::EntityHandle{0x14B0u} &&
 				boat->seats[1].retail_slot == 3 &&
 				!boat->seats[1].occupant.valid() &&
 				boat->seats[2].retail_slot == 0 &&
@@ -599,6 +596,52 @@ bool decoded_world_stream_materializes_exact_rows() {
 
 } // namespace
 
+// Regression (2026-08-05, PR #417 round): a retail 01TR host streams 1157
+// pool-2 entities; the final 0x10 pages walk slots 1024..1156. The former
+// 1024-slot clamp (an unwitnessed guess) silently dropped that tail — the
+// entire chain-link fence line of the east base never materialized on a
+// joiner while the host showed it. Retail's client indexes pool 2 unchecked;
+// its own pool capacity 1200 is the reachable bound.
+// [orig: NapiNPClientMsg_0x010 @0x433400 — Pool_GetEntryUnchecked(2, idx)
+//  @0x433487; EntityPool_Allocate @0x442168 — pool-2 capacity 1200 @0x4421a2]
+bool pool2_tail_beyond_1024_materializes() {
+	ns::ClientReplicaPipeline pipeline;
+
+	nw::StaticEntityBatch tail;
+	tail.start_index = 1150;
+	for (int i = 0; i < 7; ++i) {
+		nw::StaticEntityRecord rec;
+		rec.item_type_id = 0x10EB; // the 01TR fence tail's own type
+		rec.pos_x = (753 + i) * 65536;
+		rec.pos_y = 762 * 65536;
+		rec.pos_z = 42 * 65536;
+		tail.records.push_back(rec);
+	}
+	tail.entity_count = static_cast<uint16_t>(tail.records.size());
+	pipeline.apply(0x10, nw::encode_static_entity_batch(tail));
+
+	for (int slot = 1150; slot <= 1156; ++slot) {
+		const uint16_t handle = static_cast<uint16_t>(0x2000u | slot);
+		if (!expect(pipeline.state().find(handle) != nullptr,
+				"a pool-2 load record at slot >= 1024 must fold (retail capacity 1200)"))
+			return false;
+	}
+
+	w::World world;
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	ns::ClientWorldMaterializer materializer;
+	const ns::ClientWorldSyncResult sync =
+			materializer.sync(pipeline.state(), world);
+	if (!expect(sync.spawned.size() == 7,
+			"every pool-2 tail row materializes into the native world"))
+		return false;
+	const w::Entity *last = world.registry.get(w::EntityHandle{0x2000u | 1156u});
+	return expect(last != nullptr && last->item_id == 0x10EB &&
+			last->kind == w::EntityKind::Building,
+			"the final streamed pool-2 slot (1156) exists at its exact handle");
+}
+
 int main() {
 	if (!exact_registry_slot_contract()) return 1;
 	if (!registry_lifetime_rejects_handle_reuse()) return 1;
@@ -607,6 +650,7 @@ int main() {
 	if (!preoccupied_exact_slot_requires_a_fresh_wire_generation()) return 1;
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
+	if (!pool2_tail_beyond_1024_materializes()) return 1;
 	std::puts("client_world_materializer_test: PASS");
 	return 0;
 }

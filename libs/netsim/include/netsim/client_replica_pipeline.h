@@ -118,6 +118,14 @@ public:
 	// decoded ClientState persistent while preventing event replay on later frames.
 	std::vector<ClientRoundEvent> drain_round_events();
 	std::vector<WeaponReload> drain_weapon_reloads();
+	// S2C 0x13 entity-death notifies folded by apply(): the row's health drops to
+	// zero and the record is surfaced once so the embedding sim can run the
+	// class death callback on its world twin (a destructible's husk/explosion
+	// chain — reason 4, the net kill).
+	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
+	//  deathAnimStateId = killerSource @0x42ebdf, deathCallback(entity, 4, 0)
+	//  @0x42ebf5]
+	std::vector<EntityDeathRecord> drain_entity_deaths();
 
 	// Install the items.def-derived per-type classifier — the table the retail client
 	// itself dispatches 0x0A records through (each type's serialize callback, seeded
@@ -159,6 +167,10 @@ public:
 private:
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
+	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
+	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
+	// Entity_KillBySlotId @0x42BCE0]
+	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
 	// ABSOLUTE world positions (no anchor) + the entity identity/type, so spawn-only entities
@@ -196,6 +208,7 @@ private:
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
+	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	std::size_t unknown_tags_ = 0;
 	uint32_t game_type_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this

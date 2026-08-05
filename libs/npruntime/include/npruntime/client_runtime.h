@@ -178,6 +178,11 @@ public:
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
 	std::vector<netsim::ClientRoundEvent> drain_round_events();
 	std::vector<WeaponReload> drain_reload_notifications();
+	// S2C 0x13 death notifies the recv fold surfaced this frame. The embedding
+	// sim runs the class death callback on each world twin (reason 4 — the net
+	// kill; a destructible's husk/explosion chain).
+	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
+	std::vector<EntityDeathRecord> drain_entity_deaths();
 
 	// Deterministic golden replay (Joiner): seed the connection keys + seq/ack + self handle/type so
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]

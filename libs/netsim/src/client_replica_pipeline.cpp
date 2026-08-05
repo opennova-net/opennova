@@ -120,6 +120,47 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::ENTITY_DEATH: {
+		// The host's per-death notify for every NON-PLAYER victim (the AI/item
+		// leg of Entity_CheckAndProcessDeath) — a destructible's ONLY live death
+		// channel beside 0x26; the load-stream 0x10/0x20 batches do not
+		// re-stream after load. Retail resolves the pool row (slot < that
+		// pool's capacity), zeroes Health, stamps the killer source, and runs
+		// the class death callback with reason 4 — for a destructible item that
+		// callback IS the local husk-swap/explosion chain the world twin runs
+		// when this drains.
+		// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — gates @0x42eba2/@0x42ebbb,
+		//  Health = 0 @0x42ebd6, deathAnimStateId @0x42ebdf, cb(entity, 4, 0)
+		//  @0x42ebf5; sender Entity_CheckAndProcessDeath @0x51b550 (msg 19)]
+		EntityDeathRecord death;
+		size_t consumed = 0;
+		if (!decode_entity_death(body.data(), body.size(), death, consumed)) {
+			++unknown_tags_;
+			break;
+		}
+		apply_entity_death(death.entity_handle, death.killer_source);
+		break;
+	}
+	case s2c::KILL_SYNC: {
+		// The SECOND client death route — the destructible deathCallback's own
+		// authority resend rides this tag. Entity_KillBySlotId resolves the
+		// slot the same way, zeroes Health, and runs the same cb(entity, 4,
+		// flags); its not-already-dead gate is our world chain's husk gate.
+		// [orig: NapiNPClientMsg_0x026 @0x42EC30 → Entity_KillBySlotId
+		//  @0x42BCE0 — gates @0x42bcfc/@0x42bd15, Flags&2 gate @0x42bd2f,
+		//  Health zero @0x42bd33, cb(entity, 4, flags) @0x42bd6a; the
+		//  destructible resend Server_SendEntityStatePacket @0x509d70 via
+		//  Entity_HandleDestructibleDeathEvent @0x440210]
+		KillRecord kill;
+		size_t consumed = 0;
+		if (!decode_kill_record(body.data(), body.size(), kill, consumed)) {
+			++unknown_tags_;
+			break;
+		}
+		apply_entity_death(kill.victim_slot,
+				static_cast<int16_t>(kill.attacker));
+		break;
+	}
 	case s2c::ENTITY_SPAWN_BATCH: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
@@ -149,6 +190,35 @@ std::vector<WeaponReload> ClientReplicaPipeline::drain_weapon_reloads() {
 	std::vector<WeaponReload> out;
 	out.swap(pending_weapon_reloads_);
 	return out;
+}
+
+std::vector<EntityDeathRecord> ClientReplicaPipeline::drain_entity_deaths() {
+	std::vector<EntityDeathRecord> out;
+	out.swap(pending_entity_deaths_);
+	return out;
+}
+
+// Shared 0x13/0x26 fold: the retail handler gates (not the 0xFFFF sentinel,
+// pool nibble < 5, slot < that pool's capacity), the row Health zero, and the
+// once-surfaced record the embedding sim runs the class death callback from.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 / Entity_KillBySlotId @0x42BCE0]
+void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
+		int16_t killer_source) {
+	const world::EntityHandle handle{handle_packed};
+	if (handle_packed == 0xFFFFu ||
+			handle.pool() >= world::kEntityPoolCount ||
+			static_cast<std::size_t>(handle.slot()) >=
+					world::retail_pool_capacity(handle.pool()))
+		return;
+	if (ClientEntityState *row = state_.find(handle_packed)) {
+		row->health_word = 0;
+		row->health_known = true;
+		state_.mark_changed();
+	}
+	EntityDeathRecord death;
+	death.entity_handle = handle_packed;
+	death.killer_source = killer_source;
+	pending_entity_deaths_.push_back(death);
 }
 
 void ClientReplicaPipeline::pump(ISessionTransport &channel) {
@@ -965,7 +1035,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		const world::EntityHandle spawn_handle{rec.slot_id};
 		if (spawn_handle.pool() != 1 ||
 				static_cast<std::size_t>(spawn_handle.slot()) >=
-						world::kRetailActorPoolCapacity)
+						world::retail_pool_capacity(1))
 			continue;
 		// A 0x0D spawn is pool-1 by construction — learn the type's 0x0A replication
 		// class so the vehicle compact body decodes for it (see classify()).
@@ -1271,7 +1341,12 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 	for (size_t i = 0; i < batch.records.size(); ++i) {
 		const StaticEntityRecord &rec = batch.records[i];
 		const std::size_t slot = static_cast<std::size_t>(batch.start_index) + i;
-		if (slot >= world::kRetailActorPoolCapacity) continue;
+		// Retail indexes pool 2 unchecked; its own capacity (1200) is the bound a
+		// stock server can reach — a 1157-entity 01TR load page walked past a
+		// 1024 clamp here and silently dropped the pool tail.
+		// [orig: NapiNPClientMsg_0x010 @0x433400 — Pool_GetEntryUnchecked(2, idx)
+		//  @0x433487; capacity EntityPool_Allocate @0x4421a2]
+		if (slot >= world::retail_pool_capacity(2)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x2000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();
@@ -1350,7 +1425,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		// Pool_GetEntryUnchecked(3, startIndex+i), netHandle store at entity+124]
 		const std::size_t slot =
 				static_cast<std::size_t>(batch.start_index) + i;
-		if (slot >= world::kRetailMarkerPoolCapacity) continue;
+		if (slot >= world::retail_pool_capacity(3)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x3000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();

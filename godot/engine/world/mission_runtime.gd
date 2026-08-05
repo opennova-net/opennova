@@ -49,7 +49,7 @@ var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes on every role or tooling/test preview
 var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
 var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
-var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (host); else null
+var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
 var _playing := false
@@ -319,11 +319,16 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			options.get("fire_listener", Callable()),
 			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
 					else Callable())
-	# The host destruction-presentation pass: husk model swaps, death-piece
-	# debris, wreck fire/smoke, destruction sounds — off the sim's destruction
-	# drain (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
-	# audio/fx providers.
-	if not is_joiner and options.has("fire_audio"):
+	# The destruction-presentation pass: husk model swaps, death-piece debris,
+	# wreck fire/smoke, destruction sounds — off the sim's destruction drain
+	# (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
+	# audio/fx providers. Joiners run it too: their world raises the same
+	# events from the S2C 0x13-driven death chain and the client-side
+	# explosion/piece drains (retail's client runs the identical presentation
+	# from its own pools).
+	# [orig: NapiNPClientMsg_EntityDeath @0x42EB50 -> deathCallback(entity,4,0);
+	#  Entity_UpdateAllEntities @0x4c2100 drains unconditionally on every peer]
+	if options.has("fire_audio"):
 		_destruction_present = DestructionPresentPass.new()
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),

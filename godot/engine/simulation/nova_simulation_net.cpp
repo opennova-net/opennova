@@ -9,6 +9,7 @@
 #include <npruntime/session_status.h>
 #include <npwire/ingame_message_id.h>
 #include <rtxt/rtxt.h>
+#include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -1393,6 +1394,31 @@ void NovaSimulation::refresh_joiner_projectile_proxies() {
 
 void NovaSimulation::apply_joiner_gameplay_events() {
 	if (!joiner_ || !runtime_ || !world_) return;
+
+	// S2C 0x13 entity-death notifies: run the class death callback on the world
+	// twin — retail's client zeroes Health and invokes deathCallback(entity, 4, 0),
+	// which for a destructible item IS the local husk-swap + death-explosion
+	// chain (the visual client's only live channel for another peer destroying a
+	// static; the 0x10/0x20 load batches never re-stream after load). Pool-0
+	// organics have no materialized world twin here — their death presentation
+	// rides the compact dead bit — and destruction_notify_item_damage's own
+	// gates keep AI-driven vehicles on their state-machine death path, exactly
+	// like the authority side.
+	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
+	//  cb(entity, 4, 0) @0x42ebf5; cb == Entity_HandleDestructibleDeathEvent
+	//  @0x440210 for destructibles]
+	for (const opennova::EntityDeathRecord &death :
+			runtime_->drain_entity_deaths()) {
+		const opennova::world::EntityHandle handle{death.entity_handle};
+		if (handle.pool() < 1 || handle.pool() > 3) continue;
+		opennova::world::Entity *victim =
+				wire_world_materializer_.owned(*world_, handle);
+		if (victim == nullptr) continue;
+		victim->health = 0;
+		victim->alive = false;
+		victim->last_attacker = opennova::world::EntityHandle{};
+		opennova::world::destruction_notify_item_damage(*world_, *victim, 4);
+	}
 
 	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
 	// normal round spawner so tracers and physical impacts are produced locally;
