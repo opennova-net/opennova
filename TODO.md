@@ -45,14 +45,12 @@ hardening, and project health. Divergences from the original engine belong in
       but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
-- [ ] Wire-walk edge-gating follow-up: the native wire walk deliberately
-      transliterates the GDScript dispatch pattern, so the aim-payload,
-      ctrl-publish, and weapon-channel legs still dispatch every frame while
-      active; adopting the mission walk's change-gated edge machine for them is
-      a measured follow-up (F3 Stats wire leg before/after)
-- [ ] Env/water/sky/weather singleton `_process` set (~1 ms at the ASH_I5A
-      vantage): the July perf program's next present-side slice now that the
-      MP wire walk is native
+- [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
+      vantage before slicing — the #403 present-side rework (parked idle models,
+      `env_generation_changed`, the staggered per-model light restamp) invalidated
+      the earlier ~1 ms reading. The next perf attribution round starts from the F3
+      "Outside shell spans" row (the #403 live sessions observed the remaining frame
+      cost concentrated outside the model system after the park/submission gates)
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
@@ -66,9 +64,11 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://engine/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in libs/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
-- [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework on the `worktree-gsb` branch before landing.
+- [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Export-progress overlay initiator awareness (owner: `godot/modtools/editor/shell/export_progress_overlay.gd`): the overlay polls the ACTIVE workspace, so an export running on a non-active workspace — reachable now that the flavor confirm exports the initiator — shows no progress UI. Route the overlay through the exporting workspace instead.
 - [ ] Converge `libs/cpt`'s bit codec on `io/bit_stream.h` (owner: `libs/cpt/src/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `libs/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
+- [ ] Typed shutdown-coordinator seams (owner: `godot/game/runtime_shutdown_coordinator.gd`): the coordinator still pokes the shell stringly (`_shell.call("_cleanup_picker")`, `_shell.call("_dismiss_loading_screen")`); replace with a typed shell contract (#403 review follow-up).
+- [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 
 ## Quality campaign — remaining slices
 
@@ -126,6 +126,7 @@ open review follow-ups from #376/#378 — none blocking:
 - [ ] macOS CI coverage: #344 removed every macOS job from regular CI (the test-matrix leg, `build-gdextension-macos`, the godot-tests macOS leg, and the macOS package jobs); `macos-latest` now appears only in `release.yml` tag-time packaging, so macOS builds are first exercised at release time. Decide: restore a macOS leg (full or smoke) to PR/master CI, or record the lapse as accepted and note the release-time-only risk.
 - [ ] Incremental conventional linting: establish project-owned editor/format settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] Two ctests are `DISABLED TRUE` in `tests/CMakeLists.txt` with reasons recorded but no owner: `parametric_parity` (long byte-identical CPT fixture run, disabled pending CI stability/perf cost) and `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: each is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
+- [ ] Product/engine boundary lint: PR #252's `scripts/lint/product_boundary_check.py` (mechanical teeth for the ADR 0015/0016 boundaries, 106 lines) closed unmerged 2026-07-17 and never landed in any form; the `heigene` worktree (branch `boundary-lint-pack`, head 149b88144) still holds it. Decide: reland a current-tree version, or record the drop as covered by `link_graph_check` (ADR 0020) + `host_lint`.
 
 ## Player info (player.mnu / PLAYER_INFO)
 
