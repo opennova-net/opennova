@@ -368,6 +368,33 @@ func test_model_carries_a_submission_notifier_sized_to_its_bounds() -> void:
 			"the notifier AABB covers the mesh bounds")
 
 
+func test_submission_registry_tracks_offscreen_edges_and_frees_cleanly() -> void:
+	var model := _clocked_spy_model()
+	var registry := {}
+	model.set_submission_registry(registry)
+	assert_false(registry.has(model.get_instance_id()),
+			"the on-screen default publishes no off-screen claim")
+	model.set_on_screen(false)
+	assert_true(registry.has(model.get_instance_id()),
+			"leaving the camera publishes this model's off-screen claim")
+	model.set_on_screen(true)
+	assert_false(registry.has(model.get_instance_id()),
+			"re-entering the camera withdraws the claim")
+
+	model.set_on_screen(false)
+	var replacement := {}
+	model.set_submission_registry(replacement)
+	assert_false(registry.has(model.get_instance_id()),
+			"rebinding erases the claim from the previous registry")
+	assert_true(replacement.has(model.get_instance_id()),
+			"rebinding republishes the current state into the new registry")
+
+	var id := model.get_instance_id()
+	model.free()
+	assert_false(replacement.has(id),
+			"a freed model leaves no stale off-screen claim behind")
+
+
 func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
 	model.set_panm_clock({"time_ms": 0})

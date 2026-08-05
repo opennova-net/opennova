@@ -37,6 +37,7 @@ struct DispatchNames {
 	StringName has_muzzle = StringName("has_muzzle");
 	StringName get_muzzle_world_position = StringName("get_muzzle_world_position");
 	StringName set_ai_muzzle_world = StringName("set_ai_muzzle_world");
+	StringName set_submission_registry = StringName("set_submission_registry");
 	StringName basis = StringName("basis");
 	String eweap_gunyaw = String("EWEAP_GUNYAW");
 	String eweap_gunpitch = String("EWEAP_GUNPITCH");
@@ -745,6 +746,14 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 		if ((visual_ctrl_caps & VISUAL_PART_CLEAR) != 0) {
 			caps |= CAP_PART_CLEAR;
 		}
+		// Camera-submission seam: a capable node publishes its off-screen
+		// edges into the shared registry so the hot walk gates on one native
+		// Dictionary lookup instead of a per-row script query. Idempotent per
+		// plan rebuild; nodes without the seam stay always-submitted.
+		if (node->has_method(names().set_submission_registry)) {
+			node->call(names().set_submission_registry,
+					submission_offscreen_ids_);
+		}
 		row.caps = caps;
 		row.visual_ctrl_caps = visual_ctrl_caps;
 		rows_.push_back(row);
@@ -850,11 +859,28 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				row.transform_stamp_valid = true;
 			}
 		}
+		const bool present_visible =
+				field_i(p, base, NovaSimulation::PF_HIDDEN) == 0 &&
+				field_i(p, base,
+						NovaSimulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
+		// Camera submission: retail runs the presentation writers per
+		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
+		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
+		// @ 0x4407d0]. A row the renderer would not submit — sim-hidden,
+		// occlusion-held, or bounds off-screen — skips the aim/part/CTRL
+		// dispatch legs below. The applied stamps keep their last-dispatched
+		// values, so the next submitted frame re-applies exactly what changed
+		// while the row was out (set legs are per-submission re-asserts;
+		// falling edges latched in the publish state still clear).
+		const bool submitted = present_visible &&
+				!occlusion_hidden_ids_.has(row.bms_id) &&
+				!submission_offscreen_ids_.has(
+						static_cast<int64_t>(row.node_id));
 		// Aim overlay with the capability lookups hoisted into the row plan and
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).
 		bool body_dependency_changed = false;
-		if ((caps & CAP_RHC) != 0) {
+		if (submitted && (caps & CAP_RHC) != 0) {
 			const int32_t rhc =
 					field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED);
 			if (rhc != row.rhc) {
@@ -864,7 +890,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				body_dependency_changed = true;
 			}
 		}
-		if ((caps & CAP_AIM) != 0) {
+		if (submitted && (caps & CAP_AIM) != 0) {
 			const int32_t aim_valid =
 					field_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 			if (aim_valid != 0) {
@@ -902,7 +928,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				row.aim_valid = 0;
 			}
 		}
-		if ((output_channels_ & OUTPUT_PART_ANIM) != 0 &&
+		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0 &&
 				(caps & (CAP_PART | CAP_PART_CLEAR | CAP_CTRL)) != 0) {
 			const int32_t active1_code =
 					field_i(p, base, NovaSimulation::PF_ACTIVE1);
@@ -1057,9 +1083,6 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			row.ctrl_publish_state = next_ctrl_publish_state;
 			row.ctrl_publish_state_valid = true;
 		}
-		const bool present_visible =
-				field_i(p, base, NovaSimulation::PF_HIDDEN) == 0 &&
-				field_i(p, base, NovaSimulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
 		const int32_t present_visible_int = present_visible ? 1 : 0;
 		if (present_visible_int != row.present_visible) {
 			present_visibility_[row.bms_id] = present_visible;
@@ -1086,11 +1109,12 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			}
 		}
 		const int32_t net_id = field_i(p, base, NovaSimulation::PF_NET_ID);
-		// Hidden models skip skeletal writes unless they own the authoritative
-		// posed-muzzle feedback seam (AI fire origins survive; hidden non-weapon
+		// Unsubmitted models (hidden, occlusion-held, off-screen) skip skeletal
+		// writes unless they own the authoritative posed-muzzle feedback seam
+		// (AI fire origins survive regardless of the camera; hidden non-weapon
 		// actors take the cheap path).
 		const bool body_eligible =
-				present_visible ||
+				submitted ||
 				(net_id > 0 && (caps & CAP_MUZZLE) != 0);
 		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && body_eligible) {
 			// Main-body skeletal clip: infantry poses to the exact anim-state

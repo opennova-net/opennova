@@ -308,6 +308,17 @@ private:
 	int output_channels_ = OUTPUT_ALL;
 	Dictionary occlusion_hidden_ids_;
 	Dictionary present_visibility_;
+	// The camera-submission registry, shared BY REFERENCE with every resolved
+	// node that exposes set_submission_registry (NovaObjectModel): a node keyed
+	// by instance id is present exactly while its bounds notifier reports
+	// off-screen. Retail evaluates the presentation writers per SUBMITTED model
+	// [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes constants for the
+	// models the batch draws; cull/submit @ Entity_RenderVehicleModel
+	// @ 0x4407d0], so the walk skips the part/CTRL/aim dispatch legs for rows
+	// retail would not submit and re-applies from cold state on re-entry.
+	// Nodes without the seam (tests, third-party visuals) never register and
+	// keep today's every-row dispatch.
+	Dictionary submission_offscreen_ids_;
 
 	int64_t stat_moved_ = 0;
 	int64_t stat_posed_ = 0;
