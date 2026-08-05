@@ -4,9 +4,10 @@
   Godot binding code lives only in `godot/engine/`. Blender-only scene assembly lives in
   `apps/importer/scene_builder/` and `blender/`.
 - Layout per library: `libs/<domain>/{CMakeLists.txt, include/<domain>/, src/}`; CMake
-  target `opennova_<domain>`; namespace `opennova`. C ABI exports stay flat and
-  domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI
-  stability matters.
+  target `opennova_<domain>` (a lib may ship a second split target — `libs/mission`
+  builds `opennova_mission_format` beside `opennova_mission`); namespace `opennova`.
+  C ABI exports stay flat and domain-prefixed — Python and Godot load the same
+  `opennova_shared` library, so ABI stability matters.
 - C ABI conventions for NEW exports: annotate with the lib's `<DOMAIN>_EXPORT` macro
   (a per-lib alias of `OPENNOVA_API` from `io/export.h` — never copy the raw
   `__declspec` block again), return `int` status with `0 = success`, out-params last,
@@ -14,6 +15,12 @@
   their historical semantics (some predate this — `opennova_vfs_*` returns 1=success,
   `oed` uses a status enum); changing a shipped export's return semantics is an FFI
   behavior change and needs a deliberate, versioned decision.
+- A struct crossing the C ABI is mirrored in Python TWICE — `pyopennova/<x>_ffi.py` AND
+  `blender/opennova/<x>_ffi.py`. Any C-side layout change updates BOTH mirrors in the
+  same commit and extends the native-stride pin tests (`tests/test_def_ffi_mirror.py`,
+  `tests/test_threedi_ffi_mirror.py`) with the new fields. The cross-mirror comparison
+  alone proves nothing — the mirrors are copies of each other and have agreed on the
+  same stale stride before; only the native-stride pins catch the drift.
 - Two consumption models (LIBS-3, ADR 0024). **Model A — the flat C ABI**:
   `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
   `OPENNOVA_CORE_TARGETS` list and exports ONLY `OPENNOVA_API`-annotated symbols — the

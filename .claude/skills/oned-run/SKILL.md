@@ -7,7 +7,7 @@ description: Launches this repo's Godot project — the ONED editor or the game 
 
 The Godot project is `godot/` (Godot 4.6.1). The default scene is
 `res://modtools/editor/editor_main.tscn` — the EditorApp root hosting the whole
-ONED shell with all twelve workspaces. The game runtime is
+ONED shell with all thirteen workspaces. The game runtime is
 `res://game/main_game.tscn`. All commands are Git Bash, from the repo root.
 
 ## 1. Find the Godot binary
@@ -31,8 +31,9 @@ exists, ask the user — do not download one.
   timestamp of `godot/bin/libopennova.windows.template_debug.x86_64.dll`
   against the source change, rebuild, and FULLY restart Godot — GDExtension
   registration does not hot-reload, and a running editor holds the DLL lock.
-- Also check for a stale `build/Debug/opennova.dll` shadowing fresh native
-  code; delete it.
+- (`build/Debug/opennova.dll` shadowing is a PYTHON-FFI trap — `pyopennova/_native.py`
+  searches Debug first; the editor never loads it. Relevant here only if a helper
+  script drives pytest/onimport beside the editor.)
 - Failure signature of a stale/missing DLL: parse errors naming `Nova*`
   classes, or `Ignoring script ... does not extend GutTest` in test runs.
 - Fresh worktree or a branch switch that adds resources: run once

@@ -18,10 +18,12 @@ easier to relay than to rediscover.
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
-  in-match host; never shipped),
+  in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (packet pretty-printer), `nw_replay/` (replay streamer), `common/` (shared
-  socket/pcap helpers, deliberately app-layer). `blender/` and `opennova_max/` are the
-  DCC export plugins; `pyopennova/` is the Python FFI layer.
+  socket helpers, deliberately app-layer; pcap I/O lives in `libs/pcapio`),
+  `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
+  `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI
+  layer, `opennova_blender/` the standalone Blender importer backend.
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
   stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
   deployment stack (DEPLOY.md).
@@ -29,8 +31,10 @@ easier to relay than to rediscover.
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
-- `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed); never edit in
-  place — bump submodules upstream.
+- `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed; never edit in
+  place — bump submodules upstream) plus vendored in-tree bcrypt sources and a
+  hash-pinned sqlite FetchContent (bump sqlite by editing the URL/URL_HASH in
+  `third_party/sqlite/CMakeLists.txt`).
 
 ## Build & test
 
@@ -47,8 +51,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 ```
 
 - Fresh worktree/clone: `git submodule update --init --recursive` first — `third_party/`
-  ships empty and the build scripts don't self-init (only `scripts/bootstrap_godot.sh`
-  inits its own GUT submodule). Then build the GDExtension (`godot/bin/` has no DLL in a
+  ships empty and the build scripts self-init only GUT (`scripts/build.sh` and
+  `scripts/test_godot.sh` both run `scripts/bootstrap_godot.sh`); godot-cpp and
+  modsuperoed still need the manual init. Then build the GDExtension (`godot/bin/` has no DLL in a
   fresh worktree) and run `"$GODOT_BIN" --headless --path godot --import` once, or engine
   classes appear missing.
 - `scripts/test_godot.sh` needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*` binary in
@@ -57,8 +62,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   failure, re-run that one file in isolation (see `godot/tests/CLAUDE.md`).
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
-- A stale `build/Debug/opennova.dll` can shadow the Release DLL — delete it if the editor
-  loads stale native code.
+- A stale `build/Debug/opennova.dll` shadows `build/Release/` for the PYTHON FFI loader
+  (`pyopennova/_native.py` searches Debug first) — delete it if pytest/onimport run stale
+  native code. The Godot editor loads only `godot/bin/libopennova.*` and is unaffected;
+  for a stale editor, rebuild via `scripts/build_godot.sh` and fully restart it.
 - Asset-gated tests SKIP-AS-PASS unless env vars point at local retail installs or
   captures — a green run does not mean they exercised data. The full var→test→data
   matrix, local setup, and the never-commit-captures policy live in
@@ -101,13 +108,18 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   and ADRs 0009–0012.
 - "Host" means the game/server host and nothing else (CONTEXT.md "Host / Joiner");
   attach-points are Mounts, presentation owners are Presenters, front-ends are Shells,
-  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`.
+  a lib's embedding app is its embedder. CI enforces via `scripts/lint/host_lint.py`
+  (code suffixes only — Markdown gets a non-failing added-lines advisory and `.agents/**`
+  is exempt, so vocabulary in docs is honor-system).
 - Editor UI copy is artist-facing: "draw distance", "blend layer" — not "CDEP",
   "LOD bitstream", "mip slot".
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
   don't bundle pre-JO Delta Force titles; say pre-1.0/experimental, never
   "production-ready"; no em dashes.
 - Blender custom properties owned by this project use `opennova_*` keys.
+- Completed TODO/checklist entries are DELETED, not checked off — the history lives in
+  git, not the tracked file. (Exception: docs that self-identify as historical records,
+  e.g. `plan/status.md`, keep their completed rows.)
 
 ## Git, PRs, CI
 
