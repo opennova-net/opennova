@@ -1024,6 +1024,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.spawn_revision = next_spawn_revision;
 		++state_.world_stream_revision;
 		es.parent_handle = rec.parent_handle;
+		es.target_handle = rec.target_handle;
 		es.parent_pose_valid = false;
 		es.state_flags = static_cast<uint8_t>(rec.entity_flags & 0xFFu);
 		es.health_known = false;
@@ -1122,8 +1123,10 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 		// seat/parent loop that ratchets the pair through the depth passes
 		// (the reported climbing/spinning emplacements). The structural
 		// carrier of a mounted-on-vehicle gun rides the record's separate
-		// target field, deliberately not folded here yet.
-		// [orig: 0x0D store @0x433289 — entity+40 occupantEntity back-ref]
+		// TARGET field, staged on the row and folded by the world
+		// materializer (groundEntity/+40).
+		// [orig: 0x0D store @0x433289 — entity+368 occupantEntity back-ref;
+		//  target → groundEntity stores @0x432d47/@0x4332d7]
 		if (world::EntityHandle{child.parent_handle}.pool() == 0)
 			continue;
 		persistent_parent_child[i] = 1;

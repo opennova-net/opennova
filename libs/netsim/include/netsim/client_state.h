@@ -176,6 +176,14 @@ struct ClientEntityState {
 	int32_t parent_local_pitch_bam = 0;
 	int32_t parent_local_roll_bam = 0;
 	bool parent_pose_valid = false;
+	// The 0x0D record's separate TARGET relationship: the STRUCTURAL carrier a
+	// pool-1 mounted child rides (retail groundEntity, entity+40) — an occupied
+	// boat gun's target is the DRIVING hull while parent_handle above carries
+	// the occupant/driver back-ref (+368). Vehicle compacts re-land the same
+	// +40 slot per record; this is its 0x0D seed.
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 — target → groundEntity stores
+	//  @0x432d47/@0x4332d7; parent → occupantEntity (+368) store @0x433289]
+	uint16_t target_handle = 0xFFFF;
 	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
 	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
 	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`
