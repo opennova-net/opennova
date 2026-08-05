@@ -415,6 +415,16 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 					e.emplacement_parent_spawn_id)
 				rec.parent_handle = e.emplacement_parent.packed;
 		}
+		// The separate flag-0x0200 TARGET field carries the structural carrier
+		// (groundEntity/+40) the mounted child rides — retail serializes it
+		// from the stored pointer, independent of parent. The joiner's
+		// materializer authors its ground_target from THIS field only.
+		// [orig: serialize_entity_pool_to_packet_0 @0x503940 target write
+		//  (entity+40); handler stores @0x432d47/@0x4332d7]
+		if (e.ground_target.valid()) {
+			const world::Entity *ground = w.registry.get(e.ground_target);
+			if (ground != nullptr) rec.target_handle = e.ground_target.packed;
+		}
 		// Retail's 0x0400 block serializes the fixed mountHandles slots, not
 		// the dense gameplay seat-vector order: itemDef+604 supplies the mask
 		// for slots 0..7 and entity+416/+418 are slots 8/9. Offered empty
