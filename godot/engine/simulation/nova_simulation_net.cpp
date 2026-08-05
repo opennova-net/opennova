@@ -623,15 +623,14 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 		local->yaw = static_cast<int16_t>(std::lround(
 				opennova::world::mission_yaw_deg_from_bam_heading(
 						local->veh.yaw_bam)));
-		// The air and water movers own live attitude. Publish zero too: level is
-		// a real solved pose, not a validity sentinel. Ground/bike contact attitude
-		// remains unported, so those families retain their wire/dead-pose values.
+		// Every family mover owns live attitude now: air/water solves plus the
+		// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
+		// @0x47C1C0 client subset). Publish zero too: level is a real solved
+		// pose, not a validity sentinel. A boxless ground row's motor never
+		// advances the seeded wire attitude, so the mirror is stable there.
 		const opennova::world::VehicleTraits *traits =
 				world_->vehicle_traits.get(local->item_id);
-		const bool owns_attitude = traits != nullptr &&
-				(traits->family == opennova::world::VehicleFamily::Watercraft ||
-						traits->family == opennova::world::VehicleFamily::Helicopter ||
-						traits->family == opennova::world::VehicleFamily::Plane);
+		const bool owns_attitude = traits != nullptr;
 		if (owns_attitude) {
 			es.pitch_bam = local->veh.air_pitch_bam;
 			es.roll_bam = local->veh.air_roll_bam;

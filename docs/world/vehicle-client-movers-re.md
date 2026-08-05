@@ -21,10 +21,11 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
 | Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
-| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform solve; the wreck-tumble machinery unported | §4 |
+| Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the wreck-tumble machinery unported | §4 |
 | cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
 | Aircraft contact solve (`@ 0x47EF10`, defined 2026-07-31) | MATCHING — ported, client subset (`aircraft_contact_solve`, 2026-08-01) | §6 spec; landing/ramp-conform/water-hysteresis/sleep bench legs in `watercraft_client_motor` |
-| Ground/tracked & light contact solves (`@ 0x47C1C0` / `@ 0x479600`) | unwitnessed beyond contracts — open B-facet | D-NET-196 residuals |
+| Ground/tracked contact solve (`@ 0x47C1C0`) | MATCHING — ported, client subset (`ground_contact_solve`, 2026-08-05) | §7 spec; the wheel-clearance rest + drop-landing bench legs in `watercraft_client_motor` |
+| Wheeled (ctan) & light (cbik) contact solves (`@ 0x475DE0` / `@ 0x479600`) | unwitnessed beyond contracts — interim-carried by the tracked solve; open B-facet | §7.0 routing; D-NET-196 residuals |
 
 ---
 
@@ -2447,8 +2448,10 @@ Divergent (bike vs what the interim runs):
    states are simulated client-side (they derive from the input block + light
    solve).
 6. **Contact/attitude solve** — light (`@ 0x479600`) vs tracked (`@ 0x47C1C0`):
-   owns bike lean/roll. Unported for every family (B-facet), so the interim adds no
-   NEW loss here.
+   owns bike lean/roll. The tracked solve is PORTED (§7, 2026-08-05) and the
+   interim runs it for bikes too, so a parked bike rests at wheel clearance and
+   conforms pitch/roll; the light solve's own deltas (bike lean machine, its
+   probe shape) remain the open witness.
 7. Crash/brake-lock/slip legs differ in detail (24576 clamp, `+0x8E4` brake, 1/8
    reverse) — all input-side or crash-state-side, unreachable for a remote bike
    until occupant/crash replication lands.
@@ -2467,8 +2470,9 @@ instructions). Named **`Entity_ProcessAircraftContactPhysics`**, prototype
 IDB saved. Decompiled clean (2072 lines); every FPU-garbled block below was
 re-derived from the full instruction dump (a full instruction-level disassembly dump, session artifact).
 
-This is the tracked D-NET-196 stand-in target: our `aircraft_client_tick` currently
-substitutes a terrain clamp for this call. Companion to `aircraft_plane_client_spec.md`
+This was the tracked D-NET-196 stand-in target: our `aircraft_client_tick`
+substituted a terrain clamp for this call until the 2026-08-01 port
+(`aircraft_contact_solve`). Companion to `aircraft_plane_client_spec.md`
 (the mover) and `watercraft_client_spec.md` — same conventions: 16.16 fixed positions,
 32-bit BAM angles, 22-bit trig (`cos22`), `dbl_7C3608` = 1.4629627251502471e-09 BAM→rad,
 `dbl_7C3600` = 2^22, `flt_7C19E0` = 2147418112.0 ftol clamp, 62 Hz tick.
@@ -2985,21 +2989,212 @@ on slope/object contact.
 
 ---
 
+## §7 The ground/tracked contact/suspension solve (ported 2026-08-05)
+
+Source: `Entity_ProcessTrackedVehiclePhysics` @ 0x47C1C0 .. 0x47EF0E (0x2D4E
+bytes; decompile + targeted disassembly of the mover call region). This is the
+GROUND-family instance of the per-family contact solves — the function whose
+ABSENCE was the live joiner symptom: parked ground vehicles presented SUNKEN by
+exactly their per-model wheel clearance (Stryker −1.10 onto flat terrain
+z=42.00, BTR-80 −0.99, buggies −0.25..−0.70) with their spawn-posed addeweap
+gun children floating above, because the stand-in clamped the hull ORIGIN onto
+the terrain while this solve rests the origin at `ground − box_z_lo`.
+
+### 0. Identity and call contract
+
+- **Sole xref**: `call @ 0x48d0b1` inside `Entity_UpdateVehiclePhysics`
+  @ 0x48AF00 — AFTER `Position += velocity/slideDecay`
+  [orig: 0x48d090..0x48d0a9], BEFORE the gated yaw apply
+  [orig: `!(Flags & 0x2000) && byte+0x2F2 && !+0x2EC && !+0x2F0 → Yaw +=
+  modelPtr0` @ 0x48d0b9..0x48d0e3]. Ungated on authority: a client runs it for
+  every ground vehicle every tick.
+- Signature `(entity, hasWaterLevel)`; `hasWaterLevel` is the MOVER's arg2, a
+  dispatcher constant: **0** via the cveh/ctrn dispatchers [orig: `push 0`
+  @ 0x48efce / @ 0x48f06e], **2** via the generic router `@ 0x48F010` — the
+  catv (amphibian) path [orig: `push 2` @ 0x48f01b]. It gates ONLY the per-pad
+  water-support forces (§7.4).
+- Family routing (class table @ 0x82ABC0): cveh/ctrn/catv → the ground mover →
+  THIS solve; **ctan** → its own mover @ 0x488AB0 →
+  `Entity_ProcessWheeledVehiclePhysics` @ 0x475DE0 (callees walk); **cbik** →
+  @ 0x483FE0 → `Entity_ProcessLightVehiclePhysics` @ 0x479600 [orig: call
+  @ 0x486672]. The wheeled and light variants remain open witnesses; our port
+  carries ctan/cbik on the tracked solve as the interim (see the D-NET-196
+  residual note).
+- Returns the collision severity; the mover ignores it (`add esp,8`
+  @ 0x48d0b6).
+- The mover's grounded velocity re-derive consumes the solve's stored contact
+  direction (+0x3BC..+0x3C4, written @ 0x47E6E7..0x47E78F): `vel = speed × dir`
+  with the Z component applied only when NEGATIVE (downhill)
+  [orig: 0x48cf97..0x48d003]. NOT ported — our mover keeps the level-frame
+  re-derive (D-NET-161).
+- The mover's submerged drag rides the solve-owned Flags 0x8000:
+  `v -= (v+2)>>2` on all three velocity components
+  [orig: `test Flags,0x8000` @ 0x48d013; sheds 0x48d022..0x48d052] — PORTED;
+  the authority drown-drain countdown (word +0x11E → overlay clear) is
+  authority-gated [orig: 0x48d05a..0x48d083] — deferred.
+
+### 1. Structure vs the air solve (§6)
+
+The skeleton is the §6 solve with these deltas (everything not listed matches
+§6 block-for-block — probe radii/shape, the two force passes, severity sheds
+via the torque shifts, the strongest-probe distance-gated 0.25 cut, the planar
+push, the in-water flag with the r/2 hysteresis, corner-quad conform, and the
+0x46B140 positive-corner rise-clamped Z):
+
+1. **Sleep fast-path** [orig: 0x47C244..0x47C44B]: same gate set as §6.15
+   (velocities/speed/rates zero, not airborne, not carried, `slideDecay ∈
+   (−350,−1]` as the unsigned compare `> 0xFFFFFEA2` @ 0x47C2D0, planar
+   `Transform_ComparePartial`, four spring sinks +0x2C4..+0x2D0 zero, energy
+   +0x300 zero, `occupantEntity` +0x170 null @ 0x47C302). Action: `Position.Z
+   -= slideDecay; slideDecay >>= 1` [orig: 0x47C349/0x47C357], then the
+   contact byte refresh `+0x2F2 = up.z(Q16) > 4096 && !+0x2EC`
+   [orig: 0x47C35D..0x47C395]. Authority Flags 0x10 upkeep + the at-rest flip
+   restore follow [orig: 0x47C3A3..0x47C443] — deferred (park/wreck machine).
+   CONSEQUENCE, witnessed by the port bench: a ZERO-MOTION midair hull meets
+   this gate and hovers — the classic retail floating-placement artifact.
+2. **Model gate**: `graphicModel == NULL → return 0` before any Z logic
+   [orig: 0x47C49F] — the boxless row does NOTHING in retail; our boxless/
+   terrain-less rows keep the terrain-clamp stand-in (documented substitute,
+   same policy as §6.16).
+3. **Def clamps every call** [orig: 0x47C4B0..0x47C516]: spring 0..10,
+   springComp 0..100, flip 0..55; `dword_815184` recomputed
+   [orig: 0x47C52B..0x47C544]. All feed the deferred spring/latch machinery.
+4. **Probe geometry** [orig: 0x47C7D0..0x47CB48]: identical pad/spine shape to
+   §6.3 (`r = beam>>2`, pads at footprint corners inset r, `pad_z = box_z_lo +
+   r`, spine radius `rs = min((height>>1)−0x4000, (beam>>1)−0x1000)` floored
+   0x2000) with TWO deltas: each pad Z adds its per-wheel +0x2D4 spring offset
+   (+0x2D4/+0x2D8/+0x2DC/+0x2E0 — written only by the wheeled-solve brake
+   machinery `Vehicle_ApplyBrakingForce` @ 0x45CEB0 / @ 0x4790C7 decay legs, so
+   ZERO for tracked rows and in our subset), and the spine slots land in the
+   order 3L/4, L/2, L/4 [orig: 0x47CA6E → slot 4, 0x47CAFD → slot 5,
+   0x47CA26 → slot 6] (order is behavior-neutral — spine probes share one
+   radius and only feed severity + the max-penetration scan).
+   `v211 = −(box_z_lo + r + spring0)` @ 0x47C832 is the hull-bottom reference.
+5. **Force passes**: `Entity_CheckCollisionState(entity, probes)` twice
+   [orig: 0x47CB8C, 0x47D213] — the §6.4 sub-contract (terrain leg =
+   `Entity_ComputeCollisionForces`; entity leg deferred). Severity sheds:
+   sev1/sev3 `speed -= speed >> (torque+2)` [orig: 0x47CC31/0x47CCA1], sev2
+   `>> (torque+1)` [orig: 0x47CC71]; sev-3 authority damage (unitType-3 kill
+   at 29300, mass-scaled drain) deferred [orig: 0x47CD00..0x47CDFB]; scrape
+   sound + momentum exchange deferred [orig: 0x47CE17..0x47CF55]; the 0.25 cut
+   with the strongest-probe > 0x8000 planar distance gate and the
+   no-hit-entity condition [orig: scan 0x47CF5E..0x47D038, cut
+   0x47D0DE..0x47D0EF; the deflection-heading pair 0x47D050..0x47D093 is the
+   witnessed-dead yaw kick]. Pass 2 gated sev ≥ 1, averaged in when it still
+   collides; push is X/Y only (the Z sum rides the deferred entity-mass
+   scaling and is zero) [orig: 0x47D0F5..0x47D330; push 0x47D452..0x47D458].
+6. **Water leg** [orig: 0x47D45B..0x47D629]: per-pad support forces
+   `d_k = max(d_k, WaterZ − probeZ_k − v211)` — AMPHIBIAN DISPATCH ONLY
+   (hasWaterLevel, §7.0) [orig: 0x47D489..0x47D512] — at level pose this
+   floats the hull ORIGIN to the waterline. In-water flag: pad-average Z,
+   `avg -= r>>1` hysteresis while set, `v211 + avg >= WaterZ` clears
+   [orig: 0x47D516..0x47D53A; leaving-water emitter release 0x47D637..0x47D6BB
+   and the splash FX/overlay send 0x47D542..0x47D629 = deferrals].
+7. **Contact byte** +0x2F2 [orig: 0x47D7F4..0x47D8AF]: grounds on a SAME-SIDE
+   or DIAGONAL pad pair — {0,3},{1,2},{0,2},{1,3}; the axle pairs {0,1}/{2,3}
+   do NOT count — with `up.z(Q16) > 4096`, OR (light hulls, `mass <= 10`) any
+   single pad while `fwd.z(Q16) < 24576`; both arms also require the
+   crash/wreck/settle bytes clear (deferred latches). This is the byte the
+   mover's yaw apply and velocity re-derive read.
+8. **Spring free-fall / crush / wreck legs** [orig: 0x47DB59..0x47DD1F,
+   0x47DBFF..0x47DC50, 0x47DC62..0x47DD04]: the +0x2C4 sinks grow 187/tick on
+   no-contact wheels (`flt_7C3DC8 0.75 × flt_7C6F7C 250`; 0.25 when crashed),
+   authority crush kills at sink > 5000/7000 — all deferred with the
+   spring/oscillator machinery exactly as §6 defers them (state identically
+   zero in the subset).
+9. **Solve select** [orig: the all-zero pad test @ 0x47E1A9]:
+   - NO pad contact, upright: the airborne arm — `Flags |= 0x2000`
+     [orig: 0x47E57B], +0x2EF cleared, then the mode-1 NULL suspension call
+     [orig: 0x47E5E6] whose fit of the UNLIFTED corners is an attitude
+     identity round-trip (Z not consumed — the Z select is pad-path-only).
+     The non-authority parked spring-apply leg
+     [orig: 0x47E4D2..0x47E56C] rides replicated Flags 0x10 — deferred.
+   - NO pad contact, INVERTED (`up.z ≤ 0`): max-penetration scan over all 7
+     [orig: 0x47E1E9..0x47E23E] → `Position.Z += max` [orig: 0x47E358], the
+     crash bytes latch + `Flags &= ~0x2000` [orig: 0x47E474..0x47E4C6] —
+     ported as the physical subset (Z lift + un-airborne), crash latching
+     deferred.
+   - PAD contact: `Flags &= ~0x2000` unconditional [orig: 0x47E8EE]; the
+     contact-direction store [orig: 0x47E65D..0x47E78F, deferred]; the
+     non-authority 10-tick landing-grace timer on +0x2ED/+0x2F1
+     [orig: 0x47E7A3..0x47E7EE, deferred — both bytes feed only the deferred
+     park/wreck machine]; corner quad via `Entity_ComputeBoundingQuad`
+     @ 0x45B6E0 (non-square arm) [orig: calls 0x47DAE2/0x47DB54] in the
+     witnessed winding **c0=(+f,+s), c1=(+f,−s), c2=(−f,−s), c3=(−f,+s)** —
+     UNLIKE the §6/boat corner tables, this winding is AXIS-ALIGNED with the
+     pad probes, so the identity `corner_z[k] += d_k` pairing
+     [orig: 0x47EC05, the spring loop's zero-state arm — `itemDef->spring ==
+     0` short-circuits to it @ 0x47E973..0x47E998, and zero spring
+     sinks/energy reduce the nonzero-spring arm to the same raw lift] is
+     geometric here. Fit + Z via
+     `Entity_ProcessWheeledVehicleSuspension(corners, mtx, &outPos, r, e, 1,
+     &d[0..3])` [orig: 0x47EC4D] — the §4 MAIN_FIT with the positive-corner
+     average, `fidiv` by the positive count (the §4 zero-count hazard), and
+     the `+0x2000/tick` rise clamp [orig: 0x46C822..0x46C894]. Euler out:
+     `Math_FixedPointMatrixToEulerAngles` [orig: 0x47EC62]; **Pitch/Roll
+     always** [orig: 0x47EC83/0x47EC75], Yaw only when crashed
+     [orig: 0x47EC8F, deferred].
+10. **Z select** [orig: 0x47EC9E..0x47ECE2]: healthy upright (`!+0x2EC &&
+    up.z > 0 && !+0x2F0`): `if (slideDecay > 0) slideDecay = 0; Position.Z =
+    outPos.Z` [orig: 0x47ECAC..0x47ECBB] — **the rest-height mechanism**: at
+    equilibrium every pad probe sits at `ground + r`, so the solved Z holds
+    the origin at `ground − box_z_lo` (the wheel clearance). Crashed or
+    inverted: `Position.Z += maxGroundHeight` (the max-penetration scan
+    @ 0x47E09F..0x47E107) [orig: 0x47ECE2]; wreck-rest upright: the solved Z.
+11. **Tail** [orig: 0x47EE50..0x47EEF5]: spring-energy release, the airborne
+    tick counter (entity[1] bookkeeping @ 0x47EEC7), the non-authority
+    inverted flip-restore [orig: 0x47EEAC..0x47EEB7], wreck-rest slideDecay
+    halving, `+0x2ED = 0` — all deferred except nothing our subset consumes.
+
+### 2. The client subset (the port contract)
+
+`ground_contact_solve` in `libs/world/src/vehicle_motor.cpp`, dispatched inside
+`tick_vehicle_motor` at the witnessed call position (after integration, before
+the yaw apply) for the Ground and Bike families with resolved boxes on a
+terrain-backed world; Watercraft (the authority stand-in path) and
+boxless/terrain-less rows keep the 5-tap terrain clamp. Ported legs: the sleep
+fast-path, the 7-probe geometry (+0x2D4 offsets zero), both force passes with
+the severity sheds and the distance-gated 0.25 cut, the planar push, the
+amphibian pad water-support forces (`VehicleTraits.amphibian` ⇐ move_function
+catv), the in-water flag with hysteresis, the contact byte (→ `m.grounded`),
+the corner quad in the witnessed winding with identity d_k lifts, the shared
+4-normal fit (`plat_fit_corners`), the positive-corner rise-clamped rest Z,
+the inverted max-penetration lift, and the airborne/in-water flag ownership.
+The mover gained the submerged drag leg and reads the live solve attitude for
+its cos²(pitch) slope factor [orig: entity Pitch @ 0x48ba47]; entity
+pitch/roll int16-degree mirrors publish the conform to presentation and
+mounted-pose consumers. Named deferrals (beyond the §6-shared seams): the
+contact-direction slope-velocity feed, the +0x2ED/+0x2F1 landing-grace and
+park/wreck/crash latch machine, spring sinks/oscillators (raw d_k lifts —
+exact at rest, softened transients differ), authority damage/drown legs, FX
+and sounds, and entity-entity collision. Bench: the
+`run_ground_parked_rests_at_wheel_clearance` legs (exact rest at
+`ground − box_z_lo` from the parked wire pose AND from a 1.5 u drop; red
+against the clamp stand-in, which parks the origin at terrain — the live
+symptom).
+
+---
+
 ## IDB changes made during these sessions
 
 `0x47EF10` defined + named `Entity_ProcessAircraftContactPhysics` (a misdecoded
 instruction run at `0x480051` re-created as code); the cpln class-table callback
 `0x45D6F0` defined as the 5-byte thunk `j_Entity_UpdateAircraftPhysics`; witness
 comments on the mover/solve heads per the session notes in §5.38e. Saved.
+2026-08-05: witness comment on `Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0`
+(the §7 contract summary + the opennova port cross-reference). Saved.
 
 ## Open items
 
 The unresolved residuals live as explicit entries in the D-NET-196 ledger row
 and the §5.38e disposition: the
-light/tracked contact solves, the aircraft local-driver input map, the
-modelData box-pair provenance (the platform probe boxes — §3's tracked
-unknown), the `Math_FixedPointMatrixToEulerAngles` interior (`@ 0x613310`),
-the `Transform_ComparePartial` field scope (§6.15 — ported as planar XY by
-structural argument), and the HOST-side platform scope (authority boats still
-ride the generic motor; retail's authority runs the solve — the ungated call
-`@ 0x48ECE7`).
+wheeled (ctan `@ 0x475DE0`) and light (cbik `@ 0x479600`) contact solves
+(interim-carried by the tracked solve, §7), the tracked solve's own named
+deferrals (§7.2 — the contact-direction slope-velocity feed, the
+park/wreck/crash latch machine, spring oscillators), the aircraft local-driver
+input map, the modelData box-pair provenance (the platform probe boxes — §3's
+tracked unknown), the `Math_FixedPointMatrixToEulerAngles` interior
+(`@ 0x613310`), the `Transform_ComparePartial` field scope (§6.15 — ported as
+planar XY by structural argument), and the HOST-side platform scope (authority
+boats still ride the generic motor; retail's authority runs the solve — the
+ungated call `@ 0x48ECE7`).

@@ -360,6 +360,100 @@ bool run_bike_family_deltas() {
 	return ok;
 }
 
+bool run_ground_parked_rests_at_wheel_clearance() {
+	// The ground/tracked contact solve (D-NET-196 B-facet): a parked
+	// Ground-family row with resolved model boxes rests with its ORIGIN at
+	// wheel height above terrain — the pad probes sit at box_z_lo + r, so the
+	// solved Z holds ground - box_z_lo — instead of being gravity-dragged onto
+	// the terrain by a zero-clearance clamp (the live joiner symptom: Strykers
+	// sunk by exactly 1.10 with their spawn-posed addeweap guns floating above)
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 — pads @0x47C7DC..,
+	// solver Z @0x46C822..0x46C894, Z select @0x47ECBB].
+	std::vector<uint16_t> heightmap(64 * 64, 42 * 256); // flat terrain z = 42.0
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+
+	// Stryker-like hull (16.16): wheel bottom 1.10 below the origin, beam 3.0
+	// (pad radius r = 0.75), length 7.0.
+	const int32_t clearance = 72090; // 1.10 u — the witnessed sunk amount
+	const int32_t ground_fx = 42 << 16;
+	const int32_t rest_fx = ground_fx + clearance;
+	// (A zero-motion SUNKEN start is deliberately absent: it meets the
+	// witnessed sleep fast-path gate — velocities zero, slide in (-350,-1],
+	// planar pose unchanged, no occupant [orig: @0x47C244..0x47C349] — and
+	// retail sleeps it too; retail simply can never reach that state because
+	// the solve holds the hull from its first tick.)
+	struct Probe { int32_t start_z; const char *label; };
+	const Probe probes[] = {
+		{rest_fx, "holds the wire rest height"},
+		{rest_fx + 98304, "lands from a 1.5 u drop and rests at clearance"},
+	};
+	bool ok = true;
+	for (const Probe &pr : probes) {
+		Rig r;
+		make_rig(r);
+		r.world.env.water_z = 0; // dry land
+		r.world.terrain = &field;
+		r.traits.family = w::VehicleFamily::Ground;
+		r.traits.player_speed = 20972;
+		r.traits.acceleration = 512;
+		r.traits.deceleration = 512;
+		r.traits.torque = 7;
+		r.traits.mass = 28;
+		r.traits.max_slope = 30 * 11930464;  // deg tokens -> BAM like the parser
+		r.traits.slip_slope = 45 * 11930464;
+		r.traits.box_z_lo = -clearance;
+		r.traits.box_z_hi = 92 << 10; // +1.44 deck
+		r.traits.box_y_lo = -(3 << 15); // beam 3.0 -> r = 0.75
+		r.traits.box_y_hi = 3 << 15;
+		r.traits.box_x_lo = -(7 << 15); // length 7.0
+		r.traits.box_x_hi = 7 << 15;
+		r.traits.foot_x_lo = r.traits.box_x_lo;
+		r.traits.foot_x_hi = r.traits.box_x_hi;
+		r.traits.foot_y_lo = r.traits.box_y_lo;
+		r.traits.foot_y_hi = r.traits.box_y_hi;
+		w::Entity *veh = r.world.registry.get(r.boat);
+		if (!expect(veh != nullptr, "parked ground vehicle spawned")) return false;
+		veh->position.z = float(w::from_fixed(pr.start_z));
+		if (pr.start_z != rest_fx) {
+			// The retail-reachable mid-drop state: a hull that lost contact
+			// carries the airborne flag + a clear contact byte from its last
+			// solve. (A ZERO-MOTION midair hull instead meets the sleep gate
+			// and hovers — the witnessed retail floating-placement artifact.)
+			veh->flags |= w::kEntityFlagInAir;
+			veh->veh.grounded = false;
+		}
+		// The retail host's parked record: origin at terrain + clearance, no
+		// motion, re-sent every 8 ticks like a live 01TR join.
+		for (int t = 0; t < 120; ++t) {
+			if (t % 8 == 0)
+				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
+				      0, 0, 0);
+			w::ground_client_tick(r.world, *veh, r.traits);
+		}
+		const int32_t z = w::to_fixed(veh->position.z);
+		std::fprintf(stderr,
+		             "[ground-rest %s] z=%d rest=%d ground=%d grounded=%d air=%d\n",
+		             pr.label, z, rest_fx, ground_fx, int(veh->veh.grounded),
+		             int((veh->flags & w::kEntityFlagInAir) != 0));
+		// Within 1 cm of the wheel-clearance rest height — NOT clamped onto the
+		// terrain (the pre-solve stand-in parked the origin at ground_fx).
+		ok &= expect(std::abs(z - rest_fx) <= 0x290, pr.label);
+		ok &= expect(veh->veh.grounded, "the parked hull reports wheel contact");
+		ok &= expect((veh->flags & w::kEntityFlagInAir) == 0,
+		             "the parked hull is not airborne");
+		// Flat terrain: the attitude conform stays level.
+		ok &= expect(std::abs(veh->veh.air_pitch_bam) < (1 << 22) &&
+		                     std::abs(veh->veh.air_roll_bam) < (1 << 22),
+		             "the flat-parked hull conforms level");
+	}
+	return ok;
+}
 
 bool run_platform_solve_settles_at_waterline() {
 	// The platform solve (D-NET-196 residual, water leg): with model boxes
@@ -1443,6 +1537,7 @@ int main() {
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();
+	ok &= run_ground_parked_rests_at_wheel_clearance();
 	ok &= run_platform_solve_settles_at_waterline();
 	ok &= run_afloat_latch_controls_drag();
 	ok &= run_first_prediction_seeds_platform_state();

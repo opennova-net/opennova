@@ -301,6 +301,12 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						vt.family = opennova::world::VehicleFamily::Bike;
 					} else {
 						vt.family = opennova::world::VehicleFamily::Ground;
+						// catv rides the generic dispatcher, which passes
+						// hasWaterLevel=2 into the ground mover — arming the
+						// contact solve's pad water-support forces (the
+						// Stryker/BTR-80 are catv) [orig: @0x48f010 push 2 vs
+						// the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
+						vt.amphibian = fam == "catv";
 					}
 				}
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
