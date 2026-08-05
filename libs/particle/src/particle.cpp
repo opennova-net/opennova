@@ -124,7 +124,7 @@ std::uint32_t parse_flag_table(std::string_view raw,
 template <std::size_t N>
 std::string format_flag_table(std::uint32_t bits,
 		const std::array<std::pair<const char *, std::uint32_t>, N> &entries) {
-	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe); JO sub_5DF9C0 @ 0x5df9c0]
+	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe); JO FlagTable_BuildString @ 0x5df9c0 (ex sub_5DF9C0)]
 	// DIVERGENCE D1 (see notes/ida_particle_witness.md): the engine seeds the
 	// buffer with a LEADING space (*(WORD*)buf = 0x20) before appending names, so
 	// the value is " NAME1 NAME2 " and a line reads "flags\t=  NAME1 NAME2 ;" (two

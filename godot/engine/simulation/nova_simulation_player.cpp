@@ -2325,7 +2325,7 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	// The first-person camera consumes twice entity+0x380. Export the already
 	// wrapped composition separately from authoritative look pitch so the host
 	// cannot accidentally apply it to third person or aim rays.
-	// [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+	// [orig: Camera_ComputeThirdPersonView @0x437fc7]
 	{
 		float fp_pitch_recoil_deg = 0.0f;
 		if (world_ && world_->ai && world_->cached.local_player.valid()) {

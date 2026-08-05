@@ -431,7 +431,7 @@ ported without byte-layout claims; **pending** = not yet decompiled.
 | `CParticleDefEntry_ParseBlendMode` | `0x5e29f0` (0xc8) | chained strstr; bumpadd→3 quirk (§1.11); `mod` table at `off_7DCBA8` | `particle.cpp::parse_blend_mode` / `blend_mode_name` | match |
 | `CParticleTableDef_ParseTransformFlags` | `0x5e2950` (0x39) | tabledef flag bits | — | pending |
 | `FlagTable_ParseFromString` | `0x5df970` (0x45) | §2.5 | `particle.cpp::parse_flag_table` | match |
-| `BuildFlagString` (`sub_5DF9C0`) | `0x5df9c0` (0x98) | §2.5 | `particle.cpp::format_flag_table` | match |
+| `FlagTable_BuildString` (ex `sub_5DF9C0`) | `0x5df9c0` (0x98) | §2.5 | `particle.cpp::format_flag_table` | match |
 
 Writers (round-trip verification gold):
 

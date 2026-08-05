@@ -39,7 +39,7 @@ var tp_anchor_valid := false
 # Retail adds twice the live recoil accumulator to the first-person camera pitch.
 # This is kept separate from authoritative look pitch because third-person and
 # aim-ray consumers do not inherit that camera-only doubling.
-# [orig: Player_UpdateFirstPersonCamera @0x437fdb]
+# [orig: Camera_ComputeThirdPersonView @0x437fc7]
 var fp_pitch_recoil_deg := 0.0
 # The FP camera roll in degrees, composed in the sim: torsoRoll + lean/4
 # (torsoRoll chases the slope roll; lean is the Q/E ramp — both entity BAM state)
