@@ -47,7 +47,9 @@ next touch. The faithful-vs-open axis from
 legitimately closed; *awaiting-a-ported-consumer* is `OPEN` and must not be faked.
 
 **3. The burn-down starts NOW, in parallel with Wave 1 — freeze-exempt.** The maintainer
-grants a **per-slice freeze exemption for PAR slices** (2026-07-05). The exemption is
+grants a **per-slice freeze exemption for PAR slices** (2026-07-05). *(Status note
+2026-08-04: the freeze LIFTED 2026-07-12 at program close — the exemption language is
+retained as this decision's original context; PAR slices now run unexempted.)* The exemption is
 narrow: it covers the parity burn-down (closing tracked divergences and auditing the
 unaudited systems), not general new-feature reimplementation. The freeze otherwise stands
 for non-PAR work.

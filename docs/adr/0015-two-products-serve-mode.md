@@ -48,3 +48,15 @@ binary with a different icon; both are debt.
   architecture constraint recorded in
   [ADR 0016](0016-engine-editor-boundary.md): nothing the engine or game
   ships may depend on the editor layer.
+
+## Implementation note — network environment sourcing (2026-08-04)
+
+Authoritative network ENVIRONMENT data reaches the wire through one seam,
+`world::EnvNetworkState::publish_complete`, fed from either product shape: the
+Godot shell publishes the live `NovaWeather` node's snapshot
+(`game_world.gd::_push_network_environment` ->
+`NovaSimulation::set_network_environment`), and the sim-only host
+(`apps/nw_server`) publishes mission-sourced samples below the shell seam
+(`environment_startup.cpp`: `.env` parse + BMS fog overrides, prewarmed and
+advanced per tick). The #403-review concern that a sim-only host would emit
+default environment data does not hold — both paths feed the same publish seam.
