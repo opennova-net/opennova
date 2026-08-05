@@ -611,6 +611,29 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
+
+	# The first-person UseGun parent cull is the LOCAL render verdict and is
+	# role-blind in retail: with the embedded MountSlot live as EquippedSlot and
+	# the FP model resolved, the mounted gun's own world model is suppressed so
+	# the world pass and the FP pass never draw the gun twice
+	# [orig: Entity_RenderVehicleModel @0x4407d0 predicate @0x4407f6..0x44084c].
+	# The joiner path used to skip this entirely (host-only `ent` enrichment) —
+	# the live "two 50cal models while mounted" symptom.
+	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"without a resolved FP model the world gun still renders")
+	joiner.set_local_player_first_person_model_available(true)
+	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			"the mounted joiner suppresses the gun's duplicate world model")
+	joiner.set_local_player_camera_third_person(true)
+	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			"third person restores the world gun")
+	joiner.set_local_player_camera_third_person(false)
+	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
+			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
+
 	var child_ammo: Dictionary = joiner.get_local_player_weapon_state()
 	var child_clip := int(child_ammo.get("clip", -999))
 	var child_reserve := int(child_ammo.get("reserve", -999))

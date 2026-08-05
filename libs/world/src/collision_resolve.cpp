@@ -31,8 +31,6 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     const CandidateSlice slice = it->second;
     if (slice.count <= 0) return 0;
 
-    const Entity *ent = world.registry.get(source);
-
     // The hull-center test point: +1.5 u lift (mid-hull, so a wall's bottom face
     // is never the cheapest SAT exit), radius 1.5 u — the wheel-point array and
     // per-wheel radii ride the unported wheel solver (D-NET-161).
@@ -64,9 +62,29 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
     for (int32_t i = 0; i < slice.count; ++i) {
         const EntityHandle ch = arena_[slice.start + i];
         if (ch == source) continue;
-        // Skip the carrier chain like the original's groundEntity walk
-        // [orig: @ 0x462e3d-0x462e4f].
-        if (ent != nullptr && ent->ground_target == ch) continue;
+        // Skip candidates whose groundEntity CHAIN rides this hull — the
+        // mounted/carried children (an emplaced cannon whose 0x0D target seeds
+        // groundEntity = this vehicle), up to three hops. The pre-fix port
+        // inverted the relation (it skipped MY carrier instead), so a hull
+        // ground against its own mounted cannon's collision volume every tick
+        // and was shoved off its wire pose — the live joiner "vehicle jumping
+        // around" (13 u false equilibrium, re-snapping every subrate record).
+        // [orig: Entity_CheckCollisionState @0x462a30 proximity walk —
+        //  v33 = candidate->groundEntity @0x462e26; skip v33 == ent @0x462e37,
+        //  v33->groundEntity == ent or v33->groundEntity->groundEntity == ent
+        //  @0x462e3d..0x462e4f]
+        {
+            const Entity *cand = world.registry.get(ch);
+            if (cand != nullptr && cand->ground_target.valid()) {
+                if (cand->ground_target == source) continue;
+                const Entity *g1 = world.registry.get(cand->ground_target);
+                if (g1 != nullptr && g1->ground_target.valid()) {
+                    if (g1->ground_target == source) continue;
+                    const Entity *g2 = world.registry.get(g1->ground_target);
+                    if (g2 != nullptr && g2->ground_target == source) continue;
+                }
+            }
+        }
         int32_t bound_pos[3];
         int32_t bound_radius = 0;
         if (!target_bound(world, ch, bound_pos, bound_radius)) continue;

@@ -3988,9 +3988,24 @@ The vehicle's contact mask is 8: a section with VC/type 7 starts at its speciali
 vehicle run, while a section without VC/VK falls back to CB/default solids. It is 24
 when the def attrib2 low byte has bit 7 set (adds VK/type-12 volumes)
 [@ 0x462a91-0x462a9f].
+The proximity walk SKIPS any candidate whose `groundEntity` CHAIN reaches the
+resolving entity, three hops deep — `v33 = candidate->groundEntity; skip if
+v33 == ent, v33->groundEntity == ent, or v33->groundEntity->groundEntity ==
+ent` [@ 0x462e26-0x462e4f] — so a vehicle never collides with its own
+mounted/carried children (the addeweap cannon whose 0x0D TARGET seeds
+`groundEntity` = the hull). Witnessed exactly 2026-08-05: the first port
+INVERTED this relation (it skipped `ent->ground_target == candidate` — MY
+carrier) and a live joiner's Stryker ground against its own RCWS cannon's
+collision volume every tick, walking the hull to a false equilibrium ~13 u
+off its wire pose and re-snapping every subrate record — the reported
+"vehicle jumping all around". Corrected to the witnessed candidate-side
+chain; ctest `collision`
+(`test_vehicle_hull_skips_mounted_child_ground_chain` — 1-hop and 2-hop
+children produce no contact, an unrelated other hull's gun still pushes).
 Ported: pool-1 candidate slices (+6.0 u [orig: @ 0x4b902f]) +
 `CollisionWorld::resolve_vehicle_hull` (one mid-hull point, radius 1.5 u,
-wall-class-only, mask 8) + the motor's push/decay leg; ctest `vehicle_mount`
+wall-class-only, mask 8, the witnessed child-chain skip) + the motor's
+push/decay leg; ctest `vehicle_mount`
 (`test_vehicle_hull_stops_at_building` — a driving truck grinds to a stop at
 a wall square). Deferred (D-NET-161): the mask-24 attrib2 leg (attrib2 is not
 fed to the sim), the per-wheel point array/radii, the

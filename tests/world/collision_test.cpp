@@ -1639,6 +1639,86 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     CHECK(provider.build_handles.size() == 1);
 }
 
+// The mounted-child skip [orig: Entity_CheckCollisionState @0x462a30 proximity
+// walk @0x462e26..0x462e4f — skip when candidate->groundEntity, its
+// groundEntity, or ITS groundEntity is the resolving entity]. The live-joiner
+// regression this pins: a Stryker hull ground against its own mounted
+// "Emplaced Cannon" collision volume (the cannon's 0x0D target seeds
+// groundEntity = the hull) every tick, walking the hull ~13 u off its wire
+// pose; every subrate compact snapped it back — the reported vehicle
+// "jumping all around". An unrelated overlapping gun must still push.
+void test_vehicle_hull_skips_mounted_child_ground_chain() {
+    World world;
+    world.registry.configure_pool(1, 8);
+    CollisionWorld collision;
+
+    auto spawn_item = [&](float x, float y, float z, int item_id,
+                          float bound_radius) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_id = item_id;
+        seed.position = {x, y, z};
+        seed.yaw = 90; // mission 90 = engine heading BAM 0, like the wall template
+        seed.bound_radius = bound_radius;
+        seed.alive = true;
+        return world.registry.spawn(1, seed);
+    };
+    // The hull keeps an authored bound for its own candidate range; the
+    // children leave bound_radius unset so their proximity bound comes from
+    // the attached collision model (a zeroed entity bound would out-prune the
+    // model volume at the resolver's cheap gate).
+    const EntityHandle hull = spawn_item(13.0f, 10.0f, 0.0f, 900, 1.0f);
+    // Both children clip the hull-center probe on a SIDE face (the live cannon
+    // push was horizontal-dominant; a bottom-face exit would be dropped by the
+    // verticality split regardless of the skip under test).
+    const EntityHandle cannon = spawn_item(10.0f, 10.0f, 0.0f, 901, 0.0f);
+    const EntityHandle pintle = spawn_item(16.0f, 10.0f, 0.0f, 902, 0.0f);
+    CHECK(hull.valid() && cannon.valid() && pintle.valid());
+    VehicleTraits traits;
+    traits.physics = 1;
+    world.vehicle_traits.set(900, traits);
+
+    // The cannon rides the hull (the 0x0D target -> groundEntity relation the
+    // materializer lands); the pintle rides the cannon (a 2-hop chain).
+    world.registry.get(cannon)->ground_target = hull;
+    world.registry.get(pintle)->ground_target = cannon;
+
+    // Both children carry collision volumes overlapping the hull-center probe
+    // (offset boxes so their SAT exit is horizontal-dominant, like the live
+    // cannon push).
+    const int32_t model_id = collision.add_model(box_model(1, 0, 2.0, 2.0, 3.0));
+    collision.assign_entity(cannon, model_id);
+    collision.assign_entity(pintle, model_id);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(hull) == 2);
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+
+    const int32_t moved[3] = {fx(13.0), fx(10.0), 0};
+    const int32_t previous[3] = {fx(14.0), fx(10.0), 0};
+    int32_t push[2] = {};
+    const int32_t severity =
+            collision.resolve_vehicle_hull(world, hull, moved, previous, push);
+    CHECK(severity == 0);
+    CHECK(push[0] == 0);
+    CHECK(push[1] == 0);
+
+    // Negative control: an unrelated emplacement (another hull's child) in the
+    // same overlap still lands the full severity-3 wall push.
+    const EntityHandle other_hull = spawn_item(40.0f, 40.0f, 0.0f, 900, 1.0f);
+    const EntityHandle other_gun = spawn_item(10.0f, 10.0f, 0.0f, 903, 0.0f);
+    CHECK(other_hull.valid() && other_gun.valid());
+    world.registry.get(other_gun)->ground_target = other_hull;
+    collision.assign_entity(other_gun, model_id);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.candidate_count(hull) == 3);
+    int32_t push2[2] = {};
+    const int32_t severity2 =
+            collision.resolve_vehicle_hull(world, hull, moved, previous, push2);
+    CHECK(severity2 == 3);
+    CHECK(push2[0] != 0 || push2[1] != 0);
+}
+
 struct DemandPersonProvider final : ICollisionSectionMatrixProvider {
     CollisionWorld *collision = nullptr;
     int32_t model_id = -1;
@@ -3547,6 +3627,7 @@ int main() {
     test_person_section_raycast_uses_posed_bone_matrix();
     test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices();
     test_vehicle_hull_prefilters_stale_candidates_before_section_matrices();
+    test_vehicle_hull_skips_mounted_child_ground_chain();
     test_f3_debug_prefilters_before_building_section_matrices();
     test_iris_static_rays_prefilter_before_section_matrices();
     test_sound_los_prefilters_candidates_before_section_matrices();
