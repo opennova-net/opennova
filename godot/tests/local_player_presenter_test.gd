@@ -634,14 +634,14 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	presenter.before_world_tick(0.016)  # builds the avatar + viewmodel
 	presenter.after_world_tick()        # first person by default: placement + layer stamps
 
-	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
-		"setup() masks the reflection-only body layer off the player camera")
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+		"setup() masks the FP body layer off the player camera")
 	# The FP viewmodel renders through the dedicated renderfov pass, never the player
 	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
 		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
-		"caster marker layers cannot make the reflection-only body visible to the player")
+		"caster marker layers cannot make the hidden FP body visible to the player")
 	var pass_cam: Camera3D = presenter.viewmodel_rig().get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
@@ -650,15 +650,15 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
 			"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
 	assert_true(world.last_avatar.visible,
-		"the body stays VISIBLE in first person - the mirror renders it")
+		"the body stays VISIBLE in first person - it remains a live shadow source")
 	assert_true(world.last_viewmodel.visible, "the FP overlay shows in first person")
 	var body_instances := _visual_instances(world.last_avatar)
 	var vm_instances := _visual_instances(world.last_viewmodel)
 	assert_gt(body_instances.size(), 0, "the fake body carries a visual instance")
 	assert_gt(vm_instances.size(), 0, "the fake viewmodel carries a visual instance")
 	for vi in body_instances:
-		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY,
-			"first person: the body's visual instances ride the reflection-only layer")
+		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
+			"first person: the body's visual instances ride the shadow-only FP layer")
 	for vi in vm_instances:
 		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_VIEWMODEL,
 			"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
@@ -673,7 +673,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	assert_false(world.last_viewmodel.visible, "the FP overlay hides entirely in third person")
 
 	presenter.teardown()
-	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"teardown() restores the camera's original marker-layer bits exactly")

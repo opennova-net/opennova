@@ -44,7 +44,8 @@ func _apply_projection_masks() -> void:
 		return
 	light_cull_mask = \
 			NovaWater.VISUAL_LAYER_WORLD \
-			| NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
+			| NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR \
+			| NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
 	shadow_caster_mask = NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
 
 

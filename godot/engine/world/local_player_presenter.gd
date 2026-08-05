@@ -133,15 +133,17 @@ func setup(world, camera: Camera3D) -> void:
 	_input_router.setup(world, self)
 	_camera_saved_fov = camera.fov if camera != null else -1.0
 	_camera_saved_cull_mask = camera.cull_mask if camera != null else -1
-	# The player camera never draws the reflection-only body layer: in first
-	# person the body lives there for the water mirror alone (see
-	# _update_avatar); NovaWater's mirror camera is the one view that keeps it.
-	# It never draws the viewmodel layer either — the FP arms/weapon render
-	# through the dedicated renderfov pass the rig builds (deferred; see
+	# The player camera never draws the FP body layer: retail renders no local
+	# body in first person, and the water mirror never draws persons either
+	# (the reflection collects only vehicles above water and has no
+	# player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0]) — the layer keeps the body a shadow source only. It never
+	# draws the viewmodel layer either — the FP arms/weapon render through the
+	# dedicated renderfov pass the rig builds (deferred; see
 	# PlayerViewmodelRig.setup for the "parent busy" boot shape).
 	if _camera != null:
 		_camera.cull_mask &= ~(
-				NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
+				NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
 				| NovaWater.VISUAL_LAYER_VIEWMODEL
 				| NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK)
 	_viewmodel_rig.setup(world, self, camera)
@@ -485,11 +487,13 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 		return
 	_held_weapon.global_transform = attach as Transform3D
 	_held_weapon.visible = true
-	# Same layer rule as the body: first person hides it from the player camera by LAYER,
-	# so the water mirror still sees the soldier holding his rifle.
+	# Same layer rule as the body: first person hides it from every camera by
+	# LAYER while keeping it a shadow source (the witnessed mirror never draws
+	# persons or their held weapons — the reflection collects vehicles only
+	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]).
 	PlayerViewmodelRig.set_visual_layers(_held_weapon, NovaWater.VISUAL_LAYER_WORLD
 			if (_third_person or debug_body_in_first_person)
-			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
+			else NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -644,20 +648,20 @@ func _update_avatar(pos: Vector3) -> void:
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
 		if _avatar.has_method("set_aim_overlay"):
 			_avatar.set_aim_overlay([])
-	# The body renders in BOTH modes; first person hides it from the player
-	# camera by LAYER, not by visible = false (which would remove it from every
-	# camera, the water mirror included). Retail's reflection re-renders the
-	# world scene, which CONTAINS the local player's body - the FP arms are a
-	# separate overlay pass that never enters it [orig: Water_ReflectionPrerender
-	# @ 0x5c2780 -> render_main_scene @ 0x5c1240; the viewmodel pass is
-	# Player_RenderFirstPersonViewModel @ 0x4ded60]. setup() masked the
-	# reflection-only bit off the player camera; the mirror camera includes it.
+	# The body renders only in third person; first person hides it from every
+	# camera by LAYER, not by visible = false, so it stays a live shadow
+	# source. The 2026-08-05 witness corrected the earlier mirror-visible
+	# reading: retail's reflection collects only vehicles above water and has
+	# no player-render leg, so no person — the local body included — ever
+	# enters the mirror [orig: Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a; the
+	# viewmodel pass stays Player_RenderFirstPersonViewModel @ 0x4ded60].
 	# Stamped every frame: NovaObjectModel.rebuild() recreates its mesh
 	# children on the default layer.
 	_avatar.visible = true
 	PlayerViewmodelRig.set_visual_layers(_avatar, NovaWater.VISUAL_LAYER_WORLD
 			if (_third_person or debug_body_in_first_person)
-			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
+			else NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
 	_update_held_weapon(overlay)
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""

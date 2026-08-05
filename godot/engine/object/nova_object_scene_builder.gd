@@ -90,9 +90,13 @@ func rebuild() -> void:
 				GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 				if _m._shadow_caster_layers != 0
 				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+		# Base visual layer from the witnessed reflection filter (env #30):
+		# vehicles ride the mirror-visible world layer, everything else the
+		# no-mirror layer every normal camera still draws [orig:
+		# Entity_InitFromModel @ 0x40e20a entity+36 |= 0x400 iff vehicle].
 		instance.layers = (
-				instance.layers
-				& ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK
+				NovaWater.VISUAL_LAYER_WORLD if _m.mirror_reflected
+				else NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR
 				) | _m._shadow_caster_layers
 		var material: ShaderMaterial = _m._material_for_index(
 				material_index, lighting_context)

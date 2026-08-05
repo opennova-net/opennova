@@ -100,6 +100,10 @@ func _rebuild_if_needed() -> void:
 		var model: Node3D = NovaObjectModelScript.new()
 		model.name = "Celestial_" + key
 		add_child(model)
+		# Celestial bodies + the sun glow render INTO the water mirror
+		# [orig: render_main_scene @ 0x5c18fb/0x5c1904] — keep them on the
+		# mirror-visible world layer, unlike the filtered world entities.
+		model.mirror_reflected = true
 		model.set_object_data(data)
 		var material := _make_celestial_material(spec["additive"], spec["priority"])
 		var materials := _apply_material_override(model, material)
