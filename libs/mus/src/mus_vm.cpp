@@ -595,7 +595,7 @@ static void op_enter  (MusVM *vm) {
        field, witnessed as 0x20 in jo_gamemus/menumus; MDEdit invariantly emits
        0x20). We plumb it via MusScript.locals_frame_offset (default 0x20) so the
        handler is faithful to any chunk rather than hardcoding 0x20.
-       D-NEW-2: the original POPS the N args (`sub ebp,N*4`); we mirror with
+       D-MUS-6 (a.k.a. D-NEW-2): the original POPS the N args (`sub ebp,N*4`); we mirror with
        `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
     int n = read_u8(vm);
     int dst_off = vm->script ? (int)vm->script->locals_frame_offset : 0x20;
@@ -648,7 +648,7 @@ static void op_setstate(MusVM *vm) {
 }
 
 /* [orig: AudioVM_Op_Play @ 0x672CB0 (1B index), AudioVM_Op_PlayWait @ 0x672C90
-   (2B index)] D-NEW-3: BOTH handlers call the SAME AudioVM_StartSound(idx) and
+   (2B index)] D-MUS-11 (a.k.a. D-NEW-3): BOTH handlers call the SAME AudioVM_StartSound(idx) and
    STC (halt) identically -- the original makes NO play-vs-wait behavioral
    distinction; the only real difference is the operand width (u8 vs u16, so
    0x3D allows sound indices > 255). The `wait` arg we pass to on_play_sound is
@@ -964,7 +964,7 @@ extern "C" int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
        `dec budget; jg loop; cmp ebp,stack_base; jnz loop`, i.e.
        `while (--budget > 0 || ebp != stack_base)`: once the 32 budget is spent
        it keeps executing until the data stack drains back to base (sp == 0) or
-       a handler sets the carry/halt latch. D-NEW-1: we mirror that by breaking
+       a handler sets the carry/halt latch. D-MUS-12 (a.k.a. D-NEW-1): we mirror that by breaking
        only when the budget is spent AND the data stack is empty. (pc-range and
        unknown-opcode guards still bound malformed scripts; vm_push overflow ->
        ERROR.) */
