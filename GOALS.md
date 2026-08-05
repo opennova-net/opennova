@@ -64,7 +64,7 @@ OpenNova.
 Networking is held to the same parity bar as everything else, applied to the byte
 stream: it is **wire-compatible by design**. The aim is that our clients can join
 original (retail) servers, our servers can serve original clients, and opennova↔opennova
-works the same way — so the original games keep working as their official services age
+works the same way, so the original games keep working as their official services age
 out, and our runtime and theirs are interchangeable on the same protocol. The
 matchmaking and server backend (NovaWorld) is reimplemented and maturing
 (`apps/novaworld_server`, `libs/novaworld`); in-match replication is exercised in
@@ -74,14 +74,16 @@ and play on our hosts), with the remaining gaps tracked in
 engineering is recorded in
 [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md). Single-player already runs
 as an in-process listen server, so co-op and multiplayer share one replication path
-([the listen-server ADR](docs/adr/0011-single-player-in-process-listen-server.md));
-broader in-match gameplay netcode comes later.
+([the listen-server ADR](docs/adr/0011-single-player-in-process-listen-server.md)).
 
 ## Where we are today
 
 OpenNova is pre-1.0 and under active development. The asset pipeline and the editor
 are the most exercised surfaces; the runtime loads exported scenes, runs the terrain
 and foliage systems, and simulates authored missions (WAC scripts, BMS events, AI);
-player interaction and multiplayer are still being built. Nothing here is
+the gameplay systems (weapons, projectile physics and damage, throwables,
+mounted and emplaced weapons, vehicles, item destruction, optics and the HUD)
+are ported with test coverage, and multiplayer runs on the wire-compatible
+in-match protocol ("NovaWorld and multiplayer" above). Nothing here is
 production-ready. See the [README](README.md) for current capabilities, downloads,
 and build steps.

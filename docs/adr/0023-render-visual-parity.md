@@ -53,7 +53,7 @@ the host renderer's equivalents. Device/driver plumbing — swapchain, caps hand
 device-reset, buffer management, format selection — is out of scope as a port
 target, permanently.
 
-**3. REN runs on the PAR model — freeze-exempt as ledger burn-down.** Grills are
+**3. REN runs on the PAR model — freeze-exempt as ledger burn-down.** *(Status note 2026-08-04: the freeze LIFTED 2026-07-12; see ADR 0022's matching note.)* Grills are
 research and were always exempt. REN port slices are divergence closures under
 [ADR 0022](0022-divergence-burn-down.md)'s model: each grill mints tracked rows
 (D-RMAT / D-RORD / D-RLIT, plus rows in the grown terrain/env records), each port
