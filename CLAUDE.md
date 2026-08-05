@@ -31,9 +31,10 @@ easier to relay than to rediscover.
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
-- `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed) plus in-tree
-  vendored sources (bcrypt, sqlite); never edit in place — bump submodules upstream,
-  and treat the in-tree sources as upstream drops.
+- `third_party/` — vendored submodules (godot-cpp, gut, modsuperoed; never edit in
+  place — bump submodules upstream) plus vendored in-tree bcrypt sources and a
+  hash-pinned sqlite FetchContent (bump sqlite by editing the URL/URL_HASH in
+  `third_party/sqlite/CMakeLists.txt`).
 
 ## Build & test
 

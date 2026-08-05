@@ -150,7 +150,8 @@ paging rather than assuming either "all statics" or "no statics."
 
 - `NovaNetClient` is replay/spectator receive plumbing over the canonical
   `ClientReplicaPipeline`, not a second gameplay client stack (ADR 0026).
-- `ClientSession` is the NOVAWORLDUDP session verifier/proto-switch client, not
+- `ClientSession` is the NOVAWORLDUDP lobby-verify/proto-switch client (the
+  `LobbySession` mirror — "lobby verify" is that exchange's protocol name), not
   in-match replication.
 - `UdpSessionTransport` is an internal identity-frame conduit. NWU session
   framing, SCRK, and ProtocolMessage live in `libs/npwire` (ADR 0019); the PN
