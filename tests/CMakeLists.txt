@@ -1139,6 +1139,11 @@ add_test(NAME zone_chain COMMAND zone_chain_test)
 # items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
 # input mapping, steering chase, and speed pipeline of Entity_UpdateVehiclePhysics
 # @0x48af00 — a mounted ctrl/drvr player's replicated input moves the vehicle.
+add_executable(turret_window_test world/turret_window_test.cpp)
+target_link_libraries(turret_window_test PRIVATE opennova_world)
+target_compile_features(turret_window_test PRIVATE cxx_std_17)
+add_test(NAME turret_window COMMAND turret_window_test)
+
 add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
 target_link_libraries(vehicle_motor_test PRIVATE opennova_world opennova_def)
 target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

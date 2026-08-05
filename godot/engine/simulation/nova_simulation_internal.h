@@ -9,6 +9,7 @@
 #include "simulation/nova_simulation.h"
 
 #include <wac/compiler.h>
+#include <world/turret_window.h>
 
 #include <algorithm>
 #include <array>
@@ -409,39 +410,34 @@ inline bool emplaced_weapon_controls_for(
 					static_cast<double>(mount.pitch));
 	int32_t yaw_delta = opennova::io::bam_sub(parent_heading, gunner->heading);
 	int32_t pitch_delta = opennova::io::bam_sub(parent_pitch, gunner->pitch);
-	// The per-seat authored window wins first: the CARRIER's items.def
-	// addeweap arc for this slot (down/up/right/left degrees -> BAM, mins
-	// stored negated by the parser exactly like retail). Any nonzero value
-	// selects the whole quartet — both axes clamp with the array pairs
-	// verbatim; all-four-zero (unauthored or bare addeweap) falls to the
-	// weapon's own def window. [orig: Entity_GetWeaponTurretLimits @0x540d70
-	// — per-seat leg @0x540db5..0x540e27, gated on the child def ATTR_EWeap
-	// (0x20, ItemDef+84) with windows from carrierDef+540/556/572/588 indexed
-	// by the child's seat (subType, entity+532); the all-zero test @0x540e27
-	// selects the weapon-def leg @0x540e35..0x540e58]
-	if ((mount.emplacement_down_limit_bam | mount.emplacement_up_limit_bam |
-			mount.emplacement_right_limit_bam |
-			mount.emplacement_left_limit_bam) != 0) {
-		emplaced_clamp_turret_bam(yaw_delta,
-				mount.emplacement_right_limit_bam,
-				mount.emplacement_left_limit_bam);
-		emplaced_clamp_turret_bam(pitch_delta,
-				mount.emplacement_down_limit_bam,
-				mount.emplacement_up_limit_bam);
-	} else if (const opennova::world::WeaponTableEntry *entry =
-			mount.primary_weapon_slot_adm != 0xFFu
-					? world.weapons.by_index(mount.primary_weapon_slot_adm)
-					: nullptr) {
-		// weapon.def targetyawrange/targetpitchmax/min; zero = not authored,
-		// no window. [orig: the per-update clamp @0x441228..0x44128c via
-		// sub_540CC0]
-		const int32_t yaw_range = turret_limit_bam(entry->turret_yaw_range_deg);
-		if (yaw_range != 0)
-			emplaced_clamp_turret_bam(yaw_delta, yaw_range, -yaw_range);
-		const int32_t pitch_max = turret_limit_bam(entry->turret_pitch_max_deg);
-		const int32_t pitch_min = turret_limit_bam(entry->turret_pitch_min_deg);
-		if (pitch_max != 0 || pitch_min != 0)
-			emplaced_clamp_turret_bam(pitch_delta, pitch_max, -pitch_min);
+	// Window source selection lives in world::select_turret_window — the
+	// per-seat addeweap arc first, the weapon-def window second (the [orig]
+	// map is on the helper). Per-seat clamps BOTH axes with the quartet
+	// verbatim (an authored zero pair pins); the weapon-def leg keeps the
+	// witnessed per-axis zero-means-no-window semantics.
+	// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
+	const opennova::world::TurretWindow window =
+			opennova::world::select_turret_window(
+					mount.emplacement_down_limit_bam,
+					mount.emplacement_up_limit_bam,
+					mount.emplacement_right_limit_bam,
+					mount.emplacement_left_limit_bam,
+					mount.primary_weapon_slot_adm != 0xFFu
+							? world.weapons.by_index(
+									mount.primary_weapon_slot_adm)
+							: nullptr);
+	if (window.per_seat) {
+		emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
+				window.yaw_lower);
+		emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
+				window.pitch_lower);
+	} else {
+		if (window.yaw_upper != 0)
+			emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
+					window.yaw_lower);
+		if (window.pitch_upper != 0 || window.pitch_lower != 0)
+			emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
+					window.pitch_lower);
 	}
 	out.valid = true;
 	out.gun_yaw = static_cast<uint16_t>(static_cast<uint32_t>(yaw_delta) >> 16);
@@ -531,22 +527,29 @@ inline bool emplaced_weapon_controls_for_client(
 		// 314 deg; unclamped, the "180 tripod" model wrapped the barrel
 		// visibly wrong).
 		// [orig: the per-update clamp @0x441228..0x44128c via sub_540CC0]
-		if (arc != nullptr) {
-			emplaced_clamp_turret_bam(yaw_delta, arc->right_limit_bam,
-					arc->left_limit_bam);
-			emplaced_clamp_turret_bam(pitch_delta, arc->down_limit_bam,
-					arc->up_limit_bam);
+		const opennova::world::TurretWindow window =
+				opennova::world::select_turret_window_bam(
+						arc != nullptr ? arc->down_limit_bam : 0,
+						arc != nullptr ? arc->up_limit_bam : 0,
+						arc != nullptr ? arc->right_limit_bam : 0,
+						arc != nullptr ? arc->left_limit_bam : 0,
+						spec->turret_yaw_range_bam,
+						spec->turret_pitch_max_bam,
+						spec->turret_pitch_min_bam);
+		if (window.per_seat) {
+			emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
+					window.yaw_lower);
+			emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
+					window.pitch_lower);
 		} else {
 			// weapon.def fallback (stamped onto the spec from the primary
 			// weapon's rows).
-			if (spec->turret_yaw_range_bam != 0)
-				emplaced_clamp_turret_bam(yaw_delta, spec->turret_yaw_range_bam,
-						-spec->turret_yaw_range_bam);
-			if (spec->turret_pitch_max_bam != 0 ||
-					spec->turret_pitch_min_bam != 0)
-				emplaced_clamp_turret_bam(pitch_delta,
-						spec->turret_pitch_max_bam,
-						-spec->turret_pitch_min_bam);
+			if (window.yaw_upper != 0)
+				emplaced_clamp_turret_bam(yaw_delta, window.yaw_upper,
+						window.yaw_lower);
+			if (window.pitch_upper != 0 || window.pitch_lower != 0)
+				emplaced_clamp_turret_bam(pitch_delta, window.pitch_upper,
+						window.pitch_lower);
 		}
 		out.valid = true;
 		out.gun_yaw = static_cast<uint16_t>(
