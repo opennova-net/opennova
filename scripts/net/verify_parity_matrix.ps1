@@ -2704,7 +2704,11 @@ function Test-OpenNovaLaunchProofs {
         'OO' { 'host'; 'joiner' }
     }) | Sort-Object
     $proofs = Get-Field $Run 'opennova_launch_proofs' ([pscustomobject]@{})
-    $actualRoles = @($proofs.PSObject.Properties.Name | Sort-Object)
+    # RR carries an empty launch-proof object; Windows PowerShell 5.1 under
+    # StrictMode throws on `.Name` member enumeration over an empty property
+    # collection, so enumerate explicitly (pwsh yields @() either way).
+    $actualRoles = @($proofs.PSObject.Properties |
+        ForEach-Object { $_.Name } | Sort-Object)
     if (($actualRoles -join ',') -cne ($expectedRoles -join ',')) {
         Add-ParityFailure 'OPENNOVA_LAUNCH_ROLE_SET' $CaseId $Topology `
             "OpenNova launch-proof roles '$($actualRoles -join ',')' do not exactly match '$($expectedRoles -join ',')'."

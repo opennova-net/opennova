@@ -1321,7 +1321,12 @@ foreach ($case in $manifest.cases) {
         }
         $summaryLaunchProofs = $summary.opennova_launch_proofs
         $actualLaunchProofRoles = if ($summaryLaunchProofs) {
-            @($summaryLaunchProofs.PSObject.Properties.Name | Sort-Object)
+            # RR summaries carry an EMPTY launch-proof object. Windows
+            # PowerShell 5.1 under StrictMode throws on member-access
+            # enumeration over an empty property collection (`.Name`), so
+            # enumerate explicitly; pwsh returns @() for both spellings.
+            @($summaryLaunchProofs.PSObject.Properties |
+                ForEach-Object { $_.Name } | Sort-Object)
         } else {
             @()
         }

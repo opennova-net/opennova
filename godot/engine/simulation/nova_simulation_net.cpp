@@ -10,8 +10,12 @@
 #include <npwire/ingame_message_id.h>
 #include <rtxt/rtxt.h>
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace novasim;
@@ -255,11 +259,26 @@ void NovaSimulation::host_pump() {
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
 	// and wraps against the current renderer viewport height [orig:
 	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
-	// @ 0x511375, wrap @ 0x511391]. Refresh the portable runtime seam on
-	// every frame so resizing is observable; the retail parity runbook pins this
-	// root viewport to 1920x1080. A missing/non-drawable viewport leaves the seam
-	// explicitly unset, and npruntime suppresses 0x68 instead of guessing.
+	// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Refresh the portable
+	// runtime seam on every frame so resizing is observable; the retail parity
+	// runbook pins this root viewport to 1920x1080. The runtime owns this node
+	// without parenting it into the tree (manual pump ordering, ADR 0011), so
+	// get_viewport() alone is null on every production host: resolve the render
+	// window the way retail's CEffectWorld query does — the live window. A
+	// headless DisplayServer has no renderer (the dedicated-host analogue), and
+	// a missing/non-drawable viewport leaves the seam explicitly unset:
+	// npruntime suppresses 0x68 instead of inventing a screen size
+	// (docs/net/novaworld-net-re.md §5.34, D-NET-206).
 	Viewport *viewport = get_viewport();
+	if (viewport == nullptr) {
+		DisplayServer *display = DisplayServer::get_singleton();
+		if (display != nullptr && display->get_name() != "headless") {
+			SceneTree *tree = Object::cast_to<SceneTree>(
+					Engine::get_singleton()->get_main_loop());
+			if (tree != nullptr)
+				viewport = tree->get_root();
+		}
+	}
 	const double viewport_height = viewport != nullptr
 			? viewport->get_visible_rect().size.y : 0.0;
 	ctx_.loaded_model_viewport_height = viewport_height > 0.0

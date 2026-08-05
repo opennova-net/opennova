@@ -3687,6 +3687,22 @@ message-node delivery: transient records may share the original packet with
 reliable records, but a later NACK reconstruction omits them instead of
 promoting them to reliable.
 
+**Live-shell wiring correction (2026-08-05, D-NET-206).** The 2026-08-02 claim
+above was true at the npruntime layer only: the unit pins set the viewport seam
+directly, while the production refresh read `get_viewport()` on a
+`NovaSimulation` node the runtime never parents into the scene tree (manual
+pump ordering, ADR 0011) — null on every live host, so the seam stayed 0 and a
+live listen host behaved like a dedicated one for `0x68` exactly (the rest of
+the quartet was unaffected). Surfaced by the retail-LAN parity OR gate (the
+run's only gaps: S2C `0x68` 0-vs-5 and the reply-conditioned C2S `0x3D`
+0-vs-5). `host_pump` now resolves the render viewport the way retail's
+`CEffectWorld_GetViewportDimensions @0x5b1560` query does — own viewport when
+in tree, else the SceneTree root window when the DisplayServer is drawable —
+and headless stays suppressed (the dedicated analogue). The live wiring's
+regression instrument is the parity OR gate itself, not a GUT leg: headless
+can only reach the suppression leg, which is identical on broken and fixed
+builds.
+
 **Client reply implementation (2026-07-24, D-NET-175 closure).**
 `JoinerConnection` now queues the complete trio as semantic replies; `ClientRuntime` holds them behind
 the field-3 send gate and frames them in as few MTU-bounded session packets as possible at the shared
@@ -10353,6 +10369,9 @@ Stock-content validation (the FIRST capture of a normal retail Co-op session —
 - **D-NET-203** [MED, FIXED 2026-08-02] S2C 0x7B field 4 applies retail's `(game_type & 0xFFFDFFFF) == 0x10020` selector — waypoint families advertise `mission_file`, every other mode the resolved MissionText title — while field 5 stays the file on every arm. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740, selector @0x507822, MissionText/fallback @0x507835..0x50784F]
 - **D-NET-204** [HIGH, FIXED 2026-08-02] S2C 0x0B emits the EXACT 616 loaded header bytes while the parse state is unedited (source-header retention gated on a canonical-projection match; direct mutations fall back to the canonical writer) — retail memcpy's the loaded header, and the canonical rewrite differed on shipped `TDH_I3A.bms` (offset 0x242 loadout chunk length 0x0093 vs the model writer's 0x00AB). The encoder documents its ADR-0003 disposition. [orig: NetPacket_WriteBMSHeader @0x502CA0, the exact memcpy(..., 0x268) after its packet-space guard]
 - **D-NET-205** [MED, FIXED 2026-08-02] S2C 0x60 `MISSIONNAME` applies retail's literal two-part test `(game_type & 0xFFFDFFFF) == 0x10020 && (game_type & 0x20000) == 0`: the filename only for stock Co-op; objective/waypoint Co-op, TDM, and other modes advertise the resolved MissionText title. `MISSIONFILENAME` stays the active map file on every arm. Deliberately narrower than 0x7B's selector (D-NET-203). [orig: serialize_mission_info_to_datastream @0x523620]
+
+Retail-LAN parity validation round (fresh 01TR RR oracle + RO/OR gates on post-#403 master, 2026-08-05 — §5.34):
+- **D-NET-206** [HIGH, FIXED 2026-08-05] A live OpenNova listen host never sent the quartet's S2C 0x68 (and thus never elicited C2S 0x3D): the npruntime emitter was correct but the Godot-glue viewport-seam refresh read `get_viewport()` on the never-parented simulation node, so the seam stayed 0 and the no-renderer suppression held on every production host. `host_pump` now falls back to the SceneTree root window when out of tree and the DisplayServer is drawable; headless remains suppressed (the dedicated analogue). Full mechanism + regression-instrument rationale in §5.34's live-shell wiring correction. The RO direction was already clean (our joiner answered a retail host's 0x68 with 0x3D on schedule), and the same round's RO gate passed with zero gaps/spurious/decode failures. [orig: Server_SendRandomSeedSync @0x511360 — dedicated branch @0x51136a, CEffectWorld_GetViewportDimensions @0x5b1560 call @0x511375, wrap @0x511391]
 
 `CNapiNPConnection_*` IDB-hygiene grill (decomp cleanup + naming validation of the whole connection-node family, 2026-06-26; IDB-only — no reimpl code change):
 - **D-NET-128** [INFO, IDB] (renumbered from D-NET-116 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-116** "pending-spawn loop gates on the mission-load flag", which is cited in code and keeps the number) **The `NapiNPConnection_*` family decomp was cleaned up and its names validated against the bytes.** Scope: all 47 prefixed methods + 2 unprefixed high-table handlers + 1 unprefixed teardown sibling. Changes (Jointops.exe.kong.i64):

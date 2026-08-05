@@ -10,6 +10,9 @@
 .claude/worktrees/
 .claude/settings.local.json
 
+# Codex CLI: machine-local state and worktrees, same policy as .claude above
+.codex/
+
 # Build artifacts
 build/
 *.o

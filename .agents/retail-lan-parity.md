@@ -972,6 +972,28 @@ the named integrity profile with a different install. An unknown profile or a
 challenge outside its proved table contract must not be answered with an
 invented in-range CRC.
 
+### Manifest generation rejects an RO/OO server cfg (known harness defect, 2026-08-05)
+
+`generate_parity_manifest.ps1` fails a completed suite with "Effective retail
+cfg lacks one exact LanHostCallsign setting: … topology=RO role=server" because
+of a contract mismatch between the two retail launch paths: `onhook_run_lan_pair`
+renders the managed role block into the colocated `onhook.cfg` (which the
+runner then snapshots as the effective config), but the single-role
+`onhook_host_lan`/`onhook_join_lan` tools pass mission/port/callsign/game-type
+through the child environment and bridge request instead and never rewrite the
+cfg — so the RO server snapshot is the pristine template while the live host
+correctly advertises the case values (the wire-ready witness proves it). The
+2026-08-05 suites `parity-20260805-b/-c/-d` all captured 24/24 cells cleanly;
+`-d` reached manifest generation and stopped here. The fix belongs in the
+opennova-int MCP (make the single-role launchers render the cfg exactly like
+the pair's role half) — until it lands, the 24-cell `PARITY_STATUS` verdict
+cannot be produced, and per-run acceptance rests on the wire-ready witnesses
+plus `diff_vs_golden.ps1` gates. Two sibling defects in the same
+first-time-through class were fixed in-repo the same day: both verdict scripts
+crashed under Windows PowerShell 5.1 StrictMode enumerating the legitimately
+empty RR `opennova_launch_proofs` object (`.PSObject.Properties.Name` over an
+empty collection throws on 5.1; enumerate `.PSObject.Properties` explicitly).
+
 ## 10. Iteration discipline
 
 For every divergence:
