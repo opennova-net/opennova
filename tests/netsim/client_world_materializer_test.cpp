@@ -286,8 +286,8 @@ bool wire_target_authors_ground_separately_from_parent() {
 	// target field authors retail groundEntity (+40) — the DRIVING hull a boat
 	// gun rides. The materializer must never let the parent author the
 	// structural carrier. [orig: NapiNPClientMsg_0x00D @0x432C40 — parent →
-	// occupantEntity (+368) store @0x433289; target → groundEntity stores
-	// @0x432d47/@0x4332d7]
+	// occupantEntity (+368) store @0x433289; target → groundEntity
+	// resolve @0x4332bc, store @0x4332d7]
 	gun.parent_handle = occupant_ref.slot_id;
 	gun.target_handle = hull.slot_id;
 	nw::PoolSpawnBatch batch;

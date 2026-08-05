@@ -176,7 +176,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	// gun's target is the DRIVING hull. Resolve both only after every row in
 	// this fold has had a chance to occupy its exact slot.
 	// [orig: NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity store
-	//  @0x433289, target → groundEntity stores @0x432d47/@0x4332d7; both
+	//  @0x433289, target → groundEntity resolve @0x4332bc, store @0x4332d7; both
 	//  resolved via the pool<<12|slot walk with 0xFFFF / pool<5 / capacity
 	//  guards]
 	for (const auto &[packed, row] : current) {

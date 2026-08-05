@@ -1107,14 +1107,35 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 	};
 
 	// The item catalog and learned class table cannot change during this method.
-	// Resolve the persistent-parent predicate once per row, outside the repeated
-	// pose-composition depths.
-	std::vector<uint8_t> persistent_parent_child(state_.entities.size(), 0);
+	// Resolve each no-callback row's persistent STRUCTURAL CARRIER once, outside
+	// the repeated pose-composition depths. Retail's 'ewep' class MOVE function
+	// recomposes the child from groundEntity (entity+40) every tick — the slot
+	// the 0x0D TARGET seeds — so a compact-less mounted gun rides its DRIVING
+	// hull with no wire records of its own: the carrier-def seat bone
+	// (carrierDef+532+subType) selects a model bone and the child adopts the
+	// carrier-matrix-composed position + Euler set (or, with no resolvable
+	// bone, the carrier pose verbatim).
+	// [orig: move-fn table 'ewep' row @0x82abe0 -> Entity_UpdateTransformAndTurret
+	//  @0x440ca0 — groundEntity read @0x440cbf, bone re-resolve @0x440cfd,
+	//  carrier-matrix bone compose @0x44109d with position+Euler adoption
+	//  @0x4410dd, no-bone verbatim carrier-pose adoption @0x4410ea..0x4411bc]
+	// Without model bone tables at this layer, the recompose below carries the
+	// rigid child-in-carrier pose captured from the 0x0D absolutes — the same
+	// client-subset simplification the parent-follow path already pins.
+	std::vector<uint16_t> persistent_carrier(state_.entities.size(), 0xFFFFu);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
-		if (child.parent_handle == 0xFFFFu ||
-		    classify(child.type_id) != EntityClass::NoNetworkCallback)
+		if (child.target_handle == 0xFFFFu && child.parent_handle == 0xFFFFu)
+			continue; // no carrier candidate — skip the catalog lookup
+		if (classify(child.type_id) != EntityClass::NoNetworkCallback)
 			continue;
+		// The 0x0D TARGET is the structural carrier (groundEntity/+40) and
+		// outranks any parent: retail's transform never reads +368.
+		if (child.target_handle != 0xFFFFu) {
+			persistent_carrier[i] = child.target_handle;
+			continue;
+		}
+		if (child.parent_handle == 0xFFFFu) continue;
 		// A POOL-0 parent on a no-callback child is the occupant/driver
 		// back-reference, never a transform parent (live retail 0x0D witness,
 		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
@@ -1123,13 +1144,12 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 		// seat/parent loop that ratchets the pair through the depth passes
 		// (the reported climbing/spinning emplacements). The structural
 		// carrier of a mounted-on-vehicle gun rides the record's separate
-		// TARGET field, staged on the row and folded by the world
-		// materializer (groundEntity/+40).
+		// TARGET field, consumed above.
 		// [orig: 0x0D store @0x433289 — entity+368 occupantEntity back-ref;
-		//  target → groundEntity stores @0x432d47/@0x4332d7]
+		//  target → groundEntity resolve @0x4332bc, store @0x4332d7]
 		if (world::EntityHandle{child.parent_handle}.pool() == 0)
 			continue;
-		persistent_parent_child[i] = 1;
+		persistent_carrier[i] = child.parent_handle;
 	}
 	// Repeating the composition makes mixed seat/persistent-parent chains
 	// independent of pool/vector ordering while preserving the promotion depth
@@ -1169,20 +1189,20 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 				}
 			}
 
-			if (!persistent_parent_child[child_index]) continue;
+			if (persistent_carrier[child_index] == 0xFFFFu) continue;
 			// Only the addeweap/no-callback family rides this persistent
 			// recompose: those children never receive compact motion samples,
-			// so the load-time 0x0D parent relation is their only pose source.
-			// A compact-sampled class (player/vehicle/infantry) moves by its
-			// OWN records — its carrier composition happens per record on the
-			// record's own carrier field — and its 0x0D parentHandle is the
-			// occupantEntity/+368 DRIVER back-reference, never a transform
+			// so the load-time 0x0D target/parent relation is their only pose
+			// source. A compact-sampled class (player/vehicle/infantry) moves
+			// by its OWN records — its carrier composition happens per record
+			// on the record's own carrier field — and its 0x0D parentHandle is
+			// the occupantEntity/+368 DRIVER back-reference, never a transform
 			// parent [orig: 0x0D store @0x433289; vehicle-compact carrier
 			// compose @0x4608ce]. Recomposing such a row here glued the
 			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
 			// "a vehicle follows the player around" (one per map, whichever
 			// spawn record carried flag 0x0100).
-			ClientEntityState *parent = find_row(child.parent_handle);
+			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
 			if (parent == nullptr) continue; // a later batch may still provide it
 			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
 			// verdict. Only interpret flags/health after a real live compact has
