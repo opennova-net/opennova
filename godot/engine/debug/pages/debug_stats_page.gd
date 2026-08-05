@@ -112,13 +112,19 @@ const _ROWS := [
 			"minus": [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
 					FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]},
 	{"id": "render", "label": "Render", "depth": 0, "kind": _KIND_HEADER},
+	# Per-pass submission counts (info cells): what the main view, the shadow
+	# maps, and the water mirror each rendered last frame — pass attribution is
+	# read here, not inferred from the totals above.
+	{"id": "render_main", "label": "Main view", "depth": 1, "kind": _KIND_HEADER},
+	{"id": "render_shadow", "label": "Shadow passes", "depth": 1, "kind": _KIND_HEADER},
 	{"id": "render_root_cpu", "label": "Viewport CPU", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_ROOT_CPU},
 	{"id": "render_root_gpu", "label": "Viewport GPU", "depth": 1, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_ROOT_GPU},
-	{"id": "render_water_cpu", "label": "Water RTT CPU", "depth": 1, "kind": _KIND_SPAN,
+	{"id": "render_water", "label": "Water mirror", "depth": 1, "kind": _KIND_HEADER},
+	{"id": "render_water_cpu", "label": "Water RTT CPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_WATER_CPU},
-	{"id": "render_water_gpu", "label": "Water RTT GPU", "depth": 1, "kind": _KIND_SPAN,
+	{"id": "render_water_gpu", "label": "Water RTT GPU", "depth": 2, "kind": _KIND_SPAN,
 			"slot": FrameStatsBoard.RENDER_WATER_GPU},
 ]
 
@@ -368,7 +374,8 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	# Clear every conditional cell first so reload/menu transitions cannot retain
 	# counters from the previous world.
 	for id in ["sim", "net", "trace", "effects", "fire", "destruction",
-			"throwable", "wire_rows", "occl"]:
+			"throwable", "wire_rows", "occl", "render_main", "render_shadow",
+			"render_water"]:
 		_set_info(id, "")
 	_set_info("frame", "%d fps" % int(Performance.get_monitor(Performance.TIME_FPS)))
 	_set_info("render", "%d draws · %d objs · %s prims · %d nodes" % [
@@ -378,6 +385,12 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 				Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))),
 		int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
 	])
+	_set_pass_counts("render_main", sums, counts, frames,
+			FrameStatsBoard.RENDER_MAIN_OBJECTS, FrameStatsBoard.RENDER_MAIN_DRAWS)
+	_set_pass_counts("render_shadow", sums, counts, frames,
+			FrameStatsBoard.RENDER_SHADOW_OBJECTS, FrameStatsBoard.RENDER_SHADOW_DRAWS)
+	_set_pass_counts("render_water", sums, counts, frames,
+			FrameStatsBoard.RENDER_WATER_OBJECTS, FrameStatsBoard.RENDER_WATER_DRAWS)
 
 	var world: Object = _ctx.world() if _ctx != null else null
 
@@ -455,6 +468,20 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 					int(occ_counts.get("instances", 0)),
 					int(occ_counts.get("visible", 0)),
 					int(occ_counts.get("culled_entities", 0))])
+
+
+# One pass-count info cell: window-averaged objects/draws submitted per frame
+# by that render pass. A pass that never sampled (no water, capture just
+# opened) keeps its cleared cell.
+func _set_pass_counts(id: String, sums: PackedInt64Array,
+		counts: PackedInt32Array, frames: int, objects_slot: int,
+		draws_slot: int) -> void:
+	if frames <= 0 or counts[objects_slot] <= 0:
+		return
+	_set_info(id, "%d objs · %d draws" % [
+		int(float(sums[objects_slot]) / frames),
+		int(float(sums[draws_slot]) / frames),
+	])
 
 
 static func _compact_count(value: int) -> String:

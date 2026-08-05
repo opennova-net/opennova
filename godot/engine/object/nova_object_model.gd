@@ -123,6 +123,10 @@ var _shadow_receiver_material: ShaderMaterial
 # This model's fixed slot in the staggered environment-restamp window (see
 # _on_env_generation_changed).
 var _env_stagger_slot := 0
+# The present walk's shared camera-submission registry (see
+# set_submission_registry); unbound owners keep the always-submitted default.
+var _submission_registry: Dictionary = {}
+var _submission_registry_bound := false
 # Camera-submission gate: retail evaluates poses/PANM/material generators per
 # SUBMITTED model [orig: Terrain_RenderSectorModels @0x5c5d30], so render-
 # derived work waits while no camera can see the model's bounds. Defaults ON:
@@ -868,6 +872,11 @@ func _notification(what: int) -> void:
 		# Becoming visible must re-check the env generation missed while
 		# hidden (hidden models skip the restamp by design).
 		_wake_runtime_frame()
+	elif what == NOTIFICATION_PREDELETE:
+		# A freed model must not leave a stale off-screen claim in the shared
+		# submission registry (the walk would keep gating a reused id).
+		if _submission_registry_bound:
+			_submission_registry.erase(get_instance_id())
 
 
 ## Advance the model's render-time state once. This is the public equivalent
@@ -1138,35 +1147,39 @@ func set_on_screen(value: bool) -> void:
 	if _on_screen == value:
 		return
 	_on_screen = value
+	_publish_submission_state()
 	if value:
 		_wake_runtime_frame()
 
 
-# Keep the submission notifier matching the model's current mesh bounds. An
-# empty-bounds model draws nothing: it carries no notifier and stays flagged
-# on-screen so a later real rebuild starts from the safe default. Runs before
-# the equal-bounds early-out because rebuild() frees the previous notifier
-# with the other children even when the new bounds are identical.
-func _sync_screen_notifier(bounds: AABB) -> void:
-	if bounds.size == Vector3.ZERO:
-		if _screen_notifier != null:
-			_screen_notifier.queue_free()
-			_screen_notifier = null
-		_on_screen = true
+## Bind the present walk's shared camera-submission registry (owned by
+## NovaPresentApplier, shared BY REFERENCE): this model's instance id is
+## present exactly while its bounds notifier reports off-screen, so the
+## native walk skips the presentation writers retail only runs for a
+## submitted model [orig: Terrain_RenderSectorModels @ 0x5c5d30]. Injected
+## on every plan rebuild; owners without the walk (previews, tests) simply
+## never bind and the model stays always-submitted.
+func set_submission_registry(registry: Dictionary) -> void:
+	if _submission_registry_bound and is_same(registry, _submission_registry):
 		return
-	if _screen_notifier == null:
-		_screen_notifier = VisibleOnScreenNotifier3D.new()
-		_screen_notifier.name = "ScreenNotifier"
-		_screen_notifier.screen_entered.connect(set_on_screen.bind(true))
-		_screen_notifier.screen_exited.connect(set_on_screen.bind(false))
-		add_child(_screen_notifier)
-	# Grow past the rest bounds: a playing pose can sweep limbs slightly
-	# outside the mesh-rest AABB and the culling must stay conservative.
-	_screen_notifier.aabb = bounds.grow(1.0)
+	if _submission_registry_bound:
+		_submission_registry.erase(get_instance_id())
+	_submission_registry = registry
+	_submission_registry_bound = true
+	_publish_submission_state()
+
+
+func _publish_submission_state() -> void:
+	if not _submission_registry_bound:
+		return
+	if _on_screen:
+		_submission_registry.erase(get_instance_id())
+	else:
+		_submission_registry[get_instance_id()] = true
 
 
 func _set_model_bounds(bounds: AABB) -> void:
-	_sync_screen_notifier(bounds)
+	_scene_builder.sync_screen_notifier(bounds)
 	if _aabb_equal_approx(_model_bounds, bounds):
 		return
 	_model_bounds = bounds

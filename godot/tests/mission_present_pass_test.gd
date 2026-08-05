@@ -20,6 +20,14 @@ class FakeModel:
 	var set_controls: Array = []
 	var cleared_controls: Array[String] = []
 	var cleared_part_channels: Array[int] = []
+	# The camera-submission seam the plan build binds (production:
+	# NovaObjectModel.set_submission_registry). Tests mark a row off-screen by
+	# keying this node's instance id into the captured registry.
+	var submission_registry: Dictionary = {}
+	var registry_binds := 0
+	func set_submission_registry(registry: Dictionary) -> void:
+		submission_registry = registry
+		registry_binds += 1
 	var part_control_names: Dictionary = {
 		1: "VEHICLE_SPECIAL1",
 		2: "VEHICLE_SPECIAL2",
@@ -305,6 +313,107 @@ func test_part_channel_releases_while_inactive_and_catches_up_when_reactivated()
 	presenter.present()
 	assert_eq(model.phases, [[1, 100], [1, 200]],
 			"reactivation catches the model up to the current phase exactly once")
+
+
+# Retail evaluates the presentation writers per SUBMITTED model
+# [orig: Terrain_RenderSectorModels @ 0x5c5d30]: a row whose bounds notifier
+# reports off-screen skips the part/CTRL/aim dispatches and catches up with
+# the live state at its next submission.
+func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 7: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{ "bms_id": 7, "active1": 1, "phase1": 100,
+			"emplaced_controls_valid": 1, "emplaced_gun_yaw": 40,
+			"emplaced_gun_pitch": 8 }]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_gt(model.registry_binds, 0,
+			"the plan build binds the shared submission registry")
+	assert_eq(model.phases, [[1, 100]], "the submitted row poses")
+	assert_eq(model.ctrl_values.get("EWEAP_GUNYAW", -1), 40)
+
+	model.submission_registry[model.get_instance_id()] = true
+	sim.entities[0]["phase1"] = 250
+	sim.entities[0]["emplaced_gun_yaw"] = 90
+	presenter.present()
+	presenter.present()
+	assert_eq(model.phases, [[1, 100]],
+			"an off-screen row receives no part dispatch")
+	assert_eq(model.ctrl_values.get("EWEAP_GUNYAW", -1), 40,
+			"an off-screen row's emplaced controls hold the last submitted state")
+
+	model.submission_registry.erase(model.get_instance_id())
+	sim.entities[0]["phase1"] = 400
+	presenter.present()
+	assert_eq(model.phases, [[1, 100], [1, 400]],
+			"re-entry re-poses to the live phase, not the missed ones")
+	assert_eq(model.ctrl_values.get("EWEAP_GUNYAW", -1), 90,
+			"re-entry reasserts the emplaced writer with current values")
+
+
+func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
+	var model := FakeModel.new()
+	model.part_control_names = { 1: "HOLD_PHASE" }
+	add_child_autofree(model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 3: model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [{ "bms_id": 3, "active1": 1, "phase1": 100 }]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	assert_true(model.ctrl_values.has("HOLD_PHASE"))
+
+	model.submission_registry[model.get_instance_id()] = true
+	sim.entities[0]["active1"] = 0
+	presenter.present()
+	assert_eq(model.cleared_part_channels, [] as Array[int],
+			"no release dispatch while the row is not submitted")
+	model.submission_registry.erase(model.get_instance_id())
+	presenter.present()
+	assert_eq(model.cleared_part_channels, [1],
+			"the falling edge latched while off-screen releases on re-entry")
+
+
+func test_offscreen_muzzle_row_keeps_fire_origin_feedback_and_pose() -> void:
+	var muzzle_model := MuzzleFakeModel.new()
+	add_child_autofree(muzzle_model)
+	var plain_model := FakeModel.new()
+	add_child_autofree(plain_model)
+	var index := CountingIndex.new()
+	index.by_bms_id = { 5: muzzle_model, 6: plain_model }
+	var sim := RevisionFakeSim.new()
+	sim.entities = [
+		{ "bms_id": 5, "net_id": 9, "anim_state": 3, "anim_phase": 12 },
+		{ "bms_id": 6, "anim_state": 3, "anim_phase": 12 },
+	]
+	var presenter := _make_pass(index, sim)
+	presenter.present()
+	var initial_pushes: int = sim.muzzle_pushes.size()
+	var initial_bodies: int = muzzle_model.body_calls.size()
+	assert_gt(initial_pushes, 0)
+	assert_gt(plain_model.body_calls.size(), 0)
+
+	muzzle_model.submission_registry[muzzle_model.get_instance_id()] = true
+	plain_model.submission_registry[plain_model.get_instance_id()] = true
+	sim.entities[0]["anim_phase"] = 40
+	sim.entities[1]["anim_phase"] = 40
+	var plain_bodies: int = plain_model.body_calls.size()
+	presenter.present()
+	assert_gt(sim.muzzle_pushes.size(), initial_pushes,
+			"the D-AI-6 fire-origin feedback survives off-screen (AI still shoot)")
+	assert_gt(muzzle_model.body_calls.size(), initial_bodies,
+			"the authoritative muzzle owner keeps posing off-screen")
+	assert_eq(plain_model.body_calls.size(), plain_bodies,
+			"a non-muzzle row stops body dispatches while not submitted")
+
+	plain_model.submission_registry.erase(plain_model.get_instance_id())
+	presenter.present()
+	var last: Array = plain_model.body_calls.back()
+	assert_eq(int(last[1]), 40,
+			"re-entry re-poses the body to the live phase, not the missed one")
 
 
 func test_both_channels_posed() -> void:

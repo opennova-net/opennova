@@ -1493,6 +1493,17 @@ func _sample_water_render_stats(stats_on: bool) -> void:
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
 	_frame_stats.add(FrameStatsBoard.RENDER_WATER_GPU,
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
+	# What the mirror pass actually re-rendered (previous frame): the witnessed
+	# reflection re-renders the world scene [orig: Water_ReflectionPrerender
+	# @ 0x5c2780], so its submission count is a first-class stats row.
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_OBJECTS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
+	_frame_stats.add(FrameStatsBoard.RENDER_WATER_DRAWS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
 
 
 func _stop_water_render_stats() -> void:

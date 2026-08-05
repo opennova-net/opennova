@@ -56,6 +56,24 @@ func sample(viewport: Viewport, stats_on: bool) -> void:
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
 	_board.add(FrameStatsBoard.RENDER_ROOT_GPU,
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
+	# Per-pass submission counts (previous frame): what the main view and the
+	# shadow maps each rendered. Free counters — always tracked by the server.
+	_board.add(FrameStatsBoard.RENDER_MAIN_OBJECTS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
+	_board.add(FrameStatsBoard.RENDER_MAIN_DRAWS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
+	_board.add(FrameStatsBoard.RENDER_SHADOW_OBJECTS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW,
+					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
+	_board.add(FrameStatsBoard.RENDER_SHADOW_DRAWS,
+			RenderingServer.viewport_get_render_info(rid,
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW,
+					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
 
 
 func stop() -> void:

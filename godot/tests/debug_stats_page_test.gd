@@ -101,7 +101,8 @@ func test_rows_cover_major_systems_and_label_units() -> void:
 			&"snapshot", &"mission_rows", &"wire_rows", &"fire",
 			&"destruction", &"throwable", &"occl", &"occl_build",
 			&"occl_probe", &"occl_apply", &"occl_glue", &"env", &"audio",
-			&"hud", &"render"]:
+			&"hud", &"render", &"render_main", &"render_shadow",
+			&"render_water"]:
 		assert_not_null(_row(pane, id), "the Stats tab carries a '%s' row" % id)
 	assert_eq(pane.stats_tree.get_column_title(0), "System")
 	assert_eq(pane.stats_tree.get_column_title(1), "Avg")
@@ -191,6 +192,35 @@ func test_render_window_formats_average_peak_groups_and_residual() -> void:
 			"the group includes build, probe, apply, and binding glue")
 	assert_eq(_row(pane, &"occl_glue").average, "0.10")
 	assert_eq(_row(pane, &"shell_residual").average, "3.00")
+
+
+func test_pass_count_cells_average_per_frame_and_clear_when_unsampled() -> void:
+	var pane := _make_pane()
+	var window := _blank_window()
+	var sums: PackedInt64Array = window[0]
+	var counts: PackedInt32Array = window[2]
+	sums[FrameStatsBoard.RENDER_MAIN_OBJECTS] = 4_550
+	sums[FrameStatsBoard.RENDER_MAIN_DRAWS] = 4_510
+	counts[FrameStatsBoard.RENDER_MAIN_OBJECTS] = 10
+	sums[FrameStatsBoard.RENDER_SHADOW_OBJECTS] = 0
+	sums[FrameStatsBoard.RENDER_SHADOW_DRAWS] = 0
+	counts[FrameStatsBoard.RENDER_SHADOW_OBJECTS] = 10
+	sums[FrameStatsBoard.RENDER_WATER_OBJECTS] = 4_220
+	sums[FrameStatsBoard.RENDER_WATER_DRAWS] = 4_180
+	counts[FrameStatsBoard.RENDER_WATER_OBJECTS] = 10
+
+	pane.render_window(10, sums, window[1], counts, null, null)
+	assert_eq(_row(pane, &"render_main").info, "455 objs · 451 draws")
+	assert_eq(_row(pane, &"render_shadow").info, "0 objs · 0 draws",
+			"a sampled pass that rendered nothing reads zero, not blank")
+	assert_eq(_row(pane, &"render_water").info, "422 objs · 418 draws")
+
+	var blank := _blank_window()
+	pane.render_window(10, blank[0], blank[1], blank[2], null, null)
+	assert_eq(_row(pane, &"render_water").info, "",
+			"an unsampled pass (no water in this world) clears its cell")
+	assert_eq(_row(pane, &"render_main").info, "",
+			"pass counts never survive a window with no samples")
 
 
 func test_capture_follows_visibility_and_board_replacement() -> void:
