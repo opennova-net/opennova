@@ -225,6 +225,11 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	var mmi := rec["mmi"] as MultiMeshInstance3D
 	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"retail static batches receive dynamic silhouettes but never cast them")
+	assert_ne(mmi.layers & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+			"a type=object entity rides the no-mirror layer (env #30: only "
+			+ "vehicles reflect [orig: Entity_InitFromModel @ 0x40e20a])")
+	assert_eq(mmi.layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+			"the non-vehicle batch leaves the mirror-visible world layer")
 	var mm: MultiMesh = rec["mm"]
 	assert_eq(mm.instance_count, 1, "the new static gets its own single-instance MultiMesh")
 	assert_true((rec["mmi"] as MultiMeshInstance3D).is_inside_tree(), "the batch instance is in the container")
@@ -254,6 +259,47 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# Getter rows are copies; callers cannot rewrite the placer's retained identity.
 	source["item_id"] = 0
 	assert_eq(int(placer.get_static_item_effect_sources()[0].get("item_id", 0)), 105004)
+
+
+func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
+	# env #30: the water mirror's above-water collection keeps only
+	# ItemDefType==vehicle entities [orig: Entity_InitFromModel @ 0x40e20a
+	# entity+36 |= 0x400; Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0 filterMask 0x400]. Fixture 106002 "Static Vehicle" is the
+	# type=vehicle twin of the crate case above.
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := Placer.new(root, item_db)
+	placer.edit_mode = true
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	placer.place(mission, parent)
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2, 1, 4)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticVehicle1", NovaObjectData.new(), [{
+		"mesh": mesh, "material": null,
+		"offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+
+	var record := mission.add_entity(
+			NovaMissionData.KIND_ITEM, 106002, Vector3(1, 2, 3), Vector3.ZERO)
+	var delta: Dictionary = placer.place_single(
+			mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+	assert_eq(int(delta.get("placed", -1)), 1, "the static vehicle places")
+
+	var rec: Dictionary = placer.pickable_records.back()
+	var mmi := rec["mmi"] as MultiMeshInstance3D
+	assert_ne(mmi.layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+			"a type=vehicle entity stays on the mirror-visible world layer")
+	assert_eq(mmi.layers & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+			"the vehicle batch never rides the no-mirror layer")
 
 
 func test_place_single_static_caster_reuses_its_visible_instance() -> void:
@@ -286,9 +332,10 @@ func test_place_single_static_caster_reuses_its_visible_instance() -> void:
 	var visible_batch := placer.pickable_records.back()["mmi"] \
 			as MultiMeshInstance3D
 	assert_eq(visible_batch.layers,
-			NovaWater.VISUAL_LAYER_WORLD \
+			NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR \
 			| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
-			"the one visible draw also enters the isolated static-caster pass")
+			"the one visible draw also enters the isolated static-caster pass "
+			+ "(non-vehicle: the no-mirror world layer, env #30)")
 	assert_eq(visible_batch.cast_shadow,
 			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	assert_null(container.get_node_or_null(
@@ -365,9 +412,10 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	assert_not_null(visible_batch)
 	if visible_batch != null:
 		assert_eq(visible_batch.layers,
-				NovaWater.VISUAL_LAYER_WORLD \
+				NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR \
 				| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
-				"the visible batch joins the isolated static-caster layer")
+				"the visible batch joins the isolated static-caster layer "
+				+ "(non-vehicle: the no-mirror world layer, env #30)")
 		assert_eq(visible_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 				"the visible batch supplies the static silhouette")
@@ -413,7 +461,8 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	assert_not_null(shadow_batch,
 			"mixed admission retains a filtered shadow-only batch")
 	if visible_batch != null:
-		assert_eq(visible_batch.layers, NovaWater.VISUAL_LAYER_WORLD)
+		assert_eq(visible_batch.layers, NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR,
+				"non-vehicle: the no-mirror world layer (env #30)")
 		assert_eq(visible_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	if shadow_batch != null:

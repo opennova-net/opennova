@@ -1003,16 +1003,16 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 		"an unloaded GameWorld restores the scene-authored frame clear")
 
 
-func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> void:
-	# The reflection layer contract (env #30): the witnessed mirror is a
-	# re-render of the WORLD scene - which contains the local player's body -
-	# but never the water surface itself and never the first-person overlay,
-	# which retail draws as its own near-Z viewport pass [orig:
+func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
+	# The reflection layer contract (env #30, entity-set witness 2026-08-05):
+	# above water the mirror collects only vehicles — non-vehicle world
+	# entities ride the no-mirror layer the mask excludes — and it never draws
+	# the water surface, the FP overlay, or ANY person including the local
+	# body (the reflection has no player-render leg and persons fail the
+	# vehicle filter) [orig: Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a;
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
-	# Player_RenderFirstPersonViewModel @ 0x4ded60]. Pin the packaged scene's
-	# mirror cull_mask so first-person arms can never leak back into the
-	# reflection (and the FP-mode body, parked on the reflection-only layer by
-	# LocalPlayerPresenter, always renders in it).
+	# Player_RenderFirstPersonViewModel @ 0x4ded60].
 	var packed := load("res://engine/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
@@ -1031,10 +1031,12 @@ func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> v
 		"the FP arms/weapon overlay never enters the mirrored scene")
 	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster-only helper instances never enter the color reflection")
-	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
-		"the FP-mode local body DOES render in the mirror")
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+		"no person enters the mirror — the FP body layer stays out")
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+		"non-vehicle world entities stay out of the above-water mirror")
 	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD, 0,
-		"the mirrored scene renders the normal world")
+		"the mirrored scene renders the reflectable world")
 	assert_eq(water.mesh_instance.layers, NovaWater.VISUAL_LAYER_WATER,
 		"the water strip rides the water-only layer the mirror excludes")
 

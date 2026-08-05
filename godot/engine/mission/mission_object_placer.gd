@@ -138,6 +138,15 @@ func _check_epoch() -> void:
 	_occlusion_cache.clear()
 
 
+# Witnessed water-mirror eligibility (env #30): the reflection collects only
+# ItemDefType==vehicle entities above water [orig: Entity_InitFromModel
+# @ 0x40e20a sets entity+36 flag 0x400 iff ItemDefType(+0x5C)==1;
+# Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 filters on it].
+# DefItemType 1 = vehicle (itemdef-re.md +0x5c).
+func _item_is_mirror_reflected(item_id: int) -> bool:
+	return item_db != null and item_db.get_item_type(item_id) == 1
+
+
 # Re-stamp every harvested static-batch material from the live environment.
 # The batch materials are snapshots harvested from a throwaway model at build
 # time; without this the static world would keep its load-time lighting while
@@ -337,6 +346,13 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		var shadow_slots: Array = static_shadow_by_graphic.get(graphic, [])
 		var has_static_shadow := true in shadow_slots
 		var all_static_shadow := has_static_shadow and not (false in shadow_slots)
+		# One graphic = one item type in practice; classify the batch from its
+		# first placed source (env #30: only vehicle-type entities reflect).
+		var sources: Array = static_effect_sources_by_graphic.get(graphic, [])
+		var batch_world_layer := NovaWater.VISUAL_LAYER_WORLD \
+				if (not sources.is_empty() and _item_is_mirror_reflected(
+						int((sources[0] as Dictionary).get("item_id", 0)))) \
+				else NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR
 		var batches := _get_static_batches(graphic, env_node, container)
 		if batches.is_empty():
 			stats.unresolved += xforms.size()
@@ -362,10 +378,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				# terrain receiver layer. An all-eligible visible batch can therefore
 				# carry the static-caster marker without self-shadowing, avoiding
 				# a full duplicate MultiMesh per submesh.
-				mmi.layers = NovaWater.VISUAL_LAYER_WORLD \
+				mmi.layers = batch_world_layer \
 						| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
 				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 			else:
+				mmi.layers = batch_world_layer
 				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			if batch["material"] != null:
 				mmi.material_override = batch["material"]
@@ -452,6 +469,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		var model: Node3D = NovaObjectModelScript.new()
 		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
+		model.mirror_reflected = _item_is_mirror_reflected(int(a.get("item_id", 0)))
 		# Render the model origin at the entity's stored position directly. The engine bakes the
 		# Ground userpoint into the stored position once, at author-time (place / terrain-drag), not
 		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
@@ -533,6 +551,9 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	var model: Node3D = NovaObjectModelScript.new()
 	model.set_panm_clock(_panm_clock)
 	model.name = "PlayerAvatar_%s" % graphic
+	# Wire-streamed and avatar builds share this chain: vehicles reflect in
+	# the water mirror, persons and everything else never do (env #30).
+	model.mirror_reflected = _item_is_mirror_reflected(item_id)
 	parent.add_child(model)
 	if env_node != null and model.has_method("set_environment_node"):
 		model.set_environment_node(env_node)
@@ -650,6 +671,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		var model: Node3D = NovaObjectModelScript.new()
 		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
+		model.mirror_reflected = _item_is_mirror_reflected(item_id)
 		model.transform = xform
 		container.add_child(model)
 		if env_node != null and model.has_method("set_environment_node"):
@@ -711,6 +733,9 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			int(entity.get("ai_flags", 0)),
 			item_db.get_attrib(item_id),
 			item_db.get_attrib2(item_id))
+	var single_world_layer := NovaWater.VISUAL_LAYER_WORLD \
+			if _item_is_mirror_reflected(item_id) \
+			else NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR
 	for batch in batches:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -724,10 +749,11 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			# As in an all-eligible pooled batch, the isolated static light can
 			# use this visible instance directly: its receiver mask cannot feed
 			# the silhouette back onto the model.
-			mmi.layers = NovaWater.VISUAL_LAYER_WORLD \
+			mmi.layers = single_world_layer \
 					| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		else:
+			mmi.layers = single_world_layer
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if batch["material"] != null:
 			mmi.material_override = batch["material"]

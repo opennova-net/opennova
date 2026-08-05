@@ -120,6 +120,11 @@ var _interior_section_daylight := 0.0
 #  Terrain_CollectAndRenderTileModels @0x60D250]
 var _shadow_caster_layers := 0
 var _shadow_receiver_material: ShaderMaterial
+# Witnessed water-mirror eligibility (env #30): only vehicles reflect [orig:
+# Entity_InitFromModel @ 0x40e20a sets entity+36 flag 0x400 iff
+# ItemDefType(+0x5C)==1]. Owners stamp it BEFORE set_object_data; the scene
+# builder assigns the base visual layer from it.
+var mirror_reflected := false
 # This model's fixed slot in the staggered environment-restamp window (see
 # _on_env_generation_changed).
 var _env_stagger_slot := 0

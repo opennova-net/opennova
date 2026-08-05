@@ -11,7 +11,9 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 
 	assert_eq(light.light_cull_mask,
 			NovaWater.VISUAL_LAYER_WORLD
-			| NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
+			| NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR
+			| NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
+			"live shadows reach both world-entity layers and the hidden FP body")
 	assert_eq(light.shadow_caster_mask,
 			NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
 

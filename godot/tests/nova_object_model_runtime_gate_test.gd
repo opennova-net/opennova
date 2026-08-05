@@ -368,6 +368,35 @@ func test_model_carries_a_submission_notifier_sized_to_its_bounds() -> void:
 			"the notifier AABB covers the mesh bounds")
 
 
+func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
+	# env #30: only vehicles enter the water mirror; every other model rides
+	# the no-mirror world layer normal cameras still draw [orig:
+	# Entity_InitFromModel @ 0x40e20a entity+36 |= 0x400 iff
+	# ItemDefType(+0x5C)==1; Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0 filters the reflection's collection on it].
+	var plain := _spy_model()
+	var plain_instances := plain.find_children("*", "MeshInstance3D", true, false)
+	assert_gt(plain_instances.size(), 0, "the fixture model builds mesh instances")
+	for vi in plain_instances:
+		assert_ne((vi as MeshInstance3D).layers
+				& NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+				"a non-vehicle model rides the no-mirror world layer")
+		assert_eq((vi as MeshInstance3D).layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+				"a non-vehicle model leaves the mirror-visible layer")
+
+	var vehicle := GateSpyModel.new()
+	add_child_autofree(vehicle)
+	vehicle.set_process(false)
+	vehicle.mirror_reflected = true
+	vehicle.set_object_data(_object_data(HOUSE_3DI))
+	for vi in vehicle.find_children("*", "MeshInstance3D", true, false):
+		assert_ne((vi as MeshInstance3D).layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+				"a vehicle model stays on the mirror-visible world layer")
+		assert_eq((vi as MeshInstance3D).layers
+				& NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+				"a vehicle model never rides the no-mirror layer")
+
+
 func test_submission_registry_tracks_offscreen_edges_and_frees_cleanly() -> void:
 	var model := _clocked_spy_model()
 	var registry := {}

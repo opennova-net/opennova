@@ -8,18 +8,23 @@ extends Node3D
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
 # Visual-layer allocation for the reflection contract (env #30). The mirror
-# re-renders the WORLD scene - which contains the local player's body - but
-# never the water surface itself [orig: Water_ReflectionPrerender @ 0x5c2780
-# -> render_main_scene @ 0x5c1240 (mirrored sky/terrain/world/celestial/glare;
-# no water draw)] and never the first-person arms/weapon, which retail renders
-# as its own separate near-Z viewport pass over the finished frame
-# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerPresenter stamps
-# the two player layers each frame and masks BODY_REFLECTION_ONLY off the
-# player camera; the mirror camera below is the only view that includes it.
+# re-renders the world scene, but its entity set is FILTERED: above water the
+# reflection's own collection pass keeps only ItemDefType==vehicle entities
+# (entity+36 flag 0x400, sole writer Entity_InitFromModel @ 0x40e20a), and a
+# below-water view collects unfiltered [orig:
+# Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 — filterMask =
+# camera_below_water ? 0 : 0x400]. The mirror never draws the water surface
+# itself [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
+# @ 0x5c1240 (mirrored sky/terrain/world/celestial/glare; no water draw)],
+# never the first-person arms/weapon (retail's own near-Z overlay pass
+# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]), and never ANY person
+# — including the local body: the reflection pass has no player-render leg
+# and persons fail the vehicle filter (the pre-2026-08-05 mirror-visible
+# body-layer reading is corrected; the FP body layer is shadow-only now).
 const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world instance
 const VISUAL_LAYER_WATER := 1 << 10  # the water surface itself; mirror-excluded
 const VISUAL_LAYER_VIEWMODEL := 1 << 11  # the FP arms/weapon overlay; mirror-excluded, main-visible
-const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mirror-visible, main-excluded
+const VISUAL_LAYER_FP_BODY_SHADOW_ONLY := 1 << 12  # the FP-mode local body; hidden from every camera pass, shadow source only
 # Shadow participation is orthogonal to camera visibility. Retail renders live
 # entity silhouettes and static terrain-tile silhouettes through separate
 # projection lists, so the reimpl lights select these marker layers with
@@ -27,6 +32,14 @@ const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mi
 const VISUAL_LAYER_STATIC_SHADOW_CASTER := 1 << 13
 const VISUAL_LAYER_DYNAMIC_SHADOW_CASTER := 1 << 14
 const VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER := 1 << 15
+# The witnessed reflection entity filter (env #30): world-entity models that
+# are NOT vehicles ride this layer instead of the default world bit, so every
+# normal camera still draws them while the mirror's above-water mask leaves
+# them out — the structural translation of the retail collectors keeping only
+# entity+36 flag 0x400 rows [orig: Entity_InitFromModel @ 0x40e20a sets it iff
+# ItemDefType(+0x5C)==1 vehicle; Terrain_CollectVisibleEntitiesForReflection
+# @ 0x5c90a0 passes filterMask 0x400 for above-water views].
+const VISUAL_LAYER_WORLD_NO_MIRROR := 1 << 16
 const VISUAL_LAYER_SHADOW_CASTER_MASK := \
 		VISUAL_LAYER_STATIC_SHADOW_CASTER \
 		| VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
@@ -34,6 +47,16 @@ const VISUAL_LAYER_SHADOW_CASTER_MASK := \
 # capture override selects 512 [orig: sub_5C08B0 @ 0x5c08d1..0x5c0937].
 # The reimpl has no higher-detail/capture selector, so its witnessed mapping is 256.
 const REFLECTION_RTT_SIZE := Vector2i(256, 256)
+# The mirror camera's above-water mask: no water surface, no FP overlay
+# layers, no shadow markers, and no non-vehicle world entities (the witnessed
+# collection filter). A below-water view adds WORLD_NO_MIRROR back — retail
+# collects unfiltered there (see _update_reflection_camera).
+const REFLECTION_CULL_MASK := 0xFFFFF & ~(
+		VISUAL_LAYER_WATER
+		| VISUAL_LAYER_VIEWMODEL
+		| VISUAL_LAYER_FP_BODY_SHADOW_ONLY
+		| VISUAL_LAYER_SHADOW_CASTER_MASK
+		| VISUAL_LAYER_WORLD_NO_MIRROR)
 
 @export var environment_path: NodePath
 # The weather node owning the cloud-scroll core: the water scroll speed rides
@@ -311,20 +334,14 @@ func build() -> void:
 		add_child(reflection_viewport)
 		reflection_camera = Camera3D.new()
 		reflection_camera.name = "WaterReflectionCamera"
-		# Hide the water-only visual layer (set on mesh_instance above) from
-		# the mirror pass: the witnessed offscreen scene never draws the water
-		# surface [orig: render_main_scene @ 0x5c1240]. The first-person
-		# viewmodel layer is masked out with it - retail's FP arms/weapon are
-		# a separate near-Z overlay pass that never enters the mirrored scene
-		# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. Everything
-		# else stays in, INCLUDING the reflection-only body layer: the
-		# witnessed mirrored scene is a re-render of the world, local player's
-		# body and all [orig: Water_ReflectionPrerender @ 0x5c2780 ->
-		# render_main_scene @ 0x5c1240].
-		reflection_camera.cull_mask = 0xFFFFF & ~(
-				VISUAL_LAYER_WATER
-				| VISUAL_LAYER_VIEWMODEL
-				| VISUAL_LAYER_SHADOW_CASTER_MASK)
+		# The witnessed mirror scene: sky/terrain/celestials/foliage, world
+		# entities filtered to vehicles, no water surface, no FP overlay, no
+		# person — including the local body [orig: render_main_scene @ 0x5c1240
+		# pass list; Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0
+		# filterMask 0x400; no player-render leg exists in the pass].
+		# _update_reflection_camera re-adds WORLD_NO_MIRROR for below-water
+		# views (retail collects unfiltered there).
+		reflection_camera.cull_mask = REFLECTION_CULL_MASK
 		reflection_viewport.add_child(reflection_camera)
 		reflection_camera.current = true
 	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -478,6 +495,14 @@ func _update_reflection_camera() -> void:
 	var origin := xform.origin
 	origin.y = 2.0 * water_height - origin.y
 	reflection_camera.global_transform = Transform3D(mirrored, origin)
+	# The witnessed collection filter follows the LIVE view side per frame:
+	# above water only vehicles enter the mirror; a below-water view collects
+	# unfiltered [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0
+	# — filterMask = camera_below_water ? 0 : 0x400].
+	reflection_camera.cull_mask = (
+			REFLECTION_CULL_MASK | VISUAL_LAYER_WORLD_NO_MIRROR
+			if xform.origin.y < water_height
+			else REFLECTION_CULL_MASK)
 	# Retail rebuilds projection for the square RTT while preserving the
 	# source's horizontal field [orig: Viewport_BuildProjectionMatrix @
 	# 0x410fb0; bounds @ 0x5c1476]. Camera3D's authored `fov`/`size` axis is
