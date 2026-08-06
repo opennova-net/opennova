@@ -29,7 +29,7 @@ def build_part_hierarchy(
     """Create one Dummy per LOD part, parented as in the 3DI3 model."""
     rt = _rt()
     lod = ir.lods[lod_index]
-    num_parts = int(lod.part_count)
+    num_parts = int(lod.render_object_count)
 
     root = rt.Dummy()
     root.name = name
@@ -46,18 +46,18 @@ def build_part_hierarchy(
         part_nodes[i] = d
 
     for i in range(num_parts):
-        part = lod.parts[i]
+        part = lod.render_objects[i]
         node = part_nodes[i]
 
         abs_pos = coords.render_space((
-            float(part.abs_position[0]),
-            float(part.abs_position[1]),
-            float(part.abs_position[2]),
+            float(part.abs[0]),
+            float(part.abs[1]),
+            float(part.abs[2]),
         ))
         rel_pos = coords.render_space((
-            float(part.rel_position[0]),
-            float(part.rel_position[1]),
-            float(part.rel_position[2]),
+            float(part.rel[0]),
+            float(part.rel[1]),
+            float(part.rel[2]),
         ))
 
         if 0 <= int(part.parent_index) < num_parts and int(part.parent_index) != i:

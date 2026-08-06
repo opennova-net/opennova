@@ -11,6 +11,11 @@
 #include <math.h>
 #include "threedi/threedi.h"
 
+// Visibility macro for the flat C ABI (Python/DCC consumers load the shared
+// library; the GDExtension and ctests link statically and ignore it).
+#include <io/export.h>
+#define THREEDI_EXPORT OPENNOVA_API
+
 #if defined(_MSC_VER) && !defined(__cplusplus)
 // MSVC's C mode lacks _Static_assert; alias to C++ static_assert.
 #define _Static_assert static_assert
@@ -30,6 +35,14 @@
 #define THREEDI_TEX_SLOT_DIFFUSE  1  // Primary diffuse texture
 #define THREEDI_TEX_SLOT_DETAIL   2  // Secondary/detail texture
 #define THREEDI_TEX_SLOT_NORMAL   3  // Normal map texture
+#define THREEDI_TEX_SLOT_NORMAL_B 4  // Secondary normal map texture
+
+/* Light flags byte (ThreediLight::flags): bits 0-2 disable legs, bit 3 the
+ * light type (0 = Omni, 1 = Target). */
+#define THREEDI_LIGHT_FLAG_DISABLE_CORONA  0x01u
+#define THREEDI_LIGHT_FLAG_DISABLE_TERRAIN 0x02u
+#define THREEDI_LIGHT_FLAG_DISABLE_OBJECTS 0x04u
+#define THREEDI_LIGHT_FLAG_TYPE_TARGET     0x08u
 
 // Texture format types (type field in ThreediMaterialTexture)
 #define THREEDI_TEX_TYPE_DIFFUSE     0  // Standard diffuse texture
@@ -228,6 +241,25 @@ typedef struct ThreediUserPoint {
     char name[17];
 } ThreediUserPoint;
 
+// Decode a userpoint's authored 16.16 position into model-space floats.
+// Source axes swizzle as x->z, y->x, z->y, with the side axis mirrored so a
+// consumer's render-space -X transform preserves the authored driver/passenger
+// side. Every consumer (Godot document, DCC builders, ground anchor) applies
+// this one convention; keep the Python mirrors in sync.
+static inline void threedi_user_point_position(const ThreediUserPoint *up, float out[3]) {
+    out[0] = -(float)up->y / 65536.0f;
+    out[1] = (float)up->z / 65536.0f;
+    out[2] = (float)up->x / 65536.0f;
+}
+
+// rot_x/y/z are the local Z-axis direction unit vector, stored 16.16 with the
+// same swizzle as the position.
+static inline void threedi_user_point_direction(const ThreediUserPoint *up, float out[3]) {
+    out[0] = -(float)up->rot_y / 65536.0f;
+    out[1] = (float)up->rot_z / 65536.0f;
+    out[2] = (float)up->rot_x / 65536.0f;
+}
+
 typedef struct ThreediCollisionModelData {
     float bbox[6];                // {minX, minY, minZ, maxX, maxY, maxZ}
     float radii[3];               // {max_radius, max_radius_xy, max_radius_z}
@@ -335,6 +367,112 @@ typedef struct ThreediCollisionModel {
     ThreediCollisionTranslation *translations;
     size_t translation_count;
 } ThreediCollisionModel;
+
+// Per-COBJ run starts into the object-contiguous CVRT/CNRM/CFAC/BVOL pools.
+// The on-disk pools carry no explicit starts: each COBJ owns the next
+// num_vertices/num_normals/num_faces/num_bounding_volumes entries, exactly the
+// prefix-sum fixup retail's collision builder performs at load
+// [orig: the per-COBJ normal-run fixup in the collision builder @ 0x5b3bf0].
+typedef struct ThreediCollisionObjectRun {
+    int32_t vertex_start;
+    int32_t normal_start;
+    int32_t face_start;
+    int32_t volume_start;
+} ThreediCollisionObjectRun;
+
+// Fill out[0..object_count) with each COBJ's run starts. Returns 1 on success,
+// 0 when a count is negative or a run leaves its pool (out contents undefined).
+static inline int threedi_collision_object_runs(const ThreediCollisionModel *col,
+                                                ThreediCollisionObjectRun *out) {
+    if (!col || (!out && col->object_count != 0)) return 0;
+    size_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
+    for (size_t oi = 0; oi < col->object_count; ++oi) {
+        const ThreediCollisionObject *object = &col->objects[oi];
+        if (object->num_vertices < 0 || object->num_faces < 0 || object->num_normals < 0 ||
+            object->num_bounding_volumes < 0) return 0;
+        out[oi].vertex_start = (int32_t)vertex_cursor;
+        out[oi].normal_start = (int32_t)normal_cursor;
+        out[oi].face_start = (int32_t)face_cursor;
+        out[oi].volume_start = (int32_t)volume_cursor;
+        if ((size_t)object->num_vertices > col->vertex_count - vertex_cursor ||
+            (size_t)object->num_normals > col->normal_count - normal_cursor ||
+            (size_t)object->num_faces > col->face_count - face_cursor ||
+            (size_t)object->num_bounding_volumes > col->volume_count - volume_cursor)
+            return 0;
+        vertex_cursor += (size_t)object->num_vertices;
+        normal_cursor += (size_t)object->num_normals;
+        face_cursor += (size_t)object->num_faces;
+        volume_cursor += (size_t)object->num_bounding_volumes;
+    }
+    return 1;
+}
+
+// Return 1 when every collision slice is safe for runtime queries: backing
+// arrays exist, COBJ-owned vertex/normal/face/volume runs are contiguous and
+// in range, local CFAC indices stay within their object, and every BVOL owns a
+// non-empty BPLN window (windows are consecutive across the whole BVOL pool).
+// Object-less legacy convex blocks remain supported. Header-local so
+// validation does not expand the stable shared-library ABI.
+static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionModel *col) {
+    if (!col) return 0;
+    if (col->vertex_count != 0 && !col->vertices) return 0;
+    if (col->normal_count != 0 && !col->normals) return 0;
+    if (col->face_count != 0 && !col->faces) return 0;
+    if (col->volume_count != 0 && !col->volumes) return 0;
+    if (col->plane_count != 0 && !col->planes) return 0;
+    if (col->object_count != 0 && !col->objects) return 0;
+
+    if (col->object_count == 0 &&
+        (col->vertex_count != 0 || col->normal_count != 0 || col->face_count != 0)) return 0;
+
+    size_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
+    for (size_t oi = 0; oi < col->object_count; ++oi) {
+        const ThreediCollisionObject *object = &col->objects[oi];
+        if (object->num_vertices < 0 || object->num_faces < 0 || object->num_normals < 0 ||
+            object->num_bounding_volumes < 0) return 0;
+        const size_t nv = (size_t)object->num_vertices;
+        const size_t nn = (size_t)object->num_normals;
+        const size_t nf = (size_t)object->num_faces;
+        const size_t nb = (size_t)object->num_bounding_volumes;
+        if (nv > col->vertex_count - vertex_cursor ||
+            nn > col->normal_count - normal_cursor ||
+            nf > col->face_count - face_cursor ||
+            nb > col->volume_count - volume_cursor) return 0;
+        for (size_t fi = 0; fi < nf; ++fi) {
+            const ThreediCollisionFace *face = &col->faces[face_cursor + fi];
+            /* A negative CNRM index is authorable; the runtime CFAC walker
+               skips such faces rather than rejecting the model
+               [orig: the CNRM resolve gate in
+               Physics_RaycastAgainstBoneCollision @ 0x4e4cb0]. */
+            if (face->normal_index >= 0 && (size_t)face->normal_index >= nn) return 0;
+            for (int k = 0; k < 3; ++k)
+                if (face->vert_index[k] < 0 || (size_t)face->vert_index[k] >= nv) return 0;
+        }
+        vertex_cursor += nv;
+        normal_cursor += nn;
+        face_cursor += nf;
+        volume_cursor += nb;
+    }
+    /* The vertex/normal/face runs must exactly partition their pools, but
+       retail models legitimately author TRAILING BVOLs owned by no COBJ:
+       Zodiacs, mounted-weapon items, and large buildings in the JO corpus all
+       carry them. Retail never reaches them - every walker consumes volumes
+       only through per-COBJ runs - so an unowned tail is dead data, not an
+       unsafe model. */
+    if (col->object_count != 0 &&
+        (vertex_cursor != col->vertex_count || normal_cursor != col->normal_count ||
+         face_cursor != col->face_count || volume_cursor > col->volume_count))
+        return 0;
+
+    size_t plane_cursor = 0;
+    for (size_t i = 0; i < col->volume_count; ++i) {
+        const ThreediBoundingVolume *volume = &col->volumes[i];
+        if (volume->plane_count <= 0) return 0;
+        if ((size_t)volume->plane_count > col->plane_count - plane_cursor) return 0;
+        plane_cursor += (size_t)volume->plane_count;
+    }
+    return 1;
+}
 
 typedef struct ThreediOcclusionVertex {
     float position[3];
@@ -609,12 +747,18 @@ typedef struct Threedi3di3 {
 
 } Threedi3di3;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Parse a ThreediFile's chunk tree into typed geometry structures.
 // Returns 0 on success, -1 on parse/validation errors.
 int threedi_3di3_parse(const ThreediFile *file, Threedi3di3 *out_model);
 
 // Convenience: read a file from disk and parse it into a Threedi3di3.
-int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
+// Exported on the flat C ABI: the Python FFI mirrors (pyopennova/threedi_ffi.py
+// and blender/opennova/threedi_ffi.py) load the model through this pair.
+THREEDI_EXPORT int threedi_3di3_read(const char *path, Threedi3di3 *out_model);
 
 // Convenience: parse memory-backed 3DI bytes into a Threedi3di3.
 int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_model);
@@ -623,7 +767,22 @@ int threedi_3di3_read_memory(const uint8_t *data, size_t size, Threedi3di3 *out_
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
 // Free allocations inside a Threedi3di3.
-void threedi_3di3_free(Threedi3di3 *model);
+THREEDI_EXPORT void threedi_3di3_free(Threedi3di3 *model);
+
+// Compute a model's placement "ground anchor" — the point of the model that
+// should sit at an object's placed position. Resolution order:
+//   1. The first userpoint whose name matches "ground" case-insensitively.
+//   2. Otherwise the model ORIGIN (0,0,0): shipped missions place userpoint-less
+//      models with their origin exactly on the terrain (verified against JO
+//      data), so any other fallback mis-grounds them.
+// The anchor is written to out[3] in model space (threedi_user_point_position's
+// axis order, NOT render-swizzled): callers apply their own axis convention
+// (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
+int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
+
+#ifdef __cplusplus
+}
+#endif
 
 #pragma pack(pop)
 #endif // THREEDI_3DI3_H

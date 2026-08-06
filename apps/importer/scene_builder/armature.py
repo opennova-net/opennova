@@ -37,19 +37,19 @@ class ArmatureMixin:
         if self.ir.lod_count == 0:
             return
         lod0 = self.ir.lods[0]
-        part_count = int(lod0.part_count)
+        part_count = int(lod0.render_object_count)
         if part_count <= 0:
             return
 
-        abs_positions = []
+        head_positions = []
         for i in range(part_count):
-            part = lod0.parts[i]
-            abs_positions.append(render_space(Vector(part.abs_position)))
+            part = lod0.render_objects[i]
+            head_positions.append(render_space(Vector(part.abs)))
 
         children_by_parent = [[] for _ in range(part_count)]
         parent_indices = []
         for i in range(part_count):
-            pi = int(lod0.parts[i].parent_index)
+            pi = int(lod0.render_objects[i].parent_index)
             if pi < 0 or pi >= part_count or pi == i:
                 pi = -1
             parent_indices.append(pi)
@@ -70,12 +70,12 @@ class ArmatureMixin:
         for i in range(part_count):
             bname = f"BN{i + 1:02d}"
             eb = edit_bones.new(bname)
-            head = abs_positions[i]
+            head = head_positions[i]
             eb.head = head
 
             tail = None
             for child_idx in children_by_parent[i]:
-                delta = abs_positions[child_idx] - head
+                delta = head_positions[child_idx] - head
                 if delta.length > 1e-5:
                     tail = head + delta
                     break
@@ -94,9 +94,9 @@ class ArmatureMixin:
 
         self._bone_infos = []
         for i, pi in enumerate(parent_indices):
-            rest_origin = (Vector(lod0.parts[i].rel_position)
+            rest_origin = (Vector(lod0.render_objects[i].rel)
                            if pi >= 0
-                           else Vector(lod0.parts[i].abs_position))
+                           else Vector(lod0.render_objects[i].abs))
             rest_origin = render_space(rest_origin)
             self._bone_infos.append((
                 f"BN{i + 1:02d}",
@@ -168,9 +168,9 @@ class ArmatureMixin:
         # -- Compute absolute head positions and rotations --
         # BAD stores world-space rotation matrices and parent-local position offsets.
         # Use BAD world rotations directly (conjugated Y-up → Z-up) for abs_rotations.
-        # Accumulate abs_positions through parent world rotations (matching animation logic):
+        # Accumulate world head positions through parent world rotations (matching animation logic):
         #   world_pos = parent_world_pos + parent_world_rot @ local_offset
-        abs_positions = [None] * len(bone_infos)
+        head_positions = [None] * len(bone_infos)
         abs_rotations = [None] * len(bone_infos)
 
         # Pre-compute BAD world rotation matrices (conjugated to Blender Z-up).
@@ -190,10 +190,10 @@ class ArmatureMixin:
 
         # Accumulate world positions from parent-local offsets
         for i, (_bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
-            if parent_idx >= 0 and abs_positions[parent_idx] is not None:
-                abs_positions[i] = abs_positions[parent_idx] + abs_rotations[parent_idx] @ Vector(rest_origin)
+            if parent_idx >= 0 and head_positions[parent_idx] is not None:
+                head_positions[i] = head_positions[parent_idx] + abs_rotations[parent_idx] @ Vector(rest_origin)
             else:
-                abs_positions[i] = Vector(rest_origin)
+                head_positions[i] = Vector(rest_origin)
 
         # Child lookup for tail-length estimation (use actual hierarchy spacing,
         # not BAD bone length fields).
@@ -220,7 +220,7 @@ class ArmatureMixin:
 
         for i, (bname, parent_idx, rest_origin, _local_rot, _bad_length) in enumerate(bone_infos):
             eb = edit_bones.new(bname)
-            eb.head = abs_positions[i]
+            eb.head = head_positions[i]
 
             if i < bone_count:
                 # Use the opposite Y direction from the converted BAD basis.
@@ -234,9 +234,9 @@ class ArmatureMixin:
                 # constant so leaves still have visible tails.
                 tail_len = 0.05
                 if children_by_parent[i]:
-                    parent_head = abs_positions[i]
+                    parent_head = head_positions[i]
                     max_child_dist = max(
-                        (abs_positions[c] - parent_head).length
+                        (head_positions[c] - parent_head).length
                         for c in children_by_parent[i]
                     )
                     if max_child_dist > 1e-5:
@@ -337,8 +337,8 @@ class ArmatureMixin:
     def bind_meshes_to_armature(self):
         """Bind mesh objects to the armature via vertex groups + Armature modifier.
 
-        For skinned meshes, each vertex has up to 4 bone influences from the
-        IR's bone_indices/bone_weights remapped through the primitive's bone_table.
+        For skinned meshes, each vertex has bone influences from the model's
+        bone_indices/bone_weights remapped through the strip's bone_table.
         For non-skinned meshes, each vertex gets weight 1.0 to its part bone.
         """
         if not self.armature_object:

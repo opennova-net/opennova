@@ -19,10 +19,11 @@ THREEDI_TEX_SLOT_NORMAL_B = 4
 THREEDI_MATERIAL_FLAG_ALPHA_TEST = 0x01
 THREEDI_MATERIAL_FLAG_ALPHA_INVERT = 0x02
 THREEDI_MATERIAL_FLAG_TWO_SIDED = 0x04
-THREEDI_MATERIAL_FLAG_EMISSIVE = 0x08
 
-# The 3DI3 MTRL flag byte uses the same low bits as the normalized material flags.
 THREEDI_EMISSIVE_FULL = 2
+
+# The MTRL texture-slot array capacity (ThreediMaterial.textures).
+THREEDI_MAX_MATERIAL_TEXTURES = 24
 
 MATERIAL_BLEND_OPAQUE = "opaque"
 MATERIAL_BLEND_ALPHA = "alpha_blend"
@@ -314,7 +315,7 @@ class MaterialDescriptor:
     tex_anim: TexAnimDescriptor = field(default_factory=TexAnimDescriptor)
 
 
-def derive_uv1_tilings(ir) -> Dict[int, Tuple[float, float]]:
+def derive_uv1_tilings(model) -> Dict[int, Tuple[float, float]]:
     """Back-calculate per-material (uv1_u_tiling, uv1_v_tiling) from per-vertex
     (uv0, uv1) ratios across all LODs.
 
@@ -327,21 +328,20 @@ def derive_uv1_tilings(ir) -> Dict[int, Tuple[float, float]]:
     """
     EPS = 1e-4
     out: Dict[int, Tuple[float, float]] = {}
-    mat_count = int(getattr(ir, "material_count", 0))
+    mat_count = int(model.material_count)
     for mat_idx in range(mat_count):
         u_ratios: list[float] = []
         v_ratios: list[float] = []
-        for lod_i in range(int(getattr(ir, "lod_count", 0))):
-            lod = ir.lods[lod_i]
-            primitive_part_indices = _primitive_part_indices(lod)
-            for prim_i in range(int(getattr(lod, "primitive_count", 0))):
-                p = lod.primitives[prim_i]
-                if int(p.material_index) != mat_idx:
+        for lod_i in range(int(model.lod_count)):
+            lod = model.lods[lod_i]
+            for strip_i in range(int(lod.strip_count)):
+                strip = lod.strips[strip_i]
+                if int(strip.material_index) != mat_idx:
                     continue
-                vstart = int(p.vertex_offset)
-                vcount = int(p.vertex_count)
+                vstart = int(strip.start_vertex)
+                vcount = int(strip.num_vertices)
                 for vi in range(vstart, vstart + vcount):
-                    v = lod.vertices[vi]
+                    v = lod.vertices.items[vi]
                     u0 = float(v.uv0[0]) - 0.5
                     u1 = float(v.uv1[0]) - 0.5
                     v0 = float(v.uv0[1]) - 0.5
@@ -356,25 +356,6 @@ def derive_uv1_tilings(ir) -> Dict[int, Tuple[float, float]]:
     return out
 
 
-def _primitive_part_indices(lod) -> list[int]:
-    count = int(getattr(lod, "primitive_count", 0))
-    out = [-1] * count
-    parts = getattr(lod, "parts", None)
-    part_count = int(getattr(lod, "part_count", 0))
-    cursor = 0
-    for part_idx in range(part_count):
-        part = parts[part_idx]
-        prim_count = int(getattr(part, "primitive_count", 0))
-        if prim_count <= 0:
-            prim_count = int(getattr(part, "num_strips", 0)) + int(getattr(part, "num_alpha_strips", 0))
-        for _ in range(max(0, prim_count)):
-            if cursor >= count:
-                return out
-            out[cursor] = part_idx
-            cursor += 1
-    return out
-
-
 def _median(values: list[float]) -> float:
     s = sorted(values)
     n = len(s)
@@ -386,41 +367,35 @@ def _median(values: list[float]) -> float:
 
 
 def describe_material(
-    ir_mat,
+    mat,
     resolver=None,
     ctrl_resolver=None,
     *,
-    source_format: int | None = None,
-    texture_strategy: str | None = None,
     uv1_tiling_override: Tuple[float, float] | None = None,
 ) -> MaterialDescriptor:
-    """Interpret one ``TdpMaterial`` into DCC-neutral material data.
+    """Interpret one raw ``ThreediMaterial`` into DCC-neutral material data.
 
     ``uv1_tiling_override`` (when provided) sets the channel-1 tiling that the
     model's MTRL chunk doesn't natively carry. Compute it once per 3DI3 model via
-    ``derive_uv1_tilings(ir)`` and pass the per-material entry in.
+    ``derive_uv1_tilings(model)`` and pass the per-material entry in.
     """
 
-    index = _int_attr(ir_mat, "index", 0)
-    shader = _decode(_attr(ir_mat, "shader_name", b"")).strip() or "FF_ST_OP"
+    index = int(mat.index)
+    shader = _decode(mat.shader_name).strip() or "FF_ST_OP"
     name = "Material_%d_%s" % (index, shader)
-    flags = _int_attr(ir_mat, "flags", 0)
     diffuse, detail, normal, secondary_normal, all_textures = _texture_descriptors(
         shader,
-        ir_mat,
+        mat,
         resolver,
-        source_format=source_format,
-        texture_strategy=texture_strategy,
     )
     unknown_textures = tuple(tex for tex in all_textures if tex.role == "unknown")
 
-    emissive_type = _int_attr(ir_mat, "emissive_type", 0)
-    emissive_type2 = _int_attr(ir_mat, "emissive_type2", 0)
-    is_glass_flag = _int_attr(ir_mat, "is_glass", 0)
-    source_material_flags = _int_attr(ir_mat, "material_flags", 0) & 0xFF
-    material_flags = source_material_flags | _material_flags_from_ir_flags(flags)
-    alpha_threshold = _float_attr(ir_mat, "alpha_threshold", 0.0)
-    alpha_test_value_byte = _effective_alpha_test_byte(ir_mat, alpha_threshold)
+    emissive_type = int(mat.emissive_type)
+    emissive_type2 = int(mat.emissive_type2)
+    is_glass_flag = int(mat.is_glass)
+    material_flags = int(mat.material_flags) & 0xFF
+    alpha_test_value_byte = max(0, min(int(mat.alpha_test_value_byte), 255))
+    alpha_threshold = float(alpha_test_value_byte) / 255.0
     semantics = classify_material_shader(
         shader,
         material_flags=material_flags,
@@ -429,8 +404,6 @@ def describe_material(
         alpha_test_value_byte=alpha_test_value_byte,
     )
 
-    specular_intensity = _int_attr(ir_mat, "specular_intensity", 0)
-    specular_strength = min(float(specular_intensity) / 255.0, 1.0) if specular_intensity > 0 else 0.0
     phong_shader = semantics.family in (
         MATERIAL_SHADER_PHONG,
         MATERIAL_SHADER_ENVIRONMENT,
@@ -438,22 +411,11 @@ def describe_material(
     )
     bump_shader = semantics.needs_normal_map
     descriptor_needs_normal = semantics.needs_normal_map or bool(normal.name or secondary_normal.name)
-    viewport_specular = specular_strength
-    viewport_roughness = 1.0 - specular_strength * 0.7 if specular_strength > 0.0 else 1.0
-    if semantics.uses_specular and viewport_specular <= 0.0:
-        viewport_specular = 0.3
-        viewport_roughness = 0.5
+    # The 3DI3 MTRL record carries no specular-intensity scalar; shaders that
+    # use specular get fixed viewport preview values.
+    viewport_specular = 0.3 if semantics.uses_specular else 0.0
+    viewport_roughness = 0.5 if semantics.uses_specular else 1.0
 
-    luminosity = _int_attr(ir_mat, "luminosity", 0)
-    luminosity_strength = min(float(luminosity) / 255.0, 1.0) if luminosity > 0 else 0.0
-    u_tiling = _float_attr(ir_mat, "u_tiling", 0.0)
-    v_tiling = _float_attr(ir_mat, "v_tiling", 0.0)
-    effective_u_tiling = 1.0 if u_tiling == 0.0 else u_tiling
-    effective_v_tiling = 1.0 if v_tiling == 0.0 else v_tiling
-    has_custom_tiling = (
-        (u_tiling != 0.0 and u_tiling != 1.0)
-        or (v_tiling != 0.0 and v_tiling != 1.0)
-    )
     if uv1_tiling_override is not None:
         effective_u1_tiling = float(uv1_tiling_override[0])
         effective_v1_tiling = float(uv1_tiling_override[1])
@@ -476,6 +438,15 @@ def describe_material(
     # or leave it unused. Without a per-material flag in the 3DI3 model to gate this,
     # the safe default is no bump unless the model carries that signal.
 
+    # MTRL stores no blend-mode field; derive the legacy 0/1/2 code from the
+    # shader-tag classification ("_AB" -> alpha blend, "_AD" -> additive).
+    if semantics.blend == MATERIAL_BLEND_ADDITIVE:
+        blend_mode = 2
+    elif semantics.blend == MATERIAL_BLEND_ALPHA:
+        blend_mode = 1
+    else:
+        blend_mode = 0
+
     return MaterialDescriptor(
         index=index,
         shader=shader,
@@ -486,19 +457,18 @@ def describe_material(
         secondary_normal=secondary_normal,
         textures=all_textures,
         unknown_textures=unknown_textures,
-        flags=flags,
+        flags=material_flags,
         material_flags=material_flags,
-        source_material_flags=source_material_flags,
+        source_material_flags=material_flags,
         alpha_test_value_byte=alpha_test_value_byte,
         alpha_threshold=alpha_threshold,
-        blend_mode=_int_attr(ir_mat, "blend_mode", 0),
+        blend_mode=blend_mode,
         renderer_blend=semantics.blend,
         alpha_test=semantics.alpha_test,
         alpha_inverted=semantics.alpha_test_invert,
         two_sided=semantics.is_two_sided,
         emissive=(
-            bool(flags & THREEDI_MATERIAL_FLAG_EMISSIVE)
-            or emissive_type != 0
+            emissive_type != 0
             or emissive_type2 != 0
             or semantics.is_emissive
             or semantics.is_luminance
@@ -506,22 +476,13 @@ def describe_material(
         emissive_type=emissive_type,
         emissive_type2=emissive_type2,
         glass=semantics.is_glass,
-        glass_type2=_int_attr(ir_mat, "glass_type2", 0),
-        reflect_color=_float4_attr(ir_mat, "reflect_color"),
-        reflect_color2=_float4_attr(ir_mat, "reflect_color2"),
-        specular_intensity=specular_intensity,
-        specular_strength=specular_strength,
+        glass_type2=int(mat.glass_type2),
+        reflect_color=_float4_attr(mat, "reflect_color"),
+        reflect_color2=_float4_attr(mat, "reflect_color2"),
         viewport_specular=viewport_specular,
         viewport_roughness=viewport_roughness,
-        luminosity=luminosity,
-        luminosity_strength=luminosity_strength,
-        u_tiling=u_tiling,
-        v_tiling=v_tiling,
-        effective_u_tiling=effective_u_tiling,
-        effective_v_tiling=effective_v_tiling,
         effective_u1_tiling=effective_u1_tiling,
         effective_v1_tiling=effective_v1_tiling,
-        has_custom_tiling=has_custom_tiling,
         bump_mode=bump_mode,
         bump_uses_alpha=bump_uses_alpha,
         phong_shader=phong_shader,
@@ -537,27 +498,25 @@ def describe_material(
         uses_environment=semantics.uses_environment,
         is_luminance=semantics.is_luminance,
         is_skinned=semantics.is_skinned,
-        u_params=_uv_params(_attr(ir_mat, "u_params", None), ctrl_resolver),
-        v_params=_uv_params(_attr(ir_mat, "v_params", None), ctrl_resolver),
-        alpha_gen=_alpha_gen(_attr(ir_mat, "alpha_gen", None), ctrl_resolver),
-        rgb_gen=_rgb_gen(_attr(ir_mat, "rgb_gen", None), ctrl_resolver),
-        rgb_gen2=_rgb_gen(_attr(ir_mat, "rgb_gen2", None), ctrl_resolver),
-        tex_anim=_tex_anim(_attr(ir_mat, "animation", None)),
+        u_params=_uv_params(mat.u_params, ctrl_resolver),
+        v_params=_uv_params(mat.v_params, ctrl_resolver),
+        alpha_gen=_alpha_gen(mat.alpha_gen, ctrl_resolver),
+        rgb_gen=_rgb_gen(mat.rgb_gen, ctrl_resolver),
+        rgb_gen2=_rgb_gen(mat.rgb_gen2, ctrl_resolver),
+        tex_anim=_tex_anim(mat.animation),
     )
 
 
-def describe_materials(ir, resolver=None, ctrl_resolver=None) -> List[MaterialDescriptor]:
-    """Interpret all materials in a model data."""
+def describe_materials(model, resolver=None, ctrl_resolver=None) -> List[MaterialDescriptor]:
+    """Interpret all materials in a ``Threedi3di3`` model."""
 
     out = []
-    source_format = _int_attr(ir, "source_format", 0)
-    for i in range(_int_attr(ir, "material_count", 0)):
+    for i in range(int(model.material_count)):
         out.append(
             describe_material(
-                ir.materials[i],
+                model.materials[i],
                 resolver=resolver,
                 ctrl_resolver=ctrl_resolver,
-                source_format=source_format,
             )
         )
     return out
@@ -926,25 +885,6 @@ def ase_texture_names(desc: MaterialDescriptor, used_names: Dict[str, str]) -> T
     )
 
 
-def _effective_alpha_test_byte(ir_mat, alpha_threshold: float) -> int:
-    threshold_byte = int(round(max(0.0, min(alpha_threshold, 1.0)) * 255.0))
-    raw_byte = _int_attr(ir_mat, "alpha_test_value_byte", -1)
-    if raw_byte <= 0 and threshold_byte > 0:
-        return threshold_byte
-    return max(0, min(raw_byte, 255))
-
-
-def _material_flags_from_ir_flags(flags: int) -> int:
-    out = 0
-    if flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST:
-        out |= THREEDI_MATERIAL_FLAG_ALPHA_TEST
-    if flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT:
-        out |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT
-    if flags & THREEDI_MATERIAL_FLAG_TWO_SIDED:
-        out |= THREEDI_MATERIAL_FLAG_TWO_SIDED
-    return out
-
-
 def _normalize_shader(shader_name: str) -> str:
     return (_decode(shader_name).strip() or "FF_ST_OP").upper()
 
@@ -991,11 +931,8 @@ def _normal_space_for_tag(tag: str, has_normal_map: bool) -> str:
 
 def _texture_descriptors(
     shader: str,
-    ir_mat,
+    mat,
     resolver,
-    *,
-    source_format: int | None = None,
-    texture_strategy: str | None = None,
 ) -> Tuple[
     TextureDescriptor,
     TextureDescriptor,
@@ -1009,28 +946,23 @@ def _texture_descriptors(
     secondary_normal = TextureDescriptor("secondary_normal")
     all_textures: List[TextureDescriptor] = []
 
-    texture_count = _int_attr(ir_mat, "texture_count", 0)
-    textures = _attr(ir_mat, "textures", [])
+    texture_count = min(int(mat.texture_count), THREEDI_MAX_MATERIAL_TEXTURES)
+    textures = mat.textures
     for t_idx in range(texture_count):
-        try:
-            tex = textures[t_idx]
-        except Exception:
-            break
-        tex_name = _decode(_attr(tex, "name", b"")).strip()
+        tex = textures[t_idx]
+        tex_name = _decode(tex.name).strip()
         if not tex_name:
             continue
-        slot = _int_attr(tex, "slot", 0)
-        tex_type = _int_attr(tex, "type", 0)
-        flags = _int_attr(tex, "flags", 0)
-        role = _texture_role(shader, slot, tex_type, t_idx, bool(diffuse.name), source_format)
+        slot = int(tex.slot)
+        tex_type = int(tex.type)
+        flags = int(tex.flags)
+        role = _texture_role(shader, slot, tex_type, t_idx, bool(diffuse.name))
         desc = TextureDescriptor(
             role=role,
             name=tex_name,
             path=_resolve_texture(
                 tex_name,
                 resolver,
-                source_format=source_format,
-                texture_strategy=texture_strategy,
                 slot=slot,
                 tex_type=tex_type,
                 flags=flags,
@@ -1040,7 +972,7 @@ def _texture_descriptors(
             slot=slot,
             type=tex_type,
             flags=flags,
-            frame=_int_attr(tex, "frame", 0),
+            frame=int(tex.frame),
         )
         all_textures.append(desc)
         if desc.role == "diffuse" and (slot == THREEDI_TEX_SLOT_DIFFUSE or not diffuse.name):
@@ -1061,7 +993,6 @@ def _texture_role(
     tex_type: int,
     texture_index: int,
     has_diffuse: bool,
-    source_format: int | None = None,
 ) -> str:
     shader_key = (shader or "").upper()
     if slot == THREEDI_TEX_SLOT_DIFFUSE:
@@ -1212,8 +1143,6 @@ def _resolve_texture(
     texture_name: str,
     resolver,
     *,
-    source_format: int | None = None,
-    texture_strategy: str | None = None,
     slot: int = 0,
     tex_type: int = 0,
     flags: int = 0,
@@ -1225,8 +1154,6 @@ def _resolve_texture(
         try:
             resolved = resolver.resolve_texture(
                 texture_name,
-                strategy=texture_strategy,
-                source_format=source_format,
                 slot=slot,
                 tex_type=tex_type,
                 flags=flags,

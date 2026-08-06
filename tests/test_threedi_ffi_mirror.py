@@ -58,29 +58,48 @@ def test_blender_mirror_layouts_match_pyopennova():
         )
 
 
-def test_collision_face_round_raycast_layout():
-    face = py_threedi.ThreediIRCollisionFace
-    assert ctypes.sizeof(face) == 52
+def test_all_mirror_structs_are_packed():
+    # threedi_3di3.h wraps every struct in #pragma pack(push, 1); a mirror
+    # without _pack_ = 1 silently pads and corrupts every field after the
+    # first misalignment.
+    for name, cls in sorted(_structs(py_threedi).items()):
+        assert getattr(cls, "_pack_", None) == 1, f"{name}: _pack_ != 1"
+
+
+def test_packed_struct_sizes_pin_native_abi():
+    # Pinned against the C header's #pragma pack(1) layouts (the C side
+    # static_asserts the same numbers); drift on either side fails here.
+    assert ctypes.sizeof(py_threedi.ThreediTransform) == 8
+    assert ctypes.sizeof(py_threedi.ThreediPartAnimation) == 0x44
+    assert ctypes.sizeof(py_threedi.ThreediLight) == 116
+    assert ctypes.sizeof(py_threedi.ThreediBoundingVolume) == 36
+    assert ctypes.sizeof(py_threedi.ThreediCollisionTranslation) == 12
+    assert ctypes.sizeof(py_threedi.ThreediCollisionObject) == 88
+    assert ctypes.sizeof(py_threedi.ThreediCollisionFace) == 44
+    assert ctypes.sizeof(py_threedi.ThreediCollisionNormal) == 14
+
+
+def test_collision_face_runtime_cfac_layout():
+    # The 44-B runtime CFAC record the raycast code walks.
+    face = py_threedi.ThreediCollisionFace
+    assert ctypes.sizeof(face) == 44
     assert [(name, getattr(face, name).offset) for name in (
-        "material_flags", "poly_type", "normal", "dominate_axis",
-        "plane_dist_fp16", "min_fp16", "max_fp16",
+        "normal_index", "plane_dist_fp16", "material_flags", "poly_type",
     )] == [
-        ("material_flags", 8),
-        ("poly_type", 12),
-        ("normal", 14),
-        ("dominate_axis", 20),
-        ("plane_dist_fp16", 24),
-        ("min_fp16", 28),
-        ("max_fp16", 40),
+        ("normal_index", 6),
+        ("plane_dist_fp16", 8),
+        ("material_flags", 36),
+        ("poly_type", 40),
     ]
 
 
 def test_collision_object_exact_cobj_sphere_layout():
-    obj = py_threedi.ThreediIRCollisionObject
-    assert ctypes.sizeof(obj) == 72
+    obj = py_threedi.ThreediCollisionObject
+    assert ctypes.sizeof(obj) == 88
     assert [(name, getattr(obj, name).offset) for name in (
-        "center_fp16", "radius_fp16",
+        "offset", "med", "radius",
     )] == [
-        ("center_fp16", 56),
-        ("radius_fp16", 68),
+        ("offset", 36),
+        ("med", 72),
+        ("radius", 84),
     ]

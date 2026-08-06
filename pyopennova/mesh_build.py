@@ -19,6 +19,7 @@ from typing import Sequence, Tuple
 
 from pyopennova import coords
 from pyopennova.mesh_utils import compute_smoothing_groups
+from pyopennova.threedi_ffi import THREEDI_MESH_SKINNED
 
 Vec3 = Tuple[float, float, float]
 Vec2 = Tuple[float, float]
@@ -42,7 +43,7 @@ class FlatMesh:
 
 
 def flatten_lod(
-    ir,
+    model,
     lod_index: int,
     *,
     include_empty_parts: bool = False,
@@ -65,39 +66,39 @@ def flatten_lod(
     (e.g. 24 = 12 unique * 2) that position-only dedup would collapse to 12,
     breaking ``CDTA/CMDL.num_vertices`` parity.
     """
-    lod = ir.lods[lod_index]
-    num_parts = int(lod.part_count)
-    num_primitives = int(lod.primitive_count)
-    vertex_count = int(lod.vertex_count)
-    is_skinned = int(getattr(ir, "mesh_type", 0)) == 3
+    lod = model.lods[lod_index]
+    num_parts = int(lod.render_object_count)
+    num_strips = int(lod.strip_count)
+    vertex_count = int(lod.vertices.count)
+    is_skinned = int(model.header.mesh_type) == THREEDI_MESH_SKINNED
 
-    part_prims: dict[int, list[int]] = defaultdict(list)
-    primitive_part_indices = _primitive_part_indices(lod)
-    for prim_idx in range(num_primitives):
-        part_idx = primitive_part_indices[prim_idx] if prim_idx < len(primitive_part_indices) else -1
+    part_strips: dict[int, list[int]] = defaultdict(list)
+    strip_part_indices = _primitive_part_indices(lod)
+    for strip_idx in range(num_strips):
+        part_idx = strip_part_indices[strip_idx] if strip_idx < len(strip_part_indices) else -1
         if 0 <= part_idx < num_parts:
-            part_prims[part_idx].append(prim_idx)
+            part_strips[part_idx].append(strip_idx)
 
     out: list[FlatMesh] = []
-    part_indices = range(num_parts) if include_empty_parts else sorted(part_prims.keys())
+    part_indices = range(num_parts) if include_empty_parts else sorted(part_strips.keys())
     for part_idx in part_indices:
-        prim_indices = part_prims.get(part_idx, [])
-        if not prim_indices and include_empty_parts:
+        strip_indices = part_strips.get(part_idx, [])
+        if not strip_indices and include_empty_parts:
             out.append(FlatMesh(name=f"{part_idx + 1:02d} Mesh0", part_index=part_idx))
             continue
 
-        part = lod.parts[part_idx]
+        part = lod.render_objects[part_idx]
         part_abs = (
-            float(part.abs_position[0]),
-            float(part.abs_position[1]),
-            float(part.abs_position[2]),
+            float(part.abs[0]),
+            float(part.abs[1]),
+            float(part.abs[2]),
         )
 
         fm = _flatten_part(
             lod=lod,
             part_idx=part_idx,
             part_abs=part_abs,
-            prim_indices=prim_indices,
+            strip_indices=strip_indices,
             vertex_count=vertex_count,
             is_skinned=is_skinned,
             track_bone_data=track_bone_data,
@@ -116,13 +117,13 @@ def _flatten_part(
     lod,
     part_idx: int,
     part_abs: Vec3,
-    prim_indices: Sequence[int],
+    strip_indices: Sequence[int],
     vertex_count: int,
     is_skinned: bool,
     track_bone_data: bool,
     preserve_source_indexing: bool = False,
 ) -> FlatMesh | None:
-    """Build a FlatMesh for a single part (all primitives merged)."""
+    """Build a FlatMesh for a single part (all strips merged)."""
     fm = FlatMesh(name=f"{part_idx + 1:02d} Mesh0", part_index=part_idx)
 
     vert_map: dict[tuple, int] = {}
@@ -160,19 +161,29 @@ def _flatten_part(
             for bone_idx, weight in entries
         )
 
-    def _bone_entries(v, prim) -> list[tuple[int, float]]:
+    def _bone_entries(v, strip) -> list[tuple[int, float]]:
         if not is_skinned:
             return [(part_idx, 1.0)]
 
+        # The authored 3 weights are unnormalized; normalize to sum 1.0 (a
+        # zero sum pins the vertex fully to its first influence) so the DCC
+        # skin weights and the dedup key see the same values as before.
         entries: list[tuple[int, float]] = []
-        table_len = int(getattr(prim, "bone_table_length", 0))
-        for bi in range(min(4, len(v.bone_weights))):
+        table_len = int(strip.bone_table_length)
+        weight_sum = sum(float(w) for w in v.bone_weights)
+        for bi in range(len(v.bone_weights)):
             weight = float(v.bone_weights[bi])
+            if weight_sum > 0.0:
+                weight /= weight_sum
+            elif bi == 0:
+                weight = 1.0
+            else:
+                weight = 0.0
             if weight <= 0.0:
                 continue
             local_idx = int(v.bone_indices[bi])
             if table_len > 0 and local_idx < table_len:
-                skel_idx = int(prim.bone_table[local_idx])
+                skel_idx = int(strip.bone_table[local_idx])
             else:
                 skel_idx = 0
             entries.append((skel_idx, weight))
@@ -183,31 +194,31 @@ def _flatten_part(
             merged[bone_idx] = merged.get(bone_idx, 0.0) + weight
         return sorted(merged.items(), key=lambda item: item[0])[:4]
 
-    for prim_idx in prim_indices:
-        prim = lod.primitives[prim_idx]
-        idx_offset = int(prim.index_offset)
-        idx_count = int(prim.index_count)
-        vert_offset = int(prim.vertex_offset)
-        prim_mat_idx = int(prim.material_index)
+    for strip_idx in strip_indices:
+        strip = lod.strips[strip_idx]
+        idx_offset = int(strip.index_offset)
+        idx_count = int(strip.num_indices)
+        vert_offset = int(strip.start_vertex)
+        strip_mat_idx = int(strip.material_index)
 
         if idx_count < 3:
             continue
 
-        if prim_mat_idx not in mat_id_set:
-            mat_id_set[prim_mat_idx] = None
+        if strip_mat_idx not in mat_id_set:
+            mat_id_set[strip_mat_idx] = None
 
         for j in range(0, idx_count, 3):
             # Index winding swap (0, 2, 1) matches the Blender importer.
-            i0 = int(lod.indices[idx_offset + j + 0]) + vert_offset
-            i1 = int(lod.indices[idx_offset + j + 2]) + vert_offset
-            i2 = int(lod.indices[idx_offset + j + 1]) + vert_offset
+            i0 = int(lod.indices.indices[idx_offset + j + 0]) + vert_offset
+            i1 = int(lod.indices.indices[idx_offset + j + 2]) + vert_offset
+            i2 = int(lod.indices.indices[idx_offset + j + 1]) + vert_offset
 
             if i0 >= vertex_count or i1 >= vertex_count or i2 >= vertex_count:
                 continue
 
-            v0 = lod.vertices[i0]
-            v1 = lod.vertices[i1]
-            v2 = lod.vertices[i2]
+            v0 = lod.vertices.items[i0]
+            v1 = lod.vertices.items[i1]
+            v2 = lod.vertices.items[i2]
 
             pos0 = coords.render_space((
                 v0.position[0] - part_abs[0],
@@ -225,9 +236,9 @@ def _flatten_part(
                 v2.position[2] - part_abs[2],
             ))
 
-            bd0 = _bone_entries(v0, prim)
-            bd1 = _bone_entries(v1, prim)
-            bd2 = _bone_entries(v2, prim)
+            bd0 = _bone_entries(v0, strip)
+            bd1 = _bone_entries(v1, strip)
+            bd2 = _bone_entries(v2, strip)
 
             vi0 = _add_vert(pos0, bd0, i0)
             vi1 = _add_vert(pos1, bd1, i1)
@@ -238,7 +249,7 @@ def _flatten_part(
                 continue
 
             fm.faces.append((vi0, vi1, vi2))
-            fm.face_material_ids.append(prim_mat_idx)
+            fm.face_material_ids.append(strip_mat_idx)
 
             # UV V-flip: source has V=0 at top, target DCCs use V=0 at bottom.
             fm.face_uvs0.extend([
@@ -273,23 +284,23 @@ def _normal_tuple(n) -> Vec3:
     return (float(n[0]), float(n[1]), float(n[2]))
 
 
-def flatten_collision(ir) -> list[FlatMesh]:
-    """Build per-subobject FlatMesh from ``ir.collision[0]`` for the collision LOD.
+def flatten_collision(model) -> list[FlatMesh]:
+    """Build per-subobject FlatMesh from ``model.collision[0]`` for the collision LOD.
 
     OED's WriteCDTA / WriteCVRT / WriteCFAC / WriteCOBJ pipeline is pure
     pass-through from ``lod->subobjects[i].verts/faces``, so the .ase mesh
     layout we hand it becomes CDTA verbatim. The stock 3DI's collision chunk already encodes
     the artist's exact subobject layout, so emitting one ``.ase`` GEOMOBJECT
-    per ``coll.objects[k]`` (= one OED subobject per IR collision object)
+    per ``coll.objects[k]`` (= one OED subobject per collision object)
     reproduces stock CMDL.subObjCount, COBJ.vertCount/faceCount/normalCount,
     and CFAC vert_index byte-exactly.
 
-    Mapping (1:1): ``ir.collision[0].objects[k]`` -> output subobject ``k``.
+    Mapping (1:1): ``model.collision[0].objects[k]`` -> output subobject ``k``.
       - vertCount = ``objects[k].num_vertices``, drawn from
         ``coll.vertices[v_cum .. v_cum + num_vertices)`` where ``v_cum`` is
         the cumulative sum of prior objects' ``num_vertices``.
       - face triplets = ``coll.faces[f_cum .. f_cum + num_faces)``;
-        ``vert_index`` values are already subobject-local in the IR (per
+        ``vert_index`` values are already subobject-local (per
         ConvertToInternal's ``srcVertCount + srcObj->faces[k].v[0]`` reset
         per subobject), so use them as-is.
 
@@ -306,14 +317,14 @@ def flatten_collision(ir) -> list[FlatMesh]:
     ``(pos.y, -pos.x, pos.z)`` per vertex.
 
     The caller's ``_lod_mesh_objects`` adds the part's
-    ``coords.render_space(abs_position)`` to each vert; that's identity
-    when ``abs_position == (0,0,0)`` (all observed stock fixtures so far).
+    ``coords.render_space(part.abs)`` to each vert; that's identity
+    when ``part.abs == (0,0,0)`` (all observed stock fixtures so far).
     """
-    coll_ptr = getattr(ir, "collision", None)
+    coll_ptr = model.collision
     if not coll_ptr:
         return []
     coll = coll_ptr[0]
-    obj_count = int(getattr(coll, "object_count", 0))
+    obj_count = int(coll.object_count)
     if obj_count == 0:
         return []
 
@@ -348,23 +359,25 @@ def flatten_collision(ir) -> list[FlatMesh]:
 
 
 def primitive_part_indices(lod) -> list[int]:
-    """Map each 3DI3 strip/primitive index to its owning render object."""
+    """Map each 3DI3 strip index to its owning render object."""
     return _primitive_part_indices(lod)
 
 
 def _primitive_part_indices(lod) -> list[int]:
-    """Map each 3DI3 strip/primitive index to its owning render object."""
-    count = int(getattr(lod, "primitive_count", 0))
+    """Map each 3DI3 strip index to its owning render object.
+
+    Strips are stored sequentially per render object: ``num_strips`` opaque
+    strips followed by ``num_alpha_strips`` alpha strips, so a running cursor
+    over the render objects assigns each strip its owner.
+    """
+    count = int(lod.strip_count)
     out = [-1] * count
     cursor = 0
-    parts = getattr(lod, "parts", None)
-    part_count = int(getattr(lod, "part_count", 0))
-    for part_idx in range(part_count):
+    parts = lod.render_objects
+    for part_idx in range(int(lod.render_object_count)):
         part = parts[part_idx]
-        prim_count = int(getattr(part, "primitive_count", 0))
-        if prim_count <= 0:
-            prim_count = int(getattr(part, "num_strips", 0)) + int(getattr(part, "num_alpha_strips", 0))
-        for _ in range(max(0, prim_count)):
+        strip_count = int(part.num_strips) + int(part.num_alpha_strips)
+        for _ in range(max(0, strip_count)):
             if cursor >= count:
                 return out
             out[cursor] = part_idx

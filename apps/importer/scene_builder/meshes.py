@@ -11,6 +11,8 @@ from mathutils import Vector
 
 from blender.math_utils import render_space
 from blender.mesh_primitives import create_cube_mesh
+from pyopennova.mesh_build import primitive_part_indices
+from pyopennova.threedi_ffi import THREEDI_MESH_SKINNED
 
 from .helpers import _mtrx_to_center_rotation
 
@@ -141,7 +143,7 @@ class MeshesMixin:
             return
 
         lod0 = self.ir.lods[0]
-        num_parts = int(lod0.part_count)
+        num_parts = int(lod0.render_object_count)
 
         root = bpy.data.objects.new(base_name, None)
         root.empty_display_type = 'PLAIN_AXES'
@@ -160,11 +162,11 @@ class MeshesMixin:
 
         # Parent and position parts
         for i in range(num_parts):
-            part = lod0.parts[i]
+            part = lod0.render_objects[i]
             part_obj = self.part_nodes[i]
 
-            abs_pos = render_space(Vector(part.abs_position))
-            rel_pos = render_space(Vector(part.rel_position))
+            abs_pos = render_space(Vector(part.abs))
+            rel_pos = render_space(Vector(part.rel))
 
             parent = root
             if (part.parent_index >= 0 and
@@ -181,7 +183,7 @@ class MeshesMixin:
         return root
 
     def create_basic_meshes(self, base_name: str) -> list:
-        """Create meshes from the IR (LOD 0).
+        """Create meshes from the model (LOD 0).
 
         Delegates to _create_meshes_for_lod() which creates one mesh object
         per (part, material) pair.
@@ -202,26 +204,29 @@ class MeshesMixin:
         Each resulting mesh has exactly one material slot.
 
         Args:
-            lod: IR LOD data (self.ir.lods[N])
+            lod: ThreediLod data (self.ir.lods[N])
             part_nodes: dict mapping part index -> Blender Empty object
             track_bone_data: if True, store bone data in self._mesh_bone_data
                              (only needed for LOD 0 armature binding)
         """
         mesh_objects = []
-        num_parts = int(lod.part_count)
-        num_primitives = int(lod.primitive_count)
+        num_parts = int(lod.render_object_count)
+        num_primitives = int(lod.strip_count)
 
-        is_skinned = (int(self.ir.mesh_type) == 3)  # THREEDI_IR_MESH_SKINNED
+        is_skinned = (int(self.ir.header.mesh_type) == THREEDI_MESH_SKINNED)
 
-        # Group primitives by part_index.
+        # Group strips by their owning render object.  Strips are stored
+        # sequentially per render object (num_strips opaque then
+        # num_alpha_strips alpha); primitive_part_indices resolves the runs.
         # Creating one mesh per part (not per part+material) ensures that
         # normal smoothing crosses material boundaries within a part,
         # matching the reference tool's per-subobject smoothing behaviour.
         from collections import defaultdict, OrderedDict
+        strip_part_indices = primitive_part_indices(lod)
         part_prims = defaultdict(list)
         for prim_idx in range(num_primitives):
-            prim = lod.primitives[prim_idx]
-            part_idx = int(prim.part_index)
+            part_idx = (int(strip_part_indices[prim_idx])
+                        if prim_idx < len(strip_part_indices) else -1)
             if part_idx < 0 or part_idx >= num_parts:
                 continue
             if part_idx not in part_nodes:
@@ -231,8 +236,8 @@ class MeshesMixin:
         # Create one mesh per part (all materials merged)
         for part_idx in sorted(part_prims.keys()):
             prim_indices = part_prims[part_idx]
-            part = lod.parts[part_idx]
-            part_abs = Vector(part.abs_position)
+            part = lod.render_objects[part_idx]
+            part_abs = Vector(part.abs)
 
             all_vertices = []
             all_faces = []
@@ -245,9 +250,20 @@ class MeshesMixin:
 
             def _bone_entries(v, prim, is_skinned, part_idx):
                 if is_skinned:
+                    # The raw vertex carries 3 bone weights; normalize them to
+                    # sum 1.0 (a zero sum means full weight on index 0), the
+                    # same normalization the removed IR conversion applied.
+                    weights = [float(v.bone_weights[0]),
+                               float(v.bone_weights[1]),
+                               float(v.bone_weights[2])]
+                    total = weights[0] + weights[1] + weights[2]
+                    if total > 0.0:
+                        weights = [w / total for w in weights]
+                    else:
+                        weights = [1.0, 0.0, 0.0]
                     entries = []
-                    for bi in range(4):
-                        w = v.bone_weights[bi]
+                    for bi in range(3):
+                        w = weights[bi]
                         if w > 0:
                             local_idx = v.bone_indices[bi]
                             if prim.bone_table_length > 0 and local_idx < prim.bone_table_length:
@@ -291,7 +307,7 @@ class MeshesMixin:
             # materials are created.
             mat_idx_set = OrderedDict()
             for prim_idx in prim_indices:
-                mi = int(lod.primitives[prim_idx].material_index)
+                mi = int(lod.strips[prim_idx].material_index)
                 if mi not in mat_idx_set:
                     mat_idx_set[mi] = len(mat_idx_set)
                 if mi not in self.material_dict:
@@ -299,26 +315,26 @@ class MeshesMixin:
                         self.material_dict[mi] = self._create_material(self.ir.materials[mi])
 
             for prim_idx in prim_indices:
-                prim = lod.primitives[prim_idx]
+                prim = lod.strips[prim_idx]
                 idx_offset = int(prim.index_offset)
-                idx_count = int(prim.index_count)
-                vert_offset = int(prim.vertex_offset)
+                idx_count = int(prim.num_indices)
+                vert_offset = int(prim.start_vertex)
                 prim_mat_idx = int(prim.material_index)
 
                 if idx_count < 3:
                     continue
 
                 for j in range(0, idx_count, 3):
-                    i0 = int(lod.indices[idx_offset + j + 0]) + vert_offset
-                    i1 = int(lod.indices[idx_offset + j + 2]) + vert_offset
-                    i2 = int(lod.indices[idx_offset + j + 1]) + vert_offset
+                    i0 = int(lod.indices.indices[idx_offset + j + 0]) + vert_offset
+                    i1 = int(lod.indices.indices[idx_offset + j + 2]) + vert_offset
+                    i2 = int(lod.indices.indices[idx_offset + j + 1]) + vert_offset
 
-                    if i0 >= int(lod.vertex_count) or i1 >= int(lod.vertex_count) or i2 >= int(lod.vertex_count):
+                    if i0 >= int(lod.vertices.count) or i1 >= int(lod.vertices.count) or i2 >= int(lod.vertices.count):
                         continue
 
-                    v0 = lod.vertices[i0]
-                    v1 = lod.vertices[i1]
-                    v2 = lod.vertices[i2]
+                    v0 = lod.vertices.items[i0]
+                    v1 = lod.vertices.items[i1]
+                    v2 = lod.vertices.items[i2]
 
                     pos0 = render_space(Vector(v0.position) - part_abs)
                     pos1 = render_space(Vector(v1.position) - part_abs)
@@ -456,7 +472,7 @@ class MeshesMixin:
 
         for lod_idx in range(1, int(self.ir.lod_count)):
             lod = self.ir.lods[lod_idx]
-            num_parts = int(lod.part_count)
+            num_parts = int(lod.render_object_count)
             if num_parts == 0:
                 continue
 
@@ -481,11 +497,11 @@ class MeshesMixin:
                 lod_part_nodes[i] = part_obj
 
             for i in range(num_parts):
-                part = lod.parts[i]
+                part = lod.render_objects[i]
                 part_obj = lod_part_nodes[i]
 
-                abs_pos = render_space(Vector(part.abs_position))
-                rel_pos = render_space(Vector(part.rel_position))
+                abs_pos = render_space(Vector(part.abs))
+                rel_pos = render_space(Vector(part.rel))
 
                 parent = lod_root
                 if (part.parent_index >= 0 and
@@ -517,10 +533,10 @@ class MeshesMixin:
 
                 # Apply rotation from MTRX if available.
                 if (i < int(lod.part_animation_count) and
-                        int(self.ir.matrix_count) > 0):
+                        int(self.ir.mtrx.count) > 0):
                     mi = lod.part_animations[i].matrix_index
-                    if mi != 0xFF and mi < int(self.ir.matrix_count):
-                        rot = _mtrx_to_center_rotation(self.ir.matrices[mi].m)
+                    if mi != 0xFF and mi < int(self.ir.mtrx.count):
+                        rot = _mtrx_to_center_rotation(self.ir.mtrx.matrices[mi].m)
                         if rot is not None:
                             center_obj.matrix_local = rot
                     else:
@@ -533,7 +549,7 @@ class MeshesMixin:
             for i in range(num_parts):
                 if i not in lod_part_nodes:
                     continue
-                part = lod.parts[i]
+                part = lod.render_objects[i]
                 pi = int(part.parent_index)
                 if i == 0 or pi < 0:
                     continue

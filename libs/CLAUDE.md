@@ -81,8 +81,12 @@
   decoders read what a stock client/server emits, and opennova↔opennova requires
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
-- 3DI models: modern `.3di` (3DI3) parses via `threedi_3di3_read`; legacy GP-era `.3di`
-  (GPM/GPS/GPP) via `threedi_gp_read`. `ThreediModelIR`
-  (libs/threedi/include/threedi/threedi_ir.h) is the unified in-memory representation
-  both promote into; `threedi_ir_read` dispatches on file magic
-  (libs/threedi/src/threedi_ir.cpp) — extend its detect/convert chain for a new variant.
+- 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
+  `Threedi3di3` (libs/threedi/include/threedi/threedi_3di3.h) and that parsed struct IS
+  the model every consumer walks — the Godot document edits it in place, `tdp_from_3di`
+  generates `.3dp` from it, and the Python FFI mirrors its packed layout. There is no
+  intermediate model representation, and the GP-era (GPM/GPS/GPP) reader/writer is gone —
+  the format knowledge lives in docs/threedi/3di-gp-format-re.md. Shared derivations are
+  3DI3-native helpers in that header (userpoint decode, collision run prefix sums +
+  runtime-safety validation, `threedi_3di3_ground_anchor`); load-time fixups (the CFAC
+  normal-run resolve) happen at the consumer, where retail's loader performs them.

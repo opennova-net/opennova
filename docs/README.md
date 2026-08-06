@@ -63,6 +63,7 @@ behavior is summarized and cited.
 | [0024](adr/0024-lib-family-topology.md) | Lib family topology: one-lib-per-format affirmed; terrain/audio families are CMake INTERFACE link groups (never merges, never edge laundering); the renderer-fold reversal recorded; the two consumption models named (Model A flat C ABI / Model B C++ static link) |
 | [0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md) | ONED has no PIE or in-place mission simulation: F5/F6 run saved loose assets in one managed standalone game child; F8 stops it |
 | [0026](adr/0026-one-client-replica-pipeline.md) | One decoded-entity stack: `ClientReplicaPipeline` is the sole S2C reducer, `WirePresentPass` the sole presenter, and Person/controller/Vehicle are independent domain axes |
+| [0027](adr/0027-3di3-only-no-model-ir.md) | 3DI3 is the only model format and consumers walk the parsed `Threedi3di3` directly; the `ThreediModelIR` layer and GP-era (GPM/GPS/GPP) reader/writer are removed |
 
 ## RE records by domain
 

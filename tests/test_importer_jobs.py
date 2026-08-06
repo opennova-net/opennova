@@ -320,10 +320,23 @@ class TestImportRunner:
     def test_run_loose_import_skips_blend_save_when_disabled(self) -> None:
         from apps.importer.import_runner import run_loose_import
 
-        fake_ir = object()
+        # Raw-shaped 3DI3 fake: only as deep as the code under test reads
+        # (the scene builder is mocked; the .3dp writer sees no collision).
+        fake_model = types.SimpleNamespace(
+            header=types.SimpleNamespace(name=b"Shed", mesh_type=1),
+            lods=[],
+            lod_count=0,
+            collision=None,
+        )
         threedi_module = types.ModuleType("pyopennova.threedi_ffi")
-        threedi_module.read_model_ir = Mock(return_value=fake_ir)
-        threedi_module.free_model_ir = Mock()
+        threedi_module.read_model = Mock(return_value=fake_model)
+        threedi_module.free_model_3di3 = Mock()
+
+        tdp_module = types.ModuleType("pyopennova.tdp_ffi")
+        tdp_module.TDP_MAX_LODS = 8
+        tdp_module.tdp_from_3di = Mock()
+        tdp_module.write_tdp = Mock()
+        tdp_module.free_tdp = Mock()
 
         asset_module = types.ModuleType("pyopennova.asset_resolver")
 
@@ -346,32 +359,46 @@ class TestImportRunner:
 
         modules = {
             "pyopennova.threedi_ffi": threedi_module,
+            "pyopennova.tdp_ffi": tdp_module,
             "pyopennova.asset_resolver": asset_module,
             "apps.importer.scene_builder": scene_module,
         }
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_3dp_from_ir") as write_3dp:
-                    with patch("apps.importer.import_runner._export_ase"):
-                        with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
-                            ok = run_loose_import(
-                                threedi_path=str(FIXTURE_3DI),
-                                output_dir=str(ROOT),
-                                write_blend=False,
-                                reset_scene=False,
-                            )
+                with patch("apps.importer.import_runner._export_ase"):
+                    with patch("apps.importer.import_runner._save_blend_scene") as save_blend:
+                        ok = run_loose_import(
+                            threedi_path=str(FIXTURE_3DI),
+                            output_dir=str(ROOT),
+                            write_blend=False,
+                            reset_scene=False,
+                        )
 
         assert ok
-        write_3dp.assert_called_once_with(fake_ir, str(ROOT / "Shed.3dp"))
+        tdp_module.tdp_from_3di.assert_called_once_with(fake_model)
+        tdp_module.write_tdp.assert_called_once_with(
+            str(ROOT / "Shed.3dp"), tdp_module.tdp_from_3di.return_value
+        )
         save_blend.assert_not_called()
 
     def test_run_loose_import_exports_glb_and_fbx_from_blender_scene(self) -> None:
         from apps.importer.import_runner import run_loose_import
 
-        fake_ir = object()
+        fake_model = types.SimpleNamespace(
+            header=types.SimpleNamespace(name=b"Shed", mesh_type=1),
+            lods=[],
+            lod_count=0,
+            collision=None,
+        )
         threedi_module = types.ModuleType("pyopennova.threedi_ffi")
-        threedi_module.read_model_ir = Mock(return_value=fake_ir)
-        threedi_module.free_model_ir = Mock()
+        threedi_module.read_model = Mock(return_value=fake_model)
+        threedi_module.free_model_3di3 = Mock()
+
+        tdp_module = types.ModuleType("pyopennova.tdp_ffi")
+        tdp_module.TDP_MAX_LODS = 8
+        tdp_module.tdp_from_3di = Mock()
+        tdp_module.write_tdp = Mock()
+        tdp_module.free_tdp = Mock()
 
         asset_module = types.ModuleType("pyopennova.asset_resolver")
 
@@ -394,23 +421,23 @@ class TestImportRunner:
 
         modules = {
             "pyopennova.threedi_ffi": threedi_module,
+            "pyopennova.tdp_ffi": tdp_module,
             "pyopennova.asset_resolver": asset_module,
             "apps.importer.scene_builder": scene_module,
         }
         with patch.dict(sys.modules, modules):
             with patch("apps.importer.import_runner._setup_blender_package"):
-                with patch("apps.importer.import_runner._write_3dp_from_ir"):
-                    with patch("apps.importer.import_runner._export_ase"):
-                        with patch("apps.importer.import_runner._export_glb") as export_glb:
-                            with patch("apps.importer.import_runner._export_fbx") as export_fbx:
-                                with patch("apps.importer.import_runner._save_blend_scene"):
-                                    ok = run_loose_import(
-                                        threedi_path=str(FIXTURE_3DI),
-                                        output_dir=str(ROOT),
-                                        write_glb=True,
-                                        write_fbx=True,
-                                        reset_scene=False,
-                                    )
+                with patch("apps.importer.import_runner._export_ase"):
+                    with patch("apps.importer.import_runner._export_glb") as export_glb:
+                        with patch("apps.importer.import_runner._export_fbx") as export_fbx:
+                            with patch("apps.importer.import_runner._save_blend_scene"):
+                                ok = run_loose_import(
+                                    threedi_path=str(FIXTURE_3DI),
+                                    output_dir=str(ROOT),
+                                    write_glb=True,
+                                    write_fbx=True,
+                                    reset_scene=False,
+                                )
 
         assert ok
         export_glb.assert_called_once_with(str(ROOT), "Shed")
@@ -437,9 +464,9 @@ class TestImportRunner:
 
     def test_project_writer_has_no_bullet_lod_override_parameter(self) -> None:
         import inspect
-        from apps.importer.import_runner import _write_3dp_from_ir
+        from apps.importer.import_runner import _write_3dp_from_model
 
-        assert "bullet_lod_index" not in inspect.signature(_write_3dp_from_ir).parameters
+        assert "bullet_lod_index" not in inspect.signature(_write_3dp_from_model).parameters
 
     def test_scan_failure_is_not_empty_success(self) -> None:
         missing = str(ROOT / ".scratch" / "__missing_scan_dir__")

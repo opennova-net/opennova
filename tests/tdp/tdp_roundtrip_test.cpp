@@ -1,7 +1,7 @@
 // TDP roundtrip test: build a TdpProject, write to file, parse back, verify.
 
 #include "tdp/tdp.h"
-#include "threedi/threedi_ir.h"
+#include "threedi/threedi_3di3.h"
 #include "threedi/threedi_panm.h"
 
 #include <cmath>
@@ -194,26 +194,26 @@ int main() {
     std::printf("TDP roundtrip test PASSED\n");
 
     // =======================================================================
-    // PANM flag extraction + routing via tdp_from_ir
+    // PANM flag extraction + routing via tdp_from_3di
     // =======================================================================
     {
-        ThreediModelIR ir;
-        std::memset(&ir, 0, sizeof(ir));
+        Threedi3di3 model;
+        std::memset(&model, 0, sizeof(model));
 
         // Minimal LOD with 1 part so panm_count uses part_animation_count
-        ThreediIRLod lod0;
+        ThreediLod lod0;
         std::memset(&lod0, 0, sizeof(lod0));
-        lod0.part_count = 1;
-        ir.lods = &lod0;
-        ir.lod_count = 1;
+        lod0.render_object_count = 1;
+        model.lods = &lod0;
+        model.lod_count = 1;
 
         // Build 2 part animations with different flag combos
-        ThreediIRPartAnimation panms[2];
+        ThreediPartAnimation panms[2];
         std::memset(panms, 0, sizeof(panms));
 
         // PANM 0: rotate_type=2, scale_type=1, trans_type=1 (X), reverse_rotate=1
         panms[0].flags = threedi_panm_pack_flags(1, 2, 1, 1);
-        panms[0].part_index = 0;
+        panms[0].subobject_index = 0;
         panms[0].rotation_y.control = 3;
         panms[0].rotation_y.rate = 512;      // 2.0 after /256
         panms[0].rotation_y.start = 4551;    // ~10 deg after /(16384/360)
@@ -225,7 +225,7 @@ int main() {
 
         // PANM 1: rotate_type=0 (no rotation), scale_type=2 (per-axis), trans_type=3 (Z)
         panms[1].flags = threedi_panm_pack_flags(2, 0, 0, 3);
-        panms[1].part_index = 1;
+        panms[1].subobject_index = 1;
         panms[1].scale_x.control = 2;
         panms[1].scale_y.control = 4;
         panms[1].scale_z.control = 6;
@@ -236,8 +236,8 @@ int main() {
         lod0.part_animation_count = 2;
 
         TdpProject proj;
-        int rc2 = tdp_from_ir(&ir, &proj);
-        TEST_EXPECT(rc2 == 0 && "tdp_from_ir failed");
+        int rc2 = tdp_from_3di(&model, &proj);
+        TEST_EXPECT(rc2 == 0 && "tdp_from_3di failed");
 
         // Verify flag extraction for PANM 0
         {
@@ -301,32 +301,32 @@ int main() {
     }
 
     // =======================================================================
-    // Control register resolution via tdp_from_ir
+    // Control register resolution via tdp_from_3di
     // =======================================================================
     {
-        ThreediModelIR ir;
-        std::memset(&ir, 0, sizeof(ir));
+        Threedi3di3 model;
+        std::memset(&model, 0, sizeof(model));
 
         // Minimal LOD with 1 part
-        ThreediIRLod lod0;
+        ThreediLod lod0;
         std::memset(&lod0, 0, sizeof(lod0));
-        lod0.part_count = 1;
-        ir.lods = &lod0;
-        ir.lod_count = 1;
+        lod0.render_object_count = 1;
+        model.lods = &lod0;
+        model.lod_count = 1;
 
         // One control register
-        ThreediIRControlRegister cregs[1];
+        ThreediControlRegister cregs[1];
         std::memset(cregs, 0, sizeof(cregs));
         copy_str(cregs[0].name, sizeof(cregs[0].name), "VEHICLE_GUNYAW");
-        ir.control_registers = cregs;
-        ir.control_register_count = 1;
+        model.ctrl.registers = cregs;
+        model.ctrl.count = 1;
 
         // Part animation: rotation yaw with register-based control (code 113 = 0x71)
         // rotation_x maps to yaw (rotation_x→yaw, rotation_y→pitch, rotation_z→roll)
-        ThreediIRPartAnimation panm;
+        ThreediPartAnimation panm;
         std::memset(&panm, 0, sizeof(panm));
         panm.flags = threedi_panm_pack_flags(0, 2, 0, 0); // rotate_type=2
-        panm.part_index = 0;
+        panm.subobject_index = 0;
         panm.rotation_x.control = 113;         // register-based func
         panm.rotation_x.control_param = 0;     // index into control_registers
         panm.rotation_x.start = 0;
@@ -336,8 +336,8 @@ int main() {
         lod0.part_animation_count = 1;
 
         TdpProject proj;
-        int rc3 = tdp_from_ir(&ir, &proj);
-        TEST_EXPECT(rc3 == 0 && "tdp_from_ir failed");
+        int rc3 = tdp_from_3di(&model, &proj);
+        TEST_EXPECT(rc3 == 0 && "tdp_from_3di failed");
 
         const TdpPartAnim *pa = &proj.lods[0].part_anims[0];
         TEST_EXPECT(pa->yaw.func_id == 113);
@@ -368,29 +368,29 @@ int main() {
     }
 
     // =======================================================================
-    // Material control register resolution + rattrib via tdp_from_ir
+    // Material control register resolution + rattrib via tdp_from_3di
     // =======================================================================
     {
-        ThreediModelIR ir;
-        std::memset(&ir, 0, sizeof(ir));
+        Threedi3di3 model;
+        std::memset(&model, 0, sizeof(model));
 
         // Minimal LOD
-        ThreediIRLod lod0;
+        ThreediLod lod0;
         std::memset(&lod0, 0, sizeof(lod0));
-        lod0.part_count = 1;
-        ir.lods = &lod0;
-        ir.lod_count = 1;
+        lod0.render_object_count = 1;
+        model.lods = &lod0;
+        model.lod_count = 1;
 
         // Two control registers
-        ThreediIRControlRegister cregs[2];
+        ThreediControlRegister cregs[2];
         std::memset(cregs, 0, sizeof(cregs));
         copy_str(cregs[0].name, sizeof(cregs[0].name), "VEHICLE_WHEELS00");
         copy_str(cregs[1].name, sizeof(cregs[1].name), "ANIM_CTRL_01");
-        ir.control_registers = cregs;
-        ir.control_register_count = 2;
+        model.ctrl.registers = cregs;
+        model.ctrl.count = 2;
 
         // One material with register-driven UV scroll and animation
-        ThreediIRMaterial mat;
+        ThreediMaterial mat;
         std::memset(&mat, 0, sizeof(mat));
         mat.index = 0;
         copy_str(mat.shader_name, sizeof(mat.shader_name), "FF_ST_OP");
@@ -418,14 +418,14 @@ int main() {
         mat.animation.num_frames = 4;
 
         // Two-sided flag
-        mat.flags = THREEDI_IR_MATERIAL_FLAG_TWO_SIDED;
+        mat.material_flags = THREEDI_MATERIAL_FLAG_TWO_SIDED;
 
-        ir.materials = &mat;
-        ir.material_count = 1;
+        model.materials = &mat;
+        model.material_count = 1;
 
         TdpProject proj;
-        int rc4 = tdp_from_ir(&ir, &proj);
-        TEST_EXPECT(rc4 == 0 && "tdp_from_ir failed");
+        int rc4 = tdp_from_3di(&model, &proj);
+        TEST_EXPECT(rc4 == 0 && "tdp_from_3di failed");
         TEST_EXPECT(proj.material_count == 1);
 
         const TdpMaterial *dm = &proj.materials[0];
@@ -476,36 +476,97 @@ int main() {
     }
 
     // =======================================================================
-    // Surface type → ptype mapping via tdp_from_ir
+    // Surface type -> ptype mapping via tdp_from_3di: per-material surface
+    // types come from the model's collision faces (one COBJ per subobject,
+    // single-material parts vote directly).
     // =======================================================================
     {
-        ThreediModelIR ir;
-        std::memset(&ir, 0, sizeof(ir));
+        auto make_single_material_model = [](uint8_t poly_type,
+                ThreediLod &lod0, ThreediRenderObject &part, ThreediTriangleStrip &strip,
+                ThreediCollisionModel &col, ThreediCollisionObject &obj,
+                ThreediCollisionFace &face, ThreediMaterial &mat,
+                Threedi3di3 &model) {
+            std::memset(&lod0, 0, sizeof(lod0));
+            std::memset(&part, 0, sizeof(part));
+            std::memset(&strip, 0, sizeof(strip));
+            std::memset(&col, 0, sizeof(col));
+            std::memset(&obj, 0, sizeof(obj));
+            std::memset(&face, 0, sizeof(face));
+            std::memset(&mat, 0, sizeof(mat));
+            std::memset(&model, 0, sizeof(model));
+            copy_str(mat.shader_name, sizeof(mat.shader_name), "FF_ST_OP");
+            part.num_strips = 1;
+            strip.material_index = 0;
+            lod0.render_objects = &part;
+            lod0.render_object_count = 1;
+            lod0.strips = &strip;
+            lod0.strip_count = 1;
+            obj.num_faces = 1;
+            face.poly_type = poly_type;
+            col.objects = &obj;
+            col.object_count = 1;
+            col.faces = &face;
+            col.face_count = 1;
+            model.lods = &lod0;
+            model.lod_count = 1;
+            model.materials = &mat;
+            model.material_count = 1;
+            model.collision = &col;
+        };
 
-        // Minimal LOD with 1 part
-        ThreediIRLod lod0;
+        // Three single-material parts, each with a distinct collision surface.
+        ThreediLod lod0;
         std::memset(&lod0, 0, sizeof(lod0));
-        lod0.part_count = 1;
-        ir.lods = &lod0;
-        ir.lod_count = 1;
+        ThreediRenderObject parts[3];
+        std::memset(parts, 0, sizeof(parts));
+        ThreediTriangleStrip strips[3];
+        std::memset(strips, 0, sizeof(strips));
+        for (int i = 0; i < 3; ++i) {
+            parts[i].num_strips = 1;
+            strips[i].material_index = i;
+        }
+        lod0.render_objects = parts;
+        lod0.render_object_count = 3;
+        lod0.strips = strips;
+        lod0.strip_count = 3;
 
-        // Three materials with different surface_type values
-        ThreediIRMaterial mats[3];
+        ThreediMaterial mats[3];
         std::memset(mats, 0, sizeof(mats));
         copy_str(mats[0].shader_name, sizeof(mats[0].shader_name), "FF_ST_OP");
         copy_str(mats[1].shader_name, sizeof(mats[1].shader_name), "FF_ST_OP");
         copy_str(mats[2].shader_name, sizeof(mats[2].shader_name), "FF_ST_OP");
+        mats[0].index = 0;
+        mats[1].index = 1;
+        mats[2].index = 2;
 
-        mats[0].surface_type = 0x12; // Hard Metal → ptype 4
-        mats[1].surface_type = 0x01; // Dirt → ptype 9
-        mats[2].surface_type = 0x10; // Cloth → ptype 5
+        ThreediCollisionObject objs[3];
+        std::memset(objs, 0, sizeof(objs));
+        ThreediCollisionFace faces[3];
+        std::memset(faces, 0, sizeof(faces));
+        objs[0].num_faces = 1;
+        objs[1].num_faces = 1;
+        objs[2].num_faces = 1;
+        faces[0].poly_type = 0x12; // Hard Metal -> ptype 4
+        faces[1].poly_type = 0x01; // Dirt -> ptype 9
+        faces[2].poly_type = 0x10; // Cloth -> ptype 5
+        ThreediCollisionModel col;
+        std::memset(&col, 0, sizeof(col));
+        col.objects = objs;
+        col.object_count = 3;
+        col.faces = faces;
+        col.face_count = 3;
 
-        ir.materials = mats;
-        ir.material_count = 3;
+        Threedi3di3 model;
+        std::memset(&model, 0, sizeof(model));
+        model.lods = &lod0;
+        model.lod_count = 1;
+        model.materials = mats;
+        model.material_count = 3;
+        model.collision = &col;
 
         TdpProject proj;
-        int rc5 = tdp_from_ir(&ir, &proj);
-        TEST_EXPECT(rc5 == 0 && "tdp_from_ir failed");
+        int rc5 = tdp_from_3di(&model, &proj);
+        TEST_EXPECT(rc5 == 0 && "tdp_from_3di failed");
         TEST_EXPECT(proj.material_count == 3);
         TEST_EXPECT(proj.materials[0].ptype == 4);  // Hard Metal
         TEST_EXPECT(proj.materials[1].ptype == 9);  // Dirt
@@ -517,20 +578,18 @@ int main() {
             {0x10, 5}, {0x0F, 6}, {0x07, 7}, {0x13, 8}, {0x01, 9},
         };
         for (auto &m : mappings) {
-            ThreediIRMaterial test_mat;
-            std::memset(&test_mat, 0, sizeof(test_mat));
-            copy_str(test_mat.shader_name, sizeof(test_mat.shader_name), "FF_ST_OP");
-            test_mat.surface_type = m.st;
-
-            ThreediModelIR ir2;
-            std::memset(&ir2, 0, sizeof(ir2));
-            ir2.lods = &lod0;
-            ir2.lod_count = 1;
-            ir2.materials = &test_mat;
-            ir2.material_count = 1;
+            ThreediLod l;
+            ThreediRenderObject part;
+            ThreediTriangleStrip strip;
+            ThreediCollisionModel c;
+            ThreediCollisionObject obj;
+            ThreediCollisionFace face;
+            ThreediMaterial mat;
+            Threedi3di3 m2;
+            make_single_material_model(m.st, l, part, strip, c, obj, face, mat, m2);
 
             TdpProject p2;
-            int r = tdp_from_ir(&ir2, &p2);
+            int r = tdp_from_3di(&m2, &p2);
             TEST_EXPECT(r == 0);
             TEST_EXPECT(p2.materials[0].ptype == m.ptype);
             tdp_free(&p2);
@@ -538,41 +597,41 @@ int main() {
 
         // Unknown surface_type defaults to ptype 9
         {
-            ThreediIRMaterial unk_mat;
-            std::memset(&unk_mat, 0, sizeof(unk_mat));
-            copy_str(unk_mat.shader_name, sizeof(unk_mat.shader_name), "FF_ST_OP");
-            unk_mat.surface_type = 0xFF; // unknown
-
-            ThreediModelIR ir3;
-            std::memset(&ir3, 0, sizeof(ir3));
-            ir3.lods = &lod0;
-            ir3.lod_count = 1;
-            ir3.materials = &unk_mat;
-            ir3.material_count = 1;
+            ThreediLod l;
+            ThreediRenderObject part;
+            ThreediTriangleStrip strip;
+            ThreediCollisionModel c;
+            ThreediCollisionObject obj;
+            ThreediCollisionFace face;
+            ThreediMaterial mat;
+            Threedi3di3 m3;
+            make_single_material_model(0xFF, l, part, strip, c, obj, face, mat, m3);
 
             TdpProject p3;
-            int r = tdp_from_ir(&ir3, &p3);
+            int r = tdp_from_3di(&m3, &p3);
             TEST_EXPECT(r == 0);
             TEST_EXPECT(p3.materials[0].ptype == 9);
             tdp_free(&p3);
         }
 
-        // Default surface_type (0, from calloc) should also give ptype 9
+        // A collision-less model keeps the default surface (Dirt -> ptype 9)
         {
-            ThreediIRMaterial zero_mat;
+            ThreediMaterial zero_mat;
             std::memset(&zero_mat, 0, sizeof(zero_mat));
             copy_str(zero_mat.shader_name, sizeof(zero_mat.shader_name), "FF_ST_OP");
-            // surface_type = 0 (not in table)
 
-            ThreediModelIR ir4;
-            std::memset(&ir4, 0, sizeof(ir4));
-            ir4.lods = &lod0;
-            ir4.lod_count = 1;
-            ir4.materials = &zero_mat;
-            ir4.material_count = 1;
+            ThreediLod l;
+            std::memset(&l, 0, sizeof(l));
+            l.render_object_count = 1;
+            Threedi3di3 m4;
+            std::memset(&m4, 0, sizeof(m4));
+            m4.lods = &l;
+            m4.lod_count = 1;
+            m4.materials = &zero_mat;
+            m4.material_count = 1;
 
             TdpProject p4;
-            int r = tdp_from_ir(&ir4, &p4);
+            int r = tdp_from_3di(&m4, &p4);
             TEST_EXPECT(r == 0);
             TEST_EXPECT(p4.materials[0].ptype == 9);
             tdp_free(&p4);
@@ -583,72 +642,72 @@ int main() {
     }
 
     // =======================================================================
-    // Normal texture slots + animated frames via tdp_from_ir
+    // Normal texture slots + animated frames via tdp_from_3di
     // =======================================================================
     {
-        ThreediModelIR ir;
-        std::memset(&ir, 0, sizeof(ir));
+        Threedi3di3 model;
+        std::memset(&model, 0, sizeof(model));
 
-        ThreediIRLod lod0;
+        ThreediLod lod0;
         std::memset(&lod0, 0, sizeof(lod0));
-        lod0.part_count = 1;
-        ir.lods = &lod0;
-        ir.lod_count = 1;
+        lod0.render_object_count = 1;
+        model.lods = &lod0;
+        model.lod_count = 1;
 
         // Material with all 4 static texture slots + animated frames
-        ThreediIRMaterial mat;
+        ThreediMaterial mat;
         std::memset(&mat, 0, sizeof(mat));
         copy_str(mat.shader_name, sizeof(mat.shader_name), "FF_DT_OP");
 
         // Slot 1: DIFFUSE static, clamped
         copy_str(mat.textures[0].name, sizeof(mat.textures[0].name), "body.pic");
-        mat.textures[0].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
+        mat.textures[0].slot = THREEDI_TEX_SLOT_DIFFUSE;
         mat.textures[0].flags = 0x02; // clamped bit set, not animated
         mat.textures[0].frame = 0;
 
         // Slot 2: DETAIL static, not clamped
         copy_str(mat.textures[1].name, sizeof(mat.textures[1].name), "detail.pic");
-        mat.textures[1].slot = THREEDI_IR_TEX_SLOT_DETAIL;
+        mat.textures[1].slot = THREEDI_TEX_SLOT_DETAIL;
         mat.textures[1].flags = 0x00;
         mat.textures[1].frame = 0;
 
         // Slot 3: NORMAL static, clamped
         copy_str(mat.textures[2].name, sizeof(mat.textures[2].name), "body_n.pic");
-        mat.textures[2].slot = THREEDI_IR_TEX_SLOT_NORMAL;
+        mat.textures[2].slot = THREEDI_TEX_SLOT_NORMAL;
         mat.textures[2].flags = 0x02;
         mat.textures[2].frame = 0;
 
         // Slot 4: NORMAL_B static, not clamped
         copy_str(mat.textures[3].name, sizeof(mat.textures[3].name), "detail_n.pic");
-        mat.textures[3].slot = THREEDI_IR_TEX_SLOT_NORMAL_B;
+        mat.textures[3].slot = THREEDI_TEX_SLOT_NORMAL_B;
         mat.textures[3].flags = 0x00;
         mat.textures[3].frame = 0;
 
         // Animated diffuse slot 1, frames 0 and 1 (flags bit 0 = animated)
         copy_str(mat.textures[4].name, sizeof(mat.textures[4].name), "anim0.pic");
-        mat.textures[4].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
+        mat.textures[4].slot = THREEDI_TEX_SLOT_DIFFUSE;
         mat.textures[4].flags = 0x01; // animated, not clamped
         mat.textures[4].frame = 0;
 
         copy_str(mat.textures[5].name, sizeof(mat.textures[5].name), "anim1.pic");
-        mat.textures[5].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
+        mat.textures[5].slot = THREEDI_TEX_SLOT_DIFFUSE;
         mat.textures[5].flags = 0x03; // animated + clamped
         mat.textures[5].frame = 1;
 
         // Animated normal slot 3, frame 0
         copy_str(mat.textures[6].name, sizeof(mat.textures[6].name), "anim_n0.pic");
-        mat.textures[6].slot = THREEDI_IR_TEX_SLOT_NORMAL;
+        mat.textures[6].slot = THREEDI_TEX_SLOT_NORMAL;
         mat.textures[6].flags = 0x01; // animated, not clamped
         mat.textures[6].frame = 0;
 
         mat.texture_count = 7;
 
-        ir.materials = &mat;
-        ir.material_count = 1;
+        model.materials = &mat;
+        model.material_count = 1;
 
         TdpProject proj;
-        int rc6 = tdp_from_ir(&ir, &proj);
-        TEST_EXPECT(rc6 == 0 && "tdp_from_ir failed");
+        int rc6 = tdp_from_3di(&model, &proj);
+        TEST_EXPECT(rc6 == 0 && "tdp_from_3di failed");
         TEST_EXPECT(proj.material_count == 1);
 
         const TdpMaterial *dm = &proj.materials[0];

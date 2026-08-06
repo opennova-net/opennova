@@ -160,7 +160,7 @@ def bad_positions_from_model(
     where ``bind_rows`` is the parent's stored bind 3x3 (``BadBone.rotation``,
     row-major as parsed — identical to the reset clip's frame-0 channel
     transposed) and ``rel`` is the model part's parent-relative pivot in the
-    engine frame (``ThreediIRPart.rel_position``); the x-negation is the
+    engine frame (``ThreediRenderObject.rel``); the x-negation is the
     engine's own model->render frame map.  Root bones (parent < 0 or
     self-parented) take the x-negated rel unrotated (zero on every shipped rig).
 

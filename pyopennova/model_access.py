@@ -4,51 +4,36 @@ from __future__ import annotations
 from typing import Any
 
 
-def occlusion_access(model) -> dict[str, Any] | None:
-    """Return occlusion arrays/counts for a direct 3DI3 model.
+def occlusion_access(model) -> dict[str, Any]:
+    """Return occlusion arrays/counts for a ``Threedi3di3`` model.
 
-    Direct 3DI3 exposes occlusion tables as model-level arrays. Some tests and
-    older adapters may still provide an aggregate ``occlusion`` pointer; this
-    helper keeps consumers focused on the data shape instead of the storage
-    location.
+    3DI3 exposes occlusion tables as model-level arrays; this helper keeps
+    consumers focused on the data shape instead of the storage location.
     """
-    if hasattr(model, "occlusion_object_count"):
-        return {
-            "vertices": model.occlusion_vertices,
-            "vertex_count": int(model.occlusion_vertex_count),
-            "faces": model.occlusion_faces,
-            "face_count": int(model.occlusion_face_count),
-            "objects": model.occlusion_objects,
-            "object_count": int(model.occlusion_object_count),
-        }
-
-    occ = getattr(model, "occlusion", None)
-    if not occ:
-        return None
     return {
-        "vertices": occ.contents.vertices,
-        "vertex_count": int(occ.contents.vertex_count),
-        "faces": occ.contents.faces,
-        "face_count": int(occ.contents.face_count),
-        "objects": occ.contents.objects,
-        "object_count": int(occ.contents.object_count),
+        "vertices": model.occlusion_vertices,
+        "vertex_count": int(model.occlusion_vertex_count),
+        "faces": model.occlusion_faces,
+        "face_count": int(model.occlusion_face_count),
+        "objects": model.occlusion_objects,
+        "object_count": int(model.occlusion_object_count),
     }
 
 
 def collision_volume_metadata(coll) -> tuple[list[int], list[int]]:
     """Return per-volume owner object indices and plane starts.
 
-    Direct 3DI3 bounding-volume records do not repeat their owner object index
+    3DI3 bounding-volume records do not repeat their owner object index
     or plane start. Those are implied by the collision object's
     ``num_bounding_volumes`` and each volume's ``plane_count``.
     """
-    owners = [-1] * int(getattr(coll, "volume_count", 0))
-    plane_starts = [-1] * int(getattr(coll, "volume_count", 0))
+    owners = [-1] * int(coll.volume_count)
+    plane_starts = [-1] * int(coll.volume_count)
     volume_cursor = 0
     plane_cursor = 0
-    for object_idx in range(int(getattr(coll, "object_count", 0))):
+    for object_idx in range(int(coll.object_count)):
         obj = coll.objects[object_idx]
-        volume_count = max(0, int(getattr(obj, "num_bounding_volumes", 0)))
+        volume_count = max(0, int(obj.num_bounding_volumes))
         for _ in range(volume_count):
             if volume_cursor >= len(owners):
                 break
@@ -98,12 +83,12 @@ def material_collision_attributes(model) -> dict[int, tuple[int, int]]:
 
 
 def _material_collision_attributes_from_face_groups(model) -> dict[int, tuple[int, int]]:
-    """Fallback material collision attrs from first-seen CFAC groups."""
-    coll = getattr(model, "collision", None)
+    """Material collision attrs from first-seen CFAC groups."""
+    coll = model.collision
     if not coll:
         return {}
     face_count = int(coll.contents.face_count)
-    material_count = int(getattr(model, "material_count", 0))
+    material_count = int(model.material_count)
     ordered: list[tuple[int, int]] = []
     seen: set[tuple[int, int]] = set()
     for idx in range(face_count):

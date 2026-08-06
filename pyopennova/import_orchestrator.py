@@ -7,7 +7,7 @@ loaded 3DI / BAD handles. This module owns that scaffolding once; each DCC
 supplies a small `builder_factory` plus `output_writer` callable and delegates.
 
 Lifetime contract:
-  - Loaded 3DI IRs are freed via the ``loaded_3di_model`` context manager.
+  - Loaded 3DI models are freed via the ``loaded_3di_model`` context manager.
   - Parsed BAD files are freed via the ``parsed_bad_file`` context manager.
   - Callers don't need to wrap their builder/writer in try/finally — the
     orchestrator handles failure cleanup.
@@ -29,14 +29,14 @@ from typing import Callable, Iterator
 
 @contextmanager
 def loaded_3di_model(threedi_path: str | Path) -> Iterator[object]:
-    """Read a 3DI into an IR pointer; ``free_model_3di3`` on exit."""
+    """Read a 3DI into a ``Threedi3di3`` model; ``free_model_3di3`` on exit."""
     from pyopennova.threedi_ffi import free_model_3di3, read_model
 
-    ir = read_model(str(threedi_path))
+    model = read_model(str(threedi_path))
     try:
-        yield ir
+        yield model
     finally:
-        free_model_3di3(ir)
+        free_model_3di3(model)
 
 
 @contextmanager
@@ -78,10 +78,10 @@ def execute_loose_import(
 ) -> tuple[bool, list[str]]:
     """Loose import: read one 3DI, build a scene, write outputs.
 
-    ``builder_factory(ir, *, resolver, import_collisions, import_occlusion,
+    ``builder_factory(model, *, resolver, import_collisions, import_occlusion,
     import_lights)`` -> scene builder instance.
 
-    ``output_writer(ir, output_dir, name, builder, resolver)`` -> list of
+    ``output_writer(model, output_dir, name, builder, resolver)`` -> list of
     written paths. ``resolver`` is the active ``AssetResolver`` (some DCCs
     need it for texture copying; Max's writer ignores it).
 
@@ -99,9 +99,9 @@ def execute_loose_import(
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
 
-    with loaded_3di_model(threedi_path) as ir, AssetResolver(base_dir, game=game) as resolver:
+    with loaded_3di_model(threedi_path) as model, AssetResolver(base_dir, game=game) as resolver:
         builder = builder_factory(
-            ir,
+            model,
             resolver=resolver,
             import_collisions=import_collisions,
             import_occlusion=import_occlusion,
@@ -109,7 +109,7 @@ def execute_loose_import(
         )
         if not builder.build_basic_scene(name):
             return False, []
-        return True, list(output_writer(ir, output_dir, name, builder, resolver))
+        return True, list(output_writer(model, output_dir, name, builder, resolver))
 
 
 def execute_definition_import(
@@ -133,10 +133,10 @@ def execute_definition_import(
 ) -> tuple[bool, list[str], str]:
     """Definition import: resolve a plan, walk its main/secondary models, write.
 
-    ``builder_factory(ir, *, bad_file, anim_context, resolver,
+    ``builder_factory(model, *, bad_file, anim_context, resolver,
     import_collisions, import_occlusion, import_lights)`` -> scene builder.
 
-    ``output_writer(main_ir, project_dir, name, main_builder, resolver)``
+    ``output_writer(main_model, project_dir, name, main_builder, resolver)``
     -> list of written paths. ``resolver`` is the active ``AssetResolver``
     (Blender's writer uses it for texture copy; Max's ignores it).
 
@@ -144,7 +144,7 @@ def execute_definition_import(
     write; Max uses this for ``apply_animations``; Blender passes None
     because animation is wired during build).
 
-    ``secondary_texture_writer(ir, project_dir, resolver)`` -> None (Blender
+    ``secondary_texture_writer(model, project_dir, resolver)`` -> None (Blender
     copies textures per-secondary; Max bundles it into ``output_writer``).
 
     Returns ``(built_ok, written_paths, project_dir)``. ``built_ok`` tracks
@@ -177,17 +177,17 @@ def execute_definition_import(
         written: list[str] = []
         with parsed_bad_file(plan.reset_bad_path) as bad_file:
             main_builder = None
-            main_ir = None
+            main_model = None
             main_built = False
             try:
-                for model in plan.models:
-                    ir = read_model(model.path)
+                for entry in plan.models:
+                    model = read_model(entry.path)
                     try:
-                        if model.role == "main":
-                            main_ir = ir
+                        if entry.role == "main":
+                            main_model = model
                             ctx = plan.animation_context if import_animations else None
                             main_builder = builder_factory(
-                                ir,
+                                model,
                                 bad_file=bad_file,
                                 anim_context=ctx,
                                 resolver=resolver,
@@ -198,7 +198,7 @@ def execute_definition_import(
                             main_built = bool(main_builder.build_basic_scene(plan.scene_name))
                         elif main_builder is not None and main_built:
                             secondary = builder_factory(
-                                ir,
+                                model,
                                 bad_file=bad_file,
                                 anim_context=None,
                                 resolver=resolver,
@@ -208,17 +208,17 @@ def execute_definition_import(
                             )
                             if secondary.merge_with_existing_scene(main_builder):
                                 if secondary_texture_writer is not None:
-                                    secondary_texture_writer(ir, project_dir, resolver)
+                                    secondary_texture_writer(model, project_dir, resolver)
                     finally:
-                        if model.role != "main":
-                            free_model_3di3(ir)
+                        if entry.role != "main":
+                            free_model_3di3(model)
 
-                if main_built and main_builder is not None and main_ir is not None:
+                if main_built and main_builder is not None and main_model is not None:
                     if post_main_build is not None:
                         post_main_build(main_builder)
-                    written = list(output_writer(main_ir, project_dir, plan.export_name, main_builder, resolver))
+                    written = list(output_writer(main_model, project_dir, plan.export_name, main_builder, resolver))
             finally:
-                if main_ir is not None:
-                    free_model_3di3(main_ir)
+                if main_model is not None:
+                    free_model_3di3(main_model)
 
         return main_built, written, project_dir

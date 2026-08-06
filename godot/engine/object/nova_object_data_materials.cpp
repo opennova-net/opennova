@@ -1,6 +1,6 @@
-// NovaObjectData — materials & textures: IR material introspection and
-// editing, the shader catalog, and texture resolution through the resource
-// root / loose source directory.
+// NovaObjectData — materials & textures: MTRL introspection and editing on
+// the parsed model, the shader catalog, and texture resolution through the
+// resource root / loose source directory.
 #include "object/nova_object_data_internal.h"
 
 #include <oed/material_descriptor.h>
@@ -11,6 +11,9 @@
 using namespace novaobj;
 
 namespace {
+
+// The MTRL texture-slot array capacity (ThreediMaterial::textures).
+constexpr uint32_t kMaxMaterialTextures = 24;
 
 float dict_float(const Dictionary &dict, const char *key, float fallback) {
 	const String dict_key(key);
@@ -103,7 +106,7 @@ void add_shader_flag_fields(Dictionary &item, const char *shader_name, uint32_t 
 	item["normal_space"] = descriptor != nullptr ? from_native(shader_normal_space_name(descriptor->normal_space)) : String("none");
 }
 
-Dictionary uv_params_to_dict(const ThreediIRUvParams &params) {
+Dictionary uv_params_to_dict(const ThreediUvParams &params) {
 	Dictionary dict;
 	dict["style"] = params.style;
 	dict["phase"] = params.phase;
@@ -114,7 +117,7 @@ Dictionary uv_params_to_dict(const ThreediIRUvParams &params) {
 	return dict;
 }
 
-Dictionary alpha_gen_to_dict(const ThreediIRAlphaGen &gen) {
+Dictionary alpha_gen_to_dict(const ThreediAlphaGen &gen) {
 	Dictionary dict;
 	dict["style"] = gen.style;
 	dict["phase"] = gen.phase;
@@ -125,7 +128,7 @@ Dictionary alpha_gen_to_dict(const ThreediIRAlphaGen &gen) {
 	return dict;
 }
 
-Dictionary rgb_gen_to_dict(const ThreediIRRgbGen &gen) {
+Dictionary rgb_gen_to_dict(const ThreediRgbGen &gen) {
 	Dictionary dict;
 	dict["style"] = gen.style;
 	dict["phase"] = gen.phase;
@@ -136,7 +139,7 @@ Dictionary rgb_gen_to_dict(const ThreediIRRgbGen &gen) {
 	return dict;
 }
 
-Dictionary texture_animation_to_dict(const ThreediIRTexAnim &anim) {
+Dictionary texture_animation_to_dict(const ThreediTexAnim &anim) {
 	Dictionary dict;
 	dict["num_frames"] = anim.num_frames;
 	dict["animation_type"] = anim.animation_type;
@@ -144,7 +147,7 @@ Dictionary texture_animation_to_dict(const ThreediIRTexAnim &anim) {
 	return dict;
 }
 
-void apply_uv_params(ThreediIRUvParams &dst, const Dictionary &params) {
+void apply_uv_params(ThreediUvParams &dst, const Dictionary &params) {
 	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
 	dst.phase = dict_float(params, "phase", dst.phase);
 	dst.reg = dict_int(params, "reg", dst.reg);
@@ -153,7 +156,7 @@ void apply_uv_params(ThreediIRUvParams &dst, const Dictionary &params) {
 	dst.end = dict_float(params, "end", dst.end);
 }
 
-void apply_alpha_gen(ThreediIRAlphaGen &dst, const Dictionary &params) {
+void apply_alpha_gen(ThreediAlphaGen &dst, const Dictionary &params) {
 	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
 	dst.phase = dict_float(params, "phase", dst.phase);
 	dst.reg = dict_int(params, "reg", dst.reg);
@@ -162,7 +165,7 @@ void apply_alpha_gen(ThreediIRAlphaGen &dst, const Dictionary &params) {
 	dst.end = clamp_to_i16(dict_int(params, "end", dst.end));
 }
 
-void apply_rgb_gen(ThreediIRRgbGen &dst, const Dictionary &params) {
+void apply_rgb_gen(ThreediRgbGen &dst, const Dictionary &params) {
 	dst.style = static_cast<uint8_t>(std::clamp(dict_int(params, "style", dst.style), 0, 255));
 	dst.phase = dict_float(params, "phase", dst.phase);
 	dst.reg = dict_int(params, "reg", dst.reg);
@@ -181,17 +184,17 @@ void apply_rgb_gen(ThreediIRRgbGen &dst, const Dictionary &params) {
 	dst.end_color[3] = end.a;
 }
 
-void set_ir_texture_slot(ThreediIRMaterial &mat, int slot, int frame, const String &value, uint8_t flags) {
+void set_material_texture_slot_entry(ThreediMaterial &mat, int slot, int frame, const String &value, uint8_t flags) {
 	const String filename = String(value).get_file();
-	for (uint32_t i = 0; i < mat.texture_count && i < 8; ++i) {
-		ThreediIRMaterialTexture &tex = mat.textures[i];
+	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
+		ThreediMaterialTexture &tex = mat.textures[i];
 		if (tex.slot == static_cast<uint8_t>(slot) && tex.frame == static_cast<uint8_t>(frame) &&
 				((flags & THREEDI_TEX_FLAG_ANIMATED) == 0 || (tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0)) {
 			if (filename.is_empty()) {
 				if (i + 1 < mat.texture_count) {
 					mat.textures[i] = mat.textures[mat.texture_count - 1];
 				}
-				std::memset(&mat.textures[mat.texture_count - 1], 0, sizeof(ThreediIRMaterialTexture));
+				std::memset(&mat.textures[mat.texture_count - 1], 0, sizeof(ThreediMaterialTexture));
 				--mat.texture_count;
 			} else {
 				copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
@@ -203,14 +206,14 @@ void set_ir_texture_slot(ThreediIRMaterial &mat, int slot, int frame, const Stri
 		}
 	}
 
-	if (filename.is_empty() || mat.texture_count >= 8) {
+	if (filename.is_empty() || mat.texture_count >= kMaxMaterialTextures) {
 		return;
 	}
-	ThreediIRMaterialTexture &tex = mat.textures[mat.texture_count++];
+	ThreediMaterialTexture &tex = mat.textures[mat.texture_count++];
 	std::memset(&tex, 0, sizeof(tex));
 	copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
 	tex.slot = static_cast<uint8_t>(slot);
-	tex.type = (slot == THREEDI_IR_TEX_SLOT_NORMAL || slot == THREEDI_IR_TEX_SLOT_NORMAL_B) ? 4 : 0;
+	tex.type = (slot == THREEDI_TEX_SLOT_NORMAL || slot == THREEDI_TEX_SLOT_NORMAL_B) ? 4 : 0;
 	tex.flags = flags;
 	tex.frame = static_cast<uint8_t>(frame);
 }
@@ -218,25 +221,24 @@ void set_ir_texture_slot(ThreediIRMaterial &mat, int slot, int frame, const Stri
 } // namespace
 
 int NovaObjectData::get_material_count() const {
-	return has_ir ? static_cast<int>(ir.material_count) : 0;
+	return has_source_model ? static_cast<int>(source_model.material_count) : 0;
 }
 
 Array NovaObjectData::get_materials() const {
 	Array result;
-	if (!has_ir) {
+	if (!has_source_model) {
 		return result;
 	}
-	for (size_t i = 0; i < ir.material_count; ++i) {
-		const ThreediIRMaterial &mat = ir.materials[i];
+	for (size_t i = 0; i < source_model.material_count; ++i) {
+		const ThreediMaterial &mat = source_model.materials[i];
 		Dictionary item;
 		item["index"] = static_cast<int64_t>(i);
 		item["material_index"] = mat.index;
 		item["shader"] = from_native(mat.shader_name);
 		add_shader_flag_fields(item, mat.shader_name, shader_flags_for_tag(mat.shader_name));
 		item["texture_count"] = mat.texture_count;
-		item["alpha_threshold"] = mat.alpha_threshold;
-		item["flags"] = static_cast<int64_t>(mat.flags);
-		item["blend_mode"] = static_cast<int64_t>(mat.blend_mode);
+		item["alpha_threshold"] = static_cast<float>(mat.alpha_test_value_byte) / 255.0f;
+		item["flags"] = static_cast<int64_t>(mat.material_flags);
 		item["u_params"] = uv_params_to_dict(mat.u_params);
 		item["v_params"] = uv_params_to_dict(mat.v_params);
 		item["alpha_gen"] = alpha_gen_to_dict(mat.alpha_gen);
@@ -245,15 +247,8 @@ Array NovaObjectData::get_materials() const {
 		item["reflect_color"] = Color(mat.reflect_color[0], mat.reflect_color[1], mat.reflect_color[2], mat.reflect_color[3]);
 		item["is_glass"] = mat.is_glass != 0;
 		item["emissive_type"] = mat.emissive_type;
-		item["emissive_color"] = static_cast<int64_t>(mat.emissive_color);
-		item["specular_intensity"] = static_cast<int64_t>(mat.specular_intensity);
-		item["luminosity"] = static_cast<int64_t>(mat.luminosity);
-		item["u_tiling"] = mat.u_tiling;
-		item["v_tiling"] = mat.v_tiling;
-		item["surface_type"] = mat.surface_type;
-		item["pattrib"] = static_cast<int64_t>(mat.pattrib);
 		Array textures;
-		for (uint32_t t = 0; t < mat.texture_count && t < 8; ++t) {
+		for (uint32_t t = 0; t < mat.texture_count && t < kMaxMaterialTextures; ++t) {
 			Dictionary tex;
 			tex["name"] = from_native(mat.textures[t].name);
 			tex["slot"] = mat.textures[t].slot;
@@ -274,31 +269,31 @@ Array NovaObjectData::get_materials() const {
 
 Dictionary NovaObjectData::get_material_info(int p_index) const {
 	Dictionary info;
-	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
+	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return info;
 	}
-	const ThreediIRMaterial &mat = ir.materials[p_index];
+	const ThreediMaterial &mat = source_model.materials[p_index];
 	info["name"] = from_native(mat.shader_name);
 	info["shader_tag"] = from_native(mat.shader_name);
-	info["alpha_test"] = to_u8_color(mat.alpha_threshold);
-	info["alpha_invert"] = (mat.flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT) != 0;
-	info["two_sided"] = (mat.flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED) != 0;
-	info["alpha_test_enabled"] = (mat.flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST) != 0;
+	info["alpha_test"] = static_cast<int>(mat.alpha_test_value_byte);
+	info["alpha_invert"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0;
+	info["two_sided"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_TWO_SIDED) != 0;
+	info["alpha_test_enabled"] = (mat.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0;
 	info["is_glass"] = mat.is_glass != 0;
-	info["emissive"] = mat.emissive_type == THREEDI_EMISSIVE_FULL || mat.emissive_type == 2;
+	info["emissive"] = mat.emissive_type == THREEDI_EMISSIVE_FULL;
 	info["diffuse_a"] = String();
 	info["detail_a"] = String();
 	info["normal_a"] = String();
-	for (uint32_t i = 0; i < mat.texture_count && i < 8; ++i) {
-		const ThreediIRMaterialTexture &tex = mat.textures[i];
+	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
+		const ThreediMaterialTexture &tex = mat.textures[i];
 		if ((tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0 && tex.frame != 0) {
 			continue;
 		}
-		if (tex.slot == THREEDI_IR_TEX_SLOT_DIFFUSE && String(info["diffuse_a"]).is_empty()) {
+		if (tex.slot == THREEDI_TEX_SLOT_DIFFUSE && String(info["diffuse_a"]).is_empty()) {
 			info["diffuse_a"] = from_native(tex.name);
-		} else if (tex.slot == THREEDI_IR_TEX_SLOT_DETAIL && String(info["detail_a"]).is_empty()) {
+		} else if (tex.slot == THREEDI_TEX_SLOT_DETAIL && String(info["detail_a"]).is_empty()) {
 			info["detail_a"] = from_native(tex.name);
-		} else if ((tex.slot == THREEDI_IR_TEX_SLOT_NORMAL || tex.slot == THREEDI_IR_TEX_SLOT_NORMAL_B) &&
+		} else if ((tex.slot == THREEDI_TEX_SLOT_NORMAL || tex.slot == THREEDI_TEX_SLOT_NORMAL_B) &&
 				String(info["normal_a"]).is_empty()) {
 			info["normal_a"] = from_native(tex.name);
 		}
@@ -310,28 +305,28 @@ Dictionary NovaObjectData::get_material_info(int p_index) const {
 	info["rgb_gen_start_color"] = Color(mat.rgb_gen.start_color[0], mat.rgb_gen.start_color[1], mat.rgb_gen.start_color[2], mat.rgb_gen.start_color[3]);
 	info["rgb_gen_end_color"] = Color(mat.rgb_gen.end_color[0], mat.rgb_gen.end_color[1], mat.rgb_gen.end_color[2], mat.rgb_gen.end_color[3]);
 	info["rgb_gen_reg"] = mat.rgb_gen.reg;
-	info["rgb_gen_reg_name"] = control_register_name_for(ir, mat.rgb_gen.reg);
+	info["rgb_gen_reg_name"] = control_register_name_for(source_model, mat.rgb_gen.reg);
 	info["alpha_gen_style"] = static_cast<int>(mat.alpha_gen.style);
 	info["alpha_gen_rate"] = mat.alpha_gen.rate;
 	info["alpha_gen_phase"] = mat.alpha_gen.phase;
 	info["alpha_gen_start"] = static_cast<int>(mat.alpha_gen.start);
 	info["alpha_gen_end"] = static_cast<int>(mat.alpha_gen.end);
 	info["alpha_gen_reg"] = mat.alpha_gen.reg;
-	info["alpha_gen_reg_name"] = control_register_name_for(ir, mat.alpha_gen.reg);
+	info["alpha_gen_reg_name"] = control_register_name_for(source_model, mat.alpha_gen.reg);
 	info["uv_u_style"] = static_cast<int>(mat.u_params.style);
 	info["uv_u_rate"] = mat.u_params.gen_rate;
 	info["uv_u_phase"] = mat.u_params.phase;
 	info["uv_u_start"] = mat.u_params.start;
 	info["uv_u_end"] = mat.u_params.end;
 	info["uv_u_reg"] = mat.u_params.reg;
-	info["uv_u_reg_name"] = control_register_name_for(ir, mat.u_params.reg);
+	info["uv_u_reg_name"] = control_register_name_for(source_model, mat.u_params.reg);
 	info["uv_v_style"] = static_cast<int>(mat.v_params.style);
 	info["uv_v_rate"] = mat.v_params.gen_rate;
 	info["uv_v_phase"] = mat.v_params.phase;
 	info["uv_v_start"] = mat.v_params.start;
 	info["uv_v_end"] = mat.v_params.end;
 	info["uv_v_reg"] = mat.v_params.reg;
-	info["uv_v_reg_name"] = control_register_name_for(ir, mat.v_params.reg);
+	info["uv_v_reg_name"] = control_register_name_for(source_model, mat.v_params.reg);
 	info["anim_frames"] = static_cast<int>(mat.animation.num_frames);
 	info["anim_type"] = static_cast<int>(mat.animation.animation_type);
 	info["anim_frame_time"] = static_cast<int>(mat.animation.cycle_frame_time);
@@ -339,17 +334,17 @@ Dictionary NovaObjectData::get_material_info(int p_index) const {
 }
 
 bool NovaObjectData::set_material_field(int p_index, const String &p_key, const Variant &p_value) {
-	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
+	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return false;
 	}
-	ThreediIRMaterial &mat = ir.materials[p_index];
+	ThreediMaterial &mat = source_model.materials[p_index];
 	const String key = p_key;
 
-	auto set_flag = [&](uint32_t flag) {
+	auto set_flag = [&](uint8_t flag) {
 		if (static_cast<bool>(p_value)) {
-			mat.flags |= flag;
+			mat.material_flags |= flag;
 		} else {
-			mat.flags &= ~flag;
+			mat.material_flags &= static_cast<uint8_t>(~flag);
 		}
 	};
 	auto set_color = [&](float out[4]) {
@@ -360,7 +355,7 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 		out[3] = c.a;
 	};
 	auto resolve_reg = [&](const String &name, int32_t &reg) -> bool {
-		return resolve_control_register_index(ir, name, reg);
+		return resolve_control_register_index(source_model, name, reg);
 	};
 
 	if (key == "shader_tag" || key == "name") {
@@ -369,22 +364,22 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 		return true;
 	}
 	if (key == "alpha_test") {
-		mat.alpha_threshold = std::clamp(static_cast<float>(static_cast<int>(p_value)) / 255.0f, 0.0f, 1.0f);
+		mat.alpha_test_value_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "alpha_test_enabled") {
-		set_flag(THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST);
+		set_flag(THREEDI_MATERIAL_FLAG_ALPHA_TEST);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "alpha_invert") {
-		set_flag(THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT);
+		set_flag(THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "two_sided") {
-		set_flag(THREEDI_IR_MATERIAL_FLAG_TWO_SIDED);
+		set_flag(THREEDI_MATERIAL_FLAG_TWO_SIDED);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
@@ -394,22 +389,22 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 		return true;
 	}
 	if (key == "emissive") {
-		mat.emissive_type = static_cast<bool>(p_value) ? 2 : 0;
+		mat.emissive_type = static_cast<bool>(p_value) ? THREEDI_EMISSIVE_FULL : THREEDI_EMISSIVE_NONE;
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "diffuse_a") {
-		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_DIFFUSE, 0, p_value, 0);
+		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_DIFFUSE, 0, p_value, 0);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "detail_a") {
-		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_DETAIL, 0, p_value, 0);
+		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_DETAIL, 0, p_value, 0);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
 	if (key == "normal_a") {
-		set_ir_texture_slot(mat, THREEDI_IR_TEX_SLOT_NORMAL, 0, p_value, 0);
+		set_material_texture_slot_entry(mat, THREEDI_TEX_SLOT_NORMAL, 0, p_value, 0);
 		_notify_object_changed(UPDATE_MTRL);
 		return true;
 	}
@@ -450,18 +445,18 @@ bool NovaObjectData::set_material_field(int p_index, const String &p_key, const 
 }
 
 int NovaObjectData::get_material_shader_flags(int p_index) const {
-	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
+	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return 0;
 	}
-	return static_cast<int>(shader_flags_for_tag(ir.materials[p_index].shader_name));
+	return static_cast<int>(shader_flags_for_tag(source_model.materials[p_index].shader_name));
 }
 
 PackedStringArray NovaObjectData::get_material_anim_frames(int p_index, int p_slot) const {
 	PackedStringArray out;
-	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
+	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return out;
 	}
-	const ThreediIRMaterial &mat = ir.materials[p_index];
+	const ThreediMaterial &mat = source_model.materials[p_index];
 	const int frames = static_cast<int>(mat.animation.num_frames);
 	if (frames <= 0) {
 		return out;
@@ -470,8 +465,8 @@ PackedStringArray NovaObjectData::get_material_anim_frames(int p_index, int p_sl
 	for (int i = 0; i < frames; ++i) {
 		out[i] = String();
 	}
-	for (uint32_t i = 0; i < mat.texture_count && i < 8; ++i) {
-		const ThreediIRMaterialTexture &tex = mat.textures[i];
+	for (uint32_t i = 0; i < mat.texture_count && i < kMaxMaterialTextures; ++i) {
+		const ThreediMaterialTexture &tex = mat.textures[i];
 		if (tex.slot == static_cast<uint8_t>(p_slot) &&
 				(tex.flags & THREEDI_TEX_FLAG_ANIMATED) != 0 &&
 				tex.frame < frames) {
@@ -482,14 +477,14 @@ PackedStringArray NovaObjectData::get_material_anim_frames(int p_index, int p_sl
 }
 
 bool NovaObjectData::set_material_anim_frame(int p_index, int p_slot, int p_frame_idx, const String &p_path) {
-	if (!has_ir || p_index < 0 || static_cast<size_t>(p_index) >= ir.material_count) {
+	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return false;
 	}
-	ThreediIRMaterial &mat = ir.materials[p_index];
+	ThreediMaterial &mat = source_model.materials[p_index];
 	if (p_frame_idx < 0 || p_frame_idx >= static_cast<int>(mat.animation.num_frames)) {
 		return false;
 	}
-	set_ir_texture_slot(mat, p_slot, p_frame_idx, p_path, THREEDI_TEX_FLAG_ANIMATED);
+	set_material_texture_slot_entry(mat, p_slot, p_frame_idx, p_path, THREEDI_TEX_FLAG_ANIMATED);
 	_notify_object_changed(UPDATE_MTRL);
 	return true;
 }
@@ -529,11 +524,11 @@ String NovaObjectData::canonical_control_register_name(const String &p_name) {
 
 Array NovaObjectData::get_control_registers() const {
 	Array result;
-	if (!has_ir) {
+	if (!has_source_model) {
 		return result;
 	}
-	for (size_t i = 0; i < ir.control_register_count; ++i) {
-		const char *authored_name = ir.control_registers[i].name;
+	for (uint32_t i = 0; i < source_model.ctrl.count; ++i) {
+		const char *authored_name = source_model.ctrl.registers[i].name;
 		const uint8_t runtime_ordinal =
 				threedi_ctrl_register_loader_ordinal(authored_name);
 		Dictionary item;
@@ -554,16 +549,16 @@ Array NovaObjectData::get_control_registers() const {
 
 bool NovaObjectData::set_control_register_name(
 		int p_index, const String &p_name) {
-	if (!has_ir || ir.control_registers == nullptr || p_index < 0 ||
-			static_cast<size_t>(p_index) >= ir.control_register_count) {
+	if (!has_source_model || source_model.ctrl.registers == nullptr || p_index < 0 ||
+			static_cast<uint32_t>(p_index) >= source_model.ctrl.count) {
 		return false;
 	}
 	const std::string name = to_std(p_name);
 	if (name.size() > 24) {
 		return false;
 	}
-	copy_cstr(ir.control_registers[p_index].name,
-			sizeof(ir.control_registers[p_index].name), name.c_str());
+	copy_cstr(source_model.ctrl.registers[p_index].name,
+			sizeof(source_model.ctrl.registers[p_index].name), name.c_str());
 	// A local CTRL rename can retarget material, texture, PANM, and light
 	// references after the retail loader-name fixup, so invalidate every
 	// dependent view rather than guessing which blocks cite this slot.
@@ -572,12 +567,12 @@ bool NovaObjectData::set_control_register_name(
 }
 
 String NovaObjectData::resolve_material_texture_path(int p_material_index, int p_texture_index) const {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count ||
-			p_texture_index < 0 || p_texture_index >= 8) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count ||
+			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return String();
 	}
 
-	const ThreediIRMaterial &material = ir.materials[p_material_index];
+	const ThreediMaterial &material = source_model.materials[p_material_index];
 	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
 		return String();
 	}
@@ -591,12 +586,12 @@ String NovaObjectData::resolve_material_texture_path(int p_material_index, int p
 }
 
 Ref<Texture2D> NovaObjectData::load_material_texture(int p_material_index, int p_texture_index) const {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count ||
-			p_texture_index < 0 || p_texture_index >= 8) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count ||
+			p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return Ref<Texture2D>();
 	}
 
-	const ThreediIRMaterial &material = ir.materials[p_material_index];
+	const ThreediMaterial &material = source_model.materials[p_material_index];
 	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
 		return Ref<Texture2D>();
 	}
@@ -608,7 +603,7 @@ Ref<Texture2D> NovaObjectData::load_material_texture(int p_material_index, int p
 }
 
 String NovaObjectData::resolve_texture_name(const String &p_texture_name) const {
-	if (!has_ir || p_texture_name.is_empty()) {
+	if (!has_source_model || p_texture_name.is_empty()) {
 		return String();
 	}
 	if (resource_root.is_valid()) {
@@ -619,7 +614,7 @@ String NovaObjectData::resolve_texture_name(const String &p_texture_name) const 
 }
 
 Ref<Texture2D> NovaObjectData::load_texture_name(const String &p_texture_name) const {
-	if (!has_ir || p_texture_name.is_empty()) {
+	if (!has_source_model || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();
 	}
 	if (resource_root.is_valid()) {
@@ -629,21 +624,22 @@ Ref<Texture2D> NovaObjectData::load_texture_name(const String &p_texture_name) c
 }
 
 Error NovaObjectData::set_material_shader(int p_material_index, const String &p_shader_name) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	copy_cstr(ir.materials[p_material_index].shader_name, sizeof(ir.materials[p_material_index].shader_name),
+	copy_cstr(source_model.materials[p_material_index].shader_name,
+			sizeof(source_model.materials[p_material_index].shader_name),
 			to_std(p_shader_name).c_str());
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
 Error NovaObjectData::set_material_texture(int p_material_index, int p_texture_index, const String &p_texture_name) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	ThreediIRMaterial &material = ir.materials[p_material_index];
-	if (p_texture_index < 0 || p_texture_index >= 8) {
+	ThreediMaterial &material = source_model.materials[p_material_index];
+	if (p_texture_index < 0 || p_texture_index >= static_cast<int>(kMaxMaterialTextures)) {
 		return ERR_INVALID_PARAMETER;
 	}
 	if (static_cast<uint32_t>(p_texture_index) >= material.texture_count) {
@@ -652,23 +648,23 @@ Error NovaObjectData::set_material_texture(int p_material_index, int p_texture_i
 	copy_cstr(material.textures[p_texture_index].name, sizeof(material.textures[p_texture_index].name),
 			to_std(p_texture_name).c_str());
 	if (material.textures[p_texture_index].slot == 0) {
-		material.textures[p_texture_index].slot = THREEDI_IR_TEX_SLOT_DIFFUSE;
+		material.textures[p_texture_index].slot = THREEDI_TEX_SLOT_DIFFUSE;
 	}
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
 Error NovaObjectData::set_material_texture_slot(int p_material_index, int p_slot, const String &p_texture_name) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	if (p_slot < THREEDI_IR_TEX_SLOT_DIFFUSE || p_slot > THREEDI_IR_TEX_SLOT_NORMAL_B) {
+	if (p_slot < THREEDI_TEX_SLOT_DIFFUSE || p_slot > THREEDI_TEX_SLOT_NORMAL_B) {
 		return ERR_INVALID_PARAMETER;
 	}
 
-	ThreediIRMaterial &material = ir.materials[p_material_index];
+	ThreediMaterial &material = source_model.materials[p_material_index];
 	int texture_index = -1;
-	for (uint32_t i = 0; i < material.texture_count && i < 8; ++i) {
+	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
 		if (material.textures[i].slot == static_cast<uint8_t>(p_slot)) {
 			texture_index = static_cast<int>(i);
 			break;
@@ -679,21 +675,21 @@ Error NovaObjectData::set_material_texture_slot(int p_material_index, int p_slot
 		if (p_texture_name.is_empty()) {
 			return OK;
 		}
-		if (material.texture_count >= 8) {
+		if (material.texture_count >= kMaxMaterialTextures) {
 			return ERR_OUT_OF_MEMORY;
 		}
 		texture_index = static_cast<int>(material.texture_count);
 		++material.texture_count;
-		ThreediIRMaterialTexture &texture = material.textures[texture_index];
+		ThreediMaterialTexture &texture = material.textures[texture_index];
 		std::memset(&texture, 0, sizeof(texture));
 		texture.slot = static_cast<uint8_t>(p_slot);
-		texture.type = (p_slot == THREEDI_IR_TEX_SLOT_NORMAL || p_slot == THREEDI_IR_TEX_SLOT_NORMAL_B) ? 4 : 0;
+		texture.type = (p_slot == THREEDI_TEX_SLOT_NORMAL || p_slot == THREEDI_TEX_SLOT_NORMAL_B) ? 4 : 0;
 	}
 
-	ThreediIRMaterialTexture &texture = material.textures[texture_index];
+	ThreediMaterialTexture &texture = material.textures[texture_index];
 	copy_cstr(texture.name, sizeof(texture.name), to_std(p_texture_name.get_file()).c_str());
 	texture.slot = static_cast<uint8_t>(p_slot);
-	if (p_slot == THREEDI_IR_TEX_SLOT_NORMAL || p_slot == THREEDI_IR_TEX_SLOT_NORMAL_B) {
+	if (p_slot == THREEDI_TEX_SLOT_NORMAL || p_slot == THREEDI_TEX_SLOT_NORMAL_B) {
 		const String texture_name = p_texture_name.to_lower();
 		texture.type = texture_name.contains(".tga") ? 5 : 4;
 	} else {
@@ -704,16 +700,16 @@ Error NovaObjectData::set_material_texture_slot(int p_material_index, int p_slot
 }
 
 Error NovaObjectData::set_material_texture_slot_options(int p_material_index, int p_slot, int p_flags, int p_frame, int p_type) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	if (p_slot < THREEDI_IR_TEX_SLOT_DIFFUSE || p_slot > THREEDI_IR_TEX_SLOT_NORMAL_B) {
+	if (p_slot < THREEDI_TEX_SLOT_DIFFUSE || p_slot > THREEDI_TEX_SLOT_NORMAL_B) {
 		return ERR_INVALID_PARAMETER;
 	}
 
-	ThreediIRMaterial &material = ir.materials[p_material_index];
-	for (uint32_t i = 0; i < material.texture_count && i < 8; ++i) {
-		ThreediIRMaterialTexture &texture = material.textures[i];
+	ThreediMaterial &material = source_model.materials[p_material_index];
+	for (uint32_t i = 0; i < material.texture_count && i < kMaxMaterialTextures; ++i) {
+		ThreediMaterialTexture &texture = material.textures[i];
 		if (texture.slot != static_cast<uint8_t>(p_slot)) {
 			continue;
 		}
@@ -728,24 +724,25 @@ Error NovaObjectData::set_material_texture_slot_options(int p_material_index, in
 }
 
 Error NovaObjectData::set_material_alpha_threshold(int p_material_index, float p_alpha_threshold) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	ir.materials[p_material_index].alpha_threshold = std::clamp(p_alpha_threshold, 0.0f, 1.0f);
-	ir.materials[p_material_index].flags |= THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST;
+	source_model.materials[p_material_index].alpha_test_value_byte =
+			to_u8_color(std::clamp(p_alpha_threshold, 0.0f, 1.0f));
+	source_model.materials[p_material_index].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
 Error NovaObjectData::set_material_uv_generator(int p_material_index, const String &p_axis, const Dictionary &p_params) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
 	const String axis = p_axis.to_lower();
 	if (axis == "u") {
-		apply_uv_params(ir.materials[p_material_index].u_params, p_params);
+		apply_uv_params(source_model.materials[p_material_index].u_params, p_params);
 	} else if (axis == "v") {
-		apply_uv_params(ir.materials[p_material_index].v_params, p_params);
+		apply_uv_params(source_model.materials[p_material_index].v_params, p_params);
 	} else {
 		return ERR_INVALID_PARAMETER;
 	}
@@ -754,28 +751,28 @@ Error NovaObjectData::set_material_uv_generator(int p_material_index, const Stri
 }
 
 Error NovaObjectData::set_material_rgb_generator(int p_material_index, const Dictionary &p_params) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	apply_rgb_gen(ir.materials[p_material_index].rgb_gen, p_params);
+	apply_rgb_gen(source_model.materials[p_material_index].rgb_gen, p_params);
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
 Error NovaObjectData::set_material_alpha_generator(int p_material_index, const Dictionary &p_params) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	apply_alpha_gen(ir.materials[p_material_index].alpha_gen, p_params);
+	apply_alpha_gen(source_model.materials[p_material_index].alpha_gen, p_params);
 	_notify_object_changed(UPDATE_MTRL);
 	return OK;
 }
 
 Error NovaObjectData::set_material_texture_animation(int p_material_index, const Dictionary &p_params) {
-	if (!has_ir || p_material_index < 0 || static_cast<size_t>(p_material_index) >= ir.material_count) {
+	if (!has_source_model || p_material_index < 0 || static_cast<size_t>(p_material_index) >= source_model.material_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	ThreediIRTexAnim &animation = ir.materials[p_material_index].animation;
+	ThreediTexAnim &animation = source_model.materials[p_material_index].animation;
 	animation.num_frames = static_cast<uint8_t>(std::clamp(dict_int(p_params, "num_frames", animation.num_frames), 0, 255));
 	animation.animation_type = static_cast<uint8_t>(std::clamp(dict_int(p_params, "animation_type", animation.animation_type), 0, 255));
 	animation.cycle_frame_time = clamp_to_i16(dict_int(p_params, "cycle_frame_time", animation.cycle_frame_time));

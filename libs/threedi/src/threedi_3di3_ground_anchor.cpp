@@ -1,4 +1,4 @@
-// Placement ground-anchor resolution for IR models.
+// Placement ground-anchor resolution for 3DI3 models.
 //
 // When a placed object's stored position marks where it meets the terrain, the
 // renderer must offset the model so its "ground" reference point lands there
@@ -13,11 +13,11 @@
 //      here (part-0 bounding-sphere center) buried every userpoint-less model
 //      by its center height.
 //
-// Returned verbatim in the IR's native axis order so callers apply their own
-// coordinate convention exactly once (see NovaObjectData::get_ground_anchor,
-// which feeds the result through godot_vec3).
+// Returned in model space (threedi_user_point_position's axis order) so callers
+// apply their own coordinate convention exactly once (see
+// NovaObjectData::get_ground_anchor, which feeds the result through godot_vec3).
 
-#include "threedi/threedi_ir.h"
+#include "threedi/threedi_3di3.h"
 
 #include <stddef.h>
 
@@ -44,19 +44,16 @@ static int name_matches_ignore_case(const char *name, size_t name_cap, const cha
     return 0; // name ran its full capacity without terminating: not a match
 }
 
-int threedi_ir_ground_anchor(const ThreediModelIR *ir, int lod_index, float out[3]) {
-    (void)lod_index; // kept for ABI stability; the fallback no longer reads LOD data
-    if (!ir || !out) {
+extern "C" int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
+    if (!model || !out) {
         return 0;
     }
 
     // 1. "ground" userpoint. Userpoints are model-global, so the LOD is irrelevant here.
-    for (size_t i = 0; i < ir->userpoint_count; ++i) {
-        const ThreediIRUserPoint *up = &ir->userpoints[i];
+    for (size_t i = 0; i < model->user_point_count; ++i) {
+        const ThreediUserPoint *up = &model->user_points[i];
         if (name_matches_ignore_case(up->name, sizeof(up->name), "ground")) {
-            out[0] = up->position[0];
-            out[1] = up->position[1];
-            out[2] = up->position[2];
+            threedi_user_point_position(up, out);
             return 1;
         }
     }

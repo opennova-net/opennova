@@ -1,8 +1,8 @@
-// Test: load a .3di fixture, compute a .3dp via tdp_from_ir, compare to expected .3dp.
+// Test: load a .3di fixture, compute a .3dp via tdp_from_3di, compare to expected .3dp.
 // Iterates all subdirectories in fixtures/3dp/ so new fixtures are picked up automatically.
 
 #include "tdp/tdp.h"
-#include "threedi/threedi_ir.h"
+#include "threedi/threedi_3di3.h"
 
 #include <cmath>
 #include <cstdio>
@@ -255,21 +255,20 @@ static int test_fixture(const char *fixture_dir, const char *name) {
     std::snprintf(path_3dp_actual, sizeof(path_3dp_actual), "%s/tdp_from_3di_test_%s.3dp",
                   test_paths_temp_dir(), name);
 
-    // Load 3DI → IR
-    ThreediModelIR ir;
-    threedi_ir_init(&ir);
-    int rc = threedi_ir_read(path_3di, &ir);
+    // Load the 3DI
+    Threedi3di3 model = {};
+    int rc = threedi_3di3_read(path_3di, &model);
     if (rc != 0) {
-        std::fprintf(stderr, "FAIL [%s]: threedi_ir_read failed for %s\n", name, path_3di);
+        std::fprintf(stderr, "FAIL [%s]: threedi_3di3_read failed for %s\n", name, path_3di);
         return -1;
     }
 
-    // IR → TdpProject
+    // Model → TdpProject
     TdpProject proj;
-    rc = tdp_from_ir(&ir, &proj);
+    rc = tdp_from_3di(&model, &proj);
     if (rc != 0) {
-        std::fprintf(stderr, "FAIL [%s]: tdp_from_ir failed\n", name);
-        threedi_ir_free(&ir);
+        std::fprintf(stderr, "FAIL [%s]: tdp_from_3di failed\n", name);
+        threedi_3di3_free(&model);
         return -1;
     }
 
@@ -278,7 +277,7 @@ static int test_fixture(const char *fixture_dir, const char *name) {
     if (rc != 0) {
         std::fprintf(stderr, "FAIL [%s]: tdp_write failed\n", name);
         tdp_free(&proj);
-        threedi_ir_free(&ir);
+        threedi_3di3_free(&model);
         return -1;
     }
 
@@ -295,7 +294,7 @@ static int test_fixture(const char *fixture_dir, const char *name) {
     }
 
     tdp_free(&proj);
-    threedi_ir_free(&ir);
+    threedi_3di3_free(&model);
     return rc;
 }
 

@@ -308,6 +308,11 @@ _MAX_SCRIPT = r'''
 import os, sys
 REPO = {repo!r}
 sys.path.insert(0, REPO)
+# The Max plugin auto-load may have pre-imported these packages from another
+# checkout at startup; purge so the runner tests THIS worktree.
+for _mod in [m for m in list(sys.modules)
+             if m.split(".")[0] in ("opennova_max", "pyopennova")]:
+    del sys.modules[_mod]
 for _m in list(sys.modules):
     if (_m == "opennova_max" or _m.startswith("opennova_max.")
             or _m == "pyopennova" or _m.startswith("pyopennova.")
@@ -331,13 +336,13 @@ w = next(x for x in weapons if x.name == ITEM)
 threedi = resolver.resolve(ensure_extension(w.graphic1.main, ".3di"))
 anim_ctx = build_animation_context(w.anim_adm, resolver=resolver)
 reset_bad = parse_bad(anim_ctx.reset_animation.bad_filepath)
-ir = read_model(str(threedi))
-b = MaxSceneBuilder(ir, bad_file=reset_bad, anim_context=anim_ctx, resolver=resolver,
+model = read_model(str(threedi))
+b = MaxSceneBuilder(model, bad_file=reset_bad, anim_context=anim_ctx, resolver=resolver,
                     import_collisions=False, import_occlusion=False, import_lights=False)
 b.build_basic_scene("parity"); b.apply_animations()
 os.makedirs(OUT, exist_ok=True)
 AnimSceneExporter(rt).export(os.path.join(OUT, os.path.splitext(os.path.basename(ITEM))[0] + ".adm"))
-free_model_3di3(ir); free_bad(reset_bad); resolver.__exit__(None, None, None)
+free_model_3di3(model); free_bad(reset_bad); resolver.__exit__(None, None, None)
 '''
 
 

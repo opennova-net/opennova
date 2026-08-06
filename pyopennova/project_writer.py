@@ -7,8 +7,8 @@ import os
 log = logging.getLogger(__name__)
 
 
-def derive_poly_collision_lod(ir) -> int:
-    """Recover the .3dp ``poly_collision_lod`` value from a model data.
+def derive_poly_collision_lod(model) -> int:
+    """Recover the .3dp ``poly_collision_lod`` value from a ``Threedi3di3`` model.
 
     Stock 3DI files do not store this build-time setting directly, but it
     is recoverable: OED's ``WriteCDTA @ 0x456050`` (in ModSuperOed.exe.i64)
@@ -28,14 +28,14 @@ def derive_poly_collision_lod(ir) -> int:
     Returns ``-1`` when the 3DI3 model has no collision data, no LODs, or no
     exact count evidence.
     """
-    coll = _collision_model(ir)
+    coll = _collision_model(model)
     if coll is None:
         return -1
-    target_face_count = int(getattr(coll, "face_count", 0))
-    target_vertex_count = int(getattr(coll, "vertex_count", 0))
+    target_face_count = int(coll.face_count)
+    target_vertex_count = int(coll.vertex_count)
     if target_face_count <= 0 or target_vertex_count <= 0:
         return -1
-    lod_count = int(getattr(ir, "lod_count", 0))
+    lod_count = int(model.lod_count)
     if lod_count == 0:
         return -1
     if lod_count == 1:
@@ -43,54 +43,41 @@ def derive_poly_collision_lod(ir) -> int:
 
     face_matches: list[int] = []
     for i in range(lod_count):
-        if _lod_triangle_count(ir.lods[i]) == target_face_count:
+        if _lod_triangle_count(model.lods[i]) == target_face_count:
             face_matches.append(i)
     if face_matches:
         vertex_face_matches = [
             i for i in face_matches
-            if target_vertex_count > 0 and int(getattr(ir.lods[i], "vertex_count", 0)) == target_vertex_count
+            if target_vertex_count > 0 and int(model.lods[i].vertices.count) == target_vertex_count
         ]
         return (vertex_face_matches or face_matches)[-1]
 
     matches: list[int] = []
     for i in range(lod_count):
-        if int(getattr(ir.lods[i], "vertex_count", 0)) == target_vertex_count:
+        if int(model.lods[i].vertices.count) == target_vertex_count:
             matches.append(i)
     if matches:
         return matches[-1]
     return -1
 
 
-def _collision_model(ir):
-    coll = getattr(ir, "collision", None)
+def _collision_model(model):
+    coll = model.collision
     if not coll:
         return None
-    try:
-        return coll[0]
-    except (IndexError, TypeError, ValueError):
-        return coll
+    return coll[0]
 
 
 def _lod_triangle_count(lod) -> int:
-    strip_count = int(getattr(lod, "strip_count", getattr(lod, "primitive_count", 0)))
-    strips = getattr(lod, "strips", getattr(lod, "primitives", None))
+    strip_count = int(lod.strip_count)
+    strips = lod.strips
     if strips and strip_count > 0:
-        total = 0
-        for i in range(strip_count):
-            strip = strips[i]
-            num_triangles = getattr(strip, "num_triangles", None)
-            if num_triangles is None:
-                num_triangles = getattr(strip, "triangle_count", None)
-            if num_triangles is None:
-                num_triangles = int(getattr(strip, "index_count", 0)) // 3
-            total += int(num_triangles)
-        return total
-    index_count = int(getattr(lod, "index_count", 0))
-    return index_count // 3
+        return sum(int(strips[i].num_triangles) for i in range(strip_count))
+    return int(lod.indices.count) // 3
 
 
 def write_3dp_from_3di3(
-    ir,
+    model,
     tdp_path: str,
     collision_lod_index: int | None = None,
 ) -> tuple[str]:
@@ -105,23 +92,23 @@ def write_3dp_from_3di3(
     from pyopennova.tdp_ffi import (
         TDP_MAX_LODS,
         free_tdp,
-        tdp_from_3di3,
+        tdp_from_3di,
         write_tdp,
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(tdp_path)), exist_ok=True)
-    proj = tdp_from_3di3(ir)
+    proj = tdp_from_3di(model)
     try:
         if collision_lod_index is None:
             # No explicit override: recover poly_collision_lod from CDTA count
             # evidence by matching against existing render LODs.
             # Returns -1 when not inferable; treat that as "leave default".
-            derived = derive_poly_collision_lod(ir)
+            derived = derive_poly_collision_lod(model)
             if derived >= 0:
                 collision_lod_index = derived
         if collision_lod_index is not None and int(collision_lod_index) >= 0:
             lod_idx = int(collision_lod_index)
-            lod_count = int(getattr(ir, "lod_count", 0))
+            lod_count = int(model.lod_count)
             if lod_idx >= min(TDP_MAX_LODS, lod_count):
                 raise ValueError(
                     f"collision_lod_index {lod_idx} is not an existing LOD "

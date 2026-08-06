@@ -16,18 +16,6 @@ target_link_libraries(threedi_compare_test PRIVATE opennova_threedi)
 target_include_directories(threedi_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_compare COMMAND threedi_compare_test)
 
-# GP format parsing test
-add_executable(threedi_gp_parse_test threedi/gp_parse_test.cpp)
-target_link_libraries(threedi_gp_parse_test PRIVATE opennova_threedi)
-target_include_directories(threedi_gp_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_gp_parse COMMAND threedi_gp_parse_test)
-
-# GP format roundtrip test
-add_executable(threedi_gp_roundtrip_test threedi/gp_roundtrip_test.cpp)
-target_link_libraries(threedi_gp_roundtrip_test PRIVATE opennova_threedi)
-target_include_directories(threedi_gp_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_gp_roundtrip COMMAND threedi_gp_roundtrip_test)
-
 # Retail global control-register catalog.
 add_executable(threedi_ctrl_catalog_test threedi/ctrl_catalog_test.cpp)
 target_link_libraries(threedi_ctrl_catalog_test PRIVATE opennova_threedi)
@@ -42,21 +30,21 @@ foreach(test ctrl decode runtime wave)
     add_test(NAME threedi_panm_${test} COMMAND threedi_panm_${test}_test)
 endforeach()
 
-# Placement ground-anchor resolution (ground userpoint, else part-0 bounding center)
+# Placement ground-anchor resolution (ground userpoint, else the model origin)
 add_executable(threedi_ground_anchor_test threedi/ground_anchor_test.cpp)
 target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_threedi)
 target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_ground_anchor COMMAND threedi_ground_anchor_test)
 
-add_executable(threedi_userpoint_ir_test threedi/userpoint_ir_test.cpp)
-target_link_libraries(threedi_userpoint_ir_test PRIVATE opennova_threedi)
-target_include_directories(threedi_userpoint_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_userpoint_ir COMMAND threedi_userpoint_ir_test)
+add_executable(threedi_userpoint_test threedi/userpoint_test.cpp)
+target_link_libraries(threedi_userpoint_test PRIVATE opennova_threedi)
+target_include_directories(threedi_userpoint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_userpoint COMMAND threedi_userpoint_test)
 
-add_executable(threedi_collision_ir_test threedi/collision_ir_test.cpp)
-target_link_libraries(threedi_collision_ir_test PRIVATE opennova_threedi)
-target_include_directories(threedi_collision_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME threedi_collision_ir COMMAND threedi_collision_ir_test)
+add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
+target_link_libraries(threedi_collision_3di_test PRIVATE opennova_threedi)
+target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
 # ADM tests
 foreach(test comment trim_value parse write variants)

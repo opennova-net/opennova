@@ -54,6 +54,13 @@ def _prepend_repo_root():
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    # The Max plugin auto-load may have pre-imported these packages from
+    # another checkout at startup; purge so the batch runs THIS checkout's
+    # code coherently (the entry re-imports everything it needs below).
+    for mod in [m for m in list(sys.modules)
+                if m.split(".")[0] in ("opennova_max", "pyopennova")
+                and m != __name__]:
+        del sys.modules[mod]
 
 
 if __name__ == "__main__":

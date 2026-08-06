@@ -74,7 +74,7 @@ def _load_rig(name: str):
     bones from the .adm's anim_reset .bad — the runtime pairing."""
     from pyopennova.adm_ffi import free_adm, parse_adm
     from pyopennova.bad_ffi import free_bad, parse_bad
-    from pyopennova.threedi_ffi import free_model_ir, read_model_ir
+    from pyopennova.threedi_ffi import free_model_3di3, read_model
 
     root = Path(JO_ASSETS)
     files = {p.name.lower(): p for p in root.iterdir() if p.is_file()}
@@ -95,18 +95,18 @@ def _load_rig(name: str):
     assert reset, f"no anim_reset in {adm_path}"
     bad_path = files.get(reset.lower()) or files[reset.lower() + ".bad"]
 
-    ir = read_model_ir(str(model_path))
+    model = read_model(str(model_path))
     try:
-        lod = ir.lods[0]
+        lod = model.lods[0]
         parts = [
             dict(
-                parent=int(lod.parts[i].parent_index),
-                rel=tuple(float(v) for v in lod.parts[i].rel_position),
+                parent=int(lod.render_objects[i].parent_index),
+                rel=tuple(float(v) for v in lod.render_objects[i].rel),
             )
-            for i in range(lod.part_count)
+            for i in range(int(lod.render_object_count))
         ]
     finally:
-        free_model_ir(ir)
+        free_model_3di3(model)
 
     bf = parse_bad(str(bad_path))
     try:
