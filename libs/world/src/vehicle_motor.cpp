@@ -257,18 +257,29 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         m.yaw_seeded = true;
     }
 
-    // The wheeled/tracked contact solve owns Z, attitude, the contact byte and
-    // the airborne/in-water flags for the Ground/Bike families with resolved
-    // model boxes on a terrain-backed world; every other row (Watercraft
-    // authority stand-in, boxless lib-embedder rows, terrain-less unit worlds)
-    // keeps the 5-tap terrain-clamp stand-in below. Retail keys the same split
-    // on graphicModel presence [orig: the @0x47C49F bail]. The Bike family
-    // rides the tracked solve as its interim carrier — its witnessed variant is
-    // Entity_ProcessLightVehiclePhysics [orig: @0x479600, call @0x486672],
-    // still an open witness (D-NET-196 residual).
-    const bool wheeled_solve = (traits.family == VehicleFamily::Ground ||
-                                traits.family == VehicleFamily::Bike) &&
-            ground_contact_solve_active(traits) && world.terrain != nullptr;
+    // The per-family contact solve owns Z, attitude, the contact byte and
+    // the airborne/in-water flags for rows with resolved model boxes on a
+    // terrain-backed world; every other row (Watercraft authority stand-in,
+    // boxless lib-embedder rows, terrain-less unit worlds) keeps the 5-tap
+    // terrain-clamp stand-in below. Retail keys the same split on
+    // graphicModel presence [orig: the @0x47C49F bail]. The family routing is
+    // the class table's [orig: @0x82ABC0]: cveh/ctrn/catv -> the tracked
+    // solve @0x47C1C0; ctan -> the wheeled solve @0x475DE0 (call @0x48a9ef);
+    // cbik -> the light solve @0x479600 (call @0x486672).
+    enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
+    ContactSolveKind solve_kind = ContactSolveKind::None;
+    if (world.terrain != nullptr) {
+        if (traits.family == VehicleFamily::Ground &&
+            ground_contact_solve_active(traits))
+            solve_kind = ContactSolveKind::Tracked;
+        else if (traits.family == VehicleFamily::Tank &&
+                 ground_contact_solve_active(traits))
+            solve_kind = ContactSolveKind::Wheeled;
+        else if (traits.family == VehicleFamily::Bike &&
+                 light_contact_solve_active(traits))
+            solve_kind = ContactSolveKind::Light;
+    }
+    const bool wheeled_solve = solve_kind != ContactSolveKind::None;
 
     // Wreck gate: a dead vehicle stops driving (the mode-21 wreck state; its settle
     // physics is deferred with the state machine) [orig: @0x48af61 `!(Flags & 2) &&
@@ -367,6 +378,7 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // exist there) [orig: cbik speed servo @0x4853ac..0x4853eb].
         int32_t cmd = m.cmd_speed;
         if (traits.family != VehicleFamily::Bike &&
+            traits.family != VehicleFamily::Tank &&
             !m.grounded && (veh.flags & kEntityFlagInAir) == 0) {
             if (m.speed < 0) {
                 if (cmd < 0) cmd = -cmd;
@@ -390,7 +402,30 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // `rawAccel = (target - speed + 16) >> 5` + the branch tree @0x48bac0-0x48bbe0].
         const int32_t raw_accel = (target_speed - m.speed + 16) >> 5;
         m.speed_accel = raw_accel;
-        if (!m.grounded && traits.family != VehicleFamily::Bike) {
+        if (traits.family == VehicleFamily::Tank) {
+            // The tank servo's clamp tree [orig: Entity_UpdateTankVehiclePhysics
+            // chase @0x489d79..0x489d84, clamps @0x489d89..0x489e79]: a
+            // direction REVERSAL (and the standing
+            // start) clamps at ±2·deceleration — where the ground core keeps
+            // the raw 1/32 chase — and same-direction drive clamps to
+            // ±acceleration (target != 0) or ±deceleration (target == 0). The
+            // slope anti-creep legs ride the deferred contact-direction store
+            // (D-NET-161): with the store empty, retail takes exactly these
+            // plain caps [orig: the |dir|==0 arm @0x489C3A..0x489C6C].
+            const bool reversal = (target_speed >= 0 && m.speed < 0) ||
+                                  (target_speed <= 0 && m.speed > 0);
+            if (reversal) {
+                const int32_t d2 = 2 * traits.deceleration;
+                if (m.speed_accel > d2) m.speed_accel = d2;
+                if (m.speed_accel < -d2) m.speed_accel = -d2;
+            } else if (target_speed != 0) {
+                if (m.speed_accel > traits.acceleration) m.speed_accel = traits.acceleration;
+                if (m.speed_accel < -traits.acceleration) m.speed_accel = -traits.acceleration;
+            } else {
+                if (m.speed_accel > traits.deceleration) m.speed_accel = traits.deceleration;
+                if (m.speed_accel < -traits.deceleration) m.speed_accel = -traits.deceleration;
+            }
+        } else if (!m.grounded && traits.family != VehicleFamily::Bike) {
             // Wheels off the ground: coast clamp at half deceleration
             // [orig: @0x48bacf `±deceleration >> 1`]. The cbik mover has no
             // airborne clamp — it skips speed INTEGRATION off-contact instead
@@ -416,11 +451,13 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                 }
             }
         }
-        // The cbik mover integrates speed only in CONTACT [orig: the
-        // `!crashed && !(Flags & 0x2000) && BYTE2(aiRef0)` gate
-        // @0x485501..0x485534]; the ground core integrates unconditionally
-        // [orig: @0x48c302..0x48c32a].
-        if (traits.family != VehicleFamily::Bike || m.grounded) {
+        // The cbik AND ctan movers integrate speed only in CONTACT [orig: the
+        // `!crashed && !(Flags & 0x2000) && BYTE2(aiRef0)` gates
+        // @0x485501..0x485534 (cbik) / @0x489f34..0x489f56 with the <48
+        // stop snap (ctan)]; the
+        // ground core integrates unconditionally [orig: @0x48c302..0x48c32a].
+        if ((traits.family != VehicleFamily::Bike &&
+             traits.family != VehicleFamily::Tank) || m.grounded) {
             m.speed += m.speed_accel; // [orig: @0x48bbe6 `currentSpeed += speedAccel`]
             if (target_speed == 0 && std::abs(m.speed) < 48) m.speed = 0; // [orig: @0x48bbf7]
             if (m.speed_accel == 0) m.speed = target_speed;               // [orig: @0x48bc0d]
@@ -436,12 +473,34 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
         // `!(Flags & 0x2000) && (BYTE2(aiRef0) || autopilot)` around the
         // velocity-from-heading rewrite @0x48ed3b-0x48ed6b].
         if (m.grounded) {
-            const int32_t c = cos22_of_bam(m.yaw_bam) >> 6; // 2^22 -> 16.16 unit
-            const int32_t s = sin22_of_bam(m.yaw_bam) >> 6;
-            m.vel_x = static_cast<int32_t>((static_cast<int64_t>(m.speed) * c + 0x8000) >> 16);
-            m.vel_y = static_cast<int32_t>((static_cast<int64_t>(m.speed) * s + 0x8000) >> 16);
-            m.slide_z = 0; // level dir frame — the slope vertical term rides the clamp
-                           // below (pitch/roll contact solve deferred, D-NET-161)
+            if (traits.family == VehicleFamily::Tank) {
+                // The tank drives along its FULL basis forward row — the
+                // conformed pitch tilts the velocity, and slideDecay is
+                // REPLACED by the vertical component (the crashed-gated skip
+                // rides the deferred wreck machine) [orig: the normalized
+                // row-0 products + `slideDecay = speed*fwd.z` in the contact
+                // velocity-build stores @0x48a5ac..0x48a8b4; the low-speed
+                // contact-direction realign (the ±5°/tick cross-product
+                // rotate toward forward, BuildYXZ ±59652323) rides the
+                // deferred D-NET-161 store — with the store empty retail
+                // takes exactly this velocity = speed * fwd arm].
+                const VehicleEulerBasis tb = vehicle_euler_basis(
+                        m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+                const int32_t fwd_q16[3] = {
+                    static_cast<int32_t>(tb.fwd[0] * 65536.0),
+                    static_cast<int32_t>(tb.fwd[1] * 65536.0),
+                    static_cast<int32_t>(tb.fwd[2] * 65536.0)};
+                m.vel_x = detail::q16_mul_rhu(m.speed, fwd_q16[0]);
+                m.vel_y = detail::q16_mul_rhu(m.speed, fwd_q16[1]);
+                m.slide_z = detail::q16_mul_rhu(m.speed, fwd_q16[2]);
+            } else {
+                const int32_t c = cos22_of_bam(m.yaw_bam) >> 6; // 2^22 -> 16.16 unit
+                const int32_t s = sin22_of_bam(m.yaw_bam) >> 6;
+                m.vel_x = static_cast<int32_t>((static_cast<int64_t>(m.speed) * c + 0x8000) >> 16);
+                m.vel_y = static_cast<int32_t>((static_cast<int64_t>(m.speed) * s + 0x8000) >> 16);
+                m.slide_z = 0; // level dir frame — the slope vertical term rides the clamp
+                               // below (pitch/roll contact solve deferred, D-NET-161)
+            }
         }
         if (traits.family == VehicleFamily::Bike) {
             // Bike-only vertical up-cap; the airborne input latch that can lift
@@ -449,6 +508,11 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             // [orig: vZ = min(vZ, 0x4000) @0x48659b..0x48659d].
             if (m.slide_z > 0x4000) m.slide_z = 0x4000;
             m.slide_z -= kGravityStepBike; // [orig: @0x4865a6 `slideDecay -= 250`]
+        } else if (traits.family == VehicleFamily::Tank) {
+            // The tank shares the 250 step with the bike — no up-cap
+            // [orig: `slideDecay += -250` @0x48a82c in
+            // Entity_UpdateTankVehiclePhysics].
+            m.slide_z -= kGravityStepBike;
         } else {
             m.slide_z -= kGravityStep; // [orig: @0x48d69b `slideDecay -= 324`]
         }
@@ -490,15 +554,22 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
             }
         }
 
-        // Ground contact at the witnessed call site — after Position += velocity,
-        // before the yaw apply [orig: Entity_ProcessTrackedVehiclePhysics call
-        // @0x48d0b1]. The wheeled solve rests the hull at wheel height above
-        // terrain (pads at box_z_lo + r) and conforms attitude from per-corner
-        // lifts; rows outside its activity predicate keep the 5-tap bilinear
+        // Ground contact at the witnessed call sites — after Position +=
+        // velocity, before the yaw apply [orig: the tracked call @0x48d0b1;
+        // the wheeled call @0x48a9ef; the light call @0x486672]. Each family
+        // solve rests the hull at wheel height above terrain (pads at
+        // box_z_lo + r) and conforms attitude from per-corner lifts; rows
+        // outside their activity predicates keep the 5-tap bilinear
         // terrain-clamp stand-in (a tracked divergence, D-NET-161).
-        if (wheeled_solve) {
+        if (solve_kind == ContactSolveKind::Tracked) {
             ground_contact_solve(world, veh, traits, m, prev[0], prev[1],
                                  px, py, pz);
+        } else if (solve_kind == ContactSolveKind::Wheeled) {
+            wheeled_contact_solve(world, veh, traits, m, prev[0], prev[1],
+                                  px, py, pz);
+        } else if (solve_kind == ContactSolveKind::Light) {
+            light_contact_solve(world, veh, traits, m, prev[0], prev[1],
+                                px, py, pz);
         } else if (world.terrain != nullptr) {
             const int32_t pos3[3] = {px, py, pz};
             const GroundClearance clearance{};
@@ -533,6 +604,20 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
                     ? m.wheel_rate_bam
                     : io::bam_sar(m.wheel_rate_bam, 2);
             m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
+        } else if (traits.family == VehicleFamily::Tank) {
+            // The tank applies yaw unless PARKED (the +0x2F0 park byte —
+            // deferred latch machine, never set for live rows), quartered
+            // while airborne — the bike shape keyed on the solve-owned flag
+            // [orig: @0x48a9f7..0x48aa1d `if (!parkedByte) Yaw += (Flags &
+            // 0x2000) ? modelPtr0 >> 2 : modelPtr0`]. When the solve is
+            // inactive (boxless/terrain-less stand-in rows) the airborne flag
+            // is stale — key on m.grounded exactly like the bike arm.
+            const int32_t yaw_step =
+                    (wheeled_solve ? (veh.flags & kEntityFlagInAir) != 0
+                                   : !m.grounded)
+                            ? io::bam_sar(m.wheel_rate_bam, 2)
+                            : m.wheel_rate_bam;
+            m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
         } else if (m.grounded) {
             m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
         }
@@ -553,13 +638,9 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
 
 namespace {
 
-// atan2 in this engine's BAM convention: radians * 2^31/pi, with the exact
-// binary constant (the pair with the sin/cos scale below is deliberately NOT an
-// exact inverse — port both verbatim) [orig: dbl_7C19D8 = 683565275.5764316].
-inline int32_t bam_of_atan2(double y, double x) {
-    if (y == 0.0 && x == 0.0) return 0; // fpatan(0,0) == 0
-    return static_cast<int32_t>(std::atan2(y, x) * 683565275.5764316);
-}
+// bam_of_atan2 moved to vehicle_motor_detail.h (shared with the light solve's
+// axle fit); the exact-constant note rides with it.
+using detail::bam_of_atan2;
 
 // The vehicle-template chase bucket [orig: @0x48D480 interp — {6,8,10,15,20,25,30}].
 inline int16_t watercraft_chase_bucket(int32_t dist) {
@@ -785,35 +866,8 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z,
 
 } // namespace detail
 
-namespace {
-
-// Round-half-up 16.16 product [orig: the `imul; add 0x8000; adc; shrd 16`
-// idiom every solver product uses].
-int32_t q16_mul_rhu(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b + 0x8000) >> 16);
-}
-
-// The witnessed solver normalize: `v * 65536.0 / sqrt(dot)` in x87 double,
-// EACH COMPONENT ftol'd back to a 16.16 int; zero length -> (0,0,0)
-// [orig: 0x46C9BA..0x46CA14 pattern, repeated at every edge/normal site].
-void q16_normalize(const int64_t v[3], int32_t out[3]) {
-    const double n = std::sqrt(double(v[0]) * double(v[0]) +
-                               double(v[1]) * double(v[1]) +
-                               double(v[2]) * double(v[2]));
-    if (n <= 0.0) { out[0] = out[1] = out[2] = 0; return; }
-    out[0] = static_cast<int32_t>(double(v[0]) * 65536.0 / n);
-    out[1] = static_cast<int32_t>(double(v[1]) * 65536.0 / n);
-    out[2] = static_cast<int32_t>(double(v[2]) * 65536.0 / n);
-}
-
-// Cross of two quantized 16.16 vectors, each term a round-half-up product.
-void q16_cross(const int32_t a[3], const int32_t b[3], int64_t r[3]) {
-    r[0] = int64_t(q16_mul_rhu(a[1], b[2])) - q16_mul_rhu(a[2], b[1]);
-    r[1] = int64_t(q16_mul_rhu(a[2], b[0])) - q16_mul_rhu(a[0], b[2]);
-    r[2] = int64_t(q16_mul_rhu(a[0], b[1])) - q16_mul_rhu(a[1], b[0]);
-}
-
-} // namespace
+// q16_mul_rhu / q16_normalize / q16_cross moved to vehicle_motor_detail.h
+// (shared with the wheeled/light solves); the witness notes ride with them.
 
 namespace detail {
 
@@ -1620,6 +1674,95 @@ void ground_client_tick(World &world, Entity &veh, const VehicleTraits &traits) 
 // solve (loc_47EF10, undefined in the IDB) is unported — replaced by a terrain
 // clamp; the airborne/water branch picks derive locally from the ground cache
 // and water plane instead of the solve's Flags 0x2000/0x8000.
+// The AIR local-driver input map — the client-executed occupant block of the
+// air mover, for the LOCAL PILOT of a predicted row [orig:
+// Entity_UpdateAircraftPhysics @0x490310, the occupant input block; key-dir
+// thrust table, analog arm, stance mods, the collective and its clamps].
+// Brain registers: [544] fwd cmd, [540] lateral cmd, [548] climb-above-ground,
+// [524] absolute altitude target, [528] steer heading. Our state stores the
+// ABSOLUTE altitude target only (net_alt_target); the [548]/[524] split is
+// carried as climb = target - ground — the same quantity retail derives at
+// every near-ground boundary. Cited deferrals: the analog COLLECTIVE channel
+// (`analogThrottle << 7` — a fourth analog axis our C2S uplink does not
+// carry), the occupant's own analog-yaw write (D-NET-161: local look owns the
+// client row), the flare-release weapon scan and the authority engine-flag
+// upkeep.
+static void stage_air_vehicle_input(Entity &veh, const Entity &occ,
+                                    const VehicleTraits &traits,
+                                    int32_t ground, int32_t pz) {
+    Entity::VehicleMotorState &m = veh.veh;
+    const uint32_t move_order = static_cast<uint32_t>(occ.net_move_input) |
+                                (static_cast<uint32_t>(occ.net_stance_bits) << 8);
+    const int analog_sum = int(occ.net_analog_x) + occ.net_analog_y +
+                           occ.net_analog_z;
+    const int32_t fs = traits.player_speed; // itemDef+0x8E8 — the air speed slot
+    if ((move_order & Entity::kMoveOrderMoving) != 0) {
+        // The 8-way key thrust table [orig: the dir switch — fwd full, every
+        // diagonal/side/reverse component at HALF]:
+        switch (move_order & Entity::kMoveOrderDirMask) {
+            case 0: m.cmd_speed = fs;          m.cmd_lateral_speed = 0;       break;
+            case 1: m.cmd_speed = fs >> 1;     m.cmd_lateral_speed = fs >> 1; break;
+            case 2: m.cmd_speed = 0;           m.cmd_lateral_speed = fs >> 1; break;
+            case 3: m.cmd_speed = -fs >> 1;    m.cmd_lateral_speed = fs >> 1; break;
+            case 4: m.cmd_speed = -fs >> 1;    m.cmd_lateral_speed = 0;       break;
+            case 5: m.cmd_speed = -fs >> 1;    m.cmd_lateral_speed = -fs >> 1; break;
+            case 6: m.cmd_speed = 0;           m.cmd_lateral_speed = -fs >> 1; break;
+            case 7: m.cmd_speed = fs >> 1;     m.cmd_lateral_speed = -fs >> 1; break;
+            default: break;
+        }
+    } else {
+        // Analog cyclic: fwd = -(fs*x)>>7, lateral = -(fs*y)>>8 (half-scale),
+        // steer walks with analog yaw [orig: the analog arm — the occupant
+        // Yaw -= write rides D-NET-161].
+        m.cmd_speed = -(fs * static_cast<int32_t>(occ.net_analog_x)) >> 7;
+        m.cmd_lateral_speed = -(fs * static_cast<int32_t>(occ.net_analog_y)) >> 8;
+        m.steer_target_bam = io::bam_sub(
+                m.steer_target_bam,
+                (kAnalogSteerScale * static_cast<int32_t>(occ.net_analog_z)) >> 1);
+    }
+    if ((move_order & Entity::kMoveOrderCrouch) != 0) {
+        m.cmd_speed >>= 1;
+        m.cmd_lateral_speed >>= 1;
+    }
+    if ((move_order & Entity::kMoveOrderProne) != 0) {
+        m.cmd_speed >>= 2;
+        m.cmd_lateral_speed >>= 2;
+    }
+    // The collective (the 0x40/0x80 MoveOrder pair — the lean bits' air
+    // meaning): 0x4000/tick down/up on the altitude target, with the 256 u
+    // climb ceiling and the ground floor. Retail splits the write across the
+    // near-ground boundary (2 * boundRadius) between the climb register and
+    // the absolute target; both sides reduce to the same absolute step.
+    if (ground != INT32_MIN) {
+        if ((move_order & 0x40u) != 0) m.net_alt_target -= 0x4000;
+        if ((move_order & 0x80u) != 0) m.net_alt_target += 0x4000;
+        int32_t climb = m.net_alt_target - ground;
+        if (climb > 0x1000000) { // the 256 u ceiling
+            climb = 0x1000000;
+            m.net_alt_target = ground + climb;
+        }
+        if (climb < 0) {
+            // Landed: the engine-off reset — commands zero, steer holds the
+            // hull's own heading, the target parks below ground level.
+            m.net_alt_target = ground - 0x4000;
+            m.cmd_speed = 0;
+            m.cmd_lateral_speed = 0;
+            m.steer_target_bam = m.yaw_bam;
+            return;
+        }
+    }
+    (void)pz;
+    // Hover/flight steer source: no analog input -> the pilot's LOOK steers
+    // (freelook holds the hull heading instead).
+    if (analog_sum == 0) {
+        m.steer_target_bam =
+                (move_order & Entity::kMoveOrderFreeLook) != 0
+                        ? m.yaw_bam
+                        : bam_heading_from_mission_yaw_deg(
+                                  static_cast<double>(occ.yaw));
+    }
+}
+
 void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;
@@ -1720,12 +1863,25 @@ void aircraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits
         }
     }
 
-    // ---- 2. Register mirror [orig: @0x490C9E..0x490CCA] — the occupant !=
-    // local-player gate is deferred with the input leg (see the watercraft
-    // mirror note).
-    m.cmd_speed = m.net_recv_speed;
-    m.cmd_lateral_speed = m.net_recv_lat;
-    m.steer_target_bam = m.net_recv_steer_bam;
+    // ---- 2. Register mirror [orig: @0x490C9E..0x490CCA]: the non-pilot
+    // machine adopts the received commands verbatim; the LOCAL PILOT'S
+    // machine runs the input block instead and reconciles BOTH air commands
+    // with the received mirrors — ([544]+[708])>>1 fwd, ([540]+[712])>>1
+    // lateral [orig: the occupantEntity == g_local_player_entity leg —
+    // `([2C4]+[220])>>1 -> [220]; ([2C8]+[21C])>>1 -> [21C]`
+    // @0x491546..0x491568; the input block is stage_air_vehicle_input above].
+    if (Entity *local_pilot =
+                resolve_local_vehicle_controller(world, veh, traits)) {
+        stage_air_vehicle_input(veh, *local_pilot, traits, ground, pz);
+        m.cmd_speed = io::bam_sar(
+                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+        m.cmd_lateral_speed = io::bam_sar(
+                io::bam_add(m.cmd_lateral_speed, m.net_recv_lat), 1);
+    } else {
+        m.cmd_speed = m.net_recv_speed;
+        m.cmd_lateral_speed = m.net_recv_lat;
+        m.steer_target_bam = m.net_recv_steer_bam;
+    }
 
     // ---- 2a. Client engine-off override [orig: LABEL_305 @0x491C95..0x491CC2].
     if (!m.net_engine_on) {

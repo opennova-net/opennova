@@ -87,7 +87,11 @@ public:
 	// poses back into ClientState. Keeping this phase explicit prevents pool
 	// iteration order from leaving an earlier child one mover tick behind a
 	// later carrier.
-	void refresh_carried_entities();
+	// tick_sweep is true only from the per-tick mover call: it advances the
+	// pure-client 128-tick stale-carrier sweep (C2S 0x0F for carrier + child,
+	// local child destroy pending authority re-spawn) — record applies must
+	// not double-run the cadence [orig: the @0x440d41..0x440e2f sweep].
+	void refresh_carried_entities(bool tick_sweep = false);
 
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
 	// attached to it. The decoded view is the client's entity pool, so

@@ -672,6 +672,12 @@ struct Entity {
         bool plat_afloat = false;          // Flags 0x8000 mirror [orig: set @0x482CA5]
         bool plat_solve_valid = false;      // an earlier platform solve authored plat_afloat
         int32_t plat_airborne_ticks = 0;   // [orig: +0x3D4]
+        // Light (cbik) solve: consecutive rear-wheel contact ticks — the
+        // contact byte requires > 1, so a one-tick graze never grounds the
+        // bike [orig: entity[1].pad_040[8]; ++ @0x47C154-analog in
+        // Entity_ProcessLightVehiclePhysics, reset in the both-wheels-off
+        // branch].
+        int32_t light_rear_contact_ticks = 0;
     };
     VehicleMotorState veh;
 };

@@ -193,6 +193,17 @@ struct ClientEntityState {
 	//  'ewep' move fn Entity_UpdateTransformAndTurret @0x440ca0 via the class
 	//  table row @0x82abe0]
 	uint16_t target_handle = 0xFFFF;
+	// The pure-client stale-carrier sweep's run length: consecutive mover
+	// ticks this no-callback child's persistent carrier stayed unresolvable.
+	// At 128 the sweep queues C2S 0x0F for the carrier AND the child, then
+	// locally destroys the child pending the authority re-spawn — retail keys
+	// the same 128-tick cadence on `tick & 0x7F == 127` with the carrier's
+	// staleness marker; the per-child run is this transport layer's
+	// structural translation of that pair (our unresolvable-carrier state IS
+	// the staleness the marker tracks).
+	// [orig: Entity_UpdateTransformAndTurret @0x440ca0, the sweep
+	//  @0x440d41..0x440e2f]
+	int32_t carrier_missing_ticks = 0;
 	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
 	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
 	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`

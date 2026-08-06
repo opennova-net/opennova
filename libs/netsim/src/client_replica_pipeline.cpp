@@ -988,8 +988,9 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		}
 	}
 	// Seat mounts and persistent no-callback children are a post-mover phase:
-	// all carrier rows above have reached this tick's live pose first.
-	refresh_carried_entities();
+	// all carrier rows above have reached this tick's live pose first. The
+	// per-tick call also advances the pure-client stale-carrier sweep.
+	refresh_carried_entities(/*tick_sweep=*/true);
 }
 
 void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
@@ -1159,8 +1160,8 @@ void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	state_.mark_changed();
 }
 
-void ClientReplicaPipeline::refresh_carried_entities() {
-	std::vector<uint16_t> dead_children;
+void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
+	std::vector<uint16_t> sweep_destroyed;
 	// ClientState intentionally keeps its decoded rows public, so its general
 	// find() contract must remain a derived linear lookup. This refresh owns a
 	// stable vector for its whole eight-depth pass, though: build a disposable
@@ -1275,15 +1276,40 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 			// "a vehicle follows the player around" (one per map, whichever
 			// spawn record carried flag 0x0100).
 			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
-			if (parent == nullptr) continue; // a later batch may still provide it
-			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
-			// verdict. Only interpret flags/health after a real live compact has
-			// supplied the vehicle health word. Scripted removals without a final
-			// compact still need their witnessed destroy-list message mapped.
+			if (parent == nullptr) {
+				// The pure-client stale-carrier sweep [orig: @0x440d41..
+				// 0x440e2f]: after a 128-tick unresolvable run, request BOTH
+				// rows over C2S 0x0F and locally destroy the child — the
+				// authority's re-spawn re-materializes the pair. A later batch
+				// may still provide the carrier inside the window, which
+				// resets the run below.
+				if (tick_sweep && depth == 0 &&
+				    ++child.carrier_missing_ticks >= 128) {
+					queue_carrier_repair(persistent_carrier[child_index]);
+					queue_carrier_repair(child.handle);
+					if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
+							child.handle) == sweep_destroyed.end())
+						sweep_destroyed.push_back(child.handle);
+				}
+				continue;
+			}
+			child.carrier_missing_ticks = 0;
+			// The dead-carrier leg. Retail's client HIDES the child in place —
+			// carrier Flags & 2 -> child Flags |= 1, return, row persists
+			// pending the authority's own destroy transaction [orig:
+			// @0x440cdb..0x440cdd]. Our decoded view RETIRES the subtree
+			// instead (the #403 substitute, kept deliberately): the hide is
+			// presentation-equivalent (bit 0 = invisible), our authority
+			// genuinely despawns the attachment on carrier death, and no
+			// destroy transaction exists on this seam to mirror — an erased
+			// row IS the authority truth here. The death signal stays the
+			// known-zero health word only: the wire flags bit 1 is an
+			// overloaded spawn/movement gate on 0x0D-fed rows, not a death
+			// verdict (the loopback-identity pin).
 			if (parent->health_known && parent->health_word == 0) {
-				if (std::find(dead_children.begin(), dead_children.end(), child.handle) ==
-						dead_children.end())
-					dead_children.push_back(child.handle);
+				if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
+						child.handle) == sweep_destroyed.end())
+					sweep_destroyed.push_back(child.handle);
 				continue;
 			}
 
@@ -1323,7 +1349,7 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 					parent->roll_bam, child.parent_local_roll_bam);
 		}
 	}
-	for (uint16_t handle : dead_children) erase_entity_tree(handle);
+	for (uint16_t handle : sweep_destroyed) erase_entity_tree(handle);
 }
 
 void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body) {

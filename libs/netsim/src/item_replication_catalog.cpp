@@ -35,6 +35,10 @@ MotionFamily motion_family_from_tag(const std::string &tag) {
 	if (key.empty() || key == "null") return MotionFamily::Static;
 	if (key == "plyr" || key == "org0" || key == "org1" || key == "org2")
 		return MotionFamily::Person;
+	// ctan stays at this catalog's GroundVehicle granularity; the WORLD
+	// classifier routes it to VehicleFamily::Tank for the mover/solve split
+	// (the tank mover @0x488AB0 + the wheeled solve @0x475DE0). This value
+	// is catalog metadata — the world-side family owns dispatch.
 	if (key == "cveh" || key == "ctrn" || key == "ctan" || key == "catv")
 		return MotionFamily::GroundVehicle;
 	if (key == "cbik") return MotionFamily::LightVehicle;

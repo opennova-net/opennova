@@ -455,6 +455,225 @@ bool run_ground_parked_rests_at_wheel_clearance() {
 	return ok;
 }
 
+bool run_tank_parked_rests_at_wheel_clearance() {
+	// The wheeled (ctan) contact solve (D-NET-196 B-facet): a parked
+	// Tank-family row rests with its ORIGIN at wheel height above terrain —
+	// the same ground - box_z_lo invariant as the tracked solve, through the
+	// 13-probe geometry and the slideDecay-absorbing Z select
+	// [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 — pads
+	// @0x4762B8.., the positive-corner solver Z via
+	// Entity_ComputeSuspensionAndOrientation @0x4698A0, the absorb select
+	// @0x478BE3..0x478C06].
+	std::vector<uint16_t> heightmap(64 * 64, 42 * 256); // flat terrain z = 42.0
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+
+	// M1A1-like hull (16.16): track bottom 0.95 below the origin, beam 3.6
+	// (pad radius r = 0.9), length 7.9.
+	const int32_t clearance = 62259; // 0.95 u
+	const int32_t ground_fx = 42 << 16;
+	const int32_t rest_fx = ground_fx + clearance;
+	struct Probe { int32_t start_z; const char *label; };
+	const Probe probes[] = {
+		{rest_fx, "tank holds the wire rest height"},
+		{rest_fx + 98304, "tank lands from a 1.5 u drop and rests at clearance"},
+	};
+	bool ok = true;
+	for (const Probe &pr : probes) {
+		Rig r;
+		make_rig(r);
+		r.world.env.water_z = 0; // dry land
+		r.world.terrain = &field;
+		r.traits.family = w::VehicleFamily::Tank;
+		r.traits.player_speed = 15000;
+		r.traits.acceleration = 512;
+		r.traits.deceleration = 512;
+		r.traits.torque = 7;
+		r.traits.mass = 60;
+		r.traits.max_slope = 30 * 11930464;
+		r.traits.slip_slope = 45 * 11930464;
+		r.traits.box_z_lo = -clearance;
+		r.traits.box_z_hi = 96 << 10; // +1.5 turret deck
+		r.traits.box_y_lo = -(18 << 14); // beam 3.6 -> r = 0.9
+		r.traits.box_y_hi = 18 << 14;
+		r.traits.box_x_lo = -(79 << 12); // length ~7.9
+		r.traits.box_x_hi = 79 << 12;
+		r.traits.foot_x_lo = r.traits.box_x_lo;
+		r.traits.foot_x_hi = r.traits.box_x_hi;
+		r.traits.foot_y_lo = r.traits.box_y_lo;
+		r.traits.foot_y_hi = r.traits.box_y_hi;
+		w::Entity *veh = r.world.registry.get(r.boat);
+		if (!expect(veh != nullptr, "parked tank spawned")) return false;
+		veh->position.z = float(w::from_fixed(pr.start_z));
+		if (pr.start_z != rest_fx) {
+			veh->flags |= w::kEntityFlagInAir;
+			veh->veh.grounded = false;
+		}
+		for (int t = 0; t < 120; ++t) {
+			if (t % 8 == 0)
+				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
+				      0, 0, 0);
+			w::ground_client_tick(r.world, *veh, r.traits);
+		}
+		const int32_t z = w::to_fixed(veh->position.z);
+		std::fprintf(stderr,
+		             "[tank-rest %s] z=%d rest=%d ground=%d grounded=%d air=%d\n",
+		             pr.label, z, rest_fx, ground_fx, int(veh->veh.grounded),
+		             int((veh->flags & w::kEntityFlagInAir) != 0));
+		ok &= expect(std::abs(z - rest_fx) <= 0x290, pr.label);
+		ok &= expect(veh->veh.grounded, "the parked tank reports wheel contact");
+		ok &= expect((veh->flags & w::kEntityFlagInAir) == 0,
+		             "the parked tank is not airborne");
+		ok &= expect(std::abs(veh->veh.air_pitch_bam) < (1 << 22) &&
+		                     std::abs(veh->veh.air_roll_bam) < (1 << 22),
+		             "the flat-parked tank conforms level");
+	}
+	return ok;
+}
+
+bool run_bike_parked_rests_at_wheel_clearance() {
+	// The light (cbik) contact solve (D-NET-196 B-facet): the bike's r is
+	// height-derived — ((box_z_hi - box_z_lo) >> 1) - 0x4000 — and the Z
+	// select is the mean of the two lifted wheel corners of the axle fit, so
+	// the same rest invariant holds: origin at ground - box_z_lo
+	// [orig: Entity_ProcessLightVehiclePhysics @0x479600 — wheels on the
+	// foot centerline @0x479960.., the axle-fit Z (c0.z + c1.z) * 0.5 in
+	// Entity_UpdateVehicleChassisOrientation @0x468A50].
+	std::vector<uint16_t> heightmap(64 * 64, 42 * 256);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+
+	// dcycle2-like frame (16.16): wheel bottom 0.55 below the origin, box
+	// height 1.2 (r = 0.6 - 0.25 = 0.35), length 2.2, beam 0.8.
+	const int32_t clearance = 36044; // 0.55 u
+	const int32_t ground_fx = 42 << 16;
+	const int32_t rest_fx = ground_fx + clearance;
+	struct Probe { int32_t start_z; const char *label; };
+	const Probe probes[] = {
+		{rest_fx, "bike holds the wire rest height"},
+		{rest_fx + 65536, "bike lands from a 1 u drop and rests at clearance"},
+	};
+	bool ok = true;
+	for (const Probe &pr : probes) {
+		Rig r;
+		make_rig(r);
+		r.world.env.water_z = 0;
+		r.world.terrain = &field;
+		r.traits.family = w::VehicleFamily::Bike;
+		r.traits.player_speed = 20972;
+		r.traits.acceleration = 512;
+		r.traits.deceleration = 512;
+		r.traits.torque = 7;
+		r.traits.mass = 3;
+		r.traits.max_slope = 30 * 11930464;
+		r.traits.slip_slope = 45 * 11930464;
+		r.traits.box_z_lo = -clearance;
+		r.traits.box_z_hi = -clearance + (12 << 13); // height 1.2 -> r = 0.35
+		r.traits.box_y_lo = -(4 << 13); // beam 0.8
+		r.traits.box_y_hi = 4 << 13;
+		r.traits.box_x_lo = -(11 << 13); // length 2.2
+		r.traits.box_x_hi = 11 << 13;
+		r.traits.foot_x_lo = r.traits.box_x_lo;
+		r.traits.foot_x_hi = r.traits.box_x_hi;
+		r.traits.foot_y_lo = r.traits.box_y_lo;
+		r.traits.foot_y_hi = r.traits.box_y_hi;
+		w::Entity *veh = r.world.registry.get(r.boat);
+		if (!expect(veh != nullptr, "parked bike spawned")) return false;
+		veh->position.z = float(w::from_fixed(pr.start_z));
+		if (pr.start_z != rest_fx) {
+			veh->flags |= w::kEntityFlagInAir;
+			veh->veh.grounded = false;
+		}
+		for (int t = 0; t < 120; ++t) {
+			if (t % 8 == 0)
+				stage(*veh, w::to_fixed(100.0f), w::to_fixed(200.0f), rest_fx,
+				      0, 0, 0);
+			w::ground_client_tick(r.world, *veh, r.traits);
+		}
+		const int32_t z = w::to_fixed(veh->position.z);
+		std::fprintf(stderr,
+		             "[bike-rest %s] z=%d rest=%d grounded=%d air=%d ticks=%d\n",
+		             pr.label, z, rest_fx, int(veh->veh.grounded),
+		             int((veh->flags & w::kEntityFlagInAir) != 0),
+		             veh->veh.light_rear_contact_ticks);
+		ok &= expect(std::abs(z - rest_fx) <= 0x290, pr.label);
+		ok &= expect(veh->veh.grounded,
+		             "the parked bike reports contact after the rear-tick run");
+		ok &= expect((veh->flags & w::kEntityFlagInAir) == 0,
+		             "the parked bike is not airborne");
+		ok &= expect(std::abs(veh->veh.air_pitch_bam) < (1 << 22) &&
+		                     std::abs(veh->veh.air_roll_bam) < (1 << 22),
+		             "the flat-parked bike conforms level");
+	}
+	return ok;
+}
+
+bool run_tank_family_deltas() {
+	// The ctan promotion (D-NET-196): tanks ride the ground core with the
+	// witnessed family deltas. Pin the observable off-contact trio — gravity
+	// 250/tick with NO up-cap (bike caps at 0x4000; ground uses 324), the
+	// airborne quarter-rate yaw that stays APPLIED (the ground core freezes
+	// it), and the contact-gated speed integration (an airborne tank's speed
+	// never chases the command) [orig: Entity_UpdateTankVehiclePhysics —
+	// gravity @0x48a82c, yaw @0x48a9f7..0x48aa1d, integrate gate
+	// @0x489f34..0x489f56].
+	Rig r;
+	make_rig(r);
+	r.traits.family = w::VehicleFamily::Tank;
+	r.traits.player_speed = 15000;
+	r.traits.acceleration = 512;
+	r.traits.deceleration = 512;
+	r.world.env.water_z = 0;
+	w::Entity *veh = r.world.registry.get(r.boat);
+	if (!expect(veh != nullptr, "tank spawned")) return false;
+
+	std::vector<uint16_t> heightmap(64 * 64, 0);
+	std::vector<int> sector_grid(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heightmap.data();
+	field.dim = 64;
+	field.layout.sector_grid = sector_grid.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	r.world.terrain = &field;
+
+	const int32_t x0 = w::to_fixed(100.0f);
+	const int32_t y0 = w::to_fixed(200.0f);
+	const int32_t z0 = w::to_fixed(10.0f);
+	const int32_t steer = 0x20000000; // +45 deg
+	stage(*veh, x0, y0, z0, 0, 8192, steer);
+	w::ground_client_tick(r.world, *veh, r.traits); // arm; airborne over the flat
+	auto &m = veh->veh;
+	if (!expect(!m.grounded, "the flying tank is off-contact")) return false;
+	m.speed = 8192;
+	const int32_t speed_before = 8192;
+	m.slide_z = 0x5000; // above the bike cap: the tank must NOT clamp it
+	const int32_t yaw_before = m.yaw_bam;
+	w::ground_client_tick(r.world, *veh, r.traits);
+	bool ok = expect(m.slide_z == 0x5000 - 250,
+	                 "tank vertical = gravity 250 with no up-cap");
+	const int32_t air_yaw_step = opennova::io::bam_sub(m.yaw_bam, yaw_before);
+	ok &= expect(m.wheel_rate_bam != 0,
+	             "the airborne tank produces a non-zero yaw rate");
+	ok &= expect(air_yaw_step == opennova::io::bam_sar(m.wheel_rate_bam, 2),
+	             "the off-contact tank applies exactly one quarter yaw rate");
+	ok &= expect(m.speed == speed_before,
+	             "the airborne tank never integrates its speed command");
+	std::fprintf(stderr, "[tank-air] slide_z=%d yaw %d -> %d speed=%d\n",
+	             m.slide_z, yaw_before, m.yaw_bam, m.speed);
+	return ok;
+}
+
 bool run_platform_solve_settles_at_waterline() {
 	// The platform solve (D-NET-196 residual, water leg): with model boxes
 	// resolved, a stationary boat converges onto its waterline from above AND
@@ -931,6 +1150,66 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	             "watercraft reconciliation wraps ADD then arithmetic-shifts like x86");
 	return ok;
 }
+bool run_aircraft_local_pilot_input_gate() {
+	// The AIR local-driver input map (D-NET-196 B-facet closure): the LOCAL
+	// PILOT'S machine runs the occupant input block and reconciles BOTH air
+	// commands with the received mirrors — ([544]+[708])>>1 fwd,
+	// ([540]+[712])>>1 lateral — while a remote-piloted row keeps the
+	// verbatim register mirror [orig: Entity_UpdateAircraftPhysics @0x490310,
+	// the blend @0x491546..0x491568; the key-dir thrust table and analog arm
+	// in the occupant block].
+	Rig local;
+	make_rig(local);
+	local.traits.family = w::VehicleFamily::Helicopter;
+	local.traits.player_control = true;
+	local.traits.player_speed = 12000;
+	w::Entity *heli = local.world.registry.get(local.boat);
+	w::Entity *pilot = mount_prediction_driver(local, true);
+	if (!expect(heli && pilot, "local air prediction rig ready")) return false;
+	pilot->net_move_input = 0x08; // moving forward -> cmd = flight speed
+	pilot->yaw = 41;
+	prime_prediction_tick(*heli, -7000);
+	heli->veh.net_recv_lat = 3000;
+	heli->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-66.0);
+	heli->veh.net_engine_on = true; // replicated Flags 0x80: engine spun up
+	w::aircraft_client_tick(local.world, *heli, local.traits);
+	bool ok = true;
+	ok &= expect(heli->veh.cmd_speed ==
+	                     opennova::io::bam_sar(opennova::io::bam_add(
+	                             local.traits.player_speed, -7000), 1),
+	             "the local pilot blends forward command with the wire mirror");
+	ok &= expect(heli->veh.cmd_lateral_speed ==
+	                     opennova::io::bam_sar(3000, 1),
+	             "the local pilot blends lateral command with the wire mirror");
+	ok &= expect(heli->veh.steer_target_bam ==
+	                     w::bam_heading_from_mission_yaw_deg(41.0),
+	             "the local pilot's LOOK owns the steer target");
+
+	Rig remote;
+	make_rig(remote);
+	remote.traits.family = w::VehicleFamily::Helicopter;
+	remote.traits.player_control = true;
+	remote.traits.player_speed = 12000;
+	w::Entity *rheli = remote.world.registry.get(remote.boat);
+	w::Entity *rpilot = mount_prediction_driver(remote, false);
+	if (!expect(rheli && rpilot, "remote air prediction rig ready")) return false;
+	rpilot->net_move_input = 0x08;
+	rpilot->yaw = 41;
+	const int32_t received_steer = w::bam_from_degrees_wrapped(-66.0);
+	prime_prediction_tick(*rheli, -7000);
+	rheli->veh.net_recv_lat = 3000;
+	rheli->veh.net_recv_steer_bam = received_steer;
+	rheli->veh.net_engine_on = true;
+	w::aircraft_client_tick(remote.world, *rheli, remote.traits);
+	ok &= expect(rheli->veh.cmd_speed == -7000,
+	             "a remote-piloted aircraft keeps the received forward mirror");
+	ok &= expect(rheli->veh.cmd_lateral_speed == 3000,
+	             "a remote-piloted aircraft keeps the received lateral mirror");
+	ok &= expect(rheli->veh.steer_target_bam == received_steer,
+	             "a remote-piloted aircraft keeps the received steer mirror");
+	return ok;
+}
+
 bool run_platform_roll_is_stable_and_gravity_witnessed() {
 	// Review-pinned invariants: (1) the fit/builder pair is self-consistent
 	// in ROLL (a heeled hull may not flip sign tick-over-tick - the pre-fix
@@ -1538,6 +1817,9 @@ int main() {
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();
 	ok &= run_ground_parked_rests_at_wheel_clearance();
+	ok &= run_tank_parked_rests_at_wheel_clearance();
+	ok &= run_bike_parked_rests_at_wheel_clearance();
+	ok &= run_tank_family_deltas();
 	ok &= run_platform_solve_settles_at_waterline();
 	ok &= run_afloat_latch_controls_drag();
 	ok &= run_first_prediction_seeds_platform_state();
@@ -1550,6 +1832,7 @@ int main() {
 	ok &= run_ground_rudder_wraps_bam_seam();
 	ok &= run_ground_and_bike_local_driver_input_gate();
 	ok &= run_watercraft_local_driver_reconciliation_gate();
+	ok &= run_aircraft_local_pilot_input_gate();
 	ok &= run_platform_roll_is_stable_and_gravity_witnessed();
 	ok &= run_aircraft_glides_and_holds_altitude();
 	ok &= run_aircraft_contact_lands_and_conforms();
