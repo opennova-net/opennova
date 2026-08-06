@@ -5,7 +5,7 @@
 namespace opennova::terrain {
 
 // Bodies lifted verbatim from the three NovaTerrainData::get_height* methods
-// (godot/engine/terrain/nova_terrain_data.cpp) so behavior stays byte-identical;
+// (godot/adapter/terrain/nova_terrain_data.cpp) so behavior stays byte-identical;
 // the only change is reading f.heightmap/f.dim/f.layout instead of the class's
 // cpt.depth_buffer/trn. The original hardcoded a 1024 atlas side in the two
 // world-remap variants; we read f.dim (== 1024 for real terrain), a faithful

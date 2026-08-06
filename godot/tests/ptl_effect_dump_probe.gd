@@ -5,7 +5,7 @@ extends SceneTree
 ## emit_dur vs particle age) for the muzzle-flash suppression window.
 ## Run: GODOT_BIN --headless --path godot -s res://tests/ptl_effect_dump_probe.gd
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const TICK_DT := 1.0 / 62.0
 
 

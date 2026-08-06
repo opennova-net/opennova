@@ -15,9 +15,11 @@ with retail is *the reimpl*. Godot is never "the engine".
 _Avoid_: libs (the pre-2026-08 path), core, framework
 
 **Adapter (shell adapter)**:
-The GDExtension bindings (`Nova*` classes) plus the shell-neutral GDScript layer that
-wires Godot nodes to engine facts. Both shells consume it; it depends on neither.
-_Avoid_: engine layer (that word is the engine's), glue, bindings (only half of it)
+`godot/adapter/` — the GDExtension bindings (`Nova*` classes) plus the shell-neutral
+GDScript layer that wires Godot nodes to engine facts. Both shells consume it; it
+depends on neither.
+_Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
+engine's), glue, bindings (only half of it)
 
 **Shell**:
 An application front-end over the adapter: the game shell (`godot/game/`) and ONED
@@ -94,7 +96,7 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim scene (`godot/engine/world/game_world.tscn`): terrain,
+The runtime world-sim scene (`godot/adapter/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
 game is the sole live mission runtime; ONED authoring previews do not run gameplay
 (ADR 0025). Formerly named `NovaWorld`.

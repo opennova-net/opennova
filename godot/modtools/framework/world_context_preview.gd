@@ -22,10 +22,10 @@ extends RefCounted
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
 
-const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
-const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
+const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
+const NovaSkyScript = preload("res://adapter/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
+const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
 const HHMM_DAY := NovaEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT (EnvironmentEditor); null until

@@ -16,7 +16,7 @@ extends GutTest
 # SubViewport and made current there.
 # =============================================================================
 
-const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
+const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
 const WATER_SHADER := "res://shaders/water.gdshader"
 
 # The engine tick [docs/engine-primer.md: 62 Hz].

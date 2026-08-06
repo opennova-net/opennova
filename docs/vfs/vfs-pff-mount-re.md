@@ -4,7 +4,7 @@ The original engine's file-resolution pipeline: the boot PFF mount, the
 loose-vs-archive precedence and its `/d` gate, the search-path walk, the PFF
 container/entry formats, and the read disciplines. Reimplementation surface:
 `engine/base/vfs` (`vfs.cpp` — the engine-faithful mount stack), `engine/formats/pff`
-(container codec), `godot/engine/resource_index/nova_resource_root.cpp`
+(container codec), `godot/adapter/resource_index/nova_resource_root.cpp`
 (`mount_runtime`) and `nova_launch_flags.gd` (`/d`). Binary: retail
 **Jointops.exe** (IDB `Jointops.exe.kong.i64`); produced by the PAR-R7 audit
 (2026-07-05) that converted this system's `UNAUDITED` ledger row into the

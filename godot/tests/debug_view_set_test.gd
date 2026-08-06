@@ -1,7 +1,7 @@
 extends GutTest
 
 const NovaDebugViewStatus := preload(
-		"res://engine/debug/nova_debug_view_status.gd")
+		"res://adapter/debug/nova_debug_view_status.gd")
 
 
 func test_world_reports_overlay_installation_and_drawable_state() -> void:

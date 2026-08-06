@@ -998,7 +998,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   `env_render` module (fog policy, day phase, integer smoothing, lightning,
   glare, derived colors, BMS overrides) with `env_render_unit_test` and the
   `OPENNOVA_JO_DIR`-gated install sweep.
-- `godot/engine`: EnvFile fog/day-phase/glare/override/`to_bytes` surface +
+- `godot/adapter`: EnvFile fog/day-phase/glare/override/`to_bytes` surface +
   `NovaColorSmoother`; engine-faithful `nova_environment`/`nova_sky`/
   `nova_water`/`nova_weather`; new `nova_celestial` + two celestial shaders;
   BMS override fields through `NovaMissionData`; runtime apply/clear in
@@ -1026,7 +1026,7 @@ declared "Target binary: Jointops.exe" but cited jodemo addresses (`0x53xxxx` / 
 `0x501FB0` / `0x5D0A90`). Function bodies are identical between the two images, so the C++
 port was behaviorally correct throughout — only the citations were wrong. Recovered retail
 addresses (verified by body comparison; 18 recites applied across `engine/formats/env`, `engine/runtime/terrain`,
-and `godot/engine/environment`):
+and `godot/adapter/environment`):
 
 | Old cite (jodemo, mislabeled) | Jointops retail | Note |
 |---|---|---|

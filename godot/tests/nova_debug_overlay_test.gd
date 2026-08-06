@@ -5,8 +5,8 @@ extends GutTest
 # no listen-server auto-spawn can make the pose/no-player cases nondeterministic.
 # MissionRuntime metadata and game/ONED shell wiring are covered separately.
 
-const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
-const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
+const OverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
+const DebugViewContext := preload("res://adapter/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
 const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageMount"
@@ -1306,7 +1306,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_false(dump_status.text.contains(dumped_path))
 
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 var _saved_resource_dir := ""
 var _dumped_paths: Array[String] = []
 

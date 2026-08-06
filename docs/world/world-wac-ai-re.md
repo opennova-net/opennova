@@ -1076,7 +1076,7 @@ family's rows in the same 0x80 flag table the hand-frame branch reads. The origi
 below still describes the seat taxonomy the port reuses.
 
 The predicate gates the weapon node's visibility, reusing the existing seat
-taxonomy (`godot/engine/world/item_seat_specs.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
+taxonomy (`godot/adapter/world/item_seat_specs.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
 gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
@@ -2909,7 +2909,7 @@ builder); the tracer decision + the per-spawn `FireEvent` record =
 `world::RoundSim::spawn`; the binding drains = `NovaSimulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
 replaced by the witnessed trail channels, §24); the presentation itself =
-`godot/engine/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
+`godot/adapter/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
 effect + the §24 tracer ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`engine/runtime/world/src/collision_los.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
@@ -3292,7 +3292,7 @@ at round end, and what the SP player then SEES. Port surfaces:
 `engine/runtime/mission/src/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
 `engine/runtime/world/src/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
 `engine/net/npruntime/src/server_tick.cpp` (kill tallies, `humans`, the win-condition
-check, the respawn hold), `godot/engine/world/game_hud_presenter.gd` (the lose banner),
+check, the respawn hold), `godot/adapter/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
 `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
@@ -4224,7 +4224,7 @@ blast), the destroyed/husk model swap, and the explosion/pieces/sounds at
 death. Witnessed on retail `Jointops.exe` (`Jointops.exe.kong.i64`, imagebase
 0x400000). Ported subset: `engine/runtime/world/destruction.{h,cpp}` + the round_sim
 item leg + the collision husk swap +
-`godot/engine/world/destruction_present_pass.gd`. The native collision,
+`godot/adapter/world/destruction_present_pass.gd`. The native collision,
 damage, callback-routing, death-piece, and item-settle mechanics are pinned by
 the `destruction` ctest and the def-parse additions in
 `tests/def/def_parse_items_test.cpp` (ctest `def_parse_items`). The presenter
@@ -5110,8 +5110,8 @@ edge (`@ 0x4b9c57`). IDB
 Reimpl: `engine/runtime/world/throwables.{h,cpp}` (motors + placed devices + thinks),
 the `RoundSim` spawn dispatches and witnessed throwable `useownmove` leg
 (`engine/runtime/world/round_sim.{h,cpp}`),
-the PowerThrow charge chain (`godot/engine/simulation/nova_simulation.cpp`), the
-class/trait feed (`resolve_item_traits`), and `godot/engine/world/throwable_present_pass.gd`.
+the PowerThrow charge chain (`godot/adapter/simulation/nova_simulation.cpp`), the
+class/trait feed (`resolve_item_traits`), and `godot/adapter/world/throwable_present_pass.gd`.
 Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 + the claymore rows in `def_parse_ammo`.
 

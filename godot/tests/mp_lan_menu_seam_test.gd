@@ -7,7 +7,7 @@ extends GutTest
 # flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
 
 const MenuShell := preload("res://game/nova_menu_shell.gd")
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 
 class _LanSessionStub extends RefCounted:

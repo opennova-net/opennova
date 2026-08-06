@@ -1,9 +1,9 @@
 extends GutTest
 
 const NovaObjectModelScript := preload(
-		"res://engine/object/nova_object_model.gd")
+		"res://adapter/object/nova_object_model.gd")
 const PresentEmplacedWeapon := preload(
-		"res://engine/world/emplaced_weapon_present_pass.gd")
+		"res://adapter/world/emplaced_weapon_present_pass.gd")
 
 # Co-op LAN bidirectional bring-up (D.2) at the NovaSimulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a

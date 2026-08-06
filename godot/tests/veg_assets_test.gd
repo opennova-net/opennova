@@ -1,6 +1,6 @@
 extends GutTest
 
-const VegAssetsScript = preload("res://engine/terrain/veg_assets.gd")
+const VegAssetsScript = preload("res://adapter/terrain/veg_assets.gd")
 const SOURCE_OBJECT := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const OVERRIDE_OBJECT := "res://../fixtures/threedi/3di3/House.3di"
 

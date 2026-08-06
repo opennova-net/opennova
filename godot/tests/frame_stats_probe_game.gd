@@ -11,7 +11,7 @@ extends SceneTree
 # The persisted dir/expansion are snapshotted and restored on exit.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 const REQUIRED_ROWS := ["world", "sim", "present", "occl_apply", "hud"]

@@ -2,13 +2,13 @@
 
 // The in-match HOST owner loop, promoted into engine/net/npruntime so there is exactly ONE
 // implementation. It was copy-pasted between apps/nw_server/host_owner_loop.h and
-// godot/engine/simulation/nova_simulation.cpp (host_pump/dispatch_event/admit_peer) and had begun
+// godot/adapter/simulation/nova_simulation.cpp (host_pump/dispatch_event/admit_peer) and had begun
 // to drift; both now delegate here. The faithful reimpl of the original engine's per-frame host
 // pump [orig: CNapiNetwork_PumpManagerReceive @0x4c4d10 (recv, mgr flag 4, 250ms) +
 // CNapiNetwork_SendUDPPacket @0x4c4d30 (CNapiNPManager_SendTo) wrapped around Server_TickUpdate].
 //
 // Socket-free: the loop holds NO socket — the owner supplies a netsim::IDatagramSocket and this
-// pumps it (apps/nw_server wraps net::Socket via apps/common/net_datagram_socket.h; godot/engine
+// pumps it (apps/nw_server wraps net::Socket via apps/common/net_datagram_socket.h; godot/adapter
 // wraps NovaUdpPump). ALL protocol/crypto/framing stay in the libs (.agents/network.md). The loop
 // speaks PeerAddr; the recv timeout (0 = non-blocking busy loop; ~30 ms for a single-threaded
 // poll-pump test) is a property of the adapter, not this loop.

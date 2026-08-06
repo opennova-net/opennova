@@ -452,7 +452,7 @@ def test_ci_builds_windows_gdextension_once_and_caches_with_sccache() -> None:
         body = _workflow_job(workflow, job)
         assert "actions/download-artifact" in body
         # No consumer recompiles the GDExtension inline.
-        assert "cmake -S godot/engine" not in body
+        assert "cmake -S godot/adapter" not in body
 
     for job in [
         "package-addon",

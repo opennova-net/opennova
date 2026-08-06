@@ -4,7 +4,7 @@ extends GutTest
 # the injected shell-owned model, re-resolves mover positions through the sim
 # accessor it names, and clears cleanly when the list empties.
 
-const ViewScript := preload("res://engine/debug/pick/pick_debug_view.gd")
+const ViewScript := preload("res://adapter/debug/pick/pick_debug_view.gd")
 
 
 class StubSim:

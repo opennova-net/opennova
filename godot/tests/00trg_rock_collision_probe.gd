@@ -8,7 +8,7 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/00trg_rock_collision_probe.gd
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 const MISSION := "00TRg.bms"
 const SPAWN_BMS_ID := 1197

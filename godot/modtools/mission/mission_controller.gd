@@ -22,13 +22,13 @@ signal changed  # Mission loaded or cleared; the inspector rebuilds on this.
 # that fire outside a workspace hook (e.g. the viewport Ctrl+Z / Delete path).
 signal status_reported(message: String, is_error: bool)
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const MissionWaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://modtools/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://modtools/mission/mission_marker_overlay.gd")
-const ObjectUserPointOverlayScript := preload("res://engine/object/object_user_point_overlay.gd")
+const ObjectUserPointOverlayScript := preload("res://adapter/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
-const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
+const MissionEntityRegistry := preload("res://adapter/world/mission_entity_registry.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 

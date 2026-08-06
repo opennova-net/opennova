@@ -17,7 +17,7 @@ extends GutTest
 #
 # Asset-free: the sim, audio, fx and muzzle anchor are all stubs.
 
-const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
+const FirePresentPass := preload("res://adapter/world/fire_present_pass.gd")
 
 const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const MUZZLE := Vector3(10.6, 1.55, -4.7)

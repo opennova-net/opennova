@@ -14,7 +14,7 @@ extends RefCounted
 # Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
 # either app is the same persisted value.
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 # Layout state (split offsets) shares the same config file as the resource dir,
 # but lives in its own section; the resource-dir section is owned by
 # NovaResourceDirSettings (load_state/save_state delegate to it).

@@ -6,8 +6,8 @@ extends GutTest
 # by (kind,index)). Asset-free: a fake sim emitting a PF-layout snapshot, the real MissionEntityRegistry
 # resolver behaviour faked by a tiny index, and fake models capturing transform/phase/visible.
 
-const PresentPass := preload("res://engine/world/mission_present_pass.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PresentPass := preload("res://adapter/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 
 class FakeModel:

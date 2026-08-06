@@ -5,7 +5,7 @@ extends SceneTree
 ## pins 'auto' collapse (missing clip -> delay 0 -> wrong cadence).
 ## Run: GODOT_BIN --headless --path godot -s res://tests/weapon_bake_probe.gd
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:

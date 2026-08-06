@@ -24,7 +24,7 @@ The old in-match glue grew empirically against captures and is overworked:
 `engine/net/novaworld/game_session.cpp` (1332-line phase machine with hardcoded retail fixtures +
 ack-loop hacks), the `replication_min` `build_tag_*` builders (quarantined/superseded), the
 `netsim` deferred stubs, and the SP/host/joiner entanglement in
-`godot/engine/simulation/nova_simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
+`godot/adapter/simulation/nova_simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
 `novaworld` encode/decode/framing/capture layer) are byte-witnessed and solid. This effort
 rebuilds the *runtime* on top of those codecs as one faithful, maintainable core.
 

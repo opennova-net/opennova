@@ -3,8 +3,8 @@
 Reverse-engineering record for NovaLogic's RTXT string-table format and the
 TextResource runtime that consumes it, grilled against retail
 `Jointops.exe` (Joint Operations: Combined Arms, kong IDB) on 2026-06-09.
-Reimplementation: `engine/formats/rtxt` (format), `godot/engine/rtxt` (RtxtStringFile
-resource), `godot/engine/strings/nova_strings.gd` (runtime model),
+Reimplementation: `engine/formats/rtxt` (format), `godot/adapter/rtxt` (RtxtStringFile
+resource), `godot/adapter/strings/nova_strings.gd` (runtime model),
 `godot/modtools/strings` (ONED workspace).
 
 Ground truth: all 98 RTXT-magic `.bin` files in the retail install

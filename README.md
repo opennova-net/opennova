@@ -28,7 +28,7 @@ Three layers:
 
 - **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, particles, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.ptl`, `.lwf`, `.env`, …) directly.
 - **Core engine (`engine/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
-- **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
+- **Godot (`godot/adapter/` + `godot/game/`).** GDExtension wrappers in `adapter/` bind the engine into Godot; `game/` is the runtime scene.
 
 All of this is pre-1.0 and experimental. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today. The Godot runtime loads exported scenes, runs the terrain, foliage, and environment systems, and simulates authored missions (WAC scripts, BMS events, AI). On-foot play is coming up: weapons and loadouts, projectile physics and damage, throwables, mounted and emplaced weapons, vehicles, item destruction, optics, and the HUD are ported from the original engine and covered by tests. Multiplayer runs on a wire-compatible in-match protocol with single-player hosted as an in-process listen server, so joins and replication exercise the same path retail clients use. Every one of those systems still carries tracked gaps: the honest per-system status is the [divergence ledger](docs/divergence-ledger.md).
 
@@ -100,7 +100,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | The Godot 4.6.1 project. `engine/` (GDExtension bindings to `engine/` plus the shared GDScript engine layer both shells run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (vestigial; dedicated hosting will be a serve mode of the game runtime, see [ADR 0015](docs/adr/0015-two-products-serve-mode.md)), `tests/` (GUT suite). |
+| `godot/` | The Godot 4.6.1 project. `adapter/` (the shell adapter: GDExtension bindings to `engine/` plus the shared shell-neutral GDScript layer both shells run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (vestigial; dedicated hosting will be a serve mode of the game runtime, see [ADR 0015](docs/adr/0015-two-products-serve-mode.md)), `tests/` (GUT suite). |
 | `web/` | NovaWorld web portal (Vue 3 + TypeScript): landing, lobbies, admin, downloads. Built in CI and deployed with the service stack. |
 | `launcher/` | Windows tray app that points a stock game install at OpenNova's NovaWorld servers via one managed hosts-file entry. |
 | `backend/` | NovaWorld service data: migrations and seed data. |
@@ -256,7 +256,7 @@ scripts/package_importer_windows.ps1
 ### Build the GDExtension
 
 ```bash
-cmake -S godot/engine -B build-godot -DCMAKE_BUILD_TYPE=Release
+cmake -S godot/adapter -B build-godot -DCMAKE_BUILD_TYPE=Release
 cmake --build build-godot --config Release --target opennova
 ```
 

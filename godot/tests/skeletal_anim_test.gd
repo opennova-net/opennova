@@ -9,8 +9,8 @@ extends GutTest
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
-const MissionObjectPlacerScript = preload("res://engine/mission/mission_object_placer.gd")
-const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
+const MissionObjectPlacerScript = preload("res://adapter/mission/mission_object_placer.gd")
+const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
 
 
 func _open(path: String) -> NovaObjectData:
@@ -1101,7 +1101,7 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 		var qs: Quaternion = script_skel.get_bone_pose_rotation(i)
 		# godot-cpp's Basis->Quaternion conversion differs from core Godot's in
 		# branch selection at component boundaries (the same family as the
-		# Basis(axis, angle) divergence in godot/engine/CLAUDE.md): the script
+		# Basis(axis, angle) divergence in godot/adapter/CLAUDE.md): the script
 		# loop ran core's math, pose_skeleton runs godot-cpp's. Observed max
 		# ~0.0007 rad on boundary bones — render-invisible; exactness across the
 		# boundary is unattainable by construction.

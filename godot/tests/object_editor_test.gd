@@ -3,8 +3,8 @@ extends GutTest
 const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
 const ObjectWorkspaceScript = preload("res://modtools/object/object_workspace.gd")
-const FlyCameraScript = preload("res://engine/fly_camera.gd")
-const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
+const FlyCameraScript = preload("res://adapter/fly_camera.gd")
+const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
 
 const BIRD_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const BIRD_PROJECT_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3dp"

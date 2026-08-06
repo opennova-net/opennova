@@ -9,7 +9,7 @@ extends Node
 # the ease reads ~2 sim ticks per render frame fullscreen (62.5 Hz vs ~30-45 fps),
 # so the mid-ease captures sit a few FRAMES after the RMB edge.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/weapon_round"
 const RIG_WEAPON := "WPN_Barret"  # Scoped; M82_1st carries the empty/dup bone rows (rig-fix demo)

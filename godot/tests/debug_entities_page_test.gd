@@ -1,6 +1,6 @@
 extends GutTest
 
-const PageScript := preload("res://engine/debug/pages/debug_entities_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_entities_page.gd")
 
 
 class StubSim:

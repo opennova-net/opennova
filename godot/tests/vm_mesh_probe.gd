@@ -8,7 +8,7 @@ extends SceneTree
 #
 # Use: godot --headless --path godot -s res://tests/vm_mesh_probe.gd -- <resource-dir>
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 
 func _initialize() -> void:

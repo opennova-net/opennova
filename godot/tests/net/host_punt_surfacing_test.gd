@@ -18,7 +18,7 @@ extends GutTest
 # @0x5684a8 -> @0x568654]. So the bar is: the deploy screen goes away, the world is torn
 # down, and the shell is back in its menu with the reason reported.
 
-const DeployHost := preload("res://engine/world/deploy_screen_presenter.gd")
+const DeployHost := preload("res://adapter/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"

@@ -9,7 +9,7 @@
 # the libs they use; nothing under engine/ links a family target.
 #
 # Include from a CMake root AFTER every member target exists (both roots do:
-# the repo root and godot/engine).
+# the repo root and godot/adapter).
 
 add_library(opennova_terrain_family INTERFACE)
 target_link_libraries(opennova_terrain_family INTERFACE

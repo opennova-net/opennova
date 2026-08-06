@@ -5,9 +5,9 @@ Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase
 `0x400000`). All addresses below are that binary's.
 
 Implementing code: `engine/formats/def` (`hudpos.def` / `weapon.def` parsing), the
-`NovaHudPos` GDExtension binding (`godot/engine/hud/`), the shell-neutral view
-helpers under `godot/engine/ui/hud_*.gd`, the ONED preview workspace
-(`godot/modtools/hud/`), and the runtime overlay `godot/engine/world/game_hud.gd` fed
+`NovaHudPos` GDExtension binding (`godot/adapter/hud/`), the shell-neutral view
+helpers under `godot/adapter/ui/hud_*.gd`, the ONED preview workspace
+(`godot/modtools/hud/`), and the runtime overlay `godot/adapter/world/game_hud.gd` fed
 per-frame by `godot/game/main_game.gd`. The 2026-06-22 session witnessed the
 core pipeline read-only; the 2026-07-09 session witnessed the weapon-coupled
 elements and ported them (the weapon FSM of net-re §5.62 supplies the live

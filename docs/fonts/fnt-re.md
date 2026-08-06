@@ -4,7 +4,7 @@ Structure-mapping record for the original engine's **`.fnt`** bitmap-font format
 (the menu/HUD fonts `Arial12b`/`14n`/`14b`/`16n`/`16b`, `Impac22b`, `Impac38b`,
 `Arials18`, `Arial22`, `couri20b`) and its runtime `CGameFont`. The
 reimplementation surface is `engine/formats/fnt` (`fnt_font_t` / `fnt_parse`) and the Godot
-wrapper `NovaFntResource` (`godot/engine/fnt`); rasterization is Godot-side (
+wrapper `NovaFntResource` (`godot/adapter/fnt`); rasterization is Godot-side (
 `TextServer`, ENG-4). Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the `D-FNT-…` divergence catalog. Produced by a read-only
@@ -62,8 +62,8 @@ now retain is exactly the engine's glyph render scale `[orig: @ 0x6752c0]`.
 
 ## Cross-references
 
-- Reimpl: `engine/formats/fnt` (`fnt.h`/`fnt.c`), `godot/engine/fnt/nova_fnt_resource`,
-  `godot/engine/util/nova_cp1252.h`,
+- Reimpl: `engine/formats/fnt` (`fnt.h`/`fnt.c`), `godot/adapter/fnt/nova_fnt_resource`,
+  `godot/adapter/util/nova_cp1252.h`,
   `godot/modtools/fonts/` (the editor workspace), `fnt_rasterizer.gd` (the
   reimpl shelf packer / TextServer rasterization, ENG-4's `engine/formats/fnt` consumer).
 - The FNT shelf-packer + TextServer rasterization stay Godot-side (ENG-4); this record

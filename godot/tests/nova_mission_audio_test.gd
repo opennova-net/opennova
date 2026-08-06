@@ -5,7 +5,7 @@ extends GutTest
 ## writes. Asserts on volume_db — the headless dummy audio driver ignores
 ## stream_paused (always reads back false), so volume is the observable.
 
-const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
 
 const SILENT_DB := -80.0
 

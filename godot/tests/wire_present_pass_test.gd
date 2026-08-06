@@ -1,8 +1,8 @@
 extends GutTest
 
-const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://engine/world/present_held_weapon.gd")
+const WirePresentPass := preload("res://adapter/world/wire_present_pass.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
 
 
 class FakeModel:

@@ -9,10 +9,10 @@ extends GutTest
 # out-of-band (see the placer + game_world paths).
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
-const Placer := preload("res://engine/mission/mission_object_placer.gd")
+const Placer := preload("res://adapter/mission/mission_object_placer.gd")
 const WaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
-const OverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
-const ObjectUserPointOverlay := preload("res://engine/object/object_user_point_overlay.gd")
+const OverlayUtil := preload("res://adapter/mission/mission_overlay_util.gd")
+const ObjectUserPointOverlay := preload("res://adapter/object/object_user_point_overlay.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const HOUSE_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/House.3di"

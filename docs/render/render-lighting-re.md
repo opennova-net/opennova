@@ -9,9 +9,9 @@ binary's). Implementing code: `engine/runtime/renderer/light_runtime.{h,cpp}` (t
 witnessed chain as pure functions), `engine/formats/env` `env_weather.h`/`env_render.cpp`
 (`ModulatorChain`, `WeatherColorBlock::set_step_deltas`, `iris_gain`),
 `engine/runtime/renderer/object_shader_template.cpp` (the composed FF lighting model),
-`godot/engine/env/nova_weather_core.cpp` (the ticked chain),
-`godot/engine/environment/{nova_weather,nova_environment}.gd` +
-`godot/engine/object/nova_object_model.gd` (the uniform feed),
+`godot/adapter/env/nova_weather_core.cpp` (the ticked chain),
+`godot/adapter/environment/{nova_weather,nova_environment}.gd` +
+`godot/adapter/object/nova_object_model.gd` (the uniform feed),
 `godot/shaders/terrain_lighting.gdshaderinc` (the terrain c0/c1 surface).
 Landed by maturity REN-5 ([maturity-program.md](../maturity-program.md);
 standing rules [ADR 0023](../adr/0023-render-visual-parity.md)). The T1

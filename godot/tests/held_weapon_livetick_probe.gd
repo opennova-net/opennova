@@ -16,8 +16,8 @@ extends SceneTree
 # Run:
 #   NOVA_RESOURCE_DIR=... "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_livetick_probe.gd
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 const ATTACH := Vector3(17.95, 13.57, 0.0)  # the measured LOCAL live attach triple
 

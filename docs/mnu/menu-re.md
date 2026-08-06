@@ -2,7 +2,7 @@
 
 How Joint Operations parses, lays out, sounds, and draws its `.mnu` menus, as
 witnessed in the original engine, and how `engine/formats/mnu` (incl. the mnu_xml reader), `engine/formats/mns`,
-and `godot/engine/mnu` correspond to it.
+and `godot/adapter/mnu` correspond to it.
 
 Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imagebase
 `0x400000`, IDB `Jointops.exe.kong.i64`). All addresses are absolute in that image.
@@ -636,7 +636,7 @@ Accepted/divergent (each a documented decision, not a defect):
   user-visible "dropdowns overlap" bug). Fixed: full-menu catcher overlay as the menu's
   last child hosting the popup box (picking + draw priority by tree order), the witnessed
   outside-press close/consume + dead-cell rule on the catcher, the NovaMnuMenu single-open
-  registry, and close-on-screen-change/exit/hide. `godot/engine/mnu/nova_mnu_combo.cpp`,
+  registry, and close-on-screen-change/exit/hide. `godot/adapter/mnu/nova_mnu_combo.cpp`,
   `nova_mnu_menu.cpp`.
 - **D-MNU-12 (popup draw order — reimpl mapping):** the original has NO overlay draw pass —
   the open list draws at its tree position (`CComboWnd_Render @ 0x65bfd0` child walk ->
@@ -679,19 +679,19 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless editor model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
-| `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/engine/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
+| `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/adapter/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
 | `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `engine/formats/mnu/src/mnu.cpp` |
-| `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/src/mnu.cpp`; layout in `apply_position` — `godot/engine/mnu/nova_mnu_builder.cpp` |
+| `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/src/mnu.cpp`; layout in `apply_position` — `godot/adapter/mnu/nova_mnu_builder.cpp` |
 | `parse_edit_widget_xml_properties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
 | `sub_64AD90 @ 0x64ad90` (CHECKBOX attr parse) | CHECKBOX attrs (`AS_BUTTON/CHECKED`) in `mnu::parse_window` |
 | `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL `ORIENTATION` + `HEIGHT/WIDTH` thickness in `mnu::parse_window` |
 | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `engine/formats/mnu/src/mnu.cpp` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `engine/formats/mnu/src/mnu.cpp` |
 | `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `engine/formats/mnu/src/mnu.cpp` (`<MI>`/`<MIN_ITEM_HEIGHT>` -> `this+201`; justify/vjustify/items/appearances) |
-| `CListWnd_Construct @ 0x643bb0` (embedded `CScrollWnd@+976`; row-height sentinel `this+201 = -1`) | `NovaMnuCombo` popup defaults — `godot/engine/mnu/nova_mnu_combo.cpp` (D-MNU-8) |
+| `CListWnd_Construct @ 0x643bb0` (embedded `CScrollWnd@+976`; row-height sentinel `this+201 = -1`) | `NovaMnuCombo` popup defaults — `godot/adapter/mnu/nova_mnu_combo.cpp` (D-MNU-8) |
 | `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `NovaMnuCombo::open_popup` + `effective_item_height` — `nova_mnu_combo.cpp` (D-MNU-7/8) |
-| `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `build_combo` `set_popup_rect(list_box.position)` — `godot/engine/mnu/nova_mnu_builder.cpp` (D-MNU-7) |
-| `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
+| `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `build_combo` `set_popup_rect(list_box.position)` — `godot/adapter/mnu/nova_mnu_builder.cpp` (D-MNU-7) |
+| `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/adapter/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> `build_container` gates `add_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
 | `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` / `mnu_canvas.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
@@ -699,7 +699,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_AccumulateAncestorOffset @ 0x6465e0` (was `sub_6465E0`) | Godot parent-child nesting (positions are parent-relative) |
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
-| `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
+| `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/adapter/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
 | `dispatch_mouse_event @ 0x63ab00` (WM `0x200..0x20A` -> ids `0x1000001..0x100000B`; exclusive route to `g_ui_open_popup_wnd` `@ 0x63abb5`) | the catcher overlay owning all input while a dropdown is open — `NovaMnuCombo::open_popup` (D-MNU-11) |
 | `scene_end_frame @ 0x63e600` (frame pump only the open popup `@ 0x63e691`; clears the per-frame mouse claim `scene+16` `@ 0x63e67e`) | overlay `MOUSE_FILTER_STOP` coverage (the Godot reimpl has no per-frame pump) |
 | `CWnd_IsVisibleInHierarchy @ 0x646290` (popup-subtree-only while a popup is open `@ 0x646299`) | the overlay makes non-popup widgets unpickable; `NovaMnuCombo` closes on lost tree visibility |
@@ -711,7 +711,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
-| `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
+| `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/adapter/mnu/nova_mnu_menu.cpp` |
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/src/controls.cpp`) + `nova_menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
@@ -719,7 +719,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
 | `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) | `build_table` — `nova_mnu_builder.cpp` (id lookup + body justify + authored scrollbar) + `NovaMnuTable` |
-| `NovaControlsModel` (Godot wrapper) | `godot/engine/mnu/nova_controls_model.cpp` |
+| `NovaControlsModel` (Godot wrapper) | `godot/adapter/mnu/nova_controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
 | `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |
 | `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuCompanion._resolve_selected_class` + select-by-value |

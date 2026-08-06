@@ -40,7 +40,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 
-LINT_SCOPES = ("godot/modtools/", "godot/engine/")
+# "godot/engine/" is TRANSITIONAL beside "godot/adapter/" while the ADR 0028
+# rename is in flight (same rename-pairing mechanism as PROMOTED_SCOPES below).
+LINT_SCOPES = ("godot/modtools/", "godot/adapter/", "godot/engine/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.
@@ -102,11 +104,11 @@ PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])"
 # is in flight: with both sides of the rename in the diff pathspec, git pairs
 # moved files as renames instead of flagging their every line as added. Drop
 # the stale entry in a routine PR once master's merge-base is past the move.
-PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "engine/",
-                   "libs/", "apps/")
+PROMOTED_SCOPES = ("godot/adapter/", "godot/engine/", "godot/game/", "godot/modtools/",
+                   "engine/", "libs/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
-    "godot/engine/world/host_session_config.gd",
+    "godot/adapter/world/host_session_config.gd",
     "engine/net/novaworld/include/novaworld/gate_probe.h",
     "engine/net/npwire/include/npwire/net_ports.h",
     "engine/net/npwire/include/npwire/game_type.h",

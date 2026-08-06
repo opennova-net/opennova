@@ -44,7 +44,7 @@ SCAN_ROOTS = (
     "apps",
     "tests",
     "tools",
-    "godot/engine",
+    "godot/adapter",
     "third_party/sqlite",
     "third_party/bcrypt",
 )

@@ -209,7 +209,7 @@ jobs:
           if-no-files-found: error
           path: web/dist
 
-  # Compile the GDExtension (godot/engine + engine/ + the pinned third_party/godot-cpp)
+  # Compile the GDExtension (godot/adapter + engine/ + the pinned third_party/godot-cpp)
   # once. godot-tests and the two Windows package jobs download these DLLs instead
   # of recompiling. sccache caches godot-cpp's objects across runs, so after one
   # warm-up only changed engine/libs sources recompile. Windows must use Ninja:
@@ -252,7 +252,7 @@ jobs:
             # RelWithDebInfo objects cacheable; the default /Zi separate-PDB is not.
             # CMP0141=NEW forces that policy into godot-cpp (its CMake policy ceiling
             # is < 3.25).
-            cmake -S godot/engine -B $c.d -G Ninja `
+            cmake -S godot/adapter -B $c.d -G Ninja `
               "-DGODOTCPP_TARGET=$($c.t)" `
               "-DCMAKE_BUILD_TYPE=$($c.b)" `
               "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `

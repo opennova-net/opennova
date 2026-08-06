@@ -1,7 +1,7 @@
 extends GutTest
 
-const DestructionPresentPass := preload('res://engine/world/destruction_present_pass.gd')
-const MissionObjectPlacer := preload('res://engine/mission/mission_object_placer.gd')
+const DestructionPresentPass := preload('res://adapter/world/destruction_present_pass.gd')
+const MissionObjectPlacer := preload('res://adapter/mission/mission_object_placer.gd')
 
 
 class SimStub:

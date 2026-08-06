@@ -47,7 +47,7 @@ system shared and abstract only the data source behind a sampler seam.
 
 ### Mission execution — one standalone runtime
 
-`godot/engine/world/mission_runtime.gd` has one live owner: `GameWorld`, entered
+`godot/adapter/world/mission_runtime.gd` has one live owner: `GameWorld`, entered
 through `MainGame`. ONED does not self-tick a mission, create a local-player
 presenter, or embed the F3 debug overlay. This removes the editor-specific transport
 and lifecycle state that could make an apparently shared simulation behave
@@ -70,7 +70,7 @@ rather than adding an editor-owned transport around the simulation.
 
 ### Local player and debug UI — game-owned surfaces
 
-`godot/engine/world/local_player_presenter.gd` is instantiated only by the game
+`godot/adapter/world/local_player_presenter.gd` is instantiated only by the game
 shell. Gameplay input, mouse ownership, the viewmodel render pass, HUD feeds,
 and F3 therefore have one boot path and one lifecycle. Editor automation may
 control or inspect the managed child through the runtime debug/MCP seam, but

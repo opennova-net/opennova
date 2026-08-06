@@ -13,7 +13,7 @@ extends Control
 ## / set_workspace surface are preserved for the workstation test.
 
 const UI := preload("res://modtools/framework/inspector_forms.gd")
-const FieldBinderScript := preload("res://engine/ui/field_binder.gd")
+const FieldBinderScript := preload("res://adapter/ui/field_binder.gd")
 
 const CURVE_FIELDS := [
 	["scale_func", "Size over life"],

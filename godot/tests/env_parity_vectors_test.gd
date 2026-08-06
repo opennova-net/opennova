@@ -5,7 +5,7 @@ extends GutTest
 #
 # Pins the GDScript-visible outputs of the environment stack —
 # NovaEnvironment / NovaWeather / NovaSky / NovaWater (+ the reachable
-# NovaCelestial math via EnvFile statics), godot/engine/environment/*.gd —
+# NovaCelestial math via EnvFile statics), godot/adapter/environment/*.gd —
 # against committed vectors over a deterministic in-code corpus, so ENG-2 can
 # port the math into engine/formats/env and delete the GDScript with these staying green
 # pre/post. Structure mirrors tests/novaworld/nw_codec_identity_test.cpp (the
@@ -148,11 +148,11 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
-const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
-const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
-const NovaCelestialScript = preload("res://engine/environment/nova_celestial.gd")
+const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
+const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
+const NovaSkyScript = preload("res://adapter/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
+const NovaCelestialScript = preload("res://adapter/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0

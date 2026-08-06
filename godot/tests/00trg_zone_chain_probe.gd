@@ -17,7 +17,7 @@ const ARMORY_ATTRIB := 0x80000
 const NO_HUD_ATTRIB := 0x20000000
 const FARP_ATTRIB2 := 0x2000
 const EWEAP_ATTRIB := 0x20
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 
 func _init() -> void:

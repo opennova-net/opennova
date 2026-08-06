@@ -76,7 +76,7 @@ struct EntityHandle {
 };
 
 // Spawn-origin provenance word: (kind << 24) | (record index & 0xFFFFFF);
-// kSpawnOriginNone = none. GDScript twin: godot/engine/world/spawn_origin.gd.
+// kSpawnOriginNone = none. GDScript twin: godot/adapter/world/spawn_origin.gd.
 inline constexpr uint32_t kSpawnOriginNone = 0xFFFFFFFFu;
 constexpr uint32_t spawn_origin_pack(uint32_t kind, uint32_t index) {
     return (kind << 24) | (index & 0xFFFFFFu);

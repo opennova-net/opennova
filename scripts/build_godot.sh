@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Godot GDExtension (godot/engine/) into godot/bin/.
+# Builds the Godot GDExtension (godot/adapter/) into godot/bin/.
 #
 # This is what registers the engine's C++ classes (NovaTerrain, RtxtStringFile,
 # NovaResourceRoot, ...) with the editor. scripts/build.sh builds the engine/ +
@@ -43,7 +43,7 @@ echo "Building Godot GDExtension ($flavor -> CMake config $config)..."
 # CMAKE_BUILD_TYPE drives single-config generators (Linux/macOS Makefiles or
 # Ninja); --config drives multi-config generators (Visual Studio). Passing both
 # keeps one code path for either.
-cmake -S "$root/godot/engine" -B "$root/godot/engine/build" -DCMAKE_BUILD_TYPE="$config"
-cmake --build "$root/godot/engine/build" --config "$config" -j "$jobs"
+cmake -S "$root/godot/adapter" -B "$root/godot/adapter/build" -DCMAKE_BUILD_TYPE="$config"
+cmake --build "$root/godot/adapter/build" --config "$config" -j "$jobs"
 
 echo "GDExtension ($flavor) built into godot/bin/ — restart the Godot editor to load it."

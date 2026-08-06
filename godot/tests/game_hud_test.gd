@@ -5,7 +5,7 @@ extends GutTest
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 const WEAPON_PATH := "res://../fixtures/def/weapon.def"
-const PlayerViewEffectsScript := preload("res://engine/world/player_view_effects.gd")
+const PlayerViewEffectsScript := preload("res://adapter/world/player_view_effects.gd")
 
 var _temp_dirs: Array[String] = []
 

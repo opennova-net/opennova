@@ -4,7 +4,7 @@ extends GutTest
 # shared-session scrub knobs and authority gates, and empty states without a
 # world.
 
-const PageScript := preload("res://engine/debug/pages/debug_environment_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_environment_page.gd")
 
 
 class StubEnv:

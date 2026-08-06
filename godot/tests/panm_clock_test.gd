@@ -1,7 +1,7 @@
 extends GutTest
 
-const PanmClockScript := preload("res://engine/world/panm_clock.gd")
-const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const PanmClockScript := preload("res://adapter/world/panm_clock.gd")
+const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
 const PMP := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
 
 

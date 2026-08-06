@@ -8,14 +8,14 @@ the occlusion model data they all consume. Binary: retail **Jointops.exe**
 that binary's. The consumer engine is **PORTED** (2026-07-17):
 `engine/runtime/world/occlusion.{h,cpp}` (`OcclusionWorld` + the render-float math),
 the `CollisionWorld` camera blink query, and the reimpl wiring
-(`NovaSimulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/engine/world/occlusion_frame_pass.gd)`,
+(`NovaSimulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/adapter/world/occlusion_frame_pass.gd)`,
 the placer de-batch + `NovaObjectModel.set_section_visibility_mask`); ctest
 `occlusion` + GUT `game_world_test` / `nova_object_model_section_mask_test`
 cover it. The *producer* side (blink volume queries, the indoors bit,
 per-entity blink hits) is §15 of
 [world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the
 *consumer* side that §15 deferred as "REN-scope follow-ups". Sound occlusion is
-witnessed here too (its port target is `godot/engine/world` audio; the catalog
+witnessed here too (its port target is `godot/adapter/world` audio; the catalog
 entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 
 ## Verdict table

@@ -7,11 +7,11 @@ extends Node3D
 # from the chosen resource dir. The first-launch directory picker lives here
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
-const DebugViewContext := preload("res://engine/debug/nova_debug_view_context.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const DebugOverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
+const DebugViewContext := preload("res://adapter/debug/nova_debug_view_context.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
-const LocalPlayerPresenterScript := preload("res://engine/world/local_player_presenter.gd")
+const LocalPlayerPresenterScript := preload("res://adapter/world/local_player_presenter.gd")
 const RuntimeShutdownScript := preload("res://game/runtime_shutdown_coordinator.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a

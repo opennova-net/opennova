@@ -1,9 +1,9 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
-const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
-const PresentAimOverlay := preload("res://engine/world/aim_overlay_present_pass.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
+const PresentAimOverlay := preload("res://adapter/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
 	"sim_tick_us",
 	"net_tick_us",

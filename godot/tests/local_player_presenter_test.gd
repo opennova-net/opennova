@@ -1,7 +1,7 @@
 extends GutTest
 
-const LocalPlayerPresenter := preload("res://engine/world/local_player_presenter.gd")
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const LocalPlayerPresenter := preload("res://adapter/world/local_player_presenter.gd")
+const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 
 class FakeWeaponPart:

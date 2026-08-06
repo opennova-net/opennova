@@ -8,7 +8,7 @@ extends SceneTree
 ##   GODOT_BIN --path godot -s res://tests/firebarrel_visual_probe.gd
 ## Output: NOVA_PROBE_OUT (dir) or user://firebarrel_probe/
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const TICK_DT := 1.0 / 62.0
 const CAPTURE_TIMES := [1.0, 2.0, 3.0, 4.0]
 

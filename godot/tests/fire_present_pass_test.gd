@@ -1,6 +1,6 @@
 extends GutTest
 
-const FirePresentPass := preload("res://engine/world/fire_present_pass.gd")
+const FirePresentPass := preload("res://adapter/world/fire_present_pass.gd")
 
 
 class SimStub:

@@ -4,7 +4,7 @@ extends GutTest
 # the occlusion pass did, while the selectable building list puts exceptional
 # states first and explains the selected building in plain language.
 
-const PageScript := preload("res://engine/debug/pages/debug_occlusion_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_occlusion_page.gd")
 
 
 class StubSim:

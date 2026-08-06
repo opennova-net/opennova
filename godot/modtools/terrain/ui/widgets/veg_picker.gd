@@ -6,7 +6,7 @@ extends Window
 
 signal graphic_selected(basename: String)
 
-const VegAssets := preload("res://engine/terrain/veg_assets.gd")
+const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
 
 const _CELL_SIZE := Vector2(128, 156)
 const _PREVIEW_SIZE := Vector2(112, 112)

@@ -18,9 +18,9 @@ Classifications:
   consumer and must **not** be faked (an untracked divergence would mis-train
   authors).
 
-Chains below run editor inspector → `EnvFile` (godot/engine/env/env_file.h) →
+Chains below run editor inspector → `EnvFile` (godot/adapter/env/env_file.h) →
 runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
-`NovaCelestial`, godot/engine/environment/) → shader. The portable math lives in
+`NovaCelestial`, godot/adapter/environment/) → shader. The portable math lives in
 `engine/formats/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
 
 ## Scalars, fog, water
@@ -117,7 +117,7 @@ is the fix wave's (C7) work-order list:
 
 ## Editor follow-up (shipped by C7)
 
-`EnvFile.get_field_consumption()` (godot/engine/env/env_file.cpp) is the engine-side
+`EnvFile.get_field_consumption()` (godot/adapter/env/env_file.cpp) is the engine-side
 consumption table — field → honored | partial | unconsumed, with the original anchor
 and a plain-language note — and the Environment inspector badges PARTIAL (◐) and
 UNCONSUMED (○) rows with tooltips instead of silently accepting edits. C7 also added

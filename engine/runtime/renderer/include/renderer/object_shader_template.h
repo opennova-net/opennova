@@ -5,7 +5,7 @@
 // validation, server-side dry-run rendering, or porting to a different
 // engine without depending on Godot's Shader resource type).
 //
-// The Godot side (godot/engine/object/nova_object_shader_cache.cpp) wraps
+// The Godot side (godot/adapter/object/nova_object_shader_cache.cpp) wraps
 // these strings into Godot Shader resources and caches them per key.
 //
 // Ported from the pre-repo prototype's nova_shader_cache compose_* helpers

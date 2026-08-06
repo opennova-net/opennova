@@ -10,9 +10,9 @@ extends SceneTree
 # OPENNOVA_JO_DIR=<retail JO install> "$GODOT_BIN" --headless \
 #   --path godot -s res://tests/death_visual_anchor_probe.gd
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
-const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionEntityRegistry := preload("res://adapter/world/mission_entity_registry.gd")
+const MissionPresentPass := preload("res://adapter/world/mission_present_pass.gd")
 
 const DEATH_STATE_MIN := 173
 # The entity itself may legitimately settle/move on the kill tick. The bug is

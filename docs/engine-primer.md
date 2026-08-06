@@ -71,7 +71,7 @@ appear only where a record says so. Known scales, each owned by its record:
   `[orig: Mission_LoadBMSAndExtractSpawnPoints @ 0x40d650]`
   ([correspondence.md §3](correspondence.md)).
 - The conversion is **single-sourced** in `MissionObjectPlacer.bms_to_godot_basis` /
-  `bms_to_godot_position` (`godot/engine/mission/mission_object_placer.gd` statics),
+  `bms_to_godot_position` (`godot/adapter/mission/mission_object_placer.gd` statics),
   citing `[orig: Entity_SpawnFromBMSRecord @ 0x40eb66]` +
   `[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40]`
   ([runtime-architecture.md](runtime-architecture.md)). **Never re-derive it** — a
@@ -144,7 +144,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 
 | Subsystem | Our code | Record | Verdict |
 |---|---|---|---|
-| Menus (MNU/MNS UI) | `engine/formats/mnu` (incl. the mnu_xml reader), `engine/formats/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | record complete (D-MNU-1..12; open rows tabled in the ledger) |
+| Menus (MNU/MNS UI) | `engine/formats/mnu` (incl. the mnu_xml reader), `engine/formats/mns`, `godot/adapter/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | record complete (D-MNU-1..12; open rows tabled in the ledger) |
 | Sound banks + dialog | `engine/formats/lwf`, `engine/formats/dbf`, `engine/runtime/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | record complete (D-SND-1..17; open rows tabled in the ledger) |
 | Music (MUS/SBF/SCR) | `engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
 | Environment / time-of-day | `engine/formats/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |
@@ -153,8 +153,8 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
 | World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
 | Items (items.def entity defs) | `engine/formats/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
-| HUD + interface overlays | `godot/engine/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
-| Mission loading screen | `godot/engine/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..7) |
+| HUD + interface overlays | `godot/adapter/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
+| Mission loading screen | `godot/adapter/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..7) |
 | Player info / avatars | `engine/formats/avatars`, `NovaAvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos FIXED 2026-07-30; open: -1 spawned-soldier render NEEDS-RE, -9 persistence, -12 per-slot selection state) |
 | Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `engine/runtime/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
@@ -163,8 +163,8 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Skeletal animation (`.bad`/`.adm`) | `engine/runtime/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
 | Models (`.3di`: 3DI3 + GP) | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
-| Particles (`.ptl`) | `engine/runtime/particle`, `engine/runtime/renderer` particle path, `godot/engine/particle` (NovaEffectScene / NovaParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
-| NovaWorld networking | `engine/net/npwire`, `engine/net/novaworld`, `engine/net/napi`, `engine/net/novacrypto`, `engine/net/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered) |
+| Particles (`.ptl`) | `engine/runtime/particle`, `engine/runtime/renderer` particle path, `godot/adapter/particle` (NovaEffectScene / NovaParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
+| NovaWorld networking | `engine/net/npwire`, `engine/net/novaworld`, `engine/net/napi`, `engine/net/novacrypto`, `engine/net/netsim`, `apps/novaworld_server`, `godot/adapter/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered) |
 | Boot-required resources | `engine/base/gameprofile` `required_resources` manifest (ENG-6), consumed via `NovaResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 | VFS / PFF mount stack | `engine/base/vfs`, `engine/formats/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..11 |
 | Terrain (TRN + runtime queries) | `engine/runtime/terrain`, `engine/runtime/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
@@ -214,13 +214,13 @@ Order of operations when you need an engine truth:
 5. **Runtime introspection:**
    - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
      tabs, sim transport (play/pause/step), and mission-variable writes —
-     `godot/engine/debug/nova_debug_overlay.gd`. ONED launches that same game
+     `godot/adapter/debug/nova_debug_overlay.gd`. ONED launches that same game
      with F5, or its current saved loose mission with F6; it has no embedded
      mission preview or debug overlay.
    - `NovaSimulation` introspection: `get_present_snapshot()`,
      `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.
-   - PerfTimeline ring (`godot/engine/util/perf_timeline.gd`), rendered in the
+   - PerfTimeline ring (`godot/adapter/util/perf_timeline.gd`), rendered in the
      overlay's Perf pane; recorded baselines in `docs/perf/`.
    - Headless probes `godot/tests/*_probe.gd` (menu_shell, mission_load_perf,
      mission_reground_perf, runtime_scene, trn_project_roundtrip).

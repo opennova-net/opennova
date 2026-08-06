@@ -4,7 +4,7 @@ extends GutTest
 # knobs routed through the shared debug catalog into a public shell surface,
 # and the empty states.
 
-const PageScript := preload("res://engine/debug/pages/debug_audio_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_audio_page.gd")
 
 var _saved_buses: Dictionary = {}
 

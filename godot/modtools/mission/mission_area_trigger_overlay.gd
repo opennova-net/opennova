@@ -13,8 +13,8 @@ extends Node3D
 # rebuilt by the controller. Referenced via preload (no class_name), same convention as the
 # waypoint overlay.
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const Overlay := preload("res://engine/mission/mission_overlay_util.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const Overlay := preload("res://adapter/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of the centre grab cube; also its pick-target half-size.
 const HANDLE_HALF := 1.5

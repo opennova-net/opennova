@@ -25,9 +25,9 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/muzzle_origin_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://engine/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
 const HEAD_BONE_INDEX := 14      # LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX

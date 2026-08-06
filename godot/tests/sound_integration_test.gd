@@ -4,7 +4,7 @@ extends GutTest
 ## mount the dir, load 00TRa.bms + items.def, run NovaMissionAudio, and report how
 ## many sound markers resolved to a sound set. Skips when the data is absent.
 
-const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
 
 const JO_DIR := "C:/Users/taylor/Desktop/JOX"
 

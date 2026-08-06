@@ -4,8 +4,8 @@ extends GutTest
 # public value interface. The focused layout case observes the rendered Tree at
 # the overlay's narrow content floor so clipped diagnostics stay usable.
 
-const PaneScript := preload("res://engine/debug/pages/debug_stats_page.gd")
-const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+const PaneScript := preload("res://adapter/debug/pages/debug_stats_page.gd")
+const OverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
 
 
 class EffectInfoStub:

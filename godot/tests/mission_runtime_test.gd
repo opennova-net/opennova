@@ -5,8 +5,8 @@ extends GutTest
 # These focused tests instantiate it directly over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 
 func test_kit_from_loadout_rows_reads_the_mission_tuple_keys() -> void:

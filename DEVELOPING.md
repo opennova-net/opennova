@@ -79,7 +79,7 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
-(The README documents a `cmake -S godot/engine -B build-godot ...` equivalent; the script
+(The README documents a `cmake -S godot/adapter -B build-godot ...` equivalent; the script
 is the canonical path.)
 
 ## Run the Godot editor and game

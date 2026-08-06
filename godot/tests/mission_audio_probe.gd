@@ -9,7 +9,7 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/mission_audio_probe.gd -- <dir> <expansion> [mission.bms ...]
 # With no missions listed, probes every .bms the mount's index lists (cap 12).
 
-const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
 
 
 func _initialize() -> void:

@@ -49,7 +49,7 @@ add_subdirectory(engine/runtime/controls)
 add_subdirectory(engine/formats/playersav)
 
 # Family link-interface groups (LIBS-2, ADR 0024) — defined once every member
-# target exists; consumed by whole-family linkers (the godot/engine root).
+# target exists; consumed by whole-family linkers (the godot/adapter root).
 include(engine/families.cmake)
 
 # Vendored third-party deps that the net stack pulls in.
@@ -88,7 +88,7 @@ endif()
 # Net stack (relanded from PR #37; protocol RE record: docs/net/novaworld-net-re.md).
 # These libs are NOT bundled into the FFI shared lib; they are linked into the
 # standalone novaworld server (apps/novaworld_server) and the Godot client
-# GDExtension (godot/engine/network).
+# GDExtension (godot/adapter/network).
 add_subdirectory(engine/net/novacrypto)
 add_subdirectory(engine/net/napi)
 add_subdirectory(engine/net/npwire)

@@ -17,10 +17,10 @@ easier to relay than to rediscover.
   controls, terrain, terrain_query), `net/` (novacrypto, napi, npwire, novaworld,
   netsim, npruntime). Consumed via the flat C ABI by Python and the DCC plugins,
   by direct static link everywhere else. See `engine/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `engine/` (GDExtension C++ glue, `Nova*` classes,
-  plus the shared shell-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
-  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces), `game/` (the
-  game shell), `tests/` (GUT suite).
+- `godot/` — the Godot 4.6.1 project: `adapter/` (the shell adapter, ADR 0028:
+  GDExtension C++ glue, `Nova*` classes, plus the shared shell-neutral GDScript layer —
+  see `godot/adapter/CLAUDE.md`), `modtools/` (the OpenNova Editor "ONED" — thirteen
+  authoring workspaces), `game/` (the game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
@@ -83,7 +83,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 ## Conventions
 
 - `engine/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
-  domain-prefixed C ABI (consumed by `apps/importer/` and `godot/engine/`). The shared FFI
+  domain-prefixed C ABI (consumed by `apps/importer/` and `godot/adapter/`). The shared FFI
   target is `opennova_shared` (`opennova.dll` / `libopennova.so`).
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
@@ -160,7 +160,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `NovaSimulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
-- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/engine/CLAUDE.md`,
+- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/adapter/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `diagnosing-bugs`.

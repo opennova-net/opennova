@@ -1,11 +1,11 @@
 class_name ObjectPreview
 extends Control
 
-const FlyCameraScript = preload("res://engine/fly_camera.gd")
-const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
-const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
-const CollisionHull = preload("res://engine/object/collision_hull.gd")
-const ObjectUserPointOverlayScript = preload("res://engine/object/object_user_point_overlay.gd")
+const FlyCameraScript = preload("res://adapter/fly_camera.gd")
+const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
+const CollisionHull = preload("res://adapter/object/collision_hull.gd")
+const ObjectUserPointOverlayScript = preload("res://adapter/object/object_user_point_overlay.gd")
 
 var object_data: NovaObjectData
 

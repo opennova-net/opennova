@@ -115,7 +115,7 @@ matchmaking/handoff client and does not own a second gameplay entity model.
 - **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
   shell writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
-  is native — `NovaPresentApplier` (`godot/engine/simulation/nova_present_applier.cpp`), with the
+  is native — `NovaPresentApplier` (`godot/adapter/simulation/nova_present_applier.cpp`), with the
   GDScript file as the shell-facing facade and the node-side visual contract (ADR 0007) still
   GDScript; the aim-overlay/emplaced-weapon adapters delegate to the same native statics so the
   mission and wire passes share one implementation. The basis convention is single-sourced in

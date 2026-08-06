@@ -1,7 +1,7 @@
 # MUS / SBF / SCR — reverse-engineering record
 
 Validation record for the music subsystem (`engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr`,
-`godot/engine/audio`) against the original engine as witnessed in IDA Pro.
+`godot/adapter/audio`) against the original engine as witnessed in IDA Pro.
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses
 below are that binary's. This file is the committed home for the divergence
 catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
@@ -15,7 +15,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `engine/formats/pff` |
-| `godot/engine/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
+| `godot/adapter/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 

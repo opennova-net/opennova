@@ -9,8 +9,8 @@ extends RefCounted
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 ## Watchdog budget for tools that (re)load the mission's terrain and place
 ## its objects — that path can take seconds on large maps.

@@ -37,7 +37,7 @@ CMakeLists for `opennova_shared`).
 ## 2. Register in BOTH build graphs — the classic miss
 
 - Root `CMakeLists.txt`: `add_subdirectory(engine/<group>/<name>)` alongside the others.
-- `godot/engine/CMakeLists.txt`: the parallel, hand-maintained list — required
+- `godot/adapter/CMakeLists.txt`: the parallel, hand-maintained list — required
   the moment an engine binding links the new lib.
 
 ## 3. Fixtures (`fixtures/<name>/`)
@@ -67,8 +67,8 @@ Run loop:
 
 ## 5. Optional: engine binding and editor surface
 
-- Binding: `godot/engine/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
-  `godot/engine/register_types.cpp`, link in the engine CMake, then
+- Binding: `godot/adapter/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
+  `godot/adapter/register_types.cpp`, link in the engine CMake, then
   `bash scripts/build_godot.sh` and fully restart any open editor (no
   hot-reload). Add a GDScript smoke test `godot/tests/<name>_data_test.gd`
   using the fixture-skip pattern; run it via the `gut` skill.

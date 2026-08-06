@@ -10,7 +10,7 @@ extends Node
 ##   "$GODOT_BIN" --path godot res://tests/foliage_spawn_capture_probe.tscn
 ## Optional output override: NOVA_SPAWN_CAPTURE_DIR=<absolute-or-res://-path>
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const DEFAULT_MISSION := "00TRe.bms"
