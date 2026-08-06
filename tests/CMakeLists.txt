@@ -1587,15 +1587,6 @@ target_link_libraries(nw_pool_decode_unit_test PRIVATE opennova_novaworld openno
 target_include_directories(nw_pool_decode_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 
-# Replay-timeline assembler regression — crafts an inline capture (auth pair +
-# spawn + C2S 0x0C uplinks), drives the shared outer-decode pipeline
-# (decode_capture_to_messages) into build_replay_timeline, and asserts the
-# assembled entities + tracks. No capture fixtures, so it runs in CI.
-add_executable(nw_replay_timeline_test novaworld/nw_replay_timeline_test.cpp)
-target_link_libraries(nw_replay_timeline_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
-target_include_directories(nw_replay_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME nw_replay_timeline COMMAND nw_replay_timeline_test)
-
 # CaptureDecoder streaming-equivalence — pins that a sequence of push() calls
 # yields byte-identical InGameMessages to one batch decode_capture_to_messages()
 # (the contract the in-engine live net client relies on). Runs on an inline
@@ -1621,33 +1612,9 @@ target_compile_definitions(nw_golden_diff_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
 add_test(NAME nw_golden_diff COMMAND nw_golden_diff_test)
 
-# nw_replay role partition — pins that the replay tool splits a session into host
-# + client roles from the NAPI session opcode + UDP ports, ignores gate/SSDP
-# noise, and preserves each role's handshake. Compiles the partition unit
-# (apps/nw_replay/nw_replay_partition.cpp) directly. No fixtures, runs in CI.
-add_executable(nw_replay_partition_test
-    novaworld/nw_replay_partition_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/nw_replay/nw_replay_partition.cpp)
-target_link_libraries(nw_replay_partition_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common opennova_pcapio)
-target_include_directories(nw_replay_partition_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
-add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
-
-# nw_replay CLI + playback core — every numeric option must convert whole (no
-# NaN/inf/partial values reaching the pacing math) and a playback pass must
-# report capture-read and UDP-send failures instead of printing "complete".
-# Compiles apps/nw_replay/nw_replay_cli.cpp directly. No fixtures, runs in CI.
-add_executable(nw_replay_cli_test
-    novaworld/nw_replay_cli_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/nw_replay/nw_replay_cli.cpp)
-target_link_libraries(nw_replay_cli_test PRIVATE opennova_pcapio)
-target_include_directories(nw_replay_cli_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
-add_test(NAME nw_replay_cli COMMAND nw_replay_cli_test)
-
 # Streaming pcap reader — stream_pcap_udp_file must match the whole-file
-# read_pcap_udp byte-for-byte and honor early-exit (the basis for nw_replay
-# handling multi-GB captures without loading them into RAM). No fixtures, CI.
+# read_pcap_udp byte-for-byte and honor early-exit (so capture consumers can
+# stream multi-GB captures without loading them into RAM). No fixtures, CI.
 add_executable(nw_pcap_stream_test novaworld/nw_pcap_stream_test.cpp)
 target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common opennova_pcapio)
 target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1779,13 +1746,6 @@ target_link_libraries(netsim_item_replication_catalog_test
     PRIVATE opennova_netsim opennova_def)
 add_test(NAME netsim_item_replication_catalog
     COMMAND netsim_item_replication_catalog_test)
-
-# Replay/spectate history is an optional journal over the same client replica
-# reducer live play uses. This pins Player Person, AI Person, and Vehicle rows
-# through one ordered fold rather than parallel replay entity decoding.
-add_executable(netsim_replica_history_test netsim/replica_history_test.cpp)
-target_link_libraries(netsim_replica_history_test PRIVATE opennova_netsim)
-add_test(NAME netsim_replica_history COMMAND netsim_replica_history_test)
 
 # The ADR 0011 §4 loopback identity guard: World entity -> encode -> loopback ->
 # decode -> ClientState, field-identical to what the host's encoder + codec produced.

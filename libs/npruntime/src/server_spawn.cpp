@@ -4,6 +4,8 @@
 #include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
 #include <world/world.h>        // World, registry, cached
 
+#include <npwire/game_type.h>
+
 #include <algorithm>
 #include <array>
 #include <optional>
@@ -33,9 +35,8 @@ namespace {
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
-	constexpr uint32_t kCoopGameTypeMasked = 0x10020u;
 	const uint32_t gt = config.game_type;
-	if (!is_in_session || (gt & 0xFFFDFFFFu) == kCoopGameTypeMasked) return 1;
+	if (!is_in_session || opennova::game_type::is_waypoint_family(gt)) return 1;
 	uint32_t team1 = 0, team2 = 0;
 	world.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;

@@ -1,4 +1,5 @@
 #include "npwire/ingame_encode.h"
+#include "npwire/wire_handle.h"
 #include <io/le.h>
 
 // Encoders for the in-match S2C replication tags — the symmetric partners to
@@ -69,25 +70,25 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 		// a clear bit means "field was zero", not "field absent from state".
 		// Field->bit map matches NapiNPClientMsg_0x020 / §5.12 exactly.
 		uint8_t flags = 0;
-		if (rec.movement_val)    flags |= 0x01; // entry+16 raw BAM heading [orig: 0x50357e] (D-NET-59)
-		if (rec.orientation_val) flags |= 0x02; // entry+0   [orig: 0x503593]
-		if (rec.ammo_count)      flags |= 0x04; // entry+290 [orig: 0x5035b7]
-		if (rec.team_byte)       flags |= 0x08; // entry+354 [orig: 0x5035f1]
-		if (rec.weapon_type)     flags |= 0x10; // entry+640 [orig: 0x50360b]
-		if (rec.score_byte)      flags |= 0x20; // entry+672 [orig: 0x503633]
+		if (rec.movement_val)    flags |= kPool3SyncHasMovementVal;    // entry+16 raw BAM heading [orig: 0x50357e] (D-NET-59)
+		if (rec.orientation_val) flags |= kPool3SyncHasOrientationVal; // entry+0   [orig: 0x503593]
+		if (rec.ammo_count)      flags |= kPool3SyncHasAmmoCount;      // entry+290 [orig: 0x5035b7]
+		if (rec.team_byte)       flags |= kPool3SyncHasTeamByte;       // entry+354 [orig: 0x5035f1]
+		if (rec.weapon_type)     flags |= kPool3SyncHasWeaponType;     // entry+640 [orig: 0x50360b]
+		if (rec.score_byte)      flags |= kPool3SyncHasScoreByte;      // entry+672 [orig: 0x503633]
 
 		w.u8(flags);                    // [orig: *flags_location = flags @ 0x503660]
 		w.u32(uint32_t(rec.pos_x));     // entry+4  [orig: 0x503553]
 		w.u32(uint32_t(rec.pos_y));     // entry+8  [orig: 0x503565]
 		w.u32(uint32_t(rec.pos_z));     // entry+12 [orig: 0x503577]
 
-		if (flags & 0x01) w.u32(rec.movement_val);    // [orig: 0x50358f] (D-NET-59)
-		if (flags & 0x02) w.u32(rec.orientation_val); // [orig: 0x5035a9]
-		if (flags & 0x04) w.u16(rec.ammo_count);      // [orig: 0x5035cc]
+		if (flags & kPool3SyncHasMovementVal) w.u32(rec.movement_val);    // [orig: 0x50358f] (D-NET-59)
+		if (flags & kPool3SyncHasOrientationVal) w.u32(rec.orientation_val); // [orig: 0x5035a9]
+		if (flags & kPool3SyncHasAmmoCount) w.u16(rec.ammo_count);      // [orig: 0x5035cc]
 		w.u16(rec.net_handle);                         // ALWAYS [orig: 0x5035e2, entry+124]
-		if (flags & 0x08) w.u8(rec.team_byte);        // [orig: 0x503603]
-		if (flags & 0x10) w.u16(rec.weapon_type);     // [orig: 0x50362a]
-		if (flags & 0x20) w.u8(rec.score_byte);       // [orig: 0x503650]
+		if (flags & kPool3SyncHasTeamByte) w.u8(rec.team_byte);        // [orig: 0x503603]
+		if (flags & kPool3SyncHasWeaponType) w.u16(rec.weapon_type);     // [orig: 0x50362a]
+		if (flags & kPool3SyncHasScoreByte) w.u8(rec.score_byte);       // [orig: 0x503650]
 	}
 
 	return out;
@@ -106,46 +107,46 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		// spawn_flags DERIVED from populated fields (the original sets each bit
 		// inside `if (value) { flags |= bit; <write> }`). See ingame_encode.h.
 		uint16_t f = 0;
-		if (rec.entity_flags)              f |= 0x0020; // entity+36   [orig: 0x503ae6]
-		if (rec.euler_z)                   f |= 0x0001; // entity+16 yaw [orig: 0x503b3c]
-		if (rec.euler_x)                   f |= 0x0002; // entity+20   [orig: 0x503b58]
-		if (rec.euler_y)                   f |= 0x0004; // entity+24   [orig: 0x503b74]
-		if (rec.section_mask)              f |= 0x0008; // entity+308  [orig: 0x503b93]
-		if (rec.team_byte)                 f |= 0x0010; // entity+354 team [orig: 0x503bb2] (D-NET-58)
-		if (rec.parent_handle != 0xFFFF)   f |= 0x0100; // entity+368  [orig: 0x503bd1]
-		if (rec.target_handle != 0xFFFF)   f |= 0x0200; // entity+40   [orig: 0x503c27]
-		if (rec.seat_mask)                 f |= 0x0400; // itemDef+604 [orig: 0x503c83]
+		if (rec.entity_flags)              f |= kPoolSpawnHasEntityFlags; // entity+36   [orig: 0x503ae6]
+		if (rec.euler_z)                   f |= kPoolSpawnHasEulerZ; // entity+16 yaw [orig: 0x503b3c]
+		if (rec.euler_x)                   f |= kPoolSpawnHasEulerX; // entity+20   [orig: 0x503b58]
+		if (rec.euler_y)                   f |= kPoolSpawnHasEulerY; // entity+24   [orig: 0x503b74]
+		if (rec.section_mask)              f |= kPoolSpawnHasSectionMask; // entity+308  [orig: 0x503b93]
+		if (rec.team_byte)                 f |= kPoolSpawnHasTeamByte; // entity+354 team [orig: 0x503bb2] (D-NET-58)
+		if (rec.parent_handle != wire_handle::kInvalid) f |= kPoolSpawnHasParentHandle; // entity+368  [orig: 0x503bd1]
+		if (rec.target_handle != wire_handle::kInvalid) f |= kPoolSpawnHasTargetHandle; // entity+40   [orig: 0x503c27]
+		if (rec.seat_mask)                 f |= kPoolSpawnHasMountOccupancy; // itemDef+604 [orig: 0x503c83]
 		if (!rec.ai_name.empty() || rec.ai_profile_1 || rec.ai_profile_2)
-		                                   f |= 0x0800; // aiSlot      [orig: 0x503d53]
-		if (rec.alert_byte)                f |= 0x0040; // entity+533  [orig: 0x503e3c]
-		if (rec.action_byte)               f |= 0x0080; // entity+532  [orig: 0x503e60]
-		if (rec.weapon_type_byte)          f |= 0x1000; // entity+100  [orig: 0x503e7f]
-		if (rec.zone_number_rank)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
-		else if (rec.zone_radius)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
-		if (rec.difficulty_byte)           f |= 0x4000; // entity+624  [orig: 0x503f4c]
+		                                   f |= kPoolSpawnHasAiTrailer; // aiSlot      [orig: 0x503d53]
+		if (rec.alert_byte)                f |= kPoolSpawnHasRefNum; // entity+533  [orig: 0x503e3c]
+		if (rec.action_byte)               f |= kPoolSpawnHasSubType; // entity+532  [orig: 0x503e60]
+		if (rec.weapon_type_byte)          f |= kPoolSpawnHasWeaponTypeByte; // entity+100  [orig: 0x503e7f]
+		if (rec.zone_number_rank)               f |= kPoolSpawnHasZoneNumberRank; // entity+538  [orig: 0x503ecc]
+		else if (rec.zone_radius)         f |= kPoolSpawnHasZoneRadiusAlt; // itemDef+0x40000 path [orig: 0x503f29]
+		if (rec.difficulty_byte)           f |= kPoolSpawnHasDifficultyByte; // entity+624  [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
 		w.u16(rec.slot_id);             // packed handle [orig: 0x503a3f]
 		w.u16(rec.item_type_id);        // [orig: 0x503a57]
 		w.cstr(rec.entity_name);        // AI: entity+244, else empty [orig: 0x503a64..]
 
-		if (f & 0x0020) w.u32(rec.entity_flags); // [orig: 0x503afc]
+		if (f & kPoolSpawnHasEntityFlags) w.u32(rec.entity_flags); // [orig: 0x503afc]
 		w.u32(uint32_t(rec.pos_x));     // entity+4  [orig: 0x503b0f]
 		w.u32(uint32_t(rec.pos_y));     // entity+8  [orig: 0x503b22]
 		w.u32(uint32_t(rec.pos_z));     // entity+12 [orig: 0x503b35]
 
-		if (f & 0x0001) w.u32(uint32_t(rec.euler_z));
-		if (f & 0x0002) w.u32(uint32_t(rec.euler_x));
-		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
-		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
-		if (f & 0x0010) w.u8(rec.team_byte);   // entity+354 team (D-NET-58)
-		if (f & 0x0100) w.u16(rec.parent_handle);
-		if (f & 0x0200) w.u16(rec.target_handle);
+		if (f & kPoolSpawnHasEulerZ) w.u32(uint32_t(rec.euler_z));
+		if (f & kPoolSpawnHasEulerX) w.u32(uint32_t(rec.euler_x));
+		if (f & kPoolSpawnHasEulerY) w.u32(uint32_t(rec.euler_y));
+		if (f & kPoolSpawnHasSectionMask) w.u32(uint32_t(rec.section_mask));
+		if (f & kPoolSpawnHasTeamByte) w.u8(rec.team_byte);   // entity+354 team (D-NET-58)
+		if (f & kPoolSpawnHasParentHandle) w.u16(rec.parent_handle);
+		if (f & kPoolSpawnHasTargetHandle) w.u16(rec.target_handle);
 
 		// Mount-occupancy block. Once 0x0400 is set the original walks retail
 		// slots 0..7, then ALWAYS writes slot 8 + slot 9 (D-NET-56). The
 		// encoder only sets 0x0400 when seat_mask != 0.
-		if (f & 0x0400) {
+		if (f & kPoolSpawnHasMountOccupancy) {
 			w.u8(rec.seat_mask);
 			for (int b = 0; b < 8; ++b)
 				if (rec.seat_mask & (1u << b))
@@ -156,22 +157,22 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 
 		w.u8(rec.bone_byte);            // ALWAYS, entity+290 bone/other byte [orig: 0x503d38] (D-NET-58)
 
-		if (f & 0x0800) {               // AI trailer (D-NET-52: 4+4+cstr)
+		if (f & kPoolSpawnHasAiTrailer) { // AI trailer (D-NET-52: 4+4+cstr)
 			w.u32(rec.ai_profile_1);    // aiSlot+16  [orig: 0x503d6f]
 			w.u32(rec.ai_profile_2);    // aiSlot+20  [orig: 0x503d83]
 			w.cstr(rec.ai_name);        // aiSlot+156 [orig: 0x503dab..]
 		}
-		if (f & 0x0040) w.u8(rec.alert_byte);        // [orig: 0x503e50]
-		if (f & 0x0080) w.u8(rec.action_byte);       // [orig: 0x503e77]
-		if (f & 0x1000) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
+		if (f & kPoolSpawnHasRefNum) w.u8(rec.alert_byte);        // [orig: 0x503e50]
+		if (f & kPoolSpawnHasSubType) w.u8(rec.action_byte);       // [orig: 0x503e77]
+		if (f & kPoolSpawnHasWeaponTypeByte) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
 
-		if (f & 0x2000) {               // [orig: 0x503ee5 health block]
+		if (f & kPoolSpawnHasZoneNumberRank) { // [orig: 0x503ee5 health block]
 			w.u8(rec.zone_number_rank);      // entity+538 (the break-out byte)
 			w.u16(rec.zone_radius);    // entity+350
-		} else if (f & 0x8000) {
+		} else if (f & kPoolSpawnHasZoneRadiusAlt) {
 			w.u16(rec.zone_radius);    // entity+350 [orig: 0x503f43]
 		}
-		if (f & 0x4000) w.u8(rec.difficulty_byte);   // entity+624 [orig: 0x503f7e]
+		if (f & kPoolSpawnHasDifficultyByte) w.u8(rec.difficulty_byte);   // entity+624 [orig: 0x503f7e]
 	}
 
 	return out;
@@ -206,37 +207,37 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		w.u16(rec.item_type_id);
 
 		uint16_t f = 0;
-		if (rec.euler_z)      f |= 0x0001; // entity+16 yaw heading (32-bit BAM)
-		if (rec.euler_x)      f |= 0x0002; // entity+20
-		if (rec.euler_y)      f |= 0x0004; // entity+24
-		if (rec.section_mask) f |= 0x0008; // entity+308
-		if (rec.team_byte)    f |= 0x0010; // entity+354 (D-NET-58/62)
-		if (rec.entity_flags) f |= 0x0020; // entity+36 Flags dword (D-NET-147)
-		if (rec.bone_a)       f |= 0x0040; // entity+533 (D-NET-94)
-		if (rec.bone_b)       f |= 0x0080; // entity+532 (D-NET-94)
-		if (rec.score_flag)   f |= 0x0100; // entity+624
+		if (rec.euler_z)      f |= kStaticEntityHasEulerZ; // entity+16 yaw heading (32-bit BAM)
+		if (rec.euler_x)      f |= kStaticEntityHasEulerX; // entity+20
+		if (rec.euler_y)      f |= kStaticEntityHasEulerY; // entity+24
+		if (rec.section_mask) f |= kStaticEntityHasSectionMask; // entity+308
+		if (rec.team_byte)    f |= kStaticEntityHasTeamByte; // entity+354 (D-NET-58/62)
+		if (rec.entity_flags) f |= kStaticEntityHasEntityFlags; // entity+36 Flags dword (D-NET-147)
+		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)
+		if (rec.bone_b)       f |= kStaticEntityHasSubType; // entity+532 (D-NET-94)
+		if (rec.score_flag)   f |= kStaticEntityHasScoreFlag; // entity+624
 		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`; force the 0x200
 		// gate only when attach_ref is populated but weapon_byte is zero (else weapon_byte
 		// already triggers the write and 0x200 would be redundant).
-		if (rec.attach_ref && rec.weapon_byte == 0) f |= 0x0200;
+		if (rec.attach_ref && rec.weapon_byte == 0) f |= kStaticEntityHasAttachRef;
 
 		w.u16(f);
 		w.u32(uint32_t(rec.pos_x)); // entity+4
 		w.u32(uint32_t(rec.pos_y)); // entity+8
 		w.u32(uint32_t(rec.pos_z)); // entity+12
 
-		if (f & 0x0001) w.u32(uint32_t(rec.euler_z));
-		if (f & 0x0002) w.u32(uint32_t(rec.euler_x));
-		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
-		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
-		if (f & 0x0010) w.u8(rec.team_byte);
-		if (f & 0x0020) w.u32(rec.entity_flags);
+		if (f & kStaticEntityHasEulerZ) w.u32(uint32_t(rec.euler_z));
+		if (f & kStaticEntityHasEulerX) w.u32(uint32_t(rec.euler_x));
+		if (f & kStaticEntityHasEulerY) w.u32(uint32_t(rec.euler_y));
+		if (f & kStaticEntityHasSectionMask) w.u32(uint32_t(rec.section_mask));
+		if (f & kStaticEntityHasTeamByte) w.u8(rec.team_byte);
+		if (f & kStaticEntityHasEntityFlags) w.u32(rec.entity_flags);
 		w.u8(rec.ammo_count);          // ALWAYS, entity+290
-		if (f & 0x0040) w.u8(rec.bone_a);
-		if (f & 0x0080) w.u8(rec.bone_b);
-		if (f & 0x0100) w.u8(rec.score_flag);
+		if (f & kStaticEntityHasRefNum) w.u8(rec.bone_a);
+		if (f & kStaticEntityHasSubType) w.u8(rec.bone_b);
+		if (f & kStaticEntityHasScoreFlag) w.u8(rec.score_flag);
 		w.u8(rec.weapon_byte);         // ALWAYS, entity+538
-		if (rec.weapon_byte != 0 || (f & 0x0200)) w.u16(rec.attach_ref); // entity+350
+		if (rec.weapon_byte != 0 || (f & kStaticEntityHasAttachRef)) w.u16(rec.attach_ref); // entity+350
 	}
 
 	return out;
@@ -252,9 +253,9 @@ std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch) {
 	Writer w{out};
 
 	if (batch.has_header) {
-		w.u16(0xFFFFu);                                            // first-chunk sentinel (start_index := 0)
+		w.u16(kTerrainFirstChunkStartWord);                        // first-chunk sentinel (start_index := 0)
 		w.u16(batch.end_index);
-		w.u32(batch.magic != 0 ? batch.magic : 0x74696C30u);      // 'til0' (reader bails on mismatch)
+		w.u32(batch.magic != 0 ? batch.magic : kTerrainTileMagic); // 'til0' (reader bails on mismatch)
 		w.u32(batch.tile_count);                                   // total tiles in the full set
 		w.u32(batch.header_field2);                                // g_TerrainTileData[2]
 		w.u32(batch.header_field3);                                // g_TerrainTileData[3]
@@ -381,7 +382,7 @@ std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &r
 	// the full turret/weapon-aim block. The shared trailing write @ 0x460e10 carries
 	// Euler X when mounted (src 0x460d52) and the weapon heading BAM when not
 	// (src 0x460def). [orig: branch @ 0x460d2f]
-	if (rec.flags_byte & 0x04) {
+	if (rec.flags_byte & kVehicleCompactFlagDeadPose) {
 		w.u16(uint16_t(rec.euler_y));           // entity+24 Euler Y  [orig: 0x460d4c]
 		w.u16(uint16_t(rec.euler_x));           // entity+20 Euler X  [orig: 0x460d52 -> 0x460e10]
 	} else {
@@ -471,9 +472,9 @@ std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 	w.u8(rec.flags);
 	w.u8(rec.adm_index);
 	w.u8(rec.subtype);
-	if (rec.flags & 0x80) w.u8(rec.slot_byte);
+	if (rec.flags & kRoundEventHasSlotByte) w.u8(rec.slot_byte);
 	w.u16(rec.shooter_handle);
-	if (rec.flags & 0x40) w.u16(rec.target_handle);
+	if (rec.flags & kRoundEventHasTargetHandle) w.u16(rec.target_handle);
 	w.u16(rec.shot_seq);
 	w.u16(rec.pos_x_compressed);
 	w.u16(rec.pos_y_compressed);
@@ -504,7 +505,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	w.u8(fu.flags1);
 	w.u8(fu.flags2);
 
-	switch (fu.flags2 & 0x03) {
+	switch (fu.flags2 & kFrameFlags2SubBlockCycleMask) {
 	case 0: // weapon/reload/uniform (11 B) [orig: NetPacket_WritePlayerState @0x4ff81b]
 		w.u8(fu.weapon.preround_timer); w.u8(fu.weapon.slot_state360); w.u8(fu.weapon.slot_state368);
 		w.u8(fu.weapon.slot_state364); w.u8(fu.weapon.slot_state356); w.u8(fu.weapon.slot_state460);
@@ -702,27 +703,27 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	w.u8(ctx.player_slot);
 	w.u16(field_flags);
 	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
-	if (field_flags & 0x0001u)
+	if (field_flags & kPlayerSyncHasName)
 		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
-	if (field_flags & 0x0002u)
+	if (field_flags & kPlayerSyncHasTeamString)
 		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
-	if (field_flags & 0x0010u)
+	if (field_flags & kPlayerSyncHasVehicleName)
 		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
-	if (field_flags & 0x0004u)
+	if (field_flags & kPlayerSyncHasTeamByte)
 		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
-	if (field_flags & 0x0008u)
+	if (field_flags & kPlayerSyncHasClassByte)
 		w.u8(0);        // class/subtype byte (outside the 0x1CF7 set; slot-state default 0)
-	if (field_flags & 0x0020u)
+	if (field_flags & kPlayerSyncHasVehicleScore)
 		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
-	if (field_flags & 0x1000u)
+	if (field_flags & kPlayerSyncHasLateJoinFlag)
 		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
-	if (field_flags & 0x0040u)
+	if (field_flags & kPlayerSyncHasSquad)
 		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
-	if (field_flags & 0x0080u)
+	if (field_flags & kPlayerSyncHasSide)
 		w.u8(0);        // side [orig: slot+100577]
-	if (field_flags & 0x0400u)
+	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
-	if (field_flags & 0x0800u)
+	if (field_flags & kPlayerSyncHasVehicleTimer)
 		w.u32(0);       // vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
 	return out;
 }
@@ -734,7 +735,7 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	// 0x8000 removal + optional 0x4000 ack (golden's 0xC000): the client clears the slot and, with the
 	// ack bit, requests the next one — so the walk terminates at max_players. [orig: NapiNPClientMsg_PlayerSync
 	// @0x431370 — a 0x8000 record reads NO entity slot / fields, just [u8 slot][u16 flags].]
-	w.u16(static_cast<uint16_t>(0x8000u | (with_ack ? 0x4000u : 0u)));
+	w.u16(static_cast<uint16_t>(kPlayerSyncRemoval | (with_ack ? kPlayerSyncAck : 0u)));
 	return out;
 }
 

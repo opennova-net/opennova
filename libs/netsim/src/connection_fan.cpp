@@ -9,7 +9,9 @@
 
 #include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
+#include <npwire/game_type.h>
 #include <npwire/ingame_message_id.h>
+#include <npwire/wire_handle.h>
 #include <world/geom.h>              // to_fixed
 #include <world/vehicle_mount.h>
 
@@ -108,7 +110,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// g_GameType bit 0x20000 is set (Co-op 0x30020 is the captured case).
 		// The masks are the authoritative World::subgoals state consumed by
 		// the objective HUD on each recipient.
-		fu.objective.present = (game_type & 0x20000u) != 0u;
+		fu.objective.present = opennova::game_type::is_objective(game_type);
 		fu.objective.state[0] = static_cast<int32_t>(subgoals.won);
 		fu.objective.state[1] = static_cast<int32_t>(subgoals.lost);
 		fu.objective.state[2] = static_cast<int32_t>(subgoals.show_win);
@@ -158,7 +160,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// D-NET-151). A carrier whose pose we could not resolve (stale handle) falls back
 		// to the free-standing form.
 		const uint16_t player_carrier =
-				(e.mount_handle != 0xFFFFu) ? e.mount_handle : e.ground_handle;
+				(e.mount_handle != wire_handle::kInvalid) ? e.mount_handle : e.ground_handle;
 		switch (e.entity_class) {
 		case EntityClass::Player:
 			// 18-B player compact record, field sources witnessed in the case-1 write path
@@ -170,7 +172,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// [orig: ItemDef type/attrib and +0x326/+0x312 gates @0x4c0a39].
 			rec.player.vehicle_bone = e.veh_bone;
 			rec.player.seat_type = e.mounted_weapon_seat_type;
-			if (player_carrier != 0xFFFFu && e.carrier_pose_valid) {
+			if (player_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
@@ -184,7 +186,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.player.yaw_byte = uint8_t(
 						(uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam)) >> 24);
 			} else {
-				rec.player.carrier_handle = 0xFFFFu;
+				rec.player.carrier_handle = wire_handle::kInvalid;
 				rec.player.pos_x_compressed = cx;
 				rec.player.pos_y_compressed = cy;
 				rec.player.pos_z_compressed = cz;
@@ -276,8 +278,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// A mounted entity writes its raw bone, vehicle handle, and local pose;
 			// no overlay-specific protocol extension is needed.
 			rec.infantry.seat_bone_idx =
-					e.mount_handle != 0xFFFFu ? e.veh_bone : 0;
-			if (e.mount_handle != 0xFFFFu && e.carrier_pose_valid) {
+					e.mount_handle != wire_handle::kInvalid ? e.veh_bone : 0;
+			if (e.mount_handle != wire_handle::kInvalid && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
@@ -291,7 +293,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.infantry.yaw_byte =
 						uint8_t((local_heading + 0x00800000u) >> 24);
 			} else {
-				rec.infantry.vehicle_slot_handle = 0xFFFFu;
+				rec.infantry.vehicle_slot_handle = wire_handle::kInvalid;
 				rec.infantry.pos_x_compressed = cx;
 				rec.infantry.pos_y_compressed = cy;
 				rec.infantry.pos_z_compressed = cz;
@@ -392,7 +394,7 @@ inline std::size_t age_index(const GameEntitySnapshot &e) {
 std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	switch (e.entity_class) {
 	case EntityClass::Player:   return 5 + 18;
-	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & 0x04) ? 4 : 10);
+	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & kVehicleCompactFlagDeadPose) ? 4 : 10);
 	case EntityClass::Infantry: return 5 + 14;
 	default:                    return 0; // not emitted
 	}
@@ -523,7 +525,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	const int64_t ay = int32_t(anchor.spawn_y);
 	const int64_t az = int32_t(anchor.spawn_z);
 	const uint16_t own_handle =
-			conn.owned_entity.valid() ? conn.owned_entity.packed : 0xFFFFu;
+			conn.owned_entity.valid() ? conn.owned_entity.packed : wire_handle::kInvalid;
 
 	struct ScoredRound {
 		int32_t score;
@@ -640,10 +642,10 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 	case 0: bytes = 12 + 2 + 11 + 7 + 1; break;
 	case 1: bytes = 12 + 2 + 6 + 7 + 1; break;
 	case 2: bytes = 12 + 2 + 11 + 7 + 1; break;
-	default: bytes = 12 + 2 + (((game_type & 0x20000u) != 0u) ? 16 : 0) + 7 + 1; break;
+	default: bytes = 12 + 2 + (opennova::game_type::is_objective(game_type) ? 16 : 0) + 7 + 1; break;
 	}
-	if ((flags2 & 0x0Fu) == 8u)
-		bytes += hdr.mount_ammo.mount_handle == 0xFFFFu ? 2u : 6u;
+	if ((flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute)
+		bytes += hdr.mount_ammo.mount_handle == wire_handle::kInvalid ? 2u : 6u;
 	return bytes;
 }
 
@@ -743,7 +745,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.env.overcast = static_cast<uint8_t>(
 			std::min<uint32_t>(env.overcast_blend_q16 >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
-	hs.mount_ammo.present = (flags2 & 0x0Fu) == 8u;
+	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);

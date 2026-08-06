@@ -19,7 +19,7 @@ easier to relay than to rediscover.
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
-  `nw_pp/` (packet pretty-printer), `nw_replay/` (replay streamer), `common/` (shared
+  `nw_pp/` (packet pretty-printer), `common/` (shared
   socket helpers, deliberately app-layer; pcap I/O lives in `libs/pcapio`),
   `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
   `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI

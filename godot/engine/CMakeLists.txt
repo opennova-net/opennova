@@ -75,7 +75,6 @@ add_library(${TARGET_NAME} SHARED
     network/nova_world_host.cpp
     network/nova_world_identity.cpp
     network/nwu_lobby_session.cpp
-    network/nova_net_client.cpp
     network/item_replication_catalog_adapter.cpp
     network/nova_udp_pump.cpp
     network/nova_lan_session.cpp

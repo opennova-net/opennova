@@ -342,7 +342,8 @@ void NwUdpListener::run_loop() {
 	}
 	QueuedJoSocket jo_socket(socket.get());
 	using PumpClock = std::chrono::steady_clock;
-	const auto pump_period = std::chrono::nanoseconds(1000000000LL / 62);
+	const auto pump_period =
+			std::chrono::nanoseconds(1000000000LL / opennova::JO_ENGINE_TICK_RATE);
 	auto next_pump = PumpClock::now();
 
 	uint8_t rx[4096];
@@ -758,7 +759,9 @@ void NwUdpListener::run_loop() {
 							stream_bytes.resize(stream_size);
 
 							ProtocolMessage rpm;
-							rpm.flags.raw = (stream_size > 0xFF) ? 0x40u : 0x20u;
+							rpm.flags.raw = (stream_size > 0xFF)
+									? opennova::PROTOCOL_MSG_FLAG_LEN16
+									: opennova::PROTOCOL_MSG_FLAG_LEN8;
 							rpm.flags.len16 = stream_size > 0xFF;
 							rpm.flags.len8  = stream_size <= 0xFF;
 							rpm.tag = 0;

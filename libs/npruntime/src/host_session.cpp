@@ -355,7 +355,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// computes GetTickCount - host_start_tick; this deterministic host derives
 	// equivalent elapsed time from its fixed simulation clock.
 	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
-			(static_cast<uint64_t>(now) * 1000u) / 62u);
+			(static_cast<uint64_t>(now) * 1000u) / uint64_t(JO_ENGINE_TICK_RATE));
 	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the adapter.
@@ -502,7 +502,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 				pending_session_messages.find(c.peer) ==
 						pending_session_messages.end()) {
 			const uint64_t elapsed_ms = static_cast<uint64_t>(
-					now - c.last_session_send_tick) * 1000u / 62u;
+					now - c.last_session_send_tick) * 1000u / uint64_t(JO_ENGINE_TICK_RATE);
 			if (elapsed_ms > kHostSessionIdleSendIntervalMilliseconds) {
 				std::vector<uint8_t> keepalive;
 				if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, keepalive)) {

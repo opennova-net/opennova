@@ -1,6 +1,12 @@
 # ADR 0019: libs/npwire — the game wire protocol library
 
-- **Status**: accepted (2026-07-04, rides the NET-2 extraction PR)
+- **Status**: accepted (2026-07-04, rides the NET-2 extraction PR); amended
+  2026-08-05 — the replay/spectate half of the "capture/replay chain"
+  (`replay_timeline`, `apps/nw_replay`, the `NovaNetClient` spectator binding)
+  was deleted as unused dev scaffolding. npwire's charter is now the in-game
+  codec, the NWU session framing, and the CAPTURE DECODE chain
+  (`wire_capture`, `serverlog_decode`); mentions of the replay leg below are
+  the original decision text, left as written.
 - **Owners**: maturity program NET track
 - **Supersedes/updates**: refines the lib topology around ADR 0013's
   matchmaking/in-match split; path citations in earlier ADRs (0009–0013)

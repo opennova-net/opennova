@@ -2,7 +2,7 @@
 # netsim/npruntime encode/decode and nw_pp pretty-prints, plus the shared
 # peer_addr.h POD), the NWU session framing half of session establishment
 # (hello/keys, the flag-byte protocol_message framing), and the capture
-# decode + replay chain (wire_capture, replay timeline, .sph serverlog).
+# decode chain (wire_capture, .sph serverlog).
 # Extracted from libs/novaworld by ADR 0019: matchmaking (novaworld) sits ON
 # this wire base, never the other way around. Headers stay flat under
 # include/npwire/; sources group by leg under src/.
@@ -19,7 +19,6 @@ add_library(opennova_npwire STATIC
     src/session/nw_session_framing.cpp
     src/session/protocol_message.cpp
     src/replay/wire_capture.cpp
-    src/replay/replay_timeline.cpp
     src/replay/serverlog_decode.cpp
 )
 

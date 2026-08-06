@@ -31,6 +31,8 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
+#include <npwire/game_type.h>
+#include <npwire/wire_handle.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_catalog.h>
 #include <npwire/ingame_message_id.h>
@@ -126,8 +128,8 @@ void print_session_packet(const CapturedSessionPacket &packet) {
 constexpr bool parity_body_is_material(char dir, uint16_t full_tag) {
 	// Compare the full 9-bit dispatch identity: high-table/control messages may
 	// share these low bytes but are not gameplay frames.
-	return !((dir == 'C' && full_tag == 0x00C) ||
-			(dir == 'S' && full_tag == 0x00A));
+	return !((dir == 'C' && full_tag == c2s::ENTITY_UPLINK) ||
+			(dir == 'S' && full_tag == s2c::PER_FRAME_UPDATE));
 }
 
 constexpr bool parity_body_contract_holds() {
@@ -375,8 +377,8 @@ std::unordered_map<uint16_t, EntityClass> g_item_class;
 // into the gated decoders: 0x0F waypoint records ((g & 0xFFFDFFFF)==0x10020) and
 // 0x0A objective sub-block 3 (g & 0x20000). 0 until the first 0x7B is seen.
 uint32_t g_game_type = 0;
-inline bool gt_is_waypoint() { return (g_game_type & 0xFFFDFFFFu) == 0x10020u; }
-inline bool gt_is_objective() { return (g_game_type & 0x20000u) != 0; }
+inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type); }
+inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
 
 const char *class_name(EntityClass c) {
 	switch (c) {
@@ -476,17 +478,17 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	            type_str(r.item_type_id).c_str(),
 	            ("\"" + r.entity_name + "\"").c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
-	if (r.spawn_flags & 0x0020) std::printf(" entity36=0x%08x", r.entity_flags);
-	if (r.spawn_flags & 0x0001) std::printf(" velX");
-	if (r.spawn_flags & 0x0002) std::printf(" velY");
-	if (r.spawn_flags & 0x0004) std::printf(" velZ");
-	if (r.spawn_flags & 0x0008) std::printf(" sectionMask");
-	if (r.spawn_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
-	if (r.spawn_flags & 0x0100)
+	if (r.spawn_flags & kPoolSpawnHasEntityFlags) std::printf(" entity36=0x%08x", r.entity_flags);
+	if (r.spawn_flags & kPoolSpawnHasEulerZ) std::printf(" eulerZ");
+	if (r.spawn_flags & kPoolSpawnHasEulerX) std::printf(" eulerX");
+	if (r.spawn_flags & kPoolSpawnHasEulerY) std::printf(" eulerY");
+	if (r.spawn_flags & kPoolSpawnHasSectionMask) std::printf(" sectionMask");
+	if (r.spawn_flags & kPoolSpawnHasTeamByte) std::printf(" team=0x%02x", r.team_byte);
+	if (r.spawn_flags & kPoolSpawnHasParentHandle)
 		std::printf(" parent=%s", handle_str(r.parent_handle).c_str());
-	if (r.spawn_flags & 0x0200)
+	if (r.spawn_flags & kPoolSpawnHasTargetHandle)
 		std::printf(" target=%s", handle_str(r.target_handle).c_str());
-	if (r.spawn_flags & 0x0400) {
+	if (r.spawn_flags & kPoolSpawnHasMountOccupancy) {
 		std::printf(" seatMask=0x%02x", r.seat_mask);
 		if (r.seat_mask) {
 			int wcount = 0;
@@ -495,19 +497,19 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 		}
 	}
 	std::printf(" bone=0x%02x", r.bone_byte);
-	if (r.spawn_flags & 0x0800)
+	if (r.spawn_flags & kPoolSpawnHasAiTrailer)
 		std::printf(" AItrailer{p1=0x%08x p2=0x%08x name=\"%s\"}",
 		            r.ai_profile_1, r.ai_profile_2, r.ai_name.c_str());
-	if (r.spawn_flags & 0x0040) std::printf(" alert=0x%02x", r.alert_byte);
-	if (r.spawn_flags & 0x0080) std::printf(" action=0x%02x", r.action_byte);
-	if (r.spawn_flags & 0x1000)
+	if (r.spawn_flags & kPoolSpawnHasRefNum) std::printf(" refNum=0x%02x", r.alert_byte);
+	if (r.spawn_flags & kPoolSpawnHasSubType) std::printf(" subType=0x%02x", r.action_byte);
+	if (r.spawn_flags & kPoolSpawnHasWeaponTypeByte)
 		std::printf(" weapType=0x%02x", r.weapon_type_byte);
-	if (r.spawn_flags & 0x2000)
+	if (r.spawn_flags & kPoolSpawnHasZoneNumberRank)
 		std::printf(" zone=%u rank=%u radius=%u", r.zone_number_rank & 0x1F,
 		            r.zone_number_rank >> 5, r.zone_radius);
-	else if (r.spawn_flags & 0x8000)
+	else if (r.spawn_flags & kPoolSpawnHasZoneRadiusAlt)
 		std::printf(" zoneRadius=%u", r.zone_radius);
-	if (r.spawn_flags & 0x4000) std::printf(" diff=0x%02x", r.difficulty_byte);
+	if (r.spawn_flags & kPoolSpawnHasDifficultyByte) std::printf(" diff=0x%02x", r.difficulty_byte);
 	std::printf("\n");
 }
 
@@ -521,13 +523,13 @@ void print_pool3_sync_record(uint16_t slot_idx, const Pool3SyncRecord &r) {
 	            "pos=(%.1f, %.1f, %.1f)",
 	            unsigned(slot_idx), type_str(r.item_type_id).c_str(),
 	            r.flags_byte, fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
-	if (r.flags_byte & 0x01) std::printf(" movement=0x%08x", r.movement_val);
-	if (r.flags_byte & 0x02) std::printf(" orient=0x%08x", r.orientation_val);
-	if (r.flags_byte & 0x04) std::printf(" ammo=%u", unsigned(r.ammo_count));
+	if (r.flags_byte & kPool3SyncHasMovementVal) std::printf(" movement=0x%08x", r.movement_val);
+	if (r.flags_byte & kPool3SyncHasOrientationVal) std::printf(" orient=0x%08x", r.orientation_val);
+	if (r.flags_byte & kPool3SyncHasAmmoCount) std::printf(" ammo=%u", unsigned(r.ammo_count));
 	std::printf(" net=%s", handle_str(r.net_handle).c_str());
-	if (r.flags_byte & 0x08) std::printf(" team=0x%02x", r.team_byte);
-	if (r.flags_byte & 0x10) std::printf(" weapType=0x%04x", r.weapon_type);
-	if (r.flags_byte & 0x20) std::printf(" score=0x%02x", r.score_byte);
+	if (r.flags_byte & kPool3SyncHasTeamByte) std::printf(" team=0x%02x", r.team_byte);
+	if (r.flags_byte & kPool3SyncHasWeaponType) std::printf(" weapType=0x%04x", r.weapon_type);
+	if (r.flags_byte & kPool3SyncHasScoreByte) std::printf(" score=0x%02x", r.score_byte);
 	std::printf("\n");
 }
 
@@ -742,7 +744,7 @@ void print_tag_20(const std::vector<uint8_t> &body) {
 }
 
 void print_static_entity_record(uint16_t slot, const StaticEntityRecord &r) {
-	const uint16_t handle = uint16_t((2u << 12) | (slot & 0x0FFF));
+	const uint16_t handle = wire_handle::make(wire_handle::kPoolBuilding, slot);
 	if (r.is_empty_slot) {
 		std::printf("        slot %s (empty)\n", handle_str(handle).c_str());
 		return;
@@ -751,14 +753,14 @@ void print_static_entity_record(uint16_t slot, const StaticEntityRecord &r) {
 	            handle_str(handle).c_str(), type_str(r.item_type_id).c_str(),
 	            unsigned(r.field_flags), fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
 	if (r.field_flags & 0x0008) std::printf(" sect=0x%08x", unsigned(r.section_mask));
-	if (r.field_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
+	if (r.field_flags & kStaticEntityHasTeamByte) std::printf(" team=0x%02x", r.team_byte);
 	// The D-NET-147 building/armory fields (entity+36 Flags / +533 / +532 / +624 / +350).
-	if (r.field_flags & 0x0020) std::printf(" eflags=0x%08x", unsigned(r.entity_flags));
-	if (r.field_flags & 0x0040) std::printf(" refNum=0x%02x", r.bone_a);
-	if (r.field_flags & 0x0080) std::printf(" subType=0x%02x", r.bone_b);
-	if (r.field_flags & 0x0100) std::printf(" score=0x%02x", r.score_flag);
+	if (r.field_flags & kStaticEntityHasEntityFlags) std::printf(" eflags=0x%08x", unsigned(r.entity_flags));
+	if (r.field_flags & kStaticEntityHasRefNum) std::printf(" refNum=0x%02x", r.bone_a);
+	if (r.field_flags & kStaticEntityHasSubType) std::printf(" subType=0x%02x", r.bone_b);
+	if (r.field_flags & kStaticEntityHasScoreFlag) std::printf(" score=0x%02x", r.score_flag);
 	std::printf(" ammo=0x%02x weap=0x%02x", r.ammo_count, r.weapon_byte);
-	if (r.weapon_byte != 0 || (r.field_flags & 0x0200))
+	if (r.weapon_byte != 0 || (r.field_flags & kStaticEntityHasAttachRef))
 		std::printf(" attach=%s", handle_str(r.attach_ref).c_str());
 	std::printf("\n");
 }
@@ -780,13 +782,13 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 	            unsigned(batch.count), body.size(),
 	            clean ? "" : ", DECODE INCOMPLETE");
 	for (const auto &e : batch.entries) {
-		const char *col = e.icon_color == 0x0c ? "neutral" :
-		                  e.icon_color == 0x09 ? "Red" :
-		                  e.icon_color == 0x0a ? "Blue" : "?";
+		const char *col = e.icon_color == kZoneIconNeutral ? "neutral" :
+		                  e.icon_color == kZoneIconRed ? "Red" :
+		                  e.icon_color == kZoneIconBlue ? "Blue" : "?";
 		std::printf("        overlay handle=%s param=0x%02x icon=0x%02x(%s) "
 		            "flags=0x%02x%s source=0x%02x\n",
 		            handle_str(e.handle).c_str(), e.param, e.icon_color, col,
-		            e.flags, (e.flags & 0x10) ? " [capture-zone]" : "", e.source);
+		            e.flags, (e.flags & kZoneOverlayFlagPersistent) ? " [capture-zone]" : "", e.source);
 	}
 }
 
@@ -1010,7 +1012,7 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		// map). Other types still need --items; an Unknown there halts the walker,
 		// with the "pass --items" hint printed below — so a missing classifier never
 		// masquerades as a malformed/short stream.
-		if (t == 0x14B9) return EntityClass::Player;
+		if (t == kPlayerPersonTypeId) return EntityClass::Player;
 		return EntityClass::Unknown;
 	};
 	FrameUpdate fu;
@@ -1153,14 +1155,14 @@ void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
 	// ordinary gameplay 0x0A/0x0C messages and must never satisfy parity state.
 	if (message.settings_update) return;
 	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
-	if (message.dir == 'S' && tag == 0x7B) {
+	if (message.dir == 'S' && tag == s2c::FULL_PLAYER_INFO) {
 		FullPlayerInfo info;
 		if (decode_full_player_info(message.payload.data(), message.payload.size(), info))
 			g_game_type = info.extra;
 		return;
 	}
 
-	if (message.dir == 'C' && tag == 0x0C) {
+	if (message.dir == 'C' && tag == c2s::ENTITY_UPLINK) {
 		EntityPacketSubHeader header;
 		PlayerExtendedUplink uplink;
 		size_t header_bytes = 0, body_bytes = 0;
@@ -1199,11 +1201,11 @@ void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
 		return;
 	}
 
-	if (message.dir != 'S' || tag != 0x0A) return;
+	if (message.dir != 'S' || tag != s2c::PER_FRAME_UPDATE) return;
 	auto class_of = [](uint16_t type) -> EntityClass {
 		auto found = g_item_class.find(type);
 		if (found != g_item_class.end()) return found->second;
-		if (type == 0x14B9) return EntityClass::Player;
+		if (type == kPlayerPersonTypeId) return EntityClass::Player;
 		return EntityClass::Unknown;
 	};
 	FrameUpdate frame;

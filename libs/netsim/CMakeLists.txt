@@ -5,7 +5,6 @@ add_library(opennova_netsim STATIC
     src/item_replication_catalog.cpp
     src/client_replica_pipeline.cpp
     src/client_world_materializer.cpp
-    src/replica_history.cpp
     src/connection_fan.cpp
     src/udp_session_transport.cpp
 )

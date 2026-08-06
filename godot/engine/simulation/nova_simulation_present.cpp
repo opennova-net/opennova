@@ -6,6 +6,7 @@
 
 #include <cstring>
 
+#include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
 using namespace novasim;
@@ -196,8 +197,8 @@ Array NovaSimulation::drain_fire_presentation_events() {
 		// A zero flags byte is host/AI-originated fire, which keeps the ammo-def
 		// legs because retail presents those inline at the shooter instead.
 		// [orig: @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2]
-		d["adm_arm"] = (fe.wire_round_flags & 0x01u) == 0 &&
-				(fe.wire_round_flags & 0x02u) != 0;
+		d["adm_arm"] = (fe.wire_round_flags & opennova::kRoundEventFlagAltFire) == 0 &&
+				(fe.wire_round_flags & opennova::kRoundEventFlagAdmIndexed) != 0;
 		d["adm_index"] = fe.adm_index;
 		const double bearing = static_cast<double>(fe.yaw_bam) * kRadPerBam;
 		const double pitch = static_cast<double>(fe.pitch_bam) * kRadPerBam;
@@ -1269,7 +1270,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 				// keeps NPCs (who carry no hold ladder in the original either) out.
 				if (ent != nullptr &&
 						opennova::world::infantry_weapon_channel_visible(
-								ae->inf, (ent->engine_flags & 0x100u) != 0,
+								ae->inf,
+								(ent->engine_flags & opennova::world::kEntityFlagPlayer) != 0,
 								mount_blocks_weapon_channel(*ent))) {
 					r[PF_WPN_ANIM_STATE] =
 							static_cast<float>(ae->inf.wpn_state);
@@ -1286,10 +1288,10 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 					// This body's third-person gun. Player rows only: retail's
 					// composition gate is the Flags 0x100 player classifier, and
 					// placed NPCs carry no equipped index anyway.
-					if ((ent->engine_flags & 0x100u) != 0) {
+					if ((ent->engine_flags & opennova::world::kEntityFlagPlayer) != 0) {
 						write_present_held_weapon(
 								r, ent->equipped_adm_index,
-								(ent->flags & 2u) != 0, inputs,
+								(ent->flags & opennova::world::kEntityFlagDead) != 0, inputs,
 								ae->inf.wpn_state);
 					}
 				}

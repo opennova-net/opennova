@@ -65,7 +65,7 @@ var _debug_adapter: GameDebugAdapter
 # the set survives overlay toggles; cleared on every world load.
 var _pick_list := NovaDebugPickList.new()
 var _pick_toast: Label = null
-var _net: NetSessionController  # every net-session entry (LAN/NovaWorld/replay + env hooks)
+var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
 # The in-game HUD rides NovaGameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
 # mission text feed (queued until the HUD exists); this shell only says when the
@@ -138,32 +138,6 @@ func current_resource_root() -> NovaResourceRoot:
 	return _root
 
 
-## Enter the world DIRECTLY (no menu, no loading screen): the replay-spectate
-## entry's shell half — reveal the world + HUD, enter WORLD state, and wire the
-## load-result signals. NetSessionController drives the actual net-session load.
-func enter_net_world() -> void:
-	_menu_shell.hide_menu()
-	_world.visible = true
-	_set_hud_visible(true)
-	_state = State.WORLD
-	if not _world.world_loaded.is_connected(_on_world_loaded):
-		_world.world_loaded.connect(_on_world_loaded)
-	if not _world.load_failed.is_connected(_on_world_load_failed):
-		_world.load_failed.connect(_on_world_load_failed)
-
-
-## Roll a rejected net-session entry back to the front-end. The world's null
-## legs emit load_failed before load_net_session returns, so the synchronous
-## rollback has usually already run — this is the deterministic backstop for
-## any error leg that returns without emitting, idempotent via the same guard
-## as _on_session_lost. (That re-entrant rollback is safe only because
-## load_net_session emits load_failed strictly BEFORE constructing children;
-## an emit added mid-construction would tear down live construction.)
-func abort_net_session(reason: String) -> void:
-	if _state == State.MENU and not _world_load_pending:
-		return
-	_abort_to_menu("net session entry failed", reason)
-
 func _ready() -> void:
 	_runtime_shutdown.install_quit_policy(self, get_tree())
 	if _world == null or _camera == null or _menu_shell == null:
@@ -180,8 +154,8 @@ func _ready() -> void:
 	add_child(_player_presenter)
 	_player_presenter.setup(_world, _camera)
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
-	# not in _wire_shell, so the NW_REPLAY
-	# spectator path (which never enters the menu) still gets them; the HUD presenter's
+	# not in _wire_shell, so menu-less entries (the env launch hooks) still get
+	# them; the HUD presenter's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
 	# lazy HUD exists).
@@ -213,14 +187,13 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
-	# Every net-session ENTRY (LAN browser/host, NovaWorld panel, replay + env hooks)
+	# Every net-session ENTRY (LAN browser/host, NovaWorld panel + env hooks)
 	# lives on the NetSessionController component; the shell keeps the state
 	# machine, the load pipeline, and the session-presentation states.
 	_net = NetSessionController.new()
 	_net.name = "NetSessionController"
 	add_child(_net)
-	_net.setup(self, _world, _menu_shell, _camera,
-			_hud if _hud != null else self, $MenuLayer)
+	_net.setup(self, _world, _menu_shell, $MenuLayer)
 	# One shared frame-stats board across the shell, the world, and the HUD
 	# presenter; the world re-hands it to each mission runtime it creates.
 	_world.set_frame_stats_board(_frame_stats)
@@ -229,13 +202,6 @@ func _ready() -> void:
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
-	if _net.maybe_launch_replay_from_env():
-		return
-	# A rejected replay boot ran the world->menu rollback re-entrantly above; its
-	# rootless leg raises the folder picker (GUI runs). The normal boot below owns
-	# the front-end from here — it mounts the configured dir or re-raises the
-	# picker itself — so dismiss the stale one.
-	_cleanup_picker()
 	# Editor-managed runs pass an exact process-local directory. It wins over
 	# persisted settings but is never written back.
 	var dir := NovaLaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
@@ -254,7 +220,7 @@ func _ready() -> void:
 		return
 	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
 	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
-	# exercised without menu navigation. Off by default; mirrors the NW_REPLAY direct-launch above.
+	# exercised without menu navigation. Off by default.
 	var sp_mission := OS.get_environment("NW_SP_MISSION")
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
@@ -1075,8 +1041,6 @@ func _teardown_world_to_menu() -> void:
 	_world.unload()
 	if _player_presenter != null:
 		_player_presenter.setup(_world, _camera)
-	if _net != null:
-		_net.on_world_teardown()
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
