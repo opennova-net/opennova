@@ -206,6 +206,15 @@ void watercraft_platform_solve(World &world, Entity &veh,
 
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
+// One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
+// occupant/AI/parked input staging behind the witnessed gate, capsize damage,
+// then the same steer/thrust/drag/contact/integration core the client subset
+// runs. The AI command block comes from AiSystem::watercraft_ai_drive.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path behind
+// the @0x48DF8C..0x48DFA2 input gate; witnessed 2026-08-06]
+void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &traits,
+                           const VehicleDriveCmd *ai_cmd = nullptr);
+
 // The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
 // remote registers driving tick_vehicle_motor's core with the input block bypassed;
 // the Bike family selects its witnessed gravity/contact/yaw deltas in that core.

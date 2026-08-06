@@ -262,6 +262,7 @@ void NovaSimulation::apply_root_motion_to_ai() {
 opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
 	opennova::mission::PromoteOptions opts;
 	opts.item_seat_specs = item_seat_specs_;
+	opts.ai_profile_speeds = ai_profile_speeds_;
 	return opts;
 }
 

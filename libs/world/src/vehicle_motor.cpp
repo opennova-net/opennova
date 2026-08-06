@@ -1327,6 +1327,9 @@ void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
 
 } // namespace
 
+static void watercraft_motor_core(World &world, Entity &veh,
+                                  const VehicleTraits &traits);
+
 // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
 // remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.
 // Residual (both this and the air mover): the client-run deck-carrier follow
@@ -1352,9 +1355,6 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         // resolved floating hull as landed for one frame.
         watercraft_seed_platform_latch(world, veh, traits);
     }
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
 
     // ---- 2. Register mirror: the non-driver machine adopts the received
     // speed/steer as its own drive command, every tick
@@ -1375,6 +1375,23 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
         m.cmd_speed = m.net_recv_speed;
         m.steer_target_bam = m.net_recv_steer_bam;
     }
+
+    watercraft_motor_core(world, veh, traits);
+}
+
+// Blocks 12..19 of the cbot mover — the steer integrator through the yaw apply.
+// ONE sequence in the original, executed by every machine that runs the function
+// past the input gate: the authority (with the occupant/AI/parked staging done),
+// the driver's client (local prediction), and remote clients (register mirror).
+// Extracted verbatim from the 2026-07-31 client-subset port; the authority tick
+// below stages its inputs and runs the same core.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480, blocks @0x48E82C..0x48ED76]
+static void watercraft_motor_core(World &world, Entity &veh,
+                                  const VehicleTraits &traits) {
+    Entity::VehicleMotorState &m = veh.veh;
+    int32_t px = to_fixed(veh.position.x);
+    int32_t py = to_fixed(veh.position.y);
+    int32_t pz = to_fixed(veh.position.z);
 
     // ---- 3. Steer/rudder integrator [orig: @0x48E82C..0x48E926].
     {
@@ -1575,6 +1592,96 @@ void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &trai
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
     veh.yaw = static_cast<int16_t>(std::lround(
             mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+}
+
+// The AUTHORITY watercraft tick — the host-side cbot mover (the D-NET-161
+// watercraft deferral, witnessed 2026-08-06): occupant/AI/parked input staging
+// through the gate `attrib & 0x40 && (is_authority || occupant == local)`
+// [orig: @0x48DF7F..0x48DFA2], then the shared core. Deferrals that stay with
+// D-NET-161: the every-8th-tick groundEntity carrier refresh @0x48D51F and the
+// deck-carrier follow @0x48D6DA..0x48DACD, the fire-FX/regen-drain leg (step 3),
+// the MoveOrder analog bit-0x10 merge @0x48DE04..0x48DE7B (it mutates the
+// occupant's own MoveOrder word, which our input model rebuilds from the wire
+// every tick), the submerged-driver head-under-water input cut
+// @0x48DFD3..0x48DFDF, and the wake-anim lerp @0x48ECF5.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path]
+void tick_watercraft_motor(World &world, Entity &veh, const VehicleTraits &traits,
+                           const VehicleDriveCmd *ai_cmd) {
+    if (traits.physics == 0) return; // selector-gated like the ground rows
+    Entity::VehicleMotorState &m = veh.veh;
+    if (!m.yaw_seeded) {
+        m.yaw_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+        m.air_pitch_bam = static_cast<int32_t>(veh.pitch) * 11930464;
+        m.air_roll_bam = static_cast<int32_t>(veh.roll) * 11930464;
+        m.yaw_seeded = true;
+    }
+    // The platform solve owns Z/attitude/afloat from the first tick; an authored
+    // hull starts with no prior solve frame, so seed the latch exactly like the
+    // client path does before its first thrust pass.
+    if (!watercraft_has_platform_geometry(traits)) {
+        watercraft_refresh_fallback_afloat(world, veh);
+    } else if (!m.plat_solve_valid) {
+        watercraft_seed_platform_latch(world, veh, traits);
+    }
+
+    // A DEAD hull skips everything to the matrix-build tail — no input, no
+    // integration [orig: `test Flags, 2 -> jnz 0x48EF4B` @0x48DDFA].
+    if ((veh.flags & kEntityFlagDead) != 0) return;
+
+    // Capsize damage, authority-only: past ~100 deg of roll OR pitch the hull
+    // drains 200 health per tick to zero [orig: @0x48DE84..0x48DECD —
+    // |Roll|/|Pitch| > 0x471C7180, Health -= 200, floor 0; the overlayFlags
+    // zero at the kill edge is an unmodeled slot].
+    if (veh.health > 0 &&
+        (io::bam_abs(m.air_roll_bam) > 0x471C7180 ||
+         io::bam_abs(m.air_pitch_bam) > 0x471C7180)) {
+        veh.health -= 200;
+        if (veh.health < 0) veh.health = 0;
+    }
+
+    const bool wrecked = veh.health <= 0;
+
+    // ------------------------------------------------------------------ input block
+    // [orig: the gate @0x48DF7F..0x48DFA2; occupant resolve + class split
+    // @0x48DFA8..0x48DFCD — no attrib 0x40 means the whole block is skipped and
+    // the core runs on the persisted registers]
+    if (traits.player_control) {
+        Entity *occ = resolve_vehicle_controller(world, veh);
+        if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
+        const bool player_occupant =
+                occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
+        if (occ == nullptr || wrecked) {
+            // Parked/no controller: hold heading, zero command and ramp, lights
+            // off. The state-22 stamp lives with the brain in watercraft_ai_drive;
+            // AI_CheckVehicleStuckState stays a D-NET-161 deferral.
+            // [orig: @0x48E7EE..0x48E81E]
+            m.steer_target_bam = m.yaw_bam;
+            m.cmd_speed = 0;
+            m.steer_ramp_bam = 0;
+            veh.flags &= ~0x80u;
+        } else if (player_occupant) {
+            // The human-driver leg: 8-way keys + analog through waterSpeed, the
+            // boat 45-deg ramp cap, walk/creep halving, lights — the shared
+            // staging already carries the witnessed boat deltas
+            // [orig: @0x48DFE5..0x48E20F].
+            stage_player_vehicle_input(veh, *occ, traits);
+        } else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
+            // The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
+            // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
+            m.steer_target_bam = ai_cmd->steer_target_bam;
+            m.cmd_speed = ai_cmd->cmd_speed;
+            m.steer_ramp_bam = 0;
+        }
+        // A live non-player controller with no drive command holds the previous
+        // targets (the boarding-wait stop @0x48E75B..0x48E7EC rides D-NET-161
+        // with the boarding think).
+    }
+
+    watercraft_motor_core(world, veh, traits);
+
+    // Movement-sound presentation, same per-tick site as the ground core's tail
+    // [orig: the cbot movement-sound call in step 18 @0x48ED76..].
+    update_ground_vehicle_sound(world, veh, traits, wrecked, /*collided=*/false);
 }
 
 // The GROUND-family prediction leg (net-re §5.38e B-facet): run the shared

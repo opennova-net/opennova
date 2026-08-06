@@ -180,8 +180,37 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     ae.profile.range_secondary = static_cast<int16_t>(e.min_engagement_distance >> 16);
 
     // Per-node mover speed: brain[49]=kSpeedA (states != 16), brain[50]=kSpeedB (state 16).
+    // The .aip profile seeds them when the embedder supplied the entity's profile
+    // speeds; the parse scale is x65536/225 exactly like the PATROLSPEED command
+    // [orig: Entity_InitVehicleAIFromDef brain[49] = profile+0xC4 (combat_speed),
+    //  brain[50] = profile+0xC0 (patrol_speed) @0x4688C7/@0x4688D3; the .aip parse
+    //  x1000 x 1/225000 x 65536 @0x45E6E8..0x45E6FD]. Unresolved profiles keep the
+    //  default_speed stand-in (the rest of the profile parse remains D-AI-11 h).
     b.f[AiBrain::kSpeedA] = opts.default_speed;
     b.f[AiBrain::kSpeedB] = opts.default_speed;
+    // name2 is the raw 8-byte BMS field — an 8-char name carries no terminator.
+    size_t n2len = 0;
+    while (n2len < sizeof(e.name2) && e.name2[n2len] != '\0') ++n2len;
+    if (n2len > 0) {
+        const auto lower = [](char c) {
+            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+        };
+        for (const PromoteOptions::AiProfileSpeeds &ps : opts.ai_profile_speeds) {
+            if (ps.profile.size() != n2len) continue;
+            bool match = true;
+            for (size_t i = 0; i < n2len; ++i) {
+                if (lower(ps.profile[i]) != lower(e.name2[i])) { match = false; break; }
+            }
+            if (!match) continue;
+            if (ps.combat_speed >= 0)
+                b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
+                        (static_cast<int64_t>(ps.combat_speed) << 16) / 225);
+            if (ps.patrol_speed >= 0)
+                b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
+                        (static_cast<int64_t>(ps.patrol_speed) << 16) / 225);
+            break;
+        }
+    }
 
     // Waypoint route -> GROUND_FOLLOWWP (channel = the entity's waypoint_id).
     const NavChannel *ch = ai.nav.channel(e.waypoint_id);
@@ -303,13 +332,18 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     }
     r.nav_nodes = static_cast<int>(ai.nav.nodes.size());
 
-    // Nav channels from waypoint records. The AI channel id is 1-based: navMeshId 0 is the
-    // "no route" sentinel (AIWaypoint_UpdateTarget @0x457380 returns -1 when navMeshId==0), so
-    // an entity's waypoint_id == its channel, and waypoint_records[i] populates channel (i+1).
+    // Nav channels from waypoint records. The .bms waypoint block is POSITIONAL —
+    // 128 fixed slots where slot index == the authored list id — and the engine's
+    // channel table is indexed by waypoint_id directly, so channel i == slot i.
+    // Channel 0 is the "no route" sentinel only because no mission authors list 0
+    // (AIWaypoint_UpdateTarget @0x457380 returns -1 when navMeshId==0). Inserting a
+    // synthetic slot here shifted every channel by one: an order for list N read
+    // slot N-1 — routed vehicles took the neighboring list, and a list whose N-1
+    // slot was empty (00TRg's group-3 redirect to list 3, list 2 unauthored)
+    // dropped the order entirely.
     // [orig: XML_ParseGroupAction @0x4cc450 writes the 34-dword record per channel.]
     ai.nav.channels.clear();
-    ai.nav.channels.reserve(m.waypoint_records.size() + 1);
-    ai.nav.channels.emplace_back(); // channel 0 = empty "no route" sentinel
+    ai.nav.channels.reserve(m.waypoint_records.size());
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
         NavChannel ch;
         // The channel's dword 0 is the RAW route-flags word: bit0 = one-shot

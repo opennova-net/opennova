@@ -94,6 +94,24 @@ struct PromoteOptions {
     // pass the extracted seat list here before promotion.
     std::vector<ItemSeatSpec> item_seat_specs;
 
+    // The two witnessed .aip profile speeds, keyed by the BMS ai_textfile (name2,
+    // ASCII case-insensitive, no extension) — raw authored values; the brain seed
+    // applies the parse scale x65536/225 (1000 x 1/225000 x 65536, truncated).
+    // Hosts that can read loose/PFF .aip files pass them here before promotion;
+    // entities whose profile is absent keep the default_speed stand-in (the rest
+    // of the profile parse remains D-AI-11 h).
+    // [orig: AIProfile_ParseProperty "patrol_speed" -> profile+0xC0
+    //  @0x45E6DF..0x45E717 / "combat_speed" -> profile+0xC4 (shared scale);
+    //  Entity_InitVehicleAIFromDef seeds brain[49] = profile+0xC4 and
+    //  brain[50] = profile+0xC0 @0x4688C7/@0x4688D3, profile name = the slot
+    //  ai_textfile, def-level fallback itemDef+0x8B8, then "helo1"]
+    struct AiProfileSpeeds {
+        std::string profile;       // ai_textfile, lowercase
+        int32_t patrol_speed = -1; // raw .aip value; -1 = unauthored
+        int32_t combat_speed = -1;
+    };
+    std::vector<AiProfileSpeeds> ai_profile_speeds;
+
     // Command 123/124/125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910
     // resolves slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a
     // vehicle seat. Until the full walk-to-seat staging is ported, promotion only attaches actors

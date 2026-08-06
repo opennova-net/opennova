@@ -1238,6 +1238,26 @@ void NovaSimulation::refresh_item_seat_spec(
 	}
 }
 
+// The .aip profile-speed table ({name: {"patrol": int, "combat": int}}) the
+// shell resolved from the mission's ai_textfile set. Raw authored values; the
+// promote-time brain seed applies the witnessed x65536/225 scale (promote.h).
+void NovaSimulation::set_ai_profile_speeds(const Dictionary &p_speeds) {
+	ai_profile_speeds_.clear();
+	const Array keys = p_speeds.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String name = String(keys[i]).to_lower();
+		if (name.is_empty()) continue;
+		const Dictionary v = p_speeds[keys[i]];
+		opennova::mission::PromoteOptions::AiProfileSpeeds ps;
+		ps.profile = name.utf8().get_data();
+		if (v.has("patrol"))
+			ps.patrol_speed = static_cast<int32_t>(static_cast<int64_t>(v["patrol"]));
+		if (v.has("combat"))
+			ps.combat_speed = static_cast<int32_t>(static_cast<int64_t>(v["combat"]));
+		ai_profile_speeds_.push_back(std::move(ps));
+	}
+}
+
 void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 	item_seat_specs_.clear();
 	mounted_pose_data_by_type_.clear();
