@@ -440,6 +440,13 @@ inline int16_t org2_bucket(int32_t dist2d) {
 
 constexpr double kRadPerBam = 3.14159265358979323846 / 2147483648.0;
 
+// The caller-owned org gravity channel (the infantry.cpp world-motor twins)
+// [orig: org2 vel_z -= 208 @0x4b7acf, clamp @0x4b7c77; org1 -= 416
+//  @0x4bf7bf; terminal -32768].
+constexpr int32_t kGravityStepPlayer = 208;
+constexpr int32_t kGravityStep = 416;
+constexpr int32_t kTerminalVelZ = -32768;
+
 // The deck-ride (D-NET-196 replica tails): an org row follows its
 // groundEntity's per-tick pose delta at mover top, before root motion and
 // the settle — translation, the rotate-about-carrier, and the heading/roll
@@ -938,8 +945,9 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		// one-store folds vel into the root dz [orig: org2 gate @0x4b7ac8,
 		// store @0x4b7cef; org1 gate @0x4bf7b8].
 		if ((es.rm_entity_flags & 0x108000u) == 0) {
-			es.rm_vel_z -= es.cls == EntityClass::Player ? 208 : 416;
-			if (es.rm_vel_z < -32768) es.rm_vel_z = -32768;
+			es.rm_vel_z -= es.cls == EntityClass::Player ? kGravityStepPlayer
+			                                             : kGravityStep;
+			if (es.rm_vel_z < kTerminalVelZ) es.rm_vel_z = kTerminalVelZ;
 		}
 		es.z = io::bam_add(es.z, es.cls == EntityClass::Player
 				? es.rm_vel_z : 2 * es.rm_vel_z);
