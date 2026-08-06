@@ -814,7 +814,7 @@ inline uint32_t dictionary_u32(const Dictionary &d, const char *key, uint32_t fa
 	return static_cast<uint32_t>(value);
 }
 
-// Build the runtime collision model from a parsed .3di CDTA block — the exact
+// Build the runtime collision model from a parsed .3di CDTA block â€” the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
 // libs/threedi/src/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
 // grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object, and each face's local
@@ -1003,12 +1003,12 @@ inline bool collision_model_from_3di(const ThreediCollisionModel *col,
 	return true;
 }
 
-// The model bound-sphere radius from the .3di itself — the union of the LOD-0
+// The model bound-sphere radius from the .3di itself â€” the union of the LOD-0
 // part bounding spheres seen from the model origin, with the strip boxes as
 // the degenerate-sphere fallback. This is the entity+0 boundRadius source: the
 // original reads it off the MODEL header (gpm[5]) for every placed item,
 // collision block or not, and the proximity/hit tests and blast ranges all
-// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re §24].
+// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re Â§24].
 inline float model_bound_radius_from_3di(const Threedi3di3 &model) {
 	if (model.lod_count == 0 || model.lods == nullptr) return 0.0f;
 	const ThreediLod &lod = model.lods[0];
@@ -1033,7 +1033,7 @@ inline float model_bound_radius_from_3di(const Threedi3di3 &model) {
 	return r;
 }
 
-// Build the runtime occlusion model from the parsed OCCL tables — the 60 B
+// Build the runtime occlusion model from the parsed OCCL tables â€” the 60 B
 // portal-face records with their sequential slices (the per-record starts are
 // running prefixes over the OOBJ counts, mirroring the arena assignment of
 // [orig: load_occlusion_model_data @ 0x5b4a00]). The OFAC dwords decode as the
@@ -1099,7 +1099,7 @@ inline bool occlusion_model_from_3di(const Threedi3di3 &model,
 		out.records.push_back(rec);
 	}
 	// Slice sanity: reject models whose records point past their arrays, and
-	// whose OFAC bytes index outside their record's slice — the engine's hot
+	// whose OFAC bytes index outside their record's slice â€” the engine's hot
 	// loops (traverse/build_occluder_planes) read face vertex/plane/edge
 	// indices unchecked, so malformed or modded data is rejected here once.
 	for (const opennova::world::OcclusionPortalFace &rec : out.records) {
