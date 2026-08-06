@@ -1099,7 +1099,9 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig local;
 	make_rig(local);
 	local.traits.player_control = true;
-	local.traits.player_speed = 12000;
+	// Retail-shaped: cbot defs author waterSpeed (+0x8EC) and no player_speed —
+	// the boat player leg reads waterSpeed at every command site.
+	local.traits.water_speed = 12000;
 	w::Entity *local_boat = local.world.registry.get(local.boat);
 	w::Entity *local_driver = mount_prediction_driver(local, true);
 	if (!expect(local_boat && local_driver,
@@ -1119,7 +1121,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig remote;
 	make_rig(remote);
 	remote.traits.player_control = true;
-	remote.traits.player_speed = 12000;
+	remote.traits.water_speed = 12000;
 	w::Entity *remote_boat = remote.world.registry.get(remote.boat);
 	w::Entity *remote_driver = mount_prediction_driver(remote, false);
 	if (!expect(remote_boat && remote_driver,
@@ -1138,7 +1140,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig wrapped;
 	make_rig(wrapped);
 	wrapped.traits.player_control = true;
-	wrapped.traits.player_speed = std::numeric_limits<int32_t>::max();
+	wrapped.traits.water_speed = std::numeric_limits<int32_t>::max();
 	w::Entity *wrapped_boat = wrapped.world.registry.get(wrapped.boat);
 	w::Entity *wrapped_driver = mount_prediction_driver(wrapped, true);
 	if (!expect(wrapped_boat && wrapped_driver,
@@ -1941,8 +1943,62 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	const int hp0 = boat->health;
 	boat->veh.vel_x = 1 << 16; // would integrate if the dead skip failed
 	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
-	ok &= expect(boat->health == hp0 && boat->position.x == x0,
-	             "dead hull skips input and integration");
+	bool skipped = boat->health == hp0 && boat->position.x == x0;
+
+	// The real death path latches the dead bit on engine_flags (destruction.cpp
+	// Flags |= 6) — the skip reads the combined view, so it must hold there too.
+	boat->flags &= ~w::kEntityFlagDead;
+	boat->engine_flags |= w::kEntityFlagDead;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	skipped = skipped && boat->health == hp0 && boat->position.x == x0;
+	ok &= expect(skipped, "dead hull skips input and integration (both flag fields)");
+	return ok;
+}
+
+// A PLAYER driver commands through def waterSpeed — retail cbot defs author NO
+// player_speed, so the ground field would command 0 and host boats could not be
+// driven — and the boat consumes MoveOrder bits 6/7 as motion overrides, not
+// the ground lean flags [orig: cmd reads +0x8EC @0x48E017/@0x48E034/@0x48E088;
+// bit6 @0x48E005..0x48E00E; bit7 @0x48E010..0x48E028].
+bool run_authority_player_drive_uses_waterspeed() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	r.traits.water_speed = 5000;
+	r.traits.player_speed = 0; // retail-shaped: every JO cbot def omits it
+	w::Entity *drv = mount_ai_driver(r);
+	if (drv == nullptr) return false;
+	drv->player_class = 2;   // a human driver [orig: the Flags & 0x100 class]
+	drv->flags |= 0x100u;
+	drv->yaw = 90; // mission yaw 90 = BAM heading 0 = +x, matching the hull
+	w::Entity *boat = r.world.registry.get(r.boat);
+	boat->yaw = 90;
+	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	bool ok = expect(ctrl != nullptr, "player controller resolves");
+
+	// Forward drive: dir 1 + the move bit.
+	drv->net_move_input = 0x08u | 0x01u;
+	const float x0 = boat->position.x;
+	for (int i = 0; i < 300; ++i)
+		w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000,
+	             "player move commands waterSpeed, not the absent player_speed");
+	ok &= expect(boat->position.x - x0 > 5.0f, "player-driven boat moves");
+
+	// bit6 forces dir=1 AND the move bit (throttle with no explicit move key);
+	// no ground lean flag may appear.
+	drv->net_move_input = 0x40u;
+	boat->flags &= ~0x28u;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000, "bit6 throttles at waterSpeed");
+	ok &= expect((boat->flags & 0x20u) == 0, "bit6 writes no ground lean flag on a boat");
+
+	// bit7 forces cmd = waterSpeed with dir 7, skipping the move/analog split.
+	drv->net_move_input = 0x80u;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000, "bit7 forces the waterSpeed command");
+	ok &= expect((boat->flags & 0x8u) == 0, "bit7 writes no ground lean flag on a boat");
 	return ok;
 }
 
@@ -1984,6 +2040,7 @@ int main() {
 	ok &= run_authority_boat_parks_without_controller();
 	ok &= run_authority_capsize_drain_and_dead_skip();
 	ok &= run_authority_ai_leg_caps_at_waterspeed();
+	ok &= run_authority_player_drive_uses_waterspeed();
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();

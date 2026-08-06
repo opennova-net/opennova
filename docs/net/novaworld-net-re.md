@@ -10759,14 +10759,23 @@ slot+92890 (the per-tick displacement metric `|Δpos (dz/2, carrier-relative)|>>
 build @0x50e9e5..0x50ea5a) stamped beside the age reset, and `word_26C681E` (the env draw/view
 distance; ZERO in a fresh image = both terms off — our netsim global mirrors it from the same
 env value the occlusion camera consumes, so headless embedders keep the faithful unwired
-behavior). Pinned by `netsim_two_peer_fanout` run_0a_priority_view_terms (a watched occupied
-enemy mover outranks a nearer behind-the-viewer static; caches damp once sent) + the
-unchanged budget round-robin leg. STILL not modeled: the spectator score branch (@0x50eb2c —
-rides the unmodeled spectator mode), the tracked-handle priority floors + 0x12 despawns
-(slot+94346/+94356), the projectile chain (type-2 records @0x4ffee0/@0x504820), the budget
-halving (slot+89876 congestion flag / uptime>2000 @0x517c62), pool-0 tick-displacement for the
-speed metric (our infantry movers store no per-tick delta — vehicles are exact), and the
-recipient EYE offset on the anchor. Interop-safe: ordering is server-local policy.
+behavior). The DEAD-or-spectator recipient branch is ported (2026-08-06 review round): when the
+recipient entity carries the dead bit (`flags & 2`, latched at the organic death edge — our port
+lands it in `tick_infantry` citing `Entity_HandleDeathOnAuthority @0x407CC0` write @0x407D34,
+cleared by `Entity_ResetToSpawnState @0x4B9610`) OR the slot spectator flag
+(`playerState[89912] & 0x10` @0x50e67c — that MODE stays unmodeled), the whole positional score
+is REPLACED by the flat social score: pool 0 `600*mounted (entity+0x16C != 0) + 200*sameTeam`
+(@0x50eb28..0x50eb3f), pool 1 `1000*carrier + 300*occupied + 100*sameTeam`
+(@0x50efcf..0x50efe6); the motion-delta boosts and the bit0 damp still apply. Pinned by
+`netsim_two_peer_fanout` run_0a_priority_view_terms (a watched occupied enemy mover outranks a
+nearer behind-the-viewer static; caches damp once sent), run_0a_priority_dead_recipient_social_score
+(the same pair flips order on the recipient's dead bit alone) + the unchanged budget round-robin
+leg. STILL not modeled: the slot spectator-mode input to the dead-or-spectator flag, the
+tracked-handle priority floors + 0x12 despawns (slot+94346/+94356), the projectile chain
+(type-2 records @0x4ffee0/@0x504820), the budget halving (slot+89876 congestion flag /
+uptime>2000 @0x517c62), pool-0 tick-displacement for the speed metric (our infantry movers
+store no per-tick delta — vehicles are exact), and the recipient EYE offset on the anchor.
+Interop-safe: ordering is server-local policy.
 
 **D-NET-140** [reimpl divergence by design, DOCUMENTED 2026-07-02] **The listen host's OWN
 loopback connection receives the full 0x0A record set; retail sends its local player header-only

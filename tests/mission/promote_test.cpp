@@ -341,8 +341,11 @@ int main() {
     opts.default_speed = 20;
     mission::PromoteOptions::AiProfileSpeeds zode;
     zode.profile = "d_zode";
-    zode.patrol_speed = 75; // the shipped D_zode.aip values
-    zode.combat_speed = 75;
+    // ASYMMETRIC on purpose (h_ah6b_z.aip-shaped): the witnessed seeding is
+    // CROSSED — brain[49]=kSpeedA <- +0xC4 combat, brain[50]=kSpeedB <- +0xC0
+    // patrol — and a symmetric pair cannot detect a swapped wiring.
+    zode.patrol_speed = 70;
+    zode.combat_speed = 150;
     opts.ai_profile_speeds.push_back(zode);
     mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
 
@@ -380,12 +383,13 @@ int main() {
     CHECK(e0->brain.f[AiBrain::kSpeedB] == 20);
     CHECK(e0->team == 1);
 
-    // Organic 1's ai_textfile resolved a profile: patrol/combat 75 seed the brain
-    // at 75*65536/225 = 21845 [orig: Entity_InitVehicleAIFromDef @0x4688C7/@0x4688D3].
+    // Organic 1's ai_textfile resolved a profile: the CROSSED seeding —
+    // kSpeedA <- combat 150 -> 150*65536/225 = 43690, kSpeedB <- patrol 70 ->
+    // 70*65536/225 = 20388 [orig: Entity_InitVehicleAIFromDef @0x4688C7/@0x4688D3].
     AiEntity *e1 = ai.at(1);
     CHECK(e1 != nullptr);
-    CHECK(e1->brain.f[AiBrain::kSpeedB] == 21845);
-    CHECK(e1->brain.f[AiBrain::kSpeedA] == 21845);
+    CHECK(e1->brain.f[AiBrain::kSpeedB] == 20388);
+    CHECK(e1->brain.f[AiBrain::kSpeedA] == 43690);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
     CHECK((e0->slot.f[1] & 0x209) == 0x209);

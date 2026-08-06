@@ -213,7 +213,12 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     }
 
     // Waypoint route -> GROUND_FOLLOWWP (channel = the entity's waypoint_id).
-    const NavChannel *ch = ai.nav.channel(e.waypoint_id);
+    // Id 0 is the reserved no-route id REGARDLESS of the table's slot-0 contents
+    // — retail's positional table simply never authors list 0 and every consumer
+    // 0-gates [orig: AIWaypoint_UpdateTarget @0x457380 navMeshId==0 -> -1]; the
+    // slot half's witnessed seeding is gated the same way (init_infantry below).
+    const NavChannel *ch =
+            e.waypoint_id != 0 ? ai.nav.channel(e.waypoint_id) : nullptr;
     if (ch && ch->count > 0) {
         b.f[AiBrain::kWpType] = 1; // nav-node waypoint
         b.f[AiBrain::kWpChannel] = e.waypoint_id;

@@ -369,8 +369,13 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     if (ve == nullptr) return; // no brain: the motor's no-controller hold stands in
     AiBrain &b = ve->brain;
 
-    const bool wrecked = veh.health <= 0 || !veh.alive;
-    if (controller == nullptr || wrecked || (veh.flags & kEntityFlagDead) != 0) {
+    // The witnessed boat split is occupant-NULL or the dead flag ONLY — no
+    // health term (a 0-hp capsize-drain hull that never took the kill edge
+    // keeps driving in retail; the ground family's health check is its own
+    // witness and stays in vehicle_ai_drive). The dead bit lives on
+    // engine_flags in our split-field model, so read the combined view.
+    if (controller == nullptr ||
+        ((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
         // Parked/no driver [orig: @0x48E7EE..0x48E81E — aiComp[132] = Yaw,
         // [136] = 0, [137] = 0, AI_CheckVehicleStuckState (deferred, D-NET-161),
         // Flags &= ~0x80, state = 22]. The pend mirror is ours — one state field

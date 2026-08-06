@@ -472,8 +472,12 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const uint16_t carrier_handle = self
 			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
 			: 0xFFFF;
-	// Spectator scoring [orig: the isSpectator branch @0x50eb2c/@0x50efd3] rides the
-	// unmodeled spectator mode — every live connection scores as a normal viewer.
+	// The dead-or-spectator flag: the recipient entity's DEAD bit (flags & 2 —
+	// the everyday between-death-and-respawn state) OR the slot spectator flag
+	// playerState[89912] & 0x10 (that MODE is unmodeled and stays a D-NET-139
+	// residual) [orig: @0x50e677..0x50e693].
+	const bool self_dead_or_spectator =
+			self != nullptr && (self->state_flags & 0x02) != 0;
 
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
@@ -484,11 +488,14 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// unmodeled (0). The original anchor is the recipient EYE pos (entity pos + camera
 		// offset entity+0x6C..); ours is the owned entity's position — the header carries
 		// whichever anchor was used, so decompression stays exact either way.
+		// Squared in double like retail's fild/fmul — the int64 product can
+		// overflow at map-corner separations.
 		const int64_t dx = int64_t(e.x) - ax;
 		const int64_t dy = int64_t(e.y) - ay;
 		const int64_t dzh = (int64_t(e.z) - az) >> 1;
-		const int64_t dist =
-				static_cast<int64_t>(std::sqrt(double(dx * dx + dy * dy + dzh * dzh)));
+		const int64_t dist = static_cast<int64_t>(
+				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
+				          double(dzh) * double(dzh)));
 		const int32_t distance_tiles = int32_t(dist >> 16);
 
 		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, a tracked-handle
@@ -504,12 +511,30 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		//            + 3*speedDelta + 2*headingDelta].
 		int64_t v = distance_tiles < 1124 ? (1124 - distance_tiles) : 0;
 
-		if (self != nullptr) {
+		if (self_dead_or_spectator) {
+			// A dead-or-spectator recipient REPLACES the whole positional score
+			// (distScore, angle, LOS, +200-in-view) with a flat social score;
+			// the motion-delta boosts and the bit0 damp below still apply.
+			// [orig: pool-0 @0x50eb28..0x50eb3f = 600*mounted (entity+0x16C != 0)
+			//  + 200*sameTeam; pool-1 @0x50efcf..0x50efe6 = 1000*carrier
+			//  + 300*occupied + 100*sameTeam]
+			const bool same_team = e.team != 0 && e.team == self_team;
+			if (e.pool == 1) {
+				const bool is_carrier = e.wire_handle == carrier_handle;
+				v = 1000 * (is_carrier ? 1 : 0) + 300 * (e.occupied ? 1 : 0) +
+				    100 * (same_team ? 1 : 0);
+			} else {
+				v = 600 * (e.mounted ? 1 : 0) + 200 * (same_team ? 1 : 0);
+			}
+		} else if (self != nullptr) {
 			// View-angle score: 256 - |elev - Pitch|>>25 - yawTerm, where yawTerm =
 			// |bearing - Yaw|>>24 folded +64 past 64 [orig: the two fpatan blocks
 			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale dbl_7C57B8 folds to plain
 			// BAM deltas]. Can go negative behind the viewer.
-			const double planar = std::sqrt(double(dx * dx + dy * dy));
+			// Squared in double like retail's fild/fmul — the int64 product can
+			// overflow at map-corner separations.
+			const double planar = std::sqrt(double(dx) * double(dx) +
+			                                double(dy) * double(dy));
 			const int32_t bearing_bam = static_cast<int32_t>(
 					std::llround(std::atan2(double(dy), double(dx)) * 683565275.5764316));
 			const int32_t elev_bam = static_cast<int32_t>(std::llround(
@@ -517,9 +542,13 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			// abs(0x80000000) stays NEGATIVE (the cdq/xor/sub form), so a bearing
 			// EXACTLY astern yields yaw_term -128 and angle 384 — a witnessed
 			// retail singularity, kept as-is [orig: the abs32 idiom @0x50e9e2].
-			int32_t yaw_term = prio_iabs32(bearing_bam - view_yaw) >> 24;
+			// Unsigned arithmetic preserves the original mod-2^32 BAM wrap (both
+			// operands span the full circle; a signed difference is UB here).
+			int32_t yaw_term = prio_iabs32(static_cast<int32_t>(
+					uint32_t(bearing_bam) - uint32_t(view_yaw))) >> 24;
 			if (yaw_term > 64) yaw_term += 64;
-			const int32_t pitch_term = prio_iabs32(elev_bam - view_pitch) >> 25;
+			const int32_t pitch_term = prio_iabs32(static_cast<int32_t>(
+					uint32_t(elev_bam) - uint32_t(view_pitch))) >> 25;
 			const int32_t angle = 256 - pitch_term - yaw_term;
 
 			// Enemy bonus [orig: team byte +0x162... +354 compare @0x50ea7a/@0x50ef45].
@@ -563,8 +592,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		const std::size_t idx = age_index(e);
 		const int32_t cached_heading_bam =
 				static_cast<int32_t>(uint32_t(conn.s2c_entity_heading[idx]) << 24);
+		// Unsigned difference: the cached byte reconstructs to exactly INT_MIN
+		// for heading 0x80, and euler_z spans the circle — signed sub is UB.
 		const int32_t heading_delta =
-				prio_iabs32(cached_heading_bam - e.euler_z) >> 24;
+				prio_iabs32(static_cast<int32_t>(
+						uint32_t(cached_heading_bam) - uint32_t(e.euler_z))) >> 24;
 		const int32_t speed_delta =
 				std::abs(int(conn.s2c_entity_speed[idx]) - int(e.tick_speed_q6));
 		v += 3 * int64_t(speed_delta) + 2 * int64_t(heading_delta);

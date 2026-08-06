@@ -173,6 +173,9 @@ struct GameEntitySnapshot {
 	// pool-0: mounted AND the carrier def lacks attrib 0x20 (EWEAP) — such riders LOSE the
 	// +100 standing term [orig: @0x50eb08..0x50eb15 reads mountDef+0x54 bit5].
 	bool mounted_non_eweap = false;
+	// pool-0: mounted at all (the entity+0x16C carrier pointer is non-null) — the
+	// dead-recipient score's 600-point term [orig: hasTarget @0x50eb28..0x50eb3f].
+	bool mounted = false;
 };
 
 } // namespace opennova

@@ -35,22 +35,22 @@ opennova::bms::File make_demo_mission() {
 	m.markers.push_back(marker(200 << 16, 0, 0));
 	m.markers.push_back(marker(300 << 16, 0, 0));
 
-	opennova::bms::WaypointRecord wr{};
-	wr.flags = opennova::bms::WaypointFlags::None; // loops
-	wr.marker_count = 3;
-	wr.waypoint_numbers = {0, 1, 2};
-	m.waypoint_records.push_back(wr);
+	// The waypoint table is POSITIONAL — slot index == authored list id, slot 0
+	// = the reserved no-route id. The looping patrol the organics author as
+	// wp_id 1 sits at slot 1; the BLUE-flagged HUD route at slot 2.
+	m.waypoint_records.resize(3);
+	m.waypoint_records[1].flags = opennova::bms::WaypointFlags::None; // loops
+	m.waypoint_records[1].marker_count = 3;
+	m.waypoint_records[1].waypoint_numbers = {0, 1, 2};
 
 	// A BLUE-flagged player route over the same markers: promotion builds the
 	// HUD waypoint track from the first such record (marker 0 authors a wide
 	// radius + a name id so the view surfaces meaningful fields).
 	m.markers[0].wp_distance = 25;
 	m.markers[0].ttool_index = 1;
-	opennova::bms::WaypointRecord player_route{};
-	player_route.flags = opennova::bms::WaypointFlags::BlueTeam;
-	player_route.marker_count = 3;
-	player_route.waypoint_numbers = {0, 1, 2};
-	m.waypoint_records.push_back(player_route);
+	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::BlueTeam;
+	m.waypoint_records[2].marker_count = 3;
+	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
 
 	m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1));
 	m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1));

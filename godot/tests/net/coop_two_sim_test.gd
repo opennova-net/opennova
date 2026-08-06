@@ -629,8 +629,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var stride: int = host.get_present_stride()
 
 	# HOST sees the JOINER: its client-decoded present carries the admitted joiner. [D-NET-112] Both
-	# players carry net_id 0 (no SSN); a player is identified by its WIRE HANDLE, so the joiner is the
-	# player row (PF_KIND 0, no BMS origin) whose handle is NOT the host's own player handle.
+	# players carry net_id 0 (no SSN); a player is identified by its WIRE HANDLE, so the joiner is
+	# the player-typed row (0x14B9, synthetic origin) whose handle is NOT the host's own handle.
 	var host_own: int = host.get_local_player_wire_handle()
 	var hsnap: PackedFloat32Array = host.get_present_snapshot()
 	var host_sees_joiner := false

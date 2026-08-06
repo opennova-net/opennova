@@ -194,7 +194,12 @@ void update_ground_vehicle_sound(World &world, Entity &vehicle,
     }
 
     const bool stopped = wrecked || (vehicle.flags & 0x2u) != 0;
-    const int64_t denominator = magnitude_i32(traits.player_speed);
+    // The family's max drive speed: boats author waterSpeed (+0x8EC) and no
+    // player_speed — the ground field would zero the denominator and pin every
+    // boat in the stop lane.
+    const int64_t denominator = magnitude_i32(
+            traits.family == VehicleFamily::Watercraft ? traits.water_speed
+                                                       : traits.player_speed);
     if (stopped || denominator <= 0) {
         emit_emitter(world, vehicle, kForwardLane, audio::kSlotSoundLoop1 + 1,
                      {}, 0, 0);

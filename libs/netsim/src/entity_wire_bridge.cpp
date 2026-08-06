@@ -203,6 +203,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		if ((s.entity_class == EntityClass::Player ||
 		     s.entity_class == EntityClass::Infantry) &&
 				e.mounted && e.mount_target.valid()) {
+			// The carrier pointer is non-null — the dead-recipient score's
+			// 600-point term [orig: entity+0x16C @0x50eb28..0x50eb3f].
+			s.mounted = true;
 			// Riders lose the +100 standing term unless the carrier is an EWEAP
 			// [orig: mountDef+0x54 bit5 @0x50eb08..0x50eb15].
 			if (const world::Entity *mount = w.registry.get(e.mount_target)) {

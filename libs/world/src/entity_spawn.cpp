@@ -8,7 +8,10 @@ void entity_reset_to_spawn_state(Entity &e) {
     e.spawn_position = e.position;
     // ... then `entity->Flags &= ~2u` clears entity+36 bit 1 — the movement gate
     // (net-re §5.2b / §5.6). See entity_spawn.h for the deferred remainder of the reset.
+    // Our split-field model mirrors the SAME witnessed bit on engine_flags
+    // (the organic death edge latches both), so the reset clears both views.
     e.flags &= ~2u;
+    e.engine_flags &= ~2u;
     e.damage_state = 0;
     // Spawn body-anim state 44 (idle2, or 153 when the class table maps it — class table
     // unmodeled) + a fresh anim channel — the wire bytes 14/15 a freshly deployed player
