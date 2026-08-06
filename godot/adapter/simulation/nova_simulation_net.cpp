@@ -691,7 +691,10 @@ void NovaSimulation::resolve_client_row_adm_ids() {
 		if (!adm.is_empty()) {
 			if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
 			adm_id = infantry_anim_.register_adm(
-					infantry_adm_resource_root_, adm);
+					infantry_adm_resource_root_.is_valid()
+							? &infantry_adm_resource_root_->native_index()
+							: nullptr,
+					std::string(adm.utf8().get_data()));
 		}
 		if (adm_id < 0 && !infantry_anim_.empty()) adm_id = 0; // the default set
 		client_row_adm_by_type_[es.type_id] = adm_id;

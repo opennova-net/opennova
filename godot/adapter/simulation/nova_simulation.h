@@ -46,7 +46,7 @@
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
-#include "simulation/infantry_root_motion.h"
+#include <simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
 #include "netsim/item_replication_catalog.h" // canonical items.def replication traits
@@ -977,7 +977,7 @@ private:
 	// Anim-driven soldier locomotion: the .adm/.bad-backed root-motion source the infantry
 	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
 	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
-	InfantryRootMotion infantry_anim_;
+	opennova::simassets::AdmRootMotion infantry_anim_;
 	// Per-entity ADM resolution is a spawn-time invariant, not a one-shot mission-load
 	// sweep: joiner-local and host-admitted players are attached to the AI pool after
 	// MissionRuntime's initial call. Retain the resolver inputs and advance this

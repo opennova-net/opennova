@@ -1,64 +1,60 @@
-#include "infantry_root_motion.h"
+#include "simassets/adm_root_motion.h"
 
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include <adm/adm.h>
 #include <bad/bad.h>
+#include <io/strutil.h>
+#include <resource_index/resource_index.h>
 
-#include "resource_index/nova_resource_root.h"
+namespace opennova::simassets {
 
-namespace godot {
-
-void InfantryRootMotion::clear() {
+void AdmRootMotion::clear() {
 	sets_.clear();
 	by_name_.clear();
 }
 
-int InfantryRootMotion::parse_adm(const Ref<NovaResourceRoot> &p_resource_root,
-                                  const String &p_adm_name, ClipSet &out) {
+int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
+                             const std::string &adm_name, ClipSet &out) {
 	out.tracks.clear();
-	out.adm_name = String();
-	if (p_resource_root.is_null()) {
+	out.adm_name.clear();
+	if (index == nullptr) {
 		return 0;
 	}
-	const PackedByteArray adm_bytes = p_resource_root->read_file(p_adm_name);
-	if (adm_bytes.is_empty()) {
+	std::vector<uint8_t> adm_bytes;
+	if (!index->read_file(adm_name, adm_bytes) || adm_bytes.empty()) {
 		return 0;
 	}
 	AdmFile adm;
-	if (adm_parse_buffer(reinterpret_cast<const char *>(adm_bytes.ptr()),
-	                     static_cast<size_t>(adm_bytes.size()), &adm) != 0) {
+	if (adm_parse_buffer(reinterpret_cast<const char *>(adm_bytes.data()),
+	                     adm_bytes.size(), &adm) != 0) {
 		return 0;
 	}
-	out.adm_name = p_adm_name;
+	out.adm_name = adm_name;
 
 	// .bad basename resolution, as in NovaSkeletalAnim::load_from_resource_root.
-	auto resolve_bad = [](const String &value) -> String {
-		String bad_name = value;
-		if (!bad_name.to_lower().ends_with(".bad")) {
-			bad_name += ".bad";
+	auto resolve_bad = [](const std::string &value) -> std::string {
+		if (!strutil::ends_with_icase(value, ".bad")) {
+			return value + ".bad";
 		}
-		return bad_name;
+		return value;
 	};
 
 	// Several states usually share one clip (walk_* dirs, idles): cache parsed tracks by
 	// resolved .bad name so each file is read + parsed once per .adm.
 	std::unordered_map<std::string, Track> by_file;
-	auto track_for = [&](const String &value) -> const Track * {
-		const String bad_name = resolve_bad(value);
-		const std::string cache_key{bad_name.to_lower().utf8().get_data()};
+	auto track_for = [&](const std::string &value) -> const Track * {
+		const std::string bad_name = resolve_bad(value);
+		const std::string cache_key = strutil::to_lower(bad_name);
 		auto cached = by_file.find(cache_key);
 		if (cached != by_file.end()) {
 			return cached->second.frame_count > 0 ? &cached->second : nullptr;
 		}
 		Track t;
-		const PackedByteArray bytes = p_resource_root->read_file(bad_name);
+		std::vector<uint8_t> bytes;
 		BadFile bf;
-		if (!bytes.is_empty() &&
-		    bad_parse_buffer(bytes.ptr(), static_cast<size_t>(bytes.size()), &bf) == 0) {
+		if (index->read_file(bad_name, bytes) && !bytes.empty() &&
+		    bad_parse_buffer(bytes.data(), bytes.size(), &bf) == 0) {
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
 			if (bf.frame_count > 0 && bf.num_events == static_cast<size_t>(bf.frame_count) + 1) {
 				t.frame_count = static_cast<int32_t>(bf.frame_count);
@@ -87,12 +83,12 @@ int InfantryRootMotion::parse_adm(const Ref<NovaResourceRoot> &p_resource_root,
 
 	// adm key lookup, case-insensitive (keys are authored "anim_<name>", same names as
 	// the state table off_8135F0).
-	std::unordered_map<std::string, String> values;
+	std::unordered_map<std::string, std::string> values;
 	for (size_t i = 0; i < adm.count; ++i) {
-		const String key = String(adm.entries[i].key).to_lower();
-		const String value = String(adm.entries[i].value);
-		if (!value.is_empty()) {
-			values.emplace(std::string{key.utf8().get_data()}, value);
+		const std::string key = strutil::to_lower(adm.entries[i].key);
+		const std::string value = adm.entries[i].value;
+		if (!value.empty()) {
+			values.emplace(key, value);
 		}
 	}
 	adm_free(&adm);
@@ -112,15 +108,15 @@ int InfantryRootMotion::parse_adm(const Ref<NovaResourceRoot> &p_resource_root,
 	return static_cast<int>(out.tracks.size());
 }
 
-int InfantryRootMotion::register_adm(const Ref<NovaResourceRoot> &p_resource_root,
-                                     const String &p_adm_name) {
-	const std::string key{p_adm_name.to_lower().utf8().get_data()};
+int AdmRootMotion::register_adm(const opennova::ResourceIndex *index,
+                                const std::string &adm_name) {
+	const std::string key = strutil::to_lower(adm_name);
 	auto cached = by_name_.find(key);
 	if (cached != by_name_.end()) {
 		return cached->second;
 	}
 	ClipSet set;
-	if (parse_adm(p_resource_root, p_adm_name, set) <= 0) {
+	if (parse_adm(index, adm_name, set) <= 0) {
 		return -1; // no usable clips: caller leaves the entity at adm_id 0 / sourceless
 	}
 	const int adm_id = static_cast<int>(sets_.size());
@@ -129,12 +125,12 @@ int InfantryRootMotion::register_adm(const Ref<NovaResourceRoot> &p_resource_roo
 	return adm_id;
 }
 
-bool InfantryRootMotion::has_clip(int adm_id, int state_id) const {
+bool AdmRootMotion::has_clip(int adm_id, int state_id) const {
 	return resolve_track(adm_id, state_id) != nullptr;
 }
 
-const InfantryRootMotion::Track *InfantryRootMotion::resolve_track(int adm_id,
-                                                                   int state_id) const {
+const AdmRootMotion::Track *AdmRootMotion::resolve_track(int adm_id,
+                                                         int state_id) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return nullptr;
 	}
@@ -149,7 +145,7 @@ const InfantryRootMotion::Track *InfantryRootMotion::resolve_track(int adm_id,
 	return it != tracks.end() ? &it->second : nullptr;
 }
 
-int32_t InfantryRootMotion::position_of(const Track &track, int32_t phase_ticks) {
+int32_t AdmRootMotion::position_of(const Track &track, int32_t phase_ticks) {
 	const int32_t total_half = track.frame_count * 2;
 	if (track.loop) {
 		phase_ticks %= total_half;
@@ -158,20 +154,20 @@ int32_t InfantryRootMotion::position_of(const Track &track, int32_t phase_ticks)
 	return phase_ticks >= total_half ? total_half - 1 : (phase_ticks < 0 ? 0 : phase_ticks);
 }
 
-float InfantryRootMotion::sample(const Track &track, const std::vector<float> &channel,
-                                 int32_t phase_ticks) {
+float AdmRootMotion::sample(const Track &track, const std::vector<float> &channel,
+                            int32_t phase_ticks) {
 	const int32_t position = position_of(track, phase_ticks);
 	const size_t frame = static_cast<size_t>(position >> 1);
 	return (position & 1) ? (channel[frame] + channel[frame + 1]) * 0.5f
 	                      : channel[frame];
 }
 
-uint32_t InfantryRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) {
+uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) {
 	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks) >> 1)];
 }
 
-bool InfantryRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
-                                 opennova::world::RootMotionFrame &out) {
+bool AdmRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
+                            opennova::world::RootMotionFrame &out) {
 	const Track *track = resolve_track(adm_id, state_id);
 	if (track == nullptr) {
 		return false;
@@ -200,7 +196,7 @@ bool InfantryRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
 	return true;
 }
 
-bool InfantryRootMotion::advance_blended(
+bool AdmRootMotion::advance_blended(
 		int adm_id,
 		int primary_state, int32_t &primary_phase_ticks,
 		int target_state, int32_t &target_phase_ticks,
@@ -241,26 +237,26 @@ bool InfantryRootMotion::advance_blended(
 	return true;
 }
 
-int32_t InfantryRootMotion::clip_length_ticks(int adm_id, int state_id) const {
+int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id) const {
 	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the
 	// state has no track — the weapon channel's deferred promotion then never length-fires.
 	const Track *track = resolve_track(adm_id, state_id);
 	return track != nullptr ? track->frame_count * 2 : -1;
 }
 
-int InfantryRootMotion::clip_count(int adm_id) const {
+int AdmRootMotion::clip_count(int adm_id) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return 0;
 	}
 	return static_cast<int>(sets_[adm_id].tracks.size());
 }
 
-const String &InfantryRootMotion::adm_name(int adm_id) const {
-	static const String empty;
+const std::string &AdmRootMotion::adm_name(int adm_id) const {
+	static const std::string empty;
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return empty;
 	}
 	return sets_[adm_id].adm_name;
 }
 
-} // namespace godot
+} // namespace opennova::simassets

@@ -4,6 +4,7 @@
 # the engine-side replacement for the adapter's render-object duck calls.
 # Model B only (C++ static link); never part of the C ABI.
 add_library(opennova_simassets STATIC
+    src/adm_root_motion.cpp
     src/model_builders.cpp
     src/sim_model_cache.cpp
 )
@@ -17,7 +18,7 @@ target_include_directories(opennova_simassets
 # stack) is the cache's byte source.
 target_link_libraries(opennova_simassets
     PUBLIC opennova_threedi opennova_world opennova_resource_index
-    PRIVATE opennova_io
+    PRIVATE opennova_anim opennova_bad opennova_io
 )
 
 target_compile_features(opennova_simassets PRIVATE cxx_std_17)

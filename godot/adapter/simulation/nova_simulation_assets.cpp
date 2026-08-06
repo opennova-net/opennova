@@ -25,7 +25,9 @@ int NovaSimulation::set_infantry_anim_map(const Ref<NovaResourceRoot> &p_resourc
 	// resets the whole registry on each (re)load.
 	infantry_anim_.clear();
 	reset_infantry_adm_ids();
-	const int default_adm_id = infantry_anim_.register_adm(p_resource_root, p_adm_name);
+	const int default_adm_id = infantry_anim_.register_adm(
+			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr,
+			std::string(p_adm_name.utf8().get_data()));
 	const int default_clip_count = default_adm_id == 0 ? infantry_anim_.clip_count(0) : 0;
 	// Every stored per-entity id indexes this registry; rebuilding it invalidates
 	// all prior assignments. Only repopulate once slot 0 is the successfully loaded
@@ -76,8 +78,9 @@ void NovaSimulation::resolve_new_infantry_adm_ids() {
 		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
 		if (adm.is_empty()) continue;
 		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
-		const int adm_id =
-				infantry_anim_.register_adm(infantry_adm_resource_root_, adm);
+		const int adm_id = infantry_anim_.register_adm(
+				&infantry_adm_resource_root_->native_index(),
+				std::string(adm.utf8().get_data()));
 		if (adm_id >= 0) e->inf.adm_id = adm_id;
 	}
 	infantry_adm_resolved_ai_count_ = count;

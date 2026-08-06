@@ -523,7 +523,9 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
 	out["infantry"] = e->inf.active;
 	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
-	out["adm_name"] = e->inf.active ? infantry_anim_.adm_name(e->inf.adm_id) : String();
+	out["adm_name"] = e->inf.active
+			? String::utf8(infantry_anim_.adm_name(e->inf.adm_id).c_str())
+			: String();
 	out["infantry_move_mode"] = e->inf.move_mode;
 	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
 	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
