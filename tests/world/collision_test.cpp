@@ -1208,6 +1208,79 @@ void test_cb_ground_probe_sets_ground_target() {
 }
 
 // ---------------------------------------------------------------------------
+void test_replica_resolve_candidates_ground_and_peers() {
+    // The replica seam (net-re §5.38e, D-NET-196): a decoded remote row with
+    // NO world entity resolves through the SAME movement collision resolver —
+    // an ad-hoc candidate slice at the query position feeds both the contact
+    // passes and the ground probe (standing on buildings), the peer spheres
+    // ride the witnessed repulsion loop with self-exclusion, and the staged
+    // tables restore afterwards. [orig: remote org rows run the ordinary
+    // resolver @0x4b2bd0 through the shared mover tails]
+    Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    const int32_t soldier_count_before = rig.cw.candidate_count(rig.soldier);
+
+    // (a) Ground THROUGH the candidate model: feet just above the box top.
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        EntityHandle ground;
+        const int32_t clearance = rig.cw.resolve_replica(
+            rig.world, state, pos, vel, vel_z, 0, fx(1.8), true, 0, 43, 0u,
+            nullptr, 0, 0xFFFF, &ground);
+        CHECK(ground == rig.building);
+        CHECK(clearance > 0 && clearance <= fx(0.06)); // ~0.05 u over the top
+    }
+
+    // (b) Wall push-out from the ad-hoc candidates: a capsule against the box
+    // side face is pushed away (the building spans x 7..13 at y 10).
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(6.6), fx(10.0), fx(0.0)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                               fx(1.8), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               &ground);
+        CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
+    }
+
+    // (c) Peer repulsion + self-exclusion, far from every model candidate.
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(30.0), fx(30.0), fx(1.0)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        CollisionWorld::ReplicaPeer peer;
+        peer.handle = 0x0007;
+        peer.x = fx(30.2);
+        peer.y = fx(30.0);
+        peer.z = fx(1.0);
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                               fx(1.8), true, 0, 43, 0u, &peer, 1, 0xFFFF,
+                               &ground);
+        CHECK(pos[0] < fx(30.0)); // pushed away from the overlapping peer
+        // The same peer marked as SELF must not push.
+        CollisionWorld::ResolveState state2;
+        int32_t pos2[3] = {fx(30.0), fx(30.0), fx(1.0)};
+        int32_t vel2[2] = {0, 0};
+        int32_t vel_z2 = 0;
+        rig.cw.resolve_replica(rig.world, state2, pos2, vel2, vel_z2, fx(0.4),
+                               fx(1.8), true, 0, 43, 0u, &peer, 1,
+                               /*exclude_handle=*/0x0007, &ground);
+        CHECK(pos2[0] == fx(30.0));
+    }
+
+    // (d) The staged tables restore: no slice remains under the reserved key
+    // and the soldier's own slice is untouched.
+    CHECK(rig.cw.candidate_count(EntityHandle{}) == 0);
+    CHECK(rig.cw.candidate_count(rig.soldier) == soldier_count_before);
+}
+
+// ---------------------------------------------------------------------------
 void test_sound_occlusion() {
     // Sound-occlusion distance inflation [orig: Sound_ApplyOcclusionDistance
     // @ 0x529970]: base = min(d/8, 10u); ray-1 block compounds 2*base + 5u;
@@ -3613,6 +3686,7 @@ int main() {
     test_pool1_item_is_one_collision_candidate();
     test_ladder_contact_bookkeeping_is_not_ground();
     test_cb_ground_probe_sets_ground_target();
+    test_replica_resolve_candidates_ground_and_peers();
     test_debug_seams();
     test_raycast_clear_los();
     test_raycast_clear_table_readiness();
