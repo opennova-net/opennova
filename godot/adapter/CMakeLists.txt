@@ -139,6 +139,9 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation_net.cpp
     simulation/nova_simulation_occlusion.cpp
     simulation/nova_simulation_player.cpp
+    simulation/nova_simulation_player_loadout.cpp
+    simulation/nova_simulation_player_view.cpp
+    simulation/nova_simulation_player_weapon.cpp
     simulation/nova_simulation_present.cpp
     wac/nova_wac_program.cpp
     lwf/nova_lwf_data.cpp
