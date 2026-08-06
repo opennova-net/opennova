@@ -1041,7 +1041,6 @@ func _teardown_world_to_menu() -> void:
 	_world.unload()
 	if _player_presenter != null:
 		_player_presenter.setup(_world, _camera)
-	if _net != null:
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
