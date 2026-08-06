@@ -548,7 +548,7 @@ slot order, extra archives never mount, pinned by
 @ 0x829f90]`); the editor's browse index deliberately keeps `ScanAll`
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
-(D-VFS-1/-3/-7/-10/-11 are tabled above with their closures — not repeated here.)
+(D-VFS-1/-3/-7/-10/-11 are closed — see the dated closure lines below; not repeated here.)
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
@@ -1013,8 +1013,8 @@ lowers them, as the R-audits did):
 
 | System | Slice | Record |
 |---|---|---|
-| Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT, tabled above) |
-| Batching / draw order / pass structure | REN-3 | **landed 2026-07-06** — [render/render-order-re.md](render/render-order-re.md) (D-RORD, tabled above) |
+| Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT — open rows tabled above, closures below) |
+| Batching / draw order / pass structure | REN-3 | **landed 2026-07-06** — [render/render-order-re.md](render/render-order-re.md) (D-RORD — open rows tabled above, closures below) |
 | Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | **landed 2026-07-06** — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT, tabled above) |
 
 Terrain-TSS and sky/water shader findings grow the existing
