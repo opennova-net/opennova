@@ -155,7 +155,7 @@ viewport/waypoint/zone ops), and the quality campaign's W4-6b (#373,
 later added `preview_ops` and retired `sim_ops` with the standalone runtime.
 The ~1,040-line residual is the composing facade the section framework
 prescribes — document/selection/overlay state stays on the controller by
-design (TODO.md records the same disposition).
+design (the disposition is recorded here; there is no separate TODO row).
 
 ## TST — public-seam test refits (umbrella Wave 2; ADR 0018)
 

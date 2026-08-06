@@ -5,7 +5,7 @@ arrives via terrain/BMS rather than the inspector), but not every field reaches 
 visible render input yet. This matrix classifies each editor-exposed field
 so authors (and the editor UI) can tell a live control from a parsed-but-deferred one,
 and so renderer changes flip rows only with citations. It is the audit behind the
-editor-depth roadmap's environment fidelity work; the reverse-engineering record it
+environment fidelity work; the reverse-engineering record it
 leans on is [env-tod-re.md](env-tod-re.md).
 
 Classifications:

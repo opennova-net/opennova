@@ -1,10 +1,10 @@
 # Mission-load performance baseline (2026-06-11)
 
-The recorded numbers behind the editor-depth roadmap's perf decisions. C1
-(PR #97) instrumented both products with `PerfTimeline`; this is the first
+The recorded numbers behind the 2026-06 editor perf push-down decisions.
+PR #97 instrumented both products with `PerfTimeline`; this is the first
 captured baseline, taken to decide which push-down the next perf slice
-should be (the roadmap's C3 placement-plan / C4 pick-collider candidates
-were *contingent on these numbers*).
+should be (the placement-plan and pick-collider candidates were *contingent
+on these numbers*).
 
 ## Capture setup
 
@@ -126,5 +126,5 @@ Godot_v4.6.1-stable_win64_console.exe --headless --path godot \
 
 Record the second run of a session (OS-warm); override the mission list
 with JO_PROBE_MISSIONS=a.bms,b.bms when needed. The same data is visible
-interactively in the debug overlay's Perf tab (C11) after any mission load,
+interactively in the debug overlay's Perf tab after any mission load,
 in either host.

@@ -67,9 +67,15 @@ Each domain's next step is named in its own record, not centrally:
 | Terrain / foliage / tiles | ledger § Terrain, Foliage, Tiles | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
 | Environment | ledger § Environment | [env/env-tod-re.md](env/env-tod-re.md), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md) |
+| Editor depth (ONED workspaces) | TODO.md (editor UX rows) + the workspace matrix | [oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) — the editor's standing roadmap (survived the umbrella close) |
 
 Work that is **not** a parity divergence — editor UX, project health, code
-hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead.
+hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
+the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
+(the NovaWorld-integration era), `libs/npruntime/ROADMAP.md`,
+[oned/editor-layer-program.md](oned/editor-layer-program.md), and
+[maturity-program.md](maturity-program.md)'s historical body (its two log
+appendices stay live).
 
 ## The research queue
 
