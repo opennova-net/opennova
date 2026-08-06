@@ -259,9 +259,9 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
-Closed: **env #17** -> `FIXED` — Iris auto-exposure modulator gain — FIXED 2026-07-06 (REN-5): the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ ... (full detail: env-tod-re.md + git history).
+Closed: **env #17** -> `FIXED` — Iris auto-exposure modulator gain — FIXED 2026-07-06 (REN-5): the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ ... (full detail: env-tod-re.md + git history) Witness: [orig: @ 0x57e512; @ 0x57d940].
 Closed: **env #29** -> `FIXED` — Water surface tessellation — FIXED 2026-07-07 (the REN-6 tail): the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → ... (full detail: env-tod-re.md + git history).
-Closed: **env #30** -> `FIXED` — Water reflection — FIXED 2026-07-07 (the REN-6 tail): reimpl planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v ... (full detail: env-tod-re.md + git history).
+Closed: **env #30** -> `FIXED` — Water reflection — FIXED 2026-07-07 (the REN-6 tail): reimpl planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v ... (full detail: env-tod-re.md + git history) Witness: [orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240] Witness: [orig: allocator @ 0x5c08d1..0x5c0937; viewport @ 0x5c1464..0x5c1614].
 Closed 2026-07-10: **env #35** -> `FIXED` — Water sine LUT provenance: the runtime `std::sin` build forked per libm at trunc boundaries (the GitHub `macos-26-arm64` image flipped non-landmark bytes and every downstream noise pixel (full detail: env-tod-re.md + git history).
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
@@ -387,7 +387,7 @@ Closed 2026-07-15: **D-WPN-18** -> `FIXED` — The LOCAL fire leg fed `RoundSim.
 Closed 2026-07-16: **D-WPN-19** -> `FIXED` — FALSE READING RESOLVED 2026-07-16. The slot+0x18 callback is installed on the GROUP (`CEffectGroup_SetDeathCallback @0x5e1940`, group+0x5C/+0x60) and invoked only by `CEffectGroup_Destroy @0x5e3460` (full detail: world-wac-ai-re.md + git history).
 Closed: **D-WPN-24** -> `RESOLVED` — Ammo-class pool ids are assigned by first-appearance registry order at table build and both storages (entity+288 class 1 / the pool array) fold into one per-entity array (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-21: **D-WPN-27** -> `FIXED` — Emplaced models received only PLAYPARTANIM control-register ordinals 0/1 (full detail: world-wac-ai-re.md + git history).
-Closed 2026-07-29: **D-WPN-31** -> `FIXED` — The PANM bridge placed PLAYPARTANIM phases on the model's first two CTRL entries, so B50Cal's local `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]` order aliased a generic part phase onto heat/yaw (full detail: world-wac-ai-re.md + git history).
+Closed 2026-07-29: **D-WPN-31** -> `FIXED` — The PANM bridge placed PLAYPARTANIM phases on the model's first two CTRL entries, so B50Cal's local `[HEAT_GLOW, EWEAP_GUNYAW, EWEAP_GUNPITCH]` order aliased a generic part phase onto heat/yaw (full detail: world-wac-ai-re.md + git history) Witness: [orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator @ 0x456710] Witness: [orig: HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38].
 Closed 2026-07-27: **D-WPN-33** -> `FIXED` — Fire particles spawned at the shooter's EYE instead of the muzzle, on two independent paths (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-31: **D-WPN-34** -> `FIXED` — Spawn-time weapon spread and physical recoil were absent/approximate: ERROR/theta and ammo recoil values lost their exact integer carriers (full detail: world-wac-ai-re.md + git history).
 
@@ -464,11 +464,11 @@ Closed 2026-07-09: **D-HUD-1** -> `FIXED` — Stance indicator = discrete cross-
 Closed 2026-07-18: **D-HUD-2** -> `FIXED` — Stance widget = frame-swap + fade; do not port a rotating compass ring (full detail: hud-re.md + git history).
 Closed: **D-HUD-3** -> `FIXED` — HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) (full detail: hud-re.md + git history).
 Closed: **D-HUD-4** -> `FIXED` — Health-bar fill WIDTH uses the capped `+92` ratio; fill COLOR uses an uncapped recomputed ratio (full detail: hud-re.md + git history).
-Closed 2026-07-31: **D-HUD-7** -> `FIXED` — Crosshair spread now consumes the exact ERROR integer plus both signed live terms, `pitchBlend(+0x380)>>7` and movement/weapon-weight spread `(+0x384)>>7` (full detail: hud-re.md + git history).
+Closed 2026-07-31: **D-HUD-7** -> `FIXED` — Crosshair spread now consumes the exact ERROR integer plus both signed live terms, `pitchBlend(+0x380)>>7` and movement/weapon-weight spread `(+0x384)>>7` (full detail: hud-re.md + git history) Witness: [orig: HUD_DrawCrosshair @ 0x592640; RoundData_SpawnRound @ 0x4ec0d0; Entity_UpdateInfantryPlayerBody @ 0x4b40e0].
 Closed 2026-07-31: **D-HUD-9** -> `FIXED` — Crosshair visibility and the aimed ERROR triplet now share a bounded `Player_CanFireWeapon @0x5cf780` projection: promoted Scoped or Sighted (except SWITCHFROM), card-switch reload, camera ... (full detail: hud-re.md + git history).
 Closed 2026-07-11: **D-HUD-10** -> `FIXED` — Crosshair anchors at the fixed design center (full detail: hud-re.md + git history).
 Closed 2026-07-22: **D-HUD-15** -> `FIXED` — Weapon heat bar (`HUD_DrawWeaponHeatBar @ 0x599700`, ex "minimap" misnomer) drawer ported; the info feed now carries a real level (full detail: hud-re.md + git history).
-Closed 2026-06-23: **D-PLAYERINFO-7** -> `FIXED` — `PLAYER_INFO` screen orchestration host wiring: `PlayerInfoMenuCompanion` (godot/game/player_info_menu_companion.gd) drives the live `player.mnu` screen (full detail: avatars-re.md + git history).
+Closed 2026-06-23: **D-PLAYERINFO-7** -> `FIXED` — `PLAYER_INFO` screen orchestration host wiring: `PlayerInfoMenuCompanion` (godot/game/player_info_menu_companion.gd) drives the live `player.mnu` screen (full detail: avatars-re.md + git history) Witness: [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; PlayerInfo_HandleNationalitySelect @ 0x560600; PlayerInfo_HandleDivisionSelect @ 0x560690; populate_avatar_combo_list @ 0x560210].
 Closed 2026-07-22: **D-PLAYERINFO-10** -> `FIXED` — Voice preview host wiring now binds `TESTPLAYERVOICE` and requests the selected avatar's `VOICE_%d` through `menu.lwf` `[orig: PlayerInfo_PreviewVoice @ 0x55ff70]` (full detail: avatars-re.md + git history).
 Closed 2026-07-30: **D-PLAYERINFO-11** -> `FIXED` — Loadout ammo combos + weight readout + icons: witnessed 2026-07-30 (`@ 0x55e8b0`/`@ 0x55def0`/`@ 0x55f480`/`@ 0x55f1f0` decompiled (full detail: avatars-re.md + git history).
 Closed 2026-07-28: **D-SND-16** -> `FIXED` — Ambient marker eval RAN per render frame in `NovaMissionAudio.tick` (full detail: lwf-dbf-sound-re.md + git history).
@@ -623,9 +623,9 @@ De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Closed: **D-TERRAIN-1** -> `PERMANENT` — Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include (register below; full detail: terrain-re.md + git history).
-Closed 2026-07-06: **D-TERRAIN-2** -> `FIXED` — Shared surface include stacked TWO ×2 detail-normal factors on the splat (gobj-era chimera) (full detail: terrain-re.md + git history).
-Closed 2026-07-07: **D-TERRAIN-3** -> `FIXED` — Below-horizon region: cameras see past the sky dome's 1024-unit rim to the raw viewport background (full detail: terrain-re.md + git history).
-Closed: **D-TERRAIN-4** -> `PERMANENT` — The ported terrain raycast's editor-mode guards (the `terrain_raycast.h` sampler seam): beyond-extent samples report no-terrain/no-hit where retail CLAMPS the cell to the grid edge (register below; full detail: terrain-re.md + git history).
+Closed 2026-07-06: **D-TERRAIN-2** -> `FIXED` — Shared surface include stacked TWO ×2 detail-normal factors on the splat (gobj-era chimera) (full detail: terrain-re.md + git history) Witness: [orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0; compile_terrain_pixel_shaders @ 0x605260].
+Closed 2026-07-07: **D-TERRAIN-3** -> `FIXED` — Below-horizon region: cameras see past the sky dome's 1024-unit rim to the raw viewport background (full detail: terrain-re.md + git history) Witness: [orig: @ 0x677100].
+Closed: **D-TERRAIN-4** -> `PERMANENT` — The ported terrain raycast's editor-mode guards (the `terrain_raycast.h` sampler seam): beyond-extent samples report no-terrain/no-hit where retail CLAMPS the cell to the grid edge (register below; full detail: terrain-re.md + git history) Witness: [orig: OOB masks @ 0x31a0010/0x319fc0c] Witness: [orig: Terrain_SeamFlags_* @ 0x31a17f0..].
 Closed 2026-07-13: **D-TERRAIN-5** -> `FIXED` — Top ps.1.4 inputs and fog were stand-ins: heightmap normal was misused as t3, raw near/far textures were camera-crossfaded, DBlend was unnormalized, authored-detail coefficient/custom mips and the ... (full detail: terrain-re.md + git history).
 Closed 2026-07-13: **D-TERRAIN-6** -> `FIXED` — LOD/fog/overlay base-pass semantics: exact clamped `lod_sub / 2` eight-family selection, type-0 eye-depth vs linear radial fog, and overlay RGB before lighting while retaining the cached ... (full detail: terrain-re.md + git history).
 Closed 2026-07-14: **D-TERRAIN-10** -> `FIXED` — EnvFile preserves the direct `Environment_GetLightDirectionFloat` tuple `g`, not Godot/world XYZ (full detail: terrain-re.md + git history).
@@ -713,7 +713,7 @@ Closed 2026-07-19: **D-FNT-4** -> `FIXED` — cp1252 specials: `to_font_file` ke
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
-Closed 2026-07-07: **D-BOOT-1** -> `FIXED` — Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion) (full detail: required-resources.md + git history).
+Closed 2026-07-07: **D-BOOT-1** -> `FIXED` — Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion) (full detail: required-resources.md + git history) Witness: [orig: Expansion_LoadAssets @ 0x4a4798/@ 0x4a4906; AudioVM_OpenContextFile @ 0x672160; AudioVM_LoadScriptFile @ 0x672d20; Sbf_OpenFile_Gamemus @ 0x4ed6c0].
 
 ### Render — materials/state — [render/render-material-re.md](render/render-material-re.md) (D-RMAT catalog; REN-2)
 
@@ -804,7 +804,7 @@ De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
 Closed: **D-RORD-2** -> `PERMANENT` — Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced (register below; full detail: render-order-re.md + git history).
-Closed: **D-RORD-4** -> `RESOLVED` — FP render pass ported 2026-07-09: `PlayerViewmodelRig` composites the viewmodel through a dedicated shared-world SubViewport (full detail: render-order-re.md + git history).
+Closed: **D-RORD-4** -> `RESOLVED` — FP render pass ported 2026-07-09: `PlayerViewmodelRig` composites the viewmodel through a dedicated shared-world SubViewport (full detail: render-order-re.md + git history) Witness: [orig: @ 0x4ded60: near swap @0x4dee29/restore @0x4df0aa, fov @0x4dee71 -> h->v @0x58d900, depth remap @ 0x58a7b0; parser key 'renderfov' @0x54482a].
 Closed: **D-RORD-6** -> `PERMANENT` — The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced (register below; full detail: render-order-re.md + git history).
 
 ### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
