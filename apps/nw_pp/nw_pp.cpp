@@ -32,6 +32,7 @@
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
 #include <npwire/game_type.h>
+#include <npwire/wire_handle.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_catalog.h>
 #include <npwire/ingame_message_id.h>
