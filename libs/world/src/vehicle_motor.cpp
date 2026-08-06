@@ -1410,10 +1410,12 @@ static void watercraft_motor_core(World &world, Entity &veh,
 
 // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the client-executed subset for a
 // remote boat; disasm-verified spec 2026-07-31 (net-re §5.38e). Block cites inline.
-// Residual (both this and the air mover): the client-run deck-carrier follow
-// (groundEntity tick-delta + parent-rotation re-seat @0x48D6DA..0x48DACD /
-// @0x4905BC..0x49095B) is unported — the embedding sim freezes carried rows to
-// the row-level seat-follow instead (D-NET-196 residuals).]
+// Deliberate stand-in (both this and the air mover): the client-run
+// deck-carrier follow (groundEntity tick-delta + parent-rotation re-seat
+// @0x48D6DA..0x48DACD / @0x4905BC..0x49095B) is replaced by the embedding
+// sim freezing carried rows to the row-level seat-follow — the D-NET-196
+// client-subset facet (divergence-ledger permanent register; the INFANTRY
+// deck-ride twins ARE ported: client_replica_pipeline row_deck_ride).]
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;
