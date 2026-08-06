@@ -72,7 +72,7 @@ in gitignored `.scratch/`, full stop.
 
 - The full `ctest` CI job already runs every gated test as a skip-pass; the logic
   they would exercise is covered in CI by the **inline-pcap unit tests**
-  (`nw_pool_decode_unit_test`, `nw_replay_timeline_test`, `nw_capture_decoder_test`
+  (`nw_pool_decode_unit_test`, `nw_capture_decoder_test`
   craft tiny in-memory pcaps and run unconditionally) — that is the sanctioned CI
   substitute, per the net-test convention.
 - Retail-data gates can never run on public runners (copyright + size). A

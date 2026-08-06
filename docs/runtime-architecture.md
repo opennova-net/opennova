@@ -87,12 +87,12 @@ do for a joined client. The in-match runtime behind that seam is `libs/npruntime
 [net/novaworld-net-re.md](net/novaworld-net-re.md).
 
 Decoded entities now have one client-state path
-([ADR 0026](adr/0026-one-client-replica-pipeline.md)). Live `ClientRuntime` and
-replay/spectate `NovaNetClient` both reduce S2C messages through
-`ClientReplicaPipeline`; replay optionally journals that result through
-`ReplicaHistory`. Both expose the same `PF_*` projection to
-`wire_present_pass.gd`. `NovaWorldClient` remains the matchmaking/handoff
-client and does not own a second gameplay entity model.
+([ADR 0026](adr/0026-one-client-replica-pipeline.md)): the live `ClientRuntime`
+reduces S2C messages through `ClientReplicaPipeline`, which exposes the `PF_*`
+projection to `wire_present_pass.gd`. (The replay/spectate consumer —
+`NovaNetClient` + `ReplicaHistory` — was removed 2026-08-05 as unused dev
+scaffolding; see the ADR's amendment.) `NovaWorldClient` remains the
+matchmaking/handoff client and does not own a second gameplay entity model.
 
 ## Layers
 

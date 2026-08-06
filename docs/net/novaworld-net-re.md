@@ -3208,6 +3208,15 @@ Witnessed against the dvxi5 probe (2 trucks type `0x050E` → 0x0D; 2 objective 
 
 ### 5.25 Replay timeline — assembling a capture into per-entity tracks (tooling, 2026-06-17)
 
+> **Retired 2026-08-05:** the replay/spectator tool chain this section (and the
+> event/env-stream notes below) describes — `replay_timeline`, `apps/nw_replay`,
+> `NovaNetClient`, `ReplicaHistory`, `NetEventView`, the spectator kill feed —
+> was deleted as unused dev scaffolding (ADR 0019/0026 amendments). The WIRE
+> FINDINGS recorded here (event/env stream shapes, decompression, anchors,
+> lifecycle semantics) stand, witnessed via the shared capture-decode chain
+> (`wire_capture`, still live) and the surviving decoders; `nw_pp` remains the
+> capture viewer.
+
 The pool decoders (§5.11/§5.12/§5.23) and the C2S `0x0C` uplink (§5.10) are composed into a
 reusable **replay timeline** so a whole capture can be *seen*, not just byte-asserted. The
 outer-decode pipeline (envelope → NWU → SCRK → `0x43`/`0x83` → reassembly → tag dispatch) — long

@@ -65,8 +65,7 @@ weapon "WPN_M4"
 end
 """
 const ISOLATED_ENV := [
-	"NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
-	"NW_REPLAY_DIR", "NW_REPLAY_LOOSE", "NW_REPLAY_ITEMS",
+	"NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
 ]
 
 
@@ -338,55 +337,6 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "menu",
 			"the shell stays on the front-end state the picker contract needs")
-
-
-func test_session_loss_with_no_mounted_root_returns_shell_to_menu_state() -> void:
-	# The NW_REPLAY spectate entry runs a world with no mounted root; losing
-	# that session must land the shell back on the front-end state (the
-	# picker/F9 contract is MENU-only) instead of parking it in WORLD forever.
-	_temp_dir = OS.get_cache_dir().path_join(
-			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	NovaResourceDirSettings.set_resource_dir(_temp_dir)  # empty dir: unmountable
-	NovaResourceDirSettings.set_game("jo")
-	_shell = MAIN_GAME_SCENE.instantiate()
-	assert_not_null(_shell)
-	add_child(_shell)
-	await get_tree().process_frame
-	_shell.enter_net_world()
-	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
-	assert_eq(String(state["shell"]["state"]), "world",
-			"the spectate entry is in-world with no mounted root")
-	_shell.get_node("World").session_lost.emit("test: replay stream ended")
-	state = _shell.get_game_debug_adapter().get_mcp_game_state()
-	assert_eq(String(state["shell"]["state"]), "menu",
-			"a rootless teardown lands on the front-end state, not WORLD")
-	assert_false(_shell.is_world_loading())
-
-
-func test_rejected_replay_boot_falls_through_to_the_menu_front_end() -> void:
-	# A replay boot whose session is rejected before connecting (here: the replay
-	# dir cannot mount) must not consume the boot: the shell falls through to the
-	# normal front-end — menu visible on main.mnu, world and HUD hidden, no kill
-	# feed — instead of ending on a blank visible world with no session.
-	OS.set_environment("NW_REPLAY", "127.0.0.1:42000")
-	OS.set_environment("NW_REPLAY_DIR", OS.get_cache_dir().path_join(
-			"opennova_nonexistent_replay_%d" % Time.get_ticks_usec()))
-	_shell = await _make_shell()  # asserts the boot lands on main.mnu
-	if _shell == null:
-		return
-	var state: Dictionary = _shell.get_game_debug_adapter().get_mcp_game_state()
-	assert_eq(String(state["shell"]["state"]), "menu",
-			"the rejected replay session leaves the shell on the front-end state")
-	assert_false(_shell.is_world_loading())
-	assert_not_null(_shell.current_resource_root(),
-			"the fall-through boot mounted the persisted dir")
-	assert_false(_shell.get_node("World").visible,
-			"the rejected session's world reveal is rolled back")
-	assert_false(_shell.get_node("HUD/FpsLabel").visible,
-			"the HUD contents hide with the menu up")
-	assert_null(_shell.get_node("HUD").get_node_or_null("NetKillFeed"),
-			"no kill feed exists for a session that never started")
 
 
 func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() -> void:

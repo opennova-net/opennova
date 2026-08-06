@@ -5,6 +5,17 @@
   [ADR 0011](0011-single-player-in-process-listen-server.md), and
   [ADR 0013](0013-consolidated-net-core.md)
 
+## Amendment (2026-08-05)
+
+The replay/spectate consumer named throughout — `NovaNetClient`,
+`ReplicaHistory`, and the batch `build_replay_timeline` — was deleted as unused
+dev scaffolding (it never shipped and no live path consumed it; the capture
+DECODE chain that feeds parity tests is untouched). The decision itself is
+unchanged and now reads simpler: `ClientReplicaPipeline` is the sole S2C entity
+reducer and `wire_present_pass.gd` its sole presenter, with the live joiner
+(`ClientRuntime`) as the one consumer. Mentions of the replay consumer below
+are the original decision text, left as written.
+
 ## Context
 
 Live play and replay/spectate used the same `npwire` decoders but built two

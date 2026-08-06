@@ -14,7 +14,6 @@
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/protocol_message.h>
-#include <npwire/replay_timeline.h>
 #include <npwire/session_keys.h>
 #include <npwire/wire_capture.h>
 
@@ -209,7 +208,7 @@ void test_pool3_sync_0x20_via_pcap() {
 // (90 - heading) must recover the authored BMS yaw the editor places from — so a
 // net static sits exactly where ONED's bms_to_godot_basis would put it. Before the
 // fix this field was dropped and every static stood at heading 0 (faced east).
-void test_spawn_heading_flows_to_timeline() {
+void test_spawn_heading_survives_the_wire() {
 	const double bms_yaw = 30.0;                 // what an author would set in the .bms
 	const double engine_heading = 90.0 - bms_yaw; // the engine/wire frame = 60 deg
 	const uint32_t yaw_bam = uint32_t((uint64_t(int(engine_heading)) << 32) / 360);
@@ -229,23 +228,12 @@ void test_spawn_heading_flows_to_timeline() {
 	EXPECT(decode_pool_spawn_batch(inner.data(), inner.size(), rt));
 	EXPECT(rt.records.size() == 1 && rt.records[0].euler_z == int32_t(yaw_bam));
 
-	// Flow it through the timeline as a server 0x0D message.
-	InGameMessage m;
-	m.frame_index = 1;
-	m.dir = 'S';
-	m.tag = 0x0D;
-	m.payload = inner;
-	ReplayTimeline tl = build_replay_timeline({m});
-
-	const ReplayEntity *e = nullptr;
-	for (const auto &ent : tl.entities)
-		if (ent.handle == 0x1003) { e = &ent; break; }
-	EXPECT(e != nullptr);
-	if (!e) return;
-	EXPECT(e->has_spawn && e->spawn.has_heading);
-	EXPECT(std::fabs(e->spawn.heading_deg - engine_heading) < 0.5);   // ~60 deg on the wire
+	// Convert the wire yaw the way presentation does (32-bit BAM -> degrees;
+	// the D-NET-86 witness: entity+16 is the yaw heading, NOT a velocity).
+	const double heading_deg = double(uint32_t(rt.records[0].euler_z)) * 360.0 / 4294967296.0;
+	EXPECT(std::fabs(heading_deg - engine_heading) < 0.5);            // ~60 deg on the wire
 	// Placement-equivalence: 90 - heading == the authored BMS yaw the editor uses.
-	EXPECT(std::fabs((90.0 - e->spawn.heading_deg) - bms_yaw) < 0.5); // ~30 deg
+	EXPECT(std::fabs((90.0 - heading_deg) - bms_yaw) < 0.5); // ~30 deg
 }
 
 } // namespace
@@ -254,7 +242,7 @@ int main() {
 	test_pcap_roundtrip();
 	test_pool_spawn_0d_via_pcap();
 	test_pool3_sync_0x20_via_pcap();
-	test_spawn_heading_flows_to_timeline();
+	test_spawn_heading_survives_the_wire();
 	if (g_failures) {
 		std::printf("\n%d assertion(s) failed\n", g_failures);
 		return 1;
