@@ -5,6 +5,14 @@
 #include <cstdlib>
 #include <vector>
 
+// Retail loads each unique .3DI definition once per mount and hands every
+// consumer the same cached parse — the renderer-side unique-loaded-definitions
+// cache the C2S 0x3D challenge later snapshots [orig: the unique-loaded-.3DI
+// cache frozen by sub_5B3A80; see the adapter's NetworkChallengeModelRegistry].
+// This is the simulation's mirror of that structure over the mounted index;
+// the render side keeps its own (and keeps feeding the challenge registry —
+// sim parses never register there).
+
 namespace opennova::simassets {
 
 namespace {
