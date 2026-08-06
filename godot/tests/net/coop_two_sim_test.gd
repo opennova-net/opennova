@@ -2364,11 +2364,17 @@ func _subrate_walk_mission() -> NovaMissionData:
 	# entities across frames (the D-NET-154 regime): eight parked AI organics
 	# plus the deploy markers. They sit far from the walkers so nothing
 	# interacts; they exist purely to fill the per-frame byte budget.
+	# The fillers park BEHIND the joiner's deploy facing (mission +y): under
+	# the FULL D-NET-139 priority score (view-angle terms, 2026-08-06) an
+	# in-view filler legitimately outranks the behind-side walking host player
+	# and the walker starves — retail's own geometry rule. Behind the viewer
+	# the fillers' folded angle keeps the walker streaming every frame, which
+	# is this test's baseline (the chase-glide contract, not starvation).
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(8):
 		assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
-				Vector3(120 + 6 * i, 140, 0), Vector3.ZERO).is_empty())
+				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
 	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
