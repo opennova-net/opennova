@@ -19,6 +19,7 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | Component | Verdict | Evidence |
 |---|---|---|
 | Watercraft mover client subset (`@ 0x48D480`) | MATCHING — ported (`watercraft_client_tick`) | §1 spec; `watercraft_client_motor` ctest (glide/coast/steer + the witnessed −167/−8350 vertical legs) |
+| Watercraft mover AUTHORITY half (`@ 0x48D480`, gate `@ 0x48DF8C`) | MATCHING — ported (`tick_watercraft_motor` + `AiSystem::watercraft_ai_drive`; shared `watercraft_motor_core`) | §1.12 spec (witnessed 2026-08-06); `watercraft_client_motor` ctest authority legs; `00trg_defense_probe.gd` (host boats drive their event routes) |
 | Aircraft mover client subset (`@ 0x490310`; cpln thunk `@ 0x45D6F0`) | MATCHING — ported (`aircraft_client_tick`) | §2 spec; air glide + altitude-hold + abandoned-hover ctest legs |
 | Boat platform solve (`@ 0x481870`) | MATCHING — ported, client subset (`watercraft_platform_solve`) | §3 spec + §4 solver interiors; settle/level/roll-stability/gravity bench legs |
 | Shared suspension solvers (`@ 0x46C8E0` / `@ 0x46B140`) | witnessed — the Z/fit paths ported inside the platform, air, and ground solves; the wreck-tumble machinery unported | §4 |
@@ -37,11 +38,15 @@ imagebase 0x400000). Decompilation cross-checked against a full instruction-leve
 reconstructed from the disassembly, not the decompile. Ground-family comparison (part F)
 is from `Entity_UpdateVehiclePhysics` decompile only, as permitted.
 
-Scope: the blocks a CLIENT executes for a REMOTE (non-local-driver, non-authority)
-watercraft — everything OUTSIDE the drive-INPUT block gated at 0x48DF8C..0x48DFA2
-(`attrib&0x40 && (is_authority || occupant == g_local_player_entity)`), from the interp
-block's register mirror to the position integration. The per-record chase (interp) is
-already ported; it is recapped only for ordering and for the stale-speed decay it owns.
+Scope: originally the blocks a CLIENT executes for a REMOTE (non-local-driver,
+non-authority) watercraft — everything OUTSIDE the drive-INPUT block gated at
+0x48DF8C..0x48DFA2 (`attrib&0x40 && (is_authority || occupant ==
+g_local_player_entity)`), from the interp block's register mirror to the position
+integration. The per-record chase (interp) is already ported; it is recapped only
+for ordering and for the stale-speed decay it owns. **2026-08-06: the AUTHORITY
+half (the gated MoveOrder merge/capsize and the INPUT block's player/AI/parked
+legs) is witnessed in §1.12 and ported — this record now covers the full
+function minus the cited deferrals.**
 
 Conventions: positions/velocities are 16.16 fixed (1.0 = 0x10000 world unit); angles are
 32-bit BAM; `>>` is the x86 `sar` (arithmetic); `(a*b + 0x8000) >> 16` denotes the exact
@@ -132,9 +137,10 @@ All of this is ONE call of Entity_UpdateWatercraftPhysics per world tick:
 8. Dead check: `Flags & 2` -> skip everything to step 16 [0x48DDFA].
 9. MoveOrder merge + capsize damage — both gated off for remote clients
    [0x48DE20 requires occupant==local or authority; 0x48DE84 requires authority].
+   Authority behavior: §1.12.
 10. Seat sweep (attrib&0x40): stale occupantEntity/mountHandles cleared [0x48DED4..0x48DF7D]. Runs on clients.
-11. INPUT block — **skipped** (the gate this spec excludes) [0x48DF8C..0x48DFA2 jumps
-    remote clients straight to 0x48E82C].
+11. INPUT block — **skipped on remote clients** (the gate) [0x48DF8C..0x48DFA2 jumps
+    remote clients straight to 0x48E82C]. The authority/local-driver interior: §1.12.
 12. Steer/rudder integrator — §3 [0x48E82C..0x48E926].
 13. Thrust (cmd != 0) or zero-cmd velocity snap — §4 [0x48E926..0x48EA12 / 0x48EAB1].
 14. Drag/slip/keel block — §5 [0x48EA14..0x48EBB3]. Writes currentSpeed.
@@ -498,6 +504,93 @@ decay); entity velocityX/Y, slideDecay, currentSpeed, aiState, modelPtr0, Positi
 X/Y/Z, Yaw (+= modelPtr0, and the interp steps), Pitch/Roll (carrier follow + platform
 solve only), interpProgress, pendingAnimStateId (anim), orientationMatrix, Flags
 (0x20000 tail; 0x2000/0x8000 via the platform solve).
+
+### 12. The authority half — input gate, occupant legs, capsize (witnessed 2026-08-06)
+
+Disasm-witnessed (decompile too large to serve; every claim below is from the
+instruction stream). Port: `tick_watercraft_motor` +
+`AiSystem::watercraft_ai_drive` (`libs/world/src/vehicle_motor.cpp` /
+`ai_waypoints.cpp`); blocks 12..19 are the client-ported sequence, extracted
+verbatim into the shared `watercraft_motor_core`. Field identities pinned this
+session from the curated IDB types: entity +0x11E = `Health` (i16), +0x12C =
+`MoveOrder` (the input-flags word), +0x130/131/132 = analogX/Y/Z, +0x148 =
+`moveTimer`, +0x74 = `CameraOffset.z`, +0x7C = `DcbId`; itemDef +0x8D8 =
+`minAI`, +0x180 = `criticalHp`, +0x8E8 = `playerSpeed` DISTINCT from +0x8EC =
+`waterSpeed`; AiBrain +0x1FC = `target_ref` [127], +0x200 = `out_speed` [128],
++0x34.. = the `wp_type/wp_channel/...` waypoint block [13..], +0x54 =
+`wp_bearing` [21], +0x80 = the per-leg turn budget [32] (IDB name `anim_flag`
+is stale here), +0x8C = the budget divisor param [35] (IDB `stored_key_time`).
+
+- **MoveOrder merge** [orig: @ 0x48DE04..0x48DE7B; gate `attrib&0x40 &&
+  occupant && occupant->Flags&0x100 && (occupant==local || is_authority)`]:
+  if analogX+analogY+analogZ != 0, or MoveOrder bit3 with a nonzero low-3
+  direction, set MoveOrder bit 0x10 on the OCCUPANT (the free-look/steer-mode
+  latch the player leg reads). Deferred in the port — our input model rebuilds
+  MoveOrder from the wire each tick.
+- **Capsize drain, authority-only** [orig: @ 0x48DE84..0x48DECD]: when |Roll|
+  or |Pitch| exceeds 0x471C7180 (~100°), `Health -= 200` per tick, floored at
+  0; at the kill edge `overlayFlags` (+0x178) is zeroed (unmodeled slot).
+  Ported in `tick_watercraft_motor`.
+- **INPUT gate** [orig: @ 0x48DF7F..0x48DFA2]: no `attrib&0x40` → straight to
+  the steer integrator @ 0x48E82C (the core runs on persisted registers).
+  Gate pass = `is_authority || occupant == g_local_player_entity`.
+- **Entry split** [orig: @ 0x48DFA8..0x48DFCD]: occupant NULL **or entity
+  Flags&2** → parked leg @ 0x48E7EE. (A second Flags&2 test @ 0x48DDFA
+  earlier jumps dead hulls to the matrix tail — the port early-returns there.)
+  Occupied: `moveTimer = 0`; occupant WITHOUT Flags&0x100 (an AI body) → AI
+  leg @ 0x48E247; a PLAYER whose head is underwater (`occupant->Position.z +
+  CameraOffset.z <= Env_WaterHeightFixed` [orig: @ 0x48DFD3..0x48DFDF]) also
+  routes to the AI leg (deferred in the port — player-leg refinement).
+- **Player leg** [orig: @ 0x48DFE5..0x48E20F]: forces brain state 22
+  [@ 0x48DFF5]; MoveOrder bit6 forces dir=1; bit7 → cmd = waterSpeed, dir=7;
+  bit3 → cmd = waterSpeed; else analog: cmd = −(analogX×waterSpeed)>>7 and the
+  dominant lateral analog (×0x2EFAA>>1) steers occupant Yaw when !bit4 (plus
+  the local camera mirror); bit9 cmd>>=1, bit8 cmd>>=2, bit5 = lights (Flags
+  0x80); analog-sum==0 → steer = occupant Yaw (bit4: entity Yaw); dir!=0 ramps
+  [137] += 0x16C16C0 cap 0x1FFFFFE0 else [137]=0; the 8-way switch (1..7):
+  ±ramp on steer, reverse cases cmd = −cmd>>1, dir 2/6 cmd=0. Ported as the
+  shared `stage_player_vehicle_input` (already carried the boat ramp cap).
+  Tail [orig: @ 0x48E20F..0x48E242]: the LOCAL driver on a NON-authority
+  machine averages `[136] = ([177]+[136])>>1` — the client reconcile the
+  D-NET-196 port already models.
+- **AI-driver leg** [orig: @ 0x48E247..0x48E756], ported as
+  `watercraft_ai_drive`:
+  1. state 22 → 16 hand-back [@ 0x48E247..0x48E24D];
+  2. `[135] ← target_ref[127]` (unmodeled slot), `[136] ← out_speed[128]`
+     capped at waterSpeed [@ 0x48E254..0x48E279];
+  3. the minAI crew clamp [@ 0x48E27F..0x48E2C7]: `minAI > 1` and no body near
+     the entry bone (`Entity_IsBoneInProximity @ 0x434F90`, 8 u) and
+     `Entity_CountMountedEntities @ 0x435970` < minAI → `Health =
+     min(Health, criticalHp)` — undercrewed AI hulls bleed to critical
+     (deferred, D-NET-161: def minai/criticalHp unparsed in traits);
+  4. waypoint refresh when the budget [32] is spent and the waypoint block
+     [13] is live: `AIWaypoint_UpdateTarget @ 0x457380` on `&brain[13]`, then
+     budget = `(|Yaw − wp_bearing[21]| / ((brain[35]>>15) + 32)) << 4` —
+     truncate-divide THEN shift, unlike the ground leg's `32*err/denom`
+     [@ 0x48E2D5..0x48E31C];
+  5. Δ = clamp(wp_bearing − Yaw, ±budget) [@ 0x48E322..0x48E33C]; when
+     `turnRate2<<6 < budget`, cmd ×= 0.75 per tier |Δ| > 15°/30°/45°
+     (0x0AAAAAA0/0x15555540/0x1FFFFFE0, round-half-up) [@ 0x48E33E..0x48E3EA];
+  6. steer = Yaw + Δ — NO ground-style `Δ>>3` term [@ 0x48E3F0..0x48E3F5];
+  7. slip counter-steer [@ 0x48E3FB..0x48E577]: motion = atan2(velY,velX)→BAM;
+     corr = `(sin22(Yaw − motion) × min(|v|, 1.0)) >> 22` (sin at the 2^22
+     scale, dbl 4194304.0 @ 0x7C3600; no rounding bias), `steer += corr << 14`;
+     |corr| tiers 0x800/0x1000/0x2000/0x3000 damp cmd ×0xC000/0x8000/0x6000/
+     0x4000 (each round-half-up, compounding);
+  8. the pool-1 avoid brake [@ 0x48E577..0x48E756] — instruction-identical to
+     the ground block @ 0x48bd8f (shared `vehicle_avoid_brake` in the port);
+  9. the boarding-wait hold [@ 0x48E75B..0x48E7EC]: if
+     `Entity_CanEnterVehicle @ 0x435480` and any live unmounted pool-0 AI has
+     `aiRuntime[+0x94] == 125` with `[+0x98] == DcbId` → steer = Yaw, cmd = 0,
+     ramp = 0, lights off (deferred with the boarding think, D-NET-161).
+- **Parked leg** [orig: @ 0x48E7EE..0x48E81E]: steer = Yaw, cmd = 0, ramp = 0,
+  `AI_CheckVehicleStuckState @ 0x465290` (deferred), lights off, state 22.
+  Both legs fall into the steer integrator @ 0x48E82C (§3, the ported core).
+
+Deferrals staying with D-NET-161: the every-8th-tick groundEntity refresh
+[@ 0x48D51F] + deck-carrier follow, the fire-FX/regen-drain leg, the MoveOrder
+merge, the submerged-driver cut, the minAI clamp, the [135] mirror, the
+boarding-wait hold, the stuck check, and the wake-anim lerp.
 
 ---
 

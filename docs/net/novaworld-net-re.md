@@ -10989,19 +10989,36 @@ SM state 22 + the 22→16 hand-back) are PORTED — `AiSystem::vehicle_ai_drive`
 `turnRate2<<6 < budget`, steer `Yaw+Δ+Δ/8`, cmd speed `min(brain outSpeed, playerSpeed)`);
 the SM's kinematic `apply_locomotion` retires for `physics != 0` vehicles (the motor is
 the only integrator, matching the original split). Pinned by ctest `vehicle_mount`.
+2026-08-06 update (the 00TRg host-defense slice, vehicle-client-movers-re §1.12): the
+**watercraft AUTHORITY mover is PORTED** — `world::tick_watercraft_motor` (the
+`@ 0x48DF8C` input gate, capsize drain `@ 0x48DE84` |Roll/Pitch| > 0x471C7180 →
+−200 hp/tick, player leg via the shared staging, parked hold `@ 0x48E7EE`) +
+`AiSystem::watercraft_ai_drive` (the cbot AI-driver leg `@ 0x48E247..0x48E756`:
+waterSpeed cap, boat turn budget `(err/denom)<<4`, 15/30/45° ×0.75 damps, steer
+`Yaw+Δ` without the ground `Δ/8`, the slip counter-steer + 4-tier damps, the shared
+pool-1 avoid brake) over the client-ported block core extracted as
+`watercraft_motor_core`; the AiSystem authority pass now family-dispatches
+(`Entity_DispatchPhysics_cbot @ 0x48EFA3` vs `_cveh @ 0x48efc0`). The pool-1
+collision-avoid DAMPING (`@ 0x48bd8f-0x48bf26` / cbot `@ 0x48E577`, the
+DcbId-seeded 0.25–0.75 yield factor) is ported for both families (shared
+`vehicle_avoid_brake`).
 
 Tracked deferrals: the air/helicopter family (`move_function chel` — Super Pumas stay
-parked; the buggy-family ground core is what landed), the skid/tire-slip model, pool-1
-vehicle-vs-vehicle collision + the collision-avoid damping (`@ 0x48bd8f-0x48bf26` incl.
-the DcbId-seeded 0.25–0.75 yield factor), water drag/drowning drain, the wait-for-boarders
-stop (`@ 0x48bf6f-0x48bff9`, aiComp mode 125), the minAI crew health clamp
-(`@ 0x48bc4e-94`), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`),
+parked; ground + watercraft authority cores are what landed), the skid/tire-slip model,
+pool-1 vehicle-vs-vehicle collision CONTACT, water drag/drowning drain, the
+wait-for-boarders stop (`@ 0x48bf6f-0x48bff9` / cbot `@ 0x48E75B-0x48E7EC`, aiComp
+mode 125 — rides the boarding think), the minAI crew health clamp (`@ 0x48bc4e-94` /
+cbot `@ 0x48E27F-0x48E2C7` — def `minAI`+0x8D8 / `criticalHp`+0x180 unparsed in
+traits), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`), the
+vehicle stuck check (`AI_CheckVehicleStuckState @ 0x465290`), the boat MoveOrder
+analog merge (`@ 0x48DE04-0x48DE7B`) + submerged-driver input cut
+(`@ 0x48DFD3-0x48DFDF`) + `aiComp[135] ← target_ref[127]` mirror (unmodeled slot),
 `EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
-state machine, husk/section damage, the wheel-contact pitch/roll solver
-(`Entity_ProcessTrackedVehiclePhysics @ 0x47c1c0` — substituted by the shared 5-tap
-bilinear terrain clamp), the above-water drive gate, the ground/carrier-follow
-grounded-on-entity block, and the driver-yaw analog write-back for remote drivers
-(their yaw is wire-owned on our host). 2026-07-17 update: the hull-vs-WORLD collision
+state machine, husk/section damage, the ctan/cbik dedicated contact solves (the
+tracked solve `@ 0x47c1c0` client subset landed 2026-08-05 and carries them interim),
+the above-water drive gate, the ground/carrier-follow grounded-on-entity block, and
+the driver-yaw analog write-back for remote drivers (their yaw is wire-owned on our
+host). 2026-07-17 update: the hull-vs-WORLD collision
 half of `Entity_CheckCollisionState @ 0x462a30` is PORTED (world-wac-ai-re §23.3
 addendum — `CollisionWorld::resolve_vehicle_hull`, one mid-hull point, the wall-like
 full-force severity-3 class + the def-torque speed decay `@ 0x47cc13-0x47ccc1`);

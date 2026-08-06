@@ -4044,6 +4044,54 @@ player `commandGroup = 1` [orig: @ 0x519fd0, the same block that writes team
 04TR's waves are infantry-led; its lone-vehicle groups need crews (leg 3) or
 stay parked exactly as retail parks them.
 
+2026-08-06 addendum — **00TRg's "move in to defend" waves** (the host-parity
+slice; diagnosis probe `godot/tests/00trg_defense_probe.gd`). The mission's
+entire defense is event-driven: crews command-mount at spawn (waypoint_id 125,
+authored on their vehicles), then delay-gated events RedirectGroupTo the boat
+groups 5/6/7 (patrol boat SSN 60, Zodiacs 56/57) and truck group 3, and
+GroupAtWaypoint arrivals debark defender groups 14/15. Two host-side defects
+kept every vehicle parked:
+
+1. **The nav-channel table was off by one** (a reimpl bug, fixed in
+   `libs/mission/src/promote.cpp`): the .bms waypoint block is POSITIONAL — 128
+   slots, slot index == authored list id, channel 0 = "no route" only because
+   no mission authors list 0 [orig: `XML_ParseGroupAction @ 0x4cc450` writes
+   the per-channel record; `AIWaypoint_UpdateTarget @ 0x457380` returns −1 on
+   navMeshId 0]. The build inserted a synthetic slot-0 sentinel and appended,
+   so an order for list N read slot N−1: 00TRg authors lists 1 and 3–16 (no
+   list 2), so group 3's redirect read the empty slot 2 and dropped, while the
+   boats took the NEIGHBORING lists' routes. 00TRa's probe-verified ride had
+   masked this (its shifted slot still held a drivable route and the probe
+   asserted displacement only). Pinned by the `mission_promote` ctest's
+   gap-shape checks (list 3 above an unauthored list 2).
+2. **Boats had no authority mover** — Watercraft rows fell through the ground
+   core, sank 1–3 u below the waterline at load (gravity, no buoyancy, no
+   wheel solve) and never integrated drive. The cbot authority half is now
+   witnessed and ported (`tick_watercraft_motor` +
+   `AiSystem::watercraft_ai_drive`, family-dispatched in the AiSystem
+   authority pass) — see
+   [vehicle-client-movers-re.md](vehicle-client-movers-re.md) §1.12.
+
+Retail-faithful quirk left in place: 00TRg's event 21 redirects group 7
+(Zodiac 57) but sets its PatrolSpeed on group 6 (a designer slip in the
+shipped mission), so 57 sails at its PROFILE default speed. That default is
+now witnessed and ported as a narrow D-AI-11 (h) sub-piece: the .aip parse
+stores `patrol_speed` at profile+0xC0 and `combat_speed` at profile+0xC4,
+both scaled ×1000 × 1/225000 × 65536 = ×65536/225 — the same constant as the
+scripted PATROLSPEED command [orig: `AIProfile_ParseProperty @ 0x45de70`, the
+patrol handler @ 0x45E6DF..0x45E717] — and the vehicle spawn init seeds
+`brain[49] (kSpeedA) = profile+0xC4`, `brain[50] (kSpeedB) = profile+0xC0`,
+with the profile resolved from the slot's ai_textfile (def-level fallback
+itemDef+0x8B8, then `"helo1"`) [orig: `Entity_InitVehicleAIFromDef
+@ 0x4686d0` — the seeds @ 0x4688C7/@ 0x4688D3]. The port:
+`PromoteOptions::ai_profile_speeds` (raw values, keyed by ai_textfile;
+scale applied at the brain seed in `init_brain`), fed by the shell's
+`AiProfileSpeeds.build` (.aip reader) through
+`NovaSimulation.set_ai_profile_speeds` — the same embedder seam as the seat
+specs. d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
+`mission_promote` ctest. The def-level/helo1 fallbacks and the REST of the
+profile parse stay D-AI-11 (h).
+
 ### 23.4 The AI boarding chain (witnessed, port pending)
 
 aiComp (+0x68 component) fields: **+148 (dword 37) = the waypoint-list slot,
