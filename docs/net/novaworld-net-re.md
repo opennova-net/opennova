@@ -6106,8 +6106,15 @@ mode]: SP/none = 1 (62.5 Hz); NovaWorld = 12 (~5.2 Hz); LAN non-authority = 6; L
 `g_LanMode @ 0x2550BFC` (server-config `lanmode 1..4` [orig: parse `@ 0x550425`, invalid → 2;
 `Config_SetDefaults @ 0x54d23a` → 1]): 1 → 12 (~5.2 Hz, the stock default), 2 → 6 (~10.4 Hz),
 3 → 4 (~15.6 Hz), 4 → 3 (~20.8 Hz — the fastest cadence a retail host can produce). Loopback and
-out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. The host applies the value
-per connection AND dictates it to the peer via the H:0x00 CS-config update, mask 8 / field 3
+out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. Field measurement
+(2026-08-06, the RR 00TRg oracle run): the retail host on this machine ran `lanmode = 4` from
+its SAVED `game.cfg` — median 0x0A inter-frame 49.8 ms = holdoff 3 (~19–20 Hz measured), one
+record for the busiest vehicle in EVERY frame at the same 600-B budget. The onhook
+`LanHostLanMode` key does NOT set retail's `g_LanMode` (retail reads its own config), so an
+OR/RR comparison must align our host's `lan_mode` with the retail copy's `game.cfg` value —
+a mode-1 opennova host against a mode-4 retail oracle is a 4× cadence deficit that presents
+as far-entity choppiness/"never arrives" (the 00TRg round-2 residual after the D-NET-139
+score fix).
 [orig: `NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40`, sends `@ 0x4c5fc0/@ 0x4c5fcb`; the client
 applies any value verbatim, `HandleCSConfigUpdate @ 0x621940`]. The protocol template default is 0
 (per-tick) — a client that never receives the update sends every tick.
@@ -10727,20 +10734,48 @@ until items.def healthMax is resolved onto the world entity); boundary-exact uni
 byte re-classed remote players every applied frame. Live retail-join verification 2026-07-02
 (v11 capture, full join+deploy+move): **0 C2S 0x0F** vs 1,526 in the pre-fix v10 session.
 
-**D-NET-139** [reimpl approximation, DOCUMENTED 2026-07-02] **The 0x0A priority score ports the
-distance/age/own-boost terms; the view-interest terms contribute 0.** `select_frame_entities`
-(`libs/netsim/connection_fan.cpp`) ports from `Server_BuildEntityPriorityList @ 0x50e590` +
-`serialize_entity_states_to_packet @ 0x50f070`: the saturating age sweep (@0x50e60f), the
-`sqrt(dx²+dy²+(dz/2)²)>>16` distance metric with the 1124-tile gate and age≥50 force-admit
-(@0x50e925), the `(entity+36 & 1) >> 4` damp, the +1000 own-entity boost, the
-`age + v + ((age*v)>>8)` key, descending sort (shell sort @0x526cf0 ≙ stable_sort), and the
-600-byte soft budget (g_entity_send_budget @0xC8FC50, checked after each record @0x50f34b, age
-reset on selection @0x50f168; round-robin is EMERGENT from aging — no cursor). NOT modeled (0
-contribution): angleScore (recipient view yaw), the LOS raycast (@0x50eadb), enemy/team bonuses,
-velocity/heading delta caches (slot+91434/+92890), the +200 view-distance bonus (word_26C681E),
-the tracked-handle priority floors + 0x12 despawns (slot+94346/+94356), the projectile chain
-(type-2 records @0x4ffee0/@0x504820), and the budget halving (slot+89876 congestion flag /
-uptime>2000 @0x517c62). Interop-safe: ordering differs, the record set converges via aging.
+**D-NET-139** [reimpl approximation, FULL TERMS PORTED 2026-08-06] **The 0x0A priority score.**
+`select_frame_entities` (`libs/netsim/connection_fan.cpp`) ports from
+`Server_BuildEntityPriorityList @ 0x50e590` + `serialize_entity_states_to_packet @ 0x50f070`:
+the saturating age sweep (@0x50e60f), the `sqrt(dx²+dy²+(dz/2)²)>>16` distance metric with the
+1124-tile gate and age≥50 force-admit (@0x50e925), the `(entity+36 & 1) >> 4` damp, the +1000
+own-entity boost, the `age + v + ((age*v)>>8)` key, descending sort (shell sort @0x526cf0 ≙
+stable_sort), and the 600-byte soft budget (g_entity_send_budget @0xC8FC50, checked after each
+record @0x50f34b, age reset on selection @0x50f168; round-robin is EMERGENT from aging — no
+cursor). 2026-08-06 (the 00TRg OR-run choppiness/"trucks never arrive" diagnosis — a starved
+patrol boat measured ONE record per ~10 s, riding the age-50 force-admit alone): the full
+score is now ported. Both pool loops expand to `distScore + 2*angleScore + 50*enemy
+(+50*isPlayer pool 0) + 100*LOS (+100*standing pool 0, lost when mounted on a non-EWEAP
+carrier @0x50eb08) + 1000*(entity == the recipient's CARRIER — mount over ground,
+@0x50e65e..0x50e66b: your ride streams at top priority) (+200*occupied pool 1, entity+0x170
+@0x50efc9) (+200 inside the view distance) + 3*speedDelta + 2*headingDelta`, where
+`angleScore = 256 − |elevBAM − Pitch|>>25 − yawTerm`, `yawTerm = |bearingBAM − Yaw|>>24
+folded +64 past 64` (the ×(−2^31/π) fpatan scale dbl_7C57B8 @0x50e94a..0x50e9e2; the exact-astern
+`abs(0x80000000)` singularity scores angle 384 and is kept), the LOS ray gated on
+`angleScore > 128 && dist < word_26C681E` (@0x50eac5, our ported terrain+sector ray standing in
+for `Entity_CheckLineOfSightTerrainAndEntities @0x53b130` — interior witness a follow-up), the
+last-SENT per-recipient caches at slot+91434 (heading `(Yaw+0x800000)>>24`, write @0x50f17c) and
+slot+92890 (the per-tick displacement metric `|Δpos (dz/2, carrier-relative)|>>6` clamp 255,
+build @0x50e9e5..0x50ea5a) stamped beside the age reset, and `word_26C681E` (the env draw/view
+distance; ZERO in a fresh image = both terms off — our netsim global mirrors it from the same
+env value the occlusion camera consumes, so headless embedders keep the faithful unwired
+behavior). The DEAD-or-spectator recipient branch is ported (2026-08-06 review round): when the
+recipient entity carries the dead bit (`flags & 2`, latched at the organic death edge — our port
+lands it in `tick_infantry` citing `Entity_HandleDeathOnAuthority @0x407CC0` write @0x407D34,
+cleared by `Entity_ResetToSpawnState @0x4B9610`) OR the slot spectator flag
+(`playerState[89912] & 0x10` @0x50e67c — that MODE stays unmodeled), the whole positional score
+is REPLACED by the flat social score: pool 0 `600*mounted (entity+0x16C != 0) + 200*sameTeam`
+(@0x50eb28..0x50eb3f), pool 1 `1000*carrier + 300*occupied + 100*sameTeam`
+(@0x50efcf..0x50efe6); the motion-delta boosts and the bit0 damp still apply. Pinned by
+`netsim_two_peer_fanout` run_0a_priority_view_terms (a watched occupied enemy mover outranks a
+nearer behind-the-viewer static; caches damp once sent), run_0a_priority_dead_recipient_social_score
+(the same pair flips order on the recipient's dead bit alone) + the unchanged budget round-robin
+leg. STILL not modeled: the slot spectator-mode input to the dead-or-spectator flag, the
+tracked-handle priority floors + 0x12 despawns (slot+94346/+94356), the projectile chain
+(type-2 records @0x4ffee0/@0x504820), the budget halving (slot+89876 congestion flag /
+uptime>2000 @0x517c62), pool-0 tick-displacement for the speed metric (our infantry movers
+store no per-tick delta — vehicles are exact), and the recipient EYE offset on the anchor.
+Interop-safe: ordering is server-local policy.
 
 **D-NET-140** [reimpl divergence by design, DOCUMENTED 2026-07-02] **The listen host's OWN
 loopback connection receives the full 0x0A record set; retail sends its local player header-only
@@ -10989,19 +11024,36 @@ SM state 22 + the 22→16 hand-back) are PORTED — `AiSystem::vehicle_ai_drive`
 `turnRate2<<6 < budget`, steer `Yaw+Δ+Δ/8`, cmd speed `min(brain outSpeed, playerSpeed)`);
 the SM's kinematic `apply_locomotion` retires for `physics != 0` vehicles (the motor is
 the only integrator, matching the original split). Pinned by ctest `vehicle_mount`.
+2026-08-06 update (the 00TRg host-defense slice, vehicle-client-movers-re §1.12): the
+**watercraft AUTHORITY mover is PORTED** — `world::tick_watercraft_motor` (the
+`@ 0x48DF8C` input gate, capsize drain `@ 0x48DE84` |Roll/Pitch| > 0x471C7180 →
+−200 hp/tick, player leg via the shared staging, parked hold `@ 0x48E7EE`) +
+`AiSystem::watercraft_ai_drive` (the cbot AI-driver leg `@ 0x48E247..0x48E756`:
+waterSpeed cap, boat turn budget `(err/denom)<<4`, 15/30/45° ×0.75 damps, steer
+`Yaw+Δ` without the ground `Δ/8`, the slip counter-steer + 4-tier damps, the shared
+pool-1 avoid brake) over the client-ported block core extracted as
+`watercraft_motor_core`; the AiSystem authority pass now family-dispatches
+(`Entity_DispatchPhysics_cbot @ 0x48EFA3` vs `_cveh @ 0x48efc0`). The pool-1
+collision-avoid DAMPING (`@ 0x48bd8f-0x48bf26` / cbot `@ 0x48E577`, the
+DcbId-seeded 0.25–0.75 yield factor) is ported for both families (shared
+`vehicle_avoid_brake`).
 
 Tracked deferrals: the air/helicopter family (`move_function chel` — Super Pumas stay
-parked; the buggy-family ground core is what landed), the skid/tire-slip model, pool-1
-vehicle-vs-vehicle collision + the collision-avoid damping (`@ 0x48bd8f-0x48bf26` incl.
-the DcbId-seeded 0.25–0.75 yield factor), water drag/drowning drain, the wait-for-boarders
-stop (`@ 0x48bf6f-0x48bff9`, aiComp mode 125), the minAI crew health clamp
-(`@ 0x48bc4e-94`), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`),
+parked; ground + watercraft authority cores are what landed), the skid/tire-slip model,
+pool-1 vehicle-vs-vehicle collision CONTACT, water drag/drowning drain, the
+wait-for-boarders stop (`@ 0x48bf6f-0x48bff9` / cbot `@ 0x48E75B-0x48E7EC`, aiComp
+mode 125 — rides the boarding think), the minAI crew health clamp (`@ 0x48bc4e-94` /
+cbot `@ 0x48E27F-0x48E2C7` — def `minAI`+0x8D8 / `criticalHp`+0x180 unparsed in
+traits), the handbrake byte-973 latch + aim-lock stop (`@ 0x48c03a/0x48c086`), the
+vehicle stuck check (`AI_CheckVehicleStuckState @ 0x465290`), the boat MoveOrder
+analog merge (`@ 0x48DE04-0x48DE7B`) + submerged-driver input cut
+(`@ 0x48DFD3-0x48DFDF`) + `aiComp[135] ← target_ref[127]` mirror (unmodeled slot),
 `EntityAI_ProcessVehicleStateMachine @ 0x4583c0`'s non-drive states, the engine sound
-state machine, husk/section damage, the wheel-contact pitch/roll solver
-(`Entity_ProcessTrackedVehiclePhysics @ 0x47c1c0` — substituted by the shared 5-tap
-bilinear terrain clamp), the above-water drive gate, the ground/carrier-follow
-grounded-on-entity block, and the driver-yaw analog write-back for remote drivers
-(their yaw is wire-owned on our host). 2026-07-17 update: the hull-vs-WORLD collision
+state machine, husk/section damage, the ctan/cbik dedicated contact solves (the
+tracked solve `@ 0x47c1c0` client subset landed 2026-08-05 and carries them interim),
+the above-water drive gate, the ground/carrier-follow grounded-on-entity block, and
+the driver-yaw analog write-back for remote drivers (their yaw is wire-owned on our
+host). 2026-07-17 update: the hull-vs-WORLD collision
 half of `Entity_CheckCollisionState @ 0x462a30` is PORTED (world-wac-ai-re §23.3
 addendum — `CollisionWorld::resolve_vehicle_hull`, one mid-hull point, the wall-like
 full-force severity-3 class + the def-torque speed decay `@ 0x47cc13-0x47ccc1`);

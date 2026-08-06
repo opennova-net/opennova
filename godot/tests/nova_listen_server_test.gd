@@ -515,10 +515,14 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 		if int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
 			found_player = true
 			assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "player is alive")
-			# The player has no BMS placement, so it carries no (kind,index) origin (PF_KIND 0)
-			# — unlike placed mission nodes, its avatar is host-managed by handle + ownerConnectionId.
-			assert_eq(int(snap[base + NovaSimulation.PF_KIND]), 0,
-				"player carries no BMS (kind,index) origin")
+			# The player has no BMS placement: it carries the explicit none/synthetic
+			# origin (kind 255, index 0xFFFFFF), which the wire present pass renders
+			# wire-direct instead of deferring to a placed node. (The old Entity
+			# default 0 read as authored kind 0/index 0 and defer-swallowed the row.)
+			assert_eq(int(snap[base + NovaSimulation.PF_KIND]), 255,
+				"player carries the synthetic origin kind, not a fake authored identity")
+			assert_eq(int(snap[base + NovaSimulation.PF_INDEX]), 0xFFFFFF,
+				"player carries the synthetic origin index sentinel")
 	assert_true(found_player, "the auto-spawned local player replicated into the client-decoded present")
 	sim.free()
 

@@ -185,6 +185,34 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 				s.pitch_bam = ai->pitch;
 			}
 		}
+		// Priority-feed fills (D-NET-139 full terms; the World-aware seam).
+		if (s.entity_class == EntityClass::Vehicle) {
+			// The per-tick displacement metric off the authority motor's own
+			// integration step (vel_x/vel_y/slide_z ARE this tick's deltas):
+			// sqrt(dx^2 + dy^2 + (dz/2)^2) >> 6, clamp 255
+			// [orig: the build metric @0x50e9e5..0x50ea5a].
+			const double mx = static_cast<double>(e.veh.vel_x);
+			const double my = static_cast<double>(e.veh.vel_y);
+			const double mz = static_cast<double>(e.veh.slide_z >> 1);
+			const int32_t mag =
+					static_cast<int32_t>(std::sqrt(mx * mx + my * my + mz * mz)) >> 6;
+			s.tick_speed_q6 = static_cast<uint8_t>(mag > 255 ? 255 : (mag < 0 ? 0 : mag));
+			// A live controller occupies the hull [orig: entity+0x170 @0x50efc9].
+			s.occupied = e.primary_occupant.valid();
+		}
+		if ((s.entity_class == EntityClass::Player ||
+		     s.entity_class == EntityClass::Infantry) &&
+				e.mounted && e.mount_target.valid()) {
+			// The carrier pointer is non-null — the dead-recipient score's
+			// 600-point term [orig: entity+0x16C @0x50eb28..0x50eb3f].
+			s.mounted = true;
+			// Riders lose the +100 standing term unless the carrier is an EWEAP
+			// [orig: mountDef+0x54 bit5 @0x50eb08..0x50eb15].
+			if (const world::Entity *mount = w.registry.get(e.mount_target)) {
+				s.mounted_non_eweap =
+						(mount->item_attrib & world::kItemAttribEweap) == 0u;
+			}
+		}
 		// A mountable carried G EWeap overloads the compact player's seat_type
 		// byte as the authoritative selected-slot echo. Derive it from the live
 		// target and mutable MountSlot bit, never a map/game constant.

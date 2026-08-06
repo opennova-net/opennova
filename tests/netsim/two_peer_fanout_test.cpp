@@ -712,6 +712,215 @@ bool run_0a_vehicle_budget_round_robin() {
 	return true;
 }
 
+// (h2) The D-NET-139 FULL-TERMS priority score (witnessed + ported 2026-08-06): an
+//     occupied, enemy, MOVING vehicle centered in the recipient's view outranks a
+//     NEARER unoccupied one behind the viewer — the view-angle (2*angle), enemy (+50),
+//     occupied (+200), inside-view (+200 with the env view distance set), LOS (+100,
+//     terrain-less = clear) and the 3*speedDelta motion boost off the last-sent cache
+//     [orig: Server_BuildEntityPriorityList @0x50e590 — pool-1 score @0x50f008; cache
+//     reads @0x50e905/@0x50ea77, writes at the serialize site @0x50f17c].
+bool run_0a_priority_view_terms() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	// Recipient at (100,100) facing +x (mission yaw 90 -> engine heading BAM 0).
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+	if (!expect(host_h.valid(), "host player spawned")) return false;
+	world.registry.get(host_h)->team = 1;
+
+	// A: NEAR (~30 u) BEHIND the viewer (a few degrees off the exact 180 —
+	// retail's cdq/xor/sub abs leaves abs(0x80000000) NEGATIVE, so an entity
+	// EXACTLY astern scores angle 384, a witnessed singularity the port keeps),
+	// unoccupied, still.
+	w::EntityHandle a_h{};
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050B;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.position = {70.0f, 95.0f, 10.0f};
+		veh.yaw = 90;
+		veh.team = 1; // same team: no enemy bonus
+		a_h = world.registry.spawn(1, veh);
+		if (!expect(a_h.valid(), "vehicle A spawned")) return false;
+	}
+	// B: FAR (400 u) dead ahead, enemy, occupied, moving at 0.5 u/tick.
+	w::EntityHandle b_h{};
+	{
+		w::Entity crew;
+		crew.kind = w::EntityKind::Organic;
+		crew.item_id = 2072;
+		crew.health = 150;
+		crew.alive = true;
+		const w::EntityHandle crew_h = world.registry.spawn(0, crew);
+		if (!expect(crew_h.valid(), "crew spawned")) return false;
+
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050D;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.position = {500.0f, 100.0f, 10.0f};
+		veh.yaw = 90;
+		veh.team = 2; // enemy of the recipient
+		veh.primary_occupant = crew_h;    // occupied [orig: entity+0x170 @0x50efc9]
+		veh.veh.vel_x = 0x8000;           // this tick's displacement -> speed metric 255
+		b_h = world.registry.spawn(1, veh);
+		if (!expect(b_h.valid(), "vehicle B spawned")) return false;
+	}
+
+	ns::set_view_distance_units(600); // arm the LOS gate + the +200 inside-view bonus
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	nw::PlayerReplicationState fallback;
+
+	const auto record_index = [](const nw::FrameUpdate &fu, uint16_t handle) {
+		for (std::size_t i = 0; i < fu.records.size(); ++i)
+			if (fu.records[i].handle == handle) return int(i);
+		return -1;
+	};
+	const auto pump = [&](nw::FrameUpdate &fu) -> bool {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		const auto resolver = [](uint16_t tid) {
+			return tid == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Vehicle;
+		};
+		return expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu),
+		              "0x0A frame decodes");
+	};
+
+	nw::FrameUpdate f1;
+	if (!pump(f1)) { ns::set_view_distance_units(0); return false; }
+	const int ia1 = record_index(f1, a_h.packed);
+	const int ib1 = record_index(f1, b_h.packed);
+	bool ok = expect(ia1 >= 0 && ib1 >= 0, "both vehicles fit the frame");
+	ok = ok && expect(ib1 < ia1,
+	                  "watched/occupied/enemy/moving B outranks the nearer behind-the-viewer A");
+	// The selection stamped B's last-sent caches [orig: @0x50f17c + the speed tail].
+	ok = ok && expect(conns[0].s2c_entity_speed[256 + (b_h.packed & 0xFF)] == 255,
+	                  "B's speed cache stamped at selection");
+	// Frame 2: the one-shot speed delta is gone, but the sustained view terms
+	// (angle/enemy/occupied/LOS/+200) still order B first.
+	nw::FrameUpdate f2;
+	if (!pump(f2)) { ns::set_view_distance_units(0); return false; }
+	const int ia2 = record_index(f2, a_h.packed);
+	const int ib2 = record_index(f2, b_h.packed);
+	ok = ok && expect(ia2 >= 0 && ib2 >= 0 && ib2 < ia2,
+	                  "sustained view terms keep B ahead once the motion delta is spent");
+	ns::set_view_distance_units(0); // process-global: restore for the sibling tests
+	if (!ok) return false;
+	std::printf("PASS 0a_priority_view_terms\n");
+	return true;
+}
+
+// (k) The DEAD-recipient flat score [orig: flag build @0x50e677..0x50e693 —
+//     entity dead bit OR the slot spectator flag; pool-1 branch
+//     @0x50efcf..0x50efe6 = 1000*carrier + 300*occupied + 100*sameTeam,
+//     REPLACING distScore/angle/LOS/+200]: the same two vehicles flip order on
+//     the recipient's dead bit alone. Both are still with matched headings, so
+//     the motion-delta boosts cancel between frames.
+bool run_0a_priority_dead_recipient_social_score() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	// Recipient at (100,100) facing +x, team 1, ALIVE for frame 1.
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+	if (!expect(host_h.valid(), "host player spawned")) return false;
+	world.registry.get(host_h)->team = 1;
+
+	// C: same-team OCCUPIED vehicle, far (600 u) BEHIND the viewer, still.
+	// Live score: distance remnant + negative-ish angle. Dead score: 300 + 100.
+	w::EntityHandle c_h{};
+	{
+		w::Entity crew;
+		crew.kind = w::EntityKind::Organic;
+		crew.item_id = 2072;
+		crew.health = 150;
+		crew.alive = true;
+		const w::EntityHandle crew_h = world.registry.spawn(0, crew);
+		if (!expect(crew_h.valid(), "crew spawned")) return false;
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050B;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.position = {-500.0f, 95.0f, 10.0f};
+		veh.yaw = 90;
+		veh.team = 1;
+		veh.primary_occupant = crew_h;
+		c_h = world.registry.spawn(1, veh);
+		if (!expect(c_h.valid(), "vehicle C spawned")) return false;
+	}
+	// D: ENEMY vehicle near (~30 u) dead ahead, unoccupied, still.
+	// Live score: ~1094 + 2*256 + 50. Dead score: 0.
+	w::EntityHandle d_h{};
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050D;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.position = {130.0f, 100.0f, 10.0f};
+		veh.yaw = 90;
+		veh.team = 2;
+		d_h = world.registry.spawn(1, veh);
+		if (!expect(d_h.valid(), "vehicle D spawned")) return false;
+	}
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	nw::PlayerReplicationState fallback;
+	const auto record_index = [](const nw::FrameUpdate &fu, uint16_t handle) {
+		for (std::size_t i = 0; i < fu.records.size(); ++i)
+			if (fu.records[i].handle == handle) return int(i);
+		return -1;
+	};
+	const auto pump = [&](nw::FrameUpdate &fu) -> bool {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		const auto resolver = [](uint16_t tid) {
+			return tid == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Vehicle;
+		};
+		return expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu),
+		              "0x0A frame decodes");
+	};
+
+	nw::FrameUpdate f1;
+	if (!pump(f1)) return false;
+	const int ic1 = record_index(f1, c_h.packed);
+	const int id1 = record_index(f1, d_h.packed);
+	bool ok = expect(ic1 >= 0 && id1 >= 0, "both vehicles fit the frame");
+	ok = ok && expect(id1 < ic1,
+	                  "a live viewer orders the near/ahead/enemy D first");
+
+	// Kill the recipient: the score swaps to the flat social branch.
+	world.registry.get(host_h)->flags |= w::kEntityFlagDead;
+	nw::FrameUpdate f2;
+	if (!pump(f2)) return false;
+	const int ic2 = record_index(f2, c_h.packed);
+	const int id2 = record_index(f2, d_h.packed);
+	ok = ok && expect(ic2 >= 0 && id2 >= 0 && ic2 < id2,
+	                  "a dead recipient orders the same-team occupied C first (300+100 vs 0)");
+	if (!ok) return false;
+	std::printf("PASS 0a_priority_dead_recipient_social_score\n");
+	return true;
+}
+
 // (i) The witnessed player compact-record field sources [orig: NetPacket_SerializePlayerState
 //     @0x4C09C0 case 1]: TRUNCATED yaw byte (@0x4c0c5d — not rounded), rounded pitch byte
 //     (@0x4c0c77), anim slot low (entity+0x12C @0x4c0c9c), unmasked state flags (entity+0x24
@@ -1534,7 +1743,9 @@ int main() {
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
-	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
+	                run_0a_vehicle_budget_round_robin() && run_0a_priority_view_terms() &&
+	                run_0a_priority_dead_recipient_social_score() &&
+	                run_0a_player_record_field_sources() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&

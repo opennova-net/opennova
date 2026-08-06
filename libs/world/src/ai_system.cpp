@@ -423,13 +423,17 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
     }
-    // Ground-vehicle motor pass: every pool-1 entity with vehicle traits (items.def
-    // `physics` selector non-zero) runs the drive core — consuming a mounted ctrl/drvr
-    // player's replicated input on the authority. AUTHORITY-ONLY here: a joiner's local
-    // copies are wire-posed (the vehicle compact record read side), and the driver's
-    // client-side prediction leg is the retail client's concern, not this host loop's.
-    // [orig: the per-class tick from Entity_UpdateAllEntities -> Entity_DispatchPhysics_cveh
-    // @0x48efc0 -> Entity_UpdateVehiclePhysics @0x48af00; authority drive gate @0x48b0ff]
+    // Vehicle motor pass: every pool-1 entity with vehicle traits (items.def
+    // `physics` selector non-zero) runs its family's drive core — ground/bike
+    // through the cveh core, watercraft through the cbot mover — consuming a
+    // mounted ctrl/drvr player's replicated input on the authority. AUTHORITY-ONLY
+    // here: a joiner's local copies are wire-posed (the vehicle compact record
+    // read side), and the driver's client-side prediction leg is the retail
+    // client's concern, not this host loop's.
+    // [orig: the per-class tick from Entity_UpdateAllEntities ->
+    // Entity_DispatchPhysics_cveh @0x48efc0 -> Entity_UpdateVehiclePhysics
+    // @0x48af00 / _cbot @0x48EFA3 -> Entity_UpdateWatercraftPhysics @0x48D480;
+    // authority drive gates @0x48b0ff / @0x48DF8C]
     if (is_authority && !world.vehicle_traits.empty()) {
         vehicle_pass_handles_.clear();
         world.registry.for_each([&](const Entity &e) {
@@ -465,17 +469,27 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                 if (player_ctrl) {
                     // A player drive freezes the SM mover exactly like the parked leg —
                     // the route never advances under a human driver [orig: the player
-                    // leg forces SM state 22 too @0x48b993].
+                    // leg forces SM state 22 too @0x48b993 / the boat leg @0x48DFF5].
                     if (AiEntity *ve = for_handle(h)) {
                         ve->brain.f[AiBrain::kCurState] = 22;
                         ve->brain.f[AiBrain::kPendState] = 22;
                     }
+                } else if (traits->family == VehicleFamily::Watercraft) {
+                    watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
+                                        *traits, cmd);
                 } else {
                     vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
                                      cmd);
                 }
             }
-            tick_vehicle_motor(world, *veh, *traits, &cmd);
+            // Per-family motor dispatch, the class-table split [orig:
+            // Entity_DispatchPhysics_cbot @0x48EFA3 -> the cbot mover @0x48D480
+            // vs _cveh @0x48efc0 -> the ground core @0x48af00].
+            if (traits->family == VehicleFamily::Watercraft) {
+                tick_watercraft_motor(world, *veh, *traits, &cmd);
+            } else {
+                tick_vehicle_motor(world, *veh, *traits, &cmd);
+            }
             // Mirror the integrated transform back into the brain entity — one struct in
             // the original; the SM mover and the present snapshot read pos[]/heading.
             if (AiEntity *ve = for_handle(h)) {

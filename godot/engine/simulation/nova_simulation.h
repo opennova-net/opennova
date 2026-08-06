@@ -990,6 +990,9 @@ private:
 	std::unordered_map<uint16_t, opennova::world::CollisionWorld::ResolveState>
 			joiner_replica_resolve_states_;
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
+	// The two witnessed .aip profile speeds per ai_textfile, fed to
+	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).
+	std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> ai_profile_speeds_;
 	// Model resources paired with the persistent seat table. Kept across
 	// reset_world because set_item_seat_specs runs before mission promotion.
 	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
@@ -1687,6 +1690,7 @@ public:
 	// and direct test/tooling fixtures call this through MissionRuntime.setup().
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
 	void set_item_seat_specs(const Array &p_specs);
+	void set_ai_profile_speeds(const Dictionary &p_speeds);
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);

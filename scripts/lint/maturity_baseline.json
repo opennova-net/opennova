@@ -41,6 +41,7 @@
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
-    "debug_entity_picker.gd|static func pick_at_crosshair("
+    "debug_entity_picker.gd|static func pick_at_crosshair(",
+    "ai_profile_speeds.gd|static func build(mission, resource_root) -> Dictionary:"
   ]
 }

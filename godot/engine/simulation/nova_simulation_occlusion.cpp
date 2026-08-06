@@ -3,6 +3,8 @@
 // dictionaries + debug round spawn).
 #include "simulation/nova_simulation_internal.h"
 
+#include <netsim/connection_fan.h>
+
 using namespace novasim;
 
 void NovaSimulation::occlusion_init_mission() {
@@ -77,6 +79,12 @@ void NovaSimulation::run_occlusion_frame(const Transform3D &p_camera, double p_f
 
 	cam.fog_dist = to_fixed(p_fog_dist_units);
 	cam.water_z = to_fixed(p_water_z_units);
+	// Mirror the env view distance into the 0x0A priority score's global — the
+	// same value retail's env writes into word_26C681E for the render AND the
+	// priority builder to read (D-NET-139: the LOS gate + the +200 inside-view
+	// bonus). Headless embedders that never run an occlusion frame leave it 0,
+	// which disables both terms exactly like an unwritten retail global.
+	opennova::netsim::set_view_distance_units(static_cast<int>(p_fog_dist_units));
 	// The mission-attribute force-indoors override ORs the indoors bit into the
 	// frame's accum view. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
 	cam.local_blink_flags =

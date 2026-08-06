@@ -40,6 +40,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // node for it through the present pass (the player has no BMS placement of its own). A high
     // net_id (0xFFF0) won't collide with the small mission bms ids. [net-re §5.38; ADR 0012]
     seed.bms_id = static_cast<int32_t>(spawn.net_id);
+    // No BMS placement — carry the explicit none/synthetic origin, matching the joiner-side
+    // materializer (client_world_materializer.cpp). The Entity default 0 is indistinguishable
+    // from authored record (kind 0, index 0), which made the host's wire present pass defer the
+    // admitted-player row to a placed node that does not exist, leaving the avatar unbuilt.
+    seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
     seed.has_item_def = world.player_has_item_def;

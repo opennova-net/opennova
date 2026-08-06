@@ -1099,7 +1099,9 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig local;
 	make_rig(local);
 	local.traits.player_control = true;
-	local.traits.player_speed = 12000;
+	// Retail-shaped: cbot defs author waterSpeed (+0x8EC) and no player_speed —
+	// the boat player leg reads waterSpeed at every command site.
+	local.traits.water_speed = 12000;
 	w::Entity *local_boat = local.world.registry.get(local.boat);
 	w::Entity *local_driver = mount_prediction_driver(local, true);
 	if (!expect(local_boat && local_driver,
@@ -1119,7 +1121,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig remote;
 	make_rig(remote);
 	remote.traits.player_control = true;
-	remote.traits.player_speed = 12000;
+	remote.traits.water_speed = 12000;
 	w::Entity *remote_boat = remote.world.registry.get(remote.boat);
 	w::Entity *remote_driver = mount_prediction_driver(remote, false);
 	if (!expect(remote_boat && remote_driver,
@@ -1138,7 +1140,7 @@ bool run_watercraft_local_driver_reconciliation_gate() {
 	Rig wrapped;
 	make_rig(wrapped);
 	wrapped.traits.player_control = true;
-	wrapped.traits.player_speed = std::numeric_limits<int32_t>::max();
+	wrapped.traits.water_speed = std::numeric_limits<int32_t>::max();
 	w::Entity *wrapped_boat = wrapped.world.registry.get(wrapped.boat);
 	w::Entity *wrapped_driver = mount_prediction_driver(wrapped, true);
 	if (!expect(wrapped_boat && wrapped_driver,
@@ -1809,10 +1811,236 @@ bool run_client_family_sound_dispatch_scope() {
 	return ok;
 }
 
+// ---- AUTHORITY legs (the host-side cbot mover, witnessed 2026-08-06;
+// vehicle-client-movers-re.md §1.12; D-NET-161) ----
+
+w::Entity *mount_ai_driver(Rig &r) {
+	w::Entity *vehicle = r.world.registry.get(r.boat);
+	if (!expect(vehicle != nullptr, "authority vehicle spawned")) return nullptr;
+	w::Seat seat;
+	seat.type = w::SeatType::Driver;
+	seat.bone_index = 7;
+	seat.source_name = "drvrx00";
+	vehicle->seats.push_back(seat);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.item_id = 2072;
+	body.player_class = 0; // an AI body, not a player [orig: !(Flags & 0x100)]
+	body.health = 150;
+	body.health_max = 150;
+	body.alive = true;
+	const w::EntityHandle handle = r.world.registry.spawn(0, body);
+	if (!expect(w::entity_process_vehicle_attach(r.world, handle, r.boat, 7),
+	            "AI driver mounted")) return nullptr;
+	return r.world.registry.get(handle);
+}
+
+// Brain + a nav node 200 u dead ahead (+x; mission yaw 90 = BAM 0).
+int stage_boat_brain(Rig &r, w::AiSystem &sys, int32_t out_speed) {
+	const int ai_idx = sys.attach(r.boat);
+	w::AiEntity &ve = *sys.at(ai_idx);
+	ve.pos[0] = 100 << 16;
+	ve.pos[1] = 200 << 16;
+	ve.pos[2] = 10 << 16;
+	ve.heading = w::bam_heading_from_mission_yaw_deg(90.0);
+	sys.nav.channels.resize(3);
+	sys.nav.channels[2].count = 1;
+	sys.nav.channels[2].entries[0] = 0;
+	sys.nav.nodes.resize(1);
+	sys.nav.nodes[0] = w::NavEntry{{2 << 16, 300 << 16, 200 << 16, 10 << 16, 0}};
+	w::AiBrain &b = ve.brain;
+	b.f[w::AiBrain::kCurState] = 16;
+	b.f[w::AiBrain::kWpType] = 1;
+	b.f[w::AiBrain::kWpChannel] = 2;
+	b.f[w::AiBrain::kWpNode] = 0;
+	b.f[w::AiBrain::kOutSpeed] = out_speed;
+	return ai_idx;
+}
+
+// An AI controller in the ctrl seat drives the boat toward its node on open
+// water, holding the waterline — the 00TRg Zodiac case [orig: the AI leg
+// @0x48E247..0x48E756 feeding the shared core].
+bool run_authority_ai_boat_drives_afloat() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	w::AiSystem sys;
+	const int ai_idx = stage_boat_brain(r, sys, 30 * 293); // PatrolSpeed 30
+	w::AiBrain &b = sys.at(ai_idx)->brain;
+	w::Entity *drv = mount_ai_driver(r);
+	if (drv == nullptr) return false;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	bool ok = expect(ctrl != nullptr, "AI controller resolves");
+
+	const float x0 = boat->position.x;
+	bool drove = false;
+	float max_dz = 0.0f;
+	for (int i = 0; i < 300; ++i) {
+		w::VehicleDriveCmd cmd;
+		sys.watercraft_ai_drive(r.world, *boat, ctrl, r.traits, cmd);
+		drove = drove || cmd.ai_drive;
+		w::tick_watercraft_motor(r.world, *boat, r.traits, &cmd);
+		w::AiEntity *ve = sys.for_handle(r.boat);
+		ve->pos[0] = static_cast<int32_t>(boat->position.x * 65536.0f);
+		ve->pos[1] = static_cast<int32_t>(boat->position.y * 65536.0f);
+		ve->pos[2] = static_cast<int32_t>(boat->position.z * 65536.0f);
+		ve->heading = boat->veh.yaw_bam;
+		max_dz = std::max(max_dz, std::abs(boat->position.z - 10.0f));
+	}
+	ok &= expect(drove, "AI leg staged a drive command");
+	ok &= expect(b.f[w::AiBrain::kCurState] == 16, "state 16 held (22->16 handback)");
+	ok &= expect(boat->position.x - x0 > 10.0f, "boat drove toward the node");
+	ok &= expect(std::abs(boat->position.y - 200.0f) < 30.0f, "no runaway lateral drift");
+	ok &= expect(max_dz < 2.0f, "hull held the waterline while driving");
+	if (!ok) std::fprintf(stderr, "  (drove %.1fu, max dz %.2fu)\n",
+	                      boat->position.x - x0, max_dz);
+	return ok;
+}
+
+// No controller: the brain parks (state 22) and the motor holds — the parked
+// leg [orig: @0x48E7EE..0x48E81E].
+bool run_authority_boat_parks_without_controller() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	w::AiSystem sys;
+	const int ai_idx = stage_boat_brain(r, sys, 30 * 293);
+	w::AiBrain &b = sys.at(ai_idx)->brain;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	w::VehicleDriveCmd cmd;
+	sys.watercraft_ai_drive(r.world, *boat, nullptr, r.traits, cmd);
+	bool ok = expect(!cmd.ai_drive, "no drive command without a controller");
+	ok &= expect(b.f[w::AiBrain::kCurState] == 22 &&
+	                     b.f[w::AiBrain::kPendState] == 22,
+	             "parked stamp 22 (+ the pend mirror)");
+	const float x0 = boat->position.x;
+	for (int i = 0; i < 60; ++i)
+		w::tick_watercraft_motor(r.world, *boat, r.traits, &cmd);
+	ok &= expect(boat->veh.cmd_speed == 0, "parked hold zeroes the command");
+	ok &= expect(std::abs(boat->position.x - x0) < 0.5f, "parked boat stays put");
+	return ok;
+}
+
+// Authority capsize: past ~100 deg of roll the hull drains 200 hp/tick; a
+// DEAD-flagged hull skips the whole tick [orig: @0x48DE84..0x48DECD /
+// the Flags&2 jump @0x48DDFA].
+bool run_authority_capsize_drain_and_dead_skip() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	boat->roll = 110; // seeds air_roll_bam = 110 * 11930464 > 0x471C7180
+	boat->health = 1000;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	bool ok = expect(boat->health == 800, "capsized hull drained 200 hp");
+
+	boat->flags |= w::kEntityFlagDead;
+	const float x0 = boat->position.x;
+	const int hp0 = boat->health;
+	boat->veh.vel_x = 1 << 16; // would integrate if the dead skip failed
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	bool skipped = boat->health == hp0 && boat->position.x == x0;
+
+	// The real death path latches the dead bit on engine_flags (destruction.cpp
+	// Flags |= 6) — the skip reads the combined view, so it must hold there too.
+	boat->flags &= ~w::kEntityFlagDead;
+	boat->engine_flags |= w::kEntityFlagDead;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	skipped = skipped && boat->health == hp0 && boat->position.x == x0;
+	ok &= expect(skipped, "dead hull skips input and integration (both flag fields)");
+	return ok;
+}
+
+// A PLAYER driver commands through def waterSpeed — retail cbot defs author NO
+// player_speed, so the ground field would command 0 and host boats could not be
+// driven — and the boat consumes MoveOrder bits 6/7 as motion overrides, not
+// the ground lean flags [orig: cmd reads +0x8EC @0x48E017/@0x48E034/@0x48E088;
+// bit6 @0x48E005..0x48E00E; bit7 @0x48E010..0x48E028].
+bool run_authority_player_drive_uses_waterspeed() {
+	Rig r;
+	make_rig(r);
+	set_zodiac_boxes(r.traits);
+	r.traits.player_control = true;
+	r.traits.water_speed = 5000;
+	r.traits.player_speed = 0; // retail-shaped: every JO cbot def omits it
+	w::Entity *drv = mount_ai_driver(r);
+	if (drv == nullptr) return false;
+	drv->player_class = 2;   // a human driver [orig: the Flags & 0x100 class]
+	drv->flags |= 0x100u;
+	drv->yaw = 90; // mission yaw 90 = BAM heading 0 = +x, matching the hull
+	w::Entity *boat = r.world.registry.get(r.boat);
+	boat->yaw = 90;
+	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	bool ok = expect(ctrl != nullptr, "player controller resolves");
+
+	// Forward drive: dir 1 + the move bit.
+	drv->net_move_input = 0x08u | 0x01u;
+	const float x0 = boat->position.x;
+	for (int i = 0; i < 300; ++i)
+		w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000,
+	             "player move commands waterSpeed, not the absent player_speed");
+	ok &= expect(boat->position.x - x0 > 5.0f, "player-driven boat moves");
+
+	// bit6 forces dir=1 AND the move bit (throttle with no explicit move key);
+	// no ground lean flag may appear.
+	drv->net_move_input = 0x40u;
+	boat->flags &= ~0x28u;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000, "bit6 throttles at waterSpeed");
+	ok &= expect((boat->flags & 0x20u) == 0, "bit6 writes no ground lean flag on a boat");
+
+	// bit7 forces cmd = waterSpeed with dir 7, skipping the move/analog split.
+	drv->net_move_input = 0x80u;
+	w::tick_watercraft_motor(r.world, *boat, r.traits, nullptr);
+	ok &= expect(boat->veh.cmd_speed == 5000, "bit7 forces the waterSpeed command");
+	ok &= expect((boat->flags & 0x8u) == 0, "bit7 writes no ground lean flag on a boat");
+	return ok;
+}
+
+// The AI leg caps command at def waterSpeed and steers Yaw + delta with no
+// ground-style delta/8 term [orig: @0x48E260..0x48E279 / @0x48E3F0..0x48E3F5].
+bool run_authority_ai_leg_caps_at_waterspeed() {
+	Rig r;
+	make_rig(r);
+	r.traits.player_control = true;
+	r.traits.water_speed = 5000;
+	w::AiSystem sys;
+	const int ai_idx = stage_boat_brain(r, sys, 30000); // out_speed above the cap
+	w::AiBrain &b = sys.at(ai_idx)->brain;
+	b.f[w::AiBrain::kCurState] = 22; // must hand back to 16
+	w::Entity *drv = mount_ai_driver(r);
+	if (drv == nullptr) return false;
+	w::Entity *boat = r.world.registry.get(r.boat);
+	boat->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(90.0);
+	boat->veh.yaw_seeded = true;
+	w::Entity *ctrl = w::resolve_vehicle_controller(r.world, *boat);
+	bool ok = expect(ctrl != nullptr, "controller resolves");
+	w::VehicleDriveCmd cmd;
+	sys.watercraft_ai_drive(r.world, *boat, ctrl, r.traits, cmd);
+	ok &= expect(cmd.ai_drive, "AI leg drives");
+	ok &= expect(cmd.cmd_speed == 5000, "command capped at waterSpeed");
+	ok &= expect(b.f[w::AiBrain::kCurState] == 16, "22 -> 16 handback");
+	// Node dead ahead + aligned heading + zero velocity: budget refresh finds
+	// ~zero error, so steer == heading exactly (no delta/8 residue).
+	ok &= expect(cmd.steer_target_bam == boat->veh.yaw_bam,
+	             "steer = heading + delta with no delta/8 term");
+	return ok;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
+	ok &= run_authority_ai_boat_drives_afloat();
+	ok &= run_authority_boat_parks_without_controller();
+	ok &= run_authority_capsize_drain_and_dead_skip();
+	ok &= run_authority_ai_leg_caps_at_waterspeed();
+	ok &= run_authority_player_drive_uses_waterspeed();
 	ok &= run_fast_boat_glides();
 	ok &= run_ground_vehicle_glides();
 	ok &= run_bike_family_deltas();

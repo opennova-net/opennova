@@ -723,11 +723,28 @@ public:
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
     //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
     //    delta + delta/8, and fill `out` (ai_drive = true).
-    // Tracked deferrals (D-NET-161): the minAI crew health clamp, the pool-1
-    // collision-avoid damping, the wait-for-boarders stop, the handbrake byte-973 latch
-    // and the aim-lock stop.
+    // Tracked deferrals (D-NET-161): the minAI crew health clamp, the
+    // wait-for-boarders stop, the handbrake byte-973 latch and the aim-lock stop.
+    // (The pool-1 collision-avoid brake is ported inline.)
     void vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                           const VehicleTraits &traits, VehicleDriveCmd &out);
+
+    // The WATERCRAFT sibling of vehicle_ai_drive — the cbot AI-driver/parked
+    // staging witnessed 2026-08-06 [orig: Entity_UpdateWatercraftPhysics
+    // @0x48D480, AI leg @0x48E247..0x48E756, parked leg @0x48E7EE..0x48E81E]:
+    //  - controller == nullptr (or wrecked/dead vehicle): parked stamp (state 22);
+    //  - an AI controller: 22->16 hand-back, cmd = min(brain outSpeed, water_speed),
+    //    boat turn budget (|err|/denom) << 4 on the spent-budget refresh, +-budget
+    //    delta clamp, 0.75x speed damps at 15/30/45 deg of residual turn, steer =
+    //    heading + delta (no delta/8 term), the slip counter-steer + its 4-tier
+    //    speed damps, and the shared pool-1 avoid brake.
+    // Tracked deferrals (D-NET-161): the minAI crew health clamp
+    // (@0x48E27F..0x48E2C7, def minai/criticalHp), the aiComp[135] <- brain[127]
+    // target mirror (unmodeled slot), the wait-for-boarders stop
+    // (@0x48E75B..0x48E7EC, rides the boarding think) and the stuck check
+    // (AI_CheckVehicleStuckState @0x465290).
+    void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
+                             const VehicleTraits &traits, VehicleDriveCmd &out);
 
     // Integrate part-anim phase dwords with retail's wrapping ADD for dir==1
     // and wrapping SUB for every other nonzero direction. Clamp/stop only on

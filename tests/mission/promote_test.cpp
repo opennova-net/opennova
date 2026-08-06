@@ -2,6 +2,7 @@
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
 // data (entities patrol their authored routes). See libs/mission/src/promote.cpp.
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
 #include "mission/promote.h"
@@ -291,11 +292,25 @@ int main() {
     wr.flags = bms::WaypointFlags::None; // loops
     wr.marker_count = 3;
     wr.waypoint_numbers = {0, 1, 2};
-    m.waypoint_records.push_back(wr);
+    // The .bms waypoint block is positional (slot == authored list id, slot 0 never
+    // authored); this route is list 1, so it lives at slot 1. List 3 sits above an
+    // UNAUTHORED list 2 — the 00TRg shape that exposed the shifted channel table
+    // (an order for list 3 must read slot 3, not the empty slot 2).
+    bms::WaypointRecord wr3{};
+    wr3.flags = bms::WaypointFlags::None;
+    wr3.marker_count = 2;
+    wr3.waypoint_numbers = {2, 0};
+    m.waypoint_records.resize(4);
+    m.waypoint_records[1] = wr;
+    m.waypoint_records[3] = wr3;
 
     // waypoint_id is 1-based (channel 0 = the AI "no route" sentinel); these patrol channel 1.
     m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1, /*wp_num=*/0));
     m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1, /*wp_num=*/0));
+    // Organic 1 authors an ai_textfile whose .aip speeds the embedder resolved —
+    // its brain seeds the profile speeds at the witnessed x65536/225 scale while
+    // organic 0 keeps the default_speed stand-in.
+    std::memcpy(m.organics[1].name2, "d_zode", 7);
     m.organics[0].bmsi_attributes =
             static_cast<uint32_t>(bms::BmsiAttributeFlags::Blind) |
             static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding) |
@@ -324,11 +339,19 @@ int main() {
     mission::PromoteOptions opts;
     opts.arrival_radius = 1000;
     opts.default_speed = 20;
+    mission::PromoteOptions::AiProfileSpeeds zode;
+    zode.profile = "d_zode";
+    // ASYMMETRIC on purpose (h_ah6b_z.aip-shaped): the witnessed seeding is
+    // CROSSED — brain[49]=kSpeedA <- +0xC4 combat, brain[50]=kSpeedB <- +0xC0
+    // patrol — and a symmetric pair cannot detect a swapped wiring.
+    zode.patrol_speed = 70;
+    zode.combat_speed = 150;
+    opts.ai_profile_speeds.push_back(zode);
     mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
 
     // ---- promotion populated entities + brains + nav ----
     CHECK(r.nav_nodes == 3);
-    CHECK(r.nav_channels == 1);
+    CHECK(r.nav_channels == 4); // channel table size == the slot-indexed record table
     CHECK(r.brains == 2);   // the 2 organics
     CHECK(r.spawned == 6);  // 1 building + 3 markers (pool 3, as the original spawns them) + 2 organics
     CHECK(r.dropped == 0);
@@ -339,12 +362,16 @@ int main() {
     CHECK(ai.nav.nodes[0].f[1] == (100 << 16)); // marker 0 X
     CHECK(ai.nav.nodes[0].f[0] == 1000);        // arrival radius (payload0)
     CHECK(ai.nav.channel(0) != nullptr);
-    CHECK(ai.nav.channel(0)->count == 0);       // channel 0 = empty "no route" sentinel
-    const NavChannel *ch = ai.nav.channel(1);   // the record populates channel 1 (1-based)
+    CHECK(ai.nav.channel(0)->count == 0);       // slot 0 is never authored = "no route"
+    const NavChannel *ch = ai.nav.channel(1);   // channel == slot == the authored list id
     CHECK(ch != nullptr);
     CHECK(ch->count == 3);
     CHECK(ch->loopflag == 0);             // WaypointFlags::None -> loops
     CHECK(ch->entries[2] == 2);
+    // The gap shape: list 2 unauthored (empty), list 3 present at its own slot.
+    CHECK(ai.nav.channel(2) != nullptr && ai.nav.channel(2)->count == 0);
+    CHECK(ai.nav.channel(3) != nullptr && ai.nav.channel(3)->count == 2);
+    CHECK(ai.nav.channel(3)->entries[0] == 2);
 
     // organic 0 is in GROUND_FOLLOWWP with its route + spawn transform.
     AiEntity *e0 = ai.at(0);
@@ -355,6 +382,14 @@ int main() {
     CHECK(e0->brain.f[AiBrain::kWpNode] == 0);
     CHECK(e0->brain.f[AiBrain::kSpeedB] == 20);
     CHECK(e0->team == 1);
+
+    // Organic 1's ai_textfile resolved a profile: the CROSSED seeding —
+    // kSpeedA <- combat 150 -> 150*65536/225 = 43690, kSpeedB <- patrol 70 ->
+    // 70*65536/225 = 20388 [orig: Entity_InitVehicleAIFromDef @0x4688C7/@0x4688D3].
+    AiEntity *e1 = ai.at(1);
+    CHECK(e1 != nullptr);
+    CHECK(e1->brain.f[AiBrain::kSpeedB] == 20388);
+    CHECK(e1->brain.f[AiBrain::kSpeedA] == 43690);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
     CHECK((e0->slot.f[1] & 0x209) == 0x209);
@@ -404,18 +439,19 @@ int main() {
         wm.markers[0].ttool_index = 4;              // STRWPNAME004
         wm.markers[1].wp_adv_trigger = 3;           // completes when event 3 fires
         wm.markers[1].bmsi_attributes = 1u << 22;   // chain-back
-        // Record 0: an AI patrol route (unflagged) — must NOT become the track.
+        // List 1: an AI patrol route (unflagged) — must NOT become the track.
         bms::WaypointRecord ai_route{};
         ai_route.flags = bms::WaypointFlags::None;
         ai_route.marker_count = 1;
         ai_route.waypoint_numbers = {2};
-        wm.waypoint_records.push_back(ai_route);
-        // Record 1: the blue player route.
+        // List 2: the blue player route. Slot-indexed like the .bms block.
         bms::WaypointRecord blue{};
         blue.flags = bms::WaypointFlags::BlueTeam;
         blue.marker_count = 2;
         blue.waypoint_numbers = {0, 1};
-        wm.waypoint_records.push_back(blue);
+        wm.waypoint_records.resize(3);
+        wm.waypoint_records[1] = ai_route;
+        wm.waypoint_records[2] = blue;
 
         World ww;
         AiSystem wai;

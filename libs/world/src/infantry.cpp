@@ -1059,6 +1059,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (e.health <= 0) {
         Entity *ent = world.registry.get(e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
+            // The kill latches the entity dead bit (Flags |= 2) — the compact
+            // state byte carries it unmasked, and the 0x0A priority list reads
+            // it as the recipient's dead-or-spectator gate. Both views of our
+            // split flags field take it; the spawn reset clears them.
+            // [orig: Entity_HandleDeathOnAuthority @0x407CC0 `or Flags, 2`
+            //  @0x407D34; the client death-event apply mirrors it @0x40727E]
+            if (ent != nullptr) {
+                ent->flags |= kEntityFlagDead;
+                ent->engine_flags |= kEntityFlagDead;
+            }
             // A mounted body detaches so the corpse falls with the world, not the
             // seat [orig: entity+0x16C -> Entity_DetachFromVehicleIfServer @0x4b9c57;
             // the edge also clears Flags 0x40 @0x4b9d2a].

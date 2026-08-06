@@ -1168,6 +1168,10 @@ void test_redirect_and_speed_commands() {
     r.sys.nav.nodes[0] = NavEntry{{1 << 16, 500 << 16, 200 << 16, 10 << 16, 0}};
     r.sys.nav.nodes[1] = NavEntry{{1 << 16, 150 << 16, 200 << 16, 10 << 16, 0}};
 
+    // A stale spawn command in the SLOT must be overwritten by the redirect —
+    // the 00TRg debarked-crew freeze: slot[37]=125 short-circuits the infantry
+    // think forever if the redirect only writes the brain registers.
+    ve.slot.f[37] = 125;
     CHECK(r.w.commands.group_to_waypoint(3, 2) == 1); // RedirectGroupTo(3, list 2)
     AiBrain &b = ve.brain;
     CHECK(b.f[AiBrain::kWpType] == 1);
@@ -1176,6 +1180,13 @@ void test_redirect_and_speed_commands() {
     // the scan's fallback initializer, so a broken nearest-node scan fails here.
     CHECK(b.f[AiBrain::kWpNode] == 1);
     CHECK(r.veh().wp_number == 1);
+    // The SLOT half of the witnessed redirect block [orig: Entity_SetWaypointByTeam
+    // @0x43cdb4 — aiComp+140=1, +148=list, +152=node, carrier cleared]: the
+    // infantry think navigates from these, not the brain registers.
+    CHECK(ve.slot.f[35] == 1);
+    CHECK(ve.slot.f[37] == 2);
+    CHECK(ve.slot.f[38] == 1);
+    CHECK(ve.slot.f[36] == 0);
 
     // BMS RedirectGroupTo carries an explicit node in param3. It must not be
     // replaced by the nearest-node sentinel used by the two-argument WAC form.
