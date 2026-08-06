@@ -834,12 +834,40 @@ public:
     };
     // anim_state_flags = the state's g_animStateFlagsTable word (bit 0 forces a
     // full update; the id itself picks the repulsion-exempt states).
+    // out_ground (optional) receives the ground probe's hit entity — the same
+    // value the resolver stores into a registered source's groundEntity.
     int32_t resolve_entity(World &world, EntityHandle source, ResolveState &state,
                            int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                            int32_t capsule_bottom, int32_t capsule_top,
                            int32_t heading, int32_t body_pitch, bool is_player,
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
-                           uint32_t anim_state_flags, int16_t &health);
+                           uint32_t anim_state_flags, int16_t &health,
+                           EntityHandle *out_ground = nullptr);
+
+    // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
+    // decoded remote row that has NO world entity — retail runs remote
+    // organics through the ordinary org movers whose shared tail calls the
+    // resolver ungated [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4;
+    // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is built AD HOC
+    // at the query position with the pool-0 rule (source radius 0x10000 +
+    // 4.0 u pad — D-COL-3's boundRadius stand-in), person repulsion runs the
+    // world persons_ PLUS the caller-passed replica peer spheres through the
+    // SAME witnessed loop (a ClientState peer's "live re-read" is its staged
+    // snapshot — the row has no registry entity), and the Entity-side writes
+    // (flag latches, blink, groundEntity) become the out_ground return.
+    // is_authority is pinned false: a replica resolve never runs damage legs.
+    struct ReplicaPeer {
+        int32_t x = 0, y = 0, z = 0;
+        int32_t radius = 0x10000;
+        uint16_t handle = 0xFFFF; // wire handle, for self-exclusion only
+    };
+    int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
+                            int32_t vel_xy[2], int32_t &vel_z,
+                            int32_t capsule_bottom, int32_t capsule_top,
+                            bool is_player, uint32_t tick, int32_t anim_state_id,
+                            uint32_t anim_state_flags, const ReplicaPeer *peers,
+                            int32_t peer_count, uint16_t exclude_handle,
+                            EntityHandle *out_ground);
 
     // Hull-vs-world contact for the vehicle motor [orig: Entity_CheckCollisionState
     // @ 0x462a30, called per tick from the vehicle physics @ 0x47cb8c/0x47d213 —
@@ -1092,6 +1120,13 @@ private:
     uint16_t projectile_local_player_wire_handle_ = 0xFFFF;
     std::vector<EntityHandle> arena_;   // cap 3000 [orig: g_ProxCandidateArena]
     std::unordered_map<uint16_t, CandidateSlice> candidates_;
+    // Staged only for the duration of one resolve_replica call: the replica
+    // peer spheres the person-repulsion loop walks after persons_, and the
+    // calling row's own wire handle (self-exclusion). Empty for every
+    // ordinary resolve_entity call.
+    const ReplicaPeer *replica_peers_ = nullptr;
+    int32_t replica_peer_count_ = 0;
+    uint16_t replica_exclude_handle_ = 0xFFFF;
 };
 
 } // namespace opennova::world

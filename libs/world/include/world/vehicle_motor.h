@@ -17,19 +17,19 @@
 // This port is the AUTHORITY drive core for the ground family (items.def `physics`
 // selector non-zero routes here [orig: Entity_DispatchPhysics_cveh @0x48efc0]):
 // input mapping, steering chase, speed pipeline, velocity integration, gravity,
-// submerged drag, and the wheeled/tracked contact + suspension solve
-// (Entity_ProcessTrackedVehiclePhysics @0x47C1C0 client subset — pad probes at
-// wheel height, per-corner lifts, the 4-normal attitude fit, the rise-clamped
-// positive-corner rest Z; vehicle-client-movers-re.md §7; boxless/terrain-less
+// submerged drag, and the per-family contact + suspension solves
+// (tracked @0x47C1C0 for cveh/ctrn/catv, wheeled @0x475DE0 for ctan/Tank,
+// light @0x479600 for cbik/Bike — client subsets: pad probes at wheel height,
+// per-corner lifts, the 4-normal/axle attitude fits, the positive-corner or
+// mean-wheel rest Z; vehicle-client-movers-re.md §7-§9; boxless/terrain-less
 // rows keep the bilinear terrain-clamp stand-in). Tracked deferrals (D-NET-161):
 // the air/helicopter AUTHORITY mover (`move_function chel` — Super Pumas stay
 // parked), the skid/tire-slip model (`tireSlip`/`slip_speed`; the ASH buggy
 // authors slip_speed 0), the pool-1 vehicle-vs-vehicle collision loop +
 // collision-avoid damping, the authority drown-drain countdown, the solve's
 // contact-direction store feeding a slope-following velocity re-derive
-// (@0x47E65D../@0x48cf97.. — the mover keeps its level frame), the ctan-family
-// mover (@0x488ab0 -> the wheeled solve @0x475de0) and the cbik light solve
-// (@0x479600) — both interim-carried by the ground core/tracked solve, the AI
+// (@0x47E65D../@0x48cf97.. — the mover keeps its level frame; the tank keeps
+// its full-basis drive with the same store deferred), the AI
 // autopilot/waypoint drive (states 16/18), specialized vehicle sound families
 // beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, and the
 // vehicle AI state machine's non-drive states
@@ -62,11 +62,22 @@ enum class VehicleFamily : uint8_t {
     Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
     Helicopter, // chel/CHel -> Entity_UpdateAircraftPhysics @0x490310
     Plane,      // cpln
-    Bike,       // cbik -> Entity_UpdatePlayerInfantryMovement @0x483FE0 (misnomer:
-                // the cbike-family mover). Shares the ground template; the four
-                // witnessed family deltas gate on this tag inside the core
-                // (gravity 250, vZ up-cap, airborne throttle/integration, yaw
-                // always-applied >>2 in water) [cbik grill 2026-07-31].
+    Bike,       // cbik -> Entity_UpdateLightVehiclePhysics @0x483FE0. Shares the
+                // ground template; the witnessed family deltas gate on this tag
+                // inside the core (gravity 250, vZ up-cap, airborne
+                // throttle/integration, yaw always-applied >>2 in water)
+                // [cbik grill 2026-07-31], and the contact solve is the light
+                // variant [orig: Entity_ProcessLightVehiclePhysics @0x479600,
+                // call @0x486672].
+    Tank,       // ctan -> Entity_UpdateTankVehiclePhysics @0x488AB0 (its own
+                // class-table row @0x82ABC0). The ground template with the
+                // witnessed tank deltas (gravity 250, contact-gated speed
+                // integration with the ±2·deceleration reversal clamps,
+                // full-basis drive velocity, yaw applied unless parked with the
+                // airborne quarter-rate), and the contact solve is the wheeled
+                // variant [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0,
+                // call @0x48a9ef; dispatcher push 0 @0x48f004 = no
+                // water support].
 };
 
 // CHel/cpln occupy direct rows in g_EntityClassPhysicsTable. Unlike the

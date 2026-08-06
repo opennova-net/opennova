@@ -202,5 +202,73 @@ int main() {
 	// heading delta the gun's heading must track the hull's live heading.
 	ok &= expect(gun->heading_bam == hull->heading_bam,
 	             "the gun heading tracks the hull heading (verbatim adoption)");
+
+	// --- The pure-client 128-tick stale-carrier sweep [orig:
+	// Entity_UpdateTransformAndTurret @0x440ca0, the sweep @0x440d41..
+	// 0x440e2f]: a child whose structural carrier never resolves requests
+	// BOTH rows over C2S 0x0F after a 128-tick run, then locally destroys
+	// itself pending the authority re-spawn.
+	{
+		constexpr uint16_t kOrphanGun = 0x1018;
+		constexpr uint16_t kMissingHull = 0x1030; // never spawned
+		nw::PoolSpawnBatch orphan_batch;
+		nw::PoolSpawnRecord orphan;
+		orphan.slot_id = kOrphanGun;
+		orphan.item_type_id = kGunType;
+		orphan.entity_name = "50 cal. (orphaned)";
+		orphan.pos_x = hull_x0;
+		orphan.pos_y = hull_y0;
+		orphan.pos_z = hull_z0;
+		orphan.euler_z = 0;
+		orphan.bone_byte = 0;
+		orphan.target_handle = kMissingHull;
+		orphan.parent_handle = 0xFFFF;
+		orphan_batch.records.push_back(orphan);
+		view.apply(nw::s2c::POOL_SPAWN,
+		           nw::encode_pool_spawn_batch(orphan_batch));
+		ok &= expect(view.state().find(kOrphanGun) != nullptr,
+		             "the orphaned gun materializes");
+		(void)view.drain_carrier_repair_requests(); // clear any prior state
+		for (int t = 0; t < 127; ++t) view.tick_remote_motion(0xFFFF);
+		ok &= expect(view.state().find(kOrphanGun) != nullptr,
+		             "127 unresolved ticks keep the child (inside the window)");
+		ok &= expect(view.drain_carrier_repair_requests().empty(),
+		             "no repair request before the 128-tick boundary");
+		view.tick_remote_motion(0xFFFF);
+		const std::vector<uint16_t> repairs =
+				view.drain_carrier_repair_requests();
+		bool asked_carrier = false, asked_child = false;
+		for (uint16_t h : repairs) {
+			if (h == kMissingHull) asked_carrier = true;
+			if (h == kOrphanGun) asked_child = true;
+		}
+		ok &= expect(asked_carrier && asked_child,
+		             "the sweep queues C2S 0x0F for carrier AND child");
+		ok &= expect(view.state().find(kOrphanGun) == nullptr,
+		             "the sweep locally destroys the child pending re-spawn");
+	}
+
+	// --- The dead-carrier leg. Retail's client HIDES the child in place
+	// (carrier Flags & 2 -> child Flags |= 1 @0x440cdb..0x440cdd) pending the
+	// authority's destroy transaction; our decoded view RETIRES the subtree
+	// instead — presentation-equivalent, and the authority truth on this seam
+	// (the loopback-identity test pins the same retire through the parent
+	// relation). A zero health word is the death signal; the wire flags bit 1
+	// alone must NOT retire (an overloaded spawn/movement gate).
+	{
+		nw::FrameUpdate flagged = hull_frame(ax, ay, az, true_x, true_y, 0x6000);
+		flagged.records[0].vehicle.flags_byte = 0x02; // gate bit, health alive
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(flagged));
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(view.state().find(kGunHandle) != nullptr,
+		             "the overloaded flags bit alone never retires the child");
+		nw::FrameUpdate dead = hull_frame(ax, ay, az, true_x, true_y, 0x6000);
+		dead.records[0].vehicle.health_word = 0;
+		dead.records[0].vehicle.is_dead_pose = true;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(view.state().find(kGunHandle) == nullptr,
+		             "a zero-health carrier retires the target-carried child");
+	}
 	return ok ? 0 : 1;
 }

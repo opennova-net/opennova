@@ -552,13 +552,17 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
                 aircraft_client_tick(world, *veh, *traits);
             } else if (veh->veh.net_predicted && veh->health > 0 &&
                     (traits->family == VehicleFamily::Ground ||
-                     traits->family == VehicleFamily::Bike)) {
+                     traits->family == VehicleFamily::Bike ||
+                     traits->family == VehicleFamily::Tank)) {
                 // Runs the motor core, whose tail already ticks the movement
                 // sound — skip the separate sound call below for this row.
-                // Bikes ride the same entry; the core branches on the family
-                // tag for the four witnessed cbik deltas (gravity 250, vZ
-                // up-cap, contact-gated integration, always-applied yaw)
-                // [orig: @0x483FE0 vs @0x48AF00; cbik grill 2026-07-31].
+                // Bikes and tanks ride the same entry; the core branches on
+                // the family tag for the witnessed cbik deltas (gravity 250,
+                // vZ up-cap, contact-gated integration, always-applied yaw)
+                // and the ctan deltas (gravity 250, contact-gated integration
+                // with the ±2·decel reversal clamps, full-basis velocity,
+                // parked-gated yaw with the airborne quarter-rate)
+                // [orig: @0x483FE0 / @0x488AB0 vs @0x48AF00].
                 ground_client_tick(world, *veh, *traits);
                 continue;
             }

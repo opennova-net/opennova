@@ -982,6 +982,13 @@ private:
 	void reset_infantry_adm_ids();
 	void resolve_new_infantry_adm_ids();
 	static void resolve_infantry_adm_before_server_tick(void *p_context);
+	// Per-replica-row resolver state (the movement collision resolver's
+	// prev-pose + idle skip counter) keyed by wire handle — the persistent
+	// half the ClientState row cannot carry across the netsim seam. Entries
+	// for retired rows are benign: a reused handle's stale prev pose triggers
+	// one displaced-detect full update and self-corrects.
+	std::unordered_map<uint16_t, opennova::world::CollisionWorld::ResolveState>
+			joiner_replica_resolve_states_;
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
 	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).

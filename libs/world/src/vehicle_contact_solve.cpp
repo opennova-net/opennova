@@ -550,5 +550,626 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     }
 }
 
+// The wheeled (ctan/tank) contact + suspension solve — the client-executed
+// subset of Entity_ProcessWheeledVehiclePhysics [orig: @0x475DE0; live caller
+// the tank mover Entity_UpdateTankVehiclePhysics @0x488AB0, call @0x48a9ef,
+// water-support arg 0 via the ctank dispatcher's push @0x48f004]. Witness:
+// docs/world/vehicle-client-movers-re.md §8. The skeleton is the tracked
+// solve with the wheeled deltas: 13 probes (4 wheel pads + 6 belly stations
+// along the side rails + 3 spine, ALL at the pad radius r), per-probe
+// planar-contact/reverse flags feeding a stability contact byte and the
+// head-on wall stop, and a Z select that absorbs the step into slideDecay
+// instead of the tracked +0x2000 rise clamp.
+// Cited deferrals (the same seams as the tracked solve §7): every authority
+// Health write (park-move damage @0x477157.., spine-impact @0x47733f..,
+// underside-crush @0x477e6a-region, burn drain/emitters), the live per-wheel
+// spring machinery (sink growth +250/tick on airborne wheels, the
+// Vehicle_ApplyBrakingForce @0x45CEB0 decay, Entity_ApplyDamageOscillation
+// @0x45D240 — state identically zero here, so pads probe at box_z_lo + r and
+// the corner lifts consume raw d_k exactly like the zero-state original),
+// entity-entity collision + momentum exchange (mass-gated transfer at the
+// sev-3 leg and the entity-mass delta scaling — plat_terrain_probe carries
+// the terrain leg only), the crash/flip/park/wreck latch machine (the
+// capsize-threshold flip byte, the falling-crash client latch, the settle
+// state machine + Yaw adoption, Entity_ApplyWheelSuspensionForces' parked
+// spring apply), the contact-direction downhill store (+0x3BC..+0x3C4 with
+// the fixed -28672 Z renormalize — the mover keeps its level-frame re-derive,
+// D-NET-161), and scrape/landing sounds, splash FX + the water
+// enter/exit overlay sends.
+void wheeled_contact_solve(World &world, Entity &veh,
+                           const VehicleTraits &traits,
+                           Entity::VehicleMotorState &m,
+                           int32_t start_x, int32_t start_y,
+                           int32_t &px, int32_t &py, int32_t &pz) {
+    // ---- sleep fast-path [orig: @0x475E5C..0x475FB2]: the tracked gate set
+    // (velocities/speed/rates zero, not airborne, not carried, slideDecay in
+    // (-350,-1] via the unsigned `> 0xFFFFFEA2` compare, planar
+    // Transform_ComparePartial, no occupant; the four spring sinks and the
+    // energy word ride the deferred machinery and are identically zero).
+    // Action: undo the vertical dribble, then refresh the contact byte from
+    // the current pose [orig: Z -= slideDecay @0x475F51; slideDecay >>= 1
+    // @0x475F5F; `BYTE2(aiRef0) = upZ > 4096 && !crashed` @0x475F8F]. The
+    // authority park upkeep + the at-rest flip restore are latch-machine
+    // deferrals [orig: @0x475FA1..0x476040].
+    if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 &&
+        m.wheel_rate_bam == 0 && (veh.flags & kEntityFlagInAir) == 0 &&
+        m.slide_z > -350 && m.slide_z < 0 &&
+        px == start_x && py == start_y && !veh.primary_occupant.valid()) {
+        pz -= m.slide_z;
+        m.slide_z >>= 1;
+        const VehicleEulerBasis rest_basis = vehicle_euler_basis(
+                m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+        m.grounded = rest_basis.up[2] * 65536.0 > 4096.0;
+        return;
+    }
+
+    // ---- def clamps every call [orig: @0x476070..0x4760E5 — spring 0..10,
+    // springComp 0..100, flip 0..55] feed the deferred spring/latch machinery.
+    // ---- probe geometry [orig: @0x4762B8..0x476559]: 4 wheel pads at the
+    // footprint corners inset by r = beam >> 2, Z = box_z_lo + r (each pad's
+    // per-wheel +0x2D4 spring offset is zero here); 6 belly stations along
+    // the two side rails at X = foot_x_lo + r + {3q, 3q, q, q, 2q, 2q} with
+    // q = ftol(0.75 * box_x_span) >> 2 [orig: flt_7C3DC8 = 0.75 @0x4762F2];
+    // 3 spine probes at X = box_x_lo + {3L/4, L/2, L/4}, Y = box ymid,
+    // Z = box_z_hi -w/+w/-w with w = (beam >> 3) - 0x4000 [orig: the
+    // @0x47653A +w middle-spine store]. EVERY radius is r — the wheeled solve
+    // has no separate spine radius [orig: the 13 radius stores all copy
+    // suspensionOffset].
+    const int32_t r = (traits.box_y_hi - traits.box_y_lo) >> 2;
+    const int32_t Lbox = traits.box_x_hi - traits.box_x_lo;
+    const int32_t beam = traits.box_y_hi - traits.box_y_lo;
+    const int32_t ymid_box =
+            traits.box_y_lo + (beam >> 1);
+    const int32_t pad_z = traits.box_z_lo + r;
+    const int32_t w = (beam >> 3) - 0x4000;
+    const int32_t q = static_cast<int32_t>(double(Lbox) * 0.75) >> 2;
+    const int32_t bx = traits.foot_x_lo + r; // belly-station base X
+    const int32_t ys = traits.foot_y_hi - r; // starboard rail (+side)
+    const int32_t yp = traits.foot_y_lo + r; // port rail (-side)
+    const int32_t probes_model[13][3] = {
+        {traits.foot_x_hi - r, ys, pad_z},              // pad0 (+fwd,+side)
+        {traits.foot_x_hi - r, yp, pad_z},              // pad1 (+fwd,-side)
+        {traits.foot_x_lo + r, yp, pad_z},              // pad2 (-fwd,-side)
+        {traits.foot_x_lo + r, ys, pad_z},              // pad3 (-fwd,+side)
+        {bx + 3 * q, ys, pad_z},                        // belly4 (fwd,+side)
+        {bx + 3 * q, yp, pad_z},                        // belly5 (fwd,-side)
+        {bx + q, yp, pad_z},                            // belly6 (rear,-side)
+        {bx + q, ys, pad_z},                            // belly7 (rear,+side)
+        {bx + 2 * q, ys, pad_z},                        // belly8 (mid,+side)
+        {bx + 2 * q, yp, pad_z},                        // belly9 (mid,-side)
+        {traits.box_x_lo + ((3 * Lbox) >> 2), ymid_box, traits.box_z_hi - w},
+        {traits.box_x_lo + (Lbox >> 1), ymid_box, traits.box_z_hi + w},
+        {traits.box_x_lo + (Lbox >> 2), ymid_box, traits.box_z_hi - w},
+    };
+    const int32_t hull_bottom_neg = -(traits.box_z_lo + r); // [orig: -v41 @0x4761B4]
+    const int32_t half_w =
+            (traits.foot_y_hi - r) - (traits.foot_y_lo + r); // [orig: @0x4761E2]
+    const int32_t half_h =
+            (traits.foot_x_hi - r) - (traits.foot_x_lo + r);
+
+    const VehicleEulerBasis basis = vehicle_euler_basis(
+            m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+    int32_t probes[13][3];
+    for (int i = 0; i < 13; ++i) {
+        int32_t rotated[3];
+        basis.q22.rotate_point(probes_model[i], rotated);
+        probes[i][0] = px + rotated[0];
+        probes[i][1] = py + rotated[1];
+        probes[i][2] = pz + rotated[2];
+    }
+
+    // ---- the two force passes + severity [orig: Entity_CheckCollisionState
+    // calls @0x476897/@0x476F98; the shared terrain-leg sub-contract]. Same
+    // torque sheds as tracked [orig: @0x476944/@0x476984/@0x4769B8]; the
+    // sev-3 scrape sound + momentum exchange are deferred; the 0.25 cut scans
+    // the STRONGEST of the first SEVEN probes only (4 pads + the three
+    // forward/rear belly stations) with the > 0x8000 planar distance gate and
+    // the no-hit-entity condition (vacuously true) [orig: init from probe 0
+    // @0x476BC3, scan `while (v73 < 7)` @0x476C4D-region; cut via flt_7C333C].
+    const int32_t soft = cos22_of_bam_x87(traits.max_slope);
+    const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
+    PlatProbeForce forces[13];
+    int32_t sev = 0;
+    for (int i = 0; i < 13; ++i)
+        sev = std::max(sev, plat_terrain_probe(world, probes[i][0],
+                                               probes[i][1], probes[i][2], r,
+                                               soft, hard, forces[i]));
+    if (sev == 1) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+    } else if (sev == 2) {
+        m.speed -= m.speed >> ((traits.torque + 1) & 31);
+    } else if (sev == 3) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+        int strongest = 0;
+        int64_t best = -1;
+        for (int i = 0; i < 7; ++i) {
+            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
+            const int64_t mag2 = sfx * sfx + sfy * sfy;
+            if (mag2 > best) { best = mag2; strongest = i; }
+        }
+        const int64_t ddx = int64_t(probes[strongest][0]) - px;
+        const int64_t ddy = int64_t(probes[strongest][1]) - py;
+        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+            m.speed = int32_t(m.speed * 0.25);
+    }
+    int32_t d[13];
+    for (int i = 0; i < 13; ++i) d[i] = forces[i].fz;
+    if (sev >= 1) {
+        // Second pass over the planar-shifted probes, averaged in when it
+        // still collides; the push is X/Y only (the Z sum rides the deferred
+        // entity-mass leg) [orig: @0x476E19..0x476FF4; push @0x477149..].
+        int64_t dX = 0, dY = 0;
+        for (int i = 0; i < 13; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
+        for (int i = 0; i < 13; ++i) {
+            probes[i][0] += int32_t(dX);
+            probes[i][1] += int32_t(dY);
+        }
+        PlatProbeForce forces2[13];
+        int32_t sev2 = 0;
+        for (int i = 0; i < 13; ++i)
+            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0],
+                                                     probes[i][1],
+                                                     probes[i][2], r,
+                                                     soft, hard, forces2[i]));
+        if (sev2 != 0) {
+            int64_t dX2 = 0, dY2 = 0;
+            for (int i = 0; i < 13; ++i) {
+                dX2 += forces2[i].fx;
+                dY2 += forces2[i].fy;
+            }
+            for (int i = 0; i < 13; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
+            dX = (dX2 + dX) >> 1;
+            dY = (dY2 + dY) >> 1;
+        }
+        px += int32_t(dX);
+        py += int32_t(dY);
+    }
+
+    // ---- the in-water flag with the r/2 hysteresis [orig: @0x477496..
+    // 0x4774F3; wheel-average Z against the hull-bottom reference]. The
+    // per-wheel water-support forces ride the dispatcher's hasWaterLevel arg,
+    // which the ctank dispatcher pins to 0 [orig: push 0 @0x48f004] — tanks
+    // never float; the flag itself is unconditional. Splash FX + the overlay
+    // sends and the water-exit emitter release are cited deferrals.
+    if (world.env.water_z != 0) {
+        int32_t avg = (probes[0][2] + probes[1][2] + probes[2][2] +
+                       probes[3][2]) >> 2;
+        if ((veh.flags & 0x8000u) != 0u) avg -= r >> 1;
+        if (hull_bottom_neg + avg >= world.env.water_z)
+            veh.flags &= ~0x8000u;
+        else
+            veh.flags |= 0x8000u;
+    }
+
+    // ---- per-probe planar-contact + reverse flags [orig: the per-probe
+    // walk @0x477BF4..0x477D0A]: a probe "contacts" when it produced a planar
+    // force (flat terrain never does; walls and slope-hard faces do), and a
+    // contacted probe is a REVERSE hit when its normalized force opposes the
+    // contact direction (dot < -0.75 = -49152) — the direction is the stored
+    // downhill contact vector, falling back to the basis forward row when the
+    // store is empty [orig: the |dir|==0 fallback @0x477A48..; our subset
+    // defers the store (D-NET-161), so the fallback IS the direction].
+    bool contact_flag[13];
+    bool reverse_flag[13];
+    bool any_contact = false;
+    int64_t sum_fx = 0, sum_fy = 0, sum_fz = 0;
+    for (int i = 0; i < 13; ++i) {
+        contact_flag[i] = forces[i].fx != 0 || forces[i].fy != 0;
+        reverse_flag[i] = false;
+        if (!contact_flag[i]) continue;
+        any_contact = true;
+        sum_fx += forces[i].fx;
+        sum_fy += forces[i].fy;
+        sum_fz += forces[i].fz;
+        const double n = std::sqrt(double(forces[i].fx) * forces[i].fx +
+                                   double(forces[i].fy) * forces[i].fy +
+                                   double(forces[i].fz) * forces[i].fz);
+        if (n <= 0.0) continue;
+        const double dot = (double(forces[i].fx) * basis.fwd[0] +
+                            double(forces[i].fy) * basis.fwd[1] +
+                            double(forces[i].fz) * basis.fwd[2]) / n;
+        reverse_flag[i] = dot * 65536.0 < -49152.0;
+    }
+    // The head-on wall stop [orig: @0x477D3E..0x477E30]: the summed contacted
+    // force, normalized, against the same direction — past -0.871 (-57070)
+    // the drive state zeroes. The authority park-move damage leg riding it is
+    // deferred.
+    if (any_contact) {
+        const double n = std::sqrt(double(sum_fx) * double(sum_fx) +
+                                   double(sum_fy) * double(sum_fy) +
+                                   double(sum_fz) * double(sum_fz));
+        if (n > 0.0) {
+            const double dot = (double(sum_fx) * basis.fwd[0] +
+                                double(sum_fy) * basis.fwd[1] +
+                                double(sum_fz) * basis.fwd[2]) / n;
+            if (dot * 65536.0 < -57070.0) {
+                m.vel_x = 0;
+                m.vel_y = 0;
+                m.speed = 0;
+            }
+        }
+    }
+
+    // ---- the stability contact byte [orig: @0x477F31..0x477FA9 +
+    // `BYTE2(aiRef0) = upZ > 0x2000 && stable && !crashed && !parked &&
+    // !destroyed` @0x477FB4]: the leading axle for the current gear (front
+    // pads driving forward, rear pads in reverse) must be SYMMETRIC — both
+    // pads contacted or neither — and neither may be a reverse-direction hit.
+    // The crash/park/destroyed bytes ride the deferred latch machine.
+    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
+    {
+        bool stable;
+        if (m.speed >= 0) {
+            if (reverse_flag[0] || reverse_flag[1]) stable = false;
+            else stable = contact_flag[0] == contact_flag[1];
+        } else {
+            if (reverse_flag[2] || reverse_flag[3]) stable = false;
+            else stable = contact_flag[2] == contact_flag[3];
+        }
+        m.grounded = up_z16 > 0x2000 && stable;
+    }
+
+    // ---- the 7-slot contact model [orig: the wheel/belly pair maxes
+    // @0x4780E5..0x478131 — slot k = max(d_k, d_{k+4}) for the four wheels,
+    // slots 4..6 = the spine d's] and the solve select [orig: the
+    // `centerMax <= 0 && wheelBellyMax <= 0` split @0x478435].
+    int32_t slot_max[7];
+    for (int k = 0; k < 4; ++k) slot_max[k] = std::max(d[k], d[k + 4]);
+    slot_max[4] = d[10];
+    slot_max[5] = d[11];
+    slot_max[6] = d[12];
+    int32_t center_max = std::max(d[8], d[9]);
+    int32_t wheel_belly_max = d[0];
+    for (int i = 1; i < 8; ++i) wheel_belly_max = std::max(wheel_belly_max, d[i]);
+
+    if (center_max <= 0 && wheel_belly_max <= 0) {
+        if (up_z16 < 0) {
+            // Inverted with spine/slot contact: lift by the max over the
+            // seven contact slots, stay grounded; the crash-latch adoption is
+            // deferred with the wreck machine [orig: the gated slot scan
+            // @0x47843E..0x4784DA; `Position.Z += bestSurfaceY` @0x478540].
+            int32_t maxs = 0;
+            for (int i = 0; i < 7; ++i) maxs = std::max(maxs, slot_max[i]);
+            if (maxs > 0) {
+                pz += maxs;
+                return;
+            }
+        }
+        // Airborne: the flag sets; the suspension orientation runs on the
+        // unlifted corners — an attitude identity round-trip [orig: Flags |=
+        // 0x2000 @0x478522; the client parked spring apply riding replicated
+        // Flags 0x10 is deferred @0x478509..].
+        veh.flags |= kEntityFlagInAir;
+        return;
+    }
+    // ---- wheel/belly contact: airborne clears unconditionally
+    // [orig: @0x478604 in the latch fall-through]. The corner quad lifts by
+    // the four WHEEL d's only (belly/spine d's feed severity and the Z maxes)
+    // in the zero-state spring loop [orig: `dest[corner].z += d_k`
+    // @0x478A16/@0x478A72-region; Vehicle_ApplyBrakingForce and the
+    // oscillator transfer are the deferred spring machinery].
+    veh.flags &= ~kEntityFlagInAir;
+    int32_t c[4][3];
+    {
+        const int32_t hw2 = half_w >> 1, hh2 = half_h >> 1;
+        const int32_t corner_model[4][3] = {
+            {+hh2, +hw2, 0}, {+hh2, -hw2, 0}, {-hh2, -hw2, 0}, {-hh2, +hw2, 0},
+        };
+        for (int k = 0; k < 4; ++k) {
+            int32_t rotated[3];
+            basis.q22.rotate_point(corner_model[k], rotated);
+            c[k][0] = px + rotated[0];
+            c[k][1] = py + rotated[1];
+            c[k][2] = pz + rotated[2] + d[k];
+        }
+    }
+    PlatFit fit;
+    plat_fit_corners(c, fit);
+    // Pitch/Roll always overwritten from the conform; Yaw only in the
+    // crashed/latched states (deferred) [orig: the Euler stores
+    // @0x478AB1..0x478AD8]. The int16 degree mirrors feed presentation.
+    m.air_pitch_bam = fit.pitch_bam;
+    m.air_roll_bam = fit.roll_bam;
+    veh.pitch = static_cast<int16_t>(std::lround(
+            double(m.air_pitch_bam) * kDegreesPerBam));
+    veh.roll = static_cast<int16_t>(std::lround(
+            double(m.air_roll_bam) * kDegreesPerBam));
+    if (up_z16 > 0) {
+        // Upright: Z = the solver chassis Z (the positive-corner average from
+        // Entity_ComputeSuspensionAndOrientation [orig: @0x4698A0, the
+        // positive-only corner scan + divide @0x46AF54..0x46AFE1]), with the
+        // step ABSORBED into slideDecay, clamped non-positive — the wheeled
+        // solve's form; there is no +0x2000 rise clamp here
+        // [orig: `slideDecay += solvedZ - Position.Z; if (slideDecay > 0)
+        // slideDecay = 0; Position.Z = solvedZ` @0x478BE3..0x478C06]. The
+        // !orientationResult fallback (Z += max wheel d) rides the
+        // crash/latch gates and is deferred with them.
+        const int32_t new_z = fit.positive_z_avg;
+        m.slide_z += new_z - pz;
+        if (m.slide_z > 0) m.slide_z = 0;
+        pz = new_z;
+    } else {
+        // Inverted: lift by the max penetration over all thirteen probes
+        // [orig: the crashed/inverted `Position.Z += v300` @0x478D06 with the
+        // gated all-13 scan @0x477FF4..0x478014].
+        int32_t maxd = 0;
+        for (int i = 0; i < 13; ++i) maxd = std::max(maxd, d[i]);
+        pz += maxd;
+    }
+    // Airborne tick counter [orig: @0x4795D4..0x4795F1].
+    m.plat_airborne_ticks =
+            (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
+}
+
+// The light (cbik/bike) contact + suspension solve — the client-executed
+// subset of Entity_ProcessLightVehiclePhysics [orig: @0x479600; sole caller
+// the cbik mover Entity_UpdateLightVehiclePhysics @0x483FE0, call @0x486672,
+// water arg 0 via the cbike dispatcher @0x48eff4, frameFlags 1]. Witness:
+// docs/world/vehicle-client-movers-re.md §9. Six probes on the hull
+// centerline — two wheels + three spine + one mid-hull — and the 2-corner
+// AXLE fit (Entity_UpdateVehicleChassisOrientation [orig: @0x468A50]): fwd =
+// the normalized front-to-rear wheel line through the lifted corners, roll
+// continuity by orthonormalizing against the previous up, Z = the mean of
+// the two lifted wheel corners [orig: `*(out+8) = (c0.z + c1.z) * 0.5` via
+// flt_7C3B94 @0x468D34-region].
+// Cited deferrals (same seams as §7/§8): authority impact/eject legs (the
+// head-on rider ejection ladder @0x47A343.., the belly-strike eject, the
+// underside crush), the wheelie/spring machinery (sinks grow +100/tick, the
+// sub_45CFB0 decay, Entity_ApplyDamageOscillationFast — zero state here),
+// the tip-over/crash tumble (the parked bike's 298261 BAM/tick fall-over,
+// Entity_QueueSuspensionForce legs, the flip byte at the 0..100 def clamp),
+// the grounded heading/lean smoother (Entity_SmoothHeadingToTarget
+// [orig: @0x45B2C0, call @0x47a7d3] — the FPU-garbled roll-rate producer;
+// the lean is presentation-additive and stays a named deferral pinned to its
+// disassembly), the contact-direction store (D-NET-161), entity momentum
+// exchange, and every sound/FX/overlay send.
+bool light_contact_solve_active(const VehicleTraits &traits) {
+    return traits.box_z_hi != traits.box_z_lo &&
+           traits.box_x_hi != traits.box_x_lo &&
+           (((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000) > 0;
+}
+
+void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
+                         Entity::VehicleMotorState &m,
+                         int32_t start_x, int32_t start_y,
+                         int32_t &px, int32_t &py, int32_t &pz) {
+    // ---- sleep fast-path [orig: @0x47972C..0x479790]: velocities/speed/
+    // rates zero, not airborne, not carried, slideDecay in (-300,-1] (the
+    // unsigned `> 0xFFFFFED4` compare — the bike window is 300, not the
+    // tracked/wheeled 350), planar compare, energy zero, not crashed. Action
+    // gated on the mover's frameFlags=1: undo the dribble and return — the
+    // bike sleep has NO contact-byte refresh [orig: Z -= slideDecay
+    // @0x47976B; slideDecay >>= 1 @0x479777].
+    if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 &&
+        m.wheel_rate_bam == 0 && (veh.flags & kEntityFlagInAir) == 0 &&
+        m.slide_z > -300 && m.slide_z < 0 &&
+        px == start_x && py == start_y) {
+        pz -= m.slide_z;
+        m.slide_z >>= 1;
+        return;
+    }
+
+    // ---- probe geometry [orig: @0x479960..0x479C20]: r = (box height >> 1)
+    // - 0x4000 [orig: @0x47992A-region]; the two wheels on the FOOT
+    // centerline at X = foot_x_hi - r / foot_x_lo + r, Z = box_z_lo + r
+    // (per-wheel sinks zero); three spine probes on the BOX centerline at
+    // X = box_x_lo + {L/4, 3L/4, L/2}, Z = box_z_lo + 2r; one mid-hull probe
+    // at X = box_x_lo + L/2, Z = box_z_lo + 3r [orig: `box_z_lo -
+    // ftol(4r * -0.75)` via flt_7C6F78 @0x479BC1]. Every radius is r
+    // [orig: the plain fild/ftol round-trip @0x4799b7/@0x4799e7].
+    const int32_t r = ((traits.box_z_hi - traits.box_z_lo) >> 1) - 0x4000;
+    const int32_t Lbox = traits.box_x_hi - traits.box_x_lo;
+    const int32_t foot_ymid = (traits.foot_y_lo + traits.foot_y_hi) >> 1;
+    const int32_t box_ymid =
+            traits.box_y_lo + ((traits.box_y_hi - traits.box_y_lo) >> 1);
+    const int32_t wheel_z = traits.box_z_lo + r;
+    const int32_t probes_model[6][3] = {
+        {traits.foot_x_hi - r, foot_ymid, wheel_z},            // front wheel
+        {traits.foot_x_lo + r, foot_ymid, wheel_z},            // rear wheel
+        {traits.box_x_lo + (Lbox >> 2), box_ymid, traits.box_z_lo + 2 * r},
+        {traits.box_x_lo + ((3 * Lbox) >> 2), box_ymid, traits.box_z_lo + 2 * r},
+        {traits.box_x_lo + (Lbox >> 1), box_ymid, traits.box_z_lo + 2 * r},
+        {traits.box_x_lo + (Lbox >> 1), box_ymid, traits.box_z_lo + 3 * r},
+    };
+
+    const VehicleEulerBasis basis = vehicle_euler_basis(
+            m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+    int32_t probes[6][3];
+    for (int i = 0; i < 6; ++i) {
+        int32_t rotated[3];
+        basis.q22.rotate_point(probes_model[i], rotated);
+        probes[i][0] = px + rotated[0];
+        probes[i][1] = py + rotated[1];
+        probes[i][2] = pz + rotated[2];
+    }
+
+    // ---- the two force passes + severity [orig: Entity_CheckCollisionState
+    // @0x479C2B/@0x479E7C]. Same torque sheds [orig: @0x479C89/@0x479CD1/
+    // @0x479D0F]; the sev-3 authority damage (unitType-3 kill at 29300, the
+    // mass<=3 light multiplier), scrape sound and momentum exchange are
+    // deferred; the 0.25 cut scans probes 0..4 — the mid-hull probe is
+    // excluded [orig: init from probe 0 @0x479DEB, `while (v61 < 5)`
+    // @0x479E36-region].
+    const int32_t soft = cos22_of_bam_x87(traits.max_slope);
+    const int32_t hard = cos22_of_bam_x87(traits.slip_slope);
+    PlatProbeForce forces[6];
+    int32_t sev = 0;
+    for (int i = 0; i < 6; ++i)
+        sev = std::max(sev, plat_terrain_probe(world, probes[i][0],
+                                               probes[i][1], probes[i][2], r,
+                                               soft, hard, forces[i]));
+    if (sev == 1) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+    } else if (sev == 2) {
+        m.speed -= m.speed >> ((traits.torque + 1) & 31);
+    } else if (sev == 3) {
+        m.speed -= m.speed >> ((traits.torque + 2) & 31);
+        int strongest = 0;
+        int64_t best = -1;
+        for (int i = 0; i < 5; ++i) {
+            const int64_t sfx = forces[i].fx, sfy = forces[i].fy;
+            const int64_t mag2 = sfx * sfx + sfy * sfy;
+            if (mag2 > best) { best = mag2; strongest = i; }
+        }
+        const int64_t ddx = int64_t(probes[strongest][0]) - px;
+        const int64_t ddy = int64_t(probes[strongest][1]) - py;
+        if (ddx * ddx + ddy * ddy > int64_t(0x8000) * 0x8000)
+            m.speed = int32_t(m.speed * 0.25);
+    }
+    int32_t d[6];
+    for (int i = 0; i < 6; ++i) d[i] = forces[i].fz;
+    if (sev >= 1) {
+        // Pass 2: the push sums probes 0..4 only — the mid-hull probe never
+        // contributes to the planar separation [orig: the five-term fx/fy
+        // sums @0x479ppp-region 5.., push @0x47A0AF..0x47A0BE].
+        int64_t dX = 0, dY = 0;
+        for (int i = 0; i < 5; ++i) { dX += forces[i].fx; dY += forces[i].fy; }
+        for (int i = 0; i < 6; ++i) {
+            probes[i][0] += int32_t(dX);
+            probes[i][1] += int32_t(dY);
+        }
+        PlatProbeForce forces2[6];
+        int32_t sev2 = 0;
+        for (int i = 0; i < 6; ++i)
+            sev2 = std::max(sev2, plat_terrain_probe(world, probes[i][0],
+                                                     probes[i][1],
+                                                     probes[i][2], r,
+                                                     soft, hard, forces2[i]));
+        if (sev2 != 0) {
+            int64_t dX2 = 0, dY2 = 0;
+            for (int i = 0; i < 5; ++i) {
+                dX2 += forces2[i].fx;
+                dY2 += forces2[i].fy;
+            }
+            for (int i = 0; i < 6; ++i) d[i] = (forces2[i].fz + d[i]) >> 1;
+            dX = (dX2 + dX) >> 1;
+            dY = (dY2 + dY) >> 1;
+        }
+        px += int32_t(dX);
+        py += int32_t(dY);
+    }
+
+    // ---- the in-water flag: the plain two-wheel average against the
+    // waterline — the bike form has NO hysteresis and NO hull-bottom offset
+    // [orig: `(z0 + z1) >> 1 >= WaterZ` @0x479F7C..0x479F90]. The per-wheel
+    // water support rides the dispatcher arg (0 for cbik). Splash FX +
+    // overlay sends deferred.
+    if (world.env.water_z != 0) {
+        if (((probes[0][2] + probes[1][2]) >> 1) >= world.env.water_z)
+            veh.flags &= ~0x8000u;
+        else
+            veh.flags |= 0x8000u;
+    }
+
+    // ---- the any-contact speed halver [orig: `if (anyContact && |vel| >
+    // 17580) currentSpeed >>= 1` @0x47A66E..0x47A683]: planar-force contact
+    // at speed sheds half. (The head-on detector's authority damage/eject
+    // ladder is deferred — a bike takes damage instead of the tank's wall
+    // stop.)
+    {
+        bool any_contact = false;
+        for (int i = 0; i < 6; ++i)
+            if (forces[i].fx != 0 || forces[i].fy != 0) any_contact = true;
+        if (any_contact) {
+            const double vmag = std::sqrt(double(m.vel_x) * m.vel_x +
+                                          double(m.vel_y) * m.vel_y +
+                                          double(m.slide_z) * m.slide_z);
+            if (vmag > 17580.0) m.speed >>= 1;
+        }
+    }
+
+    // ---- solve select [orig: the `!d_front && !d_rear` split @0x47A985].
+    const int32_t up_z16 = static_cast<int32_t>(basis.up[2] * 65536.0);
+    const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * 65536.0);
+    if (d[0] == 0 && d[1] == 0) {
+        // Both wheels off: the rear-contact run resets, airborne sets, and
+        // the chassis call runs its airborne arm — the axle fit of the
+        // UNLIFTED corners, an attitude identity [orig: the reset @0x47AA13;
+        // Flags |= 0x2000 @0x47AC84; the crashed/parked Z-lift and the
+        // spine-crash latch are deferred with the wreck machine].
+        m.light_rear_contact_ticks = 0;
+        veh.flags |= kEntityFlagInAir;
+        m.plat_airborne_ticks += 1;
+        return;
+    }
+    // ---- wheel contact: the 2-corner axle fit [orig: the grounded arm of
+    // Entity_UpdateVehicleChassisOrientation @0x468B03..0x468D3B]. Corners
+    // from the isSquare quad — ±half the inset foot length along the basis
+    // forward row [orig: Entity_ComputeBoundingQuad @0x45B6E0 isSquare arm:
+    // c0 = pos + 0.5*len*fwd, c1 = pos - 0.5*len*fwd] — lifted by the wheel
+    // d's in the zero-state spring loop [orig: dest[2] += d0 / dest[5] += d1].
+    veh.flags &= ~kEntityFlagInAir;
+    const int32_t half_len =
+            ((traits.foot_x_hi - r) - (traits.foot_x_lo + r)) >> 1;
+    int32_t cf[3], cr[3];
+    for (int i = 0; i < 3; ++i) {
+        const int32_t off = static_cast<int32_t>(
+                (static_cast<int64_t>(half_len) *
+                         static_cast<int32_t>(basis.fwd[i] * 65536.0) +
+                 0x8000) >> 16);
+        cf[i] = off;
+        cr[i] = -off;
+    }
+    cf[0] += px; cf[1] += py; cf[2] += pz + d[0];
+    cr[0] += px; cr[1] += py; cr[2] += pz + d[1];
+    // fwd = the normalized axle line; right = normalize(old_up x fwd); up =
+    // fwd x right — roll continuity against the previous up row
+    // [orig: the cross/normalize chain @0x468BC1..0x468CE1]; then the
+    // standard substitute Euler pair (the same convention plat_fit_corners
+    // uses; Math_FixedPointMatrixToEulerAngles @0x613310 interior = the
+    // shared pending witness).
+    {
+        const int64_t axle[3] = {int64_t(cf[0]) - cr[0], int64_t(cf[1]) - cr[1],
+                                 int64_t(cf[2]) - cr[2]};
+        int32_t fwd[3];
+        q16_normalize(axle, fwd);
+        const int32_t old_up[3] = {
+            static_cast<int32_t>(basis.up[0] * 65536.0),
+            static_cast<int32_t>(basis.up[1] * 65536.0),
+            static_cast<int32_t>(basis.up[2] * 65536.0)};
+        int64_t raw[3];
+        q16_cross(old_up, fwd, raw);
+        int32_t right[3];
+        q16_normalize(raw, right);
+        q16_cross(fwd, right, raw);
+        int32_t up[3];
+        q16_normalize(raw, up);
+        const double fxy = std::sqrt(double(fwd[0]) * fwd[0] +
+                                     double(fwd[1]) * fwd[1]);
+        m.air_pitch_bam = bam_of_atan2(double(fwd[2]), fxy);
+        m.air_roll_bam = bam_of_atan2(double(right[2]), double(up[2]));
+        veh.pitch = static_cast<int16_t>(std::lround(
+                double(m.air_pitch_bam) * kDegreesPerBam));
+        veh.roll = static_cast<int16_t>(std::lround(
+                double(m.air_roll_bam) * kDegreesPerBam));
+    }
+    // Z select: crashed/no-up/parked ride the latch machine; the live leg
+    // clamps slideDecay non-positive and adopts the fit Z — the mean of the
+    // two lifted wheel corners [orig: `slideDecay = min(slideDecay, 0);
+    // Position.Z = out.z` @0x47AF52..0x47AF60; out.z = (c0.z + c1.z) * 0.5
+    // via flt_7C3B94].
+    if (up_z16 > 0) {
+        if (m.slide_z > 0) m.slide_z = 0;
+        pz = static_cast<int32_t>(
+                (int64_t(cf[2]) + cr[2]) / 2);
+    } else {
+        int32_t maxd = 0;
+        for (int i = 0; i < 5; ++i) maxd = std::max(maxd, d[i]);
+        pz += maxd;
+    }
+    // Both-wheel landing absorbs half the fall [orig: `if (d0 && d1 &&
+    // slideDecay < 0) slideDecay -= slideDecay >> 1` @0x47B0F1..0x47B103].
+    if (d[0] != 0 && d[1] != 0 && m.slide_z < 0)
+        m.slide_z -= m.slide_z >> 1;
+    // ---- the contact byte [orig: @0x47A4CC..0x47A52B]: up.z > 4096, the
+    // lean bound |right.z| < 40960, REAR wheel contact, and a rear-contact
+    // run longer than one tick [orig: the +1 @0x47B739-region, reset in the
+    // both-wheels-off branch; `|entity[1].pad_040[8]| <= 1` kills the byte].
+    if (d[1] != 0) m.light_rear_contact_ticks += 1;
+    m.grounded = up_z16 > 4096 && std::abs(side_z16) < 40960 &&
+                 d[1] != 0 && m.light_rear_contact_ticks > 1;
+    m.plat_airborne_ticks = 0;
+}
+
 } // namespace detail
 } // namespace opennova::world

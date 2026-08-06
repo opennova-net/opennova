@@ -26,7 +26,10 @@ deferrals) — this record hosts the witnesses, the ledger owns the catalog.
 | cbik mover client subset (`@ 0x483FE0`) | MATCHING — the four family deltas ported into the shared ground core | §5 spec; the bike bench leg (gravity 250 / vZ cap / airborne yaw vs Ground) |
 | Aircraft contact solve (`@ 0x47EF10`, defined 2026-07-31) | MATCHING — ported, client subset (`aircraft_contact_solve`, 2026-08-01) | §6 spec; landing/ramp-conform/water-hysteresis/sleep bench legs in `watercraft_client_motor` |
 | Ground/tracked contact solve (`@ 0x47C1C0`) | MATCHING — ported, client subset (`ground_contact_solve`, 2026-08-05) | §7 spec; the wheel-clearance rest + drop-landing bench legs in `watercraft_client_motor` |
-| Wheeled (ctan) & light (cbik) contact solves (`@ 0x475DE0` / `@ 0x479600`) | unwitnessed beyond contracts — interim-carried by the tracked solve; open B-facet | §7.0 routing; D-NET-196 residuals |
+| Wheeled (ctan) contact solve (`@ 0x475DE0`) | MATCHING — ported, client subset (`wheeled_contact_solve`, 2026-08-06) | §8 spec; the tank rest/drop bench legs |
+| Light (cbik) contact solve (`@ 0x479600`) + 2-corner chassis fit (`@ 0x468A50`) | MATCHING — ported, client subset (`light_contact_solve`, 2026-08-06); the lean smoother `@ 0x45B2C0` is a named FPU deferral | §9 spec; the bike rest/drop bench legs |
+| Tank (ctan) mover deltas (`@ 0x488AB0`) | MATCHING — the witnessed family deltas ported into the shared ground core (2026-08-06) | §10 spec; the tank family-delta bench leg |
+| Aircraft local-driver input map (`@ 0x490310` occupant block) | MATCHING — ported (`stage_air_vehicle_input` + the both-command blend, 2026-08-06); analog collective = named deferral | §10.4; the air local-pilot gate bench leg |
 
 ---
 
@@ -3107,12 +3110,14 @@ the terrain while this solve rests the origin at `ground − box_z_lo`.
   catv (amphibian) path [orig: `push 2` @ 0x48f01b]. It gates ONLY the per-pad
   water-support forces (§7.4).
 - Family routing (class table @ 0x82ABC0): cveh/ctrn/catv → the ground mover →
-  THIS solve; **ctan** → its own mover @ 0x488AB0 →
-  `Entity_ProcessWheeledVehiclePhysics` @ 0x475DE0 (callees walk); **cbik** →
-  @ 0x483FE0 → `Entity_ProcessLightVehiclePhysics` @ 0x479600 [orig: call
-  @ 0x486672]. The wheeled and light variants remain open witnesses; our port
-  carries ctan/cbik on the tracked solve as the interim (see the D-NET-196
-  residual note).
+  THIS solve; **ctan** → its own mover `Entity_UpdateTankVehiclePhysics`
+  @ 0x488AB0 → `Entity_ProcessWheeledVehiclePhysics` @ 0x475DE0 (call
+  @ 0x48a9ef, water arg 0 via the ctank dispatcher @ 0x48f004); **cbik** →
+  `Entity_UpdateLightVehiclePhysics` @ 0x483FE0 →
+  `Entity_ProcessLightVehiclePhysics` @ 0x479600 [orig: call @ 0x486672,
+  water arg 0 @ 0x48eff4]. Both variants are witnessed and ported (§8/§9);
+  `VehicleFamily::Tank`/`Bike` route them (2026-08-06 — the tracked-solve
+  interim is retired).
 - Returns the collision severity; the mover ignores it (`add esp,8`
   @ 0x48d0b6).
 - The mover's grounded velocity re-derive consumes the solve's stored contact
@@ -3268,6 +3273,222 @@ symptom).
 
 ---
 
+## §8 The wheeled (ctan) contact/suspension solve (ported 2026-08-06)
+
+Source: `Entity_ProcessWheeledVehiclePhysics` @ 0x475DE0 .. 0x4795FA (0x381A
+bytes; decompile + targeted disassembly). The ctan/tank family's instance of
+the per-family contact solves — the live caller is the tank mover (§10), call
+@ 0x48a9ef, hasWaterLevel pinned 0 by the ctank dispatcher (`push 0`
+@ 0x48f004: tanks never float). A second reference from
+`Entity_UpdateMountedInfantryMovement` @ 0x486a50 (call @ 0x4885d0) has no
+live dispatcher — table-resolved dead/AI-side code.
+
+The skeleton is the tracked solve (§7) with these deltas (everything not
+listed matches §7 block-for-block — def clamps, severity sheds via the torque
+shifts, pass-2 averaging with the X/Y-only push, the in-water flag with the
+r/2 hysteresis against `-(box_z_lo + r)`, and the §4 positive-corner solver
+Z):
+
+1. **THIRTEEN probes, every radius r = beam >> 2** [orig: geometry
+   @ 0x4762B8..0x476559; the 13 radius stores all copy suspensionOffset]:
+   the 4 wheel pads of §7 (footprint corners inset r, Z = box_z_lo + r + the
+   per-wheel +0x2D4 sink — zero in the client subset), SIX belly stations
+   along the two side rails at X = foot_x_lo + r + {3q, 3q, q, q, 2q, 2q}
+   with q = ftol(0.75 × box_x_span) >> 2 (flt_7C3DC8 = 0.75) and the
+   front/rear/averaged per-side sinks in Z, and THREE spine probes at
+   X = box_x_lo + {3L/4, L/2, L/4}, Y = box ymid, Z = box_z_hi − w/+w/−w with
+   w = (beam >> 3) − 0x4000 (the MIDDLE spine probe sits ABOVE the deck).
+   There is no separate spine radius.
+2. **The 7-slot contact model** [orig: the pair maxes @ 0x4780E5..0x478131]:
+   slot k = max(d_wheel_k, d_belly_k) for the four wheel/rail pairs, slots
+   4..6 = the spine d's. The sev-3 0.25-cut scans the strongest of the first
+   SEVEN probe forces only [orig: init from probe 0 @ 0x476BC3].
+3. **Per-probe planar-contact + reverse flags → the stability contact byte**
+   [orig: the per-probe walk @ 0x477BF4..0x477D0A; the byte
+   @ 0x477F31..0x477FB4]: a probe "contacts" when it produced a planar force;
+   a contacted probe is a REVERSE hit when its normalized force opposes the
+   contact direction past −0.75 (−49152). The contact byte requires
+   `up.z(Q16) > 0x2000` (NOT §7's 4096) and the LEADING axle for the current
+   gear (front pads forward, rear pads in reverse) to be SYMMETRIC — both
+   contacted or neither — with no reverse hit on it. The direction is the
+   +0x3BC contact-direction store, falling back to the basis forward row when
+   empty [orig: @ 0x477A48..] — our subset defers the store (D-NET-161), so
+   the fallback IS the direction.
+4. **The head-on wall stop** [orig: @ 0x477D3E..0x477E30]: the summed
+   contacted force, normalized, against the same direction — past −0.871
+   (−57070) the drive state zeroes (velocityX/Y and currentSpeed). The
+   authority park-move damage riding it is deferred.
+5. **The Z select absorbs into slideDecay** [orig: `slideDecay += solvedZ −
+   Position.Z; if (slideDecay > 0) slideDecay = 0; Position.Z = solvedZ`
+   @ 0x478BE3..0x478C06]: no §7 +0x2000 rise clamp — the landing step cancels
+   the fall velocity instead. The solver is
+   `Entity_ComputeSuspensionAndOrientation` @ 0x4698A0 (the third §4-family
+   instance; positive-only corner average + fidiv by the positive count
+   @ 0x46AF54..0x46AFE1, the same MAIN_FIT core as `plat_fit_corners`).
+   Inverted: `Position.Z += max` over ALL 13 d's [orig: @ 0x478D06 with the
+   gated scan @ 0x477FF4..0x478014]; the upside no-wheel-contact arm lifts by
+   the max over the SEVEN contact slots [orig: @ 0x47843E..0x478540].
+6. **The corner quad lifts by the four WHEEL d's only** (belly/spine d's feed
+   severity and the Z maxes) [orig: the zero-state spring loop
+   `dest[corner].z += d_k` @ 0x478A16..; `Vehicle_ApplyBrakingForce`
+   @ 0x45CEB0 and `Entity_ApplyDamageOscillation` @ 0x45D240 are the live
+   spring machinery — sinks grow +250/tick on airborne wheels, decay through
+   the brake curve — all zero-state in the subset, so pads probe at
+   box_z_lo + r and the lifts are raw, exactly like the zero-state original].
+7. **Live-in-retail legs deferred with their §7-shared seams**: the sev-3
+   entity momentum exchange and the entity-mass delta scaling (mass-gated
+   transfer at `hit mass < 2×own` [orig: @ 0x476E19-region]), the crash/flip
+   latches (the |up·z| < cos(flip) capsize byte, the falling-crash client arm
+   keyed airborne+parked, the settle machine + its Yaw adoption,
+   `Entity_ApplyWheelSuspensionForces` @ 0x463560's parked spring apply), the
+   contact-direction downhill store (renormalized with fixed Z = −28672 while
+   descending [orig: the tail @ 0x479518-region]), authority damage
+   (spine-impact, underside-crush, park-move, burn), and every sound/FX/
+   overlay send.
+
+Port: `wheeled_contact_solve` (libs/world/src/vehicle_contact_solve.cpp),
+routed by `VehicleFamily::Tank`. Bench: the tank rest/drop legs (exact rest at
+`ground − box_z_lo` through the 13-probe geometry and the slideDecay-absorb
+select).
+
+## §9 The light (cbik) contact/suspension solve (ported 2026-08-06)
+
+Source: `Entity_ProcessLightVehiclePhysics` @ 0x479600 .. 0x47C1B7 (0x2BB7
+bytes) + `Entity_UpdateVehicleChassisOrientation` @ 0x468A50 (0x83C — the
+2-corner chassis fit) + `Entity_SmoothHeadingToTarget` @ 0x45B2C0 (0x317 —
+the grounded heading/lean smoother, called @ 0x47a7d3). Sole caller the cbik
+mover @ 0x483FE0 (call @ 0x486672, frameFlags 1, water arg 0 @ 0x48eff4).
+
+Deltas from the §7/§8 skeleton:
+
+1. **r is HEIGHT-derived**: r = ((box_z_hi − box_z_lo) >> 1) − 0x4000 — not
+   beam >> 2. SIX probes on the hull centerline, every radius r [orig:
+   geometry @ 0x479960..0x479C20; the plain fild/ftol radius round-trip
+   @ 0x4799b7]: two WHEELS on the FOOT centerline (X = foot_x_hi − r /
+   foot_x_lo + r, Y = (foot_y_lo + foot_y_hi) >> 1, Z = box_z_lo + r + sink),
+   three spine probes on the BOX centerline at X = box_x_lo + {L/4, 3L/4,
+   L/2}, Z = box_z_lo + 2r, and one mid-hull probe at L/2, Z = box_z_lo + 3r
+   [orig: `box_z_lo − ftol(4r × −0.75)` via flt_7C6F78 = −0.75 @ 0x479BC1].
+2. **Sleep window (−300, −1]** (the `> 0xFFFFFED4` unsigned compare — §7/§8
+   use 350), no contact-byte refresh in the sleep arm, and the whole
+   suspension tail is gated on the mover's frameFlags.
+3. **The 0.25-cut scans probes 0..4** (the mid-hull probe excluded); pass 2's
+   planar push sums probes 0..4 only.
+4. **The in-water flag is the plain two-wheel average** against the waterline
+   — NO hysteresis, NO hull-bottom offset [orig: `(z0 + z1) >> 1 >= WaterZ`
+   @ 0x479F7C..0x479F90].
+5. **The any-contact speed halver** [orig: @ 0x47A66E..0x47A683]: planar
+   contact at |velocity| > 17580 sheds half the drive speed. There is NO tank
+   wall stop — the bike's head-on detector (summed contacted force against
+   the normalized VELOCITY past −0.871) feeds the authority damage/eject
+   ladder instead (29300 kill / 21975 eject / 19045 −20, the belly-strike
+   eject at speed > 26370) [orig: @ 0x47A343..] — deferred authority legs.
+6. **The 2-corner AXLE fit** [orig: Entity_UpdateVehicleChassisOrientation
+   @ 0x468A50, the grounded arm @ 0x468B03..0x468D3B]: corners from the
+   isSquare quad — `c0 = pos + 0.5·len·fwd`, `c1 = pos − 0.5·len·fwd`
+   [orig: Entity_ComputeBoundingQuad @ 0x45B6E0 isSquare arm] — lifted by the
+   wheel d's; fwd = the normalized front-to-rear line, right =
+   normalize(old_up × fwd), up = fwd × right (roll continuity), Euler out
+   through the standard substitute pair. **Z = (c0.z + c1.z) × 0.5**
+   (flt_7C3B94 = 0.5) — the mean wheel penetration, adopted with the
+   slideDecay non-positive clamp. Airborne: the fit of the unlifted corners =
+   attitude identity. The crash tumble (BuildYXZ with the 298261 BAM/tick
+   fall-over decay — a parked bike TIPS OVER), the wheelie force queues
+   (`Entity_QueueSuspensionForce`), and the flip 0..100 def clamp ride the
+   deferred wreck machine.
+7. **The contact byte needs a REAR-WHEEL RUN**: `up.z(Q16) > 4096`, the lean
+   bound |right.z| < 40960, rear-wheel contact, and MORE THAN ONE consecutive
+   rear-contact tick (`entity[1].pad_040[8]`, reset in the both-wheels-off
+   branch) [orig: @ 0x47A4CC..0x47A52B] — a one-tick graze never grounds the
+   bike. Both-wheel landings absorb half the fall
+   [orig: `slideDecay −= slideDecay >> 1` @ 0x47B0F1..0x47B103].
+8. **The grounded heading/lean smoother** `Entity_SmoothHeadingToTarget`
+   @ 0x45B2C0 (roll-rate producer into modelPtr2, the speed>4096 lean-latch
+   arm vs the low-speed direct arm, ±itemDef+92C·0.1·scale clamps, the
+   |delta| ≤ 256 deadband) is **FPU-garbled in decompile and stays a NAMED
+   DEFERRAL** pinned to its disassembly — the lean is presentation-additive;
+   pitch/roll pose comes from the axle fit. Sinks grow +100/tick (not 250)
+   with `sub_45CFB0`/`Entity_ApplyDamageOscillationFast` as the spring
+   machinery — zero-state in the subset.
+
+Port: `light_contact_solve` (vehicle_contact_solve.cpp), routed by
+`VehicleFamily::Bike` (the tracked-solve interim retired). Bench: the bike
+rest/drop legs.
+
+## §10 The tank (ctan) mover deltas + the air local-driver input map (ported 2026-08-06)
+
+Source: `Entity_UpdateTankVehiclePhysics` @ 0x488AB0 .. 0x48AEDB (0x242B;
+renamed this session from the historic misnomer
+`Entity_UpdateMountedInfantryMovement_0`). The ground-mover template
+(@ 0x48AF00, §5.38e) with these witnessed deltas — everything not listed
+(input dir cases with the 0x16C16C0 ramp / 0x238E38C0 cap, the >>1 reverse
+command, the crouch/prone speed mods, the turn-rate blend, the
+(target−yaw+32)>>6 servo, the aiState (4−32·delta) smoothing, the
+(cmd+received)>>1 local-driver blend, the ±drag and submerged legs) matches
+the ground core:
+
+1. **Gravity 250** [orig: `slideDecay += −250` @ 0x48a82c] — the bike step,
+   with NO vertical up-cap.
+2. **Contact-gated speed integration** with the <48 stop snap [orig:
+   @ 0x489f34..0x489f56] — an airborne tank never chases its command.
+3. **The servo clamp tree** [orig: chase @ 0x489d79..0x489d84, clamps
+   @ 0x489d89..0x489e79]: a direction REVERSAL clamps at ±2·deceleration
+   (the ground core keeps the raw 1/32 chase); same-direction at
+   ±acceleration (target ≠ 0) or ±deceleration (target 0). The slope
+   anti-creep legs (±decel >> 2 at |speed| ≤ 4096, the ∓2·decel hard arm)
+   ride the deferred contact-direction store — with the store empty retail
+   takes exactly the plain caps.
+4. **Full-basis drive velocity** [orig: the contact velocity-build stores
+   @ 0x48a5ac..0x48a8b4]: velocity = speed × the normalized basis forward
+   row, slideDecay REPLACED by speed × fwd.z — the tank drives along its
+   conformed pitch. The low-speed contact-direction realign (the ±5°/tick
+   BuildYXZ ±59652323 cross-product rotate toward forward) and the downhill
+   creep-hold ride the deferred D-NET-161 store; the empty-store arm is
+   exactly velocity = speed × fwd.
+5. **Yaw applied unless PARKED, quartered airborne** [orig:
+   @ 0x48a9f7..0x48aa1d `if (!parkedByte) Yaw += (Flags & 0x2000) ?
+   modelPtr0 >> 2 : modelPtr0`] — the bike shape keyed on the solve-owned
+   flag; the park byte rides the deferred latch machine.
+6. **Named deferrals**: the differential track-scroll accumulators
+   (animStateId/deathAnimStateId — presentation, no consumer in our runtime
+   yet), the turret slew chase (brain 460..504, the ±0x2108421 step), the
+   carrier-follow rotation composition (our carrier recompose owns carried
+   rows), the AI drive/avoidance legs, and the joiner interp block — whose
+   ladder {6,8,10,15,20,25,30} at {0x2AAA, 0x4000, 0x5555, 0x8000, 0x10000,
+   0x20000}, 0x2000 deadband, 0x60000/0x20000-at-reg<293 snap (0xC0000
+   crashed), (delta+10)/20 heading, and (v+64)>>7 drift decay are IDENTICAL
+   to the already-ported ground/vehicle chase — no netsim change needed.
+
+### 10.4 The aircraft local-driver input map
+
+Source: the occupant input block of `Entity_UpdateAircraftPhysics`
+@ 0x490310. Brain registers: [544] fwd cmd, [540] lateral cmd, [548]
+climb-above-ground, [524] absolute altitude target, [528] steer heading.
+Witnessed and ported (`stage_air_vehicle_input` + the register-mirror gate in
+`aircraft_client_tick`):
+
+- The 8-way key thrust table on the air speed slot (itemDef+0x8E8 —
+  playerSpeed): fwd full; every diagonal/side/reverse component HALF.
+- Analog cyclic: fwd = −(fs·x) >> 7, lateral = −(fs·y) >> 8 (half-scale
+  lateral), steer −= (192426·z) >> 1. Crouch/walk mods >> 2 / >> 1 on both.
+- The collective: the 0x40/0x80 MoveOrder pair steps ±0x4000/tick across the
+  near-ground boundary (2 × boundRadius) between [548] and [524]; the 256 u
+  climb ceiling (0x1000000); climb < 0 = LANDED → the engine-off reset
+  (commands zero, steer = own yaw, target parks 0x4000 below ground). Our
+  state stores the ABSOLUTE target only; the split is carried as
+  climb = target − ground (the same quantity retail derives at every
+  boundary).
+- **The local-pilot blend on BOTH commands** [orig: `([2C4]+[220])>>1 →
+  [220]; ([2C8]+[21C])>>1 → [21C]` @ 0x491546..0x491568]: fwd and lateral
+  each reconcile with their received mirrors; steer stays owned by local
+  LOOK. A remote-piloted row keeps the verbatim register mirror.
+- Named deferrals: the analog COLLECTIVE channel (`analogThrottle << 7` — a
+  fourth analog axis our C2S uplink does not carry), the occupant's own
+  analog-yaw write (D-NET-161), the flare-release weapon scan, and the
+  authority engine-flag upkeep.
+
+---
+
 ## IDB changes made during these sessions
 
 `0x47EF10` defined + named `Entity_ProcessAircraftContactPhysics` (a misdecoded
@@ -3276,17 +3497,24 @@ instruction run at `0x480051` re-created as code); the cpln class-table callback
 comments on the mover/solve heads per the session notes in §5.38e. Saved.
 2026-08-05: witness comment on `Entity_ProcessTrackedVehiclePhysics @ 0x47C1C0`
 (the §7 contract summary + the opennova port cross-reference). Saved.
+2026-08-06: `0x488AB0` renamed `Entity_UpdateMountedInfantryMovement_0` →
+`Entity_UpdateTankVehiclePhysics` (the ctan class-table mover) and `0x483FE0`
+renamed `Entity_UpdatePlayerInfantryMovement` → `Entity_UpdateLightVehiclePhysics`
+(the cbik mover) — both historic misnomers; witness comments on the two solves
+(§8/§9 contract summaries + port cross-references). Saved.
 
 ## Open items
 
 The unresolved residuals live as explicit entries in the D-NET-196 ledger row
-and the §5.38e disposition: the
-wheeled (ctan `@ 0x475DE0`) and light (cbik `@ 0x479600`) contact solves
-(interim-carried by the tracked solve, §7), the tracked solve's own named
-deferrals (§7.2 — the contact-direction slope-velocity feed, the
-park/wreck/crash latch machine, spring oscillators), the aircraft local-driver
-input map, the modelData box-pair provenance (the platform probe boxes — §3's
-tracked unknown), the `Math_FixedPointMatrixToEulerAngles` interior
+and the §5.38e disposition (the wheeled/light solves, the tank mover deltas
+and the aircraft local-driver input map CLOSED 2026-08-06 — §8/§9/§10): the
+ground-family shared deferrals (the contact-direction slope-velocity feed,
+the park/wreck/crash latch machine, spring sinks/oscillators — D-NET-161),
+the bike lean smoother (`Entity_SmoothHeadingToTarget @ 0x45B2C0` —
+FPU-garbled, disasm-pinned), the analog collective channel, the tank
+track-scroll/turret-slew presentation, the modelData box-pair provenance
+(the platform probe boxes — §3's tracked unknown), the
+`Math_FixedPointMatrixToEulerAngles` interior
 (`@ 0x613310`), the `Transform_ComparePartial` field scope (§6.15 — ported as
 planar XY by structural argument), and the HOST-side platform scope (authority
 boats still ride the generic motor; retail's authority runs the solve — the

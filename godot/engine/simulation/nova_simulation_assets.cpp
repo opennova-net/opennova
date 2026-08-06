@@ -299,6 +299,13 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 						vt.family = opennova::world::VehicleFamily::Plane;
 					} else if (fam == "cbik") {
 						vt.family = opennova::world::VehicleFamily::Bike;
+					} else if (fam == "ctan") {
+						// The shipped M1A1/T80 author `ctank`; the 4-byte key
+						// is ctan — its own class-table row routes the tank
+						// mover + the wheeled contact solve [orig: @0x82ABC0
+						// ctan -> @0x48f000 ->
+						// Entity_UpdateTankVehiclePhysics @0x488AB0].
+						vt.family = opennova::world::VehicleFamily::Tank;
 					} else {
 						vt.family = opennova::world::VehicleFamily::Ground;
 						// catv rides the generic dispatcher, which passes
