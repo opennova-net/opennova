@@ -94,9 +94,6 @@ func prepare() -> void:
 		world.cancel_join_preload()
 		world.cancel_join_admission()
 		world.unload()
-	var net: Variant = _shell.get("_net")
-	if net != null:
-		net.on_world_teardown()
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
