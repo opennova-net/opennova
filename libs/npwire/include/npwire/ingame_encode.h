@@ -265,7 +265,7 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // QueueReliableMessage(0x22, slot+1)`; g_max_player_slots = the 0x04 slot-config maxPlayers byte]. Default
 // 0x1CF7 = the join-broadcast field set [orig: Server_PlayerAdd @0x51d2bf `push 7415`].
 std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx,
-                                        uint16_t field_flags = 0x1CF7);
+                                        uint16_t field_flags = kPlayerSyncJoinBroadcastFields);
 
 // tag=0x46 PLAYER-SYNC REMOVAL — a 3-byte record [u8 slot][u16 flags] with the 0x8000 removal bit set
 // (and 0x4000 ack to keep the walk going, matching golden's 0xC000). The client clears/unlinks that slot

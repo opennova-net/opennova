@@ -253,9 +253,9 @@ std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch) {
 	Writer w{out};
 
 	if (batch.has_header) {
-		w.u16(0xFFFFu);                                            // first-chunk sentinel (start_index := 0)
+		w.u16(kTerrainFirstChunkStartWord);                        // first-chunk sentinel (start_index := 0)
 		w.u16(batch.end_index);
-		w.u32(batch.magic != 0 ? batch.magic : 0x74696C30u);      // 'til0' (reader bails on mismatch)
+		w.u32(batch.magic != 0 ? batch.magic : kTerrainTileMagic); // 'til0' (reader bails on mismatch)
 		w.u32(batch.tile_count);                                   // total tiles in the full set
 		w.u32(batch.header_field2);                                // g_TerrainTileData[2]
 		w.u32(batch.header_field3);                                // g_TerrainTileData[3]
@@ -382,7 +382,7 @@ std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &r
 	// the full turret/weapon-aim block. The shared trailing write @ 0x460e10 carries
 	// Euler X when mounted (src 0x460d52) and the weapon heading BAM when not
 	// (src 0x460def). [orig: branch @ 0x460d2f]
-	if (rec.flags_byte & 0x04) {
+	if (rec.flags_byte & kVehicleCompactFlagDeadPose) {
 		w.u16(uint16_t(rec.euler_y));           // entity+24 Euler Y  [orig: 0x460d4c]
 		w.u16(uint16_t(rec.euler_x));           // entity+20 Euler X  [orig: 0x460d52 -> 0x460e10]
 	} else {
@@ -472,9 +472,9 @@ std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 	w.u8(rec.flags);
 	w.u8(rec.adm_index);
 	w.u8(rec.subtype);
-	if (rec.flags & 0x80) w.u8(rec.slot_byte);
+	if (rec.flags & kRoundEventHasSlotByte) w.u8(rec.slot_byte);
 	w.u16(rec.shooter_handle);
-	if (rec.flags & 0x40) w.u16(rec.target_handle);
+	if (rec.flags & kRoundEventHasTargetHandle) w.u16(rec.target_handle);
 	w.u16(rec.shot_seq);
 	w.u16(rec.pos_x_compressed);
 	w.u16(rec.pos_y_compressed);
@@ -703,27 +703,27 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	w.u8(ctx.player_slot);
 	w.u16(field_flags);
 	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
-	if (field_flags & 0x0001u)
+	if (field_flags & kPlayerSyncHasName)
 		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
-	if (field_flags & 0x0002u)
+	if (field_flags & kPlayerSyncHasTeamString)
 		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
-	if (field_flags & 0x0010u)
+	if (field_flags & kPlayerSyncHasVehicleName)
 		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
-	if (field_flags & 0x0004u)
+	if (field_flags & kPlayerSyncHasTeamByte)
 		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
-	if (field_flags & 0x0008u)
+	if (field_flags & kPlayerSyncHasClassByte)
 		w.u8(0);        // class/subtype byte (outside the 0x1CF7 set; slot-state default 0)
-	if (field_flags & 0x0020u)
+	if (field_flags & kPlayerSyncHasVehicleScore)
 		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
-	if (field_flags & 0x1000u)
+	if (field_flags & kPlayerSyncHasLateJoinFlag)
 		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
-	if (field_flags & 0x0040u)
+	if (field_flags & kPlayerSyncHasSquad)
 		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
-	if (field_flags & 0x0080u)
+	if (field_flags & kPlayerSyncHasSide)
 		w.u8(0);        // side [orig: slot+100577]
-	if (field_flags & 0x0400u)
+	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
-	if (field_flags & 0x0800u)
+	if (field_flags & kPlayerSyncHasVehicleTimer)
 		w.u32(0);       // vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
 	return out;
 }
@@ -735,7 +735,7 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	// 0x8000 removal + optional 0x4000 ack (golden's 0xC000): the client clears the slot and, with the
 	// ack bit, requests the next one — so the walk terminates at max_players. [orig: NapiNPClientMsg_PlayerSync
 	// @0x431370 — a 0x8000 record reads NO entity slot / fields, just [u8 slot][u16 flags].]
-	w.u16(static_cast<uint16_t>(0x8000u | (with_ack ? 0x4000u : 0u)));
+	w.u16(static_cast<uint16_t>(kPlayerSyncRemoval | (with_ack ? kPlayerSyncAck : 0u)));
 	return out;
 }
 

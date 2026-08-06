@@ -454,6 +454,39 @@ struct PlayerList {
 };
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 
+// S2C 0x46 player-sync field bits. Names follow the SERIALIZER's field
+// semantics [orig: NetPacket_SerializePlayerSync0x46 @0x505e80 write sites
+// @0x505f9b..0x506230]; the §5.21 client read labels the same fields
+// generically ("id" for 0x0010, "entityRef" for 0x0800) — both ends noted at
+// the struct fields below.
+inline constexpr uint16_t kPlayerSyncHasName         = 0x0001; // cstr
+inline constexpr uint16_t kPlayerSyncHasTeamString   = 0x0002; // cstr; retail always "" (@0x505ff7)
+inline constexpr uint16_t kPlayerSyncHasTeamByte     = 0x0004;
+inline constexpr uint16_t kPlayerSyncHasClassByte    = 0x0008; // type|subtype (outside the 0x1CF7 set)
+inline constexpr uint16_t kPlayerSyncHasVehicleName  = 0x0010; // cstr (§5.21 "id" label)
+inline constexpr uint16_t kPlayerSyncHasVehicleScore = 0x0020;
+inline constexpr uint16_t kPlayerSyncHasSquad        = 0x0040;
+inline constexpr uint16_t kPlayerSyncHasSide         = 0x0080;
+inline constexpr uint16_t kPlayerSyncHasQuality      = 0x0400;
+inline constexpr uint16_t kPlayerSyncHasVehicleTimer = 0x0800; // u32 (§5.21 "entityRef" label)
+inline constexpr uint16_t kPlayerSyncHasLateJoinFlag = 0x1000;
+inline constexpr uint16_t kPlayerSyncAck             = 0x4000; // roster-walk ack; no body
+inline constexpr uint16_t kPlayerSyncRemoval         = 0x8000; // removal; no body fields
+
+// The join-broadcast field set [orig: Server_PlayerAdd @0x51d2bf `push 7415`]
+// and the client's roster-walk request mask (the same set + the ack bit).
+inline constexpr uint16_t kPlayerSyncJoinBroadcastFields =
+		kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasTeamByte |
+		kPlayerSyncHasVehicleName | kPlayerSyncHasVehicleScore |
+		kPlayerSyncHasSquad | kPlayerSyncHasSide | kPlayerSyncHasQuality |
+		kPlayerSyncHasVehicleTimer | kPlayerSyncHasLateJoinFlag;
+static_assert(kPlayerSyncJoinBroadcastFields == 0x1CF7,
+              "the witnessed Server_PlayerAdd broadcast mask");
+inline constexpr uint16_t kPlayerSyncRosterWalkFields =
+		kPlayerSyncJoinBroadcastFields | kPlayerSyncAck;
+static_assert(kPlayerSyncRosterWalkFields == 0x5CF7,
+              "the witnessed client roster-walk request mask");
+
 // S2C 0x46 player-sync (§5.21) — one player record, fields gated by a bitmask
 // read in SOURCE order (NON-numeric: 0x10 before 0x04, 0x1000 before 0x40).
 // [orig: NapiNPClientMsg_PlayerSync @ 0x431370]
@@ -476,6 +509,15 @@ struct PlayerSync {
 	bool     queue_ack = false;      // 0x4000 — no body byte; client queues a C2S 0x22 ack
 };
 bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out);
+
+// §5.19 minimap-overlay entry vocabulary: the icon-color byte indexes
+// g_minimap_overlay_color_table @ 0x840A10 (LE 0xAARRGGBB dwords), and the
+// flags byte carries the two witnessed marker bits.
+inline constexpr uint8_t kZoneIconNeutral = 0x0C; // 0xFF208020 green — neutral (BMS team 0)
+inline constexpr uint8_t kZoneIconRed     = 0x09; // 0xFF802020 — Red (BMS team 2)
+inline constexpr uint8_t kZoneIconBlue    = 0x0A; // 0xFF304080 — Blue (BMS team 1)
+inline constexpr uint8_t kZoneOverlayFlagPersistent = 0x10; // persistent capture-zone marker
+inline constexpr uint8_t kZoneOverlayFlagClearSlot  = 0x20; // clear slot (handle -> 0xFFFF, lifetime 0)
 
 // One entry from a S2C 0x40 minimap-overlay update / capture-zone state batch
 // (§5.19). 6 bytes per entry, prefixed by a u8 count. Overlay position is read
@@ -582,6 +624,11 @@ struct PlayerCompactRecord {
 // ASH_I5A: 16 parked buggies flip to flags=0x06 short-form in one mass-death frame
 // f=237868). A LIVE vehicle — including one being DRIVEN — always streams the 21-B
 // full form; drive replication is host-side simulation, not a form switch.
+
+// The §5.13 form selector: flags_byte bit 0x04 picks the 15-B dead/wreck
+// pose-only form over the 21-B live form (the death family sets Flags |= 6).
+inline constexpr uint8_t kVehicleCompactFlagDeadPose = 0x04;
+
 struct VehicleCompactRecord {
 	uint16_t parent_slot_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
 	uint16_t pos_x_compressed = 0;        // entity+4   (vehicle-local if parent != none)
@@ -633,6 +680,14 @@ struct InfantryCompactRecord {
 	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
 };
 
+// §5.9.1 round-event `flags` bits (the fire-mode byte, ring+30). Bits 4-5 are
+// the pre-consume magazine-count low two bits — a 2-bit lane, deliberately not
+// named as single masks.
+inline constexpr uint8_t kRoundEventFlagAltFire         = 0x01; // bit0 alt-fire
+inline constexpr uint8_t kRoundEventFlagAdmIndexed      = 0x02; // bit1 adm-indexed
+inline constexpr uint8_t kRoundEventHasSlotByte         = 0x80; // [ring+32 != 0 @0x5048bb]
+inline constexpr uint8_t kRoundEventHasTargetHandle     = 0x40; // [live fire target @0x50485a]
+
 // One §5.9.1 ROUND-EVENT record (ex "weapon-hit" — a decode-era misnomer): a round
 // FIRED by another player, carried as the fire origin + direction the receiving
 // client re-simulates the round from (RoundData_SpawnRound); no impact is on the
@@ -666,8 +721,8 @@ struct RoundEventRecord {
 	uint16_t yaw_bam_high = 0;        // fire DIRECTION yaw, BAM high half (<< 16 on apply)
 	uint16_t pitch_bam_high = 0;      // fire DIRECTION pitch, BAM high half
 
-	bool has_slot_byte() const { return (flags & 0x80) != 0; }
-	bool has_target_handle() const { return (flags & 0x40) != 0; }
+	bool has_slot_byte() const { return (flags & kRoundEventHasSlotByte) != 0; }
+	bool has_target_handle() const { return (flags & kRoundEventHasTargetHandle) != 0; }
 };
 
 bool decode_player_compact_record(const uint8_t *body, size_t len,
@@ -846,6 +901,14 @@ struct FrameMountAmmo {
 	uint16_t clip = 0;              // selected MountSlot +0x10
 	uint16_t reserve = 0;           // selected MountSlot +0x12
 };
+
+// The 0x0A header flags2 selectors: the low nibble routes the sub-block —
+// values 0..3 are the plain sub-block cycle, and the exact value 8 (sub-block 0
+// with bit 3) appends the phase-8 mounted-ammo record
+// [orig: writer @0x4FFD9A / reader @0x430459; high nibble ignored, D-NET-75].
+inline constexpr uint8_t kFrameFlags2SubBlockCycleMask = 0x03;
+inline constexpr uint8_t kFrameFlags2RouteMask         = 0x0F;
+inline constexpr uint8_t kFrameFlags2MountedAmmoRoute  = 0x08;
 
 struct FrameUpdate {
 	// Header refs (dword_A822E4/E8/EC) — the i32 16.16 world anchor each compact
@@ -1608,6 +1671,13 @@ struct TerrainTileEntry {
 	uint32_t word1 = 0;
 	uint32_t word2 = 0;
 };
+
+// §5.37 stream framing: the first chunk announces itself with the 0xFFFF wire
+// start word, then the 'til0' header magic (the reader bails without loading on
+// a mismatch). libs/til's TIL_MAGIC pins the same literal for the on-disk form.
+inline constexpr uint16_t kTerrainFirstChunkStartWord = 0xFFFF;
+inline constexpr uint32_t kTerrainTileMagic = 0x74696C30; // 'til0' little-endian
+static_assert(kTerrainTileMagic == 0x74696C30u);
 struct TerrainLoadBatch {
 	bool     has_header = false;  // first chunk (wire start word == 0xFFFF)
 	uint16_t start_index = 0;     // first tile index this chunk carries (0 for the header chunk)
