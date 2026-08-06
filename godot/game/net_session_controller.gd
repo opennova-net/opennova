@@ -10,25 +10,17 @@ extends Node
 # seam. Game-layer only: the engine world below knows nothing of menus or env
 # hooks.
 
-const NetKillFeedScript := preload("res://game/net_killfeed.gd")
-
-var _shell  # MainGame: start_world_load / enter_net_world / current_resource_root
+var _shell  # MainGame: start_world_load / current_resource_root
 var _world: GameWorld
 var _menu_shell  # NovaMenuShell (nova_menu_shell.gd)
-var _camera: Camera3D
-var _hud_parent: Node   # where the spectator kill feed mounts
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
-var _net_killfeed  # net spectator kill feed, built while in a replay session
 
 
-func setup(shell, world: GameWorld, menu_shell, camera: Camera3D,
-		hud_parent: Node, panel_layer: Node) -> void:
+func setup(shell, world: GameWorld, menu_shell, panel_layer: Node) -> void:
 	_shell = shell
 	_world = world
 	_menu_shell = menu_shell
-	_camera = camera
-	_hud_parent = hud_parent
 	_panel_layer = panel_layer
 
 
@@ -38,25 +30,7 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 	mp_companion.lan_join_requested.connect(join_lan_server)
 
 
-# Net-session teardown that rides the shell's world-to-menu rollback.
-func on_world_teardown() -> void:
-	if _net_killfeed != null:
-		_net_killfeed.queue_free()
-		_net_killfeed = null
-
-
 # --- Env launch hooks (dev/demo scaffolding) -----------------------------------
-
-# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
-# inherit from the editor), skip the menu and dial the replay tool / server
-# directly — each instance gets slotted into a role on connect. True when the
-# session started; a rejected session returns false so the shell's normal boot
-# continues and restores the front-end.
-func maybe_launch_replay_from_env() -> bool:
-	if OS.get_environment("NW_REPLAY").is_empty():
-		return false
-	return _enter_net_session()
-
 
 # Co-op LAN demo hooks. These remain useful for deterministic smoke runs even
 # though mp.mnu's LAN_SEARCH now browses live hosts through NovaLanSession.
@@ -283,39 +257,6 @@ func _resolve_default_mission() -> String:
 	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
 	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
 	return MissionCatalog.first_mission_name(_resource_root())
-
-
-# --- Replay spectate (NW_REPLAY) -------------------------------------------------
-
-# Spectate a net session (no menu). The source (replay tool or a real server) is
-# at NW_REPLAY="host:port"; the map name comes off the wire, so only the resource
-# dir is needed: NW_REPLAY_DIR (else the persisted one), NW_REPLAY_LOOSE for a flat
-# extract, and NW_REPLAY_ITEMS as an optional items.def override. False when the
-# session was rejected (the shell has been rolled back to the menu).
-func _enter_net_session() -> bool:
-	var ep := OS.get_environment("NW_REPLAY")
-	var parts := ep.split(":")
-	_shell.enter_net_world()
-	var err := _world.load_net_session({
-		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
-		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
-		"dir": OS.get_environment("NW_REPLAY_DIR"),
-		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
-		"items": OS.get_environment("NW_REPLAY_ITEMS"),
-		"camera": _camera,
-	})
-	if err != OK:
-		push_warning("NetSessionController: net session failed to start (%d)" % err)
-		_shell.abort_net_session(error_string(err))
-		return false
-	# Kill feed over the spectator: reads the same decoded event stream NetEventView
-	# draws in 3D, posting kill / objective lines to a top-right HUD feed.
-	if _net_killfeed == null:
-		_net_killfeed = NetKillFeedScript.new()
-		_net_killfeed.name = "NetKillFeed"
-		_hud_parent.add_child(_net_killfeed)
-	_net_killfeed.set_client(_world.get_net_client())
-	return true
 
 
 # --- Shared lookups --------------------------------------------------------------

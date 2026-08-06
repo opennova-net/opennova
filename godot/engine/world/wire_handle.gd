@@ -11,6 +11,8 @@ extends RefCounted
 const POOL_SHIFT := 12
 const POOL_MASK := 0xF
 const SLOT_MASK := 0xFFF
+const INVALID := 0xFFFF   # "not found" / no-entity sentinel
+const POOL_COUNT := 5     # live pools 0..4 (pool 4 = effects)
 
 
 static func pool(handle: int) -> int:

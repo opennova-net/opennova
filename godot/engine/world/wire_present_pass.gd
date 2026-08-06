@@ -10,8 +10,8 @@ extends RefCounted
 # (docs/net §5.23/§5.25/§5.38b).
 #
 # It is the wire analog of MissionObjectPlacer + MissionPresentPass and the sole
-# presenter for a decoded ClientState, whether the source is a live
-# NovaSimulation joiner or a NovaNetClient spectator. It keeps one
+# presenter for a decoded ClientState (the live NovaSimulation joiner's
+# ClientReplicaPipeline, ADR 0026). It keeps one
 # NovaObjectModel per wire handle, resolved by the wire type id, and updates each
 # transform + visibility from the source's shared PF_* snapshot contract.
 #

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
+
 #include <npwire/replication_model.h> // PlayerReplicationState (opennova::)
 #include <npwire/session_hello.h> // DisconnectEvent
 
@@ -16,8 +18,10 @@ inline constexpr uint32_t INTEGRITY_REQUEST_PERIOD_TICKS = 0x136u + 1u;
 // One explicit global countdown: reset 0 emits at the next boundary, reload
 // 0x136 emits again after exactly 310 further Server_TickUpdate calls.
 inline constexpr uint32_t NETWORK_QUALITY_BROADCAST_PERIOD_TICKS = 0x136u;
-inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS = 30u * 62u;
-inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS = 12u * 62u;
+inline constexpr uint32_t CONTROL_REQUEST_LIVE_GATE_TICKS =
+		30u * uint32_t(JO_ENGINE_TICK_RATE);
+inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS =
+		12u * uint32_t(JO_ENGINE_TICK_RATE);
 
 // Stage retail's high-table H:0x03 LogPuntEvent record for one remote. The
 // first event wins and immediately closes that connection's gameplay gate;

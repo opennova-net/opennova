@@ -177,7 +177,7 @@ const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chai
                                        uint8_t team, uint32_t game_type) {
     // [orig: find_spawn_entity_for_team @0x4fc810]
     const Entity *found = nullptr;
-    if ((game_type & 0x20000u) != 0) {
+    if ((game_type & kGameTypeObjectiveBit) != 0) {
         // Co-op branch: the LAST team-matching un-numbered spawn entity [orig: @0x4fc834].
         world.registry.for_each([&](const Entity &e) {
             const int pool = e.handle.pool();

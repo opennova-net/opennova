@@ -158,6 +158,13 @@ inline int32_t body_anim_slot_from_state(int state) {
 
 uint32_t infantry_anim_flags(int state);
 
+// The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
+// the wire player compact carries the same pair as its 2-bit stance lane).
+// [orig: g_animStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
+// @0x4EC252..0x4EC27A]
+inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
+inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
+
 // One tick of AnimMap root output, in entity-local axes. [orig: AnimMap_UpdateEntity
 // @0x40b5f0 tail]
 struct RootMotionFrame {

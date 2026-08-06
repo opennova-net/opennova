@@ -229,7 +229,7 @@ public:
 	// with the live g_currentWeaponSlot (the equipped combo after the spawn fill). The wire team
 	// byte is NOT part of this seam — it is latched from the host's S2C 0x04 tail byte, exactly
 	// like retail's byte_A85B48. Unset keeps the capture-default kit, so headless callers (ctests,
-	// nw_replay, seed_in_match) preserve today's auto behavior byte-for-byte.
+	// seed_in_match) preserve today's auto behavior byte-for-byte.
 	// [orig: Game_StartMission @0x525836/@0x525c2e -> NetPacket_SendLoadoutSubmit @0x42cdc0]
 	// The optional blue/red side blocks below carry the profile content the two PROFILE-sourced
 	// submissions read (this pair and the S2C 0x50 reselect). player_class/rows remain the

@@ -512,7 +512,7 @@ Wave 8 branch-validation grill (2026-07-01; net-re §8 Wave 8; reimpl in `libs/n
 | `ServerConfig_ApplyHostSetting` | `0x4a6000` | SET-command → `dword_2550A04` mpattrib bitfield (`TeamChoose` bit 0x4, `TeamFF`/`FriendlyTag` inverted 0x200/0x400) | — | witnessed (read-only) |
 
 Kill feed + replay event/environment streams (§5.26/§5.27; one-host/one-client capture 2026-06-17;
-`nw_pp` printers + `libs/novaworld` decoders, `nw_replay_timeline` `test_event_stream`):
+`nw_pp` printers + the npwire decoders):
 
 | original | addr | role | D-NET | status |
 |---|---|---|---|---|

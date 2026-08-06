@@ -93,7 +93,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 |------|----------|
 | `libs/` | C/C++ engine libraries: format parsers, runtime systems, networking, and editor support (see [C/C++ Libraries](#cc-libraries)). |
 | `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
-| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a dev/golden-harness in-match host (`nw_server`, never shipped), the packet pretty-printer (`nw_pp`), the replay streamer (`nw_replay`), and shared socket/pcap helpers (`common/`). |
+| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a dev/golden-harness in-match host (`nw_server`, never shipped), the packet pretty-printer (`nw_pp`), and shared socket/pcap helpers (`common/`). |
 | `pyopennova/` | Python ctypes FFI layer over the shared `opennova` library, used by the importer and the Python tests. |
 | `opennova_jobs/` | DCC-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | DCC-agnostic PySide6 importer dialog and pure UI helpers. |
@@ -169,7 +169,7 @@ Wire-compatible with the original protocols: our encoders produce bytes a stock 
 |---------|-------------|
 | **novacrypto** | CRC-32/MPEG-2 and the NWU/EPASK/URL ciphers behind every NovaWorld exchange. |
 | **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the lobby protocol. |
-| **npwire** | The in-game wire protocol: the in-match message codec and catalog, NWU session framing, and the capture/replay chain (ADR 0019). |
+| **npwire** | The in-game wire protocol: the in-match message codec and catalog, NWU session framing, and the capture decode chain (ADR 0019). |
 | **novaworld** | The NovaWorld matchmaking and service lib: session state above the framing, gate (first contact, login, server-browser data), and lobby persistence (the only sqlite link). |
 | **netsim** | The in-match net seam: the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server. |
 | **npruntime** | The in-match NP server and client state machines and frame loop, ported from the original engine over the netsim seam. |

@@ -53,7 +53,7 @@ private:
 		String anim_def;
 		String sound_profile;
 		// items.def *_function class-tag directives. The net layer maps these to a
-		// §5.10b wire dispatch class (NovaNetClient::class_from_tag); the placer/
+		// §5.10b wire dispatch class (netsim class_from_tag); the placer/
 		// renderer doesn't use them. Stored raw so the object DB stays net-agnostic.
 		String ai_function;
 		String move_function;

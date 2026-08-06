@@ -21,6 +21,17 @@ enum class EntityClass : uint8_t {
 	NoNetworkCallback, // known ItemDef class with fn[3] == 0; tag==1 header only
 };
 
+// The DEFAULT player Person item template id (§5.2a host-built player entity;
+// §5.6 — the one type the 0x0C organic path is crash-safe on where 0x0D is
+// not). Every capture to date streams this id for players; it is a default the
+// runtime carries as data (PlayerReplicationState.entity_type_id), not an
+// invariant — consumers compare against it only on the no-items.def fallback
+// legs, and the player's selected CHARACTER rides the separate avatar channel
+// (S2C 0x29 packedCharId -> CharacterEntity, D-PLAYERINFO-1), never this id.
+// world/player_spawn.h mirrors it as kPlayerInfantryTypeId (the historical wire
+// vocabulary); libs/netsim static_asserts the two agree.
+inline constexpr uint16_t kPlayerPersonTypeId = 0x14B9;
+
 // Map a 4-char items.def class-tag (case-sensitive §5.10b match) to its class.
 EntityClass class_from_tag(const char *tag);
 

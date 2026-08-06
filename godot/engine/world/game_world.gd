@@ -25,11 +25,8 @@ const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
 const NovaSunShadowScript := preload("res://engine/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const PanmClockScript := preload("res://engine/world/panm_clock.gd")
-const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
-const NetEventView := preload("res://engine/world/net_event_view.gd")
 const NovaDebugViewStatus := preload(
 		"res://engine/debug/nova_debug_view_status.gd")
-const NET_CONTAINER_NAME := "NetObjects"
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
 const WEATHER_TICK_HZ := NovaWeather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
 const MAX_WEATHER_CATCHUP_TICKS := 31
@@ -132,9 +129,6 @@ var _occlusion: OcclusionFramePass
 # entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
-var _net_client     # NovaNetClient: the in-match wire client (replay or live)
-var _net_view       # WirePresentPass: the shared live/spectator replica presenter
-var _net_event_view # NetEventView: draws the decoded event stream over the world
 # A host-injected resource root (main_game hands its boot mount over; tests
 # hand fixture roots). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
@@ -426,120 +420,6 @@ func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String =
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
-## Spectate a NET-driven session: a NovaNetClient connects to the source (the
-## replay tool today, a real server later), and entities come from the LIVE WIRE
-## stream — not the .bms placements, not the AI sim. The map name rides the wire
-## (S2C 0x7B), so when the client learns it we load that mission's terrain +
-## environment; meanwhile WirePresentPass renders the canonical client replicas.
-## Only the resource dir + the endpoint are needed.
-## opts: { dir, loose (bool), replay_host, replay_port, items (optional items.def
-## path override), camera (Camera3D for the spectator overview) }.
-func load_net_session(opts: Dictionary) -> int:
-	# Resource root: a `loose` dir (a flat extract — e.g. an authored probe folder)
-	# mounts via set_root_dir; otherwise the normal PFF-install resolution.
-	var resource_root: NovaResourceRoot
-	var dir := String(opts.get("dir", ""))
-	if bool(opts.get("loose", false)) and not dir.is_empty():
-		resource_root = NovaResourceRoot.new()
-		resource_root.set_root_dir(dir)
-		set_resource_root(resource_root)
-	else:
-		resource_root = _resolve_root(dir)
-	if resource_root == null:
-		return ERR_CANT_OPEN
-	_clear_mission_tile_info()
-	_resource_root = resource_root
-
-	# Item database for BOTH the §5.10b wire dispatch-class table and model
-	# resolution. Normally resolved from the mounted root; an explicit `items` path
-	# overrides it (e.g. when a probe's items.def lives outside the install).
-	var item_db := NovaItemDatabase.new()
-	var items_path := String(opts.get("items", ""))
-	var item_err := item_db.load(items_path) if not items_path.is_empty() \
-		else item_db.load_from_resource_root(resource_root, "items.def")
-	if item_err != OK:
-		push_warning("net session: items.def not loaded (%s) — entities won't resolve" % item_db.get_last_error())
-
-	# Spectate uses the same item/model projector as live replication. The
-	# MissionObjectPlacer resolves both authored ids and compact wire ids.
-	_placer = MissionObjectPlacer.new(resource_root, item_db)
-
-	# The in-match spectator client (replay vs real differ only by the endpoint).
-	_net_client = NovaNetClient.new()
-	_net_client.name = "NovaNetClient"
-	_net_client.set_item_database(item_db)
-	_net_client.replay_host = String(opts.get("replay_host", "127.0.0.1"))
-	_net_client.replay_port = int(opts.get("replay_port", 42000))
-	_net_client.mission_known.connect(_on_net_mission)
-	# The replica reducer/body mover must run before this node's present pass in
-	# the same render frame. Lower process priorities run first in Godot.
-	_net_client.set_process_priority(get_process_priority() - 1)
-	add_child(_net_client)
-
-	var container := Node3D.new()
-	container.name = NET_CONTAINER_NAME
-	add_child(container)
-
-	_net_view = WirePresentPass.new()
-	_net_view.setup(_net_client, _placer, container, _env, null, {
-		"camera": opts.get("camera", null),
-	})
-
-	# Draw the decoded event stream (fire / hits / kills / capture zones) over the
-	# rendered world — the 3D replacement for the standalone viewer's 2D markers.
-	_net_event_view = NetEventView.new()
-	_net_event_view.name = "NetEventView"
-	_net_event_view.setup(_net_client)
-	add_child(_net_event_view)
-
-	_net_client.connect_to_replay()
-	_loaded = true
-	_debug_views.on_loaded()
-	world_loaded.emit()
-	return OK
-
-
-# The map name arrived on the wire (S2C 0x7B). Load that mission's terrain +
-# environment so the streamed entities have ground to stand on. Entities are NOT
-# placed from the .bms and the AI sim never runs — they come from the wire.
-func _on_net_mission(mission_name: String) -> void:
-	if _loaded_mission != null or _resource_root == null:
-		return
-	# Wire-selected missions use the same witnessed archive-only BMS path.
-	# [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
-	if not _resource_root.has_file(
-			mission_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY):
-		push_warning("net session: map '%s' (from the wire) not in %s" % [mission_name, _resource_root.get_root_dir()])
-		return
-	var mission := NovaMissionData.new()
-	if mission.open_from_resource_root(
-			_resource_root, mission_name, NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY) != OK:
-		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
-		return
-	# A wire map is a small transaction over both required render resources.
-	# Keep retained consumers dormant and the BMS retryable until ENV + TRN have
-	# both loaded; otherwise a valid terrain could resurrect stale atmosphere.
-	_set_weather_world_tick_driven(true)
-	_set_water_world_rendering_enabled(false)
-	_load_mission_tile_info(mission_name, _resource_root)
-	var env_name := mission.get_environment_ref() + ".env"
-	if not _resource_root.has_file(env_name) or not _load_environment(env_name):
-		push_warning("net session: environment %s.env not loaded" % mission.get_environment_ref())
-		return
-	var trn := mission.get_terrain_ref() + ".trn"
-	if not _resource_root.has_file(trn) or not _load_terrain(trn):
-		push_warning("net session: terrain %s.trn not loaded" % mission.get_terrain_ref())
-		return
-	# EnvFile overrides and the distinct BMS water-height rung commit together
-	# only after the complete map is renderable. A partial load publishes neither.
-	_apply_mission_environment_overrides(mission)
-	_loaded_mission = mission
-	_mission_forces_indoors = (int(mission.get_info().get("attrib_flags", 0)) & NovaMissionData.ATTRIB_FORCE_INDOORS) != 0
-	_prepare_autonomous_weather()
-	_set_water_world_rendering_enabled(true)
-	print_verbose("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
-
-
 # The ONE mission path — the file entry (load_mission) and the in-memory
 # entry (load_mission_data) converge here: resolve the header's terrain +
 # environment from `resource_root`, apply the mission's env overrides, build the
@@ -719,12 +599,6 @@ func get_loaded_mission_file() -> String:
 	return _loaded_mission_file
 
 
-## The active net spectator client (NovaNetClient), or null outside a net session.
-## Hosts use it to drive a kill-feed / event HUD off the same decoded stream.
-func get_net_client():
-	return _net_client
-
-
 func get_sim() -> Object:
 	# Runtime test/tool seams stay duck typed on _runtime (harness stubs install
 	# doubles through game_world_test's _install_runtime seam); every stub honors
@@ -787,20 +661,6 @@ func unload() -> void:
 	# Debug-view teardown: the retain/free split (user-point re-arm vs freed
 	# overlays vs the deliberately surviving particle/pick stack) lives in the set.
 	_debug_views.on_unload()
-	# Net session teardown (no-ops for a normal mission).
-	if _net_event_view != null:
-		_net_event_view.queue_free()
-	if _net_view != null:
-		_net_view.teardown()
-	if _net_client != null:
-		_net_client.stop()
-		_net_client.queue_free()
-	var net_container := get_node_or_null(NodePath(NET_CONTAINER_NAME))
-	if net_container != null:
-		net_container.queue_free()
-	_net_event_view = null
-	_net_view = null
-	_net_client = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
@@ -2570,8 +2430,6 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 
 func _process(_delta: float) -> void:
 	_sample_panm_clock()
-	if _net_view != null:
-		_net_view.present()
 	if not _loaded or not is_visible_in_tree():
 		_restore_idle_frame_clear_color()
 		return
