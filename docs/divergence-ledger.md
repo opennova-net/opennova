@@ -533,12 +533,7 @@ slot order, extra archives never mount, pinned by
 @ 0x829f90]`); the editor's browse index deliberately keeps `ScanAll`
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
-Closed 2026-07-17: **D-VFS-1**, **D-VFS-3**, and **D-VFS-7** — per-call source
-policy, verbatim relative runtime queries, and exact archive-name comparison are
-live and pinned at the VFS/Godot seams; **D-VFS-10** records the ratified safety
-boundary around those newly live loose probes. Added 2026-07-30: **D-VFS-11** —
-the editor-managed `--loose-root` boot fallback, ratified by
-[ADR 0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md).
+(D-VFS-1/-3/-7/-10/-11 are tabled above with their closures — not repeated here.)
 
 ### Credits (CBIN) — [credits/cbin-re.md](credits/cbin-re.md) (D-CBIN catalog; PAR-R5, PARTIAL)
 

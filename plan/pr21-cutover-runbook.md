@@ -1,5 +1,11 @@
 # PR 21 — NovaWorld production deploy + cutover (runbook)
 
+> **Status (2026-08-06): still un-executed** — the one open item of the
+> NovaWorld-integration era. The "#136 -> master is open" premise below is
+> historical (#136 merged; the trunk landed). The operator sequence and secrets
+> schema remain current against [DEPLOY.md](../DEPLOY.md). Tracked in
+> TODO.md § Project health follow-ups.
+
 Final step of the integration. Everything else is merged into the trunk
 `web-nw-for-real-master` (the single integration PR **#136** → `master` is open), CI is green
 except the two known-unrelated reds (`modsuperoed-smoke`, `validate-deliverables`, also red on

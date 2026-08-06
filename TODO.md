@@ -44,7 +44,7 @@ hardening, and project health. Divergences from the original engine belong in
       gates (both GREEN on the 2026-08-05 suites, 24/24 cells captured cleanly).
       Details: `.agents/retail-lan-parity.md` §9
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
-      `libs/terrain` carries 22 anchors across 15 files and `godot/engine/terrain/` 18
+      `libs/terrain` carries 23 anchors across 15 files and `godot/engine/terrain/` 18
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
@@ -79,34 +79,51 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Converge `libs/cpt`'s bit codec on `io/bit_stream.h` (owner: `libs/cpt/src/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `libs/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
 - [ ] Typed shutdown-coordinator seams (owner: `godot/game/runtime_shutdown_coordinator.gd`): the coordinator still pokes the shell stringly (`_shell.call("_cleanup_picker")`, `_shell.call("_dismiss_loading_screen")`); replace with a typed shell contract (#403 review follow-up).
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
-
-## Quality campaign — remaining slices
-
-The 2026-07 quality campaign (approved 2026-07-28) runs as small independent PRs
-straight to master. Waves 1–4 are DONE (#310–#375): Phase 0 relanded the stranded
-#303 audit; W1 hygiene (dead code, print-zero + ratchets, the io/log.h sink,
-canonical constants); W2 duplication collapse (strutil, framers + PeerAddr, io
-primitives, gd helpers, tooling, pcapio, W2-7 hardening; W2-3 retired as refuted);
-W3 split the six god files into one-concern TUs (mission, collision, 3DI3, GP,
-ai, def), fixed the citation ratchet (#349), and closed with the W3-4..W3-7
-slices (#352–#356); W4 was the GDScript wave (#357–#375). Remaining: W5 only,
-plus the no-magic remainder:
-
-- [ ] W5 consolidations + push-downs: perf-span unify, sim debug-snapshot
+- [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
+      waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
       narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
       the avatar/object preview de-fork + shared MCP arg helper, push-downs
       (ItemSeatSpecs first — that PR also lands the standing "new engine logic
-      starts in libs/" CLAUDE.md rule — then camera and armory/catalog) —
-      opportunistic
-- [ ] No-magic remainder (C11): named constants for the OED rattrib/pattrib magic
-      values — #365 landed the net-message-id and witnessed-flag-bit halves; the
-      OED half is blocked on a ModSuperOed IDB witness
-
-## Standalone runtime / debug stack follow-ups (post-#376)
-
-ADR 0025 made the standalone game ONED's only live mission runtime. These are the
-open review follow-ups from #376/#378 — none blocking:
-
+      starts in libs/" CLAUDE.md rule; the camera and armory push-downs are their
+      own rows below) — opportunistic
+- [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
+      rattrib/pattrib magic values — #365 landed the net-message-id and
+      witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
+- [ ] HUD view-helper math cluster -> one `libs/hud` port slice (the ENG-4/FNT
+      pattern: math + constants native, draw/Font blits stay host): exact-integer
+      fade decay, 1024x768 design scale, 16.16 crosshair spread + TAPER strip,
+      Q16 stance scaling, health thresholds, message tick policy, half-bright
+      text, ammo format, stance->ERROR-row remap, capacity-1 reserve fold — all
+      `[orig]`-cited in `godot/engine/ui/hud_*.gd` / `game_hud.gd` /
+      `game_hud_presenter.gd`; no libs home exists today (ENG-5 sweep-#2 row,
+      moved from the closed maturity program 2026-08-06)
+- [ ] Mission TOD clock -> `libs/env` clock slice: `Env_TodAdvancePerTick =
+      0x18000000/(3720*minutes)` `[orig: @ 0x57d108]`, Q8.8->8.24 widening,
+      60-min clamp — currently in `nova_environment.gd`, zero presence in
+      libs/env (ENG-5 row)
+- [ ] Camera/view composition remainder -> fold into `libs/world` player_view:
+      eye height 1.0 dual-declared with `nova_simulation.cpp`, TP distance/orbit
+      `[orig: @ 0x4391d0]`, eye re-aim `[orig: @ 0x437d10]`, weapon.def /256
+      view-offset + axis map `[orig: @ 0x4dd380]`; the ADS lerp, the
+      anim-key-substring stance probe, and the 4x-re-declared 62.5 Hz tick
+      constant are close-now candidates riding this (`player_viewmodel_rig.gd`;
+      ENG-5 row; the W5 "camera" push-down is this row)
+- [ ] Editor-preview PLAYPARTANIM phase integrator: route `nova_object_model.gd`'s
+      preview through `AiSystem::advance_part_anim` (the height-sampler
+      dual-implementation pattern); the runtime already uses `set_part_phase`
+      correctly (ENG-5 row)
+- [ ] Particle flag literals (`1<<18/27/28`) re-declared + flags->kill-plane
+      dispatch in `effect_world.gd` / `particle_preview.gd` — close-now: alias
+      off the already-bound `NovaParticleDef` flag table (the MATERIAL_FLAG_*
+      pattern exactly) (ENG-5 row)
+- [ ] Armory derivation math, class-resolve half: the scan + masks
+      `[orig: @ 0x5642f0]` in `armory_menu_companion.gd` — the weight half
+      closed 2026-07-30 via `NovaWeaponDatabase` (ENG-5 row; the W5
+      "armory/catalog" push-down is this row)
+- [ ] Avatar menu-portrait presentation math (BAM/frame idle, 2^28 sway,
+      rand-yaw `[orig: @ 0x55dba0; @ 0x5600d0]`) in `avatar_preview.gd` —
+      minor, exception-leaning; disposition with the `libs/hud` slice's review
+      (ENG-5 row)
 - [ ] Editor/runtime version-skew guard: the two CI zips (`opennova-modtools-windows`,
       `opennova-runtime-windows`) can pair a fixed editor with a stale `opennova.exe`
       and fail as an unexplained resource picker. The child already writes a `version`
@@ -131,6 +148,11 @@ open review follow-ups from #376/#378 — none blocking:
 
 ## Project health follow-ups
 
+- [ ] NovaWorld production deploy + cutover (operator-executed, one-time): the
+      stack (gate + NovaWorld server + legacy HTTP services + web portal) has
+      never been deployed to production — steps in [DEPLOY.md](DEPLOY.md), the
+      operator sequence in `plan/pr21-cutover-runbook.md` (its "#136 open"
+      premise is historical; commands remain current)
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, Python, and Godot gates.
 - [ ] Full Linux core tests: add an Ubuntu leg for the complete native/Python suite after triaging any platform-only failures. Acceptance: the full CTest and Python suites run on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] macOS CI coverage: #344 removed every macOS job from regular CI (the test-matrix leg, `build-gdextension-macos`, the godot-tests macOS leg, and the macOS package jobs); `macos-latest` now appears only in `release.yml` tag-time packaging, so macOS builds are first exercised at release time. Decide: restore a macOS leg (full or smoke) to PR/master CI, or record the lapse as accepted and note the release-time-only risk.
@@ -140,10 +162,8 @@ open review follow-ups from #376/#378 — none blocking:
 
 ## Player info (player.mnu / PLAYER_INFO)
 
-The avatar lists, cascade, team filter, name, 3D preview, ACCEPT seam, and the three
-loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) are wired
-(godot/game/player_info_menu_companion.gd; grilled in docs/playerinfo/avatars-re.md
-D-PLAYERINFO-7..12). Remaining:
+player.mnu is wired end to end (`player_info_menu_companion.gd`; grilled in
+docs/playerinfo/avatars-re.md, D-PLAYERINFO-7..12). Remaining:
 
 - [ ] Persist the avatar/class/loadout selections to the on-disk profile
       (D-PLAYERINFO-9 — the NAME half is done: `NovaPlayerProfile.save_callsign` writes

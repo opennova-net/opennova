@@ -416,10 +416,10 @@ WeaponDef_ParseProperty @ 0x54d730 — GameText_GetString("WepDes", textid)]`.
 (The earlier note blaming "REVX02's Game.bin" for raw-id fallbacks described the
 port's own misload — Game.bin never carries `WepDes`; corrected 2026-07-11.)
 
-Reimpl plan (now fully witnessed; producer + consumer + masks): extend `libs/def`
-`DefWeaponDef` to capture the loadout fields above + add VFS (in-memory) parsers, add
-a `NovaWeaponDatabase` binding, then wire the host combos + ammo + weight. Tracked in
-TODO.md (Player info / loadout).
+Reimpl plan — LANDED (#388/#390, 2026-07-30): `libs/def` `DefWeaponDef` carries the
+loadout fields above with VFS (in-memory) parsers, `NovaWeaponDatabase` binds them,
+and the host combos + ammo + weight are wired (D-PLAYERINFO-11 below). The remaining
+player-info work is TODO.md's persistence row plus D-PLAYERINFO-1.
 
 ### Ammo combos, weight, and icons (D-PLAYERINFO-11 — witnessed 2026-07-30)
 
