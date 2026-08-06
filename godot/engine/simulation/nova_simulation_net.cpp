@@ -834,6 +834,12 @@ void NovaSimulation::joiner_pump() {
 	// @0x4B3D6E..0x4B3DA9]
 	runtime_->view().set_remote_motion_terrain(
 			world_ != nullptr ? world_->terrain : nullptr);
+	// The replica water/float channel reads the mission water plane
+	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
+	// water in this world).
+	runtime_->view().set_water_z(
+			world_ != nullptr ? world_->env.water_z : 0,
+			world_ != nullptr && world_->env.water_z != 0);
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model
@@ -869,13 +875,50 @@ void NovaSimulation::joiner_pump() {
 							q.capsule_bottom, q.capsule_top, q.is_player_class,
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &ground);
+							q.row_handle, &q.entity_flags, &ground);
 					q.out_ground = ground.valid() ? ground.packed
 					                              : opennova::world::EntityHandle::kInvalid;
 					return clearance;
 				});
+		// The deck-ride carrier seam: resolved_ground is the registry handle
+		// the ground probe stored; the ride follows that entity's live pose
+		// [orig: the org movers read groundEntity's Position/savedLivePose
+		// +0x80../body* +0x8C.. @0x4b530b../@0x4ba47f..]. Predicted vehicles
+		// serve the precise BAM motor attitude; anything else converts the
+		// presented degrees (a static's deltas are zero either way).
+		runtime_->view().set_carrier_pose_provider(
+				[this](uint16_t handle,
+						opennova::netsim::ClientReplicaPipeline::CarrierPose
+								&out) -> bool {
+					if (world_ == nullptr) return false;
+					opennova::world::EntityHandle h;
+					h.packed = handle;
+					const opennova::world::Entity *e = world_->registry.get(h);
+					if (e == nullptr) return false;
+					out.pos[0] = opennova::world::to_fixed(e->position.x);
+					out.pos[1] = opennova::world::to_fixed(e->position.y);
+					out.pos[2] = opennova::world::to_fixed(e->position.z);
+					if (e->veh.net_predicted && e->veh.yaw_seeded) {
+						out.yaw = e->veh.yaw_bam;
+						out.pitch = e->veh.air_pitch_bam;
+						out.roll = e->veh.air_roll_bam;
+					} else {
+						out.yaw = opennova::world::
+								bam_heading_from_mission_yaw_deg(e->yaw);
+						out.pitch = static_cast<int32_t>(std::llround(
+								double(e->pitch) /
+								opennova::world::kDegreesPerBam));
+						out.roll = static_cast<int32_t>(std::llround(
+								double(e->roll) /
+								opennova::world::kDegreesPerBam));
+					}
+					out.bound_radius =
+							opennova::world::to_fixed(e->bound_radius);
+					return true;
+				});
 	} else {
 		runtime_->view().set_replica_contact_resolver(nullptr);
+		runtime_->view().set_carrier_pose_provider(nullptr);
 	}
 	resolve_client_row_adm_ids();
 	joiner_send_hello_once();

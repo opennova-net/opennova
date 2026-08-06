@@ -94,11 +94,43 @@ public:
 		uint32_t tick = 0;
 		const ReplicaPeerSphere *peers = nullptr;
 		int32_t peer_count = 0;
+		uint32_t entity_flags = 0;    // in/out — the row's retail-Flags mirror
+		                              // (rm_entity_flags); the resolver's latch
+		                              // sites read/write it as they do
+		                              // ent->flags on a registry row
 		uint16_t out_ground = 0xFFFF; // ground-probe hit (wire handle)
 	};
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
 		replica_contact_resolver_ = std::move(resolver);
+	}
+
+	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
+	// contact resolve grounded it on an entity follows that carrier's
+	// per-tick pose delta — translation plus the rotate-about-carrier —
+	// exactly as retail's org movers ride groundEntity at mover top
+	// [orig: org2 @0x4b52a0..0x4b5726; org1 @0x4ba45d..; the standalone twin
+	//  Entity_InterpolateFromParentDelta @0x4a8dc0]. The embedding sim
+	// resolves the probe's wire handle to the live carrier pose (world
+	// entity); the pipeline keeps the per-rider saved copy and derives the
+	// deltas. Angles are BAM32; bound_radius is 16.16 (the ride drops when
+	// the unmounted rider strays beyond it [orig: @0x4b52a7..0x4b52ff]).
+	struct CarrierPose {
+		int32_t pos[3] = {};
+		int32_t yaw = 0, pitch = 0, roll = 0; // BAM32
+		int32_t bound_radius = 0;             // 16.16
+	};
+	using CarrierPoseProvider = std::function<bool(uint16_t handle, CarrierPose &out)>;
+	void set_carrier_pose_provider(CarrierPoseProvider provider) {
+		carrier_pose_provider_ = std::move(provider);
+	}
+
+	// Mission water plane for the replica water/float channel (16.16;
+	// has_water false = no water in this world). Fed per pump by the
+	// embedder from the env state [orig: Env_WaterHeightFixed @ 0x26C6454].
+	void set_water_z(int32_t z, bool has_water) {
+		water_z_ = z;
+		has_water_ = has_water;
 	}
 
 	// The per-class between-update mover, one call per 62.5 Hz logic tick after
@@ -246,6 +278,9 @@ private:
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
+	CarrierPoseProvider carrier_pose_provider_;
+	int32_t water_z_ = 0;
+	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;

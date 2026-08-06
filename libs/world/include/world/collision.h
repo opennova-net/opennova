@@ -861,13 +861,24 @@ public:
         int32_t radius = 0x10000;
         uint16_t handle = 0xFFFF; // wire handle, for self-exclusion only
     };
+    // entity_flags (optional) is the row's persistent retail-Flags mirror — the
+    // caller-owned stand-in for the entity Flags word the resolver's latch
+    // sites read and write on a registry row. When provided, the resolve runs
+    // the SAME flag channel retail runs on a remote entity: the InAir bit
+    // feeds the idle-skip full-update discriminant [orig: @ 0x4b2ca6], the
+    // resolve-start clear drops Indoors/LadderContact/zone bits
+    // [orig: @ 0x4b2d54 block], the CL touch latches LadderContact
+    // [orig: @ 0x4b3291], the blink accum latches Indoors [orig: @ 0x4b34c2],
+    // the dead/hidden and parachute bits gate/widen repulsion
+    // [orig: @ 0x4b3aac/0x4b3aba], and the ground probe's terrain clamp is
+    // skipped while Indoors [orig: the Flags & 0x800000 gate @ 0x413785].
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
                             bool is_player, uint32_t tick, int32_t anim_state_id,
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
-                            EntityHandle *out_ground);
+                            uint32_t *entity_flags, EntityHandle *out_ground);
 
     // Hull-vs-world contact for the vehicle motor [orig: Entity_CheckCollisionState
     // @ 0x462a30, called per tick from the vehicle physics @ 0x47cb8c/0x47d213 —
@@ -1127,6 +1138,10 @@ private:
     const ReplicaPeer *replica_peers_ = nullptr;
     int32_t replica_peer_count_ = 0;
     uint16_t replica_exclude_handle_ = 0xFFFF;
+    // Staged like replica_peers_: the calling row's retail-Flags mirror. The
+    // resolver's flag latch sites and the ground probe's indoors gate read and
+    // write it exactly where they read and write ent->flags on a registry row.
+    uint32_t *replica_flags_ = nullptr;
 };
 
 } // namespace opennova::world

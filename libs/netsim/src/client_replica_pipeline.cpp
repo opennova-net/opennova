@@ -438,6 +438,161 @@ inline int16_t org2_bucket(int32_t dist2d) {
 	return 18;
 }
 
+constexpr double kRadPerBam = 3.14159265358979323846 / 2147483648.0;
+
+// The deck-ride (D-NET-196 replica tails): an org row follows its
+// groundEntity's per-tick pose delta at mover top, before root motion and
+// the settle — translation, the rotate-about-carrier, and the heading/roll
+// adoption. Retail reads the CARRIER's savedLivePose (+0x80..) / body*
+// (+0x8C..) triple, stamped at the carrier's own mover start; a transport
+// row keeps the per-rider saved copy instead — the deltas are identical,
+// one carrier sample per frame. The rotate un-rotates the rider's carrier
+// offset by the SAVED attitude with 2^-22-scaled NEGATED sines
+// (dbl_7C57B0 = -4194304.0 — the inverse rotation) and re-rotates by the
+// CURRENT attitude with positive sines, exactly the witnessed product
+// order. [orig: org2 @0x4b52a0..0x4b5726 (z biased by capsule_bottom/2,
+// restored @0x4b5649); org1 @0x4ba45d..0x4ba891; the standalone twin
+// Entity_InterpolateFromParentDelta @0x4a8dc0]
+void row_deck_ride(ClientEntityState &es,
+                   const ClientReplicaPipeline::CarrierPoseProvider &carrier) {
+	if (es.resolved_ground == 0xFFFF) {
+		es.rm_carrier_handle = 0xFFFF;
+		return;
+	}
+	ClientReplicaPipeline::CarrierPose cp;
+	if (!carrier(es.resolved_ground, cp)) {
+		es.rm_carrier_handle = 0xFFFF;
+		return;
+	}
+	if (es.rm_carrier_handle != es.resolved_ground) {
+		// First contact tick seeds the per-rider saved pose. Retail's rider
+		// consumes the carrier-side savedLivePose immediately; the one-tick
+		// seed lag is the per-rider copy's only difference (documented).
+		es.rm_carrier_handle = es.resolved_ground;
+		es.rm_carrier_pos[0] = cp.pos[0];
+		es.rm_carrier_pos[1] = cp.pos[1];
+		es.rm_carrier_pos[2] = cp.pos[2];
+		es.rm_carrier_yaw = cp.yaw;
+		es.rm_carrier_pitch = cp.pitch;
+		es.rm_carrier_roll = cp.roll;
+		return;
+	}
+	// The unmounted out-of-radius drop: 3D distance vs the carrier's bound
+	// radius, saturated at 0x7FFF0000 before the int compare; beyond it the
+	// ride AND the ground link drop [orig: @0x4b52a7..0x4b52ff — the
+	// flt_7C19E0 = 2147418112.0 clamp, groundEntity = 0].
+	{
+		const double ddx = static_cast<double>(es.x - cp.pos[0]);
+		const double ddy = static_cast<double>(es.y - cp.pos[1]);
+		const double ddz = static_cast<double>(es.z - cp.pos[2]);
+		double len = std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+		if (len > 2147418112.0) len = 2147418112.0;
+		if (static_cast<int32_t>(len) > cp.bound_radius) {
+			es.resolved_ground = 0xFFFF;
+			es.rm_carrier_handle = 0xFFFF;
+			return;
+		}
+	}
+	const int32_t dpx = cp.pos[0] - es.rm_carrier_pos[0];
+	const int32_t dpy = cp.pos[1] - es.rm_carrier_pos[1];
+	const int32_t dpz = cp.pos[2] - es.rm_carrier_pos[2];
+	const int32_t dyaw = io::bam_sub(cp.yaw, es.rm_carrier_yaw);
+	const int32_t dpitch = io::bam_sub(cp.pitch, es.rm_carrier_pitch);
+	const int32_t droll = io::bam_sub(cp.roll, es.rm_carrier_roll);
+	es.x += dpx;
+	es.y += dpy;
+	es.z += dpz;
+	const int32_t rider_yaw_before = es.heading_bam;
+	if (dyaw != 0 || dpitch != 0 || droll != 0) {
+		auto q22c = [](int32_t bam) {
+			return static_cast<int32_t>(
+					std::cos(static_cast<double>(bam) * kRadPerBam) * 4194304.0);
+		};
+		auto q22s = [](int32_t bam) {
+			return static_cast<int32_t>(
+					std::sin(static_cast<double>(bam) * kRadPerBam) * 4194304.0);
+		};
+		auto q22s_neg = [](int32_t bam) {
+			return static_cast<int32_t>(
+					std::sin(static_cast<double>(bam) * kRadPerBam) * -4194304.0);
+		};
+		auto m22 = [](int32_t a, int32_t b) {
+			return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+		};
+		// The org2 z bias: rel_z is taken from the capsule mid, the halved
+		// anim-frame bottom restored on writeback [orig: @0x4b53a1/0x4b5649];
+		// the last advanced frame's bottom serves a transport row.
+		const int32_t cb_half =
+				es.rm_prev_bottom_live ? (es.rm_prev_bottom >> 1) : 0;
+		// Retail's SHLs wrap in 32-bit registers; shift through unsigned so a
+		// negative offset is not C++ UB.
+		auto shl8 = [](int32_t v) {
+			return static_cast<int32_t>(static_cast<uint32_t>(v) << 8);
+		};
+		const int32_t rel_x = shl8(es.x - cp.pos[0]) + 127;
+		const int32_t rel_y = shl8(es.y - cp.pos[1]) + 127;
+		const int32_t rel_z = shl8(es.z - cb_half - cp.pos[2]) + 127;
+		// Un-rotate by the saved attitude (negated sines = the inverse)
+		// [orig: @0x4b537b..0x4b5567].
+		const int32_t cys = q22c(es.rm_carrier_yaw), sys = q22s_neg(es.rm_carrier_yaw);
+		const int32_t cps = q22c(es.rm_carrier_pitch), sps = q22s_neg(es.rm_carrier_pitch);
+		const int32_t crs = q22c(es.rm_carrier_roll), srs = q22s_neg(es.rm_carrier_roll);
+		const int32_t rot_yaw_x = m22(rel_x, cys) - m22(rel_y, sys);
+		const int32_t rot_yaw_y = m22(rel_x, sys) + m22(rel_y, cys);
+		const int32_t rot_pitch_x = m22(rot_yaw_x, cps);
+		const int32_t rot_pitch_cross = m22(rel_z, sps);
+		const int32_t rot_pitch_z = m22(rot_yaw_x, sps) + m22(rel_z, cps);
+		const int32_t rot_roll_x = m22(rot_yaw_y, crs) - m22(rot_pitch_z, srs);
+		const int32_t rot_roll_z = m22(rot_yaw_y, srs) + m22(rot_pitch_z, crs);
+		const int32_t unrot_xz = rot_pitch_x - rot_pitch_cross;
+		// Re-rotate by the current attitude (positive sines), roll ->
+		// pitch -> yaw [orig: @0x4b54ff..0x4b5653].
+		const int32_t cyc = q22c(cp.yaw), syc = q22s(cp.yaw);
+		const int32_t cpc = q22c(cp.pitch), spc = q22s(cp.pitch);
+		const int32_t crc = q22c(cp.roll), src = q22s(cp.roll);
+		const int32_t a = m22(rot_roll_x, src) + m22(rot_roll_z, crc);
+		const int32_t b = m22(rot_roll_x, crc) - m22(rot_roll_z, src);
+		const int32_t p = m22(unrot_xz, cpc) - m22(a, spc);
+		const int32_t zp = m22(unrot_xz, spc) + m22(a, cpc);
+		es.x = cp.pos[0] + ((m22(p, cyc) - m22(b, syc)) >> 8);
+		es.y = cp.pos[1] + ((m22(p, syc) + m22(b, cyc)) >> 8);
+		es.z = cp.pos[2] + cb_half + (zp >> 8);
+	}
+	// Heading/attitude adoption. Both motors add the carrier yaw delta to the
+	// render heading and the body heading (org2 @0x4b5656..0x4b56c1, org1
+	// @0x4ba842..0x4ba861; the mounted 0x1000-seat skip is seat-machinery a
+	// transport row never reaches). org1 additionally drags its chase TARGET
+	// (+0x1A8 @0x4ba867) and look Pitch (+0x14 @0x4ba88e); org2's bodyPitch
+	// and torso/aim target adds have no row channels — named deferrals. Roll
+	// adopts on both (+0x18 @0x4b5723/@0x4ba88b). The pitch/roll deltas are
+	// rotated by the carrier-vs-rider relative yaw taken BEFORE the yaw add.
+	if (dyaw != 0 || dpitch != 0 || droll != 0) {
+		const int32_t rel_yaw = io::bam_sub(cp.yaw, rider_yaw_before);
+		const double rr = static_cast<double>(rel_yaw) * kRadPerBam;
+		const int32_t rc = static_cast<int32_t>(std::cos(rr) * 4194304.0);
+		const int32_t rs = static_cast<int32_t>(std::sin(rr) * 4194304.0);
+		auto m22 = [](int32_t a2, int32_t b2) {
+			return static_cast<int32_t>((static_cast<int64_t>(a2) * b2) >> 22);
+		};
+		const int32_t pitch_d = m22(dpitch, rc) - m22(droll, rs);
+		const int32_t roll_d = m22(dpitch, rs) + m22(droll, rc);
+		es.heading_bam = io::bam_add(es.heading_bam, dyaw);
+		es.rm_body_heading = io::bam_add(es.rm_body_heading, dyaw);
+		es.roll_bam = io::bam_add(es.roll_bam, roll_d);
+		if (es.cls == EntityClass::Infantry) {
+			es.net_target_heading_bam =
+					io::bam_add(es.net_target_heading_bam, dyaw);
+			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
+		}
+	}
+	es.rm_carrier_pos[0] = cp.pos[0];
+	es.rm_carrier_pos[1] = cp.pos[1];
+	es.rm_carrier_pos[2] = cp.pos[2];
+	es.rm_carrier_yaw = cp.yaw;
+	es.rm_carrier_pitch = cp.pitch;
+	es.rm_carrier_roll = cp.roll;
+}
+
 // The vehicle-family bucket [orig: Entity_UpdateWatercraftPhysics
 // @0x48D480 (shared template) — {6,8,10,15,20,25,30}].
 inline int16_t vehicle_bucket(int32_t dist) {
@@ -557,19 +712,90 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 // a retail ADM dump witness (root row 4756), not an IDA code claim. The wire
 // state byte drives the channel; the player compact's phase byte seeds a fresh
 // transition [orig: NetPacket_SerializePlayerState entity+0x377 store
-// @0x4C11A6; AnimMap_UpdateEntity one-shot clear @0x40B7E4]. Deferrals: the
-// airborne/drowning/ladder overrides ride entity+0x24 bits beyond the wire
-// state byte (unreplicated — the chase Z absorbs the error); candidate-model
-// contacts remain a D-NET-196 resolver residual. Caller-owned gravity/vertical
-// velocity is a separate row-state residual [orig: Entity_UpdateInfantryPlayerBody
-// vertical add @0x4B7CE0..0x4B7CEF, then resolver call @0x4B7CF4]. The resolver's bounded
-// terrain-column settle is ported below.
+// @0x4C11A6; AnimMap_UpdateEntity one-shot clear @0x40B7E4]. The
+// airborne/drowning/ladder overrides ride the row's rm_entity_flags mirror of
+// entity+0x24 — latched locally by the resolve and the edge/water channels
+// below, never wire-carried, exactly retail's remote rows (world-wac-ai-re.md
+// §29). Caller-owned gravity/vertical velocity is rm_vel_z
+// [orig: Entity_UpdateInfantryPlayerBody vertical add @0x4B7CE0..0x4B7CEF,
+// then resolver call @0x4B7CF4].
+// The per-motor water/float channel, at the mover tail after the settle
+// [orig: org2 @0x4b8020..0x4b8373; org1 @0x4bfae2..0x4bfca2]. Entry has the
+// asymmetric hysteresis (submerge at head-under z + 0xA000 < water, leave at
+// z >= water) and the CL/platform 0x100000 exemption; the splash/overlay
+// edges are FX deferrals. The float latch is `(Flags & ~0x2000) | 0x8000` —
+// swimming overrides airborne — and the not-submerged exit clears the float
+// AND dive bits (0x208000).
+void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
+                       int32_t capsule_bottom, int32_t water_z, bool has_water,
+                       uint32_t tick) {
+	if (!has_water) {
+		// No mission water plane (the EnvState 0 sentinel): the channel is
+		// off, and any stale float/dive bits clear so the gravity gate can
+		// never wedge on them.
+		es.rm_entity_flags &= ~0x208000u;
+		return;
+	}
+	const bool afloat = (es.rm_entity_flags & 0x8000u) != 0;
+	const int32_t probe = io::bam_add(es.z, afloat ? 0 : 0xA000);
+	if (probe >= water_z || (es.rm_entity_flags & 0x100000u) != 0) {
+		es.rm_entity_flags &= ~0x208000u; // [orig: @0x4b8373 / @0x4bfc5c]
+		return;
+	}
+	const int32_t cb_neg = capsule_bottom > 0 ? 0 : capsule_bottom;
+	if (es.cls == EntityClass::Player) {
+		// The org2 buoyant-rise form, REMOTE arm: flat base -0x4C9 (the
+		// surface bob is local-player-only in org2 [orig: @0x4b8063..0x4b80a5,
+		// else-arm 0xFFFFFB37]) and no look-pitch dive term (gated
+		// local-or-authority [orig: @0x4b80aa..0x4b8102]).
+		const int32_t base = cb_neg - 0x4C9;
+		const int32_t base_q = base >> 4;
+		es.z = io::bam_add(es.z, (base_q < 0 ? -base_q : base_q) + 0x70);
+		// The vertical drag [orig: @0x4b814f..0x4b8163]; the planar pair has
+		// no row channels (rows carry no slide velocity) — named deferral.
+		es.rm_vel_z -= (es.rm_vel_z + 16) >> 5;
+		// Surface line: water + base/2 - eyeHeight/2. Rows carry no stance
+		// eye chase; retail's own deploy reset default 0xD000 stands in
+		// [orig: line @0x4b8146..0x4b8169; the 0xD000 seed @0x42ffc9]
+		// (named divergence: a crouch-swimming row's line sits marginally
+		// off until the wire chase corrects it).
+		const int32_t surf = water_z + (base >> 1) - (0xD000 >> 1);
+		if (es.z >= surf) {
+			es.rm_entity_flags &= ~0x200000u; // surfaced [orig: @0x4b8176]
+			es.z = surf;
+		} else if (es.z < surf - 0x2000 &&
+		           (es.rm_entity_flags & 0x200000u) == 0) {
+			es.rm_entity_flags |= 0x200000u; // the dive bit [orig: @0x4b81ef]
+		}
+	} else {
+		// The org1 snap form: the float target quarter-chased from the
+		// post-integrate z — gravity's and the resolver's z contributions
+		// are DISCARDED while afloat (the tail rewrites z from the saved
+		// pre-gravity value). The bob wave applies to every row.
+		// [orig: target @0x4bfb2a..0x4bfb84 (sin(((x+y)>>12 + 4*tick)/256 *
+		//  3.1) * 1224); the quarter-step tail @0x4bfc65..0x4bfc86]
+		const int32_t wave_arg =
+				((es.x + es.y) >> 12) + static_cast<int32_t>(tick) * 4;
+		const int32_t bob = static_cast<int32_t>(
+				std::sin(static_cast<double>(wave_arg) * 0.00390625 * 3.1) *
+				1224.0);
+		const int32_t target =
+				io::bam_add(water_z, bob - (0xD000 >> 1) - 0x4C9 + cb_neg);
+		es.z = io::bam_add(z_post_integrate,
+		                   (io::bam_sub(target, z_post_integrate) + 2) >> 2);
+	}
+	// The float latch (the splash/overlay edge is an FX deferral)
+	// [orig: @0x4b8363 / @0x4bfc48].
+	es.rm_entity_flags = (es.rm_entity_flags & ~0x2000u) | 0x8000u;
+}
+
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
                           uint32_t key, bool is_self,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
-                          int32_t peer_count, uint32_t tick) {
+                          int32_t peer_count, uint32_t tick, int32_t water_z,
+                          bool has_water) {
 	if (es.rm_adm_id < 0) return;
 	// Channel state machine (the begin_body_transition mirror). The phase
 	// seed is ONE-SHOT per received record [orig: AnimMap_UpdateEntity zeroes
@@ -666,15 +892,30 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	                   (3.14159265358979323846 / 2147483648.0);
 	const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
 	const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
-	const int32_t wx =
+	int32_t wx =
 			static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
 			static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
-	const int32_t wy =
+	int32_t wy =
 			static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
 			static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
+	// Root suppression flag channels: the float bit zeroes the vertical
+	// channel, CL/ladder-platform contact the horizontal pair. org2 writes
+	// the literal 1 — keeping the resolver's moving discriminant true — and
+	// org1 writes true zeros. [orig: org2 @0x4b7ab0..0x4b7ac4 (the ebp =
+	// 0x8000 load @0x4b7979); org1 @0x4bf667..0x4bf680]
+	const int32_t suppressed =
+			es.cls == EntityClass::Player ? 1 : 0;
+	if ((es.rm_entity_flags & 0x8000u) != 0) dz_eff = suppressed;
+	if ((es.rm_entity_flags & 0x100000u) != 0) {
+		wx = suppressed;
+		wy = suppressed;
+	}
 	es.x += wx;
 	es.y += wy;
 	es.z += dz_eff;
+	// The org1 water tail re-bases from this value (gravity + resolver z are
+	// discarded while afloat) [orig: the pre-gravity save @0x4bf6ba].
+	const int32_t z_post_integrate = es.z;
 
 	// The settle. With an embedder-provided contact resolver, this is the FULL
 	// movement collision resolver at the witnessed caller order — the
@@ -687,12 +928,19 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// [orig: vertical add @0x4B7CE0..0x4B7CEF then the resolver call
 	// @0x4B7CF4 and lift @0x4B7CFE..0x4B7D0A (org2); @0x4BF7B8..0x4BF7FA
 	// (org1); Entity_MovementCollisionResolver @0x4B2BD0; landing vel zero in
-	// the shared tail]. The >0xF000 airborne return and the indoors/ladder/
-	// drowning latches stay named residuals — no replica-row consumer exists
-	// yet. Without a resolver, the bounded terrain-column subset below stands.
+	// the shared tail]. The row's rm_entity_flags word rides the query both
+	// ways — the resolver's latch sites and the caller's edge/water channels
+	// share it (world-wac-ai-re.md §29). Without a resolver, the bounded
+	// terrain-column subset below stands.
 	if (resolver != nullptr && *resolver) {
-		es.rm_vel_z -= es.cls == EntityClass::Player ? 208 : 416;
-		if (es.rm_vel_z < -32768) es.rm_vel_z = -32768;
+		// Gravity skips while on a ladder/platform or afloat (the 0x108000
+		// gate); the position add itself is unconditional — the witnessed
+		// one-store folds vel into the root dz [orig: org2 gate @0x4b7ac8,
+		// store @0x4b7cef; org1 gate @0x4bf7b8].
+		if ((es.rm_entity_flags & 0x108000u) == 0) {
+			es.rm_vel_z -= es.cls == EntityClass::Player ? 208 : 416;
+			if (es.rm_vel_z < -32768) es.rm_vel_z = -32768;
+		}
 		es.z = io::bam_add(es.z, es.cls == EntityClass::Player
 				? es.rm_vel_z : 2 * es.rm_vel_z);
 		ClientReplicaPipeline::ReplicaContactQuery q;
@@ -711,16 +959,37 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.tick = tick;
 		q.peers = peers;
 		q.peer_count = peer_count;
+		q.entity_flags = es.rm_entity_flags;
 		const int32_t clearance = (*resolver)(q);
 		es.x = q.pos[0];
 		es.y = q.pos[1];
 		es.z = q.pos[2];
 		es.rm_vel_z = q.vel_z; // the idle skip band reverts + zeroes it
+		es.rm_entity_flags = q.entity_flags;
 		es.resolved_ground = q.out_ground;
 		if (clearance <= 0) {
 			es.z = io::bam_sub(es.z, clearance);
 			es.rm_vel_z = 0;
+			// Landing clears the airborne/swim bit (the landing sound is an
+			// FX deferral) [orig: org2 @0x4b7f7c..0x4b7fa1; org1 landing
+			// tail @0x4bf89f].
+			es.rm_entity_flags &= ~0x2000u;
+		} else if (clearance > 0xF000) {
+			// The ledge/airborne edge: gate on !(Flags & 0x10A002) for the
+			// player body (dead suppresses the whole edge) and 0x10A000 for
+			// org1; carried force-clears and the airborne bit sets. The org2
+			// 3/4 momentum carry and the local anim-31/47 stamps are named
+			// deferrals — rows carry no slide velocity and the wire state
+			// byte owns the channel. [orig: org2 @0x4b7e17..0x4b7e73; org1
+			// @0x4bf8ae..0x4bf901]
+			const uint32_t edge_mask =
+					es.cls == EntityClass::Player ? 0x10A002u : 0x10A000u;
+			if ((es.rm_entity_flags & edge_mask) == 0)
+				es.rm_entity_flags =
+						(es.rm_entity_flags & ~0x40u) | 0x2000u;
 		}
+		row_water_channel(es, z_post_integrate, frame.capsule_bottom, water_z,
+		                  has_water, tick);
 		return;
 	}
 
@@ -755,6 +1024,12 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 				io::bam_sub(es.z, frame.capsule_bottom), resolved_ground);
 		if (foot_clearance <= 0) es.z = io::bam_sub(es.z, foot_clearance);
 	}
+	// The bounded subset still runs the water channel — the float latch and
+	// the per-motor surface hold are mover-tail behavior, not resolver
+	// behavior (a resolver-less embedder with env water keeps swimmers at
+	// the surface between records).
+	row_water_channel(es, z_post_integrate, frame.capsule_bottom, water_z,
+	                  has_water, tick);
 }
 
 } // namespace
@@ -911,12 +1186,18 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				// idle 43 [orig: @0x4B465D, g_animStateFlagsTable bit0 gate].
 				es.anim_state_id = world::anim_state::kIdle;
 			}
+			// The deck-ride runs at the witnessed mover position — after the
+			// chase, before root motion — for every armed org row with a
+			// grounded carrier, clip or no clip [orig: org2 ride @0x4b52a0
+			// between the chase @0x4b4470 and the integrate @0x4b7cbf].
+			if (!is_self && carrier_pose_provider_)
+				row_deck_ride(es, carrier_pose_provider_);
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
 				                     rm_key, is_self, &replica_contact_resolver_,
 				                     contact_peers.data(),
 				                     static_cast<int32_t>(contact_peers.size()),
-				                     rm_key);
+				                     rm_key, water_z_, has_water_);
 			break;
 		}
 		case EntityClass::Infantry: {
@@ -974,12 +1255,18 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				if (step < -69273360) step = -69273360;
 				es.heading_bam = io::bam_add(es.heading_bam, step);
 			}
+			// The deck-ride runs at the witnessed mover position — after the
+			// chase, before root motion — for every armed org row with a
+			// grounded carrier, clip or no clip [orig: org2 ride @0x4b52a0
+			// between the chase @0x4b4470 and the integrate @0x4b7cbf].
+			if (!is_self && carrier_pose_provider_)
+				row_deck_ride(es, carrier_pose_provider_);
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
 				                     rm_key, is_self, &replica_contact_resolver_,
 				                     contact_peers.data(),
 				                     static_cast<int32_t>(contact_peers.size()),
-				                     rm_key);
+				                     rm_key, water_z_, has_water_);
 			break;
 		}
 		case EntityClass::Vehicle: {

@@ -211,10 +211,28 @@ struct ClientEntityState {
 	int32_t rm_vel_z = 0;
 	// The contact resolver's ground-probe hit for this row (wire handle;
 	// 0xFFFF = terrain/none) — retail's groundEntity (+0x28) store
-	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. Stored for the
-	// deck-ride follow; the carrier-delta application for ground-standing
-	// rows is the named next leg.
+	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. The deck-ride
+	// consumes it: the row follows the hit entity's per-tick pose delta.
 	uint16_t resolved_ground = 0xFFFF;
+	// The row's persistent retail entity-Flags mirror — the caller-owned word
+	// the resolver's latch sites and the mover flag channels read and write on
+	// a registry entity (InAir 0x2000, Drowning/float 0x8000, LadderContact
+	// 0x100000, Submerged 0x200000, Indoors 0x800000). Set/cleared by the
+	// resolve, the airborne/landing edges, and the water block; consumed by
+	// the root suppressions, the gravity gate, the probe's indoors skip, and
+	// the resolver's full-update discriminant.
+	uint32_t rm_entity_flags = 0;
+	// Deck-ride saved carrier pose (the rider-side savedLivePose analog):
+	// retail keeps ONE savedLivePose + body* triple on the CARRIER, stamped at
+	// its mover start and consumed by every rider [orig: org2 @0x4b530b..
+	// reads carrier +0x80..+0x94]; a transport row keeps its own copy of the
+	// carrier pose it last consumed — the deltas are identical, sampled at the
+	// same once-per-frame cadence.
+	uint16_t rm_carrier_handle = 0xFFFF;
+	int32_t rm_carrier_pos[3] = {};
+	int32_t rm_carrier_yaw = 0;   // BAM32
+	int32_t rm_carrier_pitch = 0; // BAM32
+	int32_t rm_carrier_roll = 0;  // BAM32
 	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
 	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
 	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`

@@ -264,8 +264,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
    stays 0 (D-INF-19 fix log). Port: `AiSystem::infantry_slope_pass`
    (`libs/world/src/infantry.cpp`), pinned by the `test_slope_*` cases in
    `tests/world/infantry_test.cpp`.
-5. Inter-entity separation + 8-direction avoidance raycasts + swim details + combat maneuver modes
+5. Inter-entity separation + 8-direction avoidance raycasts + combat maneuver modes
    (1/2/5/7/8/12) — **RE'd to address level, detail pass pending** (dump lines ~1080–1290, 3000–4550).
+   The swim/float details are done: §29.1 (both motors, byte-witnessed).
 
 ### 3.6 Death/corpse/respawn (health ≤ 0 edge)
 Drop/detach, corpse timer `entity[82] = def+2192` (−61 in the silent-cleanup variant), death anim
@@ -3751,8 +3752,11 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 
 ### 22.5 Open follow-ups
 
-1. The org2 swim/parachute physics block `@ 0x4b7b18+` (descent, water
-   transitions) — unread; rides D-INF-3 (water) + D-INF-20 (parachute).
+1. The org2 parachute physics half `@ 0x4b7b18-0x4b7c8d` (auto-deploy at
+   vel −14336 + aux 0x10, chute sounds/flap words, the chute brake
+   `vel += 0x29C` under −0x1C00) — read 2026-08-06, still unported; rides
+   D-INF-20. The WATER half is §29.1 (witnessed + replica-ported; the local
+   motor's port rides D-INF-3).
 2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
    the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
    UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
@@ -5475,10 +5479,11 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 | 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the damage path also writes an entity `Flags \|= 0x800` critical-hit latch (`round_sim.cpp` seat/head branches) — same value, distinct unnamed meaning; that site stays raw |
 | 0x2000 | `kEntityFlagInAir` | airborne / swimming | `[orig: grounded selector @ 0x4b78ab]`; §3, §15.3 |
 | 0x4000 | `kEntityFlagPriorityTarget` | set on every fire; decays per perception scan (the §16.2 x6 scoring flag) | `[orig: set @ 0x4bf370; clear @ 0x4bbfa4]` |
-| 0x8000 | `kEntityFlagDrowning` | drowning — zeroes vertical swim input | §3 movement clamps |
+| 0x8000 | `kEntityFlagDrowning` | deep-water FLOAT latch (the "drowning" family — the death-cause consumer maps it to 175): asymmetric-hysteresis submerge, zeroes the vertical root, gates gravity via 0x108000, and hands z to the per-motor float blocks | `[orig: latch @ 0x4b8363 / @ 0x4bfc48; entry @ 0x4b8020 / @ 0x4bfafe]`; §29.1 |
 | 0x20000 | `kEntityFlagBuilding` | kind Building | `[orig: Entity_InitFromModel @ 0x40e105]` |
 | 0x100000 | `kEntityFlagLadderContact` | CL/type-4 ladder touch; locks upper-body pose + skips gravity while aligned | `[orig: @ 0x4b3291]`; §14, §15.4 |
 | 0x400000 | `kEntityFlagArmoryZone` | type-6 (CA) volume touch — gates weapon.mnu on action 218 | `[orig: @ 0x4aea45, @ 0x49b848]`; §15.4 |
+| 0x200000 | (unnamed in reimpl; the netsim flags mirror carries it raw) | fully-submerged/dive latch — org2's water block sets it below the float line − 0x2000 (with the dive splash), clears at the surface clamp; both motors clear it with 0x8000 on the not-submerged exit (`~0x208000`) | `[orig: set @ 0x4b81ef; clear @ 0x4b8176; exits @ 0x4b8373 / @ 0x4bfc5c]`; §29.1 |
 | 0x800000 | `kEntityFlagIndoors` | indoors (blink accum bit 2 -> Flags); render + AI retry gates | §4 (render-occlusion-re), §15.4, §17 |
 | 0x1000000 | `kEntityFlagNoShadow` | BMS NoShadow trait | `[orig: @ 0x40e9f0]` |
 | 0x4000000 | `kEntityFlagIndestructible` | BMS Indestructible / hp==0 item | `[orig: @ 0x40e9f0; @ 0x40dc8e]`; §15.3 force skip |
@@ -5489,7 +5494,7 @@ code keeps raw hex at these sites; do not name without a new witness):
 | Bit | Where it appears | Note |
 |---|---|---|
 | 0x1 | destruction sweeps skip `engine_flags & 0x1` targets; part of the `0x2000001`/`0x43` composites | reads as an "inactive/exempt" family; unpinned |
-| 0x80 | (reserved in the spawn composition) | unpinned |
+| 0x80 | org1 ladder-CLIMB mode: gates the eighth-step x/y chase to +0x2FC/+0x300 and the capped sixteenth-step z chase to +0x304 with gravity bypassed (`[orig: test al,al @ 0x4bf6b8; the chase @ 0x4bf625-0x4bf6ea]`, §29.3) | witnessed in use (the climb SM that sets it rides D-COL-5); unnamed until a reimpl consumer exists |
 | 0x10000 | `!(Flags & 0x112002)` comment-only gate (§3) | unpinned |
 | 0x2000000 | the `0x2000001` skip composite (collision/throwables/LOS) | unpinned |
 | 0x8000000 | AI combat candidate skip; `0x8000001` composite | unpinned |
@@ -5501,6 +5506,142 @@ raw per the partially-witnessed rule): dismount scrub `~0xA000`
 (`~(Drowning|InAir|Mounted) | Mounted`) `[orig: @ 0x546c56-0x546c7c;
 @ 0x494752-0x494775]`; repulsion exemption `0x43` and skip composites
 `0x2000001`/`0x8000001` stay raw (constituent bits unpinned).
+
+## 29. The org water/float channel and the deck-ride (D-NET-196 replica tails, 2026-08-06)
+
+The two mover blocks the replica-infantry tails needed, witnessed end to end
+in both org movers. Ported for DECODED rows in
+`libs/netsim/src/client_replica_pipeline.cpp` (`row_water_channel`,
+`row_deck_ride`, the root suppressions and gravity gate in
+`row_root_motion_tick`) with the resolver-side flags channel in
+`libs/world/src/collision_resolve.cpp` (`resolve_replica` `entity_flags`).
+The LOCAL infantry motor's water block remains unported (D-INF-3) — this
+section is its witness when that slice runs.
+
+### 29.1 The water/float channel (`Flags 0x8000` + the dive bit `0x200000`)
+
+Entry, both motors, at the mover tail after the settle: submerged iff
+`pos.z + (Flags & 0x8000 ? 0 : 0xA000) < Env_WaterHeightFixed`, and
+`Flags & 0x100000` (CL/platform contact) exempts entirely — an asymmetric
+hysteresis: enter head-under (0.625 u), leave only at the surface
+`[orig: org2 @ 0x4b8020-0x4b804d; org1 @ 0x4bfae2-0x4bfb10]`. The
+not-submerged exit clears BOTH bits: `Flags &= ~0x208000`
+`[orig: org2 @ 0x4b8373; org1 @ 0x4bfc5c]`. Every submerged tick latches
+`Flags = (Flags & ~0x2000) | 0x8000` — swimming overrides airborne — with a
+splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
+(effect selected by the was-swim 0x2000 bit)
+`[orig: org2 @ 0x4b8182/0x4b8363; org1 @ 0x4bfb87/0x4bfc48]`.
+
+- **org2 (player body) — the buoyant-rise form** `[orig: @ 0x4b8053-0x4b8373]`:
+  base = `min(capsule_bottom, 0) - 0x4C9`, plus a LOCAL-player-only surface
+  bob `-sin(((y+x)>>12 + 4·tick)·(1/256)·3.1)·(-1224)` — a remote row gets the
+  flat `-0x4C9` `[orig: the local/else split @ 0x4b8063-0x4b80a5]`. A
+  look-pitch dive/rise term `clamp(((|base/2|+0x1000)·(Pitch>>14)+0x8000)>>16,
+  ±0x800)` applies only for `MoveOrder bit3 && (local || authority)` — zero
+  for a replica row `[orig: @ 0x4b80aa-0x4b8113]`. Per tick:
+  `pos.z += |base>>4| + pitch_term + 0x70` (the buoyant rise), the velocity
+  triplet drags `v -= (v+16)>>5` `[orig: @ 0x4b8124-0x4b8163]`, and the
+  surface line `surf = water + base/2 - eyeHeight(+0x74)/2` clamps from
+  above (clear `0x200000`, `pos.z = surf`); deeper than `surf - 0x2000` with
+  `0x200000` clear sets the dive bit + the dive splash once
+  `[orig: @ 0x4b8169-0x4b81f5]`. The local-player scope auto-toggles ride the
+  same block (`@ 0x4b8304-0x4b8360`, presentation-only).
+- **org1 (NPC) — the snap form** `[orig: @ 0x4bfb16-0x4bfc86]`: float target
+  `water + bob - height(+0x74)/2 - 0x4C9 + min(capsule_bottom, 0)` with the
+  bob for EVERY row (no local gate), then the tail rewrites
+  `pos.z = z_saved + (target - z_saved + 2) >> 2` where `z_saved` is the
+  POST-INTEGRATE z captured before gravity `[orig: the save @ 0x4bf6ba; the
+  quarter-step tail through `+0xAC` @ 0x4bfc65-0x4bfc86]` — gravity's and the
+  resolver's z contributions are DISCARDED while afloat. org1 never sets the
+  dive bit (clears it on exit only).
+- **Motion couplings**: `0x8000` suppresses the vertical root channel (org2
+  writes the literal 1 — keeping the resolver's moving discriminant true —
+  org1 a true 0) and `0x100000` the horizontal pair, same literals
+  `[orig: org2 @ 0x4b7ab0-0x4b7ac4, the `ebp = 0x8000` load @ 0x4b7979;
+  org1 @ 0x4bf667-0x4bf680]`; gravity skips while `Flags & 0x108000`
+  `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the position-add itself is
+  unconditional (org2 folds vel into the one root store `@ 0x4b7cef`).
+- **Port notes (client subset)**: the replica port carries the org2 REMOTE
+  arm (flat base, no pitch term) and the org1 snap form verbatim; the
+  splash/overlay edges are FX deferrals; rows carry no planar velocity, so
+  the org2 x/y drags have no consumer; and rows have no stance eye chase, so
+  the surface line uses retail's own deploy-reset default `0xD000` for
+  `+0x74` `[orig: the seed @ 0x42ffc9]` — a named stand-in inside the
+  D-NET-196 client-subset scope. `Env` source: the mission water plane
+  (`World::EnvState.water_z`, 0 = no water = channel off with a
+  self-healing `~0x208000` clear).
+
+### 29.2 The deck-ride (groundEntity pose-follow)
+
+Both org movers make a row FOLLOW its `groundEntity (+0x28)` at mover top —
+after the position chase, before root motion — so anything standing on a
+moving entity rides it. There is no vehicle-type gate: a static carrier
+simply contributes zero deltas.
+
+- **Entry/drop** `[orig: org2 @ 0x4b5288-0x4b52ff; org1 @ 0x4ba45d-0x4ba479]`:
+  null groundEntity skips. An UNMOUNTED rider beyond the carrier's
+  boundRadius (`[carrier+0]`, 3D distance saturated at
+  `flt_7C19E0 = 2147418112.0`) drops the ride AND zeroes groundEntity; a
+  mounted (+0x16C) rider skips the radius check.
+- **Translation** `[orig: org2 @ 0x4b530b-0x4b535d; org1 @ 0x4ba47f-0x4ba4bc]`:
+  `rider.pos += carrier.Position - carrier.savedLivePose (+0x80..)`; the
+  attitude deltas read `body* (+0x8C/+0x90/+0x94)` — the carrier's saved
+  attitude triple, stamped at its own mover start.
+- **Rotate-about-carrier** (only when an attitude delta exists)
+  `[orig: org2 @ 0x4b537b-0x4b5653; the standalone twin
+  Entity_InterpolateFromParentDelta @ 0x4a8dc0 (the physicsless-child move
+  function — same math, no capsule bias)]`: `rel = ((rider - carrier) << 8)
+  + 127` per axis, org2 biasing rel_z by `-capsule_bottom/2` (restored on
+  writeback `@ 0x4b5649`); un-rotate by the SAVED attitude with
+  2^-22-scaled NEGATED sines (`dbl_7C57B0 = -4194304.0` — the inverse
+  rotation), re-rotate by the CURRENT attitude with positive sines
+  (yaw→pitch→roll forward, roll→pitch→yaw back), Q22 products
+  (`imul; shrd 22`), writeback `rider.pos = carrier.pos + rel' >> 8`.
+- **Attitude adoption** `[orig: org2 @ 0x4b5656-0x4b5726; org1
+  @ 0x4ba7a5-0x4ba88e]`: the pitch/roll deltas rotate by the carrier-vs-rider
+  relative yaw (taken BEFORE the yaw add): `pitchΔ' = cos·pitchΔ - sin·rollΔ`,
+  `rollΔ' = sin·pitchΔ + cos·rollΔ`. Both motors add yawΔ to Yaw + bodyHeading
+  + the four torso/aim chase targets (+0x2D4/+0x2D8/+0x2E4/+0x2E8) and rollΔ'
+  to Roll (+0x18); a rider mounted on a `def+0x58 & 0x1000` seat skips the
+  Yaw add (bodyHeading still follows); the LOCAL player's camera-yaw
+  accumulator (`dword_B75FCC`) follows too. org1 additionally drags its chase
+  TARGET (+0x1A8) and the look Pitch (+0x14) `[orig: @ 0x4ba867/@ 0x4ba88e]`;
+  org2 adds pitchΔ' to bodyPitch (+0x90) only.
+- **Port notes (replica rows)**: retail keeps ONE savedLivePose on the
+  CARRIER consumed by every rider; a transport row keeps a per-rider saved
+  copy (`rm_carrier_*`) — identical deltas, one carrier sample per frame,
+  with a one-tick seed lag on first contact. The carrier pose comes through
+  `ClientReplicaPipeline::set_carrier_pose_provider` (the embedding sim
+  resolves `resolved_ground` against the world registry; predicted vehicles
+  serve the exact BAM motor attitude). Our joiner frame runs vehicle
+  prediction AFTER remote motion, so a rider consumes the PREVIOUS frame's
+  carrier delta — retail's own rider-ticks-before-carrier ordering case (the
+  mover order is entity-table order there). Rows have no bodyPitch or
+  torso/aim channels — the org2 pitchΔ'/aim adds are named deferrals; rows
+  adopt heading (+ the org1 chase target and look pitch) and roll.
+  Pinned by `netsim_client_replica_pipeline_contact_resolver` (translation
+  follow, the 90° rotate-about, heading adoption, the radius drop) and the
+  collision_test replica flags legs (the resolve-start clear, the InAir
+  full-update discriminant).
+
+### 29.3 Follow-ups
+
+1. The local infantry motor's water block (D-INF-3) and ladder-climb chase
+   (`Flags 0x80` org1 mode: eighth-step x/y to +0x2FC/+0x300, sixteenth-step
+   z to +0x304 capped, gravity bypassed `[orig: @ 0x4bf625-0x4bf6ea]`;
+   the org2 ladder-top exit push `[orig: @ 0x4b7fa8-0x4b8019, 0.5 u along
+   -bodyHeading when g_LadderContactZ > pos.z, then Flags &= ~0x100000]`)
+   stay D-COL-5/D-INF-3 scope — witnessed here, unported for the local
+   motor.
+2. The vehicle-side 0x8000 writers (`Entity_ProcessVehicleSuspension`/the
+   family solves) are that family's in-water flag — same bit, vehicle
+   context; already ported in the contact solves.
+3. The runover/crush kill leg inside the resolver
+   (`[orig: @ 0x4b37c2-0x4b39f7]` — def-type-1 vehicle, |v| thresholds
+   0x27B0 both sides, team/FF gates, authority-only, death anim cause 2 by
+   approach quadrant, killer = carrier occupant +0x170, groundEntity-riders
+   exempt) is witnessed for the D-NET-161/00TRg authority arc — not a
+   client-subset item.
 
 ## IDB type-sync session (2026-07-30)
 

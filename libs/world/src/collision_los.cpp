@@ -40,6 +40,10 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
     if (source.valid()) {
         if (const Entity *se = world.registry.get(source))
             indoors = (se->flags & kEntityFlagIndoors) != 0;
+    } else if (replica_flags_ != nullptr) {
+        // A replica resolve probes under the invalid key; its staged flags
+        // mirror serves the same indoors gate [orig: @ 0x413785].
+        indoors = (*replica_flags_ & kEntityFlagIndoors) != 0;
     }
     if (terrain != nullptr && terrain->valid() && !indoors) {
         const float wx = static_cast<float>(ray.start[0]) / 65536.0f;
