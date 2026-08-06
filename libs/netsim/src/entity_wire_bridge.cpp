@@ -3,14 +3,25 @@
 #include <cmath>      // std::lround
 
 #include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
+#include <npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
 #include <terrain/height_field.h>  // TerrainHeightField::valid
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
+#include <world/entity.h>      // EntityHandle (pinned below)
 #include <world/geom.h>        // to_fixed / from_fixed
 #include <world/infantry.h>    // kInfantryAirborneGap / remote body state
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
 #include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {
+
+// npwire's wire_handle packing and world's EntityHandle are the same witnessed
+// layout [orig: EntityPool_FindByNetId @ 0x4f0a20]; world stays net-agnostic and
+// npwire sim-agnostic, so netsim — the one lib that sees both — pins them here.
+static_assert(wire_handle::kInvalid == world::EntityHandle::kInvalid);
+static_assert(wire_handle::kPoolCount == world::kEntityPoolCount);
+static_assert(wire_handle::make(3, 5) == world::EntityHandle::make(3, 5).packed);
+static_assert(wire_handle::pool(0x2123) == world::EntityHandle{0x2123}.pool() &&
+              wire_handle::slot(0x2123) == world::EntityHandle{0x2123}.slot());
 
 // The player Person item template (§5.2a host-built player entity; the same id
 // PlayerReplicationState::entity_type_id defaults to).

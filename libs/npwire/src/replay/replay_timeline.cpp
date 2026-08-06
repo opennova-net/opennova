@@ -2,6 +2,7 @@
 
 #include "npwire/ingame_decode.h"
 #include "npwire/ingame_message_id.h"
+#include "npwire/wire_handle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +22,7 @@ double bam_byte_to_deg(uint8_t hi) { return bam32_to_deg(uint32_t(hi) << 24); }
 // the decompressed position is vehicle-LOCAL and we can't place it yet). 0xFFFF
 // and the high-nibble sentinel both mean "unmounted" (the engine adds the anchor).
 bool is_dead_pose_parent(uint16_t parent) {
-	return parent != 0xFFFF && (parent & 0xF000) < 0x5000;
+	return wire_handle::is_real_mount_parent(parent);
 }
 
 // One S2C 0x0A compact record -> a ReplaySample. Unmounted records decode to WORLD
@@ -87,7 +88,7 @@ struct MountedRec {
 
 // The slot-id sentinel that ends a spawn batch (also guards stale/free slots).
 bool is_sentinel_slot(uint16_t slot) {
-	return slot == 0xFFFF || (slot & 0xF000) >= 0x5000;
+	return wire_handle::is_batch_end_sentinel(slot);
 }
 
 struct Builder {
@@ -321,7 +322,7 @@ ReplayTimeline build_replay_timeline(
 				const auto &r = batch.records[i];
 				if (r.is_empty_slot) continue;
 				const uint16_t slot = uint16_t(batch.start_index + i);
-				const uint16_t handle = uint16_t((3u << 12) | (slot & 0x0FFF));
+				const uint16_t handle = wire_handle::make(wire_handle::kPoolMarker, slot);
 				ReplayEntity &e = b.get(handle, r.item_type_id);
 				e.type_id = r.item_type_id;
 				e.net_id = r.net_handle;
@@ -372,7 +373,7 @@ ReplayTimeline build_replay_timeline(
 				const auto &r = batch.records[i];
 				if (r.is_empty_slot) continue;
 				const uint16_t slot = uint16_t(batch.start_index + i);
-				const uint16_t handle = uint16_t((2u << 12) | (slot & 0x0FFF));
+				const uint16_t handle = wire_handle::make(wire_handle::kPoolBuilding, slot);
 				ReplayEntity &e = b.get(handle, r.item_type_id);
 				e.type_id = r.item_type_id;
 				if (r.field_flags & 0x0010) {

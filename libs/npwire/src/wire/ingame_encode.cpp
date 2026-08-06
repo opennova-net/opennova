@@ -1,4 +1,5 @@
 #include "npwire/ingame_encode.h"
+#include "npwire/wire_handle.h"
 #include <io/le.h>
 
 // Encoders for the in-match S2C replication tags — the symmetric partners to
@@ -112,8 +113,8 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.euler_y)                   f |= 0x0004; // entity+24   [orig: 0x503b74]
 		if (rec.section_mask)              f |= 0x0008; // entity+308  [orig: 0x503b93]
 		if (rec.team_byte)                 f |= 0x0010; // entity+354 team [orig: 0x503bb2] (D-NET-58)
-		if (rec.parent_handle != 0xFFFF)   f |= 0x0100; // entity+368  [orig: 0x503bd1]
-		if (rec.target_handle != 0xFFFF)   f |= 0x0200; // entity+40   [orig: 0x503c27]
+		if (rec.parent_handle != wire_handle::kInvalid) f |= 0x0100; // entity+368  [orig: 0x503bd1]
+		if (rec.target_handle != wire_handle::kInvalid) f |= 0x0200; // entity+40   [orig: 0x503c27]
 		if (rec.seat_mask)                 f |= 0x0400; // itemDef+604 [orig: 0x503c83]
 		if (!rec.ai_name.empty() || rec.ai_profile_1 || rec.ai_profile_2)
 		                                   f |= 0x0800; // aiSlot      [orig: 0x503d53]

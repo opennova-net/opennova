@@ -1,5 +1,7 @@
 #include "npwire/ingame_decode.h"
 
+#include "npwire/wire_handle.h"
+
 #include "../wire_cursor.h"
 
 #include <cmath>
@@ -114,7 +116,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 			out.records.push_back(std::move(rec));
 			return false;
 		}
-		if (rec.slot_id == 0xFFFF || (rec.slot_id & 0xF000) >= 0x5000) {
+		if (wire_handle::is_batch_end_sentinel(rec.slot_id)) {
 			// Retail handler returns immediately on the sentinel — without
 			// storing this record. Match that: stop the loop here.
 			out.sentinel_ended_early = true;
@@ -397,7 +399,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		// (@ 0x42e79d / 0x42e7b1). The slot >= pool.capacity guard is pool-state
 		// dependent and not reproducible from the wire alone — the two value
 		// sentinels below are.
-		if (rec.slot_id == 0xFFFF || (rec.slot_id & 0xF000) >= 0x5000) {
+		if (wire_handle::is_batch_end_sentinel(rec.slot_id)) {
 			out.sentinel_ended_early = true;
 			return (c.p == c.end);
 		}
