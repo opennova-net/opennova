@@ -112,6 +112,18 @@ SpawnZoneRegistry build_spawn_zone_list(const World &world);
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 
+// The C2S 0x2C deploy-pick sentinels [orig: Input_HandleActionBinding case 12
+// @0x49b0c5-0x49b17b - param 0 -> 0xFFFF (no pick), 65534 -> 0xFFFE (the
+// auto-team zone pick); host decode Server_ProcessClientRequestRespawn
+// @0x519AF0, net-re paragraph 5.61].
+inline constexpr uint16_t kDeployPickNone = 0xFFFF;
+inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
+
+// The one witnessed g_GameType BIT the spawn picker tests. libs/world stays
+// net-agnostic, so this mirrors npwire's game_type::kObjectiveBit; libs/netsim
+// static_asserts the two agree (entity_wire_bridge.cpp).
+inline constexpr uint32_t kGameTypeObjectiveBit = 0x20000;
+
 // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
 // frontier — enemy-capturable, or carrying the team's frontier number — with
 // control fully secured (>= 0x10000). Co-op gametypes (game_type & 0x20000) take

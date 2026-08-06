@@ -2,19 +2,31 @@
 
 #include <cmath>      // std::lround
 
+#include <npwire/game_type.h>     // kObjectiveBit (pinned below)
 #include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
+#include <npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
 #include <terrain/height_field.h>  // TerrainHeightField::valid
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
+#include <world/entity.h>      // EntityHandle (pinned below)
 #include <world/geom.h>        // to_fixed / from_fixed
+#include <world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
 #include <world/infantry.h>    // kInfantryAirborneGap / remote body state
-#include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
+#include <world/spawn_select.h> // kSpawnMarkerStartTypes + kGameTypeObjectiveBit (pinned below)
 #include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {
 
-// The player Person item template (§5.2a host-built player entity; the same id
-// PlayerReplicationState::entity_type_id defaults to).
-static constexpr uint16_t kPlayerPersonTypeId = 0x14B9u;
+// npwire's wire_handle packing and world's EntityHandle are the same witnessed
+// layout [orig: EntityPool_FindByNetId @ 0x4f0a20]; world stays net-agnostic and
+// npwire sim-agnostic, so netsim — the one lib that sees both — pins them here.
+static_assert(wire_handle::kInvalid == world::EntityHandle::kInvalid);
+static_assert(wire_handle::kPoolCount == world::kEntityPoolCount);
+static_assert(wire_handle::make(3, 5) == world::EntityHandle::make(3, 5).packed);
+static_assert(wire_handle::pool(0x2123) == world::EntityHandle{0x2123}.pool() &&
+              wire_handle::slot(0x2123) == world::EntityHandle{0x2123}.slot());
+static_assert(game_type::kObjectiveBit == world::kGameTypeObjectiveBit);
+static_assert(kPlayerPersonTypeId == world::kPlayerInfantryTypeId);
+
 
 EntityClass class_for_type_id(uint16_t type_id) {
 	// A bare type id cannot reveal ItemDef+356. Keep the one exact built-in
@@ -141,11 +153,11 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.vehicle_forward_speed_reg = e.veh.cmd_speed;          // vehicleData[136]
 	s.vehicle_lateral_speed_reg = e.veh.cmd_lateral_speed; // vehicleData[135]
 	s.vehicle_steer_target_bam = e.veh.steer_target_bam;   // vehicleData[132]
-	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : 0xFFFFu;
+	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : wire_handle::kInvalid;
 	// entity+0x28 groundEntity — the standing-on carrier the player record echoes when not
 	// mounted [orig: op1 @0x4c0a08 reads +0x28 as the default carrier]. Mirrored from the
 	// owner's uplink for read-applied peers (apply_player_intent; D-NET-151).
-	s.ground_handle = e.ground_target.valid() ? e.ground_target.packed : 0xFFFFu;
+	s.ground_handle = e.ground_target.valid() ? e.ground_target.packed : wire_handle::kInvalid;
 	return s;
 }
 
@@ -194,8 +206,8 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply
 		// leaves the pose invalid and the record falls back to the free-standing form.
 		const uint16_t carrier =
-				s.mount_handle != 0xFFFFu ? s.mount_handle : s.ground_handle;
-		if (carrier != 0xFFFFu) {
+				s.mount_handle != wire_handle::kInvalid ? s.mount_handle : s.ground_handle;
+		if (carrier != wire_handle::kInvalid) {
 			if (const world::Entity *c =
 			            w.registry.get(world::EntityHandle{carrier})) {
 				constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
@@ -353,11 +365,11 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// Entity::seats stays dense for gameplay and carries the fixed retail slot explicitly.
 	// [orig: itemDef+604/+605..+614; entity+400..+418]
 	if (e.has_item_def) {
-		rec.mount_handle_8 = 0xFFFFu;
-		rec.mount_handle_9 = 0xFFFFu;
+		rec.mount_handle_8 = wire_handle::kInvalid;
+		rec.mount_handle_9 = wire_handle::kInvalid;
 		for (const world::Seat &seat : e.seats) {
 			const uint16_t occupant =
-					seat.occupant.valid() ? seat.occupant.packed : 0xFFFFu;
+					seat.occupant.valid() ? seat.occupant.packed : wire_handle::kInvalid;
 			if (seat.retail_slot < 8) {
 				rec.seat_mask |= static_cast<uint8_t>(1u << seat.retail_slot);
 				rec.mount_handles[seat.retail_slot] = occupant;
@@ -432,7 +444,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		for (const world::Seat &seat : e.seats) {
 			const uint16_t occupant = seat.occupant.valid()
 					? seat.occupant.packed
-					: 0xFFFFu;
+					: wire_handle::kInvalid;
 			if (seat.retail_slot < 8) {
 				rec.seat_mask |= static_cast<uint8_t>(1u << seat.retail_slot);
 				rec.mount_handles[seat.retail_slot] = occupant;
@@ -610,7 +622,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// carrier applies the local values RAW — exactly the original's null-carrier leg (no
 	// transform, no rejection). The resolved path uses the carrier's complete modeled Euler.
 	int32_t wire_x = intent.pos_x, wire_y = intent.pos_y, wire_z = intent.pos_z;
-	const bool grounded = intent.carrier_handle != 0xFFFFu;
+	const bool grounded = intent.carrier_handle != wire_handle::kInvalid;
 	if (grounded) {
 		if (const world::Entity *carrier = world.registry.get(
 		            world::EntityHandle{static_cast<uint16_t>(intent.carrier_handle)})) {

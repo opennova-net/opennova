@@ -126,11 +126,6 @@ add_subdirectory(apps/nw_server)
 # .sph server logs, or `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
 add_subdirectory(apps/nw_pp)
 
-# nw_replay — streams a representative captured NovaWorld S2C path to a Godot
-# spectator endpoint. It can also print/validate the host/client role partition.
-# This is a debugging tool, not part of the runtime.
-add_subdirectory(apps/nw_replay)
-
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
     opennova_fnt

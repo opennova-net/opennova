@@ -1,5 +1,7 @@
 #include "npwire/ingame_decode.h"
 
+#include "npwire/wire_handle.h"
+
 #include "../wire_cursor.h"
 
 #include <cmath>
@@ -114,7 +116,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 			out.records.push_back(std::move(rec));
 			return false;
 		}
-		if (rec.slot_id == 0xFFFF || (rec.slot_id & 0xF000) >= 0x5000) {
+		if (wire_handle::is_batch_end_sentinel(rec.slot_id)) {
 			// Retail handler returns immediately on the sentinel — without
 			// storing this record. Match that: stop the loop here.
 			out.sentinel_ended_early = true;
@@ -129,18 +131,18 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 			return false;
 		}
 
-		if (rec.spawn_flags & 0x0020) rec.entity_flags = c.u32();
+		if (rec.spawn_flags & kPoolSpawnHasEntityFlags) rec.entity_flags = c.u32();
 		rec.pos_x = int32_t(c.u32());
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.spawn_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
-		if (rec.spawn_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
-		if (rec.spawn_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.spawn_flags & 0x0008) rec.section_mask = int32_t(c.u32());
-		if (rec.spawn_flags & 0x0010) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
-		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
-		if (rec.spawn_flags & 0x0200) rec.target_handle = c.u16();
+		if (rec.spawn_flags & kPoolSpawnHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.spawn_flags & kPoolSpawnHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.spawn_flags & kPoolSpawnHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
+		if (rec.spawn_flags & kPoolSpawnHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.spawn_flags & kPoolSpawnHasTeamByte) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
+		if (rec.spawn_flags & kPoolSpawnHasParentHandle) rec.parent_handle = c.u16();
+		if (rec.spawn_flags & kPoolSpawnHasTargetHandle) rec.target_handle = c.u16();
 
 		// Mount-occupancy block (0x0400). The retail handler reads the seat-mask
 		// byte, then — for a non-zero mask — one occupant handle per set bit
@@ -153,7 +155,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		// 0x400 when the mask is non-zero), so the byte-witness capture didn't
 		// exercise it — but the client handler reads it, so the port must too.
 		// [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
-		if (rec.spawn_flags & 0x0400) {
+		if (rec.spawn_flags & kPoolSpawnHasMountOccupancy) {
 			rec.seat_mask = c.u8();
 			if (rec.seat_mask) {
 				for (int b = 0; b < 8; ++b) {
@@ -167,22 +169,22 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 
 		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
 
-		if (rec.spawn_flags & 0x0800) {
+		if (rec.spawn_flags & kPoolSpawnHasAiTrailer) {
 			rec.ai_profile_1 = c.u32();
 			rec.ai_profile_2 = c.u32();
 			rec.ai_name = c.cstr();
 		}
-		if (rec.spawn_flags & 0x0040) rec.alert_byte = c.u8();
-		if (rec.spawn_flags & 0x0080) rec.action_byte = c.u8();
-		if (rec.spawn_flags & 0x1000) rec.weapon_type_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasRefNum) rec.alert_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasSubType) rec.action_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasWeaponTypeByte) rec.weapon_type_byte = c.u8();
 
-		if (rec.spawn_flags & 0x2000) {
+		if (rec.spawn_flags & kPoolSpawnHasZoneNumberRank) {
 			rec.zone_number_rank = c.u8();
 			rec.zone_radius = c.u16();
-		} else if (rec.spawn_flags & 0x8000) {
+		} else if (rec.spawn_flags & kPoolSpawnHasZoneRadiusAlt) {
 			rec.zone_radius = c.u16();
 		}
-		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) rec.difficulty_byte = c.u8();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -226,13 +228,13 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.flags_byte & 0x01) rec.movement_val = c.u32();  // entitySlot+16, raw BAM heading — NOT parent (D-NET-59)
-		if (rec.flags_byte & 0x02) rec.orientation_val = c.u32();
-		if (rec.flags_byte & 0x04) rec.ammo_count = c.u16();
+		if (rec.flags_byte & kPool3SyncHasMovementVal) rec.movement_val = c.u32();  // entitySlot+16, raw BAM heading — NOT parent (D-NET-59)
+		if (rec.flags_byte & kPool3SyncHasOrientationVal) rec.orientation_val = c.u32();
+		if (rec.flags_byte & kPool3SyncHasAmmoCount) rec.ammo_count = c.u16();
 		rec.net_handle = c.u16();
-		if (rec.flags_byte & 0x08) rec.team_byte = c.u8();
-		if (rec.flags_byte & 0x10) rec.weapon_type = c.u16();
-		if (rec.flags_byte & 0x20) rec.score_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasTeamByte) rec.team_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasWeaponType) rec.weapon_type = c.u16();
+		if (rec.flags_byte & kPool3SyncHasScoreByte) rec.score_byte = c.u8();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -281,18 +283,18 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.field_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
-		if (rec.field_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
-		if (rec.field_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
-		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
-		if (rec.field_flags & 0x0020) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
+		if (rec.field_flags & kStaticEntityHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.field_flags & kStaticEntityHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.field_flags & kStaticEntityHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
+		if (rec.field_flags & kStaticEntityHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.field_flags & kStaticEntityHasTeamByte) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
+		if (rec.field_flags & kStaticEntityHasEntityFlags) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
-		if (rec.field_flags & 0x0040) rec.bone_a = c.u8();
-		if (rec.field_flags & 0x0080) rec.bone_b = c.u8();
-		if (rec.field_flags & 0x0100) rec.score_flag = c.u8();
+		if (rec.field_flags & kStaticEntityHasRefNum) rec.bone_a = c.u8();
+		if (rec.field_flags & kStaticEntityHasSubType) rec.bone_b = c.u8();
+		if (rec.field_flags & kStaticEntityHasScoreFlag) rec.score_flag = c.u8();
 		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
-		if (rec.weapon_byte != 0 || (rec.field_flags & 0x0200)) rec.attach_ref = c.u16();
+		if (rec.weapon_byte != 0 || (rec.field_flags & kStaticEntityHasAttachRef)) rec.attach_ref = c.u16();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -352,24 +354,24 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	out.field_bitmask = c.u16();
 	if (!c.ok) return false;
 	const uint16_t m = out.field_bitmask;
-	out.queue_ack = (m & 0x4000) != 0;   // no body byte; applies to live AND removal rows
-	if (m & 0x8000) {
+	out.queue_ack = (m & kPlayerSyncAck) != 0;   // no body byte; applies to live AND removal rows
+	if (m & kPlayerSyncRemoval) {
 		out.removal = true;
 		return (c.p == c.end);
 	}
 	out.entity_slot_id = c.u8();
 	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, entityRef.
-	if (m & 0x0001) out.name = c.cstr();
-	if (m & 0x0002) out.clan = c.cstr();
-	if (m & 0x0010) out.id_label = c.cstr();
-	if (m & 0x0004) out.team = c.u8();
-	if (m & 0x0008) out.type_subtype = c.u8();
-	if (m & 0x0020) out.field_0020 = c.u8();
-	if (m & 0x1000) out.field_1000 = c.u8();
-	if (m & 0x0040) out.field_0040 = c.u8();
-	if (m & 0x0080) out.field_0080 = c.u8();
-	if (m & 0x0400) out.quality = c.u8();
-	if (m & 0x0800) out.entity_ref = c.u32();
+	if (m & kPlayerSyncHasName) out.name = c.cstr();
+	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
+	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
+	if (m & kPlayerSyncHasTeamByte) out.team = c.u8();
+	if (m & kPlayerSyncHasClassByte) out.type_subtype = c.u8();
+	if (m & kPlayerSyncHasVehicleScore) out.field_0020 = c.u8();
+	if (m & kPlayerSyncHasLateJoinFlag) out.field_1000 = c.u8();
+	if (m & kPlayerSyncHasSquad) out.field_0040 = c.u8();
+	if (m & kPlayerSyncHasSide) out.field_0080 = c.u8();
+	if (m & kPlayerSyncHasQuality) out.quality = c.u8();
+	if (m & kPlayerSyncHasVehicleTimer) out.entity_ref = c.u32();
 	return (c.p == c.end);
 }
 
@@ -397,7 +399,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		// (@ 0x42e79d / 0x42e7b1). The slot >= pool.capacity guard is pool-state
 		// dependent and not reproducible from the wire alone — the two value
 		// sentinels below are.
-		if (rec.slot_id == 0xFFFF || (rec.slot_id & 0xF000) >= 0x5000) {
+		if (wire_handle::is_batch_end_sentinel(rec.slot_id)) {
 			out.sentinel_ended_early = true;
 			return (c.p == c.end);
 		}
@@ -447,7 +449,7 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 	out.slot_id = c.u16();
 	if (!c.ok) return false;
 	// Sentinel: retail returns before reading anything else (@ 0x4337c5).
-	if (out.slot_id == 0xFFFF) return (c.p == c.end);
+	if (out.slot_id == wire_handle::kInvalid) return (c.p == c.end);
 	out.item_type_id = c.u16();
 	out.item_type = c.u8();
 	out.team = c.u8();
@@ -555,7 +557,7 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed   = c.u16();
 	out.euler_z            = int16_t(c.u16());
 	out.flags_byte         = c.u8();
-	out.is_dead_pose         = (out.flags_byte & 0x04) != 0;
+	out.is_dead_pose         = (out.flags_byte & kVehicleCompactFlagDeadPose) != 0;
 	if (out.is_dead_pose) {
 		// Mounted: the remaining two Euler components (entity+584/+580).
 		out.euler_y = int16_t(c.u16());
@@ -701,11 +703,11 @@ bool decode_round_event_record(const uint8_t *body, size_t len,
 	out.flags        = c.u8();
 	out.adm_index    = c.u8();
 	out.subtype      = c.u8();
-	if (out.flags & 0x80) {
+	if (out.flags & kRoundEventHasSlotByte) {
 		out.slot_byte = c.u8();
 	}
 	out.shooter_handle = c.u16();
-	if (out.flags & 0x40) {
+	if (out.flags & kRoundEventHasTargetHandle) {
 		out.target_handle = c.u16();
 	}
 	out.shot_seq         = c.u16();
@@ -801,7 +803,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.anchor_z = c.i32();
 	out.flags1 = c.u8();    // loadprog / death-spectator signals
 	out.flags2 = c.u8();
-	out.sub_block = uint8_t(out.flags2 & 0x03);
+	out.sub_block = uint8_t(out.flags2 & kFrameFlags2SubBlockCycleMask);
 	switch (out.sub_block) {
 	case 0:
 		// Local-player weapon/reload/uniform state (11 B) [orig: NetPacket_WritePlayerState
@@ -864,7 +866,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.local_tail_present = true;
 
 	// Conditional phase-8 mounted-ammo record (sub-block 0 + flags2 bit 3 set).
-	if ((out.flags2 & 0x0F) == 8) {
+	if ((out.flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute) {
 		const uint16_t mount_handle = c.u16();
 		if (!c.ok) return finish(false);
 		if (mount_handle != 0xFFFF) {
@@ -1483,7 +1485,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 	const uint16_t first = c.u16();   // wire start word
 	out.end_index = c.u16();
 	if (!c.ok) return false;          // need the 4-byte [start][end] frame
-	out.has_header = (first == 0xFFFF);
+	out.has_header = (first == kTerrainFirstChunkStartWord);
 	if (out.has_header) {
 		out.start_index = 0;
 		out.magic = c.u32();          // 'til0'
@@ -1491,7 +1493,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 		out.header_field2 = c.u32();
 		out.header_field3 = c.u32();
 		if (!c.ok) return false;
-		if (out.magic != 0x74696C30u) return false;  // reader returns 1 (no load) otherwise
+		if (out.magic != kTerrainTileMagic) return false;  // reader returns 1 (no load) otherwise
 	} else {
 		out.start_index = first;
 	}

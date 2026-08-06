@@ -5,8 +5,8 @@ extends Node3D
 # F3 overlay's read-only panes -- a developer tool for eyeballing the skeletal runtime
 # (bone placement, locomotion phase sync, FP-arms posing), not engine-witnessed behavior.
 #
-# Everything is rebuilt into ONE ImmediateMesh every frame (the same redraw-from-live-state
-# model NetEventView uses), so spawning / despawning models needs no invalidation: the next
+# Everything is rebuilt into ONE ImmediateMesh every frame (redraw-from-live-state:
+# no retained per-model nodes), so spawning / despawning models needs no invalidation: the next
 # frame's walk simply finds the current set. Built / freed by GameWorld on the F3 overlay's
 # "Show skeletons" toggle.
 
@@ -35,7 +35,7 @@ func setup(root: Node) -> void:
 	mi.name = "SkeletonDebugLines"
 	mi.mesh = _mesh
 	# Unshaded, vertex-coloured, depth-test off so the bones read over the character meshes
-	# (the same overlay recipe as NetEventView's markers).
+	# (the standard debug-overlay recipe).
 	var mat := MissionOverlayUtil.line_material()
 	mat.no_depth_test = true
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -56,7 +56,7 @@ func _process(_delta: float) -> void:
 			continue
 		_drawable_count += 1
 		_draw_skeleton(skel)
-	# An empty surface is invalid -- skip emit when nothing was gathered (mirrors NetEventView).
+	# An empty surface is invalid -- skip emit when nothing was gathered.
 	if _segments.is_empty():
 		return
 	MissionOverlayUtil.emit_line_segments(_mesh, _segments)

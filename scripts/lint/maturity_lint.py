@@ -96,7 +96,7 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 # canonical home per language and NEW bare literals of them are hard findings.
 #   7597        the NovaWorld gate UDP port    gate_probe.h / net_ports.h / HostSessionConfig
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
-#   0x30020     the retail Co-op g_GameType    HostSessionConfig.GAME_TYPE_COOP
+#   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
 PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "libs/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
@@ -104,6 +104,7 @@ PROMOTED_CANONICAL = (
     "godot/engine/world/host_session_config.gd",
     "libs/novaworld/include/novaworld/gate_probe.h",
     "libs/npwire/include/npwire/net_ports.h",
+    "libs/npwire/include/npwire/game_type.h",
 )
 PROMOTED_EXEMPT = re.compile(r"^\s*#|^\s*//|\[orig|\bconst\s|\bconstexpr\s|#define\s")
 
@@ -180,8 +181,8 @@ def main() -> int:
     for f in promoted_findings:
         print(f"[lint][promoted-literal] {f}")
         print("[lint]   this value has a canonical named home "
-              "(HostSessionConfig / novaworld gate_probe.h / npwire net_ports.h) "
-              "— reference it instead of re-minting the literal.")
+              "(HostSessionConfig / novaworld gate_probe.h / npwire net_ports.h / "
+              "npwire game_type.h) — reference it instead of re-minting the literal.")
 
     if (dict_findings or promoted_findings) and args.enforce:
         return 1

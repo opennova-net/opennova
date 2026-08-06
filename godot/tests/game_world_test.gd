@@ -763,61 +763,6 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 			"an inexact wire header cannot leave the previous host metadata live")
 	assert_false(wire_mission.is_wire_header_only())
 
-
-func test_net_map_missing_environment_does_not_commit_partial_render_state() -> void:
-	var root_dir := _stage_minimal_fixture("net_missing_env")
-	var mission_path := root_dir.path_join("mnml.bms")
-	var mission := NovaMissionData.new()
-	assert_eq(mission.open_file(mission_path), OK)
-	assert_true(mission.set_header_int("water_override", 24))
-	assert_true(mission.set_header_flag(0x1, true))
-	assert_eq(mission.save_file(), OK)
-	_write_pff(root_dir.path_join("resource.pff"), [{
-		"name": "mnml.bms",
-		"bytes": FileAccess.get_file_as_bytes(mission_path),
-	}])
-	assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.env")), OK)
-
-	var root := NovaResourceRoot.new()
-	assert_eq(root.mount_runtime(root_dir, "", true), OK)
-	var packed := load("res://engine/world/game_world.tscn") as PackedScene
-	var world := packed.instantiate() as GameWorld
-	add_child_autofree(world)
-	await get_tree().process_frame
-	world.set_resource_root(root)
-
-	# A retained environment is exactly what the failed wire load must not
-	# mutate or render against. It may belong to a preview or an earlier epoch.
-	var stale_env := EnvFile.new()
-	stale_env.set_source_path(ProjectSettings.globalize_path(
-			"res://../fixtures/minimal/resources/mnml.env"))
-	assert_eq(stale_env.load(), OK)
-	var env_node := world.get_node("NovaEnvironment") as NovaEnvironment
-	env_node.environment_data = stale_env
-	var water := world.get_node("NovaWater") as NovaWater
-	water.water_height = 3.0
-
-	assert_eq(world.load_net_session({
-		"replay_host": "127.0.0.1",
-		"replay_port": 9,
-	}), OK)
-	var client = world.get_net_client()
-	assert_not_null(client)
-	if client == null:
-		return
-	client.emit_signal("mission_known", "mnml.bms")
-
-	assert_false(stale_env.has_mission_overrides(),
-			"a missing required ENV cannot apply BMS overrides to retained data")
-	assert_null(world.get_loaded_mission(),
-			"an incomplete wire map stays retryable instead of latching its BMS")
-	assert_eq(water.water_height, 3.0,
-			"the distinct BMS water rung commits with the map, not a partial load")
-	assert_false(water.is_water_render_active(),
-			"terrain success alone cannot render water against a stale ENV")
-	world.unload()
-
-
 func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	NovaStrings.clear()
 	var root_dir := _stage_minimal_fixture("first_armory_open")

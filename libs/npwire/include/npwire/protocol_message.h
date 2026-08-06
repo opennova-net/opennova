@@ -246,6 +246,12 @@ struct QueuedSessionPacket {
 // game template sets the same 100 as the NOVAWORLDUDP service template.
 // Future packets beyond this many queued sequence numbers are consumed but not retained.
 // [orig: CNapiNetwork_Init @0x4ca4a0 stores @0x4cab10/@0x4cabe0; HandleSessionPacket @0x626c18]
+// The engine tick rate every wire cadence conversion divides by: 1000/62 ms
+// per tick (~16.13 ms), 1e9/62 ns pump periods, the send-holdoff dividers
+// (net-re §5.47a). Docs sometimes quote the nominal 62.5 Hz; the integer the
+// original arithmetic uses at every witnessed site is 62.
+constexpr int64_t JO_ENGINE_TICK_RATE = 62;
+
 constexpr size_t SESSION_PACKET_QUEUE_MAX = 100;
 
 struct SessionSequencing {

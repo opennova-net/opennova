@@ -159,6 +159,10 @@ inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — g
 inline constexpr uint32_t kItemAttribNoHud = 0x20000000u;
 inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
 
+// The "no ADM slot" sentinel every mount/equip byte uses (primary_weapon_slot_adm,
+// equipped_adm_index): 0xFF = none selected.
+inline constexpr uint8_t kAdmSlotNone = 0xFF;
+
 // The retail entity Flags dword bits (Entity::engine_flags + the organic
 // low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
 // witnessed meaning; the consolidated per-bit table is

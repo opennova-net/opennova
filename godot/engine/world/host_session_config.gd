@@ -16,6 +16,24 @@ const GAME_TYPE_COOP := 0x30020
 ## A mission without a multiplayer attrib (the retail training mission case)
 ## resolves to the non-objective Co-op family when launched by LAN automation.
 const GAME_TYPE_TRAINING_COOP := 0x10020
+## The rest of the witnessed g_GameType code words (the retail LTGT_* gametext
+## keys — docs/interface/loading-screen-re.md). C++ twin: libs/npwire
+## game_type.h (kCoop = TRAINING_COOP, kObjectiveCoop = COOP); the GUT pin test
+## holds both sides to the same hex. Code words are opaque beyond the objective
+## bit — never decompose them.
+const GAME_TYPE_DEATHMATCH := 0x00000            # LTGT_DM
+const GAME_TYPE_KING_OF_THE_HILL := 0x00001      # LTGT_KOTH
+const GAME_TYPE_TEAM_DEATHMATCH := 0x10000       # LTGT_TDM
+const GAME_TYPE_TEAM_KING_OF_THE_HILL := 0x10001 # LTGT_TKOTH
+const GAME_TYPE_ATTACK_AND_DEFEND := 0x10002     # LTGT_AD
+const GAME_TYPE_CAPTURE_THE_FLAG := 0x10004      # LTGT_CTF
+const GAME_TYPE_FLAGBALL := 0x10008              # LTGT_FB
+const GAME_TYPE_ADVANCE_AND_SECURE := 0x10010    # LTGT_AAS
+const GAME_TYPE_SEARCH_AND_DESTROY := 0x90002    # LTGT_SD
+const GAME_TYPE_CONQUER_AND_CONTROL := 0x50010   # LTGT_CAC
+## The 0x0A sub-block-3 gate bit (npwire game_type::kObjectiveBit):
+## GAME_TYPE_COOP == GAME_TYPE_TRAINING_COOP | GAME_TYPE_OBJECTIVE_BIT.
+const GAME_TYPE_OBJECTIVE_BIT := 0x20000
 ## First port of the witnessed retail LAN host range
 ## [orig: game.cfg mplanserverportmin/max 32768-32787, JO_SERVER].
 ## C++ twin: libs/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint
@@ -77,27 +95,27 @@ var death_messages := 1
 static func game_type_for_mission_mode(mode: int) -> int:
 	match mode:
 		NovaMissionData.ATTRIB_DEATHMATCH:
-			return 0x00000
+			return GAME_TYPE_DEATHMATCH
 		NovaMissionData.ATTRIB_TEAM_DEATHMATCH:
-			return 0x10000
+			return GAME_TYPE_TEAM_DEATHMATCH
 		NovaMissionData.ATTRIB_COOP:
 			return GAME_TYPE_COOP
 		NovaMissionData.ATTRIB_KING_OF_THE_HILL:
-			return 0x00001
+			return GAME_TYPE_KING_OF_THE_HILL
 		NovaMissionData.ATTRIB_TEAM_KING_OF_THE_HILL:
-			return 0x10001
+			return GAME_TYPE_TEAM_KING_OF_THE_HILL
 		NovaMissionData.ATTRIB_SEARCH_AND_DESTROY:
-			return 0x90002
+			return GAME_TYPE_SEARCH_AND_DESTROY
 		NovaMissionData.ATTRIB_ATTACK_AND_DEFEND:
-			return 0x10002
+			return GAME_TYPE_ATTACK_AND_DEFEND
 		NovaMissionData.ATTRIB_CAPTURE_THE_FLAG:
-			return 0x10004
+			return GAME_TYPE_CAPTURE_THE_FLAG
 		NovaMissionData.ATTRIB_FLAGBALL:
-			return 0x10008
+			return GAME_TYPE_FLAGBALL
 		NovaMissionData.ATTRIB_ADVANCE_AND_SECURE:
-			return 0x10010
+			return GAME_TYPE_ADVANCE_AND_SECURE
 		NovaMissionData.ATTRIB_CONQUER_AND_CONTROL:
-			return 0x50010
+			return GAME_TYPE_CONQUER_AND_CONTROL
 		_:
 			return GAME_TYPE_TRAINING_COOP
 

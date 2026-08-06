@@ -15,7 +15,7 @@ All output goes to `<repo>\.scratch\` (gitignored). Never commit raw captures,
 | `lib.ps1` | Shared helpers (repo/.scratch paths, run stamps, Godot + dumpcap discovery). Dot-sourced by the rest. |
 | `detect_capture.ps1` | Verify Npcap + dumpcap and a loopback adapter. Run this first. |
 | `capture.ps1` | `-Action start\|stop -Tag <t>` — dumpcap to `.scratch\<tag>-<stamp>.pcapng`. Defaults to the loopback adapter; `-Iface` for a real NIC. Stop validates every pcapng block through exact EOF and can require a final-packet tail marker. |
-| `decode.ps1` | Decode a `.pcapng`/`.sph` with `nw_pp` (+ optional `nw_replay --print-roles`). Finds the tool in Release or Debug. |
+| `decode.ps1` | Decode a `.pcapng`/`.sph` with `nw_pp`. Finds the tool in Release or Debug. |
 | `export_parity_corpus.py` | Create or verify `items.def`, `ammo.def`, and mission bytes through the engine-faithful mounted retail VFS; requires the SERVER and CLIENT resolutions, source archives, hashes, and bytes to agree. |
 | `exercise_retail_input.ps1` | Focus one exact retail PID and record a create-new witness for the fixed W/D/A movement-and-turn trajectory used by exercised RR/OR runs. |
 | `godot/tests/net/parity_joiner_driver.gd` | Tracked frame-driven OpenNova joiner used by verdict-bearing RO/OO runs; publishes readiness/motion evidence and performs request/ACK cooperative teardown. |
@@ -465,7 +465,7 @@ child exits.
   the loopback adapter `\Device\NPF_Loopback` present → `CAPTURE_READY=loopback`.
 - `nw_pp` reads dumpcap's loopback-adapter pcapng directly (link-type handled by
   `apps/common/pcap_reader`). Build the tools with `scripts/build.sh`; binaries land
-  in `build\apps\{nw_pp,nw_replay}\{Release|Debug}\`.
+  in `build\apps\nw_pp\{Release|Debug}\`.
 - Pass dumpcap a device **name** (`\Device\NPF_Loopback`), not the `dumpcap -D`
   ordinal — the ordinal is rejected.
 - `$env:JO_GAME_DIR` = folder containing `Jointops.exe` (machine-local; set in

@@ -14,6 +14,7 @@
 
 #include <mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
 #include <netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
+#include <npwire/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <npwire/ingame_message_id.h>
 #include <world/entity.h>                 // world::Entity (0x0F spawn pose)
@@ -210,7 +211,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// World::waypoints; each entry's node is the corresponding pool-3 marker
 	// index, so its wire handle is 0x3000|node. [orig @0x502e41..0x502edb]
 	const bool waypoint_gametype =
-			(ctx.config.game_type & 0xFFFDFFFFu) == 0x00010020u;
+			game_type::is_waypoint_family(ctx.config.game_type);
 	std::vector<const world::WaypointEntry *> waypoints;
 	if (waypoint_gametype && recipient_team == 1 && ctx.world != nullptr) {
 		waypoints.reserve(std::min<std::size_t>(
@@ -444,7 +445,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			auto rd_u32 = [](const uint8_t *p) -> uint32_t {
 				return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 			};
-			if (til.size() < kTilHeaderBytes || rd_u32(til.data()) != 0x74696C30u) {
+			if (til.size() < kTilHeaderBytes || rd_u32(til.data()) != kTerrainTileMagic) {
 				world_pool_done = true; // no (valid) .til -> emit nothing, advance past phase 5
 				break;
 			}
@@ -464,7 +465,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				batch.start_index = static_cast<uint16_t>(off);
 				batch.end_index = static_cast<uint16_t>(off + cnt);
 				if (batch.has_header) {
-					batch.magic = 0x74696C30u;
+					batch.magic = kTerrainTileMagic;
 					batch.tile_count = total_count;   // TOTAL set size (drives the client's alloc)
 					batch.header_field2 = res0;
 					batch.header_field3 = res1;
