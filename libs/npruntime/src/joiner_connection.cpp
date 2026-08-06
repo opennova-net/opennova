@@ -1451,6 +1451,34 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
 			out.inbound_gameplay.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::ENTITY_DEATH) {
+			// S2C 0x13 ENTITY DEATH — the host's per-death notify for every
+			// non-player victim (the AI/item leg of Entity_CheckAndProcessDeath).
+			// The replica pipeline folds it (Health = 0 + the surfaced death
+			// record) and the embedding sim runs the class death callback on the
+			// world twin — a destructible's husk/explosion chain (reason 4).
+			// Without this surface a joiner never saw a destructible die unless
+			// its own visual round predicted it.
+			// [orig: NapiNPClientMsg_EntityDeath @0x42EB50; sender
+			//  Entity_CheckAndProcessDeath @0x51b550 — msg 19, mask 0x90]
+			EntityDeathRecord death;
+			std::size_t death_consumed = 0;
+			if (decode_entity_death(
+					m.payload.data(), m.payload.size(), death, death_consumed))
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::KILL_SYNC) {
+			// S2C 0x26 KILL SYNC — the second death route (the destructible
+			// deathCallback's own authority resend among its senders); the
+			// client kills the addressed slot through the same class death
+			// callback. Folded beside 0x13 by the replica pipeline.
+			// [orig: NapiNPClientMsg_0x026 @0x42EC30 → Entity_KillBySlotId
+			//  @0x42BCE0; resend Server_SendEntityStatePacket @0x509d70 via
+			//  Entity_HandleDestructibleDeathEvent @0x440210]
+			KillRecord kill;
+			std::size_t kill_consumed = 0;
+			if (decode_kill_record(
+					m.payload.data(), m.payload.size(), kill, kill_consumed))
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
 			ZoneTimerValue value;
 			std::size_t consumed = 0;

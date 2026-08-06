@@ -16,16 +16,23 @@
 //
 // This port is the AUTHORITY drive core for the ground family (items.def `physics`
 // selector non-zero routes here [orig: Entity_DispatchPhysics_cveh @0x48efc0]):
-// input mapping, steering chase, speed pipeline, velocity integration, gravity and a
-// terrain ground clamp. Tracked deferrals (D-NET-161): the air/helicopter family
-// (`move_function chel` — Super Pumas stay parked), the skid/tire-slip model
-// (`tireSlip`/`slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
-// vehicle-vs-vehicle collision loop + collision-avoid damping, water
-// drag/drowning drain (the plane exists but motor physics does not consume it), the
-// AI autopilot/waypoint drive (states 16/18), specialized vehicle sound families
-// beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, the
-// wheel-contact pitch/roll solver (Entity_ProcessTrackedVehiclePhysics — substituted
-// by the bilinear terrain clamp), and the vehicle AI state machine's non-drive states
+// input mapping, steering chase, speed pipeline, velocity integration, gravity,
+// submerged drag, and the wheeled/tracked contact + suspension solve
+// (Entity_ProcessTrackedVehiclePhysics @0x47C1C0 client subset — pad probes at
+// wheel height, per-corner lifts, the 4-normal attitude fit, the rise-clamped
+// positive-corner rest Z; vehicle-client-movers-re.md §7; boxless/terrain-less
+// rows keep the bilinear terrain-clamp stand-in). Tracked deferrals (D-NET-161):
+// the air/helicopter AUTHORITY mover (`move_function chel` — Super Pumas stay
+// parked), the skid/tire-slip model (`tireSlip`/`slip_speed`; the ASH buggy
+// authors slip_speed 0), the pool-1 vehicle-vs-vehicle collision loop +
+// collision-avoid damping, the authority drown-drain countdown, the solve's
+// contact-direction store feeding a slope-following velocity re-derive
+// (@0x47E65D../@0x48cf97.. — the mover keeps its level frame), the ctan-family
+// mover (@0x488ab0 -> the wheeled solve @0x475de0) and the cbik light solve
+// (@0x479600) — both interim-carried by the ground core/tracked solve, the AI
+// autopilot/waypoint drive (states 16/18), specialized vehicle sound families
+// beyond the ground idle/drive/reverse pass in vehicle_sound.cpp, and the
+// vehicle AI state machine's non-drive states
 // [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
 #ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
 #define OPENNOVA_WORLD_VEHICLE_MOTOR_H
@@ -83,6 +90,10 @@ struct VehicleTraits {
                                // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
     bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
     VehicleFamily family = VehicleFamily::Ground; // move_function tag (§5.38e movers)
+    bool amphibian = false;    // move_function catv: the generic dispatcher passes
+                               // hasWaterLevel=2 into the ground mover, arming the
+                               // contact solve's pad water-support forces; cveh/ctrn
+                               // pass 0 [orig: @0x48f010 vs @0x48efce/@0x48f06e]
     int32_t water_speed = 0;   // itemDef+0x8EC waterSpeed — the cbot family's max
                                // drive speed (the same slot the ground family
                                // reads as playerSpeed) [orig: @0x48E835]

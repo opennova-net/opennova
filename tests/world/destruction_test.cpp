@@ -1287,6 +1287,71 @@ void test_building_death_requires_loaded_husk_model() {
     CHECK(!collapse_sound);
 }
 
+// The MP VISUAL CLIENT runs the destruction chain locally. Retail's client
+// receives S2C 0x13, zeroes Health, and runs the class death callback
+// (reason 4 = the net kill) — and its per-frame entity update drains the
+// explosion queue, dead-item settle, and the death-piece pool UNGATED on every
+// peer. A joiner therefore detonates the husk chain's kz blast and flies its
+// pieces from its own pools; only the round pool's authority gate keeps
+// gameplay consequences host-side. Regression: the drains used to be
+// is_authority-only, so a joiner's 0x13-driven death queued a chain blast that
+// never processed (no explosion FX, frozen pieces).
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5;
+//  Entity_UpdateAllEntities @0x4c2100 — DeathPiece_TickAll @0x4c221c,
+//  Projectile_ProcessExplosionQueue @0x4c223f, unconditional]
+void test_net_kill_runs_client_side_death_chain() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(2, 8);
+    // The joiner role: an MP session without projectile authority.
+    w.mp_session = true;
+    w.projectile_authority = false;
+
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 500;
+    seed.health = 30;
+    seed.position = Vec3{10.0f, 0.0f, 0.0f};
+    seed.bound_radius = 1.0f;
+    const EntityHandle barrel = w.registry.spawn(2, seed);
+    w.item_death_traits.set(500, barrel_traits());
+
+    // The S2C 0x13 fold: Health = 0, then the class death callback (reason 4).
+    Entity *b = w.registry.get(barrel);
+    b->health = 0;
+    b->alive = false;
+    destruction_notify_item_damage(w, *b, 4);
+    CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+          (kEntityFlagDead | kEntityFlagHusk));
+    CHECK(w.destruction.husk_swaps.size() == 1);
+    CHECK(w.destruction.husk_swaps[0].wire_handle == barrel.packed);
+    CHECK(w.explosions.queue.size() == 1); // the chain blast is staged
+
+    // The non-authority client tick drains the queue exactly like retail's
+    // shared per-frame update; the presentation counters advance.
+    w.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    CHECK(w.explosions.queue.empty());
+    CHECK(w.destruction.explosions_processed == 1);
+
+    // Control: a plain non-authority world OUTSIDE an MP session (tests,
+    // pre-join states) keeps the authority-only drain.
+    auto sp_heap = std::make_unique<World>();
+    World &sp = *sp_heap;
+    seed_ammo(sp);
+    sp.registry.configure_pool(2, 8);
+    Entity sp_seed = seed;
+    const EntityHandle sp_barrel = sp.registry.spawn(2, sp_seed);
+    sp.item_death_traits.set(500, barrel_traits());
+    Entity *sb = sp.registry.get(sp_barrel);
+    sb->health = 0;
+    destruction_notify_item_damage(sp, *sb, 4);
+    CHECK(sp.explosions.queue.size() == 1);
+    sp.run_logic_tick(/*is_authority=*/false, /*pre_mission=*/false);
+    CHECK(sp.explosions.queue.size() == 1); // still parked: not a visual client
+}
+
 int main() {
     test_explosion_damage_gates();
     test_explosion_los_excludes_victim_hull();
@@ -1313,6 +1378,7 @@ int main() {
     test_death_kick_field();
     test_round_destroys_item();
     test_building_death_requires_loaded_husk_model();
+    test_net_kill_runs_client_side_death_chain();
     if (failures == 0) std::printf("destruction_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

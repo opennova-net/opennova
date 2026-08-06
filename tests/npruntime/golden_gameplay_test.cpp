@@ -198,10 +198,30 @@ int main() {
 	            "peer entity SNAPped to the captured C2S 0x0C position")) return 1;
 
 	// Server_TickUpdate emitted exactly one S2C 0x0A on the peer's transport.
+	// The same first boundary also legitimately emits the witnessed round-start
+	// session channel S2C 0x79: the network-quality countdown initializes to
+	// zero and fires immediately, then reloads 0x136 [orig:
+	// g_network_quality_broadcast_timer, reset by Server_InitNewRoundState
+	// @0x51CA9E; decrement/emit in Server_TickUpdate]. Anything OUTSIDE
+	// {0x79, 0x0A} on this tick is a regression.
 	std::vector<uint8_t> raw;
-	if (!expect(udp.pop_outbound(raw), "Server_TickUpdate emitted an S2C datagram for the peer")) return 1;
-	if (!expect(!raw.empty() && raw[0] == 0x0A, "emitted datagram is tag 0x0A")) return 1;
-	if (!expect(!udp.pop_outbound(raw), "exactly one S2C 0x0A per connection per frame")) return 1;
+	std::vector<uint8_t> frame_0a;
+	int datagrams = 0;
+	int frames_0a = 0;
+	while (udp.pop_outbound(raw)) {
+		++datagrams;
+		if (!expect(!raw.empty(), "emitted S2C datagram is non-empty")) return 1;
+		if (raw[0] == 0x0A) {
+			++frames_0a;
+			frame_0a = raw;
+		} else if (!expect(raw[0] == 0x79,
+				"first-boundary emissions besides 0x0A are only the witnessed 0x79")) {
+			return 1;
+		}
+	}
+	if (!expect(datagrams > 0, "Server_TickUpdate emitted an S2C datagram for the peer")) return 1;
+	if (!expect(frames_0a == 1, "exactly one S2C 0x0A per connection per frame")) return 1;
+	raw = frame_0a;
 
 	// Decode the emitted 0x0A (the witnessed §5.9 frame build_tag_0a_world_reference -> encode_frame_update
 	// produces; decode_frame_update is its inverse).

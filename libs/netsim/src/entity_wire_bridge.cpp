@@ -420,7 +420,7 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// from the stored pointer, independent of parent. The joiner's
 		// materializer authors its ground_target from THIS field only.
 		// [orig: serialize_entity_pool_to_packet_0 @0x503940 target write
-		//  (entity+40); handler stores @0x432d47/@0x4332d7]
+		//  (entity+40); handler resolve @0x4332bc, store @0x4332d7]
 		if (e.ground_target.valid()) {
 			const world::Entity *ground = w.registry.get(e.ground_target);
 			if (ground != nullptr) rec.target_handle = e.ground_target.packed;

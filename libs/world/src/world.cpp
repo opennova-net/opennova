@@ -1135,7 +1135,8 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     if (!pre_mission &&
         (is_authority || (mp_session && !projectile_authority)))
         round_sim.tick(*this, terrain, ai != nullptr ? ai->collision : nullptr);
-    if (is_authority && !pre_mission) {
+    if (!pre_mission &&
+        (is_authority || (mp_session && !projectile_authority))) {
         // The explosion-queue drain runs once per frame after the projectile
         // update [orig: Projectile_ProcessExplosionQueue @0x4ead80]; entries the
         // damage callbacks push (the kz death chain) land next tick, exactly like
@@ -1143,6 +1144,15 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
         // [orig: the Entity_UpdateStaticDeathPhysics / _UpdateFallingDeathPhysics
         // update callbacks] and the death-piece pool advances
         // [orig: DeathPiece_TickAll @0x57b900].
+        // Retail runs all three UNGATED on every peer — the shared per-frame
+        // entity update calls them on clients too, which is how a joiner's
+        // 0x13/0x26-triggered death chain detonates its kz blasts and flies its
+        // pieces locally. The MP visual client (the round pool's predicate
+        // above) therefore drains them as well; its authoritative state keeps
+        // arriving over the wire regardless.
+        // [orig: Entity_UpdateAllEntities @0x4c2100 — DeathPiece_TickAll
+        //  @0x4c221c, Projectile_ProcessExplosionQueue @0x4c223f, and the
+        //  pool-2/3 update-callback walk, all unconditional]
         // The water plane: env.water_z (16.16, the #265 sound-profile home) —
         // zero means "no water authored", the same read the wreck gates use
         // [orig: Env_WaterHeightFixed @0x26c6454].

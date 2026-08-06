@@ -9,9 +9,14 @@
 #include <npruntime/session_status.h>
 #include <npwire/ingame_message_id.h>
 #include <rtxt/rtxt.h>
+#include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace novasim;
@@ -255,11 +260,26 @@ void NovaSimulation::host_pump() {
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
 	// and wraps against the current renderer viewport height [orig:
 	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
-	// @ 0x511375, wrap @ 0x511391]. Refresh the portable runtime seam on
-	// every frame so resizing is observable; the retail parity runbook pins this
-	// root viewport to 1920x1080. A missing/non-drawable viewport leaves the seam
-	// explicitly unset, and npruntime suppresses 0x68 instead of guessing.
+	// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Refresh the portable
+	// runtime seam on every frame so resizing is observable; the retail parity
+	// runbook pins this root viewport to 1920x1080. The runtime owns this node
+	// without parenting it into the tree (manual pump ordering, ADR 0011), so
+	// get_viewport() alone is null on every production host: resolve the render
+	// window the way retail's CEffectWorld query does — the live window. A
+	// headless DisplayServer has no renderer (the dedicated-host analogue), and
+	// a missing/non-drawable viewport leaves the seam explicitly unset:
+	// npruntime suppresses 0x68 instead of inventing a screen size
+	// (docs/net/novaworld-net-re.md §5.34, D-NET-206).
 	Viewport *viewport = get_viewport();
+	if (viewport == nullptr) {
+		DisplayServer *display = DisplayServer::get_singleton();
+		if (display != nullptr && display->get_name() != "headless") {
+			SceneTree *tree = Object::cast_to<SceneTree>(
+					Engine::get_singleton()->get_main_loop());
+			if (tree != nullptr)
+				viewport = tree->get_root();
+		}
+	}
 	const double viewport_height = viewport != nullptr
 			? viewport->get_visible_rect().size.y : 0.0;
 	ctx_.loaded_model_viewport_height = viewport_height > 0.0
@@ -604,15 +624,14 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 		local->yaw = static_cast<int16_t>(std::lround(
 				opennova::world::mission_yaw_deg_from_bam_heading(
 						local->veh.yaw_bam)));
-		// The air and water movers own live attitude. Publish zero too: level is
-		// a real solved pose, not a validity sentinel. Ground/bike contact attitude
-		// remains unported, so those families retain their wire/dead-pose values.
+		// Every family mover owns live attitude now: air/water solves plus the
+		// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
+		// @0x47C1C0 client subset). Publish zero too: level is a real solved
+		// pose, not a validity sentinel. A boxless ground row's motor never
+		// advances the seeded wire attitude, so the mirror is stable there.
 		const opennova::world::VehicleTraits *traits =
 				world_->vehicle_traits.get(local->item_id);
-		const bool owns_attitude = traits != nullptr &&
-				(traits->family == opennova::world::VehicleFamily::Watercraft ||
-						traits->family == opennova::world::VehicleFamily::Helicopter ||
-						traits->family == opennova::world::VehicleFamily::Plane);
+		const bool owns_attitude = traits != nullptr;
 		if (owns_attitude) {
 			es.pitch_bam = local->veh.air_pitch_bam;
 			es.roll_bam = local->veh.air_roll_bam;
@@ -1375,6 +1394,31 @@ void NovaSimulation::refresh_joiner_projectile_proxies() {
 
 void NovaSimulation::apply_joiner_gameplay_events() {
 	if (!joiner_ || !runtime_ || !world_) return;
+
+	// S2C 0x13 entity-death notifies: run the class death callback on the world
+	// twin — retail's client zeroes Health and invokes deathCallback(entity, 4, 0),
+	// which for a destructible item IS the local husk-swap + death-explosion
+	// chain (the visual client's only live channel for another peer destroying a
+	// static; the 0x10/0x20 load batches never re-stream after load). Pool-0
+	// organics have no materialized world twin here — their death presentation
+	// rides the compact dead bit — and destruction_notify_item_damage's own
+	// gates keep AI-driven vehicles on their state-machine death path, exactly
+	// like the authority side.
+	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
+	//  cb(entity, 4, 0) @0x42ebf5; cb == Entity_HandleDestructibleDeathEvent
+	//  @0x440210 for destructibles]
+	for (const opennova::EntityDeathRecord &death :
+			runtime_->drain_entity_deaths()) {
+		const opennova::world::EntityHandle handle{death.entity_handle};
+		if (handle.pool() < 1 || handle.pool() > 3) continue;
+		opennova::world::Entity *victim =
+				wire_world_materializer_.owned(*world_, handle);
+		if (victim == nullptr) continue;
+		victim->health = 0;
+		victim->alive = false;
+		victim->last_attacker = opennova::world::EntityHandle{};
+		opennova::world::destruction_notify_item_damage(*world_, *victim, 4);
+	}
 
 	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
 	// normal round spawner so tracers and physical impacts are produced locally;

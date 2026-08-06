@@ -39,10 +39,21 @@ enum class EntityKind : uint8_t {
 
 // Live entity pools 0..4 [orig: the g_pool_list walk bound @0x431910].
 inline constexpr int kEntityPoolCount = 5;
-// Fixed g_pool_list capacities used by mission promotion and the retail load
-// handlers' packed-index validation (pools 0..2 @1024, marker pool 3 @4096).
-inline constexpr std::size_t kRetailActorPoolCapacity = 1024;
-inline constexpr std::size_t kRetailMarkerPoolCapacity = 4096;
+// Fixed g_pool_list capacities, used by mission promotion and as the memory-safe
+// bound behind the retail load handlers' unchecked pool indexing
+// (Pool_GetEntryUnchecked walks a fixed-capacity pool; the serving side never
+// exceeds its own capacity). Witnessed per pool: organics 256, items 1200,
+// buildings 1200, pool-3 768, effects 128.
+// [orig: EntityPool_Allocate @0x442168 — capacity stores @0x4421cd (pool 0, 256),
+//  @0x44219c/@0x4421a2 (pools 1/2, 1200), @0x442203 (pool 3, 768),
+//  @0x44221e (pool 4, 128)]
+inline constexpr std::size_t kRetailPoolCapacity[kEntityPoolCount] = {
+    256, 1200, 1200, 768, 128};
+constexpr std::size_t retail_pool_capacity(int pool) {
+    return pool >= 0 && pool < kEntityPoolCount
+            ? kRetailPoolCapacity[pool]
+            : 0;
+}
 
 // Packed addressable handle: (pool_index << 12) | (slot_index & 0xFFF).
 // [orig: return value of EntityPool_FindByNetId @0x4f0a20; 0xFFFF == not found.]

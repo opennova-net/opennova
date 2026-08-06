@@ -120,6 +120,47 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::ENTITY_DEATH: {
+		// The host's per-death notify for every NON-PLAYER victim (the AI/item
+		// leg of Entity_CheckAndProcessDeath) — a destructible's ONLY live death
+		// channel beside 0x26; the load-stream 0x10/0x20 batches do not
+		// re-stream after load. Retail resolves the pool row (slot < that
+		// pool's capacity), zeroes Health, stamps the killer source, and runs
+		// the class death callback with reason 4 — for a destructible item that
+		// callback IS the local husk-swap/explosion chain the world twin runs
+		// when this drains.
+		// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — gates @0x42eba2/@0x42ebbb,
+		//  Health = 0 @0x42ebd6, deathAnimStateId @0x42ebdf, cb(entity, 4, 0)
+		//  @0x42ebf5; sender Entity_CheckAndProcessDeath @0x51b550 (msg 19)]
+		EntityDeathRecord death;
+		size_t consumed = 0;
+		if (!decode_entity_death(body.data(), body.size(), death, consumed)) {
+			++unknown_tags_;
+			break;
+		}
+		apply_entity_death(death.entity_handle, death.killer_source);
+		break;
+	}
+	case s2c::KILL_SYNC: {
+		// The SECOND client death route — the destructible deathCallback's own
+		// authority resend rides this tag. Entity_KillBySlotId resolves the
+		// slot the same way, zeroes Health, and runs the same cb(entity, 4,
+		// flags); its not-already-dead gate is our world chain's husk gate.
+		// [orig: NapiNPClientMsg_0x026 @0x42EC30 → Entity_KillBySlotId
+		//  @0x42BCE0 — gates @0x42bcfc/@0x42bd15, Flags&2 gate @0x42bd2f,
+		//  Health zero @0x42bd33, cb(entity, 4, flags) @0x42bd6a; the
+		//  destructible resend Server_SendEntityStatePacket @0x509d70 via
+		//  Entity_HandleDestructibleDeathEvent @0x440210]
+		KillRecord kill;
+		size_t consumed = 0;
+		if (!decode_kill_record(body.data(), body.size(), kill, consumed)) {
+			++unknown_tags_;
+			break;
+		}
+		apply_entity_death(kill.victim_slot,
+				static_cast<int16_t>(kill.attacker));
+		break;
+	}
 	case s2c::ENTITY_SPAWN_BATCH: // pool-0 organic spawn batch (§5.23)
 		apply_organic_spawn(body);
 		break;
@@ -149,6 +190,35 @@ std::vector<WeaponReload> ClientReplicaPipeline::drain_weapon_reloads() {
 	std::vector<WeaponReload> out;
 	out.swap(pending_weapon_reloads_);
 	return out;
+}
+
+std::vector<EntityDeathRecord> ClientReplicaPipeline::drain_entity_deaths() {
+	std::vector<EntityDeathRecord> out;
+	out.swap(pending_entity_deaths_);
+	return out;
+}
+
+// Shared 0x13/0x26 fold: the retail handler gates (not the 0xFFFF sentinel,
+// pool nibble < 5, slot < that pool's capacity), the row Health zero, and the
+// once-surfaced record the embedding sim runs the class death callback from.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 / Entity_KillBySlotId @0x42BCE0]
+void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
+		int16_t killer_source) {
+	const world::EntityHandle handle{handle_packed};
+	if (handle_packed == 0xFFFFu ||
+			handle.pool() >= world::kEntityPoolCount ||
+			static_cast<std::size_t>(handle.slot()) >=
+					world::retail_pool_capacity(handle.pool()))
+		return;
+	if (ClientEntityState *row = state_.find(handle_packed)) {
+		row->health_word = 0;
+		row->health_known = true;
+		state_.mark_changed();
+	}
+	EntityDeathRecord death;
+	death.entity_handle = handle_packed;
+	death.killer_source = killer_source;
+	pending_entity_deaths_.push_back(death);
 }
 
 void ClientReplicaPipeline::pump(ISessionTransport &channel) {
@@ -965,7 +1035,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		const world::EntityHandle spawn_handle{rec.slot_id};
 		if (spawn_handle.pool() != 1 ||
 				static_cast<std::size_t>(spawn_handle.slot()) >=
-						world::kRetailActorPoolCapacity)
+						world::retail_pool_capacity(1))
 			continue;
 		// A 0x0D spawn is pool-1 by construction — learn the type's 0x0A replication
 		// class so the vehicle compact body decodes for it (see classify()).
@@ -1107,14 +1177,35 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 	};
 
 	// The item catalog and learned class table cannot change during this method.
-	// Resolve the persistent-parent predicate once per row, outside the repeated
-	// pose-composition depths.
-	std::vector<uint8_t> persistent_parent_child(state_.entities.size(), 0);
+	// Resolve each no-callback row's persistent STRUCTURAL CARRIER once, outside
+	// the repeated pose-composition depths. Retail's 'ewep' class MOVE function
+	// recomposes the child from groundEntity (entity+40) every tick — the slot
+	// the 0x0D TARGET seeds — so a compact-less mounted gun rides its DRIVING
+	// hull with no wire records of its own: the carrier-def seat bone
+	// (carrierDef+532+subType) selects a model bone and the child adopts the
+	// carrier-matrix-composed position + Euler set (or, with no resolvable
+	// bone, the carrier pose verbatim).
+	// [orig: move-fn table 'ewep' row @0x82abe0 -> Entity_UpdateTransformAndTurret
+	//  @0x440ca0 — groundEntity read @0x440cbf, bone re-resolve @0x440cfd,
+	//  carrier-matrix bone compose @0x44109d with position+Euler adoption
+	//  @0x4410dd, no-bone verbatim carrier-pose adoption @0x4410ea..0x4411bc]
+	// Without model bone tables at this layer, the recompose below carries the
+	// rigid child-in-carrier pose captured from the 0x0D absolutes — the same
+	// client-subset simplification the parent-follow path already pins.
+	std::vector<uint16_t> persistent_carrier(state_.entities.size(), 0xFFFFu);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
-		if (child.parent_handle == 0xFFFFu ||
-		    classify(child.type_id) != EntityClass::NoNetworkCallback)
+		if (child.target_handle == 0xFFFFu && child.parent_handle == 0xFFFFu)
+			continue; // no carrier candidate — skip the catalog lookup
+		if (classify(child.type_id) != EntityClass::NoNetworkCallback)
 			continue;
+		// The 0x0D TARGET is the structural carrier (groundEntity/+40) and
+		// outranks any parent: retail's transform never reads +368.
+		if (child.target_handle != 0xFFFFu) {
+			persistent_carrier[i] = child.target_handle;
+			continue;
+		}
+		if (child.parent_handle == 0xFFFFu) continue;
 		// A POOL-0 parent on a no-callback child is the occupant/driver
 		// back-reference, never a transform parent (live retail 0x0D witness,
 		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
@@ -1123,13 +1214,12 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 		// seat/parent loop that ratchets the pair through the depth passes
 		// (the reported climbing/spinning emplacements). The structural
 		// carrier of a mounted-on-vehicle gun rides the record's separate
-		// TARGET field, staged on the row and folded by the world
-		// materializer (groundEntity/+40).
+		// TARGET field, consumed above.
 		// [orig: 0x0D store @0x433289 — entity+368 occupantEntity back-ref;
-		//  target → groundEntity stores @0x432d47/@0x4332d7]
+		//  target → groundEntity resolve @0x4332bc, store @0x4332d7]
 		if (world::EntityHandle{child.parent_handle}.pool() == 0)
 			continue;
-		persistent_parent_child[i] = 1;
+		persistent_carrier[i] = child.parent_handle;
 	}
 	// Repeating the composition makes mixed seat/persistent-parent chains
 	// independent of pool/vector ordering while preserving the promotion depth
@@ -1169,20 +1259,20 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 				}
 			}
 
-			if (!persistent_parent_child[child_index]) continue;
+			if (persistent_carrier[child_index] == 0xFFFFu) continue;
 			// Only the addeweap/no-callback family rides this persistent
 			// recompose: those children never receive compact motion samples,
-			// so the load-time 0x0D parent relation is their only pose source.
-			// A compact-sampled class (player/vehicle/infantry) moves by its
-			// OWN records — its carrier composition happens per record on the
-			// record's own carrier field — and its 0x0D parentHandle is the
-			// occupantEntity/+368 DRIVER back-reference, never a transform
+			// so the load-time 0x0D target/parent relation is their only pose
+			// source. A compact-sampled class (player/vehicle/infantry) moves
+			// by its OWN records — its carrier composition happens per record
+			// on the record's own carrier field — and its 0x0D parentHandle is
+			// the occupantEntity/+368 DRIVER back-reference, never a transform
 			// parent [orig: 0x0D store @0x433289; vehicle-compact carrier
 			// compose @0x4608ce]. Recomposing such a row here glued the
 			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
 			// "a vehicle follows the player around" (one per map, whichever
 			// spawn record carried flag 0x0100).
-			ClientEntityState *parent = find_row(child.parent_handle);
+			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
 			if (parent == nullptr) continue; // a later batch may still provide it
 			// 0x0D entity_flags bit 1 is a spawn/movement gate, not a death
 			// verdict. Only interpret flags/health after a real live compact has
@@ -1251,7 +1341,12 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 	for (size_t i = 0; i < batch.records.size(); ++i) {
 		const StaticEntityRecord &rec = batch.records[i];
 		const std::size_t slot = static_cast<std::size_t>(batch.start_index) + i;
-		if (slot >= world::kRetailActorPoolCapacity) continue;
+		// Retail indexes pool 2 unchecked; its own capacity (1200) is the bound a
+		// stock server can reach — a 1157-entity 01TR load page walked past a
+		// 1024 clamp here and silently dropped the pool tail.
+		// [orig: NapiNPClientMsg_0x010 @0x433400 — Pool_GetEntryUnchecked(2, idx)
+		//  @0x433487; capacity EntityPool_Allocate @0x4421a2]
+		if (slot >= world::retail_pool_capacity(2)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x2000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();
@@ -1330,7 +1425,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		// Pool_GetEntryUnchecked(3, startIndex+i), netHandle store at entity+124]
 		const std::size_t slot =
 				static_cast<std::size_t>(batch.start_index) + i;
-		if (slot >= world::kRetailMarkerPoolCapacity) continue;
+		if (slot >= world::retail_pool_capacity(3)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x3000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();

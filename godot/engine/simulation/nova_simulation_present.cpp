@@ -1108,28 +1108,41 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 			// [orig: attachment call @ 0x546518;
 			//  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
 			write_present_world_model_heat_glow(r, *world_, *ent);
-			if (local_first_person_usegun &&
-					local_player->mount_target == h) {
-				const opennova::world::WeaponTableEntry *mount_def =
-						world_->weapons.by_index(ent->primary_weapon_slot_adm);
-				// Primary retail leg: FP model exists and this exact embedded
-				// MountSlot is the live EquippedSlot. flags2 Invisible is the
-				// witnessed alternate forced-cull leg and does not require the
-				// EquippedSlot comparison.
-				// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
-				//  Def+0x0c & 0x800 @0x44083f]
-				const bool equipped_parent_slot =
-						local_usegun_slot_active_ && local_usegun_mount_ == h &&
-						local_usegun_weapon_adm_ == ent->primary_weapon_slot_adm;
-				if (mount_def != nullptr &&
-						((mount_def->has_first_person_model_reference &&
-						  local_first_person_model_adm_ ==
-								  ent->primary_weapon_slot_adm &&
-						  equipped_parent_slot) ||
-						 (mount_def->flags2 &
-						  opennova::world::weapon_flag2::kInvisible) != 0))
-					r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
-			}
+		}
+		// The local first-person UseGun parent cull is a render verdict of THIS
+		// machine's own mount state, and retail's render walk applies it
+		// identically on every role. Resolve the mount row directly: a joiner's
+		// exact-handle materialized entity carries the resolved embedded
+		// MountSlot (primary_weapon_slot_adm), while `ent` above deliberately
+		// stays host-only authored-identity enrichment — keeping this inside it
+		// skipped the cull on joiners, drawing the mounted gun TWICE (its wire
+		// world model plus the FP model).
+		// [orig: Entity_RenderVehicleModel @0x4407d0 predicate
+		//  @0x4407f6..0x44084c; sole submit @0x440918]
+		if (local_first_person_usegun && local_player->mount_target == h) {
+			const opennova::world::Entity *mount_row = world_->registry.get(h);
+			const opennova::world::WeaponTableEntry *mount_def =
+					mount_row != nullptr
+					? world_->weapons.by_index(mount_row->primary_weapon_slot_adm)
+					: nullptr;
+			// Primary retail leg: FP model exists and this exact embedded
+			// MountSlot is the live EquippedSlot. flags2 Invisible is the
+			// witnessed alternate forced-cull leg and does not require the
+			// EquippedSlot comparison.
+			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
+			//  Def+0x0c & 0x800 @0x44083f]
+			const bool equipped_parent_slot = mount_row != nullptr &&
+					local_usegun_slot_active_ && local_usegun_mount_ == h &&
+					local_usegun_weapon_adm_ ==
+							mount_row->primary_weapon_slot_adm;
+			if (mount_def != nullptr &&
+					((mount_def->has_first_person_model_reference &&
+					  local_first_person_model_adm_ ==
+							  mount_row->primary_weapon_slot_adm &&
+					  equipped_parent_slot) ||
+					 (mount_def->flags2 &
+					  opennova::world::weapon_flag2::kInvisible) != 0))
+				r[PF_LOCAL_VIEW_SUPPRESSED] = 1.0f;
 		}
 		// Two retail callbacks write this three-register family. The sector
 		// renderer publishes TEX_TEAM for every placed pool-1/2/3 model that

@@ -27,6 +27,7 @@ add_library(opennova_world STATIC
     src/spawn_select.cpp
     src/tracer_trails.cpp
     src/vehicle_attach.cpp
+    src/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     src/vehicle_motor.cpp
     src/vehicle_sound.cpp
     src/weapon_fsm.cpp

@@ -233,6 +233,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.state() = netsim::ClientState{};
 	view_.drain_round_events();
 	view_.drain_weapon_reloads();
+	view_.drain_entity_deaths();
 	view_.set_game_type(0);
 	return joiner_->start();
 }
@@ -339,6 +340,10 @@ std::vector<netsim::ClientRoundEvent> ClientRuntime::drain_round_events() {
 	return view_.drain_round_events();
 }
 
+std::vector<EntityDeathRecord> ClientRuntime::drain_entity_deaths() {
+	return view_.drain_entity_deaths();
+}
+
 std::vector<WeaponReload> ClientRuntime::drain_reload_notifications() {
 	std::vector<WeaponReload> notifications;
 	notifications.swap(pending_reload_notifications_);
@@ -442,9 +447,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			}
 		}
 		// Host authority already spawned every accepted round/refill. Its decoded
-		// listen-client replica pipeline must not retain duplicate visual gameplay events.
+		// listen-client replica pipeline must not retain duplicate visual gameplay
+		// events. Deaths too: the authority's own damage pass ran the death chain
+		// (and its 0x13 broadcast skips the loopback — mask 0x90 NOT_HOST).
 		view_.drain_round_events();
 		view_.drain_weapon_reloads();
+		view_.drain_entity_deaths();
 	} else {
 		// A remote joiner: framed datagrams. JoinerConnection decodes the 0x83 SESSION envelope and
 		// surfaces the inner bodies, which we fold via ClientReplicaPipeline::apply (the single remote-wire

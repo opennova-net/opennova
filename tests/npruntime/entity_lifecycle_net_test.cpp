@@ -520,6 +520,96 @@ bool run_empty_slot_sweep_retires_the_row() {
 			"0x5D: the swept row is GONE (no ghost person proxy survives)");
 }
 
+// ---------------------------------------------------------------------------------
+// (D) the S2C 0x13 entity-death fold — a destructible's only live death channel
+// ---------------------------------------------------------------------------------
+
+// The host notifies every non-player death as S2C 0x13 [u16 handle][i16 killer].
+// The connection surfaces the validated body, the replica fold zeroes the row's
+// health, and drain_entity_deaths hands the record to the embedding sim exactly
+// once, so it can run the class death callback (reason 4 — the husk/explosion
+// chain) on the world twin. Regression: 0x13 used to be dropped at the
+// connection's tag chain — a joiner never saw a destructible die.
+// [orig: sender Entity_CheckAndProcessDeath @0x51b550 (msg 19, mask 0x90);
+//  handler NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
+//  deathCallback(entity, 4, 0) @0x42ebf5]
+bool run_entity_death_notify_reaches_the_sim() {
+	constexpr uint16_t kSelf = 0x0005;
+	// A pool-2 static in the 0x10 tail beyond the former 1024 clamp: the death
+	// fold only works if the load fold accepted the full retail pool range.
+	constexpr uint16_t kBarrel = 0x2000u | 1130u;
+	np::ClientRuntime client("DeathJoiner", [] { return uint64_t(0); });
+	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+
+	// Prior state: the streamed static row exists with no witnessed health.
+	{
+		StaticEntityBatch batch;
+		batch.start_index = 1130;
+		StaticEntityRecord rec;
+		rec.item_type_id = 0x10EB;
+		rec.pos_x = 753 * 65536;
+		rec.pos_y = 762 * 65536;
+		rec.pos_z = 42 * 65536;
+		batch.records.push_back(rec);
+		batch.entity_count = 1;
+		const std::vector<uint8_t> dg = frame_server_session(
+				server_tx, {make_protocol_message(
+						0x10, encode_static_entity_batch(batch))});
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(1);
+	}
+	const ns::ClientEntityState *before = row_for(client.state(), kBarrel);
+	if (!expect(before != nullptr && !before->health_known,
+			"0x13: the streamed static row exists, health unwitnessed"))
+		return false;
+	if (!expect(client.drain_entity_deaths().empty(),
+			"0x13: no death surfaced before the notify"))
+		return false;
+
+	// The 4-byte notify [orig: BuildDeathNotifyPayload @0x5036e0].
+	std::vector<uint8_t> body13;
+	body13.push_back(static_cast<uint8_t>(kBarrel & 0xFFu));
+	body13.push_back(static_cast<uint8_t>(kBarrel >> 8));
+	body13.push_back(0x03); // killerSource
+	body13.push_back(0x00);
+	const std::vector<uint8_t> dg = frame_server_session(
+			server_tx, {make_protocol_message(0x13, body13)});
+	client.receive(dg.data(), dg.size());
+	(void)client.Client_ProcessNetworkFrame(2);
+
+	const ns::ClientEntityState *after = row_for(client.state(), kBarrel);
+	if (!expect(after != nullptr && after->health_known && after->health_word == 0,
+			"0x13: the fold zeroes the row's health (retail Health = 0)"))
+		return false;
+	const std::vector<EntityDeathRecord> deaths = client.drain_entity_deaths();
+	if (!expect(deaths.size() == 1 && deaths[0].entity_handle == kBarrel &&
+				deaths[0].killer_source == 3,
+			"0x13: exactly one death record reaches the sim drain"))
+		return false;
+	if (!expect(client.drain_entity_deaths().empty(),
+			"0x13: the drain is consume-once"))
+		return false;
+
+	// The SECOND death route: S2C 0x26 kill-sync (the destructible callback's
+	// own authority resend) folds through the same surface.
+	// [orig: NapiNPClientMsg_0x026 @0x42EC30 → Entity_KillBySlotId @0x42BCE0]
+	std::vector<uint8_t> body26;
+	body26.push_back(static_cast<uint8_t>(kBarrel & 0xFFu));
+	body26.push_back(static_cast<uint8_t>(kBarrel >> 8));
+	body26.push_back(0x07); // attacker
+	body26.push_back(0x00);
+	const std::vector<uint8_t> dg26 = frame_server_session(
+			server_tx, {make_protocol_message(0x26, body26)});
+	client.receive(dg26.data(), dg26.size());
+	(void)client.Client_ProcessNetworkFrame(3);
+	const std::vector<EntityDeathRecord> kills = client.drain_entity_deaths();
+	return expect(kills.size() == 1 && kills[0].entity_handle == kBarrel &&
+				kills[0].killer_source == 7,
+			"0x26: the kill-sync route reaches the same sim drain");
+}
+
 // S2C 0x46 bit15: bookkeeping only. The entity row must SURVIVE.
 bool run_player_sync_removal_keeps_the_entity() {
 	constexpr uint16_t kSelf = 0x0005;
@@ -793,6 +883,7 @@ int main() {
 	if (!run_team_assign_default_kit_stays_byte_identical()) return 1;
 	if (!run_empty_slot_sweep_surfaces_raw_gameplay()) return 1;
 	if (!run_empty_slot_sweep_retires_the_row()) return 1;
+	if (!run_entity_death_notify_reaches_the_sim()) return 1;
 	if (!run_player_sync_removal_keeps_the_entity()) return 1;
 	if (!run_host_answers_the_sweep_request()) return 1;
 	if (!run_in_match_session_loss()) return 1;

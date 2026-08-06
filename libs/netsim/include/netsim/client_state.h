@@ -162,9 +162,12 @@ struct ClientEntityState {
 	// client body pass decays it later in the same frame.
 	int32_t recoil_pitch = 0;
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
-	// ClientReplicaPipeline captures this row's rigid parent-local pose after the whole
-	// batch is present, then recomposes it from each decoded parent sample. This
-	// is the retail path for NoNetworkCallback addeweap children.
+	// ClientReplicaPipeline captures this row's rigid carrier-local pose after the
+	// whole batch is present, then recomposes it from the followed carrier's live
+	// pose each tick. This is the retail path for NoNetworkCallback addeweap
+	// children; the followed carrier is target_handle (groundEntity) when set,
+	// else this parent (non-pool-0 only, D-NET-195). The parent_local_* cluster
+	// below stores the captured pose for whichever carrier is followed.
 	uint16_t parent_handle = 0xFFFF;
 	int32_t parent_local_x = 0;
 	int32_t parent_local_y = 0;
@@ -180,9 +183,15 @@ struct ClientEntityState {
 	// pool-1 mounted child rides (retail groundEntity, entity+40) — an occupied
 	// boat gun's target is the DRIVING hull while parent_handle above carries
 	// the occupant/driver back-ref (+368). Vehicle compacts re-land the same
-	// +40 slot per record; this is its 0x0D seed.
-	// [orig: NapiNPClientMsg_0x00D @0x432C40 — target → groundEntity stores
-	//  @0x432d47/@0x4332d7; parent → occupantEntity (+368) store @0x433289]
+	// +40 slot per record; this is its 0x0D seed. For a compact-less
+	// (NoNetworkCallback) child this slot also drives the LIVE per-tick follow:
+	// retail's 'ewep' move function recomposes the child from groundEntity
+	// every tick, so the gun tracks a DRIVING carrier between/without records
+	// (refresh_carried_entities).
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 — target → groundEntity
+	//  resolve @0x4332bc, store @0x4332d7; parent → occupantEntity (+368) store @0x433289;
+	//  'ewep' move fn Entity_UpdateTransformAndTurret @0x440ca0 via the class
+	//  table row @0x82abe0]
 	uint16_t target_handle = 0xFFFF;
 	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
 	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1

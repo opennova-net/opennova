@@ -272,12 +272,11 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                               const PromoteOptions &opts) {
     PromoteResult r;
 
-    // Pools (pools 0..3 = actors searched by net id, pool 4 = static props).
-    world.registry.configure_pool(0, opts.actor_pool_capacity);
-    world.registry.configure_pool(1, opts.actor_pool_capacity);
-    world.registry.configure_pool(2, opts.actor_pool_capacity);
-    world.registry.configure_pool(3, opts.marker_pool_capacity);
-    world.registry.configure_pool(4, opts.actor_pool_capacity);
+    // Pools (pools 0..3 = actors searched by net id, pool 4 = static props),
+    // at the witnessed per-pool retail capacities by default
+    // [orig: EntityPool_Allocate @0x442168].
+    for (int pool = 0; pool < world::kEntityPoolCount; ++pool)
+        world.registry.configure_pool(pool, opts.pool_capacities[pool]);
 
     // Nav nodes from markers. Node index == marker order, which is exactly what
     // WaypointRecord::waypoint_numbers indexes. Markers ALSO spawn into pool 3 below
