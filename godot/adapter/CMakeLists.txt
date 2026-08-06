@@ -38,6 +38,7 @@ add_subdirectory(../../engine/formats/def opennova_def)
 add_subdirectory(../../engine/formats/avatars opennova_avatars)
 add_subdirectory(../../engine/base/refs opennova_refs)
 add_subdirectory(../../engine/runtime/world opennova_world)
+add_subdirectory(../../engine/runtime/simassets opennova_simassets)
 add_subdirectory(../../engine/runtime/wac opennova_wac)
 add_subdirectory(../../engine/runtime/mission opennova_mission)
 add_subdirectory(../../engine/formats/lwf opennova_lwf)
@@ -232,6 +233,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_def
     opennova_avatars
     opennova_world
+    opennova_simassets
     opennova_wac
     opennova_mission
     opennova_audio_family

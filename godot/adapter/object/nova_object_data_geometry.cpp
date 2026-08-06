@@ -2,6 +2,8 @@
 // bones/skinning, collision volumes, lights and user points.
 #include "object/nova_object_data_internal.h"
 
+#include <simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/plane.hpp>
@@ -295,20 +297,10 @@ Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
 }
 
 bool NovaObjectData::has_collision() const {
-	if (!has_source_model || source_model.collision == nullptr) return false;
-	const ThreediCollisionModel *collision = source_model.collision;
-	if (collision->volume_count > 0) return true;
-	if (!is_skinned(0)) return false;
-	if (collision->face_count > 0 && collision->faces != nullptr &&
-			collision->vertex_count > 0 && collision->vertices != nullptr &&
-			collision->object_count > 0 && collision->objects != nullptr)
-		return true;
-	if (collision->objects != nullptr) {
-		for (size_t i = 0; i < collision->object_count; ++i) {
-			if (collision->objects[i].radius > 0) return true;
-		}
-	}
-	return false;
+	// One implementation per engine fact (ADR 0016): the predicate lives in
+	// engine/runtime/simassets beside the collision model build it gates.
+	return has_source_model &&
+			opennova::simassets::model_has_collision(source_model);
 }
 
 bool NovaObjectData::has_occlusion() const {
@@ -442,22 +434,10 @@ PackedInt32Array NovaObjectData::get_bone_parents(int p_lod_index) const {
 }
 
 bool NovaObjectData::is_skinned(int p_lod_index) const {
-	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
-		return false;
-	}
-	if (source_model.header.mesh_type == THREEDI_MESH_SKINNED) {
-		return true;
-	}
-	const ThreediLod &lod = source_model.lods[p_lod_index];
-	if (lod.strips == nullptr) {
-		return false;
-	}
-	for (size_t i = 0; i < lod.strip_count; ++i) {
-		if (lod.strips[i].bone_table_length > 0) {
-			return true;
-		}
-	}
-	return false;
+	// One implementation per engine fact (ADR 0016): delegates to
+	// engine/runtime/simassets, beside the collision gate that consumes it.
+	return has_source_model &&
+			opennova::simassets::model_is_skinned(source_model, p_lod_index);
 }
 
 Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {

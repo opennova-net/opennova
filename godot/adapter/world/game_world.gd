@@ -1486,6 +1486,8 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 						ItemSeatSpecs.build_item_seat_specs_for_type_ids(
 								warmed_types.keys(), _resource_root, item_db))
 				challenge_sim.resolve_item_traits(item_db)
+				if _resource_root != null:
+					challenge_sim.set_asset_root(_resource_root)
 				challenge_sim.resolve_collision_instances(item_db, _placer)
 				challenge_sim.occlusion_init_mission()
 	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))

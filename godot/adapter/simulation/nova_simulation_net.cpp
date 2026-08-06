@@ -1346,20 +1346,42 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 				int32_t model_id = -1;
 				int32_t occlusion_id = -1;
 				float bound_radius = 0.0f;
-				Ref<NovaObjectData> data =
-						collision_placer_->call("object_data_for", graphic);
-				if (data.is_valid()) {
-					opennova::world::CollisionModel model;
-					if (collision_model_from_3di(data->native_model().collision, model,
-							data->has_collision())) {
-						model_id = collision_world_.add_model(std::move(model));
-						if (data->has_live_panm_for_lod(0))
-							collision_pose_data_[model_id] = data;
+				if (sim_models_.has_index()) {
+					// ADR 0028: the joiner's wire ghosts read the same sim-side
+					// parse-once cache the registry sweep uses.
+					if (const Threedi3di3 *m3 = sim_models_.model_for(key)) {
+						opennova::world::CollisionModel model;
+						if (collision_model_from_3di(m3->collision, model,
+								opennova::simassets::model_has_collision(*m3))) {
+							model_id = collision_world_.add_model(std::move(model));
+							Ref<NovaObjectData> pose_data =
+									collision_placer_->call("object_data_for", graphic);
+							if (pose_data.is_valid() &&
+									pose_data->has_live_panm_for_lod(0))
+								collision_pose_data_[model_id] = pose_data;
+						}
+						opennova::world::OcclusionModel occ;
+						if (occlusion_model_from_3di(*m3, occ))
+							occlusion_id = occlusion_world_.add_model(std::move(occ));
+						bound_radius = model_bound_radius_from_3di(*m3);
 					}
-					opennova::world::OcclusionModel occ;
-					if (occlusion_model_from_3di(data->native_model(), occ))
-						occlusion_id = occlusion_world_.add_model(std::move(occ));
-					bound_radius = model_bound_radius_from_3di(data->native_model());
+				} else {
+					// Legacy render-cache extraction (test seam; dies with S3).
+					Ref<NovaObjectData> data =
+							collision_placer_->call("object_data_for", graphic);
+					if (data.is_valid()) {
+						opennova::world::CollisionModel model;
+						if (collision_model_from_3di(data->native_model().collision, model,
+								data->has_collision())) {
+							model_id = collision_world_.add_model(std::move(model));
+							if (data->has_live_panm_for_lod(0))
+								collision_pose_data_[model_id] = data;
+						}
+						opennova::world::OcclusionModel occ;
+						if (occlusion_model_from_3di(data->native_model(), occ))
+							occlusion_id = occlusion_world_.add_model(std::move(occ));
+						bound_radius = model_bound_radius_from_3di(data->native_model());
+					}
 				}
 				it = collision_model_by_graphic_.emplace(key, model_id).first;
 				collision_occlusion_by_graphic_.emplace(key, occlusion_id);

@@ -31,6 +31,7 @@
 #include <wac/wac_system.h>
 
 #include "wac/nova_wac_program.h"
+#include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
 #include <world/collision.h>
 #include <world/occlusion.h>
@@ -290,6 +291,11 @@ private:
 	};
 	Ref<NovaItemDatabase> collision_item_db_;
 	Ref<RefCounted> collision_placer_;
+	// The sim's own asset source (ADR 0028): the mounted root pinned for its
+	// index lifetime + the parse-once model cache the collision/occlusion/
+	// radius extraction reads. Render caches stay render-only.
+	Ref<NovaResourceRoot> asset_root_;
+	opennova::simassets::SimModelCache sim_models_;
 	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
 	std::unordered_map<std::string, int32_t> collision_occlusion_by_graphic_;
 	std::unordered_map<std::string, float> collision_radius_by_graphic_;
@@ -1740,8 +1746,17 @@ public:
 	// instance count. Also attaches the render-occlusion portal models (buildings
 	// whose graphic carries OVRT/OPLN/OFAC/OOBJ records) with their def bits.
 	// Idempotent per load.
+	// With an asset root installed (set_asset_root — the production path), model
+	// extraction reads the sim's own SimModelCache (ADR 0028); the placer then
+	// supplies only the render-side pose sources (live-PANM data + skeletal
+	// sets — the S3 push-down target). Without one, the legacy placer
+	// extraction runs (the GUT stub seam, deleted with S3).
 	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db,
 	                                Object *p_placer);
+	// Install the mounted root the SIMULATION resolves assets through — the
+	// engine-side mirror of the render mount. Pins the root's index for the
+	// sim-model cache (ADR 0028).
+	void set_asset_root(const Ref<class NovaResourceRoot> &p_root);
 
 	// Mission-start portal init: register + weld + per-building flag stamp over
 	// the attached occlusion models. Call once after resolve_collision_instances.

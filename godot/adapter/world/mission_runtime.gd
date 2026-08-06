@@ -386,6 +386,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# movement collision resolver @0x4b2bd0 + the query set;
 	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
 	if options.get("item_db") != null and options.get("placer") != null:
+		# The sim resolves collision/occlusion .3di data through its OWN mounted
+		# source (ADR 0028) — the placer supplies only render-side pose sets.
+		if options.get("resource_root") != null:
+			_sim.set_asset_root(options["resource_root"])
 		_sim.resolve_collision_instances(options["item_db"], options["placer"])
 		# Mission-start portal init over the occlusion models just attached:
 		# register the exterior window faces, weld coincident opposite pairs of

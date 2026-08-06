@@ -553,6 +553,12 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
+# simassets: the sim-side .3di derivations (ADR 0028)
+add_executable(simassets_model_builders_test simassets/model_builders_test.cpp)
+target_link_libraries(simassets_model_builders_test PRIVATE opennova_simassets)
+target_include_directories(simassets_model_builders_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_model_builders COMMAND simassets_model_builders_test)
+
 # OED object workspace/export tests
 add_executable(oed_build_model_test oed/build_model_test.cpp)
 target_link_libraries(oed_build_model_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)

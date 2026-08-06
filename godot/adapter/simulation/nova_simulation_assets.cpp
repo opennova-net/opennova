@@ -749,9 +749,23 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 	return matched_section;
 }
 
+void NovaSimulation::set_asset_root(const Ref<NovaResourceRoot> &p_root) {
+	asset_root_ = p_root;
+	sim_models_.set_index(
+			p_root.is_valid() ? &p_root->native_index() : nullptr);
+}
+
 int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
                                                 Object *p_placer) {
 	if (!world_ || p_item_db.is_null() || p_placer == nullptr) return 0;
+	// Production installs the sim's own asset source first (ADR 0028); the
+	// no-root leg below is the GUT stub seam and dies with S3.
+	if (!sim_models_.has_index()) {
+		godot::UtilityFunctions::print_verbose(
+				"NovaSimulation: no asset root installed — collision extraction "
+				"falls back to the placer (test seam; production calls "
+				"set_asset_root first)");
+	}
 	RefCounted *placer_ref = Object::cast_to<RefCounted>(p_placer);
 	if (placer_ref == nullptr) return 0;
 	collision_item_db_ = p_item_db;
@@ -787,21 +801,44 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			int32_t model_id = -1;
 			int32_t occlusion_id = -1;
 			float bound_radius = 0.0f;
-			// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the placer's
-			// per-graphic NovaObjectData cache (the render path loads the same object).
-			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
-			if (data.is_valid()) {
-				opennova::world::CollisionModel model;
-				if (collision_model_from_3di(
-						data->native_model().collision, model, data->has_collision())) {
-					model_id = collision_world_.add_model(std::move(model));
-					if (data->has_live_panm_for_lod(0))
-						collision_pose_data_[model_id] = data;
+			if (sim_models_.has_index()) {
+				// ADR 0028: the sim reads its own parse-once cache. The placer
+				// now supplies only the render-side pose sources (live-PANM
+				// object data + skeletal sets) — the S3 push-down target.
+				if (const Threedi3di3 *m3 = sim_models_.model_for(key)) {
+					opennova::world::CollisionModel model;
+					if (collision_model_from_3di(m3->collision, model,
+							opennova::simassets::model_has_collision(*m3))) {
+						model_id = collision_world_.add_model(std::move(model));
+						Ref<NovaObjectData> pose_data =
+								p_placer->call("object_data_for", graphic);
+						if (pose_data.is_valid() &&
+								pose_data->has_live_panm_for_lod(0))
+							collision_pose_data_[model_id] = pose_data;
+					}
+					opennova::world::OcclusionModel occ;
+					if (occlusion_model_from_3di(*m3, occ))
+						occlusion_id = occlusion_world_.add_model(std::move(occ));
+					bound_radius = model_bound_radius_from_3di(*m3);
 				}
-				opennova::world::OcclusionModel occ;
-				if (occlusion_model_from_3di(data->native_model(), occ))
-					occlusion_id = occlusion_world_.add_model(std::move(occ));
-				bound_radius = model_bound_radius_from_3di(data->native_model());
+			} else {
+				// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the
+				// legacy render-cache extraction. Test-only once production
+				// installs the asset root; deleted with S3.
+				Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
+				if (data.is_valid()) {
+					opennova::world::CollisionModel model;
+					if (collision_model_from_3di(
+							data->native_model().collision, model, data->has_collision())) {
+						model_id = collision_world_.add_model(std::move(model));
+						if (data->has_live_panm_for_lod(0))
+							collision_pose_data_[model_id] = data;
+					}
+					opennova::world::OcclusionModel occ;
+					if (occlusion_model_from_3di(data->native_model(), occ))
+						occlusion_id = occlusion_world_.add_model(std::move(occ));
+					bound_radius = model_bound_radius_from_3di(data->native_model());
+				}
 			}
 			it = collision_model_by_graphic_.emplace(key, model_id).first;
 			collision_occlusion_by_graphic_.emplace(key, occlusion_id);
@@ -825,11 +862,16 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			opennova::world::VehicleTraits *vt =
 					world_->vehicle_traits.get_mutable(e->item_id);
 			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
-				Ref<NovaObjectData> vdata =
-						p_placer->call("object_data_for", graphic);
-				if (vdata.is_valid()) {
-					const ThreediCollisionModel *col =
-							vdata->native_model().collision;
+				const Threedi3di3 *vm3 = sim_models_.has_index()
+						? sim_models_.model_for(key)
+						: nullptr;
+				Ref<NovaObjectData> vdata;
+				if (vm3 == nullptr && !sim_models_.has_index())
+					vdata = p_placer->call("object_data_for", graphic);
+				if (vm3 != nullptr || vdata.is_valid()) {
+					const ThreediCollisionModel *col = vm3 != nullptr
+							? vm3->collision
+							: vdata->native_model().collision;
 					if (col != nullptr && col->objects != nullptr &&
 							col->object_count > 0) {
 						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
@@ -931,34 +973,59 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			// entity. A successfully opened model supplies that pointer even when
 			// it has no collision block; missing/corrupt assets leave it null.
 			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
+			const bool native_assets = sim_models_.has_index();
+			const Threedi3di3 *first_husk_m3 = nullptr;
+			const Threedi3di3 *final_husk_m3 = nullptr;
 			Ref<NovaObjectData> first_husk_data;
 			Ref<NovaObjectData> final_husk_data;
-			if (!first_husk_name_s.is_empty())
-				first_husk_data = p_placer->call("object_data_for", first_husk_name_s);
-			if (!final_husk_name_s.is_empty())
-				final_husk_data = p_placer->call("object_data_for", final_husk_name_s);
+			if (native_assets) {
+				if (!first_husk_name_s.is_empty())
+					first_husk_m3 = sim_models_.model_for(
+							std::string(first_husk_name_s.utf8().get_data()));
+				if (!final_husk_name_s.is_empty())
+					final_husk_m3 = sim_models_.model_for(
+							std::string(final_husk_name_s.utf8().get_data()));
+			} else {
+				if (!first_husk_name_s.is_empty())
+					first_husk_data = p_placer->call("object_data_for", first_husk_name_s);
+				if (!final_husk_name_s.is_empty())
+					final_husk_data = p_placer->call("object_data_for", final_husk_name_s);
+			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id))
-				t->husk_model_loaded =
-						first_husk_data.is_valid() || final_husk_data.is_valid();
+				t->husk_model_loaded = native_assets
+						? (first_husk_m3 != nullptr || final_husk_m3 != nullptr)
+						: (first_husk_data.is_valid() || final_husk_data.is_valid());
 			const std::string husk_key(husk_name_s.utf8().get_data());
 			Ref<NovaObjectData> husk_data = first_husk_name_s.is_empty()
 					? final_husk_data
 					: first_husk_data;
+			// One model view for both modes: the sim cache's parse, or the
+			// legacy render object's (the S3-retired stub seam).
+			const Threedi3di3 *husk_m3 = native_assets
+					? (first_husk_name_s.is_empty() ? final_husk_m3 : first_husk_m3)
+					: (husk_data.is_valid() ? &husk_data->native_model() : nullptr);
 			auto hit = collision_model_by_graphic_.find(husk_key);
 			if (hit == collision_model_by_graphic_.end()) {
 				int32_t husk_model_id = -1;
-				if (husk_data.is_valid()) {
+				if (husk_m3 != nullptr) {
 					opennova::world::CollisionModel hmodel;
+					const bool husk_spheres = native_assets
+							? opennova::simassets::model_has_collision(*husk_m3)
+							: husk_data->has_collision();
 					if (collision_model_from_3di(
-							husk_data->native_model().collision, hmodel,
-							husk_data->has_collision())) {
+							husk_m3->collision, hmodel, husk_spheres)) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
-						if (husk_data->has_live_panm_for_lod(0))
-							collision_pose_data_[husk_model_id] = husk_data;
+						Ref<NovaObjectData> husk_pose = native_assets
+								? Ref<NovaObjectData>(
+										p_placer->call("object_data_for", husk_name_s))
+								: husk_data;
+						if (husk_pose.is_valid() &&
+								husk_pose->has_live_panm_for_lod(0))
+							collision_pose_data_[husk_model_id] = husk_pose;
 					}
 					collision_radius_by_graphic_.emplace(husk_key,
-							model_bound_radius_from_3di(husk_data->native_model()));
+							model_bound_radius_from_3di(*husk_m3));
 				}
 				hit = collision_model_by_graphic_.emplace(
 						husk_key, husk_model_id).first;
@@ -978,8 +1045,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				auto kz_it = collision_husk_kz_points_by_graphic_.find(husk_key);
 				if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
 					std::vector<opennova::world::Vec3> kz_points;
-					if (husk_data.is_valid()) {
-						const Threedi3di3 &hmodel3di = husk_data->native_model();
+					if (husk_m3 != nullptr) {
+						const Threedi3di3 &hmodel3di = *husk_m3;
 						for (size_t up_index = 0;
 								hmodel3di.user_points != nullptr && up_index < hmodel3di.user_point_count;
 								++up_index) {
@@ -1023,9 +1090,13 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				Ref<NovaObjectData> hdata = final_husk_name_s.is_empty()
 						? first_husk_data
 						: final_husk_data;
-				if (hdata.is_valid() && hdata->native_model().lod_count > 0 &&
-				    hdata->native_model().lods != nullptr) {
-					const ThreediLod &lod = hdata->native_model().lods[0];
+				const Threedi3di3 *piece_m3 = native_assets
+						? (final_husk_name_s.is_empty() ? first_husk_m3
+						                                : final_husk_m3)
+						: (hdata.is_valid() ? &hdata->native_model() : nullptr);
+				if (piece_m3 != nullptr && piece_m3->lod_count > 0 &&
+				    piece_m3->lods != nullptr) {
+					const ThreediLod &lod = piece_m3->lods[0];
 					info.sections = static_cast<int32_t>(lod.render_object_count);
 					for (size_t pi = 0; lod.render_objects != nullptr && pi < lod.render_object_count;
 							++pi) {
@@ -1058,9 +1129,9 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				}
 				hs = collision_husk_pieces_by_graphic_.emplace(
 						piece_key, std::move(info)).first;
-				if (hdata.is_valid())
+				if (piece_m3 != nullptr)
 					collision_radius_by_graphic_.emplace(piece_key,
-							model_bound_radius_from_3di(hdata->native_model()));
+							model_bound_radius_from_3di(*piece_m3));
 			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id)) {
