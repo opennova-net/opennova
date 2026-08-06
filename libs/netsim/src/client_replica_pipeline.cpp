@@ -566,7 +566,10 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 // terrain-column settle is ported below.
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
-                          uint32_t key, bool is_self) {
+                          uint32_t key, bool is_self,
+                          const ClientReplicaPipeline::ReplicaContactResolver *resolver,
+                          const ClientReplicaPipeline::ReplicaPeerSphere *peers,
+                          int32_t peer_count, uint32_t tick) {
 	if (es.rm_adm_id < 0) return;
 	// Channel state machine (the begin_body_transition mirror). The phase
 	// seed is ONE-SHOT per received record [orig: AnimMap_UpdateEntity zeroes
@@ -673,6 +676,54 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	es.y += wy;
 	es.z += dz_eff;
 
+	// The settle. With an embedder-provided contact resolver, this is the FULL
+	// movement collision resolver at the witnessed caller order — the
+	// caller-owned vertical velocity integrates first (org2 `vel -= 208;
+	// pos += vel`, org1 `vel -= 416; pos += 2*vel`, terminal -32768), then the
+	// resolver runs candidate-model contacts, push-out, person + replica-peer
+	// repulsion, and the ground probe THROUGH candidate models; a non-positive
+	// clearance lifts the row and zeroes the vertical velocity (the landing),
+	// and the probe's hit lands in resolved_ground (retail's groundEntity).
+	// [orig: vertical add @0x4B7CE0..0x4B7CEF then the resolver call
+	// @0x4B7CF4 and lift @0x4B7CFE..0x4B7D0A (org2); @0x4BF7B8..0x4BF7FA
+	// (org1); Entity_MovementCollisionResolver @0x4B2BD0; landing vel zero in
+	// the shared tail]. The >0xF000 airborne return and the indoors/ladder/
+	// drowning latches stay named residuals — no replica-row consumer exists
+	// yet. Without a resolver, the bounded terrain-column subset below stands.
+	if (resolver != nullptr && *resolver) {
+		es.rm_vel_z -= es.cls == EntityClass::Player ? 208 : 416;
+		if (es.rm_vel_z < -32768) es.rm_vel_z = -32768;
+		es.z = io::bam_add(es.z, es.cls == EntityClass::Player
+				? es.rm_vel_z : 2 * es.rm_vel_z);
+		ClientReplicaPipeline::ReplicaContactQuery q;
+		q.row_handle = es.handle;
+		q.is_player_class = es.cls == EntityClass::Player;
+		q.pos[0] = es.x;
+		q.pos[1] = es.y;
+		q.pos[2] = es.z;
+		q.vel_xy[0] = wx;
+		q.vel_xy[1] = wy;
+		q.vel_z = es.rm_vel_z;
+		q.capsule_bottom = frame.capsule_bottom;
+		q.capsule_top = frame.capsule_top;
+		q.anim_state_id = es.anim_state_id;
+		q.anim_state_flags = world::infantry_anim_flags(es.anim_state_id);
+		q.tick = tick;
+		q.peers = peers;
+		q.peer_count = peer_count;
+		const int32_t clearance = (*resolver)(q);
+		es.x = q.pos[0];
+		es.y = q.pos[1];
+		es.z = q.pos[2];
+		es.rm_vel_z = q.vel_z; // the idle skip band reverts + zeroes it
+		es.resolved_ground = q.out_ground;
+		if (clearance <= 0) {
+			es.z = io::bam_sub(es.z, clearance);
+			es.rm_vel_z = 0;
+		}
+		return;
+	}
+
 	// Retail quantizes the final origin upward to the 0x1800 grid and probes
 	// exactly 0x20000 downward. Terrain is accepted only inside that segment;
 	// otherwise the segment end is the resolver's bounded fallback. Then only
@@ -711,6 +762,27 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	const uint32_t rm_key = ++rm_tick_counter_;
+	// The replica-peer sphere table for this tick's contact resolves — every
+	// live organic replica row, one snapshot per tick (replica rows are
+	// ordinary persons to the resolver's repulsion loop; the world person
+	// tables cannot see ClientState rows). The dead-peer skip is the
+	// witnessed +36&2 gate [orig: @0x4b3b8d]; bit-0 rows are frozen
+	// carried-object/not-ready placeholders and sit out as our analogue.
+	std::vector<ReplicaPeerSphere> contact_peers;
+	if (replica_contact_resolver_) {
+		contact_peers.reserve(state_.entities.size());
+		for (const ClientEntityState &pe : state_.entities) {
+			if (pe.cls != EntityClass::Player && pe.cls != EntityClass::Infantry)
+				continue;
+			if (pe.state_flags_known && (pe.state_flags & 0x03u) != 0u) continue;
+			ReplicaPeerSphere p;
+			p.handle = pe.handle;
+			p.x = pe.x;
+			p.y = pe.y;
+			p.z = pe.z;
+			contact_peers.push_back(p);
+		}
+	}
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.net_has_compact) continue;
 		const bool chased_class = es.cls == EntityClass::Player ||
@@ -841,7 +913,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
-				                     rm_key, is_self);
+				                     rm_key, is_self, &replica_contact_resolver_,
+				                     contact_peers.data(),
+				                     static_cast<int32_t>(contact_peers.size()),
+				                     rm_key);
 			break;
 		}
 		case EntityClass::Infantry: {
@@ -901,7 +976,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			if (root_motion_ != nullptr)
 				row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
-				                     rm_key, is_self);
+				                     rm_key, is_self, &replica_contact_resolver_,
+				                     contact_peers.data(),
+				                     static_cast<int32_t>(contact_peers.size()),
+				                     rm_key);
 			break;
 		}
 		case EntityClass::Vehicle: {

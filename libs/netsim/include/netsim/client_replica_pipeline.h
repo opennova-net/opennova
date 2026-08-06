@@ -63,6 +63,44 @@ public:
 	void set_remote_motion_mode(bool enabled) { remote_motion_mode_ = enabled; }
 	bool remote_motion_mode() const { return remote_motion_mode_; }
 
+	// The replica contact-resolver seam (net-re §5.38e, D-NET-196): when the
+	// embedding sim provides a resolver, each armed Player/Infantry row's
+	// settle runs the FULL movement collision resolver — candidate-model
+	// contacts and push-out, world-person + replica-peer repulsion, and the
+	// ground probe THROUGH candidate models — in place of the bounded
+	// terrain-column subset. Retail runs remote organics through the ordinary
+	// org movers whose shared tail calls the resolver ungated
+	// [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4;
+	//  Entity_UpdateInfantryAI @0x4BF7FA; resolver @0x4B2BD0]. The peers span
+	// carries every live undead replica organic this tick (the resolver's
+	// person-repulsion needs rows the world tables cannot see). Returns the
+	// signed foot clearance (feet Z - resolved ground Z).
+	struct ReplicaPeerSphere {
+		uint16_t handle = 0xFFFF;
+		int32_t x = 0, y = 0, z = 0;
+		int32_t radius = 0x10000;
+	};
+	struct ReplicaContactQuery {
+		uint16_t row_handle = 0xFFFF;
+		bool is_player_class = false; // org2 (player body) vs org1 (NPC) shape
+		int32_t pos[3] = {};          // in/out, 16.16 mission space
+		int32_t vel_xy[2] = {};       // this tick's planar root step (the
+		                              // resolver's moving/full-update discriminant)
+		int32_t vel_z = 0;            // in/out — the skip band reverts + zeroes
+		int32_t capsule_bottom = 0;   // anim-frame capsule extents
+		int32_t capsule_top = 0;
+		int32_t anim_state_id = 0;
+		uint32_t anim_state_flags = 0;
+		uint32_t tick = 0;
+		const ReplicaPeerSphere *peers = nullptr;
+		int32_t peer_count = 0;
+		uint16_t out_ground = 0xFFFF; // ground-probe hit (wire handle)
+	};
+	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
+	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
+		replica_contact_resolver_ = std::move(resolver);
+	}
+
 	// The per-class between-update mover, one call per 62.5 Hz logic tick after
 	// the recv fold (retail order: Client_ProcessNetworkFrame first, entity
 	// movers after). Chases each armed row's live pose/heading toward its staged
@@ -207,6 +245,7 @@ private:
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
+	ReplicaContactResolver replica_contact_resolver_;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;

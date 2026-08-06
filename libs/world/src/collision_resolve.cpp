@@ -111,7 +111,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        int32_t capsule_bottom, int32_t capsule_top,
                                        int32_t heading, int32_t body_pitch, bool is_player,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
-                                       uint32_t anim_state_flags, int16_t &health) {
+                                       uint32_t anim_state_flags, int16_t &health,
+                                       EntityHandle *out_ground) {
     // [orig: movement collision resolver @ 0x4b2bd0]
     (void)heading;    // consumed by retail's on-ladder 2-point variant (D-COL-5)
     (void)body_pitch;
@@ -396,6 +397,36 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
             pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
         }
+        // The staged REPLICA peers walk the SAME witnessed loop (threshold
+        // 30% of summed radii, push (thr - dist)/4 through the quantized
+        // table). A ClientState peer's "live re-read" is its staged snapshot —
+        // the row has no registry entity, and the caller stages only live,
+        // undead peers. Empty for every ordinary resolve. [orig: the same
+        // @ 0x4b3a5c-0x4b3c52 loop — replica rows are ordinary persons to it]
+        for (int32_t pi = 0; pi < replica_peer_count_; ++pi) {
+            const ReplicaPeer &p = replica_peers_[pi];
+            if (p.handle == replica_exclude_handle_) continue;
+            const int32_t threshold = 30 * (my_radius + p.radius) / 100;
+            const int32_t ddx = p.x - pos[0];
+            const int32_t ddy = p.y - pos[1];
+            const int32_t ddz = p.z - pos[2];
+            if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
+                continue;
+            if (vec_len_ftol(ddx, ddy, 0) > threshold) continue;
+            const int32_t dist = vec_len_ftol(pos[0] - p.x, pos[1] - p.y, 0);
+            if (dist > threshold) continue;
+            const int32_t amount = (threshold - dist) >> 2;
+            const int32_t ang = static_cast<int32_t>(
+                std::atan2(static_cast<double>(pos[1] - p.y),
+                           static_cast<double>(pos[0] - p.x)) *
+                kBamPerRadian);
+            const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
+            const DirTable &t = dir_table();
+            const int32_t sn = t.sin22[idx & 1023];
+            const int32_t cs = t.sin22[(idx & 1023) + 256];
+            pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
+            pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+        }
     }
 
     // Ground settle tail. [orig: @ 0x4b3d6e-0x4b3da9 — quantize Z up to the 6144
@@ -414,6 +445,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // [orig: the unconditional +0x28 store in
     // Entity_RaycastGroundHeightAndObject @ 0x414370]
     if (ent != nullptr) ent->ground_target = ground_hit;
+    if (out_ground != nullptr) *out_ground = ground_hit;
 
     state.prev_pos[0] = pos[0];
     state.prev_pos[1] = pos[1];
@@ -425,6 +457,72 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         local_resolve_debug.foot_clearance = feet_z - ground;
     }
     return feet_z - ground;
+}
+
+// See collision.h — the replica seam. The interior IS resolve_entity: an
+// invalid source handle takes every null-entity arm the resolver already
+// carries (no flag latches, no blink store, no debug capture), the ad-hoc
+// candidate slice is staged under the never-allocated invalid key, and the
+// peer spheres ride the staged span the repulsion loop walks after persons_.
+// [orig: the remote org rows run the SAME Entity_MovementCollisionResolver
+//  @0x4b2bd0 through the shared mover tails — there is no replica variant in
+//  retail; this wrapper only rebuilds the two per-entity tables (candidate
+//  slice, person slot) the transport-side row does not have]
+int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32_t pos[3],
+                                        int32_t vel_xy[2], int32_t &vel_z,
+                                        int32_t capsule_bottom, int32_t capsule_top,
+                                        bool is_player, uint32_t tick, int32_t anim_state_id,
+                                        uint32_t anim_state_flags, const ReplicaPeer *peers,
+                                        int32_t peer_count, uint16_t exclude_handle,
+                                        EntityHandle *out_ground) {
+    // The ad-hoc candidate slice at the query position — the pool-0 rule of
+    // the 17th-tick builder (source radius 0x10000 + 4.0 u pad)
+    // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0, pool-0 leg].
+    const size_t arena_mark = arena_.size();
+    const int32_t range = 0x10000 + 0x40000;
+    CandidateSlice slice;
+    slice.start = static_cast<int32_t>(arena_.size());
+    slice.count = 0;
+    for (const DynSlot &d : dynamics_) {
+        const int32_t total = range + d.radius;
+        if (abs32(d.x - pos[0]) > total || abs32(d.y - pos[1]) > total ||
+            abs32(d.z - pos[2]) > total)
+            continue;
+        if (vec_len_ftol(d.x - pos[0], d.y - pos[1], d.z - pos[2]) > total) continue;
+        if (arena_.size() >= 3000) break;
+        arena_.push_back(d.h);
+        ++slice.count;
+    }
+    for (const StaticSlot &s : statics_) {
+        const int32_t sx = static_slot_coord_q16(s.x);
+        const int32_t sy = static_slot_coord_q16(s.y);
+        const int32_t sz = static_slot_coord_q16(s.z);
+        const int32_t total = range + (static_cast<int32_t>(s.radius) << 16);
+        if (abs32(sx - pos[0]) > total || abs32(sy - pos[1]) > total ||
+            abs32(sz - pos[2]) > total)
+            continue;
+        if (vec_len_ftol(sx - pos[0], sy - pos[1], sz - pos[2]) > total) continue;
+        if (arena_.size() >= 3000) break;
+        arena_.push_back(s.h);
+        ++slice.count;
+    }
+    const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
+    candidates_[replica_key.packed] = slice;
+    replica_peers_ = peers;
+    replica_peer_count_ = peer_count;
+    replica_exclude_handle_ = exclude_handle;
+    int16_t health_dummy = 100; // damage legs are authority-gated off anyway
+    const int32_t clearance = resolve_entity(
+        world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
+        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player,
+        /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
+        health_dummy, out_ground);
+    replica_peers_ = nullptr;
+    replica_peer_count_ = 0;
+    replica_exclude_handle_ = 0xFFFF;
+    candidates_.erase(replica_key.packed);
+    arena_.resize(arena_mark);
+    return clearance;
 }
 
 std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(

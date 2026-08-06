@@ -834,6 +834,49 @@ void NovaSimulation::joiner_pump() {
 	// @0x4B3D6E..0x4B3DA9]
 	runtime_->view().set_remote_motion_terrain(
 			world_ != nullptr ? world_->terrain : nullptr);
+	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
+	// joiner world's collision tables live, each armed Player/Infantry row's
+	// settle runs the ported movement collision resolver — candidate-model
+	// contacts + push-out, world-person and replica-peer repulsion, and the
+	// ground probe THROUGH candidate models — replacing the terrain-column
+	// subset. Retail runs remote organics through the ordinary org movers
+	// whose shared tail calls the resolver ungated [orig: calls @0x4B7CF4 /
+	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
+	// (joiner_replica_resolve_states_) across pumps.
+	if (world_ != nullptr && world_->ai != nullptr &&
+			world_->ai->collision != nullptr) {
+		runtime_->view().set_replica_contact_resolver(
+				[this](opennova::netsim::ClientReplicaPipeline::ReplicaContactQuery
+								&q) -> int32_t {
+					using opennova::world::CollisionWorld;
+					CollisionWorld *col = world_->ai->collision;
+					CollisionWorld::ResolveState &st =
+							joiner_replica_resolve_states_[q.row_handle];
+					std::vector<CollisionWorld::ReplicaPeer> peers;
+					peers.reserve(static_cast<size_t>(q.peer_count));
+					for (int32_t i = 0; i < q.peer_count; ++i) {
+						CollisionWorld::ReplicaPeer p;
+						p.handle = q.peers[i].handle;
+						p.x = q.peers[i].x;
+						p.y = q.peers[i].y;
+						p.z = q.peers[i].z;
+						p.radius = q.peers[i].radius;
+						peers.push_back(p);
+					}
+					opennova::world::EntityHandle ground;
+					const int32_t clearance = col->resolve_replica(
+							*world_, st, q.pos, q.vel_xy, q.vel_z,
+							q.capsule_bottom, q.capsule_top, q.is_player_class,
+							q.tick, q.anim_state_id, q.anim_state_flags,
+							peers.data(), static_cast<int32_t>(peers.size()),
+							q.row_handle, &ground);
+					q.out_ground = ground.valid() ? ground.packed
+					                              : opennova::world::EntityHandle::kInvalid;
+					return clearance;
+				});
+	} else {
+		runtime_->view().set_replica_contact_resolver(nullptr);
+	}
 	resolve_client_row_adm_ids();
 	joiner_send_hello_once();
 	joiner_deposit_inbound();
