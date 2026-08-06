@@ -24,7 +24,7 @@
 namespace godot {
 
 // Godot-side novaworld client. One instance per game client.
-// Wraps the C++ libs (libs/novacrypto + libs/napi + libs/novaworld) via
+// Wraps the C++ libs (engine/net/novacrypto + engine/net/napi + engine/net/novaworld) via
 // GDExtension so GDScript can drive the full handshake without seeing the
 // raw NWU/CRC/TLV machinery.
 //
@@ -183,7 +183,7 @@ private:
 
 	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
 	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/
-	// sequencing/cookie-jar all live in flow_ (libs/novaworld); these are pure pumps.
+	// sequencing/cookie-jar all live in flow_ (engine/net/novaworld); these are pure pumps.
 	HTTPRequest *login_http_ = nullptr;
 	HTTPRequest *join_http_ = nullptr;
 	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the

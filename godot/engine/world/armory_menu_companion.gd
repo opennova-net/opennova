@@ -454,7 +454,7 @@ func _selected_grenade_loadout() -> Array[Dictionary]:
 # "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)" with the witnessed encumbrance bands
 # <33.3 LIGHT / <66.6 NORMAL / else HEAVY [orig: update_weapon_weight_display
 # @0x565640 — sprintf "%s %.1f %s (%s)"].
-# The parent-slot sum and the encumbrance bands ride the libs/def port shared
+# The parent-slot sum and the encumbrance bands ride the engine/formats/def port shared
 # with PLAYER_INFO (NovaWeaponDatabase.loadout_weight/encumbrance_class —
 # [orig: calculate_loadout_weight @0x55f1f0 sibling]; ctest def_loadout_weight
 # pins the formula and the exact thresholds).

@@ -1,4 +1,4 @@
-// CDEP per-block range constraint, raw16 kernel (libs/terrain/cdep_constraint).
+// CDEP per-block range constraint, raw16 kernel (engine/runtime/terrain/cdep_constraint).
 //
 // Ports terrain_editor_cdep_constraint.gd into C++, correcting the float-domain
 // clamp to the raw16 integer domain so the post-clamp quantized range can never

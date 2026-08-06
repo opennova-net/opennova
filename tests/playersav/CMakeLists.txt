@@ -1,4 +1,4 @@
-# weapon.sav player-profile parse/serialize tests (libs/playersav).
+# weapon.sav player-profile parse/serialize tests (engine/formats/playersav).
 # The retail-corpus leg is gated on OPENNOVA_WEAPON_SAV and skips as a pass.
 add_executable(playersav_weapon_sav_test weapon_sav_test.cpp)
 target_link_libraries(playersav_weapon_sav_test PRIVATE opennova_playersav)

@@ -17,7 +17,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// Thin GDExtension wrapper over libs/def hudpos.def parsing (def_parse_hudpos).
+// Thin GDExtension wrapper over engine/formats/def hudpos.def parsing (def_parse_hudpos).
 //
 // Read-only: it surfaces the original HUD layout — element positions in the
 // 1024x768 virtual design space, colors, stance/graphic frames and the HUD fonts

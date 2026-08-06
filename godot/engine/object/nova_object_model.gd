@@ -4,9 +4,9 @@ extends Node3D
 signal bounds_changed(bounds: AABB)
 
 # The per-material 3DI flag byte constants live on NovaObjectShaderCache,
-# single-sourced from libs/threedi (THREEDI_MATERIAL_FLAG_*) — REN-2.
+# single-sourced from engine/formats/threedi (THREEDI_MATERIAL_FLAG_*) — REN-2.
 # The OED re-export mask bits are aliases of the NovaObjectData binding,
-# single-sourced from libs/oed (OED_UPDATE_*) — ENG-4.
+# single-sourced from engine/formats/oed (OED_UPDATE_*) — ENG-4.
 const OED_UPDATE_NONE := NovaObjectData.UPDATE_NONE
 const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL
 const OED_UPDATE_LGHT := NovaObjectData.UPDATE_LGHT
@@ -21,7 +21,7 @@ const OED_UPDATE_ALL := NovaObjectData.UPDATE_ALL
 # sky_rgb 84,88,89; ground_rgb 49,55,46), so a preview lights like a JO noon
 # world instead of an invented dusk. Engine-fed values come from the env
 # blocks below. (Must stay equal to the composer's uniform defaults —
-# libs/renderer/src/object_shader_template.cpp.)
+# engine/runtime/renderer/src/object_shader_template.cpp.)
 const DEFAULT_HEMI_SKY_COLOR := Vector3(84.0 / 255.0, 88.0 / 255.0, 89.0 / 255.0)
 const DEFAULT_DIR_LIGHT_DIR := Vector3(-0.4082, -0.8165, -0.4082)
 const DEFAULT_DIR_LIGHT_COLOR := Vector3(170.0 / 255.0, 170.0 / 255.0, 167.0 / 255.0)

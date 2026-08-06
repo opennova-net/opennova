@@ -53,7 +53,7 @@ def _rol32(v: int, s: int) -> int:
 
 
 def scr_blob(plaintext: bytes, key: int) -> bytes:
-    """The stored "SCR\\x01" form of `plaintext` under `key`: the inverse of libs/scr decrypt
+    """The stored "SCR\\x01" form of `plaintext` under `key`: the inverse of engine/formats/scr decrypt
     (XOR keystream, then reverse), so vfs_decode_payload recovers `plaintext` with that key."""
     b = bytearray(plaintext)
     k = key & 0xFFFFFFFF
@@ -64,7 +64,7 @@ def scr_blob(plaintext: bytes, key: int) -> bytes:
     return b"SCR\x01" + bytes(b)
 
 
-# SCR keys (mirror libs/scr/include/scr/scr.h).
+# SCR keys (mirror engine/formats/scr/include/scr/scr.h).
 _SCR_KEY_DEFAULT = 0xABEEFACE  # JO Demo
 _SCR_KEY_JO_DFX2 = 0x2A5A8EAD  # retail JO/DFX2
 

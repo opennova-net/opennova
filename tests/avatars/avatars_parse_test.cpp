@@ -1,4 +1,4 @@
-// Parse test for opennova libs/avatars over the real retail Avatars.def.
+// Parse test for opennova engine/formats/avatars over the real retail Avatars.def.
 // Fixture: fixtures/avatars/Avatars.def, copied verbatim from a retail
 // Joint Operations + JOX extract (Desktop/REVX02/AVATARS.DEF). Pins the parser
 // against the witnessed grammar (docs/playerinfo/avatars-re.md): part pool,

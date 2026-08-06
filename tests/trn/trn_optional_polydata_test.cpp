@@ -1,6 +1,6 @@
 // Verifies save_trn/load_trn round-trips a TRN with empty polydata. The
 // Godot editor writes project-mode .trn files with no polydata since the
-// "Make CPT optional" change — this test locks in that the libs/trn parser
+// "Make CPT optional" change — this test locks in that the engine/formats/trn parser
 // handles that shape without regressions (the polydata is consumer-enforced
 // at the NovaTerrainData level, not the trn_io level).
 

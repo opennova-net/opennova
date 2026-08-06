@@ -44,7 +44,7 @@ hardening, and project health. Divergences from the original engine belong in
       gates (both GREEN on the 2026-08-05 suites, 24/24 cells captured cleanly).
       Details: `.agents/retail-lan-parity.md` §9
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
-      `libs/terrain` carries 23 anchors across 15 files and `godot/engine/terrain/` 18
+      `engine/runtime/terrain` carries 23 anchors across 15 files and `godot/engine/terrain/` 18
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
@@ -65,18 +65,18 @@ hardening, and project health. Divergences from the original engine belong in
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
       witness it directly
-- [ ] Incremental terrain-build tile load: `libs/terrain/src/build_quadtree.cpp` skips the
+- [ ] Incremental terrain-build tile load: `engine/runtime/terrain/src/build_quadtree.cpp` skips the
       witnessed cached-tile load leg (`process_quadtree_leaf` / `sub_402730`) and always
       regenerates from base meshes — correct on a clean build, but retail treats existing
       tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
       witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
       divergence
 - [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://engine/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
-- [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in libs/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
+- [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Export-progress overlay initiator awareness (owner: `godot/modtools/editor/shell/export_progress_overlay.gd`): the overlay polls the ACTIVE workspace, so an export running on a non-active workspace — reachable now that the flavor confirm exports the initiator — shows no progress UI. Route the overlay through the exporting workspace instead.
-- [ ] Converge `libs/cpt`'s bit codec on `io/bit_stream.h` (owner: `libs/cpt/src/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `libs/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
+- [ ] Converge `engine/formats/cpt`'s bit codec on `io/bit_stream.h` (owner: `engine/formats/cpt/src/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
 - [ ] Typed shutdown-coordinator seams (owner: `godot/game/runtime_shutdown_coordinator.gd`): the coordinator still pokes the shell stringly (`_shell.call("_cleanup_picker")`, `_shell.call("_dismiss_loading_screen")`); replace with a typed shell contract (#403 review follow-up).
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
@@ -84,12 +84,12 @@ hardening, and project health. Divergences from the original engine belong in
       narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
       the avatar/object preview de-fork + shared MCP arg helper, push-downs
       (ItemSeatSpecs first — that PR also lands the standing "new engine logic
-      starts in libs/" CLAUDE.md rule; the camera and armory push-downs are their
+      starts in engine/" CLAUDE.md rule; the camera and armory push-downs are their
       own rows below) — opportunistic
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
-- [ ] HUD view-helper math cluster -> one `libs/hud` port slice (the ENG-4/FNT
+- [ ] HUD view-helper math cluster -> one `engine/hud` port slice (the ENG-4/FNT
       pattern: math + constants native, draw/Font blits stay host): exact-integer
       fade decay, 1024x768 design scale, 16.16 crosshair spread + TAPER strip,
       Q16 stance scaling, health thresholds, message tick policy, half-bright
@@ -97,11 +97,11 @@ hardening, and project health. Divergences from the original engine belong in
       `[orig]`-cited in `godot/engine/ui/hud_*.gd` / `game_hud.gd` /
       `game_hud_presenter.gd`; no libs home exists today (ENG-5 sweep-#2 row,
       moved from the closed maturity program 2026-08-06)
-- [ ] Mission TOD clock -> `libs/env` clock slice: `Env_TodAdvancePerTick =
+- [ ] Mission TOD clock -> `engine/formats/env` clock slice: `Env_TodAdvancePerTick =
       0x18000000/(3720*minutes)` `[orig: @ 0x57d108]`, Q8.8->8.24 widening,
       60-min clamp — currently in `nova_environment.gd`, zero presence in
-      libs/env (ENG-5 row)
-- [ ] Camera/view composition remainder -> fold into `libs/world` player_view:
+      engine/formats/env (ENG-5 row)
+- [ ] Camera/view composition remainder -> fold into `engine/runtime/world` player_view:
       eye height 1.0 dual-declared with `nova_simulation.cpp`, TP distance/orbit
       `[orig: @ 0x4391d0]`, eye re-aim `[orig: @ 0x437d10]`, weapon.def /256
       view-offset + axis map `[orig: @ 0x4dd380]`; the ADS lerp, the
@@ -122,7 +122,7 @@ hardening, and project health. Divergences from the original engine belong in
       "armory/catalog" push-down is this row)
 - [ ] Avatar menu-portrait presentation math (BAM/frame idle, 2^28 sway,
       rand-yaw `[orig: @ 0x55dba0; @ 0x5600d0]`) in `avatar_preview.gd` —
-      minor, exception-leaning; disposition with the `libs/hud` slice's review
+      minor, exception-leaning; disposition with the `engine/hud` slice's review
       (ENG-5 row)
 - [ ] Editor/runtime version-skew guard: the two CI zips (`opennova-modtools-windows`,
       `opennova-runtime-windows`) can pair a fixed editor with a stale `opennova.exe`

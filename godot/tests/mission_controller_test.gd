@@ -625,7 +625,7 @@ func test_new_mission_palette_and_placement_work() -> void:
 func test_kind_for_item_type_matches_shipping_data() -> void:
 	# The empirically verified 1:1 mapping (185k entities across 114 JO missions). The
 	# non-obvious part is Decoration AND Foliage sharing the Building list with Building.
-	# The table lives in the engine's authoring facade now (libs/mission authoring.h),
+	# The table lives in the engine's authoring facade now (engine/runtime/mission authoring.h),
 	# exposed as the NovaMissionData.kind_for_item_type static.
 	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_PERSON), NovaMissionData.KIND_ORGANIC, "person -> organic")
 	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_BUILDING), NovaMissionData.KIND_BUILDING, "building -> building")

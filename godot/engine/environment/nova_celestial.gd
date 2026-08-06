@@ -20,7 +20,7 @@ const CelestialShader = preload("res://shaders/celestial.gdshader")
 const CelestialAdditiveShader = preload("res://shaders/celestial_additive.gdshader")
 
 # Render-priority rungs from the witnessed frame ladder, single-sourced from
-# libs/renderer/render_order via NovaObjectShaderCache (maturity REN-3,
+# engine/runtime/renderer/render_order via NovaObjectShaderCache (maturity REN-3,
 # docs/render/render-order-re.md): the sky pass draws star field then bodies
 # BEFORE all world alpha [orig: Terrain_RenderSkyboxPass @ 0x610ac0 before
 # Terrain_RenderSceneWithReflection @ 0x5c93a0]; the glare is the frame's
@@ -40,7 +40,7 @@ var _cached_env: Node = null
 var _cached_cam: Camera3D = null
 var _bodies: Dictionary = {} # name -> { model, materials, tint }
 var _loaded_names: Dictionary = {}
-# env #33: the 256-instance star field (generation + twinkle in libs/env via
+# env #33: the 256-instance star field (generation + twinkle in engine/formats/env via
 # NovaStarField; regenerated per celestial load like retail
 # [orig: Star_GenerateInstanceTable @ 0x5ac850 <- EffectWorld_LoadCelestialModels]).
 var _star_core := NovaStarField.new()
@@ -281,7 +281,7 @@ func _set_body_shader_parameter(body: Dictionary, parameter: StringName, value) 
 # the additive celestial shader, textured with the star 3DI's diffuse. The
 # witnessed placement is camera + offset per star with per-star twinkle
 # brightness [orig: render_star_field @ 0x5ad9c0]; the near-light cull and
-# the twinkle accumulator run in libs/env.
+# the twinkle accumulator run in engine/formats/env.
 func _build_star_field(star_name: String) -> void:
 	if star_name.strip_edges().is_empty() or _resource_root == null:
 		return

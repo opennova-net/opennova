@@ -10,7 +10,7 @@
 
 using namespace godot;
 
-// Pin the GDScript-facing TYPE_* mirror to the libs/def source of truth so the
+// Pin the GDScript-facing TYPE_* mirror to the engine/formats/def source of truth so the
 // two mappings can never drift again (docs/world/itemdef-re.md D-ITEMDEF-1).
 static_assert(NovaItemDatabase::TYPE_UNKNOWN == DEF_ITEM_TYPE_UNSET, "TYPE_UNKNOWN drifted from DefItemType");
 static_assert(NovaItemDatabase::TYPE_VEHICLE == DEF_ITEM_TYPE_VEHICLE, "TYPE_VEHICLE drifted from DefItemType");

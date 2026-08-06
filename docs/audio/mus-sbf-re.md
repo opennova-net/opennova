@@ -1,6 +1,6 @@
 # MUS / SBF / SCR — reverse-engineering record
 
-Validation record for the music subsystem (`libs/mus`, `libs/sbf`, `libs/scr`,
+Validation record for the music subsystem (`engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr`,
 `godot/engine/audio`) against the original engine as witnessed in IDA Pro.
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses
 below are that binary's. This file is the committed home for the divergence
@@ -10,11 +10,11 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| MUS VM (`libs/mus/src/mus_vm.cpp`) | **MATCHING** (behavioral proof) | 52 inline citations (dispatch `@0x672720`, 65 opcodes, intrinsics); golden event-stream ctest `mus_vm` reproduces the original handlers' output byte-identically for gamemus/menumus across 5 var scenarios; local Unicorn differential (see "RE tooling" below) |
+| MUS VM (`engine/formats/mus/src/mus_vm.cpp`) | **MATCHING** (behavioral proof) | 52 inline citations (dispatch `@0x672720`, 65 opcodes, intrinsics); golden event-stream ctest `mus_vm` reproduces the original handlers' output byte-identically for gamemus/menumus across 5 var scenarios; local Unicorn differential (see "RE tooling" below) |
 | MUS compiler write path | **MATCHING** (read-only grill) | entry-index round-trip + operand-width checks (`mus_entry_roundtrip`, `mus_encode_idempotence`, 25-case `mus_authored_behavioral`) |
-| SBF bank codec (`libs/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
-| SCR container codec (`libs/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
-| PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `libs/pff` |
+| SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
+| SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
+| PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `engine/formats/pff` |
 | `godot/engine/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
@@ -211,7 +211,7 @@ codec routine:
   misleading auto-name `Network_DecryptBuffer`): byte-reverse the whole
   buffer (`@0x53D0B3`), then per byte
   `key = ROL32(key + ROL32(key, 11), 4) ^ 1; *p ^= (uint8)key` (`@0x53D0D3`).
-  `libs/scr` `scr_decrypt` is a byte-exact structural translation.
+  `engine/formats/scr` `scr_decrypt` is a byte-exact structural translation.
 - **Site 1, .def text data** — `File_ParseASCIIFile @ 0x53D810`, sniff
   `@0x53D899`: decrypts only when the caller passed a nonzero key AND the
   header is exactly `'S','C','R',0x01`. Otherwise the buffer parses as
@@ -243,7 +243,7 @@ sources:
 2. **PFF entry** — `PFF_LoadFileToMemory @ 0x768920`: if the directory
    entry's flag bit 0 is set, the payload is XOR-decrypted with the rol-7
    keystream. This — not an SCR variant — is how retail encrypted
-   gamemus/menumus ship. Implemented and cited in `libs/pff`
+   gamemus/menumus ship. Implemented and cited in `engine/formats/pff`
    (`PFF_FLAG_ENCRYPTED`).
 
 So the supported forms are: (a) plaintext `SCR0` (loose, or PFF entry without

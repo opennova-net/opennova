@@ -477,7 +477,7 @@ bool NovaMissionData::set_entity_property_int(int kind, int index, const String 
 	if (index < 0) {
 		return false;
 	}
-	// The name->member mapping (and the seed-from-record + clamp rules) lives in libs/mission, the
+	// The name->member mapping (and the seed-from-record + clamp rules) lives in engine/runtime/mission, the
 	// same as the header setters; the wrapper just forwards the field name. Adding an AI/waypoint
 	// field is one edit there, not four parallel ones across this file and the inspector.
 	if (!document.set_entity_property_int(to_native_kind(kind), static_cast<size_t>(index),

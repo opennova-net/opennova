@@ -25,8 +25,8 @@ namespace godot {
 class NovaResourceRoot;
 class Skeleton3D;
 
-// Godot adapter over the portable .bad/.adm skeletal runtime (libs/anim + libs/bad +
-// libs/adm). Loads a model's .adm (a key -> .bad-basename map), parses + samples every
+// Godot adapter over the portable .bad/.adm skeletal runtime (engine/runtime/anim + engine/formats/bad +
+// engine/adm). Loads a model's .adm (a key -> .bad-basename map), parses + samples every
 // referenced .bad clip, and exposes Godot-typed results so the GDScript owner can build a
 // Skeleton3D + Skin + drive per-bone poses:
 //   - get_skeleton_bones(): bind-pose bones (name/parent/parent-local rest Transform3D)

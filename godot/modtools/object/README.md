@@ -24,11 +24,11 @@ the object under different lighting.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.3di` | [`libs/threedi`](../../../libs/threedi) | the compiled NovaLogic model: geometry, materials, part anims, collision, occlusion |
-| `.3dp` | [`libs/tdp`](../../../libs/tdp) | the object *project*: material defs, LOD settings, part-anim metadata for round-trip editing |
-| `.ase` | [`libs/ase`](../../../libs/ase) | the per-LOD mesh source bound in the LODs workflow |
+| `.3di` | [`engine/formats/threedi`](../../../engine/formats/threedi) | the compiled NovaLogic model: geometry, materials, part anims, collision, occlusion |
+| `.3dp` | [`engine/formats/tdp`](../../../engine/formats/tdp) | the object *project*: material defs, LOD settings, part-anim metadata for round-trip editing |
+| `.ase` | [`engine/formats/ase`](../../../engine/formats/ase) | the per-LOD mesh source bound in the LODs workflow |
 
-The `.3di` export session itself is driven by [`libs/oed`](../../../libs/oed).
+The `.3di` export session itself is driven by [`engine/formats/oed`](../../../engine/formats/oed).
 
 ## Authoring geometry in a DCC: naming conventions
 

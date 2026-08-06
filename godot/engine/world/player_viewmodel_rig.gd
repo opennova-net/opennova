@@ -243,7 +243,7 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 -> AltCamOffset],
 	# with the visible ease carried by the 15-step scope-camera interp — SIM state
 	# at the world cadence [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp
-	# @0x82CE40; libs/world player_view_bias_units states the blend].
+	# @0x82CE40; engine/runtime/world player_view_bias_units states the blend].
 	var ads := view.scope_fraction if view != null else 0.0
 	# The NoCardSwitch reload rule: reloading a card-switching weapon drops the
 	# ADS bias for the frame (instant, not eased) [orig: Player_UpdateFirstPersonCamera

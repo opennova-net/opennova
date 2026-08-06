@@ -14,7 +14,7 @@
 //   2. height_field_height_world_bilinear at a sector seam, locked and unlocked.
 //   3. The default (all-zero locks) field still taps across the full atlas.
 //
-// [orig: sub_402D20 @0x402D20, ported in libs/terrain/src/terrain_mesh.cpp.]
+// [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/src/terrain_mesh.cpp.]
 
 #include "terrain/coords.h"
 #include "terrain/height_field.h"

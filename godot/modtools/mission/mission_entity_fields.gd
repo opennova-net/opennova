@@ -4,7 +4,7 @@ extends RefCounted
 # Single ordered description of the per-entity AI / waypoint SPIN fields in the inspector's Behavior
 # section. _build_behavior_section iterates this instead of hand-writing one call per row, so the
 # field set + ranges live in one place. Each `property` must match the entity dictionary key (and the
-# name->member table in libs/mission set_entity_property_int); a `{section: ...}` entry emits a
+# name->member table in engine/runtime/mission set_entity_property_int); a `{section: ...}` entry emits a
 # heading; an optional `tip` sets the row's tooltip.
 #
 # The waypoint-path picker, the name1 / name2 / ai_flags text fields, and the top-of-panel team /

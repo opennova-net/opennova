@@ -173,7 +173,7 @@ static func add_check_row(parent: Control, label: String, pressed: bool) -> Chec
 # empty, or not valid hex (so the caller can render it as "unresolved").
 # MNU colors are AARRGGBB (8 digits) or RRGGBB (6, opaque) — NOT Godot's HTML
 # RRGGBBAA, so the pairs are read by hand [orig: the menu color parser reads
-# the dword as 0xAARRGGBB, see libs/mnu color handling].
+# the dword as 0xAARRGGBB, see engine/formats/mnu color handling].
 static func color_from_mnu(raw: String):
 	var token := raw.strip_edges()
 	if token.begins_with("#"):

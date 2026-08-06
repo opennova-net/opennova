@@ -853,7 +853,7 @@ func cdep_ranges_valid(image: Image) -> bool:
 	# a 32767-raw-unit range. The brush enforces this live; this bake-time guard
 	# makes a corrupt CPT impossible regardless of how the heightmap got into
 	# this state. The raw16 range scan lives in C++ (NovaTerrainData ->
-	# libs/terrain/cdep_constraint); this stays GDScript as export policy.
+	# engine/runtime/terrain/cdep_constraint); this stays GDScript as export policy.
 	if image == null:
 		return false
 	if data == null:

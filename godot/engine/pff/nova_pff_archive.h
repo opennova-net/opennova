@@ -18,7 +18,7 @@
 
 namespace godot {
 
-// Editable single-archive PFF tool, exposed to the OpenNova Editor. Wraps the libs/pff reader +
+// Editable single-archive PFF tool, exposed to the OpenNova Editor. Wraps the engine/formats/pff reader +
 // streaming writer + the payload decode layer + the game-profile table. A "game" choice drives
 // both the container key (for encrypting added files) and the payload codec (for decoding on
 // extract). Read-only resolution still belongs to NovaResourceRoot; this class is the authoring

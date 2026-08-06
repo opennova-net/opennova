@@ -48,7 +48,7 @@ func get_index() -> RefCounted:
 	return _index
 
 
-# The whole-editor reference index (libs/refs over the mounted root): one
+# The whole-editor reference index (engine/base/refs over the mounted root): one
 # instance per library so every link widget / referrers panel shares the same
 # lazily-built graph. It self-invalidates against the root's cache epoch, so a
 # rescan or directory change never serves stale edges.

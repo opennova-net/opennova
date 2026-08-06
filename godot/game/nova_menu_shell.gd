@@ -110,7 +110,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
 # The Options -> Controls key-binding table, and the device radios that switch it
-# (Keyboard/Mouse/Joystick). The shell fills the table from the libs/controls catalog.
+# (Keyboard/Mouse/Joystick). The shell fills the table from the engine/runtime/controls catalog.
 @export var control_table_names := PackedStringArray([
 	"CONTROL_MAPPING",
 ])
@@ -157,7 +157,7 @@ var _ready_done := false
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
-# Lazily-built Options -> Controls key-binding catalog (libs/controls).
+# Lazily-built Options -> Controls key-binding catalog (engine/runtime/controls).
 var _controls_model: NovaControlsModel = null
 
 

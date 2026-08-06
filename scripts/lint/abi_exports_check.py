@@ -157,7 +157,7 @@ def main() -> int:
             print(f"[abi]   - {s}")
         print("[abi] If this ABI change is deliberate, regenerate the baseline in the SAME")
         print("[abi] commit (--write-baseline) and note it in docs/maturity-program.md;")
-        print("[abi] shipped exports keep their historical semantics (libs/CLAUDE.md).")
+        print("[abi] shipped exports keep their historical semantics (engine/CLAUDE.md).")
         return 1
 
     print(f"[abi] OK: {len(current)} C-ABI exports match the baseline; no net-lib symbols")

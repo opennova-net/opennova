@@ -1,5 +1,5 @@
 // Pure C helper to locate the repo root directory from __FILE__.
-// Walks parent directories looking for both "fixtures/" and "libs/".
+// Walks parent directories looking for both "fixtures/" and "engine/".
 
 #ifndef TEST_PATHS_H
 #define TEST_PATHS_H
@@ -33,7 +33,7 @@ static int test_paths_is_repo_root(const char *dir) {
     char buf[4096];
     snprintf(buf, sizeof(buf), "%s%cfixtures", dir, TEST_PATHS_SEP);
     if (!test_paths_dir_exists(buf)) return 0;
-    snprintf(buf, sizeof(buf), "%s%clibs", dir, TEST_PATHS_SEP);
+    snprintf(buf, sizeof(buf), "%s%cengine", dir, TEST_PATHS_SEP);
     if (!test_paths_dir_exists(buf)) return 0;
     return 1;
 }

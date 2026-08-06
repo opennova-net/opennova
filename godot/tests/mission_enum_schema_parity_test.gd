@@ -1,7 +1,7 @@
 extends GutTest
 
 # Drift guard between the engine's trigger/action enum reflectors (NovaMissionData.get_trigger_*_types
-# / get_action_types, whose names come from libs/mission) and the shared core param schema. A new named
+# / get_action_types, whose names come from engine/runtime/mission) and the shared core param schema. A new named
 # enum value added in the C++ format must either gain a schema row OR be listed on an explicit raw-only
 # allowlist below -- otherwise it silently
 # degrades to a raw spinbox in the inspector with no param labels. Adding it here forces the choice to
@@ -68,7 +68,7 @@ func test_every_named_action_type_has_schema_or_allowlist() -> void:
 
 func test_no_schema_row_references_an_unnamed_enum() -> void:
 	# Reverse guard was previously needed for editor-owned TRIGGERS/ACTIONS dictionaries. The schema now
-	# lives in libs/mission beside the enum names, so stale rows are caught by C++ compilation/tests.
+	# lives in engine/runtime/mission beside the enum names, so stale rows are caught by C++ compilation/tests.
 	var m := _mission()
 	var stale: Array = []
 	assert_gt(m.get_trigger_main_types().size(), 0, "enum reflectors remain available")

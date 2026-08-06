@@ -22,7 +22,7 @@ const RANGE_UNITS := 250.0
 const LABEL_CAP := 200
 
 # Record type -> outline color (the 60 B record type byte,
-# libs/world/include/world/occlusion.h).
+# engine/runtime/world/include/world/occlusion.h).
 static func type_color(record_type: int) -> Color:
 	match record_type:
 		0:

@@ -30,7 +30,7 @@ extends SceneTree
 #
 # The composite mode (REN-3) renders the DRAW-ORDER scenes: overlapping
 # translucent quads whose depths are arranged AGAINST the witnessed order, so
-# only the ported priority ladder (libs/renderer/render_order via
+# only the ported priority ladder (engine/runtime/renderer/render_order via
 # NovaObjectShaderCache) produces the correct stack — Godot's per-object
 # depth sort alone would compose them backwards. Scene 1 is the water bracket
 # (below-water alpha under the water surface under above-water alpha

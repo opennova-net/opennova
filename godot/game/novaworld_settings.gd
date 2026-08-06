@@ -12,7 +12,7 @@ const SECTION := "novaworld"
 enum Target { OPENNOVA = 0, REAL = 1 }
 
 # The original NovaWorld gate host — matches GATE_DEFAULT_HOST in
-# libs/novaworld/gate_probe.h. The OpenNova host is configured per build/run
+# engine/net/novaworld/gate_probe.h. The OpenNova host is configured per build/run
 # (dev: localhost), so it is not stored here. GATE_PORT is the gate's UDP port,
 # shared by both targets (NovaWorldPanel's default); the engine-side session
 # record owns the value.

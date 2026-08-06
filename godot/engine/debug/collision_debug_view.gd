@@ -20,7 +20,7 @@ const TYPE_CT := 10
 const TYPE_CF := 13
 
 # Volume type -> wireframe color (the collidable-type table in
-# docs/world/world-wac-ai-re.md section 15 / libs/world/include/world/collision.h).
+# docs/world/world-wac-ai-re.md section 15 / engine/runtime/world/include/world/collision.h).
 static func type_color(volume_type: int) -> Color:
 	match volume_type:
 		1:

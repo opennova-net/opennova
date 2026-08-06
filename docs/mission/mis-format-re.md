@@ -12,7 +12,7 @@ Witness images used by this record (never mix their addresses):
 - **`dfx2med.exe`** — the shipped retail Mission Editor (IDB
   `dfx2med.exe.i64` exists on disk; entity-record field NAMES were witnessed
   from its `Med_WriteMisFile @ 0x454630` at the 2026-06-06 pass — see
-  `libs/mission/include/mission/bms.h`). Its full `.mis` grammar grill is
+  `engine/runtime/mission/include/mission/bms.h`). Its full `.mis` grammar grill is
   still pending (D-MIS-3).
 
 ## Current verdict
@@ -35,7 +35,7 @@ native `NILE_PROJECT` XML scene; the DLL is import-only (Nile saves its own
 format). Driver: `MisLdr_ImportMisFile @ 0x10006610` — tokenize/parse the
 `.mis` via `MisLdr_ParseMisLine @ 0x100017b0` → load `items.def` through the
 SCR text loader with key `0x2A5A8EAD` (the JO/DFX2 `.def` key,
-`libs/scr` `SCR_KEY_JO_DFX2`) via `MisLdr_ParseItemsDefLine @ 0x10006370`
+`engine/formats/scr` `SCR_KEY_JO_DFX2`) via `MisLdr_ParseItemsDefLine @ 0x10006370`
 (`id` stored −100000; `attrib:` tokens LFP/EWeap/SpawnPoint/ChangeTeam set
 flag bits) → emit the XML scene via `MisLdr_WriteNileProjectXml @ 0x10004930`.
 

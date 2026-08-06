@@ -88,7 +88,7 @@ static func serialize(node) -> String:
 
 # Decompiler surface form of a stored intrinsic name: G* drops the G (GSV->SV),
 # F*/T* become Obj.method (FSet->F.Set). Matches split_method_name in
-# libs/mus/src/mus_decompile_shared.h, and the compiler inverts it.
+# engine/formats/mus/src/mus_decompile_shared.h, and the compiler inverts it.
 static func surface(stored: String) -> String:
 	if stored.length() > 1 and stored[0] == "G":
 		return stored.substr(1)
@@ -97,7 +97,7 @@ static func surface(stored: String) -> String:
 	return stored
 
 
-# ---- catalogs (driven by libs/mus) --------------------------------------
+# ---- catalogs (driven by engine/formats/mus) --------------------------------------
 
 # Binary operators, grouped for the menu (text op, friendly label). Straight from
 # binop_str (mus_decompile_shared.h) / binop_byte (mus_compile.cpp).

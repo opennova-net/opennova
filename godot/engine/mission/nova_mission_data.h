@@ -21,11 +21,11 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// Thin GDExtension wrapper over opennova::mission::MissionDocument (libs/mission).
+// Thin GDExtension wrapper over opennova::mission::MissionDocument (engine/runtime/mission).
 // Parses a NovaLogic .bms/.mis mission file and exposes its header (terrain/env refs,
 // metadata) and its placed entities as Godot dictionaries. The read surface is
 // loading + getters; the mutate surface (Phase 1 authoring) is set_entity_transform
-// + save, calling the already byte-faithful writer in libs/mission.
+// + save, calling the already byte-faithful writer in engine/runtime/mission.
 class NovaMissionData : public RefCounted {
 	GDCLASS(NovaMissionData, RefCounted)
 
@@ -43,7 +43,7 @@ private:
 	PackedInt32Array mis_base_heights;
 
 	// Whole-document undo / redo history + exact dirty, on the shared editor core
-	// (libs/oned_edit). The snapshot is the parsed bms::File (never serialized bytes);
+	// (engine/base/oned_edit). The snapshot is the parsed bms::File (never serialized bytes);
 	// the no-op equal-gate and the dirty compare both use the byte-faithful bms::equal
 	// via BmsFileEqual (a free function, not operator==). begin_edit() captures the
 	// pre-edit document, commit_edit() records one step iff it changed, undo()/redo()
@@ -86,7 +86,7 @@ public:
 		KIND_ITEM = 1,
 		KIND_BUILDING = 2,
 		KIND_ORGANIC = 3,
-		// Mirrors opennova::mission::bms::WaypointFlags (libs/mission). Bound as constants so
+		// Mirrors opennova::mission::bms::WaypointFlags (engine/runtime/mission). Bound as constants so
 		// GDScript composes a path's flags without magic numbers. A path with DOES_NOT_LOOP
 		// clear loops back to its first marker; BLUE_TEAM / RED_TEAM scope it to a side.
 		WP_FLAG_DOES_NOT_LOOP = 1,
@@ -113,7 +113,7 @@ public:
 		ATTRIB_TEAM_KING_OF_THE_HILL = 0x40000000,
 		ATTRIB_SEARCH_AND_DESTROY = 0x80000000,
 		ATTRIB_GAME_MODE_MASK = 0xFF830000,
-		// items.def id = wire type id + this offset (libs/mission kItemIdOffset;
+		// items.def id = wire type id + this offset (engine/runtime/mission kItemIdOffset;
 		// pinned by static_assert in the .cpp). Bound so GDScript never
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
 		// entity records — mission/mission.h]
@@ -203,7 +203,7 @@ public:
 	// Returns false if (kind, index) is out of range. Sets the dirty flag on success.
 	bool remove_entity(int kind, int index);
 
-	// --- Authoring facade (libs/mission authoring.h) ---------------------------
+	// --- Authoring facade (engine/runtime/mission authoring.h) ---------------------------
 	// The editing policies the editor used to hand-roll, as engine capabilities:
 	// the items.def-type -> entity-list table, the author-time Ground-userpoint
 	// bake [orig: sub_401A90, dfx2med.exe], and the path-consistent marker
@@ -246,7 +246,7 @@ public:
 	// --- Waypoints ------------------------------------------------------------
 	// A mission carries 128 fixed waypoint paths; a path is an ordered list of marker
 	// indices (each an index into the KIND_MARKER entity list) plus flags (WP_FLAG_*).
-	// Units follow a path via their per-entity "waypoint_id". The lib (libs/mission)
+	// Units follow a path via their per-entity "waypoint_id". The lib (engine/runtime/mission)
 	// already parses and round-trips all of this byte-faithfully; this is the binding.
 	//
 	// Every populated path summary as { index, flags, marker_count } -- the cheap read
@@ -277,7 +277,7 @@ public:
 	// --- Area triggers / restriction zones ------------------------------------
 	// A mission carries N 32-byte axis-aligned box zones (out-of-bounds / objective regions). The
 	// bounds-check consumers read them as interleaved per-axis fixed-point + a flags dword at off 28
-	// (Entity_IsTeamInTriggerBounds @0x43c75c). The lib (libs/mission) round-trips them byte-faithfully;
+	// (Entity_IsTeamInTriggerBounds @0x43c75c). The lib (engine/runtime/mission) round-trips them byte-faithfully;
 	// this is the binding. A zone dictionary is { index, id, min: Vector3, max: Vector3, active: bool,
 	// constrain_z: bool, raw_flags: int }; min/max are mission-space corners (the placement layer
 	// converts to Godot space, same as entities). `id` is the off-0 dword (Phase-5 UNKNOWN; carried raw).
@@ -320,7 +320,7 @@ public:
 
 	// --- Mission scripting (events / triggers / actions, Phase 4) -------------
 	// A mission's logic is a list of events; each event chains a contiguous run of triggers (conditions)
-	// and a run of actions (effects). The typed model + index bookkeeping live in libs/mission; this is the
+	// and a run of actions (effects). The typed model + index bookkeeping live in engine/runtime/mission; this is the
 	// binding. Dictionary shapes: an event is { index, flags, trigger_index, action_index, trigger_count,
 	// action_count, reset_after, delay, unknown5, unknown6 }; a trigger is { index, condition_flags,
 	// main_type, main_type_name, sub_type, sub_type_name, param1..4, unknown7, negated, logic_or, logic_xor,
@@ -353,7 +353,7 @@ public:
 	bool remove_event_action(int event_index, int local_index);
 	bool move_event_action(int event_index, int local_index, int delta);
 	// Enum choice lists for the editor's type dropdowns; each an Array of { value: int, name: String },
-	// reflected from libs/mission's name switches so new enum values appear without UI changes. The sub-type
+	// reflected from engine/runtime/mission's name switches so new enum values appear without UI changes. The sub-type
 	// lists are composite (depend on the chosen main / action type).
 	Array get_trigger_main_types() const;
 	Array get_trigger_sub_types(int main_type) const;
@@ -368,7 +368,7 @@ public:
 
 	// Write the document back to disk. save_file() targets the path it was opened
 	// from; save_as() targets a new path and adopts it. Both clear the dirty flag and
-	// go through the byte-faithful writer in libs/mission. save_file() returns
+	// go through the byte-faithful writer in engine/runtime/mission. save_file() returns
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);

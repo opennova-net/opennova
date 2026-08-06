@@ -582,7 +582,7 @@ func test_place_single_is_a_noop_on_null_inputs() -> void:
 
 
 # --- Engine-facade bake parity --------------------------------------------------
-# The authoring facade (libs/mission authoring.h) bakes the Ground anchor in mission
+# The authoring facade (engine/runtime/mission authoring.h) bakes the Ground anchor in mission
 # space with the conjugated engine matrix [orig: sub_401A90, dfx2med.exe;
 # Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40 + the .3di import's
 # model-forward correction]; the editor's live drag bakes in Godot space with

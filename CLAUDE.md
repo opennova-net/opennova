@@ -8,10 +8,15 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `libs/` — portable C++ core (format/runtime libraries: terrain, terrain_query,
-  threedi, mission, wac, world, novaworld, npwire, audio, pff, vfs, ...).
-  Godot-agnostic — no Godot types ever.
-  Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
+- `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; CMake targets
+  `opennova_<domain>`, namespace `opennova` — names unchanged by the 2026-08 move).
+  Four groups, directories only — never link groups or namespaces:
+  `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
+  `formats/` (one lib per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
+  ADR 0024), `runtime/` (world, wac, mission, anim, audio, particle, renderer,
+  controls, terrain, terrain_query), `net/` (novacrypto, napi, npwire, novaworld,
+  netsim, npruntime). Consumed via the flat C ABI by Python and the DCC plugins,
+  by direct static link everywhere else. See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `engine/` (GDExtension C++ glue, `Nova*` classes,
   plus the shared shell-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
   `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces), `game/` (the
@@ -20,7 +25,7 @@ easier to relay than to rediscover.
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (packet pretty-printer), `common/` (shared
-  socket helpers, deliberately app-layer; pcap I/O lives in `libs/pcapio`),
+  socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`),
   `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
   `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI
   layer, `opennova_blender/` the standalone Blender importer backend.
@@ -77,7 +82,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Conventions
 
-- `libs/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
+- `engine/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
   domain-prefixed C ABI (consumed by `apps/importer/` and `godot/engine/`). The shared FFI
   target is `opennova_shared` (`opennova.dll` / `libopennova.so`).
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
@@ -155,7 +160,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `NovaSimulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
-- Directory-scoped agent rules: `libs/CLAUDE.md`, `godot/engine/CLAUDE.md`,
+- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/engine/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `diagnosing-bugs`.

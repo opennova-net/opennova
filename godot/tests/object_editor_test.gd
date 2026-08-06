@@ -19,7 +19,7 @@ const HOUSE_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/House.3di"
 const CHARMODEL_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
 const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
-# Deliberate literal pins of the ModSuperOED ReExport3DI bit layout (libs/oed
+# Deliberate literal pins of the ModSuperOED ReExport3DI bit layout (engine/formats/oed
 # OED_UPDATE_*). Product code aliases NovaObjectData.UPDATE_*; this suite pins
 # the values so binding drift fails here (see test_oed_update_mask_binding).
 const OED_UPDATE_NONE := 0
@@ -235,7 +235,7 @@ func test_object_data_open_3dp_render_signature_matches_exported_3di() -> void:
 func test_oed_update_mask_binding_matches_modsuperoed_bit_layout() -> void:
 	# The single-source contract (ENG-4): product GDScript aliases
 	# NovaObjectData.UPDATE_*; these literals pin the ModSuperOED ReExport3DI
-	# bit layout carried by libs/oed's OED_UPDATE_* so drift fails loudly.
+	# bit layout carried by engine/formats/oed's OED_UPDATE_* so drift fails loudly.
 	assert_eq(NovaObjectData.UPDATE_NONE, OED_UPDATE_NONE)
 	assert_eq(NovaObjectData.UPDATE_MTRL, OED_UPDATE_MTRL)
 	assert_eq(NovaObjectData.UPDATE_LGHT, OED_UPDATE_LGHT)

@@ -71,7 +71,7 @@ var _avatar: Node3D = null
 var _held_weapon: Node3D = null      # the 3P gun; a SIBLING of _avatar (see GameWorld)
 var _held_weapon_graphic := ""      # the gfx3 the live node was built from
 # --- the equipped-weapon FSM view + the sim-owned view state (net-re §5.62/§5.41) --
-# The FSM and the VIEW STATE both tick in the sim at 62.5 Hz (libs/world
+# The FSM and the VIEW STATE both tick in the sim at 62.5 Hz (engine/runtime/world
 # weapon_fsm + player_view; ADR 0016 — policy, state, and cadence live in the
 # engine): the ADS engaged bit + 15-step ease, the fov policy, and the 3P anchor
 # chase arrive as a PlayerLocalView snapshot each frame. This presenter places the
@@ -397,7 +397,7 @@ func aim_range_units() -> int:
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var endpoint := eye + forward * AIM_PROJECT_RANGE
 	# The terrain surface, through the ported retail raycast
-	# (NovaTerrainData.raycast_terrain -> libs/terrain_query/terrain_raycast.h
+	# (NovaTerrainData.raycast_terrain -> engine/runtime/terrain_query/terrain_raycast.h
 	# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]) rather than a Godot
 	# physics query. The terrain heightfield was the only thing that query could
 	# ever hit in the runtime -- object pick bodies are editor-only -- so this
@@ -539,7 +539,7 @@ func _update_player_camera() -> void:
 		# Chase camera: the smoothed anchor is SIM state — Position + CameraOffset
 		# (the head-bone eye) eased a quarter-step per 62.5 Hz TICK (render-rate
 		# independent) [orig: ThirdPersonCamera_Update @0x437b70/@0x437c8d; ported
-		# in libs/world player_view]. Until the first 3P tick seeds the chase, the
+		# in engine/runtime/world player_view]. Until the first 3P tick seeds the chase, the
 		# eye stands in. The camera keeps the AIM angles pitched up by the orbit
 		# default; on-foot orbit_yaw stays 0 until the orbit keys port.
 		var anchor := eye
@@ -605,7 +605,7 @@ func _set_model_lighting_context(model: Node, interior: bool,
 
 
 # The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,
-# eased by the 15-tick interp, suppressed in third person — libs/world
+# eased by the 15-tick interp, suppressed in third person — engine/runtime/world
 # player_view [orig: g_cameraFovDeg @0x26C6848; Player_ToggleWeaponScope @0x4df401;
 # @0x4df3fa]); this presenter converts horizontal -> vertical through the live aspect
 # via the ONE shared conversion [orig: @0x58d900].

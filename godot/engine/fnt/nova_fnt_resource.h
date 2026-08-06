@@ -19,7 +19,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// FNT format facts, single-sourced from libs/fnt (ENG-4): editor scripts
+	// FNT format facts, single-sourced from engine/formats/fnt (ENG-4): editor scripts
 	// alias these instead of re-declaring the numbers.
 	enum {
 		FIRST_CHAR = FNT_FIRST_CHAR,

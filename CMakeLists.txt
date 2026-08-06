@@ -3,54 +3,54 @@ project(opennova LANGUAGES C CXX)
 
 # Add libraries
 # io first: header-only shared infrastructure (byte/bit IO, fixed-point, strutil)
-add_subdirectory(libs/io)
-add_subdirectory(libs/pcx)
-add_subdirectory(libs/fnt)
-add_subdirectory(libs/foliage)
-add_subdirectory(libs/til)
-add_subdirectory(libs/tpj)
-add_subdirectory(libs/trn)
-add_subdirectory(libs/cpt)
-add_subdirectory(libs/env)
-add_subdirectory(libs/threedi)
-add_subdirectory(libs/bad)
-add_subdirectory(libs/anim)
-add_subdirectory(libs/pcapio)
-add_subdirectory(libs/pff)
-add_subdirectory(libs/gameprofile)
-add_subdirectory(libs/bfc1)
-add_subdirectory(libs/cbin)
-add_subdirectory(libs/def)
-add_subdirectory(libs/avatars)
-add_subdirectory(libs/scr)
-add_subdirectory(libs/rtxt)
-add_subdirectory(libs/ase)
-add_subdirectory(libs/tdp)
-add_subdirectory(libs/oed)
-add_subdirectory(libs/renderer)
-add_subdirectory(libs/particle)
-add_subdirectory(libs/terrain_query)
-add_subdirectory(libs/terrain)
-add_subdirectory(libs/vfs)
-add_subdirectory(libs/resource_index)
-add_subdirectory(libs/world)
-add_subdirectory(libs/wac)
-add_subdirectory(libs/sbf)
-add_subdirectory(libs/mus)
-add_subdirectory(libs/mnu)
-add_subdirectory(libs/mns)
-add_subdirectory(libs/mission)
-add_subdirectory(libs/lwf)
-add_subdirectory(libs/dbf)
-add_subdirectory(libs/audio)
-add_subdirectory(libs/oned_edit)
-add_subdirectory(libs/refs)
-add_subdirectory(libs/controls)
-add_subdirectory(libs/playersav)
+add_subdirectory(engine/base/io)
+add_subdirectory(engine/formats/pcx)
+add_subdirectory(engine/formats/fnt)
+add_subdirectory(engine/formats/foliage)
+add_subdirectory(engine/formats/til)
+add_subdirectory(engine/formats/tpj)
+add_subdirectory(engine/formats/trn)
+add_subdirectory(engine/formats/cpt)
+add_subdirectory(engine/formats/env)
+add_subdirectory(engine/formats/threedi)
+add_subdirectory(engine/formats/bad)
+add_subdirectory(engine/runtime/anim)
+add_subdirectory(engine/base/pcapio)
+add_subdirectory(engine/formats/pff)
+add_subdirectory(engine/base/gameprofile)
+add_subdirectory(engine/formats/bfc1)
+add_subdirectory(engine/formats/cbin)
+add_subdirectory(engine/formats/def)
+add_subdirectory(engine/formats/avatars)
+add_subdirectory(engine/formats/scr)
+add_subdirectory(engine/formats/rtxt)
+add_subdirectory(engine/formats/ase)
+add_subdirectory(engine/formats/tdp)
+add_subdirectory(engine/formats/oed)
+add_subdirectory(engine/runtime/renderer)
+add_subdirectory(engine/runtime/particle)
+add_subdirectory(engine/runtime/terrain_query)
+add_subdirectory(engine/runtime/terrain)
+add_subdirectory(engine/base/vfs)
+add_subdirectory(engine/base/resource_index)
+add_subdirectory(engine/runtime/world)
+add_subdirectory(engine/runtime/wac)
+add_subdirectory(engine/formats/sbf)
+add_subdirectory(engine/formats/mus)
+add_subdirectory(engine/formats/mnu)
+add_subdirectory(engine/formats/mns)
+add_subdirectory(engine/runtime/mission)
+add_subdirectory(engine/formats/lwf)
+add_subdirectory(engine/formats/dbf)
+add_subdirectory(engine/runtime/audio)
+add_subdirectory(engine/base/oned_edit)
+add_subdirectory(engine/base/refs)
+add_subdirectory(engine/runtime/controls)
+add_subdirectory(engine/formats/playersav)
 
 # Family link-interface groups (LIBS-2, ADR 0024) — defined once every member
 # target exists; consumed by whole-family linkers (the godot/engine root).
-include(libs/families.cmake)
+include(engine/families.cmake)
 
 # Vendored third-party deps that the net stack pulls in.
 add_subdirectory(third_party/sqlite)
@@ -89,21 +89,21 @@ endif()
 # These libs are NOT bundled into the FFI shared lib; they are linked into the
 # standalone novaworld server (apps/novaworld_server) and the Godot client
 # GDExtension (godot/engine/network).
-add_subdirectory(libs/novacrypto)
-add_subdirectory(libs/napi)
-add_subdirectory(libs/npwire)
-add_subdirectory(libs/novaworld)
+add_subdirectory(engine/net/novacrypto)
+add_subdirectory(engine/net/napi)
+add_subdirectory(engine/net/npwire)
+add_subdirectory(engine/net/novaworld)
 
 # netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire
 # bridge + the in-process loopback. The single lib depending on BOTH the runtime
 # world (opennova_world) and the wire codec (opennova_novaworld); linked into the
 # Godot client GDExtension and the netsim tests, not the FFI shared lib.
-add_subdirectory(libs/netsim)
+add_subdirectory(engine/net/netsim)
 
 # npruntime — the IDA-faithful in-match NAPI NP runtime (the named server/client
 # state machines + frame loop) built on the netsim seam. Godot-free and socket-free;
 # the owner (apps/nw_server, the Godot binding) pumps bytes through ISessionTransport.
-add_subdirectory(libs/npruntime)
+add_subdirectory(engine/net/npruntime)
 
 # Shared app utilities (UDP sockets, pcap writer) used by the standalone
 # servers and the loopback tests.
@@ -117,7 +117,7 @@ add_subdirectory(apps/nw_lan_probe)
 # Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
 add_subdirectory(apps/novaworld_server)
 
-# nw_server — the headless in-match game HOST (P6): a real-UDP owner loop over libs/npruntime
+# nw_server — the headless in-match game HOST (P6): a real-UDP owner loop over engine/net/npruntime
 # (Server_TickUpdate + handle_server_datagram), separate from the matchmaking novaworld_server.
 # Pure C++ — never links godot-cpp (it is not in this CMake graph; see apps/nw_server/CMakeLists.txt).
 add_subdirectory(apps/nw_server)

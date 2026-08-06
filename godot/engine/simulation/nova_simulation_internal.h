@@ -67,7 +67,7 @@ namespace novasim {
 
 inline constexpr double kFixed16 = 65536.0;
 inline constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
-// Canonical definition lives in libs/world/player_spawn.h (shared with the npruntime host).
+// Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the npruntime host).
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
 inline constexpr float kBinocularAimOffsetDeg = 2.8125f; // 0x02000000 BAM
 inline constexpr double kTau = 6.28318530717958647692;
@@ -819,7 +819,7 @@ inline uint32_t dictionary_u32(const Dictionary &d, const char *key, uint32_t fa
 
 // Build the runtime collision model from a parsed .3di CDTA block — the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
-// libs/threedi/src/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
+// engine/formats/threedi/src/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
 // grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object, and each face's local
 // CNRM index resolves against its object's run at build time, exactly the load-time
 // fixup retail performs [orig: the per-COBJ normal-run fixup in the collision builder

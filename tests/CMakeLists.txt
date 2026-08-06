@@ -65,7 +65,7 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_bad)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
-# ANIM skeletal sampler (libs/anim): coordinate conventions, quaternion helpers, and
+# ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the real BINOC.bad fixture.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
 target_link_libraries(anim_sample_test PRIVATE opennova_anim opennova_bad)
@@ -177,7 +177,7 @@ target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
-# pushed down from nova_sound_bank.gd into libs/audio.
+# pushed down from nova_sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)
 target_link_libraries(sound_selector_test PRIVATE opennova_audio)
 target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -504,7 +504,7 @@ target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
 # Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
-# via the libs/dbf + libs/lwf writers, byte-stable vs the committed files.
+# via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.
 add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
 target_link_libraries(minimal_companion_gen_test PRIVATE opennova_dbf opennova_lwf)
 target_compile_definitions(minimal_companion_gen_test PRIVATE
@@ -576,7 +576,7 @@ foreach(test light_runtime material_classify material_eval
     target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
     target_include_directories(renderer_${test}_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/libs/oed/include)
+        ${CMAKE_SOURCE_DIR}/engine/formats/oed/include)
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
@@ -756,7 +756,7 @@ add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_trn)
 target_include_directories(trn_config_roundtrip_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/libs/terrain/include
+    ${CMAKE_SOURCE_DIR}/engine/runtime/terrain/include
 )
 add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
@@ -776,13 +776,13 @@ target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
 
 # CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
-# ported from terrain_editor_cdep_constraint.gd into libs/terrain.
+# ported from terrain_editor_cdep_constraint.gd into engine/runtime/terrain.
 add_executable(cdep_constraint_test terrain/cdep_constraint_test.cpp)
 target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
 target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
 
-# Terrain world->source coordinate transform kernel (libs/terrain/coords).
+# Terrain world->source coordinate transform kernel (engine/runtime/terrain/coords).
 # Characterizes the runtime resolve_world_sample formula plus the editor-mode
 # guard divergences (bounds-reject, id-clamp, local-clamp) ported from
 # EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
@@ -800,7 +800,7 @@ target_link_libraries(quadrant_lock_test PRIVATE opennova_terrain_query)
 target_include_directories(quadrant_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME quadrant_lock COMMAND quadrant_lock_test)
 
-# The retail terrain segment raycast (libs/terrain_query/terrain_raycast):
+# The retail terrain segment raycast (engine/runtime/terrain_query/terrain_raycast):
 # the Terrain_RaycastHeightmapLoRes march + HiRes_0 refine structural
 # translation over a synthetic sampler — step normalization/budget, ray-z hit
 # semantics, the column-shortcut crossing asymmetry, the empty-cell height-0
@@ -810,14 +810,14 @@ target_link_libraries(terrain_raycast_test PRIVATE opennova_terrain_query)
 target_include_directories(terrain_raycast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_raycast COMMAND terrain_raycast_test)
 
-# Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
+# Height brush kernels (engine/runtime/terrain/brush): raise/lower, smooth (two-pass),
 # flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
 add_executable(brush_height_test terrain/brush_height_test.cpp)
 target_link_libraries(brush_height_test PRIVATE opennova_terrain)
 target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME brush_height COMMAND brush_height_test)
 
-# Colour/blend brush kernels (libs/terrain/brush) on RGBA8 buffers. Byte-parity
+# Colour/blend brush kernels (engine/runtime/terrain/brush) on RGBA8 buffers. Byte-parity
 # critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
 add_executable(brush_color_test terrain/brush_color_test.cpp)
 target_link_libraries(brush_color_test PRIVATE opennova_terrain)
@@ -836,7 +836,7 @@ if(MSVC)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 
-# Particle (.ptl) text-format parser/simulator tests. See libs/particle and the
+# Particle (.ptl) text-format parser/simulator tests. See engine/runtime/particle and the
 # witness matrix in docs/particles/ptl-format-re.md
 # (CParticleDef_ParseFromConfigMap @ 0x5ed210, Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
@@ -1183,7 +1183,7 @@ target_include_directories(wac_environment_wire_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(wac_environment_wire_test PRIVATE cxx_std_17)
 add_test(NAME wac_environment_wire COMMAND wac_environment_wire_test)
 
-# Cross-system: BMS event runtime + WAC share one world/var store (libs/mission
+# Cross-system: BMS event runtime + WAC share one world/var store (engine/runtime/mission
 # event_runtime + opennova_wac). MisvarChange(V#) and WAC eq(V#) see the same var.
 add_executable(event_runtime_test mission/event_runtime_test.cpp)
 target_link_libraries(event_runtime_test PRIVATE opennova_mission opennova_wac opennova_world)
@@ -2063,5 +2063,5 @@ if(BUILD_SHARED_LIB)
     endif()
 endif()
 
-# weapon.sav player-profile format tests (libs/playersav).
+# weapon.sav player-profile format tests (engine/formats/playersav).
 add_subdirectory(playersav)

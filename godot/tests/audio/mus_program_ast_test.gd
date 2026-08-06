@@ -3,7 +3,7 @@ extends GutTest
 # Covers NovaMusicScript.get_program_ast: the full structured statement tree the
 # visual-first editor renders (every play, transition, assignment, intrinsic
 # call, if/else, on-switch -- not just the section topology the model exposes).
-# Built from libs/mus mus_parse_to_ast, the structured twin of the decompiler.
+# Built from engine/formats/mus mus_parse_to_ast, the structured twin of the decompiler.
 
 const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 

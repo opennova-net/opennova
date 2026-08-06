@@ -48,7 +48,7 @@ public:
 	PackedInt32Array get_entry_indices_at_cell(int cell_x, int cell_z) const;
 
 	// Runtime-shared tile-atlas UV flag transform (flip X, flip Y, rotate 90)
-	// shared with the renderer. opennova::til_transform_local_uv @ libs/til/til.h;
+	// shared with the renderer. opennova::til_transform_local_uv @ engine/formats/til/til.h;
 	// engine jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0, sub_5C42B0@0x5C42B0.
 	static Vector2 transform_local_uv(Vector2 uv, int flags);
 

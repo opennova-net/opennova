@@ -56,7 +56,7 @@ CODE_SUFFIXES = (
     ".py", ".ps1", ".sh", ".ts", ".vue", ".cs", ".sql", ".toml", ".cfg",
 )
 SCAN_PREFIXES = (
-    "godot/", "libs/", "apps/", "scripts/", "web/src/", "pyopennova/",
+    "godot/", "engine/", "apps/", "scripts/", "web/src/", "pyopennova/",
     "tests/", "launcher/", "backend/", "blender/", "opennova_max/",
     "opennova_qt_ui/", "opennova_jobs/", "opennova_blender/", "release/",
 )
@@ -99,7 +99,7 @@ FROZEN_TOKENS = (
     "host_players",
 )
 FROZEN_PATHS = ("fixtures/", "backend/migrations/",
-                "apps/novaworld_server/templates/", "libs/napi/",
+                "apps/novaworld_server/templates/", "engine/net/napi/",
                 "third_party/")
 
 CITATION = re.compile(r"\[orig:[^\]]*\]")
@@ -109,7 +109,7 @@ DIVERGENCE_ID = re.compile(r"\bD-[A-Z]+-\d+\b")
 # elsewhere in docs get the advisory.
 DOC_HOST_OK = re.compile(
     r"^(docs/net/|docs/adr/000[9]-|docs/adr/001[0-3]-|\.agents/|plan/"
-    r"|libs/npruntime/)")
+    r"|engine/net/npruntime/)")
 
 
 def run_git(*args: str) -> str:

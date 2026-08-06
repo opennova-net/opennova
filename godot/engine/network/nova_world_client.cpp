@@ -442,7 +442,7 @@ void NovaWorldClient::refresh_server_list() {
 	trigger_gsb();
 }
 
-// ---- Lobby HTTP pump (over libs/novaworld LobbyHttpFlow) ----------------
+// ---- Lobby HTTP pump (over engine/net/novaworld LobbyHttpFlow) ----------------
 
 // Snapshot the gate/session outputs into the flow context. The gate values
 // (startup_url/post_ip/post_port) are frozen once the gate replies; web_domain +

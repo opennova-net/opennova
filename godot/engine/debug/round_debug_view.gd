@@ -9,7 +9,7 @@ extends SimDebugView
 #
 # Data comes from NovaSimulation.get_round_debug(): positions are already in
 # Godot space, sections/faces/materials are the exact values the narrow phase
-# resolved (libs/world round_sim.cpp ring). Rebuilds only when the ring
+# resolved (engine/runtime/world round_sim.cpp ring). Rebuilds only when the ring
 # advances. Built / freed by GameWorld on the overlay's "Show round trails"
 # toggle, like the collision view.
 

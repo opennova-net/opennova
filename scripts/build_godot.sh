@@ -2,7 +2,7 @@
 # Builds the Godot GDExtension (godot/engine/) into godot/bin/.
 #
 # This is what registers the engine's C++ classes (NovaTerrain, RtxtStringFile,
-# NovaResourceRoot, ...) with the editor. scripts/build.sh builds the libs/ +
+# NovaResourceRoot, ...) with the editor. scripts/build.sh builds the engine/ +
 # ctest suite but NOT this DLL, so the editor can run a stale extension and fail
 # to parse any GDScript that references a newly added class. Run this after
 # adding/changing engine/ sources, then fully restart the editor — GDExtension

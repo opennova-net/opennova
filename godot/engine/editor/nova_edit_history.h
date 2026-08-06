@@ -9,7 +9,7 @@
 namespace godot {
 
 // Boxed-snapshot undo/redo history for the GDScript editors: the thin
-// GDExtension wrapper over the shared C++ core (libs/oned_edit) that
+// GDExtension wrapper over the shared C++ core (engine/base/oned_edit) that
 // EnvironmentEditor, SoundController, StringsEditor and the fnt/mnu op-stack
 // editors otherwise each hand-roll. The mission editor uses the same core
 // typed on bms::File inside NovaMissionData; this is the Variant flavor the

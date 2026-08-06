@@ -1,4 +1,4 @@
-// libs/refs extractor tests — fixtures are synthesized in-memory through each
+// engine/base/refs extractor tests — fixtures are synthesized in-memory through each
 // format's own writer (env::save_env, cbin::encode, plain-text items.def), so
 // no committed binaries are needed and the edges asserted are exactly what the
 // format libraries themselves produce.

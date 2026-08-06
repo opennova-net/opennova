@@ -2,7 +2,7 @@ extends GutTest
 
 ## Drift guard: the editor's GeneratorStyleCatalog (friendly names for the NovaLogic
 ## generator-style byte) must stay in lockstep with the canonical C++ enum
-## kControlEntries in libs/threedi/src/threedi_panm.cpp. This is what failed
+## kControlEntries in engine/formats/threedi/src/threedi_panm.cpp. This is what failed
 ## silently before (materials mislabeled 50 as "square"; lights showed "Custom 55").
 
 const PartAnimsInspectorScript = preload("res://modtools/object/ui/inspectors/part_anims_inspector.gd")
@@ -21,7 +21,7 @@ func _label(consumer: String, id: int) -> String:
 
 
 func _canonical_codes_from_cpp() -> Array:
-	var path := ProjectSettings.globalize_path("res://").path_join("../libs/threedi/src/threedi_panm.cpp").simplify_path()
+	var path := ProjectSettings.globalize_path("res://").path_join("../engine/formats/threedi/src/threedi_panm.cpp").simplify_path()
 	var file := FileAccess.open(path, FileAccess.READ)
 	assert_not_null(file, "Canonical generator-style source should be readable at %s" % path)
 	if file == null:

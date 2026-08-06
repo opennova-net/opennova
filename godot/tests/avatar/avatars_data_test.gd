@@ -2,7 +2,7 @@ extends GutTest
 
 # Smoke test for the NovaAvatarDatabase GDExtension binding over the committed
 # retail Avatars.def fixture (fixtures/avatars/Avatars.def). Mirrors the
-# libs/avatars ctests one layer up, and exercises the editor bridge
+# engine/formats/avatars ctests one layer up, and exercises the editor bridge
 # (get_model/set_model) and the save path.
 const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
 

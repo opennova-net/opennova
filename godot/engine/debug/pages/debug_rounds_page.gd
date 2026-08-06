@@ -1,6 +1,6 @@
 class_name DebugRoundsPage
 extends NovaDebugPage
-## The round hit-test inspector: the RoundSim debug ring (libs/world
+## The round hit-test inspector: the RoundSim debug ring (engine/runtime/world
 ## round_sim.cpp), newest first — what each recently resolved round actually
 ## did (which entity, which COBJ section/face or reaction-bone/damage-zone
 ## pair, which material -> impact tag, husk state), with the face-miss fly-ons

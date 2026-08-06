@@ -6,7 +6,7 @@ extends Control
 # Jointops.exe!Intrinsic_GSV @ 0x6720E0 / GSDV @ 0x672120; we render the
 # decoded 0..255 value. Holds the last value so the bars don't flicker between
 # the script's volume calls. GSDV passes left=0 to mean "left unchanged" (a
-# known fidelity quirk in libs/mus); we display channels as received.
+# known fidelity quirk in engine/formats/mus); we display channels as received.
 
 const MAX_VOL := 255.0
 

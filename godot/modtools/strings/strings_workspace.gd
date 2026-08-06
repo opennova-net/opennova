@@ -268,7 +268,7 @@ func get_preview_font_names() -> PackedStringArray:
 		var file := String(path).get_file()
 		if names.has(file):
 			continue
-		# Sniff the header 4CC (single-sourced from libs/fnt) so a stray
+		# Sniff the header 4CC (single-sourced from engine/formats/fnt) so a stray
 		# non-font .fnt never reaches the parser — which error-logs — from
 		# plain picker enumeration; the picker then eager-previews only fonts
 		# that can actually load.

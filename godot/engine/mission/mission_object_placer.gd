@@ -1034,7 +1034,7 @@ func _has_occlusion_records(item_id: int) -> bool:
 # static batching. Mirrors the evaluator's own gates: the entry-level animated check and
 # the per-track idle check. [orig: PANM_BuildNodeMatrices track gates + PANM_SampleTrack
 # (sub_4354B0) idle gate (control & 0xF0), Render_ShaderTickMs @0x2721A40 — ported in
-# libs/threedi/src/threedi_panm_matrices.cpp / threedi_panm_runtime.cpp]
+# engine/formats/threedi/src/threedi_panm_matrices.cpp / threedi_panm_runtime.cpp]
 func _graphic_needs_live_panm(graphic: String) -> bool:
 	if _graphic_panm_cache.has(graphic):
 		return bool(_graphic_panm_cache[graphic])

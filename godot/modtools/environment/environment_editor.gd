@@ -2,9 +2,9 @@ class_name EnvironmentEditor
 extends "res://modtools/editor/editor_document.gd"
 
 # Editor-side document controller for EnvFile.
-# Core ENV behavior stays in libs/env via EnvFile; this node owns authoring
+# Core ENV behavior stays in engine/formats/env via EnvFile; this node owns authoring
 # state, active path, and live-preview time.
-# IDA equivalents are referenced in libs/env: Environment_LoadTimeOfDayConfig @ 0x57db30
+# IDA equivalents are referenced in engine/formats/env: Environment_LoadTimeOfDayConfig @ 0x57db30
 # loads/sorts, TimeOfDay_ParseProperty @ 0x57c590 maps keywords, and
 # Environment_ComputeTimeOfDayColors @ 0x57de40 evaluates TOD colors.
 
@@ -17,7 +17,7 @@ var time_of_day: float = 1200.0
 var _suspend_dirty: bool = false
 
 # Undo/redo + the begin/commit session live on the shared EditorDocument
-# snapshot history (NovaEditHistory over libs/oned_edit); the hooks below give
+# snapshot history (NovaEditHistory over engine/base/oned_edit); the hooks below give
 # it EnvFile's byte snapshots and this editor's signal fan-out.
 
 

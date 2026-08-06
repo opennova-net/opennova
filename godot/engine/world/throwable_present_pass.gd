@@ -1,6 +1,6 @@
 ## Viewing-client presentation for throwables: item-modeled flying rounds
 ## (grenades, satchels, claymores in the air) and known placed devices — the
-## render half of libs/world's ThrowableSim/RoundSim state (world-wac-ai-re §27).
+## render half of engine/runtime/world's ThrowableSim/RoundSim state (world-wac-ai-re §27).
 ## Joiners currently learn flying rounds from S2C tag-2; placed-device 0x59/0x12
 ## replication remains deferred and this pass only renders state the sim has.
 ## [orig: the round renders as its TrcrID item model via Entity_InitFromItemDef

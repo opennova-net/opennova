@@ -1,7 +1,7 @@
 #ifndef NOVA_MUSIC_SCRIPT_H
 #define NOVA_MUSIC_SCRIPT_H
 
-// MUS interactive-music script wrapper. The underlying parser is libs/mus
+// MUS interactive-music script wrapper. The underlying parser is engine/formats/mus
 // (mus_open_memory), which mirrors the engine's
 // AudioVM_LoadScriptFile @ 0x00672D20 (Jointops.exe) script-load path. Held as a
 // godot::Resource so a .bin script file appears in the editor's resource
@@ -57,7 +57,7 @@ public:
 	// One Dictionary per section: { name:String, index:int, is_entry:bool,
 	// is_idle_loop:bool, edges:Array[{to:int, to_name:String, kind:int}],
 	// plays:Array[{track:int, wait:bool}] }. kind: 0=transition (setstate),
-	// 1=switch (tablexec), 2=branch. Built from libs/mus mus_build_section_model,
+	// 1=switch (tablexec), 2=branch. Built from engine/formats/mus mus_build_section_model,
 	// which reads OPCODES (so a real setstate transition is distinguished from
 	// the frame-setup `enter` the decompiled text can't tell apart) and binds
 	// every instruction to an owning section by code offset. Independent of the
@@ -80,7 +80,7 @@ public:
 	//   IF       -> expr:String, then:Array[stmt], else:Array[stmt] (else_present:bool)
 	//   SWITCH   -> expr:String, action:String ("enter"/"play"/"goto"),
 	//               targets:Array[{name:String, section:int, track:int}]
-	// Built from libs/mus mus_parse_to_ast, the structured twin of the
+	// Built from engine/formats/mus mus_parse_to_ast, the structured twin of the
 	// decompiler (mus_ast_emit_text re-emits byte-identical .mus). Track names
 	// are left to the caller (it has the bank); `track` is the SBF entry index.
 	Array get_program_ast(const StringName &p_script_name) const;

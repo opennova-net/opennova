@@ -19,7 +19,7 @@
 namespace godot {
 
 // Godot-facing wrapper around a parsed MNU menu document (NovaLogic's XML-like
-// UI markup). All format behavior lives in libs/mnu; this Resource adds the
+// UI markup). All format behavior lives in engine/formats/mnu; this Resource adds the
 // editor-facing read + mutation surface, change signal (Resource::emit_changed),
 // and Godot byte/file I/O.
 //

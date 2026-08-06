@@ -58,7 +58,7 @@ const STRATEGY_TARGET_ID := 2
 const MIX_CHANNELS := 8
 const SILENT_DB := -80.0  # hard-silent floor for out-of-mix voices
 # Time-of-day region cuts (4/10/17/21 h) and the ~5-game-minute crossfade margin
-# live with the eval in libs/audio (ambient_mixer.cpp time_of_day_region)
+# live with the eval in engine/runtime/audio (ambient_mixer.cpp time_of_day_region)
 # [orig: Entity_CalcTimeOfDayRegion @ 0x408110; margin @ 0x408203].
 
 var _resource_root  # NovaResourceRoot
@@ -74,7 +74,7 @@ var _audio_root: Node3D
 # [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_h:float,
 #    layers_by_set:{set_name: Array[Dictionary]} }]
 var _markers: Array = []
-# The native emitter system (libs/audio AmbientMixer): staggered tick&7 marker
+# The native emitter system (engine/runtime/audio AmbientMixer): staggered tick&7 marker
 # eval/registration on the logic-tick clock + the per-frame live-slot ranking
 # (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). This node keeps the
 # per-candidate descriptors for stream resolution and the voice binding below.
@@ -516,7 +516,7 @@ func set_simulation(sim: Object) -> void:
 
 ## The per-frame ambient mix pass [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0,
 ## called once per render frame from the Game Loop render callback @ 0x521341]:
-## the native mixer (libs/audio AmbientMixer) ranks the LIVE emitter slots —
+## the native mixer (engine/runtime/audio AmbientMixer) ranks the LIVE emitter slots —
 ## registered at the witnessed staggered tick cadence via advance_ticks — through
 ## the two-radius member-0 curve with occlusion, and this node binds the loudest
 ## MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 reimpl territory). Stable
@@ -1029,7 +1029,7 @@ func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
 ## next cut; `adjacent` is the neighbouring region at that edge (same-set
 ## neighbours suppress the dip [orig: @ 0x4a819d]).
 static func time_of_day_region(hours: float) -> TimeOfDayRegion:
-	# The open-low cuts, edge blends, and night-wrap forms live in libs/audio
+	# The open-low cuts, edge blends, and night-wrap forms live in engine/runtime/audio
 	# (ambient_mixer.cpp time_of_day_region) beside the eval that consumes them.
 	var d: Dictionary = NovaAmbientMixer.time_of_day_region(hours)
 	return TimeOfDayRegion.new(int(d.region), int(d.adjacent), float(d.blend))

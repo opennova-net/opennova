@@ -14,7 +14,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// Thin GDExtension wrapper over libs/def weapon.def parsing (def_parse_weapons), surfacing
+// Thin GDExtension wrapper over engine/formats/def weapon.def parsing (def_parse_weapons), surfacing
 // the PLAYER_INFO loadout slice: per-slot weapon lists filtered by the selected class + team,
 // with the fields the loadout combos + weight readout consume.
 // [orig: WeaponDef_LoadAll @ 0x54dd10 / WeaponDef_ParseProperty @ 0x54d730; consumer
@@ -52,7 +52,7 @@ private:
 		float pos[6] = { 0, 0, 0, 0, 0, 0 };
 		float tpos[6] = { 0, 0, 0, 0, 0, 0 };
 		float renderfov = 80.0f;
-		// The witnessed WeaponDef+8 flag mask (libs/def flag_table maps the file
+		// The witnessed WeaponDef+8 flag mask (engine/formats/def flag_table maps the file
 		// tokens: scoped 1, sighted 2, burst 0x20, auto 0x100, ...) and the ADS zoom
 		// magnification [orig: Player_ToggleWeaponScope @ 0x4df0c0 gates Flags & 3;
 		// scoped FOV = 80 / zoom @ 0x4df401].
@@ -157,7 +157,7 @@ public:
 	int find_weapon(const String &name) const;
 
 	// Total loadout weight over the indexed weapons: per entry weaponweight +
-	// (count <= 0 ? maxclips : count) * clipweight — the libs/def port of the
+	// (count <= 0 ? maxclips : count) * clipweight — the engine/formats/def port of the
 	// parent-slot terms [orig: calculate_loadout_weight @ 0x55f1f0]. Invalid
 	// indices contribute nothing; a short counts array reads as -1 (default).
 	double loadout_weight(const PackedInt32Array &weapon_indices,

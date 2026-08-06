@@ -98,7 +98,7 @@ func test_admit_remote_peer_spawns_a_world_entity() -> void:
 
 	# Drive the same PeerSpawned reaction the handshake would: spawn the joiner into the live
 	# World + bind it to a connection. (The handshake that produces this event is unit-tested
-	# in libs/host_session_accept_test.)
+	# in engine/host_session_accept_test.)
 	var spawn_pos := Vector3(20, 0, 30)
 	assert_true(sim.admit_test_remote_peer(spawn_pos, 0.0, 2), "joiner admitted into the World")
 

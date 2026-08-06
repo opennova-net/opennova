@@ -14,7 +14,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// A compiled WAC script program: the GDExtension face of libs/wac's compiler,
+// A compiled WAC script program: the GDExtension face of engine/runtime/wac's compiler,
 // so the editor can lint/inspect mission scripts and the runtime can install
 // them on the simulation (NovaSimulation.set_wac_program). Compilation here is
 // registry-less (symbolic group/area names need a promoted world; numeric ids

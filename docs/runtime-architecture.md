@@ -82,7 +82,7 @@ paths use, and the local player is a host-side server entity driven by a wire-sh
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
 seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_presenter.gd` feeds
 intent rather than writing entity state, and the wire encoders run in single-player exactly as they
-do for a joined client. The in-match runtime behind that seam is `libs/npruntime`
+do for a joined client. The in-match runtime behind that seam is `engine/net/npruntime`
 ([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
 [net/novaworld-net-re.md](net/novaworld-net-re.md).
 
@@ -96,7 +96,7 @@ matchmaking/handoff client and does not own a second gameplay entity model.
 
 ## Layers
 
-- **Logic (portable C++)** — `libs/world` `World` + `ISystem`s (WAC VM, BMS events, AI) over one
+- **Logic (portable C++)** — `engine/runtime/world` `World` + `ISystem`s (WAC VM, BMS events, AI) over one
   shared registry + var store + `EffectLog`. `World::logic_tick` is the 62 Hz engine tick
   (`Game_ProcessMainFrame @0x5263f0`, `current_tick @0x24c1968`); dividers live inside each system —
   the WAC VM runs once per 62 ticks (`WacSystem::kTicksPerExecution`, the `0x3E` divider of
@@ -134,7 +134,7 @@ matchmaking/handoff client and does not own a second gameplay entity model.
   Local-player presentation (viewmodel, aim overlay, HUD feed, view effects) hangs off
   `local_player_presenter.gd` and the `world/player_*` / `present_*` scripts on the same principle.
 - **Audio** — name-keyed sound sets (`SoundProfile_FindLoadedByName @0x5274f0`); the member-selection
-  state machine lives in portable `libs/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
+  state machine lives in portable `engine/runtime/audio` ([ADR 0004](adr/0004-audio-selection-pushdown.md)).
 
 ## F3 frame-stat diagnostics
 
@@ -165,10 +165,10 @@ owner/exclusion setup are intentionally outside those native timing buckets.
   `set_part_phase`. **Implemented.**
 - **`.bad` / `.adm` (main skeletal/skinning)** — the primary infantry/view-model animation (walk/idle/
   fire), selected by AI state. **Implemented** (see
-  [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md)): portable `libs/anim` samples `.bad` clips
+  [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md)): portable `engine/runtime/anim` samples `.bad` clips
   (per-bone keyframe-duration walk, engine-native Y-up), `NovaSkeletalAnim` builds the bind from the
   BadBone matrix, and `NovaObjectModel` drives a `Skeleton3D` + rest-derived `Skin` (skinned organics +
-  fake-skinned rigid weapons). Mission NPCs pick a clip from `Entity.anim_slot` (`libs/world`
+  fake-skinned rigid weapons). Mission NPCs pick a clip from `Entity.anim_slot` (`engine/runtime/world`
   `body_anim.h`), driven by AI state (`Entity_UpdateInfantryAI @0x4b9910`); the present pass routes it via
   `play_body_anim`. Pose chain: `BoneAnim_FindKeyframeAtTime @0x410220` → `build_world_bone_matrices
   @0x40c770` → `Entity_BuildBoneTransformMatrices @0x4b1290`. The player-avatar `off_8135F0` slot table and

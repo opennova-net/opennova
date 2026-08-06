@@ -17,7 +17,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// GDExtension wrapper over opennova::lwf (libs/lwf). Parses a NovaLogic .lwf
+// GDExtension wrapper over opennova::lwf (engine/formats/lwf). Parses a NovaLogic .lwf
 // sound-profile and exposes its Sound Set -> Layer -> Member hierarchy as an
 // editable Godot Array-of-Dictionary tree for the ONED sound workspace.
 //
@@ -27,7 +27,7 @@ class NovaResourceRoot;
 // and encodes via opennova::lwf::encode_lwf — a valid, canonical .lwf.
 //
 // Dictionary shapes (all keys present on read; field semantics grilled vs
-// Jointops.exe -- see libs/lwf/include/lwf/lwf.h for the [orig:] anchors):
+// Jointops.exe -- see engine/formats/lwf/include/lwf/lwf.h for the [orig:] anchors):
 //   set:    { name:String, target_id:int, pitch_base:int, pitch_random_range:int,
 //             set_flags:int, layer_count:int, layers:Array[layer] }
 //   layer:  { selection_mode:int, falloff_radius:int, min_distance:int,

@@ -4,7 +4,7 @@
 // DialogSystem_Init @ 0x5275e0 (mission base name + ".dbf") which co-loads
 // "<base>.lwf" (fallback .pwf) as the dialog sound bank @ 0x44e7d4 — see
 // docs/audio/lwf-dbf-sound-re.md. The minimal mission speaks no dialog, so
-// both are authored empty-but-valid from scratch (libs/dbf + libs/lwf
+// both are authored empty-but-valid from scratch (engine/formats/dbf + engine/formats/lwf
 // writers). Same contract as minimal_rtxt_gen: default guards byte-stability
 // against the committed files; OPENNOVA_WRITE_MINIMAL_FIXTURES=1 rewrites.
 #include <dbf/dbf.h>

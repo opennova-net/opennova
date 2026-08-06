@@ -1,7 +1,7 @@
 extends GutTest
 
 # Verifies the polish-pass C1 work: get_decompiled_text_with_bank threads
-# the SBF entry names down through libs/mus's mus_decompile_with_names so
+# the SBF entry names down through engine/formats/mus's mus_decompile_with_names so
 # play / bind statements show real names instead of "sound_N" placeholders.
 
 const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
@@ -9,7 +9,7 @@ const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 
 
 # The names-less path is unchanged. It must still emit the placeholder so the
-# decompile golden test in libs/mus continues to match byte-for-byte.
+# decompile golden test in engine/formats/mus continues to match byte-for-byte.
 func test_names_less_decompile_uses_sound_n_placeholder():
 	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
 	assert_not_null(script, "fixture loads")

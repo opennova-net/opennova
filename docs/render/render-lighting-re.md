@@ -5,10 +5,10 @@ world lighting block, the per-entity shader uniforms and D3D light set, the
 dynamic point-light path, the terrain/foliage lighting constants, and the
 lighting texture/cubemap resources — witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`; all addresses are that
-binary's). Implementing code: `libs/renderer/light_runtime.{h,cpp}` (the
-witnessed chain as pure functions), `libs/env` `env_weather.h`/`env_render.cpp`
+binary's). Implementing code: `engine/runtime/renderer/light_runtime.{h,cpp}` (the
+witnessed chain as pure functions), `engine/formats/env` `env_weather.h`/`env_render.cpp`
 (`ModulatorChain`, `WeatherColorBlock::set_step_deltas`, `iris_gain`),
-`libs/renderer/object_shader_template.cpp` (the composed FF lighting model),
+`engine/runtime/renderer/object_shader_template.cpp` (the composed FF lighting model),
 `godot/engine/env/nova_weather_core.cpp` (the ticked chain),
 `godot/engine/environment/{nova_weather,nova_environment}.gd` +
 `godot/engine/object/nova_object_model.gd` (the uniform feed),
@@ -373,9 +373,9 @@ directional with 0.75 ambient material.
 
 ## The ported chain (REN-5)
 
-- `libs/env`: `WeatherColorBlock::set_step_deltas` `[orig: @ 0x57d940]`;
+- `engine/formats/env`: `WeatherColorBlock::set_step_deltas` `[orig: @ 0x57d940]`;
   `ModulatorChain` (identity-snapped pair, witnessed tick order, 62-tick
-  exposure chase). `libs/renderer/light_runtime`: `unpack_modulator_scale`,
+  exposure chase). `engine/runtime/renderer/light_runtime`: `unpack_modulator_scale`,
   `WorldLightingInputs/Block` + `build_world_lighting`,
   `compute_entity_lighting`, `ff_vertex_light` + `kFFModulate2x`,
   `sun_visibility_factor`, `point_light_color`, `point_light_attenuation`,

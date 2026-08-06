@@ -2,7 +2,7 @@
 ctypes bindings for the 3DI3 model C API (libopennova.so / opennova.dll).
 
 Every ctypes Structure here mirrors the corresponding C struct in
-libs/threedi/include/threedi/threedi_3di3.h.  The C structs are
+engine/formats/threedi/include/threedi/threedi_3di3.h.  The C structs are
 `#pragma pack(push, 1)`, so every mirror carries `_pack_ = 1`.  Keep them in
 sync — layout drift is caught by tests/test_threedi_ffi_mirror.py.
 """

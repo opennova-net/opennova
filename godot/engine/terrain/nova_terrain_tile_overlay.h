@@ -25,7 +25,7 @@ class NovaTerrainData;
 //   - docs/engine_spec_tiles.md 4.2-4.5
 //
 // Fidelity:
-//   - Atlas UV transforms and fixed->world placement use shared libs/til helpers.
+//   - Atlas UV transforms and fixed->world placement use shared engine/formats/til helpers.
 //   - The 3D ground-quad renderer remains an extension until the original in-world
 //     tile path is isolated end to end.
 //   - Outline flag (0x08) is NOT rendered in the engine's traced 3D path; runtime

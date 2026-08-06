@@ -18,7 +18,7 @@
 namespace godot {
 
 // Resource wrapper for a stock .env environment/TOD file.
-// Native data and all format behavior live in libs/env; this class is the
+// Native data and all format behavior live in engine/formats/env; this class is the
 // Godot-facing equivalent of the [orig: Environment_LoadTimeOfDayConfig @ 0x57db30] /
 // [orig: TimeOfDay_ParseProperty @ 0x57c590] state plus save support (docs/env/env-tod-re.md).
 class EnvFile : public Resource {

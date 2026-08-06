@@ -1,6 +1,6 @@
 #pragma once
 
-// Godot wrapper around libs/renderer shader classification and composition.
+// Godot wrapper around engine/runtime/renderer shader classification and composition.
 
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -37,7 +37,7 @@ public:
 	int32_t family_for_key(int32_t key) const;
 	int32_t blend_for_key(int32_t key) const;
 
-	// Every shader tag in the canonical descriptor table (libs/oed), in table
+	// Every shader tag in the canonical descriptor table (engine/formats/oed), in table
 	// order. Lets tooling (the render swatch probe, material pickers) iterate
 	// the real table instead of duplicating the tag list.
 	PackedStringArray get_known_shader_tags() const;

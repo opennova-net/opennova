@@ -1,7 +1,7 @@
 """
 ctypes bindings for the BAD animation C API (libopennova.so / opennova.dll).
 
-Mirrors structs from libs/bad/include/bad/bad.h.
+Mirrors structs from engine/formats/bad/include/bad/bad.h.
 """
 
 import ctypes

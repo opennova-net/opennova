@@ -5,7 +5,7 @@
 // PacketPeerUDP sockets. NovaWorldClient (lobby browse/login/join) and
 // NovaWorldHost (host registration) both delegate their formerly duplicated
 // socket/pump legs here and keep only their role behavior + GDScript surface.
-// Sockets live here; the protocol/crypto stay in libs/novaworld (ClientSession).
+// Sockets live here; the protocol/crypto stay in engine/net/novaworld (ClientSession).
 // Not a registered Godot class — a plain member of the two nodes.
 
 #include <godot_cpp/classes/packet_peer_udp.hpp>

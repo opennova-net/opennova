@@ -232,7 +232,7 @@ var _terrain_water_height: float = 0.0
 # The witnessed per-frame water core: the noise texture pair
 # [orig: render_water_surface @ 0x5c32c0 -> Water_GenerateNoiseTextures
 # @ 0x5c0360] plus the screen-marched strip tessellation (env #29)
-# [orig: render_water_strip_detailed @ 0x5c27d0]; math in libs/env.
+# [orig: render_water_strip_detailed @ 0x5c27d0]; math in engine/formats/env.
 var _water_core := NovaWaterCore.new()
 var _noise_color_img: Image = null
 var _noise_normal_img: Image = null
@@ -275,7 +275,7 @@ func build() -> void:
 	water_material.shader = load("res://shaders/water.gdshader") as Shader
 	# The water surface draws between the two water-side transparent brackets
 	# [orig: Terrain_RenderWaterPass @ 0x610640 between the SortAndFlush pair
-	# @ 0x5c9596 / @ 0x5c967a; ladder in libs/renderer/render_order, REN-3].
+	# @ 0x5c9596 / @ 0x5c967a; ladder in engine/runtime/renderer/render_order, REN-3].
 	water_material.render_priority = NovaObjectShaderCache.RENDER_RUNG_WATER
 
 	# The witnessed screen-marched strip mesh is LIVE (env #29): _process
@@ -453,7 +453,7 @@ func _process(delta: float) -> void:
 # inside render_main_scene @ 0x5c1240's view-matrix section]. Hex-Rays elides
 # retail's exact mirror transform, but the witnessed texm3x2 rows PIN its
 # form: they sample the RTT at u = screen U (no horizontal flip) and
-# v ~ 1 - screen V (libs/env WaterStripRows), which only holds when the
+# v ~ 1 - screen V (engine/formats/env WaterStripRows), which only holds when the
 # offscreen camera is the UP-PRESERVED proper mirror — reflect the basis
 # about the plane, then negate the reflected up column. The raw reflection
 # alone is IMPROPER (det -1: every triangle's winding flips, so faces cull

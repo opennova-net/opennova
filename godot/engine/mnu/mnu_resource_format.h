@@ -7,7 +7,7 @@
 namespace godot {
 
 // Loads NovaLogic .mnu menu files into NovaMnuDocument and saves them back via
-// the round-trip-capable serializer in libs/mnu.
+// the round-trip-capable serializer in engine/formats/mnu.
 class ResourceFormatLoaderMNU : public ResourceFormatLoader {
 	GDCLASS(ResourceFormatLoaderMNU, ResourceFormatLoader)
 

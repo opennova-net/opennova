@@ -2,7 +2,7 @@ extends RefCounted
 
 # Shared adapter from NovaSimulation's packed, authoritative aim-overlay result to
 # NovaObjectModel's node-frame skeletal deltas. Selection and mounted config formulas
-# stay in libs/anim; presentation only converts the final body + nine segment matrices
+# stay in engine/runtime/anim; presentation only converts the final body + nine segment matrices
 # into Godot space. MissionPresentPass and WirePresentPass must both go through here.
 
 ## Final root basis for a presented row. Aim-valid rows own the body rotation;

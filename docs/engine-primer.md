@@ -88,7 +88,7 @@ appear only where a record says so. Known scales, each owned by its record:
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
 - Dividers are **per system**, inside each system: the WAC VM executes once per
   **62 ticks** (`[orig: WacScript_AdvanceTick @ 0x4f81a0]`, the 0x3E divider — ours is
-  `WacSystem::kTicksPerExecution`, `libs/wac/include/wac/wac_system.h`); normal BMS
+  `WacSystem::kTicksPerExecution`, `engine/runtime/wac/include/wac/wac_system.h`); normal BMS
   events run a 16-tick gate over a quarter-list cursor (each event evaluated about
   every 64 ticks); the AI/entity motor runs every tick with its own 2/8/16-tick
   stagger (same doc).
@@ -144,34 +144,34 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 
 | Subsystem | Our code | Record | Verdict |
 |---|---|---|---|
-| Menus (MNU/MNS UI) | `libs/mnu` (incl. the mnu_xml reader), `libs/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | record complete (D-MNU-1..12; open rows tabled in the ledger) |
-| Sound banks + dialog | `libs/lwf`, `libs/dbf`, `libs/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | record complete (D-SND-1..17; open rows tabled in the ledger) |
-| Music (MUS/SBF/SCR) | `libs/mus`, `libs/sbf`, `libs/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
-| Environment / time-of-day | `libs/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |
-| String tables (RTXT) | `libs/rtxt`, NovaStrings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
-| Mission loader (`.bms`) | `libs/mission` | [correspondence.md §3](correspondence.md) | per function |
-| BMS event runtime + promotion | `libs/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
-| World / WAC VM / AI / gameplay systems | `libs/world`, `libs/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
-| Items (items.def entity defs) | `libs/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
+| Menus (MNU/MNS UI) | `engine/formats/mnu` (incl. the mnu_xml reader), `engine/formats/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | record complete (D-MNU-1..12; open rows tabled in the ledger) |
+| Sound banks + dialog | `engine/formats/lwf`, `engine/formats/dbf`, `engine/runtime/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | record complete (D-SND-1..17; open rows tabled in the ledger) |
+| Music (MUS/SBF/SCR) | `engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
+| Environment / time-of-day | `engine/formats/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |
+| String tables (RTXT) | `engine/formats/rtxt`, NovaStrings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
+| Mission loader (`.bms`) | `engine/runtime/mission` | [correspondence.md §3](correspondence.md) | per function |
+| BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
+| World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
+| Items (items.def entity defs) | `engine/formats/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
 | HUD + interface overlays | `godot/engine/ui/hud_*.gd`, `NovaHudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
 | Mission loading screen | `godot/engine/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..7) |
-| Player info / avatars | `libs/avatars`, `NovaAvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos FIXED 2026-07-30; open: -1 spawned-soldier render NEEDS-RE, -9 persistence, -12 per-slot selection state) |
-| Render — materials / state | `libs/oed` tag registry, `libs/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
-| Render — draw order | `libs/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
-| Render — lighting | `libs/renderer/light_runtime`, `libs/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |
-| Render — occlusion / blink boxes | `libs/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (libs/world/src/occlusion.cpp); D-OCC-1..8) |
-| Skeletal animation (`.bad`/`.adm`) | `libs/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
-| Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
+| Player info / avatars | `engine/formats/avatars`, `NovaAvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos FIXED 2026-07-30; open: -1 spawned-soldier render NEEDS-RE, -9 persistence, -12 per-slot selection state) |
+| Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `NovaObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
+| Render — draw order | `engine/runtime/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
+| Render — lighting | `engine/runtime/renderer/light_runtime`, `engine/formats/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |
+| Render — occlusion / blink boxes | `engine/runtime/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (engine/runtime/world/src/occlusion.cpp); D-OCC-1..8) |
+| Skeletal animation (`.bad`/`.adm`) | `engine/runtime/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
+| Models (`.3di`: 3DI3 + GP) | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
-| Particles (`.ptl`) | `libs/particle`, `libs/renderer` particle path, `godot/engine/particle` (NovaEffectScene / NovaParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
-| NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered) |
-| Boot-required resources | `libs/gameprofile` `required_resources` manifest (ENG-6), consumed via `NovaResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
-| VFS / PFF mount stack | `libs/vfs`, `libs/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..11 |
-| Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
-| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open) |
-| Tiles (`.til` overlay) | `libs/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
-| Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4) |
-| Credits (CBIN) | `libs/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
+| Particles (`.ptl`) | `engine/runtime/particle`, `engine/runtime/renderer` particle path, `godot/engine/particle` (NovaEffectScene / NovaParticleFile) | [particles/ptl-format-re.md](particles/ptl-format-re.md) | landed (#237); D-PTL catalog in the ledger |
+| NovaWorld networking | `engine/net/npwire`, `engine/net/novaworld`, `engine/net/napi`, `engine/net/novacrypto`, `engine/net/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match replication exercised in both directions against captures and live retail sessions (retail clients join and play on our hosts); remaining gaps ledgered) |
+| Boot-required resources | `engine/base/gameprofile` `required_resources` manifest (ENG-6), consumed via `NovaResourceRoot.list_missing_boot_resources` | [required-resources.md](required-resources.md) | witnessed (R8) + manifest landed: the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
+| VFS / PFF mount stack | `engine/base/vfs`, `engine/formats/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..11 |
+| Terrain (TRN + runtime queries) | `engine/runtime/terrain`, `engine/runtime/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries ported, ENG-3; rendering parity re-grilled on #245) |
+| Foliage | `engine/formats/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (runtime rebuilt on #245; D-FOLIAGE-7/9/10 open) |
+| Tiles (`.til` overlay) | `engine/formats/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
+| Fonts (`.fnt`) | `engine/formats/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..4) |
+| Credits (CBIN) | `engine/formats/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
 | Importer pipeline | `apps/importer`, `pyopennova` | [importer/importer-audit.md](importer/importer-audit.md) | tracked-by-composition (PAR-R6) |
 
 Every subsystem now has a dedicated RE record (full or partial) or a

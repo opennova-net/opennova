@@ -7,7 +7,7 @@ Format and behavior are witnessed in
 [docs/playerinfo/avatars-re.md](../../../docs/playerinfo/avatars-re.md)
 (`[orig: CAvatarDefs_Init @ 0x57b180]`,
 `[orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]`); the parser, writer, and
-authoring model live in `libs/avatars` behind the `NovaAvatarDatabase`
+authoring model live in `engine/formats/avatars` behind the `NovaAvatarDatabase`
 GDExtension class.
 
 ## Document

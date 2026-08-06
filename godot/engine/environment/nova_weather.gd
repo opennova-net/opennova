@@ -3,7 +3,7 @@ class_name NovaWeather
 extends Node3D
 
 # Weather/light smoothing owner. NovaWeatherCore (godot/engine/env, math in
-# libs/env) owns the witnessed state cluster of
+# engine/formats/env) owns the witnessed state cluster of
 # [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind PRNG/sway
 # oscillator, both lightning flash sequencers
 # ([orig: Environment_SetLightningFlash @ 0x57d320] SET-per-epoch additives),

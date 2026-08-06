@@ -1,4 +1,4 @@
-// SBF audio bank wrapper. The underlying parser is libs/sbf
+// SBF audio bank wrapper. The underlying parser is engine/formats/sbf
 // (sbf_open_memory), which mirrors the engine's
 // AudioVM_OpenContextFile @ 0x00672160 (jointops); the engine reads SBF
 // archives via the same header + entry-table layout.

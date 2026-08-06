@@ -61,7 +61,7 @@ Each domain's next step is named in its own record, not centrally:
 | Domain | Open rows live in | The record that names the next step |
 |---|---|---|
 | World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§28); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
-| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `libs/npruntime/ROADMAP.md` |
+| Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/net/npruntime/ROADMAP.md` |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
 | Render (materials, order, lighting, occlusion) | ledger § Render ×3 | [render/README.md](render/README.md) |
 | Terrain / foliage / tiles | ledger § Terrain, Foliage, Tiles | [terrain/terrain-re.md](terrain/terrain-re.md), [foliage/foliage-re.md](foliage/foliage-re.md) |
@@ -72,7 +72,7 @@ Each domain's next step is named in its own record, not centrally:
 Work that is **not** a parity divergence — editor UX, project health, code
 hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans: `plan/`
-(the NovaWorld-integration era), `libs/npruntime/ROADMAP.md`,
+(the NovaWorld-integration era), `engine/net/npruntime/ROADMAP.md`,
 [oned/editor-layer-program.md](oned/editor-layer-program.md), and
 [maturity-program.md](maturity-program.md)'s historical body (its two log
 appendices stay live).
@@ -100,7 +100,7 @@ first grill.
 | Instrument | What it prevents | How it runs |
 |---|---|---|
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
-| `scripts/lint/ratchet_counts.py` | new uncited `libs/` source files; new tests poking privates | CI, fail-on-increase against a committed baseline |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates | CI, fail-on-increase against a committed baseline |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |

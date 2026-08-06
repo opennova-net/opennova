@@ -1,4 +1,4 @@
-// Round-trip + from-scratch writer test for opennova libs/avatars.
+// Round-trip + from-scratch writer test for opennova engine/formats/avatars.
 //
 // The writer creates Avatars.def from scratch (docs/adr/0003, docs/adr/0021);
 // it does NOT reproduce the hand-authored retail file byte-for-byte (that file

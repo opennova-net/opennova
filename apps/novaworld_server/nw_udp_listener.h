@@ -63,7 +63,7 @@ struct LobbyConnState {
 	std::vector<uint8_t> server_auth_datagram;
 	// Client's ClientAuth.ck — this is retail's "local_key" per the
 	// session_id validation in NapiNPProtocol_HandleSessionPacket
-	// (libs/npwire/include/npwire/protocol_message.h notes). We
+	// (engine/net/npwire/include/npwire/protocol_message.h notes). We
 	// must echo it as the session_id field in S→C SESSION packets so
 	// retail's validator accepts them.
 	uint32_t client_ck = 0;

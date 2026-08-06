@@ -1,11 +1,11 @@
 #ifndef NOVA_MUSIC_DIRECTOR_H
 #define NOVA_MUSIC_DIRECTOR_H
 
-// NovaMusicDirector embeds a libs/mus VM and routes its hooks to Godot
+// NovaMusicDirector embeds a engine/formats/mus VM and routes its hooks to Godot
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
 // by the play / playw opcodes.
 //
-// Witnessed wire-level paths (libs/mus): Jointops.exe!AudioVM_LoadScriptFile @
+// Witnessed wire-level paths (engine/formats/mus): Jointops.exe!AudioVM_LoadScriptFile @
 // 0x00672D20 (script load), Jointops.exe!VmOp_Play @ 0x672CB0 + VmOp_PlayWait @
 // 0x672C90 (sound triggers), Jointops.exe!Intrinsic_GSV / GSDV (volume).
 

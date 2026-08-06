@@ -18,7 +18,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// Thin GDExtension wrapper over libs/def items.def parsing (def_parse_items).
+// Thin GDExtension wrapper over engine/formats/def items.def parsing (def_parse_items).
 // Resolves a mission entity's item id -> its visual model (.3di basename) and a
 // few type fields. This is the minimal "database" slice needed to place objects;
 // weapon/ammo/hud definitions are gameplay and intentionally not surfaced here.
@@ -63,7 +63,7 @@ private:
 		float light_transfer = 0.0f; // ItemDef+0x218 interior daylight fraction
 		float damage_reduc_pp = 0.0f;
 		float damage_reduc_max = 0.0f;
-		// Vehicle physics-property block, PRE-SCALED by the libs/def parser exactly like
+		// Vehicle physics-property block, PRE-SCALED by the engine/formats/def parser exactly like
 		// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Consumed by
 		// the sim's item-traits sweep (world::VehicleTraits). All 0 when absent.
 		int physics = 0;      // +0x8DC selector — non-zero = ground-vehicle motor
@@ -179,7 +179,7 @@ protected:
 
 public:
 	// DefItemDef.type values — the witnessed engine ItemDefType at ItemDef+0x5C,
-	// mirroring DefItemType in libs/def/include/def/def.h (static_asserts in the
+	// mirroring DefItemType in engine/formats/def/include/def/def.h (static_asserts in the
 	// .cpp pin the mirror). Non-injective by engine design: DECORATION==FOLIAGE
 	// and POWERUP==OBJECT share values; 7 is unused, 0 = unset/unknown.
 	// [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]

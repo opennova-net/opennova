@@ -12,7 +12,7 @@ extends RefCounted
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 # Local aliases of the binding's single-source codes — NovaSimulation /
-# NovaMissionData pin these to libs/world + libs/mission by static_assert, so
+# NovaMissionData pin these to engine/runtime/world + engine/runtime/mission by static_assert, so
 # a native change can never silently drift past this file's seat walks.
 const SEAT_NONE := NovaSimulation.SEAT_NONE
 const SEAT_PASSENGER := NovaSimulation.SEAT_PASSENGER

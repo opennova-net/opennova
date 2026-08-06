@@ -185,7 +185,7 @@ tool catalog + service in `mcp/` (`editor_mcp_tools.gd` editor-wide,
 
 The editor binds to the shared C++ core through the GDExtension in
 `godot/engine/`; on-disk formats are parsed by the libraries under
-[`libs/`](../../libs). How the editor and the runtime share rendering and
+[`engine/`](../../libs). How the editor and the runtime share rendering and
 simulation code (the `edit_mode` runtime-node pattern, sampler seams, the one
 mission runtime) is documented in
 [docs/oned/editor-runtime-parity.md](../../docs/oned/editor-runtime-parity.md).

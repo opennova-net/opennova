@@ -1,4 +1,4 @@
-// Height brush kernels (libs/terrain/brush) ported from
+// Height brush kernels (engine/runtime/terrain/brush) ported from
 // godot/modtools/terrain/terrain_editor_brushes.gd (apply_raise_lower /
 // apply_smooth / apply_flatten + the shared _for_each_brush_pixel falloff).
 //

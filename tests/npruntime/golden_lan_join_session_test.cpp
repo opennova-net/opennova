@@ -13,7 +13,7 @@
 //
 // WHAT IS DEFERRED (documented, NOT faked green):
 //   Full-datagram byte-parity of 0x81/0x82 is NOT asserted. The remaining divergence lives in the
-//   libs/novaworld session builders (build_server_hello / build_server_auth), NOT the P2 legs. The
+//   engine/net/novaworld session builders (build_server_hello / build_server_auth), NOT the P2 legs. The
 //   builders are now GRILLED (2026-06-27, D-NET Wave 3): 0x81 = NapiNPProtocol_SendServerInfoPacket
 //   @0x6204b0 (FIXED — flat builder, SF unconditional, no PL; D-NET-16/18), 0x82 =
 //   CNapiNPConnection_SendSessionInit @0x620ef0 (witnessed; see its IDB comment). Measured against this
@@ -186,9 +186,9 @@ int main() {
 	if (!expect(oa.scrk == ga.scrk, "0x82 SCRK == seed-injected server SCRK")) return 1;
 	if (!expect(oa.na == ga.na, "0x82 NA echoes ClientAuth.na")) return 1;
 
-	// --- Record the full-datagram divergence (deferred to a libs/novaworld builder grill). ---
+	// --- Record the full-datagram divergence (deferred to a engine/net/novaworld builder grill). ---
 	std::printf("[golden] handshake-leg field parity OK (0x81 HK/PN/PG/P2; 0x82 CI/CK/CR/SK/SCRK/NA).\n");
-	std::printf("[golden] full-datagram byte diff (DEFERRED — libs/novaworld builder field-set):\n");
+	std::printf("[golden] full-datagram byte diff (DEFERRED — engine/net/novaworld builder field-set):\n");
 	std::printf("         0x81: golden=%zuB ours=%zuB first_diff=%d (retail CI=%u game_server=%d; ours CI=%u)\n",
 	            g81.size(), o81.size(), first_diff(g81, o81), gh.ci, gh.is_game_server, oh.ci);
 	std::printf("         0x82: golden=%zuB ours=%zuB first_diff=%d (retail MI=0x%x cu#=%zu; ours MI=0x%x)\n",

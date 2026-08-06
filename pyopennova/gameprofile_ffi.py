@@ -1,6 +1,6 @@
-"""ctypes binding for the per-game profile table (libs/gameprofile, in opennova.dll / libopennova.so).
+"""ctypes binding for the per-game profile table (engine/base/gameprofile, in opennova.dll / libopennova.so).
 
-The game->SCR-policy mapping is the single source of truth in C (libs/gameprofile); Python resolves
+The game->SCR-policy mapping is the single source of truth in C (engine/base/gameprofile); Python resolves
 through it rather than duplicating the table, so the importer keys SCR payloads exactly like the
 engine. Only the code->policy lookup the importer needs is wrapped here.
 """

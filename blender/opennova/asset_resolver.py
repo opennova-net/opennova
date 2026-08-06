@@ -4,7 +4,7 @@ Unified loose-file + PFF asset resolver.
 Allows pointing at a game install directory containing .pff archives instead of
 requiring pre-extracted assets. Loose files still work too.
 
-Thin wrapper over the engine-faithful native VFS (libs/vfs): mount precedence and
+Thin wrapper over the engine-faithful native VFS (engine/base/vfs): mount precedence and
 SCR/BFC1 decoding happen in C, so Blender and the importer resolve byte-identical
 assets. Since the C FFI parsers take file paths (not buffers), resolved files are
 materialized to a temporary directory.

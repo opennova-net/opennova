@@ -34,7 +34,7 @@ void NovaWaterCore::update(int p_frame_counter) {
 
 namespace {
 
-// libs/env packs A<<24|R<<16|G<<8|B (the D3D dword order); Godot RGBA8 wants
+// engine/formats/env packs A<<24|R<<16|G<<8|B (the D3D dword order); Godot RGBA8 wants
 // R,G,B,A bytes.
 PackedByteArray pixels_to_rgba8(const uint32_t *pixels, int count) {
 	PackedByteArray bytes;
@@ -217,7 +217,7 @@ int NovaWaterCore::strip_build(float p_plane_height_world, float p_murk,
 
 namespace {
 
-// libs/env packs A<<24|R<<16|G<<8|B (the D3D dword order); raw bytes / 255,
+// engine/formats/env packs A<<24|R<<16|G<<8|B (the D3D dword order); raw bytes / 255,
 // no color-space conversion — the strips feed the COLOR attribute of a
 // gamma-space shader (D-RMAT-7).
 PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {

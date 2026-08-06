@@ -24,7 +24,7 @@ func test_every_ast_kind_has_title_color_tooltip():
 
 
 func test_every_intrinsic_has_friendly_label_and_mnemonic_tooltip():
-	# Keyed off MusExpr.INTRINSICS (the catalog driven by libs/mus) so a new
+	# Keyed off MusExpr.INTRINSICS (the catalog driven by engine/formats/mus) so a new
 	# intrinsic there can't silently miss a display name here.
 	for it in MusExpr.INTRINSICS:
 		var stored := String(it["name"])

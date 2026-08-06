@@ -27,11 +27,11 @@
 //
 // REN-3 extended the set with section 3: draw-order vectors (sort keys,
 // technique-class selection, the water bracket + priority ladder) pinning
-// libs/renderer/render_order against docs/render/render-order-re.md
+// engine/runtime/renderer/render_order against docs/render/render-order-re.md
 // [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
 // @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0].
 //
-// REN-5 added section 5: lighting scalars over libs/renderer/light_runtime
+// REN-5 added section 5: lighting scalars over engine/runtime/renderer/light_runtime
 // (docs/render/render-lighting-re.md) — the modulator /64 scale, the world
 // lighting block + overrides, the entity uniforms incl. the interior
 // daylight lerp, the FF vertex light + MODULATE2X, sun visibility,
@@ -43,7 +43,7 @@
 // REN-4 extended the classification rows with glow= (the 0x10000000 Q3
 // bloom-copy capability [orig: probe @ 0x5ae690; Q3 gate @ 0x5d93b5]) and
 // vfade= (the vsTracer view-angle fade, D-RMAT-2), and added section 4:
-// uv-anim vectors over libs/renderer/uv_anim
+// uv-anim vectors over engine/runtime/renderer/uv_anim
 // [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0].
 
 #include "renderer/light_runtime.h"
@@ -183,7 +183,7 @@ std::string generate() {
 		out << line;
 	}
 
-	// Section 3 (REN-3): draw-order vectors over libs/renderer/render_order —
+	// Section 3 (REN-3): draw-order vectors over engine/runtime/renderer/render_order —
 	// docs/render/render-order-re.md.
 	out << "# render-order v1 (REN-3: sort keys, technique classes, water bracket, ladder)\n";
 
@@ -253,7 +253,7 @@ std::string generate() {
 	              kRungAlphaCameraSide, kRungOverlayFx, kRungSunGlow);
 	out << line;
 
-	// Section 4 (REN-4): uv-anim vectors over libs/renderer/uv_anim — the
+	// Section 4 (REN-4): uv-anim vectors over engine/runtime/renderer/uv_anim — the
 	// time-driven MatTexCoord1 transform
 	// [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0;
 	//  bound in apply_shader_parameters @ 0x58db80 with
@@ -321,7 +321,7 @@ std::string generate() {
 		}
 	}
 
-	// Section 5 (REN-5): lighting scalars over libs/renderer/light_runtime —
+	// Section 5 (REN-5): lighting scalars over engine/runtime/renderer/light_runtime —
 	// the witnessed world-lighting chain (docs/render/render-lighting-re.md):
 	// the modulator /64 unpack [orig: @ 0x58db30; @ 0x5aaef0], the world block
 	// build + store derivations [orig: @ 0x5c8090; @ 0x5d89e0], the per-entity

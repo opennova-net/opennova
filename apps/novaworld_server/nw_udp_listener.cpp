@@ -67,7 +67,7 @@ std::string hex_sig(uint32_t value, int min_width = 2) {
 
 // make_dev_scrk / make_dev_nwuid / make_random_session_u32 and the NW-UDP
 // envelope transform (nw_decode_inbound / nw_encode_outbound) moved to
-// libs/novaworld nw_session_framing.h so the standalone server's lobby path and
+// engine/net/novaworld nw_session_framing.h so the standalone server's lobby path and
 // the consolidated HostSessionAccept share exactly one definition.
 
 struct MaintenanceStatus {

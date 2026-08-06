@@ -35,7 +35,7 @@ a local-document error.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.ptl` | [`libs/particle`](../../../libs/particle) | text format: effects, particles, curve tables, editor handles; parser/writer round-trip tested against the retail corpus |
+| `.ptl` | [`engine/runtime/particle`](../../../engine/runtime/particle) | text format: effects, particles, curve tables, editor handles; parser/writer round-trip tested against the retail corpus |
 
 ## How it is built
 

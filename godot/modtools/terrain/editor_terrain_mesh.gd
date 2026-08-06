@@ -19,7 +19,7 @@ var _origin_y: int = 0
 var _sector_grid := PackedInt32Array()
 var _bounds := AABB()
 # Source-of-truth for world->atlas coordinate transforms. The math lives in C++
-# (NovaTerrainData / libs/terrain_query/coords.h); this node forwards to it so the
+# (NovaTerrainData / engine/runtime/terrain_query/coords.h); this node forwards to it so the
 # editor brush paths and the runtime samplers share one implementation.
 var _data: NovaTerrainData = null
 var _surface_inputs: NovaTerrainSurfaceInputs = NovaTerrainSurfaceInputs.new()

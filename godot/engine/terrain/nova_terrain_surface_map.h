@@ -13,7 +13,7 @@ namespace godot {
 // A paintable 8-bit indexed surface-type (charmap) raster — the editor's
 // working view of NovaTerrainData's "charmap" PCX slot. Mirrors
 // NovaTerrainFoliageMap and deliberately shares the same generic index-grid
-// kernel from libs/foliage (circle paint + heightmap<->map coordinate
+// kernel from engine/formats/foliage (circle paint + heightmap<->map coordinate
 // mapping): the charmap is the same shape as the foliage map, a palette-indexed
 // grid aligned to the 1024-unit heightmap space, so the paint math lives in
 // exactly one place. The persistent charmap bytes stay owned by

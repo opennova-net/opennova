@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaWacProgram + the sim's WAC wiring: the binding face of libs/wac. Until
+# NovaWacProgram + the sim's WAC wiring: the binding face of engine/runtime/wac. Until
 # this slice, NovaSimulation created a WacSystem every load but nothing ever
 # installed a program — mission .wac scripts were silently inert. These pin the
 # compile surface, the resource-root layering, and the end-to-end execution

@@ -231,7 +231,7 @@ var _marker_place_armed: bool = false
 # distinct marker types that must NOT be turned into waypoints. Seeding a new path marker by copying
 # whatever marker happened to be placed first (a player start) was the "waypoints become player
 # starts" bug. The id policy now lives in the engine's authoring facade
-# (libs/mission authoring.h: marker_item_id_for_path / kWaypointMarkerItemId),
+# (engine/runtime/mission authoring.h: marker_item_id_for_path / kWaypointMarkerItemId),
 # exposed as NovaMissionData.marker_item_id_for_path / add_path_marker_grounded.
 # The live (container-local) position of a marker being dragged, written to the record on
 # release (the drag previews the gizmo only; the record is committed once, as one step).

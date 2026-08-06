@@ -98,13 +98,18 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
 #   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
-PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "libs/", "apps/")
+# "libs/" is TRANSITIONAL alongside "engine/" while the 2026-08 move (ADR 0028)
+# is in flight: with both sides of the rename in the diff pathspec, git pairs
+# moved files as renames instead of flagging their every line as added. Drop
+# the stale entry in a routine PR once master's merge-base is past the move.
+PROMOTED_SCOPES = ("godot/engine/", "godot/game/", "godot/modtools/", "engine/",
+                   "libs/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
     "godot/engine/world/host_session_config.gd",
-    "libs/novaworld/include/novaworld/gate_probe.h",
-    "libs/npwire/include/npwire/net_ports.h",
-    "libs/npwire/include/npwire/game_type.h",
+    "engine/net/novaworld/include/novaworld/gate_probe.h",
+    "engine/net/npwire/include/npwire/net_ports.h",
+    "engine/net/npwire/include/npwire/game_type.h",
 )
 PROMOTED_EXEMPT = re.compile(r"^\s*#|^\s*//|\[orig|\bconst\s|\bconstexpr\s|#define\s")
 

@@ -3,7 +3,7 @@ extends RefCounted
 
 # The wire entity-handle bit layout: the original entity pool rides the high
 # nibble and the pool slot the low 12 bits — handle = pool << 12 | slot.
-# This is the ONE GDScript home for that decode (libs/npwire owns it on the
+# This is the ONE GDScript home for that decode (engine/net/npwire owns it on the
 # native side); inspectors, HUD feeds, and the wire present pass all read it
 # here instead of re-deriving the shifts. Pools 0/1/2/3 =
 # organic/item/building/marker. [orig: EntityPool_FindByNetId @ 0x4f0a20]

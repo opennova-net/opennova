@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaReferenceIndex (godot/engine/refs): libs/refs bound over a mounted
+# NovaReferenceIndex (godot/engine/refs): engine/base/refs bound over a mounted
 # NovaResourceRoot. Covers on-demand references_of with resolution annotation,
 # the lazy whole-root build behind referrers_of, kind-specific resolve
 # candidates (texture fallbacks vs header-ref extensions vs unprobed name-table

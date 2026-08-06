@@ -18,12 +18,12 @@ divergences in its §8 catalog):
 - `docs/net/novaworld-net-re.md`
 - `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`
   (`.agents/network.md` is now a redirect to the current architecture owners:
-  `libs/npruntime/ROADMAP.md`, ADR 0013, ADR 0019)
+  `engine/net/npruntime/ROADMAP.md`, ADR 0013, ADR 0019)
 - `.agents/retail-lan-parity.md` — repeatable cfg-driven retail/OpenNova LAN
   matrix: isolated copies, hook deployment, readiness, capture, semantic gates,
   shutdown, and failure triage.
 - `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
-  in-match networking; `libs/npruntime/ROADMAP.md` is the completed build record
+  in-match networking; `engine/net/npruntime/ROADMAP.md` is the completed build record
   behind it, not current status
 - `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
   from the witnessed retail chain (phase counter + sub-blocks + priority/budget
@@ -49,7 +49,7 @@ divergences in its §8 catalog):
 ## Consolidated net core (ADR 0013)
 
 - **Message catalog is the single source of truth**:
-  `libs/npwire/include/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
+  `engine/net/npwire/include/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
   coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
   message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
 - **Capture → validate-vs-golden loop**: host from the Godot game, `dumpcap`, then

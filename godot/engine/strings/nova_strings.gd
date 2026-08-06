@@ -13,7 +13,7 @@ extends Node
 ##    marker the original formats for its error table
 ##    [orig: GameErr_GetString @ 0x4C2C60].
 ## The case-insensitive matching, first-match-wins and {hot} marker handling
-## live in libs/rtxt via the RtxtStringFile resource.
+## live in engine/formats/rtxt via the RtxtStringFile resource.
 ##
 ## The single-table convenience API (load_table/get_string/...) below predates
 ## the registry and keeps working unchanged; it reads the default table.

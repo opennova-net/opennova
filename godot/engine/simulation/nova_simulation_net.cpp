@@ -199,7 +199,7 @@ bool environment_flag_enabled(const char *name) {
 } // namespace
 
 // P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
-// (libs/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
+// (engine/net/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot binding can no
 // longer drift. NovaSimulation supplies the socket (a NovaUdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
@@ -652,7 +652,7 @@ void NovaSimulation::mirror_predicted_vehicles_to_view() {
 	}
 }
 
-// host_pump's dispatch_event + admit_peer were promoted into libs/npruntime (np::dispatch_event /
+// host_pump's dispatch_event + admit_peer were promoted into engine/net/npruntime (np::dispatch_event /
 // np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
 // the Godot binding and the headless server can no longer drift.
 

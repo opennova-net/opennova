@@ -130,7 +130,7 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		item_replication_catalog_revision_ = p_item_db->get_revision();
 	}
 	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
-	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
+	// after this sweep) seed full health without an item-db reach-back from engine/ [orig:
 	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
 	const int player_def_id =
 			static_cast<int>(opennova::world::kPlayerInfantryTypeId) +

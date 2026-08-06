@@ -19,7 +19,7 @@ Save are in the panel.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.env` | [`libs/env`](../../../libs/env) | environment: fog, sky, water, and time-of-day color keyframes (text, parsed per mission) |
+| `.env` | [`engine/formats/env`](../../../engine/formats/env) | environment: fog, sky, water, and time-of-day color keyframes (text, parsed per mission) |
 
 ## How it is built
 

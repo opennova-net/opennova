@@ -1,4 +1,4 @@
-// libs/world substrate tests: addressable entities (faithful find_by_net_id),
+// engine/runtime/world substrate tests: addressable entities (faithful find_by_net_id),
 // shared var store, entity commands, tick cadence, snapshot/restore.
 #include <cstdio>
 #include <utility>

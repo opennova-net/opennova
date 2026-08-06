@@ -68,7 +68,7 @@ class NovaSkeletalAnim;
 class NovaItemDatabase;
 class NovaResourceRoot;
 
-// THE mission runtime binding: a thin shell over the portable libs/world runtime.
+// THE mission runtime binding: a thin shell over the portable engine/runtime/world runtime.
 // Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
 // them through World::run_logic_tick — one logic tick per step(), the original's
 // 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). A render frame runs
@@ -240,7 +240,7 @@ public:
 	};
 
 	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
-	// are pinned to libs/world's SeatType by static_assert in the .cpp.
+	// are pinned to engine/runtime/world's SeatType by static_assert in the .cpp.
 	// [orig: Entity_FindBestSeatSlot @0x4351f0 classifies "sitex"->1,
 	// "ctrlx"->2, "UseGun"->3, armory scan ->4 @0x436417, "drvrx"->5]
 	enum SeatCode {
@@ -848,7 +848,7 @@ private:
 	float local_eye_mission_[3] = {0.0f, 0.0f, 0.0f};
 	bool local_eye_valid_ = false;
 
-	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
+	// --- P7: the in-match runtime as a THIN ADAPTER over engine/net/npruntime ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
 	// listen server (NapiNPServerCtx ctx_ + its own loopback client over host_loop_, driven by
 	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
@@ -858,7 +858,7 @@ private:
 	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
 	// the runtime.
 	// The host state — ctx + per-peer transports + now_tick + serve_and_play — shared with the promoted
-	// owner loop host_session_pump (libs/npruntime). MUST be declared before ctx_ (the alias) and before
+	// owner loop host_session_pump (engine/net/npruntime). MUST be declared before ctx_ (the alias) and before
 	// host_loop_ (host_owner_.host_loopback points at host_loop_, set at bring-up). Replaces the old
 	// ctx_/peers_/PeerLink members; admit_peer/dispatch_event moved into libs (np::, over host_owner_).
 	opennova::np::HostOwner host_owner_;

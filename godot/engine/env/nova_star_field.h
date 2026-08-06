@@ -10,7 +10,7 @@
 namespace godot {
 
 // The 256-instance star field (env #33): the witnessed instance table +
-// per-frame twinkle, generated and ticked in libs/env
+// per-frame twinkle, generated and ticked in engine/formats/env
 // [orig: Star_GenerateInstanceTable @ 0x5ac850; render_star_field @ 0x5ad9c0].
 // The binding serves GODOT-space data (the engine->render basis
 // godot = (-engY, engZ, engX) / 65536, the Math_FixedPointToFloat3_YNegated

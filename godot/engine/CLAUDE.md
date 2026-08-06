@@ -3,8 +3,8 @@
 Two things live here, and both must stay shell-neutral — consumable by the game
 shell (`godot/game/`) and ONED's authoring/preview surfaces (`godot/modtools/`):
 
-- **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `libs/` to
-  Godot. Thin wrappers only — format/runtime logic belongs in `libs/`. Register new
+- **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `engine/` to
+  Godot. Thin wrappers only — format/runtime logic belongs in `engine/`. Register new
   classes in `register_types.cpp`.
 - **The shared GDScript engine layer** (~38.5k LOC across ~150 scripts) both shells run on:
   - `world/` — THE runtime, and by far the largest slice (~16.4k LOC): `game_world.gd` (the
@@ -42,7 +42,7 @@ return/error contract reports context via `push_warning` (negative-path tests
 drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
-F3 overlay/stats system, and `libs/` diagnostics ride the `io/log.h` sink.
+F3 overlay/stats system, and `engine/` diagnostics ride the `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
 code; CLI tool drivers (screenshot_capture) are the allowlisted exception.
 
@@ -61,11 +61,11 @@ Gotchas:
   mission-load regression hid here; do not call it casually. `list_files()` is
   kind-curated: load known filenames via `read_file`/`has_file`; don't expect them listed.
 - The C ABI consumed here is shared with Python — keep exports flat and domain-prefixed
-  (see `libs/CLAUDE.md`).
+  (see `engine/CLAUDE.md`).
 - Net bindings (`network/nova_world_client`, `network/nova_lan_session`) are thin pumps
-  over the wire-compatible codecs — `libs/npwire` for the in-game codec + capture decode
-  (ADR 0019), `libs/novaworld` for matchmaking — sockets and signals here, protocol and
-  crypto in `libs/` (ADR 0010). Keep wire behavior in the portable libs so it stays
+  over the wire-compatible codecs — `engine/net/npwire` for the in-game codec + capture decode
+  (ADR 0019), `engine/net/novaworld` for matchmaking — sockets and signals here, protocol and
+  crypto in `engine/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
   `ClientReplicaPipeline` owns `ClientState`, and `world/wire_present_pass.gd`

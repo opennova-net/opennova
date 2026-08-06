@@ -1,4 +1,4 @@
-// Validates the minimal set's menus parse through libs/mnu and carry the boot +
+// Validates the minimal set's menus parse through engine/formats/mnu and carry the boot +
 // host/join structure the engine needs: main.mnu must expose the "Startup" node
 // [orig: sub_552500 @ 0x552651 -> CUIScene_SelectNodeByName @ 0x63b6b0], and
 // mp.mnu the LAN host/join screen [orig: @ 0x5588fa]. Authored from scratch

@@ -23,7 +23,7 @@ namespace godot {
 //
 // `flags` and `move` are stored as both uint32 bitfields (engine-faithful)
 // and raw strings (round-trip preservation). Helper getters in
-// `libs/particle/particle.h` (`particle_flag::*`, `move_flag::*`) document
+// `engine/runtime/particle/particle.h` (`particle_flag::*`, `move_flag::*`) document
 // the bit assignments.
 class NovaParticleDef : public Resource {
 	GDCLASS(NovaParticleDef, Resource)
@@ -81,7 +81,7 @@ protected:
 public:
 	// particle_flag:: bits GDScript composes directly (the full name<->bit
 	// table stays introspectable via get_particle_flag_table()). Pinned to
-	// libs/particle by static_asserts in the .cpp.
+	// engine/runtime/particle by static_asserts in the .cpp.
 	enum {
 		FLAG_YAW_AND_PITCH = 0x100,
 		FLAG_FOREVER_EMIT = 0x40000,
@@ -159,7 +159,7 @@ public:
 	opennova::particle::ParticleDef to_native() const;
 
 	// Editor introspection of the canonical name<->bit tables (single source of
-	// truth in libs/particle). The Particle workspace builds flag/move pickers
+	// truth in engine/runtime/particle). The Particle workspace builds flag/move pickers
 	// and blend-mode dropdowns from these instead of hand-copying the tables.
 	static Dictionary get_particle_flag_table();   // {name(String): bit(int)}, engine table order
 	static Dictionary get_move_flag_table();        // {name(String): bit(int)}

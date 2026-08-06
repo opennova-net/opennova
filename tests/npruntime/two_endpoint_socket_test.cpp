@@ -18,7 +18,7 @@
 //       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
 //       world stream is built from our own minimal World, not the capture's mission).
 
-#include <npruntime/host_session.h> // the host owner loop (promoted to libs/npruntime; SAME loop main.cpp runs)
+#include <npruntime/host_session.h> // the host owner loop (promoted to engine/net/npruntime; SAME loop main.cpp runs)
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter (for the host loop)
 

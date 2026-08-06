@@ -14,7 +14,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// GDExtension wrapper over opennova::dbf (libs/dbf). Parses a mission's co-named
+// GDExtension wrapper over opennova::dbf (engine/formats/dbf). Parses a mission's co-named
 // .DBF dialog bank (magic 'DLG0') and resolves a dialog id (e.g. "dlg001") to the
 // LWF sound-set name(s) it plays (e.g. "Z00gR100"). Used by the runtime to turn a
 // mission PlayWavList action's dialog id into a set the .lwf bank can play.

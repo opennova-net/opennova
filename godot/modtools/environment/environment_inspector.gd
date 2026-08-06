@@ -2,7 +2,7 @@ class_name EnvironmentInspector
 extends ScrollContainer
 
 # TOD controls edit the keyframe records parsed by TimeOfDay_ParseProperty @ 0x57c590
-# and consumed by Environment_ComputeTimeOfDayColors @ 0x57de40; EnvFile/libs/env
+# and consumed by Environment_ComputeTimeOfDayColors @ 0x57de40; EnvFile/engine/formats/env
 # owns the actual ported behavior.
 
 # Engine-side field -> consumption status (honored/partial/unconsumed) used to

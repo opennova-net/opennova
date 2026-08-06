@@ -184,7 +184,7 @@ func consume(view: PlayerWeaponView,
 					view.anim_age_ticks, false)
 
 
-# The FIRE action kind [orig: libs/world weapon_fsm.h weapon_action::kFire = 2] —
+# The FIRE action kind [orig: engine/runtime/world weapon_fsm.h weapon_action::kFire = 2] —
 # the only local action-begin that takes the with-effect (muzzle) shim.
 const WEAPON_ACTION_FIRE := 2
 

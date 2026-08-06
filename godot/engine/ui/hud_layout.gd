@@ -39,6 +39,6 @@ static func scale_rect(design: Rect2, surface: Vector2) -> Rect2:
 	return Rect2(p0, p1 - p0)
 
 
-## Convenience for the [x1,y1,x2,y2] corner rects libs/def stores (health/heat/...).
+## Convenience for the [x1,y1,x2,y2] corner rects engine/formats/def stores (health/heat/...).
 static func rect_from_corners(x1: int, y1: int, x2: int, y2: int) -> Rect2:
 	return Rect2(x1, y1, x2 - x1, y2 - y1)

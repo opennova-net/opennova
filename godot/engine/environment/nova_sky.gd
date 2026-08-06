@@ -47,7 +47,7 @@ func build() -> void:
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = sky_shader
 
-	# The witnessed 21x21 dome (441 verts / 800 tris, libs/env math), built
+	# The witnessed 21x21 dome (441 verts / 800 tris, engine/formats/env math), built
 	# ONCE at the reference height: the Y-only height scale + anisotropic
 	# normals are applied in the vertex shader, so height changes never
 	# rebuild (env #20's ratified fold; retail re-bakes per smoothed-height

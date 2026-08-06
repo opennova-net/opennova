@@ -13,7 +13,7 @@
 
 namespace godot {
 
-// The editor-facing reference index: libs/refs (extractors + RefGraph) bound
+// The editor-facing reference index: engine/base/refs (extractors + RefGraph) bound
 // over a mounted NovaResourceRoot. references_of extracts one file on demand;
 // the first referrers_of (or stats) query triggers the lazy whole-root build,
 // memoized inside RefGraph on (size, mtime) so later rebuilds only re-extract

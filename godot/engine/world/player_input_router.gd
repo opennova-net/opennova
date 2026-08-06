@@ -25,7 +25,7 @@ var _scope_was_down := false
 # fire the category actions 201-209 (categories 1..9), rows 39/40 cycleweaponP '['
 # / cycleweaponN ']' cycle prev/next [orig: input cases 200-210 @ 0x4e1144 ->
 # Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-# Player_CycleWeaponSlot @ 0x4dfe70; libs/controls k_catalog rows].
+# Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows].
 const _WEAPON_CATEGORY_KEYS: Array[Key] = [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
 		KEY_6, KEY_7, KEY_8, KEY_9]
 var _category_was_down := 0
@@ -97,7 +97,7 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 # toggle REQUEST (the sim gates it and owns the engaged state). Only while the
 # mouse is captured - UI clicks never fire. [orig: the binding dispatch cases
 # 0x95 fire / 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420 —
-# ported in libs/world weapon_fsm + NovaSimulation]
+# ported in engine/runtime/world weapon_fsm + NovaSimulation]
 func _send_weapon_input() -> void:
 	var sim = _sim()
 	var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED

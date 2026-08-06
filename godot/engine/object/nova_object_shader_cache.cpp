@@ -54,14 +54,14 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_water_split_height"), &NovaObjectShaderCache::has_water_split_height);
 	ClassDB::bind_method(D_METHOD("alpha_rung_for_height", "world_height"), &NovaObjectShaderCache::alpha_rung_for_height);
 
-	// The per-material 3DI flag byte, single-sourced from libs/threedi so
+	// The per-material 3DI flag byte, single-sourced from engine/formats/threedi so
 	// GDScript stops re-declaring the values (maturity REN-2 / ENG-4 leg).
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_ALPHA_TEST", THREEDI_MATERIAL_FLAG_ALPHA_TEST);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_ALPHA_INVERT", THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_TWO_SIDED", THREEDI_MATERIAL_FLAG_TWO_SIDED);
 
 	// The composed-key DETAIL capability bit, single-sourced from
-	// libs/renderer: the reimpl material path masks it off when a material's
+	// engine/runtime/renderer: the reimpl material path masks it off when a material's
 	// secondary texture fails to resolve, so the _MT Modulate2x stage is
 	// dropped exactly like retail drops a NULL-texture stage instead of
 	// running x2 over a placeholder (render-material-re.md §FF technique
@@ -75,7 +75,7 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_MULTIPLICATIVE", static_cast<int64_t>(renderer::ObjectBlendMode::Multiplicative));
 
 	// The witnessed transparent ordering ladder, single-sourced from
-	// libs/renderer/render_order (maturity REN-3): sky -> far-water-side
+	// engine/runtime/renderer/render_order (maturity REN-3): sky -> far-water-side
 	// alpha -> water -> camera-side alpha -> overlays -> sun glow
 	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0;
 	// docs/render/render-order-re.md].

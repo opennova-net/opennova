@@ -1,7 +1,7 @@
 """The def.h ctypes mirrors must agree with each other — and with the native stride.
 
 pyopennova/def_ffi.py and blender/opennova/def_ffi.py each mirror
-libs/def/include/def/def.h by hand; a field missed in one changes that mirror's
+engine/formats/def/include/def/def.h by hand; a field missed in one changes that mirror's
 ARRAY STRIDE, so every `entries[i]` after index zero reads shifted bytes —
 silently (names and floats just come out wrong; scope_max_mag went missing from
 the Blender mirror exactly this way). Two nets:

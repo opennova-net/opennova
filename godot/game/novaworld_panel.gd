@@ -3,7 +3,7 @@ extends Control
 
 # The NovaWorld (online multiplayer) front-end. Opened from the menu when the
 # player chooses NovaWorld. It owns one NovaWorldClient (the GDExtension pump
-# over libs/novaworld) and turns its protocol state into artist-facing status,
+# over engine/net/novaworld) and turns its protocol state into artist-facing status,
 # a server browser, and a Host-a-Game action. The panel never touches the wire
 # itself; the client does.
 #

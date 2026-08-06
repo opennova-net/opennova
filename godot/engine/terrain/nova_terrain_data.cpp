@@ -197,7 +197,7 @@ bool resolve_world_sample(const opennova::TrnConfig &trn,
 }
 
 // Builds a portable TerrainHeightField over the loaded CPT depth buffer + TRN
-// sector layout, the shared libs/terrain sampler the runtime AI also uses. The
+// sector layout, the shared engine/runtime/terrain sampler the runtime AI also uses. The
 // height samplers don't read water, so it's left default here; the AI-grounding
 // field (NovaSimulation::set_terrain_height_field) supplies the water plane.
 opennova::terrain::TerrainHeightField height_field_from(const opennova::CptFile &cpt,
@@ -563,7 +563,7 @@ void NovaTerrainData::_bind_methods() {
 	             "set_foliage_defs",
 	             "get_foliage_defs");
 
-	// Sector/atlas layout constants (single-sourced from libs/terrain_query
+	// Sector/atlas layout constants (single-sourced from engine/runtime/terrain_query
 	// terrain/coords.h; see the header declarations).
 	BIND_CONSTANT(SECTOR_SIZE);
 	BIND_CONSTANT(SECTOR_GRID_DIM);
@@ -1320,7 +1320,7 @@ int NovaTerrainData::cdep_clamp_blocks_in_rect(const Rect2i &p_rect) {
 	return clamped;
 }
 
-// Height brushes (libs/terrain/brush.h). Each pulls the editable FORMAT_RF
+// Height brushes (engine/runtime/terrain/brush.h). Each pulls the editable FORMAT_RF
 // heightmap once, mutates the dab via the shared kernel, and writes it back to
 // the SAME Image so the editor's shared ref and get_depth_raw16() stay current.
 // The brush session calls cdep_clamp_blocks_in_rect after each dab.
@@ -1379,7 +1379,7 @@ double NovaTerrainData::brush_sample_flatten_target(double world_x, double world
 	return static_cast<double>(heightmap_image->get_pixel(sx, sz).r);
 }
 
-// Colour / blend brushes (libs/terrain/brush.h). blend paints the editable
+// Colour / blend brushes (engine/runtime/terrain/brush.h). blend paints the editable
 // detail-blend buffer; colormap paint/clone the editable colour buffer. Each
 // pulls the RGBA8 bytes once, mutates the dab via the byte-parity kernel, and
 // writes back to the SAME Image (only when a pixel was touched).
@@ -1466,7 +1466,7 @@ Ref<Image> NovaTerrainData::heightmap_image_from_raw16(const PackedByteArray &p_
 	return Image::create_from_data(side, side, false, Image::FORMAT_RF, floats);
 }
 
-// The three height queries now delegate to the shared libs/terrain sampler
+// The three height queries now delegate to the shared engine/runtime/terrain sampler
 // (terrain/height_field.h) so the runtime AI grounding + the editor sample one
 // implementation. Bodies were lifted verbatim into height_field.cpp; this class
 // keeps only the loaded-guard + world->Godot coordinate boundary.

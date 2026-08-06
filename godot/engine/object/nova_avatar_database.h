@@ -13,7 +13,7 @@ namespace godot {
 
 class NovaResourceRoot;
 
-// GDExtension wrapper over libs/avatars (Avatars.def parse + write). Surfaces the
+// GDExtension wrapper over engine/formats/avatars (Avatars.def parse + write). Surfaces the
 // player-character model -- head/body/arms parts composed into combos under a
 // nationality -> division tree -- to the editor (authoring + save) and the
 // runtime PLAYER_INFO menu (read + resolve). Witnessed format/behavior:
@@ -87,7 +87,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// AvatarPartKind (libs/avatars/include/avatars/avatars.h).
+	// AvatarPartKind (engine/formats/avatars/include/avatars/avatars.h).
 	enum { PART_HEAD = 0, PART_BODY = 1, PART_ARMS = 2 };
 	// AvatarSex.
 	enum { SEX_MALE = 0, SEX_FEMALE = 1 };

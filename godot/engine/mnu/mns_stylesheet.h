@@ -15,7 +15,7 @@ namespace godot {
 
 // Godot-facing wrapper around an MNS stylesheet: a table of %VAR% -> value
 // substitutions referenced by .mnu menus (e.g. %DEF_FONTNAME%, %TRIM_COLOR%).
-// All format behavior lives in libs/mns. Keys are case-insensitive (stored
+// All format behavior lives in engine/formats/mns. Keys are case-insensitive (stored
 // uppercase in the flattened view).
 //
 // Document-backed (ADR 0014): the source of truth is a lossless mns::Document

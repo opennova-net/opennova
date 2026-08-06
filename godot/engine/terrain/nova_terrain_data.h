@@ -137,7 +137,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Sector/atlas layout constants, single-sourced from libs/terrain_query
+	// Sector/atlas layout constants, single-sourced from engine/runtime/terrain_query
 	// (terrain/coords.h) and bound to GDScript so editor scripts reference the
 	// engine's numbers instead of re-declaring them: SECTOR_SIZE world units per
 	// sector edge, the SECTOR_GRID_DIM x SECTOR_GRID_DIM authored grid, the
@@ -222,7 +222,7 @@ public:
 	void set_blendmap_image(const Ref<Image> &p_image);
 	Ref<Image> get_blendmap_image() const;
 	// CDEP per-block range enforcement on the editable heightmap (raw16 domain;
-	// see libs/terrain/cdep_constraint.h). These mutate the FORMAT_RF
+	// see engine/runtime/terrain/cdep_constraint.h). These mutate the FORMAT_RF
 	// heightmap_image in place via get_data()/set_data(), so the editor's shared
 	// Image ref and get_depth_raw16() stay current without a separate sync.
 	// clamp_* return the number of blocks clamped; count returns the number of
@@ -230,7 +230,7 @@ public:
 	int cdep_clamp_blocks_in_rect(const Rect2i &p_rect);
 	int cdep_count_violations() const;
 	int cdep_clamp_all_violations();
-	// Height brushes (libs/terrain/brush.h). Mutate the editable FORMAT_RF
+	// Height brushes (engine/runtime/terrain/brush.h). Mutate the editable FORMAT_RF
 	// heightmap in place (the editor's shared Image); cx/cz/radius/clip are atlas
 	// pixel coordinates. Math runs in double to match the GDScript originals.
 	void brush_raise_lower(int cx, int cz, int radius, double amount, double hardness, const Rect2i &p_clip);
@@ -255,7 +255,7 @@ public:
 	int get_detail_foliage_index_world(double world_x, double world_z) const;
 	// MODEL masks and gameplay queries use the sector-grid-routed foliagemap.
 	int get_foliage_index_world(float world_x, float world_z) const;
-	// Editor world->atlas coordinate transforms (libs/terrain_query/coords.h). The
+	// Editor world->atlas coordinate transforms (engine/runtime/terrain_query/coords.h). The
 	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to
 	// [0, 512-0.001]) reproduce EditorTerrainMesh's GDScript originals so the
 	// editor brush/eyedropper paths share the runtime sampler's implementation.
@@ -287,7 +287,7 @@ public:
 	// forwards here (it translates NAN to its legacy -1e6 sentinel).
 	float sample_height_world_live(double world_x, double world_z) const;
 	// Segment raycast against the terrain surface — the ENG-3 B1 port
-	// (libs/terrain_query/terrain_raycast.h) [orig: Terrain_RaycastHeightmapLoRes
+	// (engine/runtime/terrain_query/terrain_raycast.h) [orig: Terrain_RaycastHeightmapLoRes
 	// @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710]; witness record
 	// docs/terrain/terrain-re.md §Runtime terrain queries. Returns the refined
 	// world-space hit (x, height, z), or Vector3(NAN, NAN, NAN) when the segment

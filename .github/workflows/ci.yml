@@ -209,7 +209,7 @@ jobs:
           if-no-files-found: error
           path: web/dist
 
-  # Compile the GDExtension (godot/engine + libs/ + the pinned third_party/godot-cpp)
+  # Compile the GDExtension (godot/engine + engine/ + the pinned third_party/godot-cpp)
   # once. godot-tests and the two Windows package jobs download these DLLs instead
   # of recompiling. sccache caches godot-cpp's objects across runs, so after one
   # warm-up only changed engine/libs sources recompile. Windows must use Ninja:

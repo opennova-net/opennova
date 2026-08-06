@@ -1,4 +1,4 @@
-// P7 Part 2 (B2) — the NovaWorld lobby var-builders (libs/novaworld/lobby_vars). Proves the moved
+// P7 Part 2 (B2) — the NovaWorld lobby var-builders (engine/net/novaworld/lobby_vars). Proves the moved
 // builders reproduce the Godot bindings' hand-assembly byte-for-byte: the ClientHostRequest /
 // ClientHostUpdate NapiMessage serialization, the NW-S5 identity set, and the host:port split.
 // Server-free, Godot-free — the independent ctest-green bar for the B2 move.

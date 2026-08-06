@@ -1,7 +1,7 @@
 # Porting the per-frame S2C 0x0A emit (faithful, IDA-driven)
 
 The in-match replication core is the per-frame S2C `0x0A`. The retail host builds it in a small,
-fully-witnessed chain; our job is to port that chain into `libs/netsim` **structurally**, not to invent
+fully-witnessed chain; our job is to port that chain into `engine/net/netsim` **structurally**, not to invent
 a broadcast. This doc is the runbook + current state so you can continue without re-deriving.
 
 Read first: `docs/net/novaworld-net-re.md` §5.9 (wire format), §5.46 (the 0x0F flood context), and
@@ -118,7 +118,7 @@ target) in net-re D-NET-146.
   (three independent gates); the damage model is KINETIC — `min(62·|vel|,1219) ·
   weight_in_grains / 875 · zone` (falloff emerges from drag, no range table); death routes
   per-tick health<=0 → players S2C 0x13 + 0x1E kill feed (0x52/0x54/0x32 deferred), AI
-  0x13, non-players 0x26 via the single Server_SendEntityStatePacket emit. Port: libs/def
+  0x13, non-players 0x26 via the single Server_SendEntityStatePacket emit. Port: engine/formats/def
   ammo.def parse (§5.60 token subset) → `world::AmmoTable` + round_type resolve →
   `world::RoundSim` (spawn on 0x06, per-tick flight/terrain/organics, kinetic damage) →
   Server_TickUpdate death routing + host respawn release → NovaSimulation::load_ammo_table.
@@ -274,7 +274,7 @@ target) in net-re D-NET-146.
   off the CONTROLLING occupant's (+0x170) replicated MoveOrder/Yaw/analog (gate
   `(Flags&0x100) && (local || authority)` @0x48b0ff — the driver's client is prediction).
   v33's "second model + can't drive" = our missing host motor (prediction-vs-pinned-wire
-  fight). PORTED: libs/def physics block (scaled per @0x49d870), `world::VehicleTraits` +
+  fight). PORTED: engine/formats/def physics block (scaled per @0x49d870), `world::VehicleTraits` +
   the resolve_item_traits stamp, `world::tick_vehicle_motor` (the ground-family authority
   core; buggy drives, helos = tracked deferral), `Entity::net_analog_*` through
   PlayerIntent, the AiSystem vehicle pass. SLICE 2 (D-NET-162): `world::zone_capture_tick`
@@ -345,5 +345,5 @@ numbering").
   source, defer with a tracked D-NET divergence rather than guessing bytes. D-NET-134 is closed: phase 2
   uses the live mission/runtime environment owner and quantizes only at the wire boundary.
 - Never carry raw capture bytes through the encoder (ADR 0003).
-- After a `libs/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
+- After a `engine/net/netsim` change, rebuild BOTH `build/` (ctest) and the GDExtension (`scripts/build_godot.sh`,
   kill the running Godot instance first) before a live test.

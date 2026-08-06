@@ -14,7 +14,7 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 ## Format contract
 
 - Title: `# <SYSTEM> — reverse-engineering record`. The preamble names the
-  implementing code (`libs/<x>`, `godot/engine/<x>`), the binary (retail
+  implementing code (`engine/<x>`, `godot/engine/<x>`), the binary (retail
   Jointops.exe unless stated) and the IDB; state that addresses are that
   binary's.
 - Verdict table first: `Component | Verdict | Evidence`. Verdict vocabulary in

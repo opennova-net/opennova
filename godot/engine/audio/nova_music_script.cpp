@@ -1,4 +1,4 @@
-// MUS interactive-music script wrapper. The underlying parser is libs/mus
+// MUS interactive-music script wrapper. The underlying parser is engine/formats/mus
 // (mus_open_memory). Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
 
 #include "nova_music_script.h"
@@ -352,7 +352,7 @@ String NovaMusicScript::get_decompiled_text_with_bank(const StringName &p_script
 		return get_decompiled_text(p_script_name);
 	}
 	// Walk the bank's entries into a parallel CharString + const char* array
-	// so libs/mus can read the names without owning the storage. The
+	// so engine/formats/mus can read the names without owning the storage. The
 	// CharStrings keep the utf8 bytes alive for the duration of this call.
 	int entry_count = p_bank->get_entry_count();
 	std::vector<CharString> name_storage;

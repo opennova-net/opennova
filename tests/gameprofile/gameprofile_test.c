@@ -1,4 +1,4 @@
-/* Smoke tests for libs/gameprofile: table size, lookups, and the universal container key. */
+/* Smoke tests for engine/base/gameprofile: table size, lookups, and the universal container key. */
 #include <stdio.h>
 #include <string.h>
 

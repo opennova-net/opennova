@@ -6,7 +6,7 @@ extends "res://modtools/editor/editor_document.gd"
 ## Holds a single NovaLwfData for its whole lifetime and mutates it in place
 ## (open/new/undo reload the same object) so observers connect once. Undo/redo
 ## uses byte snapshots of the profile (NovaLwfData.to_bytes() <-> load_bytes),
-## reusing the byte-exact-on-unmodified encoder in libs/lwf.
+## reusing the byte-exact-on-unmodified encoder in engine/formats/lwf.
 ##
 ## Change channels mirror the Strings workspace:
 ##   - structure_changed: sets/layers/members added/removed/reordered, or a

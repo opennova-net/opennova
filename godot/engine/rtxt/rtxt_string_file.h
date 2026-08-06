@@ -14,7 +14,7 @@
 namespace godot {
 
 // Godot-facing wrapper around an RTXT localized string table (NovaLogic
-// strings/*.bin). All format behavior lives in libs/rtxt; this Resource adds the
+// strings/*.bin). All format behavior lives in engine/formats/rtxt; this Resource adds the
 // editor-facing CRUD surface, change signals, and Godot file I/O.
 //
 // Read lookups are case-insensitive. Mutating entries/sections keeps the section

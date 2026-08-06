@@ -3,7 +3,7 @@ extends RefCounted
 
 ## The ONE GDScript home for the spawn-origin provenance word decode:
 ## (kind << 24) | (record index & 0xFFFFFF); NONE = no provenance.
-## C++ twin: libs/world entity.h spawn_origin_pack/kind/index (packed by
+## C++ twin: engine/runtime/world entity.h spawn_origin_pack/kind/index (packed by
 ## mission promotion; consumed by the present passes).
 
 const KIND_SHIFT := 24

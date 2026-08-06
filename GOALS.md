@@ -67,7 +67,7 @@ original (retail) servers, our servers can serve original clients, and opennovaâ
 works the same way, so the original games keep working as their official services age
 out, and our runtime and theirs are interchangeable on the same protocol. The
 matchmaking and server backend (NovaWorld) is reimplemented and maturing
-(`apps/novaworld_server`, `libs/novaworld`); in-match replication is exercised in
+(`apps/novaworld_server`, `engine/net/novaworld`); in-match replication is exercised in
 both directions against real captures and live retail sessions (retail clients join
 and play on our hosts), with the remaining gaps tracked in
 [the divergence ledger](docs/divergence-ledger.md). The protocol reverse

@@ -215,7 +215,7 @@ static int test_bam_wrap_arithmetic()
 }
 
 
-// --- io/log.h: the one libs/ diagnostic sink (W1-3) -------------------------
+// --- io/log.h: the one engine/ diagnostic sink (W1-3) -------------------------
 static std::vector<std::pair<int, std::string>> g_log_seen;
 static void log_test_sink(opennova::io::LogLevel level, const char *msg)
 {

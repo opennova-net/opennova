@@ -16,7 +16,7 @@ namespace godot {
 // rain fade, and the fourteen color blocks with live owner consumers (ground/
 // fill, directional light, fog, sky ambient, skyfog, ceiling/cloud/floor, and
 // the six dome ramps). All
-// math lives in libs/env
+// math lives in engine/formats/env
 // (env/env_weather.h); this binding owns state and the witnessed
 // order-of-operations only. NovaWeather (the node) drives one tick() per
 // 62 Hz frame and reads the results back. RE record: docs/env/env-tod-re.md.
@@ -174,7 +174,7 @@ public:
 	// Local mission-start scalar current <- target copy [orig: sub_57F1E0].
 	void snap_scalar_currents_to_targets();
 	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
-	// are the narrowed wire units; libs/env owns the exact reconstruction.
+	// are the narrowed wire units; engine/formats/env owns the exact reconstruction.
 	void apply_network_environment_sample(int p_fog_dist, int p_fog_accel,
 			int p_rain_pct, int p_overcast);
 	// The smoothed scalar currents (world units / percent).

@@ -21,7 +21,7 @@ namespace godot {
 // the animated 128x128 ridge color/alpha texture and its DuDv/normal
 // derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360], plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
-// [orig: render_water_strip_detailed @ 0x5c27d0]. All math lives in libs/env
+// [orig: render_water_strip_detailed @ 0x5c27d0]. All math lives in engine/formats/env
 // (env/env_water_render.h); this binding owns the static tables (built once with
 // the witnessed init, from the boot PRNG state), the frame buffers, and the
 // Godot<->render basis conversion for the strip view state. NovaWater updates

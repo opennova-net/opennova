@@ -804,7 +804,7 @@ func get_fog_level_target() -> float:
 
 
 func get_fog_start() -> float:
-	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950].
+	# Policy lives in engine/formats/env env_render [orig: Render_SetFogState @ 0x58a950].
 	# Consume the smoothed CURRENT end so both bounds stay on the same curve
 	# during the 62 Hz fog spring; overcast remains 0 until weather drives it.
 	return EnvFile.fog_start_for(

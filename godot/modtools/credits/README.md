@@ -21,7 +21,7 @@ is a single-pane editor. New / Open / Save / Save As are in the action bar.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.kda` (CBIN) | [`libs/cbin`](../../../libs/cbin) | rolling-credits script: a settings section (scroll rate, spacing between entries, center) plus text, image, color, newline, and justify entries. Authored as text, compiled to an obfuscated CBIN blob |
+| `.kda` (CBIN) | [`engine/formats/cbin`](../../../engine/formats/cbin) | rolling-credits script: a settings section (scroll rate, spacing between entries, center) plus text, image, color, newline, and justify entries. Authored as text, compiled to an obfuscated CBIN blob |
 
 Credits reference fonts (`.fnt`, see the [Fonts workspace](../fonts/README.md))
 and image files.

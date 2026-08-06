@@ -6,7 +6,7 @@ extends RefCounted
 ## bytes via NovaWavLoader (cached), and spawns AudioStreamPlayer3D voices. The
 ## member-selection state machine (engine-faithful: sequential / random-anchor
 ## cycle / random default, one shared ROL-LCG stream) lives in portable C++
-## (libs/audio, via NovaSoundSelector [orig: SoundBank_PlayTriggerEntries @
+## (engine/runtime/audio, via NovaSoundSelector [orig: SoundBank_PlayTriggerEntries @
 ## 0x75ccd0]); this only feeds it the layer's member count + mode and poses the
 ## chosen member.
 ##
@@ -37,7 +37,7 @@ var occlusion_provider: Object = null
 var _banks: Array = []  # Array[NovaLwfData]
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
-# The portable member-selection state machine (libs/audio); holds the per-(bank,set,layer) state.
+# The portable member-selection state machine (engine/runtime/audio); holds the per-(bank,set,layer) state.
 var _selector := NovaSoundSelector.new()
 # wav basename(lower) -> AudioStreamWAV (or null if it failed to resolve/decode)
 var _wav_cache: Dictionary = {}
@@ -349,7 +349,7 @@ static func volume_db_from_255(vol255: int) -> float:
 ## like the original's; both arms of the engine pass a consistent scale so only
 ## the ratio matters.
 static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, clamp_vol: int) -> int:
-	# The integer form lives in libs/audio (ambient_mixer.cpp) — one implementation
+	# The integer form lives in engine/runtime/audio (ambient_mixer.cpp) — one implementation
 	# for the native mix, this one-shot path, and the GUT pins.
 	return NovaAmbientMixer.calc_distance_volume(dist_q16, radius_q16, vol255, clamp_vol)
 
@@ -365,7 +365,7 @@ static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, cl
 ## falloff REBASES to run min..falloff; inside min_distance the volume RISES
 ## as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff.
 static func emitter_layer_volume(dist_q16: int, falloff_u: int, min_u: int, vol_byte: int, member_vol: int, clamp_vol: int) -> int:
-	# The arm forms live in libs/audio (ambient_mixer.cpp) beside the mix that
+	# The arm forms live in engine/runtime/audio (ambient_mixer.cpp) beside the mix that
 	# consumes them natively; this seam stays for the one-shot path and the pins.
 	return NovaAmbientMixer.emitter_layer_volume(
 			dist_q16, falloff_u, min_u, vol_byte, member_vol, clamp_vol)
@@ -403,7 +403,7 @@ static func _stream_frames(s: AudioStreamWAV) -> int:
 
 
 # Pick the member to play for one layer. The selection STATE MACHINE (mode + per-layer cursor/bag)
-# lives in libs/audio (NovaSoundSelector); here we only feed it the member count + mode and return
+# lives in engine/runtime/audio (NovaSoundSelector); here we only feed it the member count + mode and return
 # the chosen member dictionary. Faithful to the engine's per-layer member selection.
 func _pick_member(layer_d: Dictionary, bank: int, set_i: int, layer_i: int) -> Dictionary:
 	var members: Array = layer_d.get("members", [])

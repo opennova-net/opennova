@@ -583,7 +583,7 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// [orig: build_sky_dome_mesh @ 0x578db0] — libs/env owns the math; this
+	// [orig: build_sky_dome_mesh @ 0x578db0] — engine/formats/env owns the math; this
 	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
 	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
 	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);

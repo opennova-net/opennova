@@ -1,4 +1,4 @@
-// Colour / blend brush kernels (libs/terrain/brush) ported from
+// Colour / blend brush kernels (engine/runtime/terrain/brush) ported from
 // terrain_editor_brushes.gd apply_blend_paint / apply_colormap_paint /
 // apply_colormap_clone / sample_colormap. BYTE-PARITY CRITICAL: these run on
 // RGBA8 buffers and must reproduce Godot's Image FORMAT_RGBA8 conversions

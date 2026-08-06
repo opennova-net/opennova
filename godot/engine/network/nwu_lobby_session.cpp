@@ -70,7 +70,7 @@ void NwuLobbySession::probe(const String &gate_host, int gate_port) {
 	// Wrap the NWU payload in the LSB-scatter CRC envelope the gate expects.
 	// Retail does the same; the server strips it via napi_envelope_decode, and
 	// without it the gate logs "bad envelope". (Same envelope the session
-	// channel uses in libs/novaworld/client_session.)
+	// channel uses in engine/net/novaworld/client_session.)
 	std::vector<uint8_t> packet(probe_dg.size() + 4);
 	size_t out_size = 0;
 	if (opennova::napi_envelope_encode(probe_dg.data(), probe_dg.size(),

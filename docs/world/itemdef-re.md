@@ -3,9 +3,9 @@
 Structure-mapping record for the original engine's runtime **`ItemDef`** (the
 per-item-type template loaded from `items.def`) and its copy into the 904-byte
 `GamePlayerEntity`. The reimplementation surface is the parsed model
-`DefItemDef` (`libs/def`, `apps/importer/pyopennova`) and the Godot wrapper
+`DefItemDef` (`engine/formats/def`, `apps/importer/pyopennova`) and the Godot wrapper
 `NovaItemDatabase` (`godot/engine/object`); the runtime entity copy lands in
-`libs/world` / `libs/netsim`. Binary: retail **Jointops.exe** (IDB
+`engine/runtime/world` / `engine/net/netsim`. Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the divergence catalog code comments cite as
 `docs/world/itemdef-re.md (D-ITEMDEF-…)`.
@@ -22,10 +22,10 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | --- | --- | --- |
 | `ItemDef` struct layout (2780 B) | **MATCHING (read-only grill)** | 142 members named from the parser/dumper/allocator/resolver/loader; field offsets witnessed by `ItemDef_ParseProperty @0x49eb00`, `ItemDef_DumpToFile @0x49e250`, `ItemDef_AllocateWithDefaults @0x49e3b0`, `ItemDef_ResolveAllResources @0x49e5f0`, `EntityDef_LoadModelsAndCallbacks @0x439f50` |
 | `ItemDef → GamePlayerEntity` copy | **MATCHING** | `Entity_InitFromItemDef @0x49e550` decompiles field-for-field clean (callbacks/models/health/armor/timer) |
-| `type` enum (`ItemDef+0x5c`) | **MATCHING** (was DIVERGENT; fixed **D-ITEMDEF-1** 2026-07-05) | `libs/def` `item_type_from_string` now returns the witnessed engine values (named `DefItemType`); pinned by `tests/def/def_parse_item_type_test.cpp` |
-| `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`libs/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
+| `type` enum (`ItemDef+0x5c`) | **MATCHING** (was DIVERGENT; fixed **D-ITEMDEF-1** 2026-07-05) | `engine/formats/def` `item_type_from_string` now returns the witnessed engine values (named `DefItemType`); pinned by `tests/def/def_parse_item_type_test.cpp` |
+| `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`engine/formats/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
 | `phrase_set` (`+0x86c`) | **documented + parsed with presence** | `ItemDef_ParseProperty @0x49eb00`: `_stricmp("phrase_set") @0x49f9de`, `atol @0x49f9f0`, store to the 0xADC-stride item at `@0x49fa0a`; mounted bone selection reads the target definition dword at `Entity_BuildBoneTransformMatrices @0x4b1884`. `DefItemDef` retains a separate validity bit because authored zero is meaningful |
-| `DefItemDef` parsed model (`libs/def`) | **partial, MATCHING on covered fields** | parses a faithful subset (id/type/graphic/anim_def/husk/hp/sound_profile/soundloops/shots/`*_function`); the runtime struct is far wider (see follow-ups) |
+| `DefItemDef` parsed model (`engine/formats/def`) | **partial, MATCHING on covered fields** | parses a faithful subset (id/type/graphic/anim_def/husk/hp/sound_profile/soundloops/shots/`*_function`); the runtime struct is far wider (see follow-ups) |
 
 ## Globals
 
@@ -108,7 +108,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | 0x25c–0x266 | `seatMask`/`seatBoneIndex[8]`/`controlBone`/`useGunBone` | u8 | resolved from model bone user-points |
 | 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
 | 0x270 | `foliageDebrisRef` | u32 | `cactdeb`/`palmdeb`/… |
-| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `libs/def` (`DefItemParticleFx`); the slot-A runtime attach is ported (ptl-format-re §4, D-PTL-15) |
+| 0x278 | `particleEffects` | char[723] | the per-item effect table, decomposed 2026-07-13 (`ItemDef_ParseProperty @ 0x49eb00` key sites `@ 0x4a13ad..0x4a179d`): slot A `particlefx` {effect 0x278, userpoint 0x298}; slot B `particlefxs` {0x2ae, 0x2ee, secondary 0x2ce}; slots C–F `particlefxw1..4` {0x304/0x344/0x324; 0x35a/0x39a/0x37a; 0x3ae/0x3ce (no secondary); 0x3e2/0x402 (no secondary)}; effect-only `particledeath` 0x416, `particleh2odeath` 0x44a, `particlefire` 0x47e, `particleother` 0x4b2, `particlespawn` 0x506, `particlefinale` 0x4e4. Resolved at mission start (`resolve_item_materials_and_spawn_bone_trails @ 0x522ee0`): handles/masks pack just AHEAD of each name block (slot A handle 0x274 + mask 0x276; slot B +48/+50/+52 relative to the name base; death/fire/other mask the HUSK's fixed `Dead`/`Fire`/`Other` points); userpoint→mask = `ItemDef_GetBoneMaskByName @ 0x49ea40` (exact stricmp, first 16 points). Parsed by `engine/formats/def` (`DefItemParticleFx`); the slot-A runtime attach is ported (ptl-format-re §4, D-PTL-15) |
 | 0x54b–0x60b | `primaryWeapon`/`ammo*`(×4)/`launchups*`(×3) | char[32]/char[16] | weapon-loadout strings |
 | 0x61b | `weaponPickupAnims` | char[12][16] | `weapl/r b/m/c up[2]` |
 | 0x6db–0x76b | `soundDeath`/`doorOpenSound`/`doorCloseSound`/`dawnShot`/`dayShot`/`duskShot`/`nightShot` | char[24] | sound names |
@@ -171,7 +171,7 @@ The caller sets `entity->ItemTypeIndex` (`+28`, from
 
 ## Vehicle child-emplacement attachments
 
-As of 2026-07-21, `libs/def` parses the authored `addeweap`, `addeweapG`,
+As of 2026-07-21, `engine/formats/def` parses the authored `addeweap`, `addeweapG`,
 and `addeweapC` rows used to attach child guns/equipment to vehicle model
 userpoints. The port retains authored order, the retail four-row cap and
 15-character userpoint limit, full child item IDs, the last designated G/C
@@ -213,7 +213,7 @@ this slice does not claim those behaviors.
 
 | ID | Ours | Original (Jointops.exe) | Why / consequence |
 | --- | --- | --- | --- |
-| D-ITEMDEF-1 **[FIXED 2026-07-05, maturity-par-itemdef]** | `libs/def` `item_type_from_string` (`def.cpp:700`): marker=1, vehicle=2, person=3, building=4, decoration=5, foliage=6, object=7, powerup=8; `effect` unhandled | `ItemDef_ParseProperty`: **vehicle=1, decoration=2, foliage=2, person=3, marker=4, building=5, powerup=6, object=6, effect=8** | the reimpl invented sequential-by-order values; only `person=3` agreed. `type` is not wire-serialized, so no interop break, but any runtime/editor branch on `DefItemDef.type` expecting engine semantics (e.g. effect=8, person=3 special-casing in `EntityDef_LoadModelsAndCallbacks`) was wrong. **FIXED:** `item_type_from_string` now returns the witnessed engine values via named `DefItemType` constants (`libs/def/def.h`), including `effect=8`; the `DefItemDef.type` comment is corrected; the `mission` authoring `entity_kind_for_item_type` switch and the Godot `NovaItemDatabase::TYPE_*` mirror (static-asserted against `DefItemType`) were updated in the same change. Mapping pinned by `tests/def/def_parse_item_type_test.cpp` (full string→value table) and re-cited in `tests/def/def_parse_items_test.cpp` + `tests/mission/mission_authoring_test.cpp`. The mapping is non-injective (decoration=foliage=2, powerup=object=6). The reimpl is parse-only (string→value) and no consumer converts a numeric `type` back to a token, so the collision has no reverse-direction consequence and no reverse table was invented; if a value→string need ever arises it must be witnessed first (open question — `ItemDef_DumpToFile @0x49e250` is the candidate site). |
+| D-ITEMDEF-1 **[FIXED 2026-07-05, maturity-par-itemdef]** | `engine/formats/def` `item_type_from_string` (`def.cpp:700`): marker=1, vehicle=2, person=3, building=4, decoration=5, foliage=6, object=7, powerup=8; `effect` unhandled | `ItemDef_ParseProperty`: **vehicle=1, decoration=2, foliage=2, person=3, marker=4, building=5, powerup=6, object=6, effect=8** | the reimpl invented sequential-by-order values; only `person=3` agreed. `type` is not wire-serialized, so no interop break, but any runtime/editor branch on `DefItemDef.type` expecting engine semantics (e.g. effect=8, person=3 special-casing in `EntityDef_LoadModelsAndCallbacks`) was wrong. **FIXED:** `item_type_from_string` now returns the witnessed engine values via named `DefItemType` constants (`engine/formats/def/def.h`), including `effect=8`; the `DefItemDef.type` comment is corrected; the `mission` authoring `entity_kind_for_item_type` switch and the Godot `NovaItemDatabase::TYPE_*` mirror (static-asserted against `DefItemType`) were updated in the same change. Mapping pinned by `tests/def/def_parse_item_type_test.cpp` (full string→value table) and re-cited in `tests/def/def_parse_items_test.cpp` + `tests/mission/mission_authoring_test.cpp`. The mapping is non-injective (decoration=foliage=2, powerup=object=6). The reimpl is parse-only (string→value) and no consumer converts a numeric `type` back to a token, so the collision has no reverse-direction consequence and no reverse table was invented; if a value→string need ever arises it must be witnessed first (open question — `ItemDef_DumpToFile @0x49e250` is the candidate site). |
 | D-ITEMDEF-2 | (IDB) `ItemDef+0xf0…0x12c` were auto-named `rtCounter0..4`; entity `+0x30/34/38` likewise | they are load-time resolved **model pointers** (`graphicModel`/`huskModel`/`huskFinalModel`/`graphicEnemyModel`/`virtualDisplayModel`), copied to the entity by `Entity_InitFromItemDef` | renamed in-IDB this session. The actual runtime counters are the resolved-sound-id block `+0x82c…` zeroed by `ItemDef_ResetAllRuntimeCounters`. Supersedes the "+48/52/56 counters" wording in `correspondence.md`/net-re §5.2b. |
 | D-ITEMDEF-3 | net-re **§6.8** lifted `healthMax`/`armorMax` out of `pad_17C` and referenced a "§6.9" | full struct now mapped here; there is no §6.9 in net-re | net-re §6.8 is superseded by this record; the `+286`/`+288` health/armor flow is unchanged and re-cited here. |
 
@@ -221,7 +221,7 @@ this slice does not claim those behaviors.
 
 - ~~`particleEffects` (0x278–0x54b) is mapped as one blob~~ — RESOLVED 2026-07-13:
   the key→offset map is decomposed in the field-map row above and parsed by
-  `libs/def`; the remaining thread is the RUNTIME semantics of the fxs/fxw1..4
+  `engine/formats/def`; the remaining thread is the RUNTIME semantics of the fxs/fxw1..4
   movement tiers (`Entity_SpawnBoneEffectsAtMask @ 0x458750` from the movement
   updaters) and the damage-state death/fire/other spawns (ptl-format-re §8).
 - The `*_function` class slots (`0x130/0x13c/0x150/0x15c/0x168`) are typed
@@ -237,4 +237,4 @@ this slice does not claim those behaviors.
 - `DefItemDef` covers only the net/render-relevant subset; the physics block,
   attrib flags, particle keys, `phrase_set` (with presence), `primary_weapon`,
   and `addeweap*` child attachments ARE parsed. The remaining ordinary
-  seat/door/sound tables are not yet parsed by `libs/def`.
+  seat/door/sound tables are not yet parsed by `engine/formats/def`.

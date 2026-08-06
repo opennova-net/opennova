@@ -70,7 +70,7 @@ void NovaPffArchive::build_model_from_source() {
 }
 
 std::string NovaPffArchive::normalize_name(const String &name) {
-	// Mirror libs/pff pff_norm_name: uppercase, then trim trailing spaces. Matches the writer's
+	// Mirror engine/formats/pff pff_norm_name: uppercase, then trim trailing spaces. Matches the writer's
 	// dedup and the on-disk sort so the binding never disagrees with the C library about identity.
 	const CharString utf8 = name.utf8();
 	std::string out(utf8.get_data(), static_cast<size_t>(utf8.length()));

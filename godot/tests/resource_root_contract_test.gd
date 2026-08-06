@@ -360,7 +360,7 @@ func test_is_runtime_mount_discriminates_runtime_from_editor_mounts() -> void:
 
 
 func test_boot_manifest_reports_missing_fatal_resources() -> void:
-	# ENG-6: the witnessed boot manifest (libs/gameprofile required_resources,
+	# ENG-6: the witnessed boot manifest (engine/base/gameprofile required_resources,
 	# docs/required-resources.md) probed against the mounted root. Only the
 	# individually-fatal FILE rows are probed; the boot-archive-table trio is
 	# mount_runtime's own gate [orig: fatal check @ 0x4a6f44].

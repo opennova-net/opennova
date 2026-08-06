@@ -23,7 +23,7 @@ namespace godot {
 // ClientHello -> ... -> Verified handshake NovaWorldClient runs) and then
 // sending a ClientHostRequest, refreshed by periodic ClientHostUpdate
 // heartbeats. It is the host-direction sibling of NovaWorldClient (ADR 0010):
-// sockets + signals here, protocol/crypto in libs/novaworld.
+// sockets + signals here, protocol/crypto in engine/net/novaworld.
 //
 // [orig: CNapiGameSession_SendHostRequest @ 0x4d3700 / SendHostUpdate @ 0x4d3860]
 //

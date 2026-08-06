@@ -3,8 +3,8 @@
 The client-executed subsets of the per-family vehicle movers (the D-NET-196
 prediction legs), the boat platform solve, the shared suspension solvers, the
 cbik (bike) mover, and the aircraft contact solve. Implementing code:
-`libs/world/src/vehicle_motor.cpp` (the family `*_client_tick` movers +
-`watercraft_platform_solve`), `libs/netsim/src/client_replica_pipeline.cpp` (the
+`engine/runtime/world/src/vehicle_motor.cpp` (the family `*_client_tick` movers +
+`watercraft_platform_solve`), `engine/net/netsim/src/client_replica_pipeline.cpp` (the
 per-class row chases), with the joiner wiring in
 `godot/engine/simulation/nova_simulation_net.cpp`. Binary: retail
 `Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every
@@ -414,7 +414,7 @@ orientationMatrix from `&entity->Position` and sets Flags bit 0x20000 [0x48EF50.
 ### 9. Ground-family comparison (part F) — decompile-level
 
 Question: does the client-executed subset of `Entity_UpdateVehiclePhysics` (ground)
-structurally match `world::tick_vehicle_motor` (libs/world/src/vehicle_motor.cpp) minus
+structurally match `world::tick_vehicle_motor` (engine/runtime/world/src/vehicle_motor.cpp) minus
 the input block — can ground prediction reuse tick_vehicle_motor driven by the mirrored
 cmd registers?
 
@@ -512,7 +512,7 @@ solve only), interpProgress, pendingAnimStateId (anim), orientationMatrix, Flags
 
 Disasm-witnessed (decompile too large to serve; every claim below is from the
 instruction stream). Port: `tick_watercraft_motor` +
-`AiSystem::watercraft_ai_drive` (`libs/world/src/vehicle_motor.cpp` /
+`AiSystem::watercraft_ai_drive` (`engine/runtime/world/src/vehicle_motor.cpp` /
 `ai_waypoints.cpp`); blocks 12..19 are the client-ported sequence, extracted
 verbatim into the shared `watercraft_motor_core`. Field identities pinned this
 session from the curated IDB types: entity +0x11E = `Health` (i16), +0x12C =
@@ -2273,7 +2273,7 @@ Witness session 2026-07-31. Target: `Entity_UpdatePlayerInfantryMovement @ 0x483
 update-callback table `@ 0x82ABC0`, reached via dispatch stub `@ 0x48EFF0`; net-re
 §5.38e row). Comparison base: the ground core `Entity_UpdateVehiclePhysics @ 0x48AF00`
 (our `world::ground_client_tick` interim carrier for bikes,
-`libs/world/src/vehicle_motor.cpp:725`).
+`engine/runtime/world/src/vehicle_motor.cpp:725`).
 
 Decompiler field-path glossary (IDB names, misnomer-tolerant — same struct both movers):
 `entity->renderInstance` = the aiComp pointer ("moveMode"); aiComp slots `[132]@+528` =
@@ -3246,7 +3246,7 @@ push, the in-water flag with the r/2 hysteresis, corner-quad conform, and the
 
 ### 2. The client subset (the port contract)
 
-`ground_contact_solve` in `libs/world/src/vehicle_motor.cpp`, dispatched inside
+`ground_contact_solve` in `engine/runtime/world/src/vehicle_motor.cpp`, dispatched inside
 `tick_vehicle_motor` at the witnessed call position (after integration, before
 the yaw apply) for the Ground and Bike families with resolved boxes on a
 terrain-backed world; Watercraft (the authority stand-in path) and
@@ -3346,7 +3346,7 @@ Z):
    (spine-impact, underside-crush, park-move, burn), and every sound/FX/
    overlay send.
 
-Port: `wheeled_contact_solve` (libs/world/src/vehicle_contact_solve.cpp),
+Port: `wheeled_contact_solve` (engine/runtime/world/src/vehicle_contact_solve.cpp),
 routed by `VehicleFamily::Tank`. Bench: the tank rest/drop legs (exact rest at
 `ground − box_z_lo` through the 13-probe geometry and the slideDecay-absorb
 select).

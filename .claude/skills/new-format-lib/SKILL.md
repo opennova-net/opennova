@@ -1,13 +1,13 @@
 ---
 name: new-format-lib
-description: Scaffolds a new NovaLogic format library under libs/ end to end — CMake target, opennova namespace, parser/writer, fixtures with LFS and asset-gating policy, roundtrip ctest, and optional GDExtension binding. Use when adding support for a new game file format, or when extracting a subsystem into a new portable library.
+description: Scaffolds a new NovaLogic format library under engine/ end to end — CMake target, opennova namespace, parser/writer, fixtures with LFS and asset-gating policy, roundtrip ctest, and optional GDExtension binding. Use when adding support for a new game file format, or when extracting a subsystem into a new portable library.
 ---
 
-# Add a format library under libs/
+# Add a format library under engine/
 
 Done dozens of times; the conventions are strict. Copy a living exemplar, don't
-invent: `libs/dbf` (small binary format), `libs/lwf` + `tests/lwf/` (byte-exact
-roundtrip), `libs/refs` (most recent conventions).
+invent: `engine/formats/dbf` (small binary format), `engine/formats/lwf` + `tests/lwf/` (byte-exact
+roundtrip), `engine/base/refs` (most recent conventions).
 
 ## 0. Decide before writing code
 
@@ -24,8 +24,11 @@ roundtrip), `libs/refs` (most recent conventions).
 
 ## 1. Library skeleton
 
-`libs/<name>/CMakeLists.txt` + `include/<name>/<name>.h` + `src/<name>.cpp`.
-Copy `libs/dbf/CMakeLists.txt` and rename: STATIC lib `opennova_<name>`,
+`engine/<group>/<name>/CMakeLists.txt` + `include/<name>/<name>.h` + `src/<name>.cpp`.
+A new format lib goes in `engine/formats/`; a runtime-system extraction goes in
+`engine/runtime/` (group placement rules: ADR 0028; groups are directories only — the
+target name and namespace never carry the group).
+Copy `engine/formats/dbf/CMakeLists.txt` and rename: STATIC lib `opennova_<name>`,
 PUBLIC `include/`, C++17, POSITION_INDEPENDENT_CODE. Namespace
 `opennova::<name>` (C ABI exports flat and domain-prefixed). If Python/Godot
 need it over FFI, bundle the static into `opennova_shared` (grep the root
@@ -33,7 +36,7 @@ CMakeLists for `opennova_shared`).
 
 ## 2. Register in BOTH build graphs — the classic miss
 
-- Root `CMakeLists.txt`: `add_subdirectory(libs/<name>)` alongside the others.
+- Root `CMakeLists.txt`: `add_subdirectory(engine/<group>/<name>)` alongside the others.
 - `godot/engine/CMakeLists.txt`: the parallel, hand-maintained list — required
   the moment an engine binding links the new lib.
 

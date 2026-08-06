@@ -12,7 +12,7 @@ shows the whole profile as a tree (Sound Sets, then Layers, then Members) with a
 add / remove / reorder toolbar and a Play button on every row, so you can audition
 any set, layer, or member in place. The left inspector edits the selected row's
 properties. Member selection on playback follows the engine's own state machine
-(round-robin and random modes live in [`libs/audio`](../../../libs/audio)), so
+(round-robin and random modes live in [`engine/runtime/audio`](../../../engine/runtime/audio)), so
 what you hear in the editor is what the game picks at runtime.
 
 Dialog banks (`.dbf`) are read by the engine for mission dialog but are not
@@ -22,7 +22,7 @@ authored here.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.lwf` | [`libs/lwf`](../../../libs/lwf) | sound profile (LWF1): trigger sets, layers, member sounds; selection logic shared with the runtime via [`libs/audio`](../../../libs/audio) |
+| `.lwf` | [`engine/formats/lwf`](../../../engine/formats/lwf) | sound profile (LWF1): trigger sets, layers, member sounds; selection logic shared with the runtime via [`engine/runtime/audio`](../../../engine/runtime/audio) |
 
 ## How it is built
 

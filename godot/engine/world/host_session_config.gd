@@ -17,7 +17,7 @@ const GAME_TYPE_COOP := 0x30020
 ## resolves to the non-objective Co-op family when launched by LAN automation.
 const GAME_TYPE_TRAINING_COOP := 0x10020
 ## The rest of the witnessed g_GameType code words (the retail LTGT_* gametext
-## keys — docs/interface/loading-screen-re.md). C++ twin: libs/npwire
+## keys — docs/interface/loading-screen-re.md). C++ twin: engine/net/npwire
 ## game_type.h (kCoop = TRAINING_COOP, kObjectiveCoop = COOP); the GUT pin test
 ## holds both sides to the same hex. Code words are opaque beyond the objective
 ## bit — never decompose them.
@@ -36,11 +36,11 @@ const GAME_TYPE_CONQUER_AND_CONTROL := 0x50010   # LTGT_CAC
 const GAME_TYPE_OBJECTIVE_BIT := 0x20000
 ## First port of the witnessed retail LAN host range
 ## [orig: game.cfg mplanserverportmin/max 32768-32787, JO_SERVER].
-## C++ twin: libs/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint
+## C++ twin: engine/net/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint
 ## hard-fails new bare literals of these values outside the canonical homes).
 const DEFAULT_LAN_PORT := 32768
 ## The NovaWorld gate's UDP port, shared by the OpenNova and original targets
-## (mirrors GATE_DEFAULT_PORT territory in libs/novaworld/gate_probe.h).
+## (mirrors GATE_DEFAULT_PORT territory in engine/net/novaworld/gate_probe.h).
 const DEFAULT_GATE_PORT := 7597
 ## Default lobby player cap when no host UI supplied one (the NovaWorld panel has no
 ## cap control). The mp.mnu host screen always sets its own read-back value; the

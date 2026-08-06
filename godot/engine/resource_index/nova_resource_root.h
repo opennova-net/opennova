@@ -133,7 +133,7 @@ public:
 	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Resource> load_font(const String &name) const;
 
-	// The witnessed boot-required manifest (ENG-6, libs/gameprofile
+	// The witnessed boot-required manifest (ENG-6, engine/base/gameprofile
 	// required_resources; witness source docs/required-resources.md).
 	// list_missing_boot_resources probes the FATAL-class file rows against
 	// this mounted root and returns the missing names (empty = boot-viable).

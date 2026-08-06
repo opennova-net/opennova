@@ -3,7 +3,7 @@
 // hardcoded pairs MENUMUS.SBF/MENUMUS.BIN + GAMEMUS.SBF/GAMEMUS.BIN
 // [orig: Expansion_LoadAssets @ 0x4a4730 else-branch]; retail ships the .sbf
 // banks LOOSE in the game dir and the .bin scripts in localres.pff. Both are
-// pure writer output (libs/sbf encoder + libs/mus compiler), generated at
+// pure writer output (engine/formats/sbf encoder + engine/formats/mus compiler), generated at
 // package time, never committed.
 #ifndef OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
 #define OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H

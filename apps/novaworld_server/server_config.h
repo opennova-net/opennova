@@ -60,7 +60,7 @@ struct ServerConfig {
 	// Heartbeat timeout — clients last seen longer than this get dropped
 	// from the connection registry. Default lines up with the upper end
 	// of the witnessed RandomizeTimeout window plus slack (see
-	// libs/novaworld/include/novaworld/connection/manager.h).
+	// engine/net/novaworld/include/novaworld/connection/manager.h).
 	uint64_t heartbeat_timeout_ms = 120000;
 
 	// Tick interval for the connection manager's expire pass.

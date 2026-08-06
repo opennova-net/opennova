@@ -2,7 +2,7 @@ extends GutTest
 
 # Pins the GDScript g_GameType constants to the witnessed hex (the retail
 # LTGT_* code words, docs/interface/loading-screen-re.md). The C++ twin
-# (libs/npwire/include/npwire/game_type.h) static_asserts the same values —
+# (engine/net/npwire/include/npwire/game_type.h) static_asserts the same values —
 # this is the GDScript leg of that agreement.
 
 

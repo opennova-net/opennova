@@ -75,7 +75,7 @@ public:
 	int64_t clock_tick() const;
 	int marker_count() const;
 
-	// The witnessed curve family (see libs/audio/ambient_mixer.h for the [orig]
+	// The witnessed curve family (see engine/runtime/audio/ambient_mixer.h for the [orig]
 	// map); statics so nova_sound_bank.gd's pinned seams delegate here.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);

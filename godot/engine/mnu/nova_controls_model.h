@@ -7,10 +7,10 @@
 
 namespace godot {
 
-// Thin GDScript-facing wrapper over the portable libs/controls catalog. Hands the
+// Thin GDScript-facing wrapper over the portable engine/runtime/controls catalog. Hands the
 // menu shell the Class/Action/Control rows for the Options -> Controls (CONTROL_MAPPING)
 // table, per input device. Read-only: rebinding/persistence are not modelled here.
-// The engine logic (catalog, key-name decode, binding format) lives in libs/controls
+// The engine logic (catalog, key-name decode, binding format) lives in engine/runtime/controls
 // [orig: UI_PopulateControlMappingList @ 0x55c0c0].
 class NovaControlsModel : public RefCounted {
 	GDCLASS(NovaControlsModel, RefCounted)

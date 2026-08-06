@@ -1,4 +1,4 @@
-// libs/anim skeletal sampler tests.
+// engine/runtime/anim skeletal sampler tests.
 //
 // Validates the portable .bad sampler (opennova::anim::sample_clip) in engine-native
 // (Y-up) space against:

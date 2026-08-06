@@ -4,7 +4,7 @@ Persistence layer for the standalone novaworld server.
 
 Contents:
 - `migrations/` — SQLite-flavored DDL applied idempotently on server boot via
-  `opennova::db::run_migrations` (libs/novaworld/db/sqlite.h). Order is
+  `opennova::db::run_migrations` (engine/net/novaworld/db/sqlite.h). Order is
   lexicographic: `0001_*.sql`, `0002_*.sql`, …
 - `seed/` — INSERT statements with `OR IGNORE` so they can be re-run safely.
   The standalone server applies these after migrations during startup.

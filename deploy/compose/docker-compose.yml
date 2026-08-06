@@ -11,7 +11,7 @@ services:
     image: ${SERVER_IMAGE:-opennova-novaworld:local}
     build:
       # Build context is the repo root (two levels up) so the Dockerfile
-      # can reach libs/, backend/, third_party/, apps/.
+      # can reach engine/, backend/, third_party/, apps/.
       context: ../..
       dockerfile: apps/novaworld_server/Dockerfile
     restart: unless-stopped

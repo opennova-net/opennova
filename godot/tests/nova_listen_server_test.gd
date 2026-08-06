@@ -3,7 +3,7 @@ extends GutTest
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
 # NovaSimulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
-# (libs/netsim NetSystem) and decoded back (libs/novaworld ingame_decode) — instead of
+# (engine/net/netsim NetSystem) and decoded back (engine/net/novaworld ingame_decode) — instead of
 # reading the authoritative AI pool directly. This is the in-Godot end of the Phase 1
 # loopback identity guard (tests/netsim/loopback_identity_test).
 

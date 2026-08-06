@@ -3,8 +3,8 @@
 The runtime path from a `.3di` material (shader tag string + per-material flag
 byte) to device render state, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
-`libs/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
-`libs/renderer` (`material_classify`, `material_eval`, `uv_anim`,
+`engine/formats/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
+`engine/runtime/renderer` (`material_classify`, `material_eval`, `uv_anim`,
 `object_shader_template`),
 `godot/engine/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
 `godot/engine/object/nova_object_model.gd`. Landed by maturity REN-2
@@ -56,7 +56,7 @@ first pass (`@ 0x5afc92..0x5afcaa`).
 
 **File effects.** `HLSLEffect_LoadFromFile @ 0x5ae690`: VFS read + SCR layer
 (`ScriptFile_LoadAndDecrypt @ 0x5ae060`, key 0xA55B1EED — see
-[scr](../../libs/scr/include/scr/scr.h)); `D3DXCreateEffect` with
+[scr](../../engine/formats/scr/include/scr/scr.h)); `D3DXCreateEffect` with
 `TRILINEAR/ANISO` (from `HLSLEffect_TextureFilterMode @ 0x27e5698`) +
 `FFPTRANSPOSE` (+ `TEX_UVXFORM` for the UVGen twin); reads the `EffectInfo`
 annotations (`EffectTag`, `EffectName`, `EffectSpecial`, `EffectAlt_UV`,
@@ -176,8 +176,8 @@ VS_SKBASIC). 24 FF + 18 table file-tags + 3 twins = OED's 45; the runtime
 registry additionally carries VS_TRACER (Tracer.fx: `EffectSpecial=true`,
 TECHNIQUE_NORMAL, `usevs`/no ps, TexDiffuse1, `RSAlphaMode(TRUE, ONE, ONE)`,
 ZMODE_NOWRITE, unlit, `vsTracer` Diff = `|dot(eye, normal)|²` — the soft-edge
-facing falloff). Never committed — retail data; re-derive via `libs/scr` +
-`libs/pff` from a retail install.
+facing falloff). Never committed — retail data; re-derive via `engine/formats/scr` +
+`engine/formats/pff` from a retail install.
 
 **The capability probe (REN-4, D-RMAT-4 closure).** The flag word
 (entry+160) booleans are UNIONS OVER ALL TECHNIQUES — the loader iterates
@@ -282,7 +282,7 @@ type ≤ 0x70 = WAVEFORM set/scroll/shear/scale (value =
 types 'q'..'u' (113..117) = CONTROLLED-ANIM set/scroll/shear/scale/rotation
 (value = base + range x `dword_83FCE8[2*phase]`/65536). `wave_lookup
 @ 0x5de6b0` indexes the SAME 2816-byte waveform table PANM uses
-(`WaveformTable @ 0x2bf8ed0` = libs/threedi `threedi_panm_wave_table()`);
+(`WaveformTable @ 0x2bf8ed0` = engine/formats/threedi `threedi_panm_wave_table()`);
 bands per type {1→0, 2→256, 3→768, 4→1024, 5→1280, 6→rand, 7→1536 lerped,
 8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as
 `renderer::uv_anim` (vectors section 4). The live bridge feeds the parsed U/V
@@ -404,7 +404,7 @@ ADR 0022 register).
 | D-RMAT-7 | Textures decoded sRGB→linear (`source_color`), witnessed gamma-space formulas evaluated on mixed-space values, result re-encoded by the reimpl blit — an unwitnessed transform stack around every FF shader (compressed lighting contrast, washed color response) | gamma-space end to end: raw texel sampling, gamma-space combines, framebuffer byte = displayed byte, identity display ramp at default gamma 1.0 (§Color pipeline witness above) | **FIXED (2026-07-06, the model-parity slice)**: raw sampling + gamma-space math + the exact-inverse `nova_gamma_to_linear` output across the composer and the shader set; calibrate-mode identity proof 256/256; T1 re-dumped (key set identical, 630 hashes), T2 swatch 120/120 cells moved as the expected global response change, composite IDENTICAL (ordering untouched) |
 | D-RMAT-8 | Framebuffer blending happens on blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | PERMANENT (reimpl-structural, ADR 0022 register): the reimpl cannot blend in gamma space without a gamma framebuffer; opaque + alpha-tested surfaces are byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha mixes shift midtones, additive accumulation runs dimmer); revisit only if a T3 scene shows an objectionable composite |
 | D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump |
-| D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `libs/pff`+`libs/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
+| D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `engine/formats/pff`+`engine/formats/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
 
 ## IDB changes made during the session
 

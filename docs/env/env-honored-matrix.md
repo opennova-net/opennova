@@ -21,7 +21,7 @@ Classifications:
 Chains below run editor inspector → `EnvFile` (godot/engine/env/env_file.h) →
 runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 `NovaCelestial`, godot/engine/environment/) → shader. The portable math lives in
-`libs/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
+`engine/formats/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
 
 ## Scalars, fog, water
 
@@ -47,12 +47,12 @@ runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 | Field | Chain | Status | Original anchor | Notes |
 |---|---|---|---|---|
 | `sky_speed` | `NovaWeatherCore` cloud-scroll core (rate ramp + integer accumulators) → `NovaSky` UV offsets + `NovaWater` scroll rate | HONORED | [orig: rate ramp @ 0x57eecc; accumulators Environment_UpdateWeatherTick @ 0x57f1a5..0x57f1d1; consumption render_skybox @ 0x5791de..0x579260] | ×{1, 1, 2/3, 4/3} layer factors; accumulator NEGATIVE on U (env #26). |
-| `sky_height` | `NovaSky` dome scale → `u_sky_height` (mesh from `libs/env build_sky_dome_mesh`, Y scale in the vertex shader — env #20); celestial dome distance | HONORED | [orig: build_sky_dome_mesh @ 0x578db0; rebuild gate Environment_ApplyFogAndAmbient @ 0x57e4f4] | Default carries the original raw-200 quirk; retail smooths the height (env #27), reimpl applies it instantly. |
+| `sky_height` | `NovaSky` dome scale → `u_sky_height` (mesh from `engine/formats/env build_sky_dome_mesh`, Y scale in the vertex shader — env #20); celestial dome distance | HONORED | [orig: build_sky_dome_mesh @ 0x578db0; rebuild gate Environment_ApplyFogAndAmbient @ 0x57e4f4] | Default carries the original raw-200 quirk; retail smooths the height (env #27), reimpl applies it instantly. |
 | `sky_map1` / `sky_map2` | `NovaSky` → `u_cloud_tex1/2` | HONORED | [orig: Path_ReplaceOrAppendExtension @ 0x57cc4b (.pcx coercion)] | Coercion handled by the texture resolver, not at parse. |
 | `advanced_clouds` | `NovaSky` mode switch | HONORED | [orig: render_skybox fixed-function pass @ 0x579b42] | 0 forces the dome to `cloud_tint`; ≠0 takes the keyframed-color path. |
 | `cloud_tint` (`cloud_rgb`) | `NovaSky` → `u_flat_color` (flat pass only) | HONORED | [orig: dome material AMBIENT vs D3DRS_AMBIENT=white @ 0x579b42..0x579bb6; xref sweep of Env_CloudBlock @ 0x26c64a4] | **Flipped by C7**: `cloud_rgb` now colors the dome *only* in the `advanced_clouds 0` flat pass (textureless, per the C7 pre-port read), exactly the witnessed scope. The fabricated keyframed-path `u_cloud_tint * 2.0` is deleted. |
 | `sun_3di` / `moon_3di` / `star_3di` | `NovaCelestial` model load + placement + keyframe tint | HONORED | [orig: EffectWorld_LoadCelestialModels @ 0x5adc50] | |
-| `glare_3di` | `NovaCelestial` additive overlay + `NovaGlareOcclusion` (env #14 closed 2026-07-06) | HONORED | [orig: render_skybox_sun_glow @ 0x5acd00 — window/hysteresis/dot⁴ glow chain; render_celestial_bodies @ 0x5acaa0] | Terrain ray march = the ENG-3 lo-res DDA port (`NovaTerrainData.raycast_terrain`, `libs/terrain_query` `[orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80]`); the 32-unit bilinear stand-in retired with #209 (2026-07-08). |
+| `glare_3di` | `NovaCelestial` additive overlay + `NovaGlareOcclusion` (env #14 closed 2026-07-06) | HONORED | [orig: render_skybox_sun_glow @ 0x5acd00 — window/hysteresis/dot⁴ glow chain; render_celestial_bodies @ 0x5acaa0] | Terrain ray march = the ENG-3 lo-res DDA port (`NovaTerrainData.raycast_terrain`, `engine/runtime/terrain_query` `[orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80]`); the 32-unit bilinear stand-in retired with #209 (2026-07-08). |
 
 ## Time-of-day keyframes (16 slots × 12 colors)
 
@@ -68,7 +68,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `ground` | fill/ambient light → shader globals | HONORED | |
 | `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_UpdateWeatherTick @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
-| `skyfog` | `get_frame_clear_color()` (horizon-blended, undoubled) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` stays the doubled render color | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; Clear halving @ 0x67715d] | **Closed 2026-07-05** (env-tod-re.md #21): blend ported libs/env-first, byte-exact; GameWorld clears with it (above/below-water choice witnessed). Editor preview adoption rides ENV-1; sentinel-mirror bleed still deliberately not replicated. |
+| `skyfog` | `get_frame_clear_color()` (horizon-blended, undoubled) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` stays the doubled render color | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; Clear halving @ 0x67715d] | **Closed 2026-07-05** (env-tod-re.md #21): blend ported engine/formats/env-first, byte-exact; GameWorld clears with it (above/below-water choice witnessed). Editor preview adoption rides ENV-1; sentinel-mirror bleed still deliberately not replicated. |
 | `skybase` | `NovaSky` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |
 | `skybright` | `NovaSky` → `u_sky_bright` | HONORED | |
 | `skyhighlight` | `NovaSky` → `u_sky_highlight` | HONORED | |
@@ -112,7 +112,7 @@ is the fix wave's (C7) work-order list:
 | G2 iris curve | **closed — recovered** (global auto-exposure, 64 = identity) | env-tod-re.md §Iris auto-exposure | Spec ready; requires the modulator chain — defer implementation, keep UNCONSUMED badge |
 | G3 terrain_rgb consumers | **closed — refuted terrain-inert** (bake / water quads / foliage all live) | env-tod-re.md §iris/terrain_rgb | Row stays PARTIAL with the real gap named; per-consumer port decisions ride the terrain/foliage work, not C7 |
 | G4 ApplyFogAndAmbient walk | **closed — complete** (8-row walk; exposure → `Render_LightScaleRGB` shader constant) | env-tod-re.md §…walk | Ceiling/floor: **keep** (live exposure inputs + effects indoor ambient); badge as deferred-consumer, do not delete |
-| G5 overcast precedence | **closed — corrected** (additive after `.trn` success; never a fallback; missing `.trn` aborts) | env-tod-re.md §Load pipeline | Comment-level in `libs/env`; future overcast cross-fade uses corrected order |
+| G5 overcast precedence | **closed — corrected** (additive after `.trn` success; never a fallback; missing `.trn` aborts) | env-tod-re.md §Load pipeline | Comment-level in `engine/formats/env`; future overcast cross-fade uses corrected order |
 | G6 thunder/oscillators | **closed — feeder** (`SETFLASH1`, trigger ids 0/0x80, sequencer B unreachable; no `.env` rain/wind keywords) | env-tod-re.md §weather tick | Hand to the WAC weather wave (not C7) |
 
 ## Editor follow-up (shipped by C7)

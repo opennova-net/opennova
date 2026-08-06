@@ -13,7 +13,7 @@ const MusicNavClass = preload("res://modtools/music/ui/music_nav.gd")
 # Most breadcrumb segments rendered before the older hops collapse into "…".
 const MAX_CRUMBS := 5
 
-# VM state values mirror libs/mus MusVMState.
+# VM state values mirror engine/formats/mus MusVMState.
 const VM_STOPPED := 0
 const VM_RUNNING := 1
 const VM_PAUSED := 2
