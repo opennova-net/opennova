@@ -7,7 +7,11 @@
 #include <cstring>
 
 #include <npruntime/session_status.h>
+#include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
+#include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
+#include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
+#include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
 #include <rtxt/rtxt.h>
 #include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
@@ -1359,7 +1363,8 @@ void NovaSimulation::refresh_joiner_projectile_proxies() {
 			// Pool-1 movers (vehicles, emplacements, runtime items) project
 			// their authored collision geometry at the decoded pose. Pool-2
 			// statics keep colliding through the locally loaded mission set.
-			if (((entity.handle >> 12) & 0xF) != 1) continue;
+			if (opennova::wire_handle::pool(entity.handle) !=
+					opennova::wire_handle::kPoolItem) continue;
 			const WireCollisionShape shape =
 					wire_collision_shape_for_type(entity.type_id);
 			if (shape.model_id < 0 && shape.bound_radius <= 0.0f) continue;
@@ -1430,7 +1435,8 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		// The retail deserializer dispatches only the alt/projectile bit or the
 		// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
 		// enter RoundData_SpawnRound.
-		if ((ev.flags & 0x03u) == 0) continue;
+		if ((ev.flags & (opennova::kRoundEventFlagAltFire |
+				opennova::kRoundEventFlagAdmIndexed)) == 0) continue;
 		const opennova::world::WeaponTableEntry *adm =
 				world_->weapons.by_index(ev.adm_index);
 		if (adm == nullptr || adm->ammo_index < 0) continue;
@@ -1457,10 +1463,11 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 			// RoundData_SpawnRound @0x4EC252..0x4EC27A]
 			const uint32_t anim_flags =
 					opennova::world::infantry_anim_flags(anim);
-			const bool prone = (anim_flags & 0x200u) != 0;
-			const bool crouched = (anim_flags & 0x100u) != 0;
+			const bool prone = (anim_flags & opennova::world::kAnimStanceFlagProne) != 0;
+			const bool crouched = (anim_flags & opennova::world::kAnimStanceFlagCrouched) != 0;
 			const bool swimming = anim == 36 || anim == 37 || anim == 154;
-			const bool mounted = round.shooter_carrier_handle != 0xFFFF;
+			const bool mounted =
+					round.shooter_carrier_handle != opennova::wire_handle::kInvalid;
 			// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
 			// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
 			// decoded row has no CameraOffset carrier, so raw fixed position Z is
@@ -1498,7 +1505,8 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		// the shooter's EYE — Position + CameraOffset), it executes the addressed
 		// def's action rows at the weapon's own userpoint instead.
 		// [orig: @0x42f521 / @0x42f6ce]
-		round.wire_round_flags = static_cast<uint8_t>(ev.flags & 0x03u);
+		round.wire_round_flags = static_cast<uint8_t>(ev.flags &
+				(opennova::kRoundEventFlagAltFire | opennova::kRoundEventFlagAdmIndexed));
 		world_->round_sim.spawn(
 				*world_, round,
 				opennova::world::RoundConsequenceMode::VisualOnly);
@@ -2202,9 +2210,9 @@ bool NovaSimulation::send_deployment_pick(int p_param) {
 	// 65534 -> 0xFFFE, else SpawnZoneList_GetByIndex(param-1) -> the entity handle;
 	// an index that resolves no entity falls through to 0xFFFF @0x49b17b LABEL_70]
 	if (!joiner_ || !runtime_) return false;
-	uint16_t wire = 0xFFFF;
+	uint16_t wire = opennova::world::kDeployPickNone;
 	if (p_param == 65534) {
-		wire = 0xFFFE;
+		wire = opennova::world::kDeployPickAutoTeam;
 	} else if (p_param > 0) {
 		const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 		const size_t idx = static_cast<size_t>(p_param - 1);

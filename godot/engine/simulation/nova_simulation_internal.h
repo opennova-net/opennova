@@ -119,7 +119,7 @@ inline bool mount_collapses_right_hand_row(const opennova::world::Entity &entity
 	// In the port, engine_flags is the authoritative entity+0x24 Flags mirror.
 	return entity.mounted &&
 			seat_type_blocks_weapon_channel(entity.mount_type) &&
-			(entity.engine_flags & 0x100u) == 0;
+			(entity.engine_flags & opennova::world::kEntityFlagPlayer) == 0;
 }
 
 inline int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
@@ -220,7 +220,8 @@ inline uint16_t wire_carrier_exclusion_for(
 		const std::vector<opennova::mission::ItemSeatSpec> &seat_specs) {
 	const opennova::netsim::ClientEntityState *row =
 			client_entity_for_handle(state, shooter_handle);
-	if (row == nullptr || row->carrier_handle == 0xFFFFu || row->mount_bone == 0)
+	if (row == nullptr || row->carrier_handle == opennova::world::EntityHandle::kInvalid ||
+			row->mount_bone == 0)
 		return 0xFFFFu;
 	const opennova::netsim::ClientEntityState *carrier =
 			client_entity_for_handle(state, row->carrier_handle);
@@ -422,7 +423,7 @@ inline bool emplaced_weapon_controls_for(
 					mount.emplacement_up_limit_bam,
 					mount.emplacement_right_limit_bam,
 					mount.emplacement_left_limit_bam,
-					mount.primary_weapon_slot_adm != 0xFFu
+					mount.primary_weapon_slot_adm != opennova::world::kAdmSlotNone
 							? world.weapons.by_index(
 									mount.primary_weapon_slot_adm)
 							: nullptr);
@@ -496,7 +497,7 @@ inline bool emplaced_weapon_controls_for_client(
 		// window below. [orig: Entity_GetWeaponTurretLimits @0x540d70 per-seat
 		// leg @0x540db5..0x540e27 — carrierDef+540/556/572/588[seat]]
 		const opennova::mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-		if (mount.carrier_handle != 0xFFFFu) {
+		if (mount.carrier_handle != opennova::world::EntityHandle::kInvalid) {
 			for (const opennova::netsim::ClientEntityState &carrier :
 					state.entities) {
 				if (carrier.handle != mount.carrier_handle) continue;
@@ -591,7 +592,7 @@ inline bool aim_overlay_inputs_for_client(
 	// body [orig: the mounted read of entity+0x2D0-desired aim].
 	const bool free_standing_player =
 			entity.cls == opennova::EntityClass::Player &&
-			entity.carrier_handle == 0xFFFFu;
+			entity.carrier_handle == opennova::world::EntityHandle::kInvalid;
 	out.aim_pitch = free_standing_player
 			? entity.pitch_bam
 			: static_cast<int32_t>(
@@ -629,7 +630,8 @@ inline bool aim_overlay_inputs_for_client(
 	// seat bone. Bone zero is the standing-on/deck form, not a mount. Resolve
 	// the carrier's wire type into the binding-fed production seat table; never
 	// synthesize a config byte or alias a missing definition to config zero.
-	if (entity.carrier_handle == 0xFFFFu || entity.mount_bone == 0) return true;
+	if (entity.carrier_handle == opennova::world::EntityHandle::kInvalid ||
+			entity.mount_bone == 0) return true;
 	const opennova::netsim::ClientEntityState *carrier =
 			client_entity_for_handle(state, entity.carrier_handle);
 	if (carrier == nullptr) return true;
@@ -737,7 +739,8 @@ inline void write_present_held_weapon(
 		const opennova::anim::AimOverlayInputs &p_in,
 		int p_weapon_hold_state) {
 	if (p_dead || p_in.mount_mode != opennova::anim::MountMode::OnFoot) return;
-	if (p_equipped_adm_index == 0 || p_equipped_adm_index == 0xFFu) return;
+	if (p_equipped_adm_index == 0 ||
+			p_equipped_adm_index == opennova::world::kAdmSlotNone) return;
 	r[NovaSimulation::PF_HELD_WEAPON_ADM] = static_cast<float>(p_equipped_adm_index);
 	const Vector3 attach = mission_euler_from_overlay(
 			opennova::anim::compute_held_weapon_attach_angles(p_in));
@@ -1263,7 +1266,7 @@ inline bool resolve_client_eweap_attachment_pose(
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
 		const std::unordered_map<int32_t, Ref<NovaObjectData>> &model_data_by_type,
 		uint32_t time_ms, opennova::world::MountedPose &out) {
-	if (child.parent_handle == 0xFFFFu) return false;
+	if (child.parent_handle == opennova::world::EntityHandle::kInvalid) return false;
 	const opennova::netsim::ClientEntityState *parent =
 			client_entity_for_handle(state, child.parent_handle);
 	if (parent == nullptr) return false;
