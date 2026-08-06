@@ -6106,8 +6106,15 @@ mode]: SP/none = 1 (62.5 Hz); NovaWorld = 12 (~5.2 Hz); LAN non-authority = 6; L
 `g_LanMode @ 0x2550BFC` (server-config `lanmode 1..4` [orig: parse `@ 0x550425`, invalid → 2;
 `Config_SetDefaults @ 0x54d23a` → 1]): 1 → 12 (~5.2 Hz, the stock default), 2 → 6 (~10.4 Hz),
 3 → 4 (~15.6 Hz), 4 → 3 (~20.8 Hz — the fastest cadence a retail host can produce). Loopback and
-out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. The host applies the value
-per connection AND dictates it to the peer via the H:0x00 CS-config update, mask 8 / field 3
+out-of-session connections force 1 [orig: `@ 0x4c5f63/@ 0x4c5f69`]. Field measurement
+(2026-08-06, the RR 00TRg oracle run): the retail host on this machine ran `lanmode = 4` from
+its SAVED `game.cfg` — median 0x0A inter-frame 49.8 ms = holdoff 3 (~19–20 Hz measured), one
+record for the busiest vehicle in EVERY frame at the same 600-B budget. The onhook
+`LanHostLanMode` key does NOT set retail's `g_LanMode` (retail reads its own config), so an
+OR/RR comparison must align our host's `lan_mode` with the retail copy's `game.cfg` value —
+a mode-1 opennova host against a mode-4 retail oracle is a 4× cadence deficit that presents
+as far-entity choppiness/"never arrives" (the 00TRg round-2 residual after the D-NET-139
+score fix).
 [orig: `NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40`, sends `@ 0x4c5fc0/@ 0x4c5fcb`; the client
 applies any value verbatim, `HandleCSConfigUpdate @ 0x621940`]. The protocol template default is 0
 (per-tick) — a client that never receives the update sends every tick.

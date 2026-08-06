@@ -209,6 +209,7 @@ func _run() -> void:
 
 	# --- Snapshot loop: watch orders land, motion accumulate, events fire.
 	var kickoff_fired := {}       # event -> tick observed fired
+	var debark_positions := {}    # event -> {ai_index: position at redirect}
 	var kickoff_pos := {}         # ssn -> mission position when its kickoff observed
 	var order_seen := {}          # ssn -> tick wp_channel==list first observed
 	var state16_seen := {}        # ssn -> tick state 16 first observed
@@ -234,6 +235,17 @@ func _run() -> void:
 			if not debark_fired.has(ev) and events.size() > ev and events[ev] != 0:
 				debark_fired[ev] = tick
 				print("PROBE t=%d event %d FIRED (debark)" % [tick, ev])
+				# Snapshot the defender group's positions at the redirect, so P3
+				# can assert they actually WALK (a routed-but-frozen squad fails).
+				var grp := int(DEBARK_EVENTS[ev][0])
+				var poss := {}
+				for i in AI_SCAN_CAP:
+					var d: Dictionary = _sim.get_entity_debug(i)
+					if d.is_empty():
+						break
+					if int(d.get("pool", -1)) == 0 and int(d.get("group_id", -1)) == grp:
+						poss[i] = d.get("position", Vector3.ZERO)
+				debark_positions[ev] = poss
 		for ev in TRUCK_CHAIN_EVENTS:
 			if not kickoff_fired.has(ev) and events.size() > ev and events[ev] != 0:
 				kickoff_fired[ev] = tick
@@ -249,6 +261,27 @@ func _run() -> void:
 					chain_rows.append(trow)
 				print("PROBE t=%d event %d FIRED (truck chain) | %s" %
 						[tick, ev, " | ".join(chain_rows)])
+		# Debark forensics: once group 14's redirect fired, watch its members
+		# leave the boat — the stuck-exit diagnosis (state/mount/route/motion).
+		if debark_fired.has(20):
+			var crew_rows: PackedStringArray = []
+			var shown := 0
+			for i in AI_SCAN_CAP:
+				var d: Dictionary = _sim.get_entity_debug(i)
+				if d.is_empty():
+					break
+				if int(d.get("pool", -1)) != 0 or int(d.get("group_id", -1)) != 14:
+					continue
+				var cpos: Vector3 = d.get("position", Vector3.ZERO)
+				crew_rows.append("i=%d (%.1f,%.1f,%.2f) st=%d(%s) mnt=%s wp=%d nd=%d spd=%d anim=%s" % [
+						i, cpos.x, cpos.y, cpos.z, int(d.get("state", -1)),
+						str(d.get("state_name", "?")), str(d.get("mounted", false)),
+						int(d.get("wp_channel", -1)), int(d.get("wp_node", -1)),
+						int(d.get("out_speed", 0)), str(d.get("anim_key", "?"))])
+				shown += 1
+				if shown >= 4:
+					break
+			print("PROBE t=%d DEBARK14 | %s" % [tick, " | ".join(crew_rows)])
 		var lines: PackedStringArray = []
 		for ssn in VEHICLES:
 			var vd: Dictionary = _sim.get_world_entity_debug(ssn)
@@ -318,6 +351,8 @@ func _run() -> void:
 			continue
 		var redirected := 0
 		var members := 0
+		var max_walk := 0.0
+		var start_poss: Dictionary = debark_positions.get(ev, {})
 		for i in AI_SCAN_CAP:
 			var d: Dictionary = _sim.get_entity_debug(i)
 			if d.is_empty():
@@ -327,10 +362,17 @@ func _run() -> void:
 			members += 1
 			if int(d.get("wp_channel", -1)) == lst:
 				redirected += 1
+			if start_poss.has(i):
+				var now_pos: Vector3 = d.get("position", Vector3.ZERO)
+				max_walk = max(max_walk, now_pos.distance_to(start_poss[i]))
 		if members == 0 or redirected == 0:
 			p3_ok = false
 			p3_detail.append("event %d: group %d redirect to list %d not taken (%d/%d)" % [
 					ev, grp, lst, redirected, members])
+		elif max_walk < 10.0:
+			p3_ok = false
+			p3_detail.append("event %d: group %d routed but FROZEN (max walk %.1fu)" % [
+					ev, grp, max_walk])
 	_gate("P3 arrival", p3_ok, "debark chain live" if p3_ok else "; ".join(p3_detail))
 
 	if _fail_lines.is_empty():

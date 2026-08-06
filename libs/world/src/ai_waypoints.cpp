@@ -167,6 +167,18 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
     b.f[AiBrain::kWpType] = 1;                                     // [orig: aiComp[35] = 1]
     b.f[AiBrain::kWpChannel] = list;                               // [orig: aiComp[37]]
     b.f[AiBrain::kWpNode] = std::min<int32_t>(node, ch->count - 1); // [orig: aiComp[38]]
+    // The SLOT half of the same witnessed block — the INFANTRY think navigates
+    // from slot+140/+148/+152, not the brain registers, and a spawn command
+    // (waypoint_id 123..127) parked in slot[37] otherwise short-circuits the
+    // think forever (the 00TRg debarked-crew freeze: detached, brain routed,
+    // slot still 125 -> the reserved-command early-return every think).
+    // [orig: Entity_SetWaypointByTeam @0x43cdb4 per-entity block — aiComp+140=1,
+    // +148=list, +152=node, think cooldown 0, carrier ref cleared]
+    e.slot.f[35] = 1;
+    e.slot.f[37] = list;
+    e.slot.f[38] = b.f[AiBrain::kWpNode];
+    e.slot.f[36] = 0;          // carrier ref cleared [orig: aiComp+144 = 0]
+    e.inf.wait_cooldown = 0;   // think cooldown 0 [orig: entity[74] = 0]
     // The turn-budget seed [orig: the tail block @0x43cdb4 — AIWaypoint_UpdateTarget +
     // budget = 32*|Yaw - bearing| / ((speed_param >> 15) + 32)].
     if (ai_waypoint_update_target(b, e.pos, nav) == 0) {
