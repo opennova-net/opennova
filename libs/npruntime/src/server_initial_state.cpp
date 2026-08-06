@@ -445,7 +445,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			auto rd_u32 = [](const uint8_t *p) -> uint32_t {
 				return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 			};
-			if (til.size() < kTilHeaderBytes || rd_u32(til.data()) != 0x74696C30u) {
+			if (til.size() < kTilHeaderBytes || rd_u32(til.data()) != kTerrainTileMagic) {
 				world_pool_done = true; // no (valid) .til -> emit nothing, advance past phase 5
 				break;
 			}
@@ -465,7 +465,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				batch.start_index = static_cast<uint16_t>(off);
 				batch.end_index = static_cast<uint16_t>(off + cnt);
 				if (batch.has_header) {
-					batch.magic = 0x74696C30u;
+					batch.magic = kTerrainTileMagic;
 					batch.tile_count = total_count;   // TOTAL set size (drives the client's alloc)
 					batch.header_field2 = res0;
 					batch.header_field3 = res1;

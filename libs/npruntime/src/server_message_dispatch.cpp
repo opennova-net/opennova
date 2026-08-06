@@ -11,6 +11,7 @@
 #include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <npwire/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
+#include <npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
 #include <npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <npwire/ingame_message_id.h>
@@ -1055,11 +1056,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// verbatim; ack echo @0x505f05]. The retail client stops the walk itself at
 				// its max-player count g_max_player_slots (fed by our 0x04 slot-config byte 18), so
 				// no server-side cap. A zero/absent mask answers the 0x1CF7 field set.
-				const bool echo_ack = (req_flags & 0x4000u) != 0;
+				const bool echo_ack = (req_flags & kPlayerSyncAck) != 0;
 				const uint16_t reply_flags =
-						(req_flags & ~0xC000u) != 0
-								? static_cast<uint16_t>(req_flags & ~0x8000u)
-								: static_cast<uint16_t>(0x1CF7u | (echo_ack ? 0x4000u : 0u));
+						(req_flags & static_cast<uint16_t>(~(kPlayerSyncAck | kPlayerSyncRemoval))) != 0
+								? static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval)
+								: static_cast<uint16_t>(kPlayerSyncJoinBroadcastFields |
+										(echo_ack ? kPlayerSyncAck : 0u));
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
 					replies.push_back(
@@ -1220,7 +1222,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
 						: 0;
 				const world::Entity *target = nullptr;
-				if (pick == 0xFFFE) {
+				if (pick == world::kDeployPickAutoTeam) {
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
 					// [orig: find_spawn_entity_for_team @0x4fc810 -> requestedHandle -1 on miss].
 					target = world::find_spawn_zone_for_team(*world, world->zone_chain,
@@ -1473,7 +1475,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					break;
 				// Handle validity [orig: @0x513543], then anti-spoof: the claimed shooter must
 				// BE this connection's own entity [orig: @0x51358d, doubled at @0x50bf37 -> -9].
-				if (fr.shooter_handle == 0xFFFF || (fr.shooter_handle & 0xF000u) >= 0x5000u)
+				if (wire_handle::is_batch_end_sentinel(fr.shooter_handle))
 					break;
 				if (!conn.link.owned_entity.valid() ||
 				    conn.link.owned_entity.packed != fr.shooter_handle)
@@ -1535,7 +1537,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
 				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
 				world::EntityHandle fire_target{};
-				if (fr.target_handle != 0xFFFF && (fr.target_handle & 0xF000u) < 0x5000u) {
+				if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
 					const world::EntityHandle th{fr.target_handle};
 					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
 				}
@@ -1614,8 +1616,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const world::Entity *requester =
 						world->registry.get(conn.link.owned_entity);
 				if (requester == nullptr || requester->health <= 0) break;
-				if (req.entity_handle == 0xFFFFu ||
-				    (req.entity_handle & 0xF000u) >= 0x5000u)
+				if (wire_handle::is_batch_end_sentinel(req.entity_handle))
 					break;
 				const world::EntityHandle addressed{req.entity_handle};
 				if (static_cast<size_t>(addressed.slot()) >=
@@ -1881,7 +1882,7 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
 	// flush frames it with that connection's own sequencing.
 	const PlayerReplicationState rep = make_rep_state(config, joined, world);
-	const std::vector<uint8_t> body = encode_player_sync(rep, 0x1CF7);
+	const std::vector<uint8_t> body = encode_player_sync(rep, kPlayerSyncJoinBroadcastFields);
 	for (NapiNPConnection &c : roster) {
 		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
 		c.link.transport->host_send(s2c::PLAYER_SYNC, body);

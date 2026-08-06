@@ -1,5 +1,6 @@
 #include "npruntime/client_runtime.h"
 
+#include <npwire/wire_handle.h>
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
 
@@ -278,8 +279,7 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match() ||
 	    !is_deployed() || !joiner_->has_self_handle() ||
-	    reload.entity_handle == 0xFFFFu ||
-	    (reload.entity_handle & 0xF000u) >= 0x5000u)
+	    wire_handle::is_batch_end_sentinel(reload.entity_handle))
 		return false;
 	gameplay_send_queue_.push_back(
 			make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload)));
