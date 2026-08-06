@@ -50,7 +50,7 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-04 regeneration the shape was:
+nothing keeps this sentence honest. As of the 2026-08-05 regeneration the shape was:
 **World/AI** carries the largest share (67 of 166 domain-open), **UI** (44 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
 small or permanent-register candidates) and **Net** (25) the next largest, and every
