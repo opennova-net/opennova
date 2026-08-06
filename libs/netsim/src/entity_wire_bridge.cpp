@@ -9,6 +9,7 @@
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <world/entity.h>      // EntityHandle (pinned below)
 #include <world/geom.h>        // to_fixed / from_fixed
+#include <world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
 #include <world/infantry.h>    // kInfantryAirborneGap / remote body state
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes + kGameTypeObjectiveBit (pinned below)
 #include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
@@ -24,10 +25,8 @@ static_assert(wire_handle::make(3, 5) == world::EntityHandle::make(3, 5).packed)
 static_assert(wire_handle::pool(0x2123) == world::EntityHandle{0x2123}.pool() &&
               wire_handle::slot(0x2123) == world::EntityHandle{0x2123}.slot());
 static_assert(game_type::kObjectiveBit == world::kGameTypeObjectiveBit);
+static_assert(kPlayerPersonTypeId == world::kPlayerInfantryTypeId);
 
-// The player Person item template (§5.2a host-built player entity; the same id
-// PlayerReplicationState::entity_type_id defaults to).
-static constexpr uint16_t kPlayerPersonTypeId = 0x14B9u;
 
 EntityClass class_for_type_id(uint16_t type_id) {
 	// A bare type id cannot reveal ItemDef+356. Keep the one exact built-in
