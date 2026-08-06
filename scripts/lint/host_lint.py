@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -273,6 +274,29 @@ def frozen_audit(diff_range: str) -> int:
             failures += 1
     for item, count in doc_removed.items():
         if count > doc_added[item]:
+            # A net occurrence drop is a LOSS only if the citation/id no longer
+            # resolves anywhere under docs/ at HEAD — a verbatim move (e.g. a
+            # ledger row condensed while its content lives in the record) is
+            # fine. Grep the working docs tree for the item before failing.
+            still_present = False
+            for root, _dirs, files in os.walk(REPO / "docs"):
+                for fname in files:
+                    if not fname.endswith(".md"):
+                        continue
+                    try:
+                        body = (Path(root) / fname).read_text(
+                                encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    if item in body:
+                        still_present = True
+                        break
+                if still_present:
+                    break
+            if still_present:
+                print(f"[host-lint][frozen] docs citation/ID moved (still "
+                      f"resolves): {item} (-{count} +{doc_added[item]})")
+                continue
             print(f"[host-lint][frozen] docs citation/ID lost: {item} "
                   f"(-{count} +{doc_added[item]})")
             failures += 1

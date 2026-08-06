@@ -5,6 +5,19 @@ of the maturity program and ratifies the permanent divergences listed below. The
 dashboard is [docs/divergence-ledger.md](../divergence-ledger.md); the program that
 schedules the slices is [docs/maturity-program.md](../maturity-program.md).
 
+## Amendment (2026-08-06) — closed-row retention written down
+
+The previously unwritten retention convention is now the ledger's Standing rule
+6: a closed row is CONDENSED to a dated prose closure line once its full detail
+lives in its record's catalog (the record is the authoritative content home per
+Consequence 1; the ledger stays the authoritative disposition dashboard). The
+scoreboard's "Closed rows still tabled" column counts down to zero, and a fully
+burned-and-pruned domain drops off the scoreboard. Ids remain stable and
+greppable in the closure lines; `host_lint.py --frozen-audit` verifies every
+citation and id still resolves under docs/ after a move. Nothing in the
+original decision changes — the zero-OPEN target, the vocabulary, and the
+PERMANENT register are as written below.
+
 ## Context
 
 OpenNova is a faithful reimplementation — parity, not reinterpretation
