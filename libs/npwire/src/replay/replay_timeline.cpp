@@ -297,7 +297,7 @@ ReplayTimeline build_replay_timeline(
 				ReplayEntity &e = b.get(r.slot_id, r.item_type_id);
 				e.type_id = r.item_type_id;
 				if (!r.entity_name.empty()) e.name = r.entity_name;
-				if (r.spawn_flags & 0x0010) {
+				if (r.spawn_flags & kPoolSpawnHasTeamByte) {
 					e.team = r.team_byte;
 					e.team_known = true;
 				}
@@ -306,7 +306,7 @@ ReplayTimeline build_replay_timeline(
 				s.x = r.pos_x;
 				s.y = r.pos_y;
 				s.z = r.pos_z;
-				if (r.spawn_flags & 0x0001) {
+				if (r.spawn_flags & kPoolSpawnHasEulerZ) {
 					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
 					s.has_heading = true;
 				}
@@ -326,7 +326,7 @@ ReplayTimeline build_replay_timeline(
 				ReplayEntity &e = b.get(handle, r.item_type_id);
 				e.type_id = r.item_type_id;
 				e.net_id = r.net_handle;
-				if (r.flags_byte & 0x08) {
+				if (r.flags_byte & kPool3SyncHasTeamByte) {
 					e.team = r.team_byte;
 					e.team_known = true;
 				}
@@ -335,7 +335,7 @@ ReplayTimeline build_replay_timeline(
 				s.x = r.pos_x;
 				s.y = r.pos_y;
 				s.z = r.pos_z;
-				if (r.flags_byte & 0x01) {
+				if (r.flags_byte & kPool3SyncHasMovementVal) {
 					s.heading_deg = bam32_to_deg(r.movement_val);
 					s.has_heading = true;
 				}
@@ -376,7 +376,7 @@ ReplayTimeline build_replay_timeline(
 				const uint16_t handle = wire_handle::make(wire_handle::kPoolBuilding, slot);
 				ReplayEntity &e = b.get(handle, r.item_type_id);
 				e.type_id = r.item_type_id;
-				if (r.field_flags & 0x0010) {
+				if (r.field_flags & kStaticEntityHasTeamByte) {
 					e.team = r.team_byte;
 					e.team_known = true;
 				}
@@ -388,7 +388,7 @@ ReplayTimeline build_replay_timeline(
 				// 0x01-gated euler_z (entity+16) is the static's yaw heading (32-bit
 				// BAM), not velocity (D-NET-86) — the spawn pose facing a spectator
 				// renders. Without it every static stood at heading 0 (faced east).
-				if (r.field_flags & 0x0001) {
+				if (r.field_flags & kStaticEntityHasEulerZ) {
 					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
 					s.has_heading = true;
 				}

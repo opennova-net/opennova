@@ -80,6 +80,26 @@ WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam);
 
+// S2C 0x0D spawn_flags gate bits (§5.11 field map). Names follow the witnessed
+// wire-field names; the struct fields alert_byte/action_byte below keep their
+// older decode-era spellings of the same two fields (refNum/subType, D-NET-94).
+inline constexpr uint16_t kPoolSpawnHasEulerZ         = 0x0001; // entity+16 yaw heading
+inline constexpr uint16_t kPoolSpawnHasEulerX         = 0x0002; // entity+20
+inline constexpr uint16_t kPoolSpawnHasEulerY         = 0x0004; // entity+24
+inline constexpr uint16_t kPoolSpawnHasSectionMask    = 0x0008; // entity+308
+inline constexpr uint16_t kPoolSpawnHasTeamByte       = 0x0010; // entity+354 (D-NET-58)
+inline constexpr uint16_t kPoolSpawnHasEntityFlags    = 0x0020; // entity+36
+inline constexpr uint16_t kPoolSpawnHasRefNum         = 0x0040; // entity+533 (D-NET-94)
+inline constexpr uint16_t kPoolSpawnHasSubType        = 0x0080; // entity+532
+inline constexpr uint16_t kPoolSpawnHasParentHandle   = 0x0100; // entity+368 occupant back-ref (D-NET-195)
+inline constexpr uint16_t kPoolSpawnHasTargetHandle   = 0x0200; // entity+40 structural carrier
+inline constexpr uint16_t kPoolSpawnHasMountOccupancy = 0x0400; // seat mask + occupant handles
+inline constexpr uint16_t kPoolSpawnHasAiTrailer      = 0x0800; // aiSlot+16/+20/+156
+inline constexpr uint16_t kPoolSpawnHasWeaponTypeByte = 0x1000; // entity+176
+inline constexpr uint16_t kPoolSpawnHasZoneNumberRank = 0x2000; // entity+538 + radius entity+350
+inline constexpr uint16_t kPoolSpawnHasDifficultyByte = 0x4000; // entity+624
+inline constexpr uint16_t kPoolSpawnHasZoneRadiusAlt  = 0x8000; // entity+350 (SpawnPoint path @0x503f29)
+
 // One record from a S2C 0x0D pool-entity spawn batch (§5.11).
 struct PoolSpawnRecord {
 	uint16_t spawn_flags = 0;
@@ -167,6 +187,14 @@ struct PoolSpawnBatch {
 	int16_t entity_count = 0;
 };
 
+// S2C 0x20 pool-3 flags_byte gate bits (§5.12 field map).
+inline constexpr uint8_t kPool3SyncHasMovementVal    = 0x01; // entitySlot+16 BAM heading (D-NET-59)
+inline constexpr uint8_t kPool3SyncHasOrientationVal = 0x02; // entitySlot+0
+inline constexpr uint8_t kPool3SyncHasAmmoCount      = 0x04; // entitySlot+290
+inline constexpr uint8_t kPool3SyncHasTeamByte       = 0x08; // entitySlot+354
+inline constexpr uint8_t kPool3SyncHasWeaponType     = 0x10; // entitySlot+640
+inline constexpr uint8_t kPool3SyncHasScoreByte      = 0x20; // entitySlot+672
+
 // One record from a S2C 0x20 bulk pool-3 entity sync batch (§5.12).
 struct Pool3SyncRecord {
 	// item_type_id == 0 is the empty-slot sentinel: nothing else is read,
@@ -225,6 +253,21 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 // 0x0D path. Header is [u16 startIndex][u16 entityCount] (like 0x20); each record
 // is flags-first variable-length (like 0x0D), itemTypeId == 0 is the empty-slot
 // sentinel. [orig: NapiNPClientMsg_0x010 @ 0x433400]
+//
+// S2C 0x10 field_flags gate bits (§5.9 field map). Same values as the 0x0D set
+// but a DIFFERENT family — 0x0040/0x0080/0x0100/0x0200 gate different fields
+// here. attach_ref presence is `weapon_byte != 0 || (flags & kStaticEntityHasAttachRef)`.
+inline constexpr uint16_t kStaticEntityHasEulerZ      = 0x0001; // entity+16 yaw heading
+inline constexpr uint16_t kStaticEntityHasEulerX      = 0x0002; // entity+20
+inline constexpr uint16_t kStaticEntityHasEulerY      = 0x0004; // entity+24
+inline constexpr uint16_t kStaticEntityHasSectionMask = 0x0008; // entity+308
+inline constexpr uint16_t kStaticEntityHasTeamByte    = 0x0010; // entity+354 (D-NET-58/62)
+inline constexpr uint16_t kStaticEntityHasEntityFlags = 0x0020; // entity+36 Flags dword (D-NET-147)
+inline constexpr uint16_t kStaticEntityHasRefNum      = 0x0040; // entity+533 (D-NET-94; struct field bone_a)
+inline constexpr uint16_t kStaticEntityHasSubType     = 0x0080; // entity+532 (struct field bone_b)
+inline constexpr uint16_t kStaticEntityHasScoreFlag   = 0x0100; // entity+624
+inline constexpr uint16_t kStaticEntityHasAttachRef   = 0x0200; // entity+350 (with the weapon_byte OR-gate)
+
 struct StaticEntityRecord {
 	uint16_t item_type_id = 0;   // always; 0 ⇒ empty slot (record ends, slot left zero)
 	bool     is_empty_slot = false;

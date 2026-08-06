@@ -131,18 +131,18 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 			return false;
 		}
 
-		if (rec.spawn_flags & 0x0020) rec.entity_flags = c.u32();
+		if (rec.spawn_flags & kPoolSpawnHasEntityFlags) rec.entity_flags = c.u32();
 		rec.pos_x = int32_t(c.u32());
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.spawn_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
-		if (rec.spawn_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
-		if (rec.spawn_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.spawn_flags & 0x0008) rec.section_mask = int32_t(c.u32());
-		if (rec.spawn_flags & 0x0010) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
-		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
-		if (rec.spawn_flags & 0x0200) rec.target_handle = c.u16();
+		if (rec.spawn_flags & kPoolSpawnHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.spawn_flags & kPoolSpawnHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.spawn_flags & kPoolSpawnHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
+		if (rec.spawn_flags & kPoolSpawnHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.spawn_flags & kPoolSpawnHasTeamByte) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
+		if (rec.spawn_flags & kPoolSpawnHasParentHandle) rec.parent_handle = c.u16();
+		if (rec.spawn_flags & kPoolSpawnHasTargetHandle) rec.target_handle = c.u16();
 
 		// Mount-occupancy block (0x0400). The retail handler reads the seat-mask
 		// byte, then — for a non-zero mask — one occupant handle per set bit
@@ -155,7 +155,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		// 0x400 when the mask is non-zero), so the byte-witness capture didn't
 		// exercise it — but the client handler reads it, so the port must too.
 		// [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
-		if (rec.spawn_flags & 0x0400) {
+		if (rec.spawn_flags & kPoolSpawnHasMountOccupancy) {
 			rec.seat_mask = c.u8();
 			if (rec.seat_mask) {
 				for (int b = 0; b < 8; ++b) {
@@ -169,22 +169,22 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 
 		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
 
-		if (rec.spawn_flags & 0x0800) {
+		if (rec.spawn_flags & kPoolSpawnHasAiTrailer) {
 			rec.ai_profile_1 = c.u32();
 			rec.ai_profile_2 = c.u32();
 			rec.ai_name = c.cstr();
 		}
-		if (rec.spawn_flags & 0x0040) rec.alert_byte = c.u8();
-		if (rec.spawn_flags & 0x0080) rec.action_byte = c.u8();
-		if (rec.spawn_flags & 0x1000) rec.weapon_type_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasRefNum) rec.alert_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasSubType) rec.action_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasWeaponTypeByte) rec.weapon_type_byte = c.u8();
 
-		if (rec.spawn_flags & 0x2000) {
+		if (rec.spawn_flags & kPoolSpawnHasZoneNumberRank) {
 			rec.zone_number_rank = c.u8();
 			rec.zone_radius = c.u16();
-		} else if (rec.spawn_flags & 0x8000) {
+		} else if (rec.spawn_flags & kPoolSpawnHasZoneRadiusAlt) {
 			rec.zone_radius = c.u16();
 		}
-		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
+		if (rec.spawn_flags & kPoolSpawnHasDifficultyByte) rec.difficulty_byte = c.u8();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -228,13 +228,13 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.flags_byte & 0x01) rec.movement_val = c.u32();  // entitySlot+16, raw BAM heading — NOT parent (D-NET-59)
-		if (rec.flags_byte & 0x02) rec.orientation_val = c.u32();
-		if (rec.flags_byte & 0x04) rec.ammo_count = c.u16();
+		if (rec.flags_byte & kPool3SyncHasMovementVal) rec.movement_val = c.u32();  // entitySlot+16, raw BAM heading — NOT parent (D-NET-59)
+		if (rec.flags_byte & kPool3SyncHasOrientationVal) rec.orientation_val = c.u32();
+		if (rec.flags_byte & kPool3SyncHasAmmoCount) rec.ammo_count = c.u16();
 		rec.net_handle = c.u16();
-		if (rec.flags_byte & 0x08) rec.team_byte = c.u8();
-		if (rec.flags_byte & 0x10) rec.weapon_type = c.u16();
-		if (rec.flags_byte & 0x20) rec.score_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasTeamByte) rec.team_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasWeaponType) rec.weapon_type = c.u16();
+		if (rec.flags_byte & kPool3SyncHasScoreByte) rec.score_byte = c.u8();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -283,18 +283,18 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.field_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
-		if (rec.field_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
-		if (rec.field_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
-		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
-		if (rec.field_flags & 0x0020) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
+		if (rec.field_flags & kStaticEntityHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.field_flags & kStaticEntityHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.field_flags & kStaticEntityHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
+		if (rec.field_flags & kStaticEntityHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.field_flags & kStaticEntityHasTeamByte) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
+		if (rec.field_flags & kStaticEntityHasEntityFlags) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
-		if (rec.field_flags & 0x0040) rec.bone_a = c.u8();
-		if (rec.field_flags & 0x0080) rec.bone_b = c.u8();
-		if (rec.field_flags & 0x0100) rec.score_flag = c.u8();
+		if (rec.field_flags & kStaticEntityHasRefNum) rec.bone_a = c.u8();
+		if (rec.field_flags & kStaticEntityHasSubType) rec.bone_b = c.u8();
+		if (rec.field_flags & kStaticEntityHasScoreFlag) rec.score_flag = c.u8();
 		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
-		if (rec.weapon_byte != 0 || (rec.field_flags & 0x0200)) rec.attach_ref = c.u16();
+		if (rec.weapon_byte != 0 || (rec.field_flags & kStaticEntityHasAttachRef)) rec.attach_ref = c.u16();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
