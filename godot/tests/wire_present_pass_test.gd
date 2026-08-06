@@ -527,6 +527,57 @@ func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:
 	assert_not_null(presenter.resolve_wire_handle(0x0010))
 
 
+func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void:
+	# The HOST runs this pass in full mode with the mission defer index. An
+	# admitted player (spawn_player_entity) has NO authored .bms placement, so its
+	# row carries the none/synthetic origin (kind 255, index 0xFFFFFF) and must
+	# BUILD here — the defer gate only owns real placed identities. (The Entity
+	# spawn-origin default 0 once presented as authored kind 0/index 0; the gate
+	# deferred the row to a placed node that does not exist and the joiner avatar
+	# never built on the host.) The host's OWN player row still belongs to
+	# LocalPlayerPresenter and is filtered by handle, not by origin.
+	var sim := FakeSim.new()
+	sim.local_player_handle = 1
+	sim.entities = [
+		{
+			"type_id": 0x14B9,
+			"handle": 1,
+			"kind": 255,
+			"index": 0xFFFFFF,
+			"bms_id": 0xFFF0,
+		},
+		{
+			"type_id": 0x14B9,
+			"handle": 2,
+			"kind": 255,
+			"index": 0xFFFFFF,
+			"bms_id": 0xFFF1,
+			"x": 7.0,
+		},
+	]
+	var placer := ResolvingFakePlacer.new()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var index := CountingDeferIndex.new()
+	var presenter := WirePresentPass.new()
+	presenter.setup(sim, placer, container, null, index)
+	presenter.present()
+	assert_eq(placer.built.size(), 1,
+			"exactly the remote player materializes: local by handle, remote as a wire avatar")
+	assert_null(presenter.resolve_wire_handle(1),
+			"the host's own player row stays with LocalPlayerPresenter")
+	var avatar := presenter.resolve_wire_handle(2)
+	assert_not_null(avatar, "the admitted player's avatar node exists on the host")
+	if avatar != null:
+		assert_almost_eq(avatar.position.x, 7.0, 0.001)
+		var ref: Dictionary = avatar.get_meta("entity_ref", {})
+		assert_eq(int(ref.get("runtime_type_id", 0)), 0x14B9)
+		assert_eq(int(ref.get("item_id", 0)), 0x14B9 + 100000,
+				"the runtime player type resolves through the placer's visual mapping")
+	assert_eq(index.resolve_calls, 0,
+			"synthetic-origin rows never consult the placed-node defer index")
+
+
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
 	var sim := RevisionFakeSim.new()
 	sim.entities = [

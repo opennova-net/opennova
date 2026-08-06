@@ -2018,8 +2018,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# the surrendered preload sim, consumed once per load) into the runtime's
 	# options — MissionRuntime alone adopts opts["simulation"] (ADR 0011/0012).
 	_net_drive.stage_runtime_options(opts)
-	# The placer + environment node let the joiner's wire present pass resolve + light its
-	# remote-entity avatars (build_player_animated_model); unused by the host present path.
+	# The placer + environment node let the wire present pass resolve + light its
+	# remote-entity avatars (build_player_animated_model): every remote row on a
+	# joiner, and the admitted players' synthetic-origin rows on the host.
 	opts["placer"] = _placer
 	opts["env_node"] = _env
 	# The occlusion-claim set the present pass consults (two-bit visibility

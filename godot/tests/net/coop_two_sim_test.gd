@@ -634,12 +634,28 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host_own: int = host.get_local_player_wire_handle()
 	var hsnap: PackedFloat32Array = host.get_present_snapshot()
 	var host_sees_joiner := false
+	var host_joiner_type := -1
+	var host_joiner_kind := -1
+	var host_joiner_index := -1
 	for rec in range(hsnap.size() / stride):
 		var base := rec * stride
-		if int(hsnap[base + NovaSimulation.PF_KIND]) == 0 \
+		if int(hsnap[base + NovaSimulation.PF_TYPE_ID]) == 0x14B9 \
 				and int(hsnap[base + NovaSimulation.PF_WIRE_HANDLE]) != host_own:
 			host_sees_joiner = true
+			host_joiner_type = int(hsnap[base + NovaSimulation.PF_TYPE_ID])
+			host_joiner_kind = int(hsnap[base + NovaSimulation.PF_KIND])
+			host_joiner_index = int(hsnap[base + NovaSimulation.PF_INDEX])
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
+	assert_eq(host_joiner_type, 0x14B9,
+			"the host's joiner row resolves the player runtime type so the wire pass builds its avatar")
+	# An admitted player has NO authored .bms identity: its row must carry the
+	# none/synthetic spawn origin (kind 255, index 0xFFFFFF). The Entity default 0
+	# reads as authored record (kind 0, index 0), which the host's wire present pass
+	# DEFERS to a placed node that does not exist — the joiner avatar never builds.
+	assert_eq(host_joiner_kind, 255,
+			"the admitted joiner row carries the synthetic origin kind, not a fake authored identity")
+	assert_eq(host_joiner_index, 0xFFFFFF,
+			"the admitted joiner row carries the synthetic origin index sentinel")
 	var host_remote_adm := ""
 	var host_remote_index := -1
 	for ai_index in range(host.get_entity_count()):
