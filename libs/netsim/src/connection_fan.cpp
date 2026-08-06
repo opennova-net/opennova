@@ -9,6 +9,7 @@
 
 #include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
+#include <npwire/game_type.h>
 #include <npwire/ingame_message_id.h>
 #include <world/geom.h>              // to_fixed
 #include <world/vehicle_mount.h>
@@ -108,7 +109,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// g_GameType bit 0x20000 is set (Co-op 0x30020 is the captured case).
 		// The masks are the authoritative World::subgoals state consumed by
 		// the objective HUD on each recipient.
-		fu.objective.present = (game_type & 0x20000u) != 0u;
+		fu.objective.present = opennova::game_type::is_objective(game_type);
 		fu.objective.state[0] = static_cast<int32_t>(subgoals.won);
 		fu.objective.state[1] = static_cast<int32_t>(subgoals.lost);
 		fu.objective.state[2] = static_cast<int32_t>(subgoals.show_win);
@@ -640,7 +641,7 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 	case 0: bytes = 12 + 2 + 11 + 7 + 1; break;
 	case 1: bytes = 12 + 2 + 6 + 7 + 1; break;
 	case 2: bytes = 12 + 2 + 11 + 7 + 1; break;
-	default: bytes = 12 + 2 + (((game_type & 0x20000u) != 0u) ? 16 : 0) + 7 + 1; break;
+	default: bytes = 12 + 2 + (opennova::game_type::is_objective(game_type) ? 16 : 0) + 7 + 1; break;
 	}
 	if ((flags2 & 0x0Fu) == 8u)
 		bytes += hdr.mount_ammo.mount_handle == 0xFFFFu ? 2u : 6u;

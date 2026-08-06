@@ -9,8 +9,10 @@
 #include <utility>
 
 #include <io/le.h>
+#include <npwire/game_type.h>
 
 namespace opennova::np {
+namespace gtype = opennova::game_type;
 namespace {
 
 // [orig: ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport @0x530A60
@@ -39,18 +41,18 @@ bool ascii_iequals(std::string_view a, std::string_view b) {
 }
 
 const char *score_game_type_name(uint32_t game_type) {
-	if (game_type == 0) return "DM";
-	if (game_type == 0x10000u) return "TDM";
-	if ((game_type & 0xFFFDFFFFu) == 0x10020u) return "COOP";
+	if (game_type == gtype::kDeathmatch) return "DM";
+	if (game_type == gtype::kTeamDeathmatch) return "TDM";
+	if (gtype::is_waypoint_family(game_type)) return "COOP";
 	switch (game_type) {
-	case 0x10001u: return "TKOTH";
-	case 0x00001u: return "KOTH";
-	case 0x90002u: return "SD";
-	case 0x10002u: return "AD";
-	case 0x10004u: return "CTF";
-	case 0x10008u: return "FB";
-	case 0x10010u: return "AAS";
-	case 0x50010u: return "CAC";
+	case gtype::kTeamKingOfTheHill: return "TKOTH";
+	case gtype::kKingOfTheHill: return "KOTH";
+	case gtype::kSearchAndDestroy: return "SD";
+	case gtype::kAttackDefend: return "AD";
+	case gtype::kCaptureTheFlag: return "CTF";
+	case gtype::kFlagBall: return "FB";
+	case gtype::kAdvanceAndSecure: return "AAS";
+	case gtype::kConquerAndControl: return "CAC";
 	default:
 		// Retail normalizes its unknown/nonzero row 0 to the Co-op score row.
 		return "COOP";
@@ -58,10 +60,9 @@ const char *score_game_type_name(uint32_t game_type) {
 }
 
 uint8_t session_status_game_type_index(uint32_t game_type) {
-	if (game_type == 0) return 11;
-	if (game_type == 0x10000u) return 1;
-	if ((game_type & 0xFFFDFFFFu) == 0x10020u &&
-	    (game_type & 0x20000u) != 0)
+	if (game_type == gtype::kDeathmatch) return 11;
+	if (game_type == gtype::kTeamDeathmatch) return 1;
+	if (gtype::is_waypoint_family(game_type) && gtype::is_objective(game_type))
 		return 2;
 	switch (game_type) {
 	case 0x10001u: return 3;
@@ -156,20 +157,20 @@ std::vector<uint8_t> serialize_session_status(
 
 	std::vector<std::pair<uint8_t, uint32_t>> options;
 	const uint32_t game_type = config.game_type;
-	if ((game_type & 0xFFFDFFFFu) == 0x10020u && active_players > 0) {
+	if (gtype::is_waypoint_family(game_type) && active_players > 0) {
 		options.emplace_back(
 				9, std::min<uint32_t>(active_players, 8));
 	}
-	if (game_type == 0 || game_type == 0x10000u) {
+	if (game_type == gtype::kDeathmatch || game_type == gtype::kTeamDeathmatch) {
 		options.emplace_back(1, config.score_limit);
 	}
-	if (game_type == 0x00001u || game_type == 0x10001u) {
+	if (game_type == gtype::kKingOfTheHill || game_type == gtype::kTeamKingOfTheHill) {
 		options.emplace_back(2, config.time_limit_minutes);
 	}
 	// Every live non-objective session with a nonzero respawn time appends key
 	// 8. Objective Co-op (0x30020) suppresses it; training Co-op (0x10020)
 	// therefore carries both key 9 and key 8 in the retail oracle.
-	if ((game_type & 0x20000u) == 0 && config.respawn_time != 0) {
+	if (!gtype::is_objective(game_type) && config.respawn_time != 0) {
 		options.emplace_back(8, config.respawn_time);
 	}
 	if (options.size() > 8) options.resize(8);

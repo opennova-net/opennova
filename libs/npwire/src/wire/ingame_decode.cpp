@@ -449,7 +449,7 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 	out.slot_id = c.u16();
 	if (!c.ok) return false;
 	// Sentinel: retail returns before reading anything else (@ 0x4337c5).
-	if (out.slot_id == 0xFFFF) return (c.p == c.end);
+	if (out.slot_id == wire_handle::kInvalid) return (c.p == c.end);
 	out.item_type_id = c.u16();
 	out.item_type = c.u8();
 	out.team = c.u8();

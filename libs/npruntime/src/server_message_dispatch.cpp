@@ -10,6 +10,7 @@
 
 #include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
+#include <npwire/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
 #include <npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <npwire/ingame_message_id.h>
@@ -259,7 +260,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
                                                  const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
 	const std::string &advertised_mission =
-			((cfg.game_type & 0xFFFDFFFFu) == 0x00010020u)
+			game_type::is_waypoint_family(cfg.game_type)
 					? cfg.mission_file
 					: cfg.mission_name;
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
@@ -281,9 +282,7 @@ std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg) {
 	// Retail's serialize_mission_info_to_datastream @0x523620 substitutes the
 	// map filename only for the stock Co-op selector. Objective/waypoint Co-op
 	// (bit 0x20000) and every other mode retain MissionText's display title.
-	const bool uses_coop_filename =
-			(cfg.game_type & 0xFFFDFFFFu) == 0x00010020u &&
-			(cfg.game_type & 0x00020000u) == 0;
+	const bool uses_coop_filename = game_type::is_stock_coop(cfg.game_type);
 	append_string_kv(
 			info_body,
 			"MISSIONNAME",

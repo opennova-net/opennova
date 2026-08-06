@@ -31,6 +31,7 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
+#include <npwire/game_type.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_catalog.h>
 #include <npwire/ingame_message_id.h>
@@ -375,8 +376,8 @@ std::unordered_map<uint16_t, EntityClass> g_item_class;
 // into the gated decoders: 0x0F waypoint records ((g & 0xFFFDFFFF)==0x10020) and
 // 0x0A objective sub-block 3 (g & 0x20000). 0 until the first 0x7B is seen.
 uint32_t g_game_type = 0;
-inline bool gt_is_waypoint() { return (g_game_type & 0xFFFDFFFFu) == 0x10020u; }
-inline bool gt_is_objective() { return (g_game_type & 0x20000u) != 0; }
+inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type); }
+inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
 
 const char *class_name(EntityClass c) {
 	switch (c) {

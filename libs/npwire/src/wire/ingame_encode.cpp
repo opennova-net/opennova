@@ -505,7 +505,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	w.u8(fu.flags1);
 	w.u8(fu.flags2);
 
-	switch (fu.flags2 & 0x03) {
+	switch (fu.flags2 & kFrameFlags2SubBlockCycleMask) {
 	case 0: // weapon/reload/uniform (11 B) [orig: NetPacket_WritePlayerState @0x4ff81b]
 		w.u8(fu.weapon.preround_timer); w.u8(fu.weapon.slot_state360); w.u8(fu.weapon.slot_state368);
 		w.u8(fu.weapon.slot_state364); w.u8(fu.weapon.slot_state356); w.u8(fu.weapon.slot_state460);

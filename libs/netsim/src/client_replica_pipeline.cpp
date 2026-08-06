@@ -5,6 +5,7 @@
 #include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <world/infantry.h>            // IRootMotionSource + the anim flag/state tables
 #include <world/world.h>               // exact mission PRNG seed
+#include <npwire/game_type.h>
 #include <npwire/ingame_message_id.h>
 #include <io/bam.h>                      // wrapped retail pitch chase
 
@@ -1488,7 +1489,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
-	                    (game_type_ & 0x20000u) != 0u);
+	                    game_type::is_objective(game_type_));
 
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
