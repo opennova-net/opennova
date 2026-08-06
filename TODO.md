@@ -33,6 +33,16 @@ hardening, and project health. Divergences from the original engine belong in
 
 ## Cleanup & verification backlog
 
+- [ ] Retail-LAN parity 24-cell verdict (`PARITY_STATUS`): blocked on a cross-repo
+      harness defect — the opennova-int MCP's single-role `onhook_host_lan`/
+      `onhook_join_lan` pass role config via child env and never render `onhook.cfg`,
+      so `generate_parity_manifest.ps1` rejects every RO/OO server cfg snapshot
+      ("lacks one exact LanHostCallsign"). Fix belongs in opennova-int (make
+      `LaunchLanRole` render the cfg like the `onhook_run_lan_pair` half); when it
+      lands, run a full 24-cell suite under a NEW SuitePrefix to produce the verdict.
+      Until then acceptance rests on the wire-ready witnesses + `diff_vs_golden.ps1`
+      gates (both GREEN on the 2026-08-05 suites, 24/24 cells captured cleanly).
+      Details: `.agents/retail-lan-parity.md` §9
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       `libs/terrain` carries 22 anchors across 15 files and `godot/engine/terrain/` 18
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the

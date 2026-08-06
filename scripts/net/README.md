@@ -491,20 +491,29 @@ Promote a sanitized golden under `.scratch\golden\`.
 
 ## Reference captures (`.scratch/golden/`, local-only — never commit)
 
-Two retail↔retail LAN goldens captured 2026-06-26 (single box, own LAN IP, host
-`:32768` <-> joiner `:32769`, captured on the loopback adapter). Decode with
-`--items <ITEMS.DEF>` (use `~/Desktop/JOX/ITEMS.DEF`) — without it the `0x0a`
-per-frame-update records can't be length-resolved and print `(DECODE INCOMPLETE)`.
+The golden bank the `NW_GOLDEN_*` env vars point at (gating matrix:
+`docs/asset-gated-tests.md`). Decode with `--items <ITEMS.DEF>` (use
+`~/Desktop/JOX/ITEMS.DEF`) — without it the `0x0a` per-frame-update records can't be
+length-resolved and print `(DECODE INCOMPLETE)`.
+
+Current bank — the 2026-08-05 retail-LAN parity round (mission 01TR, hash-bound
+wire-ready captures; runbook `.agents/retail-lan-parity.md`):
 
 | File | Contents |
 | --- | --- |
-| `retail-lan-host-join.pcapng` | Join reference — 494 dgrams: LAN discovery + handshake (`0x00/0x02/0x61`) + world-load (`0x10/0x0d/0x45/0x20`) + early in-match. Mission TDH_I5A. |
-| `retail-lan-host-join-session.pcapng` | Same join, session-only (374, no discovery). |
-| `retail-gameplay-session.pcapng` | In-match reference — ~8 min full co-op, mission ASH_G3D ("AS - Palu Cut Rice Paddies"): `0x0a`x2361 / `0x0c`x2351 replication loop, fired-round `0x06`, kills `0x26`, objective `0x1e`, deployed-item `0x59`, capture-zone `0x40`. Zero S2C `0x25` (no pre-deploy GameReset). |
+| `retail-lan-01tr-join-20260805.pcapng` | Join reference (`NW_GOLDEN_LAN_JOIN`). |
+| `retail-lan-01tr-join-session-20260805.pcap` | Same join, session-only (`NW_GOLDEN_LAN_JOIN_SESSION`). |
+| `retail-gameplay-01tr-20260805.pcap` | Retail↔retail in-match reference (`NW_GOLDEN_GAMEPLAY`). |
+| `opennova-host-retail-client-01tr-20260805.pcap` | OpenNova host + retail client (`NW_GOLDEN_OURS`, the "ours" side of `nw_golden_diff`). |
 
-Each has a `.pcapng.txt` decode (regenerate with `decode.ps1 -Items <ITEMS.DEF>`).
-These are the oracle to diff OpenNova-host-vs-retail-joiner against when chasing the
-join "floating / no map entities" bug.
+The 2026-06-26 trio (`retail-lan-host-join.pcapng` TDH_I5A join,
+`retail-lan-host-join-session.pcapng` session-only, `retail-gameplay-session.pcapng`
+~8 min ASH_G3D co-op) is retained beside it and remains the compiled-in `DEFAULT_*`
+fallback in `tests/CMakeLists.txt` when the env vars are unset;
+`retail-vehicle-session.pcapng` feeds the netsim capture-parent-follow gate. Each
+capture has a decode sidecar (regenerate with `decode.ps1 -Items <ITEMS.DEF>`); the
+2026-08-05 bank also carries `retail-lan-parity-20260805.NOTES.md`. These are the
+oracle side of `diff_vs_golden.ps1`.
 
 ## Capture + validate-vs-golden loop (the consolidation harness)
 
