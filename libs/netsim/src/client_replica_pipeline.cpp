@@ -7,6 +7,7 @@
 #include <world/world.h>               // exact mission PRNG seed
 #include <npwire/game_type.h>
 #include <npwire/ingame_message_id.h>
+#include <npwire/wire_handle.h>
 #include <io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
@@ -206,7 +207,7 @@ std::vector<EntityDeathRecord> ClientReplicaPipeline::drain_entity_deaths() {
 void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 		int16_t killer_source) {
 	const world::EntityHandle handle{handle_packed};
-	if (handle_packed == 0xFFFFu ||
+	if (handle_packed == wire_handle::kInvalid ||
 			handle.pool() >= world::kEntityPoolCount ||
 			static_cast<std::size_t>(handle.slot()) >=
 					world::retail_pool_capacity(handle.pool()))
@@ -729,7 +730,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		// reused; carrier_handle still records that the row is blocked on an
 		// attachment. Hold its last world pose until a resolvable carried sample
 		// (or an explicit free-standing sample) arrives.
-		if (es.carrier_handle != 0xFFFFu) continue;
+		if (es.carrier_handle != wire_handle::kInvalid) continue;
 		// The universal mover-skip: wire bit0 (carried-object/killed/not-ready
 		// — NOT seat mounts, which stream 0x40) freezes the row at its staged
 		// pose [orig: the Flags&1 early return @0x4b9a03 / the body-pass twin;
@@ -1115,7 +1116,7 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	for (int depth = 0; depth < 8; ++depth) {
 		const std::size_t before = retired.size();
 		for (const ClientEntityState &entity : state_.entities) {
-			if (entity.parent_handle == 0xFFFFu) continue;
+			if (entity.parent_handle == wire_handle::kInvalid) continue;
 			if (std::find(retired.begin(), retired.end(), entity.parent_handle) ==
 					retired.end())
 				continue;
@@ -1140,7 +1141,7 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 //  indices, resolved with Pool_GetEntryUnchecked(0, idx), so the wire handle is
 //  (0 << 12) | idx]
 void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
-	if ((pool0_index & 0xF000u) != 0u) return; // not a pool-0 slot index
+	if (wire_handle::pool(pool0_index) != wire_handle::kPoolOrganic) return; // not a pool-0 slot index
 	if (state_.find(pool0_index) == nullptr) return;
 	erase_entity_tree(pool0_index);
 }
@@ -1193,20 +1194,20 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 	// Without model bone tables at this layer, the recompose below carries the
 	// rigid child-in-carrier pose captured from the 0x0D absolutes — the same
 	// client-subset simplification the parent-follow path already pins.
-	std::vector<uint16_t> persistent_carrier(state_.entities.size(), 0xFFFFu);
+	std::vector<uint16_t> persistent_carrier(state_.entities.size(), wire_handle::kInvalid);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
-		if (child.target_handle == 0xFFFFu && child.parent_handle == 0xFFFFu)
+		if (child.target_handle == wire_handle::kInvalid && child.parent_handle == wire_handle::kInvalid)
 			continue; // no carrier candidate — skip the catalog lookup
 		if (classify(child.type_id) != EntityClass::NoNetworkCallback)
 			continue;
 		// The 0x0D TARGET is the structural carrier (groundEntity/+40) and
 		// outranks any parent: retail's transform never reads +368.
-		if (child.target_handle != 0xFFFFu) {
+		if (child.target_handle != wire_handle::kInvalid) {
 			persistent_carrier[i] = child.target_handle;
 			continue;
 		}
-		if (child.parent_handle == 0xFFFFu) continue;
+		if (child.parent_handle == wire_handle::kInvalid) continue;
 		// A POOL-0 parent on a no-callback child is the occupant/driver
 		// back-reference, never a transform parent (live retail 0x0D witness,
 		// 00TRg 2026-08-04: an OCCUPIED "50cal on 180 tripod" spawns with
@@ -1234,7 +1235,7 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 			// successfully resolved local sample. A missing carrier invalidates
 			// the sample rather than leaving an offset that could attach to a
 			// later handle reuse.
-			if (child.net_seat_valid && child.carrier_handle != 0xFFFFu) {
+			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid) {
 				const ClientEntityState *carrier = find_row(child.carrier_handle);
 				if (carrier == nullptr) {
 					child.net_seat_valid = false;
@@ -1260,7 +1261,7 @@ void ClientReplicaPipeline::refresh_carried_entities() {
 				}
 			}
 
-			if (persistent_carrier[child_index] == 0xFFFFu) continue;
+			if (persistent_carrier[child_index] == wire_handle::kInvalid) continue;
 			// Only the addeweap/no-callback family rides this persistent
 			// recompose: those children never receive compact motion samples,
 			// so the load-time 0x0D target/parent relation is their only pose
@@ -1586,14 +1587,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			record_folded[rec_i] = 1u;
 			continue;
 		}
-		uint16_t record_carrier = 0xFFFFu;
+		uint16_t record_carrier = wire_handle::kInvalid;
 		if (rec.cls == EntityClass::Player)
 			record_carrier = rec.player.carrier_handle;
 		else if (rec.cls == EntityClass::Vehicle)
 			record_carrier = rec.vehicle.parent_slot_handle;
 		else if (rec.cls == EntityClass::Infantry)
 			record_carrier = rec.infantry.vehicle_slot_handle;
-		if (record_carrier != 0xFFFFu &&
+		if (record_carrier != wire_handle::kInvalid &&
 				state_.find(record_carrier) == nullptr) {
 			if (sweep == 0) continue; // the carrier may appear this frame
 			queue_carrier_repair(record_carrier);
@@ -1630,7 +1631,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Every compact record is a complete sample of these organic fields. Clear the
 		// normalized row before class-specific assignment so dismounts and class changes
 		// cannot retain a stale carrier/bone selector from an earlier frame.
-		es.carrier_handle = 0xFFFFu;
+		es.carrier_handle = wire_handle::kInvalid;
 		es.mount_bone = 0;
 		es.seat_type = 0;
 		// Carrier identity and its resolved local pose form one atomic sample.
@@ -1712,7 +1713,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.equipped_adm_index = rec.player.anim_def_index;
 			es.state_flags = rec.player.state_flags;
 			es.move_input = rec.player.move_input_byte;
-			if (rec.player.carrier_handle != 0xFFFFu) {
+			if (rec.player.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
 						rec.player.yaw_byte, /*compose_yaw=*/true});
@@ -1744,7 +1745,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// (re-landed nulled included, D-NET-195) so the per-tick seat-follow
 			// can ride a resolving deck carrier between records.
 			es.carrier_handle = rec.vehicle.parent_slot_handle;
-			if (rec.vehicle.parent_slot_handle != 0xFFFFu) {
+			if (rec.vehicle.parent_slot_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.vehicle.parent_slot_handle, cx, cy, cz,
 						0, /*compose_yaw=*/false});
@@ -1790,12 +1791,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// entity+0x14. Retail's remote gunner rebuilds the latter locally
 			// with the same wrapped one-eighth chase as authoritative AI.
 			// [orig: chase @0x4bef7b..0x4bef97]
-			if (rec.infantry.vehicle_slot_handle != 0xFFFFu &&
+			if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid &&
 					rec.infantry.seat_bone_idx != 0) {
 				es.pitch_bam = chase_infantry_pitch(
 						es.pitch_bam, rec.infantry.aim_yaw_byte);
 			}
-			if (rec.infantry.vehicle_slot_handle != 0xFFFFu) {
+			if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
 						rec.infantry.yaw_byte, /*compose_yaw=*/true});
@@ -1840,7 +1841,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 					(has_state_flags &&
 							(state_flags &
 									(0x01u | world::kEntityFlagDead)) != 0u) ||
-					es.carrier_handle != 0xFFFFu;
+					es.carrier_handle != wire_handle::kInvalid;
 			if (row_frozen || respawned_this_record) row_channel_disarm(es);
 		}
 		// A free-standing record clears any retained seat-local pose — the
