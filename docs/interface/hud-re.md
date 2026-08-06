@@ -1014,3 +1014,10 @@ Read-only re-witness 2026-07-19 (no IDB mutations applied):
 - `SIGHTS` rows are the selected card's content/fallback input, not the
   selector. The post-clear bytes gate the calls at
   `0x5caaf3..0x5cab15`.
+
+## Ledger de-table transplants (2026-08-06)
+
+Closed ledger rows whose full text previously lived only in the divergence
+ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
+
+- **D-HUD-10** [FIXED 2026-07-11 (weapon round: `aim_screen_point()` = INF in 1P -> the HUD pins the exact center; the 3P projection uses the witnessed 1000.0 far point)] Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_camera_mode` project `Entity_BuildCameraView` `@ 0x592910`)

@@ -77,3 +77,10 @@ D-CBIN-1's markup grill.
 - Reimpl: `libs/cbin` (`cbin.h`/`cbin.cpp`), `libs/refs/src/refs_cbin.cpp`,
   `godot/engine/cbin` (credits resource + player), the ONED credits editor.
 - The one tracked credits divergence: `D-MNU-6` ([mnu/menu-re.md](../mnu/menu-re.md)).
+
+## Ledger de-table transplants (2026-08-06)
+
+Closed ledger rows whose full text previously lived only in the divergence
+ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
+
+- **D-CBIN-2** [RESOLVED (MATCHING)] Read path CONFIRMED: 8 rol-7 cipher sites in the CBIN codec region (0x75e158-0x75e914) incl. decode loops (`@0x75e473` read+decipher) — retail READS CBIN, not just writes; our symmetric decode matches

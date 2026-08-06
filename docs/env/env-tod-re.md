@@ -1199,3 +1199,10 @@ fall-through caller's analysis).
 
 Plus comments at 0x578fbb (normal formula), 0x5790d0 (half-height anchor), 0x579b42
 (textureless flat pass), 0x677040 (fog color path).
+
+## Ledger de-table transplants (2026-08-06)
+
+Closed ledger rows whose full text previously lived only in the divergence
+ledger, transplanted verbatim at the 2026-08-06 compaction (Standing rule 6).
+
+- **env #35** [FIXED (2026-07-10): the LUT is a committed 256-byte constant — the deterministic instance every existing pin was generated from; landmarks + symmetry sum unchanged; the retail-instance byte check rides the pinned-current caveat (env-tod-re.md #35)] Water sine LUT provenance: the runtime `std::sin` build forked per libm at trunc boundaries (the GitHub `macos-26-arm64` image flipped non-landmark bytes and every downstream noise pixel — `env_render_unit` red on macOS only, 2026-07-10); the original builds ONE deterministic instance via x87 fsin `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334]`
