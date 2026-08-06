@@ -1,6 +1,7 @@
 add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
+    src/tick_accumulator.cpp
     src/waypoint_track.cpp
     src/ai_combat.cpp     # acquisition, engagement, commands
     src/ai_handlers.cpp   # scoring, state names, per-state handlers + the table

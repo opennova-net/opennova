@@ -48,7 +48,7 @@ var _node_spawned_callback := Callable()
 # instance per pass; the mission pass facade owns its own separately). This
 # facade additionally owns cold-plan completeness while materialization drains.
 var _applier := NovaPresentApplier.new()
-const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # MissionRuntime.MAX_CATCHUP_TICKS
+const MAX_REMOTE_BODY_CATCHUP_TICKS := 31 # world::TickAccumulator::kMaxCatchupTicks (S14)
 # Building one streamed model can synchronously load/assemble enough Godot
 # resources to take a substantial part of a frame — a platform resource-assembly
 # cost with no retail counterpart (retail materializes its world stream under

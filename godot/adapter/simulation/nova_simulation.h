@@ -33,6 +33,7 @@
 #include "wac/nova_wac_program.h"
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
+#include <world/tick_accumulator.h>
 #include <world/collision.h>
 #include <world/occlusion.h>
 #include <world/player_input.h>
@@ -296,6 +297,8 @@ private:
 	// radius extraction reads. Render caches stay render-only.
 	Ref<NovaResourceRoot> asset_root_;
 	opennova::simassets::SimModelCache sim_models_;
+	// The 62.5 Hz real-time bank (S14, [orig: Game_MainLoop @ 0x52b630]).
+	opennova::world::TickAccumulator tick_accum_;
 	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
 	std::unordered_map<std::string, int32_t> collision_occlusion_by_graphic_;
 	std::unordered_map<std::string, float> collision_radius_by_graphic_;
@@ -1111,6 +1114,19 @@ public:
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
 	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
 	bool is_joiner() const { return joiner_; }
+	// True while a live net session owns this sim: the world tick is the ONLY
+	// pump for the session socket, so the Play/Step/Stop transport locks out
+	// (retail multiplayer has no pause; a stopped listen host reaps every
+	// joiner at cs_dir0.timeout_ms [orig: CNapiNetwork_Init @ 0x4ca4a0]).
+	// The single home for the rule — F3 transport, MCP, and the ESC pause all
+	// read this predicate.
+	bool is_transport_locked() const { return joiner_ || host_listen_; }
+	// The fixed-62.5 Hz wall-clock bank [orig: Game_MainLoop @ 0x52b630]:
+	// returns the logic ticks due for `delta` banked seconds (0..31). The
+	// shell runs that many step() calls and presents once after the batch.
+	int bank_realtime(double p_delta) { return tick_accum_.bank(p_delta); }
+	// Discard banked wall-clock (Play/Step/Stop transitions).
+	void reset_tick_bank() { tick_accum_.reset(); }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);

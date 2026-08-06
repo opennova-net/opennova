@@ -933,6 +933,12 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+add_executable(tick_accumulator_test world/tick_accumulator_test.cpp)
+target_link_libraries(tick_accumulator_test PRIVATE opennova_world)
+target_include_directories(tick_accumulator_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tick_accumulator_test PRIVATE cxx_std_17)
+add_test(NAME tick_accumulator COMMAND tick_accumulator_test)
+
 # The player waypoint track (HUD waypoint label backing state).
 add_executable(waypoint_track_test world/waypoint_track_test.cpp)
 target_link_libraries(waypoint_track_test PRIVATE opennova_world)

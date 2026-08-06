@@ -30,6 +30,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_playing", "playing"), &NovaSimulation::set_playing);
 	ClassDB::bind_method(D_METHOD("is_playing"), &NovaSimulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &NovaSimulation::step);
+	ClassDB::bind_method(D_METHOD("bank_realtime", "delta"), &NovaSimulation::bank_realtime);
+	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &NovaSimulation::reset_tick_bank);
+	ClassDB::bind_method(D_METHOD("is_transport_locked"), &NovaSimulation::is_transport_locked);
 	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &NovaSimulation::set_terrain_til_data);

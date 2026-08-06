@@ -42,8 +42,10 @@ const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
 # independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
 # [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0 (one current_tick++ @ 0x24c1968)]
-const TICK_DT := 1.0 / 62.5          # 0.016 s; matches AiEventQueue::kFrameDt (world/ai.h)
-const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms / 16 ms accumulator cap
+# 0.016 s — the engine tick quantum, single-sourced natively as
+# world::TickAccumulator::kTickDt (S14); kept here for cadence CONSUMERS
+# (avatar preview's menu clock). The accumulator arithmetic itself is native.
+const TICK_DT := 1.0 / 62.5
 
 var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes on every role or tooling/test preview
@@ -65,7 +67,6 @@ var _perf_did_tick := false
 var _frame_stats: FrameStatsBoard = null
 var _runtime_probe_enabled := false
 var _has_trace_stats_sampling := false
-var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
 var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
 # Stable mission identity for shell-neutral diagnostics such as the F3 overlay.
@@ -944,7 +945,7 @@ func _feed_projectile_trace_stats() -> void:
 
 
 ## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
-## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
+## ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch. This is the faithful
 ## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
 ## host frame rate, with no inter-tick interpolation (present reads current sim state). A long frame
 ## runs several ticks; a short frame runs none but still presents current render-only state (camera,
@@ -956,8 +957,10 @@ func tick_realtime(delta: float) -> int:
 		return 0
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
-	_accum += delta
-	var n := int(_accum / TICK_DT)
+	# The bank/clamp arithmetic is the native world::TickAccumulator (S14,
+	# [orig: Game_MainLoop @ 0x52b630]); the loop + present-once-after-batch
+	# orchestration stays here in the shell.
+	var n := int(_sim.bank_realtime(delta))
 	if n <= 0:
 		# Retail evaluates entity submission every render frame. Camera mode and
 		# local attach/detach can change between fixed ticks, so the scene passes
@@ -972,10 +975,6 @@ func tick_realtime(delta: float) -> int:
 		_perf_tick_us = Time.get_ticks_usec() - tick_start
 		_perf_did_tick = false
 		return 0
-	_accum -= float(n) * TICK_DT
-	if n > MAX_CATCHUP_TICKS:
-		n = MAX_CATCHUP_TICKS
-		_accum = 0.0  # drop the backlog so a load hitch doesn't spiral into the next frames
 	var sim_us := 0
 	var effects_us := 0
 	var net_us := 0
@@ -1024,21 +1023,25 @@ func get_perf_counters() -> Dictionary:
 ## rule in the shell; this is the single home so the F3 transport, the perf probe
 ## and any future caller cannot bypass it.
 func is_transport_locked() -> bool:
+	# Delegates to the native predicate (S14) — one home for the rule.
 	if _sim == null:
 		return false
-	return bool(_sim.is_joiner()) or bool(_sim.is_host_listening())
+	return bool(_sim.is_transport_locked())
 
 
 func play() -> void:
 	_playing = true
-	_accum = 0.0  # discard wall-clock banked while paused / loading, so Play doesn't burst-catch-up
+	if _sim != null:
+		# Discard wall-clock banked while paused / loading, so Play doesn't burst-catch-up.
+		_sim.reset_tick_bank()
 
 
 func pause() -> void:
 	if is_transport_locked():
 		return
 	_playing = false
-	_accum = 0.0
+	if _sim != null:
+		_sim.reset_tick_bank()
 
 
 ## One manual debug/tooling tick: one logic tick + present, outside the real-time loop.
@@ -1049,7 +1052,8 @@ func step_once() -> void:
 	if is_transport_locked():
 		return
 	_playing = false
-	_accum = 0.0  # manual stepping is fully decoupled from wall-clock
+	if _sim != null:
+		_sim.reset_tick_bank()  # manual stepping is fully decoupled from wall-clock
 	tick()
 
 
@@ -1061,8 +1065,8 @@ func stop() -> void:
 	if is_transport_locked():
 		return
 	_playing = false
-	_accum = 0.0  # a Stop -> Play cycle must not replay banked time
 	if _sim != null:
+		_sim.reset_tick_bank()  # a Stop -> Play cycle must not replay banked time
 		_sim.restart()  # World::restore baseline (registry/vars/env/clock) + AI re-seed
 	_clear_present_effect_poses()
 	_restore_transforms()

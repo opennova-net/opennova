@@ -537,8 +537,9 @@ func test_tick_realtime_clamps_catchup() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container)
 	rt.play()
-	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's catch-up.
-	assert_eq(rt.tick_realtime(1.0), MissionRuntime.MAX_CATCHUP_TICKS, "a long stall is clamped to the catch-up cap")
+	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
+	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
+	assert_eq(rt.tick_realtime(1.0), 31, "a long stall is clamped to the catch-up cap")
 	# The clamp DROPS the backlog (no banked spiral): a tiny delta afterward fires nothing.
 	assert_eq(rt.tick_realtime(0.001), 0, "the backlog was dropped, not carried into the next frames")
 
