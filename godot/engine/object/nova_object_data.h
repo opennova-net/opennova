@@ -21,7 +21,6 @@
 #include <oed/oed.h>
 #include <tdp/tdp.h>
 #include <threedi/threedi_3di3.h>
-#include <threedi/threedi_ir.h>
 
 #include "resource_index/nova_resource_root.h"
 
@@ -38,13 +37,14 @@ private:
 		Ase,
 	};
 
-	ThreediModelIR ir = {};
+	// THE document: the parsed (or OED-built) 3DI3 model, edited in place.
+	// 3DI sources parse straight into it; project/ASE sources keep the model
+	// the OED session builds. There is no intermediate representation.
 	Threedi3di3 source_model = {};
 	TdpProject source_project = {};
 	OedSession *oed_session = nullptr;
 
 	SourceKind source_kind = SourceKind::Empty;
-	bool has_ir = false;
 	bool has_source_model = false;
 	bool has_source_project = false;
 	uint8_t oed_dirty_mask = 0;
@@ -112,12 +112,11 @@ private:
 	Error _open_3di_bytes(const String &p_name, const PackedByteArray &p_bytes);
 	Error _open_3dp(const String &p_path);
 	Error _open_ase(const String &p_path);
-	Error _build_ir_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
+	Error _build_model_from_project_session(const char *p_model_name, uint8_t p_dirty_mask = 0);
 	Error _rebuild_oed_session_from_project(uint8_t p_dirty_mask = 0);
 	Error _export_project_backed_3di(const String &p_path, uint8_t p_update_mask);
 	Error _export_patched_3di(const String &p_path);
-	Error _apply_ir_to_source_model();
-	TdpProject _build_project_from_ir() const;
+	TdpProject _build_project_from_model() const;
 	String _export_basename() const;
 	String _source_kind_name() const;
 	bool _effective_panm_for_lod(int p_lod_index,
@@ -138,10 +137,10 @@ public:
 	NovaObjectData();
 	~NovaObjectData();
 
-	// Native-side read access to the parsed IR. The collision sweep
+	// Native-side read access to the parsed model. The collision sweep
 	// (NovaSimulation::resolve_collision_instances) builds the runtime collision
 	// model from the CDTA block; GDScript keeps the curated getters only.
-	const ThreediModelIR &native_ir() const { return ir; }
+	const Threedi3di3 &native_model() const { return source_model; }
 
 	Error open_file(const String &p_path);
 	// Mounted .3DI loads also feed the retail-compatible network challenge registry.
@@ -237,15 +236,15 @@ public:
 	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
 	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
-	// Per-part parent-relative bone pivot (native model space, raw ThreediIRPart.rel_position),
+	// Per-part parent-relative bone pivot (native model space, raw ThreediRenderObject.rel),
 	// indexed by part index, for the given LOD -- the model's authoritative bone rest positions.
 	// The skeletal runtime feeds these to NovaSkeletalAnim in place of the .bad's lossy
 	// BadBone.position (roughly half the .bad corpus triplicates X into all 3 slots). Matches the
 	// original engine, which sources bone pivots from the model bone-def table, not the .bad.
 	// [orig: the modelDef+56 pivot table read by BoneAnim_BuildWorldMatrices @0x40c400.]
 	PackedVector3Array get_bone_origins(int p_lod_index = 0) const;
-	// Per-part parent index (raw ThreediIRPart.parent_index), indexed by part index, for the
-	// given LOD -- the model's authoritative bone hierarchy, paired with get_bone_origins as
+	// Per-part parent index (raw ThreediRenderObject.parent_index), indexed by part index, for
+	// the given LOD -- the model's authoritative bone hierarchy, paired with get_bone_origins as
 	// the model bone table. The root part's parent is itself in the file; NovaSkeletalAnim/
 	// sample_clip normalize that to -1. [orig: the modelDef+56 row's +20 parent index read by
 	// BoneAnim_BuildWorldMatrices @0x40c400 -- the FK hierarchy comes from the MODEL, never

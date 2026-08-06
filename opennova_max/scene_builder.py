@@ -20,6 +20,12 @@ from pyopennova.scene_naming import (
     build_volume_name as _build_volume_name,
     format_duplicate_suffix as _format_duplicate_suffix,
 )
+from pyopennova.threedi_ffi import (
+    THREEDI_LIGHT_FLAG_TYPE_TARGET,
+    THREEDI_MESH_SKINNED,
+    user_point_direction,
+    user_point_position,
+)
 
 
 class MaxSceneBuilder:
@@ -73,7 +79,6 @@ class MaxSceneBuilder:
                 self.ir.materials[i],
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
-                source_format=getattr(self.ir, "source_format", None),
                 uv1_tiling_override=self._uv1_tilings.get(
                     _material_index(self.ir.materials[i], i)
                 ),
@@ -113,7 +118,7 @@ class MaxSceneBuilder:
             self.bind_meshes_to_armature()
             # Animation keying is applied after all merged meshes have been
             # bound, so Skin captures the reset pose for the whole import.
-        elif int(getattr(self.ir, "mesh_type", 0)) == 3:
+        elif int(self.ir.header.mesh_type) == THREEDI_MESH_SKINNED:
             self.build_armature_from_parts(name)
             self.bind_meshes_to_armature()
 
@@ -137,7 +142,6 @@ class MaxSceneBuilder:
                 self.ir.materials[i],
                 resolver=self.resolver,
                 ctrl_resolver=self._resolve_ctrl_reg,
-                source_format=getattr(self.ir, "source_format", None),
                 uv1_tiling_override=self._uv1_tilings.get(
                     _material_index(self.ir.materials[i], i)
                 ),
@@ -167,7 +171,7 @@ class MaxSceneBuilder:
         material_names = self._material_names_manifest()
         for lod_idx in range(1, int(self.ir.lod_count)):
             lod = self.ir.lods[lod_idx]
-            if int(lod.part_count) == 0:
+            if int(lod.render_object_count) == 0:
                 continue
             lod_root, lod_part_nodes = build_part_hierarchy(
                 self.ir,
@@ -200,11 +204,11 @@ class MaxSceneBuilder:
 
         verts, faces = cube_mesh(0.015)
         mat = create_marker_material("user_point_white", (1.0, 1.0, 1.0))
-        for i in range(int(self.ir.userpoint_count)):
-            up = self.ir.userpoints[i]
+        for i in range(int(self.ir.user_point_count)):
+            up = self.ir.user_points[i]
             source_name = _decode(up.name)
-            display_idx = int(up.part_index) if int(up.part_index) >= 0 else 0
-            type_code = int(up.type_code)
+            display_idx = int(up.subobject_index) if int(up.subobject_index) >= 0 else 0
+            type_code = int(up.userpoint_type)
             if type_code and 32 <= type_code <= 126:
                 prefix = f"UP{chr(type_code)}"
             else:
@@ -213,12 +217,13 @@ class MaxSceneBuilder:
             if source_name:
                 marker_name += f" {source_name}"
 
-            raw = up.position
-            world_pos = (float(raw[0]), -float(raw[2]), float(raw[1]))
+            position = user_point_position(up)
+            direction = user_point_direction(up)
+            world_pos = (float(position[0]), -float(position[2]), float(position[1]))
             parent = self.root_object
             local_pos = world_pos
-            if 0 <= int(up.part_index) < len(self.part_nodes):
-                parent = self.part_nodes[int(up.part_index)]
+            if 0 <= int(up.subobject_index) < len(self.part_nodes):
+                parent = self.part_nodes[int(up.subobject_index)]
                 local_pos = vector_sub(world_pos, world_position(parent))
 
             marker = create_mesh_node(
@@ -231,11 +236,11 @@ class MaxSceneBuilder:
             )
             rt = _rt()
             _set_user_prop(rt, marker, "nl_ase_name", marker_name)
-            _set_user_prop(rt, marker, "nl_raw_position", _csv(up.position, 3))
-            _set_user_prop(rt, marker, "nl_raw_direction", _csv(up.direction, 3))
-            _set_user_prop(rt, marker, "nl_parent_index", int(up.part_index))
-            _set_user_prop(rt, marker, "nl_type_code", int(up.type_code))
-            _apply_direction_rotation(marker, up.direction)
+            _set_user_prop(rt, marker, "nl_raw_position", _csv(position, 3))
+            _set_user_prop(rt, marker, "nl_raw_direction", _csv(direction, 3))
+            _set_user_prop(rt, marker, "nl_parent_index", int(up.subobject_index))
+            _set_user_prop(rt, marker, "nl_type_code", int(up.userpoint_type))
+            _apply_direction_rotation(marker, direction)
 
     def create_scene_lights(self) -> None:
         from .mesh import set_parent_and_local_position
@@ -243,7 +248,7 @@ class MaxSceneBuilder:
         rt = _rt()
         for i in range(int(self.ir.light_count)):
             light = self.ir.lights[i]
-            light_idx = int(light.part_index) if int(light.part_index) >= 0 else i
+            light_idx = int(light.subobj_index)
             light_name = f"LP{light_idx + 1:02d}"
             try:
                 light_obj = rt.OmniLight()
@@ -257,17 +262,18 @@ class MaxSceneBuilder:
                 _byte(rgb[2]),
             ))
             _try_set(light_obj, "multiplier", 1.0)
-            if float(light.attenuation_end) > 0.0:
-                _try_set(light_obj, "farAttenEnd", float(light.attenuation_end))
+            if float(light.atten_end) > 0.0:
+                _try_set(light_obj, "farAttenEnd", float(light.atten_end))
                 _try_set(light_obj, "useFarAtten", True)
             local_pos = coords.render_space(light.offset)
 
-            _set_user_prop(rt, light_obj, "atten_start", float(light.attenuation_start))
-            _set_user_prop(rt, light_obj, "falloff", float(light.falloff))
+            _set_user_prop(rt, light_obj, "atten_start", float(light.atten_start))
+            _set_user_prop(rt, light_obj, "falloff", float(light.falloff_byte))
             rot = coords.render_space(light.rotation)
             _set_user_prop(rt, light_obj, "tm_row2", f"{rot[0]},{rot[1]},{rot[2]}")
-            if int(light.light_type) != 0:
-                _set_user_prop(rt, light_obj, "light_type", int(light.light_type))
+            light_type = 1 if int(light.flags) & THREEDI_LIGHT_FLAG_TYPE_TARGET else 0
+            if light_type != 0:
+                _set_user_prop(rt, light_obj, "light_type", light_type)
             if int(light.style) != 0:
                 _set_user_prop(rt, light_obj, "colorgen_style", int(light.style))
                 _set_user_prop(rt, light_obj, "colorgen_rate", float(light.rate) / 256.0)
@@ -288,8 +294,8 @@ class MaxSceneBuilder:
                 _set_user_prop(rt, light_obj, "disable_lightobjects", 1)
 
             parent = self.root_object
-            if 0 <= int(light.part_index) in self.part_nodes:
-                parent = self.part_nodes[int(light.part_index)]
+            if int(light.subobj_index) in self.part_nodes:
+                parent = self.part_nodes[int(light.subobj_index)]
             set_parent_and_local_position(light_obj, parent, local_pos)
 
     def create_collision_visualization(self) -> None:
@@ -299,18 +305,18 @@ class MaxSceneBuilder:
         if int(self.ir.lod_count) == 0:
             return
         lod0 = self.ir.lods[0]
-        part_count = int(lod0.part_count)
+        part_count = int(lod0.render_object_count)
         name_counters: dict[tuple[int, int], int] = {}
         volume_owners, volume_plane_starts = collision_volume_metadata(coll.contents)
 
         for vol_idx in range(int(coll.contents.volume_count)):
             vol = coll.contents.volumes[vol_idx]
-            owner_idx = volume_owners[vol_idx] if vol_idx < len(volume_owners) else -1
+            # BVOL records carry no owner index; the per-COBJ run order
+            # (collision_volume_metadata) attributes each volume to its object.
+            object_idx = volume_owners[vol_idx] if vol_idx < len(volume_owners) else -1
             plane_start = volume_plane_starts[vol_idx] if vol_idx < len(volume_plane_starts) else -1
-            object_idx = int(getattr(vol, "object_index", owner_idx))
-            part_idx = int(getattr(vol, "part_index", object_idx))
             try:
-                color = CollisionType(int(vol.type)).color
+                color = CollisionType(int(vol.collidable_type)).color
             except ValueError:
                 color = (1.0, 1.0, 1.0)
 
@@ -318,22 +324,27 @@ class MaxSceneBuilder:
             parent_pos = (0.0, 0.0, 0.0)
             if 0 <= object_idx < part_count:
                 parent = self.part_nodes.get(object_idx, self.root_object)
-                parent_pos = coords.render_space(lod0.parts[object_idx].abs_position)
-            elif 0 <= part_idx < part_count:
-                parent = self.part_nodes.get(part_idx, self.root_object)
-                parent_pos = coords.render_space(lod0.parts[part_idx].abs_position)
+                parent_pos = coords.render_space(lod0.render_objects[object_idx].abs)
 
-            world_min = coords.collision_space(vol.min)
-            world_max = coords.collision_space(vol.max)
+            world_min = coords.collision_space((
+                float(vol.min_x_fp16) / 65536.0,
+                float(vol.min_y_fp16) / 65536.0,
+                float(vol.min_z_fp16) / 65536.0,
+            ))
+            world_max = coords.collision_space((
+                float(vol.max_x_fp16) / 65536.0,
+                float(vol.max_y_fp16) / 65536.0,
+                float(vol.max_z_fp16) / 65536.0,
+            ))
             world_center = _vec_scale(_vec_add(world_min, world_max), 0.5)
             local_center = _vec_sub(world_center, parent_pos)
 
-            name_index = object_idx if object_idx >= 0 else part_idx
+            name_index = object_idx
             name_key = name_index if name_index >= 0 else -1
-            counter_key = (int(vol.type), name_key)
+            counter_key = (int(vol.collidable_type), name_key)
             name_counters[counter_key] = name_counters.get(counter_key, 0) + 1
             mesh_name = _build_volume_name(
-                int(vol.type), int(vol.flags), name_index, name_counters[counter_key]
+                int(vol.collidable_type), int(vol.flags), name_index, name_counters[counter_key]
             ) + "-colonly"
 
             halfspaces = []
@@ -345,7 +356,7 @@ class MaxSceneBuilder:
                 for p_idx in range(int(vol.plane_count)):
                     plane = coll.contents.planes[plane_start + p_idx]
                     n = coords.collision_space(plane.normal)
-                    halfspaces.append((n[0], n[1], n[2], float(plane.distance)))
+                    halfspaces.append((n[0], n[1], n[2], float(plane.radius)))
 
             vertices = faces = None
             if halfspaces:
@@ -412,8 +423,10 @@ class MaxSceneBuilder:
                 vertex_cursor += max(0, vert_count)
                 face_cursor += max(0, face_count)
                 continue
-            vert_start = int(getattr(occ_obj, "vertex_start", vertex_cursor))
-            face_start = int(getattr(occ_obj, "face_start", face_cursor))
+            # OCCL objects store no vertex/face start; the runs are laid out
+            # sequentially per object, so a running cursor recovers them.
+            vert_start = vertex_cursor
+            face_start = face_cursor
             vertex_cursor += max(0, vert_count)
             face_cursor += max(0, face_count)
             if vert_start + vert_count > occ["vertex_count"]:
@@ -423,8 +436,8 @@ class MaxSceneBuilder:
 
             occ_parent = int(occ_obj.parent_subobject_index)
             part_abs = (0.0, 0.0, 0.0)
-            if 0 <= occ_parent < int(lod0.part_count):
-                part_abs = coords.render_space(lod0.parts[occ_parent].abs_position)
+            if 0 <= occ_parent < int(lod0.render_object_count):
+                part_abs = coords.render_space(lod0.render_objects[occ_parent].abs)
 
             vertices = []
             for j in range(vert_count):
@@ -479,7 +492,7 @@ class MaxSceneBuilder:
         if int(self.ir.lod_count) == 0:
             return
         lod0 = self.ir.lods[0]
-        part_count = int(lod0.part_count)
+        part_count = int(lod0.render_object_count)
         if part_count <= 0:
             return
         rt = _rt()
@@ -490,10 +503,10 @@ class MaxSceneBuilder:
         self.armature_object = skeleton
         self.root_motion_node = None
 
-        abs_positions = [coords.render_space(lod0.parts[i].abs_position) for i in range(part_count)]
+        bone_positions = [coords.render_space(lod0.render_objects[i].abs) for i in range(part_count)]
         parent_indices = []
         for i in range(part_count):
-            pi = int(lod0.parts[i].parent_index)
+            pi = int(lod0.render_objects[i].parent_index)
             if pi < 0 or pi >= part_count or pi == i:
                 pi = -1
             parent_indices.append(pi)
@@ -501,9 +514,9 @@ class MaxSceneBuilder:
         self.bone_nodes = []
         self._bone_infos = []
         for i in range(part_count):
-            bone = _create_bone_or_dummy(f"BN{i + 1:02d}", abs_positions[i])
+            bone = _create_bone_or_dummy(f"BN{i + 1:02d}", bone_positions[i])
             self.bone_nodes.append(bone)
-            self._bone_infos.append((bone.name, parent_indices[i], abs_positions[i]))
+            self._bone_infos.append((bone.name, parent_indices[i], bone_positions[i]))
         for i, pi in enumerate(parent_indices):
             self.bone_nodes[i].parent = self.bone_nodes[pi] if pi >= 0 else skeleton
 
@@ -542,10 +555,10 @@ class MaxSceneBuilder:
             self.bone_nodes[i].parent = self.bone_nodes[parent_idx] if parent_idx >= 0 else skeleton
 
     def _bad_bone_start_position(self, bone_index: int, bone) -> tuple[float, float, float]:
-        if int(getattr(self.ir, "lod_count", 0)) > 0:
+        if int(self.ir.lod_count) > 0:
             lod0 = self.ir.lods[0]
-            if 0 <= bone_index < int(lod0.part_count):
-                return coords.render_space(lod0.parts[bone_index].abs_position)
+            if 0 <= bone_index < int(lod0.render_object_count):
+                return coords.render_space(lod0.render_objects[bone_index].abs)
         return coords.bone_space(bone.position)
 
     def bind_meshes_to_armature(self) -> None:
@@ -641,11 +654,11 @@ class MaxSceneBuilder:
                 apply_matrices
                 and lod is not None
                 and i < int(lod.part_animation_count)
-                and int(self.ir.matrix_count) > 0
+                and int(self.ir.mtrx.count) > 0
             ):
                 mi = int(lod.part_animations[i].matrix_index)
-                if mi != 0xFF and mi < int(self.ir.matrix_count):
-                    rot = mtrx_to_center_rotation(self.ir.matrices[mi].m)
+                if mi != 0xFF and mi < int(self.ir.mtrx.count):
+                    rot = mtrx_to_center_rotation(self.ir.mtrx.matrices[mi].m)
                     if rot is not None:
                         _apply_local_rotation_matrix(center, rot)
                 else:
@@ -663,10 +676,10 @@ class MaxSceneBuilder:
         lod = self.ir.lods[lod_idx]
         verts, faces = cube_mesh(0.012)
         counters: dict[int, int] = {}
-        for i in range(int(lod.part_count)):
+        for i in range(int(lod.render_object_count)):
             if i not in part_nodes:
                 continue
-            pi = int(lod.parts[i].parent_index)
+            pi = int(lod.render_objects[i].parent_index)
             if i == 0 or pi < 0:
                 continue
             count = counters.get(pi, 0)
@@ -707,11 +720,11 @@ class MaxSceneBuilder:
         )
 
     def _resolve_ctrl_reg(self, reg_index: int) -> str | None:
-        if reg_index < 0 or reg_index >= int(self.ir.control_register_count):
+        if reg_index < 0 or reg_index >= int(self.ir.ctrl.count):
             return None
-        if not self.ir.control_registers:
+        if not self.ir.ctrl.registers:
             return None
-        return _decode(self.ir.control_registers[reg_index].name) or None
+        return _decode(self.ir.ctrl.registers[reg_index].name) or None
 
     def _material_names_manifest(self) -> str:
         names = []

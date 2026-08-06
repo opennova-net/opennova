@@ -14,11 +14,13 @@ Two related on-disk model formats:
   attributed `0x50bd0b` to `jodemo.exe`; every later probe cites the same range in
   dfvas, and it is treated as dfvas here.
 
-Reimplementation: `libs/threedi` (`threedi_gp.h` with `threedi_gp_read.cpp` +
-`threedi_gp_write.cpp` for GP; the Threedi3di3 reader/writer for 3DI3; and
-`threedi_panm_runtime.cpp` for live PANM sampling). Probe harnesses live in
-`tests/threedi/_dump_gp_*.cpp` (non-ctest executables) plus
-`scripts/probe_gp_field.py`.
+Reimplementation: `libs/threedi` (the Threedi3di3 reader/writer for 3DI3, and
+`threedi_panm_runtime.cpp` for live PANM sampling). **GP support is not
+implemented**: OpenNova is 3DI3-only (ADR 0027) — the GP reader/writer this
+record once pointed at (`threedi_gp.h`, `threedi_gp_read.cpp`,
+`threedi_gp_write.cpp`, removed 2026-08-06) validated §2 against the corpus
+below before removal; this record remains the format's knowledge home for any
+future pre-JO title bring-up.
 
 ---
 
@@ -359,10 +361,10 @@ claim of retail OED UI parity for those unused PANM styles.
 ## 2. GP runtime format — corpus probe findings
 
 Corpus: 639 `.3di` files (GPM/GPS/GPP) from the `AS_ASSETS` BHD affiliate build
-(`~/Desktop/AS_ASSETS`, `__temp.3di` excluded); 639/639 parse cleanly. The
-material-struct probe (§2.3 first table) used the smaller 22-file
-`fixtures/3dp/` set instead. All struct/field names refer to
-`libs/threedi/include/threedi/threedi_gp.h`; fields proven always-zero and
+(`~/Desktop/AS_ASSETS`, `__temp.3di` excluded); 639/639 parsed cleanly against
+the since-removed reader. The material-struct probe (§2.3 first table) used
+the smaller 22-file `fixtures/3dp/` set instead. Struct/field names below
+follow the removed `threedi_gp.h`'s vocabulary; fields proven always-zero and
 loader-unread are named `pad_<struct>_<hexoffset>` and round-tripped verbatim.
 
 Loaders: `[orig: dfvas load_gpm_model_0 @ 0x50b710]` (model-level sections),

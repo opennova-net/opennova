@@ -114,12 +114,12 @@ def _import_basic_model(
     write_glb: bool = False,
     write_fbx: bool = False,
 ) -> bool:
-    """Import a single weapon/item via the C IR pipeline and write selected outputs."""
+    """Import a single weapon/item via the native 3DI3 pipeline and write selected outputs."""
     from pathlib import Path
     from pyopennova.definitions import (
         process_def_files, ensure_extension, build_animation_context,
     )
-    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.threedi_ffi import read_model, free_model_3di3
     from pyopennova.bad_ffi import parse_bad, free_bad
     from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
@@ -177,13 +177,13 @@ def _import_basic_model(
             if model_path is None:
                 raise FileNotFoundError(f"Model file not found: {Path(base_dir) / model_file}")
 
-            ir = None
+            model = None
             try:
-                ir = read_model_ir(str(model_path))
+                model = read_model(str(model_path))
 
                 if model_type == "main":
                     ctx = anim_ctx if import_animations else None
-                    main_builder = BlenderSceneBuilder(ir, bad_file=bad_file,
+                    main_builder = BlenderSceneBuilder(model, bad_file=bad_file,
                                                        anim_context=ctx, resolver=resolver,
                                                        import_collisions=import_collisions,
                                                        import_occlusion=import_occlusion,
@@ -199,14 +199,14 @@ def _import_basic_model(
                             project_dir = os.path.join(output_dir, export_name)
                             os.makedirs(project_dir, exist_ok=True)
                             if write_3dp:
-                                _write_3dp_from_ir(
-                                    ir,
+                                _write_3dp_from_model(
+                                    model,
                                     os.path.join(project_dir, export_name + ".3dp"),
                                 )
                 else:
                     if main_builder is None:
                         continue
-                    secondary = BlenderSceneBuilder(ir, bad_file=bad_file,
+                    secondary = BlenderSceneBuilder(model, bad_file=bad_file,
                                                     resolver=resolver,
                                                     import_collisions=import_collisions,
                                                     import_occlusion=import_occlusion,
@@ -214,8 +214,8 @@ def _import_basic_model(
                     if secondary.merge_with_existing_scene(main_builder):
                         success_count += 1
             finally:
-                if ir is not None:
-                    free_model_ir(ir)
+                if model is not None:
+                    free_model_3di3(model)
 
         if bad_file is not None:
             free_bad(bad_file)
@@ -285,10 +285,10 @@ def run_import(
         raise
 
 
-def _write_3dp_from_ir(ir, tdp_path: str) -> None:
-    """Write a .3dp object workspace from the C IR using the native tdp library."""
-    from pyopennova.tdp_ffi import tdp_from_ir, write_tdp, free_tdp
-    proj = tdp_from_ir(ir)
+def _write_3dp_from_model(model, tdp_path: str) -> None:
+    """Write a .3dp object workspace from the parsed 3DI3 model using the native tdp library."""
+    from pyopennova.tdp_ffi import tdp_from_3di, write_tdp, free_tdp
+    proj = tdp_from_3di(model)
     try:
         write_tdp(tdp_path, proj)
     finally:
@@ -321,7 +321,7 @@ def run_loose_import(
     _setup_blender_package()
 
     from pathlib import Path
-    from pyopennova.threedi_ffi import read_model_ir, free_model_ir
+    from pyopennova.threedi_ffi import read_model, free_model_3di3
     from pyopennova.asset_resolver import AssetResolver
     from .scene_builder import BlenderSceneBuilder
 
@@ -330,25 +330,25 @@ def run_loose_import(
     base_dir = asset_base_dir or str(Path(threedi_path).parent)
     name = output_stem or Path(threedi_path).stem
 
-    ir = read_model_ir(threedi_path)
+    model = read_model(threedi_path)
     result = False
     try:
         with AssetResolver(base_dir) as resolver:
-            builder = BlenderSceneBuilder(ir, resolver=resolver,
+            builder = BlenderSceneBuilder(model, resolver=resolver,
                                           import_collisions=import_collisions,
                                           import_occlusion=import_occlusion,
                                           import_lights=import_lights)
             result = builder.build_basic_scene(name)
             if result and write_3dp:
-                _write_3dp_from_ir(
-                    ir,
+                _write_3dp_from_model(
+                    model,
                     os.path.join(output_dir, name + ".3dp"),
                 )
     except Exception as exc:
         log.error("run_loose_import failed: %s", exc, exc_info=True)
         raise
     finally:
-        free_model_ir(ir)
+        free_model_3di3(model)
 
     if result:
         if write_ase:

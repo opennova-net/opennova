@@ -94,6 +94,11 @@ _MAX_SCENE_SAFETY_RUNNER = textwrap.dedent(
         result_path = Path(os.environ["OPENNOVA_TEST_RESULT"])
         output_dir = Path(os.environ["OPENNOVA_TEST_OUTPUT"])
         sys.path.insert(0, str(worktree))
+        # The Max plugin auto-load may have pre-imported these packages from
+        # another checkout at startup; purge so the runner tests THIS worktree.
+        for _mod in [m for m in list(sys.modules)
+                     if m.split(".")[0] in ("opennova_max", "pyopennova")]:
+            del sys.modules[_mod]
 
         import pymxs
 

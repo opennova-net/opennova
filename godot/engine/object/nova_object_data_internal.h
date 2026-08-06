@@ -100,123 +100,21 @@ inline int project_lod_count(const TdpProject &project) {
 	return TDP_MAX_LODS;
 }
 
-inline void copy_transform(const ThreediIRTransform &src, ThreediTransform &dst) {
-	dst.control = src.control;
-	dst.control_param = src.control_param;
-	dst.rate = src.rate;
-	dst.start = src.start;
-	dst.end = src.end;
-}
-
-inline void copy_ir_part_animation(const ThreediIRPartAnimation &src, ThreediPartAnimation &dst) {
-	dst.flags = src.flags;
-	dst.parent_subobject = src.parent_part;
-	dst.subobject_index = src.part_index;
-	dst.matrix_index = src.matrix_index;
-	dst.matrix_offset = src.matrix_offset;
-	dst.bind_matrix_index = src.bind_matrix_index;
-	copy_transform(src.rotation_x, dst.rotation_x);
-	copy_transform(src.rotation_y, dst.rotation_y);
-	copy_transform(src.rotation_z, dst.rotation_z);
-	copy_transform(src.scale_x, dst.scale_x);
-	copy_transform(src.scale_y, dst.scale_y);
-	copy_transform(src.scale_z, dst.scale_z);
-	copy_transform(src.translation, dst.translation);
-}
-
-inline void copy_ir_material(const ThreediIRMaterial &src, ThreediMaterial &dst) {
-	dst.index = src.index;
-	copy_cstr(dst.shader_name, sizeof(dst.shader_name), src.shader_name);
-	dst.texture_count = std::min<uint32_t>(src.texture_count, 8u);
-	std::memset(dst.textures, 0, sizeof(dst.textures));
-	for (uint32_t i = 0; i < dst.texture_count; ++i) {
-		copy_cstr(dst.textures[i].name, sizeof(dst.textures[i].name), src.textures[i].name);
-		dst.textures[i].slot = src.textures[i].slot;
-		dst.textures[i].type = src.textures[i].type;
-		dst.textures[i].flags = src.textures[i].flags;
-		dst.textures[i].frame = src.textures[i].frame;
-	}
-
-	dst.material_flags = 0;
-	if ((src.flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_TEST) != 0) {
-		dst.material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
-	}
-	if ((src.flags & THREEDI_IR_MATERIAL_FLAG_ALPHA_INVERT) != 0) {
-		dst.material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_INVERT;
-	}
-	if ((src.flags & THREEDI_IR_MATERIAL_FLAG_TWO_SIDED) != 0) {
-		dst.material_flags |= THREEDI_MATERIAL_FLAG_TWO_SIDED;
-	}
-	dst.alpha_test_value_byte = to_u8_color(src.alpha_threshold);
-	dst.u_params.style = src.u_params.style;
-	dst.u_params.phase = src.u_params.phase;
-	dst.u_params.reg = src.u_params.reg;
-	dst.u_params.gen_rate = src.u_params.gen_rate;
-	dst.u_params.start = src.u_params.start;
-	dst.u_params.end = src.u_params.end;
-	dst.v_params.style = src.v_params.style;
-	dst.v_params.phase = src.v_params.phase;
-	dst.v_params.reg = src.v_params.reg;
-	dst.v_params.gen_rate = src.v_params.gen_rate;
-	dst.v_params.start = src.v_params.start;
-	dst.v_params.end = src.v_params.end;
-	dst.alpha_gen.style = src.alpha_gen.style;
-	dst.alpha_gen.phase = src.alpha_gen.phase;
-	dst.alpha_gen.reg = src.alpha_gen.reg;
-	dst.alpha_gen.rate = src.alpha_gen.rate;
-	dst.alpha_gen.start = src.alpha_gen.start;
-	dst.alpha_gen.end = src.alpha_gen.end;
-	dst.rgb_gen.style = src.rgb_gen.style;
-	dst.rgb_gen.phase = src.rgb_gen.phase;
-	dst.rgb_gen.reg = src.rgb_gen.reg;
-	dst.rgb_gen.rate = src.rgb_gen.rate;
-	std::memcpy(dst.rgb_gen.start_color, src.rgb_gen.start_color, sizeof(dst.rgb_gen.start_color));
-	std::memcpy(dst.rgb_gen.end_color, src.rgb_gen.end_color, sizeof(dst.rgb_gen.end_color));
-	std::memcpy(dst.reflect_color, src.reflect_color, sizeof(dst.reflect_color));
-	dst.emissive_type = src.emissive_type;
-	dst.is_glass = static_cast<uint8_t>(src.is_glass != 0);
-	dst.animation.num_frames = src.animation.num_frames;
-	dst.animation.animation_type = src.animation.animation_type;
-	dst.animation.cycle_frame_time = src.animation.cycle_frame_time;
-}
-
-inline void copy_ir_light(const ThreediIRLight &src, ThreediLight &dst) {
-	std::memcpy(dst.offset, src.offset, sizeof(dst.offset));
-	dst.atten_start = src.attenuation_start;
-	dst.atten_end = src.attenuation_end;
-	dst.style = src.style;
-	dst.phase = src.phase;
-	dst.rate = src.rate;
-	dst.color_start[0] = to_u8_color(src.color_start[2]);
-	dst.color_start[1] = to_u8_color(src.color_start[1]);
-	dst.color_start[2] = to_u8_color(src.color_start[0]);
-	dst.color_end[0] = to_u8_color(src.color_end[2]);
-	dst.color_end[1] = to_u8_color(src.color_end[1]);
-	dst.color_end[2] = to_u8_color(src.color_end[0]);
-	dst.subobj_index = static_cast<uint8_t>(std::clamp(src.part_index, 0, 255));
-	dst.flags = src.flags;
-	dst.falloff_byte = to_u8_255(src.falloff);
-	dst.rotation[0] = src.rotation[0];
-	dst.rotation[1] = src.rotation[1];
-	dst.rotation[2] = src.rotation[2];
-	dst.rotation[3] = std::cos(src.falloff * 0.017453292519943295f);
-}
-
-inline String control_register_name_for(const ThreediModelIR &ir, int32_t reg) {
-	if (reg < 0 || static_cast<size_t>(reg) >= ir.control_register_count) {
+inline String control_register_name_for(const Threedi3di3 &model, int32_t reg) {
+	if (reg < 0 || static_cast<uint32_t>(reg) >= model.ctrl.count) {
 		return String();
 	}
-	return from_native(ir.control_registers[reg].name);
+	return from_native(model.ctrl.registers[reg].name);
 }
 
-inline bool resolve_control_register_index(const ThreediModelIR &ir, const String &name, int32_t &out_reg) {
+inline bool resolve_control_register_index(const Threedi3di3 &model, const String &name, int32_t &out_reg) {
 	if (name.is_empty()) {
 		out_reg = -1;
 		return true;
 	}
 	const std::string needle = to_std(name);
-	for (size_t i = 0; i < ir.control_register_count; ++i) {
-		if (needle == ir.control_registers[i].name) {
+	for (uint32_t i = 0; i < model.ctrl.count; ++i) {
+		if (needle == model.ctrl.registers[i].name) {
 			out_reg = static_cast<int32_t>(i);
 			return true;
 		}

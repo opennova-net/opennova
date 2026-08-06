@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import bpy
 
+from pyopennova.threedi_ffi import THREEDI_MESH_SKINNED
+
 from .animation import AnimationMixin
 from .armature import ArmatureMixin
 from .helpers import _ensure_object_mode
@@ -19,17 +21,17 @@ from .overlays import OverlaysMixin
 
 class BlenderSceneBuilder(
         ArmatureMixin, AnimationMixin, MeshesMixin, MaterialsMixin, OverlaysMixin):
-    """Build a Blender scene from a ThreediModelIR + optional BadFile.
+    """Build a Blender scene from a parsed Threedi3di3 model + optional BadFile.
 
     - Part hierarchy using empties
     - Vertices localized to their part's coordinate space
     - Meshes parented to their part node
     """
 
-    def __init__(self, ir, bad_file=None, anim_context=None,
+    def __init__(self, model, bad_file=None, anim_context=None,
                  resolver=None, import_collisions=True, import_occlusion=True,
                  import_lights=True):
-        self.ir = ir
+        self.ir = model  # the raw Threedi3di3 ctypes model
         self.bad_file = bad_file
         self.anim_context = anim_context
         self.resolver = resolver
@@ -74,7 +76,7 @@ class BlenderSceneBuilder(
                 import traceback
                 traceback.print_exc()
                 print(f"Warning: failed to build animations: {e}")
-        elif int(self.ir.mesh_type) == 3:
+        elif int(self.ir.header.mesh_type) == THREEDI_MESH_SKINNED:
             # Preserve skin weights for static skinned models that have no BAD.
             # This keeps ASE MESH_WEIGHTS data so OED re-export doesn't collapse
             # all vertices onto subobject 0.

@@ -20,11 +20,11 @@ String part_anim_part_label(int part_index) {
 	return vformat("Part %02d", part_index);
 }
 
-Dictionary part_anim_part_ref(const ThreediIRLod &lod, int part_index) {
+Dictionary part_anim_part_ref(const ThreediLod &lod, int part_index) {
 	Dictionary result;
 	result["index"] = part_index;
 	result["label"] = part_anim_part_label(part_index);
-	result["valid"] = part_index >= 0 && static_cast<size_t>(part_index) < lod.part_count;
+	result["valid"] = part_index >= 0 && static_cast<size_t>(part_index) < lod.render_object_count;
 	return result;
 }
 
@@ -132,7 +132,7 @@ bool panm_control_for_mode(const String &p_mode, uint8_t &out_control) {
 	return false;
 }
 
-Dictionary panm_axis_to_editor_dict(const ThreediIRTransform &track, const ThreediModelIR &ir, bool is_rotation) {
+Dictionary panm_axis_to_editor_dict(const ThreediTransform &track, const Threedi3di3 &model, bool is_rotation) {
 	Dictionary result;
 	const bool supported = panm_control_supported(track.control);
 	result["supported"] = supported;
@@ -140,7 +140,7 @@ Dictionary panm_axis_to_editor_dict(const ThreediIRTransform &track, const Three
 	result["mode_label"] = panm_mode_label_for_control(track.control);
 	result["uses_control_register"] = panm_control_uses_register(track.control);
 	result["control_register"] = static_cast<int>(track.control_param);
-	result["control_register_label"] = control_register_name_for(ir, track.control_param);
+	result["control_register_label"] = control_register_name_for(model, track.control_param);
 	result["speed"] = static_cast<double>(track.rate) * kPanmValueUnit;
 	const double unit = is_rotation ? kPanmRotationUnit : kPanmValueUnit;
 	result["from_value"] = static_cast<double>(track.start) * unit;
@@ -195,7 +195,7 @@ String panm_scale_style_for_type(uint8_t scale_type) {
 	return "none";
 }
 
-ThreediIRTransform *semantic_part_anim_track(ThreediIRPartAnimation &anim, const String &p_channel, const String &p_axis) {
+ThreediTransform *semantic_part_anim_track(ThreediPartAnimation &anim, const String &p_channel, const String &p_axis) {
 	const String channel = p_channel.to_lower();
 	const String axis = p_axis.to_lower();
 	if (channel == "rotation") {
@@ -222,7 +222,7 @@ ThreediIRTransform *semantic_part_anim_track(ThreediIRPartAnimation &anim, const
 	return nullptr;
 }
 
-void ensure_part_anim_channel_flag(ThreediIRPartAnimation &anim, const String &p_channel, const String &p_axis) {
+void ensure_part_anim_channel_flag(ThreediPartAnimation &anim, const String &p_channel, const String &p_axis) {
 	uint8_t scale_type = threedi_panm_scale_type(anim.flags);
 	uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
 	uint8_t rotation_reversed = threedi_panm_rotation_reversed(anim.flags) ? 1 : 0;
@@ -242,20 +242,20 @@ void ensure_part_anim_channel_flag(ThreediIRPartAnimation &anim, const String &p
 	anim.flags = panm_pack_flags_from_parts(scale_type, rotation_type, rotation_reversed, translate_type);
 }
 
-Dictionary transform_to_dict(const ThreediIRTransform &track, const ThreediModelIR &ir) {
+Dictionary transform_to_dict(const ThreediTransform &track, const Threedi3di3 &model) {
 	Dictionary result;
 	result["control"] = static_cast<int>(track.control);
 	result["function"] = static_cast<int>(track.control);
 	result["control_param"] = static_cast<int>(track.control_param);
 	result["reg"] = static_cast<int>(track.control_param);
-	result["reg_name"] = control_register_name_for(ir, track.control_param);
+	result["reg_name"] = control_register_name_for(model, track.control_param);
 	result["rate"] = static_cast<int>(track.rate);
 	result["start"] = static_cast<int>(track.start);
 	result["end"] = static_cast<int>(track.end);
 	return result;
 }
 
-const ThreediIRTransform *part_anim_track_for_name(const ThreediIRPartAnimation &anim, const String &p_track) {
+const ThreediTransform *part_anim_track_for_name(const ThreediPartAnimation &anim, const String &p_track) {
 	const String track = p_track.to_lower();
 	if (track == "rotation_x" || track == "yaw") {
 		return &anim.rotation_x;
@@ -281,7 +281,7 @@ const ThreediIRTransform *part_anim_track_for_name(const ThreediIRPartAnimation 
 	return nullptr;
 }
 
-ThreediIRTransform *part_anim_track_for_name(ThreediIRPartAnimation &anim, const String &p_track) {
+ThreediTransform *part_anim_track_for_name(ThreediPartAnimation &anim, const String &p_track) {
 	const String track = p_track.to_lower();
 	if (track == "rotation_x" || track == "yaw") {
 		return &anim.rotation_x;
@@ -310,20 +310,20 @@ ThreediIRTransform *part_anim_track_for_name(ThreediIRPartAnimation &anim, const
 } // namespace
 
 int NovaObjectData::get_part_anim_count(int p_lod_index) const {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return 0;
 	}
-	return static_cast<int>(ir.lods[p_lod_index].part_animation_count);
+	return static_cast<int>(source_model.lods[p_lod_index].part_animation_count);
 }
 
 Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {
 	Array result;
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return result;
 	}
-	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	const ThreediLod &lod = source_model.lods[p_lod_index];
 	for (size_t i = 0; i < lod.part_animation_count; ++i) {
-		const ThreediIRPartAnimation &anim = lod.part_animations[i];
+		const ThreediPartAnimation &anim = lod.part_animations[i];
 		const uint8_t scale_type = threedi_panm_scale_type(anim.flags);
 		const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
 		const uint8_t translate_type = threedi_panm_translate_type(anim.flags);
@@ -334,23 +334,23 @@ Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {
 		Dictionary rotation;
 		rotation["enabled"] = rotation_enabled;
 		rotation["reversed"] = threedi_panm_rotation_reversed(anim.flags) != 0;
-		rotation["x"] = panm_axis_to_editor_dict(anim.rotation_x, ir, true);
-		rotation["y"] = panm_axis_to_editor_dict(anim.rotation_y, ir, true);
-		rotation["z"] = panm_axis_to_editor_dict(anim.rotation_z, ir, true);
+		rotation["x"] = panm_axis_to_editor_dict(anim.rotation_x, source_model, true);
+		rotation["y"] = panm_axis_to_editor_dict(anim.rotation_y, source_model, true);
+		rotation["z"] = panm_axis_to_editor_dict(anim.rotation_z, source_model, true);
 		rotation["supported"] = rotation_type == 0 || rotation_type == 2;
 
 		Dictionary scale;
 		scale["enabled"] = scale_enabled;
 		scale["style"] = panm_scale_style_for_type(scale_type);
-		scale["x"] = panm_axis_to_editor_dict(anim.scale_x, ir, false);
-		scale["y"] = panm_axis_to_editor_dict(anim.scale_y, ir, false);
-		scale["z"] = panm_axis_to_editor_dict(anim.scale_z, ir, false);
+		scale["x"] = panm_axis_to_editor_dict(anim.scale_x, source_model, false);
+		scale["y"] = panm_axis_to_editor_dict(anim.scale_y, source_model, false);
+		scale["z"] = panm_axis_to_editor_dict(anim.scale_z, source_model, false);
 		scale["supported"] = scale_type == 0 || scale_type == 1 || scale_type == 2;
 
 		Dictionary translation;
 		translation["enabled"] = translation_enabled;
 		translation["axis"] = panm_axis_key_for_translate_type(translate_type);
-		translation["track"] = panm_axis_to_editor_dict(anim.translation, ir, false);
+		translation["track"] = panm_axis_to_editor_dict(anim.translation, source_model, false);
 		translation["supported"] = translate_type <= THREEDI_TRANS_Z;
 
 		const bool rotation_supported = (rotation_type == 0 || rotation_type == 2) &&
@@ -388,12 +388,12 @@ Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {
 
 		Dictionary entry;
 		entry["index"] = static_cast<int64_t>(i);
-		entry["target_part"] = static_cast<int>(anim.part_index);
-		entry["target_part_ref"] = part_anim_part_ref(lod, anim.part_index);
-		entry["target_part_label"] = part_anim_part_label(anim.part_index);
-		entry["parent_part"] = static_cast<int>(anim.parent_part);
-		entry["parent_part_ref"] = part_anim_part_ref(lod, anim.parent_part);
-		entry["parent_part_label"] = part_anim_part_label(anim.parent_part);
+		entry["target_part"] = static_cast<int>(anim.subobject_index);
+		entry["target_part_ref"] = part_anim_part_ref(lod, anim.subobject_index);
+		entry["target_part_label"] = part_anim_part_label(anim.subobject_index);
+		entry["parent_part"] = static_cast<int>(anim.parent_subobject);
+		entry["parent_part_ref"] = part_anim_part_ref(lod, anim.parent_subobject);
+		entry["parent_part_label"] = part_anim_part_label(anim.parent_subobject);
 		entry["rotation"] = rotation;
 		entry["scale"] = scale;
 		entry["translation"] = translation;
@@ -408,25 +408,25 @@ Array NovaObjectData::get_part_anim_editor_entries(int p_lod_index) const {
 }
 
 int NovaObjectData::add_part_anim(int p_lod_index, int p_part_index) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return -1;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	const size_t old_count = lod.part_animation_count;
 	const size_t new_count = old_count + 1;
-	ThreediIRPartAnimation *next = static_cast<ThreediIRPartAnimation *>(
-			std::calloc(new_count, sizeof(ThreediIRPartAnimation)));
+	ThreediPartAnimation *next = static_cast<ThreediPartAnimation *>(
+			std::calloc(new_count, sizeof(ThreediPartAnimation)));
 	if (next == nullptr) {
 		return -1;
 	}
 	if (lod.part_animations != nullptr && old_count > 0) {
-		std::memcpy(next, lod.part_animations, old_count * sizeof(ThreediIRPartAnimation));
+		std::memcpy(next, lod.part_animations, old_count * sizeof(ThreediPartAnimation));
 	}
-	const int max_part = lod.part_count > 0 ? static_cast<int>(lod.part_count - 1) : 255;
+	const int max_part = lod.render_object_count > 0 ? static_cast<int>(lod.render_object_count - 1) : 255;
 	const int part_index = std::clamp(p_part_index, 0, std::min(max_part, 255));
-	ThreediIRPartAnimation &anim = next[old_count];
-	anim.part_index = static_cast<uint8_t>(part_index);
-	anim.parent_part = 0;
+	ThreediPartAnimation &anim = next[old_count];
+	anim.subobject_index = static_cast<uint8_t>(part_index);
+	anim.parent_subobject = 0;
 	anim.matrix_index = static_cast<uint8_t>(part_index);
 	anim.matrix_offset = 0;
 	anim.bind_matrix_index = part_index;
@@ -438,21 +438,21 @@ int NovaObjectData::add_part_anim(int p_lod_index, int p_part_index) {
 }
 
 int NovaObjectData::duplicate_part_anim(int p_lod_index, int p_anim_index) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return -1;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count || lod.part_animations == nullptr) {
 		return -1;
 	}
 	const size_t old_count = lod.part_animation_count;
 	const size_t new_count = old_count + 1;
-	ThreediIRPartAnimation *next = static_cast<ThreediIRPartAnimation *>(
-			std::calloc(new_count, sizeof(ThreediIRPartAnimation)));
+	ThreediPartAnimation *next = static_cast<ThreediPartAnimation *>(
+			std::calloc(new_count, sizeof(ThreediPartAnimation)));
 	if (next == nullptr) {
 		return -1;
 	}
-	std::memcpy(next, lod.part_animations, old_count * sizeof(ThreediIRPartAnimation));
+	std::memcpy(next, lod.part_animations, old_count * sizeof(ThreediPartAnimation));
 	next[old_count] = lod.part_animations[p_anim_index];
 	std::free(lod.part_animations);
 	lod.part_animations = next;
@@ -462,30 +462,30 @@ int NovaObjectData::duplicate_part_anim(int p_lod_index, int p_anim_index) {
 }
 
 bool NovaObjectData::delete_part_anim(int p_lod_index, int p_anim_index) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count || lod.part_animations == nullptr) {
 		return false;
 	}
 	const size_t old_count = lod.part_animation_count;
 	const size_t new_count = old_count - 1;
-	ThreediIRPartAnimation *next = nullptr;
+	ThreediPartAnimation *next = nullptr;
 	if (new_count > 0) {
-		next = static_cast<ThreediIRPartAnimation *>(
-				std::calloc(new_count, sizeof(ThreediIRPartAnimation)));
+		next = static_cast<ThreediPartAnimation *>(
+				std::calloc(new_count, sizeof(ThreediPartAnimation)));
 		if (next == nullptr) {
 			return false;
 		}
 		const size_t remove_index = static_cast<size_t>(p_anim_index);
 		if (remove_index > 0) {
-			std::memcpy(next, lod.part_animations, remove_index * sizeof(ThreediIRPartAnimation));
+			std::memcpy(next, lod.part_animations, remove_index * sizeof(ThreediPartAnimation));
 		}
 		if (remove_index + 1 < old_count) {
 			std::memcpy(next + remove_index,
 					lod.part_animations + remove_index + 1,
-					(old_count - remove_index - 1) * sizeof(ThreediIRPartAnimation));
+					(old_count - remove_index - 1) * sizeof(ThreediPartAnimation));
 		}
 	}
 	std::free(lod.part_animations);
@@ -496,32 +496,32 @@ bool NovaObjectData::delete_part_anim(int p_lod_index, int p_anim_index) {
 }
 
 bool NovaObjectData::set_part_anim_target(int p_lod_index, int p_anim_index, int p_part_index, int p_parent_part) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	const int max_part = lod.part_count > 0 ? static_cast<int>(lod.part_count - 1) : 255;
+	const int max_part = lod.render_object_count > 0 ? static_cast<int>(lod.render_object_count - 1) : 255;
 	const int part_index = std::clamp(p_part_index, 0, std::min(max_part, 255));
 	const int parent_part = std::clamp(p_parent_part, 0, std::min(max_part, 255));
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
-	anim.part_index = static_cast<uint8_t>(part_index);
-	anim.parent_part = static_cast<uint8_t>(parent_part);
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
+	anim.subobject_index = static_cast<uint8_t>(part_index);
+	anim.parent_subobject = static_cast<uint8_t>(parent_part);
 	_notify_object_changed(UPDATE_PANM);
 	return true;
 }
 
 bool NovaObjectData::set_part_anim_channel_enabled(int p_lod_index, int p_anim_index, const String &p_channel, bool p_enabled) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
 	uint8_t scale_type = threedi_panm_scale_type(anim.flags);
 	uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
 	uint8_t rotation_reversed = threedi_panm_rotation_reversed(anim.flags) ? 1 : 0;
@@ -542,10 +542,10 @@ bool NovaObjectData::set_part_anim_channel_enabled(int p_lod_index, int p_anim_i
 }
 
 bool NovaObjectData::set_part_anim_channel_mode(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, const String &p_mode, int p_control_register) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
@@ -553,8 +553,8 @@ bool NovaObjectData::set_part_anim_channel_mode(int p_lod_index, int p_anim_inde
 	if (!panm_control_for_mode(p_mode, control)) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
-	ThreediIRTransform *track = semantic_part_anim_track(anim, p_channel, p_axis);
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediTransform *track = semantic_part_anim_track(anim, p_channel, p_axis);
 	if (track == nullptr) {
 		return false;
 	}
@@ -570,15 +570,15 @@ bool NovaObjectData::set_part_anim_channel_mode(int p_lod_index, int p_anim_inde
 }
 
 bool NovaObjectData::set_part_anim_channel_values(int p_lod_index, int p_anim_index, const String &p_channel, const String &p_axis, double p_from_value, double p_to_value, double p_speed) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
-	ThreediIRTransform *track = semantic_part_anim_track(anim, p_channel, p_axis);
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediTransform *track = semantic_part_anim_track(anim, p_channel, p_axis);
 	if (track == nullptr) {
 		return false;
 	}
@@ -593,14 +593,14 @@ bool NovaObjectData::set_part_anim_channel_values(int p_lod_index, int p_anim_in
 }
 
 bool NovaObjectData::set_part_anim_rotation_reversed(int p_lod_index, int p_anim_index, bool p_reversed) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
 	anim.flags = panm_pack_flags_from_parts(
 			threedi_panm_scale_type(anim.flags),
 			threedi_panm_rotation_type(anim.flags),
@@ -612,17 +612,17 @@ bool NovaObjectData::set_part_anim_rotation_reversed(int p_lod_index, int p_anim
 
 Array NovaObjectData::get_part_animations(int p_lod_index) const {
 	Array result;
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return result;
 	}
-	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	const ThreediLod &lod = source_model.lods[p_lod_index];
 	for (size_t i = 0; i < lod.part_animation_count; ++i) {
-		const ThreediIRPartAnimation &anim = lod.part_animations[i];
+		const ThreediPartAnimation &anim = lod.part_animations[i];
 		Dictionary item;
 		item["index"] = static_cast<int64_t>(i);
 		item["flags"] = static_cast<int64_t>(anim.flags);
-		item["parent_part"] = anim.parent_part;
-		item["part_index"] = anim.part_index;
+		item["parent_part"] = anim.parent_subobject;
+		item["part_index"] = anim.subobject_index;
 		item["matrix_index"] = anim.matrix_index;
 		item["bind_matrix_index"] = anim.bind_matrix_index;
 		result.push_back(item);
@@ -632,49 +632,49 @@ Array NovaObjectData::get_part_animations(int p_lod_index) const {
 
 Dictionary NovaObjectData::get_part_anim_info(int p_lod_index, int p_anim_index) const {
 	Dictionary info;
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return info;
 	}
-	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	const ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return info;
 	}
-	const ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
+	const ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
 	info["index"] = p_anim_index;
-	info["transform_as"] = static_cast<int>(anim.part_index);
-	info["parent_subobject"] = static_cast<int>(anim.parent_part);
+	info["transform_as"] = static_cast<int>(anim.subobject_index);
+	info["parent_subobject"] = static_cast<int>(anim.parent_subobject);
 	info["flags"] = static_cast<int64_t>(anim.flags);
 	info["scale_type"] = static_cast<int>(threedi_panm_scale_type(anim.flags));
 	info["rotation_type"] = static_cast<int>(threedi_panm_rotation_type(anim.flags));
 	info["rotation_reversed"] = threedi_panm_rotation_reversed(anim.flags) != 0;
 	info["translate_type"] = static_cast<int>(threedi_panm_translate_type(anim.flags));
-	info["rotation_x"] = transform_to_dict(anim.rotation_x, ir);
-	info["rotation_y"] = transform_to_dict(anim.rotation_y, ir);
-	info["rotation_z"] = transform_to_dict(anim.rotation_z, ir);
-	info["scale_x"] = transform_to_dict(anim.scale_x, ir);
-	info["scale_y"] = transform_to_dict(anim.scale_y, ir);
-	info["scale_z"] = transform_to_dict(anim.scale_z, ir);
-	info["translation"] = transform_to_dict(anim.translation, ir);
+	info["rotation_x"] = transform_to_dict(anim.rotation_x, source_model);
+	info["rotation_y"] = transform_to_dict(anim.rotation_y, source_model);
+	info["rotation_z"] = transform_to_dict(anim.rotation_z, source_model);
+	info["scale_x"] = transform_to_dict(anim.scale_x, source_model);
+	info["scale_y"] = transform_to_dict(anim.scale_y, source_model);
+	info["scale_z"] = transform_to_dict(anim.scale_z, source_model);
+	info["translation"] = transform_to_dict(anim.translation, source_model);
 	return info;
 }
 
 bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
 	const String key = p_key;
 	if (key == "transform_as") {
-		anim.part_index = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
+		anim.subobject_index = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
 	if (key == "parent_subobject") {
-		anim.parent_part = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
+		anim.parent_subobject = static_cast<uint8_t>(std::clamp(static_cast<int>(p_value), 0, 255));
 		_notify_object_changed(UPDATE_PANM);
 		return true;
 	}
@@ -701,15 +701,15 @@ bool NovaObjectData::set_part_anim_field(int p_lod_index, int p_anim_index, cons
 }
 
 bool NovaObjectData::set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return false;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return false;
 	}
-	ThreediIRPartAnimation &anim = lod.part_animations[p_anim_index];
-	ThreediIRTransform *track = part_anim_track_for_name(anim, p_track);
+	ThreediPartAnimation &anim = lod.part_animations[p_anim_index];
+	ThreediTransform *track = part_anim_track_for_name(anim, p_track);
 	if (track == nullptr) {
 		return false;
 	}
@@ -726,7 +726,7 @@ bool NovaObjectData::set_part_anim_track_field(int p_lod_index, int p_anim_index
 	}
 	if (key == "reg_name") {
 		int32_t reg = -1;
-		if (!resolve_control_register_index(ir, String(p_value), reg) || reg < 0 || reg > 255) {
+		if (!resolve_control_register_index(source_model, String(p_value), reg) || reg < 0 || reg > 255) {
 			return false;
 		}
 		track->control_param = static_cast<uint8_t>(reg);
@@ -752,10 +752,10 @@ bool NovaObjectData::set_part_anim_track_field(int p_lod_index, int p_anim_index
 }
 
 Error NovaObjectData::set_part_animation_flags(int p_lod_index, int p_anim_index, int p_flags) {
-	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+	if (!has_source_model || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
 		return ERR_INVALID_PARAMETER;
 	}
-	ThreediIRLod &lod = ir.lods[p_lod_index];
+	ThreediLod &lod = source_model.lods[p_lod_index];
 	if (p_anim_index < 0 || static_cast<size_t>(p_anim_index) >= lod.part_animation_count) {
 		return ERR_INVALID_PARAMETER;
 	}

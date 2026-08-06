@@ -13,21 +13,27 @@ import os
 
 import bpy
 
+from pyopennova.threedi_ffi import (
+    THREEDI_EMISSIVE_FULL,
+    THREEDI_MAX_MATERIAL_TEXTURES,
+)
+
 
 class MaterialsMixin:
     def _resolve_ctrl_reg(self, reg_index):
-        """Resolve a control register index to its name string from the IR."""
-        if reg_index < 0 or reg_index >= self.ir.control_register_count:
+        """Resolve a control register index to its name string from the CTRL table."""
+        if reg_index < 0 or reg_index >= self.ir.ctrl.count:
             return None
-        if not self.ir.control_registers:
+        if not self.ir.ctrl.registers:
             return None
-        name = self.ir.control_registers[reg_index].name
+        name = self.ir.ctrl.registers[reg_index].name
         if isinstance(name, bytes):
             name = name.decode("utf-8", errors="replace").rstrip("\x00")
         return name if name else None
 
-    def _create_material(self, ir_mat):
-        mat = bpy.data.materials.new(f"Material_{ir_mat.index}")
+    def _create_material(self, mtrl):
+        """Create a Blender material from a raw ThreediMaterial (MTRL record)."""
+        mat = bpy.data.materials.new(f"Material_{mtrl.index}")
         mat.use_nodes = True
         mat.node_tree.nodes.clear()
 
@@ -46,24 +52,33 @@ class MaterialsMixin:
         elif "Specular" in bsdf.inputs:
             bsdf.inputs["Specular"].default_value = 0.0
 
-        shader = ir_mat.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
+        shader = mtrl.shader_name.decode("utf-8", errors="replace").rstrip("\x00")
         if shader:
             mat.name = f"{mat.name}_{shader}"
             mat["opennova_shader"] = shader
 
+        # Blend mode from the shader tag ("_AD" -> additive, "_AB" -> alpha
+        # blend, else opaque), matching the removed IR layer's derivation.
+        if "_AD" in shader:
+            blend_mode = 2  # ADDITIVE
+        elif "_AB" in shader:
+            blend_mode = 1  # ALPHA
+        else:
+            blend_mode = 0  # OPAQUE
+
         # Store original name before Blender mangles duplicates with .NNN suffixes
         mat["ase_material_name"] = mat.name
 
-        # Store all IR texture names as custom properties for round-trip export.
-        # IR texture slots:
+        # Store all MTRL texture names as custom properties for round-trip export.
+        # Texture slots:
         #   1 = DIFFUSE  -> exported as MAP_DIFFUSE
         #   2 = DETAIL   -> lightmap/overlay, NOT exported (causes df4oed crash)
         #   3 = NORMAL   -> stored but not exported to ASE
         # NOTE: We do NOT export slot 2 as MAP_OPACITY because:
         # 1. These are lightmaps, not alpha masks
         # 2. MAP_OPACITY triggers a crash in df4oed's material preview (sub_403750)
-        for t_idx in range(ir_mat.texture_count):
-            tex = ir_mat.textures[t_idx]
+        for t_idx in range(min(int(mtrl.texture_count), THREEDI_MAX_MATERIAL_TEXTURES)):
+            tex = mtrl.textures[t_idx]
             tex_name = tex.name.decode("utf-8", errors="replace").rstrip("\x00").strip()
             if not tex_name:
                 continue
@@ -78,7 +93,7 @@ class MaterialsMixin:
         # Default diffuse matching 3ds Max Standard material (0.588)
         mat.diffuse_color = (0.588, 0.588, 0.588, 1.0)
 
-        if ir_mat.flags & 0x04:  # TWO_SIDED
+        if mtrl.material_flags & 0x04:  # TWO_SIDED
             mat.use_backface_culling = False
 
         # Find and load diffuse texture for Blender viewport display
@@ -86,7 +101,7 @@ class MaterialsMixin:
         diffuse_bitmap = mat.get("ase_diffuse_bitmap", "")
         if diffuse_bitmap:
             tex_path = self._resolve_texture(diffuse_bitmap)
-            print(f"[TEX] mat={ir_mat.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
+            print(f"[TEX] mat={mtrl.index} diffuse={diffuse_bitmap!r} -> {tex_path}")
             if tex_path:
                 tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
                 tex_node.name = f"Diffuse_{diffuse_bitmap}"
@@ -100,26 +115,26 @@ class MaterialsMixin:
                     print(f"[TEX] Loaded image: {img.name} size={img.size[0]}x{img.size[1]} channels={img.channels}")
                     mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
 
-                    if ir_mat.flags & 0x01:  # ALPHA_TEST
+                    if mtrl.material_flags & 0x01:  # ALPHA_TEST
                         mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
                         mat.blend_method = "CLIP"
                 except Exception as e:
                     print(f"Failed to load texture {tex_path}: {e}")
 
         # Blend mode (overrides CLIP for true alpha-blend materials)
-        if ir_mat.blend_mode == 1:  # ALPHA
+        if blend_mode == 1:  # ALPHA
             mat.blend_method = "BLEND"
             mat.show_transparent_back = False
             if tex_node:
                 mat.node_tree.links.new(tex_node.outputs["Alpha"], bsdf.inputs["Alpha"])
-        elif ir_mat.blend_mode == 2:  # ADDITIVE
+        elif blend_mode == 2:  # ADDITIVE
             mat.blend_method = "BLEND"
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = 1.0
             if tex_node and "Emission Color" in bsdf.inputs:
                 mat.node_tree.links.new(tex_node.outputs["Color"], bsdf.inputs["Emission Color"])
 
-        mat["blend_mode"] = ir_mat.blend_mode
+        mat["blend_mode"] = blend_mode
 
         # Detail/lightmap texture (slot 2): create MixRGB Multiply node.
         # This gives visual representation in Blender (diffuse * detail) and
@@ -151,7 +166,7 @@ class MaterialsMixin:
                     mat.node_tree.links.new(tex_node.outputs["Color"], mix_node.inputs["Color1"])
                     mat.node_tree.links.new(detail_tex.outputs["Color"], mix_node.inputs["Color2"])
                     mat.node_tree.links.new(mix_node.outputs["Color"], bsdf.inputs["Base Color"])
-                    print(f"[TEX] mat={ir_mat.index} detail={detail_bitmap!r} -> MixRGB Multiply")
+                    print(f"[TEX] mat={mtrl.index} detail={detail_bitmap!r} -> MixRGB Multiply")
                 except Exception as e:
                     print(f"Failed to load detail texture {detail_path}: {e}")
 
@@ -197,37 +212,22 @@ class MaterialsMixin:
             mat.node_tree.links.new(tex_node.outputs["Alpha"], bump_node.inputs["Height"])
             mat.node_tree.links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
 
-        # Handle EMISSIVE flag / emissive_type
-        if ir_mat.flags & 0x08:
+        # Emissive: MTRL emissive_type 2 (full) drives full self-illumination
+        if int(mtrl.emissive_type) == THREEDI_EMISSIVE_FULL:
             if "Emission Strength" in bsdf.inputs:
                 bsdf.inputs["Emission Strength"].default_value = 1.0
 
         # Glass / reflection
-        if ir_mat.is_glass:
+        if mtrl.is_glass:
             if "Transmission Weight" in bsdf.inputs:
                 bsdf.inputs["Transmission Weight"].default_value = 0.5
             elif "Transmission" in bsdf.inputs:
                 bsdf.inputs["Transmission"].default_value = 0.5
             if "IOR" in bsdf.inputs:
                 bsdf.inputs["IOR"].default_value = 1.45
-            rc = ir_mat.reflect_color
+            rc = mtrl.reflect_color
             if rc[0] != 0.0 or rc[1] != 0.0 or rc[2] != 0.0:
                 mat["reflect_color"] = [rc[0], rc[1], rc[2], rc[3]]
-
-        # Specular intensity — in the NovaLogic engine, specular is only active
-        # when shader_type selects a bump+specular or phong+specular mode.
-        # The gsys_phong lookup uses fixed exponents (pow 4/16/64).
-        # Map specular_intensity to both Specular IOR Level and Roughness.
-        if ir_mat.specular_intensity > 0:
-            spec = min(ir_mat.specular_intensity / 255.0, 1.0)
-            if "Specular IOR Level" in bsdf.inputs:
-                bsdf.inputs["Specular IOR Level"].default_value = spec
-            elif "Specular" in bsdf.inputs:
-                bsdf.inputs["Specular"].default_value = spec
-            # Derive roughness from specular: higher specular = lower roughness.
-            # The phong LUT exponents (4-64) produce relatively tight highlights,
-            # so map 0->1.0 roughness, 255->0.3 roughness.
-            bsdf.inputs["Roughness"].default_value = 1.0 - spec * 0.7
 
         # Phong shader minimum specular for round-trip fidelity.
         # Without this, the exporter can't detect Phong (specular=0 → DOT3 path).
@@ -239,82 +239,60 @@ class MaterialsMixin:
             if bsdf.inputs["Roughness"].default_value >= 1.0:
                 bsdf.inputs["Roughness"].default_value = 0.5
 
-        # Luminosity — drives emission in the engine
-        if ir_mat.luminosity > 0:
-            lum = min(ir_mat.luminosity / 255.0, 1.0)
-            if "Emission Strength" in bsdf.inputs:
-                bsdf.inputs["Emission Strength"].default_value = lum
-
-        # UV tiling (apply Mapping node if tiling != 0 and != 1)
-        u_tile = ir_mat.u_tiling
-        v_tile = ir_mat.v_tiling
-        if (u_tile != 0.0 and u_tile != 1.0) or (v_tile != 0.0 and v_tile != 1.0):
-            if u_tile == 0.0:
-                u_tile = 1.0
-            if v_tile == 0.0:
-                v_tile = 1.0
-            uv_node = mat.node_tree.nodes.new("ShaderNodeUVMap")
-            mapping = mat.node_tree.nodes.new("ShaderNodeMapping")
-            mapping.inputs["Scale"].default_value = (u_tile, v_tile, 1.0)
-            mat.node_tree.links.new(uv_node.outputs["UV"], mapping.inputs["Vector"])
-            # Wire mapping output to all existing texture image nodes
-            for node in mat.node_tree.nodes:
-                if node.type == "TEX_IMAGE":
-                    mat.node_tree.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
-
         # Store shader animation parameters as custom properties for round-trip
-        if ir_mat.u_params.style != 0:
-            mat["uv_u_style"] = int(ir_mat.u_params.style)
-            mat["uv_u_rate"] = ir_mat.u_params.gen_rate
-            mat["uv_u_phase"] = ir_mat.u_params.phase
-            mat["uv_u_start"] = ir_mat.u_params.start
-            mat["uv_u_end"] = ir_mat.u_params.end
-        if ir_mat.v_params.style != 0:
-            mat["uv_v_style"] = int(ir_mat.v_params.style)
-            mat["uv_v_rate"] = ir_mat.v_params.gen_rate
-            mat["uv_v_phase"] = ir_mat.v_params.phase
-            mat["uv_v_start"] = ir_mat.v_params.start
-            mat["uv_v_end"] = ir_mat.v_params.end
-        if ir_mat.alpha_gen.style != 0:
-            mat["alpha_gen_style"] = int(ir_mat.alpha_gen.style)
-            mat["alpha_gen_rate"] = ir_mat.alpha_gen.rate
-            mat["alpha_gen_phase"] = ir_mat.alpha_gen.phase
-            mat["alpha_gen_start"] = int(ir_mat.alpha_gen.start)
-            mat["alpha_gen_end"] = int(ir_mat.alpha_gen.end)
-        if ir_mat.rgb_gen.style != 0:
-            mat["rgb_gen_style"] = int(ir_mat.rgb_gen.style)
-            mat["rgb_gen_rate"] = ir_mat.rgb_gen.rate
-            mat["rgb_gen_phase"] = ir_mat.rgb_gen.phase
-            sc = ir_mat.rgb_gen.start_color
-            ec = ir_mat.rgb_gen.end_color
+        if mtrl.u_params.style != 0:
+            mat["uv_u_style"] = int(mtrl.u_params.style)
+            mat["uv_u_rate"] = mtrl.u_params.gen_rate
+            mat["uv_u_phase"] = mtrl.u_params.phase
+            mat["uv_u_start"] = mtrl.u_params.start
+            mat["uv_u_end"] = mtrl.u_params.end
+        if mtrl.v_params.style != 0:
+            mat["uv_v_style"] = int(mtrl.v_params.style)
+            mat["uv_v_rate"] = mtrl.v_params.gen_rate
+            mat["uv_v_phase"] = mtrl.v_params.phase
+            mat["uv_v_start"] = mtrl.v_params.start
+            mat["uv_v_end"] = mtrl.v_params.end
+        if mtrl.alpha_gen.style != 0:
+            mat["alpha_gen_style"] = int(mtrl.alpha_gen.style)
+            mat["alpha_gen_rate"] = mtrl.alpha_gen.rate
+            mat["alpha_gen_phase"] = mtrl.alpha_gen.phase
+            mat["alpha_gen_start"] = int(mtrl.alpha_gen.start)
+            mat["alpha_gen_end"] = int(mtrl.alpha_gen.end)
+        if mtrl.rgb_gen.style != 0:
+            mat["rgb_gen_style"] = int(mtrl.rgb_gen.style)
+            mat["rgb_gen_rate"] = mtrl.rgb_gen.rate
+            mat["rgb_gen_phase"] = mtrl.rgb_gen.phase
+            sc = mtrl.rgb_gen.start_color
+            ec = mtrl.rgb_gen.end_color
             mat["rgb_gen_start_color"] = [sc[0], sc[1], sc[2], sc[3]]
             mat["rgb_gen_end_color"] = [ec[0], ec[1], ec[2], ec[3]]
-        if ir_mat.animation.num_frames > 0:
-            mat["tex_anim_frames"] = int(ir_mat.animation.num_frames)
-            mat["tex_anim_type"] = int(ir_mat.animation.animation_type)
-            mat["tex_anim_time"] = int(ir_mat.animation.cycle_frame_time)
-        if ir_mat.alpha_threshold > 0:
-            mat["alpha_threshold"] = ir_mat.alpha_threshold
+        if mtrl.animation.num_frames > 0:
+            mat["tex_anim_frames"] = int(mtrl.animation.num_frames)
+            mat["tex_anim_type"] = int(mtrl.animation.animation_type)
+            mat["tex_anim_time"] = int(mtrl.animation.cycle_frame_time)
+        if int(mtrl.alpha_test_value_byte) > 0:
+            # Alpha-test threshold byte (0..255) stored as a 0..1 float
+            mat["alpha_threshold"] = int(mtrl.alpha_test_value_byte) / 255.0
 
         # Store emissive_type for round-trip (0=none, 2=full)
-        if ir_mat.emissive_type != 0:
-            mat["emissive_type"] = int(ir_mat.emissive_type)
+        if mtrl.emissive_type != 0:
+            mat["emissive_type"] = int(mtrl.emissive_type)
 
-        # Store control register names for round-trip (resolved from IR indices)
-        if ir_mat.rgb_gen.style > 0x70 and ir_mat.rgb_gen.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.rgb_gen.reg)
+        # Store control register names for round-trip (resolved from CTRL indices)
+        if mtrl.rgb_gen.style > 0x70 and mtrl.rgb_gen.reg >= 0:
+            creg = self._resolve_ctrl_reg(mtrl.rgb_gen.reg)
             if creg:
                 mat["rgb_gen_ctrlreg"] = creg
-        if ir_mat.alpha_gen.style > 0x70 and ir_mat.alpha_gen.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.alpha_gen.reg)
+        if mtrl.alpha_gen.style > 0x70 and mtrl.alpha_gen.reg >= 0:
+            creg = self._resolve_ctrl_reg(mtrl.alpha_gen.reg)
             if creg:
                 mat["alpha_gen_ctrlreg"] = creg
-        if ir_mat.u_params.style > 0x70 and ir_mat.u_params.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.u_params.reg)
+        if mtrl.u_params.style > 0x70 and mtrl.u_params.reg >= 0:
+            creg = self._resolve_ctrl_reg(mtrl.u_params.reg)
             if creg:
                 mat["uv_u_ctrlreg"] = creg
-        if ir_mat.v_params.style > 0x70 and ir_mat.v_params.reg >= 0:
-            creg = self._resolve_ctrl_reg(ir_mat.v_params.reg)
+        if mtrl.v_params.style > 0x70 and mtrl.v_params.reg >= 0:
+            creg = self._resolve_ctrl_reg(mtrl.v_params.reg)
             if creg:
                 mat["uv_v_ctrlreg"] = creg
 

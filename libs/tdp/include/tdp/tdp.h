@@ -152,13 +152,14 @@ TDP_EXPORT void tdp_alloc_materials(TdpProject *proj, size_t count);
 TDP_EXPORT void tdp_alloc_part_anims(TdpLod *lod, size_t count);
 TDP_EXPORT void tdp_alloc_lights(TdpLod *lod, size_t count);
 
-// Forward-declare the IR struct so we don't require threedi header.
-struct ThreediModelIR;
+// Forward-declare the parsed-model struct so we don't require the threedi header.
+struct Threedi3di3;
 
-// Populate a TdpProject from a ThreediModelIR.
+// Populate a TdpProject from a parsed 3DI3 model. Per-material surface
+// type/pattrib are reconstructed from the model's collision faces.
 // Caller must call tdp_free() on `out` when done.
 // Returns 0 on success, -1 on error.
-TDP_EXPORT int tdp_from_ir(const struct ThreediModelIR *ir, TdpProject *out);
+TDP_EXPORT int tdp_from_3di(const struct Threedi3di3 *model, TdpProject *out);
 
 #ifdef __cplusplus
 }

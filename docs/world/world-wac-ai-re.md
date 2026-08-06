@@ -1763,7 +1763,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   mounted-weapon items, and large buildings carry them); every runtime walker
   consumes volumes only through the per-COBJ `+28`/`+36` runs, so an unowned
   tail is unreachable dead data — a loader/validator must tolerate it (the
-  2026-07-20 `threedi_ir_collision_is_runtime_safe` fix; `collision_ir` ctest).
+  2026-07-20 `threedi_ir_collision_is_runtime_safe` fix — since ADR 0027 the validator is `threedi_3di3_collision_is_runtime_safe` on the raw parse; ctest `threedi_collision_3di`).
   BPLN plane record
   (12 B): `+0` s16 flags, `+2/+4/+6` s16 Q14 normal, `+8` 16.16 distance.
   Witnessed as the common field reads of `@ 0x4aef90`, `@ 0x413060`, `@ 0x4ae150`.

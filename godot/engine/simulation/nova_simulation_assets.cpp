@@ -471,8 +471,8 @@ bool NovaSimulation::resolve_mounted_pose(
 	const Ref<NovaObjectData> &data = data_found->second;
 
 	Dictionary controls;
-	const ThreediModelIR &ir = data->native_ir();
-	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+	const Threedi3di3 &model = data->native_model();
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
 		return false;
 	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
 	assign_part_anim_phases(
@@ -679,8 +679,8 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 	const PackedInt32Array targets =
 			data->get_effective_panm_targets(lod_index);
 	if (targets.is_empty()) return false;
-	const ThreediModelIR &ir = data->native_ir();
-	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+	const Threedi3di3 &model = data->native_model();
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
 		return false;
 
 	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail
@@ -785,16 +785,16 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
 			if (data.is_valid()) {
 				opennova::world::CollisionModel model;
-				if (collision_model_from_ir(
-						data->native_ir().collision, model, data->has_collision())) {
+				if (collision_model_from_3di(
+						data->native_model().collision, model, data->has_collision())) {
 					model_id = collision_world_.add_model(std::move(model));
 					if (data->has_live_panm_for_lod(0))
 						collision_pose_data_[model_id] = data;
 				}
 				opennova::world::OcclusionModel occ;
-				if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
+				if (occlusion_model_from_3di(data->native_model(), occ))
 					occlusion_id = occlusion_world_.add_model(std::move(occ));
-				bound_radius = model_bound_radius_from_ir(data->native_ir());
+				bound_radius = model_bound_radius_from_3di(data->native_model());
 			}
 			it = collision_model_by_graphic_.emplace(key, model_id).first;
 			collision_occlusion_by_graphic_.emplace(key, occlusion_id);
@@ -821,8 +821,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				Ref<NovaObjectData> vdata =
 						p_placer->call("object_data_for", graphic);
 				if (vdata.is_valid()) {
-					const ThreediIRCollision *col =
-							vdata->native_ir().collision;
+					const ThreediCollisionModel *col =
+							vdata->native_model().collision;
 					if (col != nullptr && col->objects != nullptr &&
 							col->object_count > 0) {
 						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
@@ -943,15 +943,15 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				int32_t husk_model_id = -1;
 				if (husk_data.is_valid()) {
 					opennova::world::CollisionModel hmodel;
-					if (collision_model_from_ir(
-							husk_data->native_ir().collision, hmodel,
+					if (collision_model_from_3di(
+							husk_data->native_model().collision, hmodel,
 							husk_data->has_collision())) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
 						if (husk_data->has_live_panm_for_lod(0))
 							collision_pose_data_[husk_model_id] = husk_data;
 					}
 					collision_radius_by_graphic_.emplace(husk_key,
-							model_bound_radius_from_ir(husk_data->native_ir()));
+							model_bound_radius_from_3di(husk_data->native_model()));
 				}
 				hit = collision_model_by_graphic_.emplace(
 						husk_key, husk_model_id).first;
@@ -972,19 +972,21 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				if (kz_it == collision_husk_kz_points_by_graphic_.end()) {
 					std::vector<opennova::world::Vec3> kz_points;
 					if (husk_data.is_valid()) {
-						const ThreediModelIR &ir = husk_data->native_ir();
+						const Threedi3di3 &hmodel3di = husk_data->native_model();
 						for (size_t up_index = 0;
-								ir.userpoints != nullptr && up_index < ir.userpoint_count;
+								hmodel3di.user_points != nullptr && up_index < hmodel3di.user_point_count;
 								++up_index) {
-							const ThreediIRUserPoint &point = ir.userpoints[up_index];
+							const ThreediUserPoint &point = hmodel3di.user_points[up_index];
 							if (String::utf8(point.name).nocasecmp_to("KZ") != 0)
 								continue;
-							// IR is (-source y, source z, source x); destruction's
-							// placement math consumes mission-local (x, y, z).
+							// Decoded model space is (-source y, source z, source x);
+							// destruction's placement math consumes mission-local (x, y, z).
+							float up_pos[3];
+							threedi_user_point_position(&point, up_pos);
 							kz_points.push_back(opennova::world::Vec3{
-									point.position[2],
-									-point.position[0],
-									point.position[1]});
+									up_pos[2],
+									-up_pos[0],
+									up_pos[1]});
 						}
 					}
 					kz_it = collision_husk_kz_points_by_graphic_.emplace(
@@ -1014,27 +1016,29 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				Ref<NovaObjectData> hdata = final_husk_name_s.is_empty()
 						? first_husk_data
 						: final_husk_data;
-				if (hdata.is_valid() && hdata->native_ir().lod_count > 0 &&
-				    hdata->native_ir().lods != nullptr) {
-					const ThreediIRLod &lod = hdata->native_ir().lods[0];
-					info.sections = static_cast<int32_t>(lod.part_count);
-					for (size_t pi = 0; lod.parts != nullptr && pi < lod.part_count;
+				if (hdata.is_valid() && hdata->native_model().lod_count > 0 &&
+				    hdata->native_model().lods != nullptr) {
+					const ThreediLod &lod = hdata->native_model().lods[0];
+					info.sections = static_cast<int32_t>(lod.render_object_count);
+					for (size_t pi = 0; lod.render_objects != nullptr && pi < lod.render_object_count;
 							++pi) {
-						const ThreediIRPart &part = lod.parts[pi];
+						const ThreediRenderObject &part = lod.render_objects[pi];
 						info.centers.push_back(opennova::world::Vec3{
-								part.abs_position[0] + part.bounding_center[0],
-								part.abs_position[1] + part.bounding_center[1],
-								part.abs_position[2] + part.bounding_center[2]});
+								part.abs[0] + part.bounding_center[0],
+								part.abs[1] + part.bounding_center[1],
+								part.abs[2] + part.bounding_center[2]});
 					}
-					if (lod.parts != nullptr && lod.part_count > 0 &&
-					    lod.primitives != nullptr) {
-						const ThreediIRPart &p0 = lod.parts[0];
+					// Section 0 owns the first opaque+alpha strip run (strips are
+					// stored sequentially per render object).
+					if (lod.render_objects != nullptr && lod.render_object_count > 0 &&
+					    lod.strips != nullptr) {
+						const ThreediRenderObject &p0 = lod.render_objects[0];
+						const int32_t p0_strip_count = p0.num_strips + p0.num_alpha_strips;
 						bool any = false;
-						for (int32_t pr = 0; pr < p0.primitive_count; ++pr) {
-							const size_t idx =
-									static_cast<size_t>(p0.primitive_start) + pr;
-							if (idx >= lod.primitive_count) break;
-							const ThreediIRPrimitive &prim = lod.primitives[idx];
+						for (int32_t pr = 0; pr < p0_strip_count; ++pr) {
+							const size_t idx = static_cast<size_t>(pr);
+							if (idx >= lod.strip_count) break;
+							const ThreediTriangleStrip &prim = lod.strips[idx];
 							info.rest_min_z =
 									any ? std::min(info.rest_min_z, prim.min[2])
 									    : prim.min[2];
@@ -1049,7 +1053,7 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 						piece_key, std::move(info)).first;
 				if (hdata.is_valid())
 					collision_radius_by_graphic_.emplace(piece_key,
-							model_bound_radius_from_ir(hdata->native_ir()));
+							model_bound_radius_from_3di(hdata->native_model()));
 			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id)) {

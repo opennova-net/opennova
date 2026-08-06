@@ -35,7 +35,6 @@ def create_material(
     mat_ir,
     resolver=None,
     ctrl_resolver=None,
-    source_format=None,
     uv1_tiling_override=None,
 ) -> Any:
     """Create a Max StandardMaterial matching one 3DI3 material."""
@@ -44,7 +43,6 @@ def create_material(
         mat_ir,
         resolver=resolver,
         ctrl_resolver=ctrl_resolver,
-        source_format=source_format,
         uv1_tiling_override=uv1_tiling_override,
     )
 
@@ -75,18 +73,17 @@ def create_material(
 
     _wire_alpha_test(rt, mat, desc)
 
-    # Alpha-test materials use the precise threshold from the 3DI3 model; renderer_blend
-    # opacity defaults (70 / 100) only apply when alpha-test isn't already set.
-    is_alpha_blend = desc.blend_mode == 1 or desc.renderer_blend == MATERIAL_BLEND_ALPHA
-    is_additive = desc.blend_mode == 2 or desc.renderer_blend == MATERIAL_BLEND_ADDITIVE
+    # Alpha-test materials use the precise threshold from the 3DI3 model; the
+    # shader-tag blend classification ("_AB" alpha / "_AD" additive) drives the
+    # opacity defaults (70 / 100), which only apply when alpha-test isn't set.
+    is_alpha_blend = desc.renderer_blend == MATERIAL_BLEND_ALPHA
+    is_additive = desc.renderer_blend == MATERIAL_BLEND_ADDITIVE
     if is_alpha_blend or is_additive:
         _set_user_prop(rt, mat, "opennova_renderer_blend", desc.renderer_blend)
         if not desc.alpha_test:
             _try_set(mat, "opacity", 70.0 if is_alpha_blend else 100.0)
     if is_additive or desc.emissive:
         _try_set(mat, "selfIllumAmount", 100.0)
-    if desc.luminosity_strength > 0.0:
-        _try_set(mat, "selfIllumAmount", desc.luminosity_strength * 100.0)
 
     _wire_detail(rt, mat, desc)
     _wire_normal_metadata(rt, mat, desc)
@@ -214,9 +211,9 @@ def _wire_bump(rt, mat, desc) -> None:
         _set_user_prop(rt, mat, "opennova_bump_map_mode", "metadata_only")
 
 
-def create_diffuse_material(mat_ir, resolver=None, source_format=None) -> Any:
+def create_diffuse_material(mat_ir, resolver=None) -> Any:
     """Backward-compatible wrapper used by older smoke tests."""
-    return create_material(mat_ir, resolver=resolver, source_format=source_format)
+    return create_material(mat_ir, resolver=resolver)
 
 
 def create_marker_material(name: str, color_rgb: tuple[float, float, float], alpha: float = 1.0) -> Any:
@@ -293,9 +290,9 @@ def _max_material_id(material_id: int) -> int:
     return max(1, int(material_id) + 1)
 
 
-def collect_texture_diagnostics(mat_ir, resolver=None, source_format=None) -> dict[str, Any]:
+def collect_texture_diagnostics(mat_ir, resolver=None) -> dict[str, Any]:
     """Return resolved texture names/paths without touching Max material APIs."""
-    desc = describe_material(mat_ir, resolver=resolver, source_format=source_format)
+    desc = describe_material(mat_ir, resolver=resolver)
     return {
         "diffuse_name": desc.diffuse.name,
         "diffuse_path": desc.diffuse.path,
@@ -503,8 +500,8 @@ def _store_generator_props(rt, mat, mat_ir, ctrl_resolver) -> None:
         _set_user_prop(rt, mat, "tex_anim_frames", int(mat_ir.animation.num_frames))
         _set_user_prop(rt, mat, "tex_anim_type", int(mat_ir.animation.animation_type))
         _set_user_prop(rt, mat, "tex_anim_time", int(mat_ir.animation.cycle_frame_time))
-    if int(mat_ir.alpha_threshold) > 0:
-        _set_user_prop(rt, mat, "alpha_threshold", int(mat_ir.alpha_threshold))
+    if int(mat_ir.alpha_test_value_byte) > 0:
+        _set_user_prop(rt, mat, "alpha_threshold", int(mat_ir.alpha_test_value_byte))
     if int(mat_ir.emissive_type) != 0:
         _set_user_prop(rt, mat, "emissive_type", int(mat_ir.emissive_type))
     if bool(mat_ir.is_glass):

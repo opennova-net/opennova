@@ -7,7 +7,7 @@ Mirrors structs from libs/tdp/include/tdp/tdp.h.
 import ctypes
 
 from ._native import load_lib
-from .threedi_ffi import ThreediModelIR
+from .threedi_ffi import Threedi3di3
 
 TDP_MAX_LODS = 8
 TDP_MAX_ANIM_FRAMES = 8
@@ -164,8 +164,8 @@ def _bind():
     lib.tdp_parse.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
     lib.tdp_write.restype = ctypes.c_int
     lib.tdp_write.argtypes = [ctypes.c_char_p, ctypes.POINTER(TdpProject)]
-    lib.tdp_from_ir.restype = ctypes.c_int
-    lib.tdp_from_ir.argtypes = [ctypes.POINTER(ThreediModelIR), ctypes.POINTER(TdpProject)]
+    lib.tdp_from_3di.restype = ctypes.c_int
+    lib.tdp_from_3di.argtypes = [ctypes.POINTER(Threedi3di3), ctypes.POINTER(TdpProject)]
     lib.tdp_alloc_materials.restype = None
     lib.tdp_alloc_materials.argtypes = [ctypes.POINTER(TdpProject), ctypes.c_size_t]
     lib.tdp_alloc_part_anims.restype = None
@@ -199,14 +199,14 @@ def write_tdp(path: str, proj) -> None:
         raise RuntimeError(f"tdp_write failed for {path!r}")
 
 
-def tdp_from_ir(ir) -> TdpProject:
-    """Populate a TdpProject from a ThreediModelIR. Caller must call free_tdp() when done."""
+def tdp_from_3di(model) -> TdpProject:
+    """Populate a TdpProject from a parsed Threedi3di3. Caller must call free_tdp() when done."""
     _bind()
     lib = load_lib()
     proj = TdpProject()
-    rc = lib.tdp_from_ir(ctypes.byref(ir), ctypes.byref(proj))
+    rc = lib.tdp_from_3di(ctypes.byref(model), ctypes.byref(proj))
     if rc != 0:
-        raise RuntimeError("tdp_from_ir failed")
+        raise RuntimeError("tdp_from_3di failed")
     return proj
 
 

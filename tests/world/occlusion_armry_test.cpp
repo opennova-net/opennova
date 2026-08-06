@@ -1,7 +1,7 @@
 // Real-asset probe for the interior section-mask/portal engine: the retail
 // Armry01.3di (the 00TRa armory — three rooms joined by two interior portals,
-// one window, one whole-building open slot) loaded through threedi_ir_read and
-// run through the SAME IR->runtime conversions the host performs, then the
+// one window, one whole-building open slot) loaded through threedi_3di3_read and
+// run through the SAME model->runtime conversions the host performs, then the
 // camera walked through the rooms and the per-room section masks asserted.
 // Covers the room-transition chain the hand-built unit fixtures cannot: real
 // authored OFAC topology, real blink-box/section/render-part correspondence.
@@ -28,7 +28,7 @@
 #endif
 
 #include "terrain/height_field.h"
-#include "threedi/threedi_ir.h"
+#include "threedi/threedi_3di3.h"
 #include "world/collision.h"
 #include "world/occlusion.h"
 #include "world/world.h"
@@ -61,77 +61,71 @@ struct Field {
     }
 };
 
-// The host's IR->runtime collision conversion, replicated (the canonical copy
-// is collision_model_from_ir in godot/engine/simulation/nova_simulation.cpp —
-// libs/world stays format-free by design, so the leaf test carries its own).
-bool collision_from_ir(const ThreediIRCollision *col, CollisionModel &out) {
-    if (col == nullptr || col->volume_count == 0 || !threedi_ir_collision_is_runtime_safe(col))
+// The host's model->runtime collision conversion, replicated (the canonical
+// copy is collision_model_from_3di in
+// godot/engine/simulation/nova_simulation_internal.h � libs/world stays
+// format-free by design, so the leaf test carries its own).
+bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
+    if (col == nullptr || col->volume_count == 0 || !threedi_3di3_collision_is_runtime_safe(col))
         return false;
     for (size_t i = 0; i < col->plane_count; ++i) {
         CollisionPlane p;
         p.nx = static_cast<int16_t>(std::lround(col->planes[i].normal[0] * 16384.0f));
         p.ny = static_cast<int16_t>(std::lround(col->planes[i].normal[1] * 16384.0f));
         p.nz = static_cast<int16_t>(std::lround(col->planes[i].normal[2] * 16384.0f));
-        p.dist = fx(col->planes[i].distance);
+        p.dist = fx(col->planes[i].radius);
         out.planes.push_back(p);
     }
-    int32_t max_object = 0;
+    int32_t plane_cursor = 0;
     for (size_t i = 0; i < col->volume_count; ++i) {
-        const ThreediIRCollisionVolume &sv = col->volumes[i];
+        const ThreediBoundingVolume &sv = col->volumes[i];
         CollisionVolume v;
-        v.type = sv.type;
+        v.type = sv.collidable_type;
         v.flags = static_cast<uint32_t>(sv.flags);
-        v.min_x = fx(sv.min[0]);
-        v.max_x = fx(sv.max[0]);
-        v.min_y = fx(sv.min[1]);
-        v.max_y = fx(sv.max[1]);
-        v.min_z = fx(sv.min[2]);
-        v.max_z = fx(sv.max[2]);
-        v.plane_start = sv.plane_start;
+        v.min_x = sv.min_x_fp16;
+        v.max_x = sv.max_x_fp16;
+        v.min_y = sv.min_y_fp16;
+        v.max_y = sv.max_y_fp16;
+        v.min_z = sv.min_z_fp16;
+        v.max_z = sv.max_z_fp16;
+        v.plane_start = plane_cursor;
         v.plane_count = sv.plane_count;
+        plane_cursor += sv.plane_count;
         out.volumes.push_back(v);
-        if (sv.object_index > max_object) max_object = sv.object_index;
     }
-    const int32_t section_count = max_object + 1;
-    out.sections.assign(static_cast<size_t>(section_count), {});
-    int32_t cursor = 0;
-    for (int32_t s = 0; s < section_count; ++s) {
+    out.sections.assign(col->object_count, {});
+    int32_t volume_cursor = 0;
+    for (size_t s = 0; s < col->object_count; ++s) {
         CollisionSection &sec = out.sections[s];
-        sec.volume_start = cursor;
-        sec.volume_count = 0;
-        while (cursor < static_cast<int32_t>(col->volume_count)) {
-            const int32_t oi = col->volumes[cursor].object_index;
-            if ((oi < 0 ? 0 : oi) != s) break;
-            ++sec.volume_count;
-            ++cursor;
-        }
-        if (s < static_cast<int32_t>(col->object_count))
-            sec.parent_part_index = col->objects[s].parent_subobject_index;
+        sec.volume_start = volume_cursor;
+        sec.volume_count = col->objects[s].num_bounding_volumes;
+        sec.parent_part_index = col->objects[s].parent_subobject_index;
+        volume_cursor += sec.volume_count;
     }
     return true;
 }
 
-// The host's IR->runtime occlusion conversion, replicated (canonical copy:
-// occlusion_model_from_ir in nova_simulation.cpp).
-bool occlusion_from_ir(const ThreediIROcclusion *occ, OcclusionModel &out) {
-    if (occ == nullptr || occ->object_count == 0) return false;
-    for (size_t i = 0; i < occ->vertex_count; ++i) {
+// The host's model->runtime occlusion conversion, replicated (canonical copy:
+// occlusion_model_from_3di in nova_simulation_internal.h).
+bool occlusion_from_3di(const Threedi3di3 &model, OcclusionModel &out) {
+    if (model.occlusion_object_count == 0) return false;
+    for (size_t i = 0; i < model.occlusion_vertex_count; ++i) {
         OcclusionVertex v;
-        v.p[0] = occ->vertices[i].position[0];
-        v.p[1] = occ->vertices[i].position[1];
-        v.p[2] = occ->vertices[i].position[2];
+        v.p[0] = model.occlusion_vertices[i].position[0];
+        v.p[1] = model.occlusion_vertices[i].position[1];
+        v.p[2] = model.occlusion_vertices[i].position[2];
         out.vertices.push_back(v);
     }
-    for (size_t i = 0; i < occ->plane_count; ++i) {
+    for (size_t i = 0; i < model.occlusion_plane_count; ++i) {
         OcclusionPlane p;
-        p.normal[0] = occ->planes[i].normal[0];
-        p.normal[1] = occ->planes[i].normal[1];
-        p.normal[2] = occ->planes[i].normal[2];
-        p.d = occ->planes[i].radius;
+        p.normal[0] = model.occlusion_planes[i].normal[0];
+        p.normal[1] = model.occlusion_planes[i].normal[1];
+        p.normal[2] = model.occlusion_planes[i].normal[2];
+        p.d = model.occlusion_planes[i].radius;
         out.planes.push_back(p);
     }
-    for (size_t i = 0; i < occ->face_count; ++i) {
-        const ThreediIROcclusionFace &sf = occ->faces[i];
+    for (size_t i = 0; i < model.occlusion_face_count; ++i) {
+        const ThreediOcclusionFace &sf = model.occlusion_faces[i];
         OcclusionFaceRec f;
         f.v[0] = static_cast<uint8_t>(sf.raw_indices & 0xFF);
         f.v[1] = static_cast<uint8_t>((sf.raw_indices >> 8) & 0xFF);
@@ -142,23 +136,27 @@ bool occlusion_from_ir(const ThreediIROcclusion *occ, OcclusionModel &out) {
         f.edge[2] = static_cast<uint16_t>(sf.other_edge_data & 0xFFFF);
         out.faces.push_back(f);
     }
-    for (size_t i = 0; i < occ->object_count; ++i) {
-        const ThreediIROcclusionObject &so = occ->objects[i];
+    int32_t vert_cursor = 0, plane_cursor = 0, face_cursor = 0;
+    for (size_t i = 0; i < model.occlusion_object_count; ++i) {
+        const ThreediOcclusionObject &so = model.occlusion_objects[i];
         OcclusionPortalFace rec;
-        rec.type = static_cast<uint8_t>(so.type);
-        rec.section_a = static_cast<uint8_t>(so.parent_subobject_index);
-        rec.section_b = static_cast<uint8_t>(so.connecting_subobject);
+        rec.type = so.type;
+        rec.section_a = so.parent_subobject_index;
+        rec.section_b = so.connecting_subobject;
         rec.pos[0] = so.position[0];
         rec.pos[1] = so.position[1];
         rec.pos[2] = so.position[2];
         rec.radius = so.radius;
-        rec.vert_start = so.vertex_start;
+        rec.vert_start = vert_cursor;
         rec.vert_count = so.num_vertices;
-        rec.plane_start = so.plane_start;
+        rec.plane_start = plane_cursor;
         rec.plane_count = so.num_planes;
-        rec.face_start = so.face_start;
+        rec.face_start = face_cursor;
         rec.face_count = so.face_count;
         rec.glow_scale = so.glow_scale;
+        if (so.num_vertices > 0) vert_cursor += so.num_vertices;
+        if (so.num_planes > 0) plane_cursor += so.num_planes;
+        if (so.face_count > 0) face_cursor += so.face_count;
         out.records.push_back(rec);
     }
     return true;
@@ -233,17 +231,16 @@ int main() {
         std::fprintf(stderr, "FAIL: no Armry01.3di fixture path configured\n");
         return 1;
     }
-    ThreediModelIR ir;
-    threedi_ir_init(&ir);
-    if (threedi_ir_read(path.c_str(), &ir) != 0) {
+    Threedi3di3 model = {};
+    if (threedi_3di3_read(path.c_str(), &model) != 0) {
         std::fprintf(stderr, "FAIL: %s not readable\n", path.c_str());
         return 1;
     }
 
     CollisionModel cm;
     OcclusionModel om;
-    CHECK(collision_from_ir(ir.collision, cm));
-    CHECK(occlusion_from_ir(ir.occlusion, om));
+    CHECK(collision_from_3di(model.collision, cm));
+    CHECK(occlusion_from_3di(model, om));
     // The authored shape this test's assertions are keyed to.
     CHECK(cm.sections.size() == 4);
     CHECK(om.records.size() == 8);
@@ -269,7 +266,7 @@ int main() {
     CHECK(vc_count == 1);
     CHECK(bb_count == 3);
     CHECK(bb_2e_count == 2 && bb_28_count == 1);
-    threedi_ir_free(&ir);
+    threedi_3di3_free(&model);
     if (failures != 0) return 1; // shape mismatch: don't chase derived checks
 
     Rig rig;

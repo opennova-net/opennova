@@ -814,23 +814,26 @@ inline uint32_t dictionary_u32(const Dictionary &d, const char *key, uint32_t fa
 	return static_cast<uint32_t>(value);
 }
 
-// Build the runtime collision model from a parsed .3di collision IR block â€” the exact
+// Build the runtime collision model from a parsed .3di CDTA block — the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
-// libs/threedi/src/threedi_3di3.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
-// grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object. Face-only Poly
-// Collision LOD models remain valid without semantic volumes, and organic callers may
-// explicitly retain COBJ sphere-only models for posed person collision.
-inline bool collision_model_from_ir(const ThreediIRCollision *col,
+// libs/threedi/src/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
+// grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object, and each face's local
+// CNRM index resolves against its object's run at build time, exactly the load-time
+// fixup retail performs [orig: the per-COBJ normal-run fixup in the collision builder
+// @ 0x5b3bf0]. Face-only Poly Collision LOD models remain valid without semantic
+// volumes, and organic callers may explicitly retain COBJ sphere-only models for posed
+// person collision.
+inline bool collision_model_from_3di(const ThreediCollisionModel *col,
 	                             opennova::world::CollisionModel &out,
 	                             bool allow_sphere_only = false) {
-	if (col == nullptr || !threedi_ir_collision_is_runtime_safe(col)) return false;
+	if (col == nullptr || !threedi_3di3_collision_is_runtime_safe(col)) return false;
 	const bool has_face_mesh =
 			col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
 			col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr;
 	bool has_person_spheres = false;
 	if (allow_sphere_only && col->objects != nullptr) {
 		for (size_t i = 0; i < col->object_count; ++i) {
-			if (col->objects[i].radius_fp16 > 0) {
+			if (col->objects[i].radius > 0) {
 				has_person_spheres = true;
 				break;
 			}
@@ -846,16 +849,19 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 		for (int k = 0; k < 3; ++k) v.p[k] = fx(col->vertices[i].position[k]);
 		out.vertices.push_back(v);
 	}
+	// The parser divided the authored signed Q14 CNRM words by 16384, so
+	// multiplying by that power of two is an exact recovery.
 	out.normals.reserve(col->normal_count);
 	for (size_t i = 0; i < col->normal_count; ++i) {
 		opennova::world::CollisionNormal n;
-		for (int k = 0; k < 3; ++k) n.n[k] = col->normals[i].normal_q14[k];
-		n.dominant_axis = col->normals[i].dominant_axis;
+		for (int k = 0; k < 3; ++k)
+			n.n[k] = static_cast<int16_t>(std::lround(col->normals[i].normal[k] * 16384.0f));
+		n.dominant_axis = col->normals[i].dominate_axis;
 		out.normals.push_back(n);
 	}
 	// The legacy projectile path consumes the same CVRT run requantized to its
-	// authored Q8 words. IR positions originated as Q8/256, so this round-trip
-	// is exact while the indexed path above retains its Q16 view.
+	// authored Q8 words. Parsed positions originated as Q8/256, so this
+	// round-trip is exact while the indexed path above retains its Q16 view.
 	out.face_vertices.reserve(col->vertex_count);
 	for (size_t i = 0; i < col->vertex_count; ++i) {
 		opennova::world::CollisionFaceVertex v;
@@ -868,17 +874,23 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 	// CVRT/CNRM fields and the embedded Q8/Q14 fields used by the older walker.
 	out.faces.reserve(col->face_count);
 	for (size_t i = 0; i < col->face_count; ++i) {
-		const ThreediIRCollisionFace &sf = col->faces[i];
+		const ThreediCollisionFace &sf = col->faces[i];
 		opennova::world::CollisionFace f;
 		for (int k = 0; k < 3; ++k) {
 			f.vertex_index[k] = sf.vert_index[k];
 			f.v[k] = sf.vert_index[k];
-			f.normal[k] = sf.normal[k];
-			f.min[k] = sf.min_fp16[k];
-			f.max[k] = sf.max_fp16[k];
+			f.normal[k] = 0;
+			f.min[k] = 0;
+			f.max[k] = 0;
 		}
+		f.min[0] = sf.min_x_fp16;
+		f.min[1] = sf.min_y_fp16;
+		f.min[2] = sf.min_z_fp16;
+		f.max[0] = sf.max_x_fp16;
+		f.max[1] = sf.max_y_fp16;
+		f.max[2] = sf.max_z_fp16;
 		f.normal_index = sf.normal_index;
-		f.axis = sf.dominate_axis;
+		f.axis = 0;
 		f.plane_dist = sf.plane_dist_fp16;
 		f.material_flags = sf.material_flags;
 		f.poly_type = sf.poly_type;
@@ -886,32 +898,60 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 		f.material = sf.poly_type;
 		out.faces.push_back(f);
 	}
+	// Resolve each face's embedded Q14 normal from its object-local CNRM run
+	// [orig: the per-COBJ normal-run fixup in the collision builder @ 0x5b3bf0;
+	// walked by Physics_RaycastAgainstBoneCollision @ 0x4e4cb0].
+	{
+		size_t face_cursor = 0;
+		size_t normal_base = 0;
+		for (size_t obj_idx = 0; obj_idx < col->object_count; ++obj_idx) {
+			const ThreediCollisionObject &object = col->objects[obj_idx];
+			for (int32_t fi = 0; fi < object.num_faces && face_cursor < out.faces.size();
+			     ++fi, ++face_cursor) {
+				opennova::world::CollisionFace &f = out.faces[face_cursor];
+				const int32_t ni = f.normal_index;
+				const size_t resolved = normal_base + static_cast<size_t>(ni);
+				if (ni >= 0 && resolved < out.normals.size()) {
+					const opennova::world::CollisionNormal &n = out.normals[resolved];
+					f.normal[0] = n.n[0];
+					f.normal[1] = n.n[1];
+					f.normal[2] = n.n[2];
+					f.axis = n.dominant_axis;
+				}
+			}
+			normal_base += static_cast<size_t>(object.num_normals);
+		}
+	}
 
 	out.planes.reserve(col->plane_count);
 	for (size_t i = 0; i < col->plane_count; ++i) {
-		const ThreediIRCollisionPlane &sp = col->planes[i];
+		const ThreediBoundingPlane &sp = col->planes[i];
 		opennova::world::CollisionPlane p;
 		p.nx = static_cast<int16_t>(std::lround(sp.normal[0] * 16384.0f));
 		p.ny = static_cast<int16_t>(std::lround(sp.normal[1] * 16384.0f));
 		p.nz = static_cast<int16_t>(std::lround(sp.normal[2] * 16384.0f));
-		p.dist = fx(sp.distance);
+		p.dist = fx(sp.radius);
 		out.planes.push_back(p);
 	}
 
+	// BPLN windows are consecutive across the BVOL pool; the running prefix is
+	// each volume's plane_start. Authored 16.16 bounds carry over verbatim.
 	out.volumes.reserve(col->volume_count);
+	int32_t plane_cursor = 0;
 	for (size_t i = 0; i < col->volume_count; ++i) {
-		const ThreediIRCollisionVolume &sv = col->volumes[i];
+		const ThreediBoundingVolume &sv = col->volumes[i];
 		opennova::world::CollisionVolume v;
-		v.type = sv.type;
+		v.type = sv.collidable_type;
 		v.flags = static_cast<uint32_t>(sv.flags);
-		v.min_x = fx(sv.min[0]);
-		v.max_x = fx(sv.max[0]);
-		v.min_y = fx(sv.min[1]);
-		v.max_y = fx(sv.max[1]);
-		v.min_z = fx(sv.min[2]);
-		v.max_z = fx(sv.max[2]);
-		v.plane_start = sv.plane_start;
+		v.min_x = sv.min_x_fp16;
+		v.max_x = sv.max_x_fp16;
+		v.min_y = sv.min_y_fp16;
+		v.max_y = sv.max_y_fp16;
+		v.min_z = sv.min_z_fp16;
+		v.max_z = sv.max_z_fp16;
+		v.plane_start = plane_cursor;
 		v.plane_count = sv.plane_count;
+		plane_cursor += sv.plane_count;
 		out.volumes.push_back(v);
 	}
 
@@ -925,12 +965,12 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 	out.sections.assign(col->object_count, {});
 	int32_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
 	for (size_t s = 0; s < col->object_count; ++s) {
-		const ThreediIRCollisionObject &object = col->objects[s];
+		const ThreediCollisionObject &object = col->objects[s];
 		opennova::world::CollisionSection &sec = out.sections[s];
 		sec.vertex_start = vertex_cursor;
 		sec.vertex_count = object.num_vertices;
 		sec.normal_start = normal_cursor;
-		sec.normal_count = object.num_planes;
+		sec.normal_count = object.num_normals;
 		sec.face_start = face_cursor;
 		sec.face_count = object.num_faces;
 		sec.face_vertex_start = vertex_cursor;
@@ -941,7 +981,7 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 		sec.part_index = object.parent_subobject_index;
 		for (int k = 0; k < 3; ++k) {
 			sec.offset[k] = object.offset[k];
-			sec.center[k] = object.mid[k];
+			sec.center[k] = object.med[k];
 		}
 		sec.min_x = object.min[0]; sec.max_x = object.max[0];
 		sec.min_y = object.min[1]; sec.max_y = object.max[1];
@@ -963,27 +1003,27 @@ inline bool collision_model_from_ir(const ThreediIRCollision *col,
 	return true;
 }
 
-// The model bound-sphere radius from the .3di itself â€” the union of the LOD-0
-// part bounding spheres seen from the model origin, with the primitive boxes as
+// The model bound-sphere radius from the .3di itself — the union of the LOD-0
+// part bounding spheres seen from the model origin, with the strip boxes as
 // the degenerate-sphere fallback. This is the entity+0 boundRadius source: the
 // original reads it off the MODEL header (gpm[5]) for every placed item,
 // collision block or not, and the proximity/hit tests and blast ranges all
-// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re Â§24].
-inline float model_bound_radius_from_ir(const ThreediModelIR &ir) {
-	if (ir.lod_count == 0 || ir.lods == nullptr) return 0.0f;
-	const ThreediIRLod &lod = ir.lods[0];
+// consume it [orig: Entity_InitFromModel @ 0x40dc30; world-wac-ai-re §24].
+inline float model_bound_radius_from_3di(const Threedi3di3 &model) {
+	if (model.lod_count == 0 || model.lods == nullptr) return 0.0f;
+	const ThreediLod &lod = model.lods[0];
 	float r = 0.0f;
-	for (size_t i = 0; lod.parts != nullptr && i < lod.part_count; ++i) {
-		const ThreediIRPart &p = lod.parts[i];
-		const float cx = p.abs_position[0] + p.bounding_center[0];
-		const float cy = p.abs_position[1] + p.bounding_center[1];
-		const float cz = p.abs_position[2] + p.bounding_center[2];
+	for (size_t i = 0; lod.render_objects != nullptr && i < lod.render_object_count; ++i) {
+		const ThreediRenderObject &p = lod.render_objects[i];
+		const float cx = p.abs[0] + p.bounding_center[0];
+		const float cy = p.abs[1] + p.bounding_center[1];
+		const float cz = p.abs[2] + p.bounding_center[2];
 		const float c = std::sqrt(cx * cx + cy * cy + cz * cz);
 		if (c + p.bounding_radius > r) r = c + p.bounding_radius;
 	}
 	if (r <= 0.0f) {
-		for (size_t i = 0; lod.primitives != nullptr && i < lod.primitive_count; ++i) {
-			const ThreediIRPrimitive &pr = lod.primitives[i];
+		for (size_t i = 0; lod.strips != nullptr && i < lod.strip_count; ++i) {
+			const ThreediTriangleStrip &pr = lod.strips[i];
 			for (int a = 0; a < 3; ++a) {
 				r = std::max(r, std::abs(pr.min[a]));
 				r = std::max(r, std::abs(pr.max[a]));
@@ -993,34 +1033,35 @@ inline float model_bound_radius_from_ir(const ThreediModelIR &ir) {
 	return r;
 }
 
-// Build the runtime occlusion model from the parsed occlusion IR â€” the 60 B
-// portal-face records with their sequential slices (the IR conversion already
-// mirrors the arena assignment of [orig: load_occlusion_model_data @ 0x5b4a00]).
-// The IR face dwords decode as the 12 B OFAC record: bytes 0-2 = vertex
-// indices, byte 3 = plane index, then the 3 edge words (bit 15 = winding).
-inline bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
+// Build the runtime occlusion model from the parsed OCCL tables — the 60 B
+// portal-face records with their sequential slices (the per-record starts are
+// running prefixes over the OOBJ counts, mirroring the arena assignment of
+// [orig: load_occlusion_model_data @ 0x5b4a00]). The OFAC dwords decode as the
+// 12 B record: bytes 0-2 = vertex indices, byte 3 = plane index, then the 3
+// edge words (bit 15 = winding).
+inline bool occlusion_model_from_3di(const Threedi3di3 &model,
                              opennova::world::OcclusionModel &out) {
-	if (occ == nullptr || occ->object_count == 0) return false;
-	out.vertices.reserve(occ->vertex_count);
-	for (size_t i = 0; i < occ->vertex_count; ++i) {
+	if (model.occlusion_object_count == 0) return false;
+	out.vertices.reserve(model.occlusion_vertex_count);
+	for (size_t i = 0; i < model.occlusion_vertex_count; ++i) {
 		opennova::world::OcclusionVertex v;
-		v.p[0] = occ->vertices[i].position[0];
-		v.p[1] = occ->vertices[i].position[1];
-		v.p[2] = occ->vertices[i].position[2];
+		v.p[0] = model.occlusion_vertices[i].position[0];
+		v.p[1] = model.occlusion_vertices[i].position[1];
+		v.p[2] = model.occlusion_vertices[i].position[2];
 		out.vertices.push_back(v);
 	}
-	out.planes.reserve(occ->plane_count);
-	for (size_t i = 0; i < occ->plane_count; ++i) {
+	out.planes.reserve(model.occlusion_plane_count);
+	for (size_t i = 0; i < model.occlusion_plane_count; ++i) {
 		opennova::world::OcclusionPlane p;
-		p.normal[0] = occ->planes[i].normal[0];
-		p.normal[1] = occ->planes[i].normal[1];
-		p.normal[2] = occ->planes[i].normal[2];
-		p.d = occ->planes[i].radius;
+		p.normal[0] = model.occlusion_planes[i].normal[0];
+		p.normal[1] = model.occlusion_planes[i].normal[1];
+		p.normal[2] = model.occlusion_planes[i].normal[2];
+		p.d = model.occlusion_planes[i].radius;
 		out.planes.push_back(p);
 	}
-	out.faces.reserve(occ->face_count);
-	for (size_t i = 0; i < occ->face_count; ++i) {
-		const ThreediIROcclusionFace &sf = occ->faces[i];
+	out.faces.reserve(model.occlusion_face_count);
+	for (size_t i = 0; i < model.occlusion_face_count; ++i) {
+		const ThreediOcclusionFace &sf = model.occlusion_faces[i];
 		opennova::world::OcclusionFaceRec f;
 		f.v[0] = static_cast<uint8_t>(sf.raw_indices & 0xFF);
 		f.v[1] = static_cast<uint8_t>((sf.raw_indices >> 8) & 0xFF);
@@ -1031,28 +1072,34 @@ inline bool occlusion_model_from_ir(const ThreediIROcclusion *occ,
 		f.edge[2] = static_cast<uint16_t>(sf.other_edge_data & 0xFFFF);
 		out.faces.push_back(f);
 	}
-	out.records.reserve(occ->object_count);
-	for (size_t i = 0; i < occ->object_count; ++i) {
-		const ThreediIROcclusionObject &so = occ->objects[i];
+	out.records.reserve(model.occlusion_object_count);
+	int32_t vert_cursor = 0;
+	int32_t plane_cursor = 0;
+	int32_t face_cursor = 0;
+	for (size_t i = 0; i < model.occlusion_object_count; ++i) {
+		const ThreediOcclusionObject &so = model.occlusion_objects[i];
 		opennova::world::OcclusionPortalFace rec;
-		rec.type = static_cast<uint8_t>(so.type);
-		rec.section_a = static_cast<uint8_t>(so.parent_subobject_index);
-		rec.section_b = static_cast<uint8_t>(so.connecting_subobject);
+		rec.type = so.type;
+		rec.section_a = so.parent_subobject_index;
+		rec.section_b = so.connecting_subobject;
 		rec.pos[0] = so.position[0];
 		rec.pos[1] = so.position[1];
 		rec.pos[2] = so.position[2];
 		rec.radius = so.radius;
-		rec.vert_start = so.vertex_start;
+		rec.vert_start = vert_cursor;
 		rec.vert_count = so.num_vertices;
-		rec.plane_start = so.plane_start;
+		rec.plane_start = plane_cursor;
 		rec.plane_count = so.num_planes;
-		rec.face_start = so.face_start;
+		rec.face_start = face_cursor;
 		rec.face_count = so.face_count;
 		rec.glow_scale = so.glow_scale;
+		if (so.num_vertices > 0) vert_cursor += so.num_vertices;
+		if (so.num_planes > 0) plane_cursor += so.num_planes;
+		if (so.face_count > 0) face_cursor += so.face_count;
 		out.records.push_back(rec);
 	}
 	// Slice sanity: reject models whose records point past their arrays, and
-	// whose OFAC bytes index outside their record's slice â€” the engine's hot
+	// whose OFAC bytes index outside their record's slice — the engine's hot
 	// loops (traverse/build_occluder_planes) read face vertex/plane/edge
 	// indices unchecked, so malformed or modded data is rejected here once.
 	for (const opennova::world::OcclusionPortalFace &rec : out.records) {
@@ -1299,12 +1346,12 @@ inline bool resolve_client_eweap_attachment_pose(
 	if (!emplaced_weapon_controls_for_client(
 				*parent, state, specs, emplaced))
 		return false;
-	const ThreediModelIR &ir = data->native_ir();
-	if (ir.control_register_count > 0 && ir.control_registers == nullptr)
+	const Threedi3di3 &model = data->native_model();
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
 		return false;
 	bool has_eweap_control = false;
-	for (size_t slot = 0; slot < ir.control_register_count; ++slot) {
-		const String name = String::utf8(ir.control_registers[slot].name);
+	for (uint32_t slot = 0; slot < model.ctrl.count; ++slot) {
+		const String name = String::utf8(model.ctrl.registers[slot].name);
 		if (name.nocasecmp_to(kEmplacedGunYawRegister) == 0 ||
 				name.nocasecmp_to(kEmplacedGunPitchRegister) == 0) {
 			has_eweap_control = true;

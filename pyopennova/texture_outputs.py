@@ -13,21 +13,21 @@ from pyopennova.materials import TextureDescriptor, describe_materials
 log = logging.getLogger(__name__)
 
 
-def copy_model_textures(ir, output_dir: str, resolver=None) -> list[str]:
+def copy_model_textures(model, output_dir: str, resolver=None) -> list[str]:
     """Copy resolved material textures into ``output_dir/textures``.
 
     The authored texture basename is preserved for compatibility with existing
     references. If an authored ``.tga`` resolves to a DDS payload, a matching
     ``.dds`` file is written as a second sidecar.
     """
-    if ir is None or not output_dir:
+    if model is None or not output_dir:
         return []
 
     written: list[str] = []
     copied: set[str] = set()
     texture_dir = Path(output_dir) / "textures"
 
-    for texture in _resolved_textures(ir, resolver):
+    for texture in _resolved_textures(model, resolver):
         authored_name = os.path.basename(texture.name)
         if not authored_name or not texture.path:
             continue
@@ -49,9 +49,9 @@ def copy_model_textures(ir, output_dir: str, resolver=None) -> list[str]:
     return written
 
 
-def _resolved_textures(ir, resolver) -> Iterable[TextureDescriptor]:
+def _resolved_textures(model, resolver) -> Iterable[TextureDescriptor]:
     try:
-        descriptors = describe_materials(ir, resolver=resolver)
+        descriptors = describe_materials(model, resolver=resolver)
     except Exception as exc:
         log.warning("Could not inspect model textures: %s", exc)
         return ()

@@ -21,10 +21,11 @@ def write_outputs(
     """Write selected outputs for the current Max scene.
 
     ``.ase`` is intentionally written through the Max current-scene exporter,
-    not through the DCC-neutral IR ASE writer. That keeps Max/Blender parity
-    tied to what each DCC plugin actually exports. ``.bad``/``.adm`` animations
-    are likewise sourced from the live skeleton (off by default; enable for
-    batch/headless parity with the interactive Anims export).
+    not straight from the parsed model by a DCC-neutral ASE writer. That keeps
+    Max/Blender parity tied to what each DCC plugin actually exports.
+    ``.bad``/``.adm`` animations are likewise sourced from the live skeleton
+    (off by default; enable for batch/headless parity with the interactive
+    Anims export).
     """
     del builder
     os.makedirs(output_dir, exist_ok=True)

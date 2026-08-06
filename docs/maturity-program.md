@@ -81,6 +81,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| 3DI3-only model pipeline (ADR 0027) | (this PR) | **`abi_export_identity` baseline reshaped:** the six `threedi_ir_*` exports and `tdp_from_ir` are removed with the `ThreediModelIR` layer; `threedi_3di3_read`/`threedi_3di3_free` are exported for the Python FFI mirrors and `tdp_from_3di` replaces `tdp_from_ir`. Net −5 exports; the model surface the DLL exposes is now the parsed `Threedi3di3` itself. **Also banked `libs_uncited_src_files` 55 → 50** — the five deleted uncited threedi TUs (the IR core/converters and the GP reader/writer) leave the library with only its format-record-backed sources |
 | The joiner-side between-update movers | (#403) | **Banked `has_method_guards` 567 → 566 and `libs_uncited_src_files` 56 → 55** (the final review's typed-seam conversions + netsim citations). Recorded here after the fact — the slice banked the decrements in `maturity_baseline.json` without a dashboard row |
 | MNU parity + menu editor deepening | (#387) | **Banked `has_method_guards` 568 → 567 and `libs_uncited_src_files` 57 → 56.** Recorded here after the fact — no dashboard row landed with the slice |
 | MP wire present-pass hot walk native | (#389) | **Banked `has_method_guards` 579 → 568** (the GDScript walk's duck-type guards retired with the native port). Recorded here after the fact — no dashboard row landed with the slice |

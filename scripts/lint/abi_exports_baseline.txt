@@ -96,14 +96,10 @@ tdp_alloc_lights
 tdp_alloc_materials
 tdp_alloc_part_anims
 tdp_free
-tdp_from_ir
+tdp_from_3di
 tdp_init
 tdp_parse
 tdp_write
 threedi_3di3_compare_file_chunks
-threedi_ir_free
-threedi_ir_from_3di3
-threedi_ir_from_gp
-threedi_ir_ground_anchor
-threedi_ir_init
-threedi_ir_read
+threedi_3di3_free
+threedi_3di3_read

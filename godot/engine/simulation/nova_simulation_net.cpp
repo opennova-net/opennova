@@ -1303,16 +1303,16 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 						collision_placer_->call("object_data_for", graphic);
 				if (data.is_valid()) {
 					opennova::world::CollisionModel model;
-					if (collision_model_from_ir(data->native_ir().collision, model,
+					if (collision_model_from_3di(data->native_model().collision, model,
 							data->has_collision())) {
 						model_id = collision_world_.add_model(std::move(model));
 						if (data->has_live_panm_for_lod(0))
 							collision_pose_data_[model_id] = data;
 					}
 					opennova::world::OcclusionModel occ;
-					if (occlusion_model_from_ir(data->native_ir().occlusion, occ))
+					if (occlusion_model_from_3di(data->native_model(), occ))
 						occlusion_id = occlusion_world_.add_model(std::move(occ));
-					bound_radius = model_bound_radius_from_ir(data->native_ir());
+					bound_radius = model_bound_radius_from_3di(data->native_model());
 				}
 				it = collision_model_by_graphic_.emplace(key, model_id).first;
 				collision_occlusion_by_graphic_.emplace(key, occlusion_id);

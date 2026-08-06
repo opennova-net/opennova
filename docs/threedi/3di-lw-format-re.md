@@ -32,7 +32,7 @@ parent flag in the high bit, low 24 bits = length), while LW v8/v10 is a flat se
 in-memory structs - fixed-size header, then arrays, with **stale runtime pointers serialized in
 place** (see §1.3). Detection must run *after* the `"3DI3"` check, since `"3DI3"` also has
 `magic[0..2] == "3DI"`: LW = `magic[0..2]=="3DI" && magic[3] in {8,10}`
-(registration point: `threedi_ir_read`, `libs/threedi/src/threedi_ir.cpp`).
+(the IR dispatch layer this pointed at was removed by ADR 0027 — a revived LW bring-up adds its own reader per the one-lib-per-format rule, ADR 0024).
 LW also embeds no skeletal animation and uses no `.bad`/`.adm` files; animation is the `.SAF`/`.KSA`
 sidecar family (§2).
 
@@ -80,7 +80,8 @@ records → `u32 material_count` → `material_count` × 80-B materials → per 
 | `~0x58+` | - | **stale pointers** | the header is an in-memory struct dumped to disk; from ~`0x58` onward most dwords are runtime pointers (`0x0012xxxx` stack, `0x76b3xxxx` DLL); the loader overwrites them. **Ignore on read; zero on write.** |
 
 `0x18/0x1C/0x20` are the direct ancestor of GP's `lod_thresholds[3]` and `0x28` of GP's `model_tag`
-(`libs/threedi/include/threedi/threedi_gp.h`). The 4th distance slot (`DistTiny` in v8) is unused at v10.
+(see [3di-gp-format-re.md](3di-gp-format-re.md) — the GP reader itself was removed per ADR 0027).
+The 4th distance slot (`DistTiny` in v8) is unused at v10.
 
 #### Material record (80 bytes) `[orig: LW3di_ReadMaterial @ 0x47e073]`
 

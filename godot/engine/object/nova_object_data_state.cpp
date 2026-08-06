@@ -16,7 +16,7 @@ using namespace novaobj;
 namespace {
 
 constexpr uint32_t kEditStateMagic = 0x4E4F4453u; // 'NODS'
-constexpr uint16_t kEditStateVersion = 1;
+constexpr uint16_t kEditStateVersion = 2;
 
 void edit_state_append(PackedByteArray &r_out, const void *p_data, size_t p_size) {
 	const int64_t at = r_out.size();
@@ -56,7 +56,7 @@ struct EditStateLodScalars {
 
 PackedByteArray NovaObjectData::snapshot_edit_state() const {
 	PackedByteArray out;
-	if (!has_ir) {
+	if (!has_source_model) {
 		return out; // Empty blob = no document; the GDScript session stays inert.
 	}
 	edit_state_append_pod(out, kEditStateMagic);
@@ -69,26 +69,26 @@ PackedByteArray NovaObjectData::snapshot_edit_state() const {
 	edit_state_append_pod(out, name_len);
 	edit_state_append(out, name_utf8.get_data(), name_len);
 
-	const uint32_t material_count = static_cast<uint32_t>(ir.material_count);
+	const uint32_t material_count = source_model.material_count;
 	edit_state_append_pod(out, material_count);
 	if (material_count > 0) {
-		edit_state_append(out, ir.materials, material_count * sizeof(ThreediIRMaterial));
+		edit_state_append(out, source_model.materials, material_count * sizeof(ThreediMaterial));
 	}
 
-	const uint32_t light_count = static_cast<uint32_t>(ir.light_count);
+	const uint32_t light_count = static_cast<uint32_t>(source_model.light_count);
 	edit_state_append_pod(out, light_count);
 	if (light_count > 0) {
-		edit_state_append(out, ir.lights, light_count * sizeof(ThreediIRLight));
+		edit_state_append(out, source_model.lights, light_count * sizeof(ThreediLight));
 	}
 
-	const uint32_t lod_count = static_cast<uint32_t>(ir.lod_count);
+	const uint32_t lod_count = static_cast<uint32_t>(source_model.lod_count);
 	edit_state_append_pod(out, lod_count);
 	for (uint32_t i = 0; i < lod_count; ++i) {
-		const ThreediIRLod &lod = ir.lods[i];
+		const ThreediLod &lod = source_model.lods[i];
 		const uint32_t anim_count = static_cast<uint32_t>(lod.part_animation_count);
 		edit_state_append_pod(out, anim_count);
 		if (anim_count > 0) {
-			edit_state_append(out, lod.part_animations, anim_count * sizeof(ThreediIRPartAnimation));
+			edit_state_append(out, lod.part_animations, anim_count * sizeof(ThreediPartAnimation));
 		}
 	}
 
@@ -110,7 +110,7 @@ PackedByteArray NovaObjectData::snapshot_edit_state() const {
 }
 
 Error NovaObjectData::apply_edit_state(const PackedByteArray &p_bytes) {
-	if (!has_ir) {
+	if (!has_source_model) {
 		return ERR_UNCONFIGURED;
 	}
 	int64_t cursor = 0;
@@ -145,32 +145,32 @@ Error NovaObjectData::apply_edit_state(const PackedByteArray &p_bytes) {
 	// geometry-fixed counts BEFORE touching the document.
 	uint32_t material_count = 0;
 	if (!edit_state_read_pod(p_bytes, cursor, material_count) ||
-			material_count != static_cast<uint32_t>(ir.material_count)) {
+			material_count != source_model.material_count) {
 		return ERR_INVALID_DATA;
 	}
-	std::vector<ThreediIRMaterial> materials(material_count);
+	std::vector<ThreediMaterial> materials(material_count);
 	if (material_count > 0 &&
-			!edit_state_read(p_bytes, cursor, materials.data(), material_count * sizeof(ThreediIRMaterial))) {
+			!edit_state_read(p_bytes, cursor, materials.data(), material_count * sizeof(ThreediMaterial))) {
 		return ERR_INVALID_DATA;
 	}
 
 	uint32_t light_count = 0;
 	if (!edit_state_read_pod(p_bytes, cursor, light_count) ||
-			light_count != static_cast<uint32_t>(ir.light_count)) {
+			light_count != static_cast<uint32_t>(source_model.light_count)) {
 		return ERR_INVALID_DATA;
 	}
-	std::vector<ThreediIRLight> lights(light_count);
+	std::vector<ThreediLight> lights(light_count);
 	if (light_count > 0 &&
-			!edit_state_read(p_bytes, cursor, lights.data(), light_count * sizeof(ThreediIRLight))) {
+			!edit_state_read(p_bytes, cursor, lights.data(), light_count * sizeof(ThreediLight))) {
 		return ERR_INVALID_DATA;
 	}
 
 	uint32_t lod_count = 0;
 	if (!edit_state_read_pod(p_bytes, cursor, lod_count) ||
-			lod_count != static_cast<uint32_t>(ir.lod_count)) {
+			lod_count != static_cast<uint32_t>(source_model.lod_count)) {
 		return ERR_INVALID_DATA;
 	}
-	std::vector<std::vector<ThreediIRPartAnimation>> lod_anims(lod_count);
+	std::vector<std::vector<ThreediPartAnimation>> lod_anims(lod_count);
 	for (uint32_t i = 0; i < lod_count; ++i) {
 		uint32_t anim_count = 0;
 		if (!edit_state_read_pod(p_bytes, cursor, anim_count) || anim_count > 4096) {
@@ -178,7 +178,7 @@ Error NovaObjectData::apply_edit_state(const PackedByteArray &p_bytes) {
 		}
 		lod_anims[i].resize(anim_count);
 		if (anim_count > 0 &&
-				!edit_state_read(p_bytes, cursor, lod_anims[i].data(), anim_count * sizeof(ThreediIRPartAnimation))) {
+				!edit_state_read(p_bytes, cursor, lod_anims[i].data(), anim_count * sizeof(ThreediPartAnimation))) {
 			return ERR_INVALID_DATA;
 		}
 	}
@@ -207,31 +207,31 @@ Error NovaObjectData::apply_edit_state(const PackedByteArray &p_bytes) {
 	// Commit.
 	object_name = String::utf8(name_bytes.data());
 	if (material_count > 0) {
-		std::memcpy(ir.materials, materials.data(), material_count * sizeof(ThreediIRMaterial));
+		std::memcpy(source_model.materials, materials.data(), material_count * sizeof(ThreediMaterial));
 	}
 	if (light_count > 0) {
-		std::memcpy(ir.lights, lights.data(), light_count * sizeof(ThreediIRLight));
+		std::memcpy(source_model.lights, lights.data(), light_count * sizeof(ThreediLight));
 	}
 	for (uint32_t i = 0; i < lod_count; ++i) {
-		ThreediIRLod &lod = ir.lods[i];
+		ThreediLod &lod = source_model.lods[i];
 		const size_t anim_count = lod_anims[i].size();
 		if (anim_count != lod.part_animation_count) {
 			// Add/delete changed the count: realloc (same idiom as add_part_anim).
-			ThreediIRPartAnimation *next = nullptr;
+			ThreediPartAnimation *next = nullptr;
 			if (anim_count > 0) {
-				next = static_cast<ThreediIRPartAnimation *>(
-						std::calloc(anim_count, sizeof(ThreediIRPartAnimation)));
+				next = static_cast<ThreediPartAnimation *>(
+						std::calloc(anim_count, sizeof(ThreediPartAnimation)));
 				if (next == nullptr) {
 					return ERR_OUT_OF_MEMORY;
 				}
-				std::memcpy(next, lod_anims[i].data(), anim_count * sizeof(ThreediIRPartAnimation));
+				std::memcpy(next, lod_anims[i].data(), anim_count * sizeof(ThreediPartAnimation));
 			}
 			std::free(lod.part_animations);
 			lod.part_animations = next;
 			lod.part_animation_count = anim_count;
 		} else if (anim_count > 0) {
 			std::memcpy(lod.part_animations, lod_anims[i].data(),
-					anim_count * sizeof(ThreediIRPartAnimation));
+					anim_count * sizeof(ThreediPartAnimation));
 		}
 	}
 	if (has_project) {
@@ -255,15 +255,16 @@ Error NovaObjectData::apply_edit_state(const PackedByteArray &p_bytes) {
 }
 
 bool NovaObjectData::has_document() const {
-	return has_ir;
+	return has_source_model;
 }
 
 bool NovaObjectData::can_save_project() const {
-	return has_ir;
+	return has_source_model;
 }
 
 bool NovaObjectData::can_export_3di() const {
-	return has_ir && (has_source_model || oed_session != nullptr);
+	return has_source_model &&
+			(source_kind == SourceKind::Threedi || oed_session != nullptr);
 }
 
 String NovaObjectData::get_source_path() const {
@@ -298,10 +299,10 @@ Dictionary NovaObjectData::get_summary() const {
 	Dictionary result;
 	result["name"] = object_name;
 	result["source_kind"] = _source_kind_name();
-	result["lod_count"] = static_cast<int64_t>(has_ir ? ir.lod_count : 0);
-	result["material_count"] = static_cast<int64_t>(has_ir ? ir.material_count : 0);
-	result["light_count"] = static_cast<int64_t>(has_ir ? ir.light_count : 0);
-	result["userpoint_count"] = static_cast<int64_t>(has_ir ? ir.userpoint_count : 0);
+	result["lod_count"] = static_cast<int64_t>(has_source_model ? source_model.lod_count : 0);
+	result["material_count"] = static_cast<int64_t>(has_source_model ? source_model.material_count : 0);
+	result["light_count"] = static_cast<int64_t>(has_source_model ? source_model.light_count : 0);
+	result["userpoint_count"] = static_cast<int64_t>(has_source_model ? source_model.user_point_count : 0);
 	result["project_lod_count"] = static_cast<int64_t>(has_source_project ? project_lod_count(source_project) : 0);
 	result["poly_collision_lod"] = static_cast<int64_t>(has_source_project ? source_project.poly_collision_lod : 0);
 	result["oed_dirty_mask"] = static_cast<int64_t>(get_oed_dirty_mask());
@@ -353,7 +354,7 @@ bool NovaObjectData::set_lod_field(int p_lod_index, const String &p_key, const V
 	}
 
 	if (oed_session != nullptr) {
-		return _build_ir_from_project_session(nullptr, UPDATE_ALL) == OK;
+		return _build_model_from_project_session(nullptr, UPDATE_ALL) == OK;
 	}
 	_notify_object_changed(UPDATE_ALL);
 	return true;

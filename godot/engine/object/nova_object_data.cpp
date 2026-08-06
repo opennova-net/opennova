@@ -175,7 +175,6 @@ void copy_lod_binding(TdpLod &dst, const TdpLod &src) {
 } // namespace
 
 NovaObjectData::NovaObjectData() {
-	threedi_ir_init(&ir);
 	tdp_init(&source_project);
 }
 
@@ -191,11 +190,12 @@ void NovaObjectData::_clear_oed_session() {
 }
 
 void NovaObjectData::_clear_source_model() {
-	if (has_source_model) {
-		threedi_3di3_free(&source_model);
-		std::memset(&source_model, 0, sizeof(source_model));
-		has_source_model = false;
-	}
+	// Safe on an empty document too: reset_empty leaves a zeroed model whose
+	// pointers are all null, so the free is a no-op and the memset clears the
+	// header name it stamped.
+	threedi_3di3_free(&source_model);
+	std::memset(&source_model, 0, sizeof(source_model));
+	has_source_model = false;
 }
 
 void NovaObjectData::_clear_source_project() {
@@ -212,9 +212,6 @@ void NovaObjectData::_clear() {
 	_clear_source_project();
 	submesh_cache.clear();
 	_invalidate_panm_cache();
-	threedi_ir_free(&ir);
-	threedi_ir_init(&ir);
-	has_ir = false;
 	source_kind = SourceKind::Empty;
 	source_path = String();
 	source_dir = String();
@@ -264,8 +261,11 @@ void NovaObjectData::_notify_object_changed(uint8_t p_update_mask) {
 void NovaObjectData::reset_empty(const String &p_name) {
 	_clear();
 	object_name = sanitized_basename(p_name);
-	copy_cstr(ir.name, sizeof(ir.name), to_std(object_name).c_str());
-	has_ir = true;
+	// An empty document is a zeroed model carrying only its name; every count
+	// is zero, so all views read empty.
+	copy_cstr(source_model.header.name, sizeof(source_model.header.name),
+			to_std(object_name).c_str());
+	has_source_model = true;
 	_notify_object_changed();
 }
 
@@ -392,16 +392,12 @@ Error NovaObjectData::_open_3di(const String &p_path) {
 		return ERR_FILE_CANT_READ;
 	}
 	has_source_model = true;
-	if (threedi_ir_from_3di3(&source_model, &ir) != 0) {
-		last_error = "Failed to convert 3DI to IR";
-		_clear();
-		return ERR_FILE_CORRUPT;
-	}
-	has_ir = true;
 	source_kind = SourceKind::Threedi;
 	source_path = p_path;
 	source_dir = p_path.get_base_dir();
-	object_name = ir.name[0] != '\0' ? from_native(ir.name) : filename_stem(p_path);
+	object_name = source_model.header.name[0] != '\0'
+			? from_native(source_model.header.name)
+			: filename_stem(p_path);
 	_notify_object_changed();
 	return OK;
 }
@@ -417,16 +413,12 @@ Error NovaObjectData::_open_3di_bytes(const String &p_name, const PackedByteArra
 		return ERR_FILE_CANT_READ;
 	}
 	has_source_model = true;
-	if (threedi_ir_from_3di3(&source_model, &ir) != 0) {
-		last_error = "Failed to convert mounted 3DI to IR";
-		_clear();
-		return ERR_FILE_CORRUPT;
-	}
-	has_ir = true;
 	source_kind = SourceKind::Threedi;
 	source_path = p_name.get_file();
 	source_dir = String();
-	object_name = ir.name[0] != '\0' ? from_native(ir.name) : filename_stem(p_name);
+	object_name = source_model.header.name[0] != '\0'
+			? from_native(source_model.header.name)
+			: filename_stem(p_name);
 	return OK;
 }
 
@@ -466,7 +458,7 @@ Error NovaObjectData::_open_3dp(const String &p_path) {
 	}
 
 	source_kind = SourceKind::Project;
-	return _build_ir_from_project_session(nullptr);
+	return _build_model_from_project_session(nullptr);
 }
 
 Error NovaObjectData::_open_ase(const String &p_path) {
@@ -493,10 +485,10 @@ Error NovaObjectData::_open_ase(const String &p_path) {
 	}
 
 	source_kind = SourceKind::Ase;
-	return _build_ir_from_project_session(nullptr);
+	return _build_model_from_project_session(nullptr);
 }
 
-Error NovaObjectData::_build_ir_from_project_session(const char *p_model_name, uint8_t p_dirty_mask) {
+Error NovaObjectData::_build_model_from_project_session(const char *p_model_name, uint8_t p_dirty_mask) {
 	Threedi3di3 built_model = {};
 	const OedStatus build_rc = oed_session_build_model(
 			oed_session, &source_project, static_cast<uint8_t>(OED_UPDATE_ALL), p_model_name, &built_model);
@@ -505,18 +497,10 @@ Error NovaObjectData::_build_ir_from_project_session(const char *p_model_name, u
 		return ERR_FILE_CANT_READ;
 	}
 
-	if (has_ir) {
-		threedi_ir_free(&ir);
-		threedi_ir_init(&ir);
-		has_ir = false;
-	}
-	if (threedi_ir_from_3di3(&built_model, &ir) != 0) {
-		threedi_3di3_free(&built_model);
-		last_error = "Failed to convert OED model to IR";
-		return ERR_FILE_CORRUPT;
-	}
-	threedi_3di3_free(&built_model);
-	has_ir = true;
+	// The OED-built model IS the document for project/ASE sources.
+	_clear_source_model();
+	source_model = built_model;
+	has_source_model = true;
 	_notify_object_changed(p_dirty_mask);
 	return OK;
 }
@@ -553,12 +537,12 @@ Error NovaObjectData::_rebuild_oed_session_from_project(uint8_t p_dirty_mask) {
 	_clear_oed_session();
 	oed_session = next_session;
 	source_kind = SourceKind::Project;
-	return _build_ir_from_project_session(nullptr, p_dirty_mask);
+	return _build_model_from_project_session(nullptr, p_dirty_mask);
 }
 
-TdpProject NovaObjectData::_build_project_from_ir() const {
+TdpProject NovaObjectData::_build_project_from_model() const {
 	TdpProject out = {};
-	tdp_from_ir(&ir, &out);
+	tdp_from_3di(&source_model, &out);
 	if (has_source_project) {
 		for (int i = 0; i < TDP_MAX_LODS; ++i) {
 			copy_lod_binding(out.lods[i], source_project.lods[i]);
@@ -569,11 +553,11 @@ TdpProject NovaObjectData::_build_project_from_ir() const {
 }
 
 Error NovaObjectData::save_project_to_dir(const String &p_dir_path) {
-	if (!has_ir || p_dir_path.is_empty()) {
+	if (!has_source_model || p_dir_path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
 
-	TdpProject project = _build_project_from_ir();
+	TdpProject project = _build_project_from_model();
 	const String output_path = p_dir_path.path_join(_export_basename() + ".3dp");
 	std::string scene_copy_error;
 	if (has_source_project && !copy_project_scene_sources_to_dir(project, source_dir, p_dir_path, scene_copy_error)) {
@@ -593,11 +577,11 @@ Error NovaObjectData::save_project_to_dir(const String &p_dir_path) {
 }
 
 Error NovaObjectData::export_3di_to_dir(const String &p_dir_path, int p_update_mask) {
-	if (!has_ir || p_dir_path.is_empty()) {
+	if (!has_source_model || p_dir_path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
 	const String output_path = p_dir_path.path_join(_export_basename() + ".3di");
-	if (source_kind == SourceKind::Threedi && has_source_model) {
+	if (source_kind == SourceKind::Threedi) {
 		const Error err = _export_patched_3di(output_path);
 		if (err == OK) {
 			_clear_oed_dirty(UPDATE_ALL);
@@ -614,7 +598,7 @@ Error NovaObjectData::_export_project_backed_3di(const String &p_path, uint8_t p
 		return ERR_UNCONFIGURED;
 	}
 
-	TdpProject export_project = _build_project_from_ir();
+	TdpProject export_project = _build_project_from_model();
 	const std::string native_path = to_native_path(p_path);
 	OedExportRequest request = {};
 	request.project = &export_project;
@@ -630,95 +614,11 @@ Error NovaObjectData::_export_project_backed_3di(const String &p_path, uint8_t p
 	return OK;
 }
 
-Error NovaObjectData::_apply_ir_to_source_model() {
-	if (!has_ir || !has_source_model) {
+Error NovaObjectData::_export_patched_3di(const String &p_path) {
+	if (!has_source_model) {
 		return ERR_UNCONFIGURED;
 	}
-
-	if (source_model.material_count != ir.material_count || source_model.materials == nullptr) {
-		std::free(source_model.materials);
-		source_model.materials = nullptr;
-		source_model.material_count = static_cast<uint32_t>(ir.material_count);
-		if (ir.material_count > 0) {
-			source_model.materials = static_cast<ThreediMaterial *>(
-					std::calloc(ir.material_count, sizeof(ThreediMaterial)));
-			if (source_model.materials == nullptr) {
-				return ERR_OUT_OF_MEMORY;
-			}
-		}
-	}
-	for (size_t i = 0; i < ir.material_count; ++i) {
-		copy_ir_material(ir.materials[i], source_model.materials[i]);
-	}
-
-	if (source_model.light_count != ir.light_count || source_model.lights == nullptr) {
-		std::free(source_model.lights);
-		source_model.lights = nullptr;
-		source_model.light_count = ir.light_count;
-		if (ir.light_count > 0) {
-			source_model.lights = static_cast<ThreediLight *>(std::calloc(ir.light_count, sizeof(ThreediLight)));
-			if (source_model.lights == nullptr) {
-				return ERR_OUT_OF_MEMORY;
-			}
-		}
-	}
-	for (size_t i = 0; i < ir.light_count; ++i) {
-		copy_ir_light(ir.lights[i], source_model.lights[i]);
-	}
-
-	if (source_model.ctrl.count != ir.control_register_count ||
-			(source_model.ctrl.count > 0 &&
-			 source_model.ctrl.registers == nullptr)) {
-		std::free(source_model.ctrl.registers);
-		source_model.ctrl.registers = nullptr;
-		source_model.ctrl.count =
-				static_cast<uint32_t>(ir.control_register_count);
-		if (ir.control_register_count > 0) {
-			source_model.ctrl.registers =
-					static_cast<ThreediControlRegister *>(std::calloc(
-							ir.control_register_count,
-							sizeof(ThreediControlRegister)));
-			if (source_model.ctrl.registers == nullptr) {
-				return ERR_OUT_OF_MEMORY;
-			}
-		}
-	}
-	source_model.ctrl.record_size = 24;
-	for (size_t i = 0; i < ir.control_register_count; ++i) {
-		copy_cstr(source_model.ctrl.registers[i].name,
-				sizeof(source_model.ctrl.registers[i].name),
-				ir.control_registers[i].name);
-	}
-
-	const size_t lod_count = std::min(source_model.lod_count, ir.lod_count);
-	for (size_t lod_index = 0; lod_index < lod_count; ++lod_index) {
-		ThreediLod &dst_lod = source_model.lods[lod_index];
-		const ThreediIRLod &src_lod = ir.lods[lod_index];
-		if (dst_lod.part_animation_count != src_lod.part_animation_count || dst_lod.part_animations == nullptr) {
-			std::free(dst_lod.part_animations);
-			dst_lod.part_animations = nullptr;
-			dst_lod.part_animation_count = src_lod.part_animation_count;
-			if (src_lod.part_animation_count > 0) {
-				dst_lod.part_animations = static_cast<ThreediPartAnimation *>(
-						std::calloc(src_lod.part_animation_count, sizeof(ThreediPartAnimation)));
-				if (dst_lod.part_animations == nullptr) {
-					return ERR_OUT_OF_MEMORY;
-				}
-			}
-		}
-		for (size_t i = 0; i < src_lod.part_animation_count; ++i) {
-			copy_ir_part_animation(src_lod.part_animations[i], dst_lod.part_animations[i]);
-		}
-	}
-
-	return OK;
-}
-
-Error NovaObjectData::_export_patched_3di(const String &p_path) {
-	const Error apply_err = _apply_ir_to_source_model();
-	if (apply_err != OK) {
-		return apply_err;
-	}
+	// The document IS the edited model; write it back out directly.
 	const std::string native_path = to_native_path(p_path);
 	if (threedi_3di3_write(native_path.c_str(), &source_model) != 0) {
 		last_error = "Failed to write patched 3DI";

@@ -21,11 +21,6 @@ from pathlib import Path
 from . import gameprofile_ffi
 from .vfs_ffi import Vfs
 
-TEXTURE_STRATEGY_GENERIC = "generic"
-TEXTURE_STRATEGY_3DI3_DF4OED = "3di3_df4oed"
-
-THREEDI_SOURCE_3DI3 = 1
-
 _TEXTURE_EXTS = (".dds", ".tga", ".png", ".mdt", ".pcx")
 
 
@@ -112,8 +107,6 @@ class AssetResolver:
         self,
         texture_name: str,
         *,
-        strategy: str | None = None,
-        source_format: int | None = None,
         slot: int | None = None,
         tex_type: int | None = None,
         flags: int | None = None,
@@ -128,8 +121,7 @@ class AssetResolver:
             return None
 
         _ = (slot, tex_type, flags, role)  # Reserved for slot-specific flavor rules.
-        strategy_name = _texture_strategy(strategy, source_format)
-        candidates = _texture_candidates(texture_name, strategy_name)
+        candidates = _texture_candidates(texture_name)
 
         for candidate in candidates:
             result = self.resolve(candidate)
@@ -226,22 +218,10 @@ def _same_path(a: Path, b: Path) -> bool:
         return False
 
 
-def _texture_strategy(strategy: str | None, source_format: int | None) -> str:
-    if strategy:
-        value = strategy.lower()
-        if value in {"3di3", "df4oed", TEXTURE_STRATEGY_3DI3_DF4OED}:
-            return TEXTURE_STRATEGY_3DI3_DF4OED
-        return TEXTURE_STRATEGY_GENERIC
-    if source_format == THREEDI_SOURCE_3DI3:
-        return TEXTURE_STRATEGY_3DI3_DF4OED
-    return TEXTURE_STRATEGY_GENERIC
-
-
-def _texture_candidates(texture_name: str, strategy: str) -> list[str]:
+def _texture_candidates(texture_name: str) -> list[str]:
+    """Candidate lookup names in the DF4/OED 3DI3 order (.dds preferred)."""
     base, ext = _strip_known_texture_extensions(texture_name)
-    if strategy == TEXTURE_STRATEGY_3DI3_DF4OED:
-        return _dedupe_texture_candidates(_df4oed_texture_candidates(texture_name, base, ext))
-    return _dedupe_texture_candidates(_generic_texture_candidates(texture_name, base))
+    return _dedupe_texture_candidates(_df4oed_texture_candidates(texture_name, base, ext))
 
 
 def _strip_known_texture_extensions(texture_name: str) -> tuple[str, str]:
@@ -258,15 +238,6 @@ def _strip_known_texture_extensions(texture_name: str) -> tuple[str, str]:
                 stripped = True
                 break
     return base, ext
-
-
-def _generic_texture_candidates(texture_name: str, base: str) -> list[str]:
-    candidates = [texture_name]
-    for ext in (".dds", ".tga", ".png", ".mdt"):
-        candidate = base + ext
-        if candidate.lower() != texture_name.lower():
-            candidates.append(candidate)
-    return candidates
 
 
 def _df4oed_texture_candidates(texture_name: str, base: str, ext: str) -> list[str]:
