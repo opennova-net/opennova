@@ -17,7 +17,7 @@
 // carried through from a capture.
 //
 // [orig: serialize_entity_pool_to_packet   @ 0x503460]  — S2C 0x20 bulk pool-3 sync.
-// [orig: serialize_entity_pool_to_packet_0 @ 0x503940]  — S2C 0x0D pool spawn (TODO).
+// [orig: serialize_entity_pool_to_packet_0 @ 0x503940]  — S2C 0x0D pool spawn.
 
 #include <array>
 #include <cstddef>

@@ -1081,7 +1081,8 @@ public:
 	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space
 	// position, exercising the admit_peer + connection wiring without a live
 	// socket handshake (the handshake itself is unit-tested in libs —
-	// tests/novaworld/host_session_accept_test). Returns true if an entity was
+	// tests/npruntime/handshake_server_test, the P2 retarget of the retired
+	// novaworld host_session_accept_test). Returns true if an entity was
 	// spawned + bound. No-op unless host listening is on.
 	bool admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team);
 

@@ -1,10 +1,11 @@
 extends GutTest
 
 # Co-op LAN host wiring (Increment C) on NovaSimulation: enable_host_listen binds a real UDP
-# socket and stands up the witnessed host-accept handshake (HostSessionAccept) against the
-# live World; on a joiner reaching Spawned the host admits it as a pool-0 player bound to a
-# netsim connection. The full handshake->spawn LOGIC is unit-tested in libs
-# (tests/novaworld/host_session_accept_test); this exercises the Godot-layer glue —
+# socket and stands up the witnessed host-accept handshake (the npruntime host runtime,
+# P7) against the live World; on a joiner reaching Spawned the host admits it as a pool-0
+# player bound to a netsim connection. The full handshake->spawn LOGIC is unit-tested in
+# libs (tests/npruntime/handshake_server_test, the P2 retarget of the retired novaworld
+# host_session_accept lib); this exercises the Godot-layer glue —
 # socket ownership/binding, the SP path staying undisturbed, and the admit_peer->World-entity
 # wiring (admit_test_remote_peer drives the same PeerSpawned reaction without crafting wire
 # bytes in GDScript).
