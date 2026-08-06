@@ -175,7 +175,8 @@ int main() {
 	// --- The fixed 62 Hz host loop. Absolute-deadline sleep_until so the cadence does not drift. ---
 	using clock = std::chrono::steady_clock;
 	const auto baseline = clock::now();
-	constexpr int64_t kPeriodNs = 1000000000LL / 62; // ~16.129 ms per engine tick (the original cadence)
+	constexpr int64_t kPeriodNs =
+			1000000000LL / opennova::JO_ENGINE_TICK_RATE; // ~16.129 ms per engine tick (the original cadence)
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
 		world.network_env.advance_tick();

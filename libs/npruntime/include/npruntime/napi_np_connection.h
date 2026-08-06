@@ -27,7 +27,8 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 // preserves its clock contract without introducing wall-time into native tests.
 inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
 	return static_cast<uint32_t>(
-			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) / 62ull);
+			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) /
+					static_cast<uint64_t>(JO_ENGINE_TICK_RATE));
 }
 
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at
