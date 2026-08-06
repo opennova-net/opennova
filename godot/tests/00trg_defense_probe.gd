@@ -53,6 +53,10 @@ const VEHICLES := {
 const KICKOFF_EVENTS := [18, 19, 21, 8]
 # debark event -> [defender group, redirected-to list]
 const DEBARK_EVENTS := {20: [14, 15], 22: [15, 16]}
+# The truck follow-on chain (convoy diagnosis): 9 = PATROLSPEED 20 at (3,16),
+# 10 = RedirectSingleTo 58->13 / 63->14 at (3,18), 11 = PATROLSPEED 0 +
+# infantry redirects at (3,20), 12..15 = the subgoal chain behind (3,20).
+const TRUCK_CHAIN_EVENTS := [9, 10, 11, 12, 13, 14, 15]
 
 var _sim = null
 var _fail_lines: PackedStringArray = []
@@ -230,6 +234,21 @@ func _run() -> void:
 			if not debark_fired.has(ev) and events.size() > ev and events[ev] != 0:
 				debark_fired[ev] = tick
 				print("PROBE t=%d event %d FIRED (debark)" % [tick, ev])
+		for ev in TRUCK_CHAIN_EVENTS:
+			if not kickoff_fired.has(ev) and events.size() > ev and events[ev] != 0:
+				kickoff_fired[ev] = tick
+				var chain_rows: PackedStringArray = []
+				for tssn in [58, 59, 62, 63, 1664]:
+					var tvd: Dictionary = _sim.get_world_entity_debug(tssn)
+					var tpos: Vector3 = tvd.get("mission_position", Vector3.ZERO)
+					var trow := "ssn=%d (%.0f,%.0f)" % [tssn, tpos.x, tpos.y]
+					if brains.has(tssn):
+						var tbd: Dictionary = _sim.get_entity_debug(int(brains[tssn]))
+						trow += " wp=%d node=%d spd=%d" % [int(tbd.get("wp_channel", -1)),
+								int(tbd.get("wp_node", -1)), int(tbd.get("out_speed", 0))]
+					chain_rows.append(trow)
+				print("PROBE t=%d event %d FIRED (truck chain) | %s" %
+						[tick, ev, " | ".join(chain_rows)])
 		var lines: PackedStringArray = []
 		for ssn in VEHICLES:
 			var vd: Dictionary = _sim.get_world_entity_debug(ssn)

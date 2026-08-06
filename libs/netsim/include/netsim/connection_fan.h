@@ -46,6 +46,14 @@ void drain_connection_c2s(world::World &world, const Connection &conn);
 void set_entity_send_budget(int bytes);
 int entity_send_budget();
 
+// The environment draw/view distance in world units feeding the 0x0A priority
+// score's LOS gate and +200 inside-view bonus [orig: word_26C681E, env-written;
+// reads @0x50eabb/@0x50eb62]. Zero (the fresh-image default) disables both
+// terms exactly as an unwritten retail global does; the sim wires it from the
+// same env value the occlusion camera uses. (D-NET-139)
+void set_view_distance_units(int units);
+int view_distance_units();
+
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
 // `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`
 // is the world snapshot built ONCE by the caller [orig: NapiNPServer_SendToConn @0x4c4f20 per node].

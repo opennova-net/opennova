@@ -66,6 +66,17 @@ struct Connection {
 	// until they win a slot — the original's round-robin is EMERGENT from aging (no resume cursor).
 	std::array<uint8_t, 512> s2c_entity_age{};
 
+	// Per-slot last-SENT caches feeding the priority delta terms (same 512-slot
+	// indexing as the ages): heading = the entity's rounded yaw high byte
+	// `(Yaw + 0x800000) >> 24`, speed = the tick-displacement metric `|v| >> 6`
+	// clamp 255. Both written when the entity's record is serialized, beside the
+	// age reset; the build side scores `2*|headingDelta| + 3*|speedDelta|` so
+	// entities whose motion CHANGED since their last record jump the queue.
+	// [orig: slot+91434 / slot+92890; writes @0x50f17c / the @0x50f22x tail;
+	// reads @0x50e905 / @0x50ea77]
+	std::array<uint8_t, 512> s2c_entity_heading{};
+	std::array<uint8_t, 512> s2c_entity_speed{};
+
 	// Per-connection round-event watermark: the newest world.rounds sequence already swept
 	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
 	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk

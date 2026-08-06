@@ -10727,20 +10727,39 @@ until items.def healthMax is resolved onto the world entity); boundary-exact uni
 byte re-classed remote players every applied frame. Live retail-join verification 2026-07-02
 (v11 capture, full join+deploy+move): **0 C2S 0x0F** vs 1,526 in the pre-fix v10 session.
 
-**D-NET-139** [reimpl approximation, DOCUMENTED 2026-07-02] **The 0x0A priority score ports the
-distance/age/own-boost terms; the view-interest terms contribute 0.** `select_frame_entities`
-(`libs/netsim/connection_fan.cpp`) ports from `Server_BuildEntityPriorityList @ 0x50e590` +
-`serialize_entity_states_to_packet @ 0x50f070`: the saturating age sweep (@0x50e60f), the
-`sqrt(dx²+dy²+(dz/2)²)>>16` distance metric with the 1124-tile gate and age≥50 force-admit
-(@0x50e925), the `(entity+36 & 1) >> 4` damp, the +1000 own-entity boost, the
-`age + v + ((age*v)>>8)` key, descending sort (shell sort @0x526cf0 ≙ stable_sort), and the
-600-byte soft budget (g_entity_send_budget @0xC8FC50, checked after each record @0x50f34b, age
-reset on selection @0x50f168; round-robin is EMERGENT from aging — no cursor). NOT modeled (0
-contribution): angleScore (recipient view yaw), the LOS raycast (@0x50eadb), enemy/team bonuses,
-velocity/heading delta caches (slot+91434/+92890), the +200 view-distance bonus (word_26C681E),
-the tracked-handle priority floors + 0x12 despawns (slot+94346/+94356), the projectile chain
-(type-2 records @0x4ffee0/@0x504820), and the budget halving (slot+89876 congestion flag /
-uptime>2000 @0x517c62). Interop-safe: ordering differs, the record set converges via aging.
+**D-NET-139** [reimpl approximation, FULL TERMS PORTED 2026-08-06] **The 0x0A priority score.**
+`select_frame_entities` (`libs/netsim/connection_fan.cpp`) ports from
+`Server_BuildEntityPriorityList @ 0x50e590` + `serialize_entity_states_to_packet @ 0x50f070`:
+the saturating age sweep (@0x50e60f), the `sqrt(dx²+dy²+(dz/2)²)>>16` distance metric with the
+1124-tile gate and age≥50 force-admit (@0x50e925), the `(entity+36 & 1) >> 4` damp, the +1000
+own-entity boost, the `age + v + ((age*v)>>8)` key, descending sort (shell sort @0x526cf0 ≙
+stable_sort), and the 600-byte soft budget (g_entity_send_budget @0xC8FC50, checked after each
+record @0x50f34b, age reset on selection @0x50f168; round-robin is EMERGENT from aging — no
+cursor). 2026-08-06 (the 00TRg OR-run choppiness/"trucks never arrive" diagnosis — a starved
+patrol boat measured ONE record per ~10 s, riding the age-50 force-admit alone): the full
+score is now ported. Both pool loops expand to `distScore + 2*angleScore + 50*enemy
+(+50*isPlayer pool 0) + 100*LOS (+100*standing pool 0, lost when mounted on a non-EWEAP
+carrier @0x50eb08) + 1000*(entity == the recipient's CARRIER — mount over ground,
+@0x50e65e..0x50e66b: your ride streams at top priority) (+200*occupied pool 1, entity+0x170
+@0x50efc9) (+200 inside the view distance) + 3*speedDelta + 2*headingDelta`, where
+`angleScore = 256 − |elevBAM − Pitch|>>25 − yawTerm`, `yawTerm = |bearingBAM − Yaw|>>24
+folded +64 past 64` (the ×(−2^31/π) fpatan scale dbl_7C57B8 @0x50e94a..0x50e9e2; the exact-astern
+`abs(0x80000000)` singularity scores angle 384 and is kept), the LOS ray gated on
+`angleScore > 128 && dist < word_26C681E` (@0x50eac5, our ported terrain+sector ray standing in
+for `Entity_CheckLineOfSightTerrainAndEntities @0x53b130` — interior witness a follow-up), the
+last-SENT per-recipient caches at slot+91434 (heading `(Yaw+0x800000)>>24`, write @0x50f17c) and
+slot+92890 (the per-tick displacement metric `|Δpos (dz/2, carrier-relative)|>>6` clamp 255,
+build @0x50e9e5..0x50ea5a) stamped beside the age reset, and `word_26C681E` (the env draw/view
+distance; ZERO in a fresh image = both terms off — our netsim global mirrors it from the same
+env value the occlusion camera consumes, so headless embedders keep the faithful unwired
+behavior). Pinned by `netsim_two_peer_fanout` run_0a_priority_view_terms (a watched occupied
+enemy mover outranks a nearer behind-the-viewer static; caches damp once sent) + the
+unchanged budget round-robin leg. STILL not modeled: the spectator score branch (@0x50eb2c —
+rides the unmodeled spectator mode), the tracked-handle priority floors + 0x12 despawns
+(slot+94346/+94356), the projectile chain (type-2 records @0x4ffee0/@0x504820), the budget
+halving (slot+89876 congestion flag / uptime>2000 @0x517c62), pool-0 tick-displacement for the
+speed metric (our infantry movers store no per-tick delta — vehicles are exact), and the
+recipient EYE offset on the anchor. Interop-safe: ordering is server-local policy.
 
 **D-NET-140** [reimpl divergence by design, DOCUMENTED 2026-07-02] **The listen host's OWN
 loopback connection receives the full 0x0A record set; retail sends its local player header-only

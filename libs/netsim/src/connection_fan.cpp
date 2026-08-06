@@ -368,6 +368,14 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 // [orig: @0x517c62]) is deferred — no congestion-callback model yet.
 int g_entity_send_budget = 600;
 
+// word_26C681E — the environment's draw/view distance in world units, read by the
+// priority score for the LOS gate and the +200 inside-view bonus. It is ZERO in a
+// fresh image (env-written at load), and zero disables both terms in retail too —
+// so an embedder that never wires it gets the faithful unwired behavior. The sim
+// feeds it from the same env value the occlusion camera uses.
+// [orig: word_26C681E reads @0x50eabb/@0x50eb62; env/render block writer]
+int g_view_distance_units = 0;
+
 } // namespace
 
 void set_entity_send_budget(int bytes) {
@@ -379,6 +387,12 @@ void set_entity_send_budget(int bytes) {
 }
 
 int entity_send_budget() { return g_entity_send_budget; }
+
+void set_view_distance_units(int units) {
+	g_view_distance_units = units < 0 ? 0 : units;
+}
+
+int view_distance_units() { return g_view_distance_units; }
 
 namespace {
 
@@ -412,7 +426,13 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 //     completes; a selected entity's age resets to 0 [orig: @0x50f168].
 // Round-robin across frames is EMERGENT from aging: starved entities' keys climb and
 // age >= 50 force-admits them past the distance gate.
-std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
+// The 32-bit wrapping abs the score's BAM deltas use [orig: cdq/xor/sub].
+inline int32_t prio_iabs32(int32_t v) {
+	return v < 0 ? static_cast<int32_t>(0u - static_cast<uint32_t>(v)) : v;
+}
+
+std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
+                                                      Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       std::size_t header_bytes,
@@ -433,6 +453,28 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 	const int64_t ay = int32_t(anchor.spawn_y);
 	const int64_t az = int32_t(anchor.spawn_z);
 
+	// The recipient's view + relations come from its OWN entity's snapshot in the
+	// frame list [orig: the playerState-> entity reads @0x50e64e..0x50e689 — the
+	// original returns EMPTY with no player entity; our pre-spawn/loopback frames
+	// keep flowing with the view-dependent terms zeroed].
+	const GameEntitySnapshot *self = nullptr;
+	if (conn.owned_entity.valid()) {
+		for (const GameEntitySnapshot &e : entities) {
+			if (e.wire_handle == conn.owned_entity.packed) { self = &e; break; }
+		}
+	}
+	const int32_t view_yaw = self ? self->euler_z : 0;
+	const int32_t view_pitch = self ? self->pitch_bam : 0;
+	const uint8_t self_team = self ? self->team : 0;
+	// The +1000 term targets the recipient's CARRIER — mount wins over ground
+	// [orig: targetEntity = playerEntity+0x28, overridden by +0x16C @0x50e65e..0x50e66b] —
+	// the vehicle you ride (or deck you stand on) streams at top priority.
+	const uint16_t carrier_handle = self
+			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
+			: 0xFFFF;
+	// Spectator scoring [orig: the isSpectator branch @0x50eb2c/@0x50efd3] rides the
+	// unmodeled spectator mode — every live connection scores as a normal viewer.
+
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
 		const uint8_t age = conn.s2c_entity_age[age_index(e)];
@@ -444,23 +486,91 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 		// whichever anchor was used, so decompression stays exact either way.
 		const int64_t dx = int64_t(e.x) - ax;
 		const int64_t dy = int64_t(e.y) - ay;
-		const int64_t dz = (int64_t(e.z) - az) >> 1;
+		const int64_t dzh = (int64_t(e.z) - az) >> 1;
 		const int64_t dist =
-				static_cast<int64_t>(std::sqrt(double(dx * dx + dy * dy + dz * dz)));
+				static_cast<int64_t>(std::sqrt(double(dx * dx + dy * dy + dzh * dzh)));
 		const int32_t distance_tiles = int32_t(dist >> 16);
 
 		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, a tracked-handle
 		// priority floor holds it (tracked handles unmodeled -> 0), or age force-admits.
 		if (distance_tiles > 1124 && age < 50) continue;
 
-		// Score [orig: pool-0 @0x50eb5f, pool-1 @0x50f008]. Ported terms: the distance
-		// score, the (entity+36 & 1) >> 4 damp, the own-entity +1000 boost (pool 0 only),
-		// and the age combine. The view/interest terms — angleScore (recipient view yaw),
-		// LOS raycast, enemy/team bonuses, velocity/heading delta caches, and the +200
-		// view-distance bonus (word_26C681E) — need recipient-view and LOS models the
-		// headless host does not have; they contribute 0 here (D-NET-139).
+		// ---- Score, full terms (D-NET-139 port 2026-08-06)
+		// [orig: pool-0 @0x50eb5f, pool-1 @0x50f008 — both expand to
+		//  distScore + 2*angle + 50*enemy (+50*isPlayer, pool 0)
+		//            + 100*LOS (+100*standing, pool 0)
+		//            + 1000*(entity == recipient carrier) (+200*occupied, pool 1)
+		//            (+200 inside the view distance)
+		//            + 3*speedDelta + 2*headingDelta].
 		int64_t v = distance_tiles < 1124 ? (1124 - distance_tiles) : 0;
-		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50ebb0 region]
+
+		if (self != nullptr) {
+			// View-angle score: 256 - |elev - Pitch|>>25 - yawTerm, where yawTerm =
+			// |bearing - Yaw|>>24 folded +64 past 64 [orig: the two fpatan blocks
+			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale dbl_7C57B8 folds to plain
+			// BAM deltas]. Can go negative behind the viewer.
+			const double planar = std::sqrt(double(dx * dx + dy * dy));
+			const int32_t bearing_bam = static_cast<int32_t>(
+					std::llround(std::atan2(double(dy), double(dx)) * 683565275.5764316));
+			const int32_t elev_bam = static_cast<int32_t>(std::llround(
+					std::atan2(double(int64_t(e.z) - az), planar) * 683565275.5764316));
+			// abs(0x80000000) stays NEGATIVE (the cdq/xor/sub form), so a bearing
+			// EXACTLY astern yields yaw_term -128 and angle 384 — a witnessed
+			// retail singularity, kept as-is [orig: the abs32 idiom @0x50e9e2].
+			int32_t yaw_term = prio_iabs32(bearing_bam - view_yaw) >> 24;
+			if (yaw_term > 64) yaw_term += 64;
+			const int32_t pitch_term = prio_iabs32(elev_bam - view_pitch) >> 25;
+			const int32_t angle = 256 - pitch_term - yaw_term;
+
+			// Enemy bonus [orig: team byte +0x162... +354 compare @0x50ea7a/@0x50ef45].
+			const bool enemy = e.team != 0 && e.team != self_team;
+			// LOS: gated on facing (+angle > 128) AND inside the view distance; the ray is
+			// the ported terrain+sector raycast standing in for
+			// Entity_CheckLineOfSightTerrainAndEntities @0x53b130 (interior witness = a
+			// tracked follow-up; the AI ray's terrain+collision legs match its role)
+			// [orig: gate @0x50eac5, call @0x50eadb].
+			bool los = false;
+			if (angle > 128 && g_view_distance_units > 0 &&
+					distance_tiles < g_view_distance_units && w.ai != nullptr &&
+					self != nullptr) {
+				const int32_t a3[3] = {int32_t(ax), int32_t(ay), int32_t(az)};
+				const int32_t b3[3] = {e.x, e.y, e.z};
+				// The ray's collision scratch is write-only bookkeeping; the world is
+				// otherwise untouched (the AiSystem method itself is const).
+				los = w.ai->line_of_sight_clear(const_cast<world::World &>(w), a3, b3,
+				                                conn.owned_entity,
+				                                world::EntityHandle{e.wire_handle});
+			}
+			const bool is_carrier = e.wire_handle == carrier_handle;
+
+			int64_t base = 2 * int64_t(angle) + 50 * (enemy ? 1 : 0) +
+			               100 * (los ? 1 : 0) + 1000 * (is_carrier ? 1 : 0);
+			if (e.pool == 1) {
+				base += 200 * (e.occupied ? 1 : 0); // [orig: entity+0x170 @0x50efc9]
+			} else {
+				base += 50 * (e.entity_class == EntityClass::Player ? 1 : 0);
+				// The standing term: unmounted, or mounted on an EWEAP
+				// [orig: @0x50eb08..0x50eb15].
+				base += 100 * (e.mounted_non_eweap ? 0 : 1);
+			}
+			if (g_view_distance_units > 0 && distance_tiles < g_view_distance_units)
+				base += 200; // [orig: @0x50eb6c/@0x50f00b]
+			v += base;
+		}
+
+		// Motion-change boosts off the last-SENT caches [orig: reads @0x50e905/@0x50ea77;
+		// 3*speedDelta + 2*headingDelta @0x50eb80].
+		const std::size_t idx = age_index(e);
+		const int32_t cached_heading_bam =
+				static_cast<int32_t>(uint32_t(conn.s2c_entity_heading[idx]) << 24);
+		const int32_t heading_delta =
+				prio_iabs32(cached_heading_bam - e.euler_z) >> 24;
+		const int32_t speed_delta =
+				std::abs(int(conn.s2c_entity_speed[idx]) - int(e.tick_speed_q6));
+		v += 3 * int64_t(speed_delta) + 2 * int64_t(heading_delta);
+
+		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50eb83]
+		if (v < 0) v = 0; // CPairList keys are unsigned; a behind-the-viewer negative floors
 		const bool own = conn.owned_entity.valid() &&
 		                 e.wire_handle == conn.owned_entity.packed &&
 		                 e.entity_class == EntityClass::Player;
@@ -473,7 +583,9 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 	std::stable_sort(scored.begin(), scored.end(),
 	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
 
-	// 4. Budget walk (soft cap, header included) + age reset on selection.
+	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
+	// stamps on selection [orig: @0x50f168 age; @0x50f17c heading (Yaw+0x800000)>>24;
+	// the @0x50f22x speed-metric tail].
 	std::vector<GameEntitySnapshot> selected;
 	std::size_t written = header_bytes;
 	for (const Scored &s : scored) {
@@ -483,7 +595,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 				 record_bytes > hard_frame_limit - written))
 			continue;
 		selected.push_back(*s.snap);
-		conn.s2c_entity_age[age_index(*s.snap)] = 0; // [orig: @0x50f168]
+		const std::size_t idx = age_index(*s.snap);
+		conn.s2c_entity_age[idx] = 0;
+		conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
+				(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
+		conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
 		written += record_bytes;
 		if (written >= std::size_t(g_entity_send_budget)) break; // [orig: @0x50f34b]
 	}
@@ -798,7 +914,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(
-					conn, ents, anchor, header_bytes + rounds_bytes,
+					w, conn, ents, anchor, header_bytes + rounds_bytes,
 					max_frame_body_bytes);
 
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE,

@@ -160,6 +160,19 @@ struct GameEntitySnapshot {
 	// entity->playerClass and re-resolves the soldier model/itemDef from (@0x4AD580 / @0x4c1248).
 	// Filled by snapshot_of via player_class_for_wire (retail [5,9]-else-8 clamp for players).
 	uint8_t player_class = 0;
+	// ---- 0x0A priority-feed fields (the D-NET-139 full-terms port, witnessed 2026-08-06;
+	// Server_BuildEntityPriorityList @0x50e590 + the serialize cache writes @0x50f168..0x50f22x) ----
+	// |this tick's displacement| (dz halved, carrier-relative when standing on one) >> 6,
+	// clamped 255 — the per-recipient speed-cache metric [orig: build @0x50e9e5..0x50ea5a,
+	// cache write in serialize]. Filled for pool-1 vehicles from the authority motor's
+	// integration step; pool-0 per-tick displacement is not stored by our movers and stays 0
+	// (tracked D-NET-139 residual — infantry priority rides distance/angle/age).
+	uint8_t tick_speed_q6 = 0;
+	// pool-1: a live controller occupies the vehicle (entity+0x170) [orig: @0x50efc9 — +200].
+	bool occupied = false;
+	// pool-0: mounted AND the carrier def lacks attrib 0x20 (EWEAP) — such riders LOSE the
+	// +100 standing term [orig: @0x50eb08..0x50eb15 reads mountDef+0x54 bit5].
+	bool mounted_non_eweap = false;
 };
 
 } // namespace opennova
