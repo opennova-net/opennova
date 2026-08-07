@@ -209,6 +209,15 @@ struct ClientEntityState {
 	// [orig: org2 vel_z -= 208 then pos += vel @0x4B7CE0..0x4B7CEF; org1
 	//  vel_z -= 416 then pos += 2*vel; landing zero in the shared tail].
 	int32_t rm_vel_z = 0;
+	// The planar velocity pair (retail +0x98/+0x9C) — the momentum channel the
+	// org movers maintain beside the anim root: per-tick decay (in-air 63/64
+	// with the optional MoveOrder-bit3 air-steer nudge and the root pair
+	// ZEROED; grounded/org1 (7v+4)>>3 with the |v|<=8 snap), integrated as
+	// pos += vel + root, fed by the org2 ledge 3/4 momentum carry and drained
+	// by the water drags [orig: maintenance @0x4b78a8..0x4b79dc /
+	// @0x4bf5cb..0x4bf61f; integrate @0x4b7cbf..0x4b7cd2 / @0x4bf684..;
+	// carry @0x4b7e43..0x4b7e6d; drags @0x4b8124..0x4b8149].
+	int32_t rm_vel_xy[2] = {};
 	// The contact resolver's ground-probe hit for this row (wire handle;
 	// 0xFFFF = terrain/none) — retail's groundEntity (+0x28) store
 	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. The deck-ride
@@ -222,17 +231,6 @@ struct ClientEntityState {
 	// the root suppressions, the gravity gate, the probe's indoors skip, and
 	// the resolver's full-update discriminant.
 	uint32_t rm_entity_flags = 0;
-	// Deck-ride saved carrier pose (the rider-side savedLivePose analog):
-	// retail keeps ONE savedLivePose + body* triple on the CARRIER, stamped at
-	// its mover start and consumed by every rider [orig: org2 @0x4b530b..
-	// reads carrier +0x80..+0x94]; a transport row keeps its own copy of the
-	// carrier pose it last consumed — the deltas are identical, sampled at the
-	// same once-per-frame cadence.
-	uint16_t rm_carrier_handle = 0xFFFF;
-	int32_t rm_carrier_pos[3] = {};
-	int32_t rm_carrier_yaw = 0;   // BAM32
-	int32_t rm_carrier_pitch = 0; // BAM32
-	int32_t rm_carrier_roll = 0;  // BAM32
 	// Raw entity flags from the latest compact organic record: PlayerCompactRecord::
 	// state_flags or InfantryCompactRecord::flags_byte. Bit 0 is hidden and bit 1
 	// is dead/undeployed. Spawns carry no compact flags, so `state_flags_known`

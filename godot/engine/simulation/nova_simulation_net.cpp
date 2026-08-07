@@ -12,6 +12,7 @@
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
 #include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
+#include <world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <rtxt/rtxt.h>
 #include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
@@ -881,11 +882,12 @@ void NovaSimulation::joiner_pump() {
 					return clearance;
 				});
 		// The deck-ride carrier seam: resolved_ground is the registry handle
-		// the ground probe stored; the ride follows that entity's live pose
-		// [orig: the org movers read groundEntity's Position/savedLivePose
-		// +0x80../body* +0x8C.. @0x4b530b../@0x4ba47f..]. Predicted vehicles
-		// serve the precise BAM motor attitude; anything else converts the
-		// presented degrees (a static's deltas are zero either way).
+		// the ground probe stored; the ride reads that entity's LIVE pose
+		// against its mover-entry savedLivePose stamp — the witnessed pair
+		// [orig: the org movers read groundEntity's Position vs +0x80../body*
+		// +0x8C.. @0x4b530b../@0x4ba47f..]. One shared reader
+		// (carrier_pose_fixed) serves both sides so representations can
+		// never diverge; a never-stamped entity (static) reads zero delta.
 		runtime_->view().set_carrier_pose_provider(
 				[this](uint16_t handle,
 						opennova::netsim::ClientReplicaPipeline::CarrierPose
@@ -895,22 +897,22 @@ void NovaSimulation::joiner_pump() {
 					h.packed = handle;
 					const opennova::world::Entity *e = world_->registry.get(h);
 					if (e == nullptr) return false;
-					out.pos[0] = opennova::world::to_fixed(e->position.x);
-					out.pos[1] = opennova::world::to_fixed(e->position.y);
-					out.pos[2] = opennova::world::to_fixed(e->position.z);
-					if (e->veh.net_predicted && e->veh.yaw_seeded) {
-						out.yaw = e->veh.yaw_bam;
-						out.pitch = e->veh.air_pitch_bam;
-						out.roll = e->veh.air_roll_bam;
+					opennova::world::carrier_pose_fixed(
+							*e, out.pos, out.yaw, out.pitch, out.roll);
+					if (e->saved_live_valid) {
+						out.saved_pos[0] = e->saved_live_pos[0];
+						out.saved_pos[1] = e->saved_live_pos[1];
+						out.saved_pos[2] = e->saved_live_pos[2];
+						out.saved_yaw = e->saved_live_yaw;
+						out.saved_pitch = e->saved_live_pitch;
+						out.saved_roll = e->saved_live_roll;
 					} else {
-						out.yaw = opennova::world::
-								bam_heading_from_mission_yaw_deg(e->yaw);
-						out.pitch = static_cast<int32_t>(std::llround(
-								double(e->pitch) /
-								opennova::world::kDegreesPerBam));
-						out.roll = static_cast<int32_t>(std::llround(
-								double(e->roll) /
-								opennova::world::kDegreesPerBam));
+						out.saved_pos[0] = out.pos[0];
+						out.saved_pos[1] = out.pos[1];
+						out.saved_pos[2] = out.pos[2];
+						out.saved_yaw = out.yaw;
+						out.saved_pitch = out.pitch;
+						out.saved_roll = out.roll;
 					}
 					out.bound_radius =
 							opennova::world::to_fixed(e->bound_radius);

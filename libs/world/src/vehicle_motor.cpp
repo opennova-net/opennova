@@ -1416,6 +1416,30 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // sim freezing carried rows to the row-level seat-follow — the D-NET-196
 // client-subset facet (divergence-ledger permanent register; the INFANTRY
 // deck-ride twins ARE ported: client_replica_pipeline row_deck_ride).]
+void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
+                        int32_t &pitch, int32_t &roll) {
+    pos[0] = to_fixed(e.position.x);
+    pos[1] = to_fixed(e.position.y);
+    pos[2] = to_fixed(e.position.z);
+    if (e.veh.net_predicted && e.veh.yaw_seeded) {
+        yaw = e.veh.yaw_bam;
+        pitch = e.veh.air_pitch_bam;
+        roll = e.veh.air_roll_bam;
+    } else {
+        yaw = bam_heading_from_mission_yaw_deg(e.yaw);
+        pitch = static_cast<int32_t>(
+            std::llround(static_cast<double>(e.pitch) / kDegreesPerBam));
+        roll = static_cast<int32_t>(
+            std::llround(static_cast<double>(e.roll) / kDegreesPerBam));
+    }
+}
+
+void stamp_saved_live_pose(Entity &e) {
+    carrier_pose_fixed(e, e.saved_live_pos, e.saved_live_yaw,
+                       e.saved_live_pitch, e.saved_live_roll);
+    e.saved_live_valid = true;
+}
+
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
     if (!m.net_predicted) return;

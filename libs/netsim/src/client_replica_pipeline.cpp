@@ -450,10 +450,10 @@ constexpr int32_t kTerminalVelZ = -32768;
 // The deck-ride (D-NET-196 replica tails): an org row follows its
 // groundEntity's per-tick pose delta at mover top, before root motion and
 // the settle — translation, the rotate-about-carrier, and the heading/roll
-// adoption. Retail reads the CARRIER's savedLivePose (+0x80..) / body*
-// (+0x8C..) triple, stamped at the carrier's own mover start; a transport
-// row keeps the per-rider saved copy instead — the deltas are identical,
-// one carrier sample per frame. The rotate un-rotates the rider's carrier
+// adoption. The deltas read the CARRIER's live pose against its mover-entry
+// savedLivePose stamp (Entity::saved_live_* — retail +0x80..+0x94), served
+// together by the provider: the witnessed source pair, no rider-side copy.
+// The rotate un-rotates the rider's carrier
 // offset by the SAVED attitude with 2^-22-scaled NEGATED sines
 // (dbl_7C57B0 = -4194304.0 — the inverse rotation) and re-rotates by the
 // CURRENT attitude with positive sines, exactly the witnessed product
@@ -462,28 +462,9 @@ constexpr int32_t kTerminalVelZ = -32768;
 // Entity_InterpolateFromParentDelta @0x4a8dc0]
 void row_deck_ride(ClientEntityState &es,
                    const ClientReplicaPipeline::CarrierPoseProvider &carrier) {
-	if (es.resolved_ground == 0xFFFF) {
-		es.rm_carrier_handle = 0xFFFF;
-		return;
-	}
+	if (es.resolved_ground == 0xFFFF) return;
 	ClientReplicaPipeline::CarrierPose cp;
-	if (!carrier(es.resolved_ground, cp)) {
-		es.rm_carrier_handle = 0xFFFF;
-		return;
-	}
-	if (es.rm_carrier_handle != es.resolved_ground) {
-		// First contact tick seeds the per-rider saved pose. Retail's rider
-		// consumes the carrier-side savedLivePose immediately; the one-tick
-		// seed lag is the per-rider copy's only difference (documented).
-		es.rm_carrier_handle = es.resolved_ground;
-		es.rm_carrier_pos[0] = cp.pos[0];
-		es.rm_carrier_pos[1] = cp.pos[1];
-		es.rm_carrier_pos[2] = cp.pos[2];
-		es.rm_carrier_yaw = cp.yaw;
-		es.rm_carrier_pitch = cp.pitch;
-		es.rm_carrier_roll = cp.roll;
-		return;
-	}
+	if (!carrier(es.resolved_ground, cp)) return;
 	// The unmounted out-of-radius drop: 3D distance vs the carrier's bound
 	// radius, saturated at 0x7FFF0000 before the int compare; beyond it the
 	// ride AND the ground link drop [orig: @0x4b52a7..0x4b52ff — the
@@ -496,16 +477,15 @@ void row_deck_ride(ClientEntityState &es,
 		if (len > 2147418112.0) len = 2147418112.0;
 		if (static_cast<int32_t>(len) > cp.bound_radius) {
 			es.resolved_ground = 0xFFFF;
-			es.rm_carrier_handle = 0xFFFF;
 			return;
 		}
 	}
-	const int32_t dpx = cp.pos[0] - es.rm_carrier_pos[0];
-	const int32_t dpy = cp.pos[1] - es.rm_carrier_pos[1];
-	const int32_t dpz = cp.pos[2] - es.rm_carrier_pos[2];
-	const int32_t dyaw = io::bam_sub(cp.yaw, es.rm_carrier_yaw);
-	const int32_t dpitch = io::bam_sub(cp.pitch, es.rm_carrier_pitch);
-	const int32_t droll = io::bam_sub(cp.roll, es.rm_carrier_roll);
+	const int32_t dpx = cp.pos[0] - cp.saved_pos[0];
+	const int32_t dpy = cp.pos[1] - cp.saved_pos[1];
+	const int32_t dpz = cp.pos[2] - cp.saved_pos[2];
+	const int32_t dyaw = io::bam_sub(cp.yaw, cp.saved_yaw);
+	const int32_t dpitch = io::bam_sub(cp.pitch, cp.saved_pitch);
+	const int32_t droll = io::bam_sub(cp.roll, cp.saved_roll);
 	es.x += dpx;
 	es.y += dpy;
 	es.z += dpz;
@@ -541,9 +521,9 @@ void row_deck_ride(ClientEntityState &es,
 		const int32_t rel_z = shl8(es.z - cb_half - cp.pos[2]) + 127;
 		// Un-rotate by the saved attitude (negated sines = the inverse)
 		// [orig: @0x4b537b..0x4b5567].
-		const int32_t cys = q22c(es.rm_carrier_yaw), sys = q22s_neg(es.rm_carrier_yaw);
-		const int32_t cps = q22c(es.rm_carrier_pitch), sps = q22s_neg(es.rm_carrier_pitch);
-		const int32_t crs = q22c(es.rm_carrier_roll), srs = q22s_neg(es.rm_carrier_roll);
+		const int32_t cys = q22c(cp.saved_yaw), sys = q22s_neg(cp.saved_yaw);
+		const int32_t cps = q22c(cp.saved_pitch), sps = q22s_neg(cp.saved_pitch);
+		const int32_t crs = q22c(cp.saved_roll), srs = q22s_neg(cp.saved_roll);
 		const int32_t rot_yaw_x = m22(rel_x, cys) - m22(rel_y, sys);
 		const int32_t rot_yaw_y = m22(rel_x, sys) + m22(rel_y, cys);
 		const int32_t rot_pitch_x = m22(rot_yaw_x, cps);
@@ -592,12 +572,6 @@ void row_deck_ride(ClientEntityState &es,
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
 		}
 	}
-	es.rm_carrier_pos[0] = cp.pos[0];
-	es.rm_carrier_pos[1] = cp.pos[1];
-	es.rm_carrier_pos[2] = cp.pos[2];
-	es.rm_carrier_yaw = cp.yaw;
-	es.rm_carrier_pitch = cp.pitch;
-	es.rm_carrier_roll = cp.roll;
 }
 
 // The vehicle-family bucket [orig: Entity_UpdateWatercraftPhysics
@@ -734,8 +708,8 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 // swimming overrides airborne — and the not-submerged exit clears the float
 // AND dive bits (0x208000).
 void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
-                       int32_t capsule_bottom, int32_t water_z, bool has_water,
-                       uint32_t tick) {
+                       int32_t capsule_bottom, int32_t capsule_top,
+                       int32_t water_z, bool has_water, uint32_t tick) {
 	if (!has_water) {
 		// No mission water plane (the EnvState 0 sentinel): the channel is
 		// off, and any stale float/dive bits clear so the gravity gate can
@@ -750,6 +724,13 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 		return;
 	}
 	const int32_t cb_neg = capsule_bottom > 0 ? 0 : capsule_bottom;
+	// The eye vertical (+0x74): a remote row derives it per tick from the anim
+	// capsule — min(top - bottom, 0xD000), floored at 0x2000 (the lean tilt is
+	// the local-lean channel's term, zero for an unleaning row)
+	// [orig: the non-local arm @0x4b6984..0x4b6991; the floor @0x4b68e7].
+	int32_t eye_h = capsule_top - capsule_bottom;
+	if (eye_h > 0xD000) eye_h = 0xD000;
+	if (eye_h < 0x2000) eye_h = 0x2000;
 	if (es.cls == EntityClass::Player) {
 		// The org2 buoyant-rise form, REMOTE arm: flat base -0x4C9 (the
 		// surface bob is local-player-only in org2 [orig: @0x4b8063..0x4b80a5,
@@ -758,15 +739,13 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 		const int32_t base = cb_neg - 0x4C9;
 		const int32_t base_q = base >> 4;
 		es.z = io::bam_add(es.z, (base_q < 0 ? -base_q : base_q) + 0x70);
-		// The vertical drag [orig: @0x4b814f..0x4b8163]; the planar pair has
-		// no row channels (rows carry no slide velocity) — named deferral.
+		// The velocity-triplet drag [orig: @0x4b8124..0x4b8163].
+		es.rm_vel_xy[0] -= (es.rm_vel_xy[0] + 16) >> 5;
+		es.rm_vel_xy[1] -= (es.rm_vel_xy[1] + 16) >> 5;
 		es.rm_vel_z -= (es.rm_vel_z + 16) >> 5;
-		// Surface line: water + base/2 - eyeHeight/2. Rows carry no stance
-		// eye chase; retail's own deploy reset default 0xD000 stands in
-		// [orig: line @0x4b8146..0x4b8169; the 0xD000 seed @0x42ffc9]
-		// (named divergence: a crouch-swimming row's line sits marginally
-		// off until the wire chase corrects it).
-		const int32_t surf = water_z + (base >> 1) - (0xD000 >> 1);
+		// Surface line: water + base/2 - eyeHeight/2, with the capsule-derived
+		// eye above [orig: line @0x4b8146..0x4b8169].
+		const int32_t surf = water_z + (base >> 1) - (eye_h >> 1);
 		if (es.z >= surf) {
 			es.rm_entity_flags &= ~0x200000u; // surfaced [orig: @0x4b8176]
 			es.z = surf;
@@ -787,7 +766,7 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 				std::sin(static_cast<double>(wave_arg) * 0.00390625 * 3.1) *
 				1224.0);
 		const int32_t target =
-				io::bam_add(water_z, bob - (0xD000 >> 1) - 0x4C9 + cb_neg);
+				io::bam_add(water_z, bob - (eye_h >> 1) - 0x4C9 + cb_neg);
 		es.z = io::bam_add(z_post_integrate,
 		                   (io::bam_sub(target, z_post_integrate) + 2) >> 2);
 	}
@@ -905,6 +884,49 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	int32_t wy =
 			static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
 			static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
+	// The planar velocity maintenance [orig: org2 @0x4b78a8..0x4b79dc; org1
+	// @0x4bf5cb..0x4bf61f]. org2 splits on the airborne bit: in air, the
+	// optional MoveOrder-bit3 air-steer nudge (angle = look-yaw hi16 ·
+	// 2π/65536 + dirpad · π/4, force ftol(cos/sin · −64.0), the parachute
+	// straight-fall double-apply @0x4b7915..0x4b793d), the 63/64 damp, and
+	// the ROOT PAIR ZEROED — airborne movement is momentum-owned
+	// [orig: @0x4b7971..0x4b7975]; grounded (and org1 on every path): the
+	// (7·v + 4) >> 3 decay with the |v| <= 8 snap to zero.
+	if (es.cls == EntityClass::Player &&
+	    (es.rm_entity_flags & 0x2000u) != 0) {
+		if ((es.move_input & 0x08u) != 0) {
+			const int32_t dirpad = static_cast<int32_t>(es.move_input & 0x07u);
+			const double ang =
+					static_cast<double>(
+							static_cast<int16_t>(es.heading_bam >> 16)) *
+							9.587371826171875e-05 + // [orig: dbl_7C9BC0]
+					static_cast<double>(dirpad) * 0.7853975; // [orig: dbl_7C9BB0]
+			const int32_t nx =
+					static_cast<int32_t>(std::cos(ang) * -64.0); // flt_7C9BD8
+			const int32_t ny = static_cast<int32_t>(std::sin(ang) * -64.0);
+			es.rm_vel_xy[0] -= nx;
+			es.rm_vel_xy[1] -= ny;
+			if ((es.rm_entity_flags & 0x20u) != 0 && es.rm_vel_z <= -14336 &&
+			    dirpad == 0) {
+				es.rm_vel_xy[0] -= nx;
+				es.rm_vel_xy[1] -= ny;
+			}
+		}
+		es.rm_vel_xy[0] = static_cast<int32_t>(
+				(static_cast<int64_t>(es.rm_vel_xy[0]) * 63) >> 6);
+		es.rm_vel_xy[1] = static_cast<int32_t>(
+				(static_cast<int64_t>(es.rm_vel_xy[1]) * 63) >> 6);
+		wx = 0;
+		wy = 0;
+	} else {
+		auto ground_decay = [](int32_t v) {
+			v = static_cast<int32_t>((static_cast<int64_t>(v) * 7 + 4) >> 3);
+			return (v >= -8 && v <= 8) ? 0 : v;
+		};
+		es.rm_vel_xy[0] = ground_decay(es.rm_vel_xy[0]);
+		es.rm_vel_xy[1] = ground_decay(es.rm_vel_xy[1]);
+	}
+
 	// Root suppression flag channels: the float bit zeroes the vertical
 	// channel, CL/ladder-platform contact the horizontal pair. org2 writes
 	// the literal 1 — keeping the resolver's moving discriminant true — and
@@ -917,8 +939,10 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		wx = suppressed;
 		wy = suppressed;
 	}
-	es.x += wx;
-	es.y += wy;
+	// Integrate: position takes momentum + root together [orig: org2
+	// @0x4b7cbf..0x4b7cd2; org1 @0x4bf684..0x4bf6a2].
+	es.x += es.rm_vel_xy[0] + wx;
+	es.y += es.rm_vel_xy[1] + wy;
 	es.z += dz_eff;
 	// The org1 water tail re-bases from this value (gravity + resolver z are
 	// discarded while afloat) [orig: the pre-gravity save @0x4bf6ba].
@@ -957,8 +981,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.pos[0] = es.x;
 		q.pos[1] = es.y;
 		q.pos[2] = es.z;
-		q.vel_xy[0] = wx;
-		q.vel_xy[1] = wy;
+		q.vel_xy[0] = es.rm_vel_xy[0] + wx; // the actual planar step — the
+		q.vel_xy[1] = es.rm_vel_xy[1] + wy; // resolver's moving discriminant
 		q.vel_z = es.rm_vel_z;
 		q.capsule_bottom = frame.capsule_bottom;
 		q.capsule_top = frame.capsule_top;
@@ -992,12 +1016,28 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			// @0x4bf8ae..0x4bf901]
 			const uint32_t edge_mask =
 					es.cls == EntityClass::Player ? 0x10A002u : 0x10A000u;
-			if ((es.rm_entity_flags & edge_mask) == 0)
+			if ((es.rm_entity_flags & edge_mask) == 0) {
 				es.rm_entity_flags =
 						(es.rm_entity_flags & ~0x40u) | 0x2000u;
+				if (es.cls == EntityClass::Player) {
+					// The org2 3/4 momentum carry into the velocity pair and
+					// the STRAIGHT anim stamp (31, 47 while parachuting) —
+					// the wire overwrites at the next record exactly as
+					// retail's pending does [orig: carry @0x4b7e43..0x4b7e6d;
+					// stamp @0x4b7e3f..0x4b7e61]. org1 keeps its clip on a
+					// plain fall (the 47->31 ladder is parachute-gated
+					// @0x4bf8d8).
+					es.rm_vel_xy[0] += static_cast<int32_t>(
+							(static_cast<int64_t>(wx) * 3) >> 2);
+					es.rm_vel_xy[1] += static_cast<int32_t>(
+							(static_cast<int64_t>(wy) * 3) >> 2);
+					es.anim_state_id =
+							(es.rm_entity_flags & 0x20u) != 0 ? 47 : 31;
+				}
+			}
 		}
-		row_water_channel(es, z_post_integrate, frame.capsule_bottom, water_z,
-		                  has_water, tick);
+		row_water_channel(es, z_post_integrate, frame.capsule_bottom,
+		                  frame.capsule_top, water_z, has_water, tick);
 		return;
 	}
 
@@ -1036,8 +1076,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// the per-motor surface hold are mover-tail behavior, not resolver
 	// behavior (a resolver-less embedder with env water keeps swimmers at
 	// the surface between records).
-	row_water_channel(es, z_post_integrate, frame.capsule_bottom, water_z,
-	                  has_water, tick);
+	row_water_channel(es, z_post_integrate, frame.capsule_bottom,
+	                  frame.capsule_top, water_z, has_water, tick);
 }
 
 } // namespace

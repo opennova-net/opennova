@@ -5561,15 +5561,16 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   org1 @ 0x4bf667-0x4bf680]`; gravity skips while `Flags & 0x108000`
   `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the position-add itself is
   unconditional (org2 folds vel into the one root store `@ 0x4b7cef`).
-- **Port notes (client subset)**: the replica port carries the org2 REMOTE
-  arm (flat base, no pitch term) and the org1 snap form verbatim; the
-  splash/overlay edges are FX deferrals; rows carry no planar velocity, so
-  the org2 x/y drags have no consumer; and rows have no stance eye chase, so
-  the surface line uses retail's own deploy-reset default `0xD000` for
-  `+0x74` `[orig: the seed @ 0x42ffc9]` — a named stand-in inside the
-  D-NET-196 client-subset scope. `Env` source: the mission water plane
-  (`World::EnvState.water_z`, 0 = no water = channel off with a
-  self-healing `~0x208000` clear).
+- **Port notes**: the replica port carries the org2 REMOTE arm (flat base,
+  no pitch term) and the org1 snap form verbatim; the full velocity-triplet
+  drags run against the row velocity pair + `rm_vel_z`; and the `+0x74` eye
+  vertical is derived per tick exactly as retail's non-local arm derives it —
+  `min(capsule_top - capsule_bottom, 0xD000)`, floored at `0x2000` (the lean
+  tilt is the lean channel's term, zero for an unleaning row)
+  `[orig: @ 0x4b6984-0x4b6991; floor @ 0x4b68e7]`. The splash/overlay edges
+  ride the cross-cutting sound/FX slice (open for local rows too — §22.5).
+  `Env` source: the mission water plane (`World::EnvState.water_z`, 0 = no
+  water = channel off with a self-healing `~0x208000` clear).
 
 ### 29.2 The deck-ride (groundEntity pose-follow)
 
@@ -5607,22 +5608,53 @@ simply contributes zero deltas.
   accumulator (`dword_B75FCC`) follows too. org1 additionally drags its chase
   TARGET (+0x1A8) and the look Pitch (+0x14) `[orig: @ 0x4ba867/@ 0x4ba88e]`;
   org2 adds pitchΔ' to bodyPitch (+0x90) only.
-- **Port notes (replica rows)**: retail keeps ONE savedLivePose on the
-  CARRIER consumed by every rider; a transport row keeps a per-rider saved
-  copy (`rm_carrier_*`) — identical deltas, one carrier sample per frame,
-  with a one-tick seed lag on first contact. The carrier pose comes through
-  `ClientReplicaPipeline::set_carrier_pose_provider` (the embedding sim
-  resolves `resolved_ground` against the world registry; predicted vehicles
-  serve the exact BAM motor attitude). Our joiner frame runs vehicle
-  prediction AFTER remote motion, so a rider consumes the PREVIOUS frame's
-  carrier delta — retail's own rider-ticks-before-carrier ordering case (the
-  mover order is entity-table order there). Rows have no bodyPitch or
-  torso/aim channels — the org2 pitchΔ'/aim adds are named deferrals; rows
-  adopt heading (+ the org1 chase target and look pitch) and roll.
-  Pinned by `netsim_client_replica_pipeline_contact_resolver` (translation
-  follow, the 90° rotate-about, heading adoption, the radius drop) and the
-  collision_test replica flags legs (the resolve-start clear, the InAir
-  full-update discriminant).
+- **Port notes (replica rows)**: the carrier keeps the REAL mover-entry
+  savedLivePose — `Entity::saved_live_*`, stamped by `stamp_saved_live_pose`
+  at the top of both world vehicle passes via the shared
+  `carrier_pose_fixed` reader — and the provider serves live + saved
+  together, the witnessed source pair (a never-stamped static reads zero
+  delta). Our joiner frame runs vehicle prediction AFTER remote motion, so a
+  rider consumes the PREVIOUS frame's carrier delta — retail's own
+  rider-ticks-before-carrier ordering case (the mover order is entity-table
+  order there). Rows adopt heading (+ the org1 chase target and RENDERED
+  look pitch) and roll (rendered — the avatar euler consumes
+  `pitch_bam`/`roll_bam`). Open pair, tracked on the ledger row: the org2
+  bodyPitch/torso-aim adoption needs the replica body-conform channel (the
+  same +0x90 consumer family as the unported replica slope pass), and the
+  VEHICLE deck-carrier ride twins (`@ 0x48D6DA-0x48DACD` watercraft /
+  `@ 0x4905BC-0x49095B` air — same math, no capsule bias, no radius drop)
+  sit behind D-NET-161's vehicle-vs-vehicle contact, without which no ground
+  link can form on our side. Pinned by
+  `netsim_client_replica_pipeline_contact_resolver` (zero-delta parked
+  carrier, translation follow, the 90° rotate-about, heading adoption, the
+  radius drop) and the collision_test replica flags legs (the resolve-start
+  clear, the InAir full-update discriminant).
+
+### 29.2a The org planar-velocity channel (ported for replica rows 2026-08-06)
+
+The momentum pair (`+0x98/+0x9C`) beside the anim root, decoded from both
+movers and ported as `ClientEntityState::rm_vel_xy`:
+
+- **Maintenance** (before the integrate): org2 splits on the airborne bit
+  `[orig: @ 0x4b78a8-0x4b79dc]` — in air, an optional MoveOrder-bit3
+  air-steer nudge (`angle = look-yaw hi16 · 2π/65536 + dirpad(MoveOrder&7) ·
+  π/4` `[orig: dbl_7C9BC0/dbl_7C9BB0]`, force `ftol(cos/sin · −64.0)`
+  `[orig: flt_7C9BD8]`, applied TWICE for a parachute straight fall at
+  `vel_z <= −14336` with no pad `[orig: @ 0x4b7915-0x4b793d]`), then the
+  63/64 damp and the ROOT PAIR ZEROED (airborne motion is momentum-owned)
+  `[orig: @ 0x4b7943-0x4b7975]`; grounded — and org1 on every path
+  `[orig: @ 0x4bf5cb-0x4bf61f]` — the `(7·v + 4) >> 3` decay with the
+  `|v| <= 8` snap to zero.
+- **Integrate**: `pos += vel + root`, one store per axis
+  `[orig: org2 @ 0x4b7cbf-0x4b7cd2; org1 @ 0x4bf684-0x4bf6a2]`.
+- **Feeds**: the org2 ledge edge banks `3·root/4` into the pair and stamps
+  anim 31 straight (47 while parachuting; org1 keeps its clip on a plain
+  fall) `[orig: carry @ 0x4b7e43-0x4b7e6d; stamp @ 0x4b7e3f-0x4b7e61]`; the
+  water block drains the full triplet at `(v+16)>>5`
+  `[orig: @ 0x4b8124-0x4b8163]`.
+- The org2 slope-slide impulses (`@ 0x4b6f0e-0x4b6fa3`) and the jump-launch
+  writes (`@ 0x4b7ecc-0x4b7ed5`) are the slope-pass/jump systems' feeds into
+  the same pair — they ride those systems' own port units.
 
 ### 29.3 Follow-ups
 

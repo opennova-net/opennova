@@ -37,12 +37,14 @@ bool expect(bool cond, const char *msg) {
 // A minimal root source: zero planar root, live capsule extents — the settle
 // leg is the subject, not the walk.
 struct StillSource final : public opennova::world::IRootMotionSource {
+	int32_t dx = 0; // settable forward root step (the ledge-carry legs)
 	bool has_clip(int, int) const override { return true; }
 	int32_t clip_length_ticks(int, int) const override { return 1024; }
 	bool advance(int, int, int32_t &phase,
 	             opennova::world::RootMotionFrame &out) override {
 		phase += 1024;
 		out = {};
+		out.dx = dx;
 		out.capsule_bottom = 0x8000; // 0.5 u feet
 		out.capsule_top = 0x1C000;
 		return true;
@@ -52,6 +54,7 @@ struct StillSource final : public opennova::world::IRootMotionSource {
 		pphase += 1024;
 		tphase += 1024;
 		out = {};
+		out.dx = dx;
 		out.capsule_bottom = 0x8000;
 		out.capsule_top = 0x1C000;
 		return true;
@@ -277,13 +280,72 @@ int main() {
 		row_b->cls = nw::EntityClass::Player;
 	}
 
-	// --- The deck-ride: a row grounded on a carrier follows its translation
-	// delta, rotates about it on a yaw delta, and adopts the yaw into its
-	// heading; straying beyond the carrier bound radius drops the ride AND
-	// the ground link. [orig: org2 @0x4b52a0..0x4b5726]
+	// --- The org2 ledge momentum carry + anim stamp and the airborne velocity
+	// model: walking off a ledge banks 3/4 of the root step into the velocity
+	// pair and stamps anim 31 straight [orig: @0x4b7e43..0x4b7e6d /
+	// @0x4b7e3f..0x4b7e61]; in the air the root pair is zeroed, momentum owns
+	// motion, and the MoveOrder-bit3 air-steer nudge plus the 63/64 damp run
+	// [orig: @0x4b78a8..0x4b79dc].
+	{
+		view.set_water_z(0, false);
+		cap.return_clearance = -0x100; // ground the row first
+		view.tick_remote_motion(0xFFFF);
+		row_a->rm_entity_flags = 0;
+		row_b->rm_entity_flags = 0;
+		row_a->rm_vel_xy[0] = 0;
+		row_a->rm_vel_xy[1] = 0;
+		still.dx = 1024; // heading 0x40000000 (90 deg): root lands on +y
+		cap.return_clearance = 0x10000;
+		const int32_t y_before_edge = row_a->y;
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(row_a->anim_state_id == 31,
+		             "the ledge edge stamps anim 31 straight");
+		ok &= expect(row_a->rm_vel_xy[1] == 768,
+		             "the edge banks 3/4 of the root step into vel_y");
+		ok &= expect(row_a->y == y_before_edge + 1024,
+		             "the edge tick still integrates the full root step");
+		// In-air tick: root zeroed, the +y nudge (dirpad 0, look +y;
+		// ftol(sin*-64.0) truncates to -63 exactly as retail's _ftol2), then
+		// the 63/64 damp: (768 + 63) * 63 >> 6 = 818.
+		const int32_t y_before_air = row_a->y;
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(row_a->rm_vel_xy[1] == 818,
+		             "in-air: nudge then the 63/64 damp");
+		ok &= expect(row_a->y == y_before_air + 818,
+		             "in-air motion is momentum-owned (root zeroed)");
+		// Landing tick: the maintenance still ran airborne (the 0x2000 clear
+		// lands post-resolve): nudge 63 then damp -> (818+63)*63>>6 = 867.
+		still.dx = 0;
+		cap.return_clearance = -0x100;
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect((row_a->rm_entity_flags & 0x2000u) == 0,
+		             "landing clears the airborne bit after the carry flight");
+		ok &= expect(row_a->rm_vel_xy[1] == 867,
+		             "the landing tick's maintenance was still airborne");
+		// First grounded tick: the witnessed (7v+4)>>3 decay resumes.
+		cap.return_clearance = 1000;
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(row_a->rm_vel_xy[1] == ((867 * 7 + 4) >> 3),
+		             "grounded decay is the witnessed (7v+4)>>3");
+		cap.return_clearance = 1000;
+		for (int i = 0; i < 40; ++i) view.tick_remote_motion(0xFFFF);
+		ok &= expect(row_a->rm_vel_xy[1] == 0,
+		             "the |v| <= 8 snap parks the grounded decay at zero");
+		row_a->anim_state_id = 62;
+	}
+
+	// --- The deck-ride: a row grounded on a carrier follows its live-vs-
+	// savedLivePose delta, rotates about it on a yaw delta, and adopts the
+	// yaw into its heading; straying beyond the carrier bound radius drops
+	// the ride AND the ground link. The provider serves the live pose and
+	// the mover-entry stamp; the test plays the carrier's mover by
+	// restamping saved = live after each tick. [orig: org2 @0x4b52a0..0x4b5726]
 	{
 		view.set_water_z(0, false);
 		cap.return_clearance = 1000;
+		row_a->rm_entity_flags = 0;
+		row_a->rm_vel_xy[0] = 0;
+		row_a->rm_vel_xy[1] = 0;
 		ns::ClientReplicaPipeline::CarrierPose carrier;
 		carrier.pos[0] = row_a->x - (1 << 16);
 		carrier.pos[1] = row_a->y;
@@ -292,24 +354,36 @@ int main() {
 		carrier.pitch = 0;
 		carrier.roll = 0;
 		carrier.bound_radius = 8 << 16;
-		bool carrier_alive = true;
+		auto restamp = [&carrier]() {
+			carrier.saved_pos[0] = carrier.pos[0];
+			carrier.saved_pos[1] = carrier.pos[1];
+			carrier.saved_pos[2] = carrier.pos[2];
+			carrier.saved_yaw = carrier.yaw;
+			carrier.saved_pitch = carrier.pitch;
+			carrier.saved_roll = carrier.roll;
+		};
+		restamp();
 		view.set_carrier_pose_provider(
-				[&carrier, &carrier_alive](
-						uint16_t handle,
+				[&carrier](uint16_t handle,
 						ns::ClientReplicaPipeline::CarrierPose &out) -> bool {
-					if (!carrier_alive || handle != 0x2009) return false;
+					if (handle != 0x2009) return false;
 					out = carrier;
 					return true;
 				});
 		row_a->resolved_ground = 0x2009;
 		cap.ground = 0x2009; // keep the probe echoing the carrier
-		view.tick_remote_motion(0xFFFF); // seeds the per-rider saved pose
-		// Translation follow.
+		// A parked carrier (saved == live) contributes zero delta.
+		const int32_t x_static = row_a->x;
+		view.tick_remote_motion(0xFFFF);
+		ok &= expect(row_a->x == x_static,
+		             "a parked carrier contributes zero rider delta");
+		// Translation follow: the carrier mover moved it +2u since its stamp.
 		carrier.pos[0] += 2 << 16;
 		const int32_t x_before = row_a->x;
 		view.tick_remote_motion(0xFFFF);
 		ok &= expect(row_a->x == x_before + (2 << 16),
 		             "the rider follows the carrier translation delta");
+		restamp();
 		// Rotation about the carrier: +90 deg yaw turns the rider's +x offset
 		// into +y and adopts the delta into the heading.
 		const int32_t rel_x0 = row_a->x - carrier.pos[0];
@@ -325,11 +399,14 @@ int main() {
 		ok &= expect(row_a->heading_bam == static_cast<int32_t>(
 		                     static_cast<uint32_t>(heading0) + 0x40000000u),
 		             "the rider heading adopts the carrier yaw delta");
-		// The out-of-radius drop.
+		restamp();
+		// The out-of-radius drop: the ride zeroes resolved_ground before the
+		// probe echo re-lands it, and the rider holds still that tick.
 		carrier.bound_radius = 1 << 14;
+		const int32_t x_before_drop = row_a->x;
+		carrier.pos[0] += 2 << 16; // a delta the dropped ride must NOT apply
 		view.tick_remote_motion(0xFFFF);
-		ok &= expect(row_a->resolved_ground == 0xFFFF ||
-		                     row_a->rm_carrier_handle == 0xFFFF,
+		ok &= expect(row_a->x == x_before_drop,
 		             "straying beyond the bound radius drops the ride");
 	}
 

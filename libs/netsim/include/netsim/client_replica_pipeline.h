@@ -111,13 +111,17 @@ public:
 	// exactly as retail's org movers ride groundEntity at mover top
 	// [orig: org2 @0x4b52a0..0x4b5726; org1 @0x4ba45d..; the standalone twin
 	//  Entity_InterpolateFromParentDelta @0x4a8dc0]. The embedding sim
-	// resolves the probe's wire handle to the live carrier pose (world
-	// entity); the pipeline keeps the per-rider saved copy and derives the
-	// deltas. Angles are BAM32; bound_radius is 16.16 (the ride drops when
-	// the unmounted rider strays beyond it [orig: @0x4b52a7..0x4b52ff]).
+	// resolves the probe's wire handle to the carrier's LIVE pose plus its
+	// mover-entry savedLivePose stamp (Entity::saved_live_* — retail
+	// +0x80..+0x94), and the ride reads (live - saved) per rider tick, the
+	// witnessed source pair. Angles are BAM32; bound_radius is 16.16 (the
+	// ride drops when the unmounted rider strays beyond it
+	// [orig: @0x4b52a7..0x4b52ff]).
 	struct CarrierPose {
 		int32_t pos[3] = {};
 		int32_t yaw = 0, pitch = 0, roll = 0; // BAM32
+		int32_t saved_pos[3] = {};            // the mover-entry stamp
+		int32_t saved_yaw = 0, saved_pitch = 0, saved_roll = 0;
 		int32_t bound_radius = 0;             // 16.16
 	};
 	using CarrierPoseProvider = std::function<bool(uint16_t handle, CarrierPose &out)>;
