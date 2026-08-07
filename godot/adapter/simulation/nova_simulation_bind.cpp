@@ -229,6 +229,10 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::debug_mounted_pose_ab_stats);
 	ClassDB::bind_method(D_METHOD("debug_native_seat_spec_diff", "item_db"),
 			&NovaSimulation::debug_native_seat_spec_diff);
+	ClassDB::bind_method(D_METHOD("debug_set_remote_body_native_publish", "native"),
+			&NovaSimulation::debug_set_remote_body_native_publish);
+	ClassDB::bind_method(D_METHOD("debug_remote_body_native_publish"),
+			&NovaSimulation::debug_remote_body_native_publish);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &NovaSimulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &NovaSimulation::get_global_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &NovaSimulation::get_music_variables_snapshot);

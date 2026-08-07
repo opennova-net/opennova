@@ -55,6 +55,7 @@ public:
 	                     float target_weight,
 	                     opennova::world::RootMotionFrame &out) override;
 	int32_t clip_length_ticks(int adm_id, int state_id) const override;
+	bool clip_loops(int adm_id, int state_id) const override;
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }

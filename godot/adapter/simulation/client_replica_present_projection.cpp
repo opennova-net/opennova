@@ -118,29 +118,51 @@ void project_client_replica_present_row(
 
 	// An armed row presents the same simulation-owned primary channel whose
 	// root delta moves the replica. Frozen/unresolved rows are disarmed by the
-	// fold and fall back to the latest wire state, including death/seat clips.
+	// fold and fall back to the latest wire state, including death/seat clips
+	// (the retail +0x2C0 park's visible outcome).
 	const bool root_motion_armed =
 			entity.rm_adm_id >= 0 && entity.rm_state >= 0;
-	row[NovaSimulation::PF_ANIM_STATE] = static_cast<float>(
-			root_motion_armed ? entity.rm_state : entity.anim_state_id);
-	row[NovaSimulation::PF_ANIM_REMOTE_REQUEST] = 1.0f;
-	if (root_motion_armed) {
+	if (context.remote_body_native_publish && root_motion_armed) {
+		// The channel already ran the per-record receive arbitration + the
+		// deferred promotion in the fold/tick (D-NET-209), so it presents
+		// DIRECTLY in the host-loopback tuple shape: current + playhead +
+		// the blending source pair. The model-side remote FSM is bypassed.
+		row[NovaSimulation::PF_ANIM_STATE] =
+				static_cast<float>(entity.rm_state);
+		row[NovaSimulation::PF_ANIM_REMOTE_REQUEST] = 0.0f;
 		row[NovaSimulation::PF_ANIM_PHASE_TICKS] =
 				static_cast<float>(entity.rm_phase);
-	}
-	// The armed simulation channel owns transition arbitration. Dispatching the
-	// free-running wire pulse as well would race two paths on the same model.
-	if (!root_motion_armed && entity.anim_state_pulse >= 0) {
-		row[NovaSimulation::PF_ANIM_STATE_PULSE] =
-				static_cast<float>(entity.anim_state_pulse);
-		if (entity.cls == EntityClass::Player) {
-			row[NovaSimulation::PF_ANIM_PULSE_TICKS] =
-					static_cast<float>(entity.anim_pulse_ratio);
+		if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
+			row[NovaSimulation::PF_ANIM_SOURCE_STATE] =
+					static_cast<float>(entity.rm_prev_state);
+			row[NovaSimulation::PF_ANIM_SOURCE_PHASE_TICKS] =
+					static_cast<float>(entity.rm_prev_phase);
+			row[NovaSimulation::PF_ANIM_BLEND_WEIGHT] =
+					entity.rm_blend_weight;
 		}
-	}
-	if (!root_motion_armed && entity.cls == EntityClass::Player) {
-		row[NovaSimulation::PF_ANIM_PHASE_TICKS] =
-				static_cast<float>(entity.anim_channel_ratio);
+	} else {
+		row[NovaSimulation::PF_ANIM_STATE] = static_cast<float>(
+				root_motion_armed ? entity.rm_state : entity.anim_state_id);
+		row[NovaSimulation::PF_ANIM_REMOTE_REQUEST] = 1.0f;
+		if (root_motion_armed) {
+			row[NovaSimulation::PF_ANIM_PHASE_TICKS] =
+					static_cast<float>(entity.rm_phase);
+		}
+		// The armed simulation channel owns transition arbitration.
+		// Dispatching the free-running wire pulse as well would race two
+		// paths on the same model.
+		if (!root_motion_armed && entity.anim_state_pulse >= 0) {
+			row[NovaSimulation::PF_ANIM_STATE_PULSE] =
+					static_cast<float>(entity.anim_state_pulse);
+			if (entity.cls == EntityClass::Player) {
+				row[NovaSimulation::PF_ANIM_PULSE_TICKS] =
+						static_cast<float>(entity.anim_pulse_ratio);
+			}
+		}
+		if (!root_motion_armed && entity.cls == EntityClass::Player) {
+			row[NovaSimulation::PF_ANIM_PHASE_TICKS] =
+					static_cast<float>(entity.anim_channel_ratio);
+		}
 	}
 	row[NovaSimulation::PF_RIGHT_HAND_COLLAPSED] =
 			collapse_right_hand ? 1.0f : 0.0f;

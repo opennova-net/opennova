@@ -32,9 +32,13 @@ namespace anim_state {
 enum : int {
     kReset = 0,
     kWalkForward = 1,
+    kWalkForwardRight = 2,
+    kWalkForwardLeft = 8,
     kRun2 = 9,
     kRun3 = 10,
     kWalkCrouchForward = 11, // 11..18: crouch walk directional block
+    kWalkCrouchForwardRight = 12,
+    kWalkCrouchForwardLeft = 18,
     kWalkProneForward = 19,  // 19..26: prone walk directional block
     kJumpStart = 30,
     kJumpLoop = 31,
@@ -95,7 +99,10 @@ enum : int {
     kCoverAttack2 = 166,
     kRunAttack = 167,
     kRunAway = 168,
-    kRun2Crouch = 169,
+    kRun2Crouch = 169,  // 169..172: the gait->stance transition inserts the
+    kRunL2Crouch = 170, // channel plays ahead of a deferred crouch/prone walk
+    kRunR2Crouch = 171, // [orig: AnimMap_UpdateEntity @0x40b662..0x40b737]
+    kRun2Prone = 172,
     kDeathFire = 173,
     kDeathPungi = 174,
     kDeathDrown = 175,
@@ -196,6 +203,13 @@ public:
     // clip-end channel flag [orig: the 0x20000 end-flag promotion in
     // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
     virtual int32_t clip_length_ticks(int adm_id, int state_id) const = 0;
+    // Whether the state's track loops — the channel's own loop bit, seeded from
+    // the clip data flags [orig: AnimChannel_InitFromData flag word @0x410577;
+    // AnimChannel_AdvancePlayback wraps on it @0x40b16a]. A LOOPING current
+    // holding a deferred body state promotes at its next wrap boundary; a
+    // one-shot promotes at its end. Default false suits providers whose clips
+    // are one-shots (the weapon channel's existing consumers).
+    virtual bool clip_loops(int /*adm_id*/, int /*state_id*/) const { return false; }
 };
 
 struct InfantryState {

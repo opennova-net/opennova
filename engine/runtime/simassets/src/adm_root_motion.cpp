@@ -244,6 +244,14 @@ int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id) const {
 	return track != nullptr ? track->frame_count * 2 : -1;
 }
 
+bool AdmRootMotion::clip_loops(int adm_id, int state_id) const {
+	// The clip data's own loop bit, the same flag word the retail channel wraps
+	// on [orig: AnimChannel_InitFromData @0x410577 -> AnimChannel_AdvancePlayback
+	// @0x40b16a].
+	const Track *track = resolve_track(adm_id, state_id);
+	return track != nullptr && track->loop;
+}
+
 int AdmRootMotion::clip_count(int adm_id) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return 0;

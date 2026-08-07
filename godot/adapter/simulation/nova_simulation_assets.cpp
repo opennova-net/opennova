@@ -509,6 +509,14 @@ int NovaSimulation::debug_get_mounted_pose_mode() const {
 	return static_cast<int>(mounted_pose_mode_);
 }
 
+void NovaSimulation::debug_set_remote_body_native_publish(bool p_native) {
+	remote_body_native_publish_ = p_native;
+}
+
+bool NovaSimulation::debug_remote_body_native_publish() const {
+	return remote_body_native_publish_;
+}
+
 Dictionary NovaSimulation::debug_mounted_pose_ab_stats() const {
 	Dictionary out;
 	out["queries"] = static_cast<int64_t>(mounted_pose_ab_.queries);

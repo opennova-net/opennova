@@ -1,5 +1,7 @@
 #include "netsim/client_replica_pipeline.h"
 
+#include "client_replica_body_arbitration.h"
+
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
 #include <terrain/height_field.h>        // remote-person terrain settle
 #include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
@@ -783,43 +785,107 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
                           bool has_water) {
 	if (es.rm_adm_id < 0) return;
-	// Channel state machine (the begin_body_transition mirror). The phase
-	// seed is ONE-SHOT per received record [orig: AnimMap_UpdateEntity zeroes
-	// entity+0x377 after use @0x40B7E4]; the bottom-history slot resets on EVERY update of climbs
-	// 32..35 and grenade deaths 176..179, before the same-state fast path
-	// [orig: AnimMap_UpdateEntity @0x40B607..0x40B645].
-	const int wire_state = es.anim_state_id;
+	// Channel state machine (the begin_body_transition mirror). The channel
+	// chases the ARBITRATED current (+0x2BC, written per record by the fold's
+	// @0x4c1153 apply — D-NET-209), never the raw coalesced wire byte; the
+	// phase seed is ONE-SHOT per direct commit [orig: AnimMap_UpdateEntity
+	// zeroes entity+0x377 after use @0x40B7E4]; the bottom-history slot
+	// resets on EVERY update of climbs 32..35 and grenade deaths 176..179,
+	// before the same-state fast path [orig: @0x40B607..0x40B645].
+	int target_state = es.net_anim_current >= 0
+			? static_cast<int>(es.net_anim_current)
+			: static_cast<int>(es.anim_state_id);
 	const bool bottom_reset_state =
-			(wire_state >= world::anim_state::kClimbIdle &&
-			 wire_state <= world::anim_state::kClimbIdle + 3) ||
-			(wire_state >= world::anim_state::kDeathGrenadeBase &&
-			 wire_state <= world::anim_state::kDeathGrenadeBase + 3);
+			(target_state >= world::anim_state::kClimbIdle &&
+			 target_state <= world::anim_state::kClimbIdle + 3) ||
+			(target_state >= world::anim_state::kDeathGrenadeBase &&
+			 target_state <= world::anim_state::kDeathGrenadeBase + 3);
+	// The gait->stance transition insert [orig: AnimMap_UpdateEntity
+	// @0x40b662..0x40b737]: with no deferred armed, a forward gait
+	// committing to the crouch/prone walk first plays the run2crouch-family
+	// clip and defers the real target — gated on the adm actually carrying
+	// the transition clip (retail: table entry != entry 0; here: the state
+	// resolves a track).
+	if (es.net_anim_pending == 0 && es.rm_state >= 0 &&
+			es.net_anim_current >= 0 && target_state != es.rm_state) {
+		const int cur = es.rm_state;
+		int trans = -1;
+		if (cur == world::anim_state::kRunForward ||
+				cur == world::anim_state::kWalkForward ||
+				cur == world::anim_state::kRun2 ||
+				cur == world::anim_state::kRun3) {
+			if (target_state == world::anim_state::kWalkProneForward)
+				trans = world::anim_state::kRun2Prone;
+			else if (target_state == world::anim_state::kWalkCrouchForward)
+				trans = world::anim_state::kRun2Crouch;
+		} else if (cur == world::anim_state::kWalkForwardRight &&
+				target_state == world::anim_state::kWalkCrouchForwardRight) {
+			trans = world::anim_state::kRunR2Crouch;
+		} else if (cur == world::anim_state::kWalkForwardLeft &&
+				target_state == world::anim_state::kWalkCrouchForwardLeft) {
+			trans = world::anim_state::kRunL2Crouch;
+		}
+		if (trans >= 0 && src.clip_length_ticks(es.rm_adm_id, trans) >= 0) {
+			es.net_anim_pending = static_cast<int16_t>(target_state);
+			es.net_anim_pending_boundary = -1;
+			es.net_anim_current = static_cast<int16_t>(trans);
+			target_state = trans;
+		}
+	}
 	if (es.rm_state < 0) {
-		es.rm_state = static_cast<int16_t>(wire_state);
-		es.rm_prev_state = static_cast<int16_t>(wire_state);
-		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
-				? es.anim_channel_ratio
+		es.rm_state = static_cast<int16_t>(target_state);
+		es.rm_prev_state = static_cast<int16_t>(target_state);
+		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
+				? es.net_anim_ratio
 				: 0;
-		es.rm_seed_live = false;
+		es.net_anim_ratio_live = false;
 		es.rm_prev_phase = es.rm_phase;
 		es.rm_blend_weight = 1.0f;
 		es.rm_blend_step = 0.0f;
 		es.rm_prev_bottom_live = false;
-	} else if (wire_state != es.rm_state) {
+	} else if (target_state != es.rm_state) {
 		if (es.rm_blend_weight >= 1.0f) {
 			es.rm_prev_state = es.rm_state;
 			es.rm_prev_phase = es.rm_phase;
 		}
-		es.rm_state = static_cast<int16_t>(wire_state);
-		es.rm_phase = (es.cls == EntityClass::Player && es.rm_seed_live)
-				? es.anim_channel_ratio
+		es.rm_state = static_cast<int16_t>(target_state);
+		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
+				? es.net_anim_ratio
 				: 0;
-		es.rm_seed_live = false;
+		es.net_anim_ratio_live = false;
 		es.rm_blend_weight = 0.0f;
 		es.rm_blend_step =
-				(world::infantry_anim_flags(wire_state) & 0x400u) != 0
+				(world::infantry_anim_flags(target_state) & 0x400u) != 0
 						? (1.0f / 15.0f)
 						: 0.1f;
+	}
+	// The clip-end deferred promotion [orig: the deferral arms the channel's
+	// end-notify each tick (@0x40b7db/@0x40b7ad), AnimChannel_AdvancePlayback
+	// latches it at the next loop wrap / one-shot end (@0x40b1ae/@0x40b18f),
+	// and AnimMap promotes on the latched flag (@0x40b795/@0x40b7c3) — the
+	// promoted retarget lands on the NEXT tick, as here]. The boundary is
+	// armed lazily in the growing-phase convention; a queue behind an
+	// already-finished one-shot (or a track-less state) promotes immediately —
+	// the shipped hold-wedge safety, recorded inside D-NET-209.
+	if (es.net_anim_pending != 0) {
+		if (es.net_anim_pending_boundary < 0) {
+			const int32_t len = src.clip_length_ticks(es.rm_adm_id, es.rm_state);
+			if (len <= 0) {
+				es.net_anim_pending_boundary = es.rm_phase;
+			} else if (src.clip_loops(es.rm_adm_id, es.rm_state)) {
+				es.net_anim_pending_boundary = ((es.rm_phase / len) + 1) * len;
+			} else {
+				es.net_anim_pending_boundary = len;
+			}
+		}
+		if (es.rm_phase >= es.net_anim_pending_boundary) {
+			es.net_anim_current = es.net_anim_pending;
+			es.net_anim_pending = 0;
+			es.net_anim_pending_boundary = -1;
+			// The promoted request starts at frame zero on its retarget —
+			// retail zeroes the +0x377 seed every tick [orig: @0x40b7e4].
+			es.net_anim_ratio_live = false;
+		}
 	}
 	if (bottom_reset_state) es.rm_prev_bottom_live = false;
 	// The legs keep chasing whatever the clip coverage is — the body heading
@@ -1227,11 +1293,15 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			if (progress < 512) {
 				es.net_interp_progress = progress + 1;
-			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
-			           0u) {
+			} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
+								   ? es.net_anim_current
+								   : es.anim_state_id) &
+							   0x1u) != 0u) {
 				// The starved idle force: a movement state parked past the
-				// progress cap walks its root motion forever — retail forces
-				// idle 43 [orig: @0x4B465D, g_animStateFlagsTable bit0 gate].
+				// progress cap walks its root motion forever — retail reads
+				// AND writes the arbitration current (+0x2BC) [orig:
+				// @0x4b464f/@0x4b465f, g_animStateFlagsTable bit0 gate].
+				es.net_anim_current = world::anim_state::kIdle;
 				es.anim_state_id = world::anim_state::kIdle;
 			}
 			// The deck-ride runs at the witnessed mover position — after the
@@ -1282,9 +1352,13 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			if (progress < 512) {
 				es.net_interp_progress = progress + 1;
-			} else if ((world::infantry_anim_flags(es.anim_state_id) & 0x1u) !=
-			           0u) {
-				// The org1 starved idle force [orig: §5.38a cap 512 -> idle 43].
+			} else if ((world::infantry_anim_flags(es.net_anim_current >= 0
+								   ? es.net_anim_current
+								   : es.anim_state_id) &
+							   0x1u) != 0u) {
+				// The org1 starved idle force — the same +0x2BC read/write
+				// [orig: §5.38a cap 512 -> idle 43; @0x4b464f/@0x4b465f shape].
+				es.net_anim_current = world::anim_state::kIdle;
 				es.anim_state_id = world::anim_state::kIdle;
 			}
 			// Heading: the promoted target chased with the org1 body
@@ -2059,10 +2133,15 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		const uint8_t prev_anim_state = es.anim_state_id;
 		const uint8_t prev_anim_ratio = es.anim_channel_ratio;
 		if (es.type_id != rec.type_id && es.type_id != 0) {
-			// A handle reused for a different type: the stamped adm and the
-			// playing channel are the OLD body's — re-resolve and re-arm.
+			// A handle reused for a different type: the stamped adm, the
+			// playing channel, and the arbitration FSM pair are the OLD
+			// body's — re-resolve and re-arm.
 			es.rm_adm_id = -2;
 			row_channel_disarm(es);
+			es.net_anim_current = -1;
+			es.net_anim_pending = 0;
+			es.net_anim_pending_boundary = -1;
+			es.net_anim_ratio_live = false;
 		}
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
@@ -2105,10 +2184,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 				? kVehicleFlagDeadPose
 				: static_cast<uint8_t>(world::kEntityFlagDead);
 		bool respawned_this_record = false;
+		bool row_was_dead = false;
 		if (has_state_flags) {
 			const bool was_known = es.state_flags_known;
 			const bool was_dead = (es.state_flags & dead_bit) != 0u;
 			const bool is_alive = (state_flags & dead_bit) == 0u;
+			row_was_dead = was_known && was_dead;
 			es.state_flags = state_flags;
 			es.state_flags_known = true;
 			if (was_known && was_dead && is_alive) {
@@ -2255,12 +2336,25 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// buried (the 48 latched by the first transition was already presented
 		// last frame, and re-dispatching a presented state is a same-state
 		// no-op at the model). The presenter drains the pulse once per frame.
+		// (The pulse survives as the DISARMED-row fallback + the legacy
+		// publish rollback seam; armed rows now run the per-record
+		// arbitration below — D-NET-209.)
 		if (prev_anim_sampled &&
 				(rec.cls == EntityClass::Player ||
 						rec.cls == EntityClass::Infantry) &&
 				es.anim_state_id != prev_anim_state) {
 			es.anim_state_pulse = static_cast<int16_t>(prev_anim_state);
 			es.anim_pulse_ratio = prev_anim_ratio;
+		}
+		// The per-record receive arbitration (the D-NET-209 closure): every
+		// player/infantry record applies its anim byte through the retail FSM
+		// pair as it decodes — several records folded between presents each
+		// arbitrate in arrival order, exactly the @0x4c1153 shape.
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			apply_record_body_arbitration(es, es.anim_state_id,
+					es.anim_channel_ratio,
+					rec.cls == EntityClass::Player, wire_dead, row_was_dead,
+					respawned_this_record);
 		}
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {
@@ -2272,10 +2366,9 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// — presentation falls back to the per-record wire anim byte exactly
 		// as retail applies it [orig: @0x4c1153] (the death/seat clips
 		// dispatch); the respawn edge re-arms fresh so the resume never
-		// blends out of the pre-death primary. A fresh player record also
-		// refreshes the one-shot phase seed.
+		// blends out of the pre-death primary. (The one-shot phase seed now
+		// rides the arbitration's direct-commit leg above — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
-			if (rec.cls == EntityClass::Player) es.rm_seed_live = true;
 			const bool row_frozen =
 					(has_state_flags &&
 							(state_flags &

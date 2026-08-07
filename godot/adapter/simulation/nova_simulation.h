@@ -140,13 +140,14 @@ public:
 		PF_ANIM_BLEND_WEIGHT,
 		PF_ANIM_REMOTE_REQUEST, // 1 = compact request needs receive-side arbitration; 0 = authoritative current state
 		// A transition state observed and then OVERWRITTEN within one decode fold
-		// (several 0x0A datagrams can apply between present drains). Retail applies
-		// the anim byte PER RECORD through the receive arbitration [orig: @0x4c1153];
-		// our snapshot seam coalesces to the latest byte, which silently drops 1-2
-		// tick pulses — a TAPPED prone roll transmits 41/42 for only an instant
-		// because the wire byte is `pending ?: current` and flips as soon as the
-		// next state queues. Presentation dispatches the pulse BEFORE the current
-		// state so the model's arbitration replays retail's per-record order.
+		// (several 0x0A datagrams can apply between present drains). Since
+		// D-NET-209 the per-record receive arbitration [orig: @0x4c1153] runs
+		// natively in the fold and ARMED rows publish the arbitrated channel
+		// (remote_request 0); the pulse remains the DISARMED-row fallback (a
+		// TAPPED prone roll on a dead/carried/adm-less row) and the legacy
+		// publish rollback seam (debug_set_remote_body_native_publish(false)).
+		// Presentation dispatches the pulse BEFORE the current state so the
+		// model's arbitration replays retail's per-record order.
 		// -1 = none; MUST stay ahead of PF_AIM_OVERLAY_VALID (zero-fill would read
 		// as valid state 0 = anim_reset).
 		PF_ANIM_STATE_PULSE,
@@ -403,6 +404,9 @@ private:
 	// reset_world — the table installs before mission promotion).
 	std::unordered_map<int32_t, const Threedi3di3 *> mounted_pose_native_models_;
 	CollisionPoseMode mounted_pose_mode_ = CollisionPoseMode::Compare;
+	// D-NET-209 dual-publish: armed replica rows present the arbitrated
+	// simulation channel directly (default); false = legacy rollback.
+	bool remote_body_native_publish_ = true;
 	struct MountedPoseAbStats {
 		uint64_t queries = 0;
 		uint64_t divergences = 0;
@@ -1518,6 +1522,11 @@ public:
 	void debug_set_mounted_pose_mode(int p_mode);
 	int debug_get_mounted_pose_mode() const;
 	Dictionary debug_mounted_pose_ab_stats() const;
+	// The S11 dual-publish seam (D-NET-209 rollback): true (default) presents
+	// armed replica rows from the simulation-arbitrated channel directly;
+	// false restores the legacy remote-request publish (model-side FSM).
+	void debug_set_remote_body_native_publish(bool p_native);
+	bool debug_remote_body_native_publish() const;
 	Dictionary debug_native_seat_spec_diff(
 			const Ref<class NovaItemDatabase> &p_item_db);
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /

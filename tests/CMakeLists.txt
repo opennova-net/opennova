@@ -1889,6 +1889,17 @@ target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE ope
 add_test(NAME netsim_client_replica_pipeline_anim_pulse
     COMMAND netsim_client_replica_pipeline_anim_pulse_test)
 
+# D-NET-209: the per-record receive-side body-state arbitration (@0x4c1153 /
+# @0x4c0600) + the channel's deferred promotion and gait->stance transition
+# insert (@0x40b5f0) — the tapped-roll lock+queue, same-state pending survival,
+# the dead park / respawn edges, and the clip-end promotion cadence.
+add_executable(netsim_client_replica_pipeline_body_arbitration_test
+    netsim/client_replica_pipeline_body_arbitration_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_body_arbitration_test
+    PRIVATE opennova_netsim opennova_world)
+add_test(NAME netsim_client_replica_pipeline_body_arbitration
+    COMMAND netsim_client_replica_pipeline_body_arbitration_test)
+
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)

@@ -3,6 +3,7 @@ add_library(opennova_netsim STATIC
     src/serializing_sink.cpp
     src/entity_wire_bridge.cpp
     src/item_replication_catalog.cpp
+    src/client_replica_body_arbitration.cpp
     src/client_replica_pipeline.cpp
     src/client_world_materializer.cpp
     src/connection_fan.cpp

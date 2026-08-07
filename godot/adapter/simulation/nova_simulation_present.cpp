@@ -1105,7 +1105,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	const ClientReplicaPresentContext replica_present_context{
-			&item_seat_specs_, &world_->weapons, joiner_};
+			&item_seat_specs_, &world_->weapons, joiner_,
+			remote_body_native_publish_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {

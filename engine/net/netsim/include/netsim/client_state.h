@@ -79,14 +79,38 @@ struct ClientEntityState {
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
 	// A body-anim state that was applied and then OVERWRITTEN by a later record
 	// before the presenter drained this row. Retail applies each record's anim
-	// byte through the receive arbitration as it decodes [orig: @0x4c1153]; our
-	// snapshot seam samples once per render frame, so a 1-2 tick transition (a
-	// tapped prone roll: the wire byte is `pending ?: current` and flips as soon
-	// as the follow-up state queues on the authority) would otherwise never
-	// reach presentation. -1 = none. The presenter consumes it first, then the
+	// byte through the receive arbitration as it decodes [orig: @0x4c1153] —
+	// since D-NET-209 that arbitration runs natively per folded record (the
+	// net_anim_* pair below) and armed rows present the arbitrated channel;
+	// the pulse remains the DISARMED-row fallback and the legacy-publish
+	// rollback seam. -1 = none. The presenter consumes it first, then the
 	// current state, and clears it (ClientState::clear_anim_pulses).
 	int16_t anim_state_pulse = -1;
 	uint8_t anim_pulse_ratio = 0;
+	// The receive-side body-state ARBITRATION pair — the retail entity fields
+	// the per-record apply writes AS IT DECODES [orig: player @0x4c1153,
+	// infantry @0x4c0600..0x4c0641]: current (+0x2BC) and the clip-end
+	// deferred pending (+0x2B8). A same-as-current record is a pure no-op
+	// (the pending SURVIVES); a current in queue class 4, or class 0x20 with
+	// a non-idle (flags bit0 clear) arrival, queues the record as pending;
+	// everything else commits directly (current = decoded, pending = 0).
+	// Retail's own pending sentinel is 0, ambiguity included. -1 current =
+	// no record arbitrated yet. The wire-dead park (+0x2C0) needs no field:
+	// anim_state_id retains the raw byte and the frozen-row presentation
+	// fallback shows it, which is the parked byte's visible outcome.
+	int16_t net_anim_current = -1;
+	int16_t net_anim_pending = 0;
+	// The pending promotion boundary in the growing rm_phase convention,
+	// armed by the tick when a pending is present (retail: the deferral ORs
+	// 0x40000 into the channel each tick and AnimChannel_AdvancePlayback
+	// latches 0x20000 at the next loop wrap / one-shot end [orig:
+	// @0x40b7db/@0x40b7ad; @0x40b1ae/@0x40b18f]). <0 = unarmed.
+	int32_t net_anim_pending_boundary = -1;
+	// The +0x377 one-shot phase seed mirror: retail stores the ratio byte
+	// ONLY on the direct-commit leg [orig: @0x4c11a6], so a queued record's
+	// phase never seeds the current channel. Player records only.
+	uint8_t net_anim_ratio = 0;
+	bool net_anim_ratio_live = false;
 	// entity+0x2B0, the peer's equipped AdmDef index (the player compact's off-16
 	// `anim_def_index`). Retail's client stores it straight onto the peer entity and its
 	// body updater re-reads it every selection pass to pick that peer's upper-body hold
@@ -338,7 +362,6 @@ struct ClientEntityState {
 	// entity+0x377 after use [orig: AnimMap_UpdateEntity @0x40B7E4]).
 	int32_t rm_prev_bottom = 0;
 	bool rm_prev_bottom_live = false;
-	bool rm_seed_live = false;
 	int32_t rm_leg_yaw[2] = {};
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
