@@ -31,6 +31,11 @@ void FireSoundQueue::play_with_distance_delay(const char *set_name,
                                               const Vec3 &pos,
                                               int32_t source_bms_id) {
     if (set_name == nullptr || set_name[0] == '\0') return;
+    // The peer gate lives INSIDE the witnessed function: a host with no
+    // stamped listener (dedicated) plays nothing [orig: the
+    // is_mp_session_peer test at the head of Sound_PlayWithDistanceAttenuation
+    // @ 0x528e57].
+    if (!listener_valid_) return;
     // Truncating distance in integer units — retail loads the 16.16 deltas as
     // floats, sqrts, truncates the fixed value and shifts the fraction off
     // [orig: @ 0x528e7c..0x528ec0 (ftol then >> 16)].

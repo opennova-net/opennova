@@ -260,6 +260,7 @@ static inline void threedi_user_point_direction(const ThreediUserPoint *up, floa
     out[2] = (float)up->rot_x / 65536.0f;
 }
 
+
 typedef struct ThreediCollisionModelData {
     float bbox[6];                // {minX, minY, minZ, maxX, maxY, maxZ}
     float radii[3];               // {max_radius, max_radius_xy, max_radius_z}
@@ -779,6 +780,33 @@ THREEDI_EXPORT void threedi_3di3_free(Threedi3di3 *model);
 // axis order, NOT render-swizzled): callers apply their own axis convention
 // (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
+
+// A userpoint name -> the 16-bit mask over the model's FIRST 16 userpoints:
+// exact case-insensitive match, and duplicate names all set their bit. This is
+// the item-effect attach scan every consumer shares (the ITEMS.DEF particlefx
+// resolve; the death/fire/other families mask the HUSK's fixed names).
+// [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 — the first-16 stricmp walk;
+//  consumed by resolve_item_materials_and_spawn_bone_trails @ 0x522ee0]
+static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
+                                                    const char *name) {
+    if (model == NULL || name == NULL || name[0] == '\0') return 0;
+    uint16_t mask = 0;
+    size_t count = model->user_point_count < 16 ? model->user_point_count : 16;
+    for (size_t i = 0; i < count; ++i) {
+        const char *a = model->user_points[i].name;
+        const char *b = name;
+        while (*a != '\0' && *b != '\0') {
+            char ca = *a, cb = *b;
+            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+            if (ca != cb) break;
+            ++a;
+            ++b;
+        }
+        if (*a == '\0' && *b == '\0') mask |= (uint16_t)(1u << i);
+    }
+    return mask;
+}
 
 #ifdef __cplusplus
 }

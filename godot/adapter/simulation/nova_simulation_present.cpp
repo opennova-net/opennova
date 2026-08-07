@@ -385,6 +385,7 @@ Dictionary NovaSimulation::drain_destruction_events() {
 	out["glass_breaks"] = glass;
 	out["explosions_processed"] = ev.explosions_processed;
 	out["items_destroyed"] = ev.items_destroyed;
+	out["crackles"] = ev.crackles; // wreck-fire crackle rolls fired (S12b)
 	ev.clear();
 	return out;
 }
@@ -403,6 +404,10 @@ Array NovaSimulation::get_death_pieces() const {
 		d["item_id"] = p.item_id;
 		d["section"] = static_cast<int>(p.section);
 		d["type_index"] = static_cast<int>(p.type_index);
+		// The debris-type trail effect, from the ONE native table [orig:
+		// g_death_piece_types @ 0x8404f0 +0x2C]; "" = no trail authored.
+		d["trail"] = String(
+				opennova::world::death_piece_trail_effect(p.type_index));
 		d["scale"] = p.render_scale;
 		d["pos"] = Vector3(p.pos.x, p.pos.z, -p.pos.y);
 		d["heading"] = p.heading;

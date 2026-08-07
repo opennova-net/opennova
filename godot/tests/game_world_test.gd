@@ -334,6 +334,14 @@ class ItemFxObjectDataStub:
 		return points.size()
 	func get_user_point_info(index: int) -> Dictionary:
 		return points[index]
+	# The native first-16 scan's contract (S12c; engine/formats/threedi
+	# threedi_3di3_user_point_mask), mirrored over the stub's points.
+	func get_user_point_bone_mask(name: String) -> int:
+		var mask := 0
+		for i in range(mini(points.size(), 16)):
+			if String(points[i].get("name", "")).nocasecmp_to(name) == 0:
+				mask |= 1 << i
+		return mask
 
 
 class ItemFxModelStub:

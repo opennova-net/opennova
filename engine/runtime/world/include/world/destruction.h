@@ -237,6 +237,7 @@ struct DestructionEvents {
     // Diagnostic counters (probes assert the legs actually ran).
     int32_t explosions_processed = 0;
     int32_t items_destroyed = 0;
+    int32_t crackles = 0; // wreck-fire crackle rolls that fired (S12b)
 
     void clear() {
         effects.clear();
@@ -246,6 +247,31 @@ struct DestructionEvents {
         glass_breaks.clear();
     }
 };
+
+// The wreck-fire random crackle, rolled per tick per burning wreck on the
+// world's rol-xor PRNG stand-in stream (the same generator as retail's
+// PRNG_Next16_C @ 0x6131b0 — our one DestructionRng stream stands in for the
+// A/B/C instances, the documented fold). One roll per wreck at the entity
+// position collapses retail's per-fire-bone rolls at the bone positions —
+// the 4-slot bone banks remain the open D-ITEM-15 residual. The crackle
+// SOUND is distance-delay gated at the ENTITY position; the effect spawns
+// transient.
+// [orig: Entity_UpdateDeadWreckEffects @ 0x493140 (renamed ex
+//  Entity_UpdateMuzzleFlashAndEffects 2026-08-07) — per fire bone i:
+//  (fire mask & (1<<i)) && PRNG_Next16_C() < 16 && bone Z >= water ->
+//  submit g_fx_BoatExpSec @ 0x4932d1 +
+//  Sound_PlayWithDistanceAttenuation(g_snd_EXPLO_SHIP_SM_b, &entity->Position)
+//  @ 0x4932e2]
+inline constexpr const char *kFireCrackleEffect =
+        "Effect_BoatExpSec"; // [orig: g_fx_BoatExpSec @ 0x2C25CB8]
+inline constexpr const char *kFireCrackleSound =
+        "EXPLO_SHIP_SM"; // [orig: g_snd_EXPLO_SHIP_SM_b @ 0x24E08F4]
+inline constexpr uint16_t kFireCrackleThreshold = 16; // [orig: @ 0x4932bf]
+
+// The debris-type trail-effect column, by DeathPiece::type_index
+// [orig: g_death_piece_types @ 0x8404f0 +0x2C; "" = the type authors no trail
+// (NP rows); out-of-range indexes take no trail].
+const char *death_piece_trail_effect(uint8_t type_index);
 
 // World-local stand-in for the destruction paths' witnessed rol-xor PRNG
 // streams. Keeping the state on World makes independent simulations and

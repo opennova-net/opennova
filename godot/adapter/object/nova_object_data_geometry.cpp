@@ -279,6 +279,12 @@ Dictionary NovaObjectData::get_user_point_info(int p_index) const {
 	return info;
 }
 
+int NovaObjectData::get_user_point_bone_mask(const String &p_name) const {
+	if (!has_source_model) return 0;
+	return threedi_3di3_user_point_mask(&source_model,
+			p_name.utf8().get_data());
+}
+
 Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {
 	// The model-space point that should sit at a placed object's stored position:
 	// the "ground" userpoint if present, else the model origin (see

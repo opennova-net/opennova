@@ -466,11 +466,14 @@ func _attach_item_effect_to_node(node: Node3D, kind: int, item_id: int,
 	var matched := 0
 	var entity_ref: Dictionary = node.get_meta("entity_ref", {}).duplicate()
 	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+		# The first-16 case-insensitive scan is native — ONE impl in
+		# engine/formats/threedi (S12c) [orig: ItemDef_GetBoneMaskByName
+		# @ 0x49ea40; duplicate names all set their bit].
+		var mask := int(data.get_user_point_bone_mask(userpoint))
+		for i in range(ITEM_EFFECT_USER_POINT_SCAN_LIMIT):
+			if (mask & (1 << i)) == 0:
 				continue
+			var info: Dictionary = data.get_user_point_info(i)
 			var key := "itemfx:%d:%d" % [node_id, i]
 			var receipt: Dictionary = effect_world.spawn_effect_attached_request(
 					key, effect, node.global_transform,
@@ -558,11 +561,13 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 	var attached := 0
 	var matched := 0
 	if not userpoint.is_empty():
-		var points := mini(data.get_user_point_count(), ITEM_EFFECT_USER_POINT_SCAN_LIMIT)
-		for i in range(points):
-			var info: Dictionary = data.get_user_point_info(i)
-			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
+		# The same native first-16 scan as the animated leg (S12c)
+		# [orig: ItemDef_GetBoneMaskByName @ 0x49ea40].
+		var mask := int(data.get_user_point_bone_mask(userpoint))
+		for i in range(ITEM_EFFECT_USER_POINT_SCAN_LIMIT):
+			if (mask & (1 << i)) == 0:
 				continue
+			var info: Dictionary = data.get_user_point_info(i)
 			var local_pose := _item_effect_local_pose(
 					Vector3(info.get("position", Vector3.ZERO)),
 					Vector3(info.get("rotation", Vector3.ZERO)))

@@ -28,7 +28,7 @@ float world_water_z(const World &world) {
 // dword_31BFBB8 form — v = rol4(state + rol11(state)); state = v ^ 1; the
 // low 16 bits are the draw. PRNG_Next16/_B/_C @ 0x6130a0/0x6130f0/0x6131b0 are
 // per-module instances of the same generator; one stream stands in for the
-// three (piece cosmetics only — tracked in §24).]
+// three (piece cosmetics + the wreck-fire crackle, S12b — tracked in §24).]
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 
 // Piece spin rate: max * (rand % 100)/100, floored at min — NOT uniform in
@@ -734,7 +734,6 @@ void destruction_tick_dead_items(World &world,
                                  const terrain::TerrainHeightField *terrain,
                                  float water_height,
                                  DestructionEvents &events) {
-    (void)events;
     // The dead-item settle [orig: Entity_UpdateStaticDeathPhysics @ 0x494230 /
     // Entity_UpdateFallingDeathPhysics @ 0x493f70 as the post-death update
     // callbacks]. This shared pass advances every entity with an installed
@@ -745,6 +744,26 @@ void destruction_tick_dead_items(World &world,
             Entity *e = world.registry.get(EntityHandle::make(pool, static_cast<int>(s)));
             if (e == nullptr) continue;
             if ((e->engine_flags & kEntityFlagHusk) == 0) continue;
+            // The wreck-fire random crackle (S12b), one roll per burning wreck
+            // per tick on the engine PRNG stream — the draw is consumed BEFORE
+            // the water gate, retail's evaluation order. The sound rides the
+            // fire-sound distance-delay queue at the entity position.
+            // [orig: Entity_UpdateDeadWreckEffects @ 0x493140 — the roll
+            //  @ 0x4932bf, the effect @ 0x4932d1, the sound @ 0x4932e2]
+            {
+                const ItemDeathTraits *fire_traits =
+                        world.item_death_traits.get(e->item_id);
+                if (fire_traits != nullptr && !fire_traits->particlefire.empty() &&
+                        world.destruction_rng.next16() < kFireCrackleThreshold &&
+                        e->position.z >=
+                                (water_height <= -1.0e8f ? 0.0f : water_height)) {
+                    events.effects.push_back(DestructionEffectEvent{
+                            kFireCrackleEffect, e->position, Vec3{0.0f, 0.0f, 1.0f}});
+                    world.fire_sounds.play_with_distance_delay(
+                            kFireCrackleSound, e->position, e->bms_id);
+                    ++events.crackles;
+                }
+            }
             if (e->death_motion == DeathMotionMode::None) continue;
             // unitType 3 installs DeathPiece_PhysicsUpdate @ 0x48f500. Its
             // specialized callback remains a documented D-ITEM residual; do
@@ -1004,6 +1023,15 @@ void DeathPieceSim::reset() noexcept {
         p.generation = generation;
     }
     cursor = 0;
+}
+
+// The debris-type trail-effect column — the SAME kDeathPieceTypes rows the
+// piece spawner reads (one table, one impl); nullptr rows read as ""
+// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+const char *death_piece_trail_effect(uint8_t type_index) {
+    if (type_index >= kDeathPieceTypeCount) return "";
+    const char *trail = kDeathPieceTypes[type_index].trail_fx;
+    return trail != nullptr ? trail : "";
 }
 
 } // namespace opennova::world

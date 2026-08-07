@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "terrain/height_field.h"
@@ -1352,7 +1353,100 @@ void test_net_kill_runs_client_side_death_chain() {
     CHECK(sp.explosions.queue.size() == 1); // still parked: not a visual client
 }
 
+// The wreck-fire random crackle rolls in the SIM per tick on the engine PRNG
+// stream (S12b): a burning wreck (husk + authored particlefire) eventually
+// crackles — the effect event + the distance-delay-gated sound through the
+// fire-sound queue; a fire-less wreck never does; an underwater wreck consumes
+// draws (retail's order: PRNG before the water gate) but stays silent.
+// [orig: Entity_UpdateDeadWreckEffects @ 0x493140 — the roll @ 0x4932bf,
+//  effect @ 0x4932d1, sound @ 0x4932e2]
+void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
+    FlatField flat(0x4000);
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f}); // < 30 u: immediate
+    w.registry.configure_pool(1, 4);
+    ItemDeathTraits t = barrel_traits(); // authors particlefire ("Effect_Fire")
+    t.static_death = true;
+    w.item_death_traits.set(700, t);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 0;
+    seed.position = Vec3{8.0f, 8.0f, 4.0f};
+    const EntityHandle h = w.registry.spawn(1, seed);
+    Entity *e = w.registry.get(h);
+    e->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    e->alive = false;
+
+    int ticks_to_first = 0;
+    for (int i = 0; i < 20000 && w.destruction.crackles == 0; ++i) {
+        destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
+        ++ticks_to_first;
+    }
+    CHECK(w.destruction.crackles > 0);
+    bool crackle_effect = false;
+    for (const DestructionEffectEvent &fx : w.destruction.effects)
+        if (fx.effect == kFireCrackleEffect) crackle_effect = true;
+    CHECK(crackle_effect);
+    const std::vector<ReadyFireSound> sounds = w.fire_sounds.drain();
+    bool crackle_sound = false;
+    for (const ReadyFireSound &s : sounds)
+        if (s.set_name == kFireCrackleSound) crackle_sound = true;
+    CHECK(crackle_sound);
+
+    // A fire-less wreck never crackles over the same span.
+    auto w2_heap = std::make_unique<World>();
+    World &w2 = *w2_heap;
+    w2.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f});
+    w2.registry.configure_pool(1, 4);
+    ItemDeathTraits quiet = barrel_traits();
+    quiet.particlefire.clear();
+    quiet.static_death = true;
+    w2.item_death_traits.set(700, quiet);
+    const EntityHandle h2 = w2.registry.spawn(1, seed);
+    Entity *e2 = w2.registry.get(h2);
+    e2->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    e2->alive = false;
+    for (int i = 0; i < ticks_to_first + 100; ++i)
+        destruction_tick_dead_items(w2, &flat.field, -1.0e9f, w2.destruction);
+    CHECK(w2.destruction.crackles == 0);
+
+    // Underwater: the draw is consumed BEFORE the water gate — the stream
+    // advances, the crackle never fires [orig: the && order @ 0x4932bf].
+    auto w3_heap = std::make_unique<World>();
+    World &w3 = *w3_heap;
+    w3.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f});
+    w3.registry.configure_pool(1, 4);
+    ItemDeathTraits wet = barrel_traits();
+    wet.static_death = true;
+    w3.item_death_traits.set(700, wet);
+    const EntityHandle h3 = w3.registry.spawn(1, seed);
+    Entity *e3 = w3.registry.get(h3);
+    e3->engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    e3->alive = false;
+    const uint32_t state_before = w3.destruction_rng.state;
+    for (int i = 0; i < 64; ++i)
+        destruction_tick_dead_items(w3, &flat.field, 100.0f, w3.destruction);
+    CHECK(w3.destruction.crackles == 0);
+    CHECK(w3.destruction_rng.state != state_before);
+}
+
+// The debris-type trail column reads the ONE native table row
+// [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+void test_death_piece_trail_effect_rows() {
+    CHECK(std::string(death_piece_trail_effect(0)).empty());       // HULL
+    CHECK(std::string(death_piece_trail_effect(1)) == "Effect_VexpM");
+    CHECK(std::string(death_piece_trail_effect(2)) == "Effect_VexpS");
+    CHECK(std::string(death_piece_trail_effect(5)) == "Effect_PDust_S");
+    CHECK(std::string(death_piece_trail_effect(12)) == "Effect_VexpSL");
+    CHECK(std::string(death_piece_trail_effect(13)).empty());      // out of range
+    CHECK(std::string(death_piece_trail_effect(255)).empty());
+}
+
 int main() {
+    test_wreck_fire_crackle_rolls_on_the_engine_prng();
+    test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();
     test_explosion_los_excludes_victim_hull();
     test_radius_blast_skips_pool1_los();

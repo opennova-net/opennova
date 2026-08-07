@@ -34,9 +34,6 @@ const MissionObjectPlacer := preload("res://adapter/mission/mission_object_place
 
 const BURST_EFFECT := "Effect_TreeWoodExp"       # [orig: g_fx_TreeWoodExp @ 0x2C25BF4]
 const BURST_COUNT := 6                            # sampling stand-in (see header)
-const FIRE_CRACKLE_EFFECT := "Effect_BoatExpSec"  # [orig: g_fx_BoatExpSec @ 0x2C25CB8]
-const FIRE_CRACKLE_SOUND := "EXPLO_SHIP_SM"       # [orig: g_snd_EXPLO_SHIP_SM_b @ 0x24E08F4]
-const FIRE_CRACKLE_CHANCE := 16.0 / 65536.0       # [orig: PRNG_Next16_C() < 16 @ 0x4932bf]
 # Mirrors NovaSimulation.EffectStateField without making this script fail to
 # parse against an older extension DLL; the method itself remains capability-checked.
 const PRESENT_EFFECT_POSITION := 0
@@ -44,24 +41,6 @@ const PRESENT_EFFECT_ROTATION_DEG := 1
 const PRESENT_EFFECT_STATE_COUNT := 2
 const INVALID_WIRE_HANDLE := 0xffff
 const SYNTHETIC_SPAWN_ORIGIN := 0xffffffff
-
-# The debris-type trail effects by table index [orig: g_death_piece_types
-# @ 0x8404f0 +0x2C column; "" = the type authors no trail (NP rows)].
-const PIECE_TRAIL_BY_TYPE: Array[String] = [
-	"",                # 0 HULL
-	"Effect_VexpM",    # 1 WHEEL
-	"Effect_VexpS",    # 2 CHUNK_S
-	"Effect_VexpM",    # 3 CHUNK_M
-	"Effect_VexpL",    # 4 CHUNK_L
-	"Effect_PDust_S",  # 5 ROCK_S
-	"Effect_PDust_M",  # 6 ROCK_M
-	"",                # 7 ROCK_L
-	"",                # 8 CHUNKNP_S
-	"",                # 9 CHUNKNP_M
-	"",                # 10 CHUNKNP_L
-	"",                # 11 CACTUS_
-	"Effect_VexpSL",   # 12 CHUNKSF_M
-]
 
 var _sim                          # NovaSimulation
 var _container: Node3D = null     # mission container (node-less husk grafts land here)
@@ -79,6 +58,9 @@ var _burning: Dictionary = {}     # canonical wreck owner key -> live crackle an
 var _wreck_anchor_keys: Dictionary = {} # registered wreck owner keys
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
 var _piece_generation: Dictionary = {}  # piece slot -> presented allocation generation
+# Cosmetic scatter for the section-debris burst STAND-IN only (the sampling
+# note in the header); the witnessed wreck-fire crackle roll runs in the SIM
+# on the engine PRNG stream (S12b).
 var _rng := RandomNumberGenerator.new()
 
 
@@ -192,6 +174,9 @@ func present() -> void:
 		for snd_v in events.get("sounds", []):
 			_apply_sound(snd_v as Dictionary)
 		_stats.glass += (events.get("glass_breaks", []) as Array).size()
+		# Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
+		# drain above; its sound rides the fire pass's drain_fire_sounds.
+		_stats.crackles += int(events.get("crackles", 0))
 	_sync_static_husks()
 	_present_pieces()
 	_tick_wreck_fires()
@@ -554,7 +539,10 @@ func _present_pieces() -> void:
 		if bool(piece.get("settled", false)):
 			continue
 		if is_new_generation:
-			var trail := _piece_trail(int(piece.get("type_index", 0)))
+			# The type's trail effect rides the drain row from the ONE native
+			# table (world/destruction death_piece_trail_effect, S12b)
+			# [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+			var trail := String(piece.get("trail", ""))
 			if fx != null and not trail.is_empty():
 				var key := "piece:%d" % slot
 				fx.spawn_effect_owned(key, trail, pos, Vector3.UP)
@@ -568,12 +556,6 @@ func _present_pieces() -> void:
 			_piece_pos.erase(slot)
 
 
-func _piece_trail(type_index: int) -> String:
-	if type_index < 0 or type_index >= PIECE_TRAIL_BY_TYPE.size():
-		return ""
-	return PIECE_TRAIL_BY_TYPE[type_index]
-
-
 func _unregister_piece_anchor(slot: int) -> void:
 	_unregister_effect_anchor('piece:%d' % slot)
 
@@ -584,41 +566,19 @@ func _unregister_effect_anchor(key: Variant) -> void:
 		_game_world.unregister_effect_anchor(key)
 
 
-# The wreck-fire random crackle [orig: Entity_UpdateDeadWreckEffects @ 0x493140
-# — per tick, per fire bone: PRNG < 16/65536 -> Effect_BoatExpSec + the crackle
-# sound; the underwater steam-out rides the effect world's kill plane].
+# The wreck-fire registry prune: drop entries whose node died. The random
+# crackle itself rolls in the SIM on the engine PRNG stream, per logic tick,
+# and arrives as an ordinary transient effect + distance-delay-gated sound
+# (S12b; world/destruction destruction_tick_dead_items
+# [orig: Entity_UpdateDeadWreckEffects @ 0x493140]).
 func _tick_wreck_fires() -> void:
 	if _burning.is_empty():
 		return
-	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
-	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
 	for owner_key in _burning.keys():
 		var entry: Dictionary = _burning[owner_key]
-		var pos: Vector3
 		var node: Variant = entry.get("node")
-		if node is Node3D:
-			if not is_instance_valid(node):
-				_burning.erase(owner_key)
-				continue
-			pos = (node as Node3D).global_position
-		elif entry.has("bms_id"):
-			var live_v: Variant = _present_transform_for_identity(
-					int(entry.get("bms_id", 0)), entry.get("spawn_origin"))
-			if live_v is Transform3D:
-				pos = (live_v as Transform3D).origin
-			elif entry.has("pos"):
-				pos = entry["pos"]
-			else:
-				_burning.erase(owner_key)
-				continue
-		elif entry.has("pos"):
-			pos = entry["pos"]
-		else:
+		if node is Node3D and not is_instance_valid(node):
 			_burning.erase(owner_key)
 			continue
-		if _rng.randf() < FIRE_CRACKLE_CHANCE:
-			_stats.crackles += 1
-			if fx != null:
-				fx.spawn_effect(FIRE_CRACKLE_EFFECT, pos, Vector3.UP)
-			if audio != null:
-				audio.fire_soundset(FIRE_CRACKLE_SOUND, pos, 0)
+		if node == null and not entry.has("bms_id") and not entry.has("pos"):
+			_burning.erase(owner_key)

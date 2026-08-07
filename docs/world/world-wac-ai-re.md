@@ -4515,13 +4515,25 @@ and `Entity_SpawnDeathPieces` writes none.
 
 Port status: the reimpl creates at most one origin-anchored group for each
 authored Dead/water, Fire, and Other family and performs one crackle roll per
-wreck. It does not populate or follow the four bone slots independently. It
+wreck. The crackle roll itself moved into the SIM (S12b, 2026-08-07):
+`destruction_tick_dead_items` rolls per logic tick per burning wreck
+(husk + authored `particlefire`) on the world's rol-xor PRNG stand-in
+stream — the same generator as `PRNG_Next16_C @ 0x6131b0`, one stream
+standing in for the A/B/C instances — with retail's evaluation order (the
+draw consumed BEFORE the water gate `@ 0x4932bf`), the effect emitted as a
+transient event and the sound routed through the fire-sound distance-delay
+queue at the ENTITY position (`Sound_PlayWithDistanceAttenuation @ 0x4932e2`
+— the previous shell-side roll ran per render frame on a Godot RNG with an
+immediate ungated sound). It does not populate or follow the four bone slots
+independently. It
 also does not sample fire-bone submersion or emit `g_fx_Boat01Steam`: the
 effect world's kill plane merely culls particles at a plane, so it cannot
 substitute for the retail steam spawn or per-bone bank release (D-ITEM-15).
 The settle transition is ported, but the authored +0x4E0 ground-impact pair
 and periodic-sound-slot clear are not (D-ITEM-14). DeathPiece slots remain
-ownerless and untouched, matching retail.
+ownerless and untouched, matching retail. The debris-type trail column rides
+the one native `kDeathPieceTypes` table onto the piece drain
+(`death_piece_trail_effect`; the shell table died with S12b).
 
 The main dead-wreck settle is a THREE-callback family; unitType 3's separate
 specialized callback is the explicit D-ITEM-18 residual. The shared

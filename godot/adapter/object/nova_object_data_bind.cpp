@@ -66,6 +66,8 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_light_field", "index", "key", "value"), &NovaObjectData::set_light_field);
 	ClassDB::bind_method(D_METHOD("get_user_point_count"), &NovaObjectData::get_user_point_count);
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
+	ClassDB::bind_method(D_METHOD("get_user_point_bone_mask", "name"),
+			&NovaObjectData::get_user_point_bone_mask);
 	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
 	ClassDB::bind_method(D_METHOD("has_occlusion"), &NovaObjectData::has_occlusion);

@@ -207,6 +207,10 @@ public:
 	bool set_light_field(int p_index, const String &p_key, const Variant &p_value);
 	int get_user_point_count() const;
 	Dictionary get_user_point_info(int p_index) const;
+	// The item-effect attach scan: name -> 16-bit mask over the FIRST 16
+	// userpoints (case-insensitive; duplicate names all match) — one impl in
+	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
+	int get_user_point_bone_mask(const String &p_name) const;
 	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
