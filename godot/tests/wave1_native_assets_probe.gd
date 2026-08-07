@@ -89,6 +89,38 @@ func _run() -> void:
 		_fail("native/legacy attach mismatch: %d vs %d" % [attached_native, attached_legacy])
 		return
 
+	# S6b: the one-step by-name mount — the sim's RETAINED weapon.def row bakes
+	# the FSM and the rig's own .adm rings the clips, no shell dictionary and
+	# no render model involved [orig: WeaponSlotTable_LoadAllFromDefs @0x5414e0].
+	if sim.load_weapon_table(root, "weapon.def") != OK:
+		sim.free()
+		sim_legacy.free()
+		_fail("load_weapon_table failed on the retail root")
+		return
+	if not bool(sim.spawn_local_player(Vector3.ZERO, 0.0, 1)):
+		sim.free()
+		sim_legacy.free()
+		_fail("spawn_local_player failed")
+		return
+	if not bool(sim.install_local_player_weapon_by_name("WPN_M4AUTO")):
+		sim.free()
+		sim_legacy.free()
+		_fail("by-name install of WPN_M4AUTO failed against the retail root")
+		return
+	var wstate: Dictionary = sim.get_local_player_weapon_state()
+	print("[wave1] m4 by-name: active=%s clip=%d" % [
+			str(wstate.get("active", false)), int(wstate.get("clip", -1))])
+	if not bool(wstate.get("active", false)):
+		sim.free()
+		sim_legacy.free()
+		_fail("by-name install left no active weapon FSM")
+		return
+	if bool(sim.install_local_player_weapon_by_name("WPN_NOT_A_WEAPON")):
+		sim.free()
+		sim_legacy.free()
+		_fail("unknown weapon name must not install")
+		return
+
 	# The native 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
 	if int(sim.bank_realtime(0.032)) != 2:
 		sim.free()

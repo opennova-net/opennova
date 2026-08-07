@@ -4,6 +4,7 @@
 # the engine-side replacement for the adapter's render-object duck calls.
 # Model B only (C++ static link); never part of the C ABI.
 add_library(opennova_simassets STATIC
+    src/adm_clip_index.cpp
     src/adm_root_motion.cpp
     src/model_builders.cpp
     src/sim_model_cache.cpp

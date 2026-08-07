@@ -269,6 +269,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_ai_weapons", "item_db"), &NovaSimulation::resolve_ai_weapons);
 	ClassDB::bind_method(D_METHOD("set_asset_root", "resource_root"),
 	                     &NovaSimulation::set_asset_root);
+	ClassDB::bind_method(D_METHOD("install_local_player_weapon_by_name",
+	                             "weapon_name", "preserve_slot_state"),
+	                     &NovaSimulation::install_local_player_weapon_by_name,
+	                     DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
 	                     &NovaSimulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),

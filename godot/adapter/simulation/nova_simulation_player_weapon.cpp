@@ -306,6 +306,81 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 			p_def, p_clip_seconds, p_preserve_slot_state, false);
 }
 
+Dictionary NovaSimulation::weapon_dict_from_def(const DefWeaponDef &p_row) {
+	// Only the install-consumed keys; the field mapping mirrors
+	// NovaWeaponDatabase::append_entry / weapon_dict name-for-name.
+	Dictionary d;
+	d["name"] = String::utf8(p_row.weapon_name);
+	d["animadm"] = String::utf8(p_row.animadm);
+	d["flags"] = p_row.flags;
+	d["flags2"] = p_row.flags2;
+	d["heat_per_shot"] = p_row.heat_per_shot;
+	d["heat_decay_per_tick"] = p_row.heat_decay_per_tick;
+	d["heat_glow_threshold"] = p_row.heat_glow_threshold;
+	d["scope_max_mag"] = p_row.scope_max_mag;
+	d["attack_anim"] = p_row.attack_anim;
+	d["run_anim"] = p_row.run_anim;
+	d["clipsize"] = p_row.clipsize;
+	d["startrounds"] = p_row.startrounds;
+	Array actions;
+	for (size_t a = 0; a < p_row.actions_count; ++a) {
+		const DefWeaponAction &row = p_row.actions[a];
+		Dictionary act;
+		act["name"] = String::utf8(row.name);
+		act["anim"] = String::utf8(row.anim);
+		act["function"] = String::utf8(row.function);
+		act["delaystart"] = row.delaystart;
+		act["delayend"] = row.delayend;
+		act["soundset"] = String::utf8(row.soundset);
+		act["soundsetend"] = String::utf8(row.soundsetend);
+		act["particle"] = String::utf8(row.particle);
+		act["particleuserpoint"] = String::utf8(row.particleuserpoint);
+		actions.push_back(act);
+	}
+	d["actions"] = actions;
+	return d;
+}
+
+bool NovaSimulation::install_local_player_weapon_by_name(
+		const String &p_weapon_name, bool p_preserve_slot_state) {
+	if (!weapon_defs_loaded_ || p_weapon_name.is_empty()) return false;
+	const std::string want(p_weapon_name.utf8().get_data());
+	const DefWeaponDef *row = nullptr;
+	for (size_t i = 0; i < weapon_defs_.count; ++i) {
+		if (opennova::strutil::iequals(weapon_defs_.entries[i].weapon_name, want)) {
+			row = &weapon_defs_.entries[i];
+			break;
+		}
+	}
+	if (row == nullptr) return false;
+	// The rig's clip lengths through the sim's own mounted index — the same
+	// animadm chain the FP viewmodel rides ("ak47_1st" when unauthored). A
+	// missing root/rig leaves the rings empty and the 'auto' delays collapse,
+	// exactly the model-never-loads behavior of the shell path.
+	const char *adm = row->animadm[0] != '\0' ? row->animadm : "ak47_1st";
+	weapon_clip_index_.load(
+			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr, adm);
+	Dictionary clip_seconds;
+	auto add_key = [&](const char *key) {
+		if (key == nullptr || key[0] == '\0') return;
+		const String k = String::utf8(key).to_lower();
+		if (clip_seconds.has(k)) return;
+		if (const std::vector<float> *lengths = weapon_clip_index_.lengths_for(key)) {
+			PackedFloat32Array arr;
+			for (const float f : *lengths) arr.push_back(f);
+			clip_seconds[k] = arr;
+		}
+	};
+	// The exact key set the shell's clip bake fed: the idle pair + every
+	// ACTION row's anim key (game_world._setup_local_player_weapon).
+	add_key("anim_wpn_idle");
+	add_key("anim_wpn_empty_idle");
+	for (size_t a = 0; a < row->actions_count; ++a) add_key(row->actions[a].anim);
+	install_local_player_weapon(weapon_dict_from_def(*row), clip_seconds,
+			p_preserve_slot_state, false);
+	return true;
+}
+
 void NovaSimulation::rebake_local_player_weapon(const Dictionary &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state) {
 	install_local_player_weapon(

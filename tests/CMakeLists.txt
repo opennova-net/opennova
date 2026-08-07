@@ -564,6 +564,11 @@ target_link_libraries(simassets_adm_root_motion_test PRIVATE opennova_simassets)
 target_include_directories(simassets_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_root_motion COMMAND simassets_adm_root_motion_test)
 
+add_executable(simassets_adm_clip_index_test simassets/adm_clip_index_test.cpp)
+target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_simassets)
+target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
+
 # OED object workspace/export tests
 add_executable(oed_build_model_test oed/build_model_test.cpp)
 target_link_libraries(oed_build_model_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)

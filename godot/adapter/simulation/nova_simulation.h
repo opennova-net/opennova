@@ -31,6 +31,8 @@
 #include <wac/wac_system.h>
 
 #include "wac/nova_wac_program.h"
+#include <def/def.h> // the retained weapon.def parse (S6b)
+#include <simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
@@ -592,6 +594,14 @@ private:
 	// re-install (the FP model resolve late-binding clip lengths) is a def
 	// rebake and must never reset the live action slot.
 	String weapon_def_name_;
+	// The retained weapon.def parse (S6b, ADR 0028): the by-name install reads
+	// rows from here so the ACCEPT chain needs no shell dictionary. Freed on
+	// reload and in the destructor.
+	DefWeaponsFile weapon_defs_ = {};
+	bool weapon_defs_loaded_ = false;
+	// The equipped rig's per-key clip variant lengths (the native replacement
+	// for the render skeletal's clip_seconds feed).
+	opennova::simassets::AdmClipIndex weapon_clip_index_;
 	opennova::world::WeaponSlotState weapon_slot_{};
 	// The local UseGun path borrows the parent's embedded MountSlot through the
 	// normal holster/commit/draw lifecycle. Nonlocal occupants still take the
@@ -657,6 +667,10 @@ private:
 	                                 const Dictionary &p_clip_seconds,
 	                                 bool p_preserve_slot_state,
 	                                 bool p_allow_same_weapon_rebake);
+	// The install-consumed subset of a retained weapon.def row (S6b): the
+	// internal bridge into the shared install body until S7a moves the pump
+	// into engine/runtime/world with typed inputs.
+	static Dictionary weapon_dict_from_def(const DefWeaponDef &p_row);
 	uint64_t weapon_fired_serial_ = 0;
 	// Per-shooter tag-2 sequence. Unlike the presentation serial above, this
 	// survives weapon remounts/switches and resets only with the mission/player
@@ -1318,6 +1332,18 @@ public:
 	// UseGun parent/personal slot.
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
 	                             bool p_preserve_slot_state = false);
+	// The production mount (S6b, ADR 0028): find the row in the RETAINED
+	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
+	// the rig's own .adm through the sim's mounted index — one step at ACCEPT
+	// time, no shell dictionary and no render dependency [orig: the ACCEPT
+	// chain rebuilds the slot table + mounts with no render dependency —
+	// WeaponSlotTable_LoadAllFromDefs @ 0x5414e0 + Player_MountWeaponSlot
+	// @ 0x4dfa40; Anim_InitActions @ 0x541fa0 bakes the delays]. Returns false
+	// when the name is not in the retained table (caller keeps the current
+	// weapon, mirroring the armory guard). The Dictionary pair above survives
+	// as the GUT synthetic-def seam and retires with S7a.
+	bool install_local_player_weapon_by_name(const String &p_weapon_name,
+	                                         bool p_preserve_slot_state = false);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
 	// queued presentation [orig: FP model resolve @ 0x4ded60 is not a mount].

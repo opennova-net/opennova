@@ -79,6 +79,10 @@ NovaSimulation::NovaSimulation() {
 
 NovaSimulation::~NovaSimulation() {
 	leave_net_session();
+	if (weapon_defs_loaded_) {
+		def_free_weapons(&weapon_defs_);
+		weapon_defs_loaded_ = false;
+	}
 }
 
 void NovaSimulation::reset_world() {

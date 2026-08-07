@@ -1074,7 +1074,12 @@ Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_
 	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
 		return ERR_CANT_OPEN;
 	world_->weapons = opennova::np::build_weapon_table(file);
-	def_free_weapons(&file);
+	// Retain the parse (S6b): the by-name FSM install reads its full rows —
+	// the ACCEPT chain rebuilds the slot table with no shell dictionary and no
+	// render dependency [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414e0].
+	if (weapon_defs_loaded_) def_free_weapons(&weapon_defs_);
+	weapon_defs_ = file;
+	weapon_defs_loaded_ = true;
 	// The seat table may have been installed before this feed (either install
 	// order is production-legal); refresh its turret clamp windows now.
 	stamp_seat_spec_turret_limits();

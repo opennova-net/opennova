@@ -1549,20 +1549,21 @@ func set_local_player_weapon_by_name(weapon_name: String,
 	_viewmodel_weapon_override = weapon_name
 	_viewmodel_weapon_cleared = false
 	_local_weapon_preserve_slot_state = preserve_slot_state
-	# Install the new weapon's FSM on the sim NOW — the mount is not hostage to the FP
-	# model load [orig: the ACCEPT chain rebuilds the slot table + mounts with no
-	# render dependency — WeaponSlotTable_LoadAllFromDefs @0x5414e0 +
-	# Player_MountWeaponSlot @0x4dfa40 (camera/scope/switch-queue state only); the FP
-	# model resolve is a separate per-frame consumer @0x4ded60]. Clip lengths bake in
-	# again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a model
-	# that never loads leaves 'auto' delays collapsed instead of leaving the OLD
-	# weapon's FSM live under the new entity stamp.
+	# The render-side def record (viewmodel gfx/adm/fov reads + the name guard).
 	_local_weapon_dict = weapon_db.get_weapon(index)
 	var sim := get_sim()
 	if sim != null:
 		_set_local_player_first_person_model_available(false)
-		sim.set_local_player_weapon(
-				_local_weapon_dict, {}, _local_weapon_preserve_slot_state)
+		# One-step native mount (S6b, ADR 0028): the sim bakes the FSM from its
+		# RETAINED weapon.def row and seeds the clip rings from the rig's own
+		# .adm — the mount is not hostage to the FP model load, matching the
+		# retail ACCEPT chain exactly [orig: WeaponSlotTable_LoadAllFromDefs
+		# @0x5414e0 + Player_MountWeaponSlot @0x4dfa40; the FP model resolve is
+		# a separate per-frame render consumer @0x4ded60].
+		if not bool(sim.install_local_player_weapon_by_name(
+				weapon_name, _local_weapon_preserve_slot_state)):
+			push_warning("GameWorld: sim has no retained weapon.def row for '%s'" % weapon_name)
+			return false
 	return true
 
 
@@ -1680,39 +1681,10 @@ func build_local_player_viewmodel() -> Node3D:
 			container.queue_free()
 			return null
 		return container
-	_setup_local_player_weapon(gun if gun != null else arms)
+	# The FSM and its clip rings installed natively at ACCEPT time (S6b) — the
+	# model resolve is purely presentational now, as in retail [orig: the FP
+	# model resolve @0x4ded60 is a render consumer, not a mount].
 	return container
-
-
-## Install the equipped weapon's action FSM on the sim: the weapon dict's ACTION rows +
-## flags/clipsize/startrounds plus the loaded .adm clip lengths (seconds) the bake turns
-## into 62.5 Hz delays [orig: Anim_InitActions @0x541fa0 binds the rows and bakes 'auto'
-## delays via Anim_GetDurationTicks @0x53ee10; net-re §5.62]. The arms ride the same
-## animadm, so one part's clip table covers both.
-func _setup_local_player_weapon(model) -> void:
-	var sim := get_sim()
-	if sim == null:
-		return
-	if _local_weapon_dict.is_empty() or model == null or not model.has_method("get_skeletal_anim"):
-		sim.clear_local_player_weapon()
-		return
-	var skeletal = model.get_skeletal_anim()
-	var clip_seconds := {}
-	if skeletal != null:
-		var keys := ["anim_wpn_idle", "anim_wpn_empty_idle"]
-		for a in _local_weapon_dict.get("actions", []):
-			var k := String(a.get("anim", ""))
-			if not k.is_empty() and not keys.has(k):
-				keys.append(k)
-		for k in keys:
-			if skeletal.has_clip(k):
-				# EVERY variant's length, .adm file order — the sim seeds its slot
-				# rings from these and consumes them serve-then-advance (bake reads
-				# and play latches) [orig: the animState slot heads +72;
-				# Anim_GetDurationTicks @0x53ee10 / AnimMap_PlayAnimBySlot @0x40bda0].
-				clip_seconds[k] = skeletal.get_clip_variant_lengths(k)
-	sim.rebake_local_player_weapon(
-			_local_weapon_dict, clip_seconds, _local_weapon_preserve_slot_state)
 
 
 ## The installed FP weapon dict's name (empty when none) — the switch-event guard
