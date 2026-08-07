@@ -198,6 +198,13 @@ add_test(NAME sound_selector COMMAND sound_selector_test)
 # nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 add_executable(ambient_mixer_test audio/ambient_mixer_test.cpp)
 target_link_libraries(ambient_mixer_test PRIVATE opennova_audio)
+
+# S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
+# entity pools, the authored soundloop slots passed through unfiltered, walk order,
+# and the BMS type-id -> items.def id offset. [orig: @0x82ABD4 -> @0x4a8080]
+add_executable(envs_markers_test audio/envs_markers_test.cpp)
+target_link_libraries(envs_markers_test PRIVATE opennova_audio)
+add_test(NAME audio_envs_markers COMMAND envs_markers_test)
 target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)

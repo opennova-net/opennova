@@ -1,8 +1,10 @@
 #include "nova_item_database.h"
 
+#include "mission/nova_mission_data.h"
 #include "resource_index/nova_resource_root.h"
 #include "util/nova_data_format.h"
 
+#include <audio/envs_markers.h>
 #include <def/def.h>
 
 #include <algorithm>
@@ -64,6 +66,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mount_config", "id"), &NovaItemDatabase::get_mount_config);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
+	ClassDB::bind_method(D_METHOD("resolve_envs_markers", "mission"),
+			&NovaItemDatabase::resolve_envs_markers);
 	ClassDB::bind_method(D_METHOD("get_particle_effects", "id"), &NovaItemDatabase::get_particle_effects);
 	ClassDB::bind_method(D_METHOD("get_attrib", "id"), &NovaItemDatabase::get_attrib);
 	ClassDB::bind_method(D_METHOD("get_attrib2", "id"), &NovaItemDatabase::get_attrib2);
@@ -565,6 +569,31 @@ Dictionary NovaItemDatabase::get_death_traits(int id) const {
 // items.def soundloop_1..7 looping ambient set names for "snd:" marker items
 // [orig: ItemDef_ParseProperty @ 0x49eb00, "soundloop_" prefix @ 0x49fec4; the
 // 7-slot count matches the engine's Soundloop_1..7 type table @ 0x7d0788].
+// S13 (ADR 0028): the envs-class dispatch + soundloop slot resolution runs in
+// engine/runtime/audio over the retained items.def parse and the mission's
+// native bms document. The shell applies its own bank-presence filtering.
+TypedArray<Dictionary> NovaItemDatabase::resolve_envs_markers(
+		const Ref<NovaMissionData> &p_mission) const {
+	TypedArray<Dictionary> out;
+	if (p_mission.is_null()) return out;
+	const std::vector<opennova::audio::EnvsMarker> markers =
+			opennova::audio::resolve_envs_markers(
+					p_mission->native_document().bms_file(), native_items());
+	for (const opennova::audio::EnvsMarker &marker : markers) {
+		Dictionary row;
+		row["position"] = Vector3(marker.x, marker.y, marker.z);
+		row["bms_id"] = marker.bms_id;
+		PackedStringArray slots;
+		slots.resize(4);
+		for (int slot = 0; slot < 4; ++slot)
+			slots.set(slot, String(
+					marker.slot_sets[static_cast<size_t>(slot)].c_str()));
+		row["slot_sets"] = slots;
+		out.push_back(row);
+	}
+	return out;
+}
+
 PackedStringArray NovaItemDatabase::get_sound_loops(int id) const {
 	PackedStringArray out;
 	out.resize(7);

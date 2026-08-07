@@ -192,25 +192,45 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	_audio_root.name = "MissionAudio"
 	container.add_child(_audio_root)
 
-	for e in mission.get_all_entities():
-		var entity: Dictionary = e
-		var item_id := int(entity.get("item_id", 0))
-		if _strategy == STRATEGY_ITEM_SOUNDLOOP:
-			if not _is_envs_item(item_id):
+	var marker_rows: Array = []
+	if _strategy == STRATEGY_ITEM_SOUNDLOOP:
+		# S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
+		# names resolve natively over the retained items.def and the mission's
+		# bms document (audio/envs_markers.h). The bank-presence filter below
+		# stays a shell stream-resolution concern (the original has no such
+		# gate — a missing set is simply silent).
+		if _item_db != null:
+			marker_rows = _item_db.resolve_envs_markers(mission)
+	else:
+		# The two explicit reimpl-only fallback strategies keep the marker pool.
+		for e in mission.get_all_entities():
+			var entity: Dictionary = e
+			if int(entity.get("kind", -1)) != NovaMissionData.KIND_MARKER:
 				continue
-		elif int(entity.get("kind", -1)) != NovaMissionData.KIND_MARKER:
-			# Preserve the two explicit reimpl-only fallback strategies on the
-			# marker pool; only the faithful item dispatch crosses BMS kinds.
-			continue
+			marker_rows.append({
+				"position": entity.get("position", Vector3.ZERO),
+				"bms_id": int(entity.get("bms_id", 0)),
+				"slot_sets": _resolve_slot_sets(entity),
+			})
+	for row_value in marker_rows:
+		var row: Dictionary = row_value
 		_stats.markers_total += 1
-		var slot_sets := _resolve_slot_sets(entity)
+		# Authored slot names -> playable slots: only sets the loaded bank chain
+		# actually carries participate; an empty slot stays SILENT in its region.
+		var authored: PackedStringArray = row.get("slot_sets", PackedStringArray())
+		var slot_sets: PackedStringArray = ["", "", "", ""]
+		for i in range(4):
+			if i < authored.size():
+				var n := String(authored[i])
+				if not n.is_empty() and _bank.has_set(n):
+					slot_sets[i] = n
 		var distinct: PackedStringArray = []
 		for s in slot_sets:
 			if not String(s).is_empty() and not distinct.has(s):
 				distinct.append(s)
 		if distinct.is_empty():
 			continue
-		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
+		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(row.get("position", Vector3.ZERO))
 		# Keep layer candidates as data. The original registers only the current
 		# region's set and has eight physical channels; it does not materialize a
 		# player for every marker/time-of-day layer [orig: @ 0x4a81da].
@@ -232,7 +252,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			continue
 		_markers.append({
 			"pos": pos,
-			"source_bms_id": int(entity.get("bms_id", 0)),
+			"source_bms_id": int(row.get("bms_id", 0)),
 			"slot_sets": slot_sets,
 			# De-sync marker crossfades like the engine's per-entity clock
 			# stagger [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
@@ -970,19 +990,6 @@ static func _hhmm_to_hours(hhmm: float) -> float:
 	return hour + minute / 60.0
 
 
-func _is_envs_item(item_id: int) -> bool:
-	if _item_db == null:
-		return false
-	# The env sound updater is selected by the item's dispatch tag, not by the
-	# BMS record pool. Most authored `snd:` entries are marker records, but JOX
-	# also places envs decorations in the building pool (oil pumps/flares).
-	# [orig: the `envs` entry in the class dispatch table @ 0x82ABD4 routes to
-	# Entity_UpdateEnvSoundEmitter @ 0x4a8080].
-	var ai := String(_item_db.get_ai_function(item_id))
-	var move := String(_item_db.get_move_function(item_id))
-	return ai.to_lower() == "envs" or move.to_lower() == "envs"
-
-
 func _load_bank(lwf_name: String) -> void:
 	if not _resource_root.has_file(lwf_name):
 		return
@@ -1000,21 +1007,14 @@ func _load_bank(lwf_name: String) -> void:
 # carried was unwitnessed and never fires with JO data — zero envs-class items
 # ship a sound_profile key).
 func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
+	# Reimpl-only fallback strategies. The faithful STRATEGY_ITEM_SOUNDLOOP
+	# path resolves natively (audio/envs_markers.h) in setup(); the shared
+	# bank-presence filter applies at consumption there for every strategy.
 	var slots: PackedStringArray = ["", "", "", ""]
 	match _strategy:
-		STRATEGY_ITEM_SOUNDLOOP:
-			if _item_db == null:
-				return slots
-			var item_id := int(entity.get("item_id", 0))
-			var loops: Array = _item_db.get_sound_loops(item_id)
-			for i in range(4):
-				if i < loops.size():
-					var n := String(loops[i])
-					if not n.is_empty() and _bank.has_set(n):
-						slots[i] = n
 		STRATEGY_MARKER_NAME:
 			var n := String(entity.get("name", ""))
-			if not n.is_empty() and _bank.has_set(n):
+			if not n.is_empty():
 				for i in range(4):
 					slots[i] = n
 		_:

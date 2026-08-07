@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <def/def.h>
 
@@ -318,6 +319,12 @@ public:
 	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
 	// These are the looping ambient sound-set names for "snd:" marker items.
 	PackedStringArray get_sound_loops(int id) const;
+	// S13 (ADR 0028): the envs-class ambient marker resolution over the
+	// retained items.def + the mission's native document
+	// (audio/envs_markers.h). Rows: {position: Vector3 (authored BMS units),
+	// bms_id: int, slot_sets: PackedStringArray(4, "" = silent slot)}.
+	TypedArray<Dictionary> resolve_envs_markers(
+			const Ref<class NovaMissionData> &p_mission) const;
 	// The item's particle-effect keys as authored, keyed by the ITEMS.DEF key names
 	// ("particlefx"/"particlefxs"/"particlefxw1".."particlefxw4" -> {effect, userpoint,
 	// secondary_effect} sub-dictionaries; "particledeath"/"particleh2odeath"/
