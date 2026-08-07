@@ -1522,9 +1522,12 @@ public:
 	void debug_set_mounted_pose_mode(int p_mode);
 	int debug_get_mounted_pose_mode() const;
 	Dictionary debug_mounted_pose_ab_stats() const;
-	// The S11 dual-publish seam (D-NET-209 rollback): true (default) presents
-	// armed replica rows from the simulation-arbitrated channel directly;
-	// false restores the legacy remote-request publish (model-side FSM).
+	// The S11 dual-publish seam (D-NET-209): true (default) presents armed
+	// replica rows from the simulation-arbitrated channel directly; false
+	// routes them through the legacy remote-request publish (model-side FSM).
+	// This toggles ONLY the PUBLISH path — the per-record receive arbitration
+	// and the deferred/insert channel work in the fold run either way, so the
+	// flag is a presentation A/B, not a full pre-S11 rollback.
 	void debug_set_remote_body_native_publish(bool p_native);
 	bool debug_remote_body_native_publish() const;
 	Dictionary debug_native_seat_spec_diff(

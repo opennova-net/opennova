@@ -4122,10 +4122,10 @@ with the profile resolved from the slot's ai_textfile (def-level fallback
 itemDef+0x8B8, then `"helo1"`) [orig: `Entity_InitVehicleAIFromDef
 @ 0x4686d0` — the seeds @ 0x4688C7/@ 0x4688D3]. The port:
 `PromoteOptions::ai_profile_speeds` (raw values, keyed by ai_textfile;
-scale applied at the brain seed in `init_brain`), fed by the shell's
-`AiProfileSpeeds.build` (.aip reader) through
-`NovaSimulation.set_ai_profile_speeds` — the same embedder seam as the seat
-specs. d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
+scale applied at the brain seed in `init_brain`), resolved natively by
+`mission::resolve_ai_profile_speeds` inside `run_mission_boot` (S9, ADR
+0028; the former shell `AiProfileSpeeds.build` reader + the
+`set_ai_profile_speeds` seam are deleted). d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
 `mission_promote` ctest. The def-level/helo1 fallbacks and the REST of the
 profile parse stay D-AI-11 (h).
 

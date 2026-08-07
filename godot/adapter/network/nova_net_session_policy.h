@@ -40,6 +40,9 @@ public:
 			const String &p_mounted_expansion, const PackedStringArray &p_installed);
 	String decided_expansion() const;
 	String decision_error() const;
+	// The installed set as it reads in an abort reason ("none — base game
+	// only" when empty), shared with the decision leg (one impl).
+	static String describe_installed(const PackedStringArray &p_installed);
 
 	void arm_preload(int64_t p_now_ms);
 	void disarm_preload();

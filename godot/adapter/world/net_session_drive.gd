@@ -431,9 +431,12 @@ func _reconcile_join_expansion() -> bool:
 	# here: unlike the hard failure above, the root holds a valid mount of whatever DID layer,
 	# so the shell survives the abort on it.
 	if String(resource_root.get_expansion()).to_lower() != target_expansion.to_lower():
+		# The installed set is rendered by the same native helper the decision
+		# leg uses ("none — base game only" when empty), so both abort reasons
+		# read identically (one impl — engine/net/npruntime join_session_policy).
 		_fail_join_preload("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)" % [
 			target_expansion, dir, String(resource_root.get_expansion()),
-			", ".join(resource_root.list_expansions(dir))])
+			NovaNetSessionPolicy.describe_installed(resource_root.list_expansions(dir))])
 		return false
 	return true
 

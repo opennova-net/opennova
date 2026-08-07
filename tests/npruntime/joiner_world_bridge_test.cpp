@@ -51,6 +51,10 @@ struct Harness {
 	int sends = 0;
 	int spawned_hook = 0;
 	int32_t spawned_heading = -1;
+	// The embedder's live inventory-valid flag. The pump reads it BY REFERENCE
+	// so a mid-pump apply_authoritative_loadout() flip is visible to the
+	// same-pump spawn stamp (the D-NET-194 wire-header join).
+	bool inventory_valid = false;
 
 	Harness() {
 		world.ai = &ai;
@@ -60,7 +64,7 @@ struct Harness {
 	np::JoinerWorldBridge::PumpContext ctx(np::ClientRuntime &runtime) {
 		return np::JoinerWorldBridge::PumpContext{
 				world, runtime, weapon, loadout, inventory,
-				/*inventory_valid=*/false, seat_specs, /*root_motion=*/nullptr};
+				inventory_valid, seat_specs, /*root_motion=*/nullptr};
 	}
 
 	np::JoinerWorldBridge::PumpHooks hooks() {
@@ -195,12 +199,51 @@ bool run_reset_for_join() {
 	return expect(h.bridge.now_tick() == 1, "reset: the clock is not a session latch");
 }
 
+// The D-NET-194 wire-header joiner: no pre-load kit, so inventory_valid is
+// false at pump entry. The first S2C 0x5A grant folds and
+// apply_authoritative_loadout() flips the live flag + arms the equipped slot
+// INSIDE run_client_net_frame — i.e. BEFORE spawn_and_arm the SAME pump. The
+// spawn edge must see that live flip (ctx.inventory_valid is a reference, not a
+// pump-entry snapshot) and stamp L's equipped_adm_index; otherwise the entity
+// carries the default adm on the C2S 0x0C uplink until the next respawn.
+bool run_spawn_stamps_equipped_adm_from_midpump_grant() {
+	Harness h;
+	np::ClientRuntime runtime("BridgeJoiner", [] { return uint64_t(0); });
+	auto hooks = h.hooks();
+	// Model retail's mid-pump apply: flip the live inventory-valid flag and arm
+	// the equipped combo, exactly as apply_authoritative_loadout ->
+	// local_loadout_rebuild does before the spawn block runs.
+	constexpr int16_t kGrantedAdm = 16; // WPN_M16BURST-shaped grant
+	hooks.apply_authoritative_loadout = [&h, kGrantedAdm] {
+		h.calls.push_back("loadout");
+		h.inventory_valid = true;
+		h.inventory.equipped_combo = 0;
+		h.inventory.slots[0].adm_index = kGrantedAdm;
+	};
+
+	h.bridge.send_hello_once(runtime,
+			[&h](const std::vector<uint8_t> &) { ++h.sends; });
+	runtime.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                     1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	if (!expect(runtime.in_match(), "midpump grant: seeded runtime InMatch"))
+		return false;
+
+	h.bridge.pump(h.ctx(runtime), hooks);
+	if (!expect(h.bridge.local_spawned(), "midpump grant: L spawned")) return false;
+	const w::Entity *L = h.world.registry.get(h.world.cached.local_player);
+	if (!expect(L != nullptr, "midpump grant: L resolvable")) return false;
+	return expect(L->equipped_adm_index == kGrantedAdm,
+			"midpump grant: the same-pump grant stamped L's equipped adm "
+			"(regression: a by-value inventory_valid froze it at pump entry)");
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok &= run_pre_match_frame_order();
 	ok &= run_in_match_spawn_edge();
+	ok &= run_spawn_stamps_equipped_adm_from_midpump_grant();
 	ok &= run_reset_for_join();
 	if (!ok) return 1;
 	std::printf("joiner_world_bridge_test: OK\n");

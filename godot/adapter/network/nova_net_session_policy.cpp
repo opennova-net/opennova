@@ -33,6 +33,16 @@ String NovaNetSessionPolicy::decision_error() const {
 	return String::utf8(decision_.error.c_str());
 }
 
+String NovaNetSessionPolicy::describe_installed(const PackedStringArray &p_installed) {
+	std::vector<std::string> installed;
+	installed.reserve(static_cast<size_t>(p_installed.size()));
+	for (int i = 0; i < p_installed.size(); ++i) {
+		installed.push_back(to_std(p_installed[i]));
+	}
+	return String::utf8(
+			opennova::np::describe_installed_expansions(installed).c_str());
+}
+
 void NovaNetSessionPolicy::arm_preload(int64_t p_now_ms) {
 	policy_.arm_preload(static_cast<uint64_t>(p_now_ms));
 }
@@ -112,6 +122,9 @@ void NovaNetSessionPolicy::_bind_methods() {
 			&NovaNetSessionPolicy::decide_expansion);
 	ClassDB::bind_method(D_METHOD("decided_expansion"), &NovaNetSessionPolicy::decided_expansion);
 	ClassDB::bind_method(D_METHOD("decision_error"), &NovaNetSessionPolicy::decision_error);
+	ClassDB::bind_static_method("NovaNetSessionPolicy",
+			D_METHOD("describe_installed", "installed"),
+			&NovaNetSessionPolicy::describe_installed);
 	ClassDB::bind_method(D_METHOD("arm_preload", "now_ms"), &NovaNetSessionPolicy::arm_preload);
 	ClassDB::bind_method(D_METHOD("disarm_preload"), &NovaNetSessionPolicy::disarm_preload);
 	ClassDB::bind_method(D_METHOD("preload_step", "join_error", "now_ms"),

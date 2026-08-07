@@ -118,7 +118,16 @@ public:
 		world::LocalPlayerWeapon &weapon;
 		world::LocalPlayerLoadout &loadout;
 		world::WeaponInventory &inventory;
-		bool inventory_valid = false;
+		// A REFERENCE, not a snapshot: apply_authoritative_loadout() flips the
+		// embedder's inventory-valid flag mid-pump (inside run_client_net_frame,
+		// before spawn_and_arm), and spawn_and_arm must see that live edge to
+		// stamp L's equipped_adm_index + replay the deferred SWITCHTO the SAME
+		// pump the first S2C 0x5A grant folds in — the normal wire-header join
+		// (D-NET-194: no pre-load kit). A by-value copy froze it at pump entry
+		// and dropped the stamp until the next respawn (wrong equipped adm on
+		// the C2S 0x0C uplink + host third-person; no FP switch). [pinned by
+		// joiner_world_bridge_test's mid-pump-grant case]
+		bool &inventory_valid;
 		const std::vector<mission::ItemSeatSpec> &seat_specs;
 		// The per-model .adm registry the authority movers ground on (null =
 		// none loaded; the row-side root-motion leg then stays chase-only).

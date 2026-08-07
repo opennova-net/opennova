@@ -44,7 +44,7 @@ and calling the workspace's `apply_model()`.
 
 ## Preview
 
-`engine/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
+`adapter/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
 shared engine layer because the game's PLAYER_INFO menu host mounts the same
 preview) composes the resolved combo's third-person head / body `.3di` models
 into one `SubViewport` scene under a shared environment, framed by a fly
