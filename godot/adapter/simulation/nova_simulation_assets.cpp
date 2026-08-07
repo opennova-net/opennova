@@ -5,9 +5,14 @@
 #include "network/item_replication_catalog_adapter.h"
 
 #include <simassets/item_traits.h>
+#include <simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
+#include <simassets/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
+#include <threedi/threedi_ctrl_catalog.h>
 #include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
 #include <array>
+#include <cmath>
+#include <cstdio>
 
 using namespace novasim;
 
@@ -183,7 +188,104 @@ void NovaSimulation::apply_collision_to_ai() {
 	if (ai_) ai_->collision = &collision_world_;
 }
 
+// The S4 A/B seam (ADR 0028): the legacy model-bound resolver stays
+// AUTHORITATIVE while the engine-side resolver (simassets::
+// resolve_model_mounted_pose over the sim's own parse) shadows it; the
+// divergence counters gate the legacy delete alongside the live
+// emplaced-gun recipe.
 bool NovaSimulation::resolve_mounted_pose(
+		opennova::world::World &p_world,
+		const opennova::world::Entity &p_carrier,
+		const opennova::world::Seat &p_seat,
+		opennova::world::MountedPose &r_out) {
+	if (mounted_pose_mode_ == CollisionPoseMode::Legacy)
+		return resolve_mounted_pose_legacy(p_world, p_carrier, p_seat, r_out);
+	if (mounted_pose_mode_ == CollisionPoseMode::Native)
+		return resolve_mounted_pose_native(p_world, p_carrier, p_seat, r_out);
+	const bool legacy_ok =
+			resolve_mounted_pose_legacy(p_world, p_carrier, p_seat, r_out);
+	opennova::world::MountedPose native_pose;
+	const bool native_ok =
+			resolve_mounted_pose_native(p_world, p_carrier, p_seat, native_pose);
+	MountedPoseAbStats &ab = mounted_pose_ab_;
+	++ab.queries;
+	if (legacy_ok && !native_ok) {
+		++ab.native_declined;
+	} else if (!legacy_ok && native_ok) {
+		++ab.native_posed_only;
+	} else if (legacy_ok && native_ok) {
+		const float dx = r_out.position.x - native_pose.position.x;
+		const float dy = r_out.position.y - native_pose.position.y;
+		const float dz = r_out.position.z - native_pose.position.z;
+		const float pos_delta =
+				std::sqrt(dx * dx + dy * dy + dz * dz);
+		const auto wrap_delta = [](int16_t a, int16_t b) {
+			int d = std::abs(static_cast<int>(a) - static_cast<int>(b));
+			return std::min(d, 360 - d);
+		};
+		const int angle_delta = std::max(
+				{wrap_delta(r_out.yaw, native_pose.yaw),
+				 wrap_delta(r_out.pitch, native_pose.pitch),
+				 wrap_delta(r_out.roll, native_pose.roll)});
+		if (pos_delta > ab.max_position_delta)
+			ab.max_position_delta = pos_delta;
+		if (angle_delta > ab.max_angle_delta)
+			ab.max_angle_delta = angle_delta;
+		// 0.01 world units / 1 degree: far above float rounding between the
+		// two implementations, far below any real mis-pose.
+		if (pos_delta > 0.01f || angle_delta > 1) {
+			++ab.divergences;
+			ab.last_carrier_type = static_cast<int32_t>(p_carrier.item_id);
+		}
+	}
+	return legacy_ok;
+}
+
+bool NovaSimulation::resolve_mounted_pose_native(
+		opennova::world::World &p_world,
+		const opennova::world::Entity &p_carrier,
+		const opennova::world::Seat &p_seat,
+		opennova::world::MountedPose &r_out) {
+	if (!world_ || &p_world != world_.get() ||
+			p_seat.type != opennova::world::SeatType::Gunner ||
+			p_seat.bone_index == 0)
+		return false;
+	const auto found = mounted_pose_native_models_.find(p_carrier.item_id);
+	if (found == mounted_pose_native_models_.end() || found->second == nullptr)
+		return false;
+	const Threedi3di3 &model = *found->second;
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
+		return false;
+	// The same three CTRL sources the legacy resolver publishes, written by
+	// ordinal onto the retail bus.
+	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
+	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
+	const auto phase_for = [carrier_ai](int channel) -> int32_t {
+		return carrier_ai != nullptr
+				? carrier_ai->brain.f[AiBrain::kPartAnimPhase0 + channel]
+				: 0;
+	};
+	if ((p_carrier.item_attrib & 0x1000u) == 0)
+		ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL1] = phase_for(0);
+	ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL2] = phase_for(1);
+	int32_t heat_glow = 0;
+	if (opennova::world::world_model_heat_glow_for(p_world, p_carrier, heat_glow))
+		ctrl_values[THREEDI_CTRL_HEAT_GLOW] = heat_glow;
+	EmplacedWeaponControls emplaced;
+	if (emplaced_weapon_controls_for(p_world, ai_.get(), p_carrier, emplaced)) {
+		ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] =
+				static_cast<int32_t>(emplaced.gun_yaw);
+		ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =
+				static_cast<int32_t>(emplaced.gun_pitch);
+	}
+	const uint32_t time_ms = panm_time_override_ms_ >= 0
+			? static_cast<uint32_t>(panm_time_override_ms_)
+			: p_world.logic_tick * 16u;
+	return opennova::simassets::resolve_model_mounted_pose(
+			model, p_carrier, p_seat, ctrl_values, time_ms, r_out);
+}
+
+bool NovaSimulation::resolve_mounted_pose_legacy(
 		opennova::world::World &p_world,
 		const opennova::world::Entity &p_carrier,
 		const opennova::world::Seat &p_seat,
@@ -392,6 +494,173 @@ Dictionary NovaSimulation::debug_collision_pose_ab_stats() const {
 	}
 	out["last_legacy_matrix"] = legacy_m;
 	out["last_native_matrix"] = native_m;
+	return out;
+}
+
+void NovaSimulation::debug_set_mounted_pose_mode(int p_mode) {
+	switch (p_mode) {
+		case 0: mounted_pose_mode_ = CollisionPoseMode::Legacy; break;
+		case 2: mounted_pose_mode_ = CollisionPoseMode::Native; break;
+		default: mounted_pose_mode_ = CollisionPoseMode::Compare; break;
+	}
+}
+
+int NovaSimulation::debug_get_mounted_pose_mode() const {
+	return static_cast<int>(mounted_pose_mode_);
+}
+
+Dictionary NovaSimulation::debug_mounted_pose_ab_stats() const {
+	Dictionary out;
+	out["queries"] = static_cast<int64_t>(mounted_pose_ab_.queries);
+	out["divergences"] = static_cast<int64_t>(mounted_pose_ab_.divergences);
+	out["native_declined"] =
+			static_cast<int64_t>(mounted_pose_ab_.native_declined);
+	out["native_posed_only"] =
+			static_cast<int64_t>(mounted_pose_ab_.native_posed_only);
+	out["max_position_delta"] = mounted_pose_ab_.max_position_delta;
+	out["max_angle_delta"] = mounted_pose_ab_.max_angle_delta;
+	out["last_carrier_type"] = mounted_pose_ab_.last_carrier_type;
+	return out;
+}
+
+// The S4 static A/B: re-extract the installed seat-spec table's types through
+// the engine-side extractor (retained def rows + the sim's parses) and diff
+// the typed records. The three turret_* windows are stamped post-install from
+// the weapon table and are excluded. Empty native sources report as an error
+// (the GUT stub worlds); production tables compare field-for-field.
+Dictionary NovaSimulation::debug_native_seat_spec_diff(
+		const Ref<NovaItemDatabase> &p_item_db) {
+	Dictionary out;
+	out["compared"] = 0;
+	out["mismatches"] = 0;
+	out["native_missing"] = 0;
+	out["first_mismatch"] = String();
+	if (p_item_db.is_null() || !sim_models_.has_index()) {
+		out["error"] = "native sources unavailable";
+		return out;
+	}
+	std::vector<int> seeds;
+	seeds.reserve(item_seat_specs_.size());
+	for (const opennova::mission::ItemSeatSpec &spec : item_seat_specs_)
+		seeds.push_back(spec.type_id +
+				static_cast<int32_t>(opennova::mission::kItemIdOffset));
+	opennova::simassets::SeatSpecExtraction native;
+	opennova::simassets::extract_item_seat_specs(
+			p_item_db->native_items(),
+			[this](const std::string &graphic) {
+				return sim_models_.model_for(graphic);
+			},
+			seeds, native);
+	int compared = 0;
+	int mismatches = 0;
+	int native_missing = 0;
+	String first;
+	const auto note = [&](int32_t type_id, const char *what) {
+		++mismatches;
+		if (first.is_empty())
+			first = String("type ") + String::num_int64(type_id) + ": " + what;
+	};
+	const auto vec_near = [](const opennova::world::Vec3 &a,
+			const opennova::world::Vec3 &b) {
+		return std::fabs(a.x - b.x) < 1e-3f && std::fabs(a.y - b.y) < 1e-3f &&
+				std::fabs(a.z - b.z) < 1e-3f;
+	};
+	// yaw offsets are angles: +-180 (the atan2 branch at the exact back
+	// direction) is the same seat facing.
+	const auto yaw_equal = [](int16_t a, int16_t b) {
+		const int d = ((static_cast<int>(a) - static_cast<int>(b)) % 360 + 360) % 360;
+		return d == 0;
+	};
+	for (const opennova::mission::ItemSeatSpec &installed : item_seat_specs_) {
+		const auto native_it = std::lower_bound(
+				native.specs.begin(), native.specs.end(), installed.type_id,
+				[](const opennova::mission::ItemSeatSpec &s, int32_t t) {
+					return s.type_id < t;
+				});
+		if (native_it == native.specs.end() ||
+				native_it->type_id != installed.type_id) {
+			++native_missing;
+			continue;
+		}
+		++compared;
+		const opennova::mission::ItemSeatSpec &n = *native_it;
+		if (n.mount_config_valid != installed.mount_config_valid ||
+				n.mount_config != installed.mount_config)
+			note(installed.type_id, "mount_config");
+		if (n.primary_weapon != installed.primary_weapon)
+			note(installed.type_id, "primary_weapon");
+		if (n.seats.size() != installed.seats.size()) {
+			note(installed.type_id, "seat count");
+		} else {
+			for (size_t s = 0; s < n.seats.size(); ++s) {
+				const opennova::world::Seat &a = installed.seats[s];
+				const opennova::world::Seat &b = n.seats[s];
+				if (a.type != b.type || a.retail_slot != b.retail_slot ||
+						a.bone_index != b.bone_index ||
+						a.pose_index != b.pose_index ||
+						!yaw_equal(a.yaw_offset, b.yaw_offset) ||
+						a.source_name != b.source_name ||
+						!vec_near(a.seat_local, b.seat_local)) {
+					char detail[240];
+					std::snprintf(detail, sizeof(detail),
+							"seat %d inst(t=%d slot=%d bone=%d pose=%d yaw=%d src=%s l=%.4f,%.4f,%.4f) nat(t=%d slot=%d bone=%d pose=%d yaw=%d src=%s l=%.4f,%.4f,%.4f)",
+							static_cast<int>(s), static_cast<int>(a.type),
+							a.retail_slot, a.bone_index, a.pose_index,
+							a.yaw_offset, a.source_name.c_str(),
+							a.seat_local.x, a.seat_local.y, a.seat_local.z,
+							static_cast<int>(b.type), b.retail_slot,
+							b.bone_index, b.pose_index, b.yaw_offset,
+							b.source_name.c_str(), b.seat_local.x,
+							b.seat_local.y, b.seat_local.z);
+					note(installed.type_id, detail);
+					break;
+				}
+			}
+		}
+		if (n.armory_points.size() != installed.armory_points.size()) {
+			note(installed.type_id, "armory count");
+		} else {
+			for (size_t s = 0; s < n.armory_points.size(); ++s) {
+				if (!vec_near(installed.armory_points[s],
+						n.armory_points[s])) {
+					note(installed.type_id, "armory point");
+					break;
+				}
+			}
+		}
+		if (n.emplacement_attachments.size() !=
+				installed.emplacement_attachments.size()) {
+			note(installed.type_id, "attachment count");
+		} else {
+			for (size_t s = 0; s < n.emplacement_attachments.size(); ++s) {
+				const opennova::mission::ItemEmplacementAttachmentSpec &a =
+						installed.emplacement_attachments[s];
+				const opennova::mission::ItemEmplacementAttachmentSpec &b =
+						n.emplacement_attachments[s];
+				if (a.child_type_id != b.child_type_id || a.kind != b.kind ||
+						a.stored_slot != b.stored_slot ||
+						a.attachment_flags != b.attachment_flags ||
+						a.angle_count != b.angle_count ||
+						a.down_limit_bam != b.down_limit_bam ||
+						a.up_limit_bam != b.up_limit_bam ||
+						a.right_limit_bam != b.right_limit_bam ||
+						a.left_limit_bam != b.left_limit_bam ||
+						a.anchor_found != b.anchor_found ||
+						a.anchor.bone_index != b.anchor.bone_index ||
+						!yaw_equal(a.anchor.yaw_offset, b.anchor.yaw_offset) ||
+						a.anchor.source_name != b.anchor.source_name ||
+						!vec_near(a.anchor.seat_local, b.anchor.seat_local)) {
+					note(installed.type_id, "attachment fields");
+					break;
+				}
+			}
+		}
+	}
+	out["compared"] = compared;
+	out["mismatches"] = mismatches;
+	out["native_missing"] = native_missing;
+	out["native_total"] = static_cast<int>(native.specs.size());
+	out["first_mismatch"] = first;
 	return out;
 }
 
@@ -1224,6 +1493,7 @@ void NovaSimulation::set_ai_profile_speeds(const Dictionary &p_speeds) {
 void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 	item_seat_specs_.clear();
 	mounted_pose_data_by_type_.clear();
+	mounted_pose_native_models_.clear();
 	for (int64_t i = 0; i < p_specs.size(); ++i) {
 		const Variant spec_v = p_specs[i];
 		if (spec_v.get_type() != Variant::DICTIONARY) continue;
@@ -1238,6 +1508,18 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			Ref<NovaObjectData> model_data(model_data_value);
 			if (model_data.is_valid() && model_data->has_document())
 				mounted_pose_data_by_type_[spec.type_id] = model_data;
+		}
+		// S4 (ADR 0028): the native mounted-pose resolver reads the sim
+		// cache's parse of the same graphic (lifetime-stable, unlike the
+		// render Ref). Dictionary-only test worlds carry no graphic/index
+		// and simply leave the native side unregistered.
+		if (sim_models_.has_index() && spec_d.has("graphic")) {
+			const std::string graphic_key(
+					String(spec_d.get("graphic", String())).utf8().get_data());
+			if (!graphic_key.empty()) {
+				if (const Threedi3di3 *m3 = sim_models_.model_for(graphic_key))
+					mounted_pose_native_models_[spec.type_id] = m3;
+			}
 		}
 		if (spec_d.has("mount_config_valid")) {
 			spec.mount_config_valid = static_cast<bool>(spec_d.get("mount_config_valid", false));

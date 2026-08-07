@@ -14,6 +14,7 @@ extends SceneTree
 #     -s res://tests/wave1_native_assets_probe.gd
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 const MISSION := "00TRg.bms"
 
@@ -162,6 +163,22 @@ func _run() -> void:
 		_fail("A/B leg attach mismatch: %d vs %d" % [attached_ab, attached_legacy])
 		return
 	sim_ab.resolve_item_traits(item_db)
+	# S4 (ADR 0028): the static seat-spec A/B — install the shell-extracted
+	# table, then re-extract natively (retained def rows + sim parses) and
+	# diff the typed records.
+	sim_ab.set_item_seat_specs(
+			ItemSeatSpecs.build_item_seat_specs(mission, root, item_db))
+	var seat_diff: Dictionary = sim_ab.debug_native_seat_spec_diff(item_db)
+	print("[wave1] s4 seat diff: %s" % str(seat_diff))
+	if int(seat_diff.get("compared", 0)) <= 0:
+		sim_ab.free()
+		_fail("S4 seat-spec diff compared nothing")
+		return
+	if int(seat_diff.get("mismatches", 0)) != 0 \
+			or int(seat_diff.get("native_missing", 0)) != 0:
+		sim_ab.free()
+		_fail("S4 seat-spec divergence: %s" % str(seat_diff))
+		return
 	for _round in 8:
 		var _hb: Dictionary = sim_ab.get_hitbox_debug()
 		for _t in 8:

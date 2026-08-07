@@ -208,6 +208,14 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::debug_get_collision_pose_mode);
 	ClassDB::bind_method(D_METHOD("debug_collision_pose_ab_stats"),
 			&NovaSimulation::debug_collision_pose_ab_stats);
+	ClassDB::bind_method(D_METHOD("debug_set_mounted_pose_mode", "mode"),
+			&NovaSimulation::debug_set_mounted_pose_mode);
+	ClassDB::bind_method(D_METHOD("debug_get_mounted_pose_mode"),
+			&NovaSimulation::debug_get_mounted_pose_mode);
+	ClassDB::bind_method(D_METHOD("debug_mounted_pose_ab_stats"),
+			&NovaSimulation::debug_mounted_pose_ab_stats);
+	ClassDB::bind_method(D_METHOD("debug_native_seat_spec_diff", "item_db"),
+			&NovaSimulation::debug_native_seat_spec_diff);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &NovaSimulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &NovaSimulation::get_global_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &NovaSimulation::get_music_variables_snapshot);

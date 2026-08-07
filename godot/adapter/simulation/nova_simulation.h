@@ -384,6 +384,32 @@ private:
 			const opennova::world::Entity &p_carrier,
 			const opennova::world::Seat &p_seat,
 			opennova::world::MountedPose &r_out) override;
+	// The S4 A/B seam (ADR 0028): the engine-side mounted-pose resolver over
+	// the sim's own parses beside the legacy model-bound path, same
+	// Legacy/Compare/Native discipline as the collision seam.
+	bool resolve_mounted_pose_legacy(opennova::world::World &p_world,
+			const opennova::world::Entity &p_carrier,
+			const opennova::world::Seat &p_seat,
+			opennova::world::MountedPose &r_out);
+	bool resolve_mounted_pose_native(opennova::world::World &p_world,
+			const opennova::world::Entity &p_carrier,
+			const opennova::world::Seat &p_seat,
+			opennova::world::MountedPose &r_out);
+	// The native mounted-pose model source: type id -> the sim cache's parse,
+	// filled beside mounted_pose_data_by_type_ (and like it, kept across
+	// reset_world — the table installs before mission promotion).
+	std::unordered_map<int32_t, const Threedi3di3 *> mounted_pose_native_models_;
+	CollisionPoseMode mounted_pose_mode_ = CollisionPoseMode::Compare;
+	struct MountedPoseAbStats {
+		uint64_t queries = 0;
+		uint64_t divergences = 0;
+		uint64_t native_declined = 0;
+		uint64_t native_posed_only = 0;
+		float max_position_delta = 0.0f;
+		int32_t max_angle_delta = 0;
+		int32_t last_carrier_type = -1;
+	};
+	MountedPoseAbStats mounted_pose_ab_;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -1640,6 +1666,16 @@ public:
 	// {queries, divergences, result_mismatches, native_declined,
 	//  last_model_id, last_section, last_delta}; counters reset on world reset.
 	Dictionary debug_collision_pose_ab_stats() const;
+	// The S4 A/B seam: the mounted-pose resolver modes + counters (same
+	// 0/1/2 semantics), and the static seat-spec table diff — the installed
+	// (shell-extracted) table vs the engine-side extraction over the retained
+	// def rows + sim model parses. Returns {compared, mismatches,
+	// native_missing, first_mismatch}.
+	void debug_set_mounted_pose_mode(int p_mode);
+	int debug_get_mounted_pose_mode() const;
+	Dictionary debug_mounted_pose_ab_stats() const;
+	Dictionary debug_native_seat_spec_diff(
+			const Ref<class NovaItemDatabase> &p_item_db);
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.

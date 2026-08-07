@@ -83,9 +83,7 @@ hardening, and project health. Divergences from the original engine belong in
       waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
       narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
       the avatar/object preview de-fork + shared MCP arg helper, push-downs
-      (ItemSeatSpecs first — that PR also lands the standing "new engine logic
-      starts in engine/" CLAUDE.md rule; the camera and armory push-downs are their
-      own rows below) — opportunistic
+      (the camera and armory push-downs are their own rows below) — opportunistic
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness

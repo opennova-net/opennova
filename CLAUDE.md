@@ -95,6 +95,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
+- New engine logic starts in `engine/` (ADR 0028): gameplay rules, witnessed math, and
+  sim-consumed asset resolution are portable C++; GDScript wires and presents. The shell
+  keeps node writes, device sampling, and scene lifetime.
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
