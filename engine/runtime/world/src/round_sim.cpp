@@ -2,6 +2,8 @@
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include "world/round_sim.h"
 
+#include "world/fire_sound.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -494,7 +496,8 @@ void apply_round_recoil(const AmmoTableEntry &ammo,
     *source.recoil_pitch = io::bam_add(*source.recoil_pitch, impulse);
 }
 
-void record_round_fire(RoundSim &sim, const RoundSpawnParams &params) {
+void record_round_fire(World &world, RoundSim &sim,
+                       const RoundSpawnParams &params) {
     FireEvent event;
     event.shooter = params.owner;
     event.shooter_handle = params.shooter_handle;
@@ -508,6 +511,8 @@ void record_round_fire(RoundSim &sim, const RoundSpawnParams &params) {
     event.wire_round_flags = params.wire_round_flags;
     event.adm_index = params.adm_index;
     sim.fired.push_back(event);
+    // The sound legs run on the same logic-tick moment (world/fire_sound.h).
+    fire_sound_on_spawn(world, params);
 }
 
 } // namespace
@@ -590,7 +595,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         // [orig: RoundData_SpawnRound @0x4EC378]
         const int first = spawn_burst(
                 world, params, *ammo, mode, /*shotgun_spread=*/true);
-        record_round_fire(*this, params);
+        record_round_fire(world, *this, params);
         apply_round_recoil(*ammo, source);
         return first;
     }
@@ -765,7 +770,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // Record the fire for the host present layer (sound + muzzle effect) — the
     // inline-presentation moment of the original [orig: WeaponSlot_FireAndSpawnEffects
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
-    record_round_fire(*this, params);
+    record_round_fire(world, *this, params);
     ++active_count;
     // Same-shot ERROR used the old accumulator above. Recoil becomes visible
     // immediately but affects only later shots.

@@ -212,10 +212,12 @@ Array NovaSimulation::drain_fire_presentation_events() {
 		d["is_local_player"] = have_local && fe.shooter == world_->cached.local_player;
 		d["ammo_index"] = fe.ammo_index;
 		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);
-		d["sound_set"] = ammo ? String(ammo->ai_launch_set.c_str()) : String();
 		d["effect"] = ammo ? String(ammo->ai_launch_effect.c_str()) : String();
 		d["mf_light"] = ammo ? ammo->mf_light : 0;
-		// The adm arm's replacement legs. Retail executes the ADDRESSED def's action
+		// The SOUND legs of both arms moved onto the sim's logic clock with the
+		// propagation-delay queue (world/fire_sound.h; drain_fire_sounds) — this
+		// drain carries only the EFFECT legs.
+		// The adm arm's replacement leg: retail executes the ADDRESSED def's action
 		// rows instead of the ammo-def pair, and the FIRE row (slot 2) is the one that
 		// carries the muzzle flash — its effect is the only one that can reach the
 		// muzzle-glow leg, which retail gates on the action context being 2.
@@ -231,8 +233,6 @@ Array NovaSimulation::drain_fire_presentation_events() {
 				fired_def != nullptr
 						? &fired_def->action_fsm.actions[opennova::world::weapon_action::kFire]
 						: nullptr;
-		d["action_sound_set"] =
-				fire_row ? String(fire_row->soundset) : String();
 		d["action_effect"] = fire_row ? String(fire_row->particle) : String();
 		// Resolved against the THIRD-PERSON model (gfx3): ActionDef+57 is the gfx3
 		// userpoint index and +56 the gfx1 one — the opposite way round from three
@@ -243,6 +243,46 @@ Array NovaSimulation::drain_fire_presentation_events() {
 		out.push_back(d);
 	}
 	world_->round_sim.fired.clear();
+	return out;
+}
+
+// world/fire_sound.h mirrors the npwire arm bits so the sim's seed can split
+// the arms without linking the net stack — pin the pairing here, where both
+// headers are visible (the S7a weapon_flag pattern).
+static_assert(opennova::world::round_event_flag::kAltFire ==
+				opennova::kRoundEventFlagAltFire,
+		"round_event_flag::kAltFire must match the npwire decoder bit");
+static_assert(opennova::world::round_event_flag::kAdmIndexed ==
+				opennova::kRoundEventFlagAdmIndexed,
+		"round_event_flag::kAdmIndexed must match the npwire decoder bit");
+
+// The presenting shell's listener stamp — the camera position, once per frame
+// before the tick batch, feeding the sim's fire-sound distance gate
+// [orig: listener_pos @ 0x24D6630; world/fire_sound.h]. Never called on a
+// dedicated host, which is the witnessed peer gate.
+void NovaSimulation::set_sound_listener(const Vector3 &p_listener_godot) {
+	if (!loaded_) return;
+	world_->fire_sounds.set_listener(opennova::world::Vec3{
+			p_listener_godot.x, -p_listener_godot.z, p_listener_godot.y});
+}
+
+// The ready fire-sound drain: immediate near shots, the adm-arm action-row
+// sets, and expired propagation-delayed slots, in play order on the logic
+// clock. The shell plays each row positionally; the set's max-range cull
+// stays at play time in the audio bank (D-AI-8).
+// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / the pending drain
+//  Sound_TickPendingSlots @ 0x529310]
+Array NovaSimulation::drain_fire_sounds() {
+	Array out;
+	if (!loaded_) return out;
+	for (const opennova::world::ReadyFireSound &sound :
+			world_->fire_sounds.drain()) {
+		Dictionary d;
+		d["set"] = String(sound.set_name.c_str());
+		d["pos"] = Vector3(sound.pos.x, sound.pos.z, -sound.pos.y);
+		d["source_bms_id"] = sound.source_bms_id;
+		out.push_back(d);
+	}
 	return out;
 }
 

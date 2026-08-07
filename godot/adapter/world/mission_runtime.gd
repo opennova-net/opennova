@@ -51,6 +51,7 @@ var _sim: NovaSimulation
 var _present                          # MissionPresentPass: placed nodes on every role or tooling/test preview
 var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
 var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
+var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into the sim per frame (world/fire_sound.h)
 var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
 var _index
@@ -324,6 +325,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			options.get("fire_listener", Callable()),
 			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
 					else Callable())
+		# The sim's fire-sound distance gate reads the camera listener at fire
+		# time on the logic clock (world/fire_sound.h) — stamped per frame in
+		# tick_realtime. A host with no fire presentation (dedicated) never
+		# stamps, which is the witnessed peer gate [orig: @ 0x528e57].
+		_fire_listener = options.get("fire_listener", Callable())
 	# The destruction-presentation pass: husk model swaps, death-piece debris,
 	# wreck fire/smoke, destruction sounds — off the sim's destruction drain
 	# (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
@@ -827,12 +833,12 @@ func _present_entity_rows(stats_on := false) -> void:
 # One whole present frame: the entity rows plus the tick-driven passes, each
 # pass timed onto the stats board while the Stats tab captures. Owns the
 # bundled _perf_present_us the probe scripts read.
-func _present_frame(fire_ticks: int, stats_on: bool) -> void:
+func _present_frame(stats_on: bool) -> void:
 	var present_start := Time.get_ticks_usec()
 	_present_entity_rows(stats_on)
 	if _fire_present != null:
 		var fire_start := Time.get_ticks_usec() if stats_on else 0
-		_fire_present.present(fire_ticks)
+		_fire_present.present()
 		if stats_on:
 			_frame_stats.add(FrameStatsBoard.PRESENT_FIRE,
 					Time.get_ticks_usec() - fire_start)
@@ -866,6 +872,7 @@ func tick() -> bool:
 		return false
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var tick_start := Time.get_ticks_usec()
+	_stamp_sound_listener()
 	var did_tick := _advance_one_tick_no_present()
 	_perf_present_us = 0
 	if did_tick:
@@ -874,11 +881,25 @@ func tick() -> bool:
 			_frame_stats.add(FrameStatsBoard.SIM_NET, int(_sim.get_last_net_tick_us()))
 			_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
 			_frame_stats.add(FrameStatsBoard.SIM_TICKS, 1)
-		_present_frame(1, stats_on)
+		_present_frame(stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
 	_ticks_last_frame = 1 if did_tick else 0
 	return did_tick
+
+
+# Stamp the camera listener before a tick batch: fires this batch gate their
+# propagation delay against the current camera, the retail frame order (the
+# listener global updates before the entity/fire processing). Invalid or
+# non-finite listeners leave the sim unstamped — a host with no fire
+# presentation (dedicated) runs no sound leg, the witnessed peer gate.
+# [orig: listener_pos @ 0x24D6630, the @ 0x528e57 gate; world/fire_sound.h]
+func _stamp_sound_listener() -> void:
+	if not _fire_listener.is_valid():
+		return
+	var listener_v: Variant = _fire_listener.call()
+	if listener_v is Vector3 and (listener_v as Vector3).is_finite():
+		_sim.set_sound_listener(listener_v)
 
 
 # One logic tick + drain/emit effects, WITHOUT presenting. Shared by tick() (which presents once
@@ -960,6 +981,7 @@ func tick_realtime(delta: float) -> int:
 	# The bank/clamp arithmetic is the native world::TickAccumulator (S14,
 	# [orig: Game_MainLoop @ 0x52b630]); the loop + present-once-after-batch
 	# orchestration stays here in the shell.
+	_stamp_sound_listener()
 	var n := int(_sim.bank_realtime(delta))
 	if n <= 0:
 		# Retail evaluates entity submission every render frame. Camera mode and
@@ -991,7 +1013,7 @@ func tick_realtime(delta: float) -> int:
 		_frame_stats.add(FrameStatsBoard.SIM_NET, net_us)
 		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, effects_us)
 		_frame_stats.add(FrameStatsBoard.SIM_TICKS, n)
-	_present_frame(n, stats_on)
+	_present_frame(stats_on)
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true
 	_ticks_last_frame = n

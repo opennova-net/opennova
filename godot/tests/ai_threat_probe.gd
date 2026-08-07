@@ -184,8 +184,7 @@ func _run() -> void:
 			# the ai_launcheffect muzzle spawned, tracer rounds drawn (rate-gated).
 			var stats: Dictionary = world.get_fire_present_stats()
 			print("PROBE fire-present stats: %s" % str(stats))
-			if int(stats.get("fires", 0)) <= 0 or \
-					int(stats.get("sounds", 0)) + int(stats.get("delayed_sounds", 0)) <= 0:
+			if int(stats.get("fires", 0)) <= 0 or int(stats.get("sounds", 0)) <= 0:
 				print("PROBE FAIL: NPC fire presented no sound (stats above)")
 				quit(1)
 				return

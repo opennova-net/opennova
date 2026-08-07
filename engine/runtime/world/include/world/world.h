@@ -23,6 +23,7 @@
 #include "world/system.h"
 #include "world/trigger_relations.h"
 #include "world/round_ring.h"
+#include "world/fire_sound.h"
 #include "world/sound_emitter_mailbox.h"
 #include "world/var_store.h"
 #include "world/vehicle_mount.h"
@@ -428,6 +429,13 @@ public:
     audio::SoundProfileTable sound_profiles;
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
+
+    // The fire-sound propagation-delay queue on the logic clock, seeded inline
+    // at round spawn and counted down at the head of run_logic_tick; the
+    // presenting host stamps the listener and drains the ready one-shots
+    // (world/fire_sound.h witness map). [orig: the pending-sound slots
+    // @0x24DF678, Sound_TickPendingSlots @0x529310]
+    FireSoundQueue fire_sounds;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

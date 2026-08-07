@@ -1,19 +1,23 @@
 extends GutTest
 
-# The round-event ARM SPLIT in FirePresentPass.
+# The round-event ARM SPLIT in FirePresentPass — the EFFECT legs.
 #
 # Retail's receive path has two mutually exclusive arms and only one of them is the
-# ammo-def pair. Bit 0 is tested first: set -> the ammo-def arm plays ammoDef+64 and
-# spawns ammoDef+68 AT THE WIRE POSITION. Clear with bit 1 set -> the adm-indexed arm
-# spawns no ammo-def leg at all; it executes the addressed def's FIRE action row at that
+# ammo-def pair. Bit 0 is tested first: set -> the ammo-def arm spawns ammoDef+68
+# AT THE WIRE POSITION. Clear with bit 1 set -> the adm-indexed arm spawns no
+# ammo-def leg at all; it executes the addressed def's FIRE action row at that
 # weapon's own userpoint.
 # [orig: NetPacket_DeserializeRoundEvent @0x42f270 — arms @0x42f521 / @0x42f6ce;
-#  ammo legs @0x42f5dc / @0x42f6c2; the fire row @0x42f777 / @0x42f98f]
+#  ammo effect @0x42f6c2; the fire row @0x42f777 / @0x42f98f]
 #
 # This matters because the wire position IS the shooter's eye — retail sends
 # Position + CameraOffset [orig: Entity_CalcWeaponFirePosition @0x4dc750] — so running the
 # ammo-def leg on the adm arm draws every remote muzzle flash out of the shooter's face,
 # about a metre behind the barrel.
+#
+# The SOUND legs of both arms run in the sim on the logic clock
+# (world/fire_sound.h, pinned by the fire_sound ctest) and reach the audio bank
+# through drain_fire_sounds — this pass presents effects only.
 #
 # Asset-free: the sim, audio, fx and muzzle anchor are all stubs.
 
@@ -30,6 +34,8 @@ class StubSim:
 		var out := events
 		events = []
 		return out
+	func drain_fire_sounds() -> Array:
+		return []
 	func drain_tracer_trails() -> Array:
 		return []
 
@@ -81,39 +87,31 @@ func _event(adm_arm: bool) -> Dictionary:
 		"is_local_player": false,
 		"adm_arm": adm_arm,
 		"adm_index": 24,
-		"sound_set": "AMMO_LAUNCH",
 		"effect": "AMMO_EFFECT",
-		"action_sound_set": "GS_M4",
 		"action_effect": "EFFECT_M16MF",
 		"action_userpoint": "MFLASH01",
 		"mf_light": 0,
 	}
 
 
-func test_ammo_arm_keeps_the_ammo_def_legs_at_the_wire_position() -> void:
+func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 	_sim.events = [_event(false)]
-	_fire.present(1)
+	_fire.present()
 	assert_eq(_fx.spawns.size(), 1, "the ammo arm spawns exactly one effect")
 	assert_eq(String(_fx.spawns[0]["name"]), "AMMO_EFFECT",
 			"the ammo arm uses the AMMO def's effect")
 	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(WIRE_EYE),
 			"the ammo arm spawns at the wire position, unmoved")
-	assert_eq(_audio.played.size(), 1)
-	assert_eq(String(_audio.played[0]["name"]), "AMMO_LAUNCH")
 
 
 func test_adm_arm_uses_the_fire_row_at_the_weapon_anchor() -> void:
 	_sim.events = [_event(true)]
-	_fire.present(1)
+	_fire.present()
 	assert_eq(_fx.spawns.size(), 1, "the adm arm still spawns exactly one effect")
 	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
 			"the adm arm uses the FIRE action row's effect, not the ammo def's")
 	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(MUZZLE),
 			"the adm arm spawns at the weapon anchor, NOT the wire eye position")
-	assert_eq(_audio.played.size(), 1)
-	assert_eq(String(_audio.played[0]["name"]), "GS_M4",
-			"the adm arm plays the action row's sound, not the ammo def's")
-	assert_true((_audio.played[0]["pos"] as Vector3).is_equal_approx(MUZZLE))
 
 
 func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
@@ -129,7 +127,7 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 			func(): return _fx,
 			func(): return Vector3.ZERO)
 	_sim.events = [_event(true)]
-	bare.present(1)
+	bare.present()
 	assert_eq(_fx.spawns.size(), 1)
 	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
 			"the row choice does not depend on the anchor provider")
@@ -138,8 +136,7 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
 	var ev := _event(true)
 	ev["action_effect"] = ""
-	ev["action_sound_set"] = ""
 	_sim.events = [ev]
-	_fire.present(1)
+	_fire.present()
 	assert_eq(_fx.spawns.size(), 0, "an unauthored fire row spawns no effect")
-	assert_eq(_audio.played.size(), 0, "and plays no sound")
+	assert_eq(_audio.played.size(), 0, "and this pass plays no sound of its own")

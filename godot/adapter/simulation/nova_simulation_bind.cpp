@@ -152,6 +152,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&NovaSimulation::drain_fire_presentation_events);
+	ClassDB::bind_method(D_METHOD("set_sound_listener", "listener_godot"),
+			&NovaSimulation::set_sound_listener);
+	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
+			&NovaSimulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &NovaSimulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);

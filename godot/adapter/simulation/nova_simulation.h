@@ -1459,6 +1459,13 @@ public:
 	// world-wac-ai-re §17.4]
 	Array drain_fire_presentation_events();
 
+	// The fire-sound legs on the logic clock (world/fire_sound.h): the shell
+	// stamps the camera listener each frame before the tick batch, and drains
+	// the ready one-shots ({set, pos, source_bms_id} rows) each present.
+	// [orig: listener_pos @ 0x24D6630; Sound_TickPendingSlots @ 0x529310]
+	void set_sound_listener(const Vector3 &p_listener_godot);
+	Array drain_fire_sounds();
+
 	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
 	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
 	// bytes) — parsed into world.sound_profiles now and re-applied on

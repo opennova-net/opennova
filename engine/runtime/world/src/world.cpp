@@ -1094,6 +1094,13 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
     ctx.pre_mission = pre_mission;
+    // The pending fire-sound countdown, before this tick's spawns: retail
+    // drains after the client network frame (whose receive seeds our embedder
+    // also applies pre-tick) and before the server/entity updates that seed
+    // the rest [orig: Sound_TickPendingSlots @ 0x526697 in
+    // Game_ProcessMainFrame, between Client_ProcessNetworkFrame and
+    // Server_TickUpdate / Entity_UpdateAllEntities].
+    fire_sounds.tick();
     // The presenting-client identity for the spawn-time tracer style select — stamped
     // before the system loop so rounds spawned THIS tick (AI fire, local fire) select
     // against fresh values [orig: g_local_player_entity->Team read @ 0x4ec740].
@@ -1287,6 +1294,7 @@ void World::restore(const Snapshot &s) {
     effects.clear();
     slot_sounds.clear();
     sound_emitters.clear();
+    fire_sounds.clear();
     round_sim.reset();
     explosions.reset();
     throwables.reset();

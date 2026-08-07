@@ -1604,6 +1604,15 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 					 opennova::world::kEntityFlagScopeRaised) != 0;
 			source.recoil_pitch = &shooter_row->recoil_pitch;
 			round.source_state = &source;
+			// The adm-arm action sounds play at the SHOOTER's position, and a
+			// decoded remote shooter has no local entity — supply its row
+			// position for the sim's fire-sound leg (world/fire_sound.h).
+			// [orig: entity+4 @ 0x4020ef; the pool resolve @ 0x42f491]
+			round.shooter_pos = opennova::world::Vec3{
+					static_cast<float>(shooter_row->x / kFixed16),
+					static_cast<float>(shooter_row->y / kFixed16),
+					static_cast<float>(shooter_row->z / kFixed16)};
+			round.shooter_pos_valid = true;
 		}
 		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
 		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;

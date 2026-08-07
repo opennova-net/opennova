@@ -2904,18 +2904,24 @@ visible) and the §16.5-item-6 closure (`Physics_RaycastTerrainAndSectors @ 0x53
 internals — the D-AI-7 sector leg). All addresses retail `Jointops.exe` (imagebase
 0x400000, IDB `Jointops.exe.kong.i64`).
 
-PORT (same day, worktree play): the ammo.def presentation tokens = `engine/formats/def`
+PORT (same day, worktree play; sound legs re-homed 2026-08-07, S12a): the ammo.def
+presentation tokens = `engine/formats/def`
 (`def_parse_ammo` + `ammo_tracer_type_from_name`) → `AmmoTableEntry` (npruntime
 builder); the tracer decision + the per-spawn `FireEvent` record =
-`world::RoundSim::spawn`; the binding drains = `NovaSimulation::
+`world::RoundSim::spawn`; the SOUND legs of both arms + the pending-delay queue =
+`engine/runtime/world/src/fire_sound.cpp` on the logic clock (seeded inline at
+spawn, the original's fire-time moment; the shell stamps the camera listener via
+`NovaSimulation::set_sound_listener` and plays `drain_fire_sounds()` rows); the
+binding drains = `NovaSimulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
-replaced by the witnessed trail channels, §24); the presentation itself =
-`godot/adapter/world/fire_present_pass.gd` (sound + pending-delay queue + muzzle
-effect + the §24 tracer ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
+replaced by the witnessed trail channels, §24); the EFFECT presentation =
+`godot/adapter/world/fire_present_pass.gd` (muzzle effect + the §24 tracer
+ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`engine/runtime/world/src/collision_los.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
 `npruntime_round_sim` ctest (tracer cadence/forcetracer/FireEvent + the trail
-channels), the `collision` ctest (`test_raycast_clear_los`), and the
+channels), the `fire_sound` ctest (gate/formula/pool/arm-split sounds), the
+`collision` ctest (`test_raycast_clear_los`), and the
 `ai_threat_probe` in-game stats gate.
 
 ### 18.1 The ammo-def presentation fields — parse + resolve
@@ -2958,12 +2964,39 @@ bit, TRUE in SP mode 3 per net-re §5.0) — i.e. skipped only on a DEDICATED se
   `Sound_Play3DPositional(set, pos, entity, 255)`.
 
 The pending queue is 128 × 24-B slots `@ 0x24DF678..0x24E0278` (`flags|1`, set ptr,
-pos[3], countdown) allocated by `EffectSlot_AllocateAndInit @ 0x527c30` and drained
+pos[3], countdown) allocated by `EffectSlot_AllocateAndInit @ 0x527c30` (a FULL
+pool drops the sound `[orig: the failed scan return @ 0x527c47]`; a zero countdown
+seeds 1 `[orig: @ 0x527c94]`) and drained
 once per tick by `Sound_TickPendingSlots @ 0x529310` (ex `sub_529310`, renamed this
 session): countdown-- → 0 plays `Sound_Play3DPositional(set, pos, null, 255)`
-(flag-2 slots are the dialog-trigger variant). Port: `fire_present_pass.gd`
-`_pending` (per-logic-tick countdown); the range check runs at PLAY time in our
+(flag-2 slots are the dialog-trigger variant). In the frame, the drain sits
+between `Client_ProcessNetworkFrame` and `Server_TickUpdate` /
+`Entity_UpdateAllEntities` `[orig: @ 0x526697 in Game_ProcessMainFrame
+@ 0x5263f0]` — client-received seeds decrement the same frame; host/AI seeds the
+next. Port (S12a, 2026-08-07): `world::FireSoundQueue`
+(`engine/runtime/world/src/fire_sound.cpp`) — seeded inline from
+`RoundSim::spawn`, counted down at the head of `World::run_logic_tick`, listener
+stamped per frame by the shell (`set_sound_listener`; never on a dedicated host,
+the witnessed `is_mp_session_peer` gate `@ 0x528e57`); our host applies wire fire
+on the pre-tick receive boundary, projecting those seeds one countdown earlier
+than retail's post-drain server tick. The range check runs at PLAY time in our
 bank vs fire time in retail — tracked in D-AI-8.
+
+The adm-indexed receive arm plays NO ammo-def sound and takes NO propagation
+delay: `ActionSlot_ExecuteAction @ 0x4020a0` plays the row's soundset
+immediately at the SHOOTER'S entity position (`Entity_PlaySound3D_FullVolume
+@ 0x528e20` with `entity+4` `[orig: @ 0x4020ef]`), and the receive path's
+one-shot stamp (`slot+90 = 64` `[orig: @ 0x42f728/@ 0x42f8ff]`) makes the end
+shim `ActionSlot_PlayEndSoundAndDupes @ 0x401100` play the row's soundsetend
+immediately too (the local pump defers that to the active phase's END — JOX
+fire rows author the audible gunshot in soundsetend, 83/89 rows). Both the
+FIRE (+684) and RECOIL (+688) rows execute `[orig: @ 0x42f777/@ 0x42f785 and
+@ 0x42f98f/@ 0x42f9d0]`. The end shim's "dupe" leg (ActionDef+44 count /
++48 interval delayed repeats through the same slot pool `[orig: @ 0x401148/
+@ 0x40118b]`) is a tracked deferral — the JOX weapon.def authors no dupe keys.
+Port: the adm arm of `world::fire_sound_on_spawn` (immediate rows at the
+shooter's position; a joiner's entity-less wire shooter supplies its decoded
+row position, `RoundSpawnParams::shooter_pos`).
 
 ### 18.3 The muzzle effect + MF_Light glow legs
 

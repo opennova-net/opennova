@@ -23,6 +23,7 @@ add_library(opennova_world STATIC
     src/player_view.cpp
     src/player_weapon.cpp
     src/destruction.cpp
+    src/fire_sound.cpp
     src/round_sim.cpp
     src/sound_emitter_mailbox.cpp
     src/throwables.cpp

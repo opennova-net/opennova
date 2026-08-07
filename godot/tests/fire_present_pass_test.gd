@@ -6,12 +6,20 @@ const FirePresentPass := preload("res://adapter/world/fire_present_pass.gd")
 class SimStub:
 	extends RefCounted
 	var events: Array = []
+	var fire_sounds: Array = []
 	var slot_events: Array = []
 	var sound_emitter_events: Array = []
 
 	func drain_fire_presentation_events() -> Array:
 		var out := events
 		events = []
+		return out
+
+	# The sim-side fire-sound queue drain (world/fire_sound.h): the sim gates
+	# distance and counts delays down on the logic clock; the pass just plays.
+	func drain_fire_sounds() -> Array:
+		var out := fire_sounds
+		fire_sounds = []
 		return out
 
 	func drain_slot_sounds() -> Array:
@@ -63,7 +71,6 @@ class AudioStub:
 func _event(pos: Vector3, source_bms_id: int) -> Dictionary:
 	return {
 		"origin": pos,
-		"sound_set": "AI_FIRE",
 		"source_bms_id": source_bms_id,
 		"is_local_player": false,
 	}
@@ -81,17 +88,26 @@ func _make_pass(sim: SimStub, audio: AudioStub):
 	return presenter
 
 
-func test_immediate_fire_keeps_source_identity() -> void:
+func test_drained_fire_sounds_play_with_source_identity() -> void:
+	# The distance gate and delay countdown live in the sim (world/fire_sound.h,
+	# pinned by the fire_sound ctest); the pass plays each drained row verbatim.
 	var sim := SimStub.new()
 	var audio := AudioStub.new()
 	var presenter = _make_pass(sim, audio)
-	sim.events = [_event(Vector3(10, 0, 0), 77)]
+	sim.fire_sounds = [
+		{"set": "AI_FIRE", "pos": Vector3(10, 0, 0), "source_bms_id": 77},
+		{"set": "GS_END", "pos": Vector3(4, 1, 2), "source_bms_id": 0},
+	]
 
 	presenter.present()
 
-	assert_eq(audio.calls.size(), 1)
-	if audio.calls.size() == 1:
+	assert_eq(audio.calls.size(), 2)
+	assert_true(sim.fire_sounds.is_empty(), "the ready queue drains every present")
+	if audio.calls.size() == 2:
+		assert_eq(String(audio.calls[0]["set"]), "AI_FIRE")
 		assert_eq(int(audio.calls[0]["source_bms_id"]), 77)
+		assert_eq(audio.calls[1]["pos"], Vector3(4, 1, 2))
+	assert_eq(int(presenter.get_stats()["sounds"]), 2)
 	presenter.teardown()
 
 
@@ -100,6 +116,8 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 	# rounds into one visual RoundSim queue. The pass must consume every record
 	# (so the queue cannot grow frame-over-frame) while only presenting the
 	# remote record; the local action-slot leg already presented the prediction.
+	# (The sim's own seed applies the same local filter to the sound queue —
+	# the fire_sound ctest pins that half.)
 	var sim := SimStub.new()
 	var audio := AudioStub.new()
 	var presenter = _make_pass(sim, audio)
@@ -113,29 +131,8 @@ func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> 
 		assert_true(sim.events.is_empty(),
 				"the complete mixed queue is drained each presentation")
 
-	assert_eq(audio.calls.size(), 128,
-			"only one decoded remote shot is presented per frame")
-	assert_eq(int(presenter.get_stats()["fires"]), 128)
-	for call_v in audio.calls:
-		assert_eq(int((call_v as Dictionary)["source_bms_id"]), 22,
-				"the local predicted record never reaches the remote-fire leg")
-	presenter.teardown()
-
-
-func test_delayed_fire_keeps_source_identity_until_playback() -> void:
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
-	var presenter = _make_pass(sim, audio)
-	# At 330 units the witnessed delay is (62 * 330 / 330) >> 2 = 15 ticks.
-	sim.events = [_event(Vector3(330, 0, 0), 88)]
-
-	presenter.present(1)
-	assert_true(audio.calls.is_empty(), "far fire remains queued after its first tick")
-	presenter.present(14)
-
-	assert_eq(audio.calls.size(), 1)
-	if audio.calls.size() == 1:
-		assert_eq(int(audio.calls[0]["source_bms_id"]), 88)
+	assert_eq(int(presenter.get_stats()["fires"]), 128,
+			"only the decoded remote shot reaches the presentation legs")
 	presenter.teardown()
 
 

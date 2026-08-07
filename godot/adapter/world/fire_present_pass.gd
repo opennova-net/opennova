@@ -16,14 +16,16 @@ extends RefCounted
 #
 # Sound distance model [orig: Sound_PlayWithDistanceAttenuation @ 0x528E40]: a shot
 # heard from >= 30 u arrives LATE by the witnessed propagation delay
-# (62 * dist / 330) >> 2 ticks (g_SoundSpeedFixed @ 0x24D6660 = 330.0 u/s, the
-# witnessed quarter-compression) — the original queues those in the pending-sound
-# slots drained per tick by Sound_TickPendingSlots @ 0x529310; `_pending` here is
-# that queue. The set's max range gates the play (soundDef+72 in the original; our
-# bank applies the set's cull range at play time — range-checking at fire time vs
-# play time is the tracked delta, audible only if the listener moves during the
-# delay). The MF_Light muzzle glow leg (+36/+40 -> Entity_UpdateMuzzleGlowEffect
-# @ 0x56C960, a light-pool glow) is a tracked deferral — no light-pool port yet.
+# (62 * dist / 330) >> 2 ticks. The gate and the pending-sound slot pool
+# [orig: Sound_TickPendingSlots @ 0x529310] live in the SIM on the logic clock
+# (world/fire_sound.h, S12a): the runtime stamps the camera listener each frame,
+# the sim gates at fire time and counts down per logic tick, and this pass just
+# plays whatever drain_fire_sounds() returns — including the adm-arm action-row
+# sounds, which retail plays immediately at the shooter with no delay. The set's
+# max range still culls at PLAY time in our bank vs fire time in retail (the
+# tracked D-AI-8 delta). The MF_Light muzzle glow leg (+36/+40 ->
+# Entity_UpdateMuzzleGlowEffect @ 0x56C960, a light-pool glow) is a tracked
+# deferral — no light-pool port yet.
 #
 # Tracers [orig: RoundData_SpawnRound @ 0x4EC0D0]: every tracer_rate-th round per
 # shooter (forcetracer 0x8000 = every round) is visible in flight — a channel in the
@@ -49,9 +51,6 @@ extends RefCounted
 # unconditionally (the MP NoTracers rules bit, dword_24D1E34 & 1, is a net seam
 # wired via RoundSim.no_tracers_rule).
 
-const SOUND_DELAY_MIN_DIST := 30.0  # units [orig: dist >= 0x1E gate @ 0x528ed4]
-const SOUND_SPEED := 330.0          # units/s [orig: g_SoundSpeedFixed = 330.0 16.16]
-
 # Min half-width per unit of camera distance — the witnessed screen-size clamp
 # [orig: |camera - point| (16.16) x 1.83e-8 / proj scale @ CEffectChannel_RenderRibbon;
 # ~0.0012/u at the shipped projection — the proj divisor is D-AI-12g].
@@ -69,9 +68,8 @@ var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
 var _mat_additive: StandardMaterial3D  # std/rapid/sniper/df1/NVG [orig: fog-black additive]
 var _mat_alpha: StandardMaterial3D     # rocket/at4/grenade smoke [orig: alpha + scene fog]
-var _pending: Array = []        # [{ticks, set, pos, source_bms_id}] pending sounds
 # Probe/diagnostic counters (ai_threat_probe asserts the presentation actually ran).
-var _stats := {"fires": 0, "sounds": 0, "delayed_sounds": 0, "effects": 0, "tracer_peak": 0}
+var _stats := {"fires": 0, "sounds": 0, "effects": 0, "tracer_peak": 0}
 
 # The witnessed per-style ribbon tables, id 1..12 = the ammo.def tracer_type ids
 # (stdred/stdgreen/rocket/at4/grenade/rapidred/rapidgreen/8=NVG laser/sniperred/
@@ -253,19 +251,18 @@ func teardown() -> void:
 		_mesh_instance.queue_free()
 	_mesh_instance = null
 	_mesh = null
-	_pending.clear()
 
 
-## Once per present (beside the other passes), after the sim advanced. `ticks` is
-## the number of logic ticks in the batch (tick_realtime catch-up runs several per
-## present) — the pending-sound countdown consumes logic ticks, not presents.
-func present(ticks: int = 1) -> void:
+## Once per present (beside the other passes), after the sim advanced. The
+## pending-sound countdown consumes logic ticks inside the sim now
+## (world/fire_sound.h) — this pass only drains and plays.
+func present() -> void:
 	if _sim == null:
 		return
 	_drain_fires()
+	_drain_fire_sounds()
 	_drain_slot_sounds()
 	_drain_sound_emitters()
-	_tick_pending_sounds(ticks)
 	_draw_tracers()
 
 
@@ -322,32 +319,30 @@ func _drain_fires() -> void:
 	var events: Array = _sim.drain_fire_presentation_events()
 	if events.is_empty():
 		return
-	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
 	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
-	var listener := _listener_pos()
 	for ev_v in events:
 		var ev: Dictionary = ev_v
 		# The local player's own fire is presented by the action-slot legs
 		# [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
-		# else's rides the ammo-def legs below.
+		# else's rides the ammo-def legs below. (The SOUND legs of every arm
+		# run in the sim now — world/fire_sound.h — and arrive through
+		# _drain_fire_sounds; this drain owns the EFFECT legs.)
 		if bool(ev.get("is_local_player", false)):
 			continue
 		_stats.fires += 1
 		var origin: Vector3 = ev.get("origin", Vector3.ZERO)
-		var sound_set := String(ev.get("sound_set", ""))
 		var effect := String(ev.get("effect", ""))
 		# THE ARM SPLIT. Retail's round-event receive path has two mutually exclusive
-		# arms and only one of them is the ammo-def pair. The adm-indexed arm plays no
-		# ammo-def sound and spawns no ammo-def effect: it executes the ADDRESSED def's
-		# FIRE action row instead, at that weapon's own userpoint on the gfx3 model.
+		# arms and only one of them is the ammo-def pair. The adm-indexed arm spawns
+		# no ammo-def effect: it executes the ADDRESSED def's FIRE action row
+		# instead, at that weapon's own userpoint on the gfx3 model.
 		# This matters because the wire position is the shooter's EYE — retail sends
 		# Position + CameraOffset [orig: Entity_CalcWeaponFirePosition @0x4dc750] — so
 		# running the ammo-def leg on this arm draws every remote muzzle flash out of
 		# the shooter's face, roughly a metre behind the barrel.
-		# [orig: arms @0x42f521 / @0x42f6ce; ammo legs @0x42f5dc / @0x42f6c2;
+		# [orig: arms @0x42f521 / @0x42f6ce; ammo effect @0x42f6c2;
 		#  the fire row @0x42f777 / @0x42f98f]
 		if bool(ev.get("adm_arm", false)):
-			sound_set = String(ev.get("action_sound_set", ""))
 			effect = String(ev.get("action_effect", ""))
 			# The anchor: this shooter's held weapon, not the wire point. Falling back
 			# to the wire eye position would reintroduce the very bug this fixes, so an
@@ -359,27 +354,6 @@ func _drain_fires() -> void:
 						String(ev.get("action_userpoint", "")))
 				if anchored.is_finite():
 					origin = anchored
-		var source_bms_id := int(ev.get("source_bms_id", 0))
-		if audio != null and not sound_set.is_empty():
-			# Propagation delay for far shots [orig: @ 0x528ed4-0x528ef2:
-			# >= 30 u -> pending slot, (62*dist/330)>>2 ticks; else immediate].
-			var dist := origin.distance_to(listener) if listener.is_finite() else 0.0
-			if dist >= SOUND_DELAY_MIN_DIST:
-				var delay_ticks := int(62.0 * dist / SOUND_SPEED) >> 2
-				if delay_ticks > 0:
-					_pending.append({
-						"ticks": delay_ticks,
-						"set": sound_set,
-						"pos": origin,
-						"source_bms_id": source_bms_id,
-					})
-					_stats.delayed_sounds += 1
-				else:
-					audio.fire_soundset(sound_set, origin, source_bms_id)
-					_stats.sounds += 1
-			else:
-				audio.fire_soundset(sound_set, origin, source_bms_id)
-				_stats.sounds += 1
 		if fx != null and not effect.is_empty():
 			# The muzzle effect at the fire origin along the fire direction
 			# [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
@@ -389,22 +363,24 @@ func _drain_fires() -> void:
 		# ev["mf_light"]: the muzzle glow light — tracked deferral (no light pool).
 
 
-# The pending-sound queue [orig: Sound_TickPendingSlots @ 0x529310 — countdown per
-# logic tick, play 3D-positional at the recorded position on zero].
-func _tick_pending_sounds(ticks: int) -> void:
-	if _pending.is_empty():
+# The sim's ready fire sounds: immediate near shots, the adm-arm action-row
+# sets, and expired propagation-delayed slots, gated and counted down on the
+# logic clock (world/fire_sound.h). Each row plays positionally; the set's
+# max-range cull runs in the audio bank (D-AI-8).
+# [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / Sound_TickPendingSlots
+#  @ 0x529310]
+func _drain_fire_sounds() -> void:
+	var sounds: Array = _sim.drain_fire_sounds()
+	if sounds.is_empty():
 		return
 	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
-	var still: Array = []
-	for p_v in _pending:
-		var p: Dictionary = p_v
-		p["ticks"] = int(p["ticks"]) - maxi(1, ticks)
-		if int(p["ticks"]) > 0:
-			still.append(p)
-		elif audio != null:
-			audio.fire_soundset(
-				String(p["set"]), p["pos"], int(p.get("source_bms_id", 0)))
-	_pending = still
+	if audio == null:
+		return
+	for row_v in sounds:
+		var row: Dictionary = row_v
+		audio.fire_soundset(String(row.get("set", "")), row.get("pos", Vector3.ZERO),
+				int(row.get("source_bms_id", 0)))
+		_stats.sounds += 1
 
 
 # The witnessed ribbon build [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0, the

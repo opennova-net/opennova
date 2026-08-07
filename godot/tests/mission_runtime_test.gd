@@ -395,8 +395,10 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		assert_true(rt.get_sim().drain_fire_presentation_events().is_empty(),
 				"the runtime drained the complete fire queue this frame")
 
-	assert_eq(audio.calls.size(), 64,
-			"each remote-style round reaches the joiner's fire presenter once")
+	# Each remote-style round reaches the joiner's fire presenter once. The
+	# SOUND leg is the sim's now (world/fire_sound.h; the fire_sound ctest pins
+	# the gate, and fire_present_pass_test pins the drain-to-audio play) — the
+	# fixture ammo authors no ai_launch set, so no audio call is expected here.
 	assert_eq(int(rt.get_fire_present_stats()["fires"]), 64)
 
 

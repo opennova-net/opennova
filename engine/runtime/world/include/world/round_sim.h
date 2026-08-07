@@ -145,6 +145,14 @@ struct RoundSpawnParams {
     // descriptor. Zero for host/AI-originated fire. See FireEvent::wire_round_flags.
     // [orig: NetPacket_DeserializeRoundEvent @0x42f270 arm tests @0x42f521/@0x42f6ce]
     uint8_t wire_round_flags = 0;
+    // The decoded wire shooter's position at fire time, for adm-arm rounds
+    // spawned WITHOUT a local owner entity: retail's action-row sounds play at
+    // the resolved shooter entity's position, and a pure client resolves the
+    // shooter to its decoded row. Unset falls back to the fire origin (the
+    // eye). [orig: the entity+4 position ActionSlot_ExecuteAction plays at
+    // @ 0x4020ef — the receive path resolved the pool entity @ 0x42f491]
+    Vec3 shooter_pos;
+    bool shooter_pos_valid = false;
     // Immediate-only source override for a decoded remote shooter that has no
     // Entity/AiEntity in this World. Never retained by RoundSim.
     RoundSourceState *source_state = nullptr;
