@@ -9,6 +9,7 @@
 #ifndef OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
 #define OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
 
+#include <anim/aim_overlay.h>
 #include <simassets/adm_skeletal_clips.h>
 #include <threedi/threedi_3di3.h>
 #include <world/collision.h>
@@ -23,7 +24,27 @@ namespace opennova {
 class ResourceIndex;
 }
 
+namespace opennova::world {
+struct AiEntity;
+}
+
 namespace opennova::simassets {
+
+// The third-person held-weapon attach calibration — single-sourced here for
+// the render applier and the sim-side muzzle resolution alike (the GDScript
+// reference derivation lives in present_held_weapon.gd; the applier/reference
+// pair is pinned equivalent by wire_present_pass_test.gd).
+// [orig: the weapon rides model bone 16 ".bad row BN17 R Hand"
+//  (BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99); pivot nudge
+//  flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186; hand-frame
+//  Rz dbl_7C9BA0 / Ry dbl_7C9B98 via Math_BuildRotationMatrix4x4_ByAxis
+//  @ 0x611db0, branch @ 0x4b220f]
+inline constexpr int kHeldWeaponBoneIndex = 16;
+inline constexpr float kHeldWeaponAttachNudgeX = -0.05f;
+inline constexpr float kHeldWeaponAttachNudgeY = -0.05f;
+inline constexpr float kHeldWeaponAttachNudgeZ = 0.051f;
+inline constexpr double kHeldWeaponHandFrameZRad = 0.5759761961496483;
+inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 
 class SimCollisionPoseProvider : public world::ICollisionSectionMatrixProvider {
 public:
@@ -73,6 +94,22 @@ public:
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) override;
 
+	// The posed held-weapon muzzle for a registered skeletal PERSON — the
+	// sim-parse twin of the shell's rigid-weapon-draw anchor: the R-hand
+	// attach frame (bone 16 pose + the witnessed calibrations above) composed
+	// on the overlay body placement, then `weapon_model`'s named userpoint
+	// carried by it, in mission units. Applies the same draw gates as the
+	// held-weapon snapshot writer (dead / non-OnFoot / adm 0 report no
+	// weapon); false means unresolvable — the presenting shell keeps its own
+	// anchor chain (retail's deepest fallback is the entity origin).
+	// [orig: the receive-arm effect anchor Entity_ComputeActionTransform
+	//  @ 0x401310 (entity-origin fallback @ 0x401877..0x401887) over the
+	//  weapon draw frame @ 0x4b2180..0x4b22f8]
+	bool resolve_held_weapon_muzzle(world::World &world,
+			world::EntityHandle entity, uint8_t equipped_adm_index,
+			const Threedi3di3 &weapon_model, const char *userpoint_name,
+			world::Vec3 &out_mission) const;
+
 private:
 	struct SkeletalSource {
 		int32_t model_id = -1;
@@ -80,6 +117,13 @@ private:
 		std::shared_ptr<const AdmSkeletalClips> rig;
 	};
 
+	// The shared clip/blend/overlay/weapon-channel pose evaluation both the
+	// collision build and the muzzle resolution run (the @0x4b1290 chain up to
+	// the per-section composition). r_pose holds parent-relative locals.
+	bool eval_entity_pose(world::World &world, const SkeletalSource &source,
+			world::EntityHandle entity, std::vector<anim::PoseBone> &r_pose,
+			anim::AimOverlayAngles *r_angles, anim::AimOverlayInputs &r_inputs,
+			const world::Entity *&r_entity, world::AiEntity *&r_ai) const;
 	bool build_skeletal(world::World &world, const SkeletalSource &source,
 			world::EntityHandle entity,
 			const world::CollisionMatrix &entity_world,

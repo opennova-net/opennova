@@ -9,6 +9,8 @@
 
 #include <algorithm>
 
+#include <simassets/sim_collision_pose.h>
+
 #include "simulation/nova_simulation.h"
 
 using namespace godot;
@@ -335,14 +337,17 @@ namespace {
 
 // The held weapon rides bone INDEX 16 (".bad row BN17 R Hand") with a fixed
 // pivot nudge in raw def units, X negated into the render frame — the values
-// and every derivation live at the GDScript reference, present_held_weapon.gd
+// single-source from simassets (the sim-side muzzle shares them); every
+// derivation lives at the GDScript reference, present_held_weapon.gd
 // [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
-constexpr int kHeldWeaponBoneIndex = 16;
-const Vector3 kHeldWeaponAttachNudge(-0.05f, -0.05f, 0.051f);
+constexpr int kHeldWeaponBoneIndex = opennova::simassets::kHeldWeaponBoneIndex;
+const Vector3 kHeldWeaponAttachNudge(opennova::simassets::kHeldWeaponAttachNudgeX,
+		opennova::simassets::kHeldWeaponAttachNudgeY,
+		opennova::simassets::kHeldWeaponAttachNudgeZ);
 // Hand-frame calibration [orig: Rz dbl_7C9BA0 / Ry dbl_7C9B98 via
 // Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0].
-constexpr double kHandFrameZRad = 0.5759761961496483;
-constexpr double kHandFrameYRad = -1.3613982818082597;
+constexpr double kHandFrameZRad = opennova::simassets::kHeldWeaponHandFrameZRad;
+constexpr double kHandFrameYRad = opennova::simassets::kHeldWeaponHandFrameYRad;
 
 } // namespace
 

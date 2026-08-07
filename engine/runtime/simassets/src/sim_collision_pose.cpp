@@ -9,9 +9,11 @@
 #include "simassets/pose_inputs.h"
 
 #include <anim/aim_overlay.h>
+#include <io/strutil.h>
 #include <threedi/threedi_ctrl_catalog.h>
 #include <threedi/threedi_panm_pose.h>
 #include <world/ai.h>
+#include <world/angle.h>
 #include <world/infantry.h>
 #include <world/mount_controls.h>
 #include <world/world.h>
@@ -197,21 +199,16 @@ bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
 			model, out);
 }
 
-bool SimCollisionPoseProvider::build_skeletal(world::World &world,
+bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 		const SkeletalSource &source, world::EntityHandle entity,
-		const world::CollisionMatrix &entity_world,
-		const world::CollisionModel &model,
-		std::vector<world::CollisionMatrix> &out) const {
+		std::vector<anim::PoseBone> &r_pose, anim::AimOverlayAngles *r_angles,
+		anim::AimOverlayInputs &r_inputs, const world::Entity *&r_entity,
+		world::AiEntity *&r_ai) const {
 	const AdmSkeletalClips *rig = source.rig.get();
-	world::AiEntity *ai_entity =
-			world.ai != nullptr ? world.ai->for_handle(entity) : nullptr;
-	const world::Entity *e = world.registry.get(entity);
-	const size_t section_count = model.sections.size();
+	r_ai = world.ai != nullptr ? world.ai->for_handle(entity) : nullptr;
+	r_entity = world.registry.get(entity);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid() ||
-			ai_entity == nullptr || e == nullptr ||
-			rig->parents().size() < section_count ||
-			rig->rest_global().size() < section_count ||
-			rig->overlay_classes().size() < section_count)
+			r_ai == nullptr || r_entity == nullptr)
 		return false;
 
 	const std::string reset_key("anim_reset");
@@ -220,58 +217,80 @@ bool SimCollisionPoseProvider::build_skeletal(world::World &world,
 		return rig->has_clip(reset_key) ? reset_key : key;
 	};
 	const std::string primary_key =
-			resolve_primary_key(infantry_anim_key(ai_entity->inf.anim_state));
+			resolve_primary_key(infantry_anim_key(r_ai->inf.anim_state));
 	if (primary_key.empty()) return false;
 	const float primary_fps = rig->clip_fps(primary_key, 0);
 	const double primary_seconds = primary_fps > 0.0f
-			? static_cast<double>(std::max(ai_entity->inf.clip_phase, 0)) /
+			? static_cast<double>(std::max(r_ai->inf.clip_phase, 0)) /
 					(2.0 * primary_fps)
 			: 0.0;
 	std::string source_key;
 	double source_seconds = 0.0;
-	const bool primary_blend = ai_entity->inf.body_blend_active();
+	const bool primary_blend = r_ai->inf.body_blend_active();
 	if (primary_blend) {
 		source_key = resolve_primary_key(
-				infantry_anim_key(ai_entity->inf.anim_prev));
+				infantry_anim_key(r_ai->inf.anim_prev));
 		const float source_fps = rig->clip_fps(source_key, 0);
 		if (source_fps > 0.0f)
 			source_seconds =
 					static_cast<double>(
-							std::max(ai_entity->inf.anim_prev_clip_phase, 0)) /
+							std::max(r_ai->inf.anim_prev_clip_phase, 0)) /
 					(2.0 * source_fps);
 	}
 
-	const anim::AimOverlayInputs inputs = aim_overlay_inputs_for(*ai_entity, *e);
-	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
-	anim::compute_aim_overlay_angles(inputs, angles);
+	r_inputs = aim_overlay_inputs_for(*r_ai, *r_entity);
+	anim::compute_aim_overlay_angles(r_inputs, r_angles);
 	anim::Quat deltas[anim::kOverlayClassCount];
 	const anim::Quat body_inv =
-			anim::quat_inv(overlay_model_quat(angles[anim::kOverlayBody]));
+			anim::quat_inv(overlay_model_quat(r_angles[anim::kOverlayBody]));
 	for (int c = 0; c < static_cast<int>(anim::kOverlayClassCount); ++c) {
-		deltas[c] = anim::quat_mul(body_inv, overlay_model_quat(angles[c]));
+		deltas[c] = anim::quat_mul(body_inv, overlay_model_quat(r_angles[c]));
 	}
 
 	std::string weapon_key;
 	double weapon_seconds = 0.0;
-	const bool collapse_right_hand = mount_collapses_right_hand_row(*e);
 	if (world.cached.local_player.valid() &&
 			entity.packed == world.cached.local_player.packed &&
 			world::infantry_weapon_channel_visible(
-					ai_entity->inf, weapon_active,
-					mount_blocks_weapon_channel(*e))) {
-		weapon_key = infantry_anim_key(ai_entity->inf.wpn_state);
+					r_ai->inf, weapon_active,
+					mount_blocks_weapon_channel(*r_entity))) {
+		weapon_key = infantry_anim_key(r_ai->inf.wpn_state);
 		const float weapon_fps = rig->clip_fps(weapon_key, 0);
 		if (weapon_fps > 0.0f)
 			weapon_seconds =
 					static_cast<double>(
-							std::max(ai_entity->inf.wpn_clip_phase, 0)) /
+							std::max(r_ai->inf.wpn_clip_phase, 0)) /
 					(2.0 * weapon_fps);
 	}
 
-	std::vector<anim::PoseBone> pose;
 	rig->eval_composed_pose(primary_key, primary_seconds, primary_blend,
-			source_key, source_seconds, ai_entity->inf.anim_blend_weight,
-			deltas, weapon_key, weapon_seconds, pose);
+			source_key, source_seconds, r_ai->inf.anim_blend_weight,
+			deltas, weapon_key, weapon_seconds, r_pose);
+	return true;
+}
+
+bool SimCollisionPoseProvider::build_skeletal(world::World &world,
+		const SkeletalSource &source, world::EntityHandle entity,
+		const world::CollisionMatrix &entity_world,
+		const world::CollisionModel &model,
+		std::vector<world::CollisionMatrix> &out) const {
+	const AdmSkeletalClips *rig = source.rig.get();
+	const size_t section_count = model.sections.size();
+	if (rig == nullptr || !rig->loaded() || !rig->fk_valid() ||
+			rig->parents().size() < section_count ||
+			rig->rest_global().size() < section_count ||
+			rig->overlay_classes().size() < section_count)
+		return false;
+
+	std::vector<anim::PoseBone> pose;
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	anim::AimOverlayInputs inputs;
+	const world::Entity *e = nullptr;
+	world::AiEntity *ai_entity = nullptr;
+	if (!eval_entity_pose(world, source, entity, pose, angles, inputs, e,
+				ai_entity))
+		return false;
+	const bool collapse_right_hand = mount_collapses_right_hand_row(*e);
 	if (pose.size() < section_count) return false;
 
 	// The callback result is FINAL world-space. Build the body placement from
@@ -315,6 +334,216 @@ bool SimCollisionPoseProvider::build_skeletal(world::World &world,
 					body_world, render_pose, out[i]))
 			return false;
 	}
+	return true;
+}
+
+namespace {
+
+using RestTransform = AdmSkeletalClips::RestTransform;
+
+// Basis-only helpers over the RestTransform rows. Read as a godot-style
+// column-vector 3x3 in the MODEL WORLD frame: the render conversion
+// (render_matrix_from_deformation's (-x, y, z) mirror + row-vector transpose)
+// and the model-world re-import (affine_from_panm_matrix's transpose + X
+// conjugation, mounted_pose.cpp) compose to the identity on these rows, so
+// the pose/rest transforms ARE model-world affines as stored.
+RestTransform rows_mul_basis(const RestTransform &a, const RestTransform &b) {
+	RestTransform o;
+	for (int r = 0; r < 3; ++r)
+		for (int c = 0; c < 3; ++c)
+			o.rows[3 * r + c] = a.rows[3 * r + 0] * b.rows[0 * 3 + c] +
+					a.rows[3 * r + 1] * b.rows[1 * 3 + c] +
+					a.rows[3 * r + 2] * b.rows[2 * 3 + c];
+	return o;
+}
+
+anim::Vec3 rows_xform(const RestTransform &t, const anim::Vec3 &v) {
+	return anim::Vec3{
+			t.rows[0] * v.x + t.rows[1] * v.y + t.rows[2] * v.z + t.origin.x,
+			t.rows[3] * v.x + t.rows[4] * v.y + t.rows[5] * v.z + t.origin.y,
+			t.rows[6] * v.x + t.rows[7] * v.y + t.rows[8] * v.z + t.origin.z};
+}
+
+RestTransform rows_axis_y(double angle) {
+	const float c = static_cast<float>(std::cos(angle));
+	const float s = static_cast<float>(std::sin(angle));
+	RestTransform o;
+	o.rows[0] = c;
+	o.rows[2] = s;
+	o.rows[6] = -s;
+	o.rows[8] = c;
+	return o;
+}
+
+RestTransform rows_axis_z(double angle) {
+	const float c = static_cast<float>(std::cos(angle));
+	const float s = static_cast<float>(std::sin(angle));
+	RestTransform o;
+	o.rows[0] = c;
+	o.rows[1] = -s;
+	o.rows[3] = s;
+	o.rows[4] = c;
+	return o;
+}
+
+RestTransform rows_axis_x(double angle) {
+	const float c = static_cast<float>(std::cos(angle));
+	const float s = static_cast<float>(std::sin(angle));
+	RestTransform o;
+	o.rows[4] = c;
+	o.rows[5] = -s;
+	o.rows[7] = s;
+	o.rows[8] = c;
+	return o;
+}
+
+constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
+
+// The one placement convention in the model world frame — the mounted_pose
+// resolver's model_basis_from_mission_euler twin (RotY(90-yaw) * RotZ(pitch) *
+// RotX(roll) * RotY(+90), the trailing .3di model-forward correction).
+RestTransform basis_from_mission_euler(double pitch_deg, double yaw_deg,
+		double roll_deg) {
+	return rows_mul_basis(
+			rows_mul_basis(
+					rows_mul_basis(
+							rows_axis_y((90.0 - yaw_deg) * kRadiansPerDegree),
+							rows_axis_z(pitch_deg * kRadiansPerDegree)),
+					rows_axis_x(roll_deg * kRadiansPerDegree)),
+			rows_axis_y(kHalfPi));
+}
+
+// A godot-frame mission-euler triple from overlay BAM angles — the adapter's
+// mission_euler_from_overlay in native doubles.
+void mission_euler_from_overlay_angles(const anim::AimOverlayAngles &angles,
+		double &r_pitch_deg, double &r_yaw_deg, double &r_roll_deg) {
+	r_pitch_deg = static_cast<double>(angles.pitch) * world::kDegreesPerBam;
+	r_yaw_deg = world::mission_yaw_deg_from_bam_heading(angles.yaw);
+	r_roll_deg = static_cast<double>(angles.roll) * world::kDegreesPerBam;
+}
+
+} // namespace
+
+bool SimCollisionPoseProvider::resolve_held_weapon_muzzle(world::World &world,
+		world::EntityHandle entity, uint8_t equipped_adm_index,
+		const Threedi3di3 &weapon_model, const char *userpoint_name,
+		world::Vec3 &out_mission) const {
+	if (userpoint_name == nullptr || userpoint_name[0] == '\0') return false;
+	const auto found = skeletal_sources_.find(entity.packed);
+	if (found == skeletal_sources_.end()) return false;
+	const SkeletalSource &source = found->second;
+	const AdmSkeletalClips *rig = source.rig.get();
+	const world::Entity *guard = world.registry.get(entity);
+	if (rig == nullptr || guard == nullptr ||
+			source.registry_spawn_id != guard->registry_spawn_id)
+		return false;
+	if (rig->parents().size() <= kHeldWeaponBoneIndex ||
+			rig->rest_global().size() <= kHeldWeaponBoneIndex ||
+			rig->rest_global_inverse().size() <= kHeldWeaponBoneIndex)
+		return false;
+
+	std::vector<anim::PoseBone> pose;
+	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
+	anim::AimOverlayInputs inputs;
+	const world::Entity *e = nullptr;
+	world::AiEntity *ai_entity = nullptr;
+	if (!eval_entity_pose(world, source, entity, pose, angles, inputs, e,
+				ai_entity))
+		return false;
+	if (pose.size() <= kHeldWeaponBoneIndex) return false;
+	// The same draw gates the held-weapon snapshot writer applies: a dead,
+	// seated-hidden, or unarmed body reports no weapon; a mount that collapses
+	// the hand row zeroes the anchor bone outright.
+	// [orig: Entity_CanFireWeapon @ 0x4dcb10; the BN17 special row @ 0x4b1290]
+	if ((e->flags & world::kEntityFlagDead) != 0) return false;
+	if (inputs.mount_mode != anim::MountMode::OnFoot) return false;
+	if (equipped_adm_index == 0 || equipped_adm_index == world::kAdmSlotNone)
+		return false;
+	if (mount_collapses_right_hand_row(*e)) return false;
+
+	// The weapon model's named userpoint, in the model world frame — the
+	// mounted_pose decode swizzle ({y, z, x} 16.16, unmirrored: the evaluator
+	// frame already carries the loader's -X).
+	const ThreediUserPoint *up = nullptr;
+	for (size_t i = 0; i < weapon_model.user_point_count; ++i) {
+		const ThreediUserPoint &candidate = weapon_model.user_points[i];
+		if (strutil::iequals(candidate.name, userpoint_name)) {
+			up = &candidate;
+			break;
+		}
+	}
+	if (up == nullptr) return false;
+	const anim::Vec3 userpoint_model{
+			static_cast<float>(up->y) / 65536.0f,
+			static_cast<float>(up->z) / 65536.0f,
+			static_cast<float>(up->x) / 65536.0f};
+
+	// Bone-16 FK, the build_skeletal walk without the section mapping.
+	RestTransform pose_global[kHeldWeaponBoneIndex + 1];
+	for (int i = 0; i <= kHeldWeaponBoneIndex; ++i) {
+		RestTransform local;
+		anim::quat_to_mat3_rows(pose[static_cast<size_t>(i)].rotation,
+				local.rows);
+		local.origin = pose[static_cast<size_t>(i)].origin;
+		const int parent = rig->parents()[static_cast<size_t>(i)];
+		pose_global[i] = parent >= 0 && parent < i
+				? rest_mul(pose_global[parent], local)
+				: local;
+	}
+
+	// The applier's composition in the model world frame: the body placement
+	// from the overlay body class carries the bone pose; model_to_world is the
+	// deformation on that placement (pose * rest^-1). The hand-frame
+	// calibration and pivot nudge are authored in the RENDER frame — import
+	// them by the loader's X-mirror conjugation (the mounted_pose attachment
+	// recipe): render Rz(a)/Ry(b) become model-world Rz(-a)/Ry(-b), and the
+	// render nudge's negated X un-negates.
+	// [orig: the weapon draw matrix build @ 0x4b2180..0x4b22f8 — translation
+	//  overwrite @ 0x4b22cf..0x4b22f8, hand-frame branch @ 0x4b220f]
+	double body_pitch = 0.0, body_yaw = 0.0, body_roll = 0.0;
+	mission_euler_from_overlay_angles(angles[anim::kOverlayBody], body_pitch,
+			body_yaw, body_roll);
+	RestTransform body =
+			basis_from_mission_euler(body_pitch, body_yaw, body_roll);
+	body.origin = anim::Vec3{e->position.x, e->position.z, -e->position.y};
+	const RestTransform joint_world =
+			rest_mul(body, pose_global[kHeldWeaponBoneIndex]);
+	const RestTransform deformation =
+			rest_mul(pose_global[kHeldWeaponBoneIndex],
+					rig->rest_global_inverse()[kHeldWeaponBoneIndex]);
+	const RestTransform model_to_world = rest_mul(body, deformation);
+
+	const bool hand_frame = ai_entity->inf.wpn_state >= 0 &&
+			(world::infantry_anim_flags(ai_entity->inf.wpn_state) & 0x80u) != 0;
+	RestTransform attach;
+	if (hand_frame) {
+		attach = rows_mul_basis(
+				rows_mul_basis(model_to_world,
+						rows_axis_z(-kHeldWeaponHandFrameZRad)),
+				rows_axis_y(-kHeldWeaponHandFrameYRad));
+	} else {
+		const anim::AimOverlayAngles attach_angles =
+				anim::compute_held_weapon_attach_angles(inputs);
+		double ap = 0.0, ay = 0.0, ar = 0.0;
+		mission_euler_from_overlay_angles(attach_angles, ap, ay, ar);
+		attach = basis_from_mission_euler(ap, ay, ar);
+	}
+	const anim::Vec3 nudge_model{-kHeldWeaponAttachNudgeX,
+			kHeldWeaponAttachNudgeY, kHeldWeaponAttachNudgeZ};
+	RestTransform nudge_carrier = model_to_world;
+	nudge_carrier.origin = anim::Vec3{};
+	const anim::Vec3 nudged = rows_xform(nudge_carrier, nudge_model);
+	attach.origin = anim::Vec3{joint_world.origin.x + nudged.x,
+			joint_world.origin.y + nudged.y, joint_world.origin.z + nudged.z};
+
+	const anim::Vec3 muzzle_model_world = rows_xform(attach, userpoint_model);
+	if (!std::isfinite(muzzle_model_world.x) ||
+			!std::isfinite(muzzle_model_world.y) ||
+			!std::isfinite(muzzle_model_world.z))
+		return false;
+	// Godot world -> mission, the mounted_pose output conversion.
+	out_mission = world::Vec3{muzzle_model_world.x, -muzzle_model_world.z,
+			muzzle_model_world.y};
 	return true;
 }
 

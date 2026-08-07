@@ -68,8 +68,11 @@ var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
 var _mat_additive: StandardMaterial3D  # std/rapid/sniper/df1/NVG [orig: fog-black additive]
 var _mat_alpha: StandardMaterial3D     # rocket/at4/grenade smoke [orig: alpha + scene fog]
-# Probe/diagnostic counters (ai_threat_probe asserts the presentation actually ran).
-var _stats := {"fires": 0, "sounds": 0, "effects": 0, "tracer_peak": 0}
+# Probe/diagnostic counters (ai_threat_probe asserts the presentation actually
+# ran; muzzle_ab/_max compare the render anchor against the sim-posed muzzle
+# when both resolve — the S12a shadow seam toward the S11 cutover).
+var _stats := {"fires": 0, "sounds": 0, "effects": 0, "tracer_peak": 0,
+		"muzzle_ab": 0, "muzzle_ab_max": 0.0}
 
 # The witnessed per-style ribbon tables, id 1..12 = the ammo.def tracer_type ids
 # (stdred/stdgreen/rocket/at4/grenade/rapidred/rapidgreen/8=NVG laser/sniperred/
@@ -348,12 +351,23 @@ func _drain_fires() -> void:
 			# to the wire eye position would reintroduce the very bug this fixes, so an
 			# unresolvable anchor takes the provider's own body-origin fallback —
 			# retail's deepest fallback is the entity origin [orig: @0x401867..0x401887].
+			# The render node anchor stays authoritative (it carries the presented
+			# remote blends); the event's sim-posed muzzle (S12a) is its fallback
+			# and rides the A/B counters while both resolve.
+			var sim_muzzle: Variant = ev.get("muzzle")
+			var anchored := Vector3.INF
 			if _muzzle_provider.is_valid():
-				var anchored: Vector3 = _muzzle_provider.call(
+				anchored = _muzzle_provider.call(
 						int(ev.get("shooter_handle", -1)),
 						String(ev.get("action_userpoint", "")))
-				if anchored.is_finite():
-					origin = anchored
+			if anchored.is_finite():
+				origin = anchored
+				if sim_muzzle is Vector3 and (sim_muzzle as Vector3).is_finite():
+					_stats.muzzle_ab += 1
+					_stats.muzzle_ab_max = maxf(float(_stats.muzzle_ab_max),
+							anchored.distance_to(sim_muzzle))
+			elif sim_muzzle is Vector3 and (sim_muzzle as Vector3).is_finite():
+				origin = sim_muzzle
 		if fx != null and not effect.is_empty():
 			# The muzzle effect at the fire origin along the fire direction
 			# [orig: the 56-B spawn descriptor -> CEffectWorld_SpawnEmitterAtPosition
