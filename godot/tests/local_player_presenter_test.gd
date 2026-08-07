@@ -242,6 +242,12 @@ class FakeSim:
 	func local_player_interior_item_id() -> int:
 		return interior_item_id
 
+	# The sim's blended FP viewmodel bias (world/player_view.h, S8): the value
+	# double serves the hip pos over the /256 scale — the fraction-0 blend.
+	func local_player_viewmodel_bias_view_units(pos_raw: Vector3,
+			_tpos_raw: Vector3) -> Vector3:
+		return pos_raw / 256.0
+
 
 class FakeAvatar:
 	extends FakeWeaponPart
@@ -703,41 +709,42 @@ func test_camera_state_rides_the_sim_view() -> void:
 		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
 		"the camera fov is the sim's policy value through the shared conversion")
 
-	# The camera consumes retail's already-doubled recoil pitch only in first
-	# person. It must not mutate the sim aim or leak into the 3P orbit.
-	# [orig: Camera_ComputeThirdPersonView @0x437fc7]
-	world.view.fp_pitch_recoil_deg = 8.0
+	# The camera stamps the SIM-COMPOSED pose 1:1 (world/player_view.h, S8):
+	# the composition itself — the eye floor/pull-back, the recoil-doubled FP
+	# pitch, the pivot nudge and march landing — is pinned by the player_view
+	# ctest; the presenter converts the mission-euler pose to the Godot frame
+	# and stamps the node. [orig: Camera_ComputeThirdPersonView @0x437d10]
+	world.view.camera_pose_valid = true
+	world.view.camera_eye = Vector3(3.0, 1.5, -2.0)
+	world.view.camera_yaw_deg = 0.0
+	world.view.camera_pitch_deg = 8.0
+	world.view.camera_roll_deg = 0.0
 	presenter.after_world_tick()
+	assert_almost_eq((camera.global_position - Vector3(3.0, 1.5, -2.0)).length(),
+			0.0, 0.001, "the camera sits at the composed eye")
 	var fp_forward := -camera.global_basis.z
 	assert_almost_eq(rad_to_deg(asin(fp_forward.y)), 8.0, 0.001,
-			"first-person camera adds the 2*recoil pitch term")
+			"the camera pitches to the composed (recoil-doubled) pitch")
 
-	# Third person: the camera backs off the NUDGED pivot — the sim's chased
-	# anchor + R*(0.125 fwd/left/up) — by the round-start reset distance 1.0
-	# with orbit yaw/pitch 0 [orig: Camera_ResetToLocalPlayer @0x4a3d30; the
-	# nudge @0x43818a]. Level look at yaw 0: fwd = (0,0,-1), left = (-1,0,0),
-	# up = (0,1,0).
-	world.view.tp_anchor = Vector3(4.0, 2.0, -6.0)
-	world.view.tp_anchor_valid = true
+	# The FP roll rides the pose; the sign pin: positive roll (lean right)
+	# tilts the view right — the up axis leans toward +x at yaw 0.
+	world.view.camera_roll_deg = 10.0
+	presenter.after_world_tick()
+	assert_gt(camera.global_basis.y.x, 0.01,
+			"positive composed roll tilts the view right")
+	world.view.camera_roll_deg = 0.0
+
+	# Third person: the presenter stamps the same pose fields; mode-dependent
+	# composition differences live in the sim.
+	world.view.camera_eye = Vector3(4.0, 2.0, -5.25)
+	world.view.camera_pitch_deg = 0.0
 	presenter.set_third_person(true)
 	presenter.after_world_tick()
 	var tp_forward_actual := -camera.global_basis.z
 	assert_almost_eq(rad_to_deg(asin(tp_forward_actual.y)), 0.0, 0.001,
-			"third-person orbit excludes the first-person recoil doubling")
-	var pivot: Vector3 = world.view.tp_anchor \
-			+ (Vector3(0, 0, -1) + Vector3(-1, 0, 0) + Vector3(0, 1, 0)) \
-			* presenter.PLAYER_TP_PIVOT_NUDGE
-	var to_pivot: Vector3 = pivot - camera.global_position
-	assert_almost_eq(presenter.PLAYER_TP_DISTANCE, 1.0, 0.001,
-		"the in-play chase distance is the reset 1.0 [orig: @0x4a3d4c]")
-	# The march's no-collision landing: (floor(1.0/0.25) - 1) * 0.25 = 0.75 back
-	# [orig: @0x438213..0x43832e — the eye stays on the LAST 0.25u step].
-	assert_almost_eq(to_pivot.length(), 0.75, 0.001,
-		"the camera lands on the march's last 0.25u step, not the full distance")
-	var expected_eye: Vector3 = pivot - Vector3(0, 0, -1) \
-			* LocalPlayerPresenter.tp_effective_distance(presenter.PLAYER_TP_DISTANCE)
-	assert_almost_eq((camera.global_position - expected_eye).length(), 0.0, 0.001,
-		"the eye is pivot - effective_dist*forward (orbit pitch 0 at the reset)")
+			"the third-person pose keeps the composed base pitch")
+	assert_almost_eq((camera.global_position - Vector3(4.0, 2.0, -5.25)).length(),
+			0.0, 0.001, "the camera sits at the composed third-person eye")
 
 
 func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:

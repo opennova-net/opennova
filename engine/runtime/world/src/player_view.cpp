@@ -6,6 +6,10 @@
 
 #include <cmath>
 
+#include <io/bam.h>
+
+#include "world/angle.h"
+
 namespace opennova::world {
 
 void player_view_tick(PlayerViewState &v, const float eye[3]) {
@@ -151,6 +155,127 @@ void player_view_bias_units(const PlayerViewState &v, const float pos[3],
                             const float tpos[3], float out[3]) {
     const float f = player_view_scope_fraction(v);
     for (int i = 0; i < 3; ++i) out[i] = pos[i] + (tpos[i] - pos[i]) * f;
+}
+
+void player_view_bias_view_units(const PlayerViewState &v, bool suppress_bias,
+                                 const float pos[3], const float tpos[3],
+                                 float out[3]) {
+    if (suppress_bias) {
+        // The NoCardSwitch reload rule drops the ADS half for the frame
+        // (instant, not eased) — the presented viewmodel returns to the hip
+        // offset, the ported reading of retail's skipped camera-bias add
+        // [orig: @ 0x4dd439/@ 0x4dd4cc].
+        for (int i = 0; i < 3; ++i) out[i] = pos[i] / kWeaponDefPosScale;
+        return;
+    }
+    player_view_bias_units(v, pos, tpos, out);
+    for (int i = 0; i < 3; ++i) out[i] /= kWeaponDefPosScale;
+}
+
+float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam) {
+    // [orig: Camera_ComputeThirdPersonView @ 0x437fc7 — pitch += 2 * recoil]
+    return static_cast<float>(
+            static_cast<double>(io::bam_dbl(recoil_pitch_bam)) *
+            kDegreesPerBam);
+}
+
+float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam) {
+    // [orig: @ 0x437fe6 — g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+    return static_cast<float>(
+            static_cast<double>(
+                    io::bam_add(torso_roll_bam, io::bam_sar(lean_bam, 2))) *
+            kDegreesPerBam);
+}
+
+float player_view_tp_effective_distance(float distance) {
+    if (distance >= kTpMarchGate) return distance; // [orig: the gate @ 0x4381e9]
+    const int steps = static_cast<int>(distance / kTpMarchStep);
+    if (steps <= 1) return 0.0f; // [orig: numSteps <= 1 stays at the pivot @ 0x43821f]
+    return static_cast<float>(steps - 1) * kTpMarchStep;
+}
+
+namespace {
+
+constexpr double kRadPerDeg = 3.14159265358979323846 / 180.0;
+
+// The mission-frame view axes for a yaw/pitch pair (roll spins about forward
+// and moves none of these) — the (x, z, -y) godot conversion of the presented
+// look basis, kept in one place so both camera legs and the pivot nudge agree.
+void view_axes_mission(double yaw_deg, double pitch_deg, float fwd[3],
+                       float left[3], float up[3]) {
+    const double sy = std::sin(yaw_deg * kRadPerDeg);
+    const double cy = std::cos(yaw_deg * kRadPerDeg);
+    const double sp = std::sin(pitch_deg * kRadPerDeg);
+    const double cp = std::cos(pitch_deg * kRadPerDeg);
+    fwd[0] = static_cast<float>(sy * cp);
+    fwd[1] = static_cast<float>(cy * cp);
+    fwd[2] = static_cast<float>(sp);
+    if (left != nullptr) {
+        left[0] = static_cast<float>(-cy);
+        left[1] = static_cast<float>(sy);
+        left[2] = 0.0f;
+    }
+    if (up != nullptr) {
+        up[0] = static_cast<float>(-sp * sy);
+        up[1] = static_cast<float>(-sp * cy);
+        up[2] = static_cast<float>(cp);
+    }
+}
+
+} // namespace
+
+void player_view_compose_camera(const PlayerViewState &v,
+                                const float position[3],
+                                const float anchor_eye[3], bool anchor_valid,
+                                float aim_yaw_deg, float aim_pitch_deg,
+                                int32_t recoil_pitch_bam,
+                                int32_t torso_roll_bam, int32_t lean_bam,
+                                PlayerCameraPose &out) {
+    // The eye anchor: the shell-fed head-bone eye floored kEyeMinAbovePosition
+    // over Position, or the non-person +1.0 bump.
+    // [orig: the 0x2000 floor @ 0x4b6b98; the bump @ 0x437e8f]
+    float eye[3];
+    if (anchor_valid) {
+        eye[0] = anchor_eye[0];
+        eye[1] = anchor_eye[1];
+        eye[2] = anchor_eye[2] < position[2] + kEyeMinAbovePosition
+                ? position[2] + kEyeMinAbovePosition
+                : anchor_eye[2];
+    } else {
+        eye[0] = position[0];
+        eye[1] = position[1];
+        eye[2] = position[2] + kNonPersonEyeBump;
+    }
+    out.third_person = v.third_person;
+    if (v.third_person) {
+        // [orig: mode 1 @ 0x438100..0x4383e2 — the nudged pivot backs off the
+        //  march-landed distance along the orbit forward; the final rotation is
+        //  the look-at back to the pivot, equal to the seed angles with no
+        //  march collision ported (net-re §5.39)]
+        out.yaw_deg = aim_yaw_deg;
+        out.pitch_deg = aim_pitch_deg + kTpOrbitPitchDeg;
+        out.roll_deg = 0.0f;
+        const float *anchor = v.tp_anchor_valid ? v.tp_anchor : eye;
+        float fwd[3], left[3], up[3];
+        view_axes_mission(out.yaw_deg, out.pitch_deg, fwd, left, up);
+        const float back = player_view_tp_effective_distance(kTpDistance);
+        for (int i = 0; i < 3; ++i) {
+            const float pivot =
+                    anchor[i] + (fwd[i] + left[i] + up[i]) * kTpPivotNudge;
+            out.eye[i] = pivot - fwd[i] * back;
+        }
+        return;
+    }
+    // [orig: mode 0, the on-foot person leg @ 0x437f9c..0x438031 — pitch adds
+    //  the doubled recoil, roll composes torso+lean, then the eye pulls back
+    //  along the full view rotation (forward is roll-invariant)]
+    out.yaw_deg = aim_yaw_deg;
+    out.pitch_deg =
+            aim_pitch_deg + player_view_fp_pitch_recoil_deg(recoil_pitch_bam);
+    out.roll_deg = player_view_fp_roll_deg(torso_roll_bam, lean_bam);
+    float fwd[3];
+    view_axes_mission(out.yaw_deg, out.pitch_deg, fwd, nullptr, nullptr);
+    for (int i = 0; i < 3; ++i) out.eye[i] = eye[i] - fwd[i] * kFpEyePullback;
 }
 
 } // namespace opennova::world

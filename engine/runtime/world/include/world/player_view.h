@@ -37,6 +37,28 @@ constexpr int32_t kNvgGainMin = 0;
 constexpr int32_t kNvgGainMax = 4;
 // [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
 constexpr float kTpAnchorEase = 0.25f;
+// The first-person eye pull-back along the full view rotation: -0x3000 on the
+// view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
+// (-0x3000, 0, 0) added onto g_view_pos @ 0x438001..0x438031].
+constexpr float kFpEyePullback = 0.1875f;
+// The CameraOffset floor and the non-person eye bump.
+// [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
+constexpr float kEyeMinAbovePosition = 0.125f;
+constexpr float kNonPersonEyeBump = 1.0f;
+// The chase camera's in-play numbers: the ROUND-START reset (distance 1.0,
+// orbit zeroed — the tight over-the-shoulder view) and the pivot nudge/march.
+// [orig: Camera_ResetToLocalPlayer @ 0x4a3d30 (distance 0x10000 @ 0x4a3d4c,
+//  orbit zeroed @ 0x4a3d56/5b); nudge R*(0x2000,0x2000,0x2000) @ 0x43818a;
+//  0.25u march steps @ 0x438243, gate @ 0x4381e9]
+constexpr float kTpDistance = 1.0f;
+constexpr float kTpOrbitPitchDeg = 0.0f;
+constexpr float kTpPivotNudge = 0.125f;
+constexpr float kTpMarchStep = 0.25f;
+constexpr float kTpMarchGate = 8.0f;
+// weapon.def `pos`/`tpos` file unit -> world units [orig: the parser stores
+// atof(str) * 256 (flt_7D1D70 @ 0x544770) and the camera ftol's it onto the
+// 16.16 view position — the net world offset is file_value / 256].
+constexpr float kWeaponDefPosScale = 256.0f;
 
 struct PlayerViewState {
     bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
@@ -137,6 +159,65 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // Player_UpdateFirstPersonCamera @ 0x4dd380; the interp @ 0x4df36e].
 void player_view_bias_units(const PlayerViewState &v, const float pos[3],
                             const float tpos[3], float out[3]);
+
+// The eased view bias in VIEW-FRAME world units (X=forward, Y=left, Z=up —
+// the witnessed def/view frame; the aim ray's far point is {+1000, 0, 0}
+// through the same transform @ 0x592a0f): the raw blend over
+// kWeaponDefPosScale; while the NoCardSwitch reload rule suppresses the bias
+// the ADS half drops for the frame (the hip offset — the ported reading of
+// retail's skipped camera-bias add). The presenting shell maps view axes onto
+// its camera frame and parents the viewmodel — node work only.
+// [orig: Player_UpdateFirstPersonCamera @ 0x4dd380 — the view-local rotate
+//  @ 0x4dd5d8; the suppress skip @ 0x4dd439/@ 0x4dd4cc]
+void player_view_bias_view_units(const PlayerViewState &v, bool suppress_bias,
+                                 const float pos[3], const float tpos[3],
+                                 float out[3]);
+
+// The FP camera's recoil pitch: TWICE the live accumulator, camera-only —
+// third-person orbit, projectile aim, and the HUD anchor keep the base pitch.
+// [orig: Camera_ComputeThirdPersonView @ 0x437fc7]
+float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam);
+
+// The FP camera roll: torsoRoll + lean/4 (arithmetic-shift BAM quarter).
+// [orig: the on-foot person leg @ 0x437fe6 —
+//  g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)]
+float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
+
+// The chase camera's collision-march NO-COLLISION landing [orig:
+// @ 0x438213..0x43832e]: under 8.0u the eye marches back in 0.25u steps for
+// stepIndex 1..numSteps-1 (numSteps = floor(dist/0.25)) and stays on the LAST
+// step — never the full distance (numSteps <= 1 leaves the eye at the pivot
+// @ 0x43821f). The per-step bone-collision FORCES (the obstruction pull-in)
+// stay a tracked deferral (net-re §5.39).
+float player_view_tp_effective_distance(float distance);
+
+// The composed local camera for one presented frame, mission space — the
+// witnessed pose math; the presenting shell converts frames and stamps the
+// Camera3D node. `anchor_eye` is the shell-fed head-bone eye (the permanent
+// D-INF-18 write-back; pass valid=false for the non-person +1.0 bump over
+// `position`), `aim_yaw/pitch_deg` the post-binocular aim angles.
+// First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
+// on-foot person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled
+// back kFpEyePullback along the view forward; pitch adds the doubled recoil;
+// roll = torsoRoll + lean/4.
+// Third person [orig: mode 1 @ 0x438100..0x4383e2]: the chased anchor plus
+// the pivot nudge R*(nudge,nudge,nudge) backed off by the march-landed
+// distance along the orbit forward; roll 0. With no march collision ported,
+// emitting the seed angles equals the original's final look-at recompute.
+struct PlayerCameraPose {
+    float eye[3] = {0.0f, 0.0f, 0.0f}; // mission units
+    float yaw_deg = 0.0f;              // mission-euler view angles
+    float pitch_deg = 0.0f;
+    float roll_deg = 0.0f;
+    bool third_person = false;
+};
+void player_view_compose_camera(const PlayerViewState &v,
+                                const float position[3],
+                                const float anchor_eye[3], bool anchor_valid,
+                                float aim_yaw_deg, float aim_pitch_deg,
+                                int32_t recoil_pitch_bam,
+                                int32_t torso_roll_bam, int32_t lean_bam,
+                                PlayerCameraPose &out);
 
 } // namespace opennova::world
 

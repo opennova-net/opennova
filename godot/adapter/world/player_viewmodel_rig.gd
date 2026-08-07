@@ -239,20 +239,21 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-	# The ADS pos -> tpos swap: instant once sighted in the original's camera
-	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 -> AltCamOffset],
-	# with the visible ease carried by the 15-step scope-camera interp — SIM state
-	# at the world cadence [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp
-	# @0x82CE40; engine/runtime/world player_view_bias_units states the blend].
-	var ads := view.scope_fraction if view != null else 0.0
-	# The NoCardSwitch reload rule: reloading a card-switching weapon drops the
-	# ADS bias for the frame (instant, not eased) [orig: Player_UpdateFirstPersonCamera
-	# @0x4dd439/@0x4dd4cc skip the bias add while Player_IsReloadingCardSwitchWeapon].
-	if view != null and view.suppress_view_bias:
-		ads = 0.0
-	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
+	# The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
+	# suppression run in the SIM (world/player_view.h player_view_bias_view_units,
+	# S8) — one blended VIEW-FRAME offset per frame; _viewmodel_view_offset maps
+	# the view axes onto Godot camera axes. Harness sim doubles implement the
+	# same seam.
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 ->
+	#  AltCamOffset; the interp CNetPlayerInterp_Setup @0x4df36e]
+	var sim = _world.get_sim() if _world != null else null
+	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
+	if sim != null:
+		view_offset = _viewmodel_view_offset(
+				sim.local_player_viewmodel_bias_view_units(
+						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS))
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
-		vm_basis, bias * _viewmodel_offset(view_units))
+		vm_basis, bias * view_offset)
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; in the port, the dedicated layer is drawn
@@ -371,28 +372,28 @@ func _apply_viewmodel_def() -> void:
 	# set_local_player_weapon): the ADS gates + fov policy run there (ADR 0016).
 
 
-# Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
-# The witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380 — the offset is
-# VIEW-LOCAL: Math_FixedPointTransformPoint22(g_view_matrix, &cam_offset, ..) @0x4dd5d8
-# rotates it by the view basis before adding onto g_view_pos; at ADS settle (entity
-# Flags & 2) the tpos/AltCamOffset REPLACES the offset wholesale @0x4dd58f..0x4dd5c7;
-# scale flt_7D1D70=256 @0x544770]. The view/def frame is X = FORWARD, Y = LEFT,
-# Z = UP — proven by the aim ray's far point being {+65536000, 0, 0} through the SAME
-# transform [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16].
+# Map a VIEW-FRAME offset (world units, from the sim's blended bias) onto Godot
+# camera-local axes. The view/def frame is X = FORWARD, Y = LEFT, Z = UP —
+# proven by the aim ray's far point being {+65536000, 0, 0} through the SAME
+# transform [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0)
+# q16; the view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8].
 # Godot camera-local is (x right, y up, -z forward), so:
-#   file x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
-#   file y (left)    -> Godot -x
-#   file z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+#   view x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
+#   view y (left)    -> Godot -x
+#   view z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
 # (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the AK's
 # |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare — the canted-ADS
 # report. oscarmike's onhook-derived map agrees with the witnessed frame.) The
 # velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop (-1280 @0x4dd578)
 # are recorded unported tails.
+func _viewmodel_view_offset(view_units: Vector3) -> Vector3:
+	return Vector3(-view_units.y, view_units.z, -view_units.x)
+
+
+# The raw-def-units fallback for a null-sim harness: the same axis map over the
+# /256 scale the sim's blend otherwise applies [orig: flt_7D1D70=256 @0x544770].
 func _viewmodel_offset(units: Vector3) -> Vector3:
-	return Vector3(
-		-units.y / WEAPON_DEF_POS_SCALE,
-		units.z / WEAPON_DEF_POS_SCALE,
-		-units.x / WEAPON_DEF_POS_SCALE)
+	return _viewmodel_view_offset(units / WEAPON_DEF_POS_SCALE)
 
 
 # Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).

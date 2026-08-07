@@ -277,38 +277,80 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
 			-player_view_.tp_anchor[1]);
 	out["tp_anchor_valid"] = player_view_.tp_anchor_valid;
-	// The first-person camera consumes twice entity+0x380. Export the already
-	// wrapped composition separately from authoritative look pitch so the host
-	// cannot accidentally apply it to third person or aim rays.
-	// [orig: Camera_ComputeThirdPersonView @0x437fc7]
-	{
-		float fp_pitch_recoil_deg = 0.0f;
-		if (world_ && world_->ai && world_->cached.local_player.valid()) {
-			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player)) {
-				const int32_t doubled =
-						opennova::io::bam_dbl(p->inf.recoil_pitch);
-				fp_pitch_recoil_deg = static_cast<float>(
-						static_cast<double>(doubled) *
+	// The composed camera pose + its FP components — one native composition
+	// (world/player_view.h, S8): the shell converts frames and stamps the
+	// Camera3D node. The recoil doubling and torso+lean/4 roll stay exported
+	// separately for diagnostics/probes; authoritative look pitch never
+	// inherits the camera-only doubling.
+	// [orig: Camera_ComputeThirdPersonView @0x437d10 — the on-foot person leg
+	//  @0x437f9c..0x438031, the TP leg @0x438100..0x4383e2, recoil @0x437fc7,
+	//  roll @0x437fe6]
+	if (world_ && world_->ai && world_->cached.local_player.valid()) {
+		if (const AiEntity *p =
+					world_->ai->for_handle(world_->cached.local_player)) {
+			const opennova::world::Entity *e =
+					world_->registry.get(world_->cached.local_player);
+			out["fp_pitch_recoil_deg"] =
+					opennova::world::player_view_fp_pitch_recoil_deg(
+							p->inf.recoil_pitch);
+			out["fp_roll_deg"] = opennova::world::player_view_fp_roll_deg(
+					p->inf.torso_roll, p->inf.lean_angle);
+			if (e != nullptr) {
+				// The aim angles the camera composes over: the presented look
+				// getters' values, plus the binocular wander while its optical
+				// view is up (the shell's former _aim_angles_deg).
+				float aim_yaw = static_cast<float>(
+						opennova::world::mission_yaw_deg_from_bam_heading(
+								p->heading));
+				float aim_pitch = static_cast<float>(
+						static_cast<double>(p->pitch) *
 						opennova::world::kDegreesPerBam);
+				if (player_view_.binoculars_view_active) {
+					aim_yaw += static_cast<float>(binocular_yaw_offset_deg_);
+					aim_pitch += static_cast<float>(binocular_pitch_offset_deg_);
+				}
+				const float position[3] = {e->position.x, e->position.y,
+						e->position.z};
+				opennova::world::PlayerCameraPose pose;
+				opennova::world::player_view_compose_camera(player_view_,
+						position, local_weapon_.eye_mission,
+						local_weapon_.eye_valid, aim_yaw, aim_pitch,
+						p->inf.recoil_pitch, p->inf.torso_roll,
+						p->inf.lean_angle, pose);
+				out["camera_pose_valid"] = true;
+				// mission (x,y,z) -> Godot (x, z, -y).
+				out["camera_eye"] = Vector3(pose.eye[0], pose.eye[2],
+						-pose.eye[1]);
+				out["camera_yaw_deg"] = pose.yaw_deg;
+				out["camera_pitch_deg"] = pose.pitch_deg;
+				out["camera_roll_deg"] = pose.roll_deg;
 			}
 		}
-		out["fp_pitch_recoil_deg"] = fp_pitch_recoil_deg;
-	}
-	// The FP camera roll in degrees: roll = torsoRoll + lean/4 [orig: the on-foot
-	// person leg @ 0x437fe6 — g_view_rot_roll = entity+0x2DC + (entity+0xB0 >> 2)].
-	{
-		float fp_roll_deg = 0.0f;
-		if (world_ && world_->ai && world_->cached.local_player.valid()) {
-			if (const AiEntity *p = world_->ai->for_handle(world_->cached.local_player)) {
-				const int32_t roll_bam = opennova::io::bam_add(
-						p->inf.torso_roll, opennova::io::bam_sar(p->inf.lean_angle, 2));
-				fp_roll_deg = static_cast<float>(
-						static_cast<double>(roll_bam) * opennova::world::kDegreesPerBam);
-			}
-		}
-		out["fp_roll_deg"] = fp_roll_deg;
 	}
 	return out;
+}
+
+// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=forward,
+// Y=left, Z=up): the raw weapon.def `pos`/`tpos` blend over the /256 scale
+// with the NoCardSwitch reload suppression applied — the rig maps view axes
+// onto its camera frame and parents the node (world/player_view.h, S8).
+// [orig: Player_UpdateFirstPersonCamera @ 0x4dd380]
+Vector3 NovaSimulation::local_player_viewmodel_bias_view_units(
+		const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units) {
+	const opennova::world::WeaponSlotState *active_slot =
+			active_local_weapon_slot();
+	const bool suppress = local_weapon_.active &&
+			active_slot->current == opennova::world::weapon_action::kReload &&
+			(local_weapon_.def.flags &
+					opennova::world::weapon_flag::kNoCardSwitch) == 0;
+	const float pos[3] = {p_pos_raw_units.x, p_pos_raw_units.y,
+			p_pos_raw_units.z};
+	const float tpos[3] = {p_tpos_raw_units.x, p_tpos_raw_units.y,
+			p_tpos_raw_units.z};
+	float out[3];
+	opennova::world::player_view_bias_view_units(player_view_, suppress, pos,
+			tpos, out);
+	return Vector3(out[0], out[1], out[2]);
 }
 
 float NovaSimulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect) {

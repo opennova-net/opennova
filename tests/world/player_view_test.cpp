@@ -322,6 +322,99 @@ void test_unscope_on_move_and_up_refusal() {
     CHECK(v.scope_hipfire);
 }
 
+bool near_eq(float a, float b, float eps = 0.0005f) {
+    return std::fabs(a - b) <= eps;
+}
+
+// The march landing table [orig: @ 0x438213..0x43832e]: the reset distance 1.0
+// lands 0.75u back; a sub-half-metre distance stays at the pivot; the gate
+// passes >= 8.0 through untouched.
+void test_tp_effective_distance_march() {
+    CHECK(player_view_tp_effective_distance(1.0f) == 0.75f);
+    CHECK(player_view_tp_effective_distance(0.3f) == 0.0f);
+    CHECK(player_view_tp_effective_distance(0.5f) == 0.25f);
+    CHECK(player_view_tp_effective_distance(8.0f) == 8.0f);
+    CHECK(player_view_tp_effective_distance(512.0f) == 512.0f);
+}
+
+// The FP leg: the doubled recoil, the torso+lean/4 roll, the 0.125 eye floor,
+// and the 0.1875 pull-back along the (recoiled) forward.
+void test_compose_camera_first_person() {
+    PlayerViewState v;
+    const float position[3] = {10.0f, 20.0f, 5.0f};
+    const float anchor[3] = {10.0f, 20.0f, 6.6f};
+    PlayerCameraPose pose;
+    // recoil 1 deg (BAM), torso roll 2 deg, lean 4 deg -> roll 2 + 1 = 3 deg.
+    const int32_t deg_bam = 11930465; // 2^32 / 360, rounded
+    player_view_compose_camera(v, position, anchor, true, 90.0f, 0.0f,
+            deg_bam, 2 * deg_bam, 4 * deg_bam, pose);
+    CHECK(!pose.third_person);
+    CHECK(near_eq(pose.yaw_deg, 90.0f));
+    CHECK(near_eq(pose.pitch_deg, 2.0f, 0.01f)); // twice the 1-deg accumulator
+    CHECK(near_eq(pose.roll_deg, 3.0f, 0.01f));  // torso 2 + lean 4 / 4
+    // yaw 90: mission forward ~= (+cos(pitch)*1, ~0, sin(pitch)); the eye pulls
+    // 0.1875 BACK along it from the anchor.
+    CHECK(near_eq(pose.eye[0], anchor[0] - 0.1875f * std::cos(2.0f * 3.14159265f / 180.0f), 0.001f));
+    CHECK(near_eq(pose.eye[2], anchor[2] - 0.1875f * std::sin(2.0f * 3.14159265f / 180.0f), 0.001f));
+
+    // The floor: an anchor below position + 0.125 clamps up [orig: @ 0x4b6b98].
+    const float low_anchor[3] = {10.0f, 20.0f, 5.0f};
+    player_view_compose_camera(v, position, low_anchor, true, 0.0f, 0.0f, 0, 0,
+            0, pose);
+    CHECK(near_eq(pose.eye[2], 5.125f, 0.001f));
+
+    // No anchor: the non-person +1.0 bump over position [orig: @ 0x437e8f].
+    player_view_compose_camera(v, position, position, false, 0.0f, 0.0f, 0, 0,
+            0, pose);
+    CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
+}
+
+// The TP leg: the chased anchor wins over the live eye, the pivot nudges
+// 0.125 along forward+left+up, the eye backs off the march-landed 0.75, roll
+// stays 0 and the recoil doubling does NOT apply.
+void test_compose_camera_third_person() {
+    PlayerViewState v;
+    v.third_person = true;
+    v.tp_anchor_valid = true;
+    v.tp_anchor[0] = 1.0f;
+    v.tp_anchor[1] = 2.0f;
+    v.tp_anchor[2] = 3.0f;
+    const float position[3] = {0.0f, 0.0f, 0.0f};
+    const float anchor[3] = {9.0f, 9.0f, 9.0f}; // must be ignored
+    PlayerCameraPose pose;
+    const int32_t deg_bam = 11930465;
+    player_view_compose_camera(v, position, anchor, true, 0.0f, 0.0f,
+            deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, pose);
+    CHECK(pose.third_person);
+    CHECK(near_eq(pose.pitch_deg, kTpOrbitPitchDeg));
+    CHECK(pose.roll_deg == 0.0f);
+    // yaw 0 pitch 0: mission fwd = (0, 1, 0), left = (-1, 0, 0), up = (0, 0, 1).
+    // pivot = anchor + (fwd+left+up)*0.125; eye = pivot - fwd*0.75.
+    CHECK(near_eq(pose.eye[0], 1.0f - 0.125f));
+    CHECK(near_eq(pose.eye[1], 2.0f + 0.125f - 0.75f));
+    CHECK(near_eq(pose.eye[2], 3.0f + 0.125f));
+}
+
+// The view-frame bias: raw def units / 256 on the eased blend; the
+// NoCardSwitch reload suppression drops the ADS half (the hip offset).
+void test_bias_view_units() {
+    PlayerViewState v;
+    const float pos[3] = {-19.46f, 21.19f, -161.31f};
+    const float tpos[3] = {-62.33f, 29.19f, -152.56f};
+    float out[3];
+    player_view_bias_view_units(v, false, pos, tpos, out);
+    CHECK(near_eq(out[0], -19.46f / 256.0f));
+    CHECK(near_eq(out[2], -161.31f / 256.0f));
+    // Fully sighted, then suppressed: the tpos blend collapses to the hip pos.
+    v.scope_engaged = true;
+    v.scope_step = v.ease_steps;
+    player_view_bias_view_units(v, false, pos, tpos, out);
+    CHECK(near_eq(out[0], -62.33f / 256.0f));
+    player_view_bias_view_units(v, true, pos, tpos, out);
+    CHECK(near_eq(out[0], -19.46f / 256.0f));
+    CHECK(near_eq(out[1], 21.19f / 256.0f));
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -334,6 +427,10 @@ int main() {
     test_input_dispatch_gates();
     test_toggle_latch_refusal_and_inset();
     test_unscope_on_move_and_up_refusal();
+    test_tp_effective_distance_march();
+    test_compose_camera_first_person();
+    test_compose_camera_third_person();
+    test_bias_view_units();
     if (failures == 0) std::printf("player_view_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

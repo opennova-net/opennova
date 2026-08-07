@@ -1466,6 +1466,14 @@ public:
 	void set_sound_listener(const Vector3 &p_listener_godot);
 	Array drain_fire_sounds();
 
+	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,
+	// Y=left, Z=up) from raw weapon.def pos/tpos units — the /256 blend +
+	// NoCardSwitch suppression run in world/player_view (S8); the rig maps
+	// view axes onto its camera frame. [orig: Player_UpdateFirstPersonCamera
+	// @ 0x4dd380]
+	Vector3 local_player_viewmodel_bias_view_units(
+			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units);
+
 	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
 	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
 	// bytes) — parsed into world.sound_profiles now and re-applied on

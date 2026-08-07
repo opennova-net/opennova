@@ -156,6 +156,9 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::set_sound_listener);
 	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
 			&NovaSimulation::drain_fire_sounds);
+	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
+					"pos_raw_units", "tpos_raw_units"),
+			&NovaSimulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &NovaSimulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);

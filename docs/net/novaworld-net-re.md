@@ -4877,6 +4877,20 @@ overlay (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collisio
 orbit/zoom keys, the 0.125u look-at nudge, vehicle mode-1 (no local mounting), the
 kill-cam distance reel, the weather/impact shake.
 
+**Port re-home (2026-08-07, S8/ADR 0028):** the camera COMPOSITION moved into the
+engine — `world/player_view.h` `player_view_compose_camera` builds the whole
+mission-space pose per drain (FP: the CameraOffset floor `@ 0x4b6b98` + non-person
+bump `@ 0x437e8f`, the recoil-doubled pitch `@ 0x437fc7`, roll = torsoRoll + lean/4
+`@ 0x437fe6`, the −0x3000 forward pull-back `@ 0x438001`; TP: the chased anchor +
+the 0.125u pivot nudge `@ 0x43818a` backed off by the march's no-collision landing
+`@ 0x438213..0x43832e` — landed 0.75u at the reset distance 1.0), and the FP
+viewmodel bias (`pos`/`tpos` /256 blend + the NoCardSwitch suppression) is
+`player_view_bias_view_units`. `local_player_presenter.gd` converts the
+`PlayerLocalView.camera_*` pose to the Godot frame and stamps the node;
+`player_viewmodel_rig.gd` maps the view-frame bias onto camera axes. The ctest
+`player_view` pins the composition (march table, recoil doubling, nudge, floor,
+bump); the deferral list above is unchanged.
+
 **2026-07-13 addendum (the controller-parity pass) — lean, stance keys, input bits, the eye.**
 
 - **The lean-angle producer (entity+0xB0, BAM32), witnessed end to end** — the old audit's

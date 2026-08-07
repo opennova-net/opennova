@@ -99,13 +99,6 @@ hardening, and project health. Divergences from the original engine belong in
       0x18000000/(3720*minutes)` `[orig: @ 0x57d108]`, Q8.8->8.24 widening,
       60-min clamp — currently in `nova_environment.gd`, zero presence in
       engine/formats/env (ENG-5 row)
-- [ ] Camera/view composition remainder -> fold into `engine/runtime/world` player_view:
-      eye height 1.0 dual-declared with `nova_simulation.cpp`, TP distance/orbit
-      `[orig: @ 0x4391d0]`, eye re-aim `[orig: @ 0x437d10]`, weapon.def /256
-      view-offset + axis map `[orig: @ 0x4dd380]`; the ADS lerp, the
-      anim-key-substring stance probe, and the 4x-re-declared 62.5 Hz tick
-      constant are close-now candidates riding this (`player_viewmodel_rig.gd`;
-      ENG-5 row; the W5 "camera" push-down is this row)
 - [ ] Editor-preview PLAYPARTANIM phase integrator: route `nova_object_model.gd`'s
       preview through `AiSystem::advance_part_anim` (the height-sampler
       dual-implementation pattern); the runtime already uses `set_part_phase`

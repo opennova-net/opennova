@@ -45,6 +45,17 @@ var fp_pitch_recoil_deg := 0.0
 # (torsoRoll chases the slope roll; lean is the Q/E ramp — both entity BAM state)
 # [orig: the on-foot person leg @0x437fe6 — roll = entity+0x2DC + (entity+0xB0)/4].
 var fp_roll_deg := 0.0
+# The composed camera pose (world/player_view.h, S8): the engine runs the
+# witnessed FP/TP composition — the eye floor + pull-back, the recoil-doubled
+# pitch, the roll, the chased-anchor pivot nudge and march-landed back-off —
+# and the presenter only converts frames and stamps the Camera3D node.
+# [orig: Camera_ComputeThirdPersonView @0x437d10 — the on-foot person leg
+#  @0x437f9c..0x438031, the TP leg @0x438100..0x4383e2]
+var camera_pose_valid := false
+var camera_eye := Vector3.ZERO  # Godot space
+var camera_yaw_deg := 0.0       # mission-euler view angles
+var camera_pitch_deg := 0.0
+var camera_roll_deg := 0.0
 
 
 ## Decode one sim view dict; null on an empty dict (no sim).
@@ -71,4 +82,9 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))
 	out.fp_pitch_recoil_deg = float(d.get("fp_pitch_recoil_deg", 0.0))
 	out.fp_roll_deg = float(d.get("fp_roll_deg", 0.0))
+	out.camera_pose_valid = bool(d.get("camera_pose_valid", false))
+	out.camera_eye = d.get("camera_eye", Vector3.ZERO)
+	out.camera_yaw_deg = float(d.get("camera_yaw_deg", 0.0))
+	out.camera_pitch_deg = float(d.get("camera_pitch_deg", 0.0))
+	out.camera_roll_deg = float(d.get("camera_roll_deg", 0.0))
 	return out
