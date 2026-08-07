@@ -385,7 +385,7 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 				p_entity_world, p_model, r_out);
 	// The provider consumes the same per-query sim state the legacy path
 	// reads off this binding.
-	collision_pose_native_.weapon_active = weapon_active_;
+	collision_pose_native_.weapon_active = local_weapon_.active;
 	collision_pose_native_.panm_time_override_ms = panm_time_override_ms_;
 	if (collision_pose_mode_ == CollisionPoseMode::Native)
 		return collision_pose_native_.build_section_matrices(p_world, p_entity,
@@ -727,7 +727,7 @@ bool NovaSimulation::build_section_matrices_legacy(opennova::world::World &p_wor
 		if (p_world.cached.local_player.valid() &&
 				p_entity.packed == p_world.cached.local_player.packed &&
 				opennova::world::infantry_weapon_channel_visible(
-						ai_entity->inf, weapon_active_,
+						ai_entity->inf, local_weapon_.active,
 						mount_blocks_weapon_channel(*entity))) {
 			weapon_key = infantry_anim_key(ai_entity->inf.wpn_state);
 			const float weapon_fps = source.anim->get_clip_fps(weapon_key, 0);

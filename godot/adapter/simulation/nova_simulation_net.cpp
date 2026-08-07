@@ -1199,21 +1199,23 @@ void NovaSimulation::joiner_spawn_and_arm_local_player() {
 					// without it the viewmodel and the weapon FSM kept running the
 					// SUBMITTED weapon while the entity and the wire followed the
 					// granted one.
-					// weapon_start_in_switchto_ is deliberately left as the last
+					// local_weapon_.start_in_switchto is deliberately left as the last
 					// rebuild settled it — the spawn mount plays no switch actions
 					// (D-WPN-21), and this replay only restores the notification.
-					if (weapon_presentation_pending_) {
-						weapon_presentation_pending_ = false;
+					if (local_weapon_.presentation_pending) {
+						local_weapon_.presentation_pending = false;
 						const opennova::world::WeaponTableEntry *def =
 								world_->weapons.by_index(
 										static_cast<uint8_t>(slot->adm_index));
-						PendingWeaponEvent event;
+						opennova::world::WeaponPresentationEvent event;
 						event.tick = world_->logic_tick;
-						event.world_position = get_local_player_position();
-						event.switch_to_weapon = def != nullptr
-								? String::utf8(def->name.c_str())
-								: String();
-						pending_weapon_events_.push_back(std::move(event));
+						if (const opennova::world::Entity *local =
+									world_->registry.get(
+											world_->cached.local_player))
+							event.world_position = local->position;
+						event.switch_to_weapon =
+								def != nullptr ? def->name : std::string();
+						local_weapon_.events.push_back(std::move(event));
 					}
 				}
 			}
@@ -1222,9 +1224,9 @@ void NovaSimulation::joiner_spawn_and_arm_local_player() {
 		player_input_ = opennova::world::PlayerInput{};
 		// Retail polls live keys; a press during the join wait must not cross
 		// the spawn edge as a queued shot/reload. Clear the consume-latches too.
-		weapon_fire_held_ = false;
-		weapon_fire_pressed_ = false;
-		weapon_reload_pressed_ = false;
+		local_weapon_.fire_held = false;
+		local_weapon_.fire_pressed = false;
+		local_weapon_.reload_pressed = false;
 		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 		stance_latch_ = 0;
 		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
@@ -1357,9 +1359,9 @@ void NovaSimulation::joiner_apply_authoritative_health() {
 
 					player_input_ = opennova::world::PlayerInput{};
 					player_input_.look_heading = heading;
-					weapon_fire_held_ = false;
-					weapon_fire_pressed_ = false;
-					weapon_reload_pressed_ = false;
+					local_weapon_.fire_held = false;
+					local_weapon_.fire_pressed = false;
+					local_weapon_.reload_pressed = false;
 					stance_latch_ = 0;
 					look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 					respawn_local_player_loadout();
@@ -1627,9 +1629,9 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 
 	for (const opennova::WeaponReload &reload :
 			runtime_->drain_reload_notifications()) {
-		++weapon_reload_received_serial_;
-		weapon_reload_received_entity_ = reload.entity_handle;
-		weapon_reload_received_param_ = reload.reload_param;
+		++local_weapon_.reload_received_serial;
+		local_weapon_.reload_received_entity = reload.entity_handle;
+		local_weapon_.reload_received_param = reload.reload_param;
 		// ClientRuntime already applied the remote-Person receive-handler stamp
 		// before that frame's body tick. This drain retains diagnostics plus the
 		// self-only WeaponSlot_ReloadAmmo branch below.
@@ -1653,7 +1655,7 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 		// only the currently active personal slot has an FSM mirror to update here.
 		opennova::world::weapon_inventory_reload_slot(
 				world_->weapons, local_inventory_, combo);
-		if (weapon_active_ && !local_usegun_slot_active_ &&
+		if (local_weapon_.active && !local_weapon_.usegun_slot_active &&
 				local_inventory_.equipped_combo >= 0) {
 			opennova::world::WeaponSlotState &active_slot =
 					*active_local_weapon_slot();
@@ -1675,7 +1677,7 @@ void NovaSimulation::apply_joiner_gameplay_events() {
 						~opennova::world::weapon_phase::kReloadPendingBit);
 			}
 		}
-		++weapon_reload_applied_serial_;
+		++local_weapon_.reload_applied_serial;
 		AiEntity *player = world_->ai
 				? world_->ai->for_handle(world_->cached.local_player)
 				: nullptr;

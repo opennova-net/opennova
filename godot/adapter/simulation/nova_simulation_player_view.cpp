@@ -18,7 +18,7 @@ void NovaSimulation::reset_local_player_view_effects() {
 			(world_->mission_attrib_flags &
 					static_cast<uint32_t>(
 							opennova::bms::AttribFlags::StartWithNVGOn)) != 0;
-	nvg_scope_restore_ = false;
+	local_weapon_.nvg_scope_restore = false;
 	refresh_local_player_view_effects();
 }
 
@@ -37,7 +37,7 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	// EWeap. This branch precedes ordinary scope FSM gates and waits for the
 	// authoritative compact seat_type 1/2 echo before mutating local route state.
 	// [orig: Input_HandleActionBinding_0 @0x4e0420, case 6 @0x4e0492]
-	if (!weapon_active_) return false;
+	if (!local_weapon_.active) return false;
 	opennova::world::Entity *player = world_ != nullptr
 			? world_->registry.get(world_->cached.local_player) : nullptr;
 	opennova::world::Entity *mount = player != nullptr && player->mounted &&
@@ -94,27 +94,27 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(
-			weapon_def_, *active_slot)) return false;
+			local_weapon_.def, *active_slot)) return false;
 	// Scope-UP is refused while a movement key is held on a Scoped weapon
 	// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
 	if (!player_view_.scope_engaged &&
-			opennova::world::player_view_scope_up_blocked(player_view_, weapon_def_.flags))
+			opennova::world::player_view_scope_up_blocked(player_view_, local_weapon_.def.flags))
 		return false;
 	// Inset optics cannot be raised under NVG. Non-Inset sights retain the
 	// original independent behavior.
 	if (!player_view_.scope_engaged && player_view_.nvg_active &&
-			(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
+			(local_weapon_.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
 		return false;
 	// ForceScoped pins the raised sight: un-scoping is refused once settled
 	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
-	if (player_view_.scope_engaged && (weapon_def_.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 &&
+	if (player_view_.scope_engaged && (local_weapon_.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 &&
 			!opennova::world::player_view_scope_ease_active(player_view_))
 		return false;
 	// The toggle latches this ease's step count (7 for Inset weapons, else 15;
 	// 1 on the hipfire-return leg) and REFUSES while the previous ease runs
 	// [orig: Player_ToggleWeaponScope @ 0x4df177 !activeFlag; Setup @ 0x4df1b3..0x4df36e].
 	if (!opennova::world::player_view_set_engaged(player_view_, !player_view_.scope_engaged,
-			(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+			(local_weapon_.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
 		return false;
 	if (player_view_.scope_engaged)
 		opennova::world::weapon_fsm_queue_scope_up(*active_slot);
@@ -131,7 +131,7 @@ bool NovaSimulation::request_local_player_binoculars_toggle() {
 	// Retail refuses binoculars while a PowerThrow charge is live. Allowing the
 	// view to rise would suppress held weapon input and turn the charge into an
 	// unintended release [orig: g_fireChargeStartTick @ 0xB76800; action 26 gate].
-	if (power_throw_start_tick_ != 0) return false;
+	if (local_weapon_.power_throw_start_tick != 0) return false;
 	// An active scope also blocks binoculars in a gunner parent slot.
 	if (player_view_.scope_engaged && local->mounted &&
 			local->mount_type == opennova::world::SeatType::Gunner)
@@ -163,11 +163,11 @@ bool NovaSimulation::request_local_player_nvg_toggle() {
 	if (local == nullptr) return false;
 
 	if (!player_view_.nvg_active) {
-		nvg_scope_restore_ = false;
-		if (weapon_active_ && player_view_.scope_engaged &&
-				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0 &&
+		local_weapon_.nvg_scope_restore = false;
+		if (local_weapon_.active && player_view_.scope_engaged &&
+				(local_weapon_.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0 &&
 				!opennova::world::player_view_scope_ease_active(player_view_)) {
-			nvg_scope_restore_ = request_local_player_scope_toggle();
+			local_weapon_.nvg_scope_restore = request_local_player_scope_toggle();
 		}
 		return opennova::world::player_view_toggle_nvg(player_view_);
 	}
@@ -175,8 +175,8 @@ bool NovaSimulation::request_local_player_nvg_toggle() {
 	// Clear NVG before the normal scope-up request so the Inset refusal no
 	// longer applies, then consume the one-shot restore latch.
 	opennova::world::player_view_toggle_nvg(player_view_);
-	const bool restore_scope = nvg_scope_restore_;
-	nvg_scope_restore_ = false;
+	const bool restore_scope = local_weapon_.nvg_scope_restore;
+	local_weapon_.nvg_scope_restore = false;
 	if (restore_scope && !player_view_.scope_engaged)
 		request_local_player_scope_toggle();
 	return false;
@@ -209,22 +209,22 @@ void NovaSimulation::tick_local_player_view() {
 	refresh_local_player_view_effects();
 	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
 	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
-	// skeleton sample (see local_eye_mission_). Without a sample: Position + 1.0,
+	// skeleton sample (see local_weapon_.eye_mission). Without a sample: Position + 1.0,
 	// the witnessed NON-person bump [orig: @ 0x437e8f].
 	const float eye[3] = {
-		local_eye_valid_ ? local_eye_mission_[0] : e->position.x,
-		local_eye_valid_ ? local_eye_mission_[1] : e->position.y,
-		local_eye_valid_ ? local_eye_mission_[2] : e->position.z + 1.0f,
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[0] : e->position.x,
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[1] : e->position.y,
+		local_weapon_.eye_valid ? local_weapon_.eye_mission[2] : e->position.z + 1.0f,
 	};
 	opennova::world::player_view_tick(player_view_, eye);
 }
 
 void NovaSimulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) {
 	// Godot (x, y, z) -> mission (x, -z, y), the get_local_player_position inverse.
-	local_eye_mission_[0] = p_eye_godot.x;
-	local_eye_mission_[1] = -p_eye_godot.z;
-	local_eye_mission_[2] = p_eye_godot.y;
-	local_eye_valid_ = p_valid;
+	local_weapon_.eye_mission[0] = p_eye_godot.x;
+	local_weapon_.eye_mission[1] = -p_eye_godot.z;
+	local_weapon_.eye_mission[2] = p_eye_godot.y;
+	local_weapon_.eye_valid = p_valid;
 }
 
 Dictionary NovaSimulation::get_local_player_view() const {
@@ -256,23 +256,23 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	// [orig: Player_UpdateFirstPersonCamera @ 0x4dd439/@ 0x4dd4cc; the same
 	//  predicate is Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0 (ex kong
 	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
-	out["suppress_view_bias"] = weapon_active_ &&
+	out["suppress_view_bias"] = local_weapon_.active &&
 			active_slot->current == opennova::world::weapon_action::kReload &&
-			(weapon_def_.flags & opennova::world::weapon_flag::kNoCardSwitch) == 0;
+			(local_weapon_.def.flags & opennova::world::weapon_flag::kNoCardSwitch) == 0;
 	// On the supported on-foot first-person path, the standard SIGHTS card replaces
 	// the FP viewmodel once ADS settles. Scoped and Sighted are asymmetric selectors;
 	// NoCardSwitch clears both unless ForceScoped overrides it. The frame draws the
 	// card or the FP viewmodel, never both. [orig: Render_ProcessMainSceneFrame
 	// @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15; suppression @0x4dcce0]
-	out["scope_card_active"] = weapon_active_ &&
+	out["scope_card_active"] = local_weapon_.active &&
 			opennova::world::weapon_sights_card_eligible(
-					weapon_def_, *active_slot) &&
+					local_weapon_.def, *active_slot) &&
 			player_view_.scope_engaged && !player_view_.third_person &&
 			!player_view_.binoculars_view_active &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
-			weapon_active_ ? weapon_def_.flags : 0,
-			weapon_active_ ? weapon_scope_max_mag_ : 0.0f);
+			local_weapon_.active ? local_weapon_.def.flags : 0,
+			local_weapon_.active ? local_weapon_.scope_max_mag : 0.0f);
 	// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position map.
 	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
 			-player_view_.tp_anchor[1]);

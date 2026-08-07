@@ -33,6 +33,7 @@
 #include "wac/nova_wac_program.h"
 #include <def/def.h> // the retained weapon.def parse (S6b)
 #include <simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
@@ -631,10 +632,6 @@ private:
 	// Carry the sub-pixel remainder between frames so slow motion is not lost.
 	float look_px_accum_x_ = 0.0f;
 	float look_px_accum_y_ = 0.0f;
-	// The mounted def's run-gait class + ForceCrouch flag, mirrored per tick into the
-	// infantry state like wpn_hold_kind [orig: AdmDefs +0xAC 'run_anim'; flags 0x40000].
-	int weapon_run_anim_ = 0;
-	bool weapon_force_crouch_ = false;
 
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
@@ -645,11 +642,12 @@ private:
 	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
-	opennova::world::WeaponFsmDef weapon_def_{};
-	// Name of the weapon record weapon_def_ was baked from: the same-weapon
-	// re-install (the FP model resolve late-binding clip lengths) is a def
-	// rebake and must never reset the live action slot.
-	String weapon_def_name_;
+	// The whole moved equipped-weapon state (S7a, ADR 0028): def/slot/
+	// rings/serials/UseGun/PowerThrow/presentation events live in
+	// engine/runtime/world (world/player_weapon.h); this binding marshals
+	// installs, inputs, drains, and the two wire request records.
+	opennova::world::LocalPlayerWeapon local_weapon_;
+	using LocalUseGunSwitch = opennova::world::LocalUseGunSwitch;
 	// The retained weapon.def parse (S6b, ADR 0028): the by-name install reads
 	// rows from here so the ACCEPT chain needs no shell dictionary. Freed on
 	// reload and in the destructor.
@@ -658,154 +656,39 @@ private:
 	// The equipped rig's per-key clip variant lengths (the native replacement
 	// for the render skeletal's clip_seconds feed).
 	opennova::simassets::AdmClipIndex weapon_clip_index_;
-	opennova::world::WeaponSlotState weapon_slot_{};
-	// The local UseGun path borrows the parent's embedded MountSlot through the
-	// normal holster/commit/draw lifecycle. Nonlocal occupants still take the
-	// direct world::vehicle_bind_use_gun_slot assignment.
-	// [orig: Entity_AttachToUseGunSlot @0x546c25; Player_MountWeaponSlot
-	// @0x4dfa40; SwitchFrom/Rank commits @0x543475/@0x543539]
-	enum class LocalUseGunSwitch : uint8_t {
-		kNone,
-		kAttach,
-		kSwap,
-		kDetach,
-	};
-	LocalUseGunSwitch local_usegun_switch_ = LocalUseGunSwitch::kNone;
-	bool local_usegun_slot_active_ = false;
-	// Current EquippedSlot and latest g_pendingWeaponSlot equivalents. A direct
-	// gunner-to-gunner attach overwrites only the pending pair until commit.
-	opennova::world::EntityHandle local_usegun_mount_{};
-	uint8_t local_usegun_weapon_adm_ = 0xFF;
-	opennova::world::EntityHandle local_usegun_pending_mount_{};
-	uint8_t local_usegun_pending_weapon_adm_ = 0xFF;
-	uint8_t local_usegun_saved_adm_ = 0xFF;
-	int32_t local_usegun_switch_action_ = -1;
-	// Retail's render gate reads the resolved Def.fpModel pointer, not merely the
-	// authored gfx1 token. The shell reports which equipped Def actually owns the
-	// resolved first-person model; 0xFF means no model resolved.
-	uint8_t local_first_person_model_adm_ = 0xFF;
-	opennova::world::WeaponSlotState *active_local_weapon_slot();
-	const opennova::world::WeaponSlotState *active_local_weapon_slot() const;
-	bool local_usegun_switch_is_instant() const;
-	void sync_local_usegun_weapon_transition();
-	void commit_local_usegun_weapon_switch();
-	void queue_local_usegun_weapon_switch(bool p_same_category);
-	bool weapon_active_ = false;
-	bool weapon_fire_held_ = false;
-	// PowerThrow windup [orig: g_fireChargeStartTick @ 0xB76800]; 0 = idle. The
-	// release stamps pending_throw_charge_ for the next fire commit.
-	uint32_t power_throw_start_tick_ = 0;
-	uint8_t pending_throw_charge_ = 0;
-	bool weapon_fire_pressed_ = false;
-	bool weapon_reload_pressed_ = false;
-	uint64_t weapon_play_serial_ = 0;
-	String weapon_anim_key_;
-	uint32_t weapon_anim_tick_ = 0;  // authoritative start tick for FP clip phase
-	// The equipped .adm's per-slot VARIANT rings — multi-clip rows rotate round-robin.
-	// The sim owns the ring heads exactly where the original keeps them (the weapon's
-	// animState slot array +72): bake duration reads and play starts both SERVE the
-	// head then ADVANCE it, and the play latches the served index for the shell's clip
-	// playback (both viewmodel parts follow one latch, so arms and gun never split).
-	// [orig: Anim_GetDurationTicks @ 0x53ee10; AnimMap_PlayAnimBySlot @ 0x40bda0
-	//  (+68 entry latch); ring build AnimMap_RegisterBoneNode @ 0x40c2d0]
-	struct WeaponClipRing {
-		PackedFloat32Array lengths;  // every variant's clip length (seconds), file order
-		int head = 0;                // next variant to serve
-	};
-	std::vector<std::pair<String, WeaponClipRing>> weapon_clip_rings_;  // keys lowercased
-	int weapon_anim_variant_ = 0;  // the play latch [orig: animState+68]
-	WeaponClipRing *weapon_ring_for(const String &p_key_lower);
-	// Serve-then-advance duration read; < 0 when the key has no ring.
-	float weapon_ring_take_length(const char *p_key);
-	// Serve-then-advance play take; returns the served variant index (0 for ringless).
-	int weapon_ring_take_variant(const String &p_key);
+	// The UseGun borrow + slot selection moved to world/player_weapon.h
+	// (S7a); these inline wrappers keep the family's call sites unchanged.
+	opennova::world::WeaponSlotState *active_local_weapon_slot() {
+		return world_ ? opennova::world::active_local_weapon_slot(
+				*world_, local_weapon_) : &local_weapon_.slot;
+	}
+	const opennova::world::WeaponSlotState *active_local_weapon_slot() const {
+		return world_ ? opennova::world::active_local_weapon_slot(
+				*world_, local_weapon_) : &local_weapon_.slot;
+	}
+	bool local_usegun_switch_is_instant() const {
+		return world_ != nullptr && opennova::world::
+				local_usegun_switch_is_instant(*world_, local_weapon_);
+	}
+	void sync_local_usegun_weapon_transition() {
+		if (world_) opennova::world::sync_local_usegun_weapon_transition(
+				*world_, local_weapon_);
+	}
+	void commit_local_usegun_weapon_switch() {
+		if (world_) opennova::world::commit_local_usegun_weapon_switch(
+				*world_, local_weapon_);
+	}
+	void queue_local_usegun_weapon_switch(bool p_same_category) {
+		if (world_) opennova::world::queue_local_usegun_weapon_switch(
+				*world_, local_weapon_, p_same_category);
+	}
 	void install_local_player_weapon(const Dictionary &p_def,
 	                                 const Dictionary &p_clip_seconds,
 	                                 bool p_preserve_slot_state,
 	                                 bool p_allow_same_weapon_rebake);
-	// The install-consumed subset of a retained weapon.def row (S6b): the
-	// internal bridge into the shared install body until S7a moves the pump
-	// into engine/runtime/world with typed inputs.
-	static Dictionary weapon_dict_from_def(const DefWeaponDef &p_row);
-	uint64_t weapon_fired_serial_ = 0;
-	// Per-shooter tag-2 sequence. Unlike the presentation serial above, this
-	// survives weapon remounts/switches and resets only with the mission/player
-	// world [orig: word_B7C670; capture monotonic across adm changes].
-	uint16_t local_round_sequence_ = 0;
-	uint64_t weapon_dry_serial_ = 0;
-	uint64_t weapon_reload_serial_ = 0;
-	uint64_t weapon_reload_applied_serial_ = 0;
-	// Every decoded S2C 0x49, including another player's/vehicle's notification.
-	// The apply serial above remains requester-local; this receive serial is a
-	// diagnostic/test witness that the server broadcast traversed the remote wire.
-	uint64_t weapon_reload_received_serial_ = 0;
-	uint16_t weapon_reload_received_entity_ =
-			opennova::world::EntityHandle::kInvalid;
-	uint16_t weapon_reload_received_param_ = 0;
-	uint64_t weapon_unscope_serial_ = 0;
-	uint64_t weapon_rescope_serial_ = 0;
-	// The action-begin seam: serial + the started slot id; the state dict resolves
-	// the started action's soundset/particle names for the shell's sound/muzzle legs
-	// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
-	uint64_t weapon_action_serial_ = 0;
-	int weapon_action_started_ = -1;
-	// The action-END seam: serial + the finished slot id; the state dict resolves the
-	// finished action's soundsetend — the per-shot gunshot / reload-complete sound
-	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
-	uint64_t weapon_action_end_serial_ = 0;
-	int weapon_action_finished_ = -1;
-	// One tick's presentation payload, copied while the mounted def and variant-ring
-	// result are still authoritative. A render frame drains these records in tick order;
-	// the tick stamp lets delayed clip starts resume at the correct playhead.
-	struct PendingWeaponEvent {
-		uint32_t tick = 0;
-		Vector3 world_position;
-		String anim_key;
-		int anim_variant = 0;
-		int action_started = -1;
-		String action_soundset;
-		String action_particle;
-		String action_particle_userpoint;
-		// The action-routing state after this tick's view promoter and before this
-		// action's own unscope/rescope side effects. A render frame may drain several
-		// ticks, so the final view snapshot cannot make this decision for every event.
-		bool scope_settled = false;
-		bool third_person = false;
-		bool vehicle_attack_context = false;
-		int action_finished = -1;
-		String action_end_soundset;
-		// The recoil-row DIRECT effect leg (casing eject / bolt smoke): the action id
-		// plus its authored particle/userpoint. The shell spawns it with no scope gate
-		// and no live-handle suppression [orig: WeaponAction_Recoil @ 0x542dd0 gate
-		// @ 0x542efa -> ActionSlot_SpawnEffect @ 0x542f64, param7=0].
-		int action_effect = -1;
-		String effect_particle;
-		String effect_particle_userpoint;
-		// A committed weapon switch: the newly equipped def's name — the shell
-		// reinstalls the viewmodel/FSM for it [orig: the mount's model re-resolve;
-		// the equippedAdmIndex stamp @ 0x4dd727]. Empty = no switch this tick.
-		String switch_to_weapon;
-		// Explicit no-weapon commit. Empty switch_to_weapon alone means an event
-		// with no switch; it cannot represent restoring an unarmed personal slot.
-		bool clear_weapon = false;
-		// A UseGun commit selects an already-live parent/personal slot. The shell
-		// may rebake/rebuild the model definition but must not reset that slot.
-		bool preserve_slot_state = false;
-		// The switch-walk wrap-around deny [orig: PlaySoundOnDedicatedServer
-		// (dword_24E08C4) @ 0x4e0354 — the deny sound seam].
-		bool switch_denied = false;
-	};
-	std::vector<PendingWeaponEvent> pending_weapon_events_;
-	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
-	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
-	// plus the resolved AnimMap identity. The serial advances only when that AnimMap
-	// changes; each InfantryState remembers which serial it observed, matching the
-	// original's per-entity previous-held record and suppressing false dips between
-	// differently named weapons that share one map.
-	// [orig: AdmDefs +0/+0xA4/+0xA8; the +0x371 = 20 switch stamp @ 0x4b46f5].
-	int weapon_attack_kind_ = 0;
-	String weapon_anim_map_;
-	uint64_t weapon_anim_map_serial_ = 0;
+	// The Dictionary/def-row feeders both build the world install payload.
+	static opennova::world::WeaponInstallData install_data_from_dict(
+			const Dictionary &p_def, const Dictionary &p_clip_seconds);
 	void tick_local_player_weapon();
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
@@ -832,33 +715,25 @@ private:
 			opennova::playersav::make_defaults().slots[0];
 	bool weapon_profile_loaded_ = false;
 	opennova::world::WeaponAvailability weapon_availability_;
-	// A queued manual switch: the FSM plays SWITCHFROM/SWITCHRANK on the outgoing
-	// weapon; its completion commits pending -> equipped [orig: MountWeaponSlot
-	// @ 0x4dfa40 stamps g_pendingWeaponSlot + queues the action; the handler's
-	// completion consumes it].
-	bool weapon_switch_in_flight_ = false;
-	// LocalPlayerPresenter emits category/cycle input once per press. If that edge lands
-	// during SWITCHTO, retain the requested outgoing action here until the draw can
-	// transition to it; the portable queue writer keeps its witnessed refusal.
-	int32_t weapon_switch_deferred_action_ = -1;
-	// The next viewmodel install starts the FSM in SWITCHTO (the draw-in) instead of
-	// idle — set by every switch commit and by the spawn mount
-	// [orig: the switch chain runs switchfrom -> mount -> switchto].
-	bool weapon_start_in_switchto_ = false;
-	// A weapon selection committed while the local player entity did not exist yet
-	// (the joiner applies its kit/grant before L spawns). Retail puts NO entity
-	// precondition on the presentation half of a selection — the FP viewmodel is
-	// re-resolved by a per-frame consumer off EquippedSlot [orig:
-	// Player_RenderFirstPersonViewModel @0x4DED60], so the notification must not be
-	// dropped. Latched here and replayed as exactly ONE PendingWeaponEvent at the
-	// joiner spawn block, naming the weapon the inventory actually selected.
-	bool weapon_presentation_pending_ = false;
-	void commit_pending_weapon_switch();
-	// Shared mount/deny routing for the category, cycle, and switchcategory walks
-	// [orig: Player_MountWeaponSlot @ 0x4dfa40 / the deny play @ 0x4e0354].
-	void handle_weapon_switch_outcome(const opennova::world::WeaponSwitchOutcome &p_out);
-	// The witnessed input/stance gates packaged for the switch walks.
-	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const;
+	// The switch commit/outcome/gates moved to world/player_weapon.h (S7a);
+	// wrappers keep the family's call sites unchanged.
+	void commit_pending_weapon_switch() {
+		if (world_) opennova::world::commit_pending_weapon_switch(
+				*world_, local_weapon_,
+				local_inventory_valid_ ? &local_inventory_ : nullptr);
+	}
+	void handle_weapon_switch_outcome(
+			const opennova::world::WeaponSwitchOutcome &p_out) {
+		if (world_) opennova::world::handle_weapon_switch_outcome(
+				*world_, local_weapon_,
+				local_inventory_valid_ ? &local_inventory_ : nullptr, p_out);
+	}
+	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const {
+		return world_ ? opennova::world::local_weapon_switch_gates(
+						*world_, local_weapon_,
+						local_inventory_valid_ ? &local_inventory_ : nullptr)
+				: opennova::world::WeaponSwitchGates{};
+	}
 	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
@@ -907,10 +782,6 @@ private:
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
-	// Night vision temporarily drops an Inset scope and remembers that it should be
-	// restored when NVG is switched back off [orig: Player_ToggleNightVision
-	// @ 0x4e08b0, g_restoreScopeAfterNVG].
-	bool nvg_scope_restore_ = false;
 	// The binocular toggle seeds one fixed-radius random aim displacement. It
 	// survives movement/death/third-person suppression until the raw toggle drops.
 	float binocular_yaw_offset_deg_ = 0.0f;
@@ -918,14 +789,6 @@ private:
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
 	void tick_local_player_view();
-	// The shell-sampled head-bone eye (mission space), the 3P anchor-chase target
-	// [orig: ThirdPersonCamera_Update @ 0x437b70 target = Position + CameraOffset,
-	//  the posed head bone]. The original computes CameraOffset sim-side from its
-	//  bone matrices (@ 0x4b6bb3); in the port, the render skeleton lives shell-side, so
-	//  the shell feeds its sample each frame (D-INF-18). Invalid -> Position + 1.0
-	//  (the non-person bump [orig: @ 0x437e8f]).
-	float local_eye_mission_[3] = {0.0f, 0.0f, 0.0f};
-	bool local_eye_valid_ = false;
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over engine/net/npruntime ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3

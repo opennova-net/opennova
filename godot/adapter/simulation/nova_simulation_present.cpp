@@ -1135,12 +1135,12 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
 			//  Def+0x0c & 0x800 @0x44083f]
 			const bool equipped_parent_slot = mount_row != nullptr &&
-					local_usegun_slot_active_ && local_usegun_mount_ == h &&
-					local_usegun_weapon_adm_ ==
+					local_weapon_.usegun_slot_active && local_weapon_.usegun_mount == h &&
+					local_weapon_.usegun_weapon_adm ==
 							mount_row->primary_weapon_slot_adm;
 			if (mount_def != nullptr &&
 					((mount_def->has_first_person_model_reference &&
-					  local_first_person_model_adm_ ==
+					  local_weapon_.first_person_model_adm ==
 							  mount_row->primary_weapon_slot_adm &&
 					  equipped_parent_slot) ||
 					 (mount_def->flags2 &

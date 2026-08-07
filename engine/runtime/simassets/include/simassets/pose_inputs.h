@@ -9,32 +9,15 @@
 #include <world/ai.h>
 #include <world/entity.h>
 #include <world/infantry.h>
+#include <world/vehicle_mount.h>
 
 namespace opennova::simassets {
 
-inline bool seat_type_blocks_weapon_channel(world::SeatType type) {
-	switch (type) {
-		case world::SeatType::Controller:
-		case world::SeatType::Gunner:
-		case world::SeatType::Driver:
-			return true;
-		default:
-			return false; // passenger seats retain the on-foot upper-body channel
-	}
-}
-
-inline bool mount_blocks_weapon_channel(const world::Entity &entity) {
-	return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
-}
-
-inline bool mount_collapses_right_hand_row(const world::Entity &entity) {
-	// This terminal skeletal row is stricter than the secondary-channel gate:
-	// retail requires a controller/gunner/driver parent slot AND no Flags 0x100.
-	// In the port, engine_flags is the authoritative entity+0x24 Flags mirror.
-	return entity.mounted &&
-			seat_type_blocks_weapon_channel(entity.mount_type) &&
-			(entity.engine_flags & world::kEntityFlagPlayer) == 0;
-}
+// The seat-type channel predicates moved into world (vehicle_mount.h, S7a);
+// the using declarations keep this header's consumers unchanged.
+using world::mount_blocks_weapon_channel;
+using world::mount_collapses_right_hand_row;
+using world::seat_type_blocks_weapon_channel;
 
 inline anim::MountMode mount_mode_for_seat_type(world::SeatType seat_type) {
 	switch (seat_type) {

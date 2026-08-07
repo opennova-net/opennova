@@ -16,7 +16,7 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	// g_weaponScopeActive is the post-ease promotion, not raw scope intent.
 	// This one value feeds body pose, per-shot recoil scaling, and CanFire.
 	// [orig: promoter @0x4DE4F7; local body mirror @0x4B5D95]
-	const bool scope_promoted = weapon_active_ && player_view_.scope_engaged &&
+	const bool scope_promoted = local_weapon_.active && player_view_.scope_engaged &&
 			!opennova::world::player_view_scope_ease_active(player_view_);
 	// The local-player weapon-channel inputs, refreshed before the body updater runs —
 	// the Flags-bit refresh (Flags|0x10 from g_weaponScopeActive; the binoculars bit
@@ -29,17 +29,17 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	// sources behind one value and let the two disagree across a weapon switch.
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
-		if (weapon_active_) {
+		if (local_weapon_.active) {
 			opennova::world::infantry_weapon_switch_stamp(
-					p->inf, weapon_anim_map_serial_);
+					p->inf, local_weapon_.anim_map_serial);
 		}
 		p->inf.scope_raised = scope_promoted;
 		p->inf.binoculars_raised = player_view_.binoculars_raised;
 		// The run-gait class + ForceCrouch mirror, same per-tick re-read pattern as the
 		// hold kind [orig: the selection reads AdmDefs[+0x2B0]+0xAC each pass @ 0x4b72cf;
 		// the ForceCrouch checks read the equipped def flags @ 0x4b7245/@ 0x4e0d8a].
-		p->inf.wpn_run_anim = weapon_active_ ? weapon_run_anim_ : 0;
-		p->inf.wpn_force_crouch = weapon_active_ && weapon_force_crouch_;
+		p->inf.wpn_run_anim = local_weapon_.active ? local_weapon_.run_anim : 0;
+		p->inf.wpn_force_crouch = local_weapon_.active && local_weapon_.force_crouch;
 
 		// The body updater and HUD share retail's Player_CanFireWeapon verdict.
 		// A promoted Scoped weapon (Flags bit 0) is rejected while moving and
@@ -57,12 +57,12 @@ void NovaSimulation::apply_player_input_pre_tick() {
 			mount_allows_aimed_shot =
 					local->mount_type == opennova::world::SeatType::Passenger ||
 					(local->mount_type == opennova::world::SeatType::Gunner &&
-							local_usegun_slot_active_);
+							local_weapon_.usegun_slot_active);
 		}
 		const opennova::world::WeaponSlotState &active_slot =
 				*active_local_weapon_slot();
 		const uint32_t weapon_flags =
-				static_cast<uint32_t>(weapon_def_.flags);
+				static_cast<uint32_t>(local_weapon_.def.flags);
 		const uint32_t entity_flags = local != nullptr
 				? local->flags | local->engine_flags
 				: 0;
@@ -88,7 +88,7 @@ void NovaSimulation::apply_player_input_pre_tick() {
 		const bool force_scoped =
 				(weapon_flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
 		p->inf.aimed_shot_available = local != nullptr && local->alive &&
-				local->health > 0 && weapon_active_ && mount_allows_aimed_shot &&
+				local->health > 0 && local_weapon_.active && mount_allows_aimed_shot &&
 				!card_switch_reload && !player_view_.third_person &&
 				!player_view_.binoculars_view_active &&
 				(force_scoped || ordinary_aimed_shot);
@@ -219,10 +219,10 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	// toggle's ForceScoped pin (@ 0x4df12d) keeps pinned sights raised].
 	const bool move_held = p_forward || p_back || p_left || p_right;
 	if (opennova::world::player_view_move_input(player_view_, move_held,
-			weapon_active_ ? weapon_def_.flags : 0) &&
-			(weapon_def_.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
+			local_weapon_.active ? local_weapon_.def.flags : 0) &&
+			(local_weapon_.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
 		if (opennova::world::player_view_set_engaged(player_view_, false,
-				(weapon_def_.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+				(local_weapon_.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
 			opennova::world::weapon_fsm_queue_scope_down(
 					*active_local_weapon_slot());
 	}
@@ -237,9 +237,9 @@ void NovaSimulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	// the sim's own bit; the zoom-adjust keys are an unported tail, so the seed
 	// (scope_max_mag) IS the current zoom.
 	int32_t scoped_zoom = 0;
-	if (!player_view_.binoculars_view_active && weapon_active_ &&
-			player_view_.scope_engaged && weapon_scope_max_mag_ > 1.0f)
-		scoped_zoom = static_cast<int32_t>(weapon_scope_max_mag_);
+	if (!player_view_.binoculars_view_active && local_weapon_.active &&
+			player_view_.scope_engaged && local_weapon_.scope_max_mag > 1.0f)
+		scoped_zoom = static_cast<int32_t>(local_weapon_.scope_max_mag);
 	const bool prone = (stance_latch_ == 2); // [orig: MoveOrder & 0x100 @ 0x4e0ff7]
 	// Godot supplies float relative motion; the original consumes whole center-lock
 	// pixels. Accumulate the fraction so slow motion is not truncated away.
@@ -268,7 +268,7 @@ bool NovaSimulation::request_local_player_stance(int p_stance) {
 	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172 gate
 	// Entity_CheckWeaponSeatFlags(equipped, 0x40000) @ 0x4e0d8a; the seat-kind-3
 	// mount refusal rides the unported mounting slice].
-	if (weapon_active_ && weapon_force_crouch_) return false;
+	if (local_weapon_.active && local_weapon_.force_crouch) return false;
 	if (stance_latch_ == p_stance) return false;
 	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and clears
 	// the other [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60: 169 -> crouch,

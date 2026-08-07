@@ -30,6 +30,34 @@ struct IMountedPoseProvider {
                                       const Seat &seat, MountedPose &out) = 0;
 };
 
+// Seat-type pose/channel predicates (moved beside the mount surface, S7a):
+// control seats suppress the on-foot upper-body weapon channel; passengers
+// keep it. [orig: the parentSlot {2,3,5} gates @ 0x4b14a7 / @ 0x4dcc44]
+inline bool seat_type_blocks_weapon_channel(SeatType type) {
+    switch (type) {
+        case SeatType::Controller:
+        case SeatType::Gunner:
+        case SeatType::Driver:
+            return true;
+        default:
+            return false; // passenger seats retain the on-foot upper-body channel
+    }
+}
+
+inline bool mount_blocks_weapon_channel(const Entity &entity) {
+    return entity.mounted && seat_type_blocks_weapon_channel(entity.mount_type);
+}
+
+inline bool mount_collapses_right_hand_row(const Entity &entity) {
+    // This terminal skeletal row is stricter than the secondary-channel gate:
+    // retail requires a controller/gunner/driver parent slot AND no Flags 0x100.
+    // In the port, engine_flags is the authoritative entity+0x24 Flags mirror.
+    // [orig: Entity_BuildBoneTransformMatrices special row @ 0x4b1290]
+    return entity.mounted &&
+            seat_type_blocks_weapon_channel(entity.mount_type) &&
+            (entity.engine_flags & kEntityFlagPlayer) == 0;
+}
+
 // Host-facing lifecycle for effects that exist only while a vehicle has its single
 // tracked primary occupant (the +368 claimant). Payload fields are the target vehicle's
 // net_id, bms_id, spawn_origin, and packed runtime wire handle.

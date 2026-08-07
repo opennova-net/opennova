@@ -92,45 +92,45 @@ void NovaSimulation::reset_world() {
 	wire_world_stream_revision_seen_ = ~uint64_t{0};
 	wire_world_materializer_.clear();
 	invalidate_present_effect_pose_cache();
-	pending_weapon_events_.clear();
-	weapon_anim_tick_ = 0;
-	local_round_sequence_ = 0;
-	weapon_active_ = false;
-	weapon_fire_held_ = false;
-	weapon_fire_pressed_ = false;
-	weapon_reload_pressed_ = false;
+	local_weapon_.events.clear();
+	local_weapon_.anim_tick = 0;
+	local_weapon_.round_sequence = 0;
+	local_weapon_.active = false;
+	local_weapon_.fire_held = false;
+	local_weapon_.fire_pressed = false;
+	local_weapon_.reload_pressed = false;
 	// Mission-scoped loadout state [orig: Game_StartMission rebuilds restrictionData +
 	// g_armoryWeaponAvailability per mission @ 0x5246c3/@ 0x5246e8].
 	local_inventory_valid_ = false;
 	spawn_kit_.clear();
 	spawn_kit_set_ = false;
 	weapon_availability_.reset();
-	weapon_switch_in_flight_ = false;
-	weapon_switch_deferred_action_ = -1;
-	weapon_start_in_switchto_ = false;
+	local_weapon_.switch_in_flight = false;
+	local_weapon_.switch_deferred_action = -1;
+	local_weapon_.start_in_switchto = false;
 	// Mission-scoped, like the event queue cleared above. weapon_profile_ is NOT reset
 	// here: the profile record is player-scoped and outlives every mission load, the
 	// same way g_charSelClass is loaded once at boot [orig: PlayerProfile_LoadAllFromDisk
 	// @0x54f4d0 runs from the startup path, not Game_StartMission].
-	weapon_presentation_pending_ = false;
+	local_weapon_.presentation_pending = false;
 	// Mission-scoped even though weapon_profile_ is not: the RESIDENT BUFFER is rebuilt
 	// per mission, so the next session must re-copy its side's page rather than assume
 	// the previous mission's copy still stands.
 	weapon_profile_seeded_side_ = -1;
 	player_view_ = opennova::world::PlayerViewState{};
-	nvg_scope_restore_ = false;
+	local_weapon_.nvg_scope_restore = false;
 	binocular_yaw_offset_deg_ = 0.0f;
 	binocular_pitch_offset_deg_ = 0.0f;
-	local_eye_valid_ = false;
-	local_usegun_switch_ = LocalUseGunSwitch::kNone;
-	local_usegun_slot_active_ = false;
-	local_usegun_mount_ = opennova::world::EntityHandle{};
-	local_usegun_weapon_adm_ = 0xFF;
-	local_usegun_pending_mount_ = opennova::world::EntityHandle{};
-	local_usegun_pending_weapon_adm_ = 0xFF;
-	local_usegun_saved_adm_ = 0xFF;
-	local_usegun_switch_action_ = -1;
-	local_first_person_model_adm_ = 0xFF;
+	local_weapon_.eye_valid = false;
+	local_weapon_.usegun_switch = LocalUseGunSwitch::kNone;
+	local_weapon_.usegun_slot_active = false;
+	local_weapon_.usegun_mount = opennova::world::EntityHandle{};
+	local_weapon_.usegun_weapon_adm = 0xFF;
+	local_weapon_.usegun_pending_mount = opennova::world::EntityHandle{};
+	local_weapon_.usegun_pending_weapon_adm = 0xFF;
+	local_weapon_.usegun_saved_adm = 0xFF;
+	local_weapon_.usegun_switch_action = -1;
+	local_weapon_.first_person_model_adm = 0xFF;
 	world_ = std::make_unique<World>();
 	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
@@ -559,25 +559,25 @@ bool NovaSimulation::step() {
 // ClientState the present pass reads. No-op when the listen server is off.
 void NovaSimulation::restart() {
 	if (!loaded_ || !have_baseline_) return;
-	const bool usegun_was_active = local_usegun_slot_active_;
+	const bool usegun_was_active = local_weapon_.usegun_slot_active;
 	const bool usegun_was_pending =
-			local_usegun_switch_ != LocalUseGunSwitch::kNone;
-	const uint8_t saved_personal_adm = local_usegun_saved_adm_;
-	pending_weapon_events_.clear();
-	power_throw_start_tick_ = 0;
-	pending_throw_charge_ = 0;
-	weapon_fire_held_ = false;
-	weapon_fire_pressed_ = false;
-	weapon_reload_pressed_ = false;
-	local_usegun_switch_ = LocalUseGunSwitch::kNone;
-	local_usegun_slot_active_ = false;
-	local_usegun_mount_ = opennova::world::EntityHandle{};
-	local_usegun_weapon_adm_ = 0xFF;
-	local_usegun_pending_mount_ = opennova::world::EntityHandle{};
-	local_usegun_pending_weapon_adm_ = 0xFF;
-	local_usegun_saved_adm_ = 0xFF;
-	local_usegun_switch_action_ = -1;
-	weapon_switch_deferred_action_ = -1;
+			local_weapon_.usegun_switch != LocalUseGunSwitch::kNone;
+	const uint8_t saved_personal_adm = local_weapon_.usegun_saved_adm;
+	local_weapon_.events.clear();
+	local_weapon_.power_throw_start_tick = 0;
+	local_weapon_.pending_throw_charge = 0;
+	local_weapon_.fire_held = false;
+	local_weapon_.fire_pressed = false;
+	local_weapon_.reload_pressed = false;
+	local_weapon_.usegun_switch = LocalUseGunSwitch::kNone;
+	local_weapon_.usegun_slot_active = false;
+	local_weapon_.usegun_mount = opennova::world::EntityHandle{};
+	local_weapon_.usegun_weapon_adm = 0xFF;
+	local_weapon_.usegun_pending_mount = opennova::world::EntityHandle{};
+	local_weapon_.usegun_pending_weapon_adm = 0xFF;
+	local_weapon_.usegun_saved_adm = 0xFF;
+	local_weapon_.usegun_switch_action = -1;
+	local_weapon_.switch_deferred_action = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
 	if (have_wac_baseline_ && wac_) {
@@ -628,31 +628,32 @@ void NovaSimulation::restart() {
 		if (opennova::world::Entity *player =
 					world_->registry.get(world_->cached.local_player))
 			player->equipped_adm_index = saved_personal_adm;
-		weapon_active_ = false;
+		local_weapon_.active = false;
 		const opennova::world::WeaponTableEntry *saved_def =
 				world_->weapons.by_index(saved_personal_adm);
-		weapon_start_in_switchto_ = saved_def != nullptr;
-		PendingWeaponEvent event;
+		local_weapon_.start_in_switchto = saved_def != nullptr;
+		opennova::world::WeaponPresentationEvent event;
 		event.tick = world_->logic_tick;
-		event.world_position = get_local_player_position();
-		event.switch_to_weapon = saved_def != nullptr
-				? String::utf8(saved_def->name.c_str())
-				: String();
+		if (const opennova::world::Entity *local =
+					world_->registry.get(world_->cached.local_player))
+			event.world_position = local->position;
+		event.switch_to_weapon =
+				saved_def != nullptr ? saved_def->name : std::string();
 		event.clear_weapon = saved_def == nullptr;
-		pending_weapon_events_.push_back(std::move(event));
+		local_weapon_.events.push_back(std::move(event));
 	} else if (usegun_was_pending) {
 		// The presenter never left the personal weapon, but its outgoing slot may
 		// already be inside SWITCHFROM/RANK. Cancel only that action state while
 		// retaining the personal magazine and reserve.
-		const int32_t clip = weapon_slot_.clip;
-		const int32_t reserve = weapon_slot_.reserve;
-		weapon_slot_ = opennova::world::WeaponSlotState{};
-		weapon_slot_.clip = clip;
-		weapon_slot_.reserve = reserve;
+		const int32_t clip = local_weapon_.slot.clip;
+		const int32_t reserve = local_weapon_.slot.reserve;
+		local_weapon_.slot = opennova::world::WeaponSlotState{};
+		local_weapon_.slot.clip = clip;
+		local_weapon_.slot.reserve = reserve;
 	}
 	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
 		resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
-	weapon_anim_tick_ = world_->logic_tick;
+	local_weapon_.anim_tick = world_->logic_tick;
 	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.
 	// Force the next FollowOwner query to rebuild against the post-restart epoch.
