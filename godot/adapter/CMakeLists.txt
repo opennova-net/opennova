@@ -44,6 +44,7 @@ add_subdirectory(../../engine/runtime/mission opennova_mission)
 add_subdirectory(../../engine/formats/lwf opennova_lwf)
 add_subdirectory(../../engine/formats/dbf opennova_dbf)
 add_subdirectory(../../engine/runtime/audio opennova_audio)
+add_subdirectory(../../engine/runtime/hud opennova_hud)
 add_subdirectory(../../engine/base/oned_edit opennova_oned_edit)
 add_subdirectory(../../engine/runtime/controls opennova_controls)
 add_subdirectory(../../engine/formats/playersav opennova_playersav)
@@ -237,6 +238,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_wac
     opennova_mission
     opennova_audio_family
+    opennova_hud
     opennova_oned_edit
     opennova_controls
     opennova_playersav

@@ -9,6 +9,7 @@
 #include "util/texture_path_resolver.h"
 
 #include <env/env_celestial.h>
+#include <env/tod_clock.h>
 #include <env/env_weather.h>
 
 #include <algorithm>
@@ -80,6 +81,9 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("horizon_blend_skyfog", "fog", "skyfog", "fog_distance", "fog_distance_reference"), &EnvFile::horizon_blend_skyfog);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("tod_start_fixed24", "start_time_q8_8"), &EnvFile::tod_start_fixed24);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("tod_advance_per_tick", "minutes_per_day"), &EnvFile::tod_advance_per_tick);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("tod_advance", "time_fixed24", "ticks", "advance_per_tick"), &EnvFile::tod_advance);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("tile_overlay_tint_factor", "terrain_tint"), &EnvFile::tile_overlay_tint_factor);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("build_sky_dome_arrays", "sky_height"), &EnvFile::build_sky_dome_arrays);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
@@ -671,6 +675,18 @@ Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brig
 	result["glare"] = glare.glare;
 	result["fog_whiten"] = glare.fog_whiten;
 	return result;
+}
+
+int EnvFile::tod_start_fixed24(int p_start_time_q8_8) {
+	return opennova::env::tod_start_fixed24(p_start_time_q8_8);
+}
+
+int EnvFile::tod_advance_per_tick(int p_minutes_per_day) {
+	return opennova::env::tod_advance_per_tick(p_minutes_per_day);
+}
+
+int EnvFile::tod_advance(int p_time_fixed24, int p_ticks, int p_advance_per_tick) {
+	return opennova::env::tod_advance(p_time_fixed24, p_ticks, p_advance_per_tick);
 }
 
 Dictionary EnvFile::get_field_consumption() {

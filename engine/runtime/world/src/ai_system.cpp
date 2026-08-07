@@ -802,33 +802,59 @@ static int32_t part_anim_wrapped_sub(int32_t lhs, int32_t rhs) {
     return result;
 }
 
+bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate) {
+    if (dir == 0) return false; // play_type 0 (stop) freezes the sweep
+    if (dir == 1) {
+        phase = part_anim_wrapped_add(phase, rate);
+        // The original clears direction only after a strict upper overshoot.
+        // Landing exactly on 0x10000 remains active.
+        // [orig: Entity_UpdateSuspensionBounce @0x456740..0x456764]
+        if (phase > 0x10000) {
+            phase = 0x10000;
+            return true;
+        }
+        return false;
+    }
+    // Every nonzero direction other than +1 takes the subtraction branch;
+    // only a negative result clamps and stops.
+    // [orig: Entity_UpdateSuspensionBounce @0x456756..0x456764]
+    phase = part_anim_wrapped_sub(phase, rate);
+    if (phase < 0) {
+        phase = 0;
+        return true;
+    }
+    return false;
+}
+
 void AiSystem::advance_part_anim(AiEntity &e) {
     AiBrain &b = e.brain;
     for (int slot = 0; slot < 2; ++slot) {
         const int32_t dir = b.f[AiBrain::kPartAnimDir0 + slot];
         const int32_t rate = b.f[AiBrain::kPartAnimRate0 + slot];
-        if (dir == 0) continue; // play_type 0 (stop) freezes the sweep
-        int32_t &phase = b.f[AiBrain::kPartAnimPhase0 + slot];
-        if (dir == 1) {
-            phase = part_anim_wrapped_add(phase, rate);
-            // The original clears direction only after a strict upper
-            // overshoot. Landing exactly on 0x10000 remains active.
-            // [orig: Entity_UpdateSuspensionBounce @0x456740..0x456764]
-            if (phase > 0x10000) {
-                phase = 0x10000;
-                b.f[AiBrain::kPartAnimDir0 + slot] = 0;
-            }
-        } else {
-            phase = part_anim_wrapped_sub(phase, rate);
-            // Every nonzero direction other than +1 takes the subtraction
-            // branch; only a negative result clamps and stops.
-            // [orig: Entity_UpdateSuspensionBounce @0x456756..0x456764]
-            if (phase < 0) {
-                phase = 0;
-                b.f[AiBrain::kPartAnimDir0 + slot] = 0;
-            }
-        }
+        if (dir == 0) continue;
+        if (part_anim_step(b.f[AiBrain::kPartAnimPhase0 + slot], dir, rate))
+            b.f[AiBrain::kPartAnimDir0 + slot] = 0;
     }
+}
+
+// [flt_7C3310=1/65536, flt_7C3B40=0.016, flt_7C32BC=65536.] The original
+// computes `base` unconditionally, so ANIMTIME==0 -> base 0.0 -> 0.016/0.0 =
+// +inf, and the x87 ftol of infinity is the integer-indefinite 0x80000000
+// (INT_MIN) — nonzero, so the min-1 guard does NOT fire. The updater then
+// applies ordinary wrapping ADD/SUB: from phase zero, zero-time forward
+// alternates INT_MIN/zero without stopping; zero-time reverse clamps back to
+// zero and stops on its first tick. [orig: Entity_ApplyCommand
+// @0x43B1A9..0x43B1F9]
+int32_t part_anim_rate_from_seconds(double seconds) {
+    const double rate_f = (0.016 / seconds) * 65536.0; // +inf when seconds==0
+    int32_t rate;
+    if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
+        rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite
+    } else {
+        rate = static_cast<int32_t>(rate_f);     // truncate toward zero
+    }
+    if (rate == 0) rate = 1; // min-1 guard (does NOT fire for INT_MIN)
+    return rate;
 }
 
 // [orig: Entity_ApplyCommand @0x43ab60] See the header. Only case 0x22 (PLAYPARTANIM) is ported.
@@ -840,24 +866,13 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
             const int play_type = p3;
             if (static_cast<unsigned>(play_type + 1) > 2u) return; // play_type in {-1,0,1}
             const int slot = channel - 1;
-            // rate = (0.016 / seconds) * 65536 phase-units/tick, min 1. [flt_7C3310=1/65536,
-            // flt_7C3B40=0.016, flt_7C32BC=65536.] The original computes `base` unconditionally, so
-            // ANIMTIME==0 -> base 0.0 -> 0.016/0.0 = +inf, and the x87 ftol of infinity is the
-            // integer-indefinite 0x80000000 (INT_MIN) -- nonzero, so the min-1 guard does NOT fire.
-            // The updater then applies ordinary wrapping ADD/SUB. From phase
-            // zero, zero-time forward alternates INT_MIN/zero without stopping;
-            // zero-time reverse clamps back to zero and stops on its first tick.
+            // rate = (0.016 / seconds) * 65536 phase-units/tick, min 1 —
+            // shared with the editor-preview binding (see
+            // part_anim_rate_from_seconds below for the witnessed FPU shape).
             const double seconds = static_cast<double>(p4) / 65536.0; // base; p4==0 -> 0.0
-            const double rate_f = (0.016 / seconds) * 65536.0;        // +inf when p4==0
-            int32_t rate;
-            if (rate_f != rate_f || rate_f >= 2147483648.0 || rate_f < -2147483648.0) {
-                rate = static_cast<int32_t>(0x80000000); // ftol integer-indefinite (inf/NaN/overflow)
-            } else {
-                rate = static_cast<int32_t>(rate_f);      // truncate toward zero
-            }
-            if (rate == 0) rate = 1;                      // min-1 guard (does NOT fire for INT_MIN)
             comp.f[AiBrain::kPartAnimDir0 + slot] = play_type;  // comp+436+4*slot (direction)
-            comp.f[AiBrain::kPartAnimRate0 + slot] = rate;      // comp+444+4*slot (rate)
+            comp.f[AiBrain::kPartAnimRate0 + slot] =            // comp+444+4*slot (rate)
+                    part_anim_rate_from_seconds(seconds);
             break;
         }
         case 29:   // COMBATSPEED -> kSpeedA (brain +196)

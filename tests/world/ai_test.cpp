@@ -957,6 +957,28 @@ int main() {
     CHECK(sizeof(AiBrain) == 812);
     CHECK(sizeof(AiSlot) == 172);
 
+    // ---- the PLAYPARTANIM sweep seams (shared with the preview binding) ----
+    // Rate [orig: @0x43B1A9..0x43B1F9]: zero seconds -> the x87
+    // integer-indefinite INT_MIN (min-1 does NOT fire); a normal time
+    // truncates toward zero; a tiny nonzero result promotes to 1.
+    CHECK(part_anim_rate_from_seconds(0.0) ==
+          static_cast<int32_t>(0x80000000));
+    CHECK(part_anim_rate_from_seconds(1.0) ==
+          static_cast<int32_t>((0.016 / 1.0) * 65536.0));
+    CHECK(part_anim_rate_from_seconds(1.0e9) == 1);
+    // Step [orig: @0x456740..0x4567A9]: landing EXACTLY on 0x10000 stays
+    // active; only strict overshoot clamps and finishes; direction 0 freezes;
+    // reverse clamps at a strictly negative result.
+    {
+        int32_t phase = 0x10000 - 4;
+        CHECK(!part_anim_step(phase, 1, 4) && phase == 0x10000);
+        CHECK(part_anim_step(phase, 1, 4) && phase == 0x10000);
+        CHECK(!part_anim_step(phase, 0, 4) && phase == 0x10000);
+        phase = 4;
+        CHECK(!part_anim_step(phase, -1, 4) && phase == 0);
+        CHECK(part_anim_step(phase, -1, 4) && phase == 0);
+    }
+
     // ---- state name table (Entity_LookupAIStateName) ----
     CHECK(streq(ai_state_name(kAiGroundFollowWp), "GROUND_FOLLOWWP"));
     CHECK(streq(ai_state_name(kAiGroundDead), "GROUND_DEAD"));

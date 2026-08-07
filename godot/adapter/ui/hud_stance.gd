@@ -23,23 +23,18 @@ extends RefCounted
 ## factor and every frame (team tile / current / previous) scales by it.
 ## [orig: 0x800000 / max(w,h) @0x59a00a]
 static func scale_q16(frame0_size: Vector2i) -> int:
-	var m := maxi(frame0_size.x, frame0_size.y)
-	return 0x800000 / m if m > 0 else 0
+	return NovaHudPos.stance_scale_q16(frame0_size)
 
 
 ## One dimension through the witnessed fixed-point scale. [orig: @0x59a023]
 static func scaled_dim(dim: int, q16: int) -> int:
-	return (q16 * dim + 0x8000) >> 16
+	return NovaHudPos.stance_scaled_dim(dim, q16)
 
 
 ## The shared centering offset from frame 0's scaled dims; 127+ centers at 0.
 ## [orig: @0x59a02a..0x59a07e]
 static func center_offset(frame0_size: Vector2i, q16: int) -> Vector2i:
-	var sw := scaled_dim(frame0_size.x, q16)
-	var sh := scaled_dim(frame0_size.y, q16)
-	return Vector2i(
-		0 if sw >= 127 else (128 - sw) / 2,
-		0 if sh >= 127 else (128 - sh) / 2)
+	return NovaHudPos.stance_center_offset(frame0_size, q16)
 
 
 ## Draw one stance frame at the anchor (HUDSTANCEPOS, design space) plus the frame's

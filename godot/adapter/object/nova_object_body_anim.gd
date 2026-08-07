@@ -605,16 +605,11 @@ const _PART_ANIM_TICK_S := 0.016
 
 
 func _part_anim_rate_for_seconds(time_s: float) -> int:
-	# x87 FISTP returns the integer-indefinite INT_MIN for infinity, NaN,
-	# or an out-of-range result. A zero finite result is then promoted to 1.
-	# [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]
-	if time_s == 0.0:
-		return -2147483648
-	var rate_f := (_PART_ANIM_TICK_S / time_s) * 65536.0
-	if is_nan(rate_f) or rate_f >= 2147483648.0 or rate_f < -2147483648.0:
-		return -2147483648
-	var rate := int(rate_f)
-	return 1 if rate == 0 else _m._ctrl_dword(rate)
+	# The engine's witnessed rate math, x87 integer-indefinite included
+	# (ai.h part_anim_rate_from_seconds [orig: Entity_ApplyCommand
+	# @0x43B1A9..0x43B1F9]) — the same one impl ai_apply_command's
+	# PLAYPARTANIM case uses.
+	return NovaObjectData.part_anim_rate_for_seconds(time_s)
 
 
 ## Play a model part animation for the editor/legacy mission-controller path.
@@ -738,25 +733,17 @@ func _advance_part_anims(delta: float) -> bool:
 		for register in _m._part_anims.keys():
 			var anim: Dictionary = _m._part_anims[register]
 			var previous := int(anim["value"])
-			var direction := int(anim["dir"])
-			var rate := int(anim["rate"])
-			var next_value: int
-			var finished := false
-			if direction == 1:
-				next_value = _m._ctrl_dword(previous + rate)
-				if next_value > 65536:
-					next_value = 65536
-					finished = true
-			else:
-				next_value = _m._ctrl_dword(previous - rate)
-				if next_value < 0:
-					next_value = 0
-					finished = true
+			# The engine's one sweep step (ai.h part_anim_step — the same
+			# impl AiSystem::advance_part_anim runs): wrapping ADD/SUB,
+			# strict-overshoot clamp+finish.
+			var step: Dictionary = NovaObjectData.part_anim_step(
+					previous, int(anim["dir"]), int(anim["rate"]))
+			var next_value := int(step["phase"])
 			anim["value"] = next_value
 			_m._ctrl_values[register] = next_value
 			_m._ctrl_value_owners.erase(register)
 			changed = changed or next_value != previous
-			if finished:
+			if bool(step["finished"]):
 				_m._part_anims.erase(register)
 	_m._bounds_dirty = _m._bounds_dirty or changed
 	return changed

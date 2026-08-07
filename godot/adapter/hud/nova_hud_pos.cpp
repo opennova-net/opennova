@@ -4,6 +4,7 @@
 #include "util/nova_data_format.h"
 
 #include <def/def.h>
+#include <hud/hud_math.h>
 
 using namespace godot;
 
@@ -58,6 +59,25 @@ Dictionary graphic_to_dict(const DefHudGraphic &g) {
 } // namespace
 
 void NovaHudPos::_bind_methods() {
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("scale_point", "design", "surface"), &NovaHudPos::scale_point);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("pixel_delta_to_design", "delta", "surface"), &NovaHudPos::pixel_delta_to_design);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("fade_decay", "elapsed_ticks", "ramp_ticks"), &NovaHudPos::fade_decay);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("fade_flash_alpha", "elapsed_ticks", "ramp_ticks", "base_alpha", "max_alpha"), &NovaHudPos::fade_flash_alpha);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("stance_current_alpha", "elapsed_ticks", "ramp_ticks", "base_alpha"), &NovaHudPos::stance_current_alpha);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("stance_prev_alpha", "elapsed_ticks", "ramp_ticks"), &NovaHudPos::stance_prev_alpha);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("stance_scale_q16", "frame0_size"), &NovaHudPos::stance_scale_q16);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("stance_scaled_dim", "dim", "q16"), &NovaHudPos::stance_scaled_dim);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("stance_center_offset", "frame0_size", "q16"), &NovaHudPos::stance_center_offset);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("health_color_band", "fraction"), &NovaHudPos::health_color_band);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("message_expire_tick", "now_ticks", "prev_expire", "has_prev"), &NovaHudPos::message_expire_tick);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("half_bright", "color"), &NovaHudPos::half_bright);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &NovaHudPos::format_ammo);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("weapon_name_x_nudge", "narrow_surface", "align"), &NovaHudPos::weapon_name_x_nudge);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &NovaHudPos::round_icon_count);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &NovaHudPos::crosshair_spread_px_fp16);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &NovaHudPos::crosshair_total_spread_fp16);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &NovaHudPos::crosshair_error_row);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_should_draw", "aimed", "keep_while_aimed"), &NovaHudPos::crosshair_should_draw);
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaHudPos::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &NovaHudPos::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaHudPos::is_loaded);
@@ -324,4 +344,113 @@ Dictionary NovaHudPos::to_dictionary() const {
 	out["misc"] = misc;
 
 	return out;
+}
+Vector2 NovaHudPos::scale_point(const Vector2 &p_design, const Vector2 &p_surface) {
+	return Vector2(
+			static_cast<float>(opennova::hud::scale_axis(
+					p_design.x, p_surface.x, opennova::hud::kDesignWidth)),
+			static_cast<float>(opennova::hud::scale_axis(
+					p_design.y, p_surface.y, opennova::hud::kDesignHeight)));
+}
+
+Vector2 NovaHudPos::pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface) {
+	if (p_surface.x <= 0.0f || p_surface.y <= 0.0f) return Vector2();
+	return Vector2(
+			static_cast<float>(opennova::hud::pixel_delta_to_design(
+					p_delta.x, p_surface.x, opennova::hud::kDesignWidth)),
+			static_cast<float>(opennova::hud::pixel_delta_to_design(
+					p_delta.y, p_surface.y, opennova::hud::kDesignHeight)));
+}
+
+int NovaHudPos::fade_decay(int p_elapsed_ticks, int p_ramp_ticks) {
+	return opennova::hud::fade_decay(p_elapsed_ticks, p_ramp_ticks);
+}
+
+int NovaHudPos::fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
+		int p_base_alpha, int p_max_alpha) {
+	return opennova::hud::fade_flash_alpha(p_elapsed_ticks, p_ramp_ticks,
+			p_base_alpha, p_max_alpha);
+}
+
+int NovaHudPos::stance_current_alpha(int p_elapsed_ticks, int p_ramp_ticks,
+		int p_base_alpha) {
+	return opennova::hud::stance_current_alpha(p_elapsed_ticks, p_ramp_ticks,
+			p_base_alpha);
+}
+
+int NovaHudPos::stance_prev_alpha(int p_elapsed_ticks, int p_ramp_ticks) {
+	return opennova::hud::stance_prev_alpha(p_elapsed_ticks, p_ramp_ticks);
+}
+
+int NovaHudPos::stance_scale_q16(const Vector2i &p_frame0_size) {
+	return opennova::hud::stance_scale_q16(p_frame0_size.x, p_frame0_size.y);
+}
+
+int NovaHudPos::stance_scaled_dim(int p_dim, int p_q16) {
+	return opennova::hud::stance_scaled_dim(p_dim, p_q16);
+}
+
+Vector2i NovaHudPos::stance_center_offset(const Vector2i &p_frame0_size, int p_q16) {
+	return Vector2i(
+			opennova::hud::stance_center_axis(
+					opennova::hud::stance_scaled_dim(p_frame0_size.x, p_q16)),
+			opennova::hud::stance_center_axis(
+					opennova::hud::stance_scaled_dim(p_frame0_size.y, p_q16)));
+}
+
+int NovaHudPos::health_color_band(float p_fraction) {
+	// The producer domain is the witnessed 16.16 ratio; the float fraction
+	// re-enters it by truncation, the original data path.
+	return opennova::hud::health_color_band_fp16(
+			static_cast<int32_t>(p_fraction * 65536.0f));
+}
+
+int NovaHudPos::message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev) {
+	return opennova::hud::message_expire_tick(p_now_ticks, p_prev_expire, p_has_prev);
+}
+
+Color NovaHudPos::half_bright(const Color &p_color) {
+	const auto channel = [](float c) {
+		const int v = static_cast<int>(c * 255.0f + 0.5f);
+		return static_cast<uint32_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+	};
+	const uint32_t argb = 0xFF000000u | (channel(p_color.r) << 16) |
+			(channel(p_color.g) << 8) | channel(p_color.b);
+	const uint32_t hb = opennova::hud::half_bright_argb(argb);
+	return Color(((hb >> 16) & 0xFFu) / 255.0f, ((hb >> 8) & 0xFFu) / 255.0f,
+			(hb & 0xFFu) / 255.0f, 1.0f);
+}
+
+String NovaHudPos::format_ammo(int p_clip, int p_reserve, int p_capacity) {
+	return String(opennova::hud::format_ammo(p_clip, p_reserve, p_capacity).c_str());
+}
+
+int NovaHudPos::weapon_name_x_nudge(bool p_narrow_surface, int p_align) {
+	return opennova::hud::weapon_name_x_nudge(p_narrow_surface, p_align);
+}
+
+int NovaHudPos::round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor) {
+	return opennova::hud::round_icon_count(p_clip, p_reserve, p_capacity, p_divisor);
+}
+
+double NovaHudPos::crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
+		double p_screen_w) {
+	return opennova::hud::crosshair_spread_px_fp16(
+			static_cast<int32_t>(p_spread_fp16), p_fov_deg, p_screen_w);
+}
+
+int NovaHudPos::crosshair_total_spread_fp16(int p_error_fp16,
+		int p_recoil_pitch_bam, int p_weight_spread_bam) {
+	return opennova::hud::crosshair_total_spread_fp16(
+			static_cast<int32_t>(p_error_fp16),
+			static_cast<int32_t>(p_recoil_pitch_bam),
+			static_cast<int32_t>(p_weight_spread_bam));
+}
+
+int NovaHudPos::crosshair_error_row(int p_stance, bool p_scoped) {
+	return opennova::hud::crosshair_error_row(p_stance, p_scoped);
+}
+
+bool NovaHudPos::crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed) {
+	return opennova::hud::crosshair_should_draw(p_aimed, p_keep_while_aimed);
 }

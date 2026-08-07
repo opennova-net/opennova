@@ -110,4 +110,16 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 const std::vector<WeaponKitEntry> &kit,
                                 int32_t player_class, bool validate_banned);
 
+// The class the armory screen opens on: the player's current class when the
+// host's S2C 0x76 allow mask permits it, else the next allowed class scanning
+// up through 9, else gunner (7). The resolver indexes the class-id bits (5..9)
+// of the complete wire u16 directly. [orig: Armory_ResolveSelectedClass
+// @0x5642f0 against g_hostClassAllowMask]
+int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask);
+
+// The armory class filter bit: 1 << (class - 5) for the five soldier classes;
+// any other class (an unclassed SP spawn) filters NOTHING — the witnessed
+// default is ALL weapons. [orig: @0x5642f0 switch default mask = -1]
+int32_t armory_class_filter_mask(int selected_class);
+
 } // namespace opennova::world

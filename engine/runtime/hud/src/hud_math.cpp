@@ -1,0 +1,142 @@
+#include "hud/hud_math.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+namespace opennova::hud {
+
+// [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]
+double scale_axis(double design, double surface, double design_extent) {
+	return std::floor((design * surface + design_extent * 0.5) / design_extent);
+}
+
+double pixel_delta_to_design(double delta, double surface, double design_extent) {
+	if (surface <= 0.0) return 0.0;
+	return delta * design_extent / surface;
+}
+
+// [orig: draw_hud_ammo_indicator @0x599af9; draw-stance @0x599fc0] Exact
+// integer translation, including the elapsed-0 u16 underflow quirk (elapsed 0
+// reads fully decayed — one 62 Hz tick of latency).
+int fade_decay(int elapsed_ticks, int ramp_ticks) {
+	if (ramp_ticks <= 0) return 0;
+	const int e = std::clamp(elapsed_ticks, 0, ramp_ticks);
+	const int frac =
+			(((static_cast<int64_t>(e) << 16) / ramp_ticks) - 1) & 0xFFFF;
+	return 255 - ((frac >> 8) & 0xFF);
+}
+
+int fade_flash_alpha(int elapsed_ticks, int ramp_ticks, int base_alpha,
+		int max_alpha) {
+	return std::min(base_alpha + fade_decay(elapsed_ticks, ramp_ticks),
+			max_alpha);
+}
+
+// [orig: draw-stance @0x599fc2..0x59a2e3]
+int stance_current_alpha(int elapsed_ticks, int ramp_ticks, int base_alpha) {
+	return std::min(base_alpha + fade_decay(elapsed_ticks, ramp_ticks), 255);
+}
+
+int stance_prev_alpha(int elapsed_ticks, int ramp_ticks) {
+	return fade_decay(elapsed_ticks, ramp_ticks) >> 2;
+}
+
+// [orig: HUD_DrawStanceIndicator @0x59a00a]
+int32_t stance_scale_q16(int frame0_w, int frame0_h) {
+	const int m = std::max(frame0_w, frame0_h);
+	return m > 0 ? 0x800000 / m : 0;
+}
+
+// [orig: @0x59a023]
+int stance_scaled_dim(int dim, int32_t q16) {
+	return static_cast<int>(
+			(static_cast<int64_t>(q16) * dim + 0x8000) >> 16);
+}
+
+// [orig: @0x59a02a..0x59a07e] 127+ centers at 0.
+int stance_center_axis(int scaled_dim) {
+	return scaled_dim >= 127 ? 0 : (128 - scaled_dim) / 2;
+}
+
+// [orig: HUD_DrawHealthBar @0x5a2e50]
+int health_color_band_fp16(int32_t ratio_fp16) {
+	if (ratio_fp16 > 0xC000) return 0;
+	if (ratio_fp16 > 0x6FFF) return 1;
+	return 2;
+}
+
+// [orig: Chat_AddDebugMessage @0x4987f0 — @0x51f216 life, @0x49894e stagger]
+int message_expire_tick(int now_ticks, int prev_expire, bool has_prev) {
+	const int expire = now_ticks + kMessageLifeTicks;
+	if (!has_prev) return expire;
+	return std::max(expire, prev_expire + kMessageExpiryStagger);
+}
+
+// [orig: HUD_DrawTextRightAligned_HalfBright @0x580850 —
+// (color >> 1) & 0x7F7F7F | 0xFF000000]
+uint32_t half_bright_argb(uint32_t argb) {
+	return ((argb >> 1) & 0x7F7F7Fu) | 0xFF000000u;
+}
+
+// [orig: hud_draw_weapon_ammo_and_name @0x593a33..0x593ab0]
+std::string format_ammo(int clip, int reserve, int capacity) {
+	if (reserve == -1 || capacity == -1) return std::string();
+	if (clip != -1 && capacity >= 2) {
+		return std::to_string(clip) + "/" + std::to_string(reserve);
+	}
+	return std::to_string(reserve);
+}
+
+// [orig: @0x593b36..0x593bf5] align 0 = left, 1 = right; other alignments
+// take no nudge.
+int weapon_name_x_nudge(bool narrow_surface, int align) {
+	if (!narrow_surface) return 0;
+	if (align == 0) return -4;
+	if (align == 1) return 4;
+	return 0;
+}
+
+// [orig: draw_hud_ammo_indicator @0x599b9c..0x599bc1]
+int round_icon_count(int clip, int reserve, int capacity, int divisor) {
+	int n = capacity == 1 ? reserve : clip;
+	if (divisor > 1) n = (n + 1) / divisor;
+	return std::min(n, kMaxRoundIcons);
+}
+
+// [orig: HUD_DrawCrosshair @0x592b07..0x592bf5 — the HIWORD fov truncation and
+// the >>16 both survive; the 2^31/180 factors cancel between spread and fov]
+double crosshair_spread_px_fp16(int32_t spread_fp16, double fov_deg,
+		double screen_w) {
+	const int fov_i = static_cast<int>(fov_deg);
+	if (fov_i <= 0) return 0.0;
+	return static_cast<double>(
+			static_cast<int64_t>(
+					static_cast<double>(spread_fp16) * screen_w / fov_i) >>
+			16);
+}
+
+// [orig: @0x592b07..0x592b28] Wrapping i32 adds with the two arithmetic SAR
+// recoil terms.
+int32_t crosshair_total_spread_fp16(int32_t error_fp16, int32_t recoil_pitch_bam,
+		int32_t weapon_weight_spread_bam) {
+	uint32_t acc = static_cast<uint32_t>(error_fp16) +
+			static_cast<uint32_t>(recoil_pitch_bam >> 7);
+	acc += static_cast<uint32_t>(weapon_weight_spread_bam >> 7);
+	int32_t out;
+	static_assert(sizeof(out) == sizeof(acc), "i32 reinterpret");
+	std::memcpy(&out, &acc, sizeof(out));
+	return out;
+}
+
+// [orig: @0x592b37..0x592b84]
+int crosshair_error_row(int stance, bool scoped) {
+	return std::clamp(stance, 0, 2) + (scoped ? 3 : 0);
+}
+
+// [orig: gate @0x592afa]
+bool crosshair_should_draw(bool aimed_shot_available, bool keep_while_aimed) {
+	return !aimed_shot_available || keep_while_aimed;
+}
+
+} // namespace opennova::hud

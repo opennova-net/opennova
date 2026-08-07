@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
 
@@ -52,6 +53,33 @@ public:
 		DESIGN_WIDTH = 1024,
 		DESIGN_HEIGHT = 768,
 	};
+
+	// The HUD view-helper math (one impl in engine/runtime/hud hud_math.h;
+	// the GDScript Hud* helpers delegate here and keep only the CanvasItem
+	// work). Each carries its witness at the engine impl.
+	static Vector2 scale_point(const Vector2 &p_design, const Vector2 &p_surface);
+	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
+	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
+	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
+			int p_base_alpha, int p_max_alpha);
+	static int stance_current_alpha(int p_elapsed_ticks, int p_ramp_ticks,
+			int p_base_alpha);
+	static int stance_prev_alpha(int p_elapsed_ticks, int p_ramp_ticks);
+	static int stance_scale_q16(const Vector2i &p_frame0_size);
+	static int stance_scaled_dim(int p_dim, int p_q16);
+	static Vector2i stance_center_offset(const Vector2i &p_frame0_size, int p_q16);
+	static int health_color_band(float p_fraction);
+	static int message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev);
+	static Color half_bright(const Color &p_color);
+	static String format_ammo(int p_clip, int p_reserve, int p_capacity);
+	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
+	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);
+	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
+			double p_screen_w);
+	static int crosshair_total_spread_fp16(int p_error_fp16,
+			int p_recoil_pitch_bam, int p_weight_spread_bam);
+	static int crosshair_error_row(int p_stance, bool p_scoped);
+	static bool crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed);
 
 	Error load(const String &path);
 	// Load hudpos.def by flat name through the mounted resource root (VFS), so the

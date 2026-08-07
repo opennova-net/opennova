@@ -184,6 +184,14 @@ public:
 	// {"glare": 0..255, "fog_whiten": 0..40}.
 	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
+	// The mission time-of-day clock (env/tod_clock.h): the BMS Q8.8 start hour
+	// widened into the day-wrapped 8.24 accumulator [orig: @0x525371], the
+	// exact per-tick increment with retail's 60-minute day floor
+	// [orig: Env_TodAdvancePerTick @0x57d108; @0x57d170], and the tick advance.
+	static int tod_start_fixed24(int p_start_time_q8_8);
+	static int tod_advance_per_tick(int p_minutes_per_day);
+	static int tod_advance(int p_time_fixed24, int p_ticks, int p_advance_per_tick);
+
 	// The .til tile-overlay tint factor for a single-multiply shader:
 	// 2*HALF(terrain_rgb)/255 per channel — 254/255 at the default tint (the
 	// witnessed MODULATE2X-over-half combine is near-identity, not exact).

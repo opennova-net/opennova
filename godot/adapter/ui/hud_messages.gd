@@ -28,9 +28,11 @@ func clear() -> void:
 func push(text: String, color: Color, now_ticks: int) -> void:
 	if text.is_empty():
 		return
-	var expire := now_ticks + LINE_LIFE_TICKS
-	if not _lines.is_empty():
-		expire = maxi(expire, int(_lines[-1]["expire"]) + EXPIRY_STAGGER)
+	# The 930-tick life + >=186-tick stagger policy is the engine's
+	# (hud/hud_math.h message_expire_tick).
+	var expire := NovaHudPos.message_expire_tick(now_ticks,
+			int(_lines[-1]["expire"]) if not _lines.is_empty() else 0,
+			not _lines.is_empty())
 	_lines.append({ "text": text, "color": color, "expire": expire })
 	while _lines.size() > DISPLAY_SLOT_COUNT:
 		_lines.pop_front()

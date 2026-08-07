@@ -165,6 +165,13 @@ public:
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480].
 	int encumbrance_class(double weight) const;
+	// The armory screen's open-time class policy (one impl in
+	// engine/runtime/world player_loadout.h [orig: Armory_ResolveSelectedClass
+	// @0x5642f0]): the current class when the S2C 0x76 allow mask permits it,
+	// else scan up through 9, else gunner (7); and the class filter bit
+	// (1 << (class-5) for 5..9, ALL weapons otherwise).
+	static int armory_resolve_selected_class(int p_player_class, int p_class_allow_mask);
+	static int armory_class_filter_mask(int p_selected_class);
 };
 
 } // namespace godot

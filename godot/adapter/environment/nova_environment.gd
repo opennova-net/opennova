@@ -19,9 +19,6 @@ const HHMM_HOUR_SCALE := 100.0
 const CLOCK_MINUTES_PER_DAY := HOURS_PER_DAY * MINUTES_PER_HOUR
 const FIXED24_ONE_HOUR := 1 << 24
 const TOD_DAY_FIXED24 := HOURS_PER_DAY * FIXED24_ONE_HOUR
-const TOD_TICKS_PER_REAL_MINUTE := 3720  # 60 seconds * 62 logic ticks
-const Q8_8_TO_FIXED24_SHIFT := 16
-const MIN_MINUTES_PER_DAY := 60
 const DEFAULT_MINUTES_PER_DAY := 1440
 const DEFAULT_START_HOUR := 12
 
@@ -77,8 +74,8 @@ var _nvg_view_active := false
 var _nvg_gain: int = 0
 var _fog_distance: float = 1000.0
 var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
-var _mission_advance_per_tick: int = int(
-	TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * DEFAULT_MINUTES_PER_DAY))
+var _mission_advance_per_tick: int = EnvFile.tod_advance_per_tick(
+	DEFAULT_MINUTES_PER_DAY)
 # A remote authority's phase-2 state overrides only the values actually carried
 # on the wire. The local .env remains the source for colors, fog type, sky
 # height, and every other unreplicated channel.
@@ -148,16 +145,14 @@ func _process(delta: float) -> void:
 	_update_tod()
 
 
-## Start the one runtime mission clock from the BMS header. start_time is Q8.8
-## hours and widens to the engine's 8.24 accumulator; minutes_per_day is clamped
-## to retail's 60-minute minimum [orig: Game_StartMission @ 0x525371;
-## Environment_SetTodAdvanceRate @ 0x57d170].
+## Start the one runtime mission clock from the BMS header. The Q8.8 widening,
+## the day wrap, and retail's 60-minute floor are native
+## (env/tod_clock.h [orig: Game_StartMission @ 0x525371;
+## Environment_SetTodAdvanceRate @ 0x57d170]).
 func configure_mission_clock(start_time_q8_8: int, minutes_per_day: int) -> void:
 	_clear_network_environment_state()
-	var raw := start_time_q8_8 & 0xFFFF
-	_mission_time_fixed24 = (raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24
-	var rate := maxi(minutes_per_day, MIN_MINUTES_PER_DAY)
-	_mission_advance_per_tick = int(TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * rate))
+	_mission_time_fixed24 = EnvFile.tod_start_fixed24(start_time_q8_8)
+	_mission_advance_per_tick = EnvFile.tod_advance_per_tick(minutes_per_day)
 	time_of_day = mission_start_time_hhmm(start_time_q8_8)
 
 
@@ -169,13 +164,12 @@ func get_mission_advance_per_tick() -> int:
 ## by NovaEnvironment and editor previews. Keeping this public conversion here
 ## prevents runtime and Mission preview clocks from drifting apart.
 static func mission_start_time_hhmm(start_time_q8_8: int) -> float:
-	var raw := start_time_q8_8 & 0xFFFF
-	return _fixed24_to_hhmm((raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24)
+	return _fixed24_to_hhmm(EnvFile.tod_start_fixed24(start_time_q8_8))
 
 
-## Advance by completed logic ticks using the exact integer increment
-## [orig: Env_TodAdvancePerTick =
-## 0x18000000 / (3720 * minutes_per_day) @ 0x57d108].
+## Advance by completed logic ticks using the exact native integer increment
+## (env/tod_clock.h [orig: Env_TodAdvancePerTick =
+## 0x18000000 / (3720 * minutes_per_day) @ 0x57d108]).
 func advance_mission_clock(ticks: int) -> void:
 	if ticks <= 0:
 		return
@@ -183,9 +177,8 @@ func advance_mission_clock(ticks: int) -> void:
 	# tick still owns the countdown between phase-2 samples.
 	if _network_environment_active and _network_quake_ticks > 0:
 		_network_quake_ticks = maxi(0, _network_quake_ticks - ticks)
-	_mission_time_fixed24 = (
-		_mission_time_fixed24 + ticks * _mission_advance_per_tick
-	) % TOD_DAY_FIXED24
+	_mission_time_fixed24 = EnvFile.tod_advance(
+		_mission_time_fixed24, ticks, _mission_advance_per_tick)
 	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
 
 

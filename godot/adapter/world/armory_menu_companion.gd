@@ -207,27 +207,19 @@ func _populate_classes() -> void:
 			else Node.PROCESS_MODE_DISABLED
 
 
-# The class the screen opens on: the player's current class when the host allows it,
-# else the next allowed class scanning up through 9, else gunner (7)
-# [orig: Armory_ResolveSelectedClass @0x5642f0 against g_hostClassAllowMask].
+# The class the screen opens on — the engine's one impl (world/player_loadout
+# armory_resolve_selected_class [orig: Armory_ResolveSelectedClass @0x5642f0
+# against g_hostClassAllowMask]).
 func _resolve_selected_class() -> int:
-	var c := _player_class
-	if ((1 << c) & _class_allow_mask) == 0:
-		c += 1
-		while c <= 9 and ((1 << c) & _class_allow_mask) == 0:
-			c += 1
-		if c > 9:
-			c = 7
-	return c
+	return NovaWeaponDatabase.armory_resolve_selected_class(
+			_player_class, _class_allow_mask)
 
 
-# The class filter bit: 1 << (class - 5) for the five soldier classes; any other
-# class (an unclassed SP spawn) filters NOTHING — the witnessed default is ALL
-# weapons [orig: Armory_ResolveSelectedClass @0x5642f0 switch default mask = -1].
+# The class filter bit — the engine's one impl (world/player_loadout
+# armory_class_filter_mask [orig: Armory_ResolveSelectedClass @0x5642f0
+# switch default mask = -1 filters NOTHING]).
 func _class_mask() -> int:
-	if _selected_class_value < 5 or _selected_class_value > 9:
-		return -1
-	return 1 << (_selected_class_value - 5)
+	return NovaWeaponDatabase.armory_class_filter_mask(_selected_class_value)
 
 
 func _on_class_changed(index: int, _value: String) -> void:

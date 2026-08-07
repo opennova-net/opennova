@@ -205,4 +205,25 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     return true;
 }
 
+// [orig: Armory_ResolveSelectedClass @0x5642f0] The scan-up + gunner fallback
+// against the host allow mask; a class with its bit set opens as-is.
+int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask) {
+    // The &31 mirrors x86 shl's hardware count masking for an out-of-range
+    // class byte (and keeps the C++ shift defined).
+    int c = player_class;
+    if (((1u << (c & 31)) & class_allow_mask) == 0u) {
+        ++c;
+        while (c <= 9 && ((1u << (c & 31)) & class_allow_mask) == 0u) ++c;
+        if (c > 9) c = 7; // gunner
+    }
+    return c;
+}
+
+// [orig: Armory_ResolveSelectedClass @0x5642f0 switch] Classes 5..9 filter by
+// their bit; the default arm is the all-ones mask (no filtering).
+int32_t armory_class_filter_mask(int selected_class) {
+    if (selected_class < 5 || selected_class > 9) return -1;
+    return 1 << (selected_class - 5);
+}
+
 } // namespace opennova::world

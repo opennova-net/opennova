@@ -68,6 +68,12 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_user_point_info", "index"), &NovaObjectData::get_user_point_info);
 	ClassDB::bind_method(D_METHOD("get_user_point_bone_mask", "name"),
 			&NovaObjectData::get_user_point_bone_mask);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("part_anim_rate_for_seconds", "seconds"),
+			&NovaObjectData::part_anim_rate_for_seconds);
+	ClassDB::bind_static_method("NovaObjectData",
+			D_METHOD("part_anim_step", "phase", "dir", "rate"),
+			&NovaObjectData::part_anim_step);
 	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &NovaObjectData::get_ground_anchor, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("has_collision"), &NovaObjectData::has_collision);
 	ClassDB::bind_method(D_METHOD("has_occlusion"), &NovaObjectData::has_occlusion);

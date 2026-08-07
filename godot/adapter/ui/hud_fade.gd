@@ -18,25 +18,21 @@ const SECONDS_TO_TICKS := 62.0
 ## of the ramp. Exact integer translation, including the elapsed-0 wrap quirk (u16
 ## underflow makes elapsed 0 read as fully decayed — one 62 Hz tick of latency).
 static func decay(elapsed_ticks: int, ramp_ticks: int) -> int:
-	if ramp_ticks <= 0:
-		return 0
-	var e := clampi(elapsed_ticks, 0, ramp_ticks)
-	var frac := (((e << 16) / ramp_ticks) - 1) & 0xFFFF
-	return 255 - ((frac >> 8) & 0xFF)
+	return NovaHudPos.fade_decay(elapsed_ticks, ramp_ticks)
 
 
 ## The ammo/clip indicator's flash: alpha jumps toward base+255 on a change and decays
 ## back to base, clamped by the ALPHAFADE max. [orig: draw_hud_ammo_indicator @0x599af9]
 static func flash_alpha(elapsed_ticks: int, ramp_ticks: int, base_alpha: int, max_alpha: int) -> int:
-	return mini(base_alpha + decay(elapsed_ticks, ramp_ticks), max_alpha)
+	return NovaHudPos.fade_flash_alpha(elapsed_ticks, ramp_ticks, base_alpha, max_alpha)
 
 
 ## The stance cross-fade pair: the current frame draws at min(base+fade, 255); the
 ## previous frame ghosts on top at fade>>2 (the witnessed (fade<<22) alpha-byte trick,
 ## max 63) until the ramp ends. [orig: draw-stance @0x599fc2..0x59a2e3]
 static func stance_current_alpha(elapsed_ticks: int, ramp_ticks: int, base_alpha: int) -> int:
-	return mini(base_alpha + decay(elapsed_ticks, ramp_ticks), 255)
+	return NovaHudPos.stance_current_alpha(elapsed_ticks, ramp_ticks, base_alpha)
 
 
 static func stance_prev_alpha(elapsed_ticks: int, ramp_ticks: int) -> int:
-	return decay(elapsed_ticks, ramp_ticks) >> 2
+	return NovaHudPos.stance_prev_alpha(elapsed_ticks, ramp_ticks)

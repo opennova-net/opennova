@@ -21,10 +21,7 @@ var _stamp_ticks := 0
 ## divided by the rounds-per-icon divisor when > 1 (rounded up), capped at 40.
 ## [orig: @0x599b9c..0x599bc1]
 static func round_icon_count(clip: int, reserve: int, capacity: int, divisor: int) -> int:
-	var n := reserve if capacity == 1 else clip
-	if divisor > 1:
-		n = (n + 1) / divisor
-	return mini(n, MAX_ROUND_ICONS)
+	return NovaHudPos.round_icon_count(clip, reserve, capacity, divisor)
 
 
 func reset() -> void:

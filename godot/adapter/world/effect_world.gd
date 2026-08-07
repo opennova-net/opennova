@@ -13,7 +13,7 @@ const BINDING_WORLD := 0
 const BINDING_FOLLOW_OWNER := 1
 const RENDER_DOMAIN_WORLD := 0
 const RENDER_DOMAIN_FIRST_PERSON := 1
-const KILL_PLANE_DISABLED := 0
+const KILL_PLANE_DISABLED := NovaEffectScene.KILL_PLANE_DISABLED
 
 var _files: Array[NovaParticleFile] = []
 var _load_report: Dictionary = {}

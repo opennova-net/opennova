@@ -15,11 +15,7 @@ extends RefCounted
 ## otherwise; nothing when reserve or capacity is the -1 sentinel (no ammo model —
 ## knives etc.). [orig: @0x593a33..0x593ab0]
 static func format_ammo(clip: int, reserve: int, capacity: int) -> String:
-	if reserve == -1 or capacity == -1:
-		return ""
-	if clip != -1 and capacity >= 2:
-		return "%d/%d" % [clip, reserve]
-	return "%d" % reserve
+	return NovaHudPos.format_ammo(clip, reserve, capacity)
 
 
 static func draw_ammo(ci: CanvasItem, font: Font, pos: Vector4i, clip: int, reserve: int,
@@ -41,11 +37,6 @@ static func draw_weapon_name(ci: CanvasItem, font: Font, pos: Vector4i, name: St
 		color: Color, surface: Vector2) -> void:
 	if ci == null or font == null or pos.z != 0 or name.is_empty():
 		return
-	var x := pos.x
-	if surface.x <= 640.0:
-		if pos.w == 0:
-			x -= 4
-		elif pos.w == 1:
-			x += 4
+	var x := pos.x + NovaHudPos.weapon_name_x_nudge(surface.x <= 640.0, pos.w)
 	HudText.draw_text(ci, font, Vector2(x, pos.y), surface, name,
 		HudText.half_bright(color), pos.w)

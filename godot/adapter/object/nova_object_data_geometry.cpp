@@ -3,6 +3,7 @@
 #include "object/nova_object_data_internal.h"
 
 #include <simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+#include <world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -283,6 +284,20 @@ int NovaObjectData::get_user_point_bone_mask(const String &p_name) const {
 	if (!has_source_model) return 0;
 	return threedi_3di3_user_point_mask(&source_model,
 			p_name.utf8().get_data());
+}
+
+int NovaObjectData::part_anim_rate_for_seconds(double p_seconds) {
+	return opennova::world::part_anim_rate_from_seconds(p_seconds);
+}
+
+Dictionary NovaObjectData::part_anim_step(int p_phase, int p_dir, int p_rate) {
+	int32_t phase = static_cast<int32_t>(p_phase);
+	const bool finished = opennova::world::part_anim_step(phase,
+			static_cast<int32_t>(p_dir), static_cast<int32_t>(p_rate));
+	Dictionary out;
+	out["phase"] = phase;
+	out["finished"] = finished;
+	return out;
 }
 
 Vector3 NovaObjectData::get_ground_anchor(int p_lod_index) const {

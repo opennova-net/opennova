@@ -30,7 +30,7 @@ static func load_font(root: NovaResourceRoot, font_name: String) -> FontFile:
 ## Half-bright: halve each RGB channel and force opaque alpha.
 ## [orig: (color >> 1) & 0x7F7F7F | 0xFF000000]
 static func half_bright(c: Color) -> Color:
-	return Color(c.r * 0.5, c.g * 0.5, c.b * 0.5, 1.0)
+	return NovaHudPos.half_bright(c)
 
 
 ## Draw text at a design-space position scaled onto the surface, with alignment.

@@ -744,6 +744,14 @@ target_link_libraries(env_render_unit_test PRIVATE opennova_env)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
 
+# The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
+# scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
+# message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
+# spread projection/sum/row/gate.
+add_executable(hud_math_test hud/hud_math_test.cpp)
+target_link_libraries(hud_math_test PRIVATE opennova_hud)
+add_test(NAME hud_math COMMAND hud_math_test)
+
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_env opennova_vfs)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

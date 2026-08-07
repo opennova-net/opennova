@@ -29,10 +29,7 @@ const TAPER := 0.1 # inner-vertex pull-back factor [orig: 0x590f50 all cases]
 ## on both sides; fov = HIWORD(g_cameraFovDeg 16.16)]
 static func spread_px_fp16(spread_fp16: int, fov_deg: float,
 		screen_w: float) -> float:
-	var fov_i := int(fov_deg) # HIWORD truncation of the 16.16 fov register
-	if fov_i <= 0:
-		return 0.0
-	return float(int(float(spread_fp16) * screen_w / float(fov_i)) >> 16)
+	return NovaHudPos.crosshair_spread_px_fp16(spread_fp16, fov_deg, screen_w)
 
 
 ## Compatibility entry for degree-valued callers. Dynamic weapon spread uses the
@@ -46,12 +43,8 @@ static func spread_px(spread_deg: float, fov_deg: float, screen_w: float) -> flo
 ## [orig: HUD_DrawCrosshair @0x592b07..0x592b28]
 static func total_spread_fp16(error_fp16: int, recoil_pitch_bam: int,
 		weapon_weight_spread_bam: int) -> int:
-	var wrapped := _wrap_i32(error_fp16 + (recoil_pitch_bam >> 7))
-	return _wrap_i32(wrapped + (weapon_weight_spread_bam >> 7))
-
-
-static func _wrap_i32(value: int) -> int:
-	return ((value + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+	return NovaHudPos.crosshair_total_spread_fp16(
+			error_fp16, recoil_pitch_bam, weapon_weight_spread_bam)
 
 
 ## Ordinary on-foot aimed shots hide the reticle. Retail's vehicle/gunner leg
@@ -59,7 +52,7 @@ static func _wrap_i32(value: int) -> int:
 ## [orig: HUD_DrawCrosshair gate @0x592afa]
 static func should_draw(aimed_shot_available: bool,
 		keep_while_aimed: bool = false) -> bool:
-	return not aimed_shot_available or keep_while_aimed
+	return NovaHudPos.crosshair_should_draw(aimed_shot_available, keep_while_aimed)
 
 
 ## The ERROR-table row for the crosshair spread: stance (0=prone, 1=crouch, 2=stand)
@@ -67,7 +60,7 @@ static func should_draw(aimed_shot_available: bool,
 ## mounted. [orig: HUD_DrawCrosshair @0x592b37..0x592b84 — entity+300 flags
 ## 0x100=prone, 0x200=crouch]
 static func error_row(stance: int, scoped: bool) -> int:
-	return clampi(stance, 0, 2) + (3 if scoped else 0)
+	return NovaHudPos.crosshair_error_row(stance, scoped)
 
 
 ## Draw the 5 regions. `center_design`/`size_design` are virtual 1024×768 units (the

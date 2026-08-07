@@ -87,34 +87,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
-- [ ] HUD view-helper math cluster -> one `engine/hud` port slice (the ENG-4/FNT
-      pattern: math + constants native, draw/Font blits stay host): exact-integer
-      fade decay, 1024x768 design scale, 16.16 crosshair spread + TAPER strip,
-      Q16 stance scaling, health thresholds, message tick policy, half-bright
-      text, ammo format, stance->ERROR-row remap, capacity-1 reserve fold — all
-      `[orig]`-cited in `godot/adapter/ui/hud_*.gd` / `game_hud.gd` /
-      `game_hud_presenter.gd`; no libs home exists today (ENG-5 sweep-#2 row,
-      moved from the closed maturity program 2026-08-06)
-- [ ] Mission TOD clock -> `engine/formats/env` clock slice: `Env_TodAdvancePerTick =
-      0x18000000/(3720*minutes)` `[orig: @ 0x57d108]`, Q8.8->8.24 widening,
-      60-min clamp — currently in `nova_environment.gd`, zero presence in
-      engine/formats/env (ENG-5 row)
-- [ ] Editor-preview PLAYPARTANIM phase integrator: route `nova_object_model.gd`'s
-      preview through `AiSystem::advance_part_anim` (the height-sampler
-      dual-implementation pattern); the runtime already uses `set_part_phase`
-      correctly (ENG-5 row)
-- [ ] Particle flag literals (`1<<18/27/28`) re-declared + flags->kill-plane
-      dispatch in `effect_world.gd` / `particle_preview.gd` — close-now: alias
-      off the already-bound `NovaParticleDef` flag table (the MATERIAL_FLAG_*
-      pattern exactly) (ENG-5 row)
-- [ ] Armory derivation math, class-resolve half: the scan + masks
-      `[orig: @ 0x5642f0]` in `armory_menu_companion.gd` — the weight half
-      closed 2026-07-30 via `NovaWeaponDatabase` (ENG-5 row; the W5
-      "armory/catalog" push-down is this row)
-- [ ] Avatar menu-portrait presentation math (BAM/frame idle, 2^28 sway,
-      rand-yaw `[orig: @ 0x55dba0; @ 0x5600d0]`) in `avatar_preview.gd` —
-      minor, exception-leaning; disposition with the `engine/hud` slice's review
-      (ENG-5 row)
 - [ ] Editor/runtime version-skew guard: the two CI zips (`opennova-modtools-windows`,
       `opennova-runtime-windows`) can pair a fixed editor with a stale `opennova.exe`
       and fail as an unexplained resource picker. The child already writes a `version`

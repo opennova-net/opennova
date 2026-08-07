@@ -112,6 +112,21 @@ before drawing. The inverse (`[orig: Viewport_ScreenToVirtual @0x5d2c70]`,
 ×1024/width) maps screen points (e.g. the crosshair's screen center) back into
 the design space. (Matches the 1024×768 design space the oscarmike reference used.)
 
+**Port home (S15, 2026-08-07):** the whole HUD view-helper MATH cluster —
+this scaling, the ALPHAFADE decay (quirk included), the stance Q16
+scale/centering, the health color bands, the message tick policy,
+half-bright, the ammo text fold + narrow-surface nudge, the round-icon
+count, and the crosshair spread projection/sum/ERROR-row/gate — is native
+`engine/runtime/hud` (`hud/hud_math.h`, bound as `NovaHudPos` statics; the
+`hud_math` ctest pins each). The GDScript `Hud*` helpers keep only the
+CanvasItem draw work and delegate every decision here. DISPOSITION, avatar
+menu-portrait presentation math (`avatar_preview.gd` — the BAM/frame idle
+rotation, the 2^28 sway amplitude, the `(rand()%180)*0xB60B60` initial yaw
+`[orig: update_player_preview_animation @0x55dba0; PlayerInfo_InitPreviewModel
+@0x5600d0]`): granted the shell exception reviewed with this slice — pure
+menu-preview presentation, already `[orig]`-cited named constants at the
+node, no sim consumer; a lib hop adds nothing observable.
+
 ## Per-frame info struct — `HUD_BuildEntityInfo @0x4b8440`
 
 Field offsets into `dword_2723388` that the ported elements read.

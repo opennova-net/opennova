@@ -143,11 +143,27 @@ void test_class_latch_survives_kit_reset() {
 
 } // namespace
 
+// The armory open-time class policy [orig: Armory_ResolveSelectedClass
+// @0x5642f0]: allowed classes open as-is, disallowed scan up through 9, an
+// exhausted scan falls to gunner (7); the filter bit is 1 << (class-5) for
+// 5..9 and ALL weapons (-1) otherwise.
+static void test_armory_class_policy() {
+    CHECK(armory_resolve_selected_class(6, 1u << 6) == 6);
+    CHECK(armory_resolve_selected_class(5, (1u << 8)) == 8); // scan up
+    CHECK(armory_resolve_selected_class(9, 0u) == 7);        // exhausted -> gunner
+    CHECK(armory_resolve_selected_class(8, (1u << 9)) == 9);
+    CHECK(armory_class_filter_mask(5) == 1);
+    CHECK(armory_class_filter_mask(9) == (1 << 4));
+    CHECK(armory_class_filter_mask(0) == -1);  // unclassed SP spawn: no filter
+    CHECK(armory_class_filter_mask(10) == -1);
+}
+
 int main() {
     test_promotion_gate_skips_in_session();
     test_promotion_applies_availability_then_filters_kit();
     test_accept_requested_ammo_and_banned_validation();
     test_class_latch_survives_kit_reset();
+    test_armory_class_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

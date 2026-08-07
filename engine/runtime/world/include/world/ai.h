@@ -446,6 +446,21 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
 // notes/mission/anim-ai-grill-2026-06-07.md.
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4);
 
+// The PLAYPARTANIM rate from ANIMTIME seconds: (0.016 / seconds) * 65536
+// phase-units/tick with the x87-ftol integer-indefinite on inf/NaN/overflow
+// (zero seconds -> INT_MIN, which the min-1 guard deliberately does NOT
+// promote) [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9]. Shared by
+// ai_apply_command case 0x22 and the editor-preview integrator binding.
+int32_t part_anim_rate_from_seconds(double seconds);
+
+// One 16 ms part-anim sweep step: wrapping signed ADD for direction +1,
+// wrapping SUB for every other nonzero direction; only a STRICT upper (>
+// 0x10000) or negative overshoot clamps — landing exactly on an endpoint
+// stays active. Returns true when the sweep finished (the caller clears its
+// direction) [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9].
+// Shared by AiSystem::advance_part_anim and the preview binding.
+bool part_anim_step(int32_t &phase, int32_t dir, int32_t rate);
+
 // [orig: Entity_CalcAverageGroundHeight @0x457230] The entity-def height offsets
 // (def+0x2C alive / def+0x30 dead) modeled as named members — a tracked deviation,
 // those def fields are not yet RE'd (default 0 = origin sits at ground). The stand

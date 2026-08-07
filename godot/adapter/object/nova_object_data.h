@@ -211,6 +211,15 @@ public:
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
 	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
 	int get_user_point_bone_mask(const String &p_name) const;
+	// The PLAYPARTANIM editor-preview integrator's engine math (one impl in
+	// engine/runtime/world ai.h): the witnessed rate from ANIMTIME seconds
+	// [orig: Entity_ApplyCommand @0x43B1A9..0x43B1F9] and one 16 ms sweep step
+	// (returns {"phase": int, "finished": bool})
+	// [orig: Entity_UpdateSuspensionBounce @0x456740..0x4567A9]. The
+	// authoritative runtime integrates in AiSystem and presents through
+	// set_part_phase; the preview drives the same math through these.
+	static int part_anim_rate_for_seconds(double p_seconds);
+	static Dictionary part_anim_step(int p_phase, int p_dir, int p_rate);
 	Vector3 get_ground_anchor(int p_lod_index = 0) const;
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)

@@ -12,23 +12,17 @@ const DESIGN_WIDTH := 1024.0
 const DESIGN_HEIGHT := 768.0
 
 
-## Scale a design-space point to surface pixels, with the original's round-to-nearest:
-## out_x = (x*surface_w + 512)/1024, out_y = (y*surface_h + 384)/768.
+## Scale a design-space point to surface pixels, with the original's round-to-nearest
+## (the engine's one impl — hud/hud_math.h scale_axis).
 static func scale_point(design: Vector2, surface: Vector2) -> Vector2:
-	return Vector2(
-		floor((design.x * surface.x + DESIGN_WIDTH * 0.5) / DESIGN_WIDTH),
-		floor((design.y * surface.y + DESIGN_HEIGHT * 0.5) / DESIGN_HEIGHT))
+	return NovaHudPos.scale_point(design, surface)
 
 
 ## Convert an output-pixel delta back into virtual design units. Adding this to an
 ## authored anchor before scale_point() preserves exact pixel-relative placement at
 ## every surface size (integer pixel deltas commute with its round-to-nearest).
 static func pixel_delta_to_design(delta: Vector2, surface: Vector2) -> Vector2:
-	if surface.x <= 0.0 or surface.y <= 0.0:
-		return Vector2.ZERO
-	return Vector2(
-		delta.x * DESIGN_WIDTH / surface.x,
-		delta.y * DESIGN_HEIGHT / surface.y)
+	return NovaHudPos.pixel_delta_to_design(delta, surface)
 
 
 ## Scale a design-space rect by scaling both corners as points (matching the original,

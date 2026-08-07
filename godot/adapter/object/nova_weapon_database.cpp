@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/packed_float32_array.hpp>
 
 #include <def/def.h>
+#include <world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
 using namespace godot;
 
@@ -34,6 +35,12 @@ void NovaWeaponDatabase::_bind_methods() {
 			&NovaWeaponDatabase::loadout_weight);
 	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
 			&NovaWeaponDatabase::encumbrance_class);
+	ClassDB::bind_static_method("NovaWeaponDatabase",
+			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
+			&NovaWeaponDatabase::armory_resolve_selected_class);
+	ClassDB::bind_static_method("NovaWeaponDatabase",
+			D_METHOD("armory_class_filter_mask", "selected_class"),
+			&NovaWeaponDatabase::armory_class_filter_mask);
 
 	BIND_CONSTANT(SLOT_ACCESSORY);
 	BIND_CONSTANT(SLOT_PRIMARY);
@@ -330,6 +337,16 @@ double NovaWeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices
 		counts.push_back(i < ammo_counts.size() ? ammo_counts[i] : -1);
 	}
 	return def_loadout_weight(defs.data(), counts.data(), defs.size());
+}
+
+int NovaWeaponDatabase::armory_resolve_selected_class(int p_player_class,
+		int p_class_allow_mask) {
+	return opennova::world::armory_resolve_selected_class(p_player_class,
+			static_cast<uint32_t>(p_class_allow_mask) & 0xFFFFu);
+}
+
+int NovaWeaponDatabase::armory_class_filter_mask(int p_selected_class) {
+	return opennova::world::armory_class_filter_mask(p_selected_class);
 }
 
 int NovaWeaponDatabase::encumbrance_class(double weight) const {
