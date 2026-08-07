@@ -5,6 +5,7 @@
 #include "network/item_replication_catalog_adapter.h"
 
 #include <simassets/item_traits.h>
+#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
 #include <array>
 
@@ -244,6 +245,7 @@ bool NovaSimulation::ensure_collision_instance(
 	if (entity == nullptr) {
 		collision_world_.remove_entity_instance(p_entity);
 		collision_skeletal_sources_.erase(p_entity.packed);
+		collision_pose_native_.remove_entity(p_entity);
 		collision_resolution_attempted_.erase(p_entity.packed);
 		return false;
 	}
@@ -254,6 +256,7 @@ bool NovaSimulation::ensure_collision_instance(
 			return collision_world_.has_instance(p_world, p_entity);
 		collision_world_.remove_entity_instance(p_entity);
 		collision_skeletal_sources_.erase(p_entity.packed);
+		collision_pose_native_.remove_entity(p_entity);
 		collision_resolution_attempted_.erase(attempted);
 	}
 
@@ -264,7 +267,135 @@ bool NovaSimulation::ensure_collision_instance(
 	return collision_world_.has_instance(p_world, p_entity);
 }
 
+// The S3 A/B seam (ADR 0028): the engine-side provider evaluates beside the
+// legacy binding path until the live soak clears the legacy delete. Compare
+// keeps LEGACY authoritative and shadows the native provider, counting
+// divergent final matrices; the tolerance absorbs float-noise below anything
+// collision-visible (Q22 rotation / 16.16 translation units) while a real
+// mis-pose lands orders of magnitude above it.
 bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
+		opennova::world::EntityHandle p_entity, int32_t p_model_id,
+		const opennova::world::CollisionMatrix &p_entity_world,
+		const opennova::world::CollisionModel &p_model,
+		std::vector<opennova::world::CollisionMatrix> &r_out) {
+	if (collision_pose_mode_ == CollisionPoseMode::Legacy)
+		return build_section_matrices_legacy(p_world, p_entity, p_model_id,
+				p_entity_world, p_model, r_out);
+	// The provider consumes the same per-query sim state the legacy path
+	// reads off this binding.
+	collision_pose_native_.weapon_active = weapon_active_;
+	collision_pose_native_.panm_time_override_ms = panm_time_override_ms_;
+	if (collision_pose_mode_ == CollisionPoseMode::Native)
+		return collision_pose_native_.build_section_matrices(p_world, p_entity,
+				p_model_id, p_entity_world, p_model, r_out);
+
+	const bool legacy_ok = build_section_matrices_legacy(p_world, p_entity,
+			p_model_id, p_entity_world, p_model, r_out);
+	std::vector<opennova::world::CollisionMatrix> native_mats;
+	const bool native_ok = collision_pose_native_.build_section_matrices(
+			p_world, p_entity, p_model_id, p_entity_world, p_model, native_mats);
+	CollisionPoseAbStats &ab = collision_pose_ab_;
+	++ab.queries;
+	if (legacy_ok && !native_ok) {
+		// A registered-but-missing native source (stub placers without an
+		// asset root, unresolved rigs) is a coverage gap, not a divergence.
+		++ab.native_declined;
+	} else if (!legacy_ok && native_ok) {
+		// The native provider posing where legacy declined (e.g. a null
+		// placer with native assets) is capability, not divergence.
+		++ab.native_posed_only;
+	} else if (legacy_ok && native_ok) {
+		if (native_mats.size() != r_out.size()) {
+			++ab.result_mismatches;
+		} else {
+			int32_t worst = 0;
+			int worst_section = -1;
+			for (size_t s = 0; s < r_out.size(); ++s) {
+				for (int k = 0; k < 16; ++k) {
+					const int64_t d =
+							static_cast<int64_t>(r_out[s].m[k]) -
+							static_cast<int64_t>(native_mats[s].m[k]);
+					const int32_t mag = static_cast<int32_t>(d < 0 ? -d : d);
+					if (mag > worst) {
+						worst = mag;
+						worst_section = static_cast<int>(s);
+					}
+				}
+			}
+			if (worst > ab.max_delta) ab.max_delta = worst;
+			// 1024 = 2.4e-4 units of Q22 rotation / 0.016 world units of
+			// 16.16 translation — far above cross-implementation float
+			// rounding, far below any real mis-pose.
+			constexpr int32_t kDivergenceTolerance = 1024;
+			if (worst > kDivergenceTolerance) {
+				++ab.divergences;
+				const bool skeletal =
+						collision_pose_native_.has_skeletal_entity(p_entity);
+				if (skeletal) ++ab.divergences_skeletal;
+				else ++ab.divergences_generic;
+				ab.last_model_id = p_model_id;
+				ab.last_section = worst_section;
+				ab.last_delta = worst;
+				ab.last_kind = skeletal ? 1 : 0;
+				if (worst_section >= 0) {
+					for (int k = 0; k < 16; ++k) {
+						ab.last_legacy_m[k] =
+								r_out[static_cast<size_t>(worst_section)].m[k];
+						ab.last_native_m[k] = native_mats[
+								static_cast<size_t>(worst_section)].m[k];
+					}
+				}
+			}
+		}
+	}
+	return legacy_ok;
+}
+
+void NovaSimulation::debug_set_collision_pose_mode(int p_mode) {
+	switch (p_mode) {
+		case 0: collision_pose_mode_ = CollisionPoseMode::Legacy; break;
+		case 2: collision_pose_mode_ = CollisionPoseMode::Native; break;
+		default: collision_pose_mode_ = CollisionPoseMode::Compare; break;
+	}
+}
+
+int NovaSimulation::debug_get_collision_pose_mode() const {
+	return static_cast<int>(collision_pose_mode_);
+}
+
+Dictionary NovaSimulation::debug_collision_pose_ab_stats() const {
+	Dictionary out;
+	out["queries"] = static_cast<int64_t>(collision_pose_ab_.queries);
+	out["divergences"] = static_cast<int64_t>(collision_pose_ab_.divergences);
+	out["divergences_skeletal"] =
+			static_cast<int64_t>(collision_pose_ab_.divergences_skeletal);
+	out["divergences_generic"] =
+			static_cast<int64_t>(collision_pose_ab_.divergences_generic);
+	out["result_mismatches"] =
+			static_cast<int64_t>(collision_pose_ab_.result_mismatches);
+	out["native_declined"] =
+			static_cast<int64_t>(collision_pose_ab_.native_declined);
+	out["native_posed_only"] =
+			static_cast<int64_t>(collision_pose_ab_.native_posed_only);
+	out["max_delta"] = collision_pose_ab_.max_delta;
+	out["last_model_id"] = collision_pose_ab_.last_model_id;
+	out["last_section"] = collision_pose_ab_.last_section;
+	out["last_delta"] = collision_pose_ab_.last_delta;
+	out["last_kind"] = collision_pose_ab_.last_kind;
+	PackedInt32Array legacy_m;
+	PackedInt32Array native_m;
+	legacy_m.resize(16);
+	native_m.resize(16);
+	for (int k = 0; k < 16; ++k) {
+		legacy_m.set(k, collision_pose_ab_.last_legacy_m[k]);
+		native_m.set(k, collision_pose_ab_.last_native_m[k]);
+	}
+	out["last_legacy_matrix"] = legacy_m;
+	out["last_native_matrix"] = native_m;
+	return out;
+}
+
+bool NovaSimulation::build_section_matrices_legacy(opennova::world::World &p_world,
 		opennova::world::EntityHandle p_entity, int32_t p_model_id,
 		const opennova::world::CollisionMatrix &p_entity_world,
 		const opennova::world::CollisionModel &p_model,
@@ -474,6 +605,8 @@ void NovaSimulation::set_asset_root(const Ref<NovaResourceRoot> &p_root) {
 	asset_root_ = p_root;
 	sim_models_.set_index(
 			p_root.is_valid() ? &p_root->native_index() : nullptr);
+	collision_pose_native_.set_resource_index(
+			p_root.is_valid() ? &p_root->native_index() : nullptr);
 }
 
 int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
@@ -506,6 +639,7 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				previous_attempt->second != e->registry_spawn_id) {
 			collision_world_.remove_entity_instance(h);
 			collision_skeletal_sources_.erase(h.packed);
+			collision_pose_native_.remove_entity(h);
 		}
 		collision_resolution_attempted_[h.packed] = e->registry_spawn_id;
 		const bool is_organic =
@@ -536,6 +670,11 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 						if (pose_data.is_valid() &&
 								pose_data->has_live_panm_for_lod(0))
 							collision_pose_data_[model_id] = pose_data;
+						// S3 (ADR 0028): the engine-side provider poses this
+						// model from the sim's own retained parse.
+						if (threedi_panm_lod_has_live(*m3, 0))
+							collision_pose_native_.register_generic_model(
+									model_id, m3);
 					}
 					opennova::world::OcclusionModel occ;
 					if (occlusion_model_from_3di(*m3, occ))
@@ -626,6 +765,24 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			++attached;
 			if (is_organic) {
 				collision_skeletal_sources_.erase(h.packed);
+				collision_pose_native_.remove_entity(h);
+				// S3 (ADR 0028): the native skeletal source resolves from
+				// the retained def rows + the sim's own model parse; the
+				// provider validates rig/FK and declines at query time
+				// exactly like the unregistered legacy leg when it cannot.
+				if (sim_models_.has_index()) {
+					const String anim_def = p_item_db->get_anim_def(def_id);
+					if (!anim_def.is_empty()) {
+						String adm = anim_def;
+						if (!adm.to_lower().ends_with(".adm"))
+							adm += ".adm";
+						const std::string adm_name(adm.utf8().get_data());
+						collision_pose_native_.register_skeletal_entity(
+								h, e->registry_spawn_id, it->second,
+								opennova::strutil::to_lower(adm_name) + "|" + key,
+								adm_name, sim_models_.model_for(key));
+					}
+				}
 				Ref<NovaSkeletalAnim> skeletal =
 						p_placer->call("skeletal_anim_for", def_id, graphic);
 				const opennova::world::CollisionModel *person_model =
@@ -744,6 +901,13 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 						if (husk_pose.is_valid() &&
 								husk_pose->has_live_panm_for_lod(0))
 							collision_pose_data_[husk_model_id] = husk_pose;
+						// S3 (ADR 0028): only sim-cache parses are
+						// lifetime-stable enough for the native provider (the
+						// stub-placer husk view dies with its Ref).
+						if (native_assets &&
+								threedi_panm_lod_has_live(*husk_m3, 0))
+							collision_pose_native_.register_generic_model(
+									husk_model_id, husk_m3);
 					}
 					collision_radius_by_graphic_.emplace(husk_key,
 							model_bound_radius_from_3di(*husk_m3));

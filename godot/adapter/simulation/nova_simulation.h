@@ -33,6 +33,7 @@
 #include "wac/nova_wac_program.h"
 #include <def/def.h> // the retained weapon.def parse (S6b)
 #include <simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
@@ -343,6 +344,35 @@ private:
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
+	// The engine-side pose provider (S3, ADR 0028) beside the legacy binding
+	// path, and the A/B soak that gates the legacy delete: Compare evaluates
+	// BOTH per query, counts divergent final matrices, and returns the LEGACY
+	// result. Native is the post-soak cutover mode.
+	enum class CollisionPoseMode { Legacy = 0, Compare = 1, Native = 2 };
+	opennova::simassets::SimCollisionPoseProvider collision_pose_native_;
+	CollisionPoseMode collision_pose_mode_ = CollisionPoseMode::Compare;
+	struct CollisionPoseAbStats {
+		uint64_t queries = 0;           // compare-mode queries evaluated
+		uint64_t divergences = 0;       // any tolerance-exceeding matrix delta
+		uint64_t divergences_skeletal = 0; // ... on the skeletal leg
+		uint64_t divergences_generic = 0;  // ... on the PANM/generic leg
+		uint64_t result_mismatches = 0; // both posed but section counts differed
+		uint64_t native_declined = 0;   // legacy posed, native had no source
+		uint64_t native_posed_only = 0; // native posed where legacy declined
+		int32_t max_delta = 0;          // worst |fixed delta| seen (headroom)
+		int32_t last_model_id = -1;     // last divergent query's model
+		int32_t last_section = -1;      // last divergent section ordinal
+		int32_t last_delta = 0;         // that section's max |fixed delta|
+		int32_t last_kind = -1;         // 0 = generic/PANM, 1 = skeletal
+		int32_t last_legacy_m[16] = {}; // that section's legacy matrix
+		int32_t last_native_m[16] = {}; // that section's native matrix
+	};
+	CollisionPoseAbStats collision_pose_ab_;
+	bool build_section_matrices_legacy(opennova::world::World &p_world,
+			opennova::world::EntityHandle p_entity, int32_t p_model_id,
+			const opennova::world::CollisionMatrix &p_entity_world,
+			const opennova::world::CollisionModel &p_model,
+			std::vector<opennova::world::CollisionMatrix> &r_out);
 	bool ensure_collision_instance(opennova::world::World &p_world,
 			opennova::world::EntityHandle p_entity) override;
 	bool build_section_matrices(opennova::world::World &p_world,
@@ -1603,6 +1633,13 @@ public:
 	void set_panm_time_ms(int64_t p_time_ms);
 	int64_t get_panm_time_ms() const;
 	void debug_set_panm_time_ms(int64_t p_time_ms);
+	// The S3 A/B seam (ADR 0028): 0 = legacy only, 1 = compare (legacy
+	// authoritative, native shadowed + divergence counters), 2 = native only.
+	void debug_set_collision_pose_mode(int p_mode);
+	int debug_get_collision_pose_mode() const;
+	// {queries, divergences, result_mismatches, native_declined,
+	//  last_model_id, last_section, last_delta}; counters reset on world reset.
+	Dictionary debug_collision_pose_ab_stats() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.

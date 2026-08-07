@@ -9,6 +9,7 @@ add_library(opennova_threedi STATIC
     src/threedi_panm_runtime.cpp
     src/threedi_panm_wave.cpp
     src/threedi_panm_matrices.cpp
+    src/threedi_panm_pose.cpp
 )
 
 target_include_directories(opennova_threedi

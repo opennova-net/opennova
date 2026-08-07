@@ -166,6 +166,8 @@ void NovaSimulation::reset_world() {
 	wire_collision_shape_by_type_.clear();
 	collision_pose_data_.clear();
 	collision_skeletal_sources_.clear();
+	collision_pose_native_.clear();
+	collision_pose_ab_ = CollisionPoseAbStats{};
 	infantry_adm_resource_root_.unref();
 	infantry_adm_item_db_.unref();
 	infantry_adm_resolved_ai_count_ = 0;

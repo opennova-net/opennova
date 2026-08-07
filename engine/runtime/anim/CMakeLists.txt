@@ -2,6 +2,7 @@ add_library(opennova_anim STATIC
     src/adm.cpp
     src/aim_overlay.cpp
     src/anim_sample.cpp
+    src/skeletal_pose.cpp
 )
 
 target_include_directories(opennova_anim

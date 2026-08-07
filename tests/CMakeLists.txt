@@ -23,7 +23,7 @@ target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOU
 add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
 # PANM unit tests
-foreach(test ctrl decode runtime wave)
+foreach(test ctrl decode pose runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)
     target_link_libraries(threedi_panm_${test}_test PRIVATE opennova_threedi)
     target_include_directories(threedi_panm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -80,6 +80,15 @@ target_link_libraries(aim_overlay_test PRIVATE opennova_anim)
 target_include_directories(aim_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(aim_overlay_test PRIVATE cxx_std_17)
 add_test(NAME aim_overlay COMMAND aim_overlay_test)
+
+# ANIM skeletal pose (S3, ADR 0028): the time-domain window walk, blend
+# endpoints, BN## tag parse, and the .bad bind-rest transpose the collision
+# pose provider composes with.
+add_executable(anim_skeletal_pose_test anim/skeletal_pose_test.cpp)
+target_link_libraries(anim_skeletal_pose_test PRIVATE opennova_anim)
+target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)

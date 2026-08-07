@@ -4,7 +4,10 @@ extends SceneTree
 # its collision/occlusion .3di data through its OWN SimModelCache — proven by
 # attaching against a placer that supplies NOTHING — and the attach count
 # matches the legacy render-cache extraction exactly. Also pins the native
-# TickAccumulator bank the runtime loop now drives.
+# TickAccumulator bank the runtime loop now drives, and (S3) runs the
+# collision pose A/B on retail data: one sim with BOTH the render placer
+# (legacy leg) and the native asset root, compare mode counting divergent
+# final section matrices across the PANM and skeletal legs.
 #
 # Run:
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
@@ -140,5 +143,39 @@ func _run() -> void:
 
 	sim.free()
 	sim_legacy.free()
+
+	# S3 (ADR 0028): the pose-provider A/B. One sim carries BOTH sources —
+	# the render placer feeds the legacy binding path and the asset root feeds
+	# the engine-side provider — and the default Compare mode shadows every
+	# build_section_matrices query. get_hitbox_debug drives both legs (PANM
+	# entity tris + organic skeletal spheres) with the world advancing.
+	var sim_ab := NovaSimulation.new()
+	if not sim_ab.load_from_mission_data(mission):
+		sim_ab.free()
+		_fail("NovaSimulation (A/B leg) rejected %s" % MISSION)
+		return
+	sim_ab.set_asset_root(root)
+	var placer_ab := MissionObjectPlacer.new(root, item_db)
+	var attached_ab := int(sim_ab.resolve_collision_instances(item_db, placer_ab))
+	if attached_ab != attached_legacy:
+		sim_ab.free()
+		_fail("A/B leg attach mismatch: %d vs %d" % [attached_ab, attached_legacy])
+		return
+	sim_ab.resolve_item_traits(item_db)
+	for _round in 8:
+		var _hb: Dictionary = sim_ab.get_hitbox_debug()
+		for _t in 8:
+			sim_ab.step()
+	var ab: Dictionary = sim_ab.debug_collision_pose_ab_stats()
+	print("[wave1] s3 pose ab: %s" % str(ab))
+	if int(ab.get("queries", 0)) <= 0:
+		sim_ab.free()
+		_fail("S3 compare mode saw no posed-collision queries")
+		return
+	if int(ab.get("divergences", 0)) != 0 or int(ab.get("result_mismatches", 0)) != 0:
+		sim_ab.free()
+		_fail("S3 pose divergence: %s" % str(ab))
+		return
+	sim_ab.free()
 	print("wave1 native assets probe: PASS")
 	quit(0)
