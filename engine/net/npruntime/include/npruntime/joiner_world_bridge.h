@@ -13,6 +13,7 @@
 #include <world/weapon_inventory.h>
 #include <world/world.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
