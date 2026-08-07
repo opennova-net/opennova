@@ -8,11 +8,11 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <def/def.h>
+
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
-
-struct DefItemDef;
 
 namespace godot {
 
@@ -160,9 +160,18 @@ private:
 	};
 	std::unordered_map<int, Item> items;
 	std::vector<ReplicationDefinitionRecord> replication_definition_records;
+	// The retained items.def parse (ADR 0028): the sim's engine-side trait
+	// fold (simassets::resolve_item_traits / resolve_ai_weapons) reads
+	// DefItemDef rows directly from here — no Dictionary re-pack. Freed at the
+	// top of every load attempt (the id-keyed map clears there too, so the two
+	// views never diverge) and in the destructor.
+	DefItemsFile items_file_ = {};
+	bool items_file_loaded_ = false;
 	String source_path;
 	String last_error;
 	uint64_t revision = 0; // increments before every load attempt
+
+	void release_native_items();
 
 	// The one DefItemDef -> Item copy (both load paths adopt through it, so new
 	// items.def fields land in one place).
@@ -207,10 +216,15 @@ public:
 		ATTRIB_ARMORY = 0x80000,
 	};
 
+	~NovaItemDatabase();
+
 	Error load(const String &path);
 	// Load items.def by flat name through the mounted resource root (VFS), so the item
 	// database resolves from PFF archives at runtime. Mirrors the other *_from_resource_root.
 	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
+	// The retained parse the engine-side trait fold consumes (empty — entries
+	// nullptr, count 0 — until a load succeeds).
+	const DefItemsFile &native_items() const noexcept { return items_file_; }
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

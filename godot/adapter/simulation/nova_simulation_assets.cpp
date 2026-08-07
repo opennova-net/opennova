@@ -4,7 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 #include "network/item_replication_catalog_adapter.h"
 
-#include <def/def.h> // DEF_ITEM_ATTRIB_* / DEF_ITEM_ATTRIB2_*
+#include <simassets/item_traits.h>
 
 #include <array>
 
@@ -99,29 +99,12 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 	resolve_new_infantry_adm_ids();
 }
 
-// Stamp every live entity's items.def-derived wire traits via the item database:
-// - Entity::is_ai_capable from ItemDefAttrib & 0x100000 (AIData): the host's pool-1 0x0D stream
-//   emits its AI-trailer iff AI-capable, matching the stock 0x0D decoder's own gate exactly
-//   (itemDef.attrib & 0x100000 @0x433327) — byte-faithful AND crash-safe (D-NET-97).
-// - Entity::net_class_code from the items.def class tag (ai_function, else move_function — the
-//   directive that drives the ItemDef+356 serialize-callback lookup [orig: ingame_decode.h §5.10b])
-//   via opennova::class_from_tag. Load-bearing: only witnessed callback classes may be serialized
-//   into the 0x0A event loop — classifying a pool-1 ewep emplacement as a vehicle desyncs the
-//   retail client mid-frame (retail-join v13, 2026-07-02).
-// - Entity::health_max (+ health lift) from items.def hp (itemDef+0x17C healthMax): the original
-//   spawns Health = healthMax [orig: Entity_InitFromItemDef @0x49e550]; entities still at the
-//   promotion default (100) are lifted to full health. Feeds the §5.13 vehicle health word (a
-//   too-small value renders every vehicle burning) and the §5.10 field-17 tier denominator.
-//
-// The registry's for_each is const-only, so collect the live handles first, then re-fetch each as
-// a mutable Entity* — the same mutate-by-handle shape resolve_infantry_adm_ids uses.
-//
-// ID SPACE (load-bearing): Entity::item_id is the WIRE type id — the small on-disk .bms type that
-// build_pool*_batch puts on the wire verbatim (e.g. 0x050E). NovaItemDatabase is keyed by the
-// items.def id, which is wire + kItemIdOffset (mission_bms_test: bms_type_id 1291 -> item_id
-// 101291; nova_net_client.cpp wire = def_id - 100000). The offset here is mandatory: without it
-// every pool-1 lookup misses.
-// [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
+// The items.def trait sweep: the engine-side fold (simassets::resolve_item_traits,
+// ADR 0028) reads the database's retained DefItemsFile rows directly — the trait
+// semantics, ID-space offset, and [orig] witnesses live there now. This binding
+// contributes the ONE wire-class source — the netsim ItemReplicationCatalog
+// (ADR 0026) — as an injected supplier so simassets stays net-free. Idempotent;
+// called after load and again after spawning the local player.
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
 	item_traits_db_ = p_item_db;
@@ -132,242 +115,18 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		item_replication_catalog_db_ = p_item_db;
 		item_replication_catalog_revision_ = p_item_db->get_revision();
 	}
-	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
-	// after this sweep) seed full health without an item-db reach-back from engine/ [orig:
-	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
-	const int player_def_id =
-			static_cast<int>(opennova::world::kPlayerInfantryTypeId) +
-			opennova::mission::kItemIdOffset;
-	world_->player_has_item_def = p_item_db->has_item(player_def_id);
-	world_->player_item_hp = opennova::world::retail_signed_i16(
-			p_item_db->get_hp(player_def_id));
-	world_->player_item_type = static_cast<uint8_t>(p_item_db->get_item_type(player_def_id));
-	world_->player_item_attrib = p_item_db->get_attrib(player_def_id);
-	world_->player_armor_impact = opennova::world::retail_signed_i16(
-			p_item_db->get_armor_impact(player_def_id));
-	world_->player_armor_kz = opennova::world::retail_signed_i16(
-			p_item_db->get_armor_kz(player_def_id));
-	world_->player_damage_reduc_pp = p_item_db->get_damage_reduc_pp(player_def_id);
-	world_->player_damage_reduc_max = p_item_db->get_damage_reduc_max(player_def_id);
-	std::vector<opennova::world::EntityHandle> handles;
-	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
-	for (const opennova::world::EntityHandle h : handles) {
-		opennova::world::Entity *e = world_->registry.get(h);
-		if (!e) continue;
-		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
-		e->has_item_def = p_item_db->has_item(def_id);
-		e->item_type = static_cast<uint8_t>(p_item_db->get_item_type(def_id));
-		e->item_attrib2 = p_item_db->get_attrib2(def_id);
-		e->is_ai_capable = p_item_db->is_ai_capable(def_id);
-		// The same immutable profile supplies the host stamp and client decode
-		// width. Missing/ambiguous definitions fail closed as Unknown.
-		const opennova::netsim::ItemReplicationProfile *replication =
-				item_replication_catalog_->by_definition_id(def_id);
-		e->net_class_code = static_cast<uint8_t>(replication != nullptr
-				? replication->wire_entity_class()
-				: opennova::EntityClass::Unknown);
-		// items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
-		const int hp = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
-		e->health = opennova::world::retail_signed_i16(e->health);
-		e->health_max = opennova::world::retail_signed_i16(e->health_max);
-		e->armor_impact = opennova::world::retail_signed_i16(
-				p_item_db->get_armor_impact(def_id));
-		e->armor_kz = opennova::world::retail_signed_i16(
-				p_item_db->get_armor_kz(def_id));
-		e->damage_reduc_pp = p_item_db->get_damage_reduc_pp(def_id);
-		e->damage_reduc_max = p_item_db->get_damage_reduc_max(def_id);
-		if (hp != 0) {
-			e->health_max = hp;
-			if (e->health == 100) e->health = hp; // still at the promotion default
-		}
-		// Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
-		// the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
-		// (D-NET-147; every golden ASH_I5A building carries both). Resolved defs only — a
-		// missing items.def id stays untouched. [orig: Entity_InitFromModel @0x40dc8e:
-		// !itemDef->healthMax -> Flags |= 0x4000000, Health = 1, subType = -1]
-		if (hp == 0 && p_item_db->has_item(def_id)) {
-			e->engine_flags |= 0x4000000u;
-			e->sub_type = 0xFF;
-		}
-		// AS zone traits from the attrib dword: 0x20000 "ChangeTeam" = capture trigger,
-		// 0x40000 "SpawnPoint" = deploy-selectable (the ASH_I5A "Change Team & Spawn
-		// Volume" objects carry both). [orig: def+84 gates in ZoneSlotChain_BuildFromMission
-		// @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
-		const uint32_t attrib = p_item_db->get_attrib(def_id);
-		e->item_attrib = attrib;
-		e->is_capture_trigger = (attrib & DEF_ITEM_ATTRIB_CHANGETEAM) != 0;
-		e->is_spawn_point = (attrib & DEF_ITEM_ATTRIB_SPAWNPOINT) != 0;
-		// Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
-		// forever; deathtime (def+0x890, parse-scaled ticks) seeds the corpse timer at
-		// the death edge. [orig: ItemDef_ParseProperty @0x4a09d3 / @0x49fa6c; consumers
-		// Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
-		e->leave_corpse = (attrib & DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
-		e->deathtime_ticks = p_item_db->get_deathtime_ticks(def_id);
-		// Destruction traits (world/destruction.h; world-wac-ai-re §24): the death
-		// chain's def fields, keyed by item id. Fills once per distinct id.
-		// [orig: the ItemDef fields Entity_ApplyWeaponDamage / the death dispatch /
-		// Entity_InitDeathSounds read — armor +0x190/+0x192, unitType +0x196, kz
-		// +0x198, huskSubPart* +0x100.., debrisScale +0x1BC, soundDeath +0x860,
-		// the particledeath family +0x412..]
-		const Dictionary dt = p_item_db->get_death_traits(def_id);
-		e->item_unit_type = int(dt.get("unit_type", 0));
-		if (world_->item_death_traits.get(e->item_id) == nullptr &&
-		    p_item_db->has_item(def_id)) {
-			if (!dt.is_empty()) {
-				opennova::world::ItemDeathTraits t;
-				t.unit_type = int(dt.get("unit_type", 0));
-				t.kz = float(double(dt.get("kz", 0.0)));
-				t.armor_impact = int(dt.get("armor_impact", 0));
-				t.armor_blast = int(dt.get("armor_blast", 0));
-				t.team_protect = (attrib & 0x8000u) != 0; // 0x8000 is NOT in the witnessed attrib token table — stays raw
-				t.no_die = (attrib & DEF_ITEM_ATTRIB_NODIE) != 0;
-				t.static_death = (p_item_db->get_attrib2(def_id) & DEF_ITEM_ATTRIB2_STATICDEATH) != 0;
-				t.has_husk = bool(dt.get("has_husk", false));
-				t.is_decoration =
-						p_item_db->get_item_type(def_id) == NovaItemDatabase::TYPE_DECORATION;
-				t.husk_sub_part_count =
-						static_cast<uint8_t>(std::clamp(int(dt.get("husk_sub_parts", 0)), 0, 255));
-				const PackedInt32Array types = dt.get("husk_sub_part_types", PackedInt32Array());
-				for (int s = 0; s < 17 && s < types.size(); ++s)
-					t.husk_sub_part_types[s] = static_cast<uint8_t>(types[s]);
-				t.debris_scale = float(double(dt.get("debris_scale", 0.0)));
-				t.sound_death = String(dt.get("sounddeath", String())).utf8().get_data();
-				const Dictionary fx = p_item_db->get_particle_effects(def_id);
-				t.particledeath = String(fx.get("particledeath", String())).utf8().get_data();
-				t.particleh2odeath =
-						String(fx.get("particleh2odeath", String())).utf8().get_data();
-				t.particlefire = String(fx.get("particlefire", String())).utf8().get_data();
-				t.particleother = String(fx.get("particleother", String())).utf8().get_data();
-				// resolve_collision_instances enriches this row with live husk-model
-				// state and the active first-stage husk's KZ user points.
-				world_->item_death_traits.set(e->item_id, std::move(t));
-			}
-		}
-		// Vehicle mover traits: the pre-scaled items.def block + PlayerControl
-		// attrib (0x40), keyed by item id. Ground-family dispatchers test the
-		// `physics` selector, but CHel/cpln dispatch DIRECTLY to the air mover and
-		// shipped CHel rows legitimately omit that ground selector. [orig:
-		// g_EntityClassPhysicsTable @0x82abc8; ground dispatch @0x48ef90..0x48f060;
-		// Entity_UpdateAircraftPhysics @0x490310]
-		if (e->handle.pool() == 1 &&
-		    world_->vehicle_traits.get(e->item_id) == nullptr) {
-			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
-			const String fam = p_item_db->get_move_function(def_id)
-					.to_lower().substr(0, 4);
-			const bool direct_air_mover = fam == "chel" || fam == "cpln";
-			if (vp.size() == 21 && (vp[0] != 0 || direct_air_mover)) {
-				opennova::world::VehicleTraits vt;
-				vt.physics = vp[0];
-				vt.player_speed = vp[1];
-				vt.acceleration = vp[2];
-				vt.deceleration = vp[3];
-				vt.turn_rate = vp[4];
-				vt.turn_rate2 = vp[5];
-				vt.unit_type = vp[6];
-				vt.torque = vp[7];
-				vt.water_speed = vp[8];
-				vt.climb_speed = vp[9];
-				vt.turn_roll = vp[10];
-				vt.speed_pitch = vp[11];
-				// The platform slope thresholds + tuning block (def.h order).
-				vt.max_slope = vp[12];
-				vt.slip_slope = vp[13];
-				vt.mass = vp[14];
-				vt.lean = vp[15];
-				vt.lean_velocity = vp[16];
-				vt.pitch_lift = vp[17];
-				vt.pitch_lift_vel = vp[18];
-				vt.bob = vp[19];
-				vt.flip = vp[20];
-				vt.player_control = (attrib & DEF_ITEM_ATTRIB_PLAYERCONTROL) != 0;
-				// The per-frame physics mover is selected exclusively by the
-				// move_function callback resolved into itemDef+0x158. ai_function
-				// selects the event/brain callback and may deliberately differ: the
-				// shipped Dune Buggy is ai_function chel + move_function cveh and
-				// therefore still runs the ground mover. [orig:
-				// EntityDef_LookupPhysicsCallback @0x4a9240; §5.38e movers]
-				{
-					// Match on the case-folded fourcc prefix: the retail
-					// callback table keys 4-byte tags and items.def authors
-					// longer tokens onto them (`cbike`, `ctank`, `catv`,
-					// mixed-case `CHel`) — whole-string matching sent the
-					// shipped Motorcycle down the Ground motor. Same rule as
-					// netsim's motion_family_from_tag; the two classifiers
-					// must agree (ADR 0026 §4).
-					if (fam == "cbot") {
-						vt.family = opennova::world::VehicleFamily::Watercraft;
-					} else if (fam == "chel") {
-						vt.family = opennova::world::VehicleFamily::Helicopter;
-					} else if (fam == "cpln") {
-						vt.family = opennova::world::VehicleFamily::Plane;
-					} else if (fam == "cbik") {
-						vt.family = opennova::world::VehicleFamily::Bike;
-					} else if (fam == "ctan") {
-						// The shipped M1A1/T80 author `ctank`; the 4-byte key
-						// is ctan — its own class-table row routes the tank
-						// mover + the wheeled contact solve [orig: @0x82ABC0
-						// ctan -> @0x48f000 ->
-						// Entity_UpdateTankVehiclePhysics @0x488AB0].
-						vt.family = opennova::world::VehicleFamily::Tank;
-					} else {
-						vt.family = opennova::world::VehicleFamily::Ground;
-						// catv rides the generic dispatcher, which passes
-						// hasWaterLevel=2 into the ground mover — arming the
-						// contact solve's pad water-support forces (the
-						// Stryker/BTR-80 are catv) [orig: @0x48f010 push 2 vs
-						// the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
-						vt.amphibian = fam == "catv";
-					}
-				}
-				// Vehicle audio belongs to the vehicle ItemDef, not to the
-				// mounted NPC's AiProfile. Resolve the profile name and the
-				// item-level soundloop overrides once at this portable boundary.
-				// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0]
-				vt.sound_profile = p_item_db->get_sound_profile(def_id).utf8().get_data();
-				const PackedStringArray loops = p_item_db->get_sound_loops(def_id);
-				for (int i = 0; i < loops.size() &&
-						i < static_cast<int>(vt.sound_loops.size()); ++i) {
-					vt.sound_loops[static_cast<size_t>(i)] =
-							String(loops[i]).utf8().get_data();
-				}
-				world_->vehicle_traits.set(e->item_id, vt);
-			}
-		}
-	}
-	// Throwable class bindings: every items.def entry whose ai_function /
-	// move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
-	// row keyed by type id (id - 100000, the ammo TrcrID space), with the def
-	// hp/armor the placed device spawns at. [orig: EntityDef_InitAllCallbacks
-	// @ 0x4a5a70 resolves the class tables into every item def at load;
-	// world-wac-ai-re §27.]
-	world_->throwables.classes.clear();
-	const PackedInt32Array all_ids = p_item_db->get_item_ids();
-	for (int i = 0; i < all_ids.size(); ++i) {
-		const int def_id = all_ids[i];
-		const opennova::world::ThrowClass think = opennova::world::throw_class_from_tag(
-				p_item_db->get_ai_function(def_id).utf8().get_data());
-		const opennova::world::ThrowClass motor = opennova::world::throw_class_from_tag(
-				p_item_db->get_move_function(def_id).utf8().get_data());
-		if (think == opennova::world::ThrowClass::kNone &&
-				motor == opennova::world::ThrowClass::kNone)
-			continue;
-		opennova::world::ThrowableClassRow row;
-		row.item_id = def_id - opennova::mission::kItemIdOffset;
-		row.think = think;
-		row.motor = motor;
-		row.health_max = opennova::world::retail_signed_i16(p_item_db->get_hp(def_id));
-		row.armor_impact = opennova::world::retail_signed_i16(
-				p_item_db->get_armor_impact(def_id));
-		row.armor_kz = opennova::world::retail_signed_i16(
-				p_item_db->get_armor_kz(def_id));
-		world_->throwables.classes.set(row);
-	}
-	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
-	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
-	// [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
-	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
-	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
-	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
+	opennova::simassets::resolve_item_traits(
+			*world_, p_item_db->native_items(),
+			[catalog = item_replication_catalog_](int def_id) {
+				// The same immutable profile supplies the host stamp and the
+				// client decode width. Missing/ambiguous definitions fail
+				// closed as Unknown.
+				const opennova::netsim::ItemReplicationProfile *replication =
+						catalog->by_definition_id(def_id);
+				return static_cast<uint8_t>(replication != nullptr
+						? replication->wire_entity_class()
+						: opennova::EntityClass::Unknown);
+			});
 
 	install_item_class_resolver();
 }
@@ -403,55 +162,14 @@ void NovaSimulation::install_join_integrity_profile() {
 	runtime_->set_integrity_challenge_profile(join_integrity_profile_id_);
 }
 
-// The D-AI-5 host weapon seed. The original resolves the items.def ammo_closeattack/
-// easyrocket/advancedrocket/marker3 names into ammo-def ids on the def and block-copies
-// them onto the entity (+0x358..0x35B; the copy site is the open world-wac-ai-re §17.7
-// item 1 — no per-field writer exists). Until that copy is witnessed, the port carries
-// ONE ammo id + clipsize per NPC (AiProfile — JO riflemen author all four slots to the
-// same rifle round), stamped here from the item database against the loaded ammo table.
-// Also seeds the spawn magazine: word entity+0x35C = itemDef+0x894 clipsize [orig:
-// Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5]. Consumption stays motor-gated: only
-// the infantry fire pass reads ammo_primary (host-side NPCs; never the local player).
-// [orig: ItemDef_ParseProperty @ 0x4a1823 (-> def+0x56B) / @ 0x49fa1c (-> def+0x894);
-// docs/divergence-ledger.md D-AI-5]
+// The D-AI-5 host weapon seed + per-body sound-profile bind, folded into the
+// engine (simassets::resolve_ai_weapons, ADR 0028) over the retained items.def
+// rows — the seed semantics and [orig] witnesses live there now. Ammo names
+// resolve against the mission ammo table, so call AFTER load_ammo_table.
 int NovaSimulation::resolve_ai_weapons(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || !world_->ai || p_item_db.is_null()) return 0;
-	int armed = 0;
-	// Bind every body's sound profile first — persons AND vehicles carry one
-	// (e.g. DBuggy01 -> SP_DuneBuggy), and unarmed defs (the player) must not
-	// skip it. An unauthored key resolves to "default" via the emit-side
-	// fallback (index stays -1). [orig: the def+0x268 parse binding
-	// @ 0x49fb0f-0x49fb64; alloc seed @ 0x49e3f5]
-	if (!world_->sound_profiles.empty()) {
-		for (int i = 0; i < world_->ai->count(); ++i) {
-			opennova::world::AiEntity *ae = world_->ai->at(i);
-			if (ae == nullptr) continue;
-			const opennova::world::Entity *e = world_->registry.get(ae->handle);
-			if (e == nullptr) continue;
-			const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
-			const String prof = p_item_db->get_sound_profile(def_id);
-			if (prof.is_empty()) continue;
-			ae->profile.sound_profile = static_cast<int16_t>(
-				world_->sound_profiles.index_of(prof.utf8().get_data()));
-		}
-	}
-	if (world_->ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed
-	for (int i = 0; i < world_->ai->count(); ++i) {
-		opennova::world::AiEntity *ae = world_->ai->at(i);
-		if (ae == nullptr) continue;
-		const opennova::world::Entity *e = world_->registry.get(ae->handle);
-		if (e == nullptr) continue;
-		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
-		const String ammo_name = p_item_db->get_ammo_closeattack(def_id);
-		if (ammo_name.is_empty()) continue; // def authors no anim-fire round (e.g. the player)
-		const int ammo = world_->ammo.index_of(ammo_name.utf8().get_data());
-		if (ammo < 0) continue; // name not in this mission's ammo.def — stay unarmed
-		ae->profile.ammo_primary = ammo;
-		ae->profile.clip_size = p_item_db->get_clipsize(def_id);
-		ae->inf.magazine = static_cast<int16_t>(ae->profile.clip_size);
-		++armed;
-	}
-	return armed;
+	return opennova::simassets::resolve_ai_weapons(
+			*world_, p_item_db->native_items());
 }
 
 void NovaSimulation::apply_collision_to_ai() {

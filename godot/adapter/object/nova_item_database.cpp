@@ -89,12 +89,25 @@ void NovaItemDatabase::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_ARMORY);
 }
 
+NovaItemDatabase::~NovaItemDatabase() {
+	release_native_items();
+}
+
+void NovaItemDatabase::release_native_items() {
+	if (items_file_loaded_) {
+		def_free_items(&items_file_);
+		items_file_loaded_ = false;
+	}
+	items_file_ = {};
+}
+
 Error NovaItemDatabase::load(const String &path) {
 	++revision;
 	source_path = path;
 	last_error = String();
 	items.clear();
 	replication_definition_records.clear();
+	release_native_items();
 
 	PackedByteArray bytes;
 	if (!read_nova_payload_file(path, bytes)) {
@@ -115,7 +128,10 @@ Error NovaItemDatabase::load(const String &path) {
 		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
-	def_free_items(&file);
+	// Retain the parse (ADR 0028): the engine-side trait fold reads these
+	// rows directly through native_items().
+	items_file_ = file;
+	items_file_loaded_ = true;
 	return OK;
 }
 
@@ -239,6 +255,7 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 	last_error = String();
 	items.clear();
 	replication_definition_records.clear();
+	release_native_items();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
 		return ERR_INVALID_PARAMETER;
@@ -267,7 +284,10 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		items[file.entries[i].id] = item_from_entry(file.entries[i]);
 	}
 
-	def_free_items(&file);
+	// Retain the parse (ADR 0028): the engine-side trait fold reads these
+	// rows directly through native_items().
+	items_file_ = file;
+	items_file_loaded_ = true;
 	source_path = file_name;
 	return OK;
 }
