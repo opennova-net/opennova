@@ -11,6 +11,7 @@
 #define OPENNOVA_WORLD_ROUND_RING_H
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::world {

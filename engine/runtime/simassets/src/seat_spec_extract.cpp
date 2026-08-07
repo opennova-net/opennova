@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <unordered_set>
 
 namespace opennova::simassets {
@@ -165,8 +166,10 @@ void extract_seats(const Threedi3di3 &model,
 				seat_pose_index_for_user_point(canonical));
 		seat.source_name = up.name;
 		seat.seat_local = seat_local_from_user_point(up);
-		seat.yaw_offset = static_cast<int16_t>(std::clamp(
-				seat_yaw_offset_from_user_point(up), -32768, 32767));
+		seat.yaw_offset = static_cast<int16_t>(std::clamp<int>(
+				seat_yaw_offset_from_user_point(up),
+				std::numeric_limits<int16_t>::min(),
+				std::numeric_limits<int16_t>::max()));
 		r_seats.push_back(seat);
 	}
 }
@@ -225,8 +228,10 @@ void extract_attachments(const DefItemDef &def, const Threedi3di3 *model,
 						std::clamp(static_cast<int>(u) + 1, 0, 255));
 				spec.anchor.source_name = up.name;
 				spec.anchor.seat_local = seat_local_from_user_point(up);
-				spec.anchor.yaw_offset = static_cast<int16_t>(std::clamp(
-						seat_yaw_offset_from_user_point(up), -32768, 32767));
+				spec.anchor.yaw_offset = static_cast<int16_t>(std::clamp<int>(
+						seat_yaw_offset_from_user_point(up),
+						std::numeric_limits<int16_t>::min(),
+						std::numeric_limits<int16_t>::max()));
 				break;
 			}
 		}
