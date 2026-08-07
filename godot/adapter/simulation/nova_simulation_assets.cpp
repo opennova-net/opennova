@@ -1359,7 +1359,7 @@ void NovaSimulation::refresh_item_seat_spec(
 	// the parent's definition.
 	// Clear first so a later definition refresh cannot leave stale pose/capability
 	// metadata on an existing row.
-	const bool preserve_authored_slot = !wire_header_world_ &&
+	const bool preserve_authored_slot = !joiner_bridge_.wire_header_world() &&
 			p_entity.emplacement_pose_metadata_resolved &&
 			p_entity.emplacement_slot != 0;
 	const uint8_t authored_slot = p_entity.emplacement_slot;
@@ -1692,8 +1692,8 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			if (entity.handle.pool() == 1) items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
-			opennova::world::Entity *entity = wire_header_world_
-					? wire_world_materializer_.owned(*world_, handle)
+			opennova::world::Entity *entity = joiner_bridge_.wire_header_world()
+					? joiner_bridge_.materializer().owned(*world_, handle)
 					: world_->registry.get(handle);
 			if (entity != nullptr)
 				refresh_item_seat_spec(*entity);
@@ -1701,7 +1701,7 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		// A header-only join may receive its model/seat table after the 0x0D
 		// row. Definitions were installed above; now apply the retained fixed
 		// mountHandles image without creating synthetic seats.
-		if (wire_header_world_ && runtime_ != nullptr)
-			(void)wire_world_materializer_.sync(runtime_->state(), *world_);
+		if (joiner_bridge_.wire_header_world() && runtime_ != nullptr)
+			(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
 	}
 }

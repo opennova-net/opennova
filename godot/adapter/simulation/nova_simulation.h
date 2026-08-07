@@ -66,6 +66,7 @@
 #include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
 #include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
+#include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 namespace godot {
 
@@ -547,24 +548,20 @@ private:
 	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
 	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
 	bool joiner_ = false;
-	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
-	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
-	// A true S2C 0x0B mission carries only the 616-byte BMS header. Retail
-	// allocates pools 1..3 while consuming 0x0D/0x10/0x20; this bridge gives
-	// local world consumers the same exact packed rows. Full-BMS joiners never
-	// enter this path and keep ordinary promotion untouched.
-	bool wire_header_world_ = false;
-	bool wire_world_static_initialized_ = false;
-	uint64_t wire_world_topology_revision_seen_ = ~uint64_t{0};
-	uint64_t wire_world_stream_revision_seen_ = ~uint64_t{0};
-	opennova::netsim::ClientWorldMaterializer wire_world_materializer_;
-	void materialize_client_replica_world_entities();
-	opennova::world::Entity *client_replica_world_entity(
-			opennova::world::EntityHandle p_handle);
-	// Fold the latest complete phase-8 mounted-ammo sample into the exact
-	// MountSlot selected by retail's live route bit. Missing wire rows remain
-	// pending until materialization; invalid classes are consumed and ignored.
-	void apply_join_mounted_ammo_update();
+	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
+	// sequence, its latches (started/spawned/redeploy/tripwire), the
+	// wire-header materializer, and the per-replica resolver state all live in
+	// engine/net/npruntime. This binding supplies the shell legs as PumpHooks.
+	opennova::np::JoinerWorldBridge joiner_bridge_;
+	// The shell-asset leg of the bridge's materialize phase: rebuild the
+	// collision/occlusion/trait/seat caches for the changed streamed rows.
+	void on_replica_world_changed(
+			const opennova::netsim::ClientWorldSyncResult &p_sync);
+	// The env-gated ~1 Hz tripwire print (the bridge owns the sampled state).
+	void print_joiner_net_diagnostic_sample();
+	// Input-latch resets + adm resolution at L's spawn/redeploy edges.
+	void on_joiner_local_player_spawned(int32_t p_look_heading_bam);
+	void on_joiner_local_player_redeployed(int32_t p_look_heading_bam);
 	// Retail authenticates with one packed Avatars.def selection for each side.
 	// GameWorld resolves the active profile before enable_join; retain it here
 	// because a direct-loaded join rebuilds ClientRuntime in finish_load.
@@ -574,28 +571,10 @@ private:
 	// sources. Empty keeps safe silence. Retained across direct-load runtime
 	// rebuilds just like the character and charattr profile data.
 	std::string join_integrity_profile_id_;
-	// ClientRuntime raises a monotonic edge for each gameplay/deployment release.
-	// The simulation uses it to snap L to the host-selected post-pick pose; health
-	// remains separately gated by authoritative_spawn_released(), so C2S 0x0E
-	// cannot kill L and a stale positive tail cannot revive a genuinely dead L.
-	uint64_t joiner_deployment_release_revision_seen_ = 0;
-	// S2C 0x50 re-latched OUR OWN team (the second byte_A85B48 writer). The join-time
-	// team arrives through spawn_from_self, so only later edges are applied here.
-	// [orig: NapiNPClientMsg_0x050 @0x431910 — the latch @0x4319db]
-	uint64_t joiner_self_team_revision_seen_ = 0;
 	// The live environment owner consumes each decoded phase-2 edge once. The
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
 	uint32_t joiner_environment_revision_seen_ = 0;
-	// Same receive-once cursor for the conditional flags2&0x0f==8 mounted-ammo
-	// record. Keeping this separate from the render-facing environment consumer
-	// prevents a stale net sample from refilling a locally firing gun each tick.
-	uint32_t joiner_mounted_ammo_revision_seen_ = 0;
-	bool joiner_redeploy_release_pending_ = false;
-	uint32_t joiner_redeploy_health_updates_at_release_ = 0;
-	// H is stamped in C2S 0x0C and used by the present self-filter. Zero is a
-	// valid handle; runtime_->has_self_handle() carries validity independently.
-	uint16_t joiner_self_wire_handle_ = 0;
 	// Last authoritative S2C 0x5A grant installed into the local slot pool.
 	// Requests may rebuild optimistically, but only a newer host grant becomes
 	// the durable spawn/respawn kit.
@@ -608,8 +587,6 @@ private:
 	// spawn performs. [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
-	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
-	opennova::world::PlayerSpawn spawn_from_self(const opennova::np::JoinerConnection::SelfSpawn &s) const;
 
 	// Phase 2 (the moving player): the latest input from the host controller, applied to the
 	// local player's AiEntity at the TOP of each frame (net-before-logic, ADR 0009). The
@@ -770,11 +747,6 @@ private:
 	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();
-	// Project the requester-local decoded 0x0A mount relationship onto L only
-	// after the host confirms C2S 0x26/0x27.
-	void sync_joiner_authoritative_mount();
-	void mirror_client_replica_mission_entities();
-	void mirror_predicted_vehicles_to_view();
 	// The deploy/spawn-zone registry (letters/pick-index space), built lazily per
 	// load [orig: Entity_BuildSpawnZoneList @0x43EAE0].
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
@@ -824,14 +796,6 @@ private:
 	bool charattr_challenge_loaded_ = false;
 	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
-	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
-	std::size_t joiner_last_gap_depth_ = 0;                   // ~1 Hz frozen-session tripwire state
-	uint32_t joiner_last_frontier_seq_ = 0;
-	uint32_t joiner_last_records_applied_ = 0;
-	uint32_t joiner_last_outbound_seq_ = 0;
-	bool joiner_diagnostic_sampled_ = false;
-	int joiner_flat_seconds_ = 0;
-	bool joiner_freeze_suspected_ = false;
 	// One immutable items.def catalog supplies both the authoritative entity stamp
 	// and the decoded-client record-width resolver. The callback codec, physical
 	// motion family, and allocation inputs remain independent traits.
@@ -862,40 +826,12 @@ private:
 	// Server_TickUpdate -> S2C flush -> fold host_loop_ into ClientState). Socket legs gated on
 	// host_listen_ (pure SP has none).
 	void host_pump();
-	// The per-frame non-authority client loop (recv -> Client_ProcessNetworkFrame + decoded
-	// consequences -> run_logic_tick(false) for L's motor/weapon actions -> ship C2S; spawn L on
-	// the in-match edge). Sequenced from the named phase helpers below.
-	// What this frame's client net pump decoded (drives the later phases).
-	struct JoinerFrameSignals {
-		bool health = false;      // authoritative 0x0A health tail applied
-		bool objectives = false;  // objective sync applied
-	};
-	// ClientHello once (Idle -> Hello) on the first armed frame.
-	void joiner_send_hello_once();
+	// The per-frame non-authority client loop, now the bridge's pump (S10a):
+	// this binding builds the PumpContext/PumpHooks and delegates. The
+	// pre-mission preload pump shares the bridge's hello latch + clock.
 	// Deposit received framed datagrams for this frame's recv pump.
 	void joiner_deposit_inbound();
-	// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the
-	// decoded-state folds (loadout/kit, side assignment, deployment-release
-	// latch, freeze tripwire, objective sync). `net_start` is the pump's F3
-	// Stats wire-leg clock (stopped after the uplink ship, before the folds).
-	// Returns what was decoded this frame.
-	JoinerFrameSignals joiner_run_client_net_frame(uint64_t net_start);
-	// On the in-match edge: learn H, spawn L at the host-advertised pose, and
-	// arm it (deferred class/kit/adm), clearing any join-wait input latches.
-	void joiner_spawn_and_arm_local_player();
-	// Apply the recipient-local authoritative health scalar to L (never its
-	// predicted pose), with the fresh-frame and death-latch guards.
-	void joiner_apply_authoritative_health();
 	void joiner_pump();
-	// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
-	// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
-	void apply_joiner_gameplay_events();
-	// Project persistent decoded remote poses into collision-only visual
-	// proxies: Player/Infantry rows join the person walk, pool-1 movers carry
-	// their authored collision geometry at the decoded pose. Wire H remains
-	// presentation identity; local World authority never receives a cloned
-	// entity or an H->L owner mapping.
-	void refresh_joiner_projectile_proxies();
 	// Wire-side authored-shape resolution for one decoded runtime type id
 	// (items.def graphic -> the shared by-graphic collision model cache).
 	WireCollisionShape wire_collision_shape_for_type(uint16_t type_id);
@@ -934,13 +870,6 @@ private:
 	void reset_infantry_adm_ids();
 	void resolve_new_infantry_adm_ids();
 	static void resolve_infantry_adm_before_server_tick(void *p_context);
-	// Per-replica-row resolver state (the movement collision resolver's
-	// prev-pose + idle skip counter) keyed by wire handle — the persistent
-	// half the ClientState row cannot carry across the netsim seam. Entries
-	// for retired rows are benign: a reused handle's stale prev pose triggers
-	// one displaced-detect full update and self-corrects.
-	std::unordered_map<uint16_t, opennova::world::CollisionWorld::ResolveState>
-			joiner_replica_resolve_states_;
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
 	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).

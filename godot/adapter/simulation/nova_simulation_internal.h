@@ -120,62 +120,13 @@ using opennova::simassets::aim_overlay_inputs_for;
 using opennova::simassets::mount_mode_for;
 using opennova::simassets::mount_mode_for_seat_type;
 
-inline const opennova::netsim::ClientEntityState *client_entity_for_handle(
-		const opennova::netsim::ClientState &state, uint16_t handle) {
-	for (const opennova::netsim::ClientEntityState &entity : state.entities) {
-		if (entity.handle == handle) return &entity;
-	}
-	return nullptr;
-}
-
-inline const opennova::mission::ItemSeatSpec *item_seat_spec_for_type(
-		const std::vector<opennova::mission::ItemSeatSpec> &specs,
-		uint16_t type_id) {
-	// specs are sorted by type_id at install (resolve_item_traits); a joiner
-	// probes this per present row per frame, so the scan is a binary search.
-	const auto it = std::lower_bound(
-			specs.begin(), specs.end(), static_cast<int32_t>(type_id),
-			[](const opennova::mission::ItemSeatSpec &spec, int32_t t) {
-				return spec.type_id < t;
-			});
-	if (it != specs.end() && it->type_id == static_cast<int32_t>(type_id))
-		return &*it;
-	return nullptr;
-}
-
-// The mounted shooter's own vehicle joins the projectile trace exclusion exactly like
-// retail's mount rule (Controller/Gunner/Driver seats only — passengers keep clipping
-// their ride) — resolved from the wire shooter row's carrier + the binding-fed seat table
-// instead of live mount pointers. Returns 0xFFFF when unmounted, passenger-seated, or
-// the rows aren't streamed yet. Used for BOTH decoded remote rounds and the joiner's
-// own predicted rounds: on a joiner the local ignored-mount leg is dead (wire_projected
-// skips the local dynamics table), so this carrier gate is the only surviving exclusion.
-// [orig: the ignored-mount select feeding Physics_RaycastAgainstBoneCollision @ 0x4e4cb0
-//  via ray[18]]
-inline uint16_t wire_carrier_exclusion_for(
-		const opennova::netsim::ClientState &state, uint16_t shooter_handle,
-		const std::vector<opennova::mission::ItemSeatSpec> &seat_specs) {
-	const opennova::netsim::ClientEntityState *row =
-			client_entity_for_handle(state, shooter_handle);
-	if (row == nullptr || row->carrier_handle == opennova::world::EntityHandle::kInvalid ||
-			row->mount_bone == 0)
-		return 0xFFFFu;
-	const opennova::netsim::ClientEntityState *carrier =
-			client_entity_for_handle(state, row->carrier_handle);
-	const opennova::mission::ItemSeatSpec *spec = carrier != nullptr
-			? item_seat_spec_for_type(seat_specs, carrier->type_id)
-			: nullptr;
-	if (spec == nullptr) return 0xFFFFu;
-	for (const opennova::world::Seat &seat : spec->seats) {
-		if (seat.bone_index != row->mount_bone) continue;
-		if (seat.type == opennova::world::SeatType::Controller ||
-				seat.type == opennova::world::SeatType::Gunner ||
-				seat.type == opennova::world::SeatType::Driver)
-			return row->carrier_handle;
-		break;
-	}
-	return 0xFFFFu;
-}
+// The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
+// the engine with the joiner bridge (S10a, ADR 0028):
+// engine/net/npruntime joiner_world_bridge.h. The using declarations keep this
+// family's call sites unchanged.
+using opennova::np::client_entity_for_handle;
+using opennova::np::item_seat_spec_for_type;
+using opennova::np::wire_carrier_exclusion_for;
 
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";

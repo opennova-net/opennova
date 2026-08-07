@@ -86,11 +86,7 @@ NovaSimulation::~NovaSimulation() {
 }
 
 void NovaSimulation::reset_world() {
-	wire_header_world_ = false;
-	wire_world_static_initialized_ = false;
-	wire_world_topology_revision_seen_ = ~uint64_t{0};
-	wire_world_stream_revision_seen_ = ~uint64_t{0};
-	wire_world_materializer_.clear();
+	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	local_weapon_.events.clear();
 	local_weapon_.anim_tick = 0;
@@ -408,11 +404,10 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		// rebuilding it here would silently reconnect and discard the witnessed
 		// pre-load session. Direct-loaded callers have not started yet and retain
 		// the historical fresh-runtime reset.
-		if (!joiner_started_ || !runtime_) {
+		if (!joiner_bridge_.started() || !runtime_) {
 			runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
 			joiner_environment_revision_seen_ = 0;
-			joiner_mounted_ammo_revision_seen_ = 0;
-			joiner_started_ = false;
+			joiner_bridge_.reset_for_runtime_rebuild();
 			install_charattr_challenge_table();
 			install_character_join_vars();
 			install_join_integrity_profile();
@@ -422,12 +417,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		// player's pick instead of auto-answering parameter-0 (headless ClientRuntime
 		// callers keep the auto default). [orig: the DEATH screen; net-re §5.61]
 		runtime_->set_player_paced_deployment(true);
-		joiner_local_spawned_ = false;
-		joiner_deployment_release_revision_seen_ =
-				runtime_->deployment_release_revision();
-		joiner_redeploy_release_pending_ = false;
-		joiner_redeploy_health_updates_at_release_ = 0;
-		joiner_self_wire_handle_ = 0;
+		joiner_bridge_.reset_for_load(runtime_->deployment_release_revision());
 		joiner_applied_loadout_revision_ = 0;
 		local_loadout_.pending_player_class = -1; // the shell re-applies the kit after each load
 		deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
@@ -485,7 +475,7 @@ bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_missio
 	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
 	// Only the production 616-byte S2C header needs wire-time materialization.
-	wire_header_world_ = p_mission->is_wire_header_only();
+	joiner_bridge_.set_wire_header_world(p_mission->is_wire_header_only());
 	// The editor's live, in-memory mission (unsaved edits included).
 	const opennova::bms::File &file = p_mission->native_document().bms_file();
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
@@ -586,14 +576,12 @@ void NovaSimulation::restart() {
 	if (have_wac_baseline_ && wac_) {
 		wac_->restore_runtime_state(wac_baseline_);
 	}
-	if (wire_header_world_) {
+	if (joiner_bridge_.wire_header_world()) {
 		// ClientState survives Stop/Start, while the body-empty baseline removes
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		wire_world_materializer_.clear();
-		wire_world_topology_revision_seen_ = ~uint64_t{0};
-		wire_world_stream_revision_seen_ = ~uint64_t{0};
+		joiner_bridge_.reset_materialization();
 		deploy_zone_registry_built_ = false;
 	}
 	// The baseline is captured during finish_load, before MissionRuntime supplies

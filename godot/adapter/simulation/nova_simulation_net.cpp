@@ -309,361 +309,10 @@ void NovaSimulation::host_pump() {
 		last_net_tick_us_ = perf_now_us() - net_start;
 }
 
-// P7: the per-frame non-authority client loop — the Godot equivalent of the joiner half of
-// Client_ProcessNetworkFrame (§5.44). The recv-fold + the C2S 0x0C uplink are fused inside the
-// runtime. Retail dispatches received messages before the entity/weapon-action pumps, so decoded
-// consequences are applied to L before this frame's local World tick. In particular, an S2C 0x49
-// arriving on a reload's DONE boundary must refill the slot before IDLE can observe the stale empty
-// magazine and queue a second C2S 0x25. [orig: Game_ProcessMainFrame @0x5263f0;
-// Client_ProcessNetworkFrame @0x42c180]
-void NovaSimulation::sync_joiner_authoritative_mount() {
-	if (!joiner_ || !runtime_ || !runtime_->has_self_handle() ||
-			!joiner_local_spawned_ || !world_ ||
-			!world_->cached.local_player.valid())
-		return;
-	const opennova::netsim::ClientEntityState *self =
-			client_entity_for_handle(runtime_->state(), runtime_->self_handle());
-	if (self == nullptr) return;
-	opennova::world::Entity *local =
-			world_->registry.get(world_->cached.local_player);
-	if (local == nullptr) return;
-
-	const bool wire_mounted =
-			self->carrier_handle != opennova::world::EntityHandle::kInvalid &&
-			self->mount_bone != 0 &&
-			client_replica_world_entity(opennova::world::EntityHandle{
-					self->carrier_handle}) != nullptr;
-	bool changed = false;
-	if (!wire_mounted) {
-		if (local->mounted)
-			changed = opennova::world::entity_detach_from_vehicle(
-					*world_, local->handle);
-	} else if (!local->mounted ||
-			local->mount_target.packed != self->carrier_handle ||
-			local->mount_bone != self->mount_bone) {
-		// Wire-materialized mission entities retain the host's exact packed
-		// pool/slot identity in the joiner's native world. The
-		// server has already validated this exact carrier+bone pair.
-		changed = opennova::world::entity_process_vehicle_attach(
-				*world_, local->handle,
-				opennova::world::EntityHandle{self->carrier_handle},
-				self->mount_bone);
-	}
-
-	// A designated-G EWeap uses the compact player's seat_type as an
-	// authoritative selected-MountSlot echo: 1 = child slot, 2 = the validated
-	// groundEntity vehicle slot. Apply this even when the carrier+bone relation
-	// is unchanged; action 6 commonly changes only this byte.
-	// [orig: client player compact apply @0x4c1353 route legs]
-	bool route_changed = false;
-	if (wire_mounted && (self->seat_type == 1u || self->seat_type == 2u)) {
-		opennova::world::Entity *mount = client_replica_world_entity(
-				opennova::world::EntityHandle{self->carrier_handle});
-		if (mount != nullptr) {
-			// Retail does not blindly trust the authority byte: both route legs first
-			// require Entity_IsMountableGun (non-type-1 EWeap) and the authored G
-			// capability. Only the type-2 leg adds the groundEntity parent check.
-			// [orig: compact apply @0x4c1353; Entity_IsMountableGun @0x434240]
-			bool route_valid = mount->has_item_def && mount->item_type != 1u &&
-					(mount->item_attrib &
-							opennova::world::kItemAttribEweap) != 0u &&
-					(mount->emplacement_attachment_flags & 0x02u) != 0u &&
-					opennova::world::vehicle_prepare_weapon_slot(*world_, *mount);
-			uint8_t equipped_adm = mount->primary_weapon_slot_adm;
-			if (route_valid && self->seat_type == 2u && mount->ground_target.valid() &&
-					mount->emplacement_parent == mount->ground_target &&
-					mount->emplacement_parent_spawn_id != 0) {
-				opennova::world::Entity *parent =
-						client_replica_world_entity(mount->ground_target);
-				route_valid = parent != nullptr &&
-						parent->registry_spawn_id ==
-								mount->emplacement_parent_spawn_id &&
-						parent->has_item_def && parent->item_type == 1u &&
-						(parent->item_attrib &
-								opennova::world::kItemAttribEweap) != 0u &&
-						opennova::world::vehicle_prepare_weapon_slot(
-								*world_, *parent);
-				if (route_valid)
-					equipped_adm = parent->primary_weapon_slot_adm;
-			} else if (self->seat_type == 2u) {
-				route_valid = false;
-			}
-			if (route_valid) {
-				const bool select_parent = self->seat_type == 2u;
-				route_changed =
-						mount->primary_weapon_slot.redirect_to_parent_slot !=
-								select_parent ||
-						local->equipped_adm_index != equipped_adm;
-				mount->primary_weapon_slot.redirect_to_parent_slot =
-						select_parent;
-				local->equipped_adm_index = equipped_adm;
-			}
-		}
-	}
-	if (!changed && !route_changed) return;
-	if (changed) {
-		player_view_.binoculars_requested = false;
-		binocular_yaw_offset_deg_ = 0.0f;
-		binocular_pitch_offset_deg_ = 0.0f;
-		refresh_local_player_view_effects();
-		sync_local_mounted_input_heading();
-	}
-	sync_local_usegun_weapon_transition();
-}
-
-opennova::world::Entity *NovaSimulation::client_replica_world_entity(
-		opennova::world::EntityHandle p_handle) {
-	if (!world_ || !p_handle.valid()) return nullptr;
-	if (wire_header_world_)
-		return wire_world_materializer_.owned(*world_, p_handle);
-	opennova::world::Entity *entity = world_->registry.get(p_handle);
-	return entity != nullptr &&
-			entity->spawn_origin != opennova::world::kSpawnOriginNone
-			? entity
-			: nullptr;
-}
-
-void NovaSimulation::apply_join_mounted_ammo_update() {
-	if (!joiner_ || !world_ || runtime_ == nullptr) return;
-	const opennova::netsim::ClientMountedAmmoState &ammo =
-			runtime_->state().mounted_ammo;
-	if (!ammo.present ||
-			ammo.revision == joiner_mounted_ammo_revision_seen_)
-		return;
-
-	// The on-foot sentinel is a complete phase-8 observation, but it has no
-	// MountSlot to mutate. Consume it so repeated render frames cannot replay it.
-	if (!ammo.has_mount ||
-			ammo.mount_handle == opennova::world::EntityHandle::kInvalid) {
-		joiner_mounted_ammo_revision_seen_ = ammo.revision;
-		return;
-	}
-
-	const opennova::world::EntityHandle handle{ammo.mount_handle};
-	opennova::world::Entity *mount = wire_header_world_
-			? wire_world_materializer_.owned(*world_, handle)
-			: world_->registry.get(handle);
-	// A streamed row can arrive in a later initial-state page. Unlike an invalid
-	// item class, absence is not a verdict: retain this revision and retry after
-	// the materializer has populated the exact packed slot.
-	if (mount == nullptr) return;
-
-	opennova::world::WeaponSlotState *slot =
-			opennova::world::resolve_mounted_ammo_slot(*world_, *mount);
-	if (slot != nullptr) {
-		// Retail stores both words in signed 16-bit MountSlot fields. Preserve the
-		// 0xffff sentinel as -1 rather than widening it to 65535.
-		slot->clip = opennova::world::retail_signed_i16(ammo.clip);
-		slot->reserve = opennova::world::retail_signed_i16(ammo.reserve);
-	}
-	// A live row with the wrong ItemDef/type/route is the retail
-	// consume-and-ignore branch. Do not let one malformed class block later
-	// phase-8 revisions forever.
-	joiner_mounted_ammo_revision_seen_ = ammo.revision;
-}
-
-// Mirror the decoded wire positions of mission entities (pools 1-3) back onto
-// the joiner's exact-handle materialized registry rows. The local sim is NOT authoritative
-// for any of them — this write-back exists so position CONSUMERS of the local
-// world stay truthful on a joiner: the occlusion frame evaluates entity
-// visibility from registry positions (a driven-off vehicle must occlude at its
-// live position, not its spawn point), and the collision tick tables pick up the
-// same fix. Type-guarded against the row materialized at that exact streamed
-// identity; synthetic children (spawn_origin sentinel) are skipped except
-// for rows deliberately materialized from a true wire-header mission. Those rows
-// also mirror orientation/team because collision and seat consumers observe them.
-void NovaSimulation::mirror_client_replica_mission_entities() {
-	if (!joiner_ || !world_ || runtime_ == nullptr) return;
-	for (opennova::netsim::ClientEntityState &es :
-			runtime_->state().entities) {
-		const opennova::world::EntityHandle h{es.handle};
-		const int pool = h.pool();
-		if (pool < 1 || pool > 3) continue;
-		opennova::world::Entity *local = client_replica_world_entity(h);
-		if (local == nullptr ||
-				static_cast<uint16_t>(local->item_id) != es.type_id)
-			continue;
-		// Pools 1..3 are live client rows, not just presentation records. Keep
-		// every world-side collision/seat consumer on the same full wire pose.
-		const opennova::world::Entity *attachment_parent =
-				local->emplacement_parent.valid()
-				? world_->registry.get(local->emplacement_parent)
-				: nullptr;
-		const bool unresolved_persistent_attachment =
-				es.parent_pose_valid && es.parent_handle != 0xFFFFu &&
-				!local->emplacement_pose_metadata_resolved &&
-				local->emplacement_parent.packed == es.parent_handle &&
-				attachment_parent != nullptr &&
-				attachment_parent->registry_spawn_id ==
-						local->emplacement_parent_spawn_id;
-		// A 0x0D zero heading is omitted on the wire after retail memset, so
-		// heading_known remains false. Persistent parent recomposition still owns
-		// an exact heading_bam; mirror it for unresolved children whose rigid wire
-		// pose is the world-consumer source of truth.
-		if (es.heading_known || unresolved_persistent_attachment)
-			local->yaw = static_cast<int16_t>(std::lround(
-					opennova::world::mission_yaw_deg_from_bam_heading(
-							es.heading_bam)));
-		local->pitch = static_cast<int16_t>(std::lround(
-				double(es.pitch_bam) * opennova::world::kDegreesPerBam));
-		local->roll = static_cast<int16_t>(std::lround(
-				double(es.roll_bam) * opennova::world::kDegreesPerBam));
-		if (es.team_known) local->team = es.team;
-		// Watercraft prediction (§5.38e B-facet, D-NET-196): a placed cbot
-		// vehicle's motion is owned by the WORLD-side client mover — stage the
-		// latest wire sample + registers on a fresh compact and let
-		// watercraft_client_tick chase + predict; the row is mirrored BACK
-		// after the tick (mirror_predicted_vehicles_to_view).
-		if (pool == 1 && es.cls == opennova::EntityClass::Vehicle) {
-			const opennova::world::VehicleTraits *traits =
-					world_->vehicle_traits.get(local->item_id);
-			if (traits != nullptr) {
-				es.net_world_mover = true;
-				// The row-side fallback chase selects its constant set by
-				// family; only the sim resolves families (client_state.h note).
-				es.net_air_family = traits->family ==
-								opennova::world::VehicleFamily::Helicopter ||
-						traits->family == opennova::world::VehicleFamily::Plane;
-				opennova::world::Entity::VehicleMotorState &m = local->veh;
-				// The witnessed mover freezes: wire bit0 (not-ready/attached),
-				// the dead-pose/wreck bit, and a carried row riding a deck
-				// carrier all stop the prediction motor — the row keeps its
-				// snapped wire pose (wreck eulers included) / its per-tick
-				// seat-follow, and the mirror-back below yields via
-				// net_predicted [orig: the Flags&1 early return @0x4b9a03; the
-				// dead-pose short form's frozen live stores @0x460930..0x460A50].
-				// D-NET-66: death stays a snap.
-				const bool wire_frozen =
-						(es.state_flags_known &&
-								(es.state_flags &
-										(0x01u | opennova::netsim::
-												kVehicleFlagDeadPose)) != 0u) ||
-						(es.net_seat_valid && es.carrier_handle != 0xFFFFu);
-				if (wire_frozen) {
-					// The row holds its snapped/followed pose; the registry
-					// entity adopts it below like any un-predicted row so
-					// occlusion/collision see the wreck where it rests. The
-					// platform/motor transients die with the freeze so a
-					// respawned or re-staged hull never inherits stale bob
-					// phase, accumulators, or vertical velocity.
-					m.net_predicted = false;
-					m.net_seen_revision = es.compact_revision;
-					m.slide_z = 0;
-					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
-							m.plat_acc[3] = 0;
-					m.plat_at_rest = false;
-					m.plat_porpoise = false;
-					m.plat_planing = false;
-					m.plat_bob_phase = 0.0f;
-					local->position.x = static_cast<float>(es.x) / 65536.0f;
-					local->position.y = static_cast<float>(es.y) / 65536.0f;
-					local->position.z = static_cast<float>(es.z) / 65536.0f;
-					continue;
-				}
-				if (es.compact_revision != m.net_seen_revision) {
-					const bool prediction_arming = !m.net_predicted;
-					m.net_seen_revision = es.compact_revision;
-					// The fold live-snapped the row to the wire sample (rows
-					// whose first compact landed before this flag flipped stage
-					// their pre-compact pose for one record — self-corrected by
-					// the next fold's live snap); that sample is the staged
-					// target [orig: the mode-2 staging].
-					m.net_smooth_target[0] = es.x;
-					m.net_smooth_target[1] = es.y;
-					m.net_smooth_target[2] = es.z;
-					m.net_smooth_heading = es.heading_bam;
-					m.net_recv_speed = es.vehicle_speed_reg;
-					m.net_recv_steer_bam = es.vehicle_steer_bam;
-					m.net_recv_lat = es.vehicle_lat_reg;
-					// The replicated engine/collective bit [orig: Flags 0x80,
-					// air families].
-					m.net_engine_on = (es.state_flags & 0x80u) != 0u;
-					m.net_interp_progress = 0;
-					// Live vehicle compacts omit Euler X/Y. Seed the client mover's
-					// attitude exactly once when prediction arms from the retained
-					// spawn/dead-pose row; re-seeding on every live compact would
-					// erase the platform/aero solve performed between records.
-					if (prediction_arming) {
-						m.air_pitch_bam = es.pitch_bam;
-						m.air_roll_bam = es.roll_bam;
-						m.plat_solve_valid = false;
-						// Promotion seam (no retail equivalent — retail's contact
-						// solve runs from entity existence, so Flags 0x2000 is
-						// always current): seed an arming Air-family row airborne
-						// so its first predicted tick runs the aero block, not
-						// the grounded sheds. The tick-tail solve reproduces the
-						// true state one tick later either way.
-						if (traits->family ==
-										opennova::world::VehicleFamily::
-												Helicopter ||
-								traits->family ==
-										opennova::world::VehicleFamily::Plane)
-							local->flags |= opennova::world::kEntityFlagInAir;
-					}
-					m.net_predicted = true;
-				}
-				continue; // the world mover owns the registry position now
-			}
-		}
-		local->position.x = static_cast<float>(es.x) / 65536.0f;
-		local->position.y = static_cast<float>(es.y) / 65536.0f;
-		local->position.z = static_cast<float>(es.z) / 65536.0f;
-	}
-}
-
-// The world->view half of the watercraft prediction: after the tick, the
-// predicted registry pose becomes the presented row pose (present reads the
-// client replicas, ADR 0011). Heading gains the mover's full BAM precision.
-void NovaSimulation::mirror_predicted_vehicles_to_view() {
-	if (!joiner_ || !world_ || runtime_ == nullptr) return;
-	for (opennova::netsim::ClientEntityState &es :
-			runtime_->state().entities) {
-		if (!es.net_world_mover) continue;
-		const opennova::world::EntityHandle h{es.handle};
-		opennova::world::Entity *local = client_replica_world_entity(h);
-		if (local == nullptr || !local->veh.net_predicted) continue;
-		es.x = opennova::world::to_fixed(local->position.x);
-		es.y = opennova::world::to_fixed(local->position.y);
-		es.z = opennova::world::to_fixed(local->position.z);
-		es.heading_bam = local->veh.yaw_bam;
-		local->yaw = static_cast<int16_t>(std::lround(
-				opennova::world::mission_yaw_deg_from_bam_heading(
-						local->veh.yaw_bam)));
-		// Every family mover owns live attitude now: air/water solves plus the
-		// ground/bike wheeled contact solve (Entity_ProcessTrackedVehiclePhysics
-		// @0x47C1C0 client subset). Publish zero too: level is a real solved
-		// pose, not a validity sentinel. A boxless ground row's motor never
-		// advances the seeded wire attitude, so the mirror is stable there.
-		const opennova::world::VehicleTraits *traits =
-				world_->vehicle_traits.get(local->item_id);
-		const bool owns_attitude = traits != nullptr;
-		if (owns_attitude) {
-			es.pitch_bam = local->veh.air_pitch_bam;
-			es.roll_bam = local->veh.air_roll_bam;
-			// Mounted-pose and bone consumers read Entity pitch/roll, not the
-			// motor registers. Keep the exact-handle materialized carrier coherent before
-			// the post-mover attachment phase below.
-			local->pitch = static_cast<int16_t>(std::lround(
-					double(local->veh.air_pitch_bam) *
-						opennova::world::kDegreesPerBam));
-			local->roll = static_cast<int16_t>(std::lround(
-					double(local->veh.air_roll_bam) *
-						opennova::world::kDegreesPerBam));
-		}
-	}
-}
-
 // host_pump's dispatch_event + admit_peer were promoted into engine/net/npruntime (np::dispatch_event /
 // np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
 // the Godot binding and the headless server can no longer drift.
 
-// The joiner's per-frame pump. Retail dispatches received messages before the
-// entity/weapon-action pumps, so decoded consequences are applied to L before
-// this frame's local World tick. In particular, an S2C 0x49 arriving on a
-// reload's DONE boundary must refill the slot before IDLE can observe the
-// stale empty magazine and queue a second C2S 0x25.
-// [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180]
-// The pump itself is the phase sequence; each helper carries its witnesses.
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
 // type (visual item -> anim_def -> register_adm), once per row; -1 = no adm
 // (the row stays chase-only, truthful). Cached per type so late-joining
@@ -703,81 +352,55 @@ void NovaSimulation::resolve_client_row_adm_ids() {
 	}
 }
 
-void NovaSimulation::materialize_client_replica_world_entities() {
-	if (!joiner_ || !wire_header_world_ || !world_ || runtime_ == nullptr)
-		return;
-
-	const opennova::netsim::ClientState &state = runtime_->state();
-	if (wire_world_topology_revision_seen_ == state.topology_revision &&
-			wire_world_stream_revision_seen_ == state.world_stream_revision)
-		return;
-	const opennova::netsim::ClientWorldSyncResult sync =
-			wire_world_materializer_.sync(state, *world_);
-	wire_world_topology_revision_seen_ = state.topology_revision;
-	wire_world_stream_revision_seen_ = state.world_stream_revision;
-	if (sync.changed()) {
-		for (const opennova::world::EntityLifetime lifetime : sync.retired) {
-			if (!lifetime.valid()) continue;
-			const auto cached =
-					collision_resolution_attempted_.find(lifetime.handle.packed);
-			// A later allocation at the same packed handle may already have had
-			// its caches rebuilt. The retired lifetime cannot erase those.
-			if (cached != collision_resolution_attempted_.end() &&
-					cached->second != lifetime.registry_spawn_id)
-				continue;
-			const opennova::world::EntityHandle handle = lifetime.handle;
-			collision_world_.remove_entity_instance(handle);
-			occlusion_world_.remove_entity_instance(handle);
-			collision_skeletal_sources_.erase(handle.packed);
-			collision_resolution_attempted_.erase(handle.packed);
-		}
-
-		// Zone/deploy lookup is a registry-derived cache. Any streamed topology
-		// change can add/remove an eligible zone and must invalidate it before UI
-		// or a C2S 0x0E pick consults the world.
-		deploy_zone_registry_built_ = false;
-		if (item_traits_db_.is_valid())
-			resolve_item_traits(item_traits_db_);
-
-		auto refresh_seats = [&](
-				const std::vector<opennova::world::EntityLifetime> &rows) {
-			for (const opennova::world::EntityLifetime lifetime : rows) {
-				if (lifetime.handle.pool() != 1) continue;
-				if (opennova::world::Entity *entity =
-						world_->registry.get(lifetime))
-					refresh_item_seat_spec(*entity);
-			}
-		};
-		refresh_seats(sync.spawned);
-		refresh_seats(sync.updated);
-		// The wire materializer deliberately does not fabricate seat
-		// definitions. Item/model resolution above installs them, then this
-		// idempotent fold projects the retained 0x0D mountHandles image by each
-		// seat's fixed retail_slot.
-		(void)wire_world_materializer_.sync(state, *world_);
-
-		if (collision_item_db_.is_valid() && collision_placer_.is_valid())
-			resolve_collision_instances(
-					collision_item_db_, collision_placer_.ptr());
+// The shell-asset leg of the bridge's materialize phase (S10a): a streamed
+// topology/world change landed in the registry. Retire the changed rows'
+// collision/occlusion instances and caches, refresh traits + seat specs, then
+// re-fold the retained 0x0D mountHandles image through the bridge materializer.
+void NovaSimulation::on_replica_world_changed(
+		const opennova::netsim::ClientWorldSyncResult &p_sync) {
+	for (const opennova::world::EntityLifetime lifetime : p_sync.retired) {
+		if (!lifetime.valid()) continue;
+		const auto cached =
+				collision_resolution_attempted_.find(lifetime.handle.packed);
+		// A later allocation at the same packed handle may already have had
+		// its caches rebuilt. The retired lifetime cannot erase those.
+		if (cached != collision_resolution_attempted_.end() &&
+				cached->second != lifetime.registry_spawn_id)
+			continue;
+		const opennova::world::EntityHandle handle = lifetime.handle;
+		collision_world_.remove_entity_instance(handle);
+		occlusion_world_.remove_entity_instance(handle);
+		collision_skeletal_sources_.erase(handle.packed);
+		collision_resolution_attempted_.erase(handle.packed);
 	}
 
-	// The witnessed initial-state order is pool2 -> pool1 -> pool0 -> pool3.
-	// Pool 0 is therefore the first safe fence for the one-shot static-table and
-	// portal-weld pass; running it for each pool2 page would weld an incomplete
-	// world and mutate shared occlusion records repeatedly.
-	if (!wire_world_static_initialized_) {
-		bool saw_pool0 = false;
-		for (const opennova::netsim::ClientEntityState &row : state.entities) {
-			if (opennova::world::EntityHandle{row.handle}.pool() == 0) {
-				saw_pool0 = true;
-				break;
-			}
+	// Zone/deploy lookup is a registry-derived cache. Any streamed topology
+	// change can add/remove an eligible zone and must invalidate it before UI
+	// or a C2S 0x0E pick consults the world.
+	deploy_zone_registry_built_ = false;
+	if (item_traits_db_.is_valid())
+		resolve_item_traits(item_traits_db_);
+
+	auto refresh_seats = [&](
+			const std::vector<opennova::world::EntityLifetime> &rows) {
+		for (const opennova::world::EntityLifetime lifetime : rows) {
+			if (lifetime.handle.pool() != 1) continue;
+			if (opennova::world::Entity *entity =
+					world_->registry.get(lifetime))
+				refresh_item_seat_spec(*entity);
 		}
-		if (saw_pool0) {
-			occlusion_init_mission();
-			wire_world_static_initialized_ = true;
-		}
-	}
+	};
+	refresh_seats(p_sync.spawned);
+	refresh_seats(p_sync.updated);
+	// The wire materializer deliberately does not fabricate seat
+	// definitions. Item/model resolution above installs them, then this
+	// idempotent fold projects the retained 0x0D mountHandles image by each
+	// seat's fixed retail_slot.
+	(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
+
+	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
+		resolve_collision_instances(
+				collision_item_db_, collision_placer_.ptr());
 }
 
 Dictionary NovaSimulation::get_client_entity_debug(int p_handle) const {
@@ -823,164 +446,64 @@ void NovaSimulation::joiner_pump() {
 	}
 	// The joiner's wire leg for the F3 Stats board: recv pump + net frame +
 	// uplink ship, ending where the local (non-authority) world work begins.
+	// The bridge fires on_wire_leg_complete at exactly that boundary.
 	const uint64_t net_start =
 			runtime_profiling_enabled_ ? perf_now_us() : 0;
-	// The row-side root-motion leg (net-re §5.38e): hand the joiner's view the
-	// same per-model .adm registry the authority movers ground on, and resolve
-	// each decoded organic row's adm id once its type is known — the netsim
-	// twin of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn
-	// half [orig: @0x40bb60]).
-	runtime_->view().set_root_motion_source(
-			infantry_anim_.empty() ? nullptr : &infantry_anim_);
-	// The same joiner terrain backs the post-root 2u person ground probe.
-	// [orig: Entity_UpdateInfantryPlayerBody @0x4B7CF4;
-	// Entity_UpdateInfantryAI @0x4BF7FA; Entity_MovementCollisionResolver tail
-	// @0x4B3D6E..0x4B3DA9]
-	runtime_->view().set_remote_motion_terrain(
-			world_ != nullptr ? world_->terrain : nullptr);
-	// The replica water/float channel reads the mission water plane
-	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
-	// water in this world).
-	runtime_->view().set_water_z(
-			world_ != nullptr ? world_->env.water_z : 0,
-			world_ != nullptr && world_->env.water_z != 0);
-	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
-	// joiner world's collision tables live, each armed Player/Infantry row's
-	// settle runs the ported movement collision resolver — candidate-model
-	// contacts + push-out, world-person and replica-peer repulsion, and the
-	// ground probe THROUGH candidate models — replacing the terrain-column
-	// subset. Retail runs remote organics through the ordinary org movers
-	// whose shared tail calls the resolver ungated [orig: calls @0x4B7CF4 /
-	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
-	// (joiner_replica_resolve_states_) across pumps.
-	if (world_ != nullptr && world_->ai != nullptr &&
-			world_->ai->collision != nullptr) {
-		runtime_->view().set_replica_contact_resolver(
-				[this](opennova::netsim::ClientReplicaPipeline::ReplicaContactQuery
-								&q) -> int32_t {
-					using opennova::world::CollisionWorld;
-					CollisionWorld *col = world_->ai->collision;
-					CollisionWorld::ResolveState &st =
-							joiner_replica_resolve_states_[q.row_handle];
-					std::vector<CollisionWorld::ReplicaPeer> peers;
-					peers.reserve(static_cast<size_t>(q.peer_count));
-					for (int32_t i = 0; i < q.peer_count; ++i) {
-						CollisionWorld::ReplicaPeer p;
-						p.handle = q.peers[i].handle;
-						p.x = q.peers[i].x;
-						p.y = q.peers[i].y;
-						p.z = q.peers[i].z;
-						p.radius = q.peers[i].radius;
-						peers.push_back(p);
-					}
-					opennova::world::EntityHandle ground;
-					const int32_t clearance = col->resolve_replica(
-							*world_, st, q.pos, q.vel_xy, q.vel_z,
-							q.capsule_bottom, q.capsule_top, q.is_player_class,
-							q.tick, q.anim_state_id, q.anim_state_flags,
-							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &q.entity_flags, &ground);
-					q.out_ground = ground.valid() ? ground.packed
-					                              : opennova::world::EntityHandle::kInvalid;
-					return clearance;
-				});
-		// The deck-ride carrier seam: resolved_ground is the registry handle
-		// the ground probe stored; the ride reads that entity's LIVE pose
-		// against its mover-entry savedLivePose stamp — the witnessed pair
-		// [orig: the org movers read groundEntity's Position vs +0x80../body*
-		// +0x8C.. @0x4b530b../@0x4ba47f..]. One shared reader
-		// (carrier_pose_fixed) serves both sides so representations can
-		// never diverge; a never-stamped entity (static) reads zero delta.
-		runtime_->view().set_carrier_pose_provider(
-				[this](uint16_t handle,
-						opennova::netsim::ClientReplicaPipeline::CarrierPose
-								&out) -> bool {
-					if (world_ == nullptr) return false;
-					opennova::world::EntityHandle h;
-					h.packed = handle;
-					const opennova::world::Entity *e = world_->registry.get(h);
-					if (e == nullptr) return false;
-					opennova::world::carrier_pose_fixed(
-							*e, out.pos, out.yaw, out.pitch, out.roll);
-					if (e->saved_live_valid) {
-						out.saved_pos[0] = e->saved_live_pos[0];
-						out.saved_pos[1] = e->saved_live_pos[1];
-						out.saved_pos[2] = e->saved_live_pos[2];
-						out.saved_yaw = e->saved_live_yaw;
-						out.saved_pitch = e->saved_live_pitch;
-						out.saved_roll = e->saved_live_roll;
-					} else {
-						out.saved_pos[0] = out.pos[0];
-						out.saved_pos[1] = out.pos[1];
-						out.saved_pos[2] = out.pos[2];
-						out.saved_yaw = out.yaw;
-						out.saved_pitch = out.pitch;
-						out.saved_roll = out.roll;
-					}
-					out.bound_radius =
-							opennova::world::to_fixed(e->bound_radius);
-					return true;
-				});
-	} else {
-		runtime_->view().set_replica_contact_resolver(nullptr);
-		runtime_->view().set_carrier_pose_provider(nullptr);
-	}
-	resolve_client_row_adm_ids();
-	joiner_send_hello_once();
-	joiner_deposit_inbound();
-	const JoinerFrameSignals decoded = joiner_run_client_net_frame(net_start);
-	materialize_client_replica_world_entities();
-	joiner_spawn_and_arm_local_player();
-	if (decoded.health) joiner_apply_authoritative_health();
-	sync_joiner_authoritative_mount();
-	apply_join_mounted_ammo_update();
-	mirror_client_replica_mission_entities();
-
-	// Received projectile/reload gameplay and the decoded remote collision
-	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
-	// them here is the retail recv-before-actions boundary, not presentation work.
-	refresh_joiner_projectile_proxies();
-	apply_joiner_gameplay_events();
-
-	apply_player_input_pre_tick();                  // input -> L's body input
-	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
-	mirror_predicted_vehicles_to_view(); // predicted boat poses -> the presented rows
-	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
-	// seat/deck/object attachment from that final pose in this same frame, then
-	// publish the refreshed rows back to the local registry consumers. This is
-	// the retail second carrier-follow phase; doing it before the world mover
-	// leaves children one tick behind their vehicle.
-	runtime_->refresh_remote_attachments();
-	mirror_client_replica_mission_entities();
-	// The local mounted body was seat-posed earlier in AiSystem::tick, before
-	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
-	// final same-frame transform so the camera/view never trails its seat by one
-	// mover tick. Remote riders were recomposed in ClientState just above.
-	if (world_->ai != nullptr && world_->cached.local_player.valid()) {
-		if (opennova::world::AiEntity *local_ai =
-				world_->ai->for_handle(world_->cached.local_player)) {
-			world_->ai->refresh_mounted_pose(*local_ai, *world_);
-		}
-	}
-	sync_local_mounted_input_heading();
-	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
-	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
-	// pumps weapon actions per-entity, so a joiner whose player has not spawned
-	// has no slot to pump — without this gate a click during the join wait
-	// discharged the pre-armed FSM with no shooter and the joiner deployed a
-	// round short.
-	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
-	if (joiner_local_spawned_) tick_local_player_weapon();
-	++now_tick_;
-}
-
-// ClientHello once (Idle -> Hello) the first armed frame.
-void NovaSimulation::joiner_send_hello_once() {
-	if (!joiner_started_) {
-		const std::vector<uint8_t> hello = runtime_->start();
-		if (!hello.empty()) ship_to_host(hello);
-		joiner_started_ = true;
-	}
+	// The frame itself — provider wiring, hello, recv-fold + uplink + folds,
+	// the decoded-consequence application, the local World tick, and the
+	// post-tick recompose — lives in the engine bridge (S10a, ADR 0028). This
+	// binding supplies the shell legs: the socket, the render-coupled asset
+	// resolution, the loadout profile seams (S7b disposition), device input,
+	// the view/weapon pumps shared with the host path, and the clocks.
+	opennova::np::JoinerWorldBridge::PumpContext ctx{
+			*world_, *runtime_, local_weapon_, local_loadout_,
+			local_inventory_, local_inventory_valid_, item_seat_specs_,
+			infantry_anim_.empty() ? nullptr : &infantry_anim_};
+	opennova::np::JoinerWorldBridge::PumpHooks hooks;
+	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
+	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };
+	hooks.resolve_row_adm_ids = [this] { resolve_client_row_adm_ids(); };
+	if (runtime_profiling_enabled_)
+		hooks.on_wire_leg_complete = [this, net_start] {
+			last_net_tick_us_ = perf_now_us() - net_start;
+		};
+	hooks.apply_authoritative_loadout =
+			[this] { apply_joiner_authoritative_loadout(); };
+	hooks.reseed_kit_on_side_change =
+			[this] { return reseed_session_kit_on_side_change(); };
+	hooks.push_loadout_kit = [this] { push_joiner_loadout_kit(); };
+	hooks.on_diagnostic_sample =
+			[this] { print_joiner_net_diagnostic_sample(); };
+	hooks.on_replica_world_changed =
+			[this](const opennova::netsim::ClientWorldSyncResult &sync) {
+				on_replica_world_changed(sync);
+			};
+	hooks.on_replica_world_static_ready = [this] { occlusion_init_mission(); };
+	hooks.on_local_player_spawned = [this](int32_t look_heading_bam) {
+		on_joiner_local_player_spawned(look_heading_bam);
+	};
+	hooks.on_local_player_redeployed = [this](int32_t look_heading_bam) {
+		on_joiner_local_player_redeployed(look_heading_bam);
+	};
+	hooks.on_mount_changed = [this] {
+		player_view_.binoculars_requested = false;
+		binocular_yaw_offset_deg_ = 0.0f;
+		binocular_pitch_offset_deg_ = 0.0f;
+		refresh_local_player_view_effects();
+		sync_local_mounted_input_heading();
+	};
+	hooks.wire_collision_shape = [this](uint16_t type_id, int32_t &model_id,
+			float &bound_radius) {
+		const WireCollisionShape shape = wire_collision_shape_for_type(type_id);
+		model_id = shape.model_id;
+		bound_radius = shape.bound_radius;
+	};
+	hooks.apply_input_pre_tick = [this] { apply_player_input_pre_tick(); };
+	hooks.sync_mounted_input_heading =
+			[this] { sync_local_mounted_input_heading(); };
+	hooks.tick_view = [this] { tick_local_player_view(); };
+	hooks.tick_weapon = [this] { tick_local_player_weapon(); };
+	joiner_bridge_.pump(ctx, hooks);
 }
 
 // Deposit received framed datagrams for this frame's recv pump.
@@ -995,385 +518,62 @@ void NovaSimulation::joiner_deposit_inbound() {
 	}
 }
 
-// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the decoded-state
-// folds (loadout/kit, side assignment, deployment-release latch, the ~1 Hz
-// freeze tripwire, objective sync into world subgoals). `net_start` is the
-// pump's F3 Stats wire-leg clock; it stops right after the uplink ship, before
-// the folds, so the Stats board measures exactly the wire leg. Returns what
-// this frame's pump decoded (drives the later phases).
-NovaSimulation::JoinerFrameSignals NovaSimulation::joiner_run_client_net_frame(
-		uint64_t net_start) {
-	const uint32_t now = now_tick_;
-	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
-	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
-	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
-	const uint32_t health_updates_before =
-			runtime_->state().health_updates_applied;
-	const uint32_t objective_updates_before =
-			runtime_->state().objective_updates_applied;
-	const bool local_existed_before_net = joiner_local_spawned_;
-	std::vector<std::vector<uint8_t>> outs;
-	const bool have_L = joiner_local_spawned_ && world_->ai && world_->cached.local_player.valid();
-	const opennova::world::Entity *e = have_L ? world_->registry.get(world_->cached.local_player) : nullptr;
-	const opennova::world::AiEntity *ae = have_L ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
-	// A release can arrive during this recv pump. Do not let that newly-opened
-	// runtime gate transmit the corpse/stale pre-deploy pose in the same frame;
-	// L resumes uplinking only after the simulation has consumed the release and
-	// a later positive authoritative health tail.
-	const bool can_offer_uplink =
-			runtime_->is_deployed() && e != nullptr && ae != nullptr &&
-			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
-			!joiner_redeploy_release_pending_;
-	if (can_offer_uplink) {
-		const opennova::PlayerExtendedUplink up =
-				opennova::netsim::build_player_uplink(*world_, *e, *ae);
-		outs = runtime_->Client_ProcessNetworkFrame(up, now);
-	} else {
-		outs = runtime_->Client_ProcessNetworkFrame(now);
+// The ~1 Hz frozen-session diagnostic print (the bridge computes the sampled
+// state; this shell leg owns the env-gated print_verbose channel). L's LIVE
+// pose is the exact source build_player_uplink transmits: a pose that never
+// changes while the player is moving on screen means the local motor is not
+// driving L (so the host renders us frozen at spawn and eventually stops
+// streaming records around a stale reference position).
+void NovaSimulation::print_joiner_net_diagnostic_sample() {
+	if (!is_joiner_network_diagnostics_enabled() || !runtime_) return;
+	String local_state = " L=none";
+	if (joiner_bridge_.local_spawned() && world_ && world_->ai) {
+		const opennova::world::AiEntity *lae =
+				world_->ai->for_handle(world_->cached.local_player);
+		const opennova::world::Entity *le =
+				world_->registry.get(world_->cached.local_player);
+		if (lae != nullptr)
+			local_state = vformat(
+					" L=(%.1f,%.1f,%.1f) hdg=%d input=0x%02x",
+					lae->pos[0] / 65536.0f, lae->pos[1] / 65536.0f,
+					lae->pos[2] / 65536.0f,
+					static_cast<int64_t>(lae->heading >> 16),
+					static_cast<int64_t>(le ? le->net_move_input : 0));
 	}
-	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
-	if (runtime_profiling_enabled_)
-		last_net_tick_us_ = perf_now_us() - net_start;
-	apply_joiner_authoritative_loadout();
-	// The team selector may only just have become known (the S2C 0x04 latch landing
-	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
-	// resident kit buffer follows the side, exactly as retail re-copies restrictionData
-	// for the newly assigned side [orig: NapiNPClientMsg_TeamAssign @0x431a9a].
-	if (reseed_session_kit_on_side_change()) push_joiner_loadout_kit();
-	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
-	// (the join-time 0x0C record's team byte); a later assignment must move both the
-	// entity's Team and the round sim's presenting-client team, or friend/foe styling
-	// keeps rendering the old side. Retail does the same two writes: byte_A85B48 for
-	// the latch and entity->Team for the entity itself.
-	// [orig: NapiNPClientMsg_0x050 @0x431910 — @0x4319db / @0x4319ee; the round-spawn
-	//  style select reads the local player's Team @0x4ec740]
-	{
-		const uint64_t self_team_revision = runtime_->self_team_revision();
-		if (self_team_revision > joiner_self_team_revision_seen_) {
-			joiner_self_team_revision_seen_ = self_team_revision;
-			const uint8_t assigned = runtime_->assigned_team();
-			if (opennova::world::Entity *L =
-					world_->registry.get(world_->cached.local_player)) {
-				L->team = assigned;
-			}
-			world_->round_sim.local_team = assigned;
-			// The 0x50 handler also RE-SELECTS the newly assigned side's profile page
-			// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
-			// = *profileData, page = profileData + {6,2054,4102,6150,8198}
-			// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
-			// passes slot 195 RAW]. The re-submission itself lives in the joiner
-			// runtime; re-arm the seam from the NEW side so its content is the page
-			// retail would have copied. The resident buffer itself moves with the side
-			// in reseed_session_kit_on_side_change above (retail's qmemcpy replaces
-			// restrictionData wholesale @0x431a9a) — a reassignment WITHIN one side
-			// reaches only this re-arm, which is what retail's unconditional re-submit
-			// does too.
-			push_joiner_loadout_kit();
-		}
-	}
-	const uint64_t deployment_release_revision =
-			runtime_->deployment_release_revision();
-	if (deployment_release_revision >
-			joiner_deployment_release_revision_seen_) {
-		joiner_deployment_release_revision_seen_ =
-				deployment_release_revision;
-		// The first release creates L below. A later release must revive that
-		// existing identity, but only after a positive 0x0A tail observed after
-		// this release frame (not a stale positive already queued ahead of it).
-		if (local_existed_before_net) {
-			joiner_redeploy_release_pending_ = true;
-			joiner_redeploy_health_updates_at_release_ =
-					runtime_->state().health_updates_applied;
-		}
-	}
-	// Frozen-session tripwire (live-diagnosis aid, ~1 Hz): sample the signature
-	// continuously, but print it only when OPENNOVA_NET_DIAGNOSTICS is enabled.
-	// An unrecovered S2C sequence gap stalls the ordered frontier, the remote world
-	// freezes, retained records stop retiring, and the host eventually reaps us.
-	if ((now % 62u) == 0u) {
-		const std::size_t gap_depth = runtime_->inbound_gap_depth();
-		const std::size_t retained = runtime_->retained_outbound_depth();
-		const uint32_t frontier = runtime_->inbound_frontier_seq();
-		const uint32_t out_seq = runtime_->outbound_seq();
-		const uint32_t records = runtime_->state().compact_records_applied;
-		// A true ordered-replication stall requires an unresolved gap. Flat records
-		// alone are normal before deployment and whenever the remote world is idle.
-		// Continuing outbound sequence movement proves the local socket/frame pump
-		// is still alive rather than paused.
-		const bool frontier_flat =
-				joiner_diagnostic_sampled_ && frontier == joiner_last_frontier_seq_;
-		const bool records_flat =
-				joiner_diagnostic_sampled_ && records == joiner_last_records_applied_;
-		const bool outbound_advanced =
-				joiner_diagnostic_sampled_ && out_seq > joiner_last_outbound_seq_;
-		const bool stalled_sample =
-				runtime_->in_match() && runtime_->is_deployed() && gap_depth > 0 &&
-				frontier_flat && records_flat && outbound_advanced;
-		if (stalled_sample) ++joiner_flat_seconds_;
-		else joiner_flat_seconds_ = 0;
-		joiner_freeze_suspected_ = joiner_flat_seconds_ >= 3;
-		// L's LIVE pose — the exact source build_player_uplink transmits. A pose that
-		// never changes while the player is moving on screen means the local motor is
-		// not driving L (so the host renders us frozen at spawn and eventually stops
-		// streaming records around a stale reference position).
-		if (is_joiner_network_diagnostics_enabled()) {
-			String local_state = " L=none";
-			if (joiner_local_spawned_ && world_ && world_->ai) {
-				const opennova::world::AiEntity *lae =
-						world_->ai->for_handle(world_->cached.local_player);
-				const opennova::world::Entity *le =
-						world_->registry.get(world_->cached.local_player);
-				if (lae != nullptr)
-					local_state = vformat(
-							" L=(%.1f,%.1f,%.1f) hdg=%d input=0x%02x",
-							lae->pos[0] / 65536.0f, lae->pos[1] / 65536.0f,
-							lae->pos[2] / 65536.0f,
-							static_cast<int64_t>(lae->heading >> 16),
-							static_cast<int64_t>(le ? le->net_move_input : 0));
-			}
-			UtilityFunctions::print_verbose(vformat(
-					"joiner net: in=%d out=%d rec=%d gap=%d retained=%d match=%d deployed=%d%s%s",
-					static_cast<int64_t>(frontier), static_cast<int64_t>(out_seq),
-					static_cast<int64_t>(records), static_cast<int64_t>(gap_depth),
-					static_cast<int64_t>(retained), runtime_->in_match() ? 1 : 0,
-					runtime_->is_deployed() ? 1 : 0, local_state,
-					joiner_freeze_suspected_
-							? vformat(" *** REPLICATION FROZEN %ds ***",
-									  static_cast<int64_t>(joiner_flat_seconds_))
-							: String()));
-		}
-		joiner_last_frontier_seq_ = frontier;
-		joiner_last_records_applied_ = records;
-		joiner_last_outbound_seq_ = out_seq;
-		joiner_last_gap_depth_ = gap_depth;
-		joiner_diagnostic_sampled_ = true;
-	}
-	JoinerFrameSignals decoded;
-	decoded.health =
-			runtime_->state().health_updates_applied != health_updates_before;
-	decoded.objectives =
-			runtime_->state().objective_updates_applied != objective_updates_before;
-	if (decoded.objectives) {
-		const opennova::netsim::ClientState &client = runtime_->state();
-		world_->subgoals.won = client.objective_won;
-		world_->subgoals.lost = client.objective_lost;
-		world_->subgoals.show_win = client.objective_show_win;
-		world_->subgoals.show_lose = client.objective_show_lose;
-	}
-	return decoded;
+	UtilityFunctions::print_verbose(vformat(
+			"joiner net: in=%d out=%d rec=%d gap=%d retained=%d match=%d deployed=%d%s%s",
+			static_cast<int64_t>(runtime_->inbound_frontier_seq()),
+			static_cast<int64_t>(runtime_->outbound_seq()),
+			static_cast<int64_t>(runtime_->state().compact_records_applied),
+			static_cast<int64_t>(runtime_->inbound_gap_depth()),
+			static_cast<int64_t>(runtime_->retained_outbound_depth()),
+			runtime_->in_match() ? 1 : 0,
+			runtime_->is_deployed() ? 1 : 0, local_state,
+			joiner_bridge_.freeze_suspected()
+					? vformat(" *** REPLICATION FROZEN %ds ***",
+							  static_cast<int64_t>(joiner_bridge_.flat_seconds()))
+					: String()));
 }
 
-// On the in-match edge (detected by the recv-fold): learn H + spawn L at the host-advertised
-// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
-// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
-void NovaSimulation::joiner_spawn_and_arm_local_player() {
-	namespace np = opennova::np;
-	if (runtime_->in_match() && !joiner_local_spawned_ && world_->ai) {
-		joiner_self_wire_handle_ = runtime_->self_handle();
-		const np::JoinerConnection::SelfSpawn &sp = runtime_->spawn_pose();
-		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
-		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
-		joiner_local_spawned_ = h.valid();
-		// Arm L the way the host's own spawn does at Player_InitPlayer time: the
-		// shell applied the profile kit/class BEFORE L existed (the pre-spawn
-		// apply latched it into the inventory), so stamp the deferred class +
-		// damage classes + equipped adm on the fresh entity now. [orig:
-		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
-		if (opennova::world::Entity *L = world_->registry.get(h)) {
-			if (local_loadout_.pending_player_class >= 5 && local_loadout_.pending_player_class <= 9)
-				L->player_class = static_cast<uint8_t>(local_loadout_.pending_player_class);
-			sync_local_player_damage_classes();
-			if (local_inventory_valid_ && local_inventory_.equipped_combo >= 0) {
-				const opennova::world::WeaponInventorySlot *slot =
-						local_inventory_.slot(local_inventory_.equipped_combo);
-				if (slot != nullptr && slot->adm_index >= 0) {
-					L->equipped_adm_index = static_cast<uint8_t>(slot->adm_index);
-					// Replay the deferred PRESENTATION half of every selection that
-					// committed while L did not exist (the 0x5A grant applies before
-					// the spawn). Retail has no entity precondition there: the
-					// selection restamps equippedAdmIndex and the FP viewmodel is
-					// re-resolved per frame off EquippedSlot [orig: the 0x5A tail
-					// @0x4296E3 -> Player_SelectWeaponSlot @0x4DD680 @0x4dd727;
-					// Player_RenderFirstPersonViewModel @0x4DED60]. Exactly ONE event
-					// is queued, naming the weapon the inventory actually selected —
-					// without it the viewmodel and the weapon FSM kept running the
-					// SUBMITTED weapon while the entity and the wire followed the
-					// granted one.
-					// local_weapon_.start_in_switchto is deliberately left as the last
-					// rebuild settled it — the spawn mount plays no switch actions
-					// (D-WPN-21), and this replay only restores the notification.
-					if (local_weapon_.presentation_pending) {
-						local_weapon_.presentation_pending = false;
-						const opennova::world::WeaponTableEntry *def =
-								world_->weapons.by_index(
-										static_cast<uint8_t>(slot->adm_index));
-						opennova::world::WeaponPresentationEvent event;
-						event.tick = world_->logic_tick;
-						if (const opennova::world::Entity *local =
-									world_->registry.get(
-											world_->cached.local_player))
-							event.world_position = local->position;
-						event.switch_to_weapon =
-								def != nullptr ? def->name : std::string();
-						local_weapon_.events.push_back(std::move(event));
-					}
-				}
-			}
-		}
-		resolve_new_infantry_adm_ids();
-		player_input_ = opennova::world::PlayerInput{};
-		// Retail polls live keys; a press during the join wait must not cross
-		// the spawn edge as a queued shot/reload. Clear the consume-latches too.
-		local_weapon_.fire_held = false;
-		local_weapon_.fire_pressed = false;
-		local_weapon_.reload_pressed = false;
-		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
-		stance_latch_ = 0;
-		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
-	}
+// L spawned on the in-match edge: fresh adm resolution, then the join-wait
+// input latches die and the look heading seeds from the spawn facing (retail
+// polls live keys; a press during the join wait must not cross the spawn edge).
+void NovaSimulation::on_joiner_local_player_spawned(int32_t p_look_heading_bam) {
+	resolve_new_infantry_adm_ids();
+	player_input_ = opennova::world::PlayerInput{};
+	player_input_.look_heading = p_look_heading_bam;
+	stance_latch_ = 0;
+	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
 }
 
-// The 0x0A tail is the authoritative health source for the recipient's OWN
-// player. H belongs to the host's handle space; apply that recipient-local
-// scalar to the joiner's distinct motor entity L (the pump gates this phase on
-// the frame's decoded health signal). A fresh-frame guard prevents
-// ClientState's pre-frame zero default from killing L during the handshake.
-// Once L is dead, positive health revives it only after the separate
-// ACK-qualified deployment release latched by the net-frame folds, and only
-// from a later tail. That edge also snaps L to H's redeployed authoritative
-// pose before its next uplink can run.
-// [orig: tail health read @0x430428; store to local Health @0x4305df]
-void NovaSimulation::joiner_apply_authoritative_health() {
-	if (joiner_local_spawned_ &&
-			world_->cached.local_player.valid()) {
-		const opennova::world::EntityHandle local_h =
-				world_->cached.local_player;
-		opennova::world::Entity *local =
-				world_->registry.get(local_h);
-		AiEntity *local_ai =
-				world_->ai ? world_->ai->for_handle(local_h) : nullptr;
-		if (local != nullptr && local_ai != nullptr) {
-			// ClientRuntime latches authoritative spawn closed on a decoded zero
-			// tail, even if a later packet in this recv pump carries stale positive
-			// HP. The independent C2S 0x0E gameplay hold never forces health to zero.
-			const int16_t health = runtime_->authoritative_spawn_released()
-					? runtime_->state().local_health : 0;
-			if (health <= 0) {
-				local->health = health;
-				local_ai->health = health;
-				local->alive = false;
-				local->flags |= 2u;
-			} else if (joiner_redeploy_release_pending_ &&
-					runtime_->state().health_updates_applied >
-							joiner_redeploy_health_updates_at_release_) {
-				// The recipient's own compact is deliberately priority-boosted
-				// by the host. Use its redeployed pose, not the corpse pose,
-				// before movement/uplink resumes.
-				const opennova::netsim::ClientEntityState *self =
-						client_entity_for_handle(
-								runtime_->state(), runtime_->self_handle());
-				if (self != nullptr && self->seen_this_frame) {
-					const int32_t heading =
-							static_cast<int32_t>(
-									static_cast<uint32_t>(self->yaw_byte) << 24);
-					const int32_t pitch =
-							static_cast<int32_t>(
-									static_cast<uint32_t>(self->pitch_byte) << 24);
-					local->position = {
-							static_cast<float>(
-									static_cast<double>(self->x) / kFixed16),
-							static_cast<float>(
-									static_cast<double>(self->y) / kFixed16),
-							static_cast<float>(
-									static_cast<double>(self->z) / kFixed16),
-					};
-					local->yaw = static_cast<int16_t>(std::lround(
-							opennova::world::mission_yaw_deg_from_bam_heading(
-									heading)));
-					local->pitch = static_cast<int16_t>(std::lround(
-							static_cast<double>(pitch) *
-							opennova::world::kDegreesPerBam));
-					local->roll = 0;
-					local->health = health;
-					local->alive = true;
-					local->hidden = false;
-					local->flags &= ~1u;
-					local->death_anim_state = 0;
-					local->corpse_timer = 0;
-					local->net_move_input = 0;
-					local->net_analog_x = 0;
-					local->net_analog_y = 0;
-					local->net_analog_z = 0;
-					opennova::world::entity_reset_to_spawn_state(*local);
-
-					local_ai->pos[0] = self->x;
-					local_ai->pos[1] = self->y;
-					local_ai->pos[2] = self->z;
-					local_ai->heading = heading;
-					local_ai->pitch = pitch;
-					local_ai->roll = 0;
-					local_ai->body_pitch = 0;
-					local_ai->health = health;
-					local_ai->vel_x = 0;
-					local_ai->vel_z = 0;
-					local_ai->net_smooth_target[0] = self->x;
-					local_ai->net_smooth_target[1] = self->y;
-					local_ai->net_smooth_target[2] = self->z;
-					local_ai->net_smooth_heading = heading;
-					local_ai->net_smooth_pitch = pitch;
-					local_ai->net_interp_progress = 0;
-					local_ai->net_interp_steps = 0;
-					local_ai->collide_state = {};
-
-					opennova::world::InfantryState &inf = local_ai->inf;
-					inf.active = true;
-					inf.is_local_player = true;
-					inf.player_moving = false;
-					inf.player_move_dir_index = 0;
-					inf.move_mode = 0;
-					inf.target_dist = 0;
-					inf.reset_body_animation(opennova::world::anim_state::kIdle);
-					inf.reload_anim_ticks = 0;
-					inf.arms_dip_ticks = 0;
-					inf.pitch_kick_accum = 0;
-					inf.recoil_pitch = 0;
-					inf.weapon_weight_spread = 0;
-					inf.aimed_shot_available = false;
-					inf.idle_counter = 0;
-					inf.lean_left = false;
-					inf.lean_right = false;
-					inf.lean_angle = 0;
-					inf.torso_roll = 0;
-					inf.body_heading = heading;
-					inf.target_heading = heading;
-					inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
-					inf.leg_target[0] = inf.leg_target[1] = heading;
-					inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
-					inf.stance =
-							opennova::world::InfantryState::Stance::kStand;
-					inf.standing_on_entity = false;
-					inf.airborne = false;
-					inf.jump_requested = false;
-					inf.jump_cooldown = 0;
-					inf.ground_cache_valid = false;
-
-					player_input_ = opennova::world::PlayerInput{};
-					player_input_.look_heading = heading;
-					local_weapon_.fire_held = false;
-					local_weapon_.fire_pressed = false;
-					local_weapon_.reload_pressed = false;
-					stance_latch_ = 0;
-					look_px_accum_x_ = look_px_accum_y_ = 0.0f;
-					respawn_local_player_loadout();
-					joiner_redeploy_release_pending_ = false;
-					joiner_redeploy_health_updates_at_release_ = 0;
-				}
-			} else if (local->alive && (local->flags & 2u) == 0u) {
-				local->health = health;
-				local_ai->health = health;
-			}
-		}
-	}
+// L revived on an ACK-qualified redeploy release: the same input-latch reset
+// from the redeployed authoritative heading, plus the respawn loadout rebuild.
+void NovaSimulation::on_joiner_local_player_redeployed(int32_t p_look_heading_bam) {
+	player_input_ = opennova::world::PlayerInput{};
+	player_input_.look_heading = p_look_heading_bam;
+	stance_latch_ = 0;
+	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	respawn_local_player_loadout();
 }
 
 NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type(
@@ -1443,261 +643,6 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 	}
 	wire_collision_shape_by_type_.emplace(p_type_id, shape);
 	return shape;
-}
-
-void NovaSimulation::refresh_joiner_projectile_proxies() {
-	std::vector<opennova::world::ProjectilePersonProxy> person_proxies;
-	std::vector<opennova::world::ProjectileDynamicProxy> dynamic_proxies;
-	uint16_t self_wire_handle = opennova::world::EntityHandle::kInvalid;
-	if (runtime_ && runtime_->has_self_handle())
-		self_wire_handle = runtime_->self_handle();
-	if (joiner_ && runtime_ && runtime_->in_match()) {
-		for (const opennova::netsim::ClientEntityState &entity :
-				runtime_->state().entities) {
-			if (entity.handle == opennova::world::EntityHandle::kInvalid ||
-					(self_wire_handle != opennova::world::EntityHandle::kInvalid &&
-					 entity.handle == self_wire_handle) ||
-					(entity.state_flags_known &&
-					 (entity.state_flags & 0x01u) != 0))
-				continue;
-
-			// Pool-0 organics (players AND non-player infantry) join the person
-			// walk at the decoded position; retail's client walks its wire-built
-			// pool 0 the same way [orig: Physics_RaycastAgainstProximityList
-			// @ 0x4e4a30 over the client-built person table].
-			if (entity.cls == opennova::EntityClass::Player ||
-					entity.cls == opennova::EntityClass::Infantry) {
-				opennova::world::ProjectilePersonProxy proxy;
-				proxy.wire_handle = entity.handle;
-				proxy.position_q16 = opennova::world::FixedVec3{
-						entity.x, entity.y, entity.z};
-				person_proxies.push_back(proxy);
-				continue;
-			}
-
-			// Pool-1 movers (vehicles, emplacements, runtime items) project
-			// their authored collision geometry at the decoded pose. Pool-2
-			// statics keep colliding through the locally loaded mission set.
-			if (opennova::wire_handle::pool(entity.handle) !=
-					opennova::wire_handle::kPoolItem) continue;
-			const WireCollisionShape shape =
-					wire_collision_shape_for_type(entity.type_id);
-			if (shape.model_id < 0 && shape.bound_radius <= 0.0f) continue;
-			opennova::world::ProjectileDynamicProxy proxy;
-			proxy.wire_handle = entity.handle;
-			proxy.model_id = shape.model_id;
-			proxy.position_q16 = opennova::world::FixedVec3{
-					entity.x, entity.y, entity.z};
-			// The decoded pose mirrors the retail client entity fields: the compact
-			// heading sample plus locally integrated sub-byte body motion, and retained
-			// spawn/dead pitch/roll samples (entity+20/+24, live compacts omit
-			// both for vehicles).
-			proxy.heading_bam = entity.heading_bam;
-			proxy.pitch_bam = entity.pitch_bam;
-			proxy.roll_bam = entity.roll_bam;
-			proxy.bound_radius_q16 = shape.bound_radius > 0.0f
-					? static_cast<int32_t>(shape.bound_radius * 65536.0f)
-					: 0;
-			dynamic_proxies.push_back(proxy);
-		}
-	}
-	// ClientState is persistent and frame-budgeted; omission from one 0x0A is
-	// not a despawn signal, so this intentionally does not read seen_this_frame.
-	// Known-dead bit 1 is retained too: retail dead bodies remain person blockers
-	// and a destroyed vehicle's shell keeps blocking (husk-model substitution for
-	// wire proxies is a tracked residual).
-	collision_world_.replace_projectile_person_proxies(
-			std::move(person_proxies), self_wire_handle);
-	collision_world_.replace_projectile_dynamic_proxies(
-			std::move(dynamic_proxies));
-}
-
-void NovaSimulation::apply_joiner_gameplay_events() {
-	if (!joiner_ || !runtime_ || !world_) return;
-
-	// S2C 0x13 entity-death notifies: run the class death callback on the world
-	// twin — retail's client zeroes Health and invokes deathCallback(entity, 4, 0),
-	// which for a destructible item IS the local husk-swap + death-explosion
-	// chain (the visual client's only live channel for another peer destroying a
-	// static; the 0x10/0x20 load batches never re-stream after load). Pool-0
-	// organics have no materialized world twin here — their death presentation
-	// rides the compact dead bit — and destruction_notify_item_damage's own
-	// gates keep AI-driven vehicles on their state-machine death path, exactly
-	// like the authority side.
-	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — Health = 0 @0x42ebd6,
-	//  cb(entity, 4, 0) @0x42ebf5; cb == Entity_HandleDestructibleDeathEvent
-	//  @0x440210 for destructibles]
-	for (const opennova::EntityDeathRecord &death :
-			runtime_->drain_entity_deaths()) {
-		const opennova::world::EntityHandle handle{death.entity_handle};
-		if (handle.pool() < 1 || handle.pool() > 3) continue;
-		opennova::world::Entity *victim =
-				wire_world_materializer_.owned(*world_, handle);
-		if (victim == nullptr) continue;
-		victim->health = 0;
-		victim->alive = false;
-		victim->last_attacker = opennova::world::EntityHandle{};
-		opennova::world::destruction_notify_item_damage(*world_, *victim, 4);
-	}
-
-	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
-	// normal round spawner so tracers and physical impacts are produced locally;
-	// World::run_logic_tick admits this pool only under the explicit
-	// mp_session && !projectile_authority visual-client gate. Every descriptor
-	// is spawned VisualOnly below, and that mode gates every gameplay consequence.
-	for (const opennova::netsim::ClientRoundEvent &ev :
-			runtime_->drain_round_events()) {
-		// The retail deserializer dispatches only the alt/projectile bit or the
-		// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
-		// enter RoundData_SpawnRound.
-		if ((ev.flags & (opennova::kRoundEventFlagAltFire |
-				opennova::kRoundEventFlagAdmIndexed)) == 0) continue;
-		const opennova::world::WeaponTableEntry *adm =
-				world_->weapons.by_index(ev.adm_index);
-		if (adm == nullptr || adm->ammo_index < 0) continue;
-		opennova::world::RoundSpawnParams round;
-		opennova::world::RoundSourceState source;
-		round.owner = opennova::world::EntityHandle{};
-		round.shooter_handle = ev.shooter_handle;
-		// The mounted shooter's own vehicle joins the trace exclusion exactly
-		// like retail's mount rule — see wire_carrier_exclusion_for.
-		round.shooter_carrier_handle = wire_carrier_exclusion_for(
-				runtime_->state(), ev.shooter_handle, item_seat_specs_);
-		// Retail resolves the wire shooter entity and copies its TEAM into the
-		// spawned round — the friend/enemy throwable item and tracer styling key
-		// on it. Without this every remote grenade wore the enemy variant (and a
-		// variant with no motor row froze mid-air). [orig: @0x4ec705]
-		if (opennova::netsim::ClientEntityState *shooter_row =
-					runtime_->state().find(ev.shooter_handle)) {
-			round.shooter_team = shooter_row->team;
-			const int anim = shooter_row->anim_state_id;
-			// The category follows the retail animation-flags table, not a
-			// hand-maintained list of familiar locomotion clips. In particular,
-			// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-			// neither. [orig: g_animStateFlagsTable @0x8139E8; category read in
-			// RoundData_SpawnRound @0x4EC252..0x4EC27A]
-			const uint32_t anim_flags =
-					opennova::world::infantry_anim_flags(anim);
-			const bool prone = (anim_flags & opennova::world::kAnimStanceFlagProne) != 0;
-			const bool crouched = (anim_flags & opennova::world::kAnimStanceFlagCrouched) != 0;
-			const bool swimming = anim == 36 || anim == 37 || anim == 154;
-			const bool mounted =
-					round.shooter_carrier_handle != opennova::wire_handle::kInvalid;
-			// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
-			// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
-			// decoded row has no CameraOffset carrier, so raw fixed position Z is
-			// the bounded projection; the swimming anim remains an independent
-			// positive witness. Do not invent a standing-eye constant here.
-			const bool below_water = world_->env.water_z != 0 &&
-					shooter_row->z < world_->env.water_z;
-			source.person_with_item_def =
-					shooter_row->cls == opennova::EntityClass::Player ||
-					shooter_row->cls == opennova::EntityClass::Infantry;
-			source.player = shooter_row->cls == opennova::EntityClass::Player;
-			source.underwater = swimming || below_water;
-			// Mounted is the later retail override and therefore wins even while
-			// below water; otherwise the underwater predicate forces standing row 2.
-			source.stance_category = mounted ? 1 : (source.underwater ? 2 :
-					(prone ? 0 : (crouched ? 1 : 2)));
-			source.scope_raised =
-					(shooter_row->state_flags &
-					 opennova::world::kEntityFlagScopeRaised) != 0;
-			source.recoil_pitch = &shooter_row->recoil_pitch;
-			round.source_state = &source;
-			// The adm-arm action sounds play at the SHOOTER's position, and a
-			// decoded remote shooter has no local entity — supply its row
-			// position for the sim's fire-sound leg (world/fire_sound.h).
-			// [orig: entity+4 @ 0x4020ef; the pool resolve @ 0x42f491]
-			round.shooter_pos = opennova::world::Vec3{
-					static_cast<float>(shooter_row->x / kFixed16),
-					static_cast<float>(shooter_row->y / kFixed16),
-					static_cast<float>(shooter_row->z / kFixed16)};
-			round.shooter_pos_valid = true;
-		}
-		round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
-		round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
-		round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
-		round.dir_yaw_bam = ev.dir_yaw_bam;
-		round.dir_pitch_bam = ev.dir_pitch_bam;
-		round.ammo_index = adm->ammo_index;
-		round.adm_index = ev.adm_index;
-		round.shot_seq = ev.shot_seq;
-		round.subtype = ev.subtype;
-		round.charge = ev.slot_byte;
-		// Carry the arm through so presentation can honour retail's split: the
-		// adm-indexed arm spawns no ammo-def effect at the wire position (which is
-		// the shooter's EYE — Position + CameraOffset), it executes the addressed
-		// def's action rows at the weapon's own userpoint instead.
-		// [orig: @0x42f521 / @0x42f6ce]
-		round.wire_round_flags = static_cast<uint8_t>(ev.flags &
-				(opennova::kRoundEventFlagAltFire | opennova::kRoundEventFlagAdmIndexed));
-		world_->round_sim.spawn(
-				*world_, round,
-				opennova::world::RoundConsequenceMode::VisualOnly);
-	}
-
-	for (const opennova::WeaponReload &reload :
-			runtime_->drain_reload_notifications()) {
-		++local_weapon_.reload_received_serial;
-		local_weapon_.reload_received_entity = reload.entity_handle;
-		local_weapon_.reload_received_param = reload.reload_param;
-		// ClientRuntime already applied the remote-Person receive-handler stamp
-		// before that frame's body tick. This drain retains diagnostics plus the
-		// self-only WeaponSlot_ReloadAmmo branch below.
-		if (!local_inventory_valid_ || !runtime_->has_self_handle() ||
-				reload.entity_handle != runtime_->self_handle())
-			continue;
-
-		const int32_t combo = reload.reload_param;
-		opennova::world::WeaponInventorySlot *reloaded =
-				local_inventory_.slot(combo);
-		const opennova::world::WeaponTableEntry *def =
-				(reloaded != nullptr && reloaded->adm_index >= 0)
-						? world_->weapons.by_index(
-								static_cast<uint8_t>(reloaded->adm_index))
-						: nullptr;
-		if (reloaded == nullptr || def == nullptr) continue;
-
-		// WeaponSlot_ReloadAmmo is run only on the echoed notification: refund
-		// the payload-addressed slot's remaining clip to its ammo-class pool and
-		// draw a full clip. A late echo still reloads that exact slot after a switch;
-		// only the currently active personal slot has an FSM mirror to update here.
-		opennova::world::weapon_inventory_reload_slot(
-				world_->weapons, local_inventory_, combo);
-		if (local_weapon_.active && !local_weapon_.usegun_slot_active &&
-				local_inventory_.equipped_combo >= 0) {
-			opennova::world::WeaponSlotState &active_slot =
-					*active_local_weapon_slot();
-			const opennova::world::WeaponInventorySlot *equipped =
-					local_inventory_.slot(local_inventory_.equipped_combo);
-			const opennova::world::WeaponTableEntry *equipped_def =
-					(equipped != nullptr && equipped->adm_index >= 0)
-							? world_->weapons.by_index(
-									static_cast<uint8_t>(equipped->adm_index))
-							: nullptr;
-			if (equipped_def != nullptr) {
-				active_slot.reserve = opennova::world::weapon_pool_get(
-						local_inventory_, equipped_def->ammo_class_id);
-			}
-			if (combo == local_inventory_.equipped_combo) {
-				active_slot.clip = reloaded->clip;
-				active_slot.phase = static_cast<uint8_t>(
-						active_slot.phase &
-						~opennova::world::weapon_phase::kReloadPendingBit);
-			}
-		}
-		++local_weapon_.reload_applied_serial;
-		AiEntity *player = world_->ai
-				? world_->ai->for_handle(world_->cached.local_player)
-				: nullptr;
-		if (player != nullptr && player->inf.active)
-			player->inf.reload_anim_ticks = 80;
-	}
-
-	// Decoded shots above stamp the peer accumulator first; retail's client body
-	// update then decays it in this same frame. Locally predicted fire is pumped
-	// later, after the local World body tick, so it begins decaying next frame.
-	runtime_->tick_remote_recoil();
 }
 
 void NovaSimulation::enable_listen_server(bool p_enable) {
@@ -2050,22 +995,9 @@ bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const Stri
 		world_->projectile_authority = false;
 		world_->mp_session = true;
 	}
-	joiner_started_ = false;
-	joiner_local_spawned_ = false;
-	joiner_deployment_release_revision_seen_ = 0;
+	joiner_bridge_.reset_for_join();
 	joiner_environment_revision_seen_ = 0;
-	joiner_mounted_ammo_revision_seen_ = 0;
-	joiner_redeploy_release_pending_ = false;
-	joiner_redeploy_health_updates_at_release_ = 0;
-	joiner_self_wire_handle_ = 0;
 	joiner_applied_loadout_revision_ = 0;
-	joiner_last_gap_depth_ = 0;
-	joiner_last_frontier_seq_ = 0;
-	joiner_last_records_applied_ = 0;
-	joiner_last_outbound_seq_ = 0;
-	joiner_diagnostic_sampled_ = false;
-	joiner_flat_seconds_ = 0;
-	joiner_freeze_suspected_ = false;
 	return true;
 }
 
@@ -2120,24 +1052,16 @@ bool NovaSimulation::poll_join_preload() {
 	// This is the pre-mission subset of joiner_pump: the same UDP socket and
 	// ClientRuntime advance the retail connect exchange, but no World exists yet
 	// to tick and the runtime's world-ready gate suppresses the load/spawn drive.
-	if (!joiner_started_) {
-		const std::vector<uint8_t> hello = runtime_->start();
-		if (!hello.empty()) ship_to_host(hello);
-		joiner_started_ = true;
-	}
-	if (pump_.is_valid()) {
-		pump_->poll();
-		while (pump_->has_inbound()) {
-			const Dictionary d = pump_->take_inbound();
-			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
-		}
-	}
+	// The hello latch and the per-frame clock are the bridge's, shared with the
+	// in-mission pump.
+	joiner_bridge_.send_hello_once(*runtime_,
+			[this](const std::vector<uint8_t> &dg) { ship_to_host(dg); });
+	joiner_deposit_inbound();
 	for (const std::vector<uint8_t> &dg :
-			runtime_->Client_ProcessNetworkFrame(now_tick_)) {
+			runtime_->Client_ProcessNetworkFrame(joiner_bridge_.now_tick())) {
 		ship_to_host(dg);
 	}
-	++now_tick_;
+	joiner_bridge_.advance_tick();
 	return true;
 }
 
@@ -2258,8 +1182,8 @@ Dictionary NovaSimulation::get_joiner_network_diagnostics() const {
 			runtime_ ? runtime_->inbound_gap_depth() : 0u);
 	out["retained_outbound"] = static_cast<int64_t>(
 			runtime_ ? runtime_->retained_outbound_depth() : 0u);
-	out["flat_seconds"] = joiner_flat_seconds_;
-	out["freeze_suspected"] = joiner_freeze_suspected_;
+	out["flat_seconds"] = joiner_bridge_.flat_seconds();
+	out["freeze_suspected"] = joiner_bridge_.freeze_suspected();
 	out["in_match"] = runtime_ && runtime_->in_match();
 	out["deployed"] = runtime_ && runtime_->is_deployed();
 	return out;
@@ -2350,7 +1274,7 @@ int NovaSimulation::get_joiner_phase() const {
 }
 
 int NovaSimulation::get_joiner_self_handle() const {
-	return joiner_ ? static_cast<int>(joiner_self_wire_handle_) : 0;
+	return joiner_ ? static_cast<int>(joiner_bridge_.self_wire_handle()) : 0;
 }
 
 Dictionary NovaSimulation::take_join_environment_update() {
@@ -2389,34 +1313,6 @@ void NovaSimulation::ship_to_host(const std::vector<uint8_t> &dg) {
 	bytes.resize(static_cast<int64_t>(dg.size()));
 	std::memcpy(bytes.ptrw(), dg.data(), dg.size());
 	pump_->send_to_host(bytes);
-}
-
-opennova::world::PlayerSpawn NovaSimulation::spawn_from_self(
-		const opennova::np::JoinerConnection::SelfSpawn &s) const {
-	opennova::world::PlayerSpawn spawn;
-	// SelfSpawn position is mission i32 16.16; PlayerSpawn.position is float mission units.
-	spawn.position = {static_cast<float>(s.pos_x / kFixed16),
-	                  static_cast<float>(s.pos_y / kFixed16),
-	                  static_cast<float>(s.pos_z / kFixed16)};
-	// orientation is ALREADY a full 32-bit BAM (unlike HostJoinerPose.heading, an i16
-	// the host shifts << 16) -> pass it straight to the (90 - heading) mission-degree map.
-	spawn.yaw = static_cast<int16_t>(
-			std::lround(opennova::world::mission_yaw_deg_from_bam_heading(s.orientation)));
-	spawn.team = s.team;
-	// The named player record carries the host-stamped character selector and
-	// packed minimap/character id. Preserve both on local L just as retail's
-	// Player_InitPlayer does; dropping animSlot recreated the D-NET-146
-	// DBuggy-shadow association on the joiner's own presentation.
-	spawn.anim_slot = s.anim_slot;
-	spawn.minimap_net_id = s.net_id;
-	// [D-NET-112] The packed id belongs to the wire NetId ONLY. A player carries no SSN, so L
-	// takes net_id 0 exactly like the host's own spawn (server_spawn.cpp) — that keeps it out of
-	// the WAC/BMS find_by_net_id space, which PlayerSpawn.net_id's 0xFFF0 default would otherwise
-	// join, so the zero must be written explicitly. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
-	// entity+0x15C (the wire NetId); EntityPool_FindByNetId @0x4f0a20 keys entity+0x7C, left 0
-	// for players]
-	spawn.net_id = 0;
-	return spawn;
 }
 
 // (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through joiner_pump

@@ -10,6 +10,7 @@ add_library(opennova_npruntime STATIC
     src/server_initial_state.cpp
     src/server_tick.cpp
     src/client_runtime.cpp
+    src/joiner_world_bridge.cpp
     src/host_session.cpp
     src/lan_discovery.cpp
     src/weapon_table_build.cpp

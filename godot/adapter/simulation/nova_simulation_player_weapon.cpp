@@ -352,7 +352,7 @@ void NovaSimulation::tick_local_player_weapon() {
 	io.view = &player_view_;
 	io.inventory = local_inventory_valid_ ? &local_inventory_ : nullptr;
 	io.is_authority = !joiner_;
-	io.self_wire_handle = joiner_self_wire_handle_;
+	io.self_wire_handle = joiner_bridge_.self_wire_handle();
 	if (joiner_ && runtime_ != nullptr) {
 		// The joiner's OWN predicted round runs the wire-proxy walk with
 		// the local mount exclusion dead, so resolve the carrier gate from
@@ -360,7 +360,7 @@ void NovaSimulation::tick_local_player_weapon() {
 		// mounted joiner's fire stops on its own vehicle's proxy.
 		io.carrier_exclusion = [this]() {
 			return wire_carrier_exclusion_for(runtime_->state(),
-					joiner_self_wire_handle_, item_seat_specs_);
+					joiner_bridge_.self_wire_handle(), item_seat_specs_);
 		};
 	}
 	opennova::world::local_weapon_pump_tick(*world_, local_weapon_, io);
@@ -372,7 +372,7 @@ void NovaSimulation::tick_local_player_weapon() {
 		// stamps its own currentTick when accepting it.
 		// [orig: @0x42A62F/@0x42A6A1..0x42A890]
 		opennova::ClientFiredRound fire;
-		fire.shooter_handle = joiner_self_wire_handle_;
+		fire.shooter_handle = joiner_bridge_.self_wire_handle();
 		fire.fire_flags = io.fired.round.mode_flags;
 		fire.adm_index = io.fired.adm_index;
 		fire.target_handle = 0xFFFF;

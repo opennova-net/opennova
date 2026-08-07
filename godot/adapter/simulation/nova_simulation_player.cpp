@@ -191,7 +191,7 @@ int NovaSimulation::get_local_player_wire_handle() const {
 	// own pool and collides with a host-side slot (e.g. the host player), so excluding L
 	// from the wire present would wrongly hide a remote entity. On the host, the local
 	// player's own pool-0 handle IS its wire handle.
-	if (joiner_) return static_cast<int>(joiner_self_wire_handle_);
+	if (joiner_) return static_cast<int>(joiner_bridge_.self_wire_handle());
 	return (world_ && world_->cached.local_player.valid())
 			? static_cast<int>(world_->cached.local_player.packed) : 0;
 }

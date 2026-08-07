@@ -1916,6 +1916,14 @@ target_link_libraries(npruntime_initial_state_burst_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_mission)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
 
+# S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
+# [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello
+# one-shot, the in-match spawn edge for L + the weapon-pump L-gate, and the per-session resets.
+add_executable(npruntime_joiner_world_bridge_test npruntime/joiner_world_bridge_test.cpp)
+target_link_libraries(npruntime_joiner_world_bridge_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world)
+add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridge_test)
+
 # ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
