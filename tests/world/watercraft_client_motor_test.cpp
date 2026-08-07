@@ -675,7 +675,7 @@ bool run_tank_family_deltas() {
 }
 
 bool run_platform_solve_settles_at_waterline() {
-	// The platform solve (D-NET-196 residual, water leg): with model boxes
+	// The platform solve (the D-NET-196 boat water leg): with model boxes
 	// resolved, a stationary boat converges onto its waterline from above AND
 	// below, level, instead of holding a chase-frozen Z
 	// [orig: Entity_ProcessPlatformPhysics @0x481870 §8/§10 — the light-boat

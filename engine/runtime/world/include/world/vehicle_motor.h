@@ -215,6 +215,18 @@ void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits,
 void watercraft_platform_solve(World &world, Entity &veh,
                                const VehicleTraits &traits);
 
+// The carrier pose in the deck-ride's units (16.16 position / BAM32
+// attitude): predicted vehicles serve the exact motor registers, everything
+// else converts the presented pose. ONE reader shared by the mover-entry
+// savedLivePose stamp and the embedder's carrier provider, so stamped and
+// live values can never diverge in representation.
+void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
+                        int32_t &pitch, int32_t &roll);
+
+// Stamp the mover-entry savedLivePose from the same reader [orig: the
+// per-mover prologue stamps of +0x80..+0x94].
+void stamp_saved_live_pose(Entity &e);
+
 void watercraft_client_tick(World &world, Entity &veh, const VehicleTraits &traits);
 
 // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the

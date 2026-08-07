@@ -12,6 +12,7 @@
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
 #include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
+#include <world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <rtxt/rtxt.h>
 #include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
@@ -837,6 +838,12 @@ void NovaSimulation::joiner_pump() {
 	// @0x4B3D6E..0x4B3DA9]
 	runtime_->view().set_remote_motion_terrain(
 			world_ != nullptr ? world_->terrain : nullptr);
+	// The replica water/float channel reads the mission water plane
+	// [orig: Env_WaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
+	// water in this world).
+	runtime_->view().set_water_z(
+			world_ != nullptr ? world_->env.water_z : 0,
+			world_ != nullptr && world_->env.water_z != 0);
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model
@@ -872,13 +879,51 @@ void NovaSimulation::joiner_pump() {
 							q.capsule_bottom, q.capsule_top, q.is_player_class,
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &ground);
+							q.row_handle, &q.entity_flags, &ground);
 					q.out_ground = ground.valid() ? ground.packed
 					                              : opennova::world::EntityHandle::kInvalid;
 					return clearance;
 				});
+		// The deck-ride carrier seam: resolved_ground is the registry handle
+		// the ground probe stored; the ride reads that entity's LIVE pose
+		// against its mover-entry savedLivePose stamp — the witnessed pair
+		// [orig: the org movers read groundEntity's Position vs +0x80../body*
+		// +0x8C.. @0x4b530b../@0x4ba47f..]. One shared reader
+		// (carrier_pose_fixed) serves both sides so representations can
+		// never diverge; a never-stamped entity (static) reads zero delta.
+		runtime_->view().set_carrier_pose_provider(
+				[this](uint16_t handle,
+						opennova::netsim::ClientReplicaPipeline::CarrierPose
+								&out) -> bool {
+					if (world_ == nullptr) return false;
+					opennova::world::EntityHandle h;
+					h.packed = handle;
+					const opennova::world::Entity *e = world_->registry.get(h);
+					if (e == nullptr) return false;
+					opennova::world::carrier_pose_fixed(
+							*e, out.pos, out.yaw, out.pitch, out.roll);
+					if (e->saved_live_valid) {
+						out.saved_pos[0] = e->saved_live_pos[0];
+						out.saved_pos[1] = e->saved_live_pos[1];
+						out.saved_pos[2] = e->saved_live_pos[2];
+						out.saved_yaw = e->saved_live_yaw;
+						out.saved_pitch = e->saved_live_pitch;
+						out.saved_roll = e->saved_live_roll;
+					} else {
+						out.saved_pos[0] = out.pos[0];
+						out.saved_pos[1] = out.pos[1];
+						out.saved_pos[2] = out.pos[2];
+						out.saved_yaw = out.yaw;
+						out.saved_pitch = out.pitch;
+						out.saved_roll = out.roll;
+					}
+					out.bound_radius =
+							opennova::world::to_fixed(e->bound_radius);
+					return true;
+				});
 	} else {
 		runtime_->view().set_replica_contact_resolver(nullptr);
+		runtime_->view().set_carrier_pose_provider(nullptr);
 	}
 	resolve_client_row_adm_ids();
 	joiner_send_hello_once();
