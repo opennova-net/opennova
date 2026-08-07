@@ -9,15 +9,23 @@ const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 
-func test_kit_from_loadout_rows_reads_the_mission_tuple_keys() -> void:
-	# The stringly-typed seam between NovaMissionData's loadout dictionaries and the sim
-	# spawn kit: feed a REAL mission document (not hand-built rows) so a key drift on either
-	# side breaks here instead of silently degrading the kit to all -1 defaults at promote.
+func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
+	# The mission loadout chunk -> the sim spawn kit, end to end through the
+	# engine's SP-vs-net promotion (world/player_loadout.h, S7b): a REAL mission
+	# document's chunk strings stash at load and promote as ints once the weapon
+	# catalog can resolve names — offline only, the witnessed gate
+	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the tuple parse].
 	var m := NovaMissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
 		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
-	var kit := MissionRuntime.kit_from_loadout_rows(m.get_weapon_loadout())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(m))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var kit: Array = sim.get_local_player_loadout()
 	assert_eq(kit.size(), 1, "one mission row promotes to one kit row")
 	assert_eq(String(kit[0]["name"]), "WPN_KNIFE")
 	assert_eq(int(kit[0]["ammo_primary"]), 3, "the chunk string reaches the kit as an int")

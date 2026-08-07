@@ -18,6 +18,7 @@ add_library(opennova_world STATIC
     src/infantry_tables.cpp
     src/entity_spawn.cpp
     src/player_input.cpp
+    src/player_loadout.cpp
     src/player_look.cpp
     src/player_spawn.cpp
     src/player_view.cpp

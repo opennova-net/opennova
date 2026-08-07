@@ -33,6 +33,7 @@
 #include "wac/nova_wac_program.h"
 #include <def/def.h> // the retained weapon.def parse (S6b)
 #include <simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
 #include <world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
@@ -600,11 +601,11 @@ private:
 	// the durable spawn/respawn kit.
 	uint64_t joiner_applied_loadout_revision_ = 0;
 	// The shell applies the profile kit/class right after runtime setup — on a
-	// joiner that is BEFORE L exists (L spawns on the name-match). Latch the
-	// requested class here and stamp it with the equipped weapon at L's spawn,
-	// the same Player_InitPlayer-time arm the host's own spawn performs.
-	// [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
-	int pending_local_player_class_ = -1;
+	// joiner that is BEFORE L exists (L spawns on the name-match). The class
+	// latch lives on the world-typed loadout aggregate
+	// (local_loadout_.pending_player_class); L's spawn block stamps it with
+	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
+	// spawn performs. [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
@@ -697,12 +698,22 @@ private:
 	//  grill 2026-07-18]
 	opennova::world::WeaponInventory local_inventory_;
 	bool local_inventory_valid_ = false;
-	std::vector<opennova::world::WeaponKitEntry> spawn_kit_;
-	// Distinguishes an EXPLICIT kit (even the armory's all-NONE empty one, which
-	// leaves the table bare) from the never-set state that takes the WPN_M4AUTO
-	// default [orig: the default literal @ 0x5246be applies only when neither the
-	// mission entry nor the profile authored a buffer].
-	bool spawn_kit_set_ = false;
+	// The world-typed loadout aggregate (S7b): the availability table, the
+	// resident spawn kit (retail's restrictionData — spawn_kit_set
+	// distinguishes an EXPLICIT kit, even the armory's all-NONE empty one,
+	// from the never-set state that takes the WPN_M4AUTO default [orig: the
+	// default literal @ 0x5246be]), and the pre-spawn class latch. The rules
+	// over it live in world/player_loadout.h; this binding converts
+	// dictionaries and routes the joiner wire submissions.
+	opennova::world::LocalPlayerLoadout local_loadout_;
+	// The mission's loadout/availability chunks, stashed at finish_load for the
+	// weapon-table load to promote through the witnessed SP-vs-net gate —
+	// retail reads the chunks with the catalog already loaded
+	// (Game_StartMission parses weapon.def @ 0x5254b3 before
+	// Mission_LoadBMSFile runs); our mission loads first, so the promotion
+	// waits for load_weapon_table. [orig: Mission_LoadBMSFile @ 0x40F4E0]
+	std::vector<std::pair<std::string, int32_t>> mission_availability_rows_;
+	std::vector<opennova::world::WeaponKitEntry> mission_kit_rows_;
 	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
 	// side blocks (blue/red), each carrying the class byte that selects both the wire
 	// class and one of five 2048-byte kit pages, plus the single-player page.
@@ -714,7 +725,6 @@ private:
 	opennova::playersav::Record weapon_profile_ =
 			opennova::playersav::make_defaults().slots[0];
 	bool weapon_profile_loaded_ = false;
-	opennova::world::WeaponAvailability weapon_availability_;
 	// The switch commit/outcome/gates moved to world/player_weapon.h (S7a);
 	// wrappers keep the family's call sites unchanged.
 	void commit_pending_weapon_switch() {
@@ -737,8 +747,8 @@ private:
 	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
-	// Copies the assigned side's profile page into the resident kit buffer (spawn_kit_)
-	// in a live session — retail's single restrictionData [orig: Game_StartMission
+	// Copies the assigned side's profile page into the resident kit buffer
+	// (local_loadout_.spawn_kit) in a live session — retail's single restrictionData [orig: Game_StartMission
 	// @0x525813; re-run per side by NapiNPClientMsg_TeamAssign @0x431a9a]. False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
@@ -961,6 +971,10 @@ private:
 	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
 	// pre-mission pass, capture the restore baseline. Marks the sim loaded.
 	void finish_load(const opennova::bms::File &file);
+	// Stash the mission's loadout/availability chunks (plain world types) for
+	// load_weapon_table to promote through the engine's SP-vs-net gate
+	// (world/player_loadout.h). [orig: Mission_LoadBMSFile @ 0x40F4E0]
+	void stash_mission_loadout_rules(const opennova::bms::File &p_file);
 	void apply_host_session_mission_header(const opennova::bms::File &file);
 	void refresh_host_accept_config();
 
@@ -1339,7 +1353,7 @@ public:
 	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
 	// True only after a mission/profile explicitly supplied a spawn kit; the
 	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
-	bool has_explicit_spawn_loadout() const { return spawn_kit_set_; }
+	bool has_explicit_spawn_loadout() const { return local_loadout_.spawn_kit_set; }
 	// The map weapon-availability rules [orig: g_armoryWeaponAvailability @ 0x24D5600]:
 	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
 	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)

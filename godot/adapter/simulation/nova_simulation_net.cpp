@@ -1180,8 +1180,8 @@ void NovaSimulation::joiner_spawn_and_arm_local_player() {
 		// damage classes + equipped adm on the fresh entity now. [orig:
 		// Player_InitPlayer weapon leg @ 0x4e15f0; equippedAdmIndex stamp @ 0x4dd727]
 		if (opennova::world::Entity *L = world_->registry.get(h)) {
-			if (pending_local_player_class_ >= 5 && pending_local_player_class_ <= 9)
-				L->player_class = static_cast<uint8_t>(pending_local_player_class_);
+			if (local_loadout_.pending_player_class >= 5 && local_loadout_.pending_player_class <= 9)
+				L->player_class = static_cast<uint8_t>(local_loadout_.pending_player_class);
 			sync_local_player_damage_classes();
 			if (local_inventory_valid_ && local_inventory_.equipped_combo >= 0) {
 				const opennova::world::WeaponInventorySlot *slot =

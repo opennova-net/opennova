@@ -102,9 +102,9 @@ void NovaSimulation::reset_world() {
 	// Mission-scoped loadout state [orig: Game_StartMission rebuilds restrictionData +
 	// g_armoryWeaponAvailability per mission @ 0x5246c3/@ 0x5246e8].
 	local_inventory_valid_ = false;
-	spawn_kit_.clear();
-	spawn_kit_set_ = false;
-	weapon_availability_.reset();
+	local_loadout_.reset();
+	mission_availability_rows_.clear();
+	mission_kit_rows_.clear();
 	local_weapon_.switch_in_flight = false;
 	local_weapon_.switch_deferred_action = -1;
 	local_weapon_.start_in_switchto = false;
@@ -385,6 +385,9 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	// The mission's loadout/availability chunks wait for the weapon catalog —
+	// load_weapon_table promotes them through the engine's SP-vs-net gate.
+	stash_mission_loadout_rules(file);
 	reset_local_player_view_effects();
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
@@ -426,7 +429,7 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 		joiner_redeploy_health_updates_at_release_ = 0;
 		joiner_self_wire_handle_ = 0;
 		joiner_applied_loadout_revision_ = 0;
-		pending_local_player_class_ = -1; // the shell re-applies the kit after each load
+		local_loadout_.pending_player_class = -1; // the shell re-applies the kit after each load
 		deploy_zone_registry_built_ = false; // fresh world -> fresh zone registry
 		// Re-arm the 0x2F submission seam from the carried sim state. reset_world just
 		// rebuilt an EMPTY weapon catalog, so this is a deliberate no-op that leaves

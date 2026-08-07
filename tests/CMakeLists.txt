@@ -1060,6 +1060,12 @@ target_include_directories(fire_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(fire_sound_test PRIVATE cxx_std_17)
 add_test(NAME fire_sound COMMAND fire_sound_test)
 
+add_executable(player_loadout_test world/player_loadout_test.cpp)
+target_link_libraries(player_loadout_test PRIVATE opennova_world)
+target_include_directories(player_loadout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_loadout_test PRIVATE cxx_std_17)
+add_test(NAME player_loadout COMMAND player_loadout_test)
+
 # Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
 # build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
 # @0x5c4ae0, test_sector_entity_occlusion @0x5c4610, the entity-collector gates +

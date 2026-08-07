@@ -407,42 +407,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
 	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
 	# empty; the loadout reply then degrades to the tracked request-echo fallback.
+	# The mission's loadout/availability chunks were stashed at mission load and
+	# promote INSIDE load_weapon_table through the engine's witnessed SP-vs-net
+	# gate (world/player_loadout.h, S7b): a live session — listen host or joiner
+	# alike — never reads either chunk; the MP kit comes from the profile page.
+	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the profile copy
+	#  Game_StartMission @0x525767-0x525836]
 	if options.get("resource_root") != null:
 		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
 			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
-		# The map loadout rules, promoted AFTER the weapon table (name resolution +
-		# sub-weapon inheritance need it): the .bms item_availability chunk becomes
-		# the availability table, then the .bms loadout chunk becomes the spawn kit
-		# (availability-filtered, knife fallback), and the slot pool respawns from it.
-		# [orig: Game_StartMission availability build @0x5246e8 over the boot-time
-		#  catalog + Mission_LoadBMSFile's filtered restrictionData write @0x40f961;
-		#  the sim's interim default-kit rebuild inside load_weapon_table converges
-		#  onto this kit.]
-		# SINGLE-PLAYER ONLY. In a net session the original never READS either chunk:
-		# Mission_LoadBMSFile tests the session flag and fseeks past the loadout chunk
-		# and then past the availability chunk, so no map kit and no map availability
-		# table are ever promoted [orig: Mission_LoadBMSFile @0x40F4E0 — gate
-		#  @0x40f694/@0x40f6a1, loadout-chunk skip @0x40f6b2, availability-chunk skip
-		#  @0x40f6e1; the availability filter @0x40f834, the {WPN_KNIFE,-1,-1,-1}
-		#  fallback @0x40f899 and the restrictionData write @0x40f961 all live on the
-		#  non-session branch]. is_in_session is true for a LISTEN HOST as well as for a
-		# joiner, so both skip it — the MP kit instead comes from the player profile's
-		# per-class page, indexed by the very class byte that also goes on the wire
-		# [orig: Game_StartMission @0x525767-0x525836], which is what keeps retail's
-		# submitted kit class-legal at the host's accept gate [orig:
-		# NapiNPServerMsg_HandlePlayerLoadout @0x515790, test @0x515A36]. Our equivalent
-		# of is_in_session is the pair game_world.is_net_session() spells out; read it
-		# off the sim rather than the requested transport so a session that never came
-		# up is not treated as one.
-		var in_net_session := bool(_sim.is_joiner()) or bool(_sim.is_host_listening())
-		if mission != null and not in_net_session:
-			if mission.has_method("get_item_availability"):
-				_sim.set_weapon_availability(mission.get_item_availability())
-			if mission.has_method("get_weapon_loadout"):
-				var kit := kit_from_loadout_rows(mission.get_weapon_loadout())
-				if not kit.is_empty():
-					_sim.set_spawn_loadout(kit, true)
-					_sim.respawn_local_player_loadout()
 		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
 		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
 		# armory so every adm's fired round binds to its ammo index.
@@ -461,23 +434,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 
 func get_setup_error() -> int:
 	return _setup_error
-
-
-# The mission loadout rows -> the sim spawn kit. The rows carry the .bms kit tuple
-# {name, ammo_primary, ammo_secondary, flags} as raw chunk strings; the sim kit wants
-# ints. flags becomes the per-ammo damage-class byte: 1 = x0.9, 2 = x1.1, every other
-# value is neutral (net-re §5.63). Static so the stringly-typed seam between
-# NovaMissionData's dictionaries and the kit keys is testable on its own.
-static func kit_from_loadout_rows(rows: Array) -> Array[Dictionary]:
-	var kit: Array[Dictionary] = []
-	for row in rows:
-		kit.append({
-			"name": String(row.get("name", "")),
-			"ammo_primary": int(String(row.get("ammo_primary", "-1")).to_int()),
-			"ammo_secondary": int(String(row.get("ammo_secondary", "-1")).to_int()),
-			"flags": int(String(row.get("flags", "-1")).to_int()),
-		})
-	return kit
 
 
 # World position of the entity addressed by a runtime SSN (WAC/BMS addressing),
