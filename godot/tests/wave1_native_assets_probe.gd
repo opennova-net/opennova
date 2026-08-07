@@ -34,6 +34,36 @@ func _init() -> void:
 	call_deferred("_run")
 
 
+# S9 oracle: the pre-S9 shell resolution of the .aip speed table, retained
+# here as the probe's independent reference against the engine's
+# resolve_ai_profile_speeds (which production boots through boot_mission).
+static func _oracle_aip_speeds(mission, resource_root) -> Dictionary:
+	var out := {}
+	for raw in mission.get_all_entities():
+		var entity: Dictionary = raw
+		var profile := String(entity.get("name2", "")).strip_edges().to_lower()
+		if profile.is_empty() or out.has(profile):
+			continue
+		if not resource_root.has_file(profile + ".aip"):
+			continue
+		var bytes: PackedByteArray = resource_root.read_file(profile + ".aip")
+		if bytes.is_empty():
+			continue
+		var speeds := {}
+		for line in bytes.get_string_from_ascii().split("\n"):
+			var tokens := line.replace("\t", " ").strip_edges().split(" ", false)
+			if tokens.size() < 2:
+				continue
+			var key := String(tokens[0]).to_lower()
+			if key == "patrol_speed":
+				speeds["patrol"] = int(tokens[1])
+			elif key == "combat_speed":
+				speeds["combat"] = int(tokens[1])
+		if not speeds.is_empty():
+			out[profile] = speeds
+	return out
+
+
 func _fail(message: String) -> void:
 	push_error("wave1_native_assets_probe: " + message)
 	quit(1)
@@ -226,7 +256,7 @@ func _run() -> void:
 		_fail("S9 text resolution diverged: native %d vs legacy %d bytes" % [
 				int(boot_debug.get("text_size", -1)), legacy_text.size()])
 		return
-	var legacy_aip: Dictionary = AiProfileSpeeds.build(mission, root)
+	var legacy_aip: Dictionary = _oracle_aip_speeds(mission, root)
 	var native_aip: Dictionary = boot_debug.get("aip", {})
 	if legacy_aip.size() != native_aip.size():
 		_fail("S9 .aip rows diverged: native %d vs legacy %d (%s vs %s)" % [

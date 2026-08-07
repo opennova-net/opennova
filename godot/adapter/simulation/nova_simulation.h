@@ -1655,7 +1655,6 @@ public:
 	// and direct test/tooling fixtures call this through MissionRuntime.setup().
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
 	void set_item_seat_specs(const Array &p_specs);
-	void set_ai_profile_speeds(const Dictionary &p_speeds);
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);

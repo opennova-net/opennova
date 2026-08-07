@@ -216,21 +216,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	var seat_specs: Array = []
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		seat_specs = _build_item_seat_specs(mission, options["resource_root"], options["item_db"])
-	# S9a assert-equal soak: the legacy shell resolutions, computed for
-	# comparison only (S9b deletes this block and AiProfileSpeeds).
-	var legacy_text_size := -1
-	var legacy_aip: Dictionary = {}
-	var soak_root: NovaResourceRoot = options.get("resource_root")
-	if soak_root != null:
-		var legacy_text := PackedByteArray()
-		var legacy_text_base := _mission_file.get_file().get_basename()
-		var legacy_text_name := legacy_text_base + ".bin"
-		if not legacy_text_base.is_empty() and soak_root.has_file(legacy_text_name):
-			legacy_text = soak_root.read_file(legacy_text_name)
-		else:
-			legacy_text = soak_root.read_file("medmssn.bin")
-		legacy_text_size = legacy_text.size()
-		legacy_aip = AiProfileSpeeds.build(mission, soak_root)
 	var boot_err := int(_sim.boot_mission(
 			mission,
 			options.get("resource_root"),
@@ -254,7 +239,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# because the load reset cleared it (an order-free scalar, not a boot step).
 	if _presentation_time_ms >= 0:
 		_sim.set_panm_time_ms(_presentation_time_ms)
-	_assert_boot_resolution_matches(legacy_text_size, legacy_aip)
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
@@ -350,28 +334,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_capture_transforms()
 	return _sim.get_entity_count()
 
-
-
-# S9a soak: the native boot resolution must match the legacy shell resolution
-# in its decisions (text-byte choice, .aip rows). GUT treats engine errors as
-# failures, so every setup() in the suites asserts this. Dies in S9b with the
-# legacy compute legs.
-func _assert_boot_resolution_matches(legacy_text_size: int, legacy_aip: Dictionary) -> void:
-	var native: Dictionary = _sim.get_mission_boot_debug()
-	if legacy_text_size >= 0 and int(native.get("text_size", -1)) != legacy_text_size:
-		push_error("MissionRuntime: S9 boot text resolution diverged (native %d vs legacy %d bytes)" % [
-				int(native.get("text_size", -1)), legacy_text_size])
-	var native_aip: Dictionary = native.get("aip", {})
-	if legacy_aip.size() != native_aip.size():
-		push_error("MissionRuntime: S9 boot .aip row count diverged (native %d vs legacy %d)" % [
-				native_aip.size(), legacy_aip.size()])
-	for profile in legacy_aip:
-		var l: Dictionary = legacy_aip[profile]
-		var n: Dictionary = native_aip.get(profile, {})
-		if int(l.get("patrol", -1)) != int(n.get("patrol", -1)) \
-				or int(l.get("combat", -1)) != int(n.get("combat", -1)):
-			push_error("MissionRuntime: S9 boot .aip '%s' diverged (native %s vs legacy %s)" % [
-					profile, n, l])
 
 
 func get_setup_error() -> int:
