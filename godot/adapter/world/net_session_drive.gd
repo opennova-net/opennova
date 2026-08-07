@@ -9,6 +9,15 @@ extends Node
 # admission/deploy/loss observer, the session-loss latch, the ESC aborts, and
 # NovaWorld gate registration for a browsable listen host.
 #
+# The POLICY of all of that — the two ConnectOrHost windows (0xEA60), the
+# promote validation, the admission/deploy/loss edge machine with its latches,
+# and the expansion reconcile DECISION — is native
+# (engine/net/npruntime/src/join_session_policy.cpp, bound as
+# NovaNetSessionPolicy). This node keeps the signals and the lifetime: it reads
+# simulation state, forwards it to the policy each frame, and executes exactly
+# what the returned edges say — signal emission, the settle call, the preload
+# sim pump, and the in-place mount switch.
+#
 # Engine-side and shell-neutral: no menu/env knowledge lives here (the shell's
 # NetSessionController owns the entries; MainGame owns presentation). The
 # session signals stay on GameWorld — the shell contract pins them there — so
@@ -21,10 +30,6 @@ extends Node
 
 const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
-# The retail ConnectOrHost wait window, shared by the joiner's pre-load admission
-# drive and the post-load deployment watchdog [orig: 0xEA60 = 60000 ms].
-const JOIN_CONNECT_TIMEOUT_MS := 60000
-
 # The GameWorld this drive loads through — its PUBLIC surface only
 # (load_mission / mission_file / get_runtime) plus the session signals emitted
 # through it; the world's private internals arrive as the setup() Callables
@@ -33,6 +38,9 @@ var _world
 var _load_mission_internal_cb := Callable()  # (mission, bms_name, resource_root) -> int
 var _resolve_root_cb := Callable()  # (dir) -> NovaResourceRoot (or null after load_failed)
 var _spawn_loadout_cb := Callable()  # () -> Dictionary (the staged PLAYER_INFO snapshot)
+
+# The native session policy: windows, latches, edge ordering, reason text.
+var _policy := NovaNetSessionPolicy.new()
 
 # NovaWorldHost: registers a LAN/co-op listen host with the NovaWorld gate so a
 # retail client can browse + join it (F1). Only created when a gate was supplied
@@ -50,19 +58,6 @@ var _pending_join: JoinTarget = null
 # stage_runtime_options surrenders it so the connection is never restarted.
 var _join_preload_sim: NovaSimulation
 var _join_preload_root: NovaResourceRoot
-var _join_preload_deadline_ms := 0
-# Admission and deploy notifications are edges, not per-frame state reports.
-# The deploy latch releases when pending clears so a later death can reopen DEATH.
-var _join_admission_ready_emitted := false
-var _join_deploy_signal_active := false
-# One session-loss notification per session (the reason stays true afterwards).
-var _session_lost_emitted := false
-# The post-load admission wait is frame-polled by observe_tick. Keeping both
-# waits synchronous means GameWorld teardown cannot strand a suspended method
-# on this child node after freeing it.
-var _join_admission_watch_active := false
-var _join_admission_abort := false
-var _join_admission_deadline_ms := 0
 
 
 ## One-time wiring from the owning GameWorld: the world reference the public
@@ -230,9 +225,7 @@ func load_as_joiner(target: JoinTarget) -> int:
 		_world.load_failed.emit("join: no join target")
 		return ERR_INVALID_PARAMETER
 	_cancel_join_preload()
-	_join_admission_ready_emitted = false
-	_join_deploy_signal_active = false
-	_session_lost_emitted = false
+	_policy.reset_for_join()
 	_pending_join = target
 	# Internal staging for the option spread; the 0x7B promote below refreshes it
 	# with the authoritative session record before the runtime consumes it.
@@ -271,15 +264,16 @@ func load_as_joiner(target: JoinTarget) -> int:
 		return ERR_CANT_CONNECT
 	_join_preload_sim.set_join_world_ready(false)
 	_join_preload_root = resource_root
-	_join_preload_deadline_ms = Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
+	_policy.arm_preload(Time.get_ticks_msec())
 	set_process(true)
 	return OK
 
 
 # Drive one frame of the witnessed pre-world connect/session exchange while the
-# loading screen is visible. The 60-second deadline is the retail ConnectOrHost
-# timeout (0xEA60). This node-owned process step must stay synchronous: awaiting
-# here lets a freed GameWorld strand and later resume a method on this freed child.
+# loading screen is visible. The deadline is the retail ConnectOrHost window
+# (0xEA60; the policy owns it). This node-owned process step must stay
+# synchronous: awaiting here lets a freed GameWorld strand and later resume a
+# method on this freed child.
 func _process(_delta: float) -> void:
 	_drive_join_preload_step()
 
@@ -290,30 +284,26 @@ func _drive_join_preload_step() -> void:
 		return
 	if not _join_preload_sim.is_join_preload_ready():
 		_join_preload_sim.poll_join_preload()
-		var join_error := String(_join_preload_sim.get_join_error())
-		if not join_error.is_empty():
-			_fail_join_preload("join failed: %s" % join_error)
-			return
-		if Time.get_ticks_msec() >= _join_preload_deadline_ms:
-			_fail_join_preload("join timed out before the host completed preload admission")
-			return
+		var step: int = _policy.preload_step(
+				String(_join_preload_sim.get_join_error()), Time.get_ticks_msec())
+		if step == NovaNetSessionPolicy.STEP_FAIL:
+			_fail_join_preload(_policy.fail_reason())
 		return
 	# Stop the frame pump before the synchronous load transfers or releases the
 	# preload simulation. Every failure below owns its own cleanup/reporting leg.
 	set_process(false)
-	_join_preload_deadline_ms = 0
+	_policy.disarm_preload()
 	# Reconcile the mount with the host's data set BEFORE any referenced assets are
 	# resolved through it. The mission body itself comes from the host's world stream;
 	# the mount supplies shared terrain/environment/model definitions (D-NET-178/194).
 	if not _reconcile_join_expansion():
 		return
 
-	var bms := String(_join_preload_sim.get_join_mission_file()).strip_edges()
-	if bms.is_empty():
-		_fail_join_preload("join: host sent an empty map_file in S2C 0x7B")
+	if not _policy.validate_promote_mission_file(
+			String(_join_preload_sim.get_join_mission_file())):
+		_fail_join_preload(_policy.fail_reason())
 		return
-	if not bms.to_lower().ends_with(".bms"):
-		bms += ".bms"
+	var bms := _policy.promoted_mission_file()
 	var resource_root := _join_preload_root
 	if resource_root == null:
 		_fail_join_preload("join: resource root is unavailable after session identification")
@@ -324,8 +314,8 @@ func _drive_join_preload_step() -> void:
 	# retail-host -> OpenNova-client fail for custom maps even though the reverse
 	# direction worked (D-NET-194).
 	var wire_header := _join_preload_sim.get_join_mission_header()
-	if wire_header.size() != 616:
-		_fail_join_preload("join: host did not provide an exact 616-byte S2C 0x0B mission header")
+	if not _policy.validate_promote_header(wire_header.size()):
+		_fail_join_preload(_policy.fail_reason())
 		return
 	var mission := NovaMissionData.new()
 	if mission.open_wire_header(wire_header) != OK:
@@ -356,7 +346,17 @@ func _drive_join_preload_step() -> void:
 		_cancel_join_preload()
 		_clear_pending_session()
 		return
-	_arm_join_admission_watch()
+	# Post-load joiner watchdog: the admission tail (C2S 0x0A -> world stream ->
+	# loadout grants) is server-driven with no protocol-level timeout, so a
+	# stalled or incompatible host would leave the player loaded but hidden
+	# forever. The policy reuses the retail ConnectOrHost window from
+	# world-ready and composes a stage-named failure — the reachable analog of
+	# retail's post-load network-wait failure returns [orig:
+	# NapiClient_WaitForGameStart @ 0x42cc10 failure legs -> "Mission loading
+	# aborted"]. It covers only SERVER-owed transitions: at the player-paced
+	# deployment pick the watchdog ends (retail's DEATH screen simply waits;
+	# net-re 5.61).
+	_policy.arm_admission_watch(Time.get_ticks_msec())
 
 
 # Point the joiner's resource root at the HOST's expansion (S2C 0x7B field 7, net-re
@@ -370,16 +370,18 @@ func _drive_join_preload_step() -> void:
 # connect @ 0x569ded) -> Expansion_SwitchTo @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380
 # / PFF_OpenAllArchives @ 0x4a4310]. There is no second mount object, and the switch is
 # sticky: the shell keeps running on the host's expansion after the session.
-# Returns false when the join has been failed and the driver must stop.
+# The keep/remount/fail DECISION is native (np::decide_join_expansion); this
+# executes it against the live mount. Returns false when the join has been
+# failed and the driver must stop.
 func _reconcile_join_expansion() -> bool:
 	var resource_root := _join_preload_root
 	if resource_root == null:
 		return true
-	var plan := JoinExpansionPlan.decide(
+	var action: int = _policy.decide_expansion(
 		String(_join_preload_sim.get_join_expansion()),
 		String(resource_root.get_expansion()),
 		resource_root.list_expansions(resource_root.get_root_dir()))
-	if plan.action == JoinExpansionPlan.ACTION_KEEP:
+	if action == NovaNetSessionPolicy.ACTION_KEEP:
 		return true
 	# Only a runtime mount layers expansion archives at all. A loose authoring root
 	# (an editor-managed --loose-root run mounts the loose authoring tree, ADR 0025;
@@ -399,9 +401,10 @@ func _reconcile_join_expansion() -> bool:
 	# anyway [orig: Expansion_SwitchTo @ 0x5688c0, missing-.pff gate @ 0x568914] — that is
 	# precisely the ADM index-space corruption D-NET-178 records, so we refuse the join instead
 	# (tracked divergence).
-	if plan.action == JoinExpansionPlan.ACTION_FAIL:
-		_fail_join_preload(plan.error)
+	if action == NovaNetSessionPolicy.ACTION_FAIL:
+		_fail_join_preload(_policy.decision_error())
 		return false
+	var target_expansion := _policy.decided_expansion()
 	var dir := resource_root.get_root_dir()
 	var previous := String(resource_root.get_expansion())
 	# Switch THIS root rather than swapping in a second one, the same in-place remount
@@ -410,7 +413,7 @@ func _reconcile_join_expansion() -> bool:
 	# the cache epoch, so their caches self-clear. The persisted expansion setting is NOT
 	# written — the host owns this session's data set, not the local menu choice. Same layering
 	# as GameWorld._mount_runtime_root (see it for the flag rules); only the expansion differs.
-	if resource_root.mount_runtime(dir, plan.expansion, NovaLaunchFlags.loose_override_enabled(),
+	if resource_root.mount_runtime(dir, target_expansion, NovaLaunchFlags.loose_override_enabled(),
 			NovaLaunchFlags.game(ResourceDirSettings.get_game())) != OK:
 		# A hard mount failure clears the root, and the shell shares this object, so put the
 		# previous expansion back before aborting to the menu (NovaMenuShell._apply_expansion rolls
@@ -420,78 +423,42 @@ func _reconcile_join_expansion() -> bool:
 		resource_root.mount_runtime(dir, previous, NovaLaunchFlags.loose_override_enabled(),
 			NovaLaunchFlags.game(ResourceDirSettings.get_game()))
 		_fail_join_preload("join: could not mount host expansion '%s' from %s: %s" % [
-			plan.expansion, dir, mount_error])
+			target_expansion, dir, mount_error])
 		return false
 	# mount_runtime succeeds even when the expansion never layered (opennova::Vfs::mount_game
 	# falls back to base game silently), so read back what ACTUALLY mounted. Without this the
 	# abort leg above would be bypassed by a root that is quietly base game again. No rollback
 	# here: unlike the hard failure above, the root holds a valid mount of whatever DID layer,
 	# so the shell survives the abort on it.
-	if String(resource_root.get_expansion()).to_lower() != plan.expansion.to_lower():
+	if String(resource_root.get_expansion()).to_lower() != target_expansion.to_lower():
 		_fail_join_preload("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)" % [
-			plan.expansion, dir, String(resource_root.get_expansion()),
-			JoinExpansionPlan.describe_installed(resource_root.list_expansions(dir))])
+			target_expansion, dir, String(resource_root.get_expansion()),
+			", ".join(resource_root.list_expansions(dir))])
 		return false
 	return true
 
 
-# Post-load joiner watchdog: the admission tail (C2S 0x0A -> world stream -> loadout
-# grants) is server-driven with no protocol-level timeout, so a stalled or incompatible
-# host would leave the player loaded but hidden forever with no feedback. Reuse the
-# retail ConnectOrHost window (0xEA60) from world-ready and surface a stage-named
-# failure through the shell's abort-to-menu leg — the reachable analog of retail's
-# post-load network-wait failure returns [orig: NapiClient_WaitForGameStart @ 0x42cc10
-# failure legs -> "Mission loading aborted"]. The deadline covers only SERVER-owed
-# transitions: once the join reaches the player-paced deployment pick (the DEATH deploy
-# screen), the watchdog ends — retail has no in-world join timeout there, the screen
-# simply waits (a rejected pick stays up for a re-pick; net-re 5.61).
-func _arm_join_admission_watch() -> void:
-	_join_admission_watch_active = true
-	_join_admission_abort = false
-	_join_admission_deadline_ms = Time.get_ticks_msec() + JOIN_CONNECT_TIMEOUT_MS
-
-
-func _disarm_join_admission_watch() -> void:
-	_join_admission_watch_active = false
-	_join_admission_abort = false
-	_join_admission_deadline_ms = 0
-
-
-func _emit_join_admission_ready() -> void:
-	if _join_admission_ready_emitted:
-		return
-	_join_admission_ready_emitted = true
-	_world.join_admission_ready.emit()
-
-
-func _emit_join_deploy_pick_required() -> void:
-	if _join_deploy_signal_active:
-		return
-	_join_deploy_signal_active = true
-	_world.join_deploy_pick_required.emit()
-
-
-# The initial watchdog stops at admission or the player-paced deployment screen.
-# Continue observing deploy state afterward: death can create another pending edge
-# in the same session.
+# The per-frame admission/deploy/loss observer: read the joiner state, forward
+# it to the native edge machine, execute what the returned flags say. The
+# ordering, the latches, the windows, and every reason text live in the policy
+# (loss wins over every admission edge; the deploy latch re-arms when pending
+# clears; admission-ready is once per join and holds for the cold wire drain
+# behind the loading hold [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]).
 func _update_joiner_admission_signals() -> void:
 	# Render/occlusion tests install deliberately narrow runtime doubles. This
 	# observer is optional outside a real MissionRuntime, so keep the seam
 	# duck-typed instead of forcing every render-only double to model networking.
 	var runtime: Variant = _world.get_runtime()
 	if runtime == null or not runtime.has_method("get_sim"):
-		_disarm_join_admission_watch()
+		_policy.disarm_admission_watch()
 		return
 	var sim: Variant = runtime.get_sim()
 	if sim == null or not sim.has_method("is_joiner") or not bool(sim.is_joiner()):
-		_disarm_join_admission_watch()
+		_policy.disarm_admission_watch()
 		return
-	# Terminal state wins over every admission edge. The initial-admission
-	# predicate is intentionally monotonic, so it remains true after a host punt;
-	# reading it first could otherwise reveal the world in the same tick that the
-	# session-loss leg tears it down.
-	if _update_session_loss_signal(sim):
-		return
+	var loss_reason := ""
+	if sim.has_method("get_session_loss_reason"):
+		loss_reason = String(sim.get_session_loss_reason())
 	var deploy_pending: bool = sim.has_method("is_join_deploy_pick_pending") \
 			and bool(sim.is_join_deploy_pick_pending())
 	# The first valid S2C 0x5A opens retail's independent gameplay gate and can
@@ -502,65 +469,45 @@ func _update_joiner_admission_signals() -> void:
 	var initial_admission_complete: bool = \
 			sim.has_method("is_join_initial_admission_complete") \
 			and bool(sim.is_join_initial_admission_complete())
-	if _join_admission_watch_active and _join_admission_abort:
-		_disarm_join_admission_watch()
-		_world.load_failed.emit("Mission loading aborted")
+	# The join error + admission stage only matter to the armed watchdog, and
+	# the observer runs against narrow doubles that do not model them — read
+	# them exactly when the old inline machine did.
+	var join_error := ""
+	var admission_stage := ""
+	if _policy.is_admission_watch_active():
+		join_error = String(sim.get_join_error())
+		admission_stage = String(sim.get_join_admission_stage())
+	var pre: int = _policy.begin_admission_frame(loss_reason, deploy_pending,
+			initial_admission_complete, join_error, admission_stage,
+			Time.get_ticks_msec())
+	if pre & NovaNetSessionPolicy.EMIT_SESSION_LOST:
+		# MainGame handles this signal synchronously and unloads the world. All
+		# drive/policy mutation is already finished, so no owner method runs
+		# after teardown.
+		_world.session_lost.emit(_policy.session_loss_reason())
+	if pre & NovaNetSessionPolicy.FRAME_DONE:
+		if pre & NovaNetSessionPolicy.LOAD_FAILED:
+			_world.load_failed.emit(_policy.fail_reason())
 		return
-	if (deploy_pending or initial_admission_complete) \
-			and not _world.settle_join_wire_assets():
-		_disarm_join_admission_watch()
-		_world.report_join_wire_asset_failure(
-				"join: failed to settle the host's streamed mission assets")
-		return
+	var settle_ok := true
+	if pre & NovaNetSessionPolicy.SETTLE_REQUIRED:
+		settle_ok = _world.settle_join_wire_assets()
 	# The revealed world must not race the budgeted cold wire materialization
-	# (WirePresentPass.DEFAULT_COLD_SPAWN_BUDGET): the no-pick reveal holds — with
-	# its watchdog deadline still armed — until the presenter's deferred-spawn
-	# queue drains behind the loading hold. A deploy pick disarms immediately;
-	# the DEATH screen is itself the hold the drain finishes behind.
-	var wire_present_drained: bool = _world.is_join_wire_present_drained()
-	if deploy_pending or (initial_admission_complete and wire_present_drained):
-		_disarm_join_admission_watch()
-	elif _join_admission_watch_active:
-		var join_error := String(sim.get_join_error())
-		if not join_error.is_empty():
-			_disarm_join_admission_watch()
-			_world.load_failed.emit("join failed: %s" % join_error)
-			return
-		if Time.get_ticks_msec() >= _join_admission_deadline_ms:
-			var admission_stage := String(sim.get_join_admission_stage())
-			_disarm_join_admission_watch()
-			_world.load_failed.emit("join stalled waiting for the host (%s)"
-					% admission_stage)
-			return
-	if deploy_pending:
-		_emit_join_deploy_pick_required()
-	else:
-		_join_deploy_signal_active = false
-	# A player-paced pick replaces loading with DEATH. It is deliberately not
-	# also an admitted-world edge; after the pick releases, the monotonic initial
-	# predicate emits admission-ready once with deploy_pending clear — and only
-	# once the cold wire drain has emptied behind the hold.
-	if initial_admission_complete and not deploy_pending and wire_present_drained:
-		_emit_join_admission_ready()
-
-
-## Per-frame session-loss observer, read before admission from the same seam.
-## Returns true for every tick whose terminal reason is latched, while emitting
-## exactly once per session; the caller uses that result to suppress all later
-## admission/deploy edges. [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]
-func _update_session_loss_signal(sim: Variant) -> bool:
-	if not sim.has_method("get_session_loss_reason"):
-		return false
-	var reason := String(sim.get_session_loss_reason())
-	if reason.is_empty():
-		return false
-	if not _session_lost_emitted:
-		# MainGame handles this signal synchronously and unloads the world. Finish
-		# all drive mutation before emitting so no owner method runs after teardown.
-		_disarm_join_admission_watch()
-		_session_lost_emitted = true
-		_world.session_lost.emit(reason)
-	return true
+	# (WirePresentPass.DEFAULT_COLD_SPAWN_BUDGET): the policy holds the no-pick
+	# reveal — with its watchdog deadline still armed — until the presenter's
+	# deferred-spawn queue drains behind the loading hold.
+	var post: int = _policy.finish_admission_frame(
+			settle_ok, _world.is_join_wire_present_drained())
+	if post & NovaNetSessionPolicy.SETTLE_FAILED:
+		_world.report_join_wire_asset_failure(_policy.fail_reason())
+		return
+	if post & NovaNetSessionPolicy.LOAD_FAILED:
+		_world.load_failed.emit(_policy.fail_reason())
+		return
+	if post & NovaNetSessionPolicy.EMIT_DEPLOY_PICK:
+		_world.join_deploy_pick_required.emit()
+	if post & NovaNetSessionPolicy.EMIT_ADMISSION_READY:
+		_world.join_admission_ready.emit()
 
 
 # ESC/abort for the only interruptible load leg: the joiner's pre-load
@@ -583,13 +530,10 @@ func cancel_preload() -> bool:
 ## admission state machine is polled once per world tick, so the ESC window is
 ## as reachable here as it is in the pre-load connect wait. Without this a
 ## player who joins a host that stalls after the wire-header world load has no way out for the
-## full JOIN_CONNECT_TIMEOUT_MS. Returns true when a live admission wait was told
+## full ConnectOrHost window. Returns true when a live admission wait was told
 ## to abort; the watchdog reports it through the ordinary load-failure leg.
 func cancel_admission_wait() -> bool:
-	if not _join_admission_watch_active:
-		return false
-	_join_admission_abort = true
-	return true
+	return _policy.request_admission_abort()
 
 
 func _fail_join_preload(reason: String) -> void:
@@ -600,7 +544,7 @@ func _fail_join_preload(reason: String) -> void:
 
 func _cancel_join_preload() -> void:
 	set_process(false)
-	_join_preload_deadline_ms = 0
+	_policy.disarm_preload()
 	if _join_preload_sim != null:
 		_join_preload_sim.free()
 	_join_preload_sim = null
@@ -675,14 +619,11 @@ func observe_tick(runtime) -> void:
 
 
 ## One teardown for everything this drive staged or stood up, called from the
-## world's unload(): the preload sim/root, the notification latches, the typed
-## request staging, and the gate registration.
+## world's unload(): the preload sim/root, the policy's windows + notification
+## latches, the typed request staging, and the gate registration.
 func reset() -> void:
 	_cancel_join_preload()
-	_disarm_join_admission_watch()
-	_join_admission_ready_emitted = false
-	_join_deploy_signal_active = false
-	_session_lost_emitted = false
+	_policy.reset()
 	_clear_pending_session()
 	# Gate registration teardown: tells the gate to drop the host row (ClientStopHosting).
 	if _nw_host != null:

@@ -72,6 +72,7 @@
 #include "network/nova_world_host.h"
 #include "network/nova_udp_pump.h"
 #include "network/nova_lan_session.h"
+#include "network/nova_net_session_policy.h"
 #include "util/nova_data_format.h"
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
@@ -262,6 +263,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(NovaUdpPump);
 	GDREGISTER_CLASS(NovaLanSession);
+	GDREGISTER_CLASS(NovaNetSessionPolicy);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);

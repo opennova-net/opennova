@@ -5,6 +5,7 @@ add_library(opennova_npruntime STATIC
     src/session_status.cpp
     src/charattr_challenge.cpp
     src/integrity_challenge_profile.cpp
+    src/join_session_policy.cpp
     src/joiner_connection.cpp
     src/server_spawn.cpp
     src/server_initial_state.cpp
@@ -34,7 +35,8 @@ target_include_directories(opennova_npruntime
 # bms::encode_loaded_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
 # opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
 # (D-NET-141); def is a leaf C library — no cycle.
-# opennova_io: header-only strutil (ascii iequals) for the ammo effects-table bake.
+# opennova_io: header-only strutil (ascii iequals/trim) for the ammo effects-table bake
+# and the join session policy's expansion/mission-name matching.
 target_link_libraries(opennova_npruntime PUBLIC
     opennova_netsim opennova_npwire opennova_world opennova_mission_format opennova_def opennova_io)
 

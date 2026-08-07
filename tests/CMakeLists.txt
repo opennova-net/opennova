@@ -1938,6 +1938,13 @@ target_link_libraries(npruntime_joiner_world_bridge_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world)
 add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridge_test)
 
+# The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
+# promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
+# settle > window > edges), and the D-NET-178 expansion reconcile decision.
+add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
+target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_npruntime)
+add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
+
 # ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
 add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
