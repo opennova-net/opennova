@@ -435,6 +435,14 @@ private:
 	opennova::world::World::Snapshot baseline_; // runtime-start state, for restart/teardown
 	opennova::wac::WacSystem::RuntimeState wac_baseline_;
 	opennova::mission::PromoteResult promo_;
+	// The last boot_mission resolution decisions (S9 soak surface).
+	struct MissionBootDebug {
+		int32_t text_source = 0; // mission::MissionTextSource
+		int64_t text_size = 0;
+		std::string infantry_adm;
+		std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> aip_rows;
+	};
+	MissionBootDebug boot_debug_;
 	bool loaded_ = false;
 	bool playing_ = false;
 	bool have_baseline_ = false;
@@ -922,6 +930,21 @@ public:
 	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
 	// ONED gameplay launches only from a saved loose .bms through load_mission_file().
 	bool load_from_mission_data(const Ref<NovaMissionData> &p_mission);
+	// S9 (ADR 0028): the ordered mission boot — engine/runtime/mission
+	// runtime_boot owns the sequence + the file-resolution policy; this entry
+	// supplies the step bodies over the existing feeds. The shell composes
+	// role bring-up before it and presentation after it. Returns OK or
+	// ERR_CANT_OPEN (mission missing / load failed; the sequence aborted).
+	int64_t boot_mission(const Ref<NovaMissionData> &p_mission,
+			const Ref<NovaResourceRoot> &p_resource_root,
+			const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
+			const Ref<NovaTerrainData> &p_terrain, const Array &p_seat_specs,
+			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
+			const String &p_infantry_adm, const String &p_mission_file_basename,
+			bool p_playable);
+	// The boot's native resolution decisions, for the shell's S9 assert-equal
+	// soak (text source/size, .aip rows, the effective adm name).
+	Dictionary get_mission_boot_debug() const;
 	// Load + promote a .bms mission from disk; false on parse failure.
 	bool load_mission_file(const String &path);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.

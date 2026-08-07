@@ -15,6 +15,7 @@ extends SceneTree
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
 
@@ -194,5 +195,55 @@ func _run() -> void:
 		_fail("S3 pose divergence: %s" % str(ab))
 		return
 	sim_ab.free()
+
+	# S9 (ADR 0028): the mission boot on retail data through the runtime
+	# driver — setup() routes the feed/load/spawn/tables sequence through the
+	# engine's run_mission_boot, and its native file resolution (mission-text
+	# fallback, .aip profile speeds) must match the legacy shell resolution
+	# recomputed here.
+	var runtime := MissionRuntime.new()
+	get_root().add_child(runtime)
+	var boot_container := Node3D.new()
+	get_root().add_child(boot_container)
+	var boot_count := int(runtime.setup(mission, boot_container, {
+		"resource_root": root,
+		"item_db": item_db,
+		"mission_file": MISSION,
+		"playable": true,
+	}))
+	if boot_count <= 0 or int(runtime.get_setup_error()) != OK:
+		_fail("S9 boot on %s failed (count=%d err=%d)" % [
+				MISSION, boot_count, int(runtime.get_setup_error())])
+		return
+	var boot_debug: Dictionary = runtime.get_sim().get_mission_boot_debug()
+	var legacy_text := PackedByteArray()
+	var text_base := MISSION.get_basename()
+	if root.has_file(text_base + ".bin"):
+		legacy_text = root.read_file(text_base + ".bin")
+	else:
+		legacy_text = root.read_file("medmssn.bin")
+	if int(boot_debug.get("text_size", -1)) != legacy_text.size():
+		_fail("S9 text resolution diverged: native %d vs legacy %d bytes" % [
+				int(boot_debug.get("text_size", -1)), legacy_text.size()])
+		return
+	var legacy_aip: Dictionary = AiProfileSpeeds.build(mission, root)
+	var native_aip: Dictionary = boot_debug.get("aip", {})
+	if legacy_aip.size() != native_aip.size():
+		_fail("S9 .aip rows diverged: native %d vs legacy %d (%s vs %s)" % [
+				native_aip.size(), legacy_aip.size(),
+				str(native_aip), str(legacy_aip)])
+		return
+	for profile in legacy_aip:
+		var legacy_row: Dictionary = legacy_aip[profile]
+		var native_row: Dictionary = native_aip.get(profile, {})
+		if int(legacy_row.get("patrol", -1)) != int(native_row.get("patrol", -1)) \
+				or int(legacy_row.get("combat", -1)) != int(native_row.get("combat", -1)):
+			_fail("S9 .aip '%s' diverged: native %s vs legacy %s" % [
+					profile, str(native_row), str(legacy_row)])
+			return
+	print("[wave1] s9 boot: count=%d text=%d bytes (src %d) aip=%d rows" % [
+			boot_count, int(boot_debug.get("text_size", 0)),
+			int(boot_debug.get("text_source", 0)), native_aip.size()])
+
 	print("wave1 native assets probe: PASS")
 	quit(0)

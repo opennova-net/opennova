@@ -37,6 +37,7 @@ set_target_properties(opennova_mission_format PROPERTIES
 add_library(opennova_mission STATIC
     src/event_runtime.cpp
     src/promote.cpp
+    src/runtime_boot.cpp
 )
 
 target_link_libraries(opennova_mission PUBLIC

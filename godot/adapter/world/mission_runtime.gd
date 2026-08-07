@@ -206,70 +206,55 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# Standalone SP (or an isolated tooling/test preview): the in-process listen server. ONED live
 		# play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
 		_sim.enable_listen_server(true)
+	# S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
+	# file-resolution policy (mission-text fallback, .aip profile speeds, the
+	# adm default) live in engine/runtime/mission runtime_boot; boot_mission
+	# supplies the step bodies over the sim's feeds. Role bring-up ran above;
+	# presentation composition follows below. Seat specs still ride the
+	# GDScript extractor until S4b, so the built rows pass through as an
+	# argument.
+	var seat_specs: Array = []
 	if options.get("resource_root") != null and options.get("item_db") != null:
-		_sim.set_item_seat_specs(_build_item_seat_specs(mission, options["resource_root"], options["item_db"]))
-	if options.get("resource_root") != null:
-		# The .aip profile default speeds (patrol/combat) per mission ai_textfile —
-		# without them, unscripted AI vehicles crawl at the promote stand-in speed.
-		_sim.set_ai_profile_speeds(AiProfileSpeeds.build(mission, options["resource_root"]))
-	# Feed the mission's raw .til bytes BEFORE load so the host bring-up streams the S2C 0x45 terrain-tile
-	# load to joiners (net-re §5.37). Harmless for SP/joiner (only the host bring-up reads it).
-	if options.has("terrain_til"):
-		_sim.set_terrain_til_data(options["terrain_til"])
-	# Feed the per-mission RTXT table retail's NetPacket_WriteBriefingText reads
-	# for world-stream phase 6 (S2C 0x7E). Preserve the original fallback:
-	# medmssn.bin is used only when <mission>.bin does not exist; a present but
-	# malformed table is passed through and rejected without fallback.
-	var mission_text_bytes := PackedByteArray()
-	var mission_root: NovaResourceRoot = options.get("resource_root")
-	if mission_root != null:
-		var mission_text_base := _mission_file.get_file().get_basename()
-		var mission_text_name := mission_text_base + ".bin"
-		if not mission_text_base.is_empty() and mission_root.has_file(mission_text_name):
-			mission_text_bytes = mission_root.read_file(mission_text_name)
+		seat_specs = _build_item_seat_specs(mission, options["resource_root"], options["item_db"])
+	# S9a assert-equal soak: the legacy shell resolutions, computed for
+	# comparison only (S9b deletes this block and AiProfileSpeeds).
+	var legacy_text_size := -1
+	var legacy_aip: Dictionary = {}
+	var soak_root: NovaResourceRoot = options.get("resource_root")
+	if soak_root != null:
+		var legacy_text := PackedByteArray()
+		var legacy_text_base := _mission_file.get_file().get_basename()
+		var legacy_text_name := legacy_text_base + ".bin"
+		if not legacy_text_base.is_empty() and soak_root.has_file(legacy_text_name):
+			legacy_text = soak_root.read_file(legacy_text_name)
 		else:
-			mission_text_bytes = mission_root.read_file("medmssn.bin")
-	_sim.set_mission_text_data(mission_text_bytes)
-	if mission == null or not _sim.load_from_mission_data(mission):
+			legacy_text = soak_root.read_file("medmssn.bin")
+		legacy_text_size = legacy_text.size()
+		legacy_aip = AiProfileSpeeds.build(mission, soak_root)
+	var boot_err := int(_sim.boot_mission(
+			mission,
+			options.get("resource_root"),
+			options.get("item_db"),
+			options.get("placer"),
+			options.get("terrain"),
+			seat_specs,
+			options.get("terrain_til", PackedByteArray()),
+			String(options.get("wac_basename", "")),
+			String(options.get("infantry_adm", "")),
+			_mission_file.get_file().get_basename(),
+			playable or bool(options.get("player", false))))
+	if boot_err != OK:
 		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
 		_has_trace_stats_sampling = false
 		_has_native_present_effect_pose_lookup = false
 		return 0
+	# The shared render/PANM presentation DWORD — re-stamped after the boot
+	# because the load reset cleared it (an order-free scalar, not a boot step).
 	if _presentation_time_ms >= 0:
 		_sim.set_panm_time_ms(_presentation_time_ms)
-	# Ground the AI on the supplied terrain. Standalone GameWorld and isolated tooling/test previews
-	# share this seam; absent/unloaded terrain leaves authored Z untouched.
-	if options.get("terrain") != null:
-		_sim.set_terrain_height_field(options["terrain"])
-	# The sound-profile chain: SndProf.def feeds the sim's footstep/foley/landing/
-	# scream slot table (retail loads it once at boot; ours rides the mission's
-	# resource root — same file either way). The night gate the death scream
-	# reads is the BMS attrib dword finish_load already stamps.
-	# [orig: SoundProfile_LoadAll @ 0x527490 from Game_InitSubsystems]
-	if options.get("resource_root") != null:
-		var sound_rr = options["resource_root"]
-		if sound_rr.has_file("SndProf.def"):
-			_sim.set_sound_profiles(sound_rr.read_file("SndProf.def"))
-	# Anim-driven soldiers: resolve the infantry clip set (.adm -> .bad root-motion tracks) through
-	# the host's resource root. Without it soldiers stand still — their motion comes from clips.
-	if options.get("resource_root") != null:
-		var adm_name := String(options.get("infantry_adm", "E_STAND.adm"))
-		if int(_sim.set_infantry_anim_map(options["resource_root"], adm_name)) <= 0:
-			push_warning("MissionRuntime: no infantry clips from '%s' — AI soldiers will stand still." % adm_name)
-	# Mission WAC scripts: compile game.wac/server.wac/<mission>.wac through the host's
-	# resource root and install on the sim [orig: WacScript_InitAndLoad]. Absent files skip
-	# silently — a BMS-only mission leaves the VM unloaded and the script system early-outs.
-	# The VM self-gates to every 62nd tick inside the system [orig: dword_C6EAD4 / cmp 0x3E].
-	if options.get("resource_root") != null and options.has("wac_basename"):
-		var wac := NovaWacProgram.new()
-		var wac_err := int(wac.compile_from_resource_root(options["resource_root"], String(options["wac_basename"])))
-		if wac_err == OK:
-			_sim.set_wac_program(wac)
-		elif wac_err != ERR_DOES_NOT_EXIST:
-			push_warning("MissionRuntime: WAC for '%s' failed to compile (%d error(s)) — scripts disabled." % [
-				options["wac_basename"], wac.get_error_count()])
+	_assert_boot_resolution_matches(legacy_text_size, legacy_aip)
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
@@ -360,76 +345,33 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		options.get("fire_fx", Callable()), options.get("game_world"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
-	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
-	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
-	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
-	# enemy set — NOT from the first NPC's position (net-re §5.2c). The player then runs the infantry
-	# motor from input (set_player_input); visible translation needs walk clips.
-	# A joiner's local player L is spawned at the host-advertised pose on the name-match (inside
-	# the sim's joiner poll), NOT from a local start marker — so skip the host spawn here.
-	if (playable or options.get("player", false)) and not is_joiner:
-		var spawn_status := int(_sim.spawn_local_player_at_start())
-		if spawn_status < 0:
-			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
-		elif spawn_status == 0:
-			push_warning("MissionRuntime: no player-start marker (60xx start family) in this mission — spawned at fallback origin.")
-	# Per-entity grounding: resolve each infantry soldier's OWN model .adm so it grounds + locomotes
-	# off its own clip's capsule_bottom (crouch/sit/jump plant correctly), not the shared default
-	# set. Runs after the NPC promote AND the player spawn so both are covered. [D-INF-6]
-	if options.get("resource_root") != null and options.get("item_db") != null:
-		_sim.resolve_infantry_adm_ids(options["resource_root"], options["item_db"])
-	# Stamp each entity's items.def wire traits: AI-capability (0x0D AI-trailer gate, D-NET-97),
-	# the §5.10b replication class (0x0A serialize dispatch — an ewep emplacement must not ride
-	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
-	# Also installs the same class table on the local replica pipeline's 0x0A DECODE (the retail
-	# client sizes records from its own items.def), so both sides of the in-process wire agree —
-	# a mis-sized record desyncs the frame and scatters entities around the player.
-	if options.get("item_db") != null:
-		_sim.resolve_item_traits(options["item_db"])
-	# World-object collision: register each placed graphic's .3di collision block (BVOL
-	# volumes + BPLN planes) on the sim and attach per-entity instances — CB walls push
-	# back, roofs support ground probes, CA/BB triggers act, and CL contact frames decode
-	# (climb locomotion is not ported). [orig:
-	# movement collision resolver @0x4b2bd0 + the query set;
-	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
-	if options.get("item_db") != null and options.get("placer") != null:
-		# The sim resolves collision/occlusion .3di data through its OWN mounted
-		# source (ADR 0028) — the placer supplies only render-side pose sets.
-		if options.get("resource_root") != null:
-			_sim.set_asset_root(options["resource_root"])
-		_sim.resolve_collision_instances(options["item_db"], options["placer"])
-		# Mission-start portal init over the occlusion models just attached:
-		# register the exterior window faces, weld coincident opposite pairs of
-		# adjacent buildings into cross-building links, stamp the per-building
-		# flag bytes. [orig: Terrain_InitBuildingPortals @ 0x5c7480 from
-		# Game_StartMission @ 0x525e11]
-		_sim.occlusion_init_mission()
-	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
-	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
-	# empty; the loadout reply then degrades to the tracked request-echo fallback.
-	# The mission's loadout/availability chunks were stashed at mission load and
-	# promote INSIDE load_weapon_table through the engine's witnessed SP-vs-net
-	# gate (world/player_loadout.h, S7b): a live session — listen host or joiner
-	# alike — never reads either chunk; the MP kit comes from the profile page.
-	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the profile copy
-	#  Game_StartMission @0x525767-0x525836]
-	if options.get("resource_root") != null:
-		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
-			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
-		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
-		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
-		# armory so every adm's fired round binds to its ammo index.
-		if _sim.load_ammo_table(options["resource_root"], "ammo.def") != OK:
-			push_warning("MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds")
-		elif options.get("item_db") != null:
-			# Seed each NPC's anim-fire weapon: items.def ammo_closeattack + clipsize
-			# resolved against the ammo table just loaded (the D-AI-5 host seed).
-			# Without it every placed NPC is unarmed — the fire pass skips ammo_primary < 0.
-			_sim.resolve_ai_weapons(options["item_db"])
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
+
+
+
+# S9a soak: the native boot resolution must match the legacy shell resolution
+# in its decisions (text-byte choice, .aip rows). GUT treats engine errors as
+# failures, so every setup() in the suites asserts this. Dies in S9b with the
+# legacy compute legs.
+func _assert_boot_resolution_matches(legacy_text_size: int, legacy_aip: Dictionary) -> void:
+	var native: Dictionary = _sim.get_mission_boot_debug()
+	if legacy_text_size >= 0 and int(native.get("text_size", -1)) != legacy_text_size:
+		push_error("MissionRuntime: S9 boot text resolution diverged (native %d vs legacy %d bytes)" % [
+				int(native.get("text_size", -1)), legacy_text_size])
+	var native_aip: Dictionary = native.get("aip", {})
+	if legacy_aip.size() != native_aip.size():
+		push_error("MissionRuntime: S9 boot .aip row count diverged (native %d vs legacy %d)" % [
+				native_aip.size(), legacy_aip.size()])
+	for profile in legacy_aip:
+		var l: Dictionary = legacy_aip[profile]
+		var n: Dictionary = native_aip.get(profile, {})
+		if int(l.get("patrol", -1)) != int(n.get("patrol", -1)) \
+				or int(l.get("combat", -1)) != int(n.get("combat", -1)):
+			push_error("MissionRuntime: S9 boot .aip '%s' diverged (native %s vs legacy %s)" % [
+					profile, n, l])
 
 
 func get_setup_error() -> int:

@@ -25,6 +25,12 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::initialize_network_environment_mission_start);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &NovaSimulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &NovaSimulation::load_mission_file);
+	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
+			"item_db", "placer", "terrain", "seat_specs", "terrain_til",
+			"wac_basename", "infantry_adm", "mission_file_basename", "playable"),
+			&NovaSimulation::boot_mission);
+	ClassDB::bind_method(D_METHOD("get_mission_boot_debug"),
+			&NovaSimulation::get_mission_boot_debug);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &NovaSimulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaSimulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("set_playing", "playing"), &NovaSimulation::set_playing);

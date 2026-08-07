@@ -3,6 +3,8 @@
 // The class spans several TUs; see nova_simulation_internal.h for the map.
 #include "simulation/nova_simulation_internal.h"
 
+#include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+
 using namespace novasim;
 
 namespace {
@@ -467,6 +469,157 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 	}
 	// P7: host_session_config_ is consumed at the next load by bringup_host_runtime
 	// (configure_session_runtime + the §5.1 reactive-reply config); nothing to refresh live.
+}
+
+// S9 (ADR 0028): the mission boot policy. The ORDER and the gates live in
+// engine/runtime/mission runtime_boot (run_mission_boot), the file-resolution
+// rules (mission-text fallback, .aip profile speeds, the adm default) resolve
+// there over the native ResourceIndex, and this entry supplies the step bodies
+// from the existing feeds. Role bring-up (join/host/SP) runs before this in
+// the shell; presentation composition and the shell's PANM clock re-stamp run
+// after it.
+int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
+		const Ref<NovaResourceRoot> &p_resource_root,
+		const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
+		const Ref<NovaTerrainData> &p_terrain, const Array &p_seat_specs,
+		const PackedByteArray &p_terrain_til, const String &p_wac_basename,
+		const String &p_infantry_adm, const String &p_mission_file_basename,
+		bool p_playable) {
+	namespace ms = opennova::mission;
+	ms::BootFileSource files;
+	if (p_resource_root.is_valid()) {
+		const opennova::ResourceIndex *index = &p_resource_root->native_index();
+		files.has_file = [index](const std::string &name) {
+			return index->has_file(name);
+		};
+		files.read_file = [index](const std::string &name,
+				std::vector<uint8_t> &out) {
+			return index->read_file(name, out);
+		};
+	}
+	// The infantry clip-set default is boot policy (runtime_boot.h).
+	const String infantry_adm = p_infantry_adm.is_empty()
+			? String(ms::kDefaultInfantryAdm)
+			: p_infantry_adm;
+	boot_debug_ = MissionBootDebug{};
+	boot_debug_.infantry_adm = std::string(infantry_adm.utf8().get_data());
+
+	ms::BootParams params;
+	params.is_joiner = joiner_;
+	params.playable = p_playable;
+	params.has_resource_root = p_resource_root.is_valid();
+	params.has_item_db = p_item_db.is_valid();
+	params.has_placer = p_placer != nullptr;
+	params.has_terrain = p_terrain.is_valid();
+	params.has_terrain_til = !p_terrain_til.is_empty();
+	params.has_wac = !p_wac_basename.is_empty();
+
+	ms::BootSteps steps;
+	steps.install_seat_specs = [&] { set_item_seat_specs(p_seat_specs); };
+	steps.install_ai_profile_speeds = [&] {
+		// The native .aip resolve (runtime_boot). Assigning an empty row set
+		// clears the retained table, exactly like the shell resolver's empty
+		// dictionary did through set_ai_profile_speeds.
+		ai_profile_speeds_ = p_mission.is_valid()
+				? ms::resolve_ai_profile_speeds(
+						  files, p_mission->native_document().bms_file())
+				: std::vector<ms::PromoteOptions::AiProfileSpeeds>{};
+		boot_debug_.aip_rows = ai_profile_speeds_;
+	};
+	steps.install_terrain_til = [&] { set_terrain_til_data(p_terrain_til); };
+	steps.install_mission_text = [&] {
+		std::vector<uint8_t> text;
+		boot_debug_.text_source = static_cast<int32_t>(ms::resolve_mission_text(
+				files,
+				std::string(p_mission_file_basename.utf8().get_data()), text));
+		boot_debug_.text_size = static_cast<int64_t>(text.size());
+		PackedByteArray bytes;
+		bytes.resize(static_cast<int64_t>(text.size()));
+		if (!text.empty()) std::memcpy(bytes.ptrw(), text.data(), text.size());
+		set_mission_text_data(bytes);
+	};
+	steps.load_mission = [&] {
+		return p_mission.is_valid() && load_from_mission_data(p_mission);
+	};
+	steps.install_terrain_field = [&] { set_terrain_height_field(p_terrain); };
+	steps.install_sound_profiles = [&] {
+		if (!files.valid() || !files.has_file("SndProf.def")) return;
+		std::vector<uint8_t> text;
+		if (!files.read_file("SndProf.def", text)) return;
+		PackedByteArray bytes;
+		bytes.resize(static_cast<int64_t>(text.size()));
+		if (!text.empty()) std::memcpy(bytes.ptrw(), text.data(), text.size());
+		set_sound_profiles(bytes);
+	};
+	steps.install_infantry_anim = [&] {
+		if (set_infantry_anim_map(p_resource_root, infantry_adm) <= 0)
+			UtilityFunctions::push_warning(vformat(
+					"MissionRuntime: no infantry clips from '%s' — AI soldiers will stand still.",
+					infantry_adm));
+	};
+	steps.install_wac = [&] {
+		Ref<NovaWacProgram> wac;
+		wac.instantiate();
+		const Error wac_err = wac->compile_from_resource_root(
+				p_resource_root, p_wac_basename);
+		if (wac_err == OK) {
+			set_wac_program(wac);
+		} else if (wac_err != ERR_DOES_NOT_EXIST) {
+			UtilityFunctions::push_warning(vformat(
+					"MissionRuntime: WAC for '%s' failed to compile (%d error(s)) — scripts disabled.",
+					p_wac_basename, wac->get_error_count()));
+		}
+	};
+	steps.spawn_local_player = [&] {
+		const int spawn_status = spawn_local_player_at_start();
+		if (spawn_status < 0)
+			UtilityFunctions::push_warning(
+					"MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)");
+		else if (spawn_status == 0)
+			UtilityFunctions::push_warning(
+					"MissionRuntime: no player-start marker (60xx start family) in this mission — spawned at fallback origin.");
+	};
+	steps.resolve_infantry_adm = [&] {
+		resolve_infantry_adm_ids(p_resource_root, p_item_db);
+	};
+	steps.resolve_item_traits = [&] { resolve_item_traits(p_item_db); };
+	steps.install_asset_root = [&] { set_asset_root(p_resource_root); };
+	steps.resolve_collision = [&] {
+		resolve_collision_instances(p_item_db, p_placer);
+	};
+	steps.occlusion_init = [&] { occlusion_init_mission(); };
+	steps.load_weapon_table = [&] {
+		if (load_weapon_table(p_resource_root, "weapon.def") != OK)
+			UtilityFunctions::push_warning(
+					"MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
+	};
+	steps.load_ammo_table = [&] {
+		if (load_ammo_table(p_resource_root, "ammo.def") == OK) return true;
+		UtilityFunctions::push_warning(
+				"MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds");
+		return false;
+	};
+	steps.resolve_ai_weapons = [&] { resolve_ai_weapons(p_item_db); };
+
+	const ms::BootAbort abort = ms::run_mission_boot(params, steps);
+	return abort == ms::BootAbort::kNone ? OK : ERR_CANT_OPEN;
+}
+
+Dictionary NovaSimulation::get_mission_boot_debug() const {
+	Dictionary out;
+	out["text_source"] = boot_debug_.text_source;
+	out["text_size"] = boot_debug_.text_size;
+	out["infantry_adm"] = String(boot_debug_.infantry_adm.c_str());
+	Dictionary aip;
+	for (const opennova::mission::PromoteOptions::AiProfileSpeeds &row :
+			boot_debug_.aip_rows) {
+		Dictionary speeds;
+		if (row.patrol_speed != -1) speeds["patrol"] = row.patrol_speed;
+		if (row.combat_speed != -1) speeds["combat"] = row.combat_speed;
+		aip[String(row.profile.c_str())] = speeds;
+	}
+	out["aip"] = aip;
+	return out;
 }
 
 bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_mission) {
