@@ -451,6 +451,9 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
+            // Mover-entry savedLivePose [orig: the +0x80..+0x94 prologue
+            // stamps every mover carries; rider deltas read (current - saved)].
+            stamp_saved_live_pose(*veh);
             // Stage the drive input class the motor will consume: a live PLAYER controller
             // keeps the occupant leg; an AI controller (or none) routes through the brain
             // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
@@ -535,6 +538,12 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             if (veh == nullptr) continue;
             const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
             if (traits == nullptr) continue;
+            // Mover-entry savedLivePose, stamped BEFORE the prediction gates
+            // so a frozen/parked hull reads as zero rider delta — retail
+            // stamps in every mover prologue regardless of the later bails
+            // [orig: the +0x80..+0x94 prologue stamps; the deck-ride reads
+            // @0x4b530b../@0x4ba47f..].
+            stamp_saved_live_pose(*veh);
             // The joiner-side family prediction (net-re §5.38e B-facet, all
             // four families landed): each mover chases the staged wire target
             // and predicts between records from the mirrored speed/steer

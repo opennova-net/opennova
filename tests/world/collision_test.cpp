@@ -1228,7 +1228,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         EntityHandle ground;
         const int32_t clearance = rig.cw.resolve_replica(
             rig.world, state, pos, vel, vel_z, 0, fx(1.8), true, 0, 43, 0u,
-            nullptr, 0, 0xFFFF, &ground);
+            nullptr, 0, 0xFFFF, nullptr, &ground);
         CHECK(ground == rig.building);
         CHECK(clearance > 0 && clearance <= fx(0.06)); // ~0.05 u over the top
     }
@@ -1243,7 +1243,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
                                fx(1.8), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
-                               &ground);
+                               nullptr, &ground);
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
 
@@ -1261,7 +1261,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
                                fx(1.8), true, 0, 43, 0u, &peer, 1, 0xFFFF,
-                               &ground);
+                               nullptr, &ground);
         CHECK(pos[0] < fx(30.0)); // pushed away from the overlapping peer
         // The same peer marked as SELF must not push.
         CollisionWorld::ResolveState state2;
@@ -1270,7 +1270,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel_z2 = 0;
         rig.cw.resolve_replica(rig.world, state2, pos2, vel2, vel_z2, fx(0.4),
                                fx(1.8), true, 0, 43, 0u, &peer, 1,
-                               /*exclude_handle=*/0x0007, &ground);
+                               /*exclude_handle=*/0x0007, nullptr, &ground);
         CHECK(pos2[0] == fx(30.0));
     }
 
@@ -1278,6 +1278,57 @@ void test_replica_resolve_candidates_ground_and_peers() {
     // and the soldier's own slice is untouched.
     CHECK(rig.cw.candidate_count(EntityHandle{}) == 0);
     CHECK(rig.cw.candidate_count(rig.soldier) == soldier_count_before);
+
+    // (e) The replica flags channel (D-NET-196 tails). The resolve-start
+    // clear drops Indoors/LadderContact/zone bits from the staged word
+    // exactly as it does from ent->flags [orig: the @0x4b2d54 block].
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(40.0), fx(40.0), fx(1.0)};
+        int32_t vel[2] = {1, 0}; // moving: force the full update
+        int32_t vel_z = 0;
+        EntityHandle ground;
+        uint32_t flags = kEntityFlagIndoors | kEntityFlagLadderContact |
+                         kEntityFlagArmoryZone | kEntityFlagVehicleLoadoutZone |
+                         0x40000000u; // an unrelated bit survives
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                               fx(1.8), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               &flags, &ground);
+        CHECK(flags == 0x40000000u);
+    }
+
+    // (f) The InAir bit feeds the idle-skip full-update discriminant: an
+    // idle, motionless row with InAir staged never enters the skip band (the
+    // skip path zeroes vel_z and reverts gravity), while the same row
+    // without it does within the 11..20 window [orig: @0x4b2ca6].
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(44.0), fx(44.0), fx(1.0)};
+        int32_t vel[2] = {0, 0};
+        EntityHandle ground;
+        uint32_t flags = kEntityFlagInAir;
+        bool ever_skipped = false;
+        for (int i = 0; i < 25; ++i) {
+            int32_t vel_z = -100; // inside the idle band (not < -420)
+            rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                                   fx(1.8), true, static_cast<uint32_t>(i + 1),
+                                   43, 0u, nullptr, 0, 0xFFFF, &flags, &ground);
+            if (vel_z == 0) ever_skipped = true;
+        }
+        CHECK(!ever_skipped);
+        CollisionWorld::ResolveState state2;
+        int32_t pos2[3] = {fx(44.0), fx(44.0), fx(1.0)};
+        uint32_t flags2 = 0;
+        ever_skipped = false;
+        for (int i = 0; i < 25; ++i) {
+            int32_t vel_z = -100;
+            rig.cw.resolve_replica(rig.world, state2, pos2, vel, vel_z, fx(0.4),
+                                   fx(1.8), true, static_cast<uint32_t>(i + 1),
+                                   43, 0u, nullptr, 0, 0xFFFF, &flags2, &ground);
+            if (vel_z == 0) ever_skipped = true;
+        }
+        CHECK(ever_skipped);
+    }
 }
 
 // ---------------------------------------------------------------------------

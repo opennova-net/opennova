@@ -607,6 +607,20 @@ struct Entity {
     // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
     EntityHandle last_fire_target;      // kInvalid = no target claimed
 
+    // The mover-entry pose stamp riders consume — retail savedLivePose
+    // (+0x80..+0x88) and the body* attitude triple (+0x8C..+0x94), stamped at
+    // the START of the entity's own mover tick; the deck-ride reads
+    // (current - saved) as the carrier's per-tick delta [orig: the org2 self
+    // stamp @0x4b4190; the ride reads @0x4b530b../@0x4ba47f..]. Kept in the
+    // ride's units (16.16 position / BAM32 attitude) so rider deltas are
+    // exact. Never-stamped entities (statics, pre-first-tick rows) read as
+    // zero delta via saved_live_valid.
+    int32_t saved_live_pos[3] = {};
+    int32_t saved_live_yaw = 0;
+    int32_t saved_live_pitch = 0;
+    int32_t saved_live_roll = 0;
+    bool saved_live_valid = false;
+
     // --- vehicle motor state (pool-1 PlayerControl vehicles; world/vehicle_motor.h) ---
     // The original keeps this state across the entity struct and the 812-B per-entity
     // AI/physics component (`vehicleData` = *(entity+100)); the slot comments name the

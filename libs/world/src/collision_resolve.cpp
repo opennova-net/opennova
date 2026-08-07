@@ -136,6 +136,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
         full_update = true;
     if (ent != nullptr && (ent->flags & kEntityFlagInAir) != 0) full_update = true; // [orig: @ 0x4b2ca6]
+    // The replica row's flags mirror serves the same discriminant.
+    if (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagInAir) != 0) full_update = true;
     if ((tick & 0x3Fu) == 0) full_update = true;
     if (!full_update) {
         if (state.skip_counter <= 10) {
@@ -184,6 +186,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (ent != nullptr)
         ent->flags &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
                         kEntityFlagVehicleLoadoutZone);
+    if (replica_flags_ != nullptr)
+        *replica_flags_ &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
+                             kEntityFlagVehicleLoadoutZone);
 
     // Capsule test points. [orig: the not-on-ladder branch @ 0x4b2edb-0x4b2f2a —
     // 3 points: head (z + collisionRadius - halfRadius + 0.0625), eye (pos +
@@ -339,6 +344,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         ent->flags |= kEntityFlagLadderContact;
         ent->ground_target = ladder_entity;
     }
+    // A replica row latches the same CL-contact bit (the tail probe owns its
+    // ground store, as it does for entities — the mid-resolve ladder ground is
+    // overwritten there either way).
+    if (ladder_entity.valid() && replica_flags_ != nullptr)
+        *replica_flags_ |= kEntityFlagLadderContact;
 
     // Blink apply. [orig: @ 0x4b34c2-0x4b3502 — bit 2 -> Flags 0x800000; local
     // player accumulates the flags word.]
@@ -350,6 +360,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         if (is_local) local_player_blink_flags |= blink.flags;
         if ((blink.flags & kBlinkIndoorsBit) != 0) ent->flags |= kEntityFlagIndoors;
     }
+    if (replica_flags_ != nullptr && (blink.flags & kBlinkIndoorsBit) != 0)
+        *replica_flags_ |= kEntityFlagIndoors;
 
     // Inter-entity sphere repulsion (no model contact only). [orig: @ 0x4b3a5c-0x4b3c52 —
     // threshold 30% of summed radii, push (thr - dist)/4 along the atan2 direction
@@ -361,10 +373,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                       anim_state_id == 138 || anim_state_id == 139;
     // [orig: @ 0x4b3aac — Flags 0x43 (dead/hidden/carried) skips repulsion;
     // @ 0x4b3aba — Flags 0x20 widens the radius by 2.0u]
-    const bool repulse_exempt_flags = ent != nullptr && (ent->flags & 0x43u) != 0;
+    const bool repulse_exempt_flags =
+        (ent != nullptr && (ent->flags & 0x43u) != 0) ||
+        (replica_flags_ != nullptr && (*replica_flags_ & 0x43u) != 0);
     if (!had_model_contact && !repulse_exempt_state && !repulse_exempt_flags) {
         int32_t my_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
-        if (ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) my_radius += 0x20000;
+        if ((ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) ||
+            (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagParachute) != 0))
+            my_radius += 0x20000;
         for (const PersonSlot &p : persons_) {
             if (p.h == source) continue;
             const int32_t threshold = 30 * (my_radius + p.radius) / 100;
@@ -474,7 +490,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         bool is_player, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
-                                        EntityHandle *out_ground) {
+                                        uint32_t *entity_flags, EntityHandle *out_ground) {
     // The ad-hoc candidate slice at the query position — the pool-0 rule of
     // the 17th-tick builder (source radius 0x10000 + 4.0 u pad)
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0, pool-0 leg].
@@ -511,6 +527,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_peers_ = peers;
     replica_peer_count_ = peer_count;
     replica_exclude_handle_ = exclude_handle;
+    replica_flags_ = entity_flags;
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const int32_t clearance = resolve_entity(
         world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
@@ -520,6 +537,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_peers_ = nullptr;
     replica_peer_count_ = 0;
     replica_exclude_handle_ = 0xFFFF;
+    replica_flags_ = nullptr;
     candidates_.erase(replica_key.packed);
     arena_.resize(arena_mark);
     return clearance;
@@ -707,6 +725,12 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
 // the resolver loop @ 0x4b30b7-0x4b351e]
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
                                        bool is_authority) {
+    // A replica resolve latches the zone bits into the staged flags mirror —
+    // the damage legs below stay entity-only (and authority-only) either way.
+    if (replica_flags_ != nullptr && flags != 0) {
+        if ((flags & 0x4u) != 0) *replica_flags_ |= kEntityFlagArmoryZone;
+        if ((flags & 0x400u) != 0) *replica_flags_ |= kEntityFlagVehicleLoadoutZone;
+    }
     if (ent == nullptr || flags == 0) return;
     // DH/DM/DL contact damage is authority-only AND gated off for
     // EngineFlags 0x4000000 entities.
