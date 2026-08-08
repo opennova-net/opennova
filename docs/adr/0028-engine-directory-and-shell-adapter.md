@@ -1,6 +1,10 @@
 # 0028 — engine/ is the engine; godot/adapter/ is the shell adapter
 
-Status: accepted 2026-08-06
+Status: accepted 2026-08-06. §3's target-name clause (per-lib
+`opennova_<domain>` targets, families as the only link conveniences) was
+superseded by [ADR 0029](0029-engine-group-targets.md) on 2026-08-08: the
+groups are now also the CMake build targets. Directories, the `opennova`
+namespace, and include paths stand as written.
 
 ## Context
 

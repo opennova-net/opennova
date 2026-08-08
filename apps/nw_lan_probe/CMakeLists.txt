@@ -9,7 +9,7 @@ target_include_directories(opennova_lan_probe_client
 
 target_link_libraries(opennova_lan_probe_client
     PUBLIC
-        opennova_npruntime
+        opennova_net
         opennova_app_common
 )
 

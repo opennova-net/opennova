@@ -3,8 +3,8 @@
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/adapter/`. Blender-only scene assembly lives in
   `apps/importer/scene_builder/` and `blender/`.
-- Four groups (ADR 0028), directories only — never link groups, namespaces, include-path
-  segments, or target-name segments:
+- Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
+  too; still never namespaces or include-path segments:
   - `base/` — shared substrate and repo plumbing: io, vfs, resource_index, gameprofile,
     pcapio, oned_edit, refs.
   - `formats/` — one library per NovaLogic format (ADR 0024): pff, scr, bfc1, pcx, fnt,
@@ -14,11 +14,12 @@
     renderer, controls, terrain, terrain_query.
   - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,
     napi, npwire, novaworld, netsim, npruntime.
-- Layout per library: `engine/<group>/<domain>/{CMakeLists.txt, include/<domain>/, src/}`;
-  CMake target `opennova_<domain>` (a lib may ship a second split target — `engine/runtime/mission`
-  builds `opennova_mission_format` beside `opennova_mission`); namespace `opennova`.
-  C ABI exports stay flat and domain-prefixed — Python and Godot load the same
-  `opennova_shared` library, so ABI stability matters.
+- Layout per library: `engine/<group>/<domain>/{include/<domain>/, src/}` — the
+  one-directory-per-format layout, fixtures, and tests (ADR 0024) survive ADR 0029's
+  target collapse; a library builds inside its group target, not as its own (see the
+  group-targets bullet below). Namespace `opennova`. C ABI exports stay flat and
+  domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI
+  stability matters.
 - C ABI conventions for NEW exports: annotate with the lib's `<DOMAIN>_EXPORT` macro
   (a per-lib alias of `OPENNOVA_API` from `io/export.h` — never copy the raw
   `__declspec` block again), return `int` status with `0 = success`, out-params last,
@@ -34,23 +35,31 @@
   same stale stride before; only the native-stride pins catch the drift.
 - Two consumption models (LIBS-3, ADR 0024). **Model A — the flat C ABI**:
   `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
-  `OPENNOVA_CORE_TARGETS` list and exports ONLY `OPENNOVA_API`-annotated symbols — the
-  surface pinned by the `abi_export_identity` ctest baseline. Consumers: the Python FFI
-  (`pyopennova`, `apps/importer`) and the DCC plugins. **Model B — C++ static link**:
-  `godot/adapter`, the apps, the ctest suite, and the entire net stack link
-  `opennova_<domain>` targets directly; no export macro involved. The net/protocol libs
-  are Model B ONLY — formally outside the C ABI (ADR 0019; NET-4's forbidden-family
-  guard). A lib may mix models: only its annotated functions are Model A (unannotated
-  functions stay off the DLL under hidden default visibility). Adding a Model-A export
-  is a deliberate decision: annotate it AND bump the `abi_export_identity` baseline in
-  the same commit, logged in docs/maturity-program.md.
-- Family link groups (LIBS-2, ADR 0024): one-lib-per-format stands; the terrain and
-  audio format stacks additionally exist as CMake INTERFACE groups
-  (`opennova_terrain_family`, `opennova_audio_family` — `engine/families.cmake`, included
-  by both CMake roots) so whole-family consumers (the GDExtension) name the family, not
-  twelve targets. Link conveniences only — never physical merges, and never a way around
-  `link_graph_check.py`'s forbidden edges; leaf consumers (ctests, apps) keep linking
-  exactly the libs they use.
+  `OPENNOVA_CORE_TARGETS` list — the ADR 0029 group targets now — and exports ONLY
+  `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
+  ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the DCC
+  plugins. **Model B — C++ static link**: `godot/adapter`, the apps, the ctest suite,
+  and the entire net stack link the group targets directly; no export macro involved.
+  The net/protocol libs are Model B ONLY — formally outside the C ABI (ADR 0019; NET-4's
+  forbidden-family guard). A lib may mix models: only its annotated functions are
+  Model A (unannotated functions stay off the DLL under hidden default visibility).
+  Adding a Model-A export is a deliberate decision: annotate it AND bump the
+  `abi_export_identity` baseline in the same commit, logged in docs/maturity-program.md.
+- Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones — `opennova_formats`
+  (every formats/ lib plus `engine/runtime/mission`'s format half, the fold that keeps
+  the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
+  pcapio, refs), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
+  napi, npwire, netsim, npruntime + novaworld session/gate), and
+  `opennova_novaworld_service` (the service alone — the ONLY target linking
+  `opennova_sqlite`; the adapter links `opennova_net`, never the service).
+  `opennova_io`/`opennova_oned_edit` stay header-only INTERFACE. PUBLIC chain: formats
+  links io, base links formats (base deliberately sits ABOVE formats — vfs and refs
+  PARSE formats: pff/scr/bfc1, env/cbin/def/avatars/threedi/mnu/mission_format),
+  runtime links base, net links runtime, the service links net. The ADR 0024 family
+  groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
+  (`scripts/lint/include_graph_check.py` — net/wac/mission may include only
+  terrain_query's four `terrain/` headers), and `link_graph_check.py` keeps the sqlite
+  containment.
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
   `BitWriter`, `io/le.h` primitives (including the `append_*_le` vector writers every

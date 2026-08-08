@@ -1,31 +1,49 @@
 #!/usr/bin/env python3
-"""Maturity-program link-graph forbidden edges (docs/maturity-program.md, LIBS-1).
+"""Link-graph seam check over the Shape A target graph.
 
-Asserts that no forbidden (from-target, to-target) pair from
-scripts/lint/forbidden_edges.json is connected in the TRANSITIVE link
-closure of the CMake target graph. PUBLIC vs PRIVATE keywords are
-deliberately not consulted: a STATIC library's PRIVATE deps still
-propagate onto every downstream link line (as $<LINK_ONLY> interface
-entries), so every target_link_libraries edge is a real closure edge.
+The engine builds as five STATIC group targets plus two INTERFACE leaves
+(engine/CMakeLists.txt): opennova_formats, opennova_base, opennova_runtime,
+opennova_net, opennova_novaworld_service (+ opennova_io / opennova_oned_edit).
+The old ~400-target graph's per-format and terrain-seam rules moved to the
+include-level lint (scripts/lint/include_graph_check.py); what survives at
+TARGET level are the two structural seams:
+
+  1. sqlite containment (Shape A guardrail): opennova_novaworld_service is the
+     ONLY library that links opennova_sqlite. Any target whose transitive link
+     closure reaches opennova_sqlite must either be the service itself or link
+     the service DIRECTLY (its declared consumers: apps/novaworld_server and
+     the service tests). Everything else — the engine groups, the FFI shared
+     lib, the godot adapter, the other apps/tests — is a violation.
+
+  2. Forbidden edges: the game net stack never links the service leg (the
+     service sits ABOVE opennova_net), the FFI shared lib carries no net stack
+     (ADR 0019 §5; abi_export_identity pins the export surface), and the godot
+     adapter links session+gate via opennova_net, never the service.
+
+PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
+PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
+interface entries), so every target_link_libraries edge is a real closure edge.
 
 Graph source, best available first (override with --source):
 
   graphviz  `cmake --graphviz` over an existing configured build tree
             (ground truth from CMake itself; default build/, or
-            --build-dir). Re-runs configure; needs cmake on PATH.
+            --build-dir). Re-runs configure; needs cmake on PATH. The root
+            build tree does not contain the godot/adapter project, so the
+            adapter rules only bite in files mode.
   files     a transitive walk of target_link_libraries() calls parsed
             from the repo's own CMake files — no build tree needed
-            (what the pre-build CI lint step falls back to).
+            (what the pre-build CI lint step falls back to). Simple
+            single-assignment set() variables (TARGET_NAME,
+            OPENNOVA_CORE_TARGETS) are substituted so the adapter target
+            and the shared lib's whole-archive links are visible.
 
-Soft mode (default) always exits 0. --enforce makes violations exit 1
-(the umbrella's enforcement table flips this check hard after its soft
-wave).
+Soft mode (default) always exits 0. --enforce makes violations exit 1.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import shutil
 import subprocess
@@ -34,7 +52,6 @@ from collections import deque
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SPEC_PATH = Path(__file__).resolve().parent / "forbidden_edges.json"
 
 # Where the files-mode walk looks for CMake files. Vendored submodules are
 # excluded except the two the net stack actually builds (sqlite/bcrypt).
@@ -49,6 +66,42 @@ SCAN_ROOTS = (
     "third_party/bcrypt",
 )
 
+# --- The rules -------------------------------------------------------------
+
+SQLITE_TARGET = "opennova_sqlite"
+SERVICE_TARGET = "opennova_novaworld_service"
+SQLITE_RULE_REASON = (
+    "sqlite containment (Shape A guardrail): only opennova_novaworld_service "
+    "links opennova_sqlite; consumers must link the service target directly"
+)
+
+# (reason, from-targets, to-targets, targets allowed to be absent from the
+# graph without a warning — e.g. the adapter target lives in the godot/adapter
+# CMake root, never in the repo-root build tree's graphviz dump).
+FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
+    (
+        "the game net stack never links the service leg "
+        "(Shape A: opennova_novaworld_service sits ABOVE opennova_net)",
+        ["opennova_net"],
+        [SERVICE_TARGET],
+        set(),
+    ),
+    (
+        "the FFI shared lib carries no net stack (ADR 0019 §5; "
+        "abi_export_identity pins the export surface)",
+        ["opennova_shared"],
+        ["opennova_net", SERVICE_TARGET],
+        {"opennova_shared"},  # absent when BUILD_SHARED_LIB=OFF
+    ),
+    (
+        "the godot adapter links session+gate via opennova_net, "
+        "never the service leg",
+        ["opennova"],
+        [SERVICE_TARGET],
+        {"opennova"},  # defined only in the godot/adapter CMake root
+    ),
+]
+
 LINK_KEYWORDS = {
     "PUBLIC", "PRIVATE", "INTERFACE",
     "LINK_PUBLIC", "LINK_PRIVATE", "LINK_INTERFACE_LIBRARIES",
@@ -59,6 +112,7 @@ DOT_NODE = re.compile(r'^\s*"(node\d+)"\s*\[\s*label\s*=\s*"([^"]+)"')
 DOT_EDGE = re.compile(r'^\s*"(node\d+)"\s*->\s*"(node\d+)"')
 TLL_CALL = re.compile(r"target_link_libraries\s*\(([^)]*)\)", re.DOTALL)
 TARGET_DEF = re.compile(r"add_(?:library|executable)\s*\(\s*([A-Za-z0-9_.\-]+)")
+SET_CALL = re.compile(r"set\s*\(\s*([A-Za-z0-9_]+)\s+([^)]+)\)", re.DOTALL)
 
 
 def graph_from_graphviz(build_dir: Path) -> tuple[dict[str, set[str]], set[str]] | None:
@@ -94,6 +148,29 @@ def strip_cmake_comments(text: str) -> str:
     return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
 
 
+def substitute_simple_vars(text: str) -> str:
+    """Inline single-assignment set(VAR token...) values, one directory scope
+    (= one file) at a time, so ${TARGET_NAME} / ${OPENNOVA_CORE_TARGETS} links
+    become visible to the walk. Variables with generator expressions, quotes
+    around multiple values, or re-assignment stay unresolved (their calls are
+    then skipped, as before)."""
+    variables: dict[str, str] = {}
+    assigned: set[str] = set()
+    for m in SET_CALL.finditer(text):
+        name, raw = m.group(1), m.group(2)
+        tokens = [t.strip('"') for t in raw.split()]
+        if name in assigned:
+            variables.pop(name, None)  # re-assigned — ambiguous, drop it
+            continue
+        assigned.add(name)
+        if any("$" in t or '"' in t for t in tokens):
+            continue
+        variables[name] = " ".join(tokens)
+    for name, value in variables.items():
+        text = text.replace("${" + name + "}", value)
+    return text
+
+
 def graph_from_files() -> tuple[dict[str, set[str]], set[str]]:
     """(edges, known targets) parsed from the repo's own CMake files."""
     edges: dict[str, set[str]] = {}
@@ -111,6 +188,7 @@ def graph_from_files() -> tuple[dict[str, set[str]], set[str]]:
             text = strip_cmake_comments(path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
+        text = substitute_simple_vars(text)
         for m in TARGET_DEF.finditer(text):
             known.add(m.group(1))
         for m in TLL_CALL.finditer(text):
@@ -119,7 +197,7 @@ def graph_from_files() -> tuple[dict[str, set[str]], set[str]]:
                 continue
             target, deps = tokens[0], tokens[1:]
             if "$" in target or '"' in target:
-                continue  # variable-named target (none of the spec'd libs are)
+                continue  # unresolved variable-named target (foreach loops)
             for dep in deps:
                 if dep in LINK_KEYWORDS or "$" in dep or '"' in dep:
                     continue
@@ -145,6 +223,21 @@ def find_path(edges: dict[str, set[str]], start: str, goals: set[str]) -> list[s
     return None
 
 
+def check_sqlite_containment(edges: dict[str, set[str]]) -> list[str]:
+    """Every target reaching opennova_sqlite must be the service itself or a
+    DIRECT linker of the service (its declared exclusive consumers)."""
+    violations: list[str] = []
+    for target in sorted(edges):
+        if target in (SQLITE_TARGET, SERVICE_TARGET):
+            continue
+        if SERVICE_TARGET in edges.get(target, ()):
+            continue  # a declared service consumer — sqlite rides the service
+        path = find_path(edges, target, {SQLITE_TARGET})
+        if path:
+            violations.append(f"{' -> '.join(path)}  [{SQLITE_RULE_REASON}]")
+    return violations
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", default=str(REPO / "build"),
@@ -152,11 +245,8 @@ def main() -> int:
     parser.add_argument("--source", choices=("auto", "graphviz", "files"), default="auto",
                         help="graph source (default: graphviz when the build tree exists, else files)")
     parser.add_argument("--enforce", action="store_true",
-                        help="violations exit 1 (the post-soft-wave flip)")
+                        help="violations exit 1 (CI runs this)")
     args = parser.parse_args()
-
-    spec = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
-    rules = spec.get("forbidden", [])
 
     graph: tuple[dict[str, set[str]], set[str]] | None = None
     source = ""
@@ -172,19 +262,30 @@ def main() -> int:
 
     violations: list[str] = []
     warned: set[str] = set()
-    for rule in rules:
-        reason = rule.get("reason", "")
-        to_set = set(rule.get("to", []))
-        for name in list(rule.get("from", [])) + sorted(to_set):
-            # A renamed/deleted target silently vacates its rule — surface that.
-            if name not in known and name not in warned:
+    for reason, from_targets, to_targets, optional in FORBIDDEN:
+        to_set = set(to_targets)
+        for name in list(from_targets) + sorted(to_set):
+            # A renamed/deleted target silently vacates its rule — surface
+            # that, except for targets that legitimately live in the other
+            # CMake root / behind a build option.
+            if name not in known and name not in optional and name not in warned:
                 warned.add(name)
-                print(f"[linkgraph] WARNING: spec target '{name}' not in the "
-                      f"{source} graph (renamed? update forbidden_edges.json)")
-        for src in rule.get("from", []):
+                print(f"[linkgraph] WARNING: rule target '{name}' not in the "
+                      f"{source} graph (renamed? update link_graph_check.py)")
+        for src in from_targets:
             path = find_path(edges, src, to_set)
             if path:
                 violations.append(f"{' -> '.join(path)}  [{reason}]")
+
+    if SQLITE_TARGET not in known and SQLITE_TARGET not in warned:
+        warned.add(SQLITE_TARGET)
+        print(f"[linkgraph] WARNING: rule target '{SQLITE_TARGET}' not in the "
+              f"{source} graph (renamed? update link_graph_check.py)")
+    if SERVICE_TARGET not in known and SERVICE_TARGET not in warned:
+        warned.add(SERVICE_TARGET)
+        print(f"[linkgraph] WARNING: rule target '{SERVICE_TARGET}' not in the "
+              f"{source} graph (renamed? update link_graph_check.py)")
+    violations.extend(check_sqlite_containment(edges))
 
     edge_count = sum(len(v) for v in edges.values())
     print(f"[linkgraph] source {source}: {len(known)} targets, {edge_count} edges, "
