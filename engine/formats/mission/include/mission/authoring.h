@@ -12,7 +12,7 @@
 // in-game editor, headless tools, ctest) instead of editor-shell code.
 //
 // The geometry here is mission (BMS) space: Z-up, the same axes the .bms
-// records store. Hosts that render in another space (the Godot editor is
+// records store. Embedders that render in another space (the Godot editor is
 // Y-up) convert positions/anchors with their own linear axis map before
 // calling in; the policies below never see embedder coordinates.
 

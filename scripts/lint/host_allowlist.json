@@ -144,6 +144,7 @@
     "godot/game/novaworld_settings.gd",
     "engine/runtime/world/*",
     "engine/runtime/mission/*",
+    "engine/formats/mission/*",
     "engine/runtime/simassets/*",
     "engine/runtime/wac/*",
     "godot/adapter/mcp/mcp_server.gd",
