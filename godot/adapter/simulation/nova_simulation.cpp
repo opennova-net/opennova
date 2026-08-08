@@ -154,12 +154,7 @@ void NovaSimulation::reset_world() {
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_item_db_.unref();
 	item_traits_db_.unref();
-	collision_model_by_graphic_.clear();
-	collision_occlusion_by_graphic_.clear();
-	collision_radius_by_graphic_.clear();
-	collision_husk_kz_points_by_graphic_.clear();
-	collision_husk_pieces_by_graphic_.clear();
-	collision_resolution_attempted_.clear();
+	collision_resolve_.clear();
 	wire_collision_shape_by_type_.clear();
 	collision_pose_native_.clear();
 	infantry_adm_resource_root_.unref();

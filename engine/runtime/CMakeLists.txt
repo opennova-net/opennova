@@ -45,6 +45,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/adm_clip_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/adm_root_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/adm_skeletal_clips.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/collision_resolve.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/item_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/src/model_builders.cpp

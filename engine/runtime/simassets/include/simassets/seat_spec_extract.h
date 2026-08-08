@@ -15,6 +15,8 @@
 #include <mission/promote.h>
 #include <threedi/threedi_3di3.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -50,6 +52,37 @@ void extract_item_seat_specs(const DefItemsFile &items,
 // baked in), and the authored direction into the seat yaw offset in degrees.
 world::Vec3 seat_local_from_user_point(const ThreediUserPoint &point);
 int seat_yaw_offset_from_user_point(const ThreediUserPoint &point);
+
+// The installed-table lookup (moved from npruntime's joiner bridge — a pure
+// specs probe belongs beside the extraction, below the net stack).
+inline const mission::ItemSeatSpec *item_seat_spec_for_type(
+		const std::vector<mission::ItemSeatSpec> &specs,
+		uint16_t type_id) {
+	// specs are sorted by type_id at install (finalize/extract); a joiner
+	// probes this per present row per frame, so the scan is a binary search.
+	const auto it = std::lower_bound(
+			specs.begin(), specs.end(), static_cast<int32_t>(type_id),
+			[](const mission::ItemSeatSpec &spec, int32_t t) {
+				return spec.type_id < t;
+			});
+	if (it != specs.end() && it->type_id == static_cast<int32_t>(type_id))
+		return &*it;
+	return nullptr;
+}
+
+// Stamp each spec's primary-weapon turret window from the loaded weapon
+// table (BAM quartets consumed by the emplaced clamp chain).
+void stamp_seat_spec_turret_limits(world::World &world,
+		std::vector<mission::ItemSeatSpec> &specs);
+
+// Re-apply the installed table to ONE live entity: emplacement-attachment
+// identity (a promoted child on an authority/complete-BMS world preserves
+// its authored slot — p_wire_header_world true disables that, matching the
+// header-only joiner), the def-derived trait channel, and the seat rows,
+// keeping occupants synchronized by retail's fixed mountHandles slot.
+void refresh_item_seat_spec(world::World &world,
+		const std::vector<mission::ItemSeatSpec> &specs,
+		world::Entity &entity, bool p_wire_header_world);
 
 } // namespace opennova::simassets
 

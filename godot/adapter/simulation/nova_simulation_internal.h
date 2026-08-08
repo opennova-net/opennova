@@ -128,8 +128,9 @@ using opennova::simassets::mount_mode_for_seat_type;
 // engine/net/npruntime joiner_world_bridge.h. The using declarations keep this
 // family's call sites unchanged.
 using opennova::np::client_entity_for_handle;
-using opennova::np::item_seat_spec_for_type;
 using opennova::np::wire_carrier_exclusion_for;
+// The installed-table probe lives beside the extraction now (ADR 0031).
+using opennova::simassets::item_seat_spec_for_type;
 
 inline constexpr char kEmplacedGunYawRegister[] = "EWEAP_GUNYAW";
 inline constexpr char kEmplacedGunPitchRegister[] = "EWEAP_GUNPITCH";

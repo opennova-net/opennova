@@ -7,7 +7,7 @@
 // witness citations travel with each body.
 #pragma once
 
-#include <npruntime/joiner_world_bridge.h> // client_entity_for_handle / item_seat_spec_for_type
+#include <npruntime/joiner_world_bridge.h> // client_entity_for_handle
 
 #include <netsim/client_state.h>
 #include <npwire/entity_class.h>
@@ -16,6 +16,7 @@
 #include <io/bam.h>
 #include <mission/promote.h>
 #include <simassets/pose_inputs.h>
+#include <simassets/seat_spec_extract.h>
 #include <world/angle.h>
 #include <world/entity.h>
 #include <world/infantry.h>
@@ -56,7 +57,7 @@ inline bool emplaced_weapon_controls_for_client(
 		world::EmplacedWeaponControls &out) {
 	out = world::EmplacedWeaponControls{};
 	const mission::ItemSeatSpec *spec =
-			item_seat_spec_for_type(specs, mount.type_id);
+			simassets::item_seat_spec_for_type(specs, mount.type_id);
 	if (spec == nullptr) return false;
 
 	for (const netsim::ClientEntityState &occupant : state.entities) {
@@ -100,7 +101,7 @@ inline bool emplaced_weapon_controls_for_client(
 			for (const netsim::ClientEntityState &carrier : state.entities) {
 				if (carrier.handle != mount.carrier_handle) continue;
 				if (const mission::ItemSeatSpec *carrier_spec =
-						item_seat_spec_for_type(specs, carrier.type_id)) {
+						simassets::item_seat_spec_for_type(specs, carrier.type_id)) {
 					for (const mission::ItemEmplacementAttachmentSpec
 							&candidate :
 							carrier_spec->emplacement_attachments) {
@@ -240,7 +241,7 @@ inline bool aim_overlay_inputs_for_client(
 	// instead of letting body_yaw ride the aim — an aim-riding body orbits the
 	// mount with the gunner's scan, which is the reported joiner spin.
 	const mission::ItemSeatSpec *spec =
-			item_seat_spec_for_type(specs, carrier->type_id);
+			simassets::item_seat_spec_for_type(specs, carrier->type_id);
 	const world::Seat *seat = nullptr;
 	if (spec != nullptr) {
 		for (const world::Seat &candidate : spec->seats) {

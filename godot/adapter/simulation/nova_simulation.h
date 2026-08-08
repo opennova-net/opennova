@@ -36,6 +36,7 @@
 #include <world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
 #include <world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
+#include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
 #include <world/ai.h>
@@ -222,17 +223,9 @@ private:
 	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
 	opennova::world::CollisionWorld collision_world_;
 	void apply_collision_to_ai();
-	// Mission-lifetime collision graphic cache and shell inputs. The initial
-	// mission sweep and demand resolution for late-spawned players share these
-	// exact model ids; repeated sweeps only attach instances and never duplicate
-	// the model registry. MissionObjectPlacer is RefCounted, so retaining it also
-	// keeps its object/ADM caches alive for a later RoundSim or F3 query.
-	struct CollisionHuskPieceInfo {
-		int32_t sections = 0;
-		std::vector<opennova::world::Vec3> centers;
-		float rest_min_z = 0.0f;
-		float rest_max_z = 0.0f;
-	};
+	// The shell input the sweep reads (its retained items.def rows feed the
+	// engine resolve). RefCounted, so retaining it also keeps its object/ADM
+	// caches alive for a later RoundSim or F3 query.
 	Ref<NovaItemDatabase> collision_item_db_;
 	// The sim's own asset source (ADR 0028): the mounted root pinned for its
 	// index lifetime + the parse-once model cache the collision/occlusion/
@@ -243,19 +236,10 @@ private:
 	mutable opennova::simassets::SimModelCache sim_models_;
 	// The 62.5 Hz real-time bank (S14, [orig: Game_MainLoop @ 0x52b630]).
 	opennova::world::TickAccumulator tick_accum_;
-	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
-	std::unordered_map<std::string, int32_t> collision_occlusion_by_graphic_;
-	std::unordered_map<std::string, float> collision_radius_by_graphic_;
-	// First-stage husk KZ points in mission-local axes. Kept independently
-	// from the collision-model cache because a husk graphic may already have
-	// been registered as another entity's main graphic.
-	std::unordered_map<std::string, std::vector<opennova::world::Vec3>>
-			collision_husk_kz_points_by_graphic_;
-	std::unordered_map<std::string, CollisionHuskPieceInfo>
-			collision_husk_pieces_by_graphic_;
-	// Negative demand cache: one unresolved entity is attempted at most once per
-	// mission unless the shell explicitly asks for another full resolve sweep.
-	std::unordered_map<uint16_t, uint64_t> collision_resolution_attempted_;
+	// The mission-lifetime collision graphic caches + the negative demand
+	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
+	// registry sweep and the joiner's wire ghosts share one implementation.
+	opennova::simassets::CollisionResolveState collision_resolve_;
 	// Wire-side collision resolution for decoded pool-1 movers: runtime type id
 	// -> {model id, bound radius}, sharing the by-graphic caches above. -1 model
 	// with 0 radius latches an unresolvable type so it is attempted once.

@@ -5,10 +5,13 @@
 #include "simassets/seat_spec_extract.h"
 
 #include <io/strutil.h>
+#include <world/mount_controls.h> // turret_limit_bam
+#include <world/world.h>
 #include <mission/mission.h> // kItemIdOffset (items.def id <-> wire type id)
 #include <threedi/threedi_3di3.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -296,6 +299,151 @@ void extract_item_seat_specs(const DefItemsFile &items,
 			[](const mission::ItemSeatSpec &a, const mission::ItemSeatSpec &b) {
 				return a.type_id < b.type_id;
 			});
+}
+
+void stamp_seat_spec_turret_limits(world::World &world,
+		std::vector<mission::ItemSeatSpec> &specs) {
+	for (mission::ItemSeatSpec &spec : specs) {
+		if (spec.primary_weapon.empty()) continue;
+		const int index = world.weapons.index_of(spec.primary_weapon.c_str());
+		const world::WeaponTableEntry *entry =
+				index >= 0 && index <= 0xFF
+						? world.weapons.by_index(static_cast<uint8_t>(index))
+						: nullptr;
+		if (entry == nullptr) continue;
+		spec.turret_yaw_range_bam =
+				world::turret_limit_bam(entry->turret_yaw_range_deg);
+		spec.turret_pitch_max_bam =
+				world::turret_limit_bam(entry->turret_pitch_max_deg);
+		spec.turret_pitch_min_bam =
+				world::turret_limit_bam(entry->turret_pitch_min_deg);
+	}
+}
+
+void refresh_item_seat_spec(world::World &world,
+		const std::vector<mission::ItemSeatSpec> &specs,
+		world::Entity &p_entity, bool p_wire_header_world) {
+	std::array<world::EntityHandle, 10> occupants{};
+	for (const world::Seat &seat : p_entity.seats) {
+		if (seat.retail_slot < occupants.size())
+			occupants[seat.retail_slot] = seat.occupant;
+	}
+
+	// A promoted child (authority or complete-BMS joiner) already owns the exact
+	// stored addeweap slot; keep that identity across definition refreshes even
+	// when sibling types repeat. A stock streamed 0x0D row carries only child type
+	// + parent handle, so it may recover metadata only when that type is unique in
+	// the parent's definition.
+	// Clear first so a later definition refresh cannot leave stale pose/capability
+	// metadata on an existing row.
+	const bool preserve_authored_slot = !p_wire_header_world &&
+			p_entity.emplacement_pose_metadata_resolved &&
+			p_entity.emplacement_slot != 0;
+	const uint8_t authored_slot = p_entity.emplacement_slot;
+	p_entity.emplacement_pose_metadata_resolved = false;
+	p_entity.emplacement_local = {};
+	p_entity.emplacement_yaw_offset = 0;
+	p_entity.emplacement_bone = 0;
+	p_entity.emplacement_kind = 0;
+	p_entity.emplacement_slot = 0;
+	p_entity.emplacement_attachment_flags = 0;
+	p_entity.emplacement_angle_count = 0;
+	p_entity.emplacement_down_limit_bam = 0;
+	p_entity.emplacement_up_limit_bam = 0;
+	p_entity.emplacement_right_limit_bam = 0;
+	p_entity.emplacement_left_limit_bam = 0;
+	if (p_entity.emplacement_parent.valid() &&
+			p_entity.emplacement_parent_spawn_id != 0) {
+		const world::Entity *parent =
+				world.registry.get(p_entity.emplacement_parent);
+		if (parent != nullptr && parent->registry_spawn_id ==
+					p_entity.emplacement_parent_spawn_id) {
+			const mission::ItemSeatSpec *parent_spec =
+					item_seat_spec_for_type(specs,
+							static_cast<uint16_t>(parent->item_id));
+			const mission::ItemEmplacementAttachmentSpec *match = nullptr;
+			bool ambiguous = false;
+			if (parent_spec != nullptr) {
+				for (const mission::ItemEmplacementAttachmentSpec &attachment :
+						parent_spec->emplacement_attachments) {
+					if (attachment.child_type_id != p_entity.item_id) continue;
+					if (preserve_authored_slot &&
+							attachment.stored_slot != authored_slot)
+						continue;
+					if (match != nullptr) {
+						ambiguous = true;
+						break;
+					}
+					match = &attachment;
+				}
+			}
+			if (match != nullptr && !ambiguous) {
+				p_entity.emplacement_local = match->anchor.seat_local;
+				p_entity.emplacement_yaw_offset = match->anchor.yaw_offset;
+				p_entity.emplacement_bone =
+						match->anchor_found ? match->anchor.bone_index : 0;
+				p_entity.emplacement_kind = static_cast<uint8_t>(match->kind);
+				p_entity.emplacement_slot = match->stored_slot;
+				p_entity.emplacement_attachment_flags = match->attachment_flags;
+				p_entity.emplacement_angle_count = match->angle_count;
+				p_entity.emplacement_down_limit_bam = match->down_limit_bam;
+				p_entity.emplacement_up_limit_bam = match->up_limit_bam;
+				p_entity.emplacement_right_limit_bam = match->right_limit_bam;
+				p_entity.emplacement_left_limit_bam = match->left_limit_bam;
+				p_entity.emplacement_pose_metadata_resolved = true;
+			}
+		}
+	}
+
+	const mission::ItemSeatSpec *spec =
+			item_seat_spec_for_type(specs,
+					static_cast<uint16_t>(p_entity.item_id));
+	// The installed table is authoritative. Clearing a type from a later table
+	// must also clear stale model metadata on an already-streamed exact row.
+	p_entity.emplaced_config_valid = false;
+	p_entity.emplaced_config = 0;
+	p_entity.armory_points.clear();
+	p_entity.primary_weapon.clear();
+	p_entity.seats.clear();
+	if (spec == nullptr) return;
+
+	p_entity.emplaced_config_valid = spec->mount_config_valid;
+	p_entity.emplaced_config = spec->mount_config_valid
+			? spec->mount_config : 0;
+	p_entity.armory_points = spec->armory_points;
+	p_entity.primary_weapon = spec->primary_weapon;
+	// Seat specs are the def-derived trait channel: a spec that declares the
+	// EWeap primary weapon carries items.def's attrib-0x20 nature. A world
+	// running on installed specs without the item database (authored tool and
+	// test worlds) stamps the equivalent trait here so the witnessed def gate
+	// in resolve_mounted_ammo_slot [orig: @0x5460E0] holds uniformly; a real
+	// items.def sweep overwrites this with the authoritative row.
+	if (!p_entity.has_item_def && !spec->primary_weapon.empty()) {
+		p_entity.has_item_def = true;
+		p_entity.item_attrib |= world::kItemAttribEweap;
+	}
+	p_entity.seats = spec->seats;
+	for (size_t seat_index = 0; seat_index < p_entity.seats.size();
+			++seat_index) {
+		world::Seat &seat = p_entity.seats[seat_index];
+		seat.occupant = seat.retail_slot < occupants.size()
+				? occupants[seat.retail_slot]
+				: world::EntityHandle{};
+		if (!seat.occupant.valid()) continue;
+		world::Entity *occupant = world.registry.get(seat.occupant);
+		if (occupant == nullptr || !occupant->mounted ||
+				occupant->mount_target != p_entity.handle)
+			continue;
+		// mount_seat is the dense gameplay-row index, while occupancy survives
+		// table refreshes by retail's fixed mountHandles slot. Keep the occupant
+		// side synchronized when a later model table changes dense ordering.
+		occupant->mount_seat = static_cast<int8_t>(seat_index);
+		occupant->mount_type = seat.type;
+		occupant->mount_bone = seat.bone_index;
+		occupant->mounted_config_valid = p_entity.emplaced_config_valid;
+		occupant->mounted_config = p_entity.emplaced_config_valid
+				? p_entity.emplaced_config : 0;
+	}
 }
 
 } // namespace opennova::simassets
