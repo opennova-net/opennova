@@ -6,6 +6,7 @@
 #include <netsim/client_world_materializer.h>
 
 #include <mission/promote.h> // ItemSeatSpec (the binding-fed per-type seat table)
+#include <simassets/seat_spec_extract.h> // item_seat_spec_for_type (the installed-table probe)
 #include <world/collision.h> // CollisionWorld::ResolveState (per-replica resolver state)
 #include <world/entity.h>
 #include <world/player_loadout.h>
@@ -52,20 +53,8 @@ inline const netsim::ClientEntityState *client_entity_for_handle(
 	return nullptr;
 }
 
-inline const mission::ItemSeatSpec *item_seat_spec_for_type(
-		const std::vector<mission::ItemSeatSpec> &specs,
-		uint16_t type_id) {
-	// specs are sorted by type_id at install (resolve_item_traits); a joiner
-	// probes this per present row per frame, so the scan is a binary search.
-	const auto it = std::lower_bound(
-			specs.begin(), specs.end(), static_cast<int32_t>(type_id),
-			[](const mission::ItemSeatSpec &spec, int32_t t) {
-				return spec.type_id < t;
-			});
-	if (it != specs.end() && it->type_id == static_cast<int32_t>(type_id))
-		return &*it;
-	return nullptr;
-}
+// (item_seat_spec_for_type moved to simassets/seat_spec_extract.h -- a pure
+// specs probe belongs beside the extraction, below the net stack.)
 
 // The mounted shooter's own vehicle joins the projectile trace exclusion exactly like
 // retail's mount rule (Controller/Gunner/Driver seats only — passengers keep clipping
@@ -87,7 +76,7 @@ inline uint16_t wire_carrier_exclusion_for(
 	const netsim::ClientEntityState *carrier =
 			client_entity_for_handle(state, row->carrier_handle);
 	const mission::ItemSeatSpec *spec = carrier != nullptr
-			? item_seat_spec_for_type(seat_specs, carrier->type_id)
+			? simassets::item_seat_spec_for_type(seat_specs, carrier->type_id)
 			: nullptr;
 	if (spec == nullptr) return 0xFFFFu;
 	for (const world::Seat &seat : spec->seats) {

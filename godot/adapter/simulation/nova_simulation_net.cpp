@@ -362,17 +362,17 @@ void NovaSimulation::on_replica_world_changed(
 	for (const opennova::world::EntityLifetime lifetime : p_sync.retired) {
 		if (!lifetime.valid()) continue;
 		const auto cached =
-				collision_resolution_attempted_.find(lifetime.handle.packed);
+				collision_resolve_.resolution_attempted.find(lifetime.handle.packed);
 		// A later allocation at the same packed handle may already have had
 		// its caches rebuilt. The retired lifetime cannot erase those.
-		if (cached != collision_resolution_attempted_.end() &&
+		if (cached != collision_resolve_.resolution_attempted.end() &&
 				cached->second != lifetime.registry_spawn_id)
 			continue;
 		const opennova::world::EntityHandle handle = lifetime.handle;
 		collision_world_.remove_entity_instance(handle);
 		occlusion_world_.remove_entity_instance(handle);
 		collision_pose_native_.remove_entity(handle);
-		collision_resolution_attempted_.erase(handle.packed);
+		collision_resolve_.resolution_attempted.erase(handle.packed);
 	}
 
 	// Zone/deploy lookup is a registry-derived cache. Any streamed topology
@@ -591,40 +591,15 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 		const String graphic = collision_item_db_->get_graphic(def_id);
 		if (!graphic.is_empty()) {
 			const std::string key(graphic.utf8().get_data());
-			auto it = collision_model_by_graphic_.find(key);
-			if (it == collision_model_by_graphic_.end()) {
-				int32_t model_id = -1;
-				int32_t occlusion_id = -1;
-				float bound_radius = 0.0f;
-				if (sim_models_.has_index()) {
-					// ADR 0028: the joiner's wire ghosts read the same sim-side
-					// parse-once cache the registry sweep uses.
-					if (const Threedi3di3 *m3 = sim_models_.model_for(key)) {
-						opennova::world::CollisionModel model;
-						if (collision_model_from_3di(m3->collision, model,
-								opennova::simassets::model_has_collision(*m3))) {
-							model_id = collision_world_.add_model(std::move(model));
-							// S3b full: wire-ghost models pose through the
-							// native provider like the registry sweep's —
-							// this leg previously fed only the legacy map,
-							// which silently swapped joiner PANM collision
-							// onto the render-bound builder.
-							if (threedi_panm_lod_has_live(*m3, 0))
-								collision_pose_native_.register_generic_model(
-										model_id, m3);
-						}
-						opennova::world::OcclusionModel occ;
-						if (occlusion_model_from_3di(*m3, occ))
-							occlusion_id = occlusion_world_.add_model(std::move(occ));
-						bound_radius = model_bound_radius_from_3di(*m3);
-					}
-				}
-				it = collision_model_by_graphic_.emplace(key, model_id).first;				it = collision_model_by_graphic_.emplace(key, model_id).first;
-				collision_occlusion_by_graphic_.emplace(key, occlusion_id);
-				collision_radius_by_graphic_.emplace(key, bound_radius);
-			}
-			shape.model_id = it->second;
-			shape.bound_radius = collision_radius_by_graphic_[key];
+			// ADR 0031: the joiner's wire ghosts register through the SAME engine
+			// leg as the registry sweep (simassets::collision_model_for_graphic)
+			// — one implementation, one cache, identical model ids.
+			const opennova::simassets::CollisionResolveDeps deps{
+					collision_world_, occlusion_world_, collision_pose_native_,
+					sim_models_};
+			shape.model_id = opennova::simassets::collision_model_for_graphic(
+					collision_resolve_, deps, key);
+			shape.bound_radius = collision_resolve_.radius_by_graphic[key];
 		}
 	}
 	wire_collision_shape_by_type_.emplace(p_type_id, shape);
