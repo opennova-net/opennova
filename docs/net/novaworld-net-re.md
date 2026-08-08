@@ -3194,7 +3194,7 @@ spawn records can be checked field-for-field against the authored facts — the 
 D-NET-61 for pools 1/2/3.
 
 Tooling (this commit): the authored `.bms` is reduced to `fixtures/novaworld/dvxi5_manifest.txt`
-(via `opennova_mission_save_mis_path` → the engine/runtime/mission `.mis` writer); nw_pp's native pcap
+(via `opennova_mission_save_mis_path` → the engine/formats/mission `.mis` writer); nw_pp's native pcap
 reader is factored into the shared `apps/common/pcap_reader.{h,cpp}` (buffer-core + file wrapper
 + `build_pcap_udp` in-memory builder); `tests/novaworld/nw_pool_groundtruth_test` decodes the
 real `.scratch` capture **directly** (no hexcap) and asserts every authored entity reproduces;

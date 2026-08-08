@@ -8,11 +8,12 @@
   - `base/` — shared substrate and repo plumbing: io, vfs, resource_index, gameprofile,
     pcapio, oned_edit, refs.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
-    runtime-fused: ADR 0030): adm, pff, scr, sph, bfc1, pcx, fnt, rtxt, cbin, threedi,
-    tdp, ase, bad, def, dep, avatars, trn, tpj, tpm, cpt, til, foliage, env, mnu, mns,
-    sbf, lwf, dbf, mus, playersav, ptl, oed.
-  - `runtime/` — the in-match systems: world, wac, mission, anim, audio, particle,
-    renderer, controls, terrain, terrain_query.
+    runtime-fused: ADR 0030): adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt, cbin,
+    threedi, tdp, ase, bad, def, dep, avatars, mission, trn, tpj, tpm, cpt, til,
+    foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, ptl, oed.
+  - `runtime/` — the in-match systems: world, wac, mission (the runtime half — event
+    runtime, promotion, boot; the document model is `formats/mission`), anim, audio,
+    particle, renderer, controls, terrain, terrain_query.
   - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,
     napi, npwire, novaworld, netsim, npruntime.
 - Layout per library: `engine/<group>/<domain>/{include/<domain>/, src/}` — the
@@ -47,7 +48,7 @@
   Adding a Model-A export is a deliberate decision: annotate it AND bump the
   `abi_export_identity` baseline in the same commit, logged in docs/maturity-program.md.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones — `opennova_formats`
-  (every formats/ lib plus `engine/runtime/mission`'s format half, the fold that keeps
+  (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
   pcapio, refs), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
   napi, npwire, netsim, npruntime + novaworld session/gate), and

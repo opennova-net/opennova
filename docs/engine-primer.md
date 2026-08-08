@@ -149,7 +149,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Music (MUS/SBF/SCR) | `engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
 | Environment / time-of-day | `engine/formats/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |
 | String tables (RTXT) | `engine/formats/rtxt`, NovaStrings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
-| Mission loader (`.bms`) | `engine/runtime/mission` | [correspondence.md §3](correspondence.md) | per function |
+| Mission loader (`.bms`) | `engine/formats/mission` | [correspondence.md §3](correspondence.md) | per function |
 | BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
 | World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
 | Items (items.def entity defs) | `engine/formats/def`, `NovaItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |

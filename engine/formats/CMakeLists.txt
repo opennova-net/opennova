@@ -1,16 +1,19 @@
 # opennova_formats — every NovaLogic format parser/writer (one directory per
 # format, ADR 0024), built as one STATIC group target (Shape A).
 #
-# GUARDRAIL (non-negotiable): the opennova_mission_format sources — the
-# .mis/.bms parse+write half of engine/runtime/mission — belong to THIS group.
-# Without that assignment there is no acyclic 4-group partition:
-# base/refs -> mission_format while runtime/simassets -> base/resource_index
-# would cycle base and runtime. The files stay under engine/runtime/mission/
-# (sources do not move); only their target home is here.
+# GUARDRAIL (non-negotiable): the mission FORMAT half — .mis/.bms parse+write,
+# schema, authoring, the C ABI — belongs to THIS group. Without that
+# assignment there is no acyclic 4-group partition: base/refs -> the mission
+# format while runtime/simassets -> base/resource_index would cycle base and
+# runtime. Since ADR 0030 the directory matches the fold
+# (engine/formats/mission); the runtime half stays engine/runtime/mission.
 
 add_library(opennova_formats STATIC
     # adm — .adm animation definition map (anim slots -> .bad clip variant rings)
     ${CMAKE_CURRENT_SOURCE_DIR}/adm/src/adm.cpp
+    # aip — AI profile text (PARTIAL PORT: the two witnessed speed keys; the
+    # remainder is the ledgered D-AI-11(h) gap and lands here when witnessed)
+    ${CMAKE_CURRENT_SOURCE_DIR}/aip/src/aip.cpp
     # ase — 3ds Max ASCII scene export (the OED model source format)
     ${CMAKE_CURRENT_SOURCE_DIR}/ase/src/ase_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ase/src/ase_writer.cpp
@@ -48,6 +51,21 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/src/runtime.cpp
     # lwf — sound profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/src/lwf.cpp
+    # mission — .bms/.mis missions: document model, schema reflection,
+    # authoring edits, and the flat C ABI. Standalone (no world/runtime
+    # dependency); the runtime half — event runtime, promotion, boot — lives
+    # in engine/runtime/mission, both exposing <mission/...> with disjoint
+    # header sets (the ADR 0029 acyclicity fold; directory home since
+    # ADR 0030).
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/authoring.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/bms.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission.cpp          # MissionDocument — the document and its edit operations
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_capi.cpp     # the flat C ABI over it
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_mis_parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_mis_writer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_names.cpp    # BMS event-logic enum display names
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_records.cpp  # bms:: structs <-> typed editor records
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/mission_schema.cpp
     # mns — menu stylesheet
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/src/mns.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/src/mns_document.cpp
@@ -116,25 +134,13 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/tpm/src/packing.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/src/trn_io.cpp
-    # mission_format (engine/runtime/mission, format half — see GUARDRAIL above):
-    # .mis/.bms parse+write, schema reflection, authoring edits. Standalone —
-    # no world/runtime dependency; the flat C ABI (mission.h) and parse-only
-    # consumers (refs, npruntime's bms use) build against this.
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/authoring.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/bms.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission.cpp          # MissionDocument — the document and its edit operations
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_capi.cpp     # the flat C ABI over it
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_mis_parser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_mis_writer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_names.cpp    # BMS event-logic enum display names
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_records.cpp  # bms:: structs <-> typed editor records
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/src/mission_schema.cpp
 )
 
 # Every format's public include/ keeps its historical <domain>/... include shape.
 target_include_directories(opennova_formats
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/adm/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/aip/include
         ${CMAKE_CURRENT_SOURCE_DIR}/ase/include
         ${CMAKE_CURRENT_SOURCE_DIR}/avatars/include
         ${CMAKE_CURRENT_SOURCE_DIR}/bad/include
@@ -148,6 +154,7 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/fnt/include
         ${CMAKE_CURRENT_SOURCE_DIR}/foliage/include
         ${CMAKE_CURRENT_SOURCE_DIR}/lwf/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/mission/include
         ${CMAKE_CURRENT_SOURCE_DIR}/mns/include
         ${CMAKE_CURRENT_SOURCE_DIR}/mnu/include
         ${CMAKE_CURRENT_SOURCE_DIR}/mus/include
@@ -166,9 +173,6 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/tpj/include
         ${CMAKE_CURRENT_SOURCE_DIR}/tpm/include
         ${CMAKE_CURRENT_SOURCE_DIR}/trn/include
-        # mission_format's public headers (and the runtime mission half's — one
-        # include/ per directory; the runtime group reuses this propagated dir).
-        ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/mission/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/src   # miniz.h (vendored, private)
         ${CMAKE_CURRENT_SOURCE_DIR}/oed/src    # threedi_model.h (private)

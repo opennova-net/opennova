@@ -12,7 +12,7 @@ Witness images used by this record (never mix their addresses):
 - **`dfx2med.exe`** — the shipped retail Mission Editor (IDB
   `dfx2med.exe.i64` exists on disk; entity-record field NAMES were witnessed
   from its `Med_WriteMisFile @ 0x454630` at the 2026-06-06 pass — see
-  `engine/runtime/mission/include/mission/bms.h`). Its full `.mis` grammar grill is
+  `engine/formats/mission/include/mission/bms.h`). Its full `.mis` grammar grill is
   still pending (D-MIS-3).
 
 ## Current verdict

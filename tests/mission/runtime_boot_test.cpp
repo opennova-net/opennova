@@ -6,6 +6,8 @@
 
 #include <mission/runtime_boot.h>
 
+#include <aip/aip.h>
+
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -207,7 +209,8 @@ bool run_text_fallback() {
 	return true;
 }
 
-// .aip parse: the two witnessed keys, tabs, case-insensitive keys, junk lines.
+// .aip parse (engine/formats/aip): the two witnessed keys, tabs,
+// case-insensitive keys, junk lines.
 bool run_aip_parse() {
 	const std::string text =
 			"; comment line\n"
@@ -215,14 +218,14 @@ bool run_aip_parse() {
 			"combat_speed 12 trailing junk\n"
 			"unrelated 99\n";
 	std::vector<uint8_t> bytes(text.begin(), text.end());
-	ms::PromoteOptions::AiProfileSpeeds row;
-	ms::parse_aip_profile_speeds(bytes, row);
+	const opennova::aip::ProfileSpeeds row =
+			opennova::aip::parse_profile_speeds(bytes.data(), bytes.size());
 	if (!expect(row.patrol_speed == 5, "aip: patrol via tab + mixed case")) return false;
 	if (!expect(row.combat_speed == 12, "aip: combat, extra tokens ignored")) return false;
 
-	ms::PromoteOptions::AiProfileSpeeds none;
 	std::vector<uint8_t> junk{'h', 'i', '\n'};
-	ms::parse_aip_profile_speeds(junk, none);
+	const opennova::aip::ProfileSpeeds none =
+			opennova::aip::parse_profile_speeds(junk.data(), junk.size());
 	return expect(none.patrol_speed == -1 && none.combat_speed == -1,
 			"aip: unauthored keys stay -1");
 }
