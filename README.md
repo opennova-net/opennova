@@ -109,7 +109,7 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 | `tests/` | C++ test suite (ctest). Godot tests live under `godot/tests/`. |
 | `third_party/` | Vendored deps: godot-cpp, gut, and modsuperoed as submodules, plus the in-tree bcrypt and sqlite sources. |
 
-**Conventions.** Format libraries use `opennova_<domain>` CMake target names and the `opennova` C++ namespace; C ABI exports stay flat and domain-prefixed for FFI stability. The shared library target is `opennova_shared`, which bundles the core statics into `opennova.dll` / `libopennova.so`. Blender custom properties owned by this project use `opennova_*` keys.
+**Conventions.** The engine builds as five group CMake targets (`opennova_formats`, `opennova_base`, `opennova_runtime`, `opennova_net`, `opennova_novaworld_service`); every library shares the `opennova` C++ namespace, and C ABI exports stay flat and domain-prefixed for FFI stability. The shared library target is `opennova_shared`, which bundles the core groups into `opennova.dll` / `libopennova.so`. Blender custom properties owned by this project use `opennova_*` keys.
 
 ## C/C++ Libraries
 
@@ -123,6 +123,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
 | **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
+| **adm** | `.adm` | Animation definition maps: anim slots bound to `.bad` clip names, with multi-clip variant rings. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |
 | **avatars** | `Avatars.def` | Player-character definitions: head/body/arms parts composed into combos under a nationality/division tree, with a from-scratch round-trip writer. |
 | **pff** | `.pff` | Archive containers: PFF3, PFF4, and BHD variants. |
@@ -156,7 +157,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **world** | World substrate: entity registry and pools, variable store, the logic tick, and the ported gameplay systems on top of it: AI and the infantry motor, collision and occlusion queries, the weapon FSM/inventory/tables, rounds and ballistics, throwables, vehicle mount and drive, item destruction, spawn selection, zones, and the player view. |
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
 | **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. Two targets: `opennova_mission_format` (parse/write/schema) and `opennova_mission` (event runtime + promotion). |
-| **anim** | Skeletal animation: `.adm` definition parsing plus the evaluator that samples `.bad` clips into per-bone transforms. |
+| **anim** | Skeletal animation: the evaluator that samples `.bad` clips into per-bone transforms. |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
 | **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |
 | **gameprofile** | Per-game profiles: one source of truth for game identity, archive keys, and SCR codec policy. |

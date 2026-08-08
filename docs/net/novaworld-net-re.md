@@ -7717,7 +7717,7 @@ while the head moves on. Corpus: 792 multi-clip rows across the REVX02 .adm set
 `delaystart 200 / delayend auto` → ONE bake read (serves entry 0, head → 1), so the
 first reload PLAY serves entry 1 and the next served play is entry 2 — live-verified
 in the weapon_round probe (a refused reload request advances nothing). Port mapping:
-`engine/runtime/anim` adm keeps every token (`AdmEntry.values[]`, `value` = first);
+`engine/formats/adm` keeps every token (`AdmEntry.values[]`, `value` = first);
 `NovaSkeletalAnim` registers one clip per token under the same key (peek-only —
 `get_clip_variant_count/lengths`, variant-arg getters/eval); the ring CURSORS live on
 `NovaSimulation` (the animState+72 analog — `weapon_fsm_bake`’s per-auto-field reads

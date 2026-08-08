@@ -11,6 +11,10 @@
   The one-directory-per-format layout with its headers, namespace, fixtures,
   and tests, decision 5's renderer reversal, and decision 6's Model A/B
   consumption models remain in force.
+- **Completed by [ADR 0030](0030-formats-placement-criterion.md)**
+  (2026-08-08): decision 1 affirms one-lib-per-format but never defines which
+  parsers count as "a format" — ADR 0030 supplies the placement criterion and
+  the deliberately-fused table.
 
 ## Context
 

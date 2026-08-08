@@ -49,7 +49,7 @@ add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 # ADM tests
 foreach(test comment trim_value parse write variants)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
-    target_link_libraries(adm_${test}_test PRIVATE opennova_runtime)
+    target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()

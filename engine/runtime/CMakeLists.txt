@@ -8,8 +8,7 @@
 # propagated by the formats group.
 
 add_library(opennova_runtime STATIC
-    # anim — .adm clip parse + skeletal sampling + the aim overlay
-    ${CMAKE_CURRENT_SOURCE_DIR}/anim/src/adm.cpp
+    # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/src/aim_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/src/anim_sample.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/src/skeletal_pose.cpp

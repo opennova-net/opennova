@@ -9,6 +9,8 @@
 # (sources do not move); only their target home is here.
 
 add_library(opennova_formats STATIC
+    # adm — .adm animation definition map (anim slots -> .bad clip variant rings)
+    ${CMAKE_CURRENT_SOURCE_DIR}/adm/src/adm.cpp
     # ase — 3ds Max ASCII scene export (the OED model source format)
     ${CMAKE_CURRENT_SOURCE_DIR}/ase/src/ase_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ase/src/ase_writer.cpp
@@ -117,6 +119,7 @@ add_library(opennova_formats STATIC
 # Every format's public include/ keeps its historical <domain>/... include shape.
 target_include_directories(opennova_formats
     PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/adm/include
         ${CMAKE_CURRENT_SOURCE_DIR}/ase/include
         ${CMAKE_CURRENT_SOURCE_DIR}/avatars/include
         ${CMAKE_CURRENT_SOURCE_DIR}/bad/include

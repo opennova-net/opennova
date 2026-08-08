@@ -66,11 +66,13 @@ behavior is summarized and cited.
 | [0027](adr/0027-3di3-only-no-model-ir.md) | 3DI3 is the only model format and consumers walk the parsed `Threedi3di3` directly; the `ThreediModelIR` layer and GP-era (GPM/GPS/GPP) reader/writer are removed |
 | [0028](adr/0028-engine-directory-and-shell-adapter.md) | `engine/` is the engine (four groups: base/formats/runtime/net), `godot/adapter/` is the shell adapter; new engine logic starts in the engine and gameplay loops live in the engine. Its "directories only" target-name clause is superseded by ADR 0029 |
 | [0029](adr/0029-engine-group-targets.md) | Engine target topology: the per-lib CMake targets and family groups collapse into five STATIC group targets (`opennova_formats` — with mission's format half folded in — `opennova_base`, `opennova_runtime`, `opennova_net`, `opennova_novaworld_service`) plus the `opennova_io`/`opennova_oned_edit` INTERFACE pair; base links ABOVE formats; sqlite containment stays linker-enforced by the separate service target; ADR 0020's terrain seam moves to `include_graph_check.py` |
+| [0030](adr/0030-formats-placement-criterion.md) | The formats placement rule: ALL file knowledge lives in `engine/formats/` (parsed model + read/write over io/ only) and no format parser stays runtime-fused — runtime keeps only execution over the parsed model (VM, emitter, promotion); plus the shared-include-prefix rule for split domains and the extraction discipline |
 
 ## RE records by domain
 
 | Domain | Doc | Status |
 |---|---|---|
+| Animation | [`anim/adm-bad-format-re.md`](anim/adm-bad-format-re.md) | landed (consolidation 2026-08-08 — the `.adm`/`.bad` format pair gathered from the §5.40 grill chain, ADR 0007, and the correspondence rows; formats closed, the body-rig consumer tail stays D-INF-13) |
 | Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed (+ §sound-profile: the SndProf.def system + infantry slot-sound consumers, witnessed + ported 2026-07-17, D-SND-10..15; + §driver cadence: the ambient tick/frame clock split witnessed 2026-07-28, D-SND-16 minted + PORTED same day into engine/runtime/audio AmbientMixer) |
 | Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
