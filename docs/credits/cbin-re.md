@@ -3,8 +3,10 @@
 Structure-mapping record for the original engine's **CBIN** obfuscated-text
 container (the format behind the credits `.kda`) — its 20-byte header, counted
 string table, and ROL32/XOR cipher. The reimplementation surface is `engine/formats/cbin`
-(`Header` / `encode_buffer` / `decode_buffer`) and the Godot credits player
-(`godot/adapter/cbin`). Binary: retail **Jointops.exe** (IDB
+(`Header` / `encode_buffer` / `decode_buffer`, plus the Color/Justify display-view
+collapse/re-emit `credits_display_items` / `credits_entries_from_display` — editor-carried
+semantics with no `[orig]` witnesses yet, part of the PAR-R5 read-path gap) and the Godot
+credits player (`godot/adapter/cbin`). Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). This file is the committed home for the `D-CBIN`
 catalog. Produced 2026-07-05 (PAR-R5), **read-only** — witnessed from raw
 disassembly without defining functions in the shared IDB.

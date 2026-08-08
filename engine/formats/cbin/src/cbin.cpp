@@ -783,4 +783,89 @@ bool encode_file(const Credits& credits, const std::string& path, std::string& e
     return true;
 }
 
+// Display-view collapse/re-emit — the control-code state machine formerly
+// duplicated in the Godot .kda loader/saver (moved here 2026-08-08, ADR 0030).
+// No [orig] witnesses; the retail read path is tracked as cbin-re.md PAR-R5.
+
+std::vector<CreditsDisplayItem> credits_display_items(const Credits& credits) {
+    std::vector<CreditsDisplayItem> items;
+    items.reserve(credits.entries.size());
+    uint32_t color = kDefaultDisplayColor;
+    Justify justify = Justify::Center;
+    for (const Entry& src : credits.entries) {
+        switch (src.type) {
+            case EntryType::Color:
+                color = src.color;
+                break;
+            case EntryType::Justify:
+                justify = src.justify;
+                break;
+            case EntryType::Text: {
+                CreditsDisplayItem item;
+                item.type = EntryType::Text;
+                item.text = src.text;
+                item.font = src.font;
+                item.color = color;
+                item.justify = justify;
+                items.push_back(std::move(item));
+                break;
+            }
+            case EntryType::Newline: {
+                CreditsDisplayItem item;
+                item.type = EntryType::Newline;
+                items.push_back(std::move(item));
+                break;
+            }
+            case EntryType::Image: {
+                CreditsDisplayItem item;
+                item.type = EntryType::Image;
+                item.image_path = src.image_path;
+                item.image_display_x = src.image_display_x;
+                item.image_display_y = src.image_display_y;
+                item.use_simple_image_format = src.use_simple_image_format;
+                items.push_back(std::move(item));
+                break;
+            }
+        }
+    }
+    return items;
+}
+
+std::vector<Entry> credits_entries_from_display(
+        const std::vector<CreditsDisplayItem>& items) {
+    std::vector<Entry> entries;
+    entries.reserve(items.size() * 2);
+    uint32_t color = kDefaultDisplayColor;
+    Justify justify = Justify::Center;
+    for (const CreditsDisplayItem& item : items) {
+        switch (item.type) {
+            case EntryType::Text: {
+                if (item.color != color) {
+                    entries.push_back(Entry::make_color(item.color));
+                    color = item.color;
+                }
+                if (item.justify != justify) {
+                    entries.push_back(Entry::make_justify(item.justify));
+                    justify = item.justify;
+                }
+                entries.push_back(Entry::make_text(item.text, item.font));
+                break;
+            }
+            case EntryType::Newline:
+                entries.push_back(Entry::make_newline());
+                break;
+            case EntryType::Image: {
+                Entry image = Entry::make_image(
+                    item.image_path, item.image_display_x, item.image_display_y);
+                image.use_simple_image_format = item.use_simple_image_format;
+                entries.push_back(std::move(image));
+                break;
+            }
+            default:
+                break;  // control types are not display items
+        }
+    }
+    return entries;
+}
+
 }  // namespace cbin

@@ -924,6 +924,12 @@ target_include_directories(cbin_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)
 
+add_executable(cbin_display_view_test cbin/cbin_display_view_test.cpp)
+target_link_libraries(cbin_display_view_test PRIVATE opennova_formats)
+target_include_directories(cbin_display_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(cbin_display_view_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME cbin_display_view COMMAND cbin_display_view_test)
+
 # MNU menu UI tests (forgiving XML parser, MNU AST + serialize roundtrip, MNS stylesheet)
 add_executable(mnu_xml_unit_test mnu/mnu_xml_unit_test.cpp)
 target_link_libraries(mnu_xml_unit_test PRIVATE opennova_formats)
