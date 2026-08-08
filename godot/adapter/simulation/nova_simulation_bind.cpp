@@ -26,7 +26,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &NovaSimulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &NovaSimulation::load_mission_file);
 	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
-			"item_db", "placer", "terrain", "terrain_til",
+			"item_db", "terrain", "terrain_til",
 			"wac_basename", "infantry_adm", "mission_file_basename", "playable"),
 			&NovaSimulation::boot_mission);
 	ClassDB::bind_method(D_METHOD("get_mission_boot_debug"),
@@ -289,7 +289,7 @@ void NovaSimulation::_bind_methods() {
 	                             "weapon_name", "preserve_slot_state"),
 	                     &NovaSimulation::install_local_player_weapon_by_name,
 	                     DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
+	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db"),
 	                     &NovaSimulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &NovaSimulation::occlusion_init_mission);

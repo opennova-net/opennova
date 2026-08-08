@@ -284,7 +284,7 @@ bool NovaSimulation::ensure_collision_instance(
 	// Re-run the idempotent attach sweep against the retained mission caches.
 	// It resolves every entity that appeared since the previous sweep, including
 	// a player deployed after load, without registering another graphic model.
-	resolve_collision_instances(collision_item_db_, nullptr);
+	resolve_collision_instances(collision_item_db_);
 	return collision_world_.has_instance(p_world, p_entity);
 }
 
@@ -341,13 +341,10 @@ void NovaSimulation::set_asset_root(const Ref<NovaResourceRoot> &p_root) {
 			p_root.is_valid() ? &p_root->native_index() : nullptr);
 }
 
-int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
-                                                Object *p_placer) {
+int NovaSimulation::resolve_collision_instances(
+		const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return 0;
-	(void)p_placer; // retained in the bound signature; the render placer no
-	                // longer participates (S3b full: sim-cache-only sources).
-	// Production installs the sim's own asset source first (ADR 0028); the
-	// no-root leg below is the GUT stub seam and dies with S3.
+	// Production installs the sim's own asset source first (ADR 0028).
 	if (!sim_models_.has_index()) {
 		godot::UtilityFunctions::print_verbose(
 				"NovaSimulation: no asset root installed — collision/occlusion "

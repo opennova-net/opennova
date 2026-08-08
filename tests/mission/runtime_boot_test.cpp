@@ -87,7 +87,6 @@ bool run_full_order() {
 	p.playable = true;
 	p.has_resource_root = true;
 	p.has_item_db = true;
-	p.has_placer = true;
 	p.has_terrain = true;
 	p.has_terrain_til = true;
 	p.has_wac = true;
@@ -105,7 +104,7 @@ bool run_full_order() {
 }
 
 // Gates: a rootless boot keeps only the root-free steps; a joiner never
-// spawns; missing item_db/placer drops trait/collision resolution.
+// spawns; a missing item db drops trait/collision resolution.
 bool run_gates() {
 	{
 		StepRecorder r;
@@ -133,13 +132,19 @@ bool run_gates() {
 	{
 		StepRecorder r;
 		ms::BootParams p;
-		p.has_resource_root = true;
-		p.has_item_db = true; // no placer -> no asset_root/collision/occlusion
+		p.has_item_db = true; // db without root: collision resolves from the
+		                      // sim cache; only the root-fed asset_root skips
 		(void)ms::run_mission_boot(p, r.steps());
-		for (const std::string &c : r.calls)
-			if (!expect(c != "collision" && c != "occlusion" && c != "asset_root",
-					"placerless: no collision resolve"))
+		bool saw_collision = false, saw_occlusion = false;
+		for (const std::string &c : r.calls) {
+			saw_collision = saw_collision || c == "collision";
+			saw_occlusion = saw_occlusion || c == "occlusion";
+			if (!expect(c != "asset_root", "rootless db: no asset_root install"))
 				return false;
+		}
+		if (!expect(saw_collision && saw_occlusion,
+				"rootless db: collision + occlusion still run"))
+			return dump_on_fail(r, "got");
 	}
 	return true;
 }
@@ -152,7 +157,6 @@ bool run_load_abort() {
 	p.playable = true;
 	p.has_resource_root = true;
 	p.has_item_db = true;
-	p.has_placer = true;
 	const ms::BootAbort abort = ms::run_mission_boot(p, r.steps());
 	if (!expect(abort == ms::BootAbort::kLoadFailed, "abort: reported")) return false;
 	if (!expect(!r.calls.empty() && r.calls.back() == "load",

@@ -475,7 +475,7 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 // after it.
 int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 		const Ref<NovaResourceRoot> &p_resource_root,
-		const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
+		const Ref<NovaItemDatabase> &p_item_db,
 		const Ref<NovaTerrainData> &p_terrain,
 		const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 		const String &p_infantry_adm, const String &p_mission_file_basename,
@@ -512,7 +512,6 @@ int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 	params.playable = p_playable;
 	params.has_resource_root = p_resource_root.is_valid();
 	params.has_item_db = p_item_db.is_valid();
-	params.has_placer = p_placer != nullptr;
 	params.has_terrain = p_terrain.is_valid();
 	params.has_terrain_til = !p_terrain_til.is_empty();
 	params.has_wac = !p_wac_basename.is_empty();
@@ -611,9 +610,7 @@ int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 	};
 	steps.resolve_item_traits = [&] { resolve_item_traits(p_item_db); };
 	steps.install_asset_root = [&] { set_asset_root(p_resource_root); };
-	steps.resolve_collision = [&] {
-		resolve_collision_instances(p_item_db, p_placer);
-	};
+	steps.resolve_collision = [&] { resolve_collision_instances(p_item_db); };
 	steps.occlusion_init = [&] { occlusion_init_mission(); };
 	steps.load_weapon_table = [&] {
 		if (load_weapon_table(p_resource_root, "weapon.def") != OK)
@@ -823,7 +820,7 @@ void NovaSimulation::restart() {
 		local_weapon_.slot.reserve = reserve;
 	}
 	if (collision_item_db_.is_valid())
-		resolve_collision_instances(collision_item_db_, nullptr);
+		resolve_collision_instances(collision_item_db_);
 	local_weapon_.anim_tick = world_->logic_tick;
 	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.

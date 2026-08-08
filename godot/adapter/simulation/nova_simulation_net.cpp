@@ -400,7 +400,7 @@ void NovaSimulation::on_replica_world_changed(
 	(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
 
 	if (collision_item_db_.is_valid())
-		resolve_collision_instances(collision_item_db_, nullptr);
+		resolve_collision_instances(collision_item_db_);
 }
 
 Dictionary NovaSimulation::get_client_entity_debug(int p_handle) const {

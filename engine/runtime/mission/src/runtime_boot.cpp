@@ -158,7 +158,7 @@ BootAbort run_mission_boot(const BootParams &params, const BootSteps &steps) {
 	if (params.has_resource_root && params.has_item_db)
 		steps.resolve_infantry_adm();
 	if (params.has_item_db) steps.resolve_item_traits();
-	if (params.has_item_db && params.has_placer) {
+	if (params.has_item_db) {
 		if (params.has_resource_root) steps.install_asset_root();
 		steps.resolve_collision();
 		steps.occlusion_init();

@@ -549,9 +549,9 @@ func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
-# (The duck-typed placer stubs are gone with S3b: resolve_collision_instances
-# ignores its placer argument — every pose/collision source is the sim's own
-# asset root, composed per test from the committed fixtures.)
+# (The duck-typed placer stubs are gone with S3b, and the placer argument
+# with the boot-contract cleanup: every pose/collision source is the sim's
+# own asset root, composed per test from the committed fixtures.)
 
 func _anim_root() -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
@@ -1498,7 +1498,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	assert_gte(sim.resolve_collision_instances(item_db, null), 2,
+	assert_gte(sim.resolve_collision_instances(item_db), 2,
 			"precondition: both enemies use authored posed COBJ collision")
 	var reference_card: Dictionary = sim.get_entity_debug(0)
 	var rotated_card: Dictionary = sim.get_entity_debug(1)
@@ -1659,7 +1659,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			bad_root, "BINOC.bad", {"anim_emplaced": "BINOC.bad"},
 			data.get_bone_origins(), data.get_bone_parents()),
 			"mounted CharModel rig loads: %s" % skeletal.get_last_error())
-	assert_gte(sim.resolve_collision_instances(item_db, null), 1,
+	assert_gte(sim.resolve_collision_instances(item_db), 1,
 			"the mounted enemy owns authored posed COBJ collision")
 	var ammo_root := NovaResourceRoot.new()
 	assert_eq(ammo_root.set_root_dir(ProjectSettings.globalize_path(
@@ -2745,7 +2745,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
@@ -2857,7 +2857,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	# Start well off the gun's authored zero yaw. Retail's attach request snaps the
 	# requester's look/body heading to the UseGun heading before establishing the
 	# relationship; leaving this stale produces the visible torso twist at the grips.
@@ -3679,7 +3679,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility()
@@ -3710,7 +3710,7 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
 
@@ -3797,7 +3797,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	# The root deliberately omits Barrel1XF: KZ belongs to the first husk,
 	# while the final husk is only the preferred death-piece model.
 	_native_asset_root(sim, husk_dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var debug := sim.get_destruction_debug(bms_id)
 	assert_true(bool(debug.get("husk_model_loaded", false)),
 			"a successfully opened first husk supplies the retail live-model gate")
@@ -3850,7 +3850,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
 	_write_fixture_bytes(final_only_dir, "Barrel1XF.3di", bytes)
 	_native_asset_root(final_only_sim, final_only_dir)
-	assert_eq(final_only_sim.resolve_collision_instances(final_only_db, null), 1)
+	assert_eq(final_only_sim.resolve_collision_instances(final_only_db), 1)
 	var final_only_debug := final_only_sim.get_destruction_debug(
 			int(final_only_placed.get("bms_id", 0)))
 	assert_true(bool(final_only_debug.get("husk_model_loaded", false)),
@@ -3868,7 +3868,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	_copy_fixture(missing_dir,
 			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
 	_native_asset_root(missing_sim, missing_dir)
-	assert_eq(missing_sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(missing_sim.resolve_collision_instances(item_db), 1)
 	var missing_debug := missing_sim.get_destruction_debug(bms_id)
 	assert_true(bool(missing_debug.get("has_husk", false)),
 			"items.def still records the authored husk name")
@@ -3895,7 +3895,7 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/3di3/Bird1.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1,
+	assert_eq(sim.resolve_collision_instances(item_db), 1,
 		"face-only CFAC remains a real collision model")
 	var entities: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(entities.size(), 1)
@@ -3994,7 +3994,7 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "GuardTwr1.3di", _exported_3di_bytes(data))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.debug_set_panm_time_ms(0)
 	var before: PackedVector3Array = (
 		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
@@ -4330,7 +4330,7 @@ func _fast_rope_collision_moved_vertices(register_name: String, channel: int) ->
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
@@ -4404,7 +4404,7 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_count(), 1)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var before_debug: Array = sim.get_hitbox_debug().get(
 		'entities', [])
 	assert_eq(before_debug.size(), 1)
@@ -4497,7 +4497,7 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	assert_gt(sim.set_infantry_anim_map(root, "us02.adm"), 0)
 	sim.set_asset_root(root)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 
 	var before: Array = sim.get_hitbox_debug().get("organics", [])
 	assert_eq(before.size(), 19, "one posed sphere per CharModel COBJ/bone")
@@ -4547,7 +4547,7 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 0,
+	assert_eq(sim.resolve_collision_instances(item_db), 0,
 			"the initial pre-deploy sweep has no player to attach")
 	assert_true(sim.spawn_local_player(Vector3(10, 0, 0), 0.0, 1))
 
@@ -4581,7 +4581,7 @@ func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	var rows: Array = sim.get_hitbox_debug().get("organics", [])
@@ -4631,7 +4631,7 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 0,
+	assert_eq(sim.resolve_collision_instances(item_db), 0,
 			"US02 records one unresolved attempt on slot 0")
 	for _tick in 16:
 		sim.step()
@@ -4680,7 +4680,7 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	assert_true(bool(sim.get_destruction_debug(
 			bms_id).get("has_collision_instance", false)))
 	for _tick in 16:
@@ -4777,7 +4777,7 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "GuardTwr1.3di", _exported_3di_bytes(data))
 	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	var fallback_tick := sim.get_logic_tick()
 	var fallback_before: PackedVector3Array = (
 		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)

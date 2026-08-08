@@ -17,7 +17,6 @@ const ARMORY_ATTRIB := 0x80000
 const NO_HUD_ATTRIB := 0x20000000
 const FARP_ATTRIB2 := 0x2000
 const EWEAP_ATTRIB := 0x20
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 
 func _init() -> void:
@@ -51,11 +50,10 @@ func _run() -> void:
 		_fail("NovaSimulation rejected %s" % MISSION)
 		return
 	sim.resolve_item_traits(item_db)
-	var placer := MissionObjectPlacer.new(root, item_db)
 	# S3b native-only: collision extraction reads the sim's own asset root; a
-	# rootless sim attaches nothing (the placer is no longer a model source).
+	# rootless sim attaches nothing.
 	sim.set_asset_root(root)
-	if int(sim.resolve_collision_instances(item_db, placer)) <= 0:
+	if int(sim.resolve_collision_instances(item_db)) <= 0:
 		sim.free()
 		_fail("no model/collision instances resolved")
 		return

@@ -206,7 +206,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			mission,
 			options.get("resource_root"),
 			options.get("item_db"),
-			options.get("placer"),
 			options.get("terrain"),
 			options.get("terrain_til", PackedByteArray()),
 			String(options.get("wac_basename", "")),

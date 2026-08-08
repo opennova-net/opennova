@@ -12,7 +12,6 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/wave1_native_assets_probe.gd
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
@@ -80,10 +79,9 @@ func _run() -> void:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
 
-	# The sim resolves every attach from its own cache (the placer argument is
-	# vestigial post-S3b; the render extraction it once selected is gone). The
-	# legacy reference leg died with that extraction — the pin is the recorded
-	# retail attach count instead.
+	# The sim resolves every attach from its own cache; the legacy render-side
+	# reference leg died with S3b — the pin is the recorded retail attach
+	# count instead.
 	var expect_attach := 859
 	var expect_env := OS.get_environment("WAVE1_EXPECT_ATTACH").strip_edges()
 	if not expect_env.is_empty():
@@ -94,7 +92,7 @@ func _run() -> void:
 		_fail("NovaSimulation rejected %s" % MISSION)
 		return
 	sim.set_asset_root(root)
-	var attached_native := int(sim.resolve_collision_instances(item_db, null))
+	var attached_native := int(sim.resolve_collision_instances(item_db))
 
 	print("[wave1] attached native=%d (expect %d)" % [attached_native, expect_attach])
 	if attached_native != expect_attach:
@@ -155,16 +153,10 @@ func _run() -> void:
 	get_root().add_child(runtime)
 	var boot_container := Node3D.new()
 	get_root().add_child(boot_container)
-	# The placer gates the boot's resolve_collision/occlusion steps (the
-	# runtime_boot contract still names it even though the sweep itself is
-	# sim-cache-only now) — without it the hitbox/query gates below see an
-	# unattached world.
-	var boot_placer := MissionObjectPlacer.new(root, item_db)
 	var boot_count := int(runtime.setup(mission, boot_container, {
 		"resource_root": root,
 		"item_db": item_db,
 		"mission_file": MISSION,
-		"placer": boot_placer,
 		"playable": true,
 	}))
 	if boot_count <= 0 or int(runtime.get_setup_error()) != OK:
