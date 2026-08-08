@@ -5,7 +5,7 @@ Checks ONLY lines ADDED in the given diff range — untouched code is never
 flagged (the ratchet in ratchet_counts.py covers the stock):
 
   dict-contract (ADR 0017): new Dictionary-shaped public contracts in
-      godot/modtools/ or godot/engine/ GDScript — a public `-> Dictionary`
+      godot/modtools/ or godot/adapter/ GDScript — a public `-> Dictionary`
       return, a public `var x: Dictionary`, or a `const NAME := {` map
       table, all at CLASS level (column 0). Indented declarations are
       function-locals — annotating a local as Dictionary is not a new
@@ -40,9 +40,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 
-# "godot/engine/" is TRANSITIONAL beside "godot/adapter/" while the ADR 0028
-# rename is in flight (same rename-pairing mechanism as PROMOTED_SCOPES below).
-LINT_SCOPES = ("godot/modtools/", "godot/adapter/", "godot/engine/")
+LINT_SCOPES = ("godot/modtools/", "godot/adapter/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.
@@ -100,12 +98,8 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
 #   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
-# "libs/" is TRANSITIONAL alongside "engine/" while the 2026-08 move (ADR 0028)
-# is in flight: with both sides of the rename in the diff pathspec, git pairs
-# moved files as renames instead of flagging their every line as added. Drop
-# the stale entry in a routine PR once master's merge-base is past the move.
-PROMOTED_SCOPES = ("godot/adapter/", "godot/engine/", "godot/game/", "godot/modtools/",
-                   "engine/", "libs/", "apps/")
+PROMOTED_SCOPES = ("godot/adapter/", "godot/game/", "godot/modtools/",
+                   "engine/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
     "godot/adapter/world/host_session_config.gd",
