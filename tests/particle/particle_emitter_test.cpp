@@ -1105,6 +1105,76 @@ bool test_against_real_fixture() {
 	return true;
 }
 
+bool test_spawn_seeds_roll_from_orientation_z_and_signed_rate() {
+	using namespace opennova::particle;
+	constexpr float kDegToRad = 0.0174533f;
+	ParticleDef def = make_minimal_def();
+	// [orig: CParticleEmitter_SpawnParticle @ 0x5e7803 — def+3824 seeds the
+	// roll; SIGNEDROTATIONS (0x800000) pins the authored rate sign
+	// @ 0x5e782a..0x5e7889].
+	def.orientation = {0.0f, 0.0f, 45.0f};
+	def.flags |= particle_flag::SignedRotations;
+	def.roll_rot = 90.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	if (!expect(emitter_spawn_one(e), "spawn succeeds")) return false;
+	const Particle &p = e.particles[0];
+	if (!expect(near(p.rotation, 45.0f * kDegToRad, 0.0001f),
+			"roll seeds from orientation.z (degrees at author time)")) return false;
+	if (!expect(near(p.rotation_rate, 90.0f * kDegToRad, 0.0001f),
+			"SIGNEDROTATIONS keeps the authored roll_rot sign")) return false;
+	return expect(near(p.yaw, 0.0f) && near(p.pitch, 0.0f),
+			"without YAWANDPITCH the Euler channel stays zero");
+}
+
+bool test_spawn_roll_rate_sign_randomizes_without_signedrotations() {
+	using namespace opennova::particle;
+	constexpr float kDegToRad = 0.0174533f;
+	ParticleDef def = make_minimal_def();
+	def.roll_rot = 90.0f;
+	// With roll_rot_adj = 0 the magnitude is exact; only the sign is drawn
+	// [orig: SpawnParticle @ 0x5e782a — random sign flip unless 0x800000].
+	bool saw_positive = false;
+	bool saw_negative = false;
+	for (std::uint32_t seed = 1; seed <= 32; ++seed) {
+		Emitter e;
+		emitter_init(e, &def, {0, 0, 0}, seed);
+		if (!expect(emitter_spawn_one(e), "spawn succeeds")) return false;
+		const float rate = e.particles[0].rotation_rate;
+		if (!expect(near(std::fabs(rate), 90.0f * kDegToRad, 0.0001f),
+				"unsigned rate keeps the authored magnitude")) return false;
+		saw_positive = saw_positive || rate > 0.0f;
+		saw_negative = saw_negative || rate < 0.0f;
+	}
+	return expect(saw_positive && saw_negative,
+			"the sign draw produces both directions across seeds");
+}
+
+bool test_spawn_yawandpitch_seeds_euler_channel() {
+	using namespace opennova::particle;
+	constexpr float kDegToRad = 0.0174533f;
+	ParticleDef def = make_minimal_def();
+	// [orig: CParticleEmitter_SpawnNewParticle @ 0x5f3663/0x5f36a5 — the
+	// parallel yaw/pitch array behind def flag 0x100; the render side feeds
+	// it through the Euler matrix in RenderStaticBillboards @ 0x5f5068].
+	def.flags |= particle_flag::YawAndPitch | particle_flag::SignedRotations;
+	def.orientation = {30.0f, 60.0f, 0.0f};
+	def.yaw_rot = 10.0f;
+	def.pitch_rot = 20.0f;
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 7);
+	if (!expect(emitter_spawn_one(e), "spawn succeeds")) return false;
+	const Particle &p = e.particles[0];
+	if (!expect(near(p.yaw, 30.0f * kDegToRad, 0.0001f),
+			"yaw seeds from orientation.x")) return false;
+	if (!expect(near(p.pitch, 60.0f * kDegToRad, 0.0001f),
+			"pitch seeds from orientation.y")) return false;
+	if (!expect(near(p.yaw_rate, 10.0f * kDegToRad, 0.0001f),
+			"yaw_rate carries the authored yaw_rot")) return false;
+	return expect(near(p.pitch_rate, 20.0f * kDegToRad, 0.0001f),
+			"pitch_rate carries the authored pitch_rot");
+}
+
 } // namespace
 
 int main() {
@@ -1146,6 +1216,9 @@ int main() {
 	if (!test_he_explosion_orbit_uses_authored_degrees()) ++failures;
 	if (!test_orbit_axis_y_keeps_y_constant()) ++failures;
 	if (!test_against_real_fixture())       ++failures;
+	if (!test_spawn_seeds_roll_from_orientation_z_and_signed_rate()) ++failures;
+	if (!test_spawn_roll_rate_sign_randomizes_without_signedrotations()) ++failures;
+	if (!test_spawn_yawandpitch_seeds_euler_channel()) ++failures;
 	if (failures != 0) {
 		std::fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;
