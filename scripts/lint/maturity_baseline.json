@@ -38,6 +38,8 @@
     "selection_ops.gd|func get_group(",
     "scripting_ops.gd|func get_selected_event_chain()",
     "scripting_ops.gd|func get_logic_summary()",
+    "item_seat_specs.gd|static func command_rule(",
+    "item_seat_specs.gd|static func predict_best_seat(",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
