@@ -101,6 +101,59 @@ inline constexpr int kMaxRoundIcons = 40; // [orig: @0x599bbf]
 int round_icon_count(int clip, int reserve, int capacity, int divisor);
 
 // ---------------------------------------------------------------------------
+// The capacity-1 reserve fold [orig: HUD_BuildEntityInfo @0x4b85ef —
+// hudInfo+52 += clip when def+88 == 1]: the chambered round joins the
+// displayed reserve (the ammo text and the round icons both read the folded
+// count).
+
+int folded_reserve(int clip, int reserve, int capacity);
+
+// ---------------------------------------------------------------------------
+// The waypoint distance label [orig: HUD_DrawWaypointNameAndDistance
+// @0x5947e5..0x594836]: horizontal-only (the mission X/Y plane), fixed sqrt
+// truncated to whole meters (the sar-16 read).
+
+int waypoint_distance_m(double dx, double dz);
+
+// ---------------------------------------------------------------------------
+// The weapon heat bar [orig: HUD_DrawWeaponHeatBar @0x599700 — gate
+// hudInfo+60 @0x59970a; spans @0x5997a1..0x59981f]: heat is 0..0xFFFF, the
+// fill span is the rounded 16.16 fraction of the bar extent, and the fill
+// axis follows the authored rect (wide -> horizontal left-to-right, tall ->
+// vertical bottom-up).
+
+int heat_fill_span(int extent_px, int heat);
+bool heat_bar_is_horizontal(double width, double height);
+
+// ---------------------------------------------------------------------------
+// The PowerThrow windup curve [orig: HUD_DrawPowerThrowChargeBar @0x599830 —
+// curve @0x5998ad (full through the first 31 held ticks — the tap window
+// throws at full power — then restarting at 0 and climbing (held-31)/93 to
+// 1); fill @0x599964 = (progress_fp16 * extent + 0x8000) >> 16].
+
+inline constexpr int kPowerThrowTapTicks = 31;
+inline constexpr int kPowerThrowRampTicks = 93;
+
+int32_t power_throw_progress_fp16(int held_ticks);
+int power_fill_span(int32_t progress_fp16, int extent_px);
+
+// ---------------------------------------------------------------------------
+// The loading bar [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f — displayed
+// climbs +1 per draw up to the min(reported + 10, 100) liveness lead; the fill
+// arithmetic @ 0x5d4c40 — right edge = displayed * (w + 2) / 100 + x + 4
+// clamped to the track, then the final 1px inset]. Our coarser draw cadence
+// first catches displayed up to reported (the D-LOADSCR-1 adaptation: retail
+// reaches catch-up for free at window-message pump frequency).
+
+int loading_bar_step(int displayed, int reported);
+
+struct LoadingBarSpan {
+	int left = 0;
+	int right = 0; // right <= left draws an empty fill
+};
+LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed);
+
+// ---------------------------------------------------------------------------
 // The crosshair spread projection [orig: HUD_DrawCrosshair
 // @0x592b07..0x592bf5]: pixel = (spread_16.16 * screen_w / int(fov_deg)) >> 16
 // (the 2^31/180 degree factors cancel); the instability sum wraps int32 with

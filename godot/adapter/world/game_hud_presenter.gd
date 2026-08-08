@@ -186,15 +186,10 @@ func tick() -> void:
 		return
 	var max_h: int = sim.get_local_player_max_health()
 	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip
-	# key). Icon indices: 0=stand, 1=crouch, 2=prone. [orig: HUD_BuildEntityInfo
-	# @0x4b860c — entity+300 flags 0x200=crouch->1, 0x100=prone->2]
-	var anim_key: String = sim.get_local_player_anim_key()
-	var stance := 0
-	if "prone" in anim_key:
-		stance = 2
-	elif "crouch" in anim_key:
-		stance = 1
+	# The stance icon from the sim's authoritative body state (0=stand,
+	# 1=crouch, 2=prone). [orig: HUD_BuildEntityInfo @0x4b860c — entity+300
+	# flags 0x200=crouch->1, 0x100=prone->2]
+	var stance: int = sim.get_local_player_stance()
 
 	# The equipped weapon's HUD slice: re-resolve on weapon change only.
 	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def()
@@ -213,12 +208,11 @@ func tick() -> void:
 	if wv != null and wv.active:
 		weapon_active = true
 		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
-		reserve = wv.reserve
 		# Capacity-1 weapons fold the chambered round into the displayed reserve
-		# (the ammo text and the round icons both read the folded count).
+		# (hud_math.folded_reserve carries the witness).
 		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
-		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
-			reserve += clip
+		reserve = NovaHudPos.folded_reserve(clip, wv.reserve,
+				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	var scope_engaged := false
 	var scope_fraction := 0.0
@@ -350,9 +344,10 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
 	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
-	# The original distance is horizontal-only (mission X/Y deltas = the Godot
-	# ground plane), fixed sqrt truncated to whole meters. [orig: @0x594836 sar 16]
-	entry.distance_m = int(Vector2(pos.x - player.x, pos.z - player.z).length())
+	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated
+	# to whole meters natively. [orig: @0x594836 sar 16]
+	entry.distance_m = NovaHudPos.waypoint_distance_m(
+			Vector2(pos.x - player.x, pos.z - player.z))
 	return entry
 
 

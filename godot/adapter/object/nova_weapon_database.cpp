@@ -33,8 +33,19 @@ void NovaWeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &NovaWeaponDatabase::find_weapon);
 	ClassDB::bind_method(D_METHOD("loadout_weight", "weapon_indices", "ammo_counts"),
 			&NovaWeaponDatabase::loadout_weight);
+	ClassDB::bind_method(D_METHOD("extra_ammo_weight", "index", "count"),
+			&NovaWeaponDatabase::extra_ammo_weight);
 	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
 			&NovaWeaponDatabase::encumbrance_class);
+	ClassDB::bind_static_method("NovaWeaponDatabase",
+			D_METHOD("player_info_team_mask", "team"),
+			&NovaWeaponDatabase::player_info_team_mask);
+	ClassDB::bind_static_method("NovaWeaponDatabase",
+			D_METHOD("player_info_class_mask", "playerclass_value"),
+			&NovaWeaponDatabase::player_info_class_mask);
+	ClassDB::bind_static_method("NovaWeaponDatabase",
+			D_METHOD("default_clip_row", "saved", "maxclips"),
+			&NovaWeaponDatabase::default_clip_row);
 	ClassDB::bind_static_method("NovaWeaponDatabase",
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&NovaWeaponDatabase::armory_resolve_selected_class);
@@ -51,6 +62,7 @@ void NovaWeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(ENCUMBRANCE_LIGHT);
 	BIND_CONSTANT(ENCUMBRANCE_NORMAL);
 	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
+	BIND_CONSTANT(CLIP_COUNT_DEF_DEFAULT);
 }
 
 Error NovaWeaponDatabase::load(const String &path) {
@@ -337,6 +349,29 @@ double NovaWeaponDatabase::loadout_weight(const PackedInt32Array &weapon_indices
 		counts.push_back(i < ammo_counts.size() ? ammo_counts[i] : -1);
 	}
 	return def_loadout_weight(defs.data(), counts.data(), defs.size());
+}
+
+double NovaWeaponDatabase::extra_ammo_weight(int p_index, int p_count) const {
+	if (p_index < 0 || p_index >= static_cast<int>(weapons.size())) {
+		return 0.0;
+	}
+	const Weapon &w = weapons[static_cast<size_t>(p_index)];
+	DefWeaponDef d = {};
+	d.maxclips = w.maxclips;
+	d.clipweight = w.clip_weight;
+	return def_extra_ammo_weight(&d, p_count);
+}
+
+int NovaWeaponDatabase::player_info_team_mask(int p_team) {
+	return opennova::world::player_info_team_mask(p_team);
+}
+
+int NovaWeaponDatabase::player_info_class_mask(int p_playerclass_value) {
+	return opennova::world::player_info_class_mask(p_playerclass_value);
+}
+
+int NovaWeaponDatabase::default_clip_row(int p_saved, int p_maxclips) {
+	return opennova::world::player_info_default_clip_row(p_saved, p_maxclips);
 }
 
 int NovaWeaponDatabase::armory_resolve_selected_class(int p_player_class,

@@ -117,6 +117,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_stance"), &NovaSimulation::get_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &NovaSimulation::get_local_player_anim_source_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &NovaSimulation::get_local_player_anim_source_phase_ticks);
@@ -166,6 +167,9 @@ void NovaSimulation::_bind_methods() {
 					"pos_raw_units", "tpos_raw_units"),
 			&NovaSimulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &NovaSimulation::get_tracer_trails);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("compile_tracer_ribbons", "rows", "camera"),
+			&NovaSimulation::compile_tracer_ribbons);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
@@ -354,6 +358,13 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("load_weapon_profile", "path"),
 	                     &NovaSimulation::load_weapon_profile);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("weapon_profile_relpath", "expansion_name"),
+			&NovaSimulation::weapon_profile_relpath);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("fp_viewmodel_spec", "has_def", "gfx1", "gfx1a", "animadm",
+					"flags"),
+			&NovaSimulation::fp_viewmodel_spec);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &NovaSimulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),

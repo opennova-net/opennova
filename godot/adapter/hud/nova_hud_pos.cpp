@@ -90,6 +90,14 @@ void NovaHudPos::_bind_methods() {
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &NovaHudPos::format_ammo);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("weapon_name_x_nudge", "narrow_surface", "align"), &NovaHudPos::weapon_name_x_nudge);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &NovaHudPos::round_icon_count);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &NovaHudPos::folded_reserve);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &NovaHudPos::waypoint_distance_m);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("heat_fill_span", "extent_px", "heat"), &NovaHudPos::heat_fill_span);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("heat_bar_is_horizontal", "bar_size"), &NovaHudPos::heat_bar_is_horizontal);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("power_throw_progress_fp16", "held_ticks"), &NovaHudPos::power_throw_progress_fp16);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("power_fill_span", "progress_fp16", "extent_px"), &NovaHudPos::power_fill_span);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &NovaHudPos::loading_bar_step);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &NovaHudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &NovaHudPos::crosshair_spread_px_fp16);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &NovaHudPos::crosshair_total_spread_fp16);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &NovaHudPos::crosshair_error_row);
@@ -453,6 +461,40 @@ int NovaHudPos::weapon_name_x_nudge(bool p_narrow_surface, int p_align) {
 
 int NovaHudPos::round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor) {
 	return opennova::hud::round_icon_count(p_clip, p_reserve, p_capacity, p_divisor);
+}
+
+int NovaHudPos::folded_reserve(int p_clip, int p_reserve, int p_capacity) {
+	return opennova::hud::folded_reserve(p_clip, p_reserve, p_capacity);
+}
+
+int NovaHudPos::waypoint_distance_m(const Vector2 &p_ground_delta) {
+	return opennova::hud::waypoint_distance_m(p_ground_delta.x, p_ground_delta.y);
+}
+
+int NovaHudPos::heat_fill_span(int p_extent_px, int p_heat) {
+	return opennova::hud::heat_fill_span(p_extent_px, p_heat);
+}
+
+bool NovaHudPos::heat_bar_is_horizontal(const Vector2 &p_bar_size) {
+	return opennova::hud::heat_bar_is_horizontal(p_bar_size.x, p_bar_size.y);
+}
+
+int NovaHudPos::power_throw_progress_fp16(int p_held_ticks) {
+	return opennova::hud::power_throw_progress_fp16(p_held_ticks);
+}
+
+int NovaHudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
+	return opennova::hud::power_fill_span(p_progress_fp16, p_extent_px);
+}
+
+int NovaHudPos::loading_bar_step(int p_displayed, int p_reported) {
+	return opennova::hud::loading_bar_step(p_displayed, p_reported);
+}
+
+Vector2i NovaHudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {
+	const opennova::hud::LoadingBarSpan span =
+			opennova::hud::loading_bar_fill_span(p_x, p_w, p_displayed);
+	return Vector2i(span.left, span.right);
 }
 
 double NovaHudPos::crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,

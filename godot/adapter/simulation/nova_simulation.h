@@ -1146,6 +1146,11 @@ public:
 	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
 	// shell plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
+	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
+	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
+	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
+	// source is the body state, never the anim clip name.
+	int get_local_player_stance() const;
 	int get_local_player_anim_phase_ticks() const;
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
@@ -1292,6 +1297,17 @@ public:
 	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
 	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
 	Error load_weapon_profile(const String &p_path);
+	// The profile file's path RULE relative to the mount root (playersav
+	// weapon_sav_relpath): with an active expansion retail looks ONLY under
+	// "expansion/<name>/", never the root [orig: the path build
+	// @0x54f68c..@0x54f6b7]. Static so shell path assembly stays a join.
+	static String weapon_profile_relpath(const String &p_expansion_name);
+	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
+	// fp_viewmodel_spec [orig: Player_RenderFirstPersonViewModel @0x4ded60;
+	// the emplaced arms omission @0x4dedc7]). has_def=false is the bring-up
+	// path; an empty gun on a resolved def means submit no FP gun.
+	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
+			const String &p_gfx1a, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:
 	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},
 	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.
@@ -1431,6 +1447,16 @@ public:
 	// are invisible in flight (graphicModel zeroed @0x4ec900). The witness map lives
 	// in world/tracer_trails.h.]
 	PackedFloat32Array get_tracer_trails() const;
+
+	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
+	// the witnessed style tables and the camera-facing build
+	// [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0]). Static so the present
+	// pass and stub-sim tests share the one native seam:
+	// {additive: {positions, colors}, alpha: {positions, colors}, channels} —
+	// each family one triangle-strip vertex run (channels joined by degenerate
+	// pairs), ready for verbatim ImmediateMesh upload.
+	static Dictionary compile_tracer_ribbons(const PackedFloat32Array &rows,
+			const Vector3 &camera);
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
 	// §24): {effects[], sounds[], husk_swaps[], debris_bursts[], glass_breaks[],

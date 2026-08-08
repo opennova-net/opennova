@@ -911,6 +911,13 @@ typedef enum DefEncumbrance {
    matching the engine's `<=0 -> maxclips` branch. Returns the summed weight. */
 DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n);
 
+/* One extra-ammo (category-3) weight term [orig: the armory grenade leg
+   @ 0x5655c9..0x56561c; the PLAYER_INFO sub-weapon/grenade terms in the
+   @ 0x55f1f0 family]: count * clipweight only — no weaponweight. count < 0
+   (the untouched sentinel) takes the maxclips default; a chosen zero row
+   weighs nothing. */
+DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count);
+
 /* Encumbrance class for a loadout weight [orig: @ 0x55f480]: >= 66.6 HEAVY,
    >= 33.3 NORMAL, else LIGHT (the witnessed thresholds, exact). */
 DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight);

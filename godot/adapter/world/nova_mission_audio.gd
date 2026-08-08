@@ -66,7 +66,7 @@ var _audio_root: Node3D
 # the four time-of-day slot set names and lightweight layer descriptors for each
 # distinct set. A candidate_id identifies one marker/set/layer for the lifetime
 # of the mission, allowing incumbents to retain playback across ranking ticks.
-# [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_h:float,
+# [{ pos:Vector3, slot_sets:PackedStringArray(4), stagger_slot:int,
 #    layers_by_set:{set_name: Array[Dictionary]} }]
 var _markers: Array = []
 # The native emitter system (engine/runtime/audio AmbientMixer): staggered tick&7 marker
@@ -249,9 +249,10 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			"pos": pos,
 			"source_bms_id": int(row.get("bms_id", 0)),
 			"slot_sets": slot_sets,
-			# De-sync marker crossfades like the engine's per-entity clock
-			# stagger [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
-			"stagger_h": float((_markers.size() & 0xF) << 11) / 65536.0,
+			# The marker's pool-slot nibble: the native mixer derives the walk
+			# cohort AND the (slot << 11) Q16-hours clock stagger from it
+			# [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158].
+			"stagger_slot": _markers.size() & 0xF,
 			"layers_by_set": layers_by_set,
 		})
 		_stats.markers_resolved += 1
@@ -814,12 +815,8 @@ func _feed_mixer() -> void:
 		for r in range(4):
 			if r < slot_sets.size():
 				slot_keys[r] = set_names.find(String(slot_sets[r]))
-		# The walk cohort and the clock stagger both ride the marker's pool-slot
-		# nibble [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158];
-		# the stored stagger_h is that nibble in hours, inverted here.
-		var stagger_slot := int(roundf(float(marker.get("stagger_h", 0.0)) * 65536.0)) >> 11
-		_mixer.add_marker(pos, int(marker.get("source_bms_id", 0)), stagger_slot,
-				0, slot_keys, sets)
+		_mixer.add_marker(pos, int(marker.get("source_bms_id", 0)),
+				int(marker.get("stagger_slot", 0)), 0, slot_keys, sets)
 
 
 # Resolve queued name-keyed registrations into LWF layer descriptors at their

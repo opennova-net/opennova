@@ -121,8 +121,7 @@ static func gametype_text_key(game_type: int) -> String:
 ## must track reported here. The +1 lead-ahead past reported is preserved for
 ## the per-object pulse phase where multiple draws share one reported value.
 static func step_displayed(displayed: int, reported: int) -> int:
-	var lead_cap := mini(reported + 10, 100)
-	return clampi(maxi(displayed + 1, reported), 0, lead_cap)
+	return NovaHudPos.loading_bar_step(displayed, reported)
 
 
 ## The fill rect's horizontal span (left, right) for a bar whose outer frame
@@ -131,10 +130,7 @@ static func step_displayed(displayed: int, reported: int) -> int:
 ## to the track, then one final 1px inset [orig: v8 @ 0x5d4c40; fill draw after
 ## the last inset]. right <= left means an empty fill.
 static func bar_fill_span(x: int, w: int, displayed: int) -> Vector2i:
-	@warning_ignore("integer_division")  # the original's integer divide
-	var fill_right := x + 4 + displayed * (w + 2) / 100
-	fill_right = mini(fill_right, x + w + 4) - 1
-	return Vector2i(x + 3, fill_right)
+	return NovaHudPos.loading_bar_fill_span(x, w, displayed)
 
 
 ## Resolve the background image for a mission: the sidecar if present, else the

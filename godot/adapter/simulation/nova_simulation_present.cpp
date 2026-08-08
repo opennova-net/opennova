@@ -5,8 +5,10 @@
 #include "simulation/client_replica_present_projection.h"
 
 #include <cstring>
+#include <vector>
 
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
+#include <renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
 using namespace novasim;
@@ -465,6 +467,59 @@ PackedFloat32Array NovaSimulation::get_tracer_trails() const {
 	}
 	return out;
 }
+
+// The styled half of the trail split: rows in, per-family strip runs out.
+// Family packing (positions + colors arrays) is transport shape only; the
+// geometry/color math lives in renderer/tracer_frame.cpp with its citations.
+Dictionary NovaSimulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
+		const Vector3 &camera) {
+	std::vector<renderer::TracerChannelInput> channels;
+	const float *r = rows.ptr();
+	const int64_t size = rows.size();
+	int64_t i = 0;
+	while (r != nullptr && i + 2 < size) {
+		renderer::TracerChannelInput c;
+		c.style_id = static_cast<int>(r[i]);
+		c.age = static_cast<int>(r[i + 1]);
+		c.count = static_cast<int>(r[i + 2]);
+		i += 3;
+		if (c.count <= 0 || i + static_cast<int64_t>(c.count) * 4 > size) {
+			break;
+		}
+		c.points = r + i;
+		i += static_cast<int64_t>(c.count) * 4;
+		channels.push_back(c);
+	}
+	renderer::TracerRibbonFrame frame;
+	renderer::compile_tracer_ribbons(channels.data(), channels.size(),
+			{static_cast<float>(camera.x), static_cast<float>(camera.y),
+					static_cast<float>(camera.z)},
+			frame);
+	auto pack_family = [](const std::vector<float> &run) {
+		Dictionary family;
+		const int64_t verts = static_cast<int64_t>(run.size() / 7);
+		PackedVector3Array positions;
+		PackedColorArray colors;
+		positions.resize(verts);
+		colors.resize(verts);
+		Vector3 *pw = positions.ptrw();
+		Color *cw = colors.ptrw();
+		for (int64_t v = 0; v < verts; ++v) {
+			const float *f = run.data() + v * 7;
+			pw[v] = Vector3(f[0], f[1], f[2]);
+			cw[v] = Color(f[3], f[4], f[5], f[6]);
+		}
+		family["positions"] = positions;
+		family["colors"] = colors;
+		return family;
+	};
+	Dictionary out;
+	out["additive"] = pack_family(frame.additive);
+	out["alpha"] = pack_family(frame.alpha);
+	out["channels"] = frame.channels;
+	return out;
+}
+
 Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	Dictionary out;
 	if (!ai_ || !world_) return out;

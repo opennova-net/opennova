@@ -142,6 +142,17 @@ DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *amm
     return total;
 }
 
+DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count) {
+    /* [orig: the armory grenade/extra-ammo leg @ 0x5655c9..0x56561c and the
+       PLAYER_INFO sub-weapon/grenade terms in the @ 0x55f1f0 family]: the
+       category-3 rows are extra-ammo legs, not parent slots — count *
+       clipweight only, no weaponweight; the -1/absent sentinel takes the
+       maxclips default, a chosen zero row weighs nothing. */
+    if (!w) return 0.0;
+    const int clips = count < 0 ? w->maxclips : count;
+    return (double)(clips > 0 ? clips : 0) * (double)w->clipweight;
+}
+
 DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight) {
     /* [orig: update_player_info_weight_and_weapon_icons @ 0x55f480] the exact
        witnessed thresholds: >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT. */

@@ -226,4 +226,25 @@ int32_t armory_class_filter_mask(int selected_class) {
     return 1 << (selected_class - 5);
 }
 
+// [orig: PlayerInfo_SetTeamAndClassMask @0x55de60 — g_playerInfoTeamMask =
+// 2 - (team != 0)]
+int32_t player_info_team_mask(int team) {
+    return team == 0 ? 2 : 1;
+}
+
+// [orig: @0x55de60 — 5->1, 6->2, 7->4, 8->8, 9->16; out of range masks
+// nothing on this screen]
+int32_t player_info_class_mask(int playerclass_value) {
+    if (playerclass_value < 5 || playerclass_value > 9) return 0;
+    return 1 << (playerclass_value - 5);
+}
+
+// [orig: populate_ammo_combo_boxes @0x55def0; armory fill @0x565cd0 — the
+// `saved == i || (saved == -1 && i == maxclips)` row select]
+int player_info_default_clip_row(int saved, int maxclips) {
+    if (maxclips <= 0) return 0;
+    if (saved > 0) return saved < maxclips ? saved : maxclips;
+    return maxclips;
+}
+
 } // namespace opennova::world

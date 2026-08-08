@@ -406,14 +406,13 @@ func _draw_heat_bar(surface: Vector2) -> void:
 	var border: Color = _colors.get("heat_border", Color.WHITE)
 	var fill: Color = _colors.get("stancecolor_bad", Color(0.69, 0.04, 0.04))
 	draw_rect(r, border, false)
-	heat = mini(heat, 0xFFFF)
-	if r.size.y <= r.size.x:
+	if NovaHudPos.heat_bar_is_horizontal(r.size):
 		# Horizontal: fill left -> right. [orig: @0x5997f0..0x59981f]
-		var span := (int(r.size.x) * heat + 0x8000) >> 16
+		var span := NovaHudPos.heat_fill_span(int(r.size.x), heat)
 		draw_rect(Rect2(r.position + Vector2.ONE, Vector2(maxf(span - 2.0, 0.0), r.size.y - 2.0)), fill)
 	else:
 		# Vertical: fill bottom -> up. [orig: @0x5997b0..0x5997df]
-		var vspan := (int(r.size.y) * heat + 0x8000) >> 16
+		var vspan := NovaHudPos.heat_fill_span(int(r.size.y), heat)
 		var top := r.position.y + r.size.y - vspan + 1.0
 		draw_rect(Rect2(Vector2(r.position.x + 1.0, top),
 			Vector2(r.size.x - 2.0, maxf(r.position.y + r.size.y - 1.0 - top, 0.0))), fill)
@@ -437,13 +436,11 @@ func _draw_power_bar(surface: Vector2) -> void:
 	if design.size.x <= 0.0 or design.size.y <= 0.0:
 		return
 	var held := int(_info.get("windup_held_ticks", 0))
-	var progress := 1.0
-	if held >= 31:
-		progress = minf(float(held - 31) * (1.0 / 93.0), 1.0)
+	var progress_fp16 := NovaHudPos.power_throw_progress_fp16(held)
 	var color := Color8(128, 0, 0)  # [orig: the 0xFF800000 constant @0x840b1c]
 	var r := HudLayout.scale_rect(design, surface)
 	draw_rect(r, color, false)
-	var span := (int(progress * 65536.0) * int(r.size.x) + 0x8000) >> 16
+	var span := NovaHudPos.power_fill_span(progress_fp16, int(r.size.x))
 	if span > 1:
 		draw_rect(Rect2(r.position + Vector2.ONE,
 			Vector2(minf(float(span - 1), r.size.x - 2.0), r.size.y - 2.0)), color)
@@ -452,7 +449,7 @@ func _draw_power_bar(surface: Vector2) -> void:
 				Vector2(0, -15), surface)
 		HudText.draw_text(self, _font,
 			label_pos, surface,
-			"%d%%" % int(progress * 100.0), HudText.half_bright(color))
+			"%d%%" % ((progress_fp16 * 100) >> 16), HudText.half_bright(color))
 
 
 # The waypoint name + distance label at the HUDWPDINFO anchor. Gates: the mission

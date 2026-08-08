@@ -589,12 +589,11 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	#  Environment_GetFogEndDistance(underwater) @ 0x5c28a2 — below the
 	#  surface the murk visibility curve replaces the weather fog distance].
 	var underwater := cam_pos.y < water_height
-	# Above water the pass fog end is the smoothed fog distance attenuated by the
-	# overcast blend: fogDist * (1 - overcast/2) [orig: Environment_GetFogEndDistance
-	# @ 0x57e435 — (0x10000 - (Env_OvercastBlend >> 1)) * Env_FogDistCurrent >> 16].
-	var overcast: float = (_cached_env.get_overcast_blend()
-			if _cached_env != null else 0.0)
-	var pass_fog_end := fog_end * (1.0 - overcast * 0.5)
+	# Above water the pass fog end is the smoothed fog distance attenuated by
+	# the overcast blend — the native env curve [orig:
+	# Environment_GetFogEndDistance @ 0x57e435].
+	var pass_fog_end: float = EnvFile.fog_end_above_water(fog_end,
+			_cached_env.get_overcast_blend() if _cached_env != null else 0.0)
 	if underwater and env_data:
 		pass_fog_end = env_data.get_fog_end_underwater()
 	# The adjusted camera transform includes Camera3D h/v offsets, keeping the

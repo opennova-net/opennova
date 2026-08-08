@@ -745,16 +745,13 @@ func get_textured_layer_count() -> int:
 
 
 func _retail_frame_names(authored: String, frame_count: int) -> PackedStringArray:
+	# The witnessed derivation lives natively (renderer
+	# retail_particle_frame_name, D-PTL-14) — the preview resolves exactly what
+	# the runtime resolves.
 	var result := PackedStringArray()
-	if frame_count <= 1:
-		result.append(authored)
-		return result
-	var base := authored.to_lower()
-	var extension := base.find(".tga")
-	if extension >= 0:
-		base = base.substr(0, extension)
-	for frame in range(1, frame_count + 1):
-		result.append("%s_%02d.tga" % [base, frame])
+	for frame in range(1, maxi(frame_count, 1) + 1):
+		result.append(NovaParticleRenderer.retail_frame_name(
+				authored, frame_count, frame))
 	return result
 
 

@@ -104,6 +104,59 @@ int round_icon_count(int clip, int reserve, int capacity, int divisor) {
 	return std::min(n, kMaxRoundIcons);
 }
 
+// [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1;
+// the -1 sentinels (no clip / infinite) never fold]
+int folded_reserve(int clip, int reserve, int capacity) {
+	if (capacity == 1 && clip >= 0 && reserve >= 0) return reserve + clip;
+	return reserve;
+}
+
+// [orig: HUD_DrawWaypointNameAndDistance @0x5947e5..0x594836 — 2D fixed sqrt,
+// the >>16 truncation to whole meters]
+int waypoint_distance_m(double dx, double dz) {
+	return static_cast<int>(std::sqrt(dx * dx + dz * dz));
+}
+
+// [orig: HUD_DrawWeaponHeatBar spans @0x5997a1..0x59981f]
+int heat_fill_span(int extent_px, int heat) {
+	const int h = std::clamp(heat, 0, 0xFFFF);
+	return (extent_px * h + 0x8000) >> 16;
+}
+
+bool heat_bar_is_horizontal(double width, double height) {
+	return height <= width;
+}
+
+// [orig: HUD_DrawPowerThrowChargeBar curve @0x5998ad — 1/93 = flt_7CD390,
+// fld1 clamp; full through the 31-tick tap window]
+int32_t power_throw_progress_fp16(int held_ticks) {
+	if (held_ticks < kPowerThrowTapTicks) return 0x10000;
+	const int64_t ramped =
+			(static_cast<int64_t>(held_ticks - kPowerThrowTapTicks) << 16) /
+			kPowerThrowRampTicks;
+	return static_cast<int32_t>(std::min<int64_t>(ramped, 0x10000));
+}
+
+// [orig: fill @0x599964]
+int power_fill_span(int32_t progress_fp16, int extent_px) {
+	return static_cast<int>(
+			(static_cast<int64_t>(progress_fp16) * extent_px + 0x8000) >> 16);
+}
+
+// [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f; the catch-up max is the
+// D-LOADSCR-1 cadence adaptation]
+int loading_bar_step(int displayed, int reported) {
+	const int lead_cap = std::min(reported + 10, 100);
+	return std::clamp(std::max(displayed + 1, reported), 0, lead_cap);
+}
+
+// [orig: the fill arithmetic @ 0x5d4c40 — the original's integer divide]
+LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed) {
+	int fill_right = x + 4 + displayed * (w + 2) / 100;
+	fill_right = std::min(fill_right, x + w + 4) - 1;
+	return {x + 3, fill_right};
+}
+
 // [orig: HUD_DrawCrosshair @0x592b07..0x592bf5 — the HIWORD fov truncation and
 // the >>16 both survive; the 2^31/180 factors cancel between spread and fov]
 double crosshair_spread_px_fp16(int32_t spread_fp16, double fov_deg,
