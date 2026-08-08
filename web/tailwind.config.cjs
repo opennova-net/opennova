@@ -20,15 +20,7 @@ module.exports = {
         accent: 'rgb(var(--accent) / <alpha-value>)',
         danger: 'rgb(var(--danger) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
-        online: 'rgb(var(--online) / <alpha-value>)',
-        // Back-compat alias: any un-swept brand-* renders as accent, never blue.
-        brand: {
-          50: 'rgb(var(--accent) / <alpha-value>)',
-          100: 'rgb(var(--accent) / <alpha-value>)',
-          200: 'rgb(var(--accent) / <alpha-value>)',
-          500: 'rgb(var(--accent) / <alpha-value>)',
-          700: 'rgb(var(--accent) / <alpha-value>)'
-        }
+        online: 'rgb(var(--online) / <alpha-value>)'
       },
       borderColor: {
         // Bare `border` (no explicit color) uses the ONED 1px border color.

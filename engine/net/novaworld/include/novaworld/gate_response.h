@@ -43,8 +43,8 @@ namespace opennova {
 // a bug; the reverted PR #37 stack adding them was the correct fix.
 //
 // CUS / PVT are NOT part of retail JO:CA's ProcessResponse key set (they
-// came from a different/older witness). Retained as tolerant extras for
-// compatibility but flagged: do not treat them as retail.
+// came from a different/older witness), but live gate responses carry them;
+// the parser counts them as absorbed phantom keys and retains no value.
 //
 // Leading line tag (off_7CBEE4) is literal "VAR". Lines shorter than 3
 // whitespace-separated tokens (or without a "VAR" tag) are ignored,
@@ -77,11 +77,6 @@ struct GateResponse {
 	std::string glsvss_request;
 	int glsvss_rims = 0;
 	int glsvss_agrms = 0;
-
-	// Not in retail JO:CA's ProcessResponse. Retained only so old callers still
-	// compile; the parser leaves them empty while counting the VAR lines.
-	std::string cus;
-	std::string pvt;
 
 	// Count of VAR lines we successfully absorbed. Matches the original's
 	// `v6` counter; a zero count is treated as failure by the binary.

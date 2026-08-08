@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -11,21 +10,18 @@ namespace OpenNova.Launcher.Services;
 public sealed class LauncherSettingsService
 {
     private readonly string _settingsPath;
-    private readonly string? _legacySettingsPath;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
 
     public LauncherSettingsService()
-        : this(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenNovaLauncher"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OnLauncher", "settings.json"))
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenNovaLauncher"))
     {
     }
 
-    /// <summary>Test-friendly constructor with an injectable settings directory and optional legacy file to migrate.</summary>
-    public LauncherSettingsService(string settingsDirectory, string? legacySettingsPath = null)
+    /// <summary>Test-friendly constructor with an injectable settings directory.</summary>
+    public LauncherSettingsService(string settingsDirectory)
     {
         if (string.IsNullOrWhiteSpace(settingsDirectory))
         {
@@ -34,13 +30,10 @@ public sealed class LauncherSettingsService
 
         Directory.CreateDirectory(settingsDirectory);
         _settingsPath = Path.Combine(settingsDirectory, "settings.json");
-        _legacySettingsPath = legacySettingsPath;
     }
 
     public async Task<LauncherSettings> LoadAsync()
     {
-        MigrateLegacySettingsIfNeeded();
-
         if (!File.Exists(_settingsPath))
         {
             return new LauncherSettings();
@@ -61,29 +54,9 @@ public sealed class LauncherSettingsService
     public async Task SaveAsync(LauncherSettings settings)
     {
         var normalized = Normalize(settings);
-        normalized.LegacyGameDirectory = null;
 
         await using var stream = File.Open(_settingsPath, FileMode.Create, FileAccess.Write, FileShare.None);
         await JsonSerializer.SerializeAsync(stream, normalized, SerializerOptions);
-    }
-
-    private void MigrateLegacySettingsIfNeeded()
-    {
-        if (File.Exists(_settingsPath) ||
-            string.IsNullOrWhiteSpace(_legacySettingsPath) ||
-            !File.Exists(_legacySettingsPath))
-        {
-            return;
-        }
-
-        try
-        {
-            File.Copy(_legacySettingsPath, _settingsPath);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Settings] Legacy settings migration failed: {ex.Message}");
-        }
     }
 
     private static LauncherSettings Normalize(LauncherSettings settings)
@@ -108,12 +81,6 @@ public sealed class LauncherSettingsService
             {
                 settings.GameDirectories[key] = value.Trim();
             }
-        }
-
-        if (!string.IsNullOrWhiteSpace(settings.LegacyGameDirectory) &&
-            !settings.GameDirectories.ContainsKey("jop_2_consumer"))
-        {
-            settings.GameDirectories["jop_2_consumer"] = settings.LegacyGameDirectory.Trim();
         }
 
         if (settings.InstalledExpansions == null)

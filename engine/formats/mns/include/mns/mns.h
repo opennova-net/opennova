@@ -32,9 +32,6 @@ struct StyleSheet {
 // - Case-insensitive key storage (uppercase)
 bool parse(const char *data, size_t size, StyleSheet &out, std::string &error);
 
-// Parse MNS stylesheet from file.
-bool parse_file(const std::string &path, StyleSheet &out, std::string &error);
-
 // Write stylesheet to binary buffer.
 bool write(const StyleSheet &sheet, std::vector<uint8_t> &out, std::string &error);
 

@@ -272,6 +272,71 @@ bool geometry_bounds_and_reuse_contract() {
 			"identical warm compile is deterministic and allocation-free");
 }
 
+bool world_oriented_and_rolled_quad_contract() {
+	// Billboard roll spins the quad inside the view plane, while the
+	// YAWANDPITCH path (def flag 0x100) routes (yaw, pitch, roll) through the
+	// retail RotationYawPitchRoll matrix and may leave that plane
+	// [orig: CParticleEmitter_RenderStaticBillboards @ 0x5f4e10 selects the
+	// world-oriented path; the Euler feed @ 0x5f5068].
+	constexpr float kHalfPi = 1.57079632679f;
+	const auto draw_state = state(r::ParticlePipeline::Blend, 1, 0, 1);
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+
+	r::ParticleQuadSnapshot rolled;
+	rolled.center = {0.0f, 0.0f, 5.0f};
+	rolled.half_width = 2.0f;
+	rolled.half_height = 1.0f;
+	rolled.roll = kHalfPi;
+	rolled.state = draw_state;
+	{
+		r::ParticleFrameSnapshot snapshot;
+		snapshot.emitters.push_back(emitter(1, r::ParticleRenderDomain::World,
+				5.0f, {rolled}));
+		const auto &packet = compiler.compile(snapshot, view);
+		if (!check(packet.vertices.size() == 4, "rolled billboard compiles"))
+			return false;
+		// A 90-degree roll swaps the width/height extents in the view plane and
+		// keeps every corner at the quad's depth.
+		if (!check(near(packet.vertices[0].x, -1.0f) &&
+				near(packet.vertices[0].y, -2.0f) &&
+				near(packet.vertices[3].x, 1.0f) &&
+				near(packet.vertices[3].y, 2.0f),
+				"billboard roll rotates extents inside the view plane")) return false;
+		if (!check(near(packet.vertices[0].z, 5.0f) &&
+				near(packet.vertices[1].z, 5.0f) &&
+				near(packet.vertices[2].z, 5.0f) &&
+				near(packet.vertices[3].z, 5.0f),
+				"the billboard path never leaves the view plane")) return false;
+	}
+
+	r::ParticleQuadSnapshot tipped = rolled;
+	tipped.roll = 0.0f;
+	tipped.pitch = kHalfPi;
+	tipped.alignment = r::ParticleAlignment::WorldOriented;
+	{
+		r::ParticleFrameSnapshot snapshot;
+		snapshot.emitters.push_back(emitter(2, r::ParticleRenderDomain::World,
+				5.0f, {tipped}));
+		const auto &packet = compiler.compile(snapshot, view);
+		if (!check(packet.vertices.size() == 4, "world-oriented quad compiles"))
+			return false;
+		float z_span = 0.0f;
+		for (std::size_t i = 0; i < 4; ++i) {
+			const float dz = std::fabs(packet.vertices[i].z -
+					packet.vertices[0].z);
+			if (dz > z_span) z_span = dz;
+		}
+		if (!check(z_span > 1.9f,
+				"a 90-degree pitch tips the world-oriented quad out of the view plane"))
+			return false;
+		if (!check(near(packet.vertices[0].y, 0.0f) &&
+				near(packet.vertices[3].y, 0.0f),
+				"the pitched quad's height axis leaves the view Y axis")) return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -279,5 +344,6 @@ int main() {
 	if (!domain_sort_and_material_run_contract()) return 1;
 	if (!overlapping_emitters_interleave_by_particle_depth_contract()) return 1;
 	if (!geometry_bounds_and_reuse_contract()) return 1;
+	if (!world_oriented_and_rolled_quad_contract()) return 1;
 	return 0;
 }

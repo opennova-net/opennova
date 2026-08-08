@@ -35,9 +35,11 @@ void CollisionModel::finalize_sections() {
                 }
             }
         }
-        // Exact COBJ bounds win. Skeletal/person rows can also carry only an
-        // authored med/radius (no BVOL/CFAC), so preserve a positive radius even
-        // for legacy callers that did not set authored_bounds explicitly.
+        // Exact COBJ bounds win. Skeletal/person rows can also carry ONLY an
+        // authored med/radius (no BVOL/CFAC) — retail reads that authored
+        // sphere raw [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670] —
+        // so a positive radius on a volume-less section is kept as authored
+        // whether or not the producer stamped authored_bounds.
         if (s.authored_bounds || (s.volume_count <= 0 && s.radius > 0)) continue;
 
         // The bound SPHERE is synthesized only from a section's BVOL run.

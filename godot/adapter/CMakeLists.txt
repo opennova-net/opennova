@@ -114,7 +114,6 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_particle_def.cpp
     particle/nova_particle_file.cpp
     particle/nova_effect_scene.cpp
-    particle/nova_particle_emitter.cpp
     particle/nova_particle_compositor.cpp
     particle/nova_particle_renderer.cpp
     particle/ptl_resource_format.cpp

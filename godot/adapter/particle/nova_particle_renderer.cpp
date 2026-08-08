@@ -999,6 +999,11 @@ public:
 								alpha_multiplier,
 						0.0f, 1.0f);
 
+				// Flipbook clock: frame = int(4 * flip_rate * elapsed seconds)
+				// wrapped over the frame count, with GFXFLIPRAND offsetting by
+				// a serial-derived start frame [orig:
+				// CParticleEmitter_BuildBillboardQuads @ 0x5e6f17 —
+				// (256 / phase_rate) * flip_rate * phase / 64].
 				int frame_index = 0;
 				if (layer.flip_frames > 1 && layer.flip_rate > 0) {
 					int random_offset = 0;

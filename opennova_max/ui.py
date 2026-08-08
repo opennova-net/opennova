@@ -206,9 +206,6 @@ try
         print "OpenNova legacy File > Export registration context already exists; rebuilding menu entries."
     )
 
-    local mainMenuBar = menuMan.getMainMenuBar()
-    openNovaRemoveLegacyMenuItemByTitle mainMenuBar "OpenNova"
-
     local fileMenu = menuMan.findMenu "&File"
     if fileMenu == undefined do fileMenu = menuMan.findMenu "File"
     local exportMenu = undefined

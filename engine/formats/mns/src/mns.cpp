@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <sstream>
 #include <vector>
 
@@ -85,25 +84,6 @@ bool parse(const char *data, size_t size, StyleSheet &out, std::string &error) {
 		if (error.empty()) error = "MNS evaluation failed";
 	}
 	return result.success;
-}
-
-bool parse_file(const std::string &path, StyleSheet &out, std::string &error) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file) {
-		error = "Failed to open file: " + path;
-		return false;
-	}
-
-	auto size = file.tellg();
-	file.seekg(0, std::ios::beg);
-
-	std::vector<char> buffer(size);
-	if (!file.read(buffer.data(), size)) {
-		error = "Failed to read file: " + path;
-		return false;
-	}
-
-	return parse(buffer.data(), buffer.size(), out, error);
 }
 
 // Canonical lossy dump of the flat map (sorted, tab-separated). Lossless

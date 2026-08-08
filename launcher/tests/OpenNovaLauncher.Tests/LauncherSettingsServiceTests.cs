@@ -83,34 +83,6 @@ public class LauncherSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Load_MigratesLegacyOnLauncherSettingsOnce()
-    {
-        var dir = NewSettingsDir();
-        var legacyDir = Path.Combine(_tempRoot, "OnLauncher");
-        Directory.CreateDirectory(legacyDir);
-        var legacyPath = Path.Combine(legacyDir, "settings.json");
-
-        var legacySettings = new LauncherSettings();
-        legacySettings.GameDirectories["jop_2_consumer"] = _tempRoot;
-        await File.WriteAllTextAsync(legacyPath, JsonSerializer.Serialize(legacySettings, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
-
-        var service = new LauncherSettingsService(dir, legacyPath);
-        var migrated = await service.LoadAsync();
-
-        Assert.Equal(_tempRoot, migrated.GameDirectories["jop_2_consumer"]);
-        Assert.True(File.Exists(Path.Combine(dir, "settings.json")));
-
-        // Once migrated, the legacy file is no longer consulted.
-        var updated = new LauncherSettings { RedirectionEnabled = true };
-        await service.SaveAsync(updated);
-        await File.WriteAllTextAsync(legacyPath, "{\"redirectionEnabled\":false,\"gameDirectories\":{\"dfx2_consumer\":\"C:/changed\"}}");
-
-        var reloaded = await new LauncherSettingsService(dir, legacyPath).LoadAsync();
-        Assert.True(reloaded.RedirectionEnabled);
-        Assert.False(reloaded.GameDirectories.ContainsKey("dfx2_consumer"));
-    }
-
-    [Fact]
     public async Task Load_CorruptJson_FallsBackToDefaultsWithoutThrowing()
     {
         var dir = NewSettingsDir();

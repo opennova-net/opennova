@@ -36,7 +36,6 @@ void NovaAmbientMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_seconds", "dt"),
 			&NovaAmbientMixer::advance_seconds);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &NovaAmbientMixer::mix);
-	ClassDB::bind_method(D_METHOD("mix_v2", "listener"), &NovaAmbientMixer::mix_v2);
 	ClassDB::bind_method(D_METHOD("live_slot_count"),
 			&NovaAmbientMixer::live_slot_count);
 	ClassDB::bind_method(D_METHOD("clock_tick"), &NovaAmbientMixer::clock_tick);
@@ -170,15 +169,6 @@ int64_t NovaAmbientMixer::occlusion_trampoline(void *ctx, const float listener[3
 }
 
 PackedFloat32Array NovaAmbientMixer::mix(const Vector3 &listener) {
-	return mix_rows(listener, false);
-}
-
-PackedFloat32Array NovaAmbientMixer::mix_v2(const Vector3 &listener) {
-	return mix_rows(listener, true);
-}
-
-PackedFloat32Array NovaAmbientMixer::mix_rows(const Vector3 &listener,
-		bool include_pitch) {
 	const float l[3] = { static_cast<float>(listener.x),
 		static_cast<float>(listener.y), static_cast<float>(listener.z) };
 	// Resolve the provider fresh each mix: a freed provider silently degrades to
@@ -192,16 +182,13 @@ PackedFloat32Array NovaAmbientMixer::mix_rows(const Vector3 &listener,
 	const bool has_provider = sim_ != nullptr || duck_ != nullptr;
 	const std::vector<opennova::audio::AmbientCandidate> &out = mixer_.mix(
 			l, has_provider ? &NovaAmbientMixer::occlusion_trampoline : nullptr, this);
-	const int stride = include_pitch ? 6 : 5;
 	PackedFloat32Array rows;
-	rows.resize(static_cast<int64_t>(out.size()) * stride);
+	rows.resize(static_cast<int64_t>(out.size()) * 6);
 	float *w = rows.ptrw();
 	for (const opennova::audio::AmbientCandidate &c : out) {
 		*w++ = static_cast<float>(c.candidate_id);
 		*w++ = static_cast<float>(c.vol);
-		if (include_pitch) {
-			*w++ = static_cast<float>(c.pitch_q16);
-		}
+		*w++ = static_cast<float>(c.pitch_q16);
 		*w++ = c.pos[0];
 		*w++ = c.pos[1];
 		*w++ = c.pos[2];

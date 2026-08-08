@@ -344,8 +344,7 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 
 // CParticleEmitter_SpawnParticle @ 0x5e7640: bits 0x01..0x100 are set when
 // the chosen graphic layer has a non-null LUT pointer at the matching offset.
-// We follow per-graphic curves with particle-level fallback (mirrors the
-// renderer's choose_curve precedence in nova_particle_emitter.cpp).
+// We follow per-graphic curves with particle-level fallback.
 std::uint32_t compute_spawn_flags(const ParticleDef &def, std::uint32_t graphic_idx) noexcept {
 	using namespace particle_runtime_flag;
 	const GraphicLayer &layer = def.graphics[graphic_idx];
