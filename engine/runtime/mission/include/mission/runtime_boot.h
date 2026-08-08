@@ -43,15 +43,13 @@ enum class MissionTextSource { kNone, kMission, kFallback };
 MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out);
 
-// Parse one .aip profile text for the two witnessed AIProfile speed fields.
-// Raw authored values land in the row; absent keys keep -1 (unauthored — the
-// promote-time brain seed then keeps the default_speed stand-in). The rest of
-// the .aip parse remains the tracked D-AI-11 (h) gap.
-// [orig: AIProfile_ParseProperty "patrol_speed" -> profile+0xC0
-//  @0x45E6DF..0x45E717 / "combat_speed" -> profile+0xC4;
-//  Entity_InitVehicleAIFromDef seeds brain[50]/brain[49] @0x4688D3/@0x4688C7]
-void parse_aip_profile_speeds(const std::vector<uint8_t> &text,
-		PromoteOptions::AiProfileSpeeds &row);
+// The .aip PARSE lives in engine/formats/aip (aip::parse_profile_speeds — the
+// two witnessed fields, partial-port documented there; the remainder is the
+// tracked D-AI-11 (h) gap). This resolver keeps the profile walk and the
+// install row: absent keys stay -1 (unauthored — the promote-time brain seed
+// then keeps the default_speed stand-in)
+// [orig: Entity_InitVehicleAIFromDef seeds brain[50]/brain[49]
+//  @0x4688D3/@0x4688C7].
 
 // The mission's distinct ai_textfile profile set, lowercase, in entity order
 // (first occurrence wins), and each profile's resolved .aip speeds. Profiles

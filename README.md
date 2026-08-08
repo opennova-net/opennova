@@ -138,6 +138,8 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **tpm** | `.tml` `.tms` | TPM1 terrain tile meshes: packed vertices plus eight LOD index sections in three codec tiers, rotate-crypted. |
 | **dep** | `.dep` | The terrain bake's raw 1024×1024 depth-buffer intermediate. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
+| **mission** | `.bms` `.mis` | Missions: the binary and text document models, records, schema reflection, authoring edits, and the flat C ABI. |
+| **aip** | `.aip` | AI profile text (partial port: the two witnessed speed keys; the remainder is a tracked gap). |
 | **ptl** | `.ptl` | Particle effects: the effect/emitter definition model, parser, writer, and enum/field tables. |
 | **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. Includes the NovaLogic-flavored XML reader. |
 | **mns** | `.mns` | Menu stylesheets: named style variables the menu screens reference. |
@@ -159,7 +161,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, the logic tick, and the ported gameplay systems on top of it: AI and the infantry motor, collision and occlusion queries, the weapon FSM/inventory/tables, rounds and ballistics, throwables, vehicle mount and drive, item destruction, spawn selection, zones, and the player view. |
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
-| **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. Two targets: `opennova_mission_format` (parse/write/schema) and `opennova_mission` (event runtime + promotion). |
+| **mission** (runtime half) | The BMS event runtime and mission-to-world promotion over the parsed mission (the `.bms`/`.mis` document model itself lives in the mission format lib). |
 | **anim** | Skeletal animation: the evaluator that samples `.bad` clips into per-bone transforms. |
 | **particle** | The particle simulator: the emitter integrator and effect scene the runtime and the editor preview share (the `.ptl` format itself lives in the ptl parser lib). |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |

@@ -2,10 +2,10 @@
 # renderer math, anim, audio, particle, wac, mission runtime, simassets, hud,
 # controls), one STATIC group target (Shape A).
 #
-# The mission_format half of runtime/mission builds in opennova_formats (the
-# Shape A guardrail — see engine/formats/CMakeLists.txt); only the runtime half
-# (event runtime + promotion + boot) lives here. runtime/mission/include is
-# propagated by the formats group.
+# The mission FORMAT half lives in engine/formats/mission (the Shape A
+# guardrail — see engine/formats/CMakeLists.txt); this group keeps the runtime
+# half (event runtime + promotion + boot). Both halves expose <mission/...>
+# with disjoint header sets (ADR 0030 decision 2).
 
 add_library(opennova_runtime STATIC
     # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
@@ -127,6 +127,9 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/audio/include
         ${CMAKE_CURRENT_SOURCE_DIR}/controls/include
         ${CMAKE_CURRENT_SOURCE_DIR}/hud/include
+        # The runtime mission half's headers (the format half's <mission/...>
+        # headers propagate from opennova_formats — disjoint sets, one prefix).
+        ${CMAKE_CURRENT_SOURCE_DIR}/mission/include
         ${CMAKE_CURRENT_SOURCE_DIR}/particle/include
         ${CMAKE_CURRENT_SOURCE_DIR}/renderer/include
         ${CMAKE_CURRENT_SOURCE_DIR}/simassets/include
@@ -134,8 +137,6 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/include
         ${CMAKE_CURRENT_SOURCE_DIR}/wac/include
         ${CMAKE_CURRENT_SOURCE_DIR}/world/include
-        # mission/include propagates from opennova_formats (the mission_format
-        # half owns the directory's target home).
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src
 )

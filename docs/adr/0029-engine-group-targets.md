@@ -103,7 +103,10 @@ incremental relinks — was named up front and is accepted (Consequences).
   one-directory-per-format layout stand exactly —
   `engine/<group>/<domain>/{include/<domain>/, src/}` with fixtures and tests
   in place; `engine/runtime/mission` keeps its directory even though its
-  format half builds in `opennova_formats`.
+  format half builds in `opennova_formats`. [2026-08 amendment: the format
+  half's FILES moved to `engine/formats/mission` under ADR 0030 — the FOLD
+  (its target home in `opennova_formats`) is unchanged; both directories
+  expose `<mission/...>` with disjoint header sets.]
 - The `opennova` namespace, the `<domain>/...` include paths, and every source
   file.
 - The flat C ABI surface, its export conventions, and its baseline.
