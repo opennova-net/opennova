@@ -240,31 +240,11 @@ Array NovaSimulation::drain_fire_presentation_events() {
 		//  @0x54039e/@0x54040f]
 		d["action_userpoint"] =
 				fire_row ? String(fire_row->particle_userpoint) : String();
-		// The SIM-side muzzle for the 3P adm-arm anchor (S12a): the shooter's
-		// posed R-hand attach frame carrying the gfx3 model's fire userpoint,
-		// from the sim's own parses (simassets). Resolvable only for a
-		// registered skeletal WORLD entity — the host's joiner avatars; a
-		// joiner's entity-less wire shooters stay with the shell's render
-		// anchor. The shell's held-weapon-node anchor remains authoritative
-		// where it resolves (it carries the presented remote blends); this
-		// field is its sim-posed fallback and the S11-cutover seam.
-		if (bool(d["adm_arm"]) && fe.shooter.valid() && fired_def != nullptr &&
-				fire_row != nullptr && fire_row->particle_userpoint[0] != '\0' &&
-				!fired_def->third_person_model.empty()) {
-			const ::Threedi3di3 *gun_model =
-					sim_models_.model_for(fired_def->third_person_model);
-			const opennova::world::Entity *shooter_e =
-					world_->registry.get(fe.shooter);
-			opennova::world::Vec3 muzzle_mission;
-			if (gun_model != nullptr && shooter_e != nullptr &&
-					collision_pose_native_.resolve_held_weapon_muzzle(
-							*world_, fe.shooter, shooter_e->equipped_adm_index,
-							*gun_model, fire_row->particle_userpoint,
-							muzzle_mission)) {
-				d["muzzle"] = Vector3(muzzle_mission.x, muzzle_mission.z,
-						-muzzle_mission.y);
-			}
-		}
+		// The 3P adm-arm anchor is the SHELL's: the rendered held-weapon node's
+		// own userpoint (WirePresentPass.muzzle_world_for), which is what retail
+		// spawns at — the muzzle-authority decision that closed the S12a
+		// sim-posed shadow seam. The event carries the row's userpoint name; the
+		// presentation layer resolves it against the node it renders.
 		out.push_back(d);
 	}
 	world_->round_sim.fired.clear();

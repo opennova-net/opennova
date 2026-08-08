@@ -133,37 +133,6 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 			"the row choice does not depend on the anchor provider")
 
 
-func test_render_anchor_wins_over_the_sim_muzzle_and_feeds_the_ab_counter() -> void:
-	# The event's sim-posed muzzle (S12a) shadows the render anchor: the render
-	# node anchor stays authoritative, and the A/B counters record the compare.
-	var ev := _event(true)
-	ev["muzzle"] = MUZZLE + Vector3(0.25, 0.0, 0.0)
-	_sim.events = [ev]
-	_fire.present()
-	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(MUZZLE),
-			"the render anchor stays authoritative while it resolves")
-	var stats: Dictionary = _fire.get_stats()
-	assert_eq(int(stats["muzzle_ab"]), 1)
-	assert_almost_eq(float(stats["muzzle_ab_max"]), 0.25, 0.0001)
-
-
-func test_sim_muzzle_is_the_fallback_when_the_render_anchor_cannot_resolve() -> void:
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var bare = FirePresentPass.new()
-	bare.setup(_sim, container,
-			func(): return _audio,
-			func(): return _fx,
-			func(): return Vector3.ZERO)
-	var ev := _event(true)
-	var sim_muzzle := Vector3(11.0, 1.5, -4.9)
-	ev["muzzle"] = sim_muzzle
-	_sim.events = [ev]
-	bare.present()
-	assert_true((_fx.spawns[0]["pos"] as Vector3).is_equal_approx(sim_muzzle),
-			"an unresolvable render anchor takes the sim-posed muzzle, not the eye")
-
-
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
 	var ev := _event(true)
 	ev["action_effect"] = ""
